@@ -1,0 +1,30 @@
+{
+  "streams": [
+    {
+      "name": "Torrentio\n1080p",
+      "title": "The.Matrix.1999.1080p.BluRay.x264-NOGRP\n👤 1500 💾 2.1 GB ⚙️ ThePirateBay",
+      "infoHash": "aabb1122ccdd3344eeff5566778899aabbccddee",
+      "fileIdx": 0
+    },
+    {
+      "name": "Torrentio\n2160p [RD+]",
+      "title": "The.Matrix.1999.2160p.UHD.BluRay.x265-GROUP\n💾 25.4 GB ⚙️ YTS",
+      "url": "https://real-debrid.com/d/ABCDEF/matrix.mkv",
+      "infoHash": "ff00112233445566778899aabbccddeeff001122"
+    },
+    {
+      "name": "Torrentio\n720p [RD download]",
+      "title": "The.Matrix.1999.720p.BluRay.x264-REFINED\n👤 62 💾 920 MB ⚙️ RARBG",
+      "infoHash": "bbccddeeff0011223344556677889900aabbccdd"
+    },
+    {
+      "name": "Torrentio\n4K",
+      "title": "The.Matrix.Random.No.Metadata.mkv",
+      "infoHash": "99aabbccddeeff00112233445566778899aabbcc"
+    },
+    {
+      "name": "Unactionable stream",
+      "title": "No hash, no url"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": 67890,
+  "username": "bob",
+  "email": "bob@example.com",
+  "points": 0,
+  "locale": "en",
+  "type": "free",
+  "premium": 0
+}

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Kinema
+GenericName=Movie & TV Torrent Browser
+Comment=Search movies and TV series, grab magnet links, stream via Real-Debrid
+Exec=kinema %U
+Icon=dev.tlmtech.kinema
+Terminal=false
+Categories=Qt;KDE;AudioVideo;Video;
+Keywords=movie;series;torrent;magnet;real-debrid;cinema;stream;
+StartupWMClass=kinema
+StartupNotify=true
+X-DBUS-ServiceName=dev.tlmtech.kinema

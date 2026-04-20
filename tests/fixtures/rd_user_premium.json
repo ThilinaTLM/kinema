@@ -1,0 +1,11 @@
+{
+  "id": 12345,
+  "username": "alice",
+  "email": "alice@example.com",
+  "points": 100,
+  "locale": "en",
+  "avatar": "https://fcdn.real-debrid.com/0830/images/logo.png",
+  "type": "premium",
+  "premium": 7776000,
+  "expiration": "2026-11-14T08:30:00.000Z"
+}

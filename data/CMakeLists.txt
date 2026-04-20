@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+install(PROGRAMS dev.tlmtech.kinema.desktop
+    DESTINATION ${KDE_INSTALL_APPDIR}
+)
+
+install(FILES dev.tlmtech.kinema.metainfo.xml
+    DESTINATION ${KDE_INSTALL_METAINFODIR}
+)
+
+ecm_install_icons(ICONS
+    icons/sc-apps-dev.tlmtech.kinema.svg
+    DESTINATION ${KDE_INSTALL_ICONDIR}
+)

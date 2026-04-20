@@ -1,0 +1,210 @@
+# Kinema
+
+**Cinema in motion.** A native Linux / KDE Plasma 6 desktop app for
+discovering movies, browsing torrent sources via
+[Torrentio](https://torrentio.strem.fun/), and — for Real-Debrid
+subscribers — streaming the file directly in mpv or VLC.
+
+Kinema is a graphical successor to
+[`torrentio-cli`](https://github.com/tlm-engineering/torrentio-cli): same
+upstream data sources, but with metadata-rich browsing (posters, titles,
+descriptions) and one-click playback, without requiring Stremio.
+
+> **Status — Milestone 2 (series + Real-Debrid).** Movies *and* TV
+> series search. Real-Debrid token entry via the system keyring,
+> `[RD+]` badges, cached-only filtering, and Copy-direct-URL actions.
+> Player launching in mpv / VLC is still **M3**; filters UI and full
+> Settings dialog are **M4**. See the [PRD](PRD.md).
+
+## Features today (M2)
+
+- Movie **and** TV series search by title or IMDB id (`tt…`)
+- Series detail with a **season picker** and an **episode list**
+  (thumbnails, air dates)
+- Torrentio stream fetch per episode (`ttXXXXXX:S:E`)
+- **Real-Debrid** token entry, validated against `/rest/1.0/user`
+  - Token persisted in the system keyring (Secret Service /
+    KWallet / gnome-keyring), **never on disk in plaintext**
+  - `[RD+]` / `[RD]` badge icons on the torrents table
+  - **Cached on Real-Debrid only** filter checkbox
+  - **Copy / Open direct URL** on cached rows
+- Poster & thumbnail cache (memory + disk)
+- Sortable torrents table (click any column header)
+- First-class KDE Plasma 6 theming, keyboard navigation, About dialog
+
+## Coming soon
+
+- Direct-to-mpv / VLC playback + detached process launch — **M3**
+- KNotifications for launch / failure events — **M3**
+- Quality / providers / sort UI, full Settings dialog,
+  `.torrent` export, Flatpak packaging — **M4**
+
+## Requirements
+
+- **KDE Plasma 6** (or at minimum: Qt 6.5+ and KDE Frameworks 6)
+- **C++20** compiler (GCC ≥ 12 or Clang ≥ 17)
+- **CMake ≥ 3.22**
+- **extra-cmake-modules** (ECM)
+- **qcoro6** (C++20 coroutines for Qt)
+
+### Install prerequisites
+
+On **Arch Linux / Manjaro**:
+
+```bash
+sudo pacman -S --needed \
+    base-devel cmake extra-cmake-modules \
+    qt6-base qt6-tools \
+    kcoreaddons ki18n kio kconfigwidgets kxmlgui \
+    qcoro qtkeychain-qt6
+```
+
+On **Fedora 40+**:
+
+```bash
+sudo dnf install \
+    gcc-c++ cmake extra-cmake-modules \
+    qt6-qtbase-devel qt6-qttools-devel \
+    kf6-kcoreaddons-devel kf6-ki18n-devel kf6-kio-devel \
+    kf6-kconfigwidgets-devel kf6-kxmlgui-devel \
+    qcoro-qt6-devel qt6-qtkeychain-devel
+```
+
+On **Debian trixie / Ubuntu 24.10+**:
+
+```bash
+sudo apt install \
+    build-essential cmake extra-cmake-modules \
+    qt6-base-dev qt6-tools-dev \
+    libkf6coreaddons-dev libkf6i18n-dev libkf6kio-dev \
+    libkf6configwidgets-dev libkf6xmlgui-dev \
+    libqcoro6-dev qt6keychain-dev
+```
+
+> ℹ️ On non-KDE sessions (e.g. GNOME), Kinema talks to the system's
+> **Secret Service** implementation (gnome-keyring by default). The
+> token is stored the same way it would be in KWallet on a Plasma
+> session — encrypted, user-scoped, never written to disk in plaintext.
+
+## Build & run
+
+```bash
+cmake -B build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build -j$(nproc)
+ctest --test-dir build --output-on-failure
+
+./build/bin/kinema
+```
+
+## Install (optional)
+
+```bash
+cmake --install build --prefix /usr
+```
+
+This installs:
+
+- `kinema` binary to `/usr/bin/`
+- `dev.tlmtech.kinema.desktop` to `/usr/share/applications/`
+- `dev.tlmtech.kinema.metainfo.xml` to `/usr/share/metainfo/`
+- App icon to `/usr/share/icons/hicolor/scalable/apps/`
+
+## Real-Debrid setup
+
+1. Sign in at <https://real-debrid.com/apitoken> and copy your token.
+2. Open Kinema → **Tools → Real-Debrid…** (`Ctrl+Shift+R`).
+3. Paste the token, click **Test connection**. A green status line
+   shows your username, account type and premium expiry.
+4. Click **Save**. The token is written to the system keyring and the
+   torrents table starts showing `[RD+]` badges on cached releases
+   and `[RD]` badges on uncached ones.
+5. Check **Cached on Real-Debrid only** above the torrents table to
+   hide non-cached rows.
+6. On a cached row, the context menu gains **Copy direct URL** /
+   **Open direct URL**. Player handoff to mpv/VLC is coming in M3.
+
+To remove the token, open the dialog again and click **Remove token**.
+
+## Manual smoke test
+
+Run after a clean build. Every step should pass without a crash or
+unlocalised user-facing string.
+
+### M1 — movies & magnets
+
+1. `./build/bin/kinema` — window titled *Kinema* opens.
+2. Search `The Matrix` → poster grid with matches appears within ~2 s.
+3. Click the top card → detail pane populates; torrents table appears
+   within ~3 s.
+4. Right-click a torrent → **Copy magnet link** → paste into a torrent
+   client (e.g. qBittorrent) → the magnet is accepted and starts resolving.
+5. Right-click a torrent → **Open magnet link** → the system's default
+   handler launches.
+6. Type `tt0133093` directly (IMDB-id shortcut) → the Matrix detail
+   loads without a search step.
+7. Disconnect network, search anything → a clean error state appears
+   in the results pane; no crash, no frozen UI.
+8. Close and reopen the app, repeat step 2 — poster grid populates
+   near-instantly because posters are cached on disk.
+
+### M2 — series & Real-Debrid
+
+ 9. Switch the search toggle to **TV Series**, search `Breaking Bad`.
+    Poster grid appears within ~2 s.
+10. Click the top card. The detail pane shows a **Season:** dropdown
+    and an episode list. S1E1 *Pilot* is auto-selected; torrents load
+    within ~3 s.
+11. Pick **Season 2** from the dropdown. Episode list refreshes with
+    thumbnails; clicking **E1** loads torrents for `tt0903747:2:1`.
+12. Open **Tools → Real-Debrid…**, paste a real token, click **Test
+    connection**. Green status line with your username.
+13. **Save**. Run a movie search. Popular titles show `[RD+]` badges
+    on at least a few rows.
+14. Tick **Cached on Real-Debrid only**. Only `[RD+]` rows remain
+    visible; un-ticking restores the full list. No refetch happens.
+15. Right-click a cached row → **Copy direct URL** → paste into a
+    browser: the file begins to stream from `*.real-debrid.com`.
+16. Close + reopen the app. The SearchBar mode is remembered, badges
+    still show, and the cached-only checkbox state is preserved.
+17. Open the dialog, click **Remove token**. Badges disappear, the
+    checkbox hides; app reverts to pure magnet-mode.
+18. Verify no plaintext token on disk:
+    ```bash
+    grep -rI "<first 10 chars of your token>" ~/.config ~/.local ~/.cache 2>/dev/null
+    ```
+    should yield nothing.
+
+## Project layout
+
+```
+src/
+  main.cpp                 — tiny entry point (Qt + KAboutData CLI)
+  app/KinemaApplication    — QApplication subclass; identity + KAboutData
+  config/Config            — KConfig-backed singleton (preferences)
+  core/HttpClient          — QNAM wrapper returning QCoro::Task
+  core/Magnet              — pure magnet-URI builder
+  core/TorrentioConfig     — pure Torrentio-config-string builder
+  core/TokenStore          — QtKeychain wrapper returning QCoro::Task
+  api/CinemetaClient       — Cinemeta search + movie/series meta
+  api/TorrentioClient      — Torrentio stream list (movies + episodes)
+  api/RealDebridClient     — RD /user endpoint for token validation
+  api/*Parse               — pure JSON → typed-struct parsers
+  ui/MainWindow            — search → results → detail → torrents (coroutines)
+  ui/SearchBar             — search input + kind toggle (movies / series)
+  ui/ResultsModel          — QAbstractListModel of MetaSummary
+  ui/ResultCardDelegate    — poster card painter
+  ui/DetailPane            — poster, metadata, series picker, torrents
+  ui/SeriesPicker          — season combo + episode list
+  ui/EpisodesModel         — QAbstractListModel of Episode
+  ui/EpisodeDelegate       — episode row painter (thumb + title + date)
+  ui/TorrentsModel         — QAbstractTableModel of Stream (with RD icons)
+  ui/RealDebridDialog      — token entry + test + save
+  ui/ImageLoader           — two-level image cache + QCoro fetch
+  ui/StateWidget           — empty/loading/error placeholder
+data/                      — .desktop, AppStream metainfo, icon
+tests/                     — QtTest unit tests + JSON fixtures
+```
+
+## License
+
+GPL-2.0-or-later. See [LICENSE](LICENSE).

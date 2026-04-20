@@ -1,0 +1,36 @@
+build/
+build-*/
+.cache/
+.vscode/
+.idea/
+*.user
+*.user.*
+CMakeCache.txt
+CMakeFiles/
+CMakeLists.txt.user
+cmake_install.cmake
+compile_commands.json
+.clangd/
+.ccls-cache/
+
+# Build artifacts
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Generated
+moc_*.cpp
+moc_*.h
+ui_*.h
+qrc_*.cpp
+*_autogen/
+
+# Editor / OS
+.DS_Store
+*.swp
+*~

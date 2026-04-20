@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>dev.tlmtech.kinema</id>
+
+  <name>Kinema</name>
+  <summary>Cinema in motion</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+
+  <developer id="dev.tlmtech">
+    <name>Thilina Lakshan</name>
+  </developer>
+
+  <description>
+    <p>
+      Kinema is a native Linux desktop application for discovering movies
+      and TV series. Search a title or paste an IMDB id, browse available
+      torrent sources with quality and size information, and either grab
+      a magnet link or — with a Real-Debrid subscription — stream the
+      file directly in mpv or VLC.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Metadata-rich search with posters, descriptions, and ratings</li>
+      <li>Sortable torrent list with quality, size, seeder, and provider information</li>
+      <li>One-click magnet copy or open with the system default torrent handler</li>
+      <li>Optional Real-Debrid integration for instant streaming of cached releases</li>
+      <li>First-class KDE Plasma integration with secure credential storage</li>
+    </ul>
+  </description>
+
+  <url type="homepage">https://tlmtech.dev/kinema</url>
+
+  <launchable type="desktop-id">dev.tlmtech.kinema.desktop</launchable>
+
+  <provides>
+    <binary>kinema</binary>
+  </provides>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+    <category>Qt</category>
+    <category>KDE</category>
+  </categories>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-04-20">
+      <description>
+        <p>Initial development release (milestone 1 — walking skeleton).</p>
+      </description>
+    </release>
+  </releases>
+</component>

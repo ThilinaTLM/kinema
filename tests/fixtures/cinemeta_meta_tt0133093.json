@@ -1,0 +1,15 @@
+{
+  "meta": {
+    "id": "tt0133093",
+    "type": "movie",
+    "name": "The Matrix",
+    "year": "1999",
+    "poster": "https://example.com/matrix.jpg",
+    "background": "https://example.com/matrix_bg.jpg",
+    "imdbRating": "8.7",
+    "description": "A computer hacker learns from mysterious rebels about the true nature of his reality and his role in the war against its controllers.",
+    "genres": ["Action", "Sci-Fi"],
+    "runtime": "136 min",
+    "cast": ["Keanu Reeves", "Laurence Fishburne", "Carrie-Anne Moss"]
+  }
+}

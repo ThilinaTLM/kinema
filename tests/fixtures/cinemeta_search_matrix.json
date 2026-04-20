@@ -1,0 +1,35 @@
+{
+  "metas": [
+    {
+      "id": "tt0133093",
+      "type": "movie",
+      "name": "The Matrix",
+      "year": "1999",
+      "poster": "https://example.com/matrix.jpg",
+      "imdbRating": "8.7",
+      "description": "A computer hacker learns from mysterious rebels about the true nature of his reality."
+    },
+    {
+      "id": "tt0234215",
+      "type": "movie",
+      "name": "The Matrix Reloaded",
+      "year": "2003",
+      "poster": "https://example.com/reloaded.jpg",
+      "imdbRating": "7.2",
+      "description": "Neo and his allies race against time before the machines discover the city of Zion."
+    },
+    {
+      "id": "tt0090285",
+      "type": "series",
+      "name": "The Matrix (series stub)",
+      "year": "1986",
+      "poster": "https://example.com/wrong.jpg",
+      "description": "Different-type item that should be filtered out when searching movies."
+    },
+    {
+      "id": "",
+      "type": "movie",
+      "name": "Bad Row (no id)"
+    }
+  ]
+}
