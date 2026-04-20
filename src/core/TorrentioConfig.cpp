@@ -26,8 +26,12 @@ QString toPathSegment(const ConfigOptions& opts)
     // sort is always present so an empty ConfigOptions still produces a stable output.
     parts.append(QStringLiteral("sort=") + toString(opts.sort));
 
-    if (!opts.qualityFilter.isEmpty()) {
-        parts.append(QStringLiteral("qualityfilter=") + opts.qualityFilter.join(QLatin1Char(',')));
+    if (!opts.excludedResolutions.isEmpty() || !opts.excludedCategories.isEmpty()) {
+        QStringList merged;
+        merged.reserve(opts.excludedResolutions.size() + opts.excludedCategories.size());
+        merged.append(opts.excludedResolutions);
+        merged.append(opts.excludedCategories);
+        parts.append(QStringLiteral("qualityfilter=") + merged.join(QLatin1Char(',')));
     }
     if (!opts.providers.isEmpty()) {
         parts.append(QStringLiteral("providers=") + opts.providers.join(QLatin1Char(',')));

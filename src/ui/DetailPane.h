@@ -61,7 +61,7 @@ Q_SIGNALS:
 private:
     void onTorrentContextMenu(const QPoint& pos);
     void updatePoster();
-    void applyCachedOnlyFilter();
+    void applyClientFilters();
     void rebuildCachedOnlyVisibility();
 
     ImageLoader* m_loader;

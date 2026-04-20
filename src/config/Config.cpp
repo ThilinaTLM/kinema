@@ -11,15 +11,33 @@ namespace kinema::config {
 namespace {
 
 constexpr auto kGroupGeneral = "General";
+constexpr auto kGroupFilters = "Filters";
 constexpr auto kGroupRD = "RealDebrid";
 constexpr auto kGroupPlayer = "Player";
 
 constexpr auto kKeyCachedOnly = "cachedOnly";
 constexpr auto kKeySearchKind = "searchKind";
+constexpr auto kKeyDefaultSort = "defaultSort";
 constexpr auto kKeyFocusSplitter = "focusSplitter";
+constexpr auto kKeyExcludedResolutions = "excludedResolutions";
+constexpr auto kKeyExcludedCategories = "excludedCategories";
+constexpr auto kKeyKeywordBlocklist = "keywordBlocklist";
 constexpr auto kKeyRDConfigured = "configured";
 constexpr auto kKeyPlayerPreferred = "preferred";
 constexpr auto kKeyPlayerCustomCmd = "customCommand";
+
+QStringList normalize(QStringList list)
+{
+    QStringList out;
+    out.reserve(list.size());
+    for (auto& s : list) {
+        s = s.trimmed();
+        if (!s.isEmpty()) {
+            out.append(std::move(s));
+        }
+    }
+    return out;
+}
 
 KConfigGroup group(const char* name)
 {
@@ -82,6 +100,80 @@ void Config::setSearchKind(api::MediaKind k)
     g.sync();
 }
 
+core::torrentio::SortMode Config::defaultSort() const
+{
+    const auto s = group(kGroupGeneral).readEntry(kKeyDefaultSort, QStringLiteral("seeders"));
+    if (s == QLatin1String("size")) {
+        return core::torrentio::SortMode::Size;
+    }
+    if (s == QLatin1String("qualitysize")) {
+        return core::torrentio::SortMode::QualitySize;
+    }
+    return core::torrentio::SortMode::Seeders;
+}
+
+void Config::setDefaultSort(core::torrentio::SortMode m)
+{
+    if (defaultSort() == m) {
+        return;
+    }
+    auto g = group(kGroupGeneral);
+    g.writeEntry(kKeyDefaultSort, core::torrentio::toString(m));
+    g.sync();
+    Q_EMIT torrentioOptionsChanged();
+}
+
+QStringList Config::excludedResolutions() const
+{
+    return group(kGroupFilters).readEntry(kKeyExcludedResolutions, QStringList {});
+}
+
+void Config::setExcludedResolutions(QStringList list)
+{
+    list = normalize(std::move(list));
+    if (excludedResolutions() == list) {
+        return;
+    }
+    auto g = group(kGroupFilters);
+    g.writeEntry(kKeyExcludedResolutions, list);
+    g.sync();
+    Q_EMIT torrentioOptionsChanged();
+}
+
+QStringList Config::excludedCategories() const
+{
+    return group(kGroupFilters).readEntry(kKeyExcludedCategories, QStringList {});
+}
+
+void Config::setExcludedCategories(QStringList list)
+{
+    list = normalize(std::move(list));
+    if (excludedCategories() == list) {
+        return;
+    }
+    auto g = group(kGroupFilters);
+    g.writeEntry(kKeyExcludedCategories, list);
+    g.sync();
+    Q_EMIT torrentioOptionsChanged();
+}
+
+QStringList Config::keywordBlocklist() const
+{
+    return group(kGroupFilters).readEntry(kKeyKeywordBlocklist, QStringList {});
+}
+
+void Config::setKeywordBlocklist(QStringList list)
+{
+    list = normalize(std::move(list));
+    if (keywordBlocklist() == list) {
+        return;
+    }
+    auto g = group(kGroupFilters);
+    g.writeEntry(kKeyKeywordBlocklist, list);
+    g.sync();
+    Q_EMIT keywordBlocklistChanged(list);
+}
+
 QByteArray Config::focusSplitterState() const
 {
     return group(kGroupGeneral).readEntry(kKeyFocusSplitter, QByteArray {});
@@ -126,7 +218,9 @@ void Config::setCustomPlayerCommand(const QString& command)
 core::torrentio::ConfigOptions Config::defaultTorrentioOptions() const
 {
     core::torrentio::ConfigOptions opts;
-    opts.sort = core::torrentio::SortMode::Seeders;
+    opts.sort = defaultSort();
+    opts.excludedResolutions = excludedResolutions();
+    opts.excludedCategories = excludedCategories();
     return opts;
 }
 

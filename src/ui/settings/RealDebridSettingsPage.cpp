@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilina@tlmtech.dev>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "ui/RealDebridDialog.h"
+#include "ui/settings/RealDebridSettingsPage.h"
 
 #include "api/RealDebridClient.h"
 #include "config/Config.h"
@@ -12,7 +12,6 @@
 
 #include <KLocalizedString>
 
-#include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -22,23 +21,19 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
-namespace kinema::ui {
+namespace kinema::ui::settings {
 
 namespace {
 constexpr auto kOkColor = "#2e7d32";
 constexpr auto kErrorColor = "#c62828";
 } // namespace
 
-RealDebridDialog::RealDebridDialog(
+RealDebridSettingsPage::RealDebridSettingsPage(
     core::HttpClient* http, core::TokenStore* tokens, QWidget* parent)
-    : QDialog(parent)
+    : QWidget(parent)
     , m_http(http)
     , m_tokens(tokens)
 {
-    setWindowTitle(i18nc("@title:window", "Real-Debrid"));
-    setModal(true);
-    resize(520, 260);
-
     auto* intro = new QLabel(
         i18nc("@info",
             "Paste your Real-Debrid API token below. You can find it in "
@@ -72,7 +67,9 @@ RealDebridDialog::RealDebridDialog(
     m_testButton = new QPushButton(
         QIcon::fromTheme(QStringLiteral("network-connect")),
         i18nc("@action:button", "Test connection"), this);
-
+    m_saveButton = new QPushButton(
+        QIcon::fromTheme(QStringLiteral("document-save")),
+        i18nc("@action:button", "Save token"), this);
     m_removeButton = new QPushButton(
         QIcon::fromTheme(QStringLiteral("edit-delete")),
         i18nc("@action:button", "Remove token"), this);
@@ -82,14 +79,12 @@ RealDebridDialog::RealDebridDialog(
     m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setMinimumHeight(48);
 
-    m_buttonBox = new QDialogButtonBox(
-        QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-
     auto* form = new QFormLayout;
     form->addRow(i18nc("@label:textbox", "API token:"), tokenRow);
 
     auto* actionRow = new QHBoxLayout;
     actionRow->addWidget(m_testButton);
+    actionRow->addWidget(m_saveButton);
     actionRow->addStretch(1);
     actionRow->addWidget(m_removeButton);
 
@@ -99,15 +94,13 @@ RealDebridDialog::RealDebridDialog(
     layout->addLayout(actionRow);
     layout->addWidget(m_statusLabel);
     layout->addStretch(1);
-    layout->addWidget(m_buttonBox);
 
-    connect(m_buttonBox, &QDialogButtonBox::accepted, this, [this] {
-        auto t = saveToken();
-        Q_UNUSED(t);
-    });
-    connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(m_testButton, &QPushButton::clicked, this, [this] {
         auto t = testConnection();
+        Q_UNUSED(t);
+    });
+    connect(m_saveButton, &QPushButton::clicked, this, [this] {
+        auto t = saveToken();
         Q_UNUSED(t);
     });
     connect(m_removeButton, &QPushButton::clicked, this, [this] {
@@ -122,19 +115,15 @@ RealDebridDialog::RealDebridDialog(
     Q_UNUSED(t);
 }
 
-void RealDebridDialog::updateButtons()
+void RealDebridSettingsPage::updateButtons()
 {
     const bool hasText = !m_tokenEdit->text().trimmed().isEmpty();
     m_testButton->setEnabled(hasText);
-
-    auto* saveBtn = m_buttonBox->button(QDialogButtonBox::Save);
-    if (saveBtn) {
-        saveBtn->setEnabled(hasText);
-    }
+    m_saveButton->setEnabled(hasText);
     m_removeButton->setEnabled(config::Config::instance().hasRealDebrid());
 }
 
-void RealDebridDialog::setStatus(const QString& message, bool error)
+void RealDebridSettingsPage::setStatus(const QString& message, bool error)
 {
     m_statusLabel->setText(message);
     m_statusLabel->setStyleSheet(
@@ -142,13 +131,13 @@ void RealDebridDialog::setStatus(const QString& message, bool error)
             .arg(QString::fromLatin1(error ? kErrorColor : kOkColor)));
 }
 
-void RealDebridDialog::clearStatus()
+void RealDebridSettingsPage::clearStatus()
 {
     m_statusLabel->clear();
     m_statusLabel->setStyleSheet(QString {});
 }
 
-QCoro::Task<void> RealDebridDialog::loadExistingToken()
+QCoro::Task<void> RealDebridSettingsPage::loadExistingToken()
 {
     try {
         const auto existing = co_await m_tokens->read(
@@ -159,13 +148,13 @@ QCoro::Task<void> RealDebridDialog::loadExistingToken()
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), /*error=*/true);
     } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "RD dialog: keyring read failed:" << e.what();
+        qCWarning(KINEMA) << "RD settings: keyring read failed:" << e.what();
         setStatus(QString::fromUtf8(e.what()), /*error=*/true);
     }
     updateButtons();
 }
 
-QCoro::Task<void> RealDebridDialog::testConnection()
+QCoro::Task<void> RealDebridSettingsPage::testConnection()
 {
     const auto token = m_tokenEdit->text().trimmed();
     if (token.isEmpty()) {
@@ -207,44 +196,44 @@ QCoro::Task<void> RealDebridDialog::testConnection()
     m_testButton->setEnabled(!m_tokenEdit->text().trimmed().isEmpty());
 }
 
-QCoro::Task<void> RealDebridDialog::saveToken()
+QCoro::Task<void> RealDebridSettingsPage::saveToken()
 {
     const auto token = m_tokenEdit->text().trimmed();
     if (token.isEmpty()) {
         co_return;
     }
-    m_buttonBox->setEnabled(false);
+    m_saveButton->setEnabled(false);
     try {
         co_await m_tokens->write(
             QString::fromLatin1(core::TokenStore::kRealDebridKey), token);
         config::Config::instance().setHasRealDebrid(true);
         Q_EMIT tokenChanged(token);
-        accept();
+        setStatus(i18nc("@info", "Token saved to keyring."), /*error=*/false);
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), /*error=*/true);
-        m_buttonBox->setEnabled(true);
     } catch (const std::exception& e) {
         setStatus(QString::fromUtf8(e.what()), /*error=*/true);
-        m_buttonBox->setEnabled(true);
     }
+    updateButtons();
 }
 
-QCoro::Task<void> RealDebridDialog::removeToken()
+QCoro::Task<void> RealDebridSettingsPage::removeToken()
 {
     m_removeButton->setEnabled(false);
     try {
         co_await m_tokens->remove(
             QString::fromLatin1(core::TokenStore::kRealDebridKey));
         config::Config::instance().setHasRealDebrid(false);
+        m_tokenEdit->clear();
         Q_EMIT tokenChanged(QString {});
-        accept();
+        setStatus(i18nc("@info", "Token removed from keyring."),
+            /*error=*/false);
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), /*error=*/true);
-        m_removeButton->setEnabled(true);
     } catch (const std::exception& e) {
         setStatus(QString::fromUtf8(e.what()), /*error=*/true);
-        m_removeButton->setEnabled(true);
     }
+    updateButtons();
 }
 
-} // namespace kinema::ui
+} // namespace kinema::ui::settings

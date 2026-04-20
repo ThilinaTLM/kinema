@@ -20,13 +20,21 @@ namespace kinema::config {
  *
  * Groups:
  *   [General]
- *     searchKind   = "Movie" | "Series"      (last SearchBar selection)
- *     cachedOnly   = true|false              (RD cached-only checkbox)
+ *     searchKind        = "Movie" | "Series"      (last SearchBar selection)
+ *     cachedOnly        = true|false              (RD cached-only checkbox)
+ *     defaultSort       = "seeders" | "size" | "qualitysize"
+ *                                                  (Torrentio sort= param)
+ *     focusSplitter     = <QSplitter::saveState() bytes>
+ *   [Filters]
+ *     excludedResolutions = comma-separated: 4k,1080p,720p,480p,other
+ *     excludedCategories  = comma-separated: cam,scr,threed,hdr,hdr10plus,
+ *                                            dolbyvision,nonen,unknown,brremux
+ *     keywordBlocklist    = newline-separated free-form substrings
  *   [Player]
- *     preferred    = "mpv" | "vlc" | "custom"   (Play action target)
- *     customCommand= <free-form command line>  (only for preferred="custom")
+ *     preferred     = "mpv" | "vlc" | "custom"    (Play action target)
+ *     customCommand = <free-form command line>   (only for preferred="custom")
  *   [RealDebrid]
- *     configured   = true|false              (mirrors "is a token in the keyring?")
+ *     configured    = true|false                 (mirrors "is a token in the keyring?")
  *
  * Token material lives in the system keyring, never in this config.
  */
@@ -47,6 +55,20 @@ public:
     // Last-used SearchBar mode.
     api::MediaKind searchKind() const;
     void setSearchKind(api::MediaKind);
+
+    // Default Torrentio sort mode (Seeders / Size / QualitySize).
+    core::torrentio::SortMode defaultSort() const;
+    void setDefaultSort(core::torrentio::SortMode);
+
+    // Filter defaults.
+    QStringList excludedResolutions() const;
+    void setExcludedResolutions(QStringList);
+
+    QStringList excludedCategories() const;
+    void setExcludedCategories(QStringList);
+
+    QStringList keywordBlocklist() const;
+    void setKeywordBlocklist(QStringList);
 
     // Series focus view's vertical splitter state (QSplitter::saveState).
     // Empty on first run — SeriesFocusView falls back to 40/60 default.
@@ -75,6 +97,16 @@ Q_SIGNALS:
     void cachedOnlyChanged(bool);
     void realDebridChanged(bool);
     void preferredPlayerChanged(core::player::Kind);
+    /// Emitted when any setting that feeds into defaultTorrentioOptions()
+    /// changes (defaultSort, excludedResolutions, excludedCategories).
+    /// MainWindow listens to this to refetch the visible torrent list.
+    /// Sequential setter calls (typical when Settings applies several
+    /// pages at once) emit the signal multiple times; consumers should
+    /// debounce via QTimer::singleShot(0, …) if they care.
+    void torrentioOptionsChanged();
+    /// Emitted when keywordBlocklist changes. This is separate because it
+    /// only affects the client-side filter, not the server query.
+    void keywordBlocklistChanged(QStringList);
 
 private:
     Config();

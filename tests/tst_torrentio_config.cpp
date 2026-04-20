@@ -25,27 +25,55 @@ private Q_SLOTS:
         QCOMPARE(toPathSegment(o), QStringLiteral("sort=qualitysize"));
     }
 
-    void qualityAndProviders_joinedWithCommas()
+    void exclusionsAndProviders_joinedWithCommas()
     {
         ConfigOptions o;
-        o.qualityFilter = { QStringLiteral("1080p"), QStringLiteral("2160p") };
+        o.excludedResolutions = { QStringLiteral("4k"), QStringLiteral("480p") };
+        o.excludedCategories = { QStringLiteral("cam"), QStringLiteral("threed") };
         o.providers = { QStringLiteral("yts"), QStringLiteral("eztv") };
         QCOMPARE(toPathSegment(o),
-            QStringLiteral("sort=seeders|qualityfilter=1080p,2160p|providers=yts,eztv"));
+            QStringLiteral("sort=seeders|qualityfilter=4k,480p,cam,threed|providers=yts,eztv"));
     }
 
-    void emptyQualityAndProviders_areOmitted()
+    void exclusions_resolutionsBeforeCategories()
     {
         ConfigOptions o;
-        o.qualityFilter = {};
+        o.excludedResolutions = { QStringLiteral("1080p") };
+        o.excludedCategories = { QStringLiteral("hdr") };
+        QCOMPARE(toPathSegment(o),
+            QStringLiteral("sort=seeders|qualityfilter=1080p,hdr"));
+    }
+
+    void exclusions_emptyListsOmitSegment()
+    {
+        ConfigOptions o;
+        o.excludedResolutions = {};
+        o.excludedCategories = {};
         o.providers = {};
         QCOMPARE(toPathSegment(o), QStringLiteral("sort=seeders"));
+    }
+
+    void exclusions_onlyCategories_renders()
+    {
+        ConfigOptions o;
+        o.excludedCategories = { QStringLiteral("cam"), QStringLiteral("scr") };
+        QCOMPARE(toPathSegment(o),
+            QStringLiteral("sort=seeders|qualityfilter=cam,scr"));
+    }
+
+    void exclusions_onlyResolutions_renders()
+    {
+        ConfigOptions o;
+        o.excludedResolutions = { QStringLiteral("480p") };
+        QCOMPARE(toPathSegment(o),
+            QStringLiteral("sort=seeders|qualityfilter=480p"));
     }
 
     void realDebrid_isAlwaysLast()
     {
         ConfigOptions o;
-        o.qualityFilter = { QStringLiteral("1080p") };
+        o.excludedResolutions = { QStringLiteral("4k") };
+        o.excludedCategories = { QStringLiteral("cam") };
         o.providers = { QStringLiteral("yts") };
         o.realDebridToken = QStringLiteral("SECRETTOKEN");
         const auto s = toPathSegment(o);

@@ -3,11 +3,10 @@
 
 #pragma once
 
-#include <QDialog>
+#include <QWidget>
 
 #include <QCoro/QCoroTask>
 
-class QDialogButtonBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -17,27 +16,30 @@ class HttpClient;
 class TokenStore;
 }
 
-namespace kinema::ui {
+namespace kinema::ui::settings {
 
 /**
- * Dialog used to paste, test, save, and remove the Real-Debrid API
- * token. The token is never persisted in KConfig — only in the system
- * keyring via TokenStore.
+ * Settings page for Real-Debrid integration.
  *
- * Emits `tokenChanged(newToken)` on Save so MainWindow can update its
- * in-memory RD token immediately (without waiting for another keyring
- * round-trip). An empty new token means the user clicked "Remove".
+ * Self-contained: has its own inline "Test connection", "Save", and
+ * "Remove" buttons because the token operations are async against the
+ * system keyring / RD API and don't fit into the owning SettingsDialog's
+ * synchronous Apply flow.
+ *
+ * Emits tokenChanged(token) on a successful Save (or Remove, with an
+ * empty string). MainWindow listens to keep its in-memory m_rdToken
+ * in sync without a keyring round-trip.
  */
-class RealDebridDialog : public QDialog
+class RealDebridSettingsPage : public QWidget
 {
     Q_OBJECT
 public:
-    RealDebridDialog(core::HttpClient* http, core::TokenStore* tokens,
-        QWidget* parent = nullptr);
+    RealDebridSettingsPage(core::HttpClient* http,
+        core::TokenStore* tokens, QWidget* parent = nullptr);
 
 Q_SIGNALS:
-    /// Fired after a successful Save or Remove. An empty string means
-    /// the user removed their token.
+    /// Fired after a successful Save (non-empty token) or Remove
+    /// (empty string).
     void tokenChanged(const QString& token);
 
 private:
@@ -55,9 +57,9 @@ private:
     QLineEdit* m_tokenEdit {};
     QPushButton* m_showHideButton {};
     QPushButton* m_testButton {};
+    QPushButton* m_saveButton {};
     QPushButton* m_removeButton {};
     QLabel* m_statusLabel {};
-    QDialogButtonBox* m_buttonBox {};
 };
 
-} // namespace kinema::ui
+} // namespace kinema::ui::settings

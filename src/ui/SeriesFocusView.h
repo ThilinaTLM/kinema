@@ -21,6 +21,7 @@ class SeriesPicker;
 class StateWidget;
 class TorrentsModel;
 
+
 /**
  * Full-window series focus view. Replaces DetailPane's old series mode
  * with a dedicated layout:
@@ -77,7 +78,7 @@ Q_SIGNALS:
     void playRequested(const api::Stream& stream);
 
 private:
-    void applyCachedOnlyFilter();
+    void applyClientFilters();
     void rebuildCachedOnlyVisibility();
     void onTorrentContextMenu(const QPoint& pos);
     void updatePoster();

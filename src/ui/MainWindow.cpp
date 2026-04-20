@@ -14,12 +14,12 @@
 #include "kinema_debug.h"
 #include "ui/DetailPane.h"
 #include "ui/ImageLoader.h"
-#include "ui/RealDebridDialog.h"
 #include "ui/ResultCardDelegate.h"
 #include "ui/ResultsModel.h"
 #include "ui/SearchBar.h"
 #include "ui/SeriesFocusView.h"
 #include "ui/StateWidget.h"
+#include "ui/settings/SettingsDialog.h"
 
 #include <QEvent>
 
@@ -27,6 +27,7 @@
 #include <KAboutData>
 #include <KIO/OpenUrlJob>
 #include <KLocalizedString>
+#include <KStandardAction>
 
 #include <QAction>
 #include <QApplication>
@@ -39,6 +40,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -102,6 +104,13 @@ MainWindow::MainWindow(QWidget* parent)
         auto t = loadRealDebridToken();
         Q_UNUSED(t);
     }
+
+    // Refetch visible torrents whenever a Torrentio filter/sort default
+    // changes. Multiple setters in one Apply click emit the signal
+    // multiple times; debounce via a single-shot.
+    connect(&config::Config::instance(),
+        &config::Config::torrentioOptionsChanged,
+        this, &MainWindow::onTorrentioOptionsChanged);
 }
 
 MainWindow::~MainWindow() = default;
@@ -226,13 +235,10 @@ void MainWindow::buildActions()
     });
     editMenu->addAction(focusSearch);
 
-    auto* toolsMenu = menuBar()->addMenu(i18nc("@title:menu", "&Tools"));
-    auto* rdAction = new QAction(
-        QIcon::fromTheme(QStringLiteral("network-server")),
-        i18nc("@action:inmenu", "&Real-Debrid\u2026"), this);
-    rdAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
-    connect(rdAction, &QAction::triggered, this, &MainWindow::showRealDebridDialog);
-    toolsMenu->addAction(rdAction);
+    auto* settingsMenu = menuBar()->addMenu(i18nc("@title:menu", "&Settings"));
+    auto* prefsAction = KStandardAction::preferences(
+        this, &MainWindow::showSettings, this);
+    settingsMenu->addAction(prefsAction);
 
     auto* helpMenu = menuBar()->addMenu(i18nc("@title:menu", "&Help"));
     auto* aboutAction = new QAction(
@@ -267,6 +273,8 @@ QCoro::Task<void> MainWindow::runSearch(QString text, api::MediaKind kind)
     m_resultsState->showLoading(i18nc("@info:status", "Searching…"));
     m_resultsStack->setCurrentWidget(m_resultsState);
     m_detailPane->showIdle();
+    m_currentMovie.reset();
+    m_currentEpisode.reset();
     statusBar()->showMessage(i18nc("@info:status", "Searching for \"%1\"…", text));
 
     try {
@@ -358,6 +366,8 @@ QCoro::Task<void> MainWindow::loadMovieDetail(api::MetaSummary summary)
 {
     const auto myEpoch = ++m_detailEpoch;
     m_currentSeriesImdbId.clear();
+    m_currentEpisode.reset();
+    m_currentMovie = summary;
     m_detailPane->showMetaLoading();
     m_detailPane->showTorrentsLoading();
 
@@ -393,6 +403,8 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
 {
     const auto myEpoch = ++m_detailEpoch;
     m_currentSeriesImdbId = summary.imdbId;
+    m_currentMovie.reset();
+    m_currentEpisode.reset();
 
     // Push into focus view and show loading state up front.
     m_focusView->showMetaLoading();
@@ -447,6 +459,7 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
 QCoro::Task<void> MainWindow::loadEpisodeStreams(api::Episode episode, QString imdbId)
 {
     const auto myEpoch = ++m_episodeEpoch;
+    m_currentEpisode = episode;
     m_focusView->showTorrentsLoading();
 
     const auto streamId = episode.streamId(imdbId);
@@ -500,6 +513,7 @@ void MainWindow::onBackFromFocus()
     // without painting over the next selection.
     ++m_episodeEpoch;
     m_currentSeriesImdbId.clear();
+    m_currentEpisode.reset();
 
     // Put focus back on the results grid so arrow keys work immediately.
     if (m_resultsView) {
@@ -507,20 +521,50 @@ void MainWindow::onBackFromFocus()
     }
 }
 
-void MainWindow::showRealDebridDialog()
+void MainWindow::showSettings()
 {
-    auto* dlg = new RealDebridDialog(m_http.get(), m_tokens.get(), this);
-    dlg->setAttribute(Qt::WA_DeleteOnClose);
-    connect(dlg, &RealDebridDialog::tokenChanged, this,
-        [this](const QString& token) {
-            m_rdToken = token;
-            statusBar()->showMessage(
-                token.isEmpty()
-                    ? i18nc("@info:status", "Real-Debrid token removed.")
-                    : i18nc("@info:status", "Real-Debrid token saved."),
-                3000);
-        });
-    dlg->open();
+    if (!m_settingsDialog) {
+        m_settingsDialog = new settings::SettingsDialog(
+            m_http.get(), m_tokens.get(), this);
+        m_settingsDialog->setAttribute(Qt::WA_DeleteOnClose);
+        connect(m_settingsDialog, &settings::SettingsDialog::tokenChanged,
+            this, [this](const QString& token) {
+                m_rdToken = token;
+                statusBar()->showMessage(
+                    token.isEmpty()
+                        ? i18nc("@info:status", "Real-Debrid token removed.")
+                        : i18nc("@info:status", "Real-Debrid token saved."),
+                    3000);
+            });
+        connect(m_settingsDialog, &QObject::destroyed, this,
+            [this] { m_settingsDialog = nullptr; });
+    }
+    m_settingsDialog->show();
+    m_settingsDialog->raise();
+    m_settingsDialog->activateWindow();
+}
+
+void MainWindow::onTorrentioOptionsChanged()
+{
+    if (m_refetchPending) {
+        return;
+    }
+    m_refetchPending = true;
+    QTimer::singleShot(0, this, [this] {
+        m_refetchPending = false;
+        // Refetch whichever view is currently holding torrents.
+        if (m_viewStack && m_viewStack->currentWidget() == m_focusView
+            && m_currentEpisode && !m_currentSeriesImdbId.isEmpty()) {
+            auto t = loadEpisodeStreams(*m_currentEpisode, m_currentSeriesImdbId);
+            Q_UNUSED(t);
+            return;
+        }
+        if (m_viewStack && m_viewStack->currentWidget() == m_browseView
+            && m_currentMovie) {
+            auto t = loadMovieDetail(*m_currentMovie);
+            Q_UNUSED(t);
+        }
+    });
 }
 
 void MainWindow::onCopyMagnet(const api::Stream& stream)

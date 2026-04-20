@@ -11,6 +11,7 @@
 #include <QCoro/QCoroTask>
 
 #include <memory>
+#include <optional>
 
 class QListView;
 class QStackedWidget;
@@ -36,6 +37,10 @@ class SearchBar;
 class SeriesFocusView;
 class StateWidget;
 
+namespace settings {
+class SettingsDialog;
+}
+
 /**
  * Top-level window. Owns the HTTP stack, API clients, image loader, and
  * wires up the search → results → detail → torrents flow as coroutines.
@@ -58,7 +63,8 @@ private Q_SLOTS:
     void onPlayRequested(const api::Stream& stream);
     void onBackFromFocus();
     void showAbout();
-    void showRealDebridDialog();
+    void showSettings();
+    void onTorrentioOptionsChanged();
 
 private:
     QCoro::Task<void> runSearch(QString text, api::MediaKind kind);
@@ -103,8 +109,22 @@ private:
     // picks a different episode without re-fetching Cinemeta meta.
     QString m_currentSeriesImdbId;
 
-    // In-memory RD token, loaded at startup and whenever the RD dialog saves.
+    // Cached "what is currently on screen" pointers used by the
+    // Settings-triggered refetch logic. Cleared on navigation away.
+    std::optional<api::MetaSummary> m_currentMovie;
+    std::optional<api::Episode> m_currentEpisode;
+
+    // In-memory RD token, loaded at startup and whenever Settings saves.
     QString m_rdToken;
+
+    // Settings dialog is created lazily and reused across invocations.
+    settings::SettingsDialog* m_settingsDialog {};
+
+    // Debounce flag for Config::torrentioOptionsChanged: Settings often
+    // applies several sub-settings in sequence, emitting the signal
+    // multiple times. We coalesce into a single refetch via a
+    // zero-delay single-shot.
+    bool m_refetchPending = false;
 };
 
 } // namespace kinema::ui

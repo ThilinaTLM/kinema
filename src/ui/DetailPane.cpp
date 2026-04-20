@@ -4,6 +4,7 @@
 #include "ui/DetailPane.h"
 
 #include "config/Config.h"
+#include "core/StreamFilter.h"
 #include "ui/ImageLoader.h"
 #include "ui/StateWidget.h"
 #include "ui/TorrentsModel.h"
@@ -108,7 +109,7 @@ DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
             if (config::Config::instance().cachedOnly() != on) {
                 config::Config::instance().setCachedOnly(on);
             }
-            applyCachedOnlyFilter();
+            applyClientFilters();
         });
     connect(&config::Config::instance(), &config::Config::cachedOnlyChanged,
         this, [this](bool on) {
@@ -116,8 +117,10 @@ DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
                 const QSignalBlocker block(m_cachedOnlyCheck);
                 m_cachedOnlyCheck->setChecked(on);
             }
-            applyCachedOnlyFilter();
+            applyClientFilters();
         });
+    connect(&config::Config::instance(), &config::Config::keywordBlocklistChanged,
+        this, [this](const QStringList&) { applyClientFilters(); });
 
     m_torrents = new TorrentsModel(this);
     auto* proxy = new SortProxy(this);
@@ -246,7 +249,7 @@ void DetailPane::setRealDebridConfigured(bool on)
 {
     m_rdConfigured = on;
     rebuildCachedOnlyVisibility();
-    applyCachedOnlyFilter();
+    applyClientFilters();
 }
 
 void DetailPane::updatePoster()
@@ -293,33 +296,35 @@ void DetailPane::setTorrents(QList<api::Stream> streams)
 {
     m_rawStreams = std::move(streams);
     rebuildCachedOnlyVisibility();
-    applyCachedOnlyFilter();
+    applyClientFilters();
 }
 
-void DetailPane::applyCachedOnlyFilter()
+void DetailPane::applyClientFilters()
 {
     if (m_rawStreams.isEmpty()) {
         m_torrents->reset({});
         showTorrentsEmpty();
         return;
     }
-    QList<api::Stream> visible;
-    if (m_rdConfigured && m_cachedOnlyCheck->isChecked()) {
-        visible.reserve(m_rawStreams.size());
-        for (const auto& s : m_rawStreams) {
-            if (s.rdCached) {
-                visible.append(s);
-            }
-        }
-    } else {
-        visible = m_rawStreams;
-    }
+
+    core::stream_filter::ClientFilters filters;
+    filters.cachedOnly = m_rdConfigured && m_cachedOnlyCheck->isChecked();
+    filters.keywordBlocklist = config::Config::instance().keywordBlocklist();
+
+    auto visible = core::stream_filter::apply(m_rawStreams, filters);
+
     if (visible.isEmpty()) {
         m_torrents->reset({});
-        m_torrentsState->showIdle(
-            i18nc("@label", "No cached torrents"),
-            i18nc("@info", "Uncheck \u201cCached on Real-Debrid only\u201d "
-                           "to see all matches."));
+        const QString title = filters.cachedOnly
+            ? i18nc("@label", "No cached torrents")
+            : i18nc("@label", "No torrents match your filters");
+        const QString info = filters.cachedOnly
+            ? i18nc("@info",
+                "Uncheck \u201cCached on Real-Debrid only\u201d or widen "
+                "your filters in Settings.")
+            : i18nc("@info",
+                "Loosen the exclusions or keyword blocklist in Settings.");
+        m_torrentsState->showIdle(title, info);
         m_torrentsStack->setCurrentWidget(m_torrentsState);
         return;
     }

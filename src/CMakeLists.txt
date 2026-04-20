@@ -12,6 +12,7 @@ set(kinema_core_SRCS
     core/Magnet.cpp
     core/Player.cpp
     core/PlayerLauncher.cpp
+    core/StreamFilter.cpp
     core/TokenStore.cpp
     core/TorrentioConfig.cpp
 
@@ -25,7 +26,6 @@ set(kinema_core_SRCS
     ui/EpisodeDelegate.cpp
     ui/EpisodesModel.cpp
     ui/ImageLoader.cpp
-    ui/RealDebridDialog.cpp
     ui/ResultsModel.cpp
     ui/ResultCardDelegate.cpp
     ui/SeriesFocusView.cpp
@@ -35,6 +35,12 @@ set(kinema_core_SRCS
     ui/StateWidget.cpp
     ui/DetailPane.cpp
     ui/MainWindow.cpp
+
+    ui/settings/FiltersSettingsPage.cpp
+    ui/settings/GeneralSettingsPage.cpp
+    ui/settings/PlayerSettingsPage.cpp
+    ui/settings/RealDebridSettingsPage.cpp
+    ui/settings/SettingsDialog.cpp
 
     app/KinemaApplication.cpp
 )
@@ -76,6 +82,7 @@ target_link_libraries(kinema_core
         KF6::KIOGui
         KF6::ConfigWidgets
         KF6::Notifications
+        KF6::WidgetsAddons
         KF6::XmlGui
         QCoro6::Core
         QCoro6::Network

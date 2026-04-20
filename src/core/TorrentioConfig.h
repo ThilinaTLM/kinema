@@ -23,14 +23,25 @@ QString toString(SortMode);
  * Options that shape a Torrentio stream query. Rendered into a pipe-separated
  * URL path segment like:
  *
- *   sort=seeders|qualityfilter=1080p,2160p|providers=yts,eztv|realdebrid=XYZ
+ *   sort=seeders|qualityfilter=4k,cam,threed|providers=yts,eztv|realdebrid=XYZ
+ *
+ * Torrentio's `qualityfilter` URL param is an **exclusion** list that mixes
+ * resolution and variant tags. We keep the two concepts separate in code for
+ * clarity and merge them into a single comma-separated value at render time
+ * (resolutions first, then categories, preserving input order within each).
  *
  * `realDebridToken`, when non-empty, is always emitted last — Torrentio
  * requires this for the RD addon to pick it up.
  */
 struct ConfigOptions {
     SortMode sort = SortMode::Seeders;
-    QStringList qualityFilter; ///< e.g. {"720p","1080p"} — joined with ','
+    /// Resolution tags to exclude, e.g. {"4k","480p"}. Valid tokens:
+    /// `4k` (covers 2160p & 1440p), `1080p`, `720p`, `480p`, `other`.
+    QStringList excludedResolutions;
+    /// Variant tags to exclude, e.g. {"cam","threed"}. Valid tokens:
+    /// `cam`, `scr`, `threed`, `hdr`, `hdr10plus`, `dolbyvision`,
+    /// `nonen`, `unknown`, `brremux`.
+    QStringList excludedCategories;
     QStringList providers; ///< e.g. {"yts","eztv"}
     QString realDebridToken; ///< empty = no RD
 };
