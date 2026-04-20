@@ -10,6 +10,8 @@ set(kinema_core_SRCS
 
     core/HttpClient.cpp
     core/Magnet.cpp
+    core/Player.cpp
+    core/PlayerLauncher.cpp
     core/TokenStore.cpp
     core/TorrentioConfig.cpp
 
@@ -73,6 +75,7 @@ target_link_libraries(kinema_core
         KF6::KIOCore
         KF6::KIOGui
         KF6::ConfigWidgets
+        KF6::Notifications
         KF6::XmlGui
         QCoro6::Core
         QCoro6::Network

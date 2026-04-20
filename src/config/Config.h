@@ -4,6 +4,7 @@
 #pragma once
 
 #include "api/Types.h"
+#include "core/Player.h"
 #include "core/TorrentioConfig.h"
 
 #include <QByteArray>
@@ -21,6 +22,9 @@ namespace kinema::config {
  *   [General]
  *     searchKind   = "Movie" | "Series"      (last SearchBar selection)
  *     cachedOnly   = true|false              (RD cached-only checkbox)
+ *   [Player]
+ *     preferred    = "mpv" | "vlc" | "custom"   (Play action target)
+ *     customCommand= <free-form command line>  (only for preferred="custom")
  *   [RealDebrid]
  *     configured   = true|false              (mirrors "is a token in the keyring?")
  *
@@ -49,6 +53,18 @@ public:
     QByteArray focusSplitterState() const;
     void setFocusSplitterState(QByteArray state);
 
+    // Preferred external media player for the Play action. Defaults to
+    // mpv. The launcher falls back to the other known players if the
+    // preferred one isn't on $PATH.
+    core::player::Kind preferredPlayer() const;
+    void setPreferredPlayer(core::player::Kind);
+
+    // Free-form command line used when preferredPlayer() == Custom.
+    // May contain the literal token "{url}" where the URL should be
+    // substituted; otherwise the URL is appended as a final argument.
+    QString customPlayerCommand() const;
+    void setCustomPlayerCommand(const QString& command);
+
     /// Options used to build the Torrentio URL. M2 still uses defaults
     /// (sort = Seeders, no quality/provider filters); the RD token is
     /// merged in by MainWindow from the in-memory cache. M4 will add
@@ -58,6 +74,7 @@ public:
 Q_SIGNALS:
     void cachedOnlyChanged(bool);
     void realDebridChanged(bool);
+    void preferredPlayerChanged(core::player::Kind);
 
 private:
     Config();

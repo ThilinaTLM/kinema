@@ -46,6 +46,7 @@ find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS
     I18n
     KIO
     ConfigWidgets
+    Notifications
     XmlGui
 )
 

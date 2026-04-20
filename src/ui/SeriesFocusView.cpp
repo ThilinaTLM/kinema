@@ -188,6 +188,16 @@ SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
     m_torrentsView->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_torrentsView, &QTableView::customContextMenuRequested,
         this, &SeriesFocusView::onTorrentContextMenu);
+    // Double-click / Enter on a row → Play, but only when we have a
+    // direct URL (i.e. an RD-cached stream).
+    connect(m_torrentsView, &QAbstractItemView::activated, this,
+        [this, proxy](const QModelIndex& idx) {
+            const auto src = proxy->mapToSource(idx);
+            const auto* s = m_torrents->at(src.row());
+            if (s && !s->directUrl.isEmpty()) {
+                Q_EMIT playRequested(*s);
+            }
+        });
 
     m_torrentsState = new StateWidget(this);
     m_torrentsStack = new QStackedWidget(this);
@@ -425,6 +435,11 @@ void SeriesFocusView::onTorrentContextMenu(const QPoint& pos)
     }
 
     QMenu menu(this);
+    auto* play = menu.addAction(
+        QIcon::fromTheme(QStringLiteral("media-playback-start")),
+        i18nc("@action:inmenu", "&Play"));
+    menu.setDefaultAction(play);
+    menu.addSeparator();
     auto* copyMagnet = menu.addAction(
         QIcon::fromTheme(QStringLiteral("edit-copy")),
         i18nc("@action:inmenu", "Copy magnet link"));
@@ -441,13 +456,20 @@ void SeriesFocusView::onTorrentContextMenu(const QPoint& pos)
 
     const bool hasHash = !s->infoHash.isEmpty();
     const bool hasUrl = !s->directUrl.isEmpty();
+    play->setEnabled(hasUrl);
+    if (!hasUrl) {
+        play->setToolTip(i18nc("@info:tooltip",
+            "Direct playback needs a Real-Debrid cached stream."));
+    }
     copyMagnet->setEnabled(hasHash);
     openMagnet->setEnabled(hasHash);
     copyDirect->setEnabled(hasUrl);
     openDirect->setEnabled(hasUrl);
 
     if (auto* chosen = menu.exec(m_torrentsView->viewport()->mapToGlobal(pos))) {
-        if (chosen == copyMagnet) {
+        if (chosen == play) {
+            Q_EMIT playRequested(*s);
+        } else if (chosen == copyMagnet) {
             Q_EMIT copyMagnetRequested(*s);
         } else if (chosen == openMagnet) {
             Q_EMIT openMagnetRequested(*s);

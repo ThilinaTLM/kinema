@@ -12,11 +12,14 @@ namespace {
 
 constexpr auto kGroupGeneral = "General";
 constexpr auto kGroupRD = "RealDebrid";
+constexpr auto kGroupPlayer = "Player";
 
 constexpr auto kKeyCachedOnly = "cachedOnly";
 constexpr auto kKeySearchKind = "searchKind";
 constexpr auto kKeyFocusSplitter = "focusSplitter";
 constexpr auto kKeyRDConfigured = "configured";
+constexpr auto kKeyPlayerPreferred = "preferred";
+constexpr auto kKeyPlayerCustomCmd = "customCommand";
 
 KConfigGroup group(const char* name)
 {
@@ -88,6 +91,35 @@ void Config::setFocusSplitterState(QByteArray state)
 {
     auto g = group(kGroupGeneral);
     g.writeEntry(kKeyFocusSplitter, state);
+    g.sync();
+}
+
+core::player::Kind Config::preferredPlayer() const
+{
+    const auto s = group(kGroupPlayer).readEntry(kKeyPlayerPreferred, QStringLiteral("mpv"));
+    return core::player::fromString(s).value_or(core::player::Kind::Mpv);
+}
+
+void Config::setPreferredPlayer(core::player::Kind k)
+{
+    if (preferredPlayer() == k) {
+        return;
+    }
+    auto g = group(kGroupPlayer);
+    g.writeEntry(kKeyPlayerPreferred, core::player::toString(k));
+    g.sync();
+    Q_EMIT preferredPlayerChanged(k);
+}
+
+QString Config::customPlayerCommand() const
+{
+    return group(kGroupPlayer).readEntry(kKeyPlayerCustomCmd, QString {});
+}
+
+void Config::setCustomPlayerCommand(const QString& command)
+{
+    auto g = group(kGroupPlayer);
+    g.writeEntry(kKeyPlayerCustomCmd, command);
     g.sync();
 }
 

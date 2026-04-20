@@ -36,7 +36,12 @@ ecm_add_test(tst_realdebrid_parse.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_player.cpp
+    TEST_NAME tst_player
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
-         tst_torrentio_parse tst_realdebrid_parse)
+         tst_torrentio_parse tst_realdebrid_parse tst_player)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

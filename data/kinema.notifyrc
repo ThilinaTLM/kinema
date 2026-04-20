@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# KNotification event catalogue for Kinema. Installed to
+# ${KDE_INSTALL_KNOTIFYRCDIR}/kinema.notifyrc so that desktop
+# notification daemons can theme/route/mute our events and the user
+# can tweak them in systemsettings → Notifications.
+
+[Global]
+IconName=dev.tlmtech.kinema
+Comment=Kinema
+Comment[en_US]=Kinema
+Name=Kinema
+Name[en_US]=Kinema
+DesktopEntry=dev.tlmtech.kinema
+
+[Event/playbackStarted]
+Name=Playback started
+Comment=Emitted when a stream is successfully handed to mpv or VLC.
+IconName=media-playback-start
+Action=Popup
+DefaultAction=Popup
+
+[Event/playbackFailed]
+Name=Playback failed
+Comment=Emitted when the external player could not be launched.
+IconName=dialog-error
+Action=Popup
+DefaultAction=Popup

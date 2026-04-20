@@ -17,6 +17,7 @@ class QStackedWidget;
 
 namespace kinema::core {
 class HttpClient;
+class PlayerLauncher;
 class TokenStore;
 }
 
@@ -54,6 +55,7 @@ private Q_SLOTS:
     void onOpenMagnet(const api::Stream& stream);
     void onCopyDirectUrl(const api::Stream& stream);
     void onOpenDirectUrl(const api::Stream& stream);
+    void onPlayRequested(const api::Stream& stream);
     void onBackFromFocus();
     void showAbout();
     void showRealDebridDialog();
@@ -72,6 +74,7 @@ private:
     // Ownership (parented to this window)
     std::unique_ptr<core::HttpClient> m_http;
     std::unique_ptr<core::TokenStore> m_tokens;
+    std::unique_ptr<core::PlayerLauncher> m_player;
     api::CinemetaClient* m_cinemeta {};
     api::TorrentioClient* m_torrentio {};
     ImageLoader* m_imageLoader {};

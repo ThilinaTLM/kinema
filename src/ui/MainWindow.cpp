@@ -9,6 +9,7 @@
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
 #include "core/Magnet.h"
+#include "core/PlayerLauncher.h"
 #include "core/TokenStore.h"
 #include "kinema_debug.h"
 #include "ui/DetailPane.h"
@@ -61,12 +62,30 @@ MainWindow::MainWindow(QWidget* parent)
     // ---- Core services -----------------------------------------------------
     m_http = std::make_unique<core::HttpClient>(this);
     m_tokens = std::make_unique<core::TokenStore>(this);
+    m_player = std::make_unique<core::PlayerLauncher>(this);
     m_cinemeta = new api::CinemetaClient(m_http.get(), this);
     m_torrentio = new api::TorrentioClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
 
     buildLayout();
     buildActions();
+
+    // Mirror PlayerLauncher results into the status bar so the user
+    // gets a lightweight in-window confirmation on top of the
+    // KNotification the launcher already fires.
+    connect(m_player.get(), &core::PlayerLauncher::launched, this,
+        [this](core::player::Kind, const QString& title) {
+            statusBar()->showMessage(
+                i18nc("@info:status", "Playing: %1", title), 4000);
+        });
+    connect(m_player.get(), &core::PlayerLauncher::launchFailed, this,
+        [this](core::player::Kind, const QString& reason) {
+            statusBar()->showMessage(reason, 6000);
+        });
+
+    if (!m_player->preferredPlayerAvailable()) {
+        qCInfo(KINEMA) << "preferred media player not found on $PATH";
+    }
 
     // RD state is driven by Config ("configured" bit) + the in-memory token.
     const bool hasRD = config::Config::instance().hasRealDebrid();
@@ -144,6 +163,8 @@ void MainWindow::buildLayout()
         this, &MainWindow::onCopyDirectUrl);
     connect(m_detailPane, &DetailPane::openDirectUrlRequested,
         this, &MainWindow::onOpenDirectUrl);
+    connect(m_detailPane, &DetailPane::playRequested,
+        this, &MainWindow::onPlayRequested);
 
     // ---- Browse view (results grid + DetailPane in a splitter) -----------
     auto* splitter = new QSplitter(Qt::Horizontal);
@@ -172,6 +193,8 @@ void MainWindow::buildLayout()
         this, &MainWindow::onCopyDirectUrl);
     connect(m_focusView, &SeriesFocusView::openDirectUrlRequested,
         this, &MainWindow::onOpenDirectUrl);
+    connect(m_focusView, &SeriesFocusView::playRequested,
+        this, &MainWindow::onPlayRequested);
 
     // ---- Outer stack ------------------------------------------------------
     m_viewStack = new QStackedWidget(this);
@@ -541,6 +564,19 @@ void MainWindow::onCopyDirectUrl(const api::Stream& stream)
     QGuiApplication::clipboard()->setText(stream.directUrl.toString());
     statusBar()->showMessage(
         i18nc("@info:status", "Direct URL copied to clipboard"), 3000);
+}
+
+void MainWindow::onPlayRequested(const api::Stream& stream)
+{
+    if (stream.directUrl.isEmpty()) {
+        statusBar()->showMessage(
+            i18nc("@info:status",
+                "This release has no direct URL \u2014 use Real-Debrid for one-click play."),
+            5000);
+        return;
+    }
+    m_player->play(stream.directUrl,
+        stream.releaseName.isEmpty() ? stream.qualityLabel : stream.releaseName);
 }
 
 void MainWindow::onOpenDirectUrl(const api::Stream& stream)

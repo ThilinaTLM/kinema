@@ -10,10 +10,10 @@ Kinema is a graphical successor to
 upstream data sources, but with metadata-rich browsing (posters, titles,
 descriptions) and one-click playback, without requiring Stremio.
 
-> **Status — Milestone 2 (series + Real-Debrid).** Movies *and* TV
-> series search. Real-Debrid token entry via the system keyring,
-> `[RD+]` badges, cached-only filtering, and Copy-direct-URL actions.
-> Player launching in mpv / VLC is still **M3**; filters UI and full
+> **Status — Milestone 3 (mpv / VLC playback).** Everything from
+> M1 + M2, plus one-click **Play** into mpv (default) or VLC for
+> Real-Debrid cached streams, KNotifications on launch / failure,
+> and startup detection of available players. Filters UI and full
 > Settings dialog are **M4**. See the [PRD](PRD.md).
 
 ## Features today (M2)
@@ -32,14 +32,16 @@ descriptions) and one-click playback, without requiring Stremio.
   - **Copy / Open direct URL** on cached rows
 - Poster & thumbnail cache (memory + disk)
 - Sortable torrents table (click any column header)
+- **Play** directly in mpv (default) or VLC via a detached process
+  — Enter / double-click a cached row, or right-click → **Play**
+- KNotifications for playback started / failed events
 - First-class KDE Plasma 6 theming, keyboard navigation, About dialog
 
 ## Coming soon
 
-- Direct-to-mpv / VLC playback + detached process launch — **M3**
-- KNotifications for launch / failure events — **M3**
-- Quality / providers / sort UI, full Settings dialog,
-  `.torrent` export, Flatpak packaging — **M4**
+- Quality / providers / sort UI, full Settings dialog (player picker,
+  custom command, default filters), `.torrent` export, Flatpak
+  packaging — **M4**
 
 ## Requirements
 
@@ -51,14 +53,19 @@ descriptions) and one-click playback, without requiring Stremio.
 
 ### Install prerequisites
 
+Kinema expects **mpv** (default) or **VLC** on `$PATH` at runtime
+for the Play action; both are soft runtime dependencies, not
+build-time requirements.
+
 On **Arch Linux / Manjaro**:
 
 ```bash
 sudo pacman -S --needed \
     base-devel cmake extra-cmake-modules \
     qt6-base qt6-tools \
-    kcoreaddons ki18n kio kconfigwidgets kxmlgui \
-    qcoro qtkeychain-qt6
+    kcoreaddons ki18n kio kconfigwidgets knotifications kxmlgui \
+    qcoro qtkeychain-qt6 \
+    mpv
 ```
 
 On **Fedora 40+**:
@@ -68,8 +75,9 @@ sudo dnf install \
     gcc-c++ cmake extra-cmake-modules \
     qt6-qtbase-devel qt6-qttools-devel \
     kf6-kcoreaddons-devel kf6-ki18n-devel kf6-kio-devel \
-    kf6-kconfigwidgets-devel kf6-kxmlgui-devel \
-    qcoro-qt6-devel qt6-qtkeychain-devel
+    kf6-kconfigwidgets-devel kf6-knotifications-devel kf6-kxmlgui-devel \
+    qcoro-qt6-devel qt6-qtkeychain-devel \
+    mpv
 ```
 
 On **Debian trixie / Ubuntu 24.10+**:
@@ -79,8 +87,9 @@ sudo apt install \
     build-essential cmake extra-cmake-modules \
     qt6-base-dev qt6-tools-dev \
     libkf6coreaddons-dev libkf6i18n-dev libkf6kio-dev \
-    libkf6configwidgets-dev libkf6xmlgui-dev \
-    libqcoro6-dev qt6keychain-dev
+    libkf6configwidgets-dev libkf6notifications-dev libkf6xmlgui-dev \
+    libqcoro6-dev qt6keychain-dev \
+    mpv
 ```
 
 > ℹ️ On non-KDE sessions (e.g. GNOME), Kinema talks to the system's
@@ -109,6 +118,7 @@ This installs:
 - `kinema` binary to `/usr/bin/`
 - `dev.tlmtech.kinema.desktop` to `/usr/share/applications/`
 - `dev.tlmtech.kinema.metainfo.xml` to `/usr/share/metainfo/`
+- `kinema.notifyrc` to `/usr/share/knotifications6/`
 - App icon to `/usr/share/icons/hicolor/scalable/apps/`
 
 ## Real-Debrid setup
@@ -187,6 +197,26 @@ unlocalised user-facing string.
     ```
     should yield nothing.
 
+### M3 — mpv / VLC playback
+
+22. With Real-Debrid still configured, search for any popular movie
+    that has `[RD+]` cached rows. Right-click a cached row → **Play**.
+    mpv opens and begins streaming within ~2 s; a desktop
+    notification titled *Playing in mpv* appears.
+23. **Double-click** a cached row — same behaviour, no menu step.
+    Double-clicking an uncached row does nothing (tooltip on the
+    disabled Play menu item explains why).
+24. Close mpv. The Kinema window is unaffected — no dangling
+    child process (`pgrep mpv` returns nothing).
+25. Temporarily rename `mpv` out of `$PATH` (e.g.
+    `sudo mv /usr/bin/mpv /usr/bin/mpv.bak`) and retry **Play**.
+    Kinema falls back to **VLC** if present, otherwise shows a
+    *Could not start mpv* notification and a status-bar line
+    suggesting to install mpv. Restore mpv afterwards.
+26. On a row without a direct URL (plain magnet), the **Play**
+    menu item is greyed out and the context menu still offers
+    **Copy magnet link** / **Open magnet link**.
+
 ## Project layout
 
 ```
@@ -196,6 +226,8 @@ src/
   config/Config            — KConfig-backed singleton (preferences)
   core/HttpClient          — QNAM wrapper returning QCoro::Task
   core/Magnet              — pure magnet-URI builder
+  core/Player              — pure player-invocation helpers
+  core/PlayerLauncher      — detached-process spawn + KNotification
   core/TorrentioConfig     — pure Torrentio-config-string builder
   core/TokenStore          — QtKeychain wrapper returning QCoro::Task
   api/CinemetaClient       — Cinemeta search + movie/series meta
@@ -215,7 +247,7 @@ src/
   ui/RealDebridDialog      — token entry + test + save
   ui/ImageLoader           — two-level image cache + QCoro fetch
   ui/StateWidget           — empty/loading/error placeholder
-data/                      — .desktop, AppStream metainfo, icon
+data/                      — .desktop, AppStream metainfo, notifyrc, icon
 tests/                     — QtTest unit tests + JSON fixtures
 ```
 

@@ -55,6 +55,8 @@ Q_SIGNALS:
     void copyDirectUrlRequested(const api::Stream& stream);
     /// Emitted when the user selects "Open direct URL" for an RD-cached row.
     void openDirectUrlRequested(const api::Stream& stream);
+    /// Emitted when the user selects "Play" on an RD-cached row.
+    void playRequested(const api::Stream& stream);
 
 private:
     void onTorrentContextMenu(const QPoint& pos);

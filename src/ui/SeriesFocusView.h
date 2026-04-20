@@ -74,6 +74,7 @@ Q_SIGNALS:
     void openMagnetRequested(const api::Stream& stream);
     void copyDirectUrlRequested(const api::Stream& stream);
     void openDirectUrlRequested(const api::Stream& stream);
+    void playRequested(const api::Stream& stream);
 
 private:
     void applyCachedOnlyFilter();
