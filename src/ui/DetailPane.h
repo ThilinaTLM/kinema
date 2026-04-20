@@ -15,7 +15,6 @@ class QTableView;
 namespace kinema::ui {
 
 class ImageLoader;
-class SeriesPicker;
 class StateWidget;
 class TorrentsModel;
 
@@ -35,7 +34,6 @@ public:
     void showMetaLoading();
     void showMetaError(const QString& message);
     void setMeta(const api::MetaDetail& meta);
-    void setSeries(const api::SeriesDetail& series);
 
     void showTorrentsLoading();
     void showTorrentsError(const QString& message);
@@ -57,8 +55,6 @@ Q_SIGNALS:
     void copyDirectUrlRequested(const api::Stream& stream);
     /// Emitted when the user selects "Open direct URL" for an RD-cached row.
     void openDirectUrlRequested(const api::Stream& stream);
-    /// Emitted when an episode is activated in series mode.
-    void episodeSelected(const api::Episode& episode);
 
 private:
     void onTorrentContextMenu(const QPoint& pos);
@@ -78,11 +74,6 @@ private:
     QLabel* m_metaLineLabel;
     QLabel* m_descLabel;
     QUrl m_pendingPosterUrl;
-
-    // Series picker (between meta and torrents). Hidden for movies.
-    QStackedWidget* m_pickerStack;
-    QWidget* m_pickerEmpty;
-    SeriesPicker* m_seriesPicker;
 
     // Torrents side
     QCheckBox* m_cachedOnlyCheck;

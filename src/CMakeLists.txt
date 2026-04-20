@@ -26,6 +26,7 @@ set(kinema_core_SRCS
     ui/RealDebridDialog.cpp
     ui/ResultsModel.cpp
     ui/ResultCardDelegate.cpp
+    ui/SeriesFocusView.cpp
     ui/SeriesPicker.cpp
     ui/TorrentsModel.cpp
     ui/SearchBar.cpp

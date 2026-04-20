@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilina@tlmtech.dev>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "ui/DetailPane.h"
+#include "ui/SeriesFocusView.h"
 
 #include "config/Config.h"
 #include "ui/ImageLoader.h"
+#include "ui/SeriesPicker.h"
 #include "ui/StateWidget.h"
 #include "ui/TorrentsModel.h"
 
@@ -12,16 +13,19 @@
 
 #include <QAction>
 #include <QCheckBox>
-#include <QCoro/QCoroTask>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
+#include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
 #include <QPixmap>
 #include <QPixmapCache>
+#include <QPushButton>
+#include <QShortcut>
 #include <QSortFilterProxyModel>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QTableView>
 #include <QVBoxLayout>
@@ -30,7 +34,8 @@ namespace kinema::ui {
 
 namespace {
 
-/// Simple proxy that sorts via the model's SortKeyRole when available.
+/// Shared with DetailPane's SortProxy — sorts by TorrentsModel::SortKeyRole
+/// when present, falls back to display text otherwise.
 class SortProxy : public QSortFilterProxyModel
 {
 public:
@@ -50,23 +55,39 @@ protected:
 
 } // namespace
 
-DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
+SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
     : QWidget(parent)
     , m_loader(loader)
 {
-    // ---- Meta side ---------------------------------------------------------
-    m_metaState = new StateWidget(this);
+    // ---- Header strip ------------------------------------------------------
+    m_backButton = new QPushButton(
+        QIcon::fromTheme(QStringLiteral("go-previous")),
+        i18nc("@action:button", "Back to results"), this);
+    m_backButton->setAutoDefault(false);
+    m_backButton->setDefault(false);
+    m_backButton->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Left));
+    connect(m_backButton, &QPushButton::clicked,
+        this, &SeriesFocusView::backRequested);
+
+    // Esc also triggers back. Use a widget-wide shortcut so the episode
+    // list's own Qt::Key_Escape doesn't swallow it.
+    auto* escShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    escShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(escShortcut, &QShortcut::activated,
+        this, &SeriesFocusView::backRequested);
 
     m_posterLabel = new QLabel(this);
-    m_posterLabel->setFixedSize(220, 330);
+    m_posterLabel->setFixedSize(120, 180);
     m_posterLabel->setAlignment(Qt::AlignCenter);
     m_posterLabel->setFrameShape(QFrame::StyledPanel);
 
     m_titleLabel = new QLabel(this);
-    auto tf = m_titleLabel->font();
-    tf.setPointSizeF(tf.pointSizeF() * 1.4);
-    tf.setBold(true);
-    m_titleLabel->setFont(tf);
+    {
+        auto f = m_titleLabel->font();
+        f.setPointSizeF(f.pointSizeF() * 1.4);
+        f.setBold(true);
+        m_titleLabel->setFont(f);
+    }
     m_titleLabel->setWordWrap(true);
 
     m_metaLineLabel = new QLabel(this);
@@ -77,28 +98,51 @@ DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
     m_descLabel->setWordWrap(true);
     m_descLabel->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     m_descLabel->setTextFormat(Qt::PlainText);
+    m_descLabel->setMaximumHeight(80);
 
-    auto* metaRight = new QVBoxLayout;
-    metaRight->setSpacing(6);
-    metaRight->addWidget(m_titleLabel);
-    metaRight->addWidget(m_metaLineLabel);
-    metaRight->addWidget(m_descLabel, 1);
+    auto* textColumn = new QVBoxLayout;
+    textColumn->setContentsMargins(0, 0, 0, 0);
+    textColumn->setSpacing(4);
+    textColumn->addWidget(m_titleLabel);
+    textColumn->addWidget(m_metaLineLabel);
+    textColumn->addWidget(m_descLabel, 1);
 
-    auto* metaRow = new QHBoxLayout;
-    metaRow->setSpacing(12);
-    metaRow->addWidget(m_posterLabel, 0, Qt::AlignTop);
-    metaRow->addLayout(metaRight, 1);
+    auto* headerRow = new QHBoxLayout;
+    headerRow->setContentsMargins(12, 12, 12, 12);
+    headerRow->setSpacing(12);
+    headerRow->addWidget(m_posterLabel, 0, Qt::AlignTop);
+    headerRow->addLayout(textColumn, 1);
 
-    m_metaContent = new QWidget(this);
-    auto* metaContentLayout = new QVBoxLayout(m_metaContent);
-    metaContentLayout->setContentsMargins(12, 12, 12, 6);
-    metaContentLayout->addLayout(metaRow);
+    auto* headerTop = new QHBoxLayout;
+    headerTop->setContentsMargins(12, 8, 12, 0);
+    headerTop->addWidget(m_backButton);
+    headerTop->addStretch(1);
 
-    m_metaStack = new QStackedWidget(this);
-    m_metaStack->addWidget(m_metaState);
-    m_metaStack->addWidget(m_metaContent);
+    auto* headerWrap = new QWidget(this);
+    auto* headerVBox = new QVBoxLayout(headerWrap);
+    headerVBox->setContentsMargins(0, 0, 0, 0);
+    headerVBox->setSpacing(0);
+    headerVBox->addLayout(headerTop);
+    headerVBox->addLayout(headerRow);
 
-    // ---- Torrents side -----------------------------------------------------
+    // ---- Top half of splitter: SeriesPicker -------------------------------
+    m_picker = new SeriesPicker(m_loader, this);
+    connect(m_picker, &SeriesPicker::episodeActivated,
+        this, &SeriesFocusView::episodeSelected);
+
+    m_pickerState = new StateWidget(this);
+    m_pickerStack = new QStackedWidget(this);
+    m_pickerStack->addWidget(m_pickerState);
+    m_pickerStack->addWidget(m_picker);
+    m_pickerStack->setCurrentWidget(m_pickerState);
+    m_pickerState->showIdle(QString {});
+
+    auto* pickerWrap = new QWidget(this);
+    auto* pickerLayout = new QVBoxLayout(pickerWrap);
+    pickerLayout->setContentsMargins(12, 4, 12, 4);
+    pickerLayout->addWidget(m_pickerStack);
+
+    // ---- Bottom half of splitter: cached-only + torrents -------------------
     m_cachedOnlyCheck = new QCheckBox(
         i18nc("@option:check", "Cached on Real-Debrid only"), this);
     m_cachedOnlyCheck->setChecked(config::Config::instance().cachedOnly());
@@ -143,30 +187,48 @@ DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
         TorrentsModel::ColProvider, QHeaderView::ResizeToContents);
     m_torrentsView->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_torrentsView, &QTableView::customContextMenuRequested,
-        this, &DetailPane::onTorrentContextMenu);
+        this, &SeriesFocusView::onTorrentContextMenu);
 
     m_torrentsState = new StateWidget(this);
-
     m_torrentsStack = new QStackedWidget(this);
     m_torrentsStack->addWidget(m_torrentsState);
     m_torrentsStack->addWidget(m_torrentsView);
 
-    // ---- Root layout -------------------------------------------------------
     auto* cachedRow = new QHBoxLayout;
-    cachedRow->setContentsMargins(12, 0, 12, 0);
+    cachedRow->setContentsMargins(0, 0, 0, 0);
     cachedRow->addWidget(m_cachedOnlyCheck);
     cachedRow->addStretch(1);
 
+    auto* torrentsWrap = new QWidget(this);
+    auto* torrentsLayout = new QVBoxLayout(torrentsWrap);
+    torrentsLayout->setContentsMargins(12, 4, 12, 8);
+    torrentsLayout->setSpacing(4);
+    torrentsLayout->addLayout(cachedRow);
+    torrentsLayout->addWidget(m_torrentsStack, 1);
+
+    // ---- Splitter ---------------------------------------------------------
+    m_bodySplit = new QSplitter(Qt::Vertical, this);
+    m_bodySplit->setChildrenCollapsible(false);
+    m_bodySplit->addWidget(pickerWrap);
+    m_bodySplit->addWidget(torrentsWrap);
+    // Default 40/60 episodes/torrents; may be overridden by saved state.
+    applyDefaultSplitterRatio();
+
+    const auto savedState = config::Config::instance().focusSplitterState();
+    if (!savedState.isEmpty()) {
+        m_bodySplit->restoreState(savedState);
+    }
+    connect(m_bodySplit, &QSplitter::splitterMoved, this,
+        [this] { saveSplitterState(); });
+
+    // ---- Root -------------------------------------------------------------
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(4);
-    root->addWidget(m_metaStack, 0);
-    root->addLayout(cachedRow, 0);
-    root->addWidget(m_torrentsStack, 1);
+    root->setSpacing(0);
+    root->addWidget(headerWrap, 0);
+    root->addWidget(m_bodySplit, 1);
 
-    showIdle();
-
-    // When any poster arrives, see if it was the one we're waiting on.
+    // Repaint the poster when it finishes loading.
     if (m_loader) {
         connect(m_loader, &ImageLoader::posterReady, this,
             [this](const QUrl& url) {
@@ -175,79 +237,106 @@ DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
                 }
             });
     }
+
+    showMetaLoading();
 }
 
-void DetailPane::showIdle()
+void SeriesFocusView::applyDefaultSplitterRatio()
 {
-    m_metaState->showIdle(
-        i18nc("@label", "Nothing selected"),
-        i18nc("@info", "Pick a result on the left to see details and torrents."));
-    m_metaStack->setCurrentWidget(m_metaState);
-
-    m_rawStreams.clear();
-    m_torrents->reset({});
-    m_torrentsState->showIdle(QString {});
-    m_torrentsStack->setCurrentWidget(m_torrentsState);
-    rebuildCachedOnlyVisibility();
+    // 40% top, 60% bottom. Uses a ratio because the splitter may be
+    // asked for sizes before the widget has its real geometry.
+    m_bodySplit->setSizes({ 400, 600 });
+    m_bodySplit->setStretchFactor(0, 4);
+    m_bodySplit->setStretchFactor(1, 6);
 }
 
-void DetailPane::showMetaLoading()
+void SeriesFocusView::saveSplitterState()
 {
-    m_metaState->showLoading(i18nc("@info:status", "Loading details…"));
-    m_metaStack->setCurrentWidget(m_metaState);
+    config::Config::instance().setFocusSplitterState(m_bodySplit->saveState());
 }
 
-void DetailPane::showMetaError(const QString& message)
-{
-    m_metaState->showError(message, /*retryable=*/false);
-    m_metaStack->setCurrentWidget(m_metaState);
-}
-
-void DetailPane::setMeta(const api::MetaDetail& meta)
-{
-    m_titleLabel->setText(meta.summary.year
-            ? QStringLiteral("%1 (%2)").arg(meta.summary.title).arg(*meta.summary.year)
-            : meta.summary.title);
-
-    QStringList metaLine;
-    if (!meta.genres.isEmpty()) {
-        metaLine << meta.genres.join(QStringLiteral(", "));
-    }
-    if (meta.runtimeMinutes) {
-        metaLine << i18nc("@label runtime", "%1 min", *meta.runtimeMinutes);
-    }
-    if (meta.summary.imdbRating) {
-        metaLine << i18nc("@label rating", "★ %1",
-            QString::number(*meta.summary.imdbRating, 'f', 1));
-    }
-    m_metaLineLabel->setText(metaLine.join(QStringLiteral("  ·  ")));
-
-    m_descLabel->setText(meta.summary.description);
-
-    m_pendingPosterUrl = meta.summary.poster;
-    m_posterLabel->clear();
-    updatePoster();
-
-    m_metaStack->setCurrentWidget(m_metaContent);
-}
-
-void DetailPane::setRealDebridConfigured(bool on)
+void SeriesFocusView::setRealDebridConfigured(bool on)
 {
     m_rdConfigured = on;
     rebuildCachedOnlyVisibility();
     applyCachedOnlyFilter();
 }
 
-void DetailPane::updatePoster()
+void SeriesFocusView::focusEpisodeList()
+{
+    // Delegate to the picker which owns the list view.
+    m_picker->setFocus();
+}
+
+void SeriesFocusView::showMetaLoading()
+{
+    m_titleLabel->setText(i18nc("@info:status", "Loading…"));
+    m_metaLineLabel->clear();
+    m_descLabel->clear();
+    m_posterLabel->clear();
+    m_pendingPosterUrl.clear();
+
+    m_pickerState->showLoading(i18nc("@info:status", "Loading episodes…"));
+    m_pickerStack->setCurrentWidget(m_pickerState);
+
+    m_torrentsState->showIdle(QString {});
+    m_torrentsStack->setCurrentWidget(m_torrentsState);
+
+    m_rawStreams.clear();
+    m_torrents->reset({});
+    rebuildCachedOnlyVisibility();
+}
+
+void SeriesFocusView::showMetaError(const QString& message)
+{
+    m_titleLabel->setText(i18nc("@label", "Couldn't load series"));
+    m_metaLineLabel->clear();
+    m_descLabel->setText(message);
+    m_posterLabel->clear();
+
+    m_pickerState->showError(message, /*retryable=*/false);
+    m_pickerStack->setCurrentWidget(m_pickerState);
+
+    m_torrentsState->showIdle(QString {});
+    m_torrentsStack->setCurrentWidget(m_torrentsState);
+}
+
+void SeriesFocusView::setSeries(const api::SeriesDetail& series)
+{
+    const auto& sum = series.meta.summary;
+    m_titleLabel->setText(sum.year
+            ? QStringLiteral("%1 (%2)").arg(sum.title).arg(*sum.year)
+            : sum.title);
+
+    QStringList metaLine;
+    if (!series.meta.genres.isEmpty()) {
+        metaLine << series.meta.genres.join(QStringLiteral(", "));
+    }
+    if (series.meta.runtimeMinutes) {
+        metaLine << i18nc("@label runtime", "%1 min", *series.meta.runtimeMinutes);
+    }
+    if (sum.imdbRating) {
+        metaLine << i18nc("@label rating", "★ %1",
+            QString::number(*sum.imdbRating, 'f', 1));
+    }
+    m_metaLineLabel->setText(metaLine.join(QStringLiteral("  ·  ")));
+    m_descLabel->setText(sum.description);
+
+    m_pendingPosterUrl = sum.poster;
+    m_posterLabel->clear();
+    updatePoster();
+
+    m_picker->setSeries(series);
+    m_pickerStack->setCurrentWidget(m_picker);
+}
+
+void SeriesFocusView::updatePoster()
 {
     if (!m_loader || m_pendingPosterUrl.isEmpty()) {
         return;
     }
-    // Kick off a (possibly cache-hitting) fetch, then set the pixmap in a
-    // continuation. We don't await in this non-coroutine method.
     auto task = m_loader->requestPoster(m_pendingPosterUrl);
     Q_UNUSED(task);
-    // Synchronous cache hit path: query QPixmapCache directly.
     QPixmap pm;
     const auto key = QStringLiteral("kinema:poster:")
         + m_pendingPosterUrl.toString(QUrl::FullyEncoded);
@@ -257,35 +346,35 @@ void DetailPane::updatePoster()
     }
 }
 
-void DetailPane::showTorrentsLoading()
+void SeriesFocusView::showTorrentsLoading()
 {
     m_torrentsState->showLoading(i18nc("@info:status", "Finding torrents…"));
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 }
 
-void DetailPane::showTorrentsError(const QString& message)
+void SeriesFocusView::showTorrentsError(const QString& message)
 {
     m_torrentsState->showError(message, /*retryable=*/false);
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 }
 
-void DetailPane::showTorrentsEmpty()
+void SeriesFocusView::showTorrentsEmpty()
 {
     m_torrentsState->showIdle(
         i18nc("@label", "No torrents found"),
-        i18nc("@info", "Try a different release or widen your filters."));
+        i18nc("@info", "Try a different episode or widen your filters."));
     m_torrents->reset({});
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 }
 
-void DetailPane::setTorrents(QList<api::Stream> streams)
+void SeriesFocusView::setTorrents(QList<api::Stream> streams)
 {
     m_rawStreams = std::move(streams);
     rebuildCachedOnlyVisibility();
     applyCachedOnlyFilter();
 }
 
-void DetailPane::applyCachedOnlyFilter()
+void SeriesFocusView::applyCachedOnlyFilter()
 {
     if (m_rawStreams.isEmpty()) {
         m_torrents->reset({});
@@ -317,12 +406,12 @@ void DetailPane::applyCachedOnlyFilter()
     m_torrentsStack->setCurrentWidget(m_torrentsView);
 }
 
-void DetailPane::rebuildCachedOnlyVisibility()
+void SeriesFocusView::rebuildCachedOnlyVisibility()
 {
     m_cachedOnlyCheck->setVisible(m_rdConfigured && !m_rawStreams.isEmpty());
 }
 
-void DetailPane::onTorrentContextMenu(const QPoint& pos)
+void SeriesFocusView::onTorrentContextMenu(const QPoint& pos)
 {
     const auto idx = m_torrentsView->indexAt(pos);
     if (!idx.isValid()) {

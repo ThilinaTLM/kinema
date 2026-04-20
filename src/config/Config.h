@@ -6,6 +6,7 @@
 #include "api/Types.h"
 #include "core/TorrentioConfig.h"
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 
@@ -42,6 +43,11 @@ public:
     // Last-used SearchBar mode.
     api::MediaKind searchKind() const;
     void setSearchKind(api::MediaKind);
+
+    // Series focus view's vertical splitter state (QSplitter::saveState).
+    // Empty on first run — SeriesFocusView falls back to 40/60 default.
+    QByteArray focusSplitterState() const;
+    void setFocusSplitterState(QByteArray state);
 
     /// Options used to build the Torrentio URL. M2 still uses defaults
     /// (sort = Seeders, no quality/provider filters); the RD token is

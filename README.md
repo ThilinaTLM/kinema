@@ -19,8 +19,10 @@ descriptions) and one-click playback, without requiring Stremio.
 ## Features today (M2)
 
 - Movie **and** TV series search by title or IMDB id (`tt…`)
-- Series detail with a **season picker** and an **episode list**
-  (thumbnails, air dates)
+- Series detail opens in a **focused full-window view** with a
+  compact header, a season dropdown + episode list (thumbnails,
+  titles, air dates), and the torrents table below — all draggable
+  via a splitter, state persisted.
 - Torrentio stream fetch per episode (`ttXXXXXX:S:E`)
 - **Real-Debrid** token entry, validated against `/rest/1.0/user`
   - Token persisted in the system keyring (Secret Service /
@@ -151,24 +153,35 @@ unlocalised user-facing string.
 
  9. Switch the search toggle to **TV Series**, search `Breaking Bad`.
     Poster grid appears within ~2 s.
-10. Click the top card. The detail pane shows a **Season:** dropdown
-    and an episode list. S1E1 *Pilot* is auto-selected; torrents load
-    within ~3 s.
-11. Pick **Season 2** from the dropdown. Episode list refreshes with
+10. Click the top card. The window switches into a **series focus
+    view**: compact header at the top (back button, small poster,
+    metadata), then a vertical split of episodes above and torrents
+    below. S1E1 *Pilot* is auto-selected and its torrents load within
+    ~3 s.
+11. At least **4 episode rows** are visible without scrolling on a
+    1100 px-tall window. The torrents table spans the full window
+    width, with the Release column comfortably wide.
+12. Drag the splitter between episodes and torrents; the ratio
+    survives an app restart.
+13. Pick **Season 2** from the dropdown. Episode list refreshes with
     thumbnails; clicking **E1** loads torrents for `tt0903747:2:1`.
-12. Open **Tools → Real-Debrid…**, paste a real token, click **Test
+14. Press **Esc** (or click **← Back to results** or **Alt+Left**).
+    The grid reappears with the original scroll position and
+    selection; the window title returns to *Kinema*.
+15. Open **Tools → Real-Debrid…**, paste a real token, click **Test
     connection**. Green status line with your username.
-13. **Save**. Run a movie search. Popular titles show `[RD+]` badges
+16. **Save**. Run a movie search. Popular titles show `[RD+]` badges
     on at least a few rows.
-14. Tick **Cached on Real-Debrid only**. Only `[RD+]` rows remain
+17. Tick **Cached on Real-Debrid only**. Only `[RD+]` rows remain
     visible; un-ticking restores the full list. No refetch happens.
-15. Right-click a cached row → **Copy direct URL** → paste into a
+18. Right-click a cached row → **Copy direct URL** → paste into a
     browser: the file begins to stream from `*.real-debrid.com`.
-16. Close + reopen the app. The SearchBar mode is remembered, badges
-    still show, and the cached-only checkbox state is preserved.
-17. Open the dialog, click **Remove token**. Badges disappear, the
+19. Close + reopen the app. The SearchBar mode is remembered, badges
+    still show, the cached-only checkbox state is preserved, and the
+    focus-view splitter sits where you left it.
+20. Open the dialog, click **Remove token**. Badges disappear, the
     checkbox hides; app reverts to pure magnet-mode.
-18. Verify no plaintext token on disk:
+21. Verify no plaintext token on disk:
     ```bash
     grep -rI "<first 10 chars of your token>" ~/.config ~/.local ~/.cache 2>/dev/null
     ```
@@ -193,7 +206,8 @@ src/
   ui/SearchBar             — search input + kind toggle (movies / series)
   ui/ResultsModel          — QAbstractListModel of MetaSummary
   ui/ResultCardDelegate    — poster card painter
-  ui/DetailPane            — poster, metadata, series picker, torrents
+  ui/DetailPane            — poster, metadata, torrents (movie preview)
+  ui/SeriesFocusView       — full-window series view (header + splitter)
   ui/SeriesPicker          — season combo + episode list
   ui/EpisodesModel         — QAbstractListModel of Episode
   ui/EpisodeDelegate       — episode row painter (thumb + title + date)

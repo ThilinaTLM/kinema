@@ -15,6 +15,7 @@ constexpr auto kGroupRD = "RealDebrid";
 
 constexpr auto kKeyCachedOnly = "cachedOnly";
 constexpr auto kKeySearchKind = "searchKind";
+constexpr auto kKeyFocusSplitter = "focusSplitter";
 constexpr auto kKeyRDConfigured = "configured";
 
 KConfigGroup group(const char* name)
@@ -75,6 +76,18 @@ void Config::setSearchKind(api::MediaKind k)
     auto g = group(kGroupGeneral);
     g.writeEntry(kKeySearchKind,
         k == api::MediaKind::Series ? QStringLiteral("Series") : QStringLiteral("Movie"));
+    g.sync();
+}
+
+QByteArray Config::focusSplitterState() const
+{
+    return group(kGroupGeneral).readEntry(kKeyFocusSplitter, QByteArray {});
+}
+
+void Config::setFocusSplitterState(QByteArray state)
+{
+    auto g = group(kGroupGeneral);
+    g.writeEntry(kKeyFocusSplitter, state);
     g.sync();
 }
 

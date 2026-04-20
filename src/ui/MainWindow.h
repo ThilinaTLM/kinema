@@ -32,6 +32,7 @@ class ImageLoader;
 class ResultCardDelegate;
 class ResultsModel;
 class SearchBar;
+class SeriesFocusView;
 class StateWidget;
 
 /**
@@ -53,6 +54,7 @@ private Q_SLOTS:
     void onOpenMagnet(const api::Stream& stream);
     void onCopyDirectUrl(const api::Stream& stream);
     void onOpenDirectUrl(const api::Stream& stream);
+    void onBackFromFocus();
     void showAbout();
     void showRealDebridDialog();
 
@@ -82,6 +84,11 @@ private:
     StateWidget* m_resultsState {};
     QStackedWidget* m_resultsStack {};
     DetailPane* m_detailPane {};
+
+    // Outer stack: browse view (results + DetailPane) vs series focus view.
+    QStackedWidget* m_viewStack {};
+    QWidget* m_browseView {};
+    SeriesFocusView* m_focusView {};
 
     // Concurrency guard — increments on each new query so stale coroutines
     // can detect they've been superseded and bail out.

@@ -17,7 +17,10 @@
 #include "ui/ResultCardDelegate.h"
 #include "ui/ResultsModel.h"
 #include "ui/SearchBar.h"
+#include "ui/SeriesFocusView.h"
 #include "ui/StateWidget.h"
+
+#include <QEvent>
 
 #include <KAboutApplicationDialog>
 #include <KAboutData>
@@ -36,6 +39,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QVBoxLayout>
 
 namespace kinema::ui {
 
@@ -67,9 +71,11 @@ MainWindow::MainWindow(QWidget* parent)
     // RD state is driven by Config ("configured" bit) + the in-memory token.
     const bool hasRD = config::Config::instance().hasRealDebrid();
     m_detailPane->setRealDebridConfigured(hasRD);
+    m_focusView->setRealDebridConfigured(hasRD);
     connect(&config::Config::instance(), &config::Config::realDebridChanged,
         this, [this](bool on) {
             m_detailPane->setRealDebridConfigured(on);
+            m_focusView->setRealDebridConfigured(on);
         });
 
     // Load the token from the keyring in the background.
@@ -128,7 +134,7 @@ void MainWindow::buildLayout()
     m_resultsStack->addWidget(m_resultsState);
     m_resultsStack->addWidget(m_resultsView);
 
-    // ---- Detail pane -------------------------------------------------------
+    // ---- Detail pane (movies only) ----------------------------------------
     m_detailPane = new DetailPane(m_imageLoader, this);
     connect(m_detailPane, &DetailPane::copyMagnetRequested,
         this, &MainWindow::onCopyMagnet);
@@ -138,17 +144,41 @@ void MainWindow::buildLayout()
         this, &MainWindow::onCopyDirectUrl);
     connect(m_detailPane, &DetailPane::openDirectUrlRequested,
         this, &MainWindow::onOpenDirectUrl);
-    connect(m_detailPane, &DetailPane::episodeSelected,
-        this, &MainWindow::onEpisodeSelected);
 
-    // ---- Splitter root -----------------------------------------------------
-    auto* splitter = new QSplitter(Qt::Horizontal, this);
+    // ---- Browse view (results grid + DetailPane in a splitter) -----------
+    auto* splitter = new QSplitter(Qt::Horizontal);
     splitter->addWidget(m_resultsStack);
     splitter->addWidget(m_detailPane);
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 2);
     splitter->setChildrenCollapsible(false);
-    setCentralWidget(splitter);
+
+    m_browseView = new QWidget(this);
+    auto* browseLayout = new QVBoxLayout(m_browseView);
+    browseLayout->setContentsMargins(0, 0, 0, 0);
+    browseLayout->addWidget(splitter);
+
+    // ---- Series focus view -----------------------------------------------
+    m_focusView = new SeriesFocusView(m_imageLoader, this);
+    connect(m_focusView, &SeriesFocusView::backRequested,
+        this, &MainWindow::onBackFromFocus);
+    connect(m_focusView, &SeriesFocusView::episodeSelected,
+        this, &MainWindow::onEpisodeSelected);
+    connect(m_focusView, &SeriesFocusView::copyMagnetRequested,
+        this, &MainWindow::onCopyMagnet);
+    connect(m_focusView, &SeriesFocusView::openMagnetRequested,
+        this, &MainWindow::onOpenMagnet);
+    connect(m_focusView, &SeriesFocusView::copyDirectUrlRequested,
+        this, &MainWindow::onCopyDirectUrl);
+    connect(m_focusView, &SeriesFocusView::openDirectUrlRequested,
+        this, &MainWindow::onOpenDirectUrl);
+
+    // ---- Outer stack ------------------------------------------------------
+    m_viewStack = new QStackedWidget(this);
+    m_viewStack->addWidget(m_browseView);
+    m_viewStack->addWidget(m_focusView);
+    m_viewStack->setCurrentWidget(m_browseView);
+    setCentralWidget(m_viewStack);
 
     statusBar()->showMessage(i18nc("@info:status", "Ready"), 2000);
 }
@@ -340,15 +370,27 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
 {
     const auto myEpoch = ++m_detailEpoch;
     m_currentSeriesImdbId = summary.imdbId;
-    m_detailPane->showMetaLoading();
-    m_detailPane->showTorrentsLoading();
+
+    // Push into focus view and show loading state up front.
+    m_focusView->showMetaLoading();
+    m_viewStack->setCurrentWidget(m_focusView);
 
     try {
         auto sd = co_await m_cinemeta->seriesMeta(summary.imdbId);
         if (myEpoch != m_detailEpoch) {
             co_return;
         }
-        m_detailPane->setSeries(sd);
+        m_focusView->setSeries(sd);
+
+        // Update the window title for context.
+        const auto& s = sd.meta.summary;
+        setWindowTitle(s.year
+                ? i18nc("@title:window", "Kinema \u2014 %1 (%2)",
+                    s.title, QString::number(*s.year))
+                : i18nc("@title:window", "Kinema \u2014 %1", s.title));
+
+        // Give keyboard focus to the episode list for immediate arrow-key nav.
+        m_focusView->focusEpisodeList();
 
         // Auto-select S1E1 (or the first non-special episode).
         const api::Episode* first = nullptr;
@@ -359,7 +401,7 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
             }
         }
         if (!first) {
-            m_detailPane->showTorrentsEmpty();
+            m_focusView->showTorrentsEmpty();
             co_return;
         }
         auto t = loadEpisodeStreams(*first, summary.imdbId);
@@ -370,19 +412,19 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
             co_return;
         }
         qCWarning(KINEMA) << "series detail failed:" << e.message();
-        m_detailPane->showMetaError(e.message());
+        m_focusView->showMetaError(e.message());
     } catch (const std::exception& e) {
         if (myEpoch != m_detailEpoch) {
             co_return;
         }
-        m_detailPane->showMetaError(QString::fromUtf8(e.what()));
+        m_focusView->showMetaError(QString::fromUtf8(e.what()));
     }
 }
 
 QCoro::Task<void> MainWindow::loadEpisodeStreams(api::Episode episode, QString imdbId)
 {
     const auto myEpoch = ++m_episodeEpoch;
-    m_detailPane->showTorrentsLoading();
+    m_focusView->showTorrentsLoading();
 
     const auto streamId = episode.streamId(imdbId);
 
@@ -392,18 +434,18 @@ QCoro::Task<void> MainWindow::loadEpisodeStreams(api::Episode episode, QString i
         if (myEpoch != m_episodeEpoch) {
             co_return;
         }
-        m_detailPane->setTorrents(std::move(streams));
+        m_focusView->setTorrents(std::move(streams));
     } catch (const core::HttpError& e) {
         if (myEpoch != m_episodeEpoch) {
             co_return;
         }
         qCWarning(KINEMA) << "episode streams failed:" << e.message();
-        m_detailPane->showTorrentsError(e.message());
+        m_focusView->showTorrentsError(e.message());
     } catch (const std::exception& e) {
         if (myEpoch != m_episodeEpoch) {
             co_return;
         }
-        m_detailPane->showTorrentsError(QString::fromUtf8(e.what()));
+        m_focusView->showTorrentsError(QString::fromUtf8(e.what()));
     }
 }
 
@@ -424,6 +466,21 @@ QCoro::Task<void> MainWindow::loadRealDebridToken()
     } catch (const std::exception& e) {
         qCWarning(KINEMA) << "RD token read failed:" << e.what();
         m_rdToken.clear();
+    }
+}
+
+void MainWindow::onBackFromFocus()
+{
+    m_viewStack->setCurrentWidget(m_browseView);
+    setWindowTitle(QStringLiteral("Kinema"));
+    // Bump the episode epoch so any in-flight streams call bails out
+    // without painting over the next selection.
+    ++m_episodeEpoch;
+    m_currentSeriesImdbId.clear();
+
+    // Put focus back on the results grid so arrow keys work immediately.
+    if (m_resultsView) {
+        m_resultsView->setFocus();
     }
 }
 
