@@ -91,11 +91,49 @@ ecm_add_test(tst_streams_panel.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_movie_detail_controller.cpp
+    TEST_NAME tst_movie_detail_controller
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_series_detail_controller.cpp
+    TEST_NAME tst_series_detail_controller
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_token_controller.cpp
+    TEST_NAME tst_token_controller
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_cinemeta_client.cpp
+    TEST_NAME tst_cinemeta_client
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_tmdb_client.cpp
+    TEST_NAME tst_tmdb_client
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_torrentio_client.cpp
+    TEST_NAME tst_torrentio_client
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_realdebrid_client.cpp
+    TEST_NAME tst_realdebrid_client
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
          tst_date_format tst_app_settings tst_navigation
          tst_search_controller tst_stream_actions
-         tst_meta_header tst_streams_panel)
+         tst_meta_header tst_streams_panel
+         tst_movie_detail_controller tst_series_detail_controller
+         tst_token_controller tst_cinemeta_client tst_tmdb_client
+         tst_torrentio_client tst_realdebrid_client)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

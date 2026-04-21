@@ -9,6 +9,8 @@
 
 namespace kinema::core {
 
+class HttpError;
+
 /**
  * Translate an exception thrown by HttpClient or a higher-level API
  * client into a user-facing message, and log it at warning level with
@@ -35,6 +37,8 @@ namespace kinema::core {
  * }
  * ```
  */
+const HttpError* asHttpError(const std::exception& e);
+bool isHttpStatus(const std::exception& e, int status);
 QString describeError(const std::exception& e, const char* context);
 
 } // namespace kinema::core

@@ -102,10 +102,29 @@ private Q_SLOTS:
     void onBackRequested();
 
 private:
-
-
+    void buildCoreServices();
     void buildActions();
     void buildLayout();
+    void buildSearchSurface();
+    void buildResultsPages();
+    void buildDetailPages();
+    void buildControllers();
+    void wireStatusSignals();
+    void wireRealDebridState();
+    void wireTray();
+    void buildMenuBar(QAction* quitAction,
+        QAction* focusSearch,
+        QAction* homeAction,
+        QAction* prefsAction,
+        QAction* aboutAction);
+    KHamburgerMenu* buildHamburgerMenu(QAction* quitAction,
+        QAction* focusSearch,
+        QAction* homeAction,
+        QAction* prefsAction,
+        QAction* aboutAction);
+    void buildToolbarActions(QAction* homeAction, KHamburgerMenu* hamburger);
+    void restoreMenubarVisibility();
+    void buildEscapeShortcut();
     void showMovieDetail();
     void showSeriesDetail();
     void closeDetailPanel();
@@ -137,8 +156,6 @@ private:
     /// the current navigation position (disabled only on Discover
     /// home with no detail pane open).
     void updateBackActionEnabled();
-
-
     // Settings are owned by KinemaApplication and outlive this window.
     config::AppSettings& m_settings;
 
@@ -180,11 +197,6 @@ private:
     // page 1 = movie detail; page 2 = series detail. Clicking a result
     // or Discover card swaps pages; closing / Esc / Home swaps back.
     QStackedWidget* m_centerStack {};
-
-
-
-
-
     // Settings dialog is created lazily and reused across invocations.
     settings::SettingsDialog* m_settingsDialog {};
 

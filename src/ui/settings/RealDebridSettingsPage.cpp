@@ -8,6 +8,7 @@
 #include "core/DateFormat.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
+#include "core/HttpErrorPresenter.h"
 #include "core/TokenStore.h"
 #include "kinema_debug.h"
 
@@ -155,8 +156,7 @@ QCoro::Task<void> RealDebridSettingsPage::loadExistingToken()
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), /*error=*/true);
     } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "RD settings: keyring read failed:" << e.what();
-        setStatus(QString::fromUtf8(e.what()), /*error=*/true);
+        setStatus(core::describeError(e, "rd settings/load token"), /*error=*/true);
     }
     updateButtons();
 }
@@ -186,17 +186,16 @@ QCoro::Task<void> RealDebridSettingsPage::testConnection()
                     core::formatReleaseDate(*user.premiumUntil));
         }
         setStatus(msg, /*error=*/false);
-    } catch (const core::HttpError& e) {
-        if (e.httpStatus() == 401 || e.httpStatus() == 403) {
+    } catch (const std::exception& e) {
+        if (const auto* he = core::asHttpError(e);
+            he && (he->httpStatus() == 401 || he->httpStatus() == 403)) {
             setStatus(
                 i18nc("@info", "Real-Debrid rejected the token (HTTP %1).",
-                    e.httpStatus()),
+                    he->httpStatus()),
                 /*error=*/true);
         } else {
-            setStatus(e.message(), /*error=*/true);
+            setStatus(core::describeError(e, "rd settings/test auth"), /*error=*/true);
         }
-    } catch (const std::exception& e) {
-        setStatus(QString::fromUtf8(e.what()), /*error=*/true);
     }
 
     m_testButton->setEnabled(!m_tokenEdit->text().trimmed().isEmpty());
@@ -218,7 +217,7 @@ QCoro::Task<void> RealDebridSettingsPage::saveToken()
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), /*error=*/true);
     } catch (const std::exception& e) {
-        setStatus(QString::fromUtf8(e.what()), /*error=*/true);
+        setStatus(core::describeError(e, "rd settings/save token"), /*error=*/true);
     }
     updateButtons();
 }
@@ -237,7 +236,7 @@ QCoro::Task<void> RealDebridSettingsPage::removeToken()
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), /*error=*/true);
     } catch (const std::exception& e) {
-        setStatus(QString::fromUtf8(e.what()), /*error=*/true);
+        setStatus(core::describeError(e, "rd settings/remove token"), /*error=*/true);
     }
     updateButtons();
 }

@@ -46,6 +46,7 @@ private Q_SLOTS:
         QCOMPARE(s.torrentio().cachedOnly(), false);
         QCOMPARE(s.appearance().closeToTray(), true);
         QCOMPARE(s.appearance().showMenuBar(), false);
+        QVERIFY(s.appearance().playerWindowGeometry().isEmpty());
         QCOMPARE(s.realDebrid().configured(), false);
         QVERIFY(s.filter().excludedResolutions().isEmpty());
         QVERIFY(s.filter().excludedCategories().isEmpty());
@@ -104,6 +105,16 @@ private Q_SLOTS:
         QCOMPARE(static_cast<int>(s2.browse().sort()),
             static_cast<int>(api::DiscoverSort::Rating));
         QCOMPARE(s2.browse().hideObscure(), false);
+    }
+
+    void testPlayerWindowGeometryRoundtrip()
+    {
+        config::AppSettings s(m_config);
+        const auto geometry = QByteArray::fromHex("01020304A0B0C0D0");
+        s.appearance().setPlayerWindowGeometry(geometry);
+
+        config::AppSettings s2(m_config);
+        QCOMPARE(s2.appearance().playerWindowGeometry(), geometry);
     }
 
     // ---- Signals ---------------------------------------------------------

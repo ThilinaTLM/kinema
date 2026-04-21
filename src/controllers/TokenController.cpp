@@ -15,11 +15,15 @@ TokenController::TokenController(
     core::TokenStore* tokens,
     api::TmdbClient* tmdb,
     const config::RealDebridSettings& rdSettings,
-    QObject* parent)
+    QObject* parent,
+    QString tmdbCompiledDefaultToken)
     : QObject(parent)
     , m_tokens(tokens)
     , m_tmdb(tmdb)
     , m_rdSettings(rdSettings)
+    , m_tmdbCompiledDefaultToken(tmdbCompiledDefaultToken.isNull()
+            ? QString::fromLatin1(core::kTmdbCompiledDefaultToken)
+            : std::move(tmdbCompiledDefaultToken))
 {
 }
 
@@ -76,9 +80,7 @@ QCoro::Task<void> TokenController::loadTmdbTask()
     if (!user.isEmpty()) {
         next = std::move(user);
     } else {
-        const auto* def = core::kTmdbCompiledDefaultToken;
-        next = (def && def[0] != '\0') ? QString::fromLatin1(def)
-                                       : QString {};
+        next = m_tmdbCompiledDefaultToken;
     }
 
     if (m_tmdb) {

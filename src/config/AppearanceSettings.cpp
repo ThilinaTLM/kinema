@@ -10,11 +10,13 @@ namespace kinema::config {
 namespace {
 constexpr auto kGroupGeneral = "General";
 constexpr auto kGroupMainWindow = "MainWindow";
+constexpr auto kGroupPlayerWindow = "PlayerWindow";
 constexpr auto kKeyCloseToTray = "closeToTray";
 constexpr auto kKeyBrowseSplitter = "browseSplitter";
 constexpr auto kKeySeriesPaneSplitter = "seriesPaneSplitter";
 constexpr auto kKeyDetailSplitter = "detailSplitter";
 constexpr auto kKeyShowMenuBar = "ShowMenuBar";
+constexpr auto kKeyPlayerWindowGeometry = "Geometry";
 } // namespace
 
 AppearanceSettings::AppearanceSettings(KSharedConfigPtr config, QObject* parent)
@@ -88,6 +90,19 @@ void AppearanceSettings::setShowMenuBar(bool on)
 {
     auto g = m_config->group(QString::fromLatin1(kGroupMainWindow));
     g.writeEntry(kKeyShowMenuBar, on);
+    g.sync();
+}
+
+QByteArray AppearanceSettings::playerWindowGeometry() const
+{
+    return m_config->group(QString::fromLatin1(kGroupPlayerWindow))
+        .readEntry(kKeyPlayerWindowGeometry, QByteArray {});
+}
+
+void AppearanceSettings::setPlayerWindowGeometry(QByteArray geometry)
+{
+    auto g = m_config->group(QString::fromLatin1(kGroupPlayerWindow));
+    g.writeEntry(kKeyPlayerWindowGeometry, geometry);
     g.sync();
 }
 

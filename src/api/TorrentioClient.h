@@ -35,9 +35,11 @@ public:
     void setBaseUrl(QUrl url);
     const QUrl& baseUrl() const noexcept { return m_baseUrl; }
 
-    QCoro::Task<QList<Stream>> streams(MediaKind kind,
+    virtual QCoro::Task<QList<Stream>> streams(MediaKind kind,
         QString streamId,
         core::torrentio::ConfigOptions opts = {});
+
+    ~TorrentioClient() override = default;
 
 private:
     core::HttpClient* m_http;

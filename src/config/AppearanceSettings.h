@@ -13,13 +13,14 @@ namespace kinema::config {
 /**
  * Window / splitter geometry + close-to-tray.
  *
- * KConfig groups: [General] and [MainWindow]
+ * KConfig groups: [General], [MainWindow], and [PlayerWindow]
  * Keys:
  *   [General] closeToTray         bool
  *   [General] browseSplitter      QSplitter::saveState (opaque bytes)
  *   [General] seriesPaneSplitter  QSplitter::saveState (opaque bytes)
  *   [General] detailSplitter      QSplitter::saveState (opaque bytes)
  *   [MainWindow] ShowMenuBar      bool
+ *   [PlayerWindow] Geometry       QWidget::saveGeometry() (opaque bytes)
  */
 class AppearanceSettings : public QObject
 {
@@ -42,6 +43,9 @@ public:
 
     bool showMenuBar() const;
     void setShowMenuBar(bool);
+
+    QByteArray playerWindowGeometry() const;
+    void setPlayerWindowGeometry(QByteArray geometry);
 
 private:
     KSharedConfigPtr m_config;

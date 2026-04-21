@@ -73,7 +73,21 @@ MainWindow::MainWindow(config::AppSettings& settings, QWidget* parent)
     setWindowIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema")));
     resize(1200, 780);
 
-    // ---- Core services -----------------------------------------------------
+    buildCoreServices();
+    buildLayout();
+    buildActions();
+    wireStatusSignals();
+    wireRealDebridState();
+    wireTray();
+
+    // Fire the initial keyring reads (RD + TMDB). Does not block.
+    m_tokenCtrl->loadAll();
+}
+
+MainWindow::~MainWindow() = default;
+
+void MainWindow::buildCoreServices()
+{
     m_http = std::make_unique<core::HttpClient>(this);
     m_tokens = std::make_unique<core::TokenStore>(this);
     m_player = std::make_unique<core::PlayerLauncher>(
@@ -83,10 +97,10 @@ MainWindow::MainWindow(config::AppSettings& settings, QWidget* parent)
     m_tmdb = new api::TmdbClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
     m_streamActions = new services::StreamActions(m_player.get(), this);
+}
 
-    buildLayout();
-    buildActions();
-
+void MainWindow::wireStatusSignals()
+{
     // Mirror PlayerLauncher results into the status bar so the user
     // gets a lightweight in-window confirmation on top of the
     // KNotification the launcher already fires.
@@ -111,7 +125,10 @@ MainWindow::MainWindow(config::AppSettings& settings, QWidget* parent)
     if (!m_player->preferredPlayerAvailable()) {
         qCInfo(KINEMA) << "preferred media player not found on $PATH";
     }
+}
 
+void MainWindow::wireRealDebridState()
+{
     // RD state is driven by RealDebridSettings ("configured" bit) +
     // the in-memory token owned by TokenController.
     const bool hasRD = m_settings.realDebrid().configured();
@@ -130,7 +147,10 @@ MainWindow::MainWindow(config::AppSettings& settings, QWidget* parent)
     connect(&m_settings,
         &config::AppSettings::torrentioOptionsChanged,
         this, &MainWindow::onTorrentioOptionsChanged);
+}
 
+void MainWindow::wireTray()
+{
     // System tray. No-op on desktops that don't expose a tray; the
     // close-to-tray path silently falls back to "close = quit" there.
     m_tray = new controllers::TrayController(this, this);
@@ -151,16 +171,20 @@ MainWindow::MainWindow(config::AppSettings& settings, QWidget* parent)
         });
     connect(m_tray, &controllers::TrayController::quitRequested,
         this, &MainWindow::quitApplication);
-
-    // Fire the initial keyring reads (RD + TMDB). Does not block.
-    m_tokenCtrl->loadAll();
 }
-
-MainWindow::~MainWindow() = default;
 
 void MainWindow::buildLayout()
 {
-    // ---- Search bar in a tool bar ------------------------------------------
+    buildSearchSurface();
+    buildResultsPages();
+    buildDetailPages();
+    buildControllers();
+    statusBar()->showMessage(i18nc("@info:status", "Ready"), 2000);
+}
+
+void MainWindow::buildSearchSurface()
+{
+    // ---- Search bar in a tool bar ----------------------------------------
     m_toolbar = addToolBar(i18nc("@title:window", "Search"));
     m_toolbar->setMovable(false);
     m_toolbar->setFloatable(false);
@@ -175,7 +199,7 @@ void MainWindow::buildLayout()
             m_settings.search().setKind(kind);
         });
 
-    // ---- Results view ------------------------------------------------------
+    // ---- Results view ----------------------------------------------------
     m_resultsModel = new ResultsModel(this);
     m_resultsView = new QListView(this);
     m_resultsView->setModel(m_resultsModel);
@@ -200,7 +224,10 @@ void MainWindow::buildLayout()
     m_resultsState->showIdle(
         i18nc("@label", "Search to get started"),
         i18nc("@info", "Type a movie title or an IMDB id and press Enter."));
+}
 
+void MainWindow::buildResultsPages()
+{
     // Discover home page (TMDB-powered catalog strips). Sits at index
     // 0 so it's the app's default landing surface; runSearch() swaps
     // to m_resultsState / m_resultsView; showDiscoverHome() swaps
@@ -226,8 +253,10 @@ void MainWindow::buildLayout()
     m_resultsStack->addWidget(m_resultsState); // idx 1 = search state
     m_resultsStack->addWidget(m_resultsView);  // idx 2 = search results
     m_resultsStack->addWidget(m_browsePage);   // idx 3 = browse
+}
 
-    // ---- Detail panes (movies + series) ----------------------------------
+void MainWindow::buildDetailPages()
+{
     m_detailPane = new DetailPane(m_imageLoader, m_tmdb,
         m_settings.torrentio(), m_settings.filter(),
         *m_streamActions, m_settings.appearance(), this);
@@ -244,7 +273,6 @@ void MainWindow::buildLayout()
     connect(m_seriesDetailPane, &SeriesDetailPane::backToEpisodesRequested,
         this, &MainWindow::onBackToEpisodes);
 
-    // ---- Center stack: results (page 0) + detail panes (1, 2) ------------
     m_centerStack = new QStackedWidget(this);
     m_centerStack->addWidget(m_resultsStack);       // idx 0 = results
     m_centerStack->addWidget(m_detailPane);         // idx 1 = movie
@@ -252,7 +280,10 @@ void MainWindow::buildLayout()
     m_centerStack->setCurrentWidget(m_resultsStack);
 
     setCentralWidget(m_centerStack);
+}
 
+void MainWindow::buildControllers()
+{
     // Navigation state machine. Owns "what page is visible" and the
     // Back rules; every detail/results/back call below routes through
     // nav->goTo() / nav->goBack().
@@ -327,8 +358,6 @@ void MainWindow::buildLayout()
     connect(m_seriesCtrl,
         &controllers::SeriesDetailController::statusMessage,
         this, forwardStatus);
-
-    statusBar()->showMessage(i18nc("@info:status", "Ready"), 2000);
 }
 
 void MainWindow::showMovieDetail()
@@ -386,7 +415,8 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
     // initializeGL, so we pay nothing until the user actually picks
     // "Embedded" and hits Play.
     if (!m_playerWindow) {
-        m_playerWindow = new player::PlayerWindow(this);
+        m_playerWindow = new player::PlayerWindow(
+            m_settings.appearance(), this);
         // Let the tray controller surface a "Show Player" entry
         // whenever the player is hidden but has played something.
         m_tray->setPlayerWindow(m_playerWindow);
@@ -486,7 +516,7 @@ void MainWindow::buildActions()
 {
     m_actions = new KActionCollection(this);
 
-    // ---- Standard actions --------------------------------------------------
+    // ---- Standard actions ------------------------------------------------
     auto* quitAction = KStandardAction::quit(
         this, &MainWindow::quitApplication, m_actions);
     auto* prefsAction = KStandardAction::preferences(
@@ -498,7 +528,7 @@ void MainWindow::buildActions()
     m_showMenubarAction = KStandardAction::showMenubar(
         this, &MainWindow::onShowMenubarToggled, m_actions);
 
-    // ---- Custom actions ----------------------------------------------------
+    // ---- Custom actions --------------------------------------------------
     auto* focusSearch = new QAction(
         QIcon::fromTheme(QStringLiteral("search")),
         i18nc("@action:inmenu", "&Focus search"), this);
@@ -508,19 +538,10 @@ void MainWindow::buildActions()
     });
     m_actions->addAction(QStringLiteral("focus_search"), focusSearch);
 
-    // Home — swap back to the Discover page from any search result.
     auto* homeAction = KStandardAction::home(
         this, &MainWindow::showDiscoverHome, m_actions);
     homeAction->setToolTip(i18nc("@info:tooltip", "Back to Discover"));
 
-    // Browse — third top-level surface (after Discover home and
-    // free-text search). Drives the TMDB /discover filter grid.
-    // Icon: a grid-of-squares (Breeze: `view-list-icons`) — visually
-    // matches the wrap-grid of posters the user lands on. We
-    // deliberately avoid `view-filter` here since that's the icon
-    // used by the Genres button *inside* the filter bar; reusing it
-    // on the toolbar would conflate "navigate to Browse" with
-    // "apply a filter".
     m_browseAction = new QAction(
         QIcon::fromTheme(QStringLiteral("view-list-icons")),
         i18nc("@action:inmenu", "&Browse"), this);
@@ -531,7 +552,6 @@ void MainWindow::buildActions()
         this, &MainWindow::showBrowsePage);
     m_actions->addAction(QStringLiteral("browse_page"), m_browseAction);
 
-    // Back — browser-style "one level up" walker, sibling to Home.
     m_backAction = new QAction(
         QIcon::fromTheme(QStringLiteral("go-previous")),
         i18nc("@action:inmenu", "&Back"), this);
@@ -544,6 +564,22 @@ void MainWindow::buildActions()
         this, &MainWindow::onBackRequested);
     m_actions->addAction(QStringLiteral("go_back"), m_backAction);
 
+    buildEscapeShortcut();
+    buildMenuBar(quitAction, focusSearch, homeAction, prefsAction, aboutAction);
+    auto* hamburger = buildHamburgerMenu(
+        quitAction, focusSearch, homeAction, prefsAction, aboutAction);
+    buildToolbarActions(homeAction, hamburger);
+
+    // Bind all actions (and their shortcuts) to the main window so keys
+    // like Ctrl+M / Ctrl+Q / Ctrl+K fire regardless of menu-bar state.
+    m_actions->addAssociatedWidget(this);
+
+    restoreMenubarVisibility();
+    updateBackActionEnabled();
+}
+
+void MainWindow::buildEscapeShortcut()
+{
     // Esc anywhere in the window walks back one navigation level:
     //   streams page → episode list, then detail view → results.
     // No modal flows live inside the main window (Settings is a
@@ -566,8 +602,14 @@ void MainWindow::buildActions()
             closeDetailPanel();
         }
     });
+}
 
-    // ---- Classic menu bar (hidden by default, toggled via Ctrl+M) ----------
+void MainWindow::buildMenuBar(QAction* quitAction,
+    QAction* focusSearch,
+    QAction* homeAction,
+    QAction* prefsAction,
+    QAction* aboutAction)
+{
     auto* fileMenu = menuBar()->addMenu(i18nc("@title:menu", "&File"));
     fileMenu->addAction(quitAction);
 
@@ -586,9 +628,14 @@ void MainWindow::buildActions()
 
     auto* helpMenu = menuBar()->addMenu(i18nc("@title:menu", "&Help"));
     helpMenu->addAction(aboutAction);
+}
 
-    // ---- Hamburger button on the toolbar -----------------------------------
-    //
+KHamburgerMenu* MainWindow::buildHamburgerMenu(QAction* quitAction,
+    QAction* focusSearch,
+    QAction* homeAction,
+    QAction* prefsAction,
+    QAction* aboutAction)
+{
     // We deliberately do NOT call setMenuBar() on the hamburger: that would
     // mirror the classic menu bar's submenu structure (File / Edit / Settings
     // / Help), which is overkill for our handful of entries. Instead we build
@@ -596,63 +643,62 @@ void MainWindow::buildActions()
     auto* hamburger = KStandardAction::hamburgerMenu(
         nullptr, nullptr, m_actions);
     hamburger->setShowMenuBarAction(m_showMenubarAction);
-    // Deliberately NOT calling setMenuBar(): that would auto-append the
-    // menu bar's Help menu and a "More" submenu advertising menu-bar-only
-    // actions. We want a fully flat custom menu instead.
 
     connect(hamburger, &KHamburgerMenu::aboutToShowMenu, this,
-            [this, hamburger, focusSearch, homeAction, prefsAction,
-             aboutAction, quitAction] {
-        auto* menu = new QMenu;
-        menu->addAction(m_backAction);
-        menu->addAction(homeAction);
-        menu->addAction(m_browseAction);
-        menu->addAction(focusSearch);
-        menu->addSeparator();
-        menu->addAction(m_showMenubarAction);
-        menu->addAction(prefsAction);
-        menu->addSeparator();
-        menu->addAction(aboutAction);
-        menu->addSeparator();
-        menu->addAction(quitAction);
-        hamburger->setMenu(menu);
+        [this, hamburger, quitAction, focusSearch, homeAction,
+            prefsAction, aboutAction] {
+            auto* menu = new QMenu;
+            menu->addAction(m_backAction);
+            menu->addAction(homeAction);
+            menu->addAction(m_browseAction);
+            menu->addAction(focusSearch);
+            menu->addSeparator();
+            menu->addAction(m_showMenubarAction);
+            menu->addAction(prefsAction);
+            menu->addSeparator();
+            menu->addAction(aboutAction);
+            menu->addSeparator();
+            menu->addAction(quitAction);
+            hamburger->setMenu(menu);
 
-        // Build once, on demand. KHamburgerMenu reuses the installed
-        // menu for subsequent clicks.
-        disconnect(hamburger, &KHamburgerMenu::aboutToShowMenu,
-                   this, nullptr);
-    });
+            // Build once, on demand. KHamburgerMenu reuses the installed
+            // menu for subsequent clicks.
+            disconnect(hamburger, &KHamburgerMenu::aboutToShowMenu,
+                this, nullptr);
+        });
 
-    if (m_toolbar) {
-        // Prepend [Back][Home][Browse] so they sit before the SearchBar
-        // and are easy to reach with a single click (browser-style).
-        QAction* firstAction = m_toolbar->actions().value(0);
-        if (firstAction) {
-            m_toolbar->insertAction(firstAction, m_backAction);
-            m_toolbar->insertAction(firstAction, homeAction);
-            m_toolbar->insertAction(firstAction, m_browseAction);
-        } else {
-            m_toolbar->addAction(m_backAction);
-            m_toolbar->addAction(homeAction);
-            m_toolbar->addAction(m_browseAction);
-        }
-        auto* spacer = new QWidget(m_toolbar);
-        spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        m_toolbar->addWidget(spacer);
-        m_toolbar->addAction(hamburger);
+    return hamburger;
+}
+
+void MainWindow::buildToolbarActions(QAction* homeAction, KHamburgerMenu* hamburger)
+{
+    if (!m_toolbar) {
+        return;
     }
 
-    // Bind all actions (and their shortcuts) to the main window so keys
-    // like Ctrl+M / Ctrl+Q / Ctrl+K fire regardless of menu-bar state.
-    m_actions->addAssociatedWidget(this);
+    // Prepend [Back][Home][Browse] so they sit before the SearchBar
+    // and are easy to reach with a single click (browser-style).
+    QAction* firstAction = m_toolbar->actions().value(0);
+    if (firstAction) {
+        m_toolbar->insertAction(firstAction, m_backAction);
+        m_toolbar->insertAction(firstAction, homeAction);
+        m_toolbar->insertAction(firstAction, m_browseAction);
+    } else {
+        m_toolbar->addAction(m_backAction);
+        m_toolbar->addAction(homeAction);
+        m_toolbar->addAction(m_browseAction);
+    }
+    auto* spacer = new QWidget(m_toolbar);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_toolbar->addWidget(spacer);
+    m_toolbar->addAction(hamburger);
+}
 
-    // ---- Restore persisted menu-bar visibility -----------------------------
+void MainWindow::restoreMenubarVisibility()
+{
     const bool showBar = m_settings.appearance().showMenuBar();
     m_showMenubarAction->setChecked(showBar);
     menuBar()->setVisible(showBar);
-
-    // Cold start lands on Discover home, so Back has nowhere to go.
-    updateBackActionEnabled();
 }
 
 void MainWindow::onShowMenubarToggled(bool visible)

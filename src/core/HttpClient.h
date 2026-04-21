@@ -32,18 +32,21 @@ class HttpClient : public QObject
     Q_OBJECT
 public:
     explicit HttpClient(QObject* parent = nullptr);
+    ~HttpClient() override = default;
 
     /// Issue a GET for raw bytes. Throws HttpError on failure.
-    QCoro::Task<QByteArray> get(QUrl url);
+    /// Virtual so tests can capture request construction without
+    /// touching the real network stack.
+    virtual QCoro::Task<QByteArray> get(QUrl url);
 
     /// Issue a GET and parse the response body as JSON. Throws HttpError on failure.
-    QCoro::Task<QJsonDocument> getJson(QUrl url);
+    virtual QCoro::Task<QJsonDocument> getJson(QUrl url);
 
     /// GET with a caller-supplied QNetworkRequest (adds our User-Agent and
     /// redirect policy on top). Used by RealDebridClient to attach the
     /// Authorization: Bearer header without re-plumbing HttpClient.
-    QCoro::Task<QByteArray> get(QNetworkRequest request);
-    QCoro::Task<QJsonDocument> getJson(QNetworkRequest request);
+    virtual QCoro::Task<QByteArray> get(QNetworkRequest request);
+    virtual QCoro::Task<QJsonDocument> getJson(QNetworkRequest request);
 
     void setTimeout(std::chrono::milliseconds timeout);
     std::chrono::milliseconds timeout() const noexcept { return m_timeout; }

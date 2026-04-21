@@ -4,7 +4,7 @@
 #include "ui/SimilarStrip.h"
 
 #include "api/TmdbClient.h"
-#include "core/HttpError.h"
+#include "core/HttpErrorPresenter.h"
 #include "kinema_debug.h"
 #include "ui/DiscoverCardDelegate.h"
 #include "ui/DiscoverRowModel.h"
@@ -99,19 +99,11 @@ QCoro::Task<void> SimilarStrip::loadFor(api::MediaKind kind, QString imdbId)
         // /find may return the item under the opposite array; respect
         // what it actually said.
         kind = found;
-    } catch (const core::HttpError& e) {
+    } catch (const std::exception& e) {
         if (myEpoch != m_epoch) {
             co_return;
         }
-        qCDebug(KINEMA) << "Similar: /find failed:" << e.httpStatus()
-                        << e.message();
-        hide();
-        m_section->model()->reset({});
-        co_return;
-    } catch (const std::exception&) {
-        if (myEpoch != m_epoch) {
-            co_return;
-        }
+        core::describeError(e, "similar/find");
         hide();
         m_section->model()->reset({});
         co_return;
@@ -130,19 +122,11 @@ QCoro::Task<void> SimilarStrip::loadFor(api::MediaKind kind, QString imdbId)
                 co_return;
             }
         }
-    } catch (const core::HttpError& e) {
+    } catch (const std::exception& e) {
         if (myEpoch != m_epoch) {
             co_return;
         }
-        qCDebug(KINEMA) << "Similar: recommendations failed:"
-                        << e.httpStatus() << e.message();
-        hide();
-        m_section->model()->reset({});
-        co_return;
-    } catch (const std::exception&) {
-        if (myEpoch != m_epoch) {
-            co_return;
-        }
+        core::describeError(e, "similar/recommendations");
         hide();
         m_section->model()->reset({});
         co_return;

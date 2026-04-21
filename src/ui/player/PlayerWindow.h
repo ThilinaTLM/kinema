@@ -9,6 +9,10 @@
 #include <QString>
 #include <QUrl>
 
+namespace kinema::config {
+class AppearanceSettings;
+}
+
 namespace kinema::ui::player {
 
 class MpvWidget;
@@ -28,14 +32,15 @@ class MpvWidget;
  *
  * Geometry: first-time default is 1280x720 centred on the parent
  * window's screen; subsequent sessions restore the last
- * saveGeometry() blob from KSharedConfig group "PlayerWindow",
- * entry "Geometry".
+ * saveGeometry() blob through config::AppearanceSettings, preserving
+ * the existing [PlayerWindow]/Geometry on-disk storage.
  */
 class PlayerWindow : public QWidget
 {
     Q_OBJECT
 public:
-    explicit PlayerWindow(QWidget* parent = nullptr);
+    explicit PlayerWindow(config::AppearanceSettings& appearance,
+        QWidget* parent = nullptr);
     ~PlayerWindow() override;
 
     PlayerWindow(const PlayerWindow&) = delete;
@@ -86,6 +91,7 @@ private:
     void loadGeometry();
     void saveGeometryToConfig();
 
+    config::AppearanceSettings& m_appearanceSettings;
     MpvWidget* m_mpv {nullptr};
 
     // Re-entrancy guard for fullscreen toggles driven both by Qt

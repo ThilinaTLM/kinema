@@ -44,7 +44,8 @@ public:
         core::TokenStore* tokens,
         api::TmdbClient* tmdb,
         const config::RealDebridSettings& rdSettings,
-        QObject* parent = nullptr);
+        QObject* parent = nullptr,
+        QString tmdbCompiledDefaultToken = QString());
 
     const QString& realDebridToken() const noexcept { return m_rdToken; }
     const QString& tmdbToken() const noexcept { return m_tmdbToken; }
@@ -80,6 +81,7 @@ private:
 
     QString m_rdToken;
     QString m_tmdbToken;
+    QString m_tmdbCompiledDefaultToken;
 };
 
 } // namespace kinema::controllers

@@ -70,49 +70,51 @@ public:
 
     // ---- M1 catalog rows ---------------------------------------------------
 
-    QCoro::Task<QList<DiscoverItem>> trending(MediaKind kind, bool weekly = true);
-    QCoro::Task<QList<DiscoverItem>> popular(MediaKind kind);
-    QCoro::Task<QList<DiscoverItem>> topRated(MediaKind kind);
-    QCoro::Task<QList<DiscoverItem>> nowPlayingMovies();
-    QCoro::Task<QList<DiscoverItem>> onTheAirSeries();
+    virtual QCoro::Task<QList<DiscoverItem>> trending(MediaKind kind, bool weekly = true);
+    virtual QCoro::Task<QList<DiscoverItem>> popular(MediaKind kind);
+    virtual QCoro::Task<QList<DiscoverItem>> topRated(MediaKind kind);
+    virtual QCoro::Task<QList<DiscoverItem>> nowPlayingMovies();
+    virtual QCoro::Task<QList<DiscoverItem>> onTheAirSeries();
 
     // ---- Browse (filterable /discover) ------------------------------------
 
     /// Hit /discover/{movie|tv} with the caller's filters. Returns the
     /// requested page plus paging metadata. See TmdbDiscoverUrl.h for
     /// the exact query-string mapping.
-    QCoro::Task<DiscoverPageResult> discover(DiscoverQuery q);
+    virtual QCoro::Task<DiscoverPageResult> discover(DiscoverQuery q);
 
     /// Fetch the genre list for a given kind. Results are memoised per
     /// kind; the second call returns immediately. Invalidated by
     /// setLanguage() since names are localised server-side.
-    QCoro::Task<QList<TmdbGenre>> genreList(MediaKind kind);
+    virtual QCoro::Task<QList<TmdbGenre>> genreList(MediaKind kind);
 
     // ---- Click-through resolution -----------------------------------------
 
     /// Fetch /movie/{id}?append_to_response=external_ids and return the
     /// IMDB id (or an empty string if the title has none on TMDB).
-    QCoro::Task<QString> imdbIdForTmdbMovie(int tmdbId);
+    virtual QCoro::Task<QString> imdbIdForTmdbMovie(int tmdbId);
 
     /// Fetch /tv/{id}/external_ids and return the IMDB id.
-    QCoro::Task<QString> imdbIdForTmdbSeries(int tmdbId);
+    virtual QCoro::Task<QString> imdbIdForTmdbSeries(int tmdbId);
 
     /// Resolve an IMDB id to a (tmdbId, kind) pair via /find. `preferredKind`
     /// disambiguates when both movie_results and tv_results are populated
     /// (happens rarely but does). Returns (0, preferredKind) on miss.
-    QCoro::Task<std::pair<int, MediaKind>> findByImdb(
+    virtual QCoro::Task<std::pair<int, MediaKind>> findByImdb(
         QString imdbId, MediaKind preferredKind);
 
     // ---- Per-item recommendations ------------------------------------------
 
-    QCoro::Task<QList<DiscoverItem>> recommendations(MediaKind kind, int tmdbId);
-    QCoro::Task<QList<DiscoverItem>> similar(MediaKind kind, int tmdbId);
+    virtual QCoro::Task<QList<DiscoverItem>> recommendations(MediaKind kind, int tmdbId);
+    virtual QCoro::Task<QList<DiscoverItem>> similar(MediaKind kind, int tmdbId);
 
     // ---- Auth ping ---------------------------------------------------------
 
     /// Hit /authentication — a 200 means the bearer is valid.
     /// Throws HttpError on any non-2xx (401 for an invalid token).
-    QCoro::Task<void> testAuth();
+    virtual QCoro::Task<void> testAuth();
+
+    ~TmdbClient() override = default;
 
 private:
     QUrl buildUrl(const QString& path,

@@ -53,17 +53,18 @@ public:
     static constexpr auto kTmdbKey = "tmdb-token";
 
     explicit TokenStore(QObject* parent = nullptr);
+    ~TokenStore() override = default;
 
     /// Returns the stored value, or an empty string on miss.
     /// Throws TokenStoreError on keyring backend errors (not on miss).
-    QCoro::Task<QString> read(QString key);
+    virtual QCoro::Task<QString> read(QString key);
 
     /// Throws TokenStoreError on failure.
-    QCoro::Task<void> write(QString key, QString value);
+    virtual QCoro::Task<void> write(QString key, QString value);
 
     /// Silently succeeds if the entry doesn't exist.
     /// Throws TokenStoreError on other failures.
-    QCoro::Task<void> remove(QString key);
+    virtual QCoro::Task<void> remove(QString key);
 
     /// Returns false if the last keyring operation reported NoBackendAvailable.
     /// Checked by the dialog to disable Save with a clear inline message.

@@ -8,9 +8,23 @@
 
 namespace kinema::core {
 
+const HttpError* asHttpError(const std::exception& e)
+{
+    return dynamic_cast<const HttpError*>(&e);
+}
+
+bool isHttpStatus(const std::exception& e, int status)
+{
+    if (const auto* he = asHttpError(e)) {
+        return he->kind() == HttpError::Kind::HttpStatus
+            && he->httpStatus() == status;
+    }
+    return false;
+}
+
 QString describeError(const std::exception& e, const char* context)
 {
-    if (const auto* he = dynamic_cast<const HttpError*>(&e)) {
+    if (const auto* he = asHttpError(e)) {
         qCWarning(KINEMA).nospace()
             << context << ": " << he->message()
             << " (status=" << he->httpStatus() << ")";

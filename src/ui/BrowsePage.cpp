@@ -6,6 +6,7 @@
 #include "api/TmdbClient.h"
 #include "config/BrowseSettings.h"
 #include "core/HttpError.h"
+#include "core/HttpErrorPresenter.h"
 #include "kinema_debug.h"
 #include "ui/BrowseFilterBar.h"
 #include "ui/DiscoverCardDelegate.h"
@@ -285,14 +286,12 @@ QCoro::Task<void> BrowsePage::loadFirstPage()
         m_gridStack->setCurrentWidget(m_grid);
         updateLoadMoreVisibility();
         m_loading = false;
-    } catch (const core::HttpError& e) {
+    } catch (const std::exception& e) {
         if (myEpoch != m_epoch) {
             co_return;
         }
         m_loading = false;
-        qCWarning(KINEMA) << "Browse /discover failed:"
-                          << e.httpStatus() << e.message();
-        if ((e.httpStatus() == 401 || e.httpStatus() == 403)
+        if ((core::isHttpStatus(e, 401) || core::isHttpStatus(e, 403))
             && !m_pageAuthFailed) {
             m_pageAuthFailed = true;
             showPageCta(
@@ -306,15 +305,9 @@ QCoro::Task<void> BrowsePage::loadFirstPage()
         if (m_pageAuthFailed) {
             co_return;
         }
-        m_state->showError(e.message(), /*retryable=*/true);
-        m_gridStack->setCurrentWidget(m_state);
-        m_loadMoreBar->setVisible(false);
-    } catch (const std::exception& e) {
-        if (myEpoch != m_epoch) {
-            co_return;
-        }
-        m_loading = false;
-        m_state->showError(QString::fromUtf8(e.what()), /*retryable=*/true);
+        m_state->showError(
+            core::describeError(e, "browse/discover"),
+            /*retryable=*/true);
         m_gridStack->setCurrentWidget(m_state);
         m_loadMoreBar->setVisible(false);
     }
@@ -351,23 +344,13 @@ QCoro::Task<void> BrowsePage::loadNextPage()
             i18nc("@action:button browse pagination", "Load more"));
         m_loading = false;
         updateLoadMoreVisibility();
-    } catch (const core::HttpError& e) {
-        if (myEpoch != m_epoch) {
-            co_return;
-        }
-        m_loading = false;
-        qCWarning(KINEMA) << "Browse load-more failed:"
-                          << e.httpStatus() << e.message();
-        m_loadMoreStatus->setText(
-            i18nc("@info:status", "Load more failed \u2014 try again."));
-        m_loadMoreStatus->setVisible(true);
-        m_loadMoreBtn->setEnabled(true);
     } catch (const std::exception& e) {
         if (myEpoch != m_epoch) {
             co_return;
         }
         m_loading = false;
-        m_loadMoreStatus->setText(QString::fromUtf8(e.what()));
+        m_loadMoreStatus->setText(
+            core::describeError(e, "browse/load-more"));
         m_loadMoreStatus->setVisible(true);
         m_loadMoreBtn->setEnabled(true);
     }
@@ -390,7 +373,8 @@ QCoro::Task<void> BrowsePage::loadGenresFor(api::MediaKind kind)
             try {
                 auto list = co_await m_tmdb->genreList(kind);
                 m_filterBar->setAvailableGenres(std::move(list));
-            } catch (...) {
+            } catch (const std::exception& e) {
+                core::describeError(e, "browse/genres cached");
                 // Non-fatal; filter bar stays showing "Loading\u2026".
             }
         }
@@ -406,7 +390,7 @@ QCoro::Task<void> BrowsePage::loadGenresFor(api::MediaKind kind)
         }
     } catch (const std::exception& e) {
         loading = false;
-        qCWarning(KINEMA) << "Genre list fetch failed:" << e.what();
+        core::describeError(e, "browse/genres");
     }
 }
 

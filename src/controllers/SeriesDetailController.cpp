@@ -172,30 +172,30 @@ QCoro::Task<void> SeriesDetailController::openFromDiscoverTask(
     QString imdbId;
     try {
         imdbId = co_await m_tmdb->imdbIdForTmdbSeries(item.tmdbId);
-    } catch (const core::HttpError& e) {
-        const bool notFound
-            = e.kind() == core::HttpError::Kind::HttpStatus
-            && e.httpStatus() == 404;
-        qCWarning(KINEMA).nospace()
-            << "TMDB external_ids lookup failed: tv/"
-            << item.tmdbId << " (\"" << item.title << "\") \u2014 "
-            << e.httpStatus() << " " << e.message();
-        if (notFound) {
-            Q_EMIT statusMessage(
-                i18nc("@info:status",
-                    "\u201c%1\u201d isn't reachable on TMDB \u2014 "
-                    "can't fetch streams.",
-                    item.title),
-                6000);
-        } else {
-            Q_EMIT statusMessage(
-                i18nc("@info:status", "Could not open \u201c%1\u201d: %2",
-                    item.title, e.message()),
-                6000);
-        }
-        co_return;
     } catch (const std::exception& e) {
-        Q_EMIT statusMessage(QString::fromUtf8(e.what()), 6000);
+        if (const auto* he = core::asHttpError(e)) {
+            const bool notFound = he->kind() == core::HttpError::Kind::HttpStatus
+                && he->httpStatus() == 404;
+            qCWarning(KINEMA).nospace()
+                << "TMDB external_ids lookup failed: tv/"
+                << item.tmdbId << " (\"" << item.title << "\") \u2014 "
+                << he->httpStatus() << " " << he->message();
+            if (notFound) {
+                Q_EMIT statusMessage(
+                    i18nc("@info:status",
+                        "\u201c%1\u201d isn't reachable on TMDB \u2014 "
+                        "can't fetch streams.",
+                        item.title),
+                    6000);
+                co_return;
+            }
+        }
+
+        Q_EMIT statusMessage(
+            i18nc("@info:status", "Could not open \u201c%1\u201d: %2",
+                item.title,
+                core::describeError(e, "series detail/tmdb external_ids")),
+            6000);
         co_return;
     }
 

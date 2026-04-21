@@ -4,7 +4,7 @@
 #include "ui/DiscoverPage.h"
 
 #include "api/TmdbClient.h"
-#include "core/HttpError.h"
+#include "core/HttpErrorPresenter.h"
 #include "kinema_debug.h"
 #include "ui/DiscoverCardDelegate.h"
 #include "ui/DiscoverRowModel.h"
@@ -236,13 +236,11 @@ QCoro::Task<void> DiscoverPage::loadSection(int index)
         }
         s.widget->model()->reset(std::move(items));
         s.widget->showItems();
-    } catch (const core::HttpError& e) {
+    } catch (const std::exception& e) {
         if (myEpoch != s.epoch) {
             co_return;
         }
-        qCWarning(KINEMA) << "Discover section" << index << "failed:"
-                          << e.httpStatus() << e.message();
-        if ((e.httpStatus() == 401 || e.httpStatus() == 403)
+        if ((core::isHttpStatus(e, 401) || core::isHttpStatus(e, 403))
             && !m_pageAuthFailed) {
             m_pageAuthFailed = true;
             showPageError(
@@ -257,12 +255,9 @@ QCoro::Task<void> DiscoverPage::loadSection(int index)
             // Page-level error already shown; don't clobber.
             co_return;
         }
-        s.widget->showError(e.message(), /*retryable=*/true);
-    } catch (const std::exception& e) {
-        if (myEpoch != s.epoch) {
-            co_return;
-        }
-        s.widget->showError(QString::fromUtf8(e.what()), /*retryable=*/true);
+        s.widget->showError(
+            core::describeError(e, "discover/section"),
+            /*retryable=*/true);
     }
 }
 

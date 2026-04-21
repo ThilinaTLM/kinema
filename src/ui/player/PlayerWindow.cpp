@@ -7,9 +7,9 @@
 
 #include "ui/player/MpvWidget.h"
 
+#include "config/AppearanceSettings.h"
+
 #include <KLocalizedString>
-#include <KSharedConfig>
-#include <KConfigGroup>
 
 #include <QByteArray>
 #include <QCloseEvent>
@@ -25,15 +25,10 @@
 
 namespace kinema::ui::player {
 
-namespace {
-
-constexpr auto kConfigGroup = "PlayerWindow";
-constexpr auto kConfigGeometryKey = "Geometry";
-
-} // namespace
-
-PlayerWindow::PlayerWindow(QWidget* parent)
+PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
+    QWidget* parent)
     : QWidget(parent, Qt::Window)
+    , m_appearanceSettings(appearance)
 {
     // App-consistent window chrome. The actual title is set per-play
     // by play(); the placeholder here is what shows if someone
@@ -220,10 +215,7 @@ void PlayerWindow::loadGeometry()
 {
     m_geometryApplied = true;
 
-    const auto group = KSharedConfig::openConfig()->group(
-        QString::fromLatin1(kConfigGroup));
-    const QByteArray saved = group.readEntry(
-        QString::fromLatin1(kConfigGeometryKey), QByteArray {});
+    const QByteArray saved = m_appearanceSettings.playerWindowGeometry();
     if (!saved.isEmpty() && restoreGeometry(saved)) {
         return;
     }
@@ -246,11 +238,7 @@ void PlayerWindow::loadGeometry()
 
 void PlayerWindow::saveGeometryToConfig()
 {
-    auto group = KSharedConfig::openConfig()->group(
-        QString::fromLatin1(kConfigGroup));
-    group.writeEntry(
-        QString::fromLatin1(kConfigGeometryKey), saveGeometry());
-    group.sync();
+    m_appearanceSettings.setPlayerWindowGeometry(saveGeometry());
 }
 
 } // namespace kinema::ui::player
