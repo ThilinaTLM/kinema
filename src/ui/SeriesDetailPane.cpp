@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilina@tlmtech.dev>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "ui/SeriesFocusView.h"
+#include "ui/SeriesDetailPane.h"
 
 #include "config/Config.h"
 #include "core/StreamFilter.h"
@@ -18,17 +18,15 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
-#include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
 #include <QPixmap>
 #include <QPixmapCache>
-#include <QPushButton>
-#include <QShortcut>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTableView>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace kinema::ui {
@@ -56,26 +54,17 @@ protected:
 
 } // namespace
 
-SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
+SeriesDetailPane::SeriesDetailPane(ImageLoader* loader, QWidget* parent)
     : QWidget(parent)
     , m_loader(loader)
 {
     // ---- Header strip ------------------------------------------------------
-    m_backButton = new QPushButton(
-        QIcon::fromTheme(QStringLiteral("go-previous")),
-        i18nc("@action:button", "Back to results"), this);
-    m_backButton->setAutoDefault(false);
-    m_backButton->setDefault(false);
-    m_backButton->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Left));
-    connect(m_backButton, &QPushButton::clicked,
-        this, &SeriesFocusView::backRequested);
-
-    // Esc also triggers back. Use a widget-wide shortcut so the episode
-    // list's own Qt::Key_Escape doesn't swallow it.
-    auto* escShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
-    escShortcut->setContext(Qt::WidgetWithChildrenShortcut);
-    connect(escShortcut, &QShortcut::activated,
-        this, &SeriesFocusView::backRequested);
+    m_closeButton = new QToolButton(this);
+    m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
+    m_closeButton->setToolTip(i18nc("@info:tooltip", "Close details"));
+    m_closeButton->setAutoRaise(true);
+    connect(m_closeButton, &QToolButton::clicked,
+        this, &SeriesDetailPane::closeRequested);
 
     m_posterLabel = new QLabel(this);
     m_posterLabel->setFixedSize(120, 180);
@@ -101,10 +90,16 @@ SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
     m_descLabel->setTextFormat(Qt::PlainText);
     m_descLabel->setMaximumHeight(80);
 
+    auto* titleRow = new QHBoxLayout;
+    titleRow->setContentsMargins(0, 0, 0, 0);
+    titleRow->setSpacing(4);
+    titleRow->addWidget(m_titleLabel, 1);
+    titleRow->addWidget(m_closeButton, 0, Qt::AlignTop);
+
     auto* textColumn = new QVBoxLayout;
     textColumn->setContentsMargins(0, 0, 0, 0);
     textColumn->setSpacing(4);
-    textColumn->addWidget(m_titleLabel);
+    textColumn->addLayout(titleRow);
     textColumn->addWidget(m_metaLineLabel);
     textColumn->addWidget(m_descLabel, 1);
 
@@ -114,22 +109,16 @@ SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
     headerRow->addWidget(m_posterLabel, 0, Qt::AlignTop);
     headerRow->addLayout(textColumn, 1);
 
-    auto* headerTop = new QHBoxLayout;
-    headerTop->setContentsMargins(12, 8, 12, 0);
-    headerTop->addWidget(m_backButton);
-    headerTop->addStretch(1);
-
     auto* headerWrap = new QWidget(this);
     auto* headerVBox = new QVBoxLayout(headerWrap);
     headerVBox->setContentsMargins(0, 0, 0, 0);
     headerVBox->setSpacing(0);
-    headerVBox->addLayout(headerTop);
     headerVBox->addLayout(headerRow);
 
-    // ---- Top half of splitter: SeriesPicker -------------------------------
+    // ---- Left side of splitter: SeriesPicker ------------------------------
     m_picker = new SeriesPicker(m_loader, this);
     connect(m_picker, &SeriesPicker::episodeActivated,
-        this, &SeriesFocusView::episodeSelected);
+        this, &SeriesDetailPane::episodeSelected);
 
     m_pickerState = new StateWidget(this);
     m_pickerStack = new QStackedWidget(this);
@@ -140,10 +129,10 @@ SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
 
     auto* pickerWrap = new QWidget(this);
     auto* pickerLayout = new QVBoxLayout(pickerWrap);
-    pickerLayout->setContentsMargins(12, 4, 12, 4);
+    pickerLayout->setContentsMargins(12, 4, 6, 8);
     pickerLayout->addWidget(m_pickerStack);
 
-    // ---- Bottom half of splitter: cached-only + torrents -------------------
+    // ---- Right side of splitter: cached-only + torrents -------------------
     m_cachedOnlyCheck = new QCheckBox(
         i18nc("@option:check", "Cached on Real-Debrid only"), this);
     m_cachedOnlyCheck->setChecked(config::Config::instance().cachedOnly());
@@ -190,7 +179,7 @@ SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
         TorrentsModel::ColProvider, QHeaderView::ResizeToContents);
     m_torrentsView->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_torrentsView, &QTableView::customContextMenuRequested,
-        this, &SeriesFocusView::onTorrentContextMenu);
+        this, &SeriesDetailPane::onTorrentContextMenu);
     // Double-click / Enter on a row → Play, but only when we have a
     // direct URL (i.e. an RD-cached stream).
     connect(m_torrentsView, &QAbstractItemView::activated, this,
@@ -214,20 +203,20 @@ SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
 
     auto* torrentsWrap = new QWidget(this);
     auto* torrentsLayout = new QVBoxLayout(torrentsWrap);
-    torrentsLayout->setContentsMargins(12, 4, 12, 8);
+    torrentsLayout->setContentsMargins(6, 4, 12, 8);
     torrentsLayout->setSpacing(4);
     torrentsLayout->addLayout(cachedRow);
     torrentsLayout->addWidget(m_torrentsStack, 1);
 
-    // ---- Splitter ---------------------------------------------------------
-    m_bodySplit = new QSplitter(Qt::Vertical, this);
+    // ---- Splitter (horizontal — landscape first) -------------------------
+    m_bodySplit = new QSplitter(Qt::Horizontal, this);
     m_bodySplit->setChildrenCollapsible(false);
     m_bodySplit->addWidget(pickerWrap);
     m_bodySplit->addWidget(torrentsWrap);
-    // Default 40/60 episodes/torrents; may be overridden by saved state.
+    // Default 35/65 episodes/torrents; may be overridden by saved state.
     applyDefaultSplitterRatio();
 
-    const auto savedState = config::Config::instance().focusSplitterState();
+    const auto savedState = config::Config::instance().seriesPaneSplitterState();
     if (!savedState.isEmpty()) {
         m_bodySplit->restoreState(savedState);
     }
@@ -254,34 +243,34 @@ SeriesFocusView::SeriesFocusView(ImageLoader* loader, QWidget* parent)
     showMetaLoading();
 }
 
-void SeriesFocusView::applyDefaultSplitterRatio()
+void SeriesDetailPane::applyDefaultSplitterRatio()
 {
-    // 40% top, 60% bottom. Uses a ratio because the splitter may be
-    // asked for sizes before the widget has its real geometry.
-    m_bodySplit->setSizes({ 400, 600 });
-    m_bodySplit->setStretchFactor(0, 4);
-    m_bodySplit->setStretchFactor(1, 6);
+    // 35% episodes, 65% torrents. Landscape-first — the torrents
+    // table has more columns and needs the width.
+    m_bodySplit->setSizes({ 350, 650 });
+    m_bodySplit->setStretchFactor(0, 35);
+    m_bodySplit->setStretchFactor(1, 65);
 }
 
-void SeriesFocusView::saveSplitterState()
+void SeriesDetailPane::saveSplitterState()
 {
-    config::Config::instance().setFocusSplitterState(m_bodySplit->saveState());
+    config::Config::instance().setSeriesPaneSplitterState(m_bodySplit->saveState());
 }
 
-void SeriesFocusView::setRealDebridConfigured(bool on)
+void SeriesDetailPane::setRealDebridConfigured(bool on)
 {
     m_rdConfigured = on;
     rebuildCachedOnlyVisibility();
     applyClientFilters();
 }
 
-void SeriesFocusView::focusEpisodeList()
+void SeriesDetailPane::focusEpisodeList()
 {
     // Delegate to the picker which owns the list view.
     m_picker->setFocus();
 }
 
-void SeriesFocusView::showMetaLoading()
+void SeriesDetailPane::showMetaLoading()
 {
     m_titleLabel->setText(i18nc("@info:status", "Loading…"));
     m_metaLineLabel->clear();
@@ -300,7 +289,7 @@ void SeriesFocusView::showMetaLoading()
     rebuildCachedOnlyVisibility();
 }
 
-void SeriesFocusView::showMetaError(const QString& message)
+void SeriesDetailPane::showMetaError(const QString& message)
 {
     m_titleLabel->setText(i18nc("@label", "Couldn't load series"));
     m_metaLineLabel->clear();
@@ -314,7 +303,7 @@ void SeriesFocusView::showMetaError(const QString& message)
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 }
 
-void SeriesFocusView::setSeries(const api::SeriesDetail& series)
+void SeriesDetailPane::setSeries(const api::SeriesDetail& series)
 {
     const auto& sum = series.meta.summary;
     m_titleLabel->setText(sum.year
@@ -343,7 +332,7 @@ void SeriesFocusView::setSeries(const api::SeriesDetail& series)
     m_pickerStack->setCurrentWidget(m_picker);
 }
 
-void SeriesFocusView::updatePoster()
+void SeriesDetailPane::updatePoster()
 {
     if (!m_loader || m_pendingPosterUrl.isEmpty()) {
         return;
@@ -359,19 +348,19 @@ void SeriesFocusView::updatePoster()
     }
 }
 
-void SeriesFocusView::showTorrentsLoading()
+void SeriesDetailPane::showTorrentsLoading()
 {
     m_torrentsState->showLoading(i18nc("@info:status", "Finding torrents…"));
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 }
 
-void SeriesFocusView::showTorrentsError(const QString& message)
+void SeriesDetailPane::showTorrentsError(const QString& message)
 {
     m_torrentsState->showError(message, /*retryable=*/false);
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 }
 
-void SeriesFocusView::showTorrentsEmpty()
+void SeriesDetailPane::showTorrentsEmpty()
 {
     m_torrentsState->showIdle(
         i18nc("@label", "No torrents found"),
@@ -380,14 +369,14 @@ void SeriesFocusView::showTorrentsEmpty()
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 }
 
-void SeriesFocusView::setTorrents(QList<api::Stream> streams)
+void SeriesDetailPane::setTorrents(QList<api::Stream> streams)
 {
     m_rawStreams = std::move(streams);
     rebuildCachedOnlyVisibility();
     applyClientFilters();
 }
 
-void SeriesFocusView::applyClientFilters()
+void SeriesDetailPane::applyClientFilters()
 {
     if (m_rawStreams.isEmpty()) {
         m_torrents->reset({});
@@ -421,12 +410,12 @@ void SeriesFocusView::applyClientFilters()
     m_torrentsStack->setCurrentWidget(m_torrentsView);
 }
 
-void SeriesFocusView::rebuildCachedOnlyVisibility()
+void SeriesDetailPane::rebuildCachedOnlyVisibility()
 {
     m_cachedOnlyCheck->setVisible(m_rdConfigured && !m_rawStreams.isEmpty());
 }
 
-void SeriesFocusView::onTorrentContextMenu(const QPoint& pos)
+void SeriesDetailPane::onTorrentContextMenu(const QPoint& pos)
 {
     const auto idx = m_torrentsView->indexAt(pos);
     if (!idx.isValid()) {

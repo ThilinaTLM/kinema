@@ -28,7 +28,7 @@ set(kinema_core_SRCS
     ui/ImageLoader.cpp
     ui/ResultsModel.cpp
     ui/ResultCardDelegate.cpp
-    ui/SeriesFocusView.cpp
+    ui/SeriesDetailPane.cpp
     ui/SeriesPicker.cpp
     ui/TorrentsModel.cpp
     ui/SearchBar.cpp

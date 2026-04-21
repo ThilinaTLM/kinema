@@ -117,13 +117,19 @@ void EpisodeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& optio
         Qt::AlignLeft | Qt::AlignVCenter,
         tfm.elidedText(headline, Qt::ElideRight, textRect.width()));
 
-    // Release date line.
+    // Release date + description lines. Use a dimmed variant of the
+    // primary text colour for visual hierarchy. QPalette::Mid would be
+    // wrong here — it's a border/shadow role, not a text role, and on
+    // dark themes resolves to a near-black that's invisible on the
+    // list's dark Base background.
     auto subFont = option.font;
     subFont.setPointSizeF(subFont.pointSizeF() * 0.9);
     painter->setFont(subFont);
-    painter->setPen((option.state & QStyle::State_Selected)
-            ? palette.color(QPalette::HighlightedText)
-            : palette.color(QPalette::Mid));
+    auto secondary = (option.state & QStyle::State_Selected)
+        ? palette.color(QPalette::HighlightedText)
+        : palette.color(QPalette::Text);
+    secondary.setAlphaF(0.65f);
+    painter->setPen(secondary);
     const QFontMetrics sfm(subFont);
     if (!released.isEmpty()) {
         painter->drawText(QRect(textRect.left(), textRect.top() + titleH + 2,

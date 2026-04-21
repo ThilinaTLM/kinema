@@ -17,7 +17,7 @@
 #include "ui/ResultCardDelegate.h"
 #include "ui/ResultsModel.h"
 #include "ui/SearchBar.h"
-#include "ui/SeriesFocusView.h"
+#include "ui/SeriesDetailPane.h"
 #include "ui/StateWidget.h"
 #include "ui/settings/SettingsDialog.h"
 
@@ -41,6 +41,7 @@
 #include <QListView>
 #include <QMenuBar>
 #include <QRegularExpression>
+#include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -96,11 +97,11 @@ MainWindow::MainWindow(QWidget* parent)
     // RD state is driven by Config ("configured" bit) + the in-memory token.
     const bool hasRD = config::Config::instance().hasRealDebrid();
     m_detailPane->setRealDebridConfigured(hasRD);
-    m_focusView->setRealDebridConfigured(hasRD);
+    m_seriesDetailPane->setRealDebridConfigured(hasRD);
     connect(&config::Config::instance(), &config::Config::realDebridChanged,
         this, [this](bool on) {
             m_detailPane->setRealDebridConfigured(on);
-            m_focusView->setRealDebridConfigured(on);
+            m_seriesDetailPane->setRealDebridConfigured(on);
         });
 
     // Load the token from the keyring in the background.
@@ -166,7 +167,7 @@ void MainWindow::buildLayout()
     m_resultsStack->addWidget(m_resultsState);
     m_resultsStack->addWidget(m_resultsView);
 
-    // ---- Detail pane (movies only) ----------------------------------------
+    // ---- Detail panes (movies + series) ----------------------------------
     m_detailPane = new DetailPane(m_imageLoader, this);
     connect(m_detailPane, &DetailPane::copyMagnetRequested,
         this, &MainWindow::onCopyMagnet);
@@ -178,45 +179,120 @@ void MainWindow::buildLayout()
         this, &MainWindow::onOpenDirectUrl);
     connect(m_detailPane, &DetailPane::playRequested,
         this, &MainWindow::onPlayRequested);
+    connect(m_detailPane, &DetailPane::closeRequested,
+        this, &MainWindow::closeDetailPanel);
 
-    // ---- Browse view (results grid + DetailPane in a splitter) -----------
-    auto* splitter = new QSplitter(Qt::Horizontal);
-    splitter->addWidget(m_resultsStack);
-    splitter->addWidget(m_detailPane);
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 2);
-    splitter->setChildrenCollapsible(false);
-
-    m_browseView = new QWidget(this);
-    auto* browseLayout = new QVBoxLayout(m_browseView);
-    browseLayout->setContentsMargins(0, 0, 0, 0);
-    browseLayout->addWidget(splitter);
-
-    // ---- Series focus view -----------------------------------------------
-    m_focusView = new SeriesFocusView(m_imageLoader, this);
-    connect(m_focusView, &SeriesFocusView::backRequested,
-        this, &MainWindow::onBackFromFocus);
-    connect(m_focusView, &SeriesFocusView::episodeSelected,
+    m_seriesDetailPane = new SeriesDetailPane(m_imageLoader, this);
+    connect(m_seriesDetailPane, &SeriesDetailPane::episodeSelected,
         this, &MainWindow::onEpisodeSelected);
-    connect(m_focusView, &SeriesFocusView::copyMagnetRequested,
+    connect(m_seriesDetailPane, &SeriesDetailPane::copyMagnetRequested,
         this, &MainWindow::onCopyMagnet);
-    connect(m_focusView, &SeriesFocusView::openMagnetRequested,
+    connect(m_seriesDetailPane, &SeriesDetailPane::openMagnetRequested,
         this, &MainWindow::onOpenMagnet);
-    connect(m_focusView, &SeriesFocusView::copyDirectUrlRequested,
+    connect(m_seriesDetailPane, &SeriesDetailPane::copyDirectUrlRequested,
         this, &MainWindow::onCopyDirectUrl);
-    connect(m_focusView, &SeriesFocusView::openDirectUrlRequested,
+    connect(m_seriesDetailPane, &SeriesDetailPane::openDirectUrlRequested,
         this, &MainWindow::onOpenDirectUrl);
-    connect(m_focusView, &SeriesFocusView::playRequested,
+    connect(m_seriesDetailPane, &SeriesDetailPane::playRequested,
         this, &MainWindow::onPlayRequested);
+    connect(m_seriesDetailPane, &SeriesDetailPane::closeRequested,
+        this, &MainWindow::closeDetailPanel);
 
-    // ---- Outer stack ------------------------------------------------------
-    m_viewStack = new QStackedWidget(this);
-    m_viewStack->addWidget(m_browseView);
-    m_viewStack->addWidget(m_focusView);
-    m_viewStack->setCurrentWidget(m_browseView);
-    setCentralWidget(m_viewStack);
+    m_detailStack = new QStackedWidget(this);
+    m_detailStack->addWidget(m_detailPane);       // index 0 = movies
+    m_detailStack->addWidget(m_seriesDetailPane); // index 1 = series
+
+    // ---- Outer splitter: grid + detail stack -----------------------------
+    m_browseSplitter = new QSplitter(Qt::Horizontal, this);
+    m_browseSplitter->addWidget(m_resultsStack);
+    m_browseSplitter->addWidget(m_detailStack);
+    m_browseSplitter->setStretchFactor(0, 4);
+    m_browseSplitter->setStretchFactor(1, 6);
+    // We need to be able to collapse the detail side to zero width so
+    // the grid can take the full content area when nothing is selected.
+    m_browseSplitter->setChildrenCollapsible(true);
+
+    // Persist user drags — but only when the panel is actually open.
+    // Otherwise the "closed" sizes (1, 0) would be persisted as the
+    // user's preferred split.
+    connect(m_browseSplitter, &QSplitter::splitterMoved, this, [this] {
+        if (m_detailStack && m_detailStack->isVisible()) {
+            m_savedSplitterOpenState = m_browseSplitter->saveState();
+            config::Config::instance().setBrowseSplitterState(
+                m_savedSplitterOpenState);
+        }
+    });
+
+    // Seed the "open state" with either the persisted split or a
+    // 40/60 default — this is what we restore when the user opens a
+    // panel after a close.
+    const auto persisted = config::Config::instance().browseSplitterState();
+    if (!persisted.isEmpty()) {
+        m_browseSplitter->restoreState(persisted);
+        m_savedSplitterOpenState = persisted;
+    } else {
+        m_browseSplitter->setSizes({ 400, 600 });
+        m_savedSplitterOpenState = m_browseSplitter->saveState();
+    }
+
+    // Start with the grid full-width: hide the detail stack and zero
+    // its splitter slot so the handle disappears too.
+    m_detailStack->hide();
+    m_browseSplitter->setSizes({ 1, 0 });
+
+    setCentralWidget(m_browseSplitter);
 
     statusBar()->showMessage(i18nc("@info:status", "Ready"), 2000);
+}
+
+void MainWindow::openDetailPanel(int stackIndex)
+{
+    if (!m_detailStack) {
+        return;
+    }
+    m_detailStack->setCurrentIndex(stackIndex);
+    if (!m_detailStack->isVisible()) {
+        m_detailStack->show();
+        if (!m_savedSplitterOpenState.isEmpty()) {
+            m_browseSplitter->restoreState(m_savedSplitterOpenState);
+        } else {
+            m_browseSplitter->setSizes({ 400, 600 });
+        }
+    }
+}
+
+void MainWindow::closeDetailPanel()
+{
+    if (!m_detailStack || !m_detailStack->isVisible()) {
+        return;
+    }
+
+    // Cancel any in-flight work so stale fetches don't repopulate the
+    // pane after it's been dismissed.
+    ++m_detailEpoch;
+    ++m_episodeEpoch;
+    m_currentMovie.reset();
+    m_currentEpisode.reset();
+    m_currentSeriesImdbId.clear();
+
+    // Reset both panes to their idle states so re-opening a different
+    // kind later doesn't momentarily flash stale content.
+    m_detailPane->showIdle();
+    m_seriesDetailPane->showMetaLoading();
+
+    m_detailStack->hide();
+    m_browseSplitter->setSizes({ 1, 0 });
+
+    // Clear selection so clicking the same card re-opens cleanly
+    // (onResultActivated treats clicking the already-loaded card as a
+    // no-op, and we've already cleared m_currentMovie above anyway).
+    if (auto* sm = m_resultsView->selectionModel()) {
+        sm->clearSelection();
+        sm->clearCurrentIndex();
+    }
+    m_resultsView->setFocus();
+
+    setWindowTitle(QStringLiteral("Kinema"));
 }
 
 void MainWindow::buildActions()
@@ -244,6 +320,17 @@ void MainWindow::buildActions()
         m_searchBar->setFocus();
     });
     m_actions->addAction(QStringLiteral("focus_search"), focusSearch);
+
+    // Esc anywhere in the window closes the detail panel if it's open.
+    // No modal flows live inside the main window (Settings is a
+    // top-level dialog), so a window-scope shortcut is safe.
+    auto* closePanelShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    closePanelShortcut->setContext(Qt::WindowShortcut);
+    connect(closePanelShortcut, &QShortcut::activated, this, [this] {
+        if (m_detailStack && m_detailStack->isVisible()) {
+            closeDetailPanel();
+        }
+    });
 
     // ---- Classic menu bar (hidden by default, toggled via Ctrl+M) ----------
     auto* fileMenu = menuBar()->addMenu(i18nc("@title:menu", "&File"));
@@ -343,11 +430,12 @@ QCoro::Task<void> MainWindow::runSearch(QString text, api::MediaKind kind)
     if (m_resultsDelegate) {
         m_resultsDelegate->resetRequestTracking();
     }
+    // Close any open panel so the user lands in a grid-first view on
+    // every new search. closeDetailPanel() is idempotent when nothing
+    // is open.
+    closeDetailPanel();
     m_resultsState->showLoading(i18nc("@info:status", "Searching…"));
     m_resultsStack->setCurrentWidget(m_resultsState);
-    m_detailPane->showIdle();
-    m_currentMovie.reset();
-    m_currentEpisode.reset();
     statusBar()->showMessage(i18nc("@info:status", "Searching for \"%1\"…", text));
 
     try {
@@ -381,17 +469,9 @@ QCoro::Task<void> MainWindow::runSearch(QString text, api::MediaKind kind)
         statusBar()->showMessage(
             i18ncp("@info:status", "%1 result", "%1 results", results.size()),
             3000);
-
-        // Auto-select and auto-load the first result's details.
-        const auto firstIndex = m_resultsModel->index(0, 0);
-        m_resultsView->setCurrentIndex(firstIndex);
-        if (results.first().kind == api::MediaKind::Series) {
-            auto t = loadSeriesDetail(results.first());
-            Q_UNUSED(t);
-        } else {
-            auto t = loadMovieDetail(results.first());
-            Q_UNUSED(t);
-        }
+        // No auto-select: the panel stays closed until the user picks
+        // a card, so the grid can take the full content area.
+        m_resultsView->setFocus();
 
     } catch (const core::HttpError& e) {
         if (myEpoch != m_queryEpoch) {
@@ -417,10 +497,27 @@ void MainWindow::onResultActivated(const QModelIndex& index)
     if (!s) {
         return;
     }
+
+    // Clicking the already-loaded card is a no-op — avoids duplicate
+    // network fetches and pane flicker.
+    const bool panelOpen = m_detailStack && m_detailStack->isVisible();
+    if (panelOpen) {
+        if (s->kind == api::MediaKind::Movie && m_currentMovie
+            && m_currentMovie->imdbId == s->imdbId) {
+            return;
+        }
+        if (s->kind == api::MediaKind::Series
+            && m_currentSeriesImdbId == s->imdbId) {
+            return;
+        }
+    }
+
     if (s->kind == api::MediaKind::Series) {
+        openDetailPanel(/*series*/ 1);
         auto t = loadSeriesDetail(*s);
         Q_UNUSED(t);
     } else {
+        openDetailPanel(/*movie*/ 0);
         auto t = loadMovieDetail(*s);
         Q_UNUSED(t);
     }
@@ -479,26 +576,18 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
     m_currentMovie.reset();
     m_currentEpisode.reset();
 
-    // Push into focus view and show loading state up front.
-    m_focusView->showMetaLoading();
-    m_viewStack->setCurrentWidget(m_focusView);
+    // Show loading state in the series side of the detail stack.
+    m_seriesDetailPane->showMetaLoading();
 
     try {
         auto sd = co_await m_cinemeta->seriesMeta(summary.imdbId);
         if (myEpoch != m_detailEpoch) {
             co_return;
         }
-        m_focusView->setSeries(sd);
-
-        // Update the window title for context.
-        const auto& s = sd.meta.summary;
-        setWindowTitle(s.year
-                ? i18nc("@title:window", "Kinema \u2014 %1 (%2)",
-                    s.title, QString::number(*s.year))
-                : i18nc("@title:window", "Kinema \u2014 %1", s.title));
+        m_seriesDetailPane->setSeries(sd);
 
         // Give keyboard focus to the episode list for immediate arrow-key nav.
-        m_focusView->focusEpisodeList();
+        m_seriesDetailPane->focusEpisodeList();
 
         // Auto-select S1E1 (or the first non-special episode).
         const api::Episode* first = nullptr;
@@ -509,7 +598,7 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
             }
         }
         if (!first) {
-            m_focusView->showTorrentsEmpty();
+            m_seriesDetailPane->showTorrentsEmpty();
             co_return;
         }
         auto t = loadEpisodeStreams(*first, summary.imdbId);
@@ -520,12 +609,12 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
             co_return;
         }
         qCWarning(KINEMA) << "series detail failed:" << e.message();
-        m_focusView->showMetaError(e.message());
+        m_seriesDetailPane->showMetaError(e.message());
     } catch (const std::exception& e) {
         if (myEpoch != m_detailEpoch) {
             co_return;
         }
-        m_focusView->showMetaError(QString::fromUtf8(e.what()));
+        m_seriesDetailPane->showMetaError(QString::fromUtf8(e.what()));
     }
 }
 
@@ -533,7 +622,7 @@ QCoro::Task<void> MainWindow::loadEpisodeStreams(api::Episode episode, QString i
 {
     const auto myEpoch = ++m_episodeEpoch;
     m_currentEpisode = episode;
-    m_focusView->showTorrentsLoading();
+    m_seriesDetailPane->showTorrentsLoading();
 
     const auto streamId = episode.streamId(imdbId);
 
@@ -543,18 +632,18 @@ QCoro::Task<void> MainWindow::loadEpisodeStreams(api::Episode episode, QString i
         if (myEpoch != m_episodeEpoch) {
             co_return;
         }
-        m_focusView->setTorrents(std::move(streams));
+        m_seriesDetailPane->setTorrents(std::move(streams));
     } catch (const core::HttpError& e) {
         if (myEpoch != m_episodeEpoch) {
             co_return;
         }
         qCWarning(KINEMA) << "episode streams failed:" << e.message();
-        m_focusView->showTorrentsError(e.message());
+        m_seriesDetailPane->showTorrentsError(e.message());
     } catch (const std::exception& e) {
         if (myEpoch != m_episodeEpoch) {
             co_return;
         }
-        m_focusView->showTorrentsError(QString::fromUtf8(e.what()));
+        m_seriesDetailPane->showTorrentsError(QString::fromUtf8(e.what()));
     }
 }
 
@@ -575,22 +664,6 @@ QCoro::Task<void> MainWindow::loadRealDebridToken()
     } catch (const std::exception& e) {
         qCWarning(KINEMA) << "RD token read failed:" << e.what();
         m_rdToken.clear();
-    }
-}
-
-void MainWindow::onBackFromFocus()
-{
-    m_viewStack->setCurrentWidget(m_browseView);
-    setWindowTitle(QStringLiteral("Kinema"));
-    // Bump the episode epoch so any in-flight streams call bails out
-    // without painting over the next selection.
-    ++m_episodeEpoch;
-    m_currentSeriesImdbId.clear();
-    m_currentEpisode.reset();
-
-    // Put focus back on the results grid so arrow keys work immediately.
-    if (m_resultsView) {
-        m_resultsView->setFocus();
     }
 }
 
@@ -625,15 +698,18 @@ void MainWindow::onTorrentioOptionsChanged()
     m_refetchPending = true;
     QTimer::singleShot(0, this, [this] {
         m_refetchPending = false;
-        // Refetch whichever view is currently holding torrents.
-        if (m_viewStack && m_viewStack->currentWidget() == m_focusView
+        if (!m_detailStack || !m_detailStack->isVisible()) {
+            // Panel closed — nothing on screen depends on these options
+            // right now. Next open will pick up the new defaults.
+            return;
+        }
+        if (m_detailStack->currentIndex() == 1
             && m_currentEpisode && !m_currentSeriesImdbId.isEmpty()) {
             auto t = loadEpisodeStreams(*m_currentEpisode, m_currentSeriesImdbId);
             Q_UNUSED(t);
             return;
         }
-        if (m_viewStack && m_viewStack->currentWidget() == m_browseView
-            && m_currentMovie) {
+        if (m_detailStack->currentIndex() == 0 && m_currentMovie) {
             auto t = loadMovieDetail(*m_currentMovie);
             Q_UNUSED(t);
         }

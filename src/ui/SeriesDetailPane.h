@@ -9,10 +9,10 @@
 
 class QCheckBox;
 class QLabel;
-class QPushButton;
 class QSplitter;
 class QStackedWidget;
 class QTableView;
+class QToolButton;
 
 namespace kinema::ui {
 
@@ -21,36 +21,42 @@ class SeriesPicker;
 class StateWidget;
 class TorrentsModel;
 
-
 /**
- * Full-window series focus view. Replaces DetailPane's old series mode
- * with a dedicated layout:
+ * Right-side series detail pane. Replaces the old full-window
+ * SeriesFocusView: instead of taking over the whole window, it sits in
+ * MainWindow's right splitter slot next to the results grid, and can be
+ * closed back to a grid-only layout.
  *
- *   +---------------------------------------------------------+
- *   |  ← Back    From (2022)                                  |
- *   |  +----+   Drama, Horror, Mystery · 50 min · ★ 7.8       |
- *   |  |pos |   Unravel the mystery of a town…                |
- *   |  +----+                                                 |
- *   +---------------------------------------------------------+
- *   |  Season: [ 1 ▾ ]                                        |
- *   |  [ episode list — QSplitter top half ]                  |
- *   +---------------------------------------------------------+
- *   |  [✓ Cached on Real-Debrid only]                         |
- *   |  [ torrents table  — QSplitter bottom half ]            |
- *   +---------------------------------------------------------+
+ *   +------------------------------------------------------------+
+ *   | [Poster] Title (Year)                                  [×] |
+ *   |          Genre, Genre · 50 min · ★ 7.8                    |
+ *   |          One-paragraph description …                      |
+ *   +------------------------------------------------------------+
+ *   | Season: [ 1 ▾ ]                [✓ Cached on RD only]      |
+ *   +----------------------------+-------------------------------+
+ *   | Episodes list              | Torrents table                |
+ *   |  S1E1  Pilot               | Release    Q   Size  Sdrs  RD|
+ *   |  S1E2  The Way Things Are  | …                             |
+ *   |  …                         |                               |
+ *   +----------------------------+-------------------------------+
+ *                 (draggable horizontal splitter)
+ *
+ * Landscape-optimised: episodes and torrents sit side-by-side instead
+ * of stacked vertically. Poster + meta banner and the season/filter
+ * row span the pane width above the split.
  *
  * Owns the SeriesPicker, the torrents QTableView + TorrentsModel, and
  * the cached-only checkbox. MainWindow pushes a SeriesDetail into it
  * via setSeries() and handles the episodeSelected / copyMagnet / …
  * signals the same way it handles DetailPane's.
  */
-class SeriesFocusView : public QWidget
+class SeriesDetailPane : public QWidget
 {
     Q_OBJECT
 public:
-    SeriesFocusView(ImageLoader* loader, QWidget* parent = nullptr);
+    SeriesDetailPane(ImageLoader* loader, QWidget* parent = nullptr);
 
-    /// Populate the view. Auto-selects S1E1 and emits episodeSelected
+    /// Populate the pane. Auto-selects S1E1 and emits episodeSelected
     /// on the first non-special episode so MainWindow can fetch streams.
     void setSeries(const api::SeriesDetail& series);
 
@@ -65,11 +71,12 @@ public:
     void setRealDebridConfigured(bool on);
 
     /// Give keyboard focus to the episode list. Called by MainWindow
-    /// just after switching into the focus view.
+    /// just after opening the pane.
     void focusEpisodeList();
 
 Q_SIGNALS:
-    void backRequested();
+    /// Emitted when the user clicks the [×] button in the header.
+    void closeRequested();
     void episodeSelected(const api::Episode& episode);
     void copyMagnetRequested(const api::Stream& stream);
     void openMagnetRequested(const api::Stream& stream);
@@ -89,22 +96,22 @@ private:
     bool m_rdConfigured = false;
 
     // Header
-    QPushButton* m_backButton {};
+    QToolButton* m_closeButton {};
     QLabel* m_posterLabel {};
     QLabel* m_titleLabel {};
     QLabel* m_metaLineLabel {};
     QLabel* m_descLabel {};
     QUrl m_pendingPosterUrl;
 
-    // Body splitter
+    // Horizontal body splitter (episodes | torrents)
     QSplitter* m_bodySplit {};
 
-    // Top: season picker + episode list
+    // Left: season picker + episode list
     QStackedWidget* m_pickerStack {};
     StateWidget* m_pickerState {};
     SeriesPicker* m_picker {};
 
-    // Bottom: cached-only + torrents
+    // Right: cached-only + torrents
     QCheckBox* m_cachedOnlyCheck {};
     QStackedWidget* m_torrentsStack {};
     StateWidget* m_torrentsState {};

@@ -17,16 +17,13 @@
 #include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
+#include <KColorScheme>
+
 #include <QLocale>
 #include <QPushButton>
 #include <QVBoxLayout>
 
 namespace kinema::ui::settings {
-
-namespace {
-constexpr auto kOkColor = "#2e7d32";
-constexpr auto kErrorColor = "#c62828";
-} // namespace
 
 RealDebridSettingsPage::RealDebridSettingsPage(
     core::HttpClient* http, core::TokenStore* tokens, QWidget* parent)
@@ -126,9 +123,17 @@ void RealDebridSettingsPage::updateButtons()
 void RealDebridSettingsPage::setStatus(const QString& message, bool error)
 {
     m_statusLabel->setText(message);
+    // Pull the semantic positive/negative foreground from the active
+    // KColorScheme so the status reads correctly on both light and
+    // dark themes. Hardcoded hex colours (the previous approach) were
+    // too dark to see on dark Plasma palettes.
+    const KColorScheme scheme(QPalette::Active, KColorScheme::Window);
+    const auto role = error
+        ? KColorScheme::NegativeText
+        : KColorScheme::PositiveText;
+    const auto colour = scheme.foreground(role).color().name();
     m_statusLabel->setStyleSheet(
-        QStringLiteral("color: %1; font-weight: 500;")
-            .arg(QString::fromLatin1(error ? kErrorColor : kOkColor)));
+        QStringLiteral("color: %1; font-weight: 500;").arg(colour));
 }
 
 void RealDebridSettingsPage::clearStatus()

@@ -94,7 +94,12 @@ void ResultCardDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
         painter->setPen(Qt::NoPen);
         painter->setBrush(palette.color(QPalette::AlternateBase));
         painter->drawRoundedRect(posterRect, 6, 6);
-        painter->setPen(palette.color(QPalette::Mid));
+        // Use a dimmed Text colour, not QPalette::Mid: Mid is a
+        // border/shadow role and resolves to near-black on dark themes,
+        // which would make the placeholder glyph invisible.
+        auto placeholder = palette.color(QPalette::Text);
+        placeholder.setAlphaF(0.55f);
+        painter->setPen(placeholder);
         auto f = painter->font();
         f.setPointSizeF(f.pointSizeF() * 2.5);
         painter->setFont(f);

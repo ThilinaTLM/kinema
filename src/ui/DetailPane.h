@@ -11,6 +11,7 @@ class QCheckBox;
 class QLabel;
 class QStackedWidget;
 class QTableView;
+class QToolButton;
 
 namespace kinema::ui {
 
@@ -47,6 +48,8 @@ public:
     TorrentsModel* torrentsModel() const { return m_torrents; }
 
 Q_SIGNALS:
+    /// Emitted when the user clicks the [×] button in the header.
+    void closeRequested();
     /// Emitted when the user selects "Copy magnet" from the torrent row menu.
     void copyMagnetRequested(const api::Stream& stream);
     /// Emitted when the user selects "Open magnet" from the torrent row menu.
@@ -66,6 +69,9 @@ private:
 
     ImageLoader* m_loader;
     bool m_rdConfigured = false;
+
+    // Header
+    QToolButton* m_closeButton {};
 
     // Meta side
     QStackedWidget* m_metaStack;

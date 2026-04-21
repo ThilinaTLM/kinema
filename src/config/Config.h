@@ -24,7 +24,10 @@ namespace kinema::config {
  *     cachedOnly        = true|false              (RD cached-only checkbox)
  *     defaultSort       = "seeders" | "size" | "qualitysize"
  *                                                  (Torrentio sort= param)
- *     focusSplitter     = <QSplitter::saveState() bytes>
+ *     browseSplitter    = <QSplitter::saveState() bytes>
+ *                         (grid + detail-panel horizontal splitter)
+ *     seriesPaneSplitter= <QSplitter::saveState() bytes>
+ *                         (episodes | torrents inside series pane)
  *   [Filters]
  *     excludedResolutions = comma-separated: 4k,1080p,720p,480p,other
  *     excludedCategories  = comma-separated: cam,scr,threed,hdr,hdr10plus,
@@ -70,10 +73,16 @@ public:
     QStringList keywordBlocklist() const;
     void setKeywordBlocklist(QStringList);
 
-    // Series focus view's vertical splitter state (QSplitter::saveState).
-    // Empty on first run — SeriesFocusView falls back to 40/60 default.
-    QByteArray focusSplitterState() const;
-    void setFocusSplitterState(QByteArray state);
+    // Outer grid / detail-panel horizontal splitter (QSplitter::saveState).
+    // Empty on first run — MainWindow falls back to 40/60 default.
+    QByteArray browseSplitterState() const;
+    void setBrowseSplitterState(QByteArray state);
+
+    // Inner (episodes | torrents) horizontal splitter of the series
+    // detail pane (QSplitter::saveState).
+    // Empty on first run — SeriesDetailPane falls back to 35/65 default.
+    QByteArray seriesPaneSplitterState() const;
+    void setSeriesPaneSplitterState(QByteArray state);
 
     // Preferred external media player for the Play action. Defaults to
     // mpv. The launcher falls back to the other known players if the

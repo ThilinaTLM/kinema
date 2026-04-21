@@ -16,6 +16,7 @@
 class KActionCollection;
 class KHamburgerMenu;
 class QListView;
+class QSplitter;
 class QStackedWidget;
 class QToolBar;
 
@@ -37,7 +38,7 @@ class ImageLoader;
 class ResultCardDelegate;
 class ResultsModel;
 class SearchBar;
-class SeriesFocusView;
+class SeriesDetailPane;
 class StateWidget;
 
 namespace settings {
@@ -64,7 +65,6 @@ private Q_SLOTS:
     void onCopyDirectUrl(const api::Stream& stream);
     void onOpenDirectUrl(const api::Stream& stream);
     void onPlayRequested(const api::Stream& stream);
-    void onBackFromFocus();
     void showAbout();
     void showSettings();
     void onTorrentioOptionsChanged();
@@ -79,6 +79,8 @@ private:
 
     void buildActions();
     void buildLayout();
+    void openDetailPanel(int stackIndex);
+    void closeDetailPanel();
     core::torrentio::ConfigOptions currentConfig() const;
 
     // Ownership (parented to this window)
@@ -100,11 +102,17 @@ private:
     StateWidget* m_resultsState {};
     QStackedWidget* m_resultsStack {};
     DetailPane* m_detailPane {};
+    SeriesDetailPane* m_seriesDetailPane {};
 
-    // Outer stack: browse view (results + DetailPane) vs series focus view.
-    QStackedWidget* m_viewStack {};
-    QWidget* m_browseView {};
-    SeriesFocusView* m_focusView {};
+    // Outer horizontal splitter: grid (left) + detail stack (right).
+    // The detail stack holds DetailPane (index 0) and SeriesDetailPane
+    // (index 1); it is hidden when no result is selected so the grid
+    // takes the full window width.
+    QSplitter* m_browseSplitter {};
+    QStackedWidget* m_detailStack {};
+    // Last known splitter state with the panel open — restored when
+    // the user re-opens the panel after a close.
+    QByteArray m_savedSplitterOpenState;
 
     // Concurrency guard — increments on each new query so stale coroutines
     // can detect they've been superseded and bail out.

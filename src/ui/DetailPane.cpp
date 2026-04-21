@@ -25,6 +25,7 @@
 #include <QSortFilterProxyModel>
 #include <QStackedWidget>
 #include <QTableView>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace kinema::ui {
@@ -55,6 +56,14 @@ DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
     : QWidget(parent)
     , m_loader(loader)
 {
+    // ---- Header (always-visible close button) ------------------------------
+    m_closeButton = new QToolButton(this);
+    m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
+    m_closeButton->setToolTip(i18nc("@info:tooltip", "Close details"));
+    m_closeButton->setAutoRaise(true);
+    connect(m_closeButton, &QToolButton::clicked,
+        this, &DetailPane::closeRequested);
+
     // ---- Meta side ---------------------------------------------------------
     m_metaState = new StateWidget(this);
 
@@ -171,9 +180,15 @@ DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
     cachedRow->addWidget(m_cachedOnlyCheck);
     cachedRow->addStretch(1);
 
+    auto* headerRow = new QHBoxLayout;
+    headerRow->setContentsMargins(6, 6, 6, 0);
+    headerRow->addStretch(1);
+    headerRow->addWidget(m_closeButton, 0, Qt::AlignTop);
+
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(4);
+    root->addLayout(headerRow, 0);
     root->addWidget(m_metaStack, 0);
     root->addLayout(cachedRow, 0);
     root->addWidget(m_torrentsStack, 1);

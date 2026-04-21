@@ -18,7 +18,8 @@ constexpr auto kGroupPlayer = "Player";
 constexpr auto kKeyCachedOnly = "cachedOnly";
 constexpr auto kKeySearchKind = "searchKind";
 constexpr auto kKeyDefaultSort = "defaultSort";
-constexpr auto kKeyFocusSplitter = "focusSplitter";
+constexpr auto kKeyBrowseSplitter = "browseSplitter";
+constexpr auto kKeySeriesPaneSplitter = "seriesPaneSplitter";
 constexpr auto kKeyExcludedResolutions = "excludedResolutions";
 constexpr auto kKeyExcludedCategories = "excludedCategories";
 constexpr auto kKeyKeywordBlocklist = "keywordBlocklist";
@@ -174,15 +175,27 @@ void Config::setKeywordBlocklist(QStringList list)
     Q_EMIT keywordBlocklistChanged(list);
 }
 
-QByteArray Config::focusSplitterState() const
+QByteArray Config::browseSplitterState() const
 {
-    return group(kGroupGeneral).readEntry(kKeyFocusSplitter, QByteArray {});
+    return group(kGroupGeneral).readEntry(kKeyBrowseSplitter, QByteArray {});
 }
 
-void Config::setFocusSplitterState(QByteArray state)
+void Config::setBrowseSplitterState(QByteArray state)
 {
     auto g = group(kGroupGeneral);
-    g.writeEntry(kKeyFocusSplitter, state);
+    g.writeEntry(kKeyBrowseSplitter, state);
+    g.sync();
+}
+
+QByteArray Config::seriesPaneSplitterState() const
+{
+    return group(kGroupGeneral).readEntry(kKeySeriesPaneSplitter, QByteArray {});
+}
+
+void Config::setSeriesPaneSplitterState(QByteArray state)
+{
+    auto g = group(kGroupGeneral);
+    g.writeEntry(kKeySeriesPaneSplitter, state);
     g.sync();
 }
 
