@@ -25,8 +25,15 @@ subscribers — streaming straight into **mpv** or **VLC**.
   - `[RD+]` / `[RD]` badges on the torrents table
   - *Cached on Real-Debrid only* filter
   - **Copy / Open direct URL** context actions
-- **Play** in mpv (default) or VLC — Enter, double-click, or
-  right-click → Play on any cached row
+- **Play** in the **embedded mpv player** (default when built with
+  libmpv), external mpv, VLC, or a custom command — configurable
+  per preference in **Settings → Player**. Enter, double-click, or
+  right-click → Play on any cached row. The embedded player plays
+  **inside the main Kinema window** (the video replaces the detail
+  pane; Back or Esc returns you to it), uses mpv's built-in OSC,
+  supports true fullscreen (F / double-click / Esc — hides all
+  chrome), and honours your local `~/.config/mpv/{mpv,input}.conf`
+  and scripts.
 - Sortable torrents table, poster & thumbnail cache (memory + disk)
 - First-class Plasma 6 theming, keyboard navigation, KNotifications
 
@@ -35,7 +42,11 @@ subscribers — streaming straight into **mpv** or **VLC**.
 - KDE Plasma 6 (or Qt 6.5+ with KDE Frameworks 6)
 - C++20 compiler (GCC ≥ 12 / Clang ≥ 17), CMake ≥ 3.22
 - `extra-cmake-modules`, `qcoro6`, `qtkeychain` (Qt 6)
-- **mpv** or **VLC** on `$PATH` at runtime (soft dependency)
+- **libmpv** (≥ 0.36) at build time — **optional**, enables the
+  embedded player. Without it, Kinema still builds and falls back
+  to launching external mpv / VLC.
+- **mpv** or **VLC** on `$PATH` at runtime (soft dependency, for
+  external-launch fallback and custom-command users)
 
 ### Install dependencies
 
@@ -45,6 +56,8 @@ subscribers — streaming straight into **mpv** or **VLC**.
 sudo pacman -S --needed base-devel cmake extra-cmake-modules \
     qt6-base qt6-tools qcoro qtkeychain-qt6 \
     kcoreaddons ki18n kio kconfigwidgets knotifications kxmlgui mpv
+# mpv's package on Arch ships libmpv headers, so the embedded player
+# is enabled automatically.
 ```
 
 **Fedora 40+**
@@ -53,7 +66,8 @@ sudo pacman -S --needed base-devel cmake extra-cmake-modules \
 sudo dnf install gcc-c++ cmake extra-cmake-modules \
     qt6-qtbase-devel qt6-qttools-devel qcoro-qt6-devel qt6-qtkeychain-devel \
     kf6-kcoreaddons-devel kf6-ki18n-devel kf6-kio-devel \
-    kf6-kconfigwidgets-devel kf6-knotifications-devel kf6-kxmlgui-devel mpv
+    kf6-kconfigwidgets-devel kf6-knotifications-devel kf6-kxmlgui-devel \
+    mpv-libs-devel mpv
 ```
 
 **Debian trixie / Ubuntu 24.10+**
@@ -62,8 +76,13 @@ sudo dnf install gcc-c++ cmake extra-cmake-modules \
 sudo apt install build-essential cmake extra-cmake-modules \
     qt6-base-dev qt6-tools-dev libqcoro6-dev qt6keychain-dev \
     libkf6coreaddons-dev libkf6i18n-dev libkf6kio-dev \
-    libkf6configwidgets-dev libkf6notifications-dev libkf6xmlgui-dev mpv
+    libkf6configwidgets-dev libkf6notifications-dev libkf6xmlgui-dev \
+    libmpv-dev mpv
 ```
+
+> To build without the embedded player (leaner binary, no libmpv
+> dependency), configure with `-DKINEMA_ENABLE_MPV_EMBED=OFF`.
+> Kinema will still launch external mpv / VLC.
 
 > On non-KDE sessions (e.g. GNOME) the keyring backend is the system
 > Secret Service (gnome-keyring by default) — encrypted, user-scoped,

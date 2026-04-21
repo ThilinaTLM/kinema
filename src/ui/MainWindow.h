@@ -33,6 +33,10 @@ class TorrentioClient;
 
 namespace kinema::ui {
 
+namespace player {
+class MpvWidget;
+}
+
 class BrowsePage;
 class DetailPane;
 class DiscoverPage;
@@ -98,6 +102,21 @@ private:
     void showSeriesDetail();
     void closeDetailPanel();
     void onBackToEpisodes();
+
+#ifdef KINEMA_HAVE_LIBMPV
+    /// Lazily create the in-window player page, point mpv at `url`,
+    /// and swap the central stack to it. Remembers the previous
+    /// page so Back / Esc / end-of-file can return there.
+    void openEmbeddedPlayer(const QUrl& url, const QString& title);
+    /// Stop playback, leave fullscreen if needed, and return to the
+    /// page the user came from. Safe to call when the player page
+    /// isn't visible.
+    void closeEmbeddedPlayer();
+    /// True when the player page is the visible page of m_centerStack.
+    bool playerPageActive() const;
+    void enterPlayerFullscreen();
+    void exitPlayerFullscreen();
+#endif
     /// Refresh the toolbar Back action's enabled state so it matches
     /// the current navigation position (disabled only on Discover
     /// home with no detail pane open).
@@ -160,6 +179,31 @@ private:
 
     // Settings dialog is created lazily and reused across invocations.
     settings::SettingsDialog* m_settingsDialog {};
+
+    // Embedded-mpv player page. Lives as a page in m_centerStack so
+    // playback happens *inside* the Kinema window, replacing the
+    // detail pane while playing. Created lazily on first Play with
+    // Kind::Embedded selected; reused for subsequent plays. Null
+    // when the build was configured without libmpv.
+    player::MpvWidget* m_playerPage {};
+
+    // Widget that was active in m_centerStack when we flipped to
+    // the player page — where Back / Esc / end-of-file should
+    // return the user. Cleared on return so stale pointers don't
+    // outlive navigation.
+    QWidget* m_playerReturnTo {};
+
+    // Saved chrome visibility before entering player-fullscreen so we
+    // can restore it faithfully on exit. Only meaningful while
+    // isFullScreen() is true.
+    bool m_preFsToolbarVisible {true};
+    bool m_preFsMenubarVisible {false};
+    bool m_preFsStatusbarVisible {true};
+
+    // Re-entrancy guard for fullscreen toggles driven both by Qt
+    // (F key / double-click) and mpv (e.g. the user's own script
+    // calling `cycle fullscreen`).
+    bool m_applyingFullscreen {false};
 
     // Debounce flag for Config::torrentioOptionsChanged: Settings often
     // applies several sub-settings in sequence, emitting the signal

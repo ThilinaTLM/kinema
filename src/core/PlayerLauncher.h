@@ -64,6 +64,13 @@ Q_SIGNALS:
     /// Emitted when the player could not be launched. `reason` is a
     /// localised one-line message suitable for a status bar / toast.
     void launchFailed(kinema::core::player::Kind kind, const QString& reason);
+    /// Emitted when the resolved player is `Kind::Embedded` — the
+    /// UI layer listens for this and opens an in-app PlayerWindow
+    /// instead of spawning a process. Kept separate from `launched`
+    /// because the window owner (not the launcher) fires the
+    /// "playback started" notification so the display name can be
+    /// "Kinema" rather than "mpv".
+    void embeddedRequested(const QUrl& url, const QString& title);
 
 private:
     /// Resolve which player to actually use for this invocation.

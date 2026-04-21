@@ -26,7 +26,13 @@
 #include "ui/StateWidget.h"
 #include "ui/settings/SettingsDialog.h"
 
+#ifdef KINEMA_HAVE_LIBMPV
+#include "ui/player/MpvWidget.h"
+#endif
+
 #include <QEvent>
+
+#include <KNotification>
 
 #include <KAboutApplicationDialog>
 #include <KAboutData>
@@ -94,6 +100,10 @@ MainWindow::MainWindow(QWidget* parent)
         [this](core::player::Kind, const QString& reason) {
             statusBar()->showMessage(reason, 6000);
         });
+#ifdef KINEMA_HAVE_LIBMPV
+    connect(m_player.get(), &core::PlayerLauncher::embeddedRequested,
+        this, &MainWindow::openEmbeddedPlayer);
+#endif
 
     if (!m_player->preferredPlayerAvailable()) {
         qCInfo(KINEMA) << "preferred media player not found on $PATH";
@@ -309,6 +319,185 @@ void MainWindow::closeDetailPanel()
     setWindowTitle(QStringLiteral("Kinema"));
 }
 
+#ifdef KINEMA_HAVE_LIBMPV
+
+bool MainWindow::playerPageActive() const
+{
+    return m_playerPage && m_centerStack
+        && m_centerStack->currentWidget() == m_playerPage;
+}
+
+void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
+{
+    // Lazy construction: the MpvWidget initialises libmpv + an OpenGL
+    // render context in its ctor / initializeGL, so we pay nothing
+    // until the user actually picks "Embedded" and hits Play.
+    if (!m_playerPage) {
+        m_playerPage = new player::MpvWidget(this);
+        m_centerStack->addWidget(m_playerPage);
+
+        connect(m_playerPage, &player::MpvWidget::fileLoaded,
+            this, [this] {
+                const auto t = windowTitle();
+                auto* n = new KNotification(
+                    QStringLiteral("playbackStarted"),
+                    KNotification::CloseOnTimeout);
+                n->setTitle(i18nc("@title:window notification",
+                    "Playing in Kinema"));
+                n->setText(t);
+                n->setIconName(
+                    QStringLiteral("media-playback-start"));
+                n->sendEvent();
+            });
+        connect(m_playerPage, &player::MpvWidget::mpvError,
+            this, [this](const QString& reason) {
+                statusBar()->showMessage(reason, 6000);
+                auto* n = new KNotification(
+                    QStringLiteral("playbackFailed"),
+                    KNotification::CloseOnTimeout);
+                n->setTitle(i18nc("@title:window notification",
+                    "Embedded playback failed"));
+                n->setText(reason);
+                n->setIconName(QStringLiteral("dialog-error"));
+                n->sendEvent();
+            });
+        connect(m_playerPage, &player::MpvWidget::endOfFile, this,
+            [this](const QString& reason) {
+                if (reason == QLatin1String("error")) {
+                    statusBar()->showMessage(
+                        i18nc("@info:status",
+                            "Playback ended with an error."),
+                        6000);
+                }
+                closeEmbeddedPlayer();
+            });
+        connect(m_playerPage, &player::MpvWidget::toggleFullscreenRequested,
+            this, [this] {
+                if (isFullScreen()) {
+                    exitPlayerFullscreen();
+                } else {
+                    enterPlayerFullscreen();
+                }
+            });
+        connect(m_playerPage, &player::MpvWidget::leaveFullscreenRequested,
+            this, [this] {
+                // Esc in fullscreen leaves fullscreen but keeps
+                // playing. Esc in windowed closes the player
+                // entirely (handled by the window-level Esc
+                // shortcut in buildActions()).
+                if (isFullScreen()) {
+                    exitPlayerFullscreen();
+                }
+            });
+        connect(m_playerPage, &player::MpvWidget::fullscreenChanged,
+            this, [this](bool on) {
+                if (m_applyingFullscreen) {
+                    return;
+                }
+                if (on && !isFullScreen()) {
+                    enterPlayerFullscreen();
+                } else if (!on && isFullScreen()) {
+                    exitPlayerFullscreen();
+                }
+            });
+    }
+
+    // Remember where to return on close / EOF. First entry into the
+    // player page captures the detail / results page that was
+    // active; subsequent re-entries (rare — only if the user
+    // somehow navigated away without closing) keep the original.
+    if (!playerPageActive()) {
+        m_playerReturnTo = m_centerStack->currentWidget();
+    }
+    m_centerStack->setCurrentWidget(m_playerPage);
+    m_playerPage->setFocus();
+
+    setWindowTitle(title.isEmpty()
+        ? QStringLiteral("Kinema")
+        : i18nc("@title:window window title with media title",
+              "%1 — Kinema", title));
+    statusBar()->showMessage(
+        i18nc("@info:status", "Loading “%1”…", title), 3000);
+
+    m_playerPage->loadFile(url);
+}
+
+void MainWindow::closeEmbeddedPlayer()
+{
+    if (!m_playerPage) {
+        return;
+    }
+    if (isFullScreen()) {
+        exitPlayerFullscreen();
+    }
+    m_playerPage->stop();
+
+    // Return to wherever the user was before playback started. If
+    // m_playerReturnTo is stale (widget destroyed, which shouldn't
+    // happen but be defensive) fall back to the results stack.
+    QWidget* target = m_playerReturnTo;
+    if (!target || m_centerStack->indexOf(target) < 0) {
+        target = m_resultsStack;
+    }
+    m_centerStack->setCurrentWidget(target);
+    m_playerReturnTo = nullptr;
+
+    setWindowTitle(QStringLiteral("Kinema"));
+    updateBackActionEnabled();
+}
+
+void MainWindow::enterPlayerFullscreen()
+{
+    if (m_applyingFullscreen || isFullScreen()) {
+        return;
+    }
+    m_applyingFullscreen = true;
+
+    // Snapshot chrome so we can restore it exactly on exit. We
+    // deliberately don't route menubar through its QAction's
+    // setChecked() — that would persist "menu bar hidden" to
+    // config, which isn't what the user asked for.
+    m_preFsToolbarVisible = m_toolbar ? m_toolbar->isVisible() : true;
+    m_preFsMenubarVisible = menuBar()->isVisible();
+    m_preFsStatusbarVisible = statusBar()->isVisible();
+
+    if (m_toolbar) {
+        m_toolbar->hide();
+    }
+    menuBar()->hide();
+    statusBar()->hide();
+
+    showFullScreen();
+    if (m_playerPage) {
+        m_playerPage->setMpvFullscreen(true);
+        m_playerPage->setFocus();
+    }
+    m_applyingFullscreen = false;
+}
+
+void MainWindow::exitPlayerFullscreen()
+{
+    if (m_applyingFullscreen || !isFullScreen()) {
+        return;
+    }
+    m_applyingFullscreen = true;
+
+    showNormal();
+    if (m_toolbar) {
+        m_toolbar->setVisible(m_preFsToolbarVisible);
+    }
+    menuBar()->setVisible(m_preFsMenubarVisible);
+    statusBar()->setVisible(m_preFsStatusbarVisible);
+
+    if (m_playerPage) {
+        m_playerPage->setMpvFullscreen(false);
+        m_playerPage->setFocus();
+    }
+    m_applyingFullscreen = false;
+}
+
+#endif // KINEMA_HAVE_LIBMPV
+
 void MainWindow::onBackToEpisodes()
 {
     // User backed out of the streams page (via back button or Esc).
@@ -321,6 +510,21 @@ void MainWindow::onBackToEpisodes()
 
 void MainWindow::onBackRequested()
 {
+#ifdef KINEMA_HAVE_LIBMPV
+    // 0. Embedded player: Back first exits fullscreen (so the user
+    //    can hand the remote back to the window chrome), then on a
+    //    second press stops playback and returns to the previous
+    //    page.
+    if (playerPageActive()) {
+        if (isFullScreen()) {
+            exitPlayerFullscreen();
+        } else {
+            closeEmbeddedPlayer();
+        }
+        return;
+    }
+#endif
+
     // 1. Series streams page → episodes list (stays in the pane).
     if (m_centerStack
         && m_centerStack->currentWidget() == m_seriesDetailPane
@@ -354,6 +558,15 @@ void MainWindow::updateBackActionEnabled()
     if (!m_backAction) {
         return;
     }
+#ifdef KINEMA_HAVE_LIBMPV
+    // The player page always has somewhere to go back to (the
+    // detail / discover page the user came from), so Back is
+    // never disabled while it's visible.
+    if (playerPageActive()) {
+        m_backAction->setEnabled(true);
+        return;
+    }
+#endif
     const bool atDiscoverHome = m_centerStack
         && m_centerStack->currentWidget() == m_resultsStack
         && m_resultsStack
@@ -430,6 +643,19 @@ void MainWindow::buildActions()
     auto* closePanelShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     closePanelShortcut->setContext(Qt::WindowShortcut);
     connect(closePanelShortcut, &QShortcut::activated, this, [this] {
+#ifdef KINEMA_HAVE_LIBMPV
+        // Esc on the player page: first hop leaves fullscreen, second
+        // hop closes the player. Keyboard-only path mirrors the Back
+        // toolbar button above.
+        if (playerPageActive()) {
+            if (isFullScreen()) {
+                exitPlayerFullscreen();
+            } else {
+                closeEmbeddedPlayer();
+            }
+            return;
+        }
+#endif
         if (m_centerStack
             && m_centerStack->currentWidget() == m_seriesDetailPane
             && m_seriesDetailPane->tryPopStreamsPage()) {

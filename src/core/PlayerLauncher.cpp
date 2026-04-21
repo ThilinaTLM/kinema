@@ -37,7 +37,12 @@ std::optional<player::Kind> PlayerLauncher::resolvePlayer() const
         return preferred;
     }
 
-    // Fall back to the other known players (mpv first — it's our default).
+    // Fall back to the other known external players (mpv first —
+    // it's our default). Embedded is excluded from the ladder: if it
+    // was the preferred choice but isn't available (e.g. built
+    // without libmpv), we want the user to land on mpv/VLC rather
+    // than silently flipping back to the embedded path that doesn't
+    // exist.
     for (auto k : { player::Kind::Mpv, player::Kind::Vlc }) {
         if (k == preferred) {
             continue;
@@ -99,6 +104,17 @@ void PlayerLauncher::play(const QUrl& url, const QString& title)
     }
 
     const auto kind = *picked;
+
+    // Embedded playback bypasses QProcess entirely — the UI layer
+    // owns the PlayerWindow and fires its own notification once the
+    // file has loaded.
+    if (kind == player::Kind::Embedded) {
+        qCInfo(KINEMA) << "handing off to embedded player for"
+                       << (title.isEmpty() ? url.toString() : title);
+        Q_EMIT embeddedRequested(url, title);
+        return;
+    }
+
     const auto& cfg = config::Config::instance();
     const auto custom = kind == player::Kind::Custom ? cfg.customPlayerCommand() : QString {};
     const auto inv = player::buildInvocation(kind, url, custom);

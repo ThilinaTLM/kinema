@@ -30,6 +30,7 @@ public:
 private:
     void updateCustomEnabled();
 
+    QRadioButton* m_embeddedRadio {};
     QRadioButton* m_mpvRadio {};
     QRadioButton* m_vlcRadio {};
     QRadioButton* m_customRadio {};

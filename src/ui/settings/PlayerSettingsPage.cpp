@@ -33,6 +33,23 @@ QString labelWithAvailability(const QString& base, core::player::Kind kind)
 PlayerSettingsPage::PlayerSettingsPage(QWidget* parent)
     : QWidget(parent)
 {
+    // Embedded (in-app mpv) is the "nicest" option when available, so
+    // it leads the list. When Kinema was built without libmpv the
+    // radio is disabled with an explanatory suffix; we don't remove
+    // it so users understand the option exists.
+    const bool embeddedAvailable = core::player::isAvailable(
+        core::player::Kind::Embedded);
+    QString embeddedLabel = core::player::displayName(
+        core::player::Kind::Embedded);
+    if (!embeddedAvailable) {
+        embeddedLabel = i18nc("@option:radio label when build lacks libmpv",
+            "%1 (not built with libmpv)", embeddedLabel);
+    }
+    m_embeddedRadio = new QRadioButton(embeddedLabel, this);
+    m_embeddedRadio->setEnabled(embeddedAvailable);
+    m_embeddedRadio->setToolTip(i18nc("@info:tooltip",
+        "Plays inside Kinema. Uses your local mpv config and keybindings."));
+
     m_mpvRadio = new QRadioButton(
         labelWithAvailability(core::player::displayName(core::player::Kind::Mpv),
             core::player::Kind::Mpv),
@@ -45,6 +62,7 @@ PlayerSettingsPage::PlayerSettingsPage(QWidget* parent)
         i18nc("@option:radio", "Custom command"), this);
 
     auto* group = new QButtonGroup(this);
+    group->addButton(m_embeddedRadio);
     group->addButton(m_mpvRadio);
     group->addButton(m_vlcRadio);
     group->addButton(m_customRadio);
@@ -63,6 +81,7 @@ PlayerSettingsPage::PlayerSettingsPage(QWidget* parent)
     customHint->setEnabled(false);
 
     auto* form = new QFormLayout;
+    form->addRow(m_embeddedRadio);
     form->addRow(m_mpvRadio);
     form->addRow(m_vlcRadio);
     form->addRow(m_customRadio);
@@ -83,6 +102,14 @@ void PlayerSettingsPage::load()
 {
     const auto& cfg = config::Config::instance();
     switch (cfg.preferredPlayer()) {
+    case core::player::Kind::Embedded:
+        // Persisted choice survives even if the binary is now
+        // compiled without libmpv — keep it selected so rebuilding
+        // with libmpv restores the user's preference. If the radio
+        // is disabled, the user must pick another option before
+        // Apply lets a non-embedded value take over.
+        m_embeddedRadio->setChecked(true);
+        break;
     case core::player::Kind::Vlc:
         m_vlcRadio->setChecked(true);
         break;
@@ -102,7 +129,9 @@ void PlayerSettingsPage::apply()
 {
     auto& cfg = config::Config::instance();
     core::player::Kind chosen = core::player::Kind::Mpv;
-    if (m_vlcRadio->isChecked()) {
+    if (m_embeddedRadio->isChecked()) {
+        chosen = core::player::Kind::Embedded;
+    } else if (m_vlcRadio->isChecked()) {
         chosen = core::player::Kind::Vlc;
     } else if (m_customRadio->isChecked()) {
         chosen = core::player::Kind::Custom;

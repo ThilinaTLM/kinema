@@ -60,6 +60,12 @@ set(kinema_core_SRCS
     app/KinemaApplication.cpp
 )
 
+if(KINEMA_ENABLE_MPV_EMBED)
+    list(APPEND kinema_core_SRCS
+        ui/player/MpvWidget.cpp
+    )
+endif()
+
 ecm_qt_declare_logging_category(kinema_core_SRCS
     HEADER kinema_debug.h
     IDENTIFIER KINEMA
@@ -103,6 +109,16 @@ target_link_libraries(kinema_core
         QCoro6::Network
         Qt6Keychain::Qt6Keychain
 )
+
+if(KINEMA_ENABLE_MPV_EMBED)
+    target_compile_definitions(kinema_core PUBLIC KINEMA_HAVE_LIBMPV)
+    target_link_libraries(kinema_core
+        PUBLIC
+            Qt6::OpenGL
+            Qt6::OpenGLWidgets
+            PkgConfig::MPV
+    )
+endif()
 
 target_compile_definitions(kinema_core
     PUBLIC

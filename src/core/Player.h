@@ -24,6 +24,11 @@ enum class Kind {
     Mpv,
     Vlc,
     Custom,
+    /// In-process mpv, rendered into a Kinema-owned widget via
+    /// libmpv's render API. Only "available" when the app was built
+    /// with `KINEMA_HAVE_LIBMPV`; otherwise isAvailable() returns
+    /// false and callers fall back to an external player.
+    Embedded,
 };
 
 /// Canonical short id used in QConfig / on the command line

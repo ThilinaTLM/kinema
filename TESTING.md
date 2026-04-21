@@ -118,3 +118,43 @@ unlocalised user-facing string.
     grep -rI "<first 10 chars of your token>" ~/.config ~/.local ~/.cache 2>/dev/null
     ```
     should yield nothing.
+
+## M5 — Embedded mpv player (in-window)
+
+> These checks require a build with `-DKINEMA_ENABLE_MPV_EMBED=ON`
+> (the default when libmpv ≥ 0.36 is installed) and a Real-Debrid
+> session (or any other source of a direct `http(s)` stream URL).
+
+36. Open **Settings → Player**. The top radio reads **Embedded
+    (in-app mpv)** and is enabled. Select it and click **Apply**.
+37. On a cached torrent row, Enter / double-click / right-click →
+    **Play**. The Kinema window's central area **swaps from the
+    detail pane to the video** (no second window opens). Playback
+    starts within ~3 s. mpv's OSC appears on mouse move; the
+    toolbar / title bar remain visible above the video.
+38. Press **F** → the main window goes true fullscreen; the
+    toolbar, menu bar, and status bar are hidden so only the video
+    is visible. Press **Esc** → the chrome returns exactly as it
+    was (toolbar visible, menu bar hidden if it was hidden, etc.)
+    and playback continues. Press **Esc** again (now windowed) →
+    playback stops and Kinema returns to the detail pane you came
+    from. Double-click the video → toggles fullscreen.
+39. Press `space` → pause/resume. Press `9` / `0` → volume. Press
+    `j` → cycle subtitles. Your `~/.config/mpv/input.conf` bindings
+    work (e.g. a custom `Ctrl+s` script key fires).
+40. Seek with the OSC scrub bar, left-click. Seek with `←` / `→`
+    arrow keys. Both update time-pos visibly.
+41. Click the toolbar **Back** button mid-playback. If fullscreen,
+    the first click returns to windowed; the next click stops
+    playback and returns to the detail pane. Start a **second
+    play** — the existing player page is reused (no widget churn,
+    no extra GL context created).
+42. Navigate: Play episode → Back → you land on the series detail
+    pane you came from, not on Discover home. Start a movie from
+    Discover → Play → Back → you land on the movie detail pane.
+43. Switch the preferred player back to **mpv** (external) in
+    Settings. Play again → an external mpv window opens and Kinema
+    does **not** swap its central area to the video.
+44. Rebuild with `-DKINEMA_ENABLE_MPV_EMBED=OFF`. Open Settings —
+    the **Embedded** radio shows `(not built with libmpv)` and is
+    disabled. External mpv / VLC / custom continue to work.

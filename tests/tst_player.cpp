@@ -19,6 +19,7 @@ private Q_SLOTS:
         QTest::newRow("mpv") << Kind::Mpv << QStringLiteral("mpv");
         QTest::newRow("vlc") << Kind::Vlc << QStringLiteral("vlc");
         QTest::newRow("custom") << Kind::Custom << QStringLiteral("custom");
+        QTest::newRow("embedded") << Kind::Embedded << QStringLiteral("embedded");
     }
     void toFromString()
     {
@@ -110,6 +111,28 @@ private Q_SLOTS:
         const QUrl url(QStringLiteral("https://example.com/s.mkv"));
         const auto inv = buildInvocation(Kind::Custom, url, QString {});
         QVERIFY(!inv.isValid());
+    }
+
+    void embeddedInvocation_isInvalid()
+    {
+        // Embedded playback bypasses QProcess; the helper returns an
+        // invalid Invocation so the launcher's spawn path short-circuits.
+        const QUrl url(QStringLiteral("https://example.com/s.mkv"));
+        const auto inv = buildInvocation(Kind::Embedded, url);
+        QVERIFY(!inv.isValid());
+    }
+
+    void embeddedAvailability_followsBuildFlag()
+    {
+        // Whether the embedded player is "available" is purely a
+        // compile-time switch — there is no PATH lookup. The test
+        // tracks the build flag so we don't silently regress either
+        // path.
+#ifdef KINEMA_HAVE_LIBMPV
+        QVERIFY(isAvailable(Kind::Embedded));
+#else
+        QVERIFY(!isAvailable(Kind::Embedded));
+#endif
     }
 };
 

@@ -15,6 +15,7 @@ namespace {
 constexpr auto kMpvId = "mpv";
 constexpr auto kVlcId = "vlc";
 constexpr auto kCustomId = "custom";
+constexpr auto kEmbeddedId = "embedded";
 constexpr auto kUrlPlaceholder = "{url}";
 
 /// Tokenise a shell-ish command line into argv. We don't need full POSIX
@@ -81,6 +82,8 @@ QString toString(Kind k)
         return QString::fromLatin1(kVlcId);
     case Kind::Custom:
         return QString::fromLatin1(kCustomId);
+    case Kind::Embedded:
+        return QString::fromLatin1(kEmbeddedId);
     }
     return QString::fromLatin1(kMpvId);
 }
@@ -96,6 +99,9 @@ std::optional<Kind> fromString(QStringView s)
     if (s.compare(QLatin1String(kCustomId), Qt::CaseInsensitive) == 0) {
         return Kind::Custom;
     }
+    if (s.compare(QLatin1String(kEmbeddedId), Qt::CaseInsensitive) == 0) {
+        return Kind::Embedded;
+    }
     return std::nullopt;
 }
 
@@ -108,6 +114,8 @@ QString displayName(Kind k)
         return i18nc("@item:inlistbox player name", "VLC");
     case Kind::Custom:
         return i18nc("@item:inlistbox player name", "Custom command");
+    case Kind::Embedded:
+        return i18nc("@item:inlistbox player name", "Embedded (in-app mpv)");
     }
     return QStringLiteral("mpv");
 }
@@ -120,6 +128,7 @@ QString executableName(Kind k)
     case Kind::Vlc:
         return QStringLiteral("vlc");
     case Kind::Custom:
+    case Kind::Embedded:
         return QString {};
     }
     return QString {};
@@ -159,6 +168,13 @@ Invocation buildInvocation(Kind kind, const QUrl& url, const QString& customComm
         };
         break;
 
+    case Kind::Embedded:
+        // Embedded playback does not shell out — the UI layer takes
+        // a separate branch and pushes the URL into an in-process
+        // libmpv instance. Return an invalid Invocation so any
+        // caller that tried to spawn one gets a clear no-op.
+        return {};
+
     case Kind::Custom: {
         auto tokens = tokeniseCommand(customCommand);
         if (tokens.isEmpty()) {
@@ -195,6 +211,13 @@ QString findExecutable(Kind kind)
 
 bool isAvailable(Kind kind, const QString& customCommand)
 {
+    if (kind == Kind::Embedded) {
+#ifdef KINEMA_HAVE_LIBMPV
+        return true;
+#else
+        return false;
+#endif
+    }
     if (kind == Kind::Custom) {
         const auto tokens = tokeniseCommand(customCommand);
         if (tokens.isEmpty()) {
