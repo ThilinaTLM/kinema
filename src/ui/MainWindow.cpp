@@ -25,8 +25,12 @@
 
 #include <KAboutApplicationDialog>
 #include <KAboutData>
+#include <KActionCollection>
+#include <KConfigGroup>
+#include <KHamburgerMenu>
 #include <KIO/OpenUrlJob>
 #include <KLocalizedString>
+#include <KSharedConfig>
 #include <KStandardAction>
 
 #include <QAction>
@@ -118,13 +122,13 @@ MainWindow::~MainWindow() = default;
 void MainWindow::buildLayout()
 {
     // ---- Search bar in a tool bar ------------------------------------------
-    auto* toolbar = addToolBar(i18nc("@title:window", "Search"));
-    toolbar->setMovable(false);
-    toolbar->setFloatable(false);
-    toolbar->setContextMenuPolicy(Qt::PreventContextMenu);
-    m_searchBar = new SearchBar(toolbar);
+    m_toolbar = addToolBar(i18nc("@title:window", "Search"));
+    m_toolbar->setMovable(false);
+    m_toolbar->setFloatable(false);
+    m_toolbar->setContextMenuPolicy(Qt::PreventContextMenu);
+    m_searchBar = new SearchBar(m_toolbar);
     m_searchBar->setMediaKind(config::Config::instance().searchKind());
-    toolbar->addWidget(m_searchBar);
+    m_toolbar->addWidget(m_searchBar);
     connect(m_searchBar, &SearchBar::queryRequested,
         this, &MainWindow::onQueryRequested);
     connect(m_searchBar, &SearchBar::mediaKindChanged, this,
@@ -217,15 +221,21 @@ void MainWindow::buildLayout()
 
 void MainWindow::buildActions()
 {
-    auto* fileMenu = menuBar()->addMenu(i18nc("@title:menu", "&File"));
-    auto* quitAction = new QAction(
-        QIcon::fromTheme(QStringLiteral("application-exit")),
-        i18nc("@action:inmenu", "&Quit"), this);
-    quitAction->setShortcut(QKeySequence::Quit);
-    connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
-    fileMenu->addAction(quitAction);
+    m_actions = new KActionCollection(this);
 
-    auto* editMenu = menuBar()->addMenu(i18nc("@title:menu", "&Edit"));
+    // ---- Standard actions --------------------------------------------------
+    auto* quitAction = KStandardAction::quit(
+        qApp, &QApplication::quit, m_actions);
+    auto* prefsAction = KStandardAction::preferences(
+        this, &MainWindow::showSettings, m_actions);
+    auto* aboutAction = KStandardAction::aboutApp(
+        this, &MainWindow::showAbout, m_actions);
+    aboutAction->setIcon(QIcon::fromTheme(QStringLiteral("help-about"),
+        QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema"))));
+    m_showMenubarAction = KStandardAction::showMenubar(
+        this, &MainWindow::onShowMenubarToggled, m_actions);
+
+    // ---- Custom actions ----------------------------------------------------
     auto* focusSearch = new QAction(
         QIcon::fromTheme(QStringLiteral("search")),
         i18nc("@action:inmenu", "&Focus search"), this);
@@ -233,19 +243,82 @@ void MainWindow::buildActions()
     connect(focusSearch, &QAction::triggered, this, [this] {
         m_searchBar->setFocus();
     });
+    m_actions->addAction(QStringLiteral("focus_search"), focusSearch);
+
+    // ---- Classic menu bar (hidden by default, toggled via Ctrl+M) ----------
+    auto* fileMenu = menuBar()->addMenu(i18nc("@title:menu", "&File"));
+    fileMenu->addAction(quitAction);
+
+    auto* editMenu = menuBar()->addMenu(i18nc("@title:menu", "&Edit"));
     editMenu->addAction(focusSearch);
 
     auto* settingsMenu = menuBar()->addMenu(i18nc("@title:menu", "&Settings"));
-    auto* prefsAction = KStandardAction::preferences(
-        this, &MainWindow::showSettings, this);
+    settingsMenu->addAction(m_showMenubarAction);
+    settingsMenu->addSeparator();
     settingsMenu->addAction(prefsAction);
 
     auto* helpMenu = menuBar()->addMenu(i18nc("@title:menu", "&Help"));
-    auto* aboutAction = new QAction(
-        QIcon::fromTheme(QStringLiteral("help-about")),
-        i18nc("@action:inmenu", "&About Kinema…"), this);
-    connect(aboutAction, &QAction::triggered, this, &MainWindow::showAbout);
     helpMenu->addAction(aboutAction);
+
+    // ---- Hamburger button on the toolbar -----------------------------------
+    //
+    // We deliberately do NOT call setMenuBar() on the hamburger: that would
+    // mirror the classic menu bar's submenu structure (File / Edit / Settings
+    // / Help), which is overkill for our handful of entries. Instead we build
+    // a single flat menu grouped by horizontal separators.
+    auto* hamburger = KStandardAction::hamburgerMenu(
+        nullptr, nullptr, m_actions);
+    hamburger->setShowMenuBarAction(m_showMenubarAction);
+    // Deliberately NOT calling setMenuBar(): that would auto-append the
+    // menu bar's Help menu and a "More" submenu advertising menu-bar-only
+    // actions. We want a fully flat custom menu instead.
+
+    connect(hamburger, &KHamburgerMenu::aboutToShowMenu, this,
+            [this, hamburger, focusSearch, prefsAction,
+             aboutAction, quitAction] {
+        auto* menu = new QMenu;
+        menu->addAction(focusSearch);
+        menu->addSeparator();
+        menu->addAction(m_showMenubarAction);
+        menu->addAction(prefsAction);
+        menu->addSeparator();
+        menu->addAction(aboutAction);
+        menu->addSeparator();
+        menu->addAction(quitAction);
+        hamburger->setMenu(menu);
+
+        // Build once, on demand. KHamburgerMenu reuses the installed
+        // menu for subsequent clicks.
+        disconnect(hamburger, &KHamburgerMenu::aboutToShowMenu,
+                   this, nullptr);
+    });
+
+    if (m_toolbar) {
+        auto* spacer = new QWidget(m_toolbar);
+        spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        m_toolbar->addWidget(spacer);
+        m_toolbar->addAction(hamburger);
+    }
+
+    // Bind all actions (and their shortcuts) to the main window so keys
+    // like Ctrl+M / Ctrl+Q / Ctrl+K fire regardless of menu-bar state.
+    m_actions->addAssociatedWidget(this);
+
+    // ---- Restore persisted menu-bar visibility -----------------------------
+    const auto group = KSharedConfig::openConfig()->group(
+        QStringLiteral("MainWindow"));
+    const bool showBar = group.readEntry("ShowMenuBar", false);
+    m_showMenubarAction->setChecked(showBar);
+    menuBar()->setVisible(showBar);
+}
+
+void MainWindow::onShowMenubarToggled(bool visible)
+{
+    menuBar()->setVisible(visible);
+    auto group = KSharedConfig::openConfig()->group(
+        QStringLiteral("MainWindow"));
+    group.writeEntry("ShowMenuBar", visible);
+    group.sync();
 }
 
 void MainWindow::showAbout()

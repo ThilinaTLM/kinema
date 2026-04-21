@@ -13,8 +13,11 @@
 #include <memory>
 #include <optional>
 
+class KActionCollection;
+class KHamburgerMenu;
 class QListView;
 class QStackedWidget;
+class QToolBar;
 
 namespace kinema::core {
 class HttpClient;
@@ -65,6 +68,7 @@ private Q_SLOTS:
     void showAbout();
     void showSettings();
     void onTorrentioOptionsChanged();
+    void onShowMenubarToggled(bool visible);
 
 private:
     QCoro::Task<void> runSearch(QString text, api::MediaKind kind);
@@ -86,6 +90,9 @@ private:
     ImageLoader* m_imageLoader {};
 
     // UI
+    QToolBar* m_toolbar {};
+    KActionCollection* m_actions {};
+    QAction* m_showMenubarAction {};
     SearchBar* m_searchBar {};
     ResultsModel* m_resultsModel {};
     ResultCardDelegate* m_resultsDelegate {};
