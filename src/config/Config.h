@@ -81,8 +81,19 @@ public:
     // Inner (episodes | torrents) horizontal splitter of the series
     // detail pane (QSplitter::saveState).
     // Empty on first run — SeriesDetailPane falls back to 35/65 default.
+    //
+    // NOTE: unused since the full-width detail refactor — the inner
+    // split no longer exists. Accessors kept for back-compat / future
+    // migrations.
     QByteArray seriesPaneSplitterState() const;
     void setSeriesPaneSplitterState(QByteArray state);
+
+    // Detail-view left (description + similar) / right (streams or
+    // episodes→streams) horizontal splitter state. Shared by both
+    // DetailPane and SeriesDetailPane. Empty on first run — panes fall
+    // back to a ~35/65 default.
+    QByteArray detailSplitterState() const;
+    void setDetailSplitterState(QByteArray state);
 
     // Preferred external media player for the Play action. Defaults to
     // mpv. The launcher falls back to the other known players if the

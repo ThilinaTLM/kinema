@@ -45,7 +45,6 @@
 #include <QMenuBar>
 #include <QRegularExpression>
 #include <QShortcut>
-#include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTimer>
@@ -219,6 +218,8 @@ void MainWindow::buildLayout()
         });
     connect(m_seriesDetailPane, &SeriesDetailPane::episodeSelected,
         this, &MainWindow::onEpisodeSelected);
+    connect(m_seriesDetailPane, &SeriesDetailPane::backToEpisodesRequested,
+        this, &MainWindow::onBackToEpisodes);
     connect(m_seriesDetailPane, &SeriesDetailPane::copyMagnetRequested,
         this, &MainWindow::onCopyMagnet);
     connect(m_seriesDetailPane, &SeriesDetailPane::openMagnetRequested,
@@ -232,72 +233,36 @@ void MainWindow::buildLayout()
     connect(m_seriesDetailPane, &SeriesDetailPane::closeRequested,
         this, &MainWindow::closeDetailPanel);
 
-    m_detailStack = new QStackedWidget(this);
-    m_detailStack->addWidget(m_detailPane);       // index 0 = movies
-    m_detailStack->addWidget(m_seriesDetailPane); // index 1 = series
+    // ---- Center stack: results (page 0) + detail panes (1, 2) ------------
+    m_centerStack = new QStackedWidget(this);
+    m_centerStack->addWidget(m_resultsStack);       // idx 0 = results
+    m_centerStack->addWidget(m_detailPane);         // idx 1 = movie
+    m_centerStack->addWidget(m_seriesDetailPane);   // idx 2 = series
+    m_centerStack->setCurrentWidget(m_resultsStack);
 
-    // ---- Outer splitter: grid + detail stack -----------------------------
-    m_browseSplitter = new QSplitter(Qt::Horizontal, this);
-    m_browseSplitter->addWidget(m_resultsStack);
-    m_browseSplitter->addWidget(m_detailStack);
-    m_browseSplitter->setStretchFactor(0, 4);
-    m_browseSplitter->setStretchFactor(1, 6);
-    // We need to be able to collapse the detail side to zero width so
-    // the grid can take the full content area when nothing is selected.
-    m_browseSplitter->setChildrenCollapsible(true);
-
-    // Persist user drags — but only when the panel is actually open.
-    // Otherwise the "closed" sizes (1, 0) would be persisted as the
-    // user's preferred split.
-    connect(m_browseSplitter, &QSplitter::splitterMoved, this, [this] {
-        if (m_detailStack && m_detailStack->isVisible()) {
-            m_savedSplitterOpenState = m_browseSplitter->saveState();
-            config::Config::instance().setBrowseSplitterState(
-                m_savedSplitterOpenState);
-        }
-    });
-
-    // Seed the "open state" with either the persisted split or a
-    // 40/60 default — this is what we restore when the user opens a
-    // panel after a close.
-    const auto persisted = config::Config::instance().browseSplitterState();
-    if (!persisted.isEmpty()) {
-        m_browseSplitter->restoreState(persisted);
-        m_savedSplitterOpenState = persisted;
-    } else {
-        m_browseSplitter->setSizes({ 400, 600 });
-        m_savedSplitterOpenState = m_browseSplitter->saveState();
-    }
-
-    // Start with the grid full-width: hide the detail stack and zero
-    // its splitter slot so the handle disappears too.
-    m_detailStack->hide();
-    m_browseSplitter->setSizes({ 1, 0 });
-
-    setCentralWidget(m_browseSplitter);
+    setCentralWidget(m_centerStack);
 
     statusBar()->showMessage(i18nc("@info:status", "Ready"), 2000);
 }
 
-void MainWindow::openDetailPanel(int stackIndex)
+void MainWindow::showMovieDetail()
 {
-    if (!m_detailStack) {
-        return;
+    if (m_centerStack) {
+        m_centerStack->setCurrentWidget(m_detailPane);
     }
-    m_detailStack->setCurrentIndex(stackIndex);
-    if (!m_detailStack->isVisible()) {
-        m_detailStack->show();
-        if (!m_savedSplitterOpenState.isEmpty()) {
-            m_browseSplitter->restoreState(m_savedSplitterOpenState);
-        } else {
-            m_browseSplitter->setSizes({ 400, 600 });
-        }
+}
+
+void MainWindow::showSeriesDetail()
+{
+    if (m_centerStack) {
+        m_centerStack->setCurrentWidget(m_seriesDetailPane);
     }
 }
 
 void MainWindow::closeDetailPanel()
 {
-    if (!m_detailStack || !m_detailStack->isVisible()) {
+    if (!m_centerStack
+        || m_centerStack->currentWidget() == m_resultsStack) {
         return;
     }
 
@@ -314,19 +279,28 @@ void MainWindow::closeDetailPanel()
     m_detailPane->showIdle();
     m_seriesDetailPane->showMetaLoading();
 
-    m_detailStack->hide();
-    m_browseSplitter->setSizes({ 1, 0 });
+    m_centerStack->setCurrentWidget(m_resultsStack);
 
-    // Clear selection so clicking the same card re-opens cleanly
-    // (onResultActivated treats clicking the already-loaded card as a
-    // no-op, and we've already cleared m_currentMovie above anyway).
+    // Clear selection so clicking the same card re-opens cleanly.
     if (auto* sm = m_resultsView->selectionModel()) {
         sm->clearSelection();
         sm->clearCurrentIndex();
     }
-    m_resultsView->setFocus();
+    if (m_resultsStack->currentWidget() == m_resultsView) {
+        m_resultsView->setFocus();
+    }
 
     setWindowTitle(QStringLiteral("Kinema"));
+}
+
+void MainWindow::onBackToEpisodes()
+{
+    // User backed out of the streams page (via back button or Esc).
+    // Drop any in-flight stream task so its late response can't
+    // repopulate the (now-hidden) torrents table the next time the
+    // streams page is shown.
+    ++m_episodeEpoch;
+    m_currentEpisode.reset();
 }
 
 void MainWindow::buildActions()
@@ -360,13 +334,21 @@ void MainWindow::buildActions()
         this, &MainWindow::showDiscoverHome, m_actions);
     homeAction->setToolTip(i18nc("@info:tooltip", "Back to Discover"));
 
-    // Esc anywhere in the window closes the detail panel if it's open.
+    // Esc anywhere in the window walks back one navigation level:
+    //   streams page → episode list, then detail view → results.
     // No modal flows live inside the main window (Settings is a
     // top-level dialog), so a window-scope shortcut is safe.
     auto* closePanelShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     closePanelShortcut->setContext(Qt::WindowShortcut);
     connect(closePanelShortcut, &QShortcut::activated, this, [this] {
-        if (m_detailStack && m_detailStack->isVisible()) {
+        if (m_centerStack
+            && m_centerStack->currentWidget() == m_seriesDetailPane
+            && m_seriesDetailPane->tryPopStreamsPage()) {
+            onBackToEpisodes();
+            return;
+        }
+        if (m_centerStack
+            && m_centerStack->currentWidget() != m_resultsStack) {
             closeDetailPanel();
         }
     });
@@ -550,8 +532,11 @@ void MainWindow::onResultActivated(const QModelIndex& index)
     }
 
     // Clicking the already-loaded card is a no-op — avoids duplicate
-    // network fetches and pane flicker.
-    const bool panelOpen = m_detailStack && m_detailStack->isVisible();
+    // network fetches and pane flicker. "panelOpen" here means the
+    // center stack is currently showing a detail pane rather than the
+    // results stack.
+    const bool panelOpen = m_centerStack
+        && m_centerStack->currentWidget() != m_resultsStack;
     if (panelOpen) {
         if (s->kind == api::MediaKind::Movie && m_currentMovie
             && m_currentMovie->imdbId == s->imdbId) {
@@ -564,11 +549,11 @@ void MainWindow::onResultActivated(const QModelIndex& index)
     }
 
     if (s->kind == api::MediaKind::Series) {
-        openDetailPanel(/*series*/ 1);
+        showSeriesDetail();
         auto t = loadSeriesDetail(*s);
         Q_UNUSED(t);
     } else {
-        openDetailPanel(/*movie*/ 0);
+        showMovieDetail();
         auto t = loadMovieDetail(*s);
         Q_UNUSED(t);
     }
@@ -579,6 +564,9 @@ void MainWindow::onEpisodeSelected(const api::Episode& ep)
     if (m_currentSeriesImdbId.isEmpty()) {
         return;
     }
+    // The pane has already flipped to the streams page in response to
+    // the user's click (see SeriesDetailPane's episodeActivated
+    // handler). Kick off the stream fetch.
     auto t = loadEpisodeStreams(ep, m_currentSeriesImdbId);
     Q_UNUSED(t);
 }
@@ -640,23 +628,10 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
         m_seriesDetailPane->setSeries(sd);
         m_seriesDetailPane->setSimilarContext(summary.imdbId);
 
-        // Give keyboard focus to the episode list for immediate arrow-key nav.
+        // Land on the episode list — no auto-fetch. The user picks an
+        // episode explicitly; picking one flips the right column to
+        // the streams page and fires onEpisodeSelected.
         m_seriesDetailPane->focusEpisodeList();
-
-        // Auto-select S1E1 (or the first non-special episode).
-        const api::Episode* first = nullptr;
-        for (const auto& e : sd.episodes) {
-            if (e.season > 0) {
-                first = &e;
-                break;
-            }
-        }
-        if (!first) {
-            m_seriesDetailPane->showTorrentsEmpty();
-            co_return;
-        }
-        auto t = loadEpisodeStreams(*first, summary.imdbId);
-        Q_UNUSED(t);
 
     } catch (const core::HttpError& e) {
         if (myEpoch != m_detailEpoch) {
@@ -820,20 +795,14 @@ QCoro::Task<void> MainWindow::openFromDiscover(api::DiscoverItem item)
     s.description = item.overview;
     s.imdbRating = item.voteAverage;
 
-    // Swap the results stack to the search view so the panel looks
-    // consistent with a click-from-search flow. Not strictly needed
-    // (the detail panel opens regardless), but prevents confusion if
-    // the user backs out with [×] and expects to see a grid.
-    if (m_resultsStack && m_resultsView) {
-        m_resultsModel->reset({ s });
-        m_resultsStack->setCurrentWidget(m_resultsView);
-    }
-
+    // Closing the detail view now returns to whichever results-stack
+    // page is currently shown (Discover, search state, or search grid),
+    // so there's no need to synthesise a one-card grid as a fallback.
     if (s.kind == api::MediaKind::Movie) {
-        openDetailPanel(/*movie*/ 0);
+        showMovieDetail();
         co_await loadMovieDetail(s);
     } else {
-        openDetailPanel(/*series*/ 1);
+        showSeriesDetail();
         co_await loadSeriesDetail(s);
     }
 }
@@ -880,18 +849,24 @@ void MainWindow::onTorrentioOptionsChanged()
     m_refetchPending = true;
     QTimer::singleShot(0, this, [this] {
         m_refetchPending = false;
-        if (!m_detailStack || !m_detailStack->isVisible()) {
-            // Panel closed — nothing on screen depends on these options
-            // right now. Next open will pick up the new defaults.
+        if (!m_centerStack
+            || m_centerStack->currentWidget() == m_resultsStack) {
+            // No detail view visible — next open picks up the new
+            // defaults. Nothing to refetch.
             return;
         }
-        if (m_detailStack->currentIndex() == 1
+        if (m_centerStack->currentWidget() == m_seriesDetailPane
             && m_currentEpisode && !m_currentSeriesImdbId.isEmpty()) {
-            auto t = loadEpisodeStreams(*m_currentEpisode, m_currentSeriesImdbId);
+            // Series detail: only refetch when the user is actually
+            // looking at the streams page (i.e. m_currentEpisode is
+            // set). On the episode list there are no visible streams.
+            auto t = loadEpisodeStreams(
+                *m_currentEpisode, m_currentSeriesImdbId);
             Q_UNUSED(t);
             return;
         }
-        if (m_detailStack->currentIndex() == 0 && m_currentMovie) {
+        if (m_centerStack->currentWidget() == m_detailPane
+            && m_currentMovie) {
             auto t = loadMovieDetail(*m_currentMovie);
             Q_UNUSED(t);
         }

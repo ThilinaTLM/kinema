@@ -9,6 +9,8 @@
 
 class QCheckBox;
 class QLabel;
+class QScrollArea;
+class QSplitter;
 class QStackedWidget;
 class QTableView;
 class QToolButton;
@@ -25,10 +27,20 @@ class StateWidget;
 class TorrentsModel;
 
 /**
- * Right-hand pane: large poster, metadata, then the torrents table.
+ * Full-width movie detail view. Two columns separated by a draggable
+ * horizontal splitter:
  *
- * The torrents table emits signals via a context menu (copy magnet, open
- * magnet). The owning MainWindow wires those to real actions.
+ *   +-----------------------------------------------+------------------+
+ *   | [Poster] Title (Year)                         | [✓ Cached on RD] |
+ *   |          Genre · Runtime · ★ Rating           +------------------+
+ *   |          Description …                        | Quality | Release
+ *   |                                               | … torrents table
+ *   | More like this:                               |
+ *   |  [poster] [poster] [poster] …                 |
+ *   +-----------------------------------------------+------------------+
+ *
+ * The torrents table emits signals via a context menu (copy magnet,
+ * open magnet). The owning MainWindow wires those to real actions.
  */
 class DetailPane : public QWidget
 {
@@ -91,22 +103,23 @@ private:
     // Header
     QToolButton* m_closeButton {};
 
-    // Meta side
-    QStackedWidget* m_metaStack;
-    StateWidget* m_metaState;
-    QWidget* m_metaContent;
-    QLabel* m_posterLabel;
-    QLabel* m_titleLabel;
-    QLabel* m_metaLineLabel;
-    QLabel* m_descLabel;
+    // Left column (meta + description + similar)
+    QSplitter* m_split {};
+    QStackedWidget* m_leftStack {};   // state | content-scroll
+    StateWidget* m_metaState {};
+    QScrollArea* m_leftScroll {};
+    QLabel* m_posterLabel {};
+    QLabel* m_titleLabel {};
+    QLabel* m_metaLineLabel {};
+    QLabel* m_descLabel {};
     QUrl m_pendingPosterUrl;
 
-    // Torrents side
-    QCheckBox* m_cachedOnlyCheck;
-    QStackedWidget* m_torrentsStack;
-    StateWidget* m_torrentsState;
-    QTableView* m_torrentsView;
-    TorrentsModel* m_torrents;
+    // Right column (cached-only + torrents)
+    QCheckBox* m_cachedOnlyCheck {};
+    QStackedWidget* m_torrentsStack {};
+    StateWidget* m_torrentsState {};
+    QTableView* m_torrentsView {};
+    TorrentsModel* m_torrents {};
     /// Unfiltered raw results, so the cached-only checkbox can toggle
     /// without a refetch.
     QList<api::Stream> m_rawStreams;

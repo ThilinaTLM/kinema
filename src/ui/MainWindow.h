@@ -16,7 +16,6 @@
 class KActionCollection;
 class KHamburgerMenu;
 class QListView;
-class QSplitter;
 class QStackedWidget;
 class QToolBar;
 
@@ -87,8 +86,10 @@ private:
 
     void buildActions();
     void buildLayout();
-    void openDetailPanel(int stackIndex);
+    void showMovieDetail();
+    void showSeriesDetail();
     void closeDetailPanel();
+    void onBackToEpisodes();
     core::torrentio::ConfigOptions currentConfig() const;
 
     // Ownership (parented to this window)
@@ -114,15 +115,10 @@ private:
     DetailPane* m_detailPane {};
     SeriesDetailPane* m_seriesDetailPane {};
 
-    // Outer horizontal splitter: grid (left) + detail stack (right).
-    // The detail stack holds DetailPane (index 0) and SeriesDetailPane
-    // (index 1); it is hidden when no result is selected so the grid
-    // takes the full window width.
-    QSplitter* m_browseSplitter {};
-    QStackedWidget* m_detailStack {};
-    // Last known splitter state with the panel open — restored when
-    // the user re-opens the panel after a close.
-    QByteArray m_savedSplitterOpenState;
+    // Central stack: page 0 = results (Discover / state / grid);
+    // page 1 = movie detail; page 2 = series detail. Clicking a result
+    // or Discover card swaps pages; closing / Esc / Home swaps back.
+    QStackedWidget* m_centerStack {};
 
     // Concurrency guard — increments on each new query so stale coroutines
     // can detect they've been superseded and bail out.

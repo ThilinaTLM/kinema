@@ -9,6 +9,7 @@
 
 class QCheckBox;
 class QLabel;
+class QScrollArea;
 class QSplitter;
 class QStackedWidget;
 class QTableView;
@@ -27,33 +28,28 @@ class StateWidget;
 class TorrentsModel;
 
 /**
- * Right-side series detail pane. Replaces the old full-window
- * SeriesFocusView: instead of taking over the whole window, it sits in
- * MainWindow's right splitter slot next to the results grid, and can be
- * closed back to a grid-only layout.
+ * Full-width series detail view. Mirrors DetailPane's horizontal
+ * two-column layout: left = meta + description + similar strip;
+ * right = episodes-→-streams two-page stack.
  *
- *   +------------------------------------------------------------+
- *   | [Poster] Title (Year)                                  [×] |
- *   |          Genre, Genre · 50 min · ★ 7.8                    |
- *   |          One-paragraph description …                      |
- *   +------------------------------------------------------------+
- *   | Season: [ 1 ▾ ]                [✓ Cached on RD only]      |
- *   +----------------------------+-------------------------------+
- *   | Episodes list              | Torrents table                |
- *   |  S1E1  Pilot               | Release    Q   Size  Sdrs  RD|
- *   |  S1E2  The Way Things Are  | …                             |
- *   |  …                         |                               |
- *   +----------------------------+-------------------------------+
- *                 (draggable horizontal splitter)
+ *   +-----------------------------------+---------------------------+
+ *   | [Poster] Title (Year)         [×] | Season: [ 1 ▾ ]          |
+ *   |          Genre · Runtime · ★     | S1E1 Pilot                |
+ *   |          Description…             | S1E2 …                   |
+ *   |                                   | …                         |
+ *   | More like this:                   |                           |
+ *   |  [p] [p] [p] …                    |                           |
+ *   +-----------------------------------+---------------------------+
  *
- * Landscape-optimised: episodes and torrents sit side-by-side instead
- * of stacked vertically. Poster + meta banner and the season/filter
- * row span the pane width above the split.
+ * After clicking an episode the right column flips to:
  *
- * Owns the SeriesPicker, the torrents QTableView + TorrentsModel, and
- * the cached-only checkbox. MainWindow pushes a SeriesDetail into it
- * via setSeries() and handles the episodeSelected / copyMagnet / …
- * signals the same way it handles DetailPane's.
+ *   +-----------------------------------+---------------------------+
+ *   | (same left column)                | [← Episodes]  S1E1 · Pilot|
+ *   |                                   | [✓ Cached on RD]         |
+ *   |                                   | Quality | Release | …    |
+ *   +-----------------------------------+---------------------------+
+ *
+ * Esc (handled by MainWindow) pops stream-→-episode before close.
  */
 class SeriesDetailPane : public QWidget
 {
@@ -65,9 +61,24 @@ public:
         api::TmdbClient* tmdb = nullptr,
         QWidget* parent = nullptr);
 
-    /// Populate the pane. Auto-selects S1E1 and emits episodeSelected
-    /// on the first non-special episode so MainWindow can fetch streams.
+    /// Populate the pane. Lands on the episodes page; does not
+    /// auto-select any episode. MainWindow fetches streams only
+    /// after the user explicitly picks one.
     void setSeries(const api::SeriesDetail& series);
+
+    /// Flip the right column to the streams page for the given
+    /// episode and update the breadcrumb. Called by MainWindow (after
+    /// the user picks an episode) before kicking off the fetch.
+    void showEpisodeStreamsPage(const api::Episode& ep);
+
+    /// Flip the right column back to the episodes page. Used by the
+    /// back button and by Esc (via tryPopStreamsPage).
+    void showEpisodesPage();
+
+    /// If the right column is currently on the streams page, pop it
+    /// back to the episodes page and return true. Otherwise no-op
+    /// and return false. Used by MainWindow's Esc shortcut.
+    bool tryPopStreamsPage();
 
     /// Feed the series's IMDB id into the "More like this" strip.
     /// Safe to call with empty id (hides the strip). No-op when the
@@ -92,6 +103,10 @@ Q_SIGNALS:
     /// Emitted when the user clicks the [×] button in the header.
     void closeRequested();
     void episodeSelected(const api::Episode& episode);
+    /// Emitted when the user backs out of the streams page (via the
+    /// back button or Esc). MainWindow uses this to cancel any
+    /// in-flight stream coroutine.
+    void backToEpisodesRequested();
     /// Emitted when the user activates a card in the "More like this"
     /// strip. MainWindow resolves the TMDB id and opens the existing
     /// detail flow.
@@ -108,12 +123,15 @@ private:
     void onTorrentContextMenu(const QPoint& pos);
     void updatePoster();
     void saveSplitterState();
-    void applyDefaultSplitterRatio();
 
     ImageLoader* m_loader;
     bool m_rdConfigured = false;
 
-    // Header
+    // Left column (meta + description + similar)
+    QSplitter* m_split {};
+    QStackedWidget* m_leftStack {};  // state | content-scroll
+    StateWidget* m_leftState {};
+    QScrollArea* m_leftScroll {};
     QToolButton* m_closeButton {};
     QLabel* m_posterLabel {};
     QLabel* m_titleLabel {};
@@ -121,15 +139,17 @@ private:
     QLabel* m_descLabel {};
     QUrl m_pendingPosterUrl;
 
-    // Horizontal body splitter (episodes | torrents)
-    QSplitter* m_bodySplit {};
+    // Right column — two pages (episodes | streams)
+    QStackedWidget* m_rightStack {};
 
-    // Left: season picker + episode list
+    // Page 0: season picker + episode list
     QStackedWidget* m_pickerStack {};
     StateWidget* m_pickerState {};
     SeriesPicker* m_picker {};
 
-    // Right: cached-only + torrents
+    // Page 1: back button + breadcrumb + cached-only + torrents
+    QToolButton* m_backToEpisodesButton {};
+    QLabel* m_episodeBreadcrumbLabel {};
     QCheckBox* m_cachedOnlyCheck {};
     QStackedWidget* m_torrentsStack {};
     StateWidget* m_torrentsState {};

@@ -23,6 +23,7 @@
 #include <QMenu>
 #include <QPixmap>
 #include <QPixmapCache>
+#include <QScrollArea>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -65,7 +66,7 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
         connect(m_similar, &SimilarStrip::itemActivated,
             this, &SeriesDetailPane::similarActivated);
     }
-    // ---- Header strip ------------------------------------------------------
+    // ---- Close button (top-right of the pane) -----------------------------
     m_closeButton = new QToolButton(this);
     m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
     m_closeButton->setToolTip(i18nc("@info:tooltip", "Close details"));
@@ -73,8 +74,11 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
     connect(m_closeButton, &QToolButton::clicked,
         this, &SeriesDetailPane::closeRequested);
 
+    // ---- Left column widgets ----------------------------------------------
+    m_leftState = new StateWidget(this);
+
     m_posterLabel = new QLabel(this);
-    m_posterLabel->setFixedSize(120, 180);
+    m_posterLabel->setFixedSize(220, 330);
     m_posterLabel->setAlignment(Qt::AlignCenter);
     m_posterLabel->setFrameShape(QFrame::StyledPanel);
 
@@ -95,37 +99,48 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
     m_descLabel->setWordWrap(true);
     m_descLabel->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     m_descLabel->setTextFormat(Qt::PlainText);
-    m_descLabel->setMaximumHeight(80);
 
-    auto* titleRow = new QHBoxLayout;
-    titleRow->setContentsMargins(0, 0, 0, 0);
-    titleRow->setSpacing(4);
-    titleRow->addWidget(m_titleLabel, 1);
-    titleRow->addWidget(m_closeButton, 0, Qt::AlignTop);
+    auto* metaTextColumn = new QVBoxLayout;
+    metaTextColumn->setContentsMargins(0, 0, 0, 0);
+    metaTextColumn->setSpacing(6);
+    metaTextColumn->addWidget(m_titleLabel);
+    metaTextColumn->addWidget(m_metaLineLabel);
+    metaTextColumn->addWidget(m_descLabel, 1);
 
-    auto* textColumn = new QVBoxLayout;
-    textColumn->setContentsMargins(0, 0, 0, 0);
-    textColumn->setSpacing(4);
-    textColumn->addLayout(titleRow);
-    textColumn->addWidget(m_metaLineLabel);
-    textColumn->addWidget(m_descLabel, 1);
+    auto* metaRow = new QHBoxLayout;
+    metaRow->setSpacing(12);
+    metaRow->addWidget(m_posterLabel, 0, Qt::AlignTop);
+    metaRow->addLayout(metaTextColumn, 1);
 
-    auto* headerRow = new QHBoxLayout;
-    headerRow->setContentsMargins(12, 12, 12, 12);
-    headerRow->setSpacing(12);
-    headerRow->addWidget(m_posterLabel, 0, Qt::AlignTop);
-    headerRow->addLayout(textColumn, 1);
+    auto* leftContent = new QWidget(this);
+    auto* leftContentLayout = new QVBoxLayout(leftContent);
+    leftContentLayout->setContentsMargins(12, 12, 12, 12);
+    leftContentLayout->setSpacing(8);
+    leftContentLayout->addLayout(metaRow);
+    if (m_similar) {
+        leftContentLayout->addWidget(m_similar, 0);
+    }
+    leftContentLayout->addStretch(1);
 
-    auto* headerWrap = new QWidget(this);
-    auto* headerVBox = new QVBoxLayout(headerWrap);
-    headerVBox->setContentsMargins(0, 0, 0, 0);
-    headerVBox->setSpacing(0);
-    headerVBox->addLayout(headerRow);
+    m_leftScroll = new QScrollArea(this);
+    m_leftScroll->setFrameShape(QFrame::NoFrame);
+    m_leftScroll->setWidgetResizable(true);
+    m_leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_leftScroll->setWidget(leftContent);
 
-    // ---- Left side of splitter: SeriesPicker ------------------------------
+    m_leftStack = new QStackedWidget(this);
+    m_leftStack->addWidget(m_leftState);   // idx 0 = state
+    m_leftStack->addWidget(m_leftScroll);  // idx 1 = content
+
+    // ---- Right column, page 0: SeriesPicker -------------------------------
     m_picker = new SeriesPicker(m_loader, this);
-    connect(m_picker, &SeriesPicker::episodeActivated,
-        this, &SeriesDetailPane::episodeSelected);
+    connect(m_picker, &SeriesPicker::episodeActivated, this,
+        [this](const api::Episode& ep) {
+            // Flip the page immediately so the user sees feedback
+            // before MainWindow's fetch roundtrip finishes.
+            showEpisodeStreamsPage(ep);
+            Q_EMIT episodeSelected(ep);
+        });
 
     m_pickerState = new StateWidget(this);
     m_pickerStack = new QStackedWidget(this);
@@ -136,10 +151,10 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
 
     auto* pickerWrap = new QWidget(this);
     auto* pickerLayout = new QVBoxLayout(pickerWrap);
-    pickerLayout->setContentsMargins(12, 4, 6, 8);
+    pickerLayout->setContentsMargins(6, 12, 12, 12);
     pickerLayout->addWidget(m_pickerStack);
 
-    // ---- Right side of splitter: cached-only + torrents -------------------
+    // ---- Right column, page 1: cached-only + torrents ---------------------
     m_cachedOnlyCheck = new QCheckBox(
         i18nc("@option:check", "Cached on Real-Debrid only"), this);
     m_cachedOnlyCheck->setChecked(config::Config::instance().cachedOnly());
@@ -203,6 +218,34 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
     m_torrentsStack->addWidget(m_torrentsState);
     m_torrentsStack->addWidget(m_torrentsView);
 
+    // Back button + breadcrumb header for the streams page.
+    m_backToEpisodesButton = new QToolButton(this);
+    m_backToEpisodesButton->setIcon(
+        QIcon::fromTheme(QStringLiteral("go-previous")));
+    m_backToEpisodesButton->setText(i18nc("@action:button", "Episodes"));
+    m_backToEpisodesButton->setToolTip(
+        i18nc("@info:tooltip", "Back to the episode list"));
+    m_backToEpisodesButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_backToEpisodesButton->setAutoRaise(true);
+    connect(m_backToEpisodesButton, &QToolButton::clicked, this, [this] {
+        showEpisodesPage();
+        Q_EMIT backToEpisodesRequested();
+    });
+
+    m_episodeBreadcrumbLabel = new QLabel(this);
+    m_episodeBreadcrumbLabel->setTextFormat(Qt::PlainText);
+    {
+        auto f = m_episodeBreadcrumbLabel->font();
+        f.setBold(true);
+        m_episodeBreadcrumbLabel->setFont(f);
+    }
+
+    auto* streamsHeaderRow = new QHBoxLayout;
+    streamsHeaderRow->setContentsMargins(0, 0, 0, 0);
+    streamsHeaderRow->setSpacing(8);
+    streamsHeaderRow->addWidget(m_backToEpisodesButton, 0);
+    streamsHeaderRow->addWidget(m_episodeBreadcrumbLabel, 1);
+
     auto* cachedRow = new QHBoxLayout;
     cachedRow->setContentsMargins(0, 0, 0, 0);
     cachedRow->addWidget(m_cachedOnlyCheck);
@@ -210,35 +253,45 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
 
     auto* torrentsWrap = new QWidget(this);
     auto* torrentsLayout = new QVBoxLayout(torrentsWrap);
-    torrentsLayout->setContentsMargins(6, 4, 12, 8);
-    torrentsLayout->setSpacing(4);
+    torrentsLayout->setContentsMargins(6, 12, 12, 12);
+    torrentsLayout->setSpacing(6);
+    torrentsLayout->addLayout(streamsHeaderRow);
     torrentsLayout->addLayout(cachedRow);
     torrentsLayout->addWidget(m_torrentsStack, 1);
 
-    // ---- Splitter (horizontal — landscape first) -------------------------
-    m_bodySplit = new QSplitter(Qt::Horizontal, this);
-    m_bodySplit->setChildrenCollapsible(false);
-    m_bodySplit->addWidget(pickerWrap);
-    m_bodySplit->addWidget(torrentsWrap);
-    // Default 35/65 episodes/torrents; may be overridden by saved state.
-    applyDefaultSplitterRatio();
+    // Right column hosts the two pages.
+    m_rightStack = new QStackedWidget(this);
+    m_rightStack->addWidget(pickerWrap);     // idx 0 = episodes
+    m_rightStack->addWidget(torrentsWrap);   // idx 1 = streams
+    m_rightStack->setCurrentIndex(0);
 
-    const auto savedState = config::Config::instance().seriesPaneSplitterState();
+    // ---- Outer horizontal splitter (left column | right column) -----------
+    m_split = new QSplitter(Qt::Horizontal, this);
+    m_split->setChildrenCollapsible(false);
+    m_split->addWidget(m_leftStack);
+    m_split->addWidget(m_rightStack);
+    m_split->setStretchFactor(0, 35);
+    m_split->setStretchFactor(1, 65);
+    const auto savedState = config::Config::instance().detailSplitterState();
     if (!savedState.isEmpty()) {
-        m_bodySplit->restoreState(savedState);
+        m_split->restoreState(savedState);
+    } else {
+        m_split->setSizes({ 420, 780 });
     }
-    connect(m_bodySplit, &QSplitter::splitterMoved, this,
+    connect(m_split, &QSplitter::splitterMoved, this,
         [this] { saveSplitterState(); });
 
     // ---- Root -------------------------------------------------------------
+    auto* headerRow = new QHBoxLayout;
+    headerRow->setContentsMargins(6, 6, 6, 0);
+    headerRow->addStretch(1);
+    headerRow->addWidget(m_closeButton, 0, Qt::AlignTop);
+
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(0);
-    root->addWidget(headerWrap, 0);
-    root->addWidget(m_bodySplit, 1);
-    if (m_similar) {
-        root->addWidget(m_similar, 0);
-    }
+    root->setSpacing(2);
+    root->addLayout(headerRow, 0);
+    root->addWidget(m_split, 1);
 
     // Repaint the poster when it finishes loading.
     if (m_loader) {
@@ -260,18 +313,9 @@ void SeriesDetailPane::setSimilarContext(const QString& imdbId)
     }
 }
 
-void SeriesDetailPane::applyDefaultSplitterRatio()
-{
-    // 35% episodes, 65% torrents. Landscape-first — the torrents
-    // table has more columns and needs the width.
-    m_bodySplit->setSizes({ 350, 650 });
-    m_bodySplit->setStretchFactor(0, 35);
-    m_bodySplit->setStretchFactor(1, 65);
-}
-
 void SeriesDetailPane::saveSplitterState()
 {
-    config::Config::instance().setSeriesPaneSplitterState(m_bodySplit->saveState());
+    config::Config::instance().setDetailSplitterState(m_split->saveState());
 }
 
 void SeriesDetailPane::setRealDebridConfigured(bool on)
@@ -289,7 +333,10 @@ void SeriesDetailPane::focusEpisodeList()
 
 void SeriesDetailPane::showMetaLoading()
 {
-    m_titleLabel->setText(i18nc("@info:status", "Loading…"));
+    m_leftState->showLoading(i18nc("@info:status", "Loading details…"));
+    m_leftStack->setCurrentWidget(m_leftState);
+
+    m_titleLabel->clear();
     m_metaLineLabel->clear();
     m_descLabel->clear();
     m_posterLabel->clear();
@@ -298,6 +345,9 @@ void SeriesDetailPane::showMetaLoading()
     m_pickerState->showLoading(i18nc("@info:status", "Loading episodes…"));
     m_pickerStack->setCurrentWidget(m_pickerState);
 
+    // Reset to the episodes page; clear any leftover stream state.
+    m_rightStack->setCurrentIndex(0);
+    m_episodeBreadcrumbLabel->clear();
     m_torrentsState->showIdle(QString {});
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 
@@ -308,14 +358,14 @@ void SeriesDetailPane::showMetaLoading()
 
 void SeriesDetailPane::showMetaError(const QString& message)
 {
-    m_titleLabel->setText(i18nc("@label", "Couldn't load series"));
-    m_metaLineLabel->clear();
-    m_descLabel->setText(message);
-    m_posterLabel->clear();
+    m_leftState->showError(message, /*retryable=*/false);
+    m_leftStack->setCurrentWidget(m_leftState);
 
     m_pickerState->showError(message, /*retryable=*/false);
     m_pickerStack->setCurrentWidget(m_pickerState);
 
+    m_rightStack->setCurrentIndex(0);
+    m_episodeBreadcrumbLabel->clear();
     m_torrentsState->showIdle(QString {});
     m_torrentsStack->setCurrentWidget(m_torrentsState);
 }
@@ -345,8 +395,52 @@ void SeriesDetailPane::setSeries(const api::SeriesDetail& series)
     m_posterLabel->clear();
     updatePoster();
 
+    m_leftStack->setCurrentWidget(m_leftScroll);
+
     m_picker->setSeries(series);
     m_pickerStack->setCurrentWidget(m_picker);
+
+    // Fresh series load always lands on the episodes page.
+    m_rightStack->setCurrentIndex(0);
+    m_episodeBreadcrumbLabel->clear();
+    m_torrentsState->showIdle(QString {});
+    m_torrentsStack->setCurrentWidget(m_torrentsState);
+    m_rawStreams.clear();
+    m_torrents->reset({});
+    rebuildCachedOnlyVisibility();
+}
+
+void SeriesDetailPane::showEpisodeStreamsPage(const api::Episode& ep)
+{
+    const QString crumb = ep.title.isEmpty()
+        ? i18nc("@label season/episode short", "S%1E%2",
+              ep.season, ep.number)
+        : i18nc("@label season/episode short with title", "S%1E%2 · %3",
+              ep.season, ep.number, ep.title);
+    m_episodeBreadcrumbLabel->setText(crumb);
+    m_rightStack->setCurrentIndex(1);
+    m_backToEpisodesButton->setFocus();
+}
+
+void SeriesDetailPane::showEpisodesPage()
+{
+    m_rightStack->setCurrentIndex(0);
+    m_episodeBreadcrumbLabel->clear();
+    m_torrentsState->showIdle(QString {});
+    m_torrentsStack->setCurrentWidget(m_torrentsState);
+    m_rawStreams.clear();
+    m_torrents->reset({});
+    rebuildCachedOnlyVisibility();
+    m_picker->setFocus();
+}
+
+bool SeriesDetailPane::tryPopStreamsPage()
+{
+    if (m_rightStack && m_rightStack->currentIndex() == 1) {
+        showEpisodesPage();
+        return true;
+    }
+    return false;
 }
 
 void SeriesDetailPane::updatePoster()

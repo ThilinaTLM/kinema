@@ -20,6 +20,7 @@ constexpr auto kKeySearchKind = "searchKind";
 constexpr auto kKeyDefaultSort = "defaultSort";
 constexpr auto kKeyBrowseSplitter = "browseSplitter";
 constexpr auto kKeySeriesPaneSplitter = "seriesPaneSplitter";
+constexpr auto kKeyDetailSplitter = "detailSplitter";
 constexpr auto kKeyExcludedResolutions = "excludedResolutions";
 constexpr auto kKeyExcludedCategories = "excludedCategories";
 constexpr auto kKeyKeywordBlocklist = "keywordBlocklist";
@@ -196,6 +197,18 @@ void Config::setSeriesPaneSplitterState(QByteArray state)
 {
     auto g = group(kGroupGeneral);
     g.writeEntry(kKeySeriesPaneSplitter, state);
+    g.sync();
+}
+
+QByteArray Config::detailSplitterState() const
+{
+    return group(kGroupGeneral).readEntry(kKeyDetailSplitter, QByteArray {});
+}
+
+void Config::setDetailSplitterState(QByteArray state)
+{
+    auto g = group(kGroupGeneral);
+    g.writeEntry(kKeyDetailSplitter, state);
     g.sync();
 }
 

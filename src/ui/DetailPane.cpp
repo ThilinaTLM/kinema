@@ -23,7 +23,9 @@
 #include <QMenu>
 #include <QPixmap>
 #include <QPixmapCache>
+#include <QScrollArea>
 #include <QSortFilterProxyModel>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QTableView>
 #include <QToolButton>
@@ -71,7 +73,7 @@ DetailPane::DetailPane(ImageLoader* loader,
     connect(m_closeButton, &QToolButton::clicked,
         this, &DetailPane::closeRequested);
 
-    // ---- Meta side ---------------------------------------------------------
+    // ---- Left column widgets ----------------------------------------------
     m_metaState = new StateWidget(this);
 
     m_posterLabel = new QLabel(this);
@@ -106,14 +108,27 @@ DetailPane::DetailPane(ImageLoader* loader,
     metaRow->addWidget(m_posterLabel, 0, Qt::AlignTop);
     metaRow->addLayout(metaRight, 1);
 
-    m_metaContent = new QWidget(this);
-    auto* metaContentLayout = new QVBoxLayout(m_metaContent);
-    metaContentLayout->setContentsMargins(12, 12, 12, 6);
-    metaContentLayout->addLayout(metaRow);
+    // Scrollable content column: poster+meta row, then description
+    // (already inside metaRight), then the SimilarStrip at the bottom.
+    auto* leftContent = new QWidget(this);
+    auto* leftContentLayout = new QVBoxLayout(leftContent);
+    leftContentLayout->setContentsMargins(12, 12, 12, 12);
+    leftContentLayout->setSpacing(8);
+    leftContentLayout->addLayout(metaRow);
+    if (m_similar) {
+        leftContentLayout->addWidget(m_similar, 0);
+    }
+    leftContentLayout->addStretch(1);
 
-    m_metaStack = new QStackedWidget(this);
-    m_metaStack->addWidget(m_metaState);
-    m_metaStack->addWidget(m_metaContent);
+    m_leftScroll = new QScrollArea(this);
+    m_leftScroll->setFrameShape(QFrame::NoFrame);
+    m_leftScroll->setWidgetResizable(true);
+    m_leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_leftScroll->setWidget(leftContent);
+
+    m_leftStack = new QStackedWidget(this);
+    m_leftStack->addWidget(m_metaState);    // idx 0 = state
+    m_leftStack->addWidget(m_leftScroll);   // idx 1 = content
 
     // ---- Torrents side -----------------------------------------------------
     m_cachedOnlyCheck = new QCheckBox(
@@ -181,12 +196,37 @@ DetailPane::DetailPane(ImageLoader* loader,
     m_torrentsStack->addWidget(m_torrentsState);
     m_torrentsStack->addWidget(m_torrentsView);
 
-    // ---- Root layout -------------------------------------------------------
+    // ---- Right column ------------------------------------------------------
     auto* cachedRow = new QHBoxLayout;
-    cachedRow->setContentsMargins(12, 0, 12, 0);
+    cachedRow->setContentsMargins(0, 0, 0, 0);
     cachedRow->addWidget(m_cachedOnlyCheck);
     cachedRow->addStretch(1);
 
+    auto* rightWrap = new QWidget(this);
+    auto* rightLayout = new QVBoxLayout(rightWrap);
+    rightLayout->setContentsMargins(6, 12, 12, 12);
+    rightLayout->setSpacing(6);
+    rightLayout->addLayout(cachedRow, 0);
+    rightLayout->addWidget(m_torrentsStack, 1);
+
+    // ---- Splitter ----------------------------------------------------------
+    m_split = new QSplitter(Qt::Horizontal, this);
+    m_split->setChildrenCollapsible(false);
+    m_split->addWidget(m_leftStack);
+    m_split->addWidget(rightWrap);
+    m_split->setStretchFactor(0, 35);
+    m_split->setStretchFactor(1, 65);
+    const auto saved = config::Config::instance().detailSplitterState();
+    if (!saved.isEmpty()) {
+        m_split->restoreState(saved);
+    } else {
+        m_split->setSizes({ 420, 780 });
+    }
+    connect(m_split, &QSplitter::splitterMoved, this, [this] {
+        config::Config::instance().setDetailSplitterState(m_split->saveState());
+    });
+
+    // ---- Root --------------------------------------------------------------
     auto* headerRow = new QHBoxLayout;
     headerRow->setContentsMargins(6, 6, 6, 0);
     headerRow->addStretch(1);
@@ -194,14 +234,9 @@ DetailPane::DetailPane(ImageLoader* loader,
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(4);
+    root->setSpacing(2);
     root->addLayout(headerRow, 0);
-    root->addWidget(m_metaStack, 0);
-    root->addLayout(cachedRow, 0);
-    root->addWidget(m_torrentsStack, 1);
-    if (m_similar) {
-        root->addWidget(m_similar, 0);
-    }
+    root->addWidget(m_split, 1);
 
     showIdle();
 
@@ -220,8 +255,8 @@ void DetailPane::showIdle()
 {
     m_metaState->showIdle(
         i18nc("@label", "Nothing selected"),
-        i18nc("@info", "Pick a result on the left to see details and torrents."));
-    m_metaStack->setCurrentWidget(m_metaState);
+        i18nc("@info", "Pick a result to see details and torrents."));
+    m_leftStack->setCurrentWidget(m_metaState);
 
     m_rawStreams.clear();
     m_torrents->reset({});
@@ -244,13 +279,13 @@ void DetailPane::setSimilarContext(api::MediaKind kind, const QString& imdbId)
 void DetailPane::showMetaLoading()
 {
     m_metaState->showLoading(i18nc("@info:status", "Loading details…"));
-    m_metaStack->setCurrentWidget(m_metaState);
+    m_leftStack->setCurrentWidget(m_metaState);
 }
 
 void DetailPane::showMetaError(const QString& message)
 {
     m_metaState->showError(message, /*retryable=*/false);
-    m_metaStack->setCurrentWidget(m_metaState);
+    m_leftStack->setCurrentWidget(m_metaState);
 }
 
 void DetailPane::setMeta(const api::MetaDetail& meta)
@@ -278,7 +313,7 @@ void DetailPane::setMeta(const api::MetaDetail& meta)
     m_posterLabel->clear();
     updatePoster();
 
-    m_metaStack->setCurrentWidget(m_metaContent);
+    m_leftStack->setCurrentWidget(m_leftScroll);
 }
 
 void DetailPane::setRealDebridConfigured(bool on)
