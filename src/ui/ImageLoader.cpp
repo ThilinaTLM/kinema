@@ -78,8 +78,19 @@ QCoro::Task<QPixmap> ImageLoader::requestPoster(QUrl url)
     // updatePoster() → requestPoster() in response, causing unbounded
     // recursion when the first real emission (disk hit / HTTP) has
     // already populated the memory cache.
-    if (auto* pm = m_memCache.object(url)) {
-        co_return *pm;
+    if (const auto* pm = m_memCache.object(url)) {
+        // Return a deliberate copy rather than `co_return *pm;`. QCoro's
+        // TaskPromise<T>::return_value<U>(U&&) template picks up the lvalue
+        // `*pm` with U = QPixmap& and then calls `T(std::move(value))`,
+        // move-constructing from the cache entry. Since QPixmap is
+        // implicitly shared, the move leaves the cached QPixmap null —
+        // any later cached()/object() probe for this URL returns an empty
+        // pixmap, even though the cache slot still exists at the same
+        // pointer. That breaks DetailPane::updatePoster, which probes
+        // the memory cache synchronously after requestPoster() and finds
+        // a null pixmap it just "saw" moments earlier.
+        const QPixmap copy = *pm;
+        co_return copy;
     }
 
     // 2. Disk cache
