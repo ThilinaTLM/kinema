@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 
 # ---------------------------------------------------------------------------
 # kinema_core — object library containing everything except main(). Re-used

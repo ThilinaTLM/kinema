@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilina@tlmtech.dev>
-// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
 
 #include "ui/ImageLoader.h"
 

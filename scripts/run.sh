@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilina@tlmtech.dev>
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
 #
 # Configure, build, (optionally) test, and run Kinema in one go.
 
 set -euo pipefail
 
-# Resolve repo root (directory containing this script) so the script
-# works no matter where it's invoked from.
+# Resolve repo root (parent of the directory containing this script)
+# so the script works no matter where it's invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "${SCRIPT_DIR}"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
 
 BUILD_DIR="${BUILD_DIR:-build}"
 BUILD_TYPE="${BUILD_TYPE:-RelWithDebInfo}"

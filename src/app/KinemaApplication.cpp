@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilina@tlmtech.dev>
-// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
 
 #include "app/KinemaApplication.h"
 
@@ -36,14 +36,14 @@ void KinemaApplication::configure()
         i18nc("@title", "Kinema"),
         QStringLiteral(KINEMA_VERSION_STRING),
         i18n("Search movies and TV series, grab magnet links, stream via Real-Debrid."),
-        KAboutLicense::GPL_V2,
+        KAboutLicense::Apache_V2,
         i18n("© 2026 Thilina Lakshan"),
         QString{},
         QStringLiteral("https://tlmtech.dev/kinema"));
     about.addAuthor(
         i18nc("@info:credit", "Thilina Lakshan"),
         i18nc("@info:credit", "Author and maintainer"),
-        QStringLiteral("thilina@tlmtech.dev"));
+        QStringLiteral("thilinalakshanmail@gmail.com"));
     about.setDesktopFileName(QStringLiteral("dev.tlmtech.kinema"));
     about.setProductName(QByteArrayLiteral("kinema"));
     about.setOrganizationDomain(QByteArrayLiteral("tlmtech.dev"));

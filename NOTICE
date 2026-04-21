@@ -1,0 +1,72 @@
+Kinema
+Copyright 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+
+This product is licensed under the Apache License, Version 2.0 (the
+"License"); you may not use this product except in compliance with the
+License. You may obtain a copy of the License in the LICENSE file
+distributed with this source, or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------
+Third-party dependencies
+--------------------------------------------------------------------------
+
+The Apache-2.0 license above applies only to the source code and assets
+that are original to this repository. At build and run time, Kinema
+depends on the following third-party components, each of which is
+licensed under its own terms. Those licenses are NOT altered by this
+project's relicensing, and redistributors must continue to comply with
+them when shipping a combined binary.
+
+  * Qt 6 (Core, Gui, Widgets, Network, Concurrent, Test)
+      Copyright The Qt Company Ltd. and contributors.
+      Licensed under LGPL-3.0-only (or GPL-2.0-or-later / GPL-3.0, or a
+      commercial license from The Qt Company).
+      https://www.qt.io/licensing/
+
+  * KDE Frameworks 6 (CoreAddons, I18n, KIO, ConfigWidgets,
+    Notifications, StatusNotifierItem, WidgetsAddons, XmlGui)
+      Copyright the KDE contributors.
+      Primarily licensed under LGPL-2.1-or-later; individual modules
+      may carry additional permissive licenses. See each framework's
+      own COPYING/LICENSES file for the authoritative terms.
+      https://api.kde.org/frameworks/
+
+  * Extra CMake Modules (ECM)
+      Copyright the KDE contributors. BSD-3-Clause.
+
+  * QCoro
+      Copyright Daniel Vrátil and contributors. MIT.
+      https://github.com/danvratil/qcoro
+
+  * QtKeychain
+      Copyright Frank Osterfeld and contributors. BSD-3-Clause / LGPL.
+      https://github.com/frankosterfeld/qtkeychain
+
+  * mpv / libmpv (runtime dependency for the embedded player)
+      Copyright the mpv contributors. LGPL-2.1-or-later (with some
+      GPL-2.0-or-later components depending on build configuration).
+      https://mpv.io/
+
+--------------------------------------------------------------------------
+Third-party services
+--------------------------------------------------------------------------
+
+Kinema communicates at runtime with the following online services. They
+are not bundled with this source, and their trademarks, content, and
+APIs remain the property of their respective owners:
+
+  * The Movie Database (TMDB) - https://www.themoviedb.org/
+      "This product uses the TMDB API but is not endorsed or certified
+       by TMDB."
+  * Torrentio          - https://torrentio.strem.fun/
+  * Cinemeta (Stremio) - https://v3-cinemeta.strem.io/
+  * Real-Debrid        - https://real-debrid.com/
+
+--------------------------------------------------------------------------
+Bundled assets
+--------------------------------------------------------------------------
+
+  * data/dev.tlmtech.kinema.metainfo.xml - CC0-1.0
+  * All other original code and assets   - Apache-2.0
