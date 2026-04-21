@@ -14,10 +14,15 @@ class QStackedWidget;
 class QTableView;
 class QToolButton;
 
+namespace kinema::api {
+class TmdbClient;
+}
+
 namespace kinema::ui {
 
 class ImageLoader;
 class SeriesPicker;
+class SimilarStrip;
 class StateWidget;
 class TorrentsModel;
 
@@ -54,11 +59,20 @@ class SeriesDetailPane : public QWidget
 {
     Q_OBJECT
 public:
-    SeriesDetailPane(ImageLoader* loader, QWidget* parent = nullptr);
+    /// `tmdb` is optional: when null, the "More like this" strip is
+    /// omitted entirely.
+    SeriesDetailPane(ImageLoader* loader,
+        api::TmdbClient* tmdb = nullptr,
+        QWidget* parent = nullptr);
 
     /// Populate the pane. Auto-selects S1E1 and emits episodeSelected
     /// on the first non-special episode so MainWindow can fetch streams.
     void setSeries(const api::SeriesDetail& series);
+
+    /// Feed the series's IMDB id into the "More like this" strip.
+    /// Safe to call with empty id (hides the strip). No-op when the
+    /// pane was constructed without a TmdbClient.
+    void setSimilarContext(const QString& imdbId);
 
     void showMetaLoading();
     void showMetaError(const QString& message);
@@ -78,6 +92,10 @@ Q_SIGNALS:
     /// Emitted when the user clicks the [×] button in the header.
     void closeRequested();
     void episodeSelected(const api::Episode& episode);
+    /// Emitted when the user activates a card in the "More like this"
+    /// strip. MainWindow resolves the TMDB id and opens the existing
+    /// detail flow.
+    void similarActivated(const api::DiscoverItem& item);
     void copyMagnetRequested(const api::Stream& stream);
     void openMagnetRequested(const api::Stream& stream);
     void copyDirectUrlRequested(const api::Stream& stream);
@@ -119,6 +137,10 @@ private:
     TorrentsModel* m_torrents {};
 
     QList<api::Stream> m_rawStreams;
+
+    // "More like this" strip. Null when the pane was constructed
+    // without a TmdbClient.
+    SimilarStrip* m_similar {};
 };
 
 } // namespace kinema::ui

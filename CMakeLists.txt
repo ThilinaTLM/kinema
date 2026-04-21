@@ -62,6 +62,18 @@ find_package(Qt6Keychain REQUIRED)
 
 qcoro_enable_coroutines()
 
+# Optional TMDB v4 Read Access Token compiled into the binary. Empty by
+# default. When set, Discover works out-of-the-box without the user
+# pasting a token. Users can always override it in Settings.
+# Packagers: set your own token here rather than shipping upstream's.
+set(KINEMA_TMDB_DEFAULT_TOKEN "" CACHE STRING
+    "Optional TMDB v4 Read Access Token baked into the binary for Discover.")
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/TmdbConfig.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/src/core/TmdbConfig.h
+    @ONLY)
+
 ecm_setup_version(PROJECT
     VARIABLE_PREFIX KINEMA
     VERSION_HEADER "${CMAKE_CURRENT_BINARY_DIR}/kinema_version.h"

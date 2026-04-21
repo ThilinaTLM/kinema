@@ -5,11 +5,16 @@ movies and TV series, browsing torrent sources via
 [Torrentio](https://torrentio.strem.fun/), and — for Real-Debrid
 subscribers — streaming straight into **mpv** or **VLC**.
 
-> **Status:** Milestone 3 — one-click Play, KNotifications, player
-> auto-detection. Filters UI and full Settings dialog land in M4.
+> **Status:** Milestone 4 — TMDB-powered Discover home, "More like
+> this" strip on detail panes, and full Settings dialog (including
+> opt-in TMDB token override).
 
 ## Features
 
+- **Discover** home screen: TMDB-powered rows for Trending, Popular,
+  Now Playing / On The Air, and Top Rated (movies + series), plus a
+  "More like this" strip on every detail pane. Click a card and the
+  existing Cinemeta + Torrentio pipeline takes over.
 - Movie **and** TV series search by title or IMDB id (`tt…`)
 - Series focus view: season dropdown, episode list with thumbnails,
   torrents table below — draggable splitter, state persisted
@@ -81,6 +86,35 @@ sudo cmake --install build --prefix /usr
 
 Installs the `kinema` binary, `.desktop` entry, AppStream metainfo,
 `kinema.notifyrc`, and the scalable app icon.
+
+## Discover (TMDB)
+
+Kinema's Discover surface is backed by [The Movie
+Database](https://www.themoviedb.org/). It works out of the box using
+a TMDB read-access token bundled at build time — there is **nothing
+to configure** for typical use. Click a card in any row to open the
+detail pane; the "More like this" strip below the torrents table
+surfaces TMDB recommendations for the item you're viewing.
+
+Users who'd rather use their own TMDB account (for privacy, to avoid
+sharing the bundled rate-limit pool, or as a fallback if the bundled
+token has been revoked) can paste a v4 Read Access Token into
+**Settings → TMDB (Discover)**. The token is stored in the system
+keyring, never on disk in plaintext.
+
+### For packagers
+
+The bundled token is opt-in at build time via a CMake cache variable:
+
+```bash
+cmake -B build -S . -DKINEMA_TMDB_DEFAULT_TOKEN="<your v4 bearer>"
+```
+
+Leaving it empty is also supported — in that build Discover shows a
+"Set up TMDB" call-to-action until the user provides their own
+token. Distros are encouraged to inject their own token rather than
+shipping upstream's, so that a revocation upstream doesn't break
+every downstream build.
 
 ## Real-Debrid setup
 

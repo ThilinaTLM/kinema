@@ -1,0 +1,39 @@
+{
+    "adult": false,
+    "backdrop_path": "/matrix_bd.jpg",
+    "belongs_to_collection": {
+        "id": 2344,
+        "name": "The Matrix Collection",
+        "poster_path": "/col_poster.jpg",
+        "backdrop_path": "/col_bd.jpg"
+    },
+    "budget": 63000000,
+    "genres": [
+        { "id": 28, "name": "Action" },
+        { "id": 878, "name": "Science Fiction" }
+    ],
+    "homepage": "http://example.com/matrix",
+    "id": 603,
+    "imdb_id": "tt0133093",
+    "original_language": "en",
+    "original_title": "The Matrix",
+    "overview": "A hacker discovers the truth about reality.",
+    "popularity": 99.9,
+    "poster_path": "/matrix_poster.jpg",
+    "release_date": "1999-03-30",
+    "revenue": 463517383,
+    "runtime": 136,
+    "status": "Released",
+    "tagline": "Welcome to the Real World.",
+    "title": "The Matrix",
+    "video": false,
+    "vote_average": 8.7,
+    "vote_count": 25000,
+    "external_ids": {
+        "imdb_id": "tt0133093",
+        "facebook_id": null,
+        "instagram_id": null,
+        "twitter_id": null,
+        "wikidata_id": "Q83495"
+    }
+}

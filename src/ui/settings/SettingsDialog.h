@@ -16,9 +16,10 @@ class GeneralSettingsPage;
 class FiltersSettingsPage;
 class PlayerSettingsPage;
 class RealDebridSettingsPage;
+class TmdbSettingsPage;
 
 /**
- * Top-level Settings dialog. Four pages:
+ * Top-level Settings dialog. Five pages:
  *
  *   General — default search kind + Torrentio sort.
  *   Filters — server-side resolution/variant exclusions + client-side
@@ -26,10 +27,12 @@ class RealDebridSettingsPage;
  *   Player  — mpv / VLC / custom command.
  *   Real-Debrid — token management (async, self-contained; not part of
  *                 the Apply/OK flow).
+ *   TMDB (Discover) — optional override of the bundled TMDB token.
  *
  * On Apply / OK each page's apply() is called. Real-Debrid's
- * tokenChanged signal is forwarded through the dialog so MainWindow
- * can keep its in-memory token fresh without a keyring round-trip.
+ * tokenChanged and TMDB's tmdbTokenChanged signals are forwarded
+ * through the dialog so MainWindow can keep its in-memory tokens
+ * fresh without a keyring round-trip.
  */
 class SettingsDialog : public KPageDialog
 {
@@ -42,6 +45,10 @@ public:
 Q_SIGNALS:
     /// Forwarded from RealDebridSettingsPage. Empty string = removed.
     void tokenChanged(const QString& token);
+    /// Forwarded from TmdbSettingsPage. Empty string means the user
+    /// removed their override — the effective token falls back to the
+    /// compile-time default (if any).
+    void tmdbTokenChanged(const QString& token);
 
 private:
     void applyAll();
@@ -51,6 +58,7 @@ private:
     FiltersSettingsPage* m_filtersPage {};
     PlayerSettingsPage* m_playerPage {};
     RealDebridSettingsPage* m_rdPage {};
+    TmdbSettingsPage* m_tmdbPage {};
 };
 
 } // namespace kinema::ui::settings

@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilina@tlmtech.dev>
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+// Auto-generated from TmdbConfig.h.in by CMake. Do not edit by hand.
+
+#pragma once
+
+namespace kinema::core {
+
+/// Optional TMDB v4 Read Access Token baked into the binary at build
+/// time via -DKINEMA_TMDB_DEFAULT_TOKEN=<token>. Empty means no default
+/// was bundled, in which case Discover only works if the user pastes
+/// their own token in Settings.
+///
+/// Resolution order at runtime (see MainWindow::loadTmdbToken):
+///     user token (keyring) → this default → empty
+///
+/// Packagers are encouraged to inject their own token here instead of
+/// shipping upstream's — a revocation of upstream's key would otherwise
+/// break Discover in every downstream build until a new release.
+inline constexpr const char* kTmdbCompiledDefaultToken = "@KINEMA_TMDB_DEFAULT_TOKEN@";
+
+} // namespace kinema::core

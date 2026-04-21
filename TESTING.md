@@ -77,3 +77,44 @@ unlocalised user-facing string.
 26. On a row without a direct URL (plain magnet), the **Play**
     menu item is greyed out and the context menu still offers
     **Copy magnet link** / **Open magnet link**.
+
+## M4 — Discover (TMDB)
+
+> These checks assume a TMDB v4 Read Access Token is available —
+> either compiled in via `-DKINEMA_TMDB_DEFAULT_TOKEN=...` or pasted
+> into **Settings → TMDB (Discover)**.
+
+27. Cold start the app. The home surface shows **six horizontally-
+    scrolling strips** (Trending this week / Popular series / Now
+    playing in theaters / On the air / Top rated movies / Top rated
+    series). Each row fills in independently within ~3 s; a row
+    that fails doesn't block the others.
+28. Click a card in any row. The **existing detail flow** opens
+    (movie pane or series pane as appropriate) with the correct
+    poster, metadata, and torrents table. Status bar briefly shows
+    *"Looking up “…””* while TMDB resolves the IMDB id.
+29. Below the torrents table a **"More like this"** strip appears
+    with TMDB recommendations (falling back to /similar if empty).
+    Click one of those cards — the detail pane replaces its content
+    with the new item and the strip refreshes.
+30. Click the **Home** button on the toolbar (or the Go menu). The
+    results stack swaps back to the Discover page and any open
+    detail panel closes.
+31. Start a search (e.g. `inception`). The Discover page is replaced
+    by search results as before; clicking Home returns to Discover
+    with the six rows intact (no reload if the token hasn't changed).
+32. Open **Settings → TMDB (Discover)**. The intro copy frames the
+    page as an *override*, not a required setup step. Click **Test
+    connection** — status reads *Connected to TMDB*.
+33. Paste an invalid token and click **Save**. Discover swaps to the
+    *"TMDB rejected the token"* page-level call-to-action with an
+    **Open Settings** button that returns to the same dialog.
+34. Click **Remove token** in Settings. Status flips to *"Using the
+    bundled token."* (or *"No token configured…"* on builds with no
+    compile-time default). Discover re-fetches and populates again
+    if a bundled token is present.
+35. Verify no plaintext TMDB token on disk:
+    ```bash
+    grep -rI "<first 10 chars of your token>" ~/.config ~/.local ~/.cache 2>/dev/null
+    ```
+    should yield nothing.

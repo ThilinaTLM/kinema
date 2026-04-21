@@ -1,0 +1,39 @@
+{
+    "page": 1,
+    "results": [
+        {
+            "adult": false,
+            "backdrop_path": "/rec1_bd.jpg",
+            "id": 604,
+            "title": "The Matrix Reloaded",
+            "original_title": "The Matrix Reloaded",
+            "overview": "Neo continues the fight.",
+            "poster_path": "/reloaded_poster.jpg",
+            "media_type": "movie",
+            "genre_ids": [28, 878],
+            "popularity": 55.5,
+            "release_date": "2003-05-15",
+            "video": false,
+            "vote_average": 7.1,
+            "vote_count": 8000
+        },
+        {
+            "adult": false,
+            "backdrop_path": "/rec2_bd.jpg",
+            "id": 605,
+            "title": "The Matrix Revolutions",
+            "original_title": "The Matrix Revolutions",
+            "overview": "The final chapter.",
+            "poster_path": "/revolutions_poster.jpg",
+            "media_type": "movie",
+            "genre_ids": [28, 878],
+            "popularity": 50.0,
+            "release_date": "2003-11-05",
+            "video": false,
+            "vote_average": 6.7,
+            "vote_count": 7000
+        }
+    ],
+    "total_pages": 1,
+    "total_results": 2
+}

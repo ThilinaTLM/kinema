@@ -28,12 +28,14 @@ class TokenStore;
 
 namespace kinema::api {
 class CinemetaClient;
+class TmdbClient;
 class TorrentioClient;
 }
 
 namespace kinema::ui {
 
 class DetailPane;
+class DiscoverPage;
 class ImageLoader;
 class ResultCardDelegate;
 class ResultsModel;
@@ -60,6 +62,10 @@ private Q_SLOTS:
     void onQueryRequested(const QString& text, api::MediaKind kind);
     void onResultActivated(const QModelIndex& index);
     void onEpisodeSelected(const api::Episode& ep);
+    void onDiscoverItemActivated(const api::DiscoverItem& item);
+    /// Toolbar / menu "Home" action — swaps the results stack back to
+    /// the Discover page and closes any open detail panel.
+    void showDiscoverHome();
     void onCopyMagnet(const api::Stream& stream);
     void onOpenMagnet(const api::Stream& stream);
     void onCopyDirectUrl(const api::Stream& stream);
@@ -76,6 +82,8 @@ private:
     QCoro::Task<void> loadSeriesDetail(api::MetaSummary summary);
     QCoro::Task<void> loadEpisodeStreams(api::Episode episode, QString imdbId);
     QCoro::Task<void> loadRealDebridToken();
+    QCoro::Task<void> loadTmdbToken();
+    QCoro::Task<void> openFromDiscover(api::DiscoverItem item);
 
     void buildActions();
     void buildLayout();
@@ -89,6 +97,7 @@ private:
     std::unique_ptr<core::PlayerLauncher> m_player;
     api::CinemetaClient* m_cinemeta {};
     api::TorrentioClient* m_torrentio {};
+    api::TmdbClient* m_tmdb {};
     ImageLoader* m_imageLoader {};
 
     // UI
@@ -101,6 +110,7 @@ private:
     QListView* m_resultsView {};
     StateWidget* m_resultsState {};
     QStackedWidget* m_resultsStack {};
+    DiscoverPage* m_discoverPage {};
     DetailPane* m_detailPane {};
     SeriesDetailPane* m_seriesDetailPane {};
 
@@ -131,6 +141,11 @@ private:
 
     // In-memory RD token, loaded at startup and whenever Settings saves.
     QString m_rdToken;
+
+    // In-memory TMDB token. Resolved from: user keyring override →
+    // compile-time default → empty. Re-resolved when Settings saves
+    // or removes the user override.
+    QString m_tmdbToken;
 
     // Settings dialog is created lazily and reused across invocations.
     settings::SettingsDialog* m_settingsDialog {};

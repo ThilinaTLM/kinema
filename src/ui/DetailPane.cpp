@@ -6,6 +6,7 @@
 #include "config/Config.h"
 #include "core/StreamFilter.h"
 #include "ui/ImageLoader.h"
+#include "ui/SimilarStrip.h"
 #include "ui/StateWidget.h"
 #include "ui/TorrentsModel.h"
 
@@ -52,10 +53,16 @@ protected:
 
 } // namespace
 
-DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
+DetailPane::DetailPane(ImageLoader* loader,
+    api::TmdbClient* tmdb, QWidget* parent)
     : QWidget(parent)
     , m_loader(loader)
 {
+    if (tmdb) {
+        m_similar = new SimilarStrip(tmdb, loader, this);
+        connect(m_similar, &SimilarStrip::itemActivated,
+            this, &DetailPane::similarActivated);
+    }
     // ---- Header (always-visible close button) ------------------------------
     m_closeButton = new QToolButton(this);
     m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
@@ -192,6 +199,9 @@ DetailPane::DetailPane(ImageLoader* loader, QWidget* parent)
     root->addWidget(m_metaStack, 0);
     root->addLayout(cachedRow, 0);
     root->addWidget(m_torrentsStack, 1);
+    if (m_similar) {
+        root->addWidget(m_similar, 0);
+    }
 
     showIdle();
 
@@ -218,6 +228,17 @@ void DetailPane::showIdle()
     m_torrentsState->showIdle(QString {});
     m_torrentsStack->setCurrentWidget(m_torrentsState);
     rebuildCachedOnlyVisibility();
+
+    if (m_similar) {
+        m_similar->setContextImdb(api::MediaKind::Movie, QString {});
+    }
+}
+
+void DetailPane::setSimilarContext(api::MediaKind kind, const QString& imdbId)
+{
+    if (m_similar) {
+        m_similar->setContextImdb(kind, imdbId);
+    }
 }
 
 void DetailPane::showMetaLoading()

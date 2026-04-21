@@ -7,6 +7,7 @@
 #include "ui/settings/GeneralSettingsPage.h"
 #include "ui/settings/PlayerSettingsPage.h"
 #include "ui/settings/RealDebridSettingsPage.h"
+#include "ui/settings/TmdbSettingsPage.h"
 
 #include <KLocalizedString>
 
@@ -30,6 +31,7 @@ SettingsDialog::SettingsDialog(
     m_filtersPage = new FiltersSettingsPage(this);
     m_playerPage = new PlayerSettingsPage(this);
     m_rdPage = new RealDebridSettingsPage(http, tokens, this);
+    m_tmdbPage = new TmdbSettingsPage(http, tokens, this);
 
     auto* generalItem = addPage(m_generalPage,
         i18nc("@title:tab settings page", "General"));
@@ -46,6 +48,10 @@ SettingsDialog::SettingsDialog(
     auto* rdItem = addPage(m_rdPage,
         i18nc("@title:tab settings page", "Real-Debrid"));
     rdItem->setIcon(QIcon::fromTheme(QStringLiteral("network-server")));
+
+    auto* tmdbItem = addPage(m_tmdbPage,
+        i18nc("@title:tab settings page", "TMDB (Discover)"));
+    tmdbItem->setIcon(QIcon::fromTheme(QStringLiteral("applications-multimedia")));
 
     setStandardButtons(QDialogButtonBox::Ok | QDialogButtonBox::Apply
         | QDialogButtonBox::Cancel | QDialogButtonBox::RestoreDefaults);
@@ -66,6 +72,11 @@ SettingsDialog::SettingsDialog(
     // Forward RD token changes to MainWindow.
     connect(m_rdPage, &RealDebridSettingsPage::tokenChanged,
         this, &SettingsDialog::tokenChanged);
+
+    // Forward TMDB token changes to MainWindow (distinct signal so
+    // the two keyring slots don't get crossed).
+    connect(m_tmdbPage, &TmdbSettingsPage::tokenChanged,
+        this, &SettingsDialog::tmdbTokenChanged);
 }
 
 void SettingsDialog::applyAll()
@@ -73,7 +84,8 @@ void SettingsDialog::applyAll()
     m_generalPage->apply();
     m_filtersPage->apply();
     m_playerPage->apply();
-    // RD page is self-managed (Save/Remove buttons inside the page).
+    // RD and TMDB pages are self-managed (Save/Remove buttons inside
+    // the page).
 }
 
 void SettingsDialog::resetAllToDefaults()

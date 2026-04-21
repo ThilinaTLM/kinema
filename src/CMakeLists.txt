@@ -20,9 +20,14 @@ set(kinema_core_SRCS
     api/CinemetaParse.cpp
     api/RealDebridClient.cpp
     api/RealDebridParse.cpp
+    api/TmdbClient.cpp
+    api/TmdbParse.cpp
     api/TorrentioClient.cpp
     api/TorrentioParse.cpp
 
+    ui/DiscoverCardDelegate.cpp
+    ui/DiscoverPage.cpp
+    ui/DiscoverRowModel.cpp
     ui/EpisodeDelegate.cpp
     ui/EpisodesModel.cpp
     ui/ImageLoader.cpp
@@ -30,6 +35,7 @@ set(kinema_core_SRCS
     ui/ResultCardDelegate.cpp
     ui/SeriesDetailPane.cpp
     ui/SeriesPicker.cpp
+    ui/SimilarStrip.cpp
     ui/TorrentsModel.cpp
     ui/SearchBar.cpp
     ui/StateWidget.cpp
@@ -41,6 +47,7 @@ set(kinema_core_SRCS
     ui/settings/PlayerSettingsPage.cpp
     ui/settings/RealDebridSettingsPage.cpp
     ui/settings/SettingsDialog.cpp
+    ui/settings/TmdbSettingsPage.cpp
 
     app/KinemaApplication.cpp
 )

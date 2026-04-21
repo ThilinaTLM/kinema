@@ -50,6 +50,7 @@ class TokenStore : public QObject
 public:
     static constexpr auto kServiceName = "dev.tlmtech.kinema";
     static constexpr auto kRealDebridKey = "realdebrid-token";
+    static constexpr auto kTmdbKey = "tmdb-token";
 
     explicit TokenStore(QObject* parent = nullptr);
 

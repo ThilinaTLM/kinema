@@ -1,0 +1,25 @@
+{
+    "movie_results": [
+        {
+            "adult": false,
+            "backdrop_path": "/matrix_bd.jpg",
+            "id": 603,
+            "title": "The Matrix",
+            "original_language": "en",
+            "original_title": "The Matrix",
+            "overview": "A hacker discovers the truth.",
+            "poster_path": "/matrix_poster.jpg",
+            "media_type": "movie",
+            "genre_ids": [28, 878],
+            "popularity": 99.9,
+            "release_date": "1999-03-30",
+            "video": false,
+            "vote_average": 8.7,
+            "vote_count": 25000
+        }
+    ],
+    "person_results": [],
+    "tv_results": [],
+    "tv_episode_results": [],
+    "tv_season_results": []
+}

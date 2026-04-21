@@ -26,6 +26,11 @@ ecm_add_test(tst_cinemeta_parse.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_tmdb_parse.cpp
+    TEST_NAME tst_tmdb_parse
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_torrentio_parse.cpp
     TEST_NAME tst_torrentio_parse
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -47,6 +52,7 @@ ecm_add_test(tst_stream_filter.cpp
 )
 
 foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
+         tst_tmdb_parse
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

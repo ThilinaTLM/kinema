@@ -7,6 +7,7 @@
 #include "core/StreamFilter.h"
 #include "ui/ImageLoader.h"
 #include "ui/SeriesPicker.h"
+#include "ui/SimilarStrip.h"
 #include "ui/StateWidget.h"
 #include "ui/TorrentsModel.h"
 
@@ -54,10 +55,16 @@ protected:
 
 } // namespace
 
-SeriesDetailPane::SeriesDetailPane(ImageLoader* loader, QWidget* parent)
+SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
+    api::TmdbClient* tmdb, QWidget* parent)
     : QWidget(parent)
     , m_loader(loader)
 {
+    if (tmdb) {
+        m_similar = new SimilarStrip(tmdb, loader, this);
+        connect(m_similar, &SimilarStrip::itemActivated,
+            this, &SeriesDetailPane::similarActivated);
+    }
     // ---- Header strip ------------------------------------------------------
     m_closeButton = new QToolButton(this);
     m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
@@ -229,6 +236,9 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader, QWidget* parent)
     root->setSpacing(0);
     root->addWidget(headerWrap, 0);
     root->addWidget(m_bodySplit, 1);
+    if (m_similar) {
+        root->addWidget(m_similar, 0);
+    }
 
     // Repaint the poster when it finishes loading.
     if (m_loader) {
@@ -241,6 +251,13 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader, QWidget* parent)
     }
 
     showMetaLoading();
+}
+
+void SeriesDetailPane::setSimilarContext(const QString& imdbId)
+{
+    if (m_similar) {
+        m_similar->setContextImdb(api::MediaKind::Series, imdbId);
+    }
 }
 
 void SeriesDetailPane::applyDefaultSplitterRatio()

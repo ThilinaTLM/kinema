@@ -1,0 +1,64 @@
+{
+    "page": 1,
+    "results": [
+        {
+            "adult": false,
+            "backdrop_path": "/trend_bd_1.jpg",
+            "id": 603,
+            "title": "The Matrix",
+            "original_language": "en",
+            "original_title": "The Matrix",
+            "overview": "A hacker discovers the truth about reality.",
+            "poster_path": "/matrix_poster.jpg",
+            "media_type": "movie",
+            "genre_ids": [28, 878],
+            "popularity": 99.9,
+            "release_date": "1999-03-30",
+            "video": false,
+            "vote_average": 8.7,
+            "vote_count": 25000
+        },
+        {
+            "adult": false,
+            "backdrop_path": "/trend_bd_2.jpg",
+            "id": 24428,
+            "title": "The Avengers",
+            "original_language": "en",
+            "original_title": "The Avengers",
+            "overview": "Earth's mightiest heroes team up.",
+            "poster_path": "/avengers_poster.jpg",
+            "media_type": "movie",
+            "genre_ids": [28],
+            "popularity": 88.8,
+            "release_date": "2012-04-25",
+            "video": false,
+            "vote_average": 7.7,
+            "vote_count": 30000
+        },
+        {
+            "id": 99999,
+            "title": "No Poster Here",
+            "overview": "Should be skipped because poster_path is null.",
+            "poster_path": null,
+            "release_date": "2020-01-01"
+        },
+        {
+            "id": 0,
+            "title": "Bogus Item",
+            "overview": "Dropped because id is 0.",
+            "poster_path": "/x.jpg",
+            "release_date": "2020-01-01"
+        },
+        {
+            "id": 777,
+            "title": "",
+            "original_title": "Only Original Title",
+            "overview": "Falls back to original_title.",
+            "poster_path": "/fallback.jpg",
+            "release_date": "2018-06-15",
+            "vote_average": 0.0
+        }
+    ],
+    "total_pages": 1,
+    "total_results": 5
+}

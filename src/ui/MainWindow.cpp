@@ -4,15 +4,18 @@
 #include "ui/MainWindow.h"
 
 #include "api/CinemetaClient.h"
+#include "api/TmdbClient.h"
 #include "api/TorrentioClient.h"
 #include "config/Config.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
 #include "core/Magnet.h"
 #include "core/PlayerLauncher.h"
+#include "core/TmdbConfig.h"
 #include "core/TokenStore.h"
 #include "kinema_debug.h"
 #include "ui/DetailPane.h"
+#include "ui/DiscoverPage.h"
 #include "ui/ImageLoader.h"
 #include "ui/ResultCardDelegate.h"
 #include "ui/ResultsModel.h"
@@ -72,6 +75,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_player = std::make_unique<core::PlayerLauncher>(this);
     m_cinemeta = new api::CinemetaClient(m_http.get(), this);
     m_torrentio = new api::TorrentioClient(m_http.get(), this);
+    m_tmdb = new api::TmdbClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
 
     buildLayout();
@@ -107,6 +111,15 @@ MainWindow::MainWindow(QWidget* parent)
     // Load the token from the keyring in the background.
     if (hasRD) {
         auto t = loadRealDebridToken();
+        Q_UNUSED(t);
+    }
+
+    // Resolve the effective TMDB token and kick off the initial
+    // Discover refresh. Fire-and-forget; the result populates
+    // m_tmdbToken and either refreshes the rows or shows the
+    // not-configured call-to-action.
+    {
+        auto t = loadTmdbToken();
         Q_UNUSED(t);
     }
 
@@ -163,12 +176,28 @@ void MainWindow::buildLayout()
         i18nc("@label", "Search to get started"),
         i18nc("@info", "Type a movie title or an IMDB id and press Enter."));
 
+    // Discover home page (TMDB-powered catalog strips). Sits at index
+    // 0 so it's the app's default landing surface; runSearch() swaps
+    // to m_resultsState / m_resultsView; showDiscoverHome() swaps
+    // back.
+    m_discoverPage = new DiscoverPage(m_tmdb, m_imageLoader, this);
+    connect(m_discoverPage, &DiscoverPage::itemActivated,
+        this, &MainWindow::onDiscoverItemActivated);
+    connect(m_discoverPage, &DiscoverPage::settingsRequested,
+        this, &MainWindow::showSettings);
+
     m_resultsStack = new QStackedWidget(this);
-    m_resultsStack->addWidget(m_resultsState);
-    m_resultsStack->addWidget(m_resultsView);
+    m_resultsStack->addWidget(m_discoverPage); // idx 0 = home
+    m_resultsStack->addWidget(m_resultsState); // idx 1 = search state
+    m_resultsStack->addWidget(m_resultsView);  // idx 2 = search results
 
     // ---- Detail panes (movies + series) ----------------------------------
-    m_detailPane = new DetailPane(m_imageLoader, this);
+    m_detailPane = new DetailPane(m_imageLoader, m_tmdb, this);
+    connect(m_detailPane, &DetailPane::similarActivated, this,
+        [this](const api::DiscoverItem& item) {
+            auto t = openFromDiscover(item);
+            Q_UNUSED(t);
+        });
     connect(m_detailPane, &DetailPane::copyMagnetRequested,
         this, &MainWindow::onCopyMagnet);
     connect(m_detailPane, &DetailPane::openMagnetRequested,
@@ -182,7 +211,12 @@ void MainWindow::buildLayout()
     connect(m_detailPane, &DetailPane::closeRequested,
         this, &MainWindow::closeDetailPanel);
 
-    m_seriesDetailPane = new SeriesDetailPane(m_imageLoader, this);
+    m_seriesDetailPane = new SeriesDetailPane(m_imageLoader, m_tmdb, this);
+    connect(m_seriesDetailPane, &SeriesDetailPane::similarActivated, this,
+        [this](const api::DiscoverItem& item) {
+            auto t = openFromDiscover(item);
+            Q_UNUSED(t);
+        });
     connect(m_seriesDetailPane, &SeriesDetailPane::episodeSelected,
         this, &MainWindow::onEpisodeSelected);
     connect(m_seriesDetailPane, &SeriesDetailPane::copyMagnetRequested,
@@ -321,6 +355,11 @@ void MainWindow::buildActions()
     });
     m_actions->addAction(QStringLiteral("focus_search"), focusSearch);
 
+    // Home — swap back to the Discover page from any search result.
+    auto* homeAction = KStandardAction::home(
+        this, &MainWindow::showDiscoverHome, m_actions);
+    homeAction->setToolTip(i18nc("@info:tooltip", "Back to Discover"));
+
     // Esc anywhere in the window closes the detail panel if it's open.
     // No modal flows live inside the main window (Settings is a
     // top-level dialog), so a window-scope shortcut is safe.
@@ -335,6 +374,9 @@ void MainWindow::buildActions()
     // ---- Classic menu bar (hidden by default, toggled via Ctrl+M) ----------
     auto* fileMenu = menuBar()->addMenu(i18nc("@title:menu", "&File"));
     fileMenu->addAction(quitAction);
+
+    auto* goMenu = menuBar()->addMenu(i18nc("@title:menu", "&Go"));
+    goMenu->addAction(homeAction);
 
     auto* editMenu = menuBar()->addMenu(i18nc("@title:menu", "&Edit"));
     editMenu->addAction(focusSearch);
@@ -361,9 +403,10 @@ void MainWindow::buildActions()
     // actions. We want a fully flat custom menu instead.
 
     connect(hamburger, &KHamburgerMenu::aboutToShowMenu, this,
-            [this, hamburger, focusSearch, prefsAction,
+            [this, hamburger, focusSearch, homeAction, prefsAction,
              aboutAction, quitAction] {
         auto* menu = new QMenu;
+        menu->addAction(homeAction);
         menu->addAction(focusSearch);
         menu->addSeparator();
         menu->addAction(m_showMenubarAction);
@@ -381,6 +424,14 @@ void MainWindow::buildActions()
     });
 
     if (m_toolbar) {
+        // Prepend Home so it sits before the SearchBar and is easy to
+        // reach with a single click.
+        if (m_searchBar) {
+            m_toolbar->insertAction(
+                m_toolbar->actions().value(0), homeAction);
+        } else {
+            m_toolbar->addAction(homeAction);
+        }
         auto* spacer = new QWidget(m_toolbar);
         spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         m_toolbar->addWidget(spacer);
@@ -547,6 +598,8 @@ QCoro::Task<void> MainWindow::loadMovieDetail(api::MetaSummary summary)
             co_return;
         }
         m_detailPane->setMeta(detail);
+        m_detailPane->setSimilarContext(
+            api::MediaKind::Movie, summary.imdbId);
 
         auto streams = co_await m_torrentio->streams(
             api::MediaKind::Movie, summary.imdbId, currentConfig());
@@ -585,6 +638,7 @@ QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
             co_return;
         }
         m_seriesDetailPane->setSeries(sd);
+        m_seriesDetailPane->setSimilarContext(summary.imdbId);
 
         // Give keyboard focus to the episode list for immediate arrow-key nav.
         m_seriesDetailPane->focusEpisodeList();
@@ -667,6 +721,123 @@ QCoro::Task<void> MainWindow::loadRealDebridToken()
     }
 }
 
+QCoro::Task<void> MainWindow::loadTmdbToken()
+{
+    // User override wins if present; otherwise the compile-time
+    // default; otherwise empty (Discover shows not-configured state).
+    QString user;
+    try {
+        user = co_await m_tokens->read(
+            QString::fromLatin1(core::TokenStore::kTmdbKey));
+    } catch (const std::exception& e) {
+        qCWarning(KINEMA) << "TMDB token read failed:" << e.what();
+    }
+    if (!user.isEmpty()) {
+        m_tmdbToken = std::move(user);
+    } else {
+        const auto* def = core::kTmdbCompiledDefaultToken;
+        m_tmdbToken = (def && def[0] != '\0')
+            ? QString::fromLatin1(def)
+            : QString {};
+    }
+
+    if (m_tmdb) {
+        m_tmdb->setToken(m_tmdbToken);
+    }
+    if (m_discoverPage) {
+        if (m_tmdbToken.isEmpty()) {
+            m_discoverPage->showNotConfigured();
+        } else {
+            m_discoverPage->refresh();
+        }
+    }
+}
+
+void MainWindow::showDiscoverHome()
+{
+    // Cancel any open detail panel and close the search view so the
+    // grid side of the splitter is fully given over to Discover.
+    closeDetailPanel();
+    if (m_resultsStack && m_discoverPage) {
+        m_resultsStack->setCurrentWidget(m_discoverPage);
+    }
+    if (m_searchBar) {
+        m_searchBar->clearFocus();
+    }
+    statusBar()->clearMessage();
+    setWindowTitle(QStringLiteral("Kinema"));
+}
+
+void MainWindow::onDiscoverItemActivated(const api::DiscoverItem& item)
+{
+    auto t = openFromDiscover(item);
+    Q_UNUSED(t);
+}
+
+QCoro::Task<void> MainWindow::openFromDiscover(api::DiscoverItem item)
+{
+    // Resolve TMDB id → IMDB id, then hand off to the existing detail
+    // pipeline. Done on the click (not eagerly at list time) because
+    // list endpoints don't include external_ids and most cards will
+    // never be clicked.
+    statusBar()->showMessage(
+        i18nc("@info:status", "Looking up “%1”…", item.title));
+
+    QString imdbId;
+    try {
+        imdbId = item.kind == api::MediaKind::Movie
+            ? co_await m_tmdb->imdbIdForTmdbMovie(item.tmdbId)
+            : co_await m_tmdb->imdbIdForTmdbSeries(item.tmdbId);
+    } catch (const core::HttpError& e) {
+        qCWarning(KINEMA) << "TMDB external_ids lookup failed:" << e.message();
+        statusBar()->showMessage(
+            i18nc("@info:status", "Could not open “%1”: %2",
+                item.title, e.message()),
+            6000);
+        co_return;
+    } catch (const std::exception& e) {
+        statusBar()->showMessage(QString::fromUtf8(e.what()), 6000);
+        co_return;
+    }
+
+    if (imdbId.isEmpty()) {
+        statusBar()->showMessage(
+            i18nc("@info:status",
+                "“%1” has no IMDB id on TMDB — can't fetch streams.",
+                item.title),
+            6000);
+        co_return;
+    }
+
+    // Build a MetaSummary mirroring what search would have produced,
+    // so the existing flow (which expects one) runs unchanged.
+    api::MetaSummary s;
+    s.imdbId = imdbId;
+    s.kind = item.kind;
+    s.title = item.title;
+    s.year = item.year;
+    s.poster = item.poster;
+    s.description = item.overview;
+    s.imdbRating = item.voteAverage;
+
+    // Swap the results stack to the search view so the panel looks
+    // consistent with a click-from-search flow. Not strictly needed
+    // (the detail panel opens regardless), but prevents confusion if
+    // the user backs out with [×] and expects to see a grid.
+    if (m_resultsStack && m_resultsView) {
+        m_resultsModel->reset({ s });
+        m_resultsStack->setCurrentWidget(m_resultsView);
+    }
+
+    if (s.kind == api::MediaKind::Movie) {
+        openDetailPanel(/*movie*/ 0);
+        co_await loadMovieDetail(s);
+    } else {
+        openDetailPanel(/*series*/ 1);
+        co_await loadSeriesDetail(s);
+    }
+}
+
 void MainWindow::showSettings()
 {
     if (!m_settingsDialog) {
@@ -681,6 +852,17 @@ void MainWindow::showSettings()
                         ? i18nc("@info:status", "Real-Debrid token removed.")
                         : i18nc("@info:status", "Real-Debrid token saved."),
                     3000);
+            });
+        connect(m_settingsDialog, &settings::SettingsDialog::tmdbTokenChanged,
+            this, [this](const QString&) {
+                // Don't trust the forwarded value directly — the
+                // effective token could be falling back to the
+                // compile-time default. Re-resolve via the same path
+                // we use at startup.
+                auto t = loadTmdbToken();
+                Q_UNUSED(t);
+                statusBar()->showMessage(
+                    i18nc("@info:status", "TMDB token updated."), 3000);
             });
         connect(m_settingsDialog, &QObject::destroyed, this,
             [this] { m_settingsDialog = nullptr; });
