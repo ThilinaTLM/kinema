@@ -28,12 +28,18 @@ subscribers — streaming straight into **mpv** or **VLC**.
 - **Play** in the **embedded mpv player** (default when built with
   libmpv), external mpv, VLC, or a custom command — configurable
   per preference in **Settings → Player**. Enter, double-click, or
-  right-click → Play on any cached row. The embedded player plays
-  **inside the main Kinema window** (the video replaces the detail
-  pane; Back or Esc returns you to it), uses mpv's built-in OSC,
-  supports true fullscreen (F / double-click / Esc — hides all
-  chrome), and honours your local `~/.config/mpv/{mpv,input}.conf`
-  and scripts.
+  right-click → Play on any cached row. The embedded player opens
+  in a **dedicated mpv window alongside Kinema**, so you can keep
+  browsing (or close the main window to the system tray) while
+  watching. It uses mpv's built-in OSC, supports true fullscreen
+  (F / double-click / Esc), and honours your local
+  `~/.config/mpv/{mpv,input}.conf` and scripts.
+- **System tray + close-to-tray**: on Plasma 6 (and any desktop
+  exposing a StatusNotifier / system tray), closing the main window
+  hides Kinema to the tray instead of quitting — the player keeps
+  playing, and you can bring the main window back with a single
+  click on the tray icon. Right-click → **Quit Kinema** (or
+  Ctrl+Q) to exit. Toggle the behaviour in **Settings → General**.
 - Sortable torrents table, poster & thumbnail cache (memory + disk)
 - First-class Plasma 6 theming, keyboard navigation, KNotifications
 
@@ -55,7 +61,8 @@ subscribers — streaming straight into **mpv** or **VLC**.
 ```bash
 sudo pacman -S --needed base-devel cmake extra-cmake-modules \
     qt6-base qt6-tools qcoro qtkeychain-qt6 \
-    kcoreaddons ki18n kio kconfigwidgets knotifications kxmlgui mpv
+    kcoreaddons ki18n kio kconfigwidgets knotifications \
+    kstatusnotifieritem kxmlgui mpv
 # mpv's package on Arch ships libmpv headers, so the embedded player
 # is enabled automatically.
 ```
@@ -66,7 +73,8 @@ sudo pacman -S --needed base-devel cmake extra-cmake-modules \
 sudo dnf install gcc-c++ cmake extra-cmake-modules \
     qt6-qtbase-devel qt6-qttools-devel qcoro-qt6-devel qt6-qtkeychain-devel \
     kf6-kcoreaddons-devel kf6-ki18n-devel kf6-kio-devel \
-    kf6-kconfigwidgets-devel kf6-knotifications-devel kf6-kxmlgui-devel \
+    kf6-kconfigwidgets-devel kf6-knotifications-devel \
+    kf6-kstatusnotifieritem-devel kf6-kxmlgui-devel \
     mpv-libs-devel mpv
 ```
 
@@ -76,7 +84,8 @@ sudo dnf install gcc-c++ cmake extra-cmake-modules \
 sudo apt install build-essential cmake extra-cmake-modules \
     qt6-base-dev qt6-tools-dev libqcoro6-dev qt6keychain-dev \
     libkf6coreaddons-dev libkf6i18n-dev libkf6kio-dev \
-    libkf6configwidgets-dev libkf6notifications-dev libkf6xmlgui-dev \
+    libkf6configwidgets-dev libkf6notifications-dev \
+    libkf6statusnotifieritem-dev libkf6xmlgui-dev \
     libmpv-dev mpv
 ```
 

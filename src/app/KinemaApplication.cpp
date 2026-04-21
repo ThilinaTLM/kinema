@@ -7,6 +7,7 @@
 #include <KLocalizedString>
 
 #include <QIcon>
+#include <QSystemTrayIcon>
 
 #include "kinema_version.h"
 
@@ -48,6 +49,14 @@ void KinemaApplication::configure()
     about.setOrganizationDomain(QByteArrayLiteral("tlmtech.dev"));
 
     KAboutData::setApplicationData(about);
+
+    // When a system tray is available, MainWindow hides to tray on
+    // close (see MainWindow::closeEvent) and we want the app to keep
+    // running even if every window is hidden. When no tray host is
+    // available, the current behaviour — quit when the last window
+    // closes — remains correct.
+    setQuitOnLastWindowClosed(
+        !QSystemTrayIcon::isSystemTrayAvailable());
 }
 
 } // namespace kinema

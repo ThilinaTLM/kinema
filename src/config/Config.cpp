@@ -17,6 +17,7 @@ constexpr auto kGroupPlayer = "Player";
 constexpr auto kGroupBrowse = "Browse";
 
 constexpr auto kKeyCachedOnly = "cachedOnly";
+constexpr auto kKeyCloseToTray = "closeToTray";
 constexpr auto kKeySearchKind = "searchKind";
 constexpr auto kKeyDefaultSort = "defaultSort";
 constexpr auto kKeyBrowseSplitter = "browseSplitter";
@@ -111,6 +112,21 @@ void Config::setHasRealDebrid(bool on)
 bool Config::cachedOnly() const
 {
     return group(kGroupGeneral).readEntry(kKeyCachedOnly, false);
+}
+
+bool Config::closeToTray() const
+{
+    return group(kGroupGeneral).readEntry(kKeyCloseToTray, true);
+}
+
+void Config::setCloseToTray(bool on)
+{
+    if (closeToTray() == on) {
+        return;
+    }
+    auto g = group(kGroupGeneral);
+    g.writeEntry(kKeyCloseToTray, on);
+    g.sync();
 }
 
 void Config::setCachedOnly(bool on)

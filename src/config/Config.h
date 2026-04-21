@@ -23,6 +23,8 @@ namespace kinema::config {
  *   [General]
  *     searchKind        = "Movie" | "Series"      (last SearchBar selection)
  *     cachedOnly        = true|false              (RD cached-only checkbox)
+ *     closeToTray       = true|false              (hide main window to tray
+ *                                                  on close; default true)
  *     defaultSort       = "seeders" | "size" | "qualitysize"
  *                                                  (Torrentio sort= param)
  *     browseSplitter    = <QSplitter::saveState() bytes>
@@ -62,6 +64,12 @@ public:
     // Cached-on-Real-Debrid-only filter.
     bool cachedOnly() const;
     void setCachedOnly(bool);
+
+    // Hide main window to system tray on close (default true). When
+    // false, closing the main window quits the app as it did before
+    // the tray landed.
+    bool closeToTray() const;
+    void setCloseToTray(bool);
 
     // Last-used SearchBar mode.
     api::MediaKind searchKind() const;

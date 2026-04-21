@@ -26,3 +26,10 @@ Comment=Emitted when the external player could not be launched.
 IconName=dialog-error
 Action=Popup
 DefaultAction=Popup
+
+[Event/trayMinimized]
+Name=Minimized to tray
+Comment=Shown the first time Kinema hides itself to the system tray in a session, so the user knows the app is still running.
+IconName=dev.tlmtech.kinema
+Action=Popup
+DefaultAction=Popup

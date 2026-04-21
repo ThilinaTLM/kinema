@@ -63,6 +63,7 @@ set(kinema_core_SRCS
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
         ui/player/MpvWidget.cpp
+        ui/player/PlayerWindow.cpp
     )
 endif()
 
@@ -103,6 +104,7 @@ target_link_libraries(kinema_core
         KF6::KIOGui
         KF6::ConfigWidgets
         KF6::Notifications
+        KF6::StatusNotifierItem
         KF6::WidgetsAddons
         KF6::XmlGui
         QCoro6::Core

@@ -5,6 +5,7 @@
 
 #include <QWidget>
 
+class QCheckBox;
 class QComboBox;
 
 namespace kinema::ui::settings {
@@ -30,6 +31,7 @@ public:
 private:
     QComboBox* m_searchKindCombo {};
     QComboBox* m_sortCombo {};
+    QCheckBox* m_closeToTrayCheck {};
 };
 
 } // namespace kinema::ui::settings

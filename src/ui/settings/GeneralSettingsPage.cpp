@@ -9,9 +9,11 @@
 
 #include <KLocalizedString>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QSystemTrayIcon>
 #include <QVBoxLayout>
 
 namespace kinema::ui::settings {
@@ -57,11 +59,28 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
     m_sortCombo->addItem(i18nc("@item:inlistbox sort mode", "Size"));
     m_sortCombo->addItem(i18nc("@item:inlistbox sort mode", "Quality & Size"));
 
+    m_closeToTrayCheck = new QCheckBox(
+        i18nc("@option:check",
+            "Close main window to system tray (keep Kinema running)"),
+        this);
+    if (QSystemTrayIcon::isSystemTrayAvailable()) {
+        m_closeToTrayCheck->setToolTip(i18nc("@info:tooltip",
+            "When enabled, closing the main window hides Kinema to the "
+            "system tray instead of quitting. The player window keeps "
+            "playing. Use the tray icon or Ctrl+Q to quit."));
+    } else {
+        m_closeToTrayCheck->setEnabled(false);
+        m_closeToTrayCheck->setToolTip(i18nc("@info:tooltip",
+            "Your desktop does not expose a system tray, so "
+            "close-to-tray is unavailable."));
+    }
+
     auto* form = new QFormLayout;
     form->addRow(i18nc("@label:listbox", "Default search kind:"),
         m_searchKindCombo);
     form->addRow(i18nc("@label:listbox", "Default torrent sort:"),
         m_sortCombo);
+    form->addRow(m_closeToTrayCheck);
 
     auto* hint = new QLabel(
         i18nc("@info",
@@ -85,6 +104,7 @@ void GeneralSettingsPage::load()
     m_searchKindCombo->setCurrentIndex(
         cfg.searchKind() == api::MediaKind::Series ? 1 : 0);
     m_sortCombo->setCurrentIndex(sortModeToIndex(cfg.defaultSort()));
+    m_closeToTrayCheck->setChecked(cfg.closeToTray());
 }
 
 void GeneralSettingsPage::apply()
@@ -94,12 +114,14 @@ void GeneralSettingsPage::apply()
             ? api::MediaKind::Series
             : api::MediaKind::Movie);
     cfg.setDefaultSort(indexToSortMode(m_sortCombo->currentIndex()));
+    cfg.setCloseToTray(m_closeToTrayCheck->isChecked());
 }
 
 void GeneralSettingsPage::resetToDefaults()
 {
     m_searchKindCombo->setCurrentIndex(0);
     m_sortCombo->setCurrentIndex(sortModeToIndex(core::torrentio::SortMode::Seeders));
+    m_closeToTrayCheck->setChecked(true);
 }
 
 } // namespace kinema::ui::settings

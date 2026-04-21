@@ -27,12 +27,13 @@
 #include "ui/settings/SettingsDialog.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
-#include "ui/player/MpvWidget.h"
+#include "ui/player/PlayerWindow.h"
 #endif
 
 #include <QEvent>
 
 #include <KNotification>
+#include <KStatusNotifierItem>
 
 #include <KAboutApplicationDialog>
 #include <KAboutData>
@@ -47,14 +48,17 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QCloseEvent>
 #include <QIcon>
 #include <QKeySequence>
 #include <QListView>
+#include <QMenu>
 #include <QMenuBar>
 #include <QRegularExpression>
 #include <QShortcut>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QSystemTrayIcon>
 #include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -140,6 +144,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(&config::Config::instance(),
         &config::Config::torrentioOptionsChanged,
         this, &MainWindow::onTorrentioOptionsChanged);
+
+    // System tray. No-op on desktops that don't expose a tray; the
+    // close-to-tray path silently falls back to "close = quit" there.
+    buildTray();
 }
 
 MainWindow::~MainWindow() = default;
@@ -321,35 +329,29 @@ void MainWindow::closeDetailPanel()
 
 #ifdef KINEMA_HAVE_LIBMPV
 
-bool MainWindow::playerPageActive() const
-{
-    return m_playerPage && m_centerStack
-        && m_centerStack->currentWidget() == m_playerPage;
-}
-
 void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
 {
-    // Lazy construction: the MpvWidget initialises libmpv + an OpenGL
-    // render context in its ctor / initializeGL, so we pay nothing
-    // until the user actually picks "Embedded" and hits Play.
-    if (!m_playerPage) {
-        m_playerPage = new player::MpvWidget(this);
-        m_centerStack->addWidget(m_playerPage);
+    // Lazy construction: the MpvWidget (inside PlayerWindow)
+    // initialises libmpv + an OpenGL render context in its ctor /
+    // initializeGL, so we pay nothing until the user actually picks
+    // "Embedded" and hits Play.
+    if (!m_playerWindow) {
+        m_playerWindow = new player::PlayerWindow(this);
 
-        connect(m_playerPage, &player::MpvWidget::fileLoaded,
+        connect(m_playerWindow, &player::PlayerWindow::fileLoaded,
             this, [this] {
-                const auto t = windowTitle();
                 auto* n = new KNotification(
                     QStringLiteral("playbackStarted"),
                     KNotification::CloseOnTimeout);
                 n->setTitle(i18nc("@title:window notification",
                     "Playing in Kinema"));
-                n->setText(t);
+                // m_playerWindow's title is already "<media> — Kinema".
+                n->setText(m_playerWindow->windowTitle());
                 n->setIconName(
                     QStringLiteral("media-playback-start"));
                 n->sendEvent();
             });
-        connect(m_playerPage, &player::MpvWidget::mpvError,
+        connect(m_playerWindow, &player::PlayerWindow::mpvError,
             this, [this](const QString& reason) {
                 statusBar()->showMessage(reason, 6000);
                 auto* n = new KNotification(
@@ -361,139 +363,26 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
                 n->setIconName(QStringLiteral("dialog-error"));
                 n->sendEvent();
             });
-        connect(m_playerPage, &player::MpvWidget::endOfFile, this,
-            [this](const QString& reason) {
+        connect(m_playerWindow, &player::PlayerWindow::endOfFile,
+            this, [this](const QString& reason) {
+                // PlayerWindow has already stopped playback and
+                // hidden itself by now — just surface an error
+                // status for abnormal exits.
                 if (reason == QLatin1String("error")) {
                     statusBar()->showMessage(
                         i18nc("@info:status",
                             "Playback ended with an error."),
                         6000);
                 }
-                closeEmbeddedPlayer();
             });
-        connect(m_playerPage, &player::MpvWidget::toggleFullscreenRequested,
-            this, [this] {
-                if (isFullScreen()) {
-                    exitPlayerFullscreen();
-                } else {
-                    enterPlayerFullscreen();
-                }
-            });
-        connect(m_playerPage, &player::MpvWidget::leaveFullscreenRequested,
-            this, [this] {
-                // Esc in fullscreen leaves fullscreen but keeps
-                // playing. Esc in windowed closes the player
-                // entirely (handled by the window-level Esc
-                // shortcut in buildActions()).
-                if (isFullScreen()) {
-                    exitPlayerFullscreen();
-                }
-            });
-        connect(m_playerPage, &player::MpvWidget::fullscreenChanged,
-            this, [this](bool on) {
-                if (m_applyingFullscreen) {
-                    return;
-                }
-                if (on && !isFullScreen()) {
-                    enterPlayerFullscreen();
-                } else if (!on && isFullScreen()) {
-                    exitPlayerFullscreen();
-                }
-            });
+        connect(m_playerWindow, &player::PlayerWindow::visibilityChanged,
+            this, [this](bool) { updateTrayMenu(); });
     }
 
-    // Remember where to return on close / EOF. First entry into the
-    // player page captures the detail / results page that was
-    // active; subsequent re-entries (rare — only if the user
-    // somehow navigated away without closing) keep the original.
-    if (!playerPageActive()) {
-        m_playerReturnTo = m_centerStack->currentWidget();
-    }
-    m_centerStack->setCurrentWidget(m_playerPage);
-    m_playerPage->setFocus();
-
-    setWindowTitle(title.isEmpty()
-        ? QStringLiteral("Kinema")
-        : i18nc("@title:window window title with media title",
-              "%1 — Kinema", title));
     statusBar()->showMessage(
         i18nc("@info:status", "Loading “%1”…", title), 3000);
 
-    m_playerPage->loadFile(url);
-}
-
-void MainWindow::closeEmbeddedPlayer()
-{
-    if (!m_playerPage) {
-        return;
-    }
-    if (isFullScreen()) {
-        exitPlayerFullscreen();
-    }
-    m_playerPage->stop();
-
-    // Return to wherever the user was before playback started. If
-    // m_playerReturnTo is stale (widget destroyed, which shouldn't
-    // happen but be defensive) fall back to the results stack.
-    QWidget* target = m_playerReturnTo;
-    if (!target || m_centerStack->indexOf(target) < 0) {
-        target = m_resultsStack;
-    }
-    m_centerStack->setCurrentWidget(target);
-    m_playerReturnTo = nullptr;
-
-    setWindowTitle(QStringLiteral("Kinema"));
-    updateBackActionEnabled();
-}
-
-void MainWindow::enterPlayerFullscreen()
-{
-    if (m_applyingFullscreen || isFullScreen()) {
-        return;
-    }
-    m_applyingFullscreen = true;
-
-    // Snapshot chrome so we can restore it exactly on exit. We
-    // deliberately don't route menubar through its QAction's
-    // setChecked() — that would persist "menu bar hidden" to
-    // config, which isn't what the user asked for.
-    m_preFsToolbarVisible = m_toolbar ? m_toolbar->isVisible() : true;
-    m_preFsMenubarVisible = menuBar()->isVisible();
-    m_preFsStatusbarVisible = statusBar()->isVisible();
-
-    if (m_toolbar) {
-        m_toolbar->hide();
-    }
-    menuBar()->hide();
-    statusBar()->hide();
-
-    showFullScreen();
-    if (m_playerPage) {
-        m_playerPage->setMpvFullscreen(true);
-        m_playerPage->setFocus();
-    }
-    m_applyingFullscreen = false;
-}
-
-void MainWindow::exitPlayerFullscreen()
-{
-    if (m_applyingFullscreen || !isFullScreen()) {
-        return;
-    }
-    m_applyingFullscreen = true;
-
-    showNormal();
-    if (m_toolbar) {
-        m_toolbar->setVisible(m_preFsToolbarVisible);
-    }
-    menuBar()->setVisible(m_preFsMenubarVisible);
-    statusBar()->setVisible(m_preFsStatusbarVisible);
-
-    if (m_playerPage) {
-        m_playerPage->setMpvFullscreen(false);
-        m_playerPage->setFocus();
-    }
-    m_applyingFullscreen = false;
+    m_playerWindow->play(url, title);
 }
 
 #endif // KINEMA_HAVE_LIBMPV
@@ -510,20 +399,10 @@ void MainWindow::onBackToEpisodes()
 
 void MainWindow::onBackRequested()
 {
-#ifdef KINEMA_HAVE_LIBMPV
-    // 0. Embedded player: Back first exits fullscreen (so the user
-    //    can hand the remote back to the window chrome), then on a
-    //    second press stops playback and returns to the previous
-    //    page.
-    if (playerPageActive()) {
-        if (isFullScreen()) {
-            exitPlayerFullscreen();
-        } else {
-            closeEmbeddedPlayer();
-        }
-        return;
-    }
-#endif
+    // The embedded player lives in its own top-level window and owns
+    // its own Back / Esc handling, so MainWindow's back action only
+    // walks the main-window nav stack (streams → episodes → detail
+    // → results → Discover).
 
     // 1. Series streams page → episodes list (stays in the pane).
     if (m_centerStack
@@ -558,15 +437,6 @@ void MainWindow::updateBackActionEnabled()
     if (!m_backAction) {
         return;
     }
-#ifdef KINEMA_HAVE_LIBMPV
-    // The player page always has somewhere to go back to (the
-    // detail / discover page the user came from), so Back is
-    // never disabled while it's visible.
-    if (playerPageActive()) {
-        m_backAction->setEnabled(true);
-        return;
-    }
-#endif
     const bool atDiscoverHome = m_centerStack
         && m_centerStack->currentWidget() == m_resultsStack
         && m_resultsStack
@@ -580,7 +450,7 @@ void MainWindow::buildActions()
 
     // ---- Standard actions --------------------------------------------------
     auto* quitAction = KStandardAction::quit(
-        qApp, &QApplication::quit, m_actions);
+        this, &MainWindow::quitApplication, m_actions);
     auto* prefsAction = KStandardAction::preferences(
         this, &MainWindow::showSettings, m_actions);
     auto* aboutAction = KStandardAction::aboutApp(
@@ -643,19 +513,10 @@ void MainWindow::buildActions()
     auto* closePanelShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     closePanelShortcut->setContext(Qt::WindowShortcut);
     connect(closePanelShortcut, &QShortcut::activated, this, [this] {
-#ifdef KINEMA_HAVE_LIBMPV
-        // Esc on the player page: first hop leaves fullscreen, second
-        // hop closes the player. Keyboard-only path mirrors the Back
-        // toolbar button above.
-        if (playerPageActive()) {
-            if (isFullScreen()) {
-                exitPlayerFullscreen();
-            } else {
-                closeEmbeddedPlayer();
-            }
-            return;
-        }
-#endif
+        // The embedded player window handles its own Esc key
+        // (fullscreen → windowed → close); this shortcut only fires
+        // when the main window has focus, so we just drive the
+        // main-window nav stack.
         if (m_centerStack
             && m_centerStack->currentWidget() == m_seriesDetailPane
             && m_seriesDetailPane->tryPopStreamsPage()) {
@@ -1346,6 +1207,193 @@ void MainWindow::onOpenDirectUrl(const api::Stream& stream)
         }
     });
     job->start();
+}
+
+// ---- Tray + app lifecycle -------------------------------------------------
+
+void MainWindow::buildTray()
+{
+    // Respect desktops that don't expose any tray at all (minimal
+    // window managers, GNOME without extensions). KStatusNotifierItem
+    // falls back from SNI to legacy QSystemTrayIcon automatically
+    // when only the legacy mechanism is available, so this check
+    // covers the genuinely-absent case.
+    m_trayAvailable = QSystemTrayIcon::isSystemTrayAvailable();
+    if (!m_trayAvailable) {
+        qCInfo(KINEMA) << "no system tray host available;"
+                       << "close-to-tray will be inert";
+        return;
+    }
+
+    m_tray = new KStatusNotifierItem(
+        QStringLiteral("kinema"), this);
+
+    // KStatusNotifierItem auto-associates the main window when its
+    // parent is a QWidget — on activation (tray click, DBus
+    // Activate, etc.) it auto-toggles that window's visibility. We
+    // want *our* handlers to be the single source of truth for
+    // show/hide so that the behaviour matches the user's
+    // close-to-tray preference and doesn't race with the player
+    // window. Disable the association and the default "standard
+    // actions" menu (Minimize/Restore/Quit) KSNI would otherwise
+    // inject alongside the entries we add below.
+    m_tray->setAssociatedWindow(nullptr);
+    m_tray->setStandardActionsEnabled(false);
+
+    m_tray->setCategory(KStatusNotifierItem::ApplicationStatus);
+    m_tray->setStatus(KStatusNotifierItem::Active);
+    m_tray->setTitle(QStringLiteral("Kinema"));
+    m_tray->setIconByName(QStringLiteral("dev.tlmtech.kinema"));
+    m_tray->setToolTipIconByName(QStringLiteral("dev.tlmtech.kinema"));
+    m_tray->setToolTipTitle(QStringLiteral("Kinema"));
+    m_tray->setToolTipSubTitle(
+        i18nc("@info:tooltip tray icon",
+            "Cinema in motion — click to show or hide Kinema."));
+
+    // Primary activation (left-click) toggles the main window. The
+    // bool argument is whether the request came from the primary
+    // action; we treat secondary activation the same way since the
+    // context menu already offers everything else.
+    connect(m_tray, &KStatusNotifierItem::activateRequested,
+        this, [this](bool /*active*/, const QPoint& /*pos*/) {
+            if (isVisible() && !isMinimized()) {
+                hideMainWindow();
+            } else {
+                showMainWindow();
+            }
+        });
+
+    // Context menu entries. KStatusNotifierItem::contextMenu() auto-
+    // creates a QMenu we can populate and re-populate.
+    auto* menu = m_tray->contextMenu();
+
+    m_trayToggleAction = new QAction(this);
+    connect(m_trayToggleAction, &QAction::triggered, this, [this] {
+        if (isVisible() && !isMinimized()) {
+            hideMainWindow();
+        } else {
+            showMainWindow();
+        }
+    });
+    menu->addAction(m_trayToggleAction);
+
+#ifdef KINEMA_HAVE_LIBMPV
+    m_trayShowPlayerAction = new QAction(
+        QIcon::fromTheme(QStringLiteral("media-playback-start")),
+        i18nc("@action:inmenu tray", "Show Player"), this);
+    connect(m_trayShowPlayerAction, &QAction::triggered, this, [this] {
+        if (m_playerWindow) {
+            m_playerWindow->show();
+            m_playerWindow->raise();
+            m_playerWindow->activateWindow();
+            updateTrayMenu();
+        }
+    });
+    menu->addAction(m_trayShowPlayerAction);
+#endif
+
+    menu->addSeparator();
+
+    auto* trayQuit = new QAction(
+        QIcon::fromTheme(QStringLiteral("application-exit")),
+        i18nc("@action:inmenu tray", "Quit Kinema"), this);
+    connect(trayQuit, &QAction::triggered,
+        this, &MainWindow::quitApplication);
+    menu->addAction(trayQuit);
+
+    updateTrayMenu();
+}
+
+void MainWindow::updateTrayMenu()
+{
+    if (!m_trayAvailable) {
+        return;
+    }
+    if (m_trayToggleAction) {
+        const bool shown = isVisible() && !isMinimized();
+        if (shown) {
+            m_trayToggleAction->setText(
+                i18nc("@action:inmenu tray", "Hide Kinema"));
+            m_trayToggleAction->setIcon(
+                QIcon::fromTheme(QStringLiteral("window-close")));
+        } else {
+            m_trayToggleAction->setText(
+                i18nc("@action:inmenu tray", "Show Kinema"));
+            m_trayToggleAction->setIcon(
+                QIcon::fromTheme(QStringLiteral("window")));
+        }
+    }
+#ifdef KINEMA_HAVE_LIBMPV
+    if (m_trayShowPlayerAction) {
+        // Only meaningful when we have a player that was ever used
+        // but is currently hidden — otherwise the entry would either
+        // duplicate a visible window or point at nothing.
+        const bool canShow = m_playerWindow
+            && m_playerWindow->hasEverLoaded()
+            && !m_playerWindow->isVisible();
+        m_trayShowPlayerAction->setVisible(canShow);
+    }
+#endif
+}
+
+void MainWindow::showMainWindow()
+{
+    show();
+    if (isMinimized()) {
+        setWindowState(windowState() & ~Qt::WindowMinimized);
+    }
+    raise();
+    activateWindow();
+    updateTrayMenu();
+}
+
+void MainWindow::hideMainWindow()
+{
+    hide();
+    updateTrayMenu();
+}
+
+void MainWindow::quitApplication()
+{
+    m_reallyQuit = true;
+#ifdef KINEMA_HAVE_LIBMPV
+    // Take down the player window explicitly so its closeEvent can
+    // persist geometry and stop playback before the app exits.
+    if (m_playerWindow) {
+        m_playerWindow->close();
+    }
+#endif
+    qApp->quit();
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (m_reallyQuit || !m_trayAvailable
+            || !config::Config::instance().closeToTray()) {
+        // Genuine exit path: accept the close and let Qt tear the
+        // app down normally.
+        event->accept();
+        return;
+    }
+
+    hide();
+    updateTrayMenu();
+
+    if (!m_hasShownTrayToast) {
+        m_hasShownTrayToast = true;
+        auto* n = new KNotification(
+            QStringLiteral("trayMinimized"),
+            KNotification::CloseOnTimeout);
+        n->setTitle(i18nc("@title:window notification",
+            "Kinema is still running"));
+        n->setText(i18nc("@info notification",
+            "Closing the main window hid Kinema to the system tray. "
+            "Right-click the tray icon to show or quit."));
+        n->setIconName(QStringLiteral("dev.tlmtech.kinema"));
+        n->sendEvent();
+    }
+
+    event->ignore();
 }
 
 } // namespace kinema::ui
