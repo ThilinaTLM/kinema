@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/RealDebrid.h"
 
 #include <QObject>
 #include <QString>

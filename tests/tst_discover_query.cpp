@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/TmdbDiscoverUrl.h"
-#include "api/Types.h"
+#include "api/Discover.h"
 #include "core/DateWindow.h"
 
 #include <QDate>

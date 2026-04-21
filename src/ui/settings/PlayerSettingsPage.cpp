@@ -3,7 +3,7 @@
 
 #include "ui/settings/PlayerSettingsPage.h"
 
-#include "config/Config.h"
+#include "config/PlayerSettings.h"
 #include "core/Player.h"
 
 #include <KLocalizedString>
@@ -30,8 +30,10 @@ QString labelWithAvailability(const QString& base, core::player::Kind kind)
 
 } // namespace
 
-PlayerSettingsPage::PlayerSettingsPage(QWidget* parent)
+PlayerSettingsPage::PlayerSettingsPage(
+    config::PlayerSettings& settings, QWidget* parent)
     : QWidget(parent)
+    , m_settings(settings)
 {
     // Embedded (in-app mpv) is the "nicest" option when available, so
     // it leads the list. When Kinema was built without libmpv the
@@ -100,8 +102,7 @@ PlayerSettingsPage::PlayerSettingsPage(QWidget* parent)
 
 void PlayerSettingsPage::load()
 {
-    const auto& cfg = config::Config::instance();
-    switch (cfg.preferredPlayer()) {
+    switch (m_settings.preferred()) {
     case core::player::Kind::Embedded:
         // Persisted choice survives even if the binary is now
         // compiled without libmpv — keep it selected so rebuilding
@@ -121,13 +122,12 @@ void PlayerSettingsPage::load()
         m_mpvRadio->setChecked(true);
         break;
     }
-    m_customCmdEdit->setText(cfg.customPlayerCommand());
+    m_customCmdEdit->setText(m_settings.customCommand());
     updateCustomEnabled();
 }
 
 void PlayerSettingsPage::apply()
 {
-    auto& cfg = config::Config::instance();
     core::player::Kind chosen = core::player::Kind::Mpv;
     if (m_embeddedRadio->isChecked()) {
         chosen = core::player::Kind::Embedded;
@@ -136,8 +136,8 @@ void PlayerSettingsPage::apply()
     } else if (m_customRadio->isChecked()) {
         chosen = core::player::Kind::Custom;
     }
-    cfg.setPreferredPlayer(chosen);
-    cfg.setCustomPlayerCommand(m_customCmdEdit->text());
+    m_settings.setPreferred(chosen);
+    m_settings.setCustomCommand(m_customCmdEdit->text());
 }
 
 void PlayerSettingsPage::resetToDefaults()

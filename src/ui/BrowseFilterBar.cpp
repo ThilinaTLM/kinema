@@ -3,7 +3,7 @@
 
 #include "ui/BrowseFilterBar.h"
 
-#include "config/Config.h"
+#include "config/BrowseSettings.h"
 
 #include <KLocalizedString>
 
@@ -70,8 +70,10 @@ QString sortLabel(api::DiscoverSort s)
 
 } // namespace
 
-BrowseFilterBar::BrowseFilterBar(QWidget* parent)
+BrowseFilterBar::BrowseFilterBar(config::BrowseSettings& settings,
+    QWidget* parent)
     : QWidget(parent)
+    , m_settings(settings)
 {
     // ---- layout skeleton -------------------------------------------------
     auto* layout = new QHBoxLayout(this);
@@ -243,7 +245,7 @@ QMenu* BrowseFilterBar::buildGenreMenu()
                 return;
             }
             m_genreIds.clear();
-            config::Config::instance().setBrowseGenreIds({});
+            m_settings.setGenreIds({});
             m_genresMenu = buildGenreMenu();
             m_genresBtn->setMenu(m_genresMenu);
             applyGenreLabel();
@@ -335,8 +337,8 @@ void BrowseFilterBar::applyKind(api::MediaKind k)
     // cross-kind nonsense to /discover. The page will refetch the
     // genre list and feed it back in via setAvailableGenres().
     m_genreIds.clear();
-    config::Config::instance().setBrowseKind(k);
-    config::Config::instance().setBrowseGenreIds({});
+    m_settings.setKind(k);
+    m_settings.setGenreIds({});
 
     if (m_kindMovieAction && m_kindSeriesAction) {
         (k == api::MediaKind::Movie
@@ -363,7 +365,7 @@ void BrowseFilterBar::applyWindow(core::DateWindow w)
         return;
     }
     m_window = w;
-    config::Config::instance().setBrowseDateWindow(w);
+    m_settings.setDateWindow(w);
     applyWindowLabel();
     if (!m_muted) {
         Q_EMIT filtersChanged();
@@ -376,7 +378,7 @@ void BrowseFilterBar::applyRating(int ratingPct)
         return;
     }
     m_minRatingPct = ratingPct;
-    config::Config::instance().setBrowseMinRatingPct(ratingPct);
+    m_settings.setMinRatingPct(ratingPct);
     applyRatingLabel();
     if (!m_muted) {
         Q_EMIT filtersChanged();
@@ -389,7 +391,7 @@ void BrowseFilterBar::applySort(api::DiscoverSort s)
         return;
     }
     m_sort = s;
-    config::Config::instance().setBrowseSort(s);
+    m_settings.setSort(s);
     applySortLabel();
     if (!m_muted) {
         Q_EMIT filtersChanged();
@@ -406,7 +408,7 @@ void BrowseFilterBar::applyGenre(int genreId, bool checked)
     } else {
         return;
     }
-    config::Config::instance().setBrowseGenreIds(m_genreIds);
+    m_settings.setGenreIds(m_genreIds);
     applyGenreLabel();
     if (!m_muted) {
         Q_EMIT filtersChanged();
@@ -419,7 +421,7 @@ void BrowseFilterBar::applyHideObscure(bool on)
         return;
     }
     m_hideObscureChecked = on;
-    config::Config::instance().setBrowseHideObscure(on);
+    m_settings.setHideObscure(on);
     if (!m_muted) {
         Q_EMIT filtersChanged();
     }
@@ -446,7 +448,7 @@ void BrowseFilterBar::setAvailableGenres(QList<api::TmdbGenre> genres)
     const bool pruned = filtered.size() != m_genreIds.size();
     if (pruned) {
         m_genreIds = std::move(filtered);
-        config::Config::instance().setBrowseGenreIds(m_genreIds);
+        m_settings.setGenreIds(m_genreIds);
     }
 
     m_genresMenu = buildGenreMenu();
@@ -486,14 +488,14 @@ void BrowseFilterBar::resetToDefaults()
     applySort(api::DiscoverSort::Popularity);
     if (!m_genreIds.isEmpty()) {
         m_genreIds.clear();
-        config::Config::instance().setBrowseGenreIds({});
+        m_settings.setGenreIds({});
         m_genresMenu = buildGenreMenu();
         m_genresBtn->setMenu(m_genresMenu);
         applyGenreLabel();
     }
     if (!m_hideObscureChecked) {
         m_hideObscureChecked = true;
-        config::Config::instance().setBrowseHideObscure(true);
+        m_settings.setHideObscure(true);
         m_hideObscure->setChecked(true);
     }
     m_muted = false;
@@ -504,13 +506,12 @@ void BrowseFilterBar::restoreFromConfig()
 {
     m_muted = true;
 
-    auto& cfg = config::Config::instance();
-    m_kind = cfg.browseKind();
-    m_genreIds = cfg.browseGenreIds();
-    m_window = cfg.browseDateWindow();
-    m_minRatingPct = cfg.browseMinRatingPct();
-    m_sort = cfg.browseSort();
-    m_hideObscureChecked = cfg.browseHideObscure();
+    m_kind = m_settings.kind();
+    m_genreIds = m_settings.genreIds();
+    m_window = m_settings.dateWindow();
+    m_minRatingPct = m_settings.minRatingPct();
+    m_sort = m_settings.sort();
+    m_hideObscureChecked = m_settings.hideObscure();
 
     if (m_kindMovieAction && m_kindSeriesAction) {
         (m_kind == api::MediaKind::Movie

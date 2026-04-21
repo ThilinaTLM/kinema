@@ -4,7 +4,7 @@
 #include "ui/settings/RealDebridSettingsPage.h"
 
 #include "api/RealDebridClient.h"
-#include "config/Config.h"
+#include "config/RealDebridSettings.h"
 #include "core/DateFormat.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
@@ -26,10 +26,12 @@
 namespace kinema::ui::settings {
 
 RealDebridSettingsPage::RealDebridSettingsPage(
-    core::HttpClient* http, core::TokenStore* tokens, QWidget* parent)
+    core::HttpClient* http, core::TokenStore* tokens,
+    config::RealDebridSettings& rdSettings, QWidget* parent)
     : QWidget(parent)
     , m_http(http)
     , m_tokens(tokens)
+    , m_rdSettings(rdSettings)
 {
     auto* intro = new QLabel(
         i18nc("@info",
@@ -117,7 +119,7 @@ void RealDebridSettingsPage::updateButtons()
     const bool hasText = !m_tokenEdit->text().trimmed().isEmpty();
     m_testButton->setEnabled(hasText);
     m_saveButton->setEnabled(hasText);
-    m_removeButton->setEnabled(config::Config::instance().hasRealDebrid());
+    m_removeButton->setEnabled(m_rdSettings.configured());
 }
 
 void RealDebridSettingsPage::setStatus(const QString& message, bool error)
@@ -210,7 +212,7 @@ QCoro::Task<void> RealDebridSettingsPage::saveToken()
     try {
         co_await m_tokens->write(
             QString::fromLatin1(core::TokenStore::kRealDebridKey), token);
-        config::Config::instance().setHasRealDebrid(true);
+        m_rdSettings.setConfigured(true);
         Q_EMIT tokenChanged(token);
         setStatus(i18nc("@info", "Token saved to keyring."), /*error=*/false);
     } catch (const core::TokenStoreError& e) {
@@ -227,7 +229,7 @@ QCoro::Task<void> RealDebridSettingsPage::removeToken()
     try {
         co_await m_tokens->remove(
             QString::fromLatin1(core::TokenStore::kRealDebridKey));
-        config::Config::instance().setHasRealDebrid(false);
+        m_rdSettings.setConfigured(false);
         m_tokenEdit->clear();
         Q_EMIT tokenChanged(QString {});
         setStatus(i18nc("@info", "Token removed from keyring."),

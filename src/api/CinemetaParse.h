@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/Media.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>

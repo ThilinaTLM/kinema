@@ -16,6 +16,10 @@ class HttpClient;
 class TokenStore;
 }
 
+namespace kinema::config {
+class RealDebridSettings;
+}
+
 namespace kinema::ui::settings {
 
 /**
@@ -35,7 +39,9 @@ class RealDebridSettingsPage : public QWidget
     Q_OBJECT
 public:
     RealDebridSettingsPage(core::HttpClient* http,
-        core::TokenStore* tokens, QWidget* parent = nullptr);
+        core::TokenStore* tokens,
+        config::RealDebridSettings& rdSettings,
+        QWidget* parent = nullptr);
 
 Q_SIGNALS:
     /// Fired after a successful Save (non-empty token) or Remove
@@ -53,6 +59,7 @@ private:
 
     core::HttpClient* m_http;
     core::TokenStore* m_tokens;
+    config::RealDebridSettings& m_rdSettings;
 
     QLineEdit* m_tokenEdit {};
     QPushButton* m_showHideButton {};

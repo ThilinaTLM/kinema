@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/Discover.h"
 #include "core/DateWindow.h"
 
 #include <QList>
@@ -13,6 +13,10 @@ class QActionGroup;
 class QCheckBox;
 class QMenu;
 class QToolButton;
+
+namespace kinema::config {
+class BrowseSettings;
+}
 
 namespace kinema::ui {
 
@@ -35,7 +39,8 @@ class BrowseFilterBar : public QWidget
 {
     Q_OBJECT
 public:
-    explicit BrowseFilterBar(QWidget* parent = nullptr);
+    BrowseFilterBar(config::BrowseSettings& settings,
+        QWidget* parent = nullptr);
 
     /// Build an api::DiscoverQuery from the current control state.
     /// `page` is set to 1 \u2014 BrowsePage bumps it for Load-more.
@@ -80,8 +85,10 @@ private:
     void applyGenre(int genreId, bool checked);
     void applyHideObscure(bool on);
 
-    // Load initial state from Config into m_*.
+    // Load initial state from BrowseSettings into m_*.
     void restoreFromConfig();
+
+    config::BrowseSettings& m_settings;
 
     QToolButton* m_kindBtn {};
     QAction* m_kindMovieAction {};

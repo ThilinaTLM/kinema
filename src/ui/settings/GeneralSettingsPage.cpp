@@ -3,8 +3,10 @@
 
 #include "ui/settings/GeneralSettingsPage.h"
 
-#include "api/Types.h"
-#include "config/Config.h"
+#include "api/Media.h"
+#include "config/AppearanceSettings.h"
+#include "config/SearchSettings.h"
+#include "config/TorrentioSettings.h"
 #include "core/TorrentioConfig.h"
 
 #include <KLocalizedString>
@@ -47,8 +49,15 @@ core::torrentio::SortMode indexToSortMode(int idx)
 
 } // namespace
 
-GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
+GeneralSettingsPage::GeneralSettingsPage(
+    config::SearchSettings& search,
+    config::TorrentioSettings& torrentio,
+    config::AppearanceSettings& appearance,
+    QWidget* parent)
     : QWidget(parent)
+    , m_search(search)
+    , m_torrentio(torrentio)
+    , m_appearance(appearance)
 {
     m_searchKindCombo = new QComboBox(this);
     m_searchKindCombo->addItem(i18nc("@item:inlistbox", "Movie"));
@@ -100,21 +109,19 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
 
 void GeneralSettingsPage::load()
 {
-    const auto& cfg = config::Config::instance();
     m_searchKindCombo->setCurrentIndex(
-        cfg.searchKind() == api::MediaKind::Series ? 1 : 0);
-    m_sortCombo->setCurrentIndex(sortModeToIndex(cfg.defaultSort()));
-    m_closeToTrayCheck->setChecked(cfg.closeToTray());
+        m_search.kind() == api::MediaKind::Series ? 1 : 0);
+    m_sortCombo->setCurrentIndex(sortModeToIndex(m_torrentio.defaultSort()));
+    m_closeToTrayCheck->setChecked(m_appearance.closeToTray());
 }
 
 void GeneralSettingsPage::apply()
 {
-    auto& cfg = config::Config::instance();
-    cfg.setSearchKind(m_searchKindCombo->currentIndex() == 1
+    m_search.setKind(m_searchKindCombo->currentIndex() == 1
             ? api::MediaKind::Series
             : api::MediaKind::Movie);
-    cfg.setDefaultSort(indexToSortMode(m_sortCombo->currentIndex()));
-    cfg.setCloseToTray(m_closeToTrayCheck->isChecked());
+    m_torrentio.setDefaultSort(indexToSortMode(m_sortCombo->currentIndex()));
+    m_appearance.setCloseToTray(m_closeToTrayCheck->isChecked());
 }
 
 void GeneralSettingsPage::resetToDefaults()

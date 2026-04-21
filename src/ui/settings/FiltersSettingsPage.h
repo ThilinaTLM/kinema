@@ -10,6 +10,10 @@
 class QCheckBox;
 class QPlainTextEdit;
 
+namespace kinema::config {
+class FilterSettings;
+}
+
 namespace kinema::ui::settings {
 
 /**
@@ -24,13 +28,15 @@ class FiltersSettingsPage : public QWidget
 {
     Q_OBJECT
 public:
-    explicit FiltersSettingsPage(QWidget* parent = nullptr);
+    FiltersSettingsPage(config::FilterSettings& settings,
+        QWidget* parent = nullptr);
 
     void load();
     void apply();
     void resetToDefaults();
 
 private:
+    config::FilterSettings& m_settings;
     /// token ("4k", "1080p", …) → checkbox
     QHash<QString, QCheckBox*> m_resolutionChecks;
     /// token ("cam", "scr", "threed", …) → checkbox

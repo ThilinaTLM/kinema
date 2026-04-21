@@ -6,13 +6,20 @@
 #include "api/CinemetaClient.h"
 #include "api/TmdbClient.h"
 #include "api/TorrentioClient.h"
-#include "config/Config.h"
+#include "config/AppSettings.h"
+#include "controllers/MovieDetailController.h"
+#include "controllers/NavigationController.h"
+#include "controllers/Page.h"
+#include "controllers/SearchController.h"
+#include "controllers/SeriesDetailController.h"
+#include "controllers/TokenController.h"
+#include "controllers/TrayController.h"
+#include "services/StreamActions.h"
 #include "core/DateFormat.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
-#include "core/Magnet.h"
+#include "core/HttpErrorPresenter.h"
 #include "core/PlayerLauncher.h"
-#include "core/TmdbConfig.h"
 #include "core/TokenStore.h"
 #include "kinema_debug.h"
 #include "ui/BrowsePage.h"
@@ -33,48 +40,34 @@
 #include <QEvent>
 
 #include <KNotification>
-#include <KStatusNotifierItem>
 
 #include <KAboutApplicationDialog>
 #include <KAboutData>
 #include <KActionCollection>
-#include <KConfigGroup>
 #include <KHamburgerMenu>
-#include <KIO/OpenUrlJob>
 #include <KLocalizedString>
-#include <KSharedConfig>
 #include <KStandardAction>
 
 #include <QAction>
 #include <QApplication>
-#include <QClipboard>
 #include <QCloseEvent>
 #include <QIcon>
 #include <QKeySequence>
 #include <QListView>
 #include <QMenu>
 #include <QMenuBar>
-#include <QRegularExpression>
 #include <QShortcut>
 #include <QStackedWidget>
 #include <QStatusBar>
-#include <QSystemTrayIcon>
 #include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
 
 namespace kinema::ui {
 
-namespace {
-bool looksLikeImdbId(const QString& s)
-{
-    static const QRegularExpression re(QStringLiteral("^tt\\d{5,}$"));
-    return re.match(s).hasMatch();
-}
-} // namespace
-
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(config::AppSettings& settings, QWidget* parent)
     : QMainWindow(parent)
+    , m_settings(settings)
 {
     setWindowTitle(QStringLiteral("Kinema"));
     setWindowIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema")));
@@ -83,11 +76,13 @@ MainWindow::MainWindow(QWidget* parent)
     // ---- Core services -----------------------------------------------------
     m_http = std::make_unique<core::HttpClient>(this);
     m_tokens = std::make_unique<core::TokenStore>(this);
-    m_player = std::make_unique<core::PlayerLauncher>(this);
+    m_player = std::make_unique<core::PlayerLauncher>(
+        m_settings.player(), this);
     m_cinemeta = new api::CinemetaClient(m_http.get(), this);
     m_torrentio = new api::TorrentioClient(m_http.get(), this);
     m_tmdb = new api::TmdbClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
+    m_streamActions = new services::StreamActions(m_player.get(), this);
 
     buildLayout();
     buildActions();
@@ -104,6 +99,10 @@ MainWindow::MainWindow(QWidget* parent)
         [this](core::player::Kind, const QString& reason) {
             statusBar()->showMessage(reason, 6000);
         });
+    connect(m_streamActions, &services::StreamActions::statusMessage,
+        this, [this](const QString& text, int timeoutMs) {
+            statusBar()->showMessage(text, timeoutMs);
+        });
 #ifdef KINEMA_HAVE_LIBMPV
     connect(m_player.get(), &core::PlayerLauncher::embeddedRequested,
         this, &MainWindow::openEmbeddedPlayer);
@@ -113,41 +112,48 @@ MainWindow::MainWindow(QWidget* parent)
         qCInfo(KINEMA) << "preferred media player not found on $PATH";
     }
 
-    // RD state is driven by Config ("configured" bit) + the in-memory token.
-    const bool hasRD = config::Config::instance().hasRealDebrid();
+    // RD state is driven by RealDebridSettings ("configured" bit) +
+    // the in-memory token owned by TokenController.
+    const bool hasRD = m_settings.realDebrid().configured();
     m_detailPane->setRealDebridConfigured(hasRD);
     m_seriesDetailPane->setRealDebridConfigured(hasRD);
-    connect(&config::Config::instance(), &config::Config::realDebridChanged,
+    connect(&m_settings.realDebrid(),
+        &config::RealDebridSettings::configuredChanged,
         this, [this](bool on) {
             m_detailPane->setRealDebridConfigured(on);
             m_seriesDetailPane->setRealDebridConfigured(on);
         });
 
-    // Load the token from the keyring in the background.
-    if (hasRD) {
-        auto t = loadRealDebridToken();
-        Q_UNUSED(t);
-    }
-
-    // Resolve the effective TMDB token and kick off the initial
-    // Discover refresh. Fire-and-forget; the result populates
-    // m_tmdbToken and either refreshes the rows or shows the
-    // not-configured call-to-action.
-    {
-        auto t = loadTmdbToken();
-        Q_UNUSED(t);
-    }
-
     // Refetch visible torrents whenever a Torrentio filter/sort default
     // changes. Multiple setters in one Apply click emit the signal
     // multiple times; debounce via a single-shot.
-    connect(&config::Config::instance(),
-        &config::Config::torrentioOptionsChanged,
+    connect(&m_settings,
+        &config::AppSettings::torrentioOptionsChanged,
         this, &MainWindow::onTorrentioOptionsChanged);
 
     // System tray. No-op on desktops that don't expose a tray; the
     // close-to-tray path silently falls back to "close = quit" there.
-    buildTray();
+    m_tray = new controllers::TrayController(this, this);
+    connect(m_tray,
+        &controllers::TrayController::toggleMainWindowRequested,
+        this, &MainWindow::toggleMainWindow);
+    connect(m_tray,
+        &controllers::TrayController::showPlayerWindowRequested,
+        this, [this] {
+#ifdef KINEMA_HAVE_LIBMPV
+            if (m_playerWindow) {
+                m_playerWindow->show();
+                m_playerWindow->raise();
+                m_playerWindow->activateWindow();
+                m_tray->refreshMenu();
+            }
+#endif
+        });
+    connect(m_tray, &controllers::TrayController::quitRequested,
+        this, &MainWindow::quitApplication);
+
+    // Fire the initial keyring reads (RD + TMDB). Does not block.
+    m_tokenCtrl->loadAll();
 }
 
 MainWindow::~MainWindow() = default;
@@ -160,13 +166,13 @@ void MainWindow::buildLayout()
     m_toolbar->setFloatable(false);
     m_toolbar->setContextMenuPolicy(Qt::PreventContextMenu);
     m_searchBar = new SearchBar(m_toolbar);
-    m_searchBar->setMediaKind(config::Config::instance().searchKind());
+    m_searchBar->setMediaKind(m_settings.search().kind());
     m_toolbar->addWidget(m_searchBar);
     connect(m_searchBar, &SearchBar::queryRequested,
         this, &MainWindow::onQueryRequested);
     connect(m_searchBar, &SearchBar::mediaKindChanged, this,
-        [](api::MediaKind kind) {
-            config::Config::instance().setSearchKind(kind);
+        [this](api::MediaKind kind) {
+            m_settings.search().setKind(kind);
         });
 
     // ---- Results view ------------------------------------------------------
@@ -208,7 +214,8 @@ void MainWindow::buildLayout()
     // Browse page (TMDB /discover with filters). Added to the
     // results stack alongside Discover / search state / search
     // results so Back naturally walks Browse → Discover.
-    m_browsePage = new BrowsePage(m_tmdb, m_imageLoader, this);
+    m_browsePage = new BrowsePage(
+        m_tmdb, m_imageLoader, m_settings.browse(), this);
     connect(m_browsePage, &BrowsePage::itemActivated,
         this, &MainWindow::onDiscoverItemActivated);
     connect(m_browsePage, &BrowsePage::settingsRequested,
@@ -221,43 +228,21 @@ void MainWindow::buildLayout()
     m_resultsStack->addWidget(m_browsePage);   // idx 3 = browse
 
     // ---- Detail panes (movies + series) ----------------------------------
-    m_detailPane = new DetailPane(m_imageLoader, m_tmdb, this);
-    connect(m_detailPane, &DetailPane::similarActivated, this,
-        [this](const api::DiscoverItem& item) {
-            auto t = openFromDiscover(item);
-            Q_UNUSED(t);
-        });
-    connect(m_detailPane, &DetailPane::copyMagnetRequested,
-        this, &MainWindow::onCopyMagnet);
-    connect(m_detailPane, &DetailPane::openMagnetRequested,
-        this, &MainWindow::onOpenMagnet);
-    connect(m_detailPane, &DetailPane::copyDirectUrlRequested,
-        this, &MainWindow::onCopyDirectUrl);
-    connect(m_detailPane, &DetailPane::openDirectUrlRequested,
-        this, &MainWindow::onOpenDirectUrl);
-    connect(m_detailPane, &DetailPane::playRequested,
-        this, &MainWindow::onPlayRequested);
+    m_detailPane = new DetailPane(m_imageLoader, m_tmdb,
+        m_settings.torrentio(), m_settings.filter(),
+        *m_streamActions, m_settings.appearance(), this);
+    connect(m_detailPane, &DetailPane::similarActivated,
+        this, &MainWindow::onDiscoverItemActivated);
 
-    m_seriesDetailPane = new SeriesDetailPane(m_imageLoader, m_tmdb, this);
-    connect(m_seriesDetailPane, &SeriesDetailPane::similarActivated, this,
-        [this](const api::DiscoverItem& item) {
-            auto t = openFromDiscover(item);
-            Q_UNUSED(t);
-        });
+    m_seriesDetailPane = new SeriesDetailPane(m_imageLoader, m_tmdb,
+        m_settings.torrentio(), m_settings.filter(),
+        *m_streamActions, m_settings.appearance(), this);
+    connect(m_seriesDetailPane, &SeriesDetailPane::similarActivated,
+        this, &MainWindow::onDiscoverItemActivated);
     connect(m_seriesDetailPane, &SeriesDetailPane::episodeSelected,
         this, &MainWindow::onEpisodeSelected);
     connect(m_seriesDetailPane, &SeriesDetailPane::backToEpisodesRequested,
         this, &MainWindow::onBackToEpisodes);
-    connect(m_seriesDetailPane, &SeriesDetailPane::copyMagnetRequested,
-        this, &MainWindow::onCopyMagnet);
-    connect(m_seriesDetailPane, &SeriesDetailPane::openMagnetRequested,
-        this, &MainWindow::onOpenMagnet);
-    connect(m_seriesDetailPane, &SeriesDetailPane::copyDirectUrlRequested,
-        this, &MainWindow::onCopyDirectUrl);
-    connect(m_seriesDetailPane, &SeriesDetailPane::openDirectUrlRequested,
-        this, &MainWindow::onOpenDirectUrl);
-    connect(m_seriesDetailPane, &SeriesDetailPane::playRequested,
-        this, &MainWindow::onPlayRequested);
 
     // ---- Center stack: results (page 0) + detail panes (1, 2) ------------
     m_centerStack = new QStackedWidget(this);
@@ -268,59 +253,124 @@ void MainWindow::buildLayout()
 
     setCentralWidget(m_centerStack);
 
-    // Refresh the toolbar Back action whenever the navigation surface
-    // changes (detail opens/closes, or the results stack flips between
-    // Discover / search state / search results).
-    connect(m_centerStack, &QStackedWidget::currentChanged,
-        this, [this] { updateBackActionEnabled(); });
-    connect(m_resultsStack, &QStackedWidget::currentChanged,
-        this, [this] { updateBackActionEnabled(); });
+    // Navigation state machine. Owns "what page is visible" and the
+    // Back rules; every detail/results/back call below routes through
+    // nav->goTo() / nav->goBack().
+    m_nav = new controllers::NavigationController(
+        m_centerStack, m_resultsStack,
+        m_discoverPage, m_browsePage, m_resultsState, m_resultsView,
+        m_detailPane, m_seriesDetailPane, this);
+    connect(m_nav, &controllers::NavigationController::currentChanged,
+        this, [this](controllers::Page) { updateBackActionEnabled(); });
+
+    // Search coroutine + epoch + state routing.
+    m_search = new controllers::SearchController(
+        m_cinemeta, m_resultsModel, m_resultsState, m_nav, this);
+    connect(m_search, &controllers::SearchController::queryStarted,
+        this, [this] {
+            if (m_resultsDelegate) {
+                m_resultsDelegate->resetRequestTracking();
+            }
+            closeDetailPanel();
+        });
+    connect(m_search, &controllers::SearchController::resultsReady,
+        this, [this](int) { m_resultsView->setFocus(); });
+    connect(m_search, &controllers::SearchController::statusMessage,
+        this, [this](const QString& text, int timeoutMs) {
+            statusBar()->showMessage(text, timeoutMs);
+        });
+
+    // TokenController owns the in-memory RD + TMDB tokens. It must
+    // outlive the detail controllers below because they alias its
+    // realDebridToken() by const reference.
+    m_tokenCtrl = new controllers::TokenController(
+        m_tokens.get(), m_tmdb, m_settings.realDebrid(), this);
+    connect(m_tokenCtrl,
+        &controllers::TokenController::tmdbTokenChanged,
+        this, [this](const QString& token) {
+            if (m_discoverPage) {
+                if (token.isEmpty()) {
+                    m_discoverPage->showNotConfigured();
+                } else {
+                    m_discoverPage->refresh();
+                }
+            }
+            if (m_browsePage) {
+                // Browse is lazy — don't refetch until the user visits
+                // it. The CTA mirrors the token state so the first
+                // visit lands on the right page.
+                if (token.isEmpty()) {
+                    m_browsePage->showNotConfigured();
+                } else if (m_nav
+                    && m_nav->current() == controllers::Page::Browse) {
+                    m_browsePage->refresh();
+                }
+            }
+        });
+
+    // Movie + series detail coroutines. Both receive the RD token
+    // by reference so token updates land immediately without a
+    // refetch.
+    m_movieCtrl = new controllers::MovieDetailController(
+        m_cinemeta, m_torrentio, m_tmdb, m_detailPane, m_nav,
+        m_settings, m_tokenCtrl->realDebridToken(), this);
+    m_seriesCtrl = new controllers::SeriesDetailController(
+        m_cinemeta, m_torrentio, m_tmdb, m_seriesDetailPane, m_nav,
+        m_settings, m_tokenCtrl->realDebridToken(), this);
+    const auto forwardStatus =
+        [this](const QString& text, int timeoutMs) {
+            statusBar()->showMessage(text, timeoutMs);
+        };
+    connect(m_movieCtrl,
+        &controllers::MovieDetailController::statusMessage,
+        this, forwardStatus);
+    connect(m_seriesCtrl,
+        &controllers::SeriesDetailController::statusMessage,
+        this, forwardStatus);
 
     statusBar()->showMessage(i18nc("@info:status", "Ready"), 2000);
 }
 
 void MainWindow::showMovieDetail()
 {
-    if (m_centerStack) {
-        m_centerStack->setCurrentWidget(m_detailPane);
+    if (m_nav) {
+        m_nav->goTo(controllers::Page::MovieDetail);
     }
 }
 
 void MainWindow::showSeriesDetail()
 {
-    if (m_centerStack) {
-        m_centerStack->setCurrentWidget(m_seriesDetailPane);
+    if (m_nav) {
+        m_nav->goTo(controllers::Page::SeriesEpisodes);
     }
 }
 
 void MainWindow::closeDetailPanel()
 {
-    if (!m_centerStack
-        || m_centerStack->currentWidget() == m_resultsStack) {
+    if (!m_nav || !controllers::isDetailPage(m_nav->current())) {
         return;
     }
 
     // Cancel any in-flight work so stale fetches don't repopulate the
     // pane after it's been dismissed.
-    ++m_detailEpoch;
-    ++m_episodeEpoch;
-    m_currentMovie.reset();
-    m_currentEpisode.reset();
-    m_currentSeriesImdbId.clear();
+    m_movieCtrl->clear();
+    m_seriesCtrl->clear();
 
     // Reset both panes to their idle states so re-opening a different
     // kind later doesn't momentarily flash stale content.
     m_detailPane->showIdle();
     m_seriesDetailPane->showMetaLoading();
 
-    m_centerStack->setCurrentWidget(m_resultsStack);
+    // goTo returns us to whatever results-stack page the nav remembered
+    // from before the detail was opened.
+    m_nav->goTo(m_nav->resultsPageBeforeDetail());
 
     // Clear selection so clicking the same card re-opens cleanly.
     if (auto* sm = m_resultsView->selectionModel()) {
         sm->clearSelection();
         sm->clearCurrentIndex();
     }
-    if (m_resultsStack->currentWidget() == m_resultsView) {
+    if (m_nav && m_nav->current() == controllers::Page::SearchResults) {
         m_resultsView->setFocus();
     }
 
@@ -337,6 +387,9 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
     // "Embedded" and hits Play.
     if (!m_playerWindow) {
         m_playerWindow = new player::PlayerWindow(this);
+        // Let the tray controller surface a "Show Player" entry
+        // whenever the player is hidden but has played something.
+        m_tray->setPlayerWindow(m_playerWindow);
 
         connect(m_playerWindow, &player::PlayerWindow::fileLoaded,
             this, [this] {
@@ -376,7 +429,7 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
                 }
             });
         connect(m_playerWindow, &player::PlayerWindow::visibilityChanged,
-            this, [this](bool) { updateTrayMenu(); });
+            this, [this](bool) { m_tray->refreshMenu(); });
     }
 
     statusBar()->showMessage(
@@ -389,47 +442,36 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
 
 void MainWindow::onBackToEpisodes()
 {
-    // User backed out of the streams page (via back button or Esc).
-    // Drop any in-flight stream task so its late response can't
-    // repopulate the (now-hidden) torrents table the next time the
-    // streams page is shown.
-    ++m_episodeEpoch;
-    m_currentEpisode.reset();
+    // Delegate to SeriesDetailController — it owns the episode epoch
+    // and syncs nav when the back path came from the in-pane button.
+    m_seriesCtrl->onBackToEpisodes();
 }
 
 void MainWindow::onBackRequested()
 {
     // The embedded player lives in its own top-level window and owns
     // its own Back / Esc handling, so MainWindow's back action only
-    // walks the main-window nav stack (streams → episodes → detail
-    // → results → Discover).
+    // walks the main-window nav stack.
+    if (!m_nav) {
+        return;
+    }
 
-    // 1. Series streams page → episodes list (stays in the pane).
-    if (m_centerStack
-        && m_centerStack->currentWidget() == m_seriesDetailPane
-        && m_seriesDetailPane->tryPopStreamsPage()) {
+    const auto before = m_nav->current();
+
+    // Intercept the two transitions that need MainWindow-side work:
+    //   SeriesStreams → SeriesEpisodes  — cancel in-flight streams
+    //                                     (onBackToEpisodes flips nav)
+    //   Detail → results             — drop detail epochs + state
+    //                                     (closeDetailPanel flips nav)
+    if (before == controllers::Page::SeriesStreams) {
         onBackToEpisodes();
-        updateBackActionEnabled();
         return;
     }
-
-    // 2. Any detail pane → results stack (whatever sub-page was
-    //    showing before the pane opened).
-    if (m_centerStack
-        && m_centerStack->currentWidget() != m_resultsStack) {
+    if (controllers::isDetailPage(before)) {
         closeDetailPanel();
-        // currentChanged fires → updateBackActionEnabled runs.
         return;
     }
-
-    // 3. Search state / search results → Discover home.
-    if (m_resultsStack
-        && m_resultsStack->currentWidget() != m_discoverPage) {
-        showDiscoverHome();
-        return;
-    }
-
-    // 4. Already at Discover home — button should have been disabled.
+    m_nav->goBack();
 }
 
 void MainWindow::updateBackActionEnabled()
@@ -437,11 +479,7 @@ void MainWindow::updateBackActionEnabled()
     if (!m_backAction) {
         return;
     }
-    const bool atDiscoverHome = m_centerStack
-        && m_centerStack->currentWidget() == m_resultsStack
-        && m_resultsStack
-        && m_resultsStack->currentWidget() == m_discoverPage;
-    m_backAction->setEnabled(!atDiscoverHome);
+    m_backAction->setEnabled(m_nav && m_nav->canGoBack());
 }
 
 void MainWindow::buildActions()
@@ -517,14 +555,14 @@ void MainWindow::buildActions()
         // (fullscreen → windowed → close); this shortcut only fires
         // when the main window has focus, so we just drive the
         // main-window nav stack.
-        if (m_centerStack
-            && m_centerStack->currentWidget() == m_seriesDetailPane
-            && m_seriesDetailPane->tryPopStreamsPage()) {
+        if (!m_nav) {
+            return;
+        }
+        if (m_nav->current() == controllers::Page::SeriesStreams) {
             onBackToEpisodes();
             return;
         }
-        if (m_centerStack
-            && m_centerStack->currentWidget() != m_resultsStack) {
+        if (controllers::isDetailPage(m_nav->current())) {
             closeDetailPanel();
         }
     });
@@ -609,9 +647,7 @@ void MainWindow::buildActions()
     m_actions->addAssociatedWidget(this);
 
     // ---- Restore persisted menu-bar visibility -----------------------------
-    const auto group = KSharedConfig::openConfig()->group(
-        QStringLiteral("MainWindow"));
-    const bool showBar = group.readEntry("ShowMenuBar", false);
+    const bool showBar = m_settings.appearance().showMenuBar();
     m_showMenubarAction->setChecked(showBar);
     menuBar()->setVisible(showBar);
 
@@ -622,10 +658,7 @@ void MainWindow::buildActions()
 void MainWindow::onShowMenubarToggled(bool visible)
 {
     menuBar()->setVisible(visible);
-    auto group = KSharedConfig::openConfig()->group(
-        QStringLiteral("MainWindow"));
-    group.writeEntry("ShowMenuBar", visible);
-    group.sync();
+    m_settings.appearance().setShowMenuBar(visible);
 }
 
 void MainWindow::showAbout()
@@ -637,78 +670,7 @@ void MainWindow::showAbout()
 
 void MainWindow::onQueryRequested(const QString& text, api::MediaKind kind)
 {
-    // Fire-and-forget: each invocation is its own coroutine. Stale ones
-    // are filtered out inside runSearch via the epoch counter.
-    auto t = runSearch(text, kind);
-    Q_UNUSED(t);
-}
-
-QCoro::Task<void> MainWindow::runSearch(QString text, api::MediaKind kind)
-{
-    const auto myEpoch = ++m_queryEpoch;
-
-    if (m_resultsDelegate) {
-        m_resultsDelegate->resetRequestTracking();
-    }
-    // Close any open panel so the user lands in a grid-first view on
-    // every new search. closeDetailPanel() is idempotent when nothing
-    // is open.
-    closeDetailPanel();
-    m_resultsState->showLoading(i18nc("@info:status", "Searching…"));
-    m_resultsStack->setCurrentWidget(m_resultsState);
-    statusBar()->showMessage(i18nc("@info:status", "Searching for \"%1\"…", text));
-
-    try {
-        QList<api::MetaSummary> results;
-        if (looksLikeImdbId(text)) {
-            // IMDB shortcut — synthesise a one-item list from the meta fetch.
-            auto detail = co_await m_cinemeta->meta(kind, text);
-            if (myEpoch != m_queryEpoch) {
-                co_return;
-            }
-            results.append(detail.summary);
-        } else {
-            results = co_await m_cinemeta->search(kind, text);
-            if (myEpoch != m_queryEpoch) {
-                co_return;
-            }
-        }
-
-        if (results.isEmpty()) {
-            m_resultsModel->reset({});
-            m_resultsState->showIdle(
-                i18nc("@label", "No matches"),
-                i18nc("@info", "Nothing found for \"%1\".", text));
-            m_resultsStack->setCurrentWidget(m_resultsState);
-            statusBar()->showMessage(i18nc("@info:status", "No matches"), 4000);
-            co_return;
-        }
-
-        m_resultsModel->reset(results);
-        m_resultsStack->setCurrentWidget(m_resultsView);
-        statusBar()->showMessage(
-            i18ncp("@info:status", "%1 result", "%1 results", results.size()),
-            3000);
-        // No auto-select: the panel stays closed until the user picks
-        // a card, so the grid can take the full content area.
-        m_resultsView->setFocus();
-
-    } catch (const core::HttpError& e) {
-        if (myEpoch != m_queryEpoch) {
-            co_return;
-        }
-        qCWarning(KINEMA) << "search failed:" << e.message();
-        m_resultsState->showError(e.message(), /*retryable=*/false);
-        m_resultsStack->setCurrentWidget(m_resultsState);
-        statusBar()->showMessage(i18nc("@info:status", "Search failed"), 4000);
-    } catch (const std::exception& e) {
-        if (myEpoch != m_queryEpoch) {
-            co_return;
-        }
-        qCWarning(KINEMA) << "search failed (unknown):" << e.what();
-        m_resultsState->showError(QString::fromUtf8(e.what()), /*retryable=*/false);
-        m_resultsStack->setCurrentWidget(m_resultsState);
-    }
+    m_search->runQuery(text, kind);
 }
 
 void MainWindow::onResultActivated(const QModelIndex& index)
@@ -719,230 +681,31 @@ void MainWindow::onResultActivated(const QModelIndex& index)
     }
 
     // Clicking the already-loaded card is a no-op — avoids duplicate
-    // network fetches and pane flicker. "panelOpen" here means the
-    // center stack is currently showing a detail pane rather than the
-    // results stack.
-    const bool panelOpen = m_centerStack
-        && m_centerStack->currentWidget() != m_resultsStack;
+    // network fetches and pane flicker.
+    const bool panelOpen = m_nav
+        && controllers::isDetailPage(m_nav->current());
     if (panelOpen) {
-        if (s->kind == api::MediaKind::Movie && m_currentMovie
-            && m_currentMovie->imdbId == s->imdbId) {
+        if (s->kind == api::MediaKind::Movie
+            && m_movieCtrl->current()
+            && m_movieCtrl->current()->imdbId == s->imdbId) {
             return;
         }
         if (s->kind == api::MediaKind::Series
-            && m_currentSeriesImdbId == s->imdbId) {
+            && m_seriesCtrl->currentImdbId() == s->imdbId) {
             return;
         }
     }
 
     if (s->kind == api::MediaKind::Series) {
-        showSeriesDetail();
-        auto t = loadSeriesDetail(*s);
-        Q_UNUSED(t);
+        m_seriesCtrl->openFromSummary(*s);
     } else {
-        showMovieDetail();
-        auto t = loadMovieDetail(*s);
-        Q_UNUSED(t);
+        m_movieCtrl->openFromSummary(*s);
     }
 }
 
 void MainWindow::onEpisodeSelected(const api::Episode& ep)
 {
-    if (m_currentSeriesImdbId.isEmpty()) {
-        return;
-    }
-    // The pane has already flipped to the streams page in response to
-    // the user's click (see SeriesDetailPane's episodeActivated
-    // handler). Kick off the stream fetch.
-    auto t = loadEpisodeStreams(ep, m_currentSeriesImdbId);
-    Q_UNUSED(t);
-}
-
-QCoro::Task<void> MainWindow::loadMovieDetail(api::MetaSummary summary)
-{
-    const auto myEpoch = ++m_detailEpoch;
-    m_currentSeriesImdbId.clear();
-    m_currentEpisode.reset();
-    m_currentMovie = summary;
-    m_detailPane->showMetaLoading();
-    m_detailPane->showTorrentsLoading();
-
-    try {
-        auto detail = co_await m_cinemeta->meta(api::MediaKind::Movie, summary.imdbId);
-        if (myEpoch != m_detailEpoch) {
-            co_return;
-        }
-        m_detailPane->setMeta(detail);
-        m_detailPane->setSimilarContext(
-            api::MediaKind::Movie, summary.imdbId);
-
-        // Short-circuit Torrentio for unreleased movies. Streams won't
-        // exist before theatrical/streaming release, and the empty
-        // result would read as an error. Show a dedicated "not yet
-        // released" state instead, keyed on the actual release date.
-        if (core::isFutureRelease(detail.summary.released)) {
-            m_detailPane->showTorrentsUnreleased(*detail.summary.released);
-            co_return;
-        }
-
-        auto streams = co_await m_torrentio->streams(
-            api::MediaKind::Movie, summary.imdbId, currentConfig());
-        if (myEpoch != m_detailEpoch) {
-            co_return;
-        }
-        m_detailPane->setTorrents(std::move(streams));
-
-    } catch (const core::HttpError& e) {
-        if (myEpoch != m_detailEpoch) {
-            co_return;
-        }
-        qCWarning(KINEMA) << "detail/streams failed:" << e.message();
-        m_detailPane->showTorrentsError(e.message());
-    } catch (const std::exception& e) {
-        if (myEpoch != m_detailEpoch) {
-            co_return;
-        }
-        m_detailPane->showTorrentsError(QString::fromUtf8(e.what()));
-    }
-}
-
-QCoro::Task<void> MainWindow::loadSeriesDetail(api::MetaSummary summary)
-{
-    const auto myEpoch = ++m_detailEpoch;
-    m_currentSeriesImdbId = summary.imdbId;
-    m_currentMovie.reset();
-    m_currentEpisode.reset();
-
-    // Show loading state in the series side of the detail stack.
-    m_seriesDetailPane->showMetaLoading();
-
-    try {
-        auto sd = co_await m_cinemeta->seriesMeta(summary.imdbId);
-        if (myEpoch != m_detailEpoch) {
-            co_return;
-        }
-        m_seriesDetailPane->setSeries(sd);
-        m_seriesDetailPane->setSimilarContext(summary.imdbId);
-
-        // Land on the episode list — no auto-fetch. The user picks an
-        // episode explicitly; picking one flips the right column to
-        // the streams page and fires onEpisodeSelected.
-        m_seriesDetailPane->focusEpisodeList();
-
-    } catch (const core::HttpError& e) {
-        if (myEpoch != m_detailEpoch) {
-            co_return;
-        }
-        qCWarning(KINEMA) << "series detail failed:" << e.message();
-        m_seriesDetailPane->showMetaError(e.message());
-    } catch (const std::exception& e) {
-        if (myEpoch != m_detailEpoch) {
-            co_return;
-        }
-        m_seriesDetailPane->showMetaError(QString::fromUtf8(e.what()));
-    }
-}
-
-QCoro::Task<void> MainWindow::loadEpisodeStreams(api::Episode episode, QString imdbId)
-{
-    const auto myEpoch = ++m_episodeEpoch;
-    m_currentEpisode = episode;
-
-    // Same short-circuit as movies: unaired episodes produce no useful
-    // Torrentio result; surface the air date directly instead.
-    if (core::isFutureRelease(episode.released)) {
-        m_seriesDetailPane->showTorrentsUnreleased(*episode.released);
-        co_return;
-    }
-
-    m_seriesDetailPane->showTorrentsLoading();
-
-    const auto streamId = episode.streamId(imdbId);
-
-    try {
-        auto streams = co_await m_torrentio->streams(
-            api::MediaKind::Series, streamId, currentConfig());
-        if (myEpoch != m_episodeEpoch) {
-            co_return;
-        }
-        m_seriesDetailPane->setTorrents(std::move(streams));
-    } catch (const core::HttpError& e) {
-        if (myEpoch != m_episodeEpoch) {
-            co_return;
-        }
-        qCWarning(KINEMA) << "episode streams failed:" << e.message();
-        m_seriesDetailPane->showTorrentsError(e.message());
-    } catch (const std::exception& e) {
-        if (myEpoch != m_episodeEpoch) {
-            co_return;
-        }
-        m_seriesDetailPane->showTorrentsError(QString::fromUtf8(e.what()));
-    }
-}
-
-core::torrentio::ConfigOptions MainWindow::currentConfig() const
-{
-    auto opts = config::Config::instance().defaultTorrentioOptions();
-    opts.realDebridToken = m_rdToken;
-    return opts;
-}
-
-QCoro::Task<void> MainWindow::loadRealDebridToken()
-{
-    try {
-        m_rdToken = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kRealDebridKey));
-        qCDebug(KINEMA) << "RD token loaded from keyring (empty?"
-                        << m_rdToken.isEmpty() << ")";
-    } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "RD token read failed:" << e.what();
-        m_rdToken.clear();
-    }
-}
-
-QCoro::Task<void> MainWindow::loadTmdbToken()
-{
-    // User override wins if present; otherwise the compile-time
-    // default; otherwise empty (Discover shows not-configured state).
-    QString user;
-    try {
-        user = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kTmdbKey));
-    } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "TMDB token read failed:" << e.what();
-    }
-    if (!user.isEmpty()) {
-        m_tmdbToken = std::move(user);
-    } else {
-        const auto* def = core::kTmdbCompiledDefaultToken;
-        m_tmdbToken = (def && def[0] != '\0')
-            ? QString::fromLatin1(def)
-            : QString {};
-    }
-
-    if (m_tmdb) {
-        m_tmdb->setToken(m_tmdbToken);
-    }
-    if (m_discoverPage) {
-        if (m_tmdbToken.isEmpty()) {
-            m_discoverPage->showNotConfigured();
-        } else {
-            m_discoverPage->refresh();
-        }
-    }
-    if (m_browsePage) {
-        // Browse is lazy — don't refetch until the user visits it.
-        // But the CTA needs to reflect the current token state so the
-        // first visit lands on the right page.
-        if (m_tmdbToken.isEmpty()) {
-            m_browsePage->showNotConfigured();
-        } else if (m_resultsStack
-            && m_resultsStack->currentWidget() == m_browsePage) {
-            // If the user is already on Browse when the token settles,
-            // refetch immediately so they see results, not loading.
-            m_browsePage->refresh();
-        }
-    }
+    m_seriesCtrl->selectEpisode(ep);
 }
 
 void MainWindow::showDiscoverHome()
@@ -950,8 +713,8 @@ void MainWindow::showDiscoverHome()
     // Cancel any open detail panel and close the search view so the
     // grid side of the splitter is fully given over to Discover.
     closeDetailPanel();
-    if (m_resultsStack && m_discoverPage) {
-        m_resultsStack->setCurrentWidget(m_discoverPage);
+    if (m_nav) {
+        m_nav->goTo(controllers::Page::DiscoverHome);
     }
     if (m_searchBar) {
         m_searchBar->clearFocus();
@@ -965,8 +728,10 @@ void MainWindow::showBrowsePage()
     // Swap the results stack to Browse and close any detail pane so
     // the full content area is given over to the filter grid.
     closeDetailPanel();
-    if (m_resultsStack && m_browsePage) {
-        m_resultsStack->setCurrentWidget(m_browsePage);
+    if (m_nav) {
+        m_nav->goTo(controllers::Page::Browse);
+    }
+    if (m_browsePage) {
         // Fetch page 1 under the current filter state. refresh() is
         // idempotent and respects the not-configured CTA.
         m_browsePage->refresh();
@@ -980,89 +745,10 @@ void MainWindow::showBrowsePage()
 
 void MainWindow::onDiscoverItemActivated(const api::DiscoverItem& item)
 {
-    auto t = openFromDiscover(item);
-    Q_UNUSED(t);
-}
-
-QCoro::Task<void> MainWindow::openFromDiscover(api::DiscoverItem item)
-{
-    // Resolve TMDB id → IMDB id, then hand off to the existing detail
-    // pipeline. Done on the click (not eagerly at list time) because
-    // list endpoints don't include external_ids and most cards will
-    // never be clicked.
-    statusBar()->showMessage(
-        i18nc("@info:status", "Looking up “%1”…", item.title));
-
-    QString imdbId;
-    try {
-        imdbId = item.kind == api::MediaKind::Movie
-            ? co_await m_tmdb->imdbIdForTmdbMovie(item.tmdbId)
-            : co_await m_tmdb->imdbIdForTmdbSeries(item.tmdbId);
-    } catch (const core::HttpError& e) {
-        // 404 from /movie/{id} or /tv/{id}/external_ids means TMDB has no
-        // record for this (kind, id) pair — usually a stale/ghost entry
-        // in a list endpoint. Treat it like "no IMDB id" rather than a
-        // hard error: no red log, soft status-bar message. Log the item
-        // at warning level so the offending list/row can be identified.
-        const bool notFound
-            = e.kind() == core::HttpError::Kind::HttpStatus
-            && e.httpStatus() == 404;
-        qCWarning(KINEMA).nospace()
-            << "TMDB external_ids lookup failed: "
-            << (item.kind == api::MediaKind::Movie ? "movie" : "tv")
-            << "/" << item.tmdbId << " (\"" << item.title << "\") — "
-            << e.httpStatus() << " " << e.message();
-        if (notFound) {
-            statusBar()->showMessage(
-                i18nc("@info:status",
-                    "“%1” isn't reachable on TMDB — can't fetch streams.",
-                    item.title),
-                6000);
-        } else {
-            statusBar()->showMessage(
-                i18nc("@info:status", "Could not open “%1”: %2",
-                    item.title, e.message()),
-                6000);
-        }
-        co_return;
-    } catch (const std::exception& e) {
-        statusBar()->showMessage(QString::fromUtf8(e.what()), 6000);
-        co_return;
-    }
-
-    if (imdbId.isEmpty()) {
-        qCWarning(KINEMA).nospace()
-            << "TMDB has no IMDB id for "
-            << (item.kind == api::MediaKind::Movie ? "movie" : "tv")
-            << "/" << item.tmdbId << " (\"" << item.title << "\")";
-        statusBar()->showMessage(
-            i18nc("@info:status",
-                "“%1” has no IMDB id on TMDB — can't fetch streams.",
-                item.title),
-            6000);
-        co_return;
-    }
-
-    // Build a MetaSummary mirroring what search would have produced,
-    // so the existing flow (which expects one) runs unchanged.
-    api::MetaSummary s;
-    s.imdbId = imdbId;
-    s.kind = item.kind;
-    s.title = item.title;
-    s.year = item.year;
-    s.poster = item.poster;
-    s.description = item.overview;
-    s.imdbRating = item.voteAverage;
-
-    // Closing the detail view now returns to whichever results-stack
-    // page is currently shown (Discover, search state, or search grid),
-    // so there's no need to synthesise a one-card grid as a fallback.
-    if (s.kind == api::MediaKind::Movie) {
-        showMovieDetail();
-        co_await loadMovieDetail(s);
+    if (item.kind == api::MediaKind::Movie) {
+        m_movieCtrl->openFromDiscover(item);
     } else {
-        showSeriesDetail();
-        co_await loadSeriesDetail(s);
+        m_seriesCtrl->openFromDiscover(item);
     }
 }
 
@@ -1070,11 +756,15 @@ void MainWindow::showSettings()
 {
     if (!m_settingsDialog) {
         m_settingsDialog = new settings::SettingsDialog(
-            m_http.get(), m_tokens.get(), this);
+            m_http.get(), m_tokens.get(), m_settings, this);
         m_settingsDialog->setAttribute(Qt::WA_DeleteOnClose);
         connect(m_settingsDialog, &settings::SettingsDialog::tokenChanged,
             this, [this](const QString& token) {
-                m_rdToken = token;
+                // Refresh TokenController's in-memory copy from the
+                // keyring. The forwarded value is the just-saved
+                // token; refreshing re-reads to keep the single
+                // source-of-truth in TokenController.
+                m_tokenCtrl->refreshRealDebrid();
                 statusBar()->showMessage(
                     token.isEmpty()
                         ? i18nc("@info:status", "Real-Debrid token removed.")
@@ -1083,12 +773,10 @@ void MainWindow::showSettings()
             });
         connect(m_settingsDialog, &settings::SettingsDialog::tmdbTokenChanged,
             this, [this](const QString&) {
-                // Don't trust the forwarded value directly — the
-                // effective token could be falling back to the
-                // compile-time default. Re-resolve via the same path
-                // we use at startup.
-                auto t = loadTmdbToken();
-                Q_UNUSED(t);
+                // Don't trust the forwarded value — the effective
+                // token could be falling back to the compile-time
+                // default. Re-resolve via TokenController.
+                m_tokenCtrl->refreshTmdb();
                 statusBar()->showMessage(
                     i18nc("@info:status", "TMDB token updated."), 3000);
             });
@@ -1108,233 +796,22 @@ void MainWindow::onTorrentioOptionsChanged()
     m_refetchPending = true;
     QTimer::singleShot(0, this, [this] {
         m_refetchPending = false;
-        if (!m_centerStack
-            || m_centerStack->currentWidget() == m_resultsStack) {
+        if (!m_nav || !controllers::isDetailPage(m_nav->current())) {
             // No detail view visible — next open picks up the new
             // defaults. Nothing to refetch.
             return;
         }
-        if (m_centerStack->currentWidget() == m_seriesDetailPane
-            && m_currentEpisode && !m_currentSeriesImdbId.isEmpty()) {
-            // Series detail: only refetch when the user is actually
-            // looking at the streams page (i.e. m_currentEpisode is
-            // set). On the episode list there are no visible streams.
-            auto t = loadEpisodeStreams(
-                *m_currentEpisode, m_currentSeriesImdbId);
-            Q_UNUSED(t);
+        if (m_nav->current() == controllers::Page::SeriesStreams) {
+            m_seriesCtrl->refetchCurrentEpisode();
             return;
         }
-        if (m_centerStack->currentWidget() == m_detailPane
-            && m_currentMovie) {
-            auto t = loadMovieDetail(*m_currentMovie);
-            Q_UNUSED(t);
+        if (m_nav->current() == controllers::Page::MovieDetail) {
+            m_movieCtrl->refetchCurrent();
         }
     });
 }
 
-void MainWindow::onCopyMagnet(const api::Stream& stream)
-{
-    if (stream.infoHash.isEmpty()) {
-        return;
-    }
-    const auto magnet = core::magnet::build(stream.infoHash, stream.releaseName);
-    QGuiApplication::clipboard()->setText(magnet);
-    statusBar()->showMessage(
-        i18nc("@info:status", "Magnet link copied to clipboard"), 3000);
-}
-
-void MainWindow::onOpenMagnet(const api::Stream& stream)
-{
-    if (stream.infoHash.isEmpty()) {
-        return;
-    }
-    const auto magnet = core::magnet::build(stream.infoHash, stream.releaseName);
-    auto* job = new KIO::OpenUrlJob(QUrl(magnet), this);
-    job->setRunExecutables(false);
-    connect(job, &KJob::result, this, [this, job] {
-        if (job->error()) {
-            statusBar()->showMessage(
-                i18nc("@info:status", "Could not open magnet: %1", job->errorString()),
-                6000);
-            qCWarning(KINEMA) << "OpenUrlJob failed:" << job->errorString();
-        } else {
-            statusBar()->showMessage(
-                i18nc("@info:status", "Magnet sent to default handler"), 3000);
-        }
-    });
-    job->start();
-}
-
-void MainWindow::onCopyDirectUrl(const api::Stream& stream)
-{
-    if (stream.directUrl.isEmpty()) {
-        return;
-    }
-    QGuiApplication::clipboard()->setText(stream.directUrl.toString());
-    statusBar()->showMessage(
-        i18nc("@info:status", "Direct URL copied to clipboard"), 3000);
-}
-
-void MainWindow::onPlayRequested(const api::Stream& stream)
-{
-    if (stream.directUrl.isEmpty()) {
-        statusBar()->showMessage(
-            i18nc("@info:status",
-                "This release has no direct URL \u2014 use Real-Debrid for one-click play."),
-            5000);
-        return;
-    }
-    m_player->play(stream.directUrl,
-        stream.releaseName.isEmpty() ? stream.qualityLabel : stream.releaseName);
-}
-
-void MainWindow::onOpenDirectUrl(const api::Stream& stream)
-{
-    if (stream.directUrl.isEmpty()) {
-        return;
-    }
-    auto* job = new KIO::OpenUrlJob(stream.directUrl, this);
-    job->setRunExecutables(false);
-    connect(job, &KJob::result, this, [this, job] {
-        if (job->error()) {
-            statusBar()->showMessage(
-                i18nc("@info:status", "Could not open URL: %1", job->errorString()),
-                6000);
-            qCWarning(KINEMA) << "OpenUrlJob (direct) failed:" << job->errorString();
-        } else {
-            statusBar()->showMessage(
-                i18nc("@info:status", "Opening stream\u2026"), 3000);
-        }
-    });
-    job->start();
-}
-
-// ---- Tray + app lifecycle -------------------------------------------------
-
-void MainWindow::buildTray()
-{
-    // Respect desktops that don't expose any tray at all (minimal
-    // window managers, GNOME without extensions). KStatusNotifierItem
-    // falls back from SNI to legacy QSystemTrayIcon automatically
-    // when only the legacy mechanism is available, so this check
-    // covers the genuinely-absent case.
-    m_trayAvailable = QSystemTrayIcon::isSystemTrayAvailable();
-    if (!m_trayAvailable) {
-        qCInfo(KINEMA) << "no system tray host available;"
-                       << "close-to-tray will be inert";
-        return;
-    }
-
-    m_tray = new KStatusNotifierItem(
-        QStringLiteral("kinema"), this);
-
-    // KStatusNotifierItem auto-associates the main window when its
-    // parent is a QWidget — on activation (tray click, DBus
-    // Activate, etc.) it auto-toggles that window's visibility. We
-    // want *our* handlers to be the single source of truth for
-    // show/hide so that the behaviour matches the user's
-    // close-to-tray preference and doesn't race with the player
-    // window. Disable the association and the default "standard
-    // actions" menu (Minimize/Restore/Quit) KSNI would otherwise
-    // inject alongside the entries we add below.
-    m_tray->setAssociatedWindow(nullptr);
-    m_tray->setStandardActionsEnabled(false);
-
-    m_tray->setCategory(KStatusNotifierItem::ApplicationStatus);
-    m_tray->setStatus(KStatusNotifierItem::Active);
-    m_tray->setTitle(QStringLiteral("Kinema"));
-    m_tray->setIconByName(QStringLiteral("dev.tlmtech.kinema"));
-    m_tray->setToolTipIconByName(QStringLiteral("dev.tlmtech.kinema"));
-    m_tray->setToolTipTitle(QStringLiteral("Kinema"));
-    m_tray->setToolTipSubTitle(
-        i18nc("@info:tooltip tray icon",
-            "Cinema in motion — click to show or hide Kinema."));
-
-    // Primary activation (left-click) toggles the main window. The
-    // bool argument is whether the request came from the primary
-    // action; we treat secondary activation the same way since the
-    // context menu already offers everything else.
-    connect(m_tray, &KStatusNotifierItem::activateRequested,
-        this, [this](bool /*active*/, const QPoint& /*pos*/) {
-            if (isVisible() && !isMinimized()) {
-                hideMainWindow();
-            } else {
-                showMainWindow();
-            }
-        });
-
-    // Context menu entries. KStatusNotifierItem::contextMenu() auto-
-    // creates a QMenu we can populate and re-populate.
-    auto* menu = m_tray->contextMenu();
-
-    m_trayToggleAction = new QAction(this);
-    connect(m_trayToggleAction, &QAction::triggered, this, [this] {
-        if (isVisible() && !isMinimized()) {
-            hideMainWindow();
-        } else {
-            showMainWindow();
-        }
-    });
-    menu->addAction(m_trayToggleAction);
-
-#ifdef KINEMA_HAVE_LIBMPV
-    m_trayShowPlayerAction = new QAction(
-        QIcon::fromTheme(QStringLiteral("media-playback-start")),
-        i18nc("@action:inmenu tray", "Show Player"), this);
-    connect(m_trayShowPlayerAction, &QAction::triggered, this, [this] {
-        if (m_playerWindow) {
-            m_playerWindow->show();
-            m_playerWindow->raise();
-            m_playerWindow->activateWindow();
-            updateTrayMenu();
-        }
-    });
-    menu->addAction(m_trayShowPlayerAction);
-#endif
-
-    menu->addSeparator();
-
-    auto* trayQuit = new QAction(
-        QIcon::fromTheme(QStringLiteral("application-exit")),
-        i18nc("@action:inmenu tray", "Quit Kinema"), this);
-    connect(trayQuit, &QAction::triggered,
-        this, &MainWindow::quitApplication);
-    menu->addAction(trayQuit);
-
-    updateTrayMenu();
-}
-
-void MainWindow::updateTrayMenu()
-{
-    if (!m_trayAvailable) {
-        return;
-    }
-    if (m_trayToggleAction) {
-        const bool shown = isVisible() && !isMinimized();
-        if (shown) {
-            m_trayToggleAction->setText(
-                i18nc("@action:inmenu tray", "Hide Kinema"));
-            m_trayToggleAction->setIcon(
-                QIcon::fromTheme(QStringLiteral("window-close")));
-        } else {
-            m_trayToggleAction->setText(
-                i18nc("@action:inmenu tray", "Show Kinema"));
-            m_trayToggleAction->setIcon(
-                QIcon::fromTheme(QStringLiteral("window")));
-        }
-    }
-#ifdef KINEMA_HAVE_LIBMPV
-    if (m_trayShowPlayerAction) {
-        // Only meaningful when we have a player that was ever used
-        // but is currently hidden — otherwise the entry would either
-        // duplicate a visible window or point at nothing.
-        const bool canShow = m_playerWindow
-            && m_playerWindow->hasEverLoaded()
-            && !m_playerWindow->isVisible();
-        m_trayShowPlayerAction->setVisible(canShow);
-    }
-#endif
-}
+// ---- Window lifecycle -----------------------------------------------------
 
 void MainWindow::showMainWindow()
 {
@@ -1344,13 +821,22 @@ void MainWindow::showMainWindow()
     }
     raise();
     activateWindow();
-    updateTrayMenu();
+    m_tray->refreshMenu();
 }
 
 void MainWindow::hideMainWindow()
 {
     hide();
-    updateTrayMenu();
+    m_tray->refreshMenu();
+}
+
+void MainWindow::toggleMainWindow()
+{
+    if (isVisible() && !isMinimized()) {
+        hideMainWindow();
+    } else {
+        showMainWindow();
+    }
 }
 
 void MainWindow::quitApplication()
@@ -1368,8 +854,8 @@ void MainWindow::quitApplication()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (m_reallyQuit || !m_trayAvailable
-            || !config::Config::instance().closeToTray()) {
+    if (m_reallyQuit || !m_tray->available()
+            || !m_settings.appearance().closeToTray()) {
         // Genuine exit path: accept the close and let Qt tear the
         // app down normally.
         event->accept();
@@ -1377,7 +863,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
 
     hide();
-    updateTrayMenu();
+    m_tray->refreshMenu();
 
     if (!m_hasShownTrayToast) {
         m_hasShownTrayToast = true;

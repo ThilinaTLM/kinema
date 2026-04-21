@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/Discover.h"
 
 #include <QModelIndex>
 #include <QWidget>
@@ -17,6 +17,10 @@ class QStackedWidget;
 
 namespace kinema::api {
 class TmdbClient;
+}
+
+namespace kinema::config {
+class BrowseSettings;
 }
 
 namespace kinema::ui {
@@ -62,6 +66,7 @@ class BrowsePage : public QWidget
 public:
     BrowsePage(api::TmdbClient* tmdb,
         ImageLoader* images,
+        config::BrowseSettings& settings,
         QWidget* parent = nullptr);
 
     /// Re-fetch page 1 using the current filter-bar state. Used on
@@ -95,6 +100,7 @@ private:
 
     api::TmdbClient* m_tmdb;
     ImageLoader* m_images;
+    config::BrowseSettings& m_settings;
 
     // Page-level stack (idx 0 = content, idx 1 = CTA).
     QStackedWidget* m_pageStack {};

@@ -10,6 +10,10 @@ class HttpClient;
 class TokenStore;
 }
 
+namespace kinema::config {
+class AppSettings;
+}
+
 namespace kinema::ui::settings {
 
 class GeneralSettingsPage;
@@ -40,6 +44,7 @@ class SettingsDialog : public KPageDialog
 public:
     SettingsDialog(core::HttpClient* http,
         core::TokenStore* tokens,
+        config::AppSettings& settings,
         QWidget* parent = nullptr);
 
 Q_SIGNALS:

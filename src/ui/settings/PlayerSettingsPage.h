@@ -8,6 +8,10 @@
 class QLineEdit;
 class QRadioButton;
 
+namespace kinema::config {
+class PlayerSettings;
+}
+
 namespace kinema::ui::settings {
 
 /**
@@ -21,7 +25,8 @@ class PlayerSettingsPage : public QWidget
 {
     Q_OBJECT
 public:
-    explicit PlayerSettingsPage(QWidget* parent = nullptr);
+    PlayerSettingsPage(config::PlayerSettings& settings,
+        QWidget* parent = nullptr);
 
     void load();
     void apply();
@@ -30,6 +35,7 @@ public:
 private:
     void updateCustomEnabled();
 
+    config::PlayerSettings& m_settings;
     QRadioButton* m_embeddedRadio {};
     QRadioButton* m_mpvRadio {};
     QRadioButton* m_vlcRadio {};

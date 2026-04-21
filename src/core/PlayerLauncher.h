@@ -9,6 +9,10 @@
 #include <QString>
 #include <QUrl>
 
+namespace kinema::config {
+class PlayerSettings;
+}
+
 namespace kinema::core {
 
 /**
@@ -17,9 +21,9 @@ namespace kinema::core {
  * KNotification.
  *
  * The launcher reads the user's preferred player and custom command
- * from Config on every call, so Settings changes take effect
- * immediately without re-wiring. If the preferred player isn't on
- * $PATH it falls back to the first available known player.
+ * from the injected PlayerSettings on every call, so Settings changes
+ * take effect immediately without re-wiring. If the preferred player
+ * isn't on $PATH it falls back to the first available known player.
  *
  * The launcher never blocks the UI: it uses `QProcess::startDetached`,
  * so the app keeps running while playback is live. When the player
@@ -30,7 +34,8 @@ class PlayerLauncher : public QObject
 {
     Q_OBJECT
 public:
-    explicit PlayerLauncher(QObject* parent = nullptr);
+    explicit PlayerLauncher(const config::PlayerSettings& settings,
+        QObject* parent = nullptr);
     ~PlayerLauncher() override;
 
     /**
@@ -53,7 +58,7 @@ public:
     /**
      * Best-effort availability check used at startup so the UI can grey
      * out the "Play" action with a tooltip explaining what to install.
-     * Uses `Config::preferredPlayer()` unless `kindOverride` is set.
+     * Uses PlayerSettings::preferred() unless `kindOverride` is set.
      */
     bool preferredPlayerAvailable() const;
     bool playerAvailable(player::Kind kind) const;
@@ -79,6 +84,8 @@ private:
 
     void notifyLaunched(player::Kind kind, const QString& title);
     void notifyFailed(player::Kind kind, const QString& reason);
+
+    const config::PlayerSettings& m_settings;
 };
 
 } // namespace kinema::core

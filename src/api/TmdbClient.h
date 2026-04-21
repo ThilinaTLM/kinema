@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/Discover.h"
+#include "api/Media.h"
 
 #include <QHash>
 #include <QNetworkRequest>

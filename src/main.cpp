@@ -35,7 +35,7 @@ int main(int argc, char* argv[])
     std::setlocale(LC_NUMERIC, "C");
 #endif
 
-    kinema::ui::MainWindow window;
+    kinema::ui::MainWindow window(app.settings());
     window.show();
 
     return app.exec();

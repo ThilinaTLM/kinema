@@ -61,9 +61,41 @@ ecm_add_test(tst_date_format.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_app_settings.cpp
+    TEST_NAME tst_app_settings
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_navigation.cpp
+    TEST_NAME tst_navigation
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_search_controller.cpp
+    TEST_NAME tst_search_controller
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_stream_actions.cpp
+    TEST_NAME tst_stream_actions
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_meta_header.cpp
+    TEST_NAME tst_meta_header
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_streams_panel.cpp
+    TEST_NAME tst_streams_panel
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
-         tst_date_format)
+         tst_date_format tst_app_settings tst_navigation
+         tst_search_controller tst_stream_actions
+         tst_meta_header tst_streams_panel)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

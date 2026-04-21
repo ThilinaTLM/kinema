@@ -8,6 +8,12 @@
 class QCheckBox;
 class QComboBox;
 
+namespace kinema::config {
+class AppearanceSettings;
+class SearchSettings;
+class TorrentioSettings;
+}
+
 namespace kinema::ui::settings {
 
 /**
@@ -19,16 +25,23 @@ class GeneralSettingsPage : public QWidget
 {
     Q_OBJECT
 public:
-    explicit GeneralSettingsPage(QWidget* parent = nullptr);
+    GeneralSettingsPage(config::SearchSettings& search,
+        config::TorrentioSettings& torrentio,
+        config::AppearanceSettings& appearance,
+        QWidget* parent = nullptr);
 
-    /// Populate widgets from the current Config state.
+    /// Populate widgets from the current settings.
     void load();
-    /// Write widget state back into Config. Only called on Apply/OK.
+    /// Write widget state back to settings. Only called on Apply/OK.
     void apply();
     /// Restore widget state to hard-coded defaults (does not touch disk).
     void resetToDefaults();
 
 private:
+    config::SearchSettings& m_search;
+    config::TorrentioSettings& m_torrentio;
+    config::AppearanceSettings& m_appearance;
+
     QComboBox* m_searchKindCombo {};
     QComboBox* m_sortCombo {};
     QCheckBox* m_closeToTrayCheck {};

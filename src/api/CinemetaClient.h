@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/Media.h"
 
 #include <QObject>
 #include <QString>
@@ -35,12 +35,18 @@ public:
     void setBaseUrl(QUrl url);
     const QUrl& baseUrl() const noexcept { return m_baseUrl; }
 
-    QCoro::Task<QList<MetaSummary>> search(MediaKind kind, QString query);
-    QCoro::Task<MetaDetail> meta(MediaKind kind, QString imdbId);
+    // NB: these are virtual so controller tests can subclass
+    // CinemetaClient with in-memory fakes. Production callers pay
+    // one vtable dispatch per network call — noise compared to the
+    // HTTP round-trip.
+    virtual QCoro::Task<QList<MetaSummary>> search(MediaKind kind, QString query);
+    virtual QCoro::Task<MetaDetail> meta(MediaKind kind, QString imdbId);
 
     /// Series meta + episode list in one call. The body is the same
     /// endpoint as `meta(Series, id)` but we parse the `videos` array too.
-    QCoro::Task<SeriesDetail> seriesMeta(QString imdbId);
+    virtual QCoro::Task<SeriesDetail> seriesMeta(QString imdbId);
+
+    virtual ~CinemetaClient() = default;
 
 private:
     core::HttpClient* m_http;

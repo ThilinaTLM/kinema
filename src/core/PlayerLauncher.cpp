@@ -3,7 +3,7 @@
 
 #include "core/PlayerLauncher.h"
 
-#include "config/Config.h"
+#include "config/PlayerSettings.h"
 #include "kinema_debug.h"
 
 #include <KLocalizedString>
@@ -20,8 +20,10 @@ constexpr auto kEventFailed = "playbackFailed";
 
 } // namespace
 
-PlayerLauncher::PlayerLauncher(QObject* parent)
+PlayerLauncher::PlayerLauncher(const config::PlayerSettings& settings,
+    QObject* parent)
     : QObject(parent)
+    , m_settings(settings)
 {
 }
 
@@ -29,9 +31,8 @@ PlayerLauncher::~PlayerLauncher() = default;
 
 std::optional<player::Kind> PlayerLauncher::resolvePlayer() const
 {
-    const auto& cfg = config::Config::instance();
-    const auto preferred = cfg.preferredPlayer();
-    const auto custom = cfg.customPlayerCommand();
+    const auto preferred = m_settings.preferred();
+    const auto custom = m_settings.customCommand();
 
     if (player::isAvailable(preferred, custom)) {
         return preferred;
@@ -60,14 +61,15 @@ std::optional<player::Kind> PlayerLauncher::resolvePlayer() const
 
 bool PlayerLauncher::preferredPlayerAvailable() const
 {
-    const auto& cfg = config::Config::instance();
-    return player::isAvailable(cfg.preferredPlayer(), cfg.customPlayerCommand());
+    return player::isAvailable(m_settings.preferred(),
+        m_settings.customCommand());
 }
 
 bool PlayerLauncher::playerAvailable(player::Kind kind) const
 {
-    const auto& cfg = config::Config::instance();
-    const auto custom = kind == player::Kind::Custom ? cfg.customPlayerCommand() : QString {};
+    const auto custom = kind == player::Kind::Custom
+        ? m_settings.customCommand()
+        : QString {};
     return player::isAvailable(kind, custom);
 }
 
@@ -115,8 +117,9 @@ void PlayerLauncher::play(const QUrl& url, const QString& title)
         return;
     }
 
-    const auto& cfg = config::Config::instance();
-    const auto custom = kind == player::Kind::Custom ? cfg.customPlayerCommand() : QString {};
+    const auto custom = kind == player::Kind::Custom
+        ? m_settings.customCommand()
+        : QString {};
     const auto inv = player::buildInvocation(kind, url, custom);
     if (!inv.isValid()) {
         const auto reason = i18nc("@info:status",

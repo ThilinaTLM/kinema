@@ -4,6 +4,7 @@
 #include "ui/BrowsePage.h"
 
 #include "api/TmdbClient.h"
+#include "config/BrowseSettings.h"
 #include "core/HttpError.h"
 #include "kinema_debug.h"
 #include "ui/BrowseFilterBar.h"
@@ -29,10 +30,12 @@
 namespace kinema::ui {
 
 BrowsePage::BrowsePage(
-    api::TmdbClient* tmdb, ImageLoader* images, QWidget* parent)
+    api::TmdbClient* tmdb, ImageLoader* images,
+    config::BrowseSettings& settings, QWidget* parent)
     : QWidget(parent)
     , m_tmdb(tmdb)
     , m_images(images)
+    , m_settings(settings)
 {
     // ---- page-level CTA ---------------------------------------------------
     m_pageCta = new QWidget(this);
@@ -79,7 +82,7 @@ BrowsePage::BrowsePage(
     // ---- content column --------------------------------------------------
     auto* content = new QWidget(this);
 
-    m_filterBar = new BrowseFilterBar(content);
+    m_filterBar = new BrowseFilterBar(m_settings, content);
     connect(m_filterBar, &BrowseFilterBar::filtersChanged, this,
         &BrowsePage::scheduleRefresh);
 

@@ -3,6 +3,8 @@
 
 #include "app/KinemaApplication.h"
 
+#include "config/AppSettings.h"
+
 #include <KAboutData>
 #include <KLocalizedString>
 
@@ -16,6 +18,16 @@ namespace kinema {
 KinemaApplication::KinemaApplication(int& argc, char** argv)
     : QApplication(argc, argv)
 {
+}
+
+KinemaApplication::~KinemaApplication() = default;
+
+config::AppSettings& KinemaApplication::settings()
+{
+    if (!m_settings) {
+        m_settings = new config::AppSettings(this);
+    }
+    return *m_settings;
 }
 
 void KinemaApplication::configure()

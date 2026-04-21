@@ -3,19 +3,17 @@
 
 #pragma once
 
-#include "api/Types.h"
-#include "core/TorrentioConfig.h"
+#include "api/Discover.h"
+#include "api/Media.h"
 
 #include <QMainWindow>
 
 #include <QCoro/QCoroTask>
 
 #include <memory>
-#include <optional>
 
 class KActionCollection;
 class KHamburgerMenu;
-class KStatusNotifierItem;
 class QListView;
 class QStackedWidget;
 class QToolBar;
@@ -30,6 +28,23 @@ namespace kinema::api {
 class CinemetaClient;
 class TmdbClient;
 class TorrentioClient;
+}
+
+namespace kinema::config {
+class AppSettings;
+}
+
+namespace kinema::controllers {
+class MovieDetailController;
+class NavigationController;
+class SearchController;
+class SeriesDetailController;
+class TokenController;
+class TrayController;
+}
+
+namespace kinema::services {
+class StreamActions;
 }
 
 namespace kinema::ui {
@@ -61,7 +76,8 @@ class MainWindow : public QMainWindow
 {
     Q_OBJECT
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(config::AppSettings& settings,
+        QWidget* parent = nullptr);
     ~MainWindow() override;
 
 private Q_SLOTS:
@@ -75,11 +91,7 @@ private Q_SLOTS:
     /// Toolbar / menu "Browse" action — swaps the results stack to
     /// the filter-bar Browse page and closes any open detail panel.
     void showBrowsePage();
-    void onCopyMagnet(const api::Stream& stream);
-    void onOpenMagnet(const api::Stream& stream);
-    void onCopyDirectUrl(const api::Stream& stream);
-    void onOpenDirectUrl(const api::Stream& stream);
-    void onPlayRequested(const api::Stream& stream);
+
     void showAbout();
     void showSettings();
     void onTorrentioOptionsChanged();
@@ -90,13 +102,7 @@ private Q_SLOTS:
     void onBackRequested();
 
 private:
-    QCoro::Task<void> runSearch(QString text, api::MediaKind kind);
-    QCoro::Task<void> loadMovieDetail(api::MetaSummary summary);
-    QCoro::Task<void> loadSeriesDetail(api::MetaSummary summary);
-    QCoro::Task<void> loadEpisodeStreams(api::Episode episode, QString imdbId);
-    QCoro::Task<void> loadRealDebridToken();
-    QCoro::Task<void> loadTmdbToken();
-    QCoro::Task<void> openFromDiscover(api::DiscoverItem item);
+
 
     void buildActions();
     void buildLayout();
@@ -111,21 +117,14 @@ private:
     void openEmbeddedPlayer(const QUrl& url, const QString& title);
 #endif
 
-    // ---- Tray + app lifecycle ---------------------------------------------
-    /// Create the KStatusNotifierItem tray icon, context menu, and
-    /// primary-activation handler. No-op when no tray host is
-    /// available (GNOME without extensions, minimal WMs, …); in
-    /// that case m_trayAvailable stays false and close-to-tray
-    /// becomes inert.
-    void buildTray();
-    /// Refresh the tray context menu: toggle label / icon on the
-    /// Show-Hide entry, and visibility of the Show-Player entry.
-    void updateTrayMenu();
+    // ---- Window lifecycle -------------------------------------------------
     /// Bring the main window to the foreground (raise + activate).
     void showMainWindow();
     /// Hide the main window without quitting. The tray icon remains
     /// so the user can get it back.
     void hideMainWindow();
+    /// Toggle visibility; called from TrayController.
+    void toggleMainWindow();
     /// Called from every "real quit" path (tray Quit, KStandardAction::quit,
     /// Ctrl+Q). Sets m_reallyQuit so closeEvent stops hiding and
     /// then calls qApp->quit().
@@ -138,7 +137,10 @@ private:
     /// the current navigation position (disabled only on Discover
     /// home with no detail pane open).
     void updateBackActionEnabled();
-    core::torrentio::ConfigOptions currentConfig() const;
+
+
+    // Settings are owned by KinemaApplication and outlive this window.
+    config::AppSettings& m_settings;
 
     // Ownership (parented to this window)
     std::unique_ptr<core::HttpClient> m_http;
@@ -166,33 +168,22 @@ private:
     DetailPane* m_detailPane {};
     SeriesDetailPane* m_seriesDetailPane {};
 
+    controllers::NavigationController* m_nav {};
+    controllers::SearchController* m_search {};
+    controllers::MovieDetailController* m_movieCtrl {};
+    controllers::SeriesDetailController* m_seriesCtrl {};
+    controllers::TokenController* m_tokenCtrl {};
+    controllers::TrayController* m_tray {};
+    services::StreamActions* m_streamActions {};
+
     // Central stack: page 0 = results (Discover / state / grid);
     // page 1 = movie detail; page 2 = series detail. Clicking a result
     // or Discover card swaps pages; closing / Esc / Home swaps back.
     QStackedWidget* m_centerStack {};
 
-    // Concurrency guard — increments on each new query so stale coroutines
-    // can detect they've been superseded and bail out.
-    quint64 m_queryEpoch = 0;
-    quint64 m_detailEpoch = 0;
-    quint64 m_episodeEpoch = 0;
 
-    // Cached series context so we can re-fetch streams when the user
-    // picks a different episode without re-fetching Cinemeta meta.
-    QString m_currentSeriesImdbId;
 
-    // Cached "what is currently on screen" pointers used by the
-    // Settings-triggered refetch logic. Cleared on navigation away.
-    std::optional<api::MetaSummary> m_currentMovie;
-    std::optional<api::Episode> m_currentEpisode;
 
-    // In-memory RD token, loaded at startup and whenever Settings saves.
-    QString m_rdToken;
-
-    // In-memory TMDB token. Resolved from: user keyring override →
-    // compile-time default → empty. Re-resolved when Settings saves
-    // or removes the user override.
-    QString m_tmdbToken;
 
     // Settings dialog is created lazily and reused across invocations.
     settings::SettingsDialog* m_settingsDialog {};
@@ -204,11 +195,6 @@ private:
     // when the build was configured without libmpv.
     player::PlayerWindow* m_playerWindow {};
 
-    // ---- Tray + quit ------------------------------------------------------
-    KStatusNotifierItem* m_tray {};
-    QAction* m_trayToggleAction {};
-    QAction* m_trayShowPlayerAction {};
-    bool m_trayAvailable {false};
     // Set by quitApplication() so closeEvent accepts the close
     // instead of hiding the main window.
     bool m_reallyQuit {false};

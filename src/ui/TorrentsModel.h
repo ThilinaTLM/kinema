@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/Media.h"
 
 #include <QAbstractTableModel>
 #include <QList>

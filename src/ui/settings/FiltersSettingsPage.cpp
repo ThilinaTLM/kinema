@@ -3,7 +3,7 @@
 
 #include "ui/settings/FiltersSettingsPage.h"
 
-#include "config/Config.h"
+#include "config/FilterSettings.h"
 
 #include <KLocalizedString>
 
@@ -41,8 +41,10 @@ QGroupBox* makeGroup(const QString& title,
 
 } // namespace
 
-FiltersSettingsPage::FiltersSettingsPage(QWidget* parent)
+FiltersSettingsPage::FiltersSettingsPage(
+    config::FilterSettings& settings, QWidget* parent)
     : QWidget(parent)
+    , m_settings(settings)
 {
     auto* intro = new QLabel(
         i18nc("@info",
@@ -128,28 +130,26 @@ FiltersSettingsPage::FiltersSettingsPage(QWidget* parent)
 
 void FiltersSettingsPage::load()
 {
-    const auto& cfg = config::Config::instance();
-
-    const auto resSet = cfg.excludedResolutions();
+    const auto resSet = m_settings.excludedResolutions();
     for (auto it = m_resolutionChecks.constBegin();
          it != m_resolutionChecks.constEnd(); ++it) {
         it.value()->setChecked(resSet.contains(it.key()));
     }
 
-    const auto catSet = cfg.excludedCategories();
+    const auto catSet = m_settings.excludedCategories();
     for (auto it = m_categoryChecks.constBegin();
          it != m_categoryChecks.constEnd(); ++it) {
         it.value()->setChecked(catSet.contains(it.key()));
     }
 
-    m_blocklistEdit->setPlainText(cfg.keywordBlocklist().join(QLatin1Char('\n')));
+    m_blocklistEdit->setPlainText(
+        m_settings.keywordBlocklist().join(QLatin1Char('\n')));
 }
 
 void FiltersSettingsPage::apply()
 {
-    auto& cfg = config::Config::instance();
-
     // Preserve a deterministic order so the rendered URL is stable.
+    auto& cfg = m_settings;
     static const QStringList resOrder {
         QStringLiteral("4k"), QStringLiteral("1080p"), QStringLiteral("720p"),
         QStringLiteral("480p"), QStringLiteral("other"),
@@ -181,7 +181,7 @@ void FiltersSettingsPage::apply()
 
     QStringList keywords = m_blocklistEdit->toPlainText().split(
         QLatin1Char('\n'), Qt::SkipEmptyParts);
-    // Trim whitespace; Config::setKeywordBlocklist will drop empties.
+    // Trim whitespace; FilterSettings::setKeywordBlocklist drops empties.
     for (auto& k : keywords) {
         k = k.trimmed();
     }

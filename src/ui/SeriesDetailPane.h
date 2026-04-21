@@ -3,53 +3,45 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/Discover.h"
+#include "api/Media.h"
 
 #include <QWidget>
 
-class QCheckBox;
 class QLabel;
-class QScrollArea;
 class QSplitter;
 class QStackedWidget;
-class QTableView;
 class QToolButton;
 
 namespace kinema::api {
 class TmdbClient;
 }
 
+namespace kinema::config {
+class AppearanceSettings;
+class FilterSettings;
+class TorrentioSettings;
+}
+
+namespace kinema::services {
+class StreamActions;
+}
+
 namespace kinema::ui {
 
 class ImageLoader;
+class MetaHeaderWidget;
 class SeriesPicker;
-class SimilarStrip;
 class StateWidget;
-class TorrentsModel;
+class StreamsPanel;
 
 /**
- * Full-width series detail view. Mirrors DetailPane's horizontal
- * two-column layout: left = meta + description + similar strip;
- * right = episodes-→-streams two-page stack.
+ * Full-width series detail view. Thin compositor over shared widgets:
  *
- *   +-----------------------------------+---------------------------+
- *   | [Poster] Title (Year)         [×] | Season: [ 1 ▾ ]          |
- *   |          Genre · Runtime · ★     | S1E1 Pilot                |
- *   |          Description…             | S1E2 …                   |
- *   |                                   | …                         |
- *   | More like this:                   |                           |
- *   |  [p] [p] [p] …                    |                           |
- *   +-----------------------------------+---------------------------+
+ *   - left:  MetaHeaderWidget
+ *   - right: stacked episodes page / episode-streams page
  *
- * After clicking an episode the right column flips to:
- *
- *   +-----------------------------------+---------------------------+
- *   | (same left column)                | [← Episodes]  S1E1 · Pilot|
- *   |                                   | [✓ Cached on RD]         |
- *   |                                   | Quality | Release | …    |
- *   +-----------------------------------+---------------------------+
- *
- * Esc (handled by MainWindow) pops stream-→-episode before close.
+ * Public API stays stable for the controllers.
  */
 class SeriesDetailPane : public QWidget
 {
@@ -58,7 +50,11 @@ public:
     /// `tmdb` is optional: when null, the "More like this" strip is
     /// omitted entirely.
     SeriesDetailPane(ImageLoader* loader,
-        api::TmdbClient* tmdb = nullptr,
+        api::TmdbClient* tmdb,
+        config::TorrentioSettings& torrentio,
+        config::FilterSettings& filter,
+        services::StreamActions& actions,
+        config::AppearanceSettings& appearance,
         QWidget* parent = nullptr);
 
     /// Populate the pane. Lands on the episodes page; does not
@@ -113,56 +109,27 @@ Q_SIGNALS:
     /// strip. MainWindow resolves the TMDB id and opens the existing
     /// detail flow.
     void similarActivated(const api::DiscoverItem& item);
-    void copyMagnetRequested(const api::Stream& stream);
-    void openMagnetRequested(const api::Stream& stream);
-    void copyDirectUrlRequested(const api::Stream& stream);
-    void openDirectUrlRequested(const api::Stream& stream);
-    void playRequested(const api::Stream& stream);
 
 private:
-    void applyClientFilters();
-    void rebuildCachedOnlyVisibility();
-    void onTorrentContextMenu(const QPoint& pos);
-    void updatePoster();
     void saveSplitterState();
+    void resetStreamsPage();
 
-    ImageLoader* m_loader;
-    bool m_rdConfigured = false;
-
-    // Left column (meta + description + similar)
     QSplitter* m_split {};
-    QStackedWidget* m_leftStack {};  // state | content-scroll
-    StateWidget* m_leftState {};
-    QScrollArea* m_leftScroll {};
-    QLabel* m_posterLabel {};
-    QLabel* m_titleLabel {};
-    QLabel* m_upcomingBadge {};
-    QLabel* m_metaLineLabel {};
-    QLabel* m_descLabel {};
-    QUrl m_pendingPosterUrl;
+    MetaHeaderWidget* m_header {};
 
-    // Right column — two pages (episodes | streams)
     QStackedWidget* m_rightStack {};
 
-    // Page 0: season picker + episode list
+    // Page 0: season picker + episode list.
     QStackedWidget* m_pickerStack {};
     StateWidget* m_pickerState {};
     SeriesPicker* m_picker {};
 
-    // Page 1: back button + breadcrumb + cached-only + torrents
+    // Page 1: back button + breadcrumb + streams panel.
     QToolButton* m_backToEpisodesButton {};
     QLabel* m_episodeBreadcrumbLabel {};
-    QCheckBox* m_cachedOnlyCheck {};
-    QStackedWidget* m_torrentsStack {};
-    StateWidget* m_torrentsState {};
-    QTableView* m_torrentsView {};
-    TorrentsModel* m_torrents {};
+    StreamsPanel* m_streams {};
 
-    QList<api::Stream> m_rawStreams;
-
-    // "More like this" strip. Null when the pane was constructed
-    // without a TmdbClient.
-    SimilarStrip* m_similar {};
+    config::AppearanceSettings& m_appearanceSettings;
 };
 
 } // namespace kinema::ui

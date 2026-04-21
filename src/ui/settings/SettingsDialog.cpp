@@ -3,6 +3,7 @@
 
 #include "ui/settings/SettingsDialog.h"
 
+#include "config/AppSettings.h"
 #include "ui/settings/FiltersSettingsPage.h"
 #include "ui/settings/GeneralSettingsPage.h"
 #include "ui/settings/PlayerSettingsPage.h"
@@ -20,17 +21,21 @@
 namespace kinema::ui::settings {
 
 SettingsDialog::SettingsDialog(
-    core::HttpClient* http, core::TokenStore* tokens, QWidget* parent)
+    core::HttpClient* http, core::TokenStore* tokens,
+    config::AppSettings& settings, QWidget* parent)
     : KPageDialog(parent)
 {
     setWindowTitle(i18nc("@title:window", "Configure Kinema"));
     setFaceType(KPageDialog::List);
     resize(820, 560);
 
-    m_generalPage = new GeneralSettingsPage(this);
-    m_filtersPage = new FiltersSettingsPage(this);
-    m_playerPage = new PlayerSettingsPage(this);
-    m_rdPage = new RealDebridSettingsPage(http, tokens, this);
+    m_generalPage = new GeneralSettingsPage(
+        settings.search(), settings.torrentio(),
+        settings.appearance(), this);
+    m_filtersPage = new FiltersSettingsPage(settings.filter(), this);
+    m_playerPage = new PlayerSettingsPage(settings.player(), this);
+    m_rdPage = new RealDebridSettingsPage(
+        http, tokens, settings.realDebrid(), this);
     m_tmdbPage = new TmdbSettingsPage(http, tokens, this);
 
     auto* generalItem = addPage(m_generalPage,

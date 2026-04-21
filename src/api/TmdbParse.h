@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Types.h"
+#include "api/Discover.h"
 
 #include <QJsonDocument>
 #include <QString>

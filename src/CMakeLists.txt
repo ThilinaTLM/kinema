@@ -6,11 +6,19 @@
 # ---------------------------------------------------------------------------
 
 set(kinema_core_SRCS
-    config/Config.cpp
+    config/AppearanceSettings.cpp
+    config/AppSettings.cpp
+    config/BrowseSettings.cpp
+    config/FilterSettings.cpp
+    config/PlayerSettings.cpp
+    config/RealDebridSettings.cpp
+    config/SearchSettings.cpp
+    config/TorrentioSettings.cpp
 
     core/DateFormat.cpp
     core/DateWindow.cpp
     core/HttpClient.cpp
+    core/HttpErrorPresenter.cpp
     core/Magnet.cpp
     core/Player.cpp
     core/PlayerLauncher.cpp
@@ -50,6 +58,9 @@ set(kinema_core_SRCS
     ui/DetailPane.cpp
     ui/MainWindow.cpp
 
+    ui/widgets/MetaHeaderWidget.cpp
+    ui/widgets/StreamsPanel.cpp
+
     ui/settings/FiltersSettingsPage.cpp
     ui/settings/GeneralSettingsPage.cpp
     ui/settings/PlayerSettingsPage.cpp
@@ -58,6 +69,15 @@ set(kinema_core_SRCS
     ui/settings/TmdbSettingsPage.cpp
 
     app/KinemaApplication.cpp
+
+    controllers/MovieDetailController.cpp
+    controllers/NavigationController.cpp
+    controllers/SearchController.cpp
+    controllers/SeriesDetailController.cpp
+    controllers/TokenController.cpp
+    controllers/TrayController.cpp
+
+    services/StreamActions.cpp
 )
 
 if(KINEMA_ENABLE_MPV_EMBED)
