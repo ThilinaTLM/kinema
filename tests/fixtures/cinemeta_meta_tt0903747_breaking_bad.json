@@ -4,6 +4,7 @@
     "type": "series",
     "name": "Breaking Bad",
     "year": "2008–2013",
+    "released": "2008-01-20T00:00:00.000Z",
     "poster": "https://example.com/bb_poster.jpg",
     "background": "https://example.com/bb_bg.jpg",
     "imdbRating": "9.5",
@@ -66,6 +67,15 @@
         "number": 3,
         "title": "Bit by a Dead Bee",
         "released": "2009-03-22T00:00:00.000Z"
+      },
+      {
+        "id": "tt0903747:2:4",
+        "season": 2,
+        "number": 4,
+        "name": "Down",
+        "overview": "Walt and Jesse scramble after losing their RV.",
+        "firstAired": "2009-03-29T05:00:00.000Z",
+        "thumbnail": "https://example.com/bb_s2e4.jpg"
       },
       {
         "id": "tt0903747:bad",

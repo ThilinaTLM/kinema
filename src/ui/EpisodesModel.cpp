@@ -3,9 +3,9 @@
 
 #include "ui/EpisodesModel.h"
 
-#include <KLocalizedString>
+#include "core/DateFormat.h"
 
-#include <QLocale>
+#include <KLocalizedString>
 
 namespace kinema::ui {
 
@@ -35,8 +35,9 @@ QVariant EpisodesModel::data(const QModelIndex& index, int role) const
     case DescriptionRole:
         return e.description;
     case ReleasedRole:
-        return e.released ? QLocale::system().toString(*e.released, QLocale::ShortFormat)
-                          : QString {};
+        return e.released ? core::formatReleaseDate(*e.released) : QString {};
+    case FutureReleaseRole:
+        return core::isFutureRelease(e.released);
     case ThumbnailUrlRole:
         return e.thumbnail;
     case EpisodeRole:

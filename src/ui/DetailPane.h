@@ -65,6 +65,11 @@ public:
     void showTorrentsError(const QString& message);
     void setTorrents(QList<api::Stream> streams);
     void showTorrentsEmpty();
+    /// Replace the torrents panel with a "not released yet" state.
+    /// MainWindow calls this instead of kicking off Torrentio when the
+    /// item's release date is in the future; the message surfaces the
+    /// actual release date so the user knows when to come back.
+    void showTorrentsUnreleased(const QDate& releaseDate);
 
     /// Show or hide the Real-Debrid UI bits (cached-only checkbox,
     /// decoration icons on the torrents table).
@@ -104,6 +109,7 @@ private:
     QScrollArea* m_leftScroll {};
     QLabel* m_posterLabel {};
     QLabel* m_titleLabel {};
+    QLabel* m_upcomingBadge {};
     QLabel* m_metaLineLabel {};
     QLabel* m_descLabel {};
     QUrl m_pendingPosterUrl;

@@ -5,6 +5,7 @@
 
 #include "api/RealDebridClient.h"
 #include "config/Config.h"
+#include "core/DateFormat.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
 #include "core/TokenStore.h"
@@ -19,7 +20,6 @@
 #include <QLineEdit>
 #include <KColorScheme>
 
-#include <QLocale>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -181,8 +181,7 @@ QCoro::Task<void> RealDebridSettingsPage::testConnection()
         if (user.premiumUntil) {
             msg += QLatin1Char('\n')
                 + i18nc("@info", "Premium until: %1",
-                    QLocale::system().toString(user.premiumUntil->date(),
-                        QLocale::ShortFormat));
+                    core::formatReleaseDate(*user.premiumUntil));
         }
         setStatus(msg, /*error=*/false);
     } catch (const core::HttpError& e) {

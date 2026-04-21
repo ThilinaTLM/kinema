@@ -5,11 +5,16 @@
 
 #include "ui/EpisodesModel.h"
 #include "ui/ImageLoader.h"
+#include "ui/UpcomingBadge.h"
+
+#include <KLocalizedString>
 
 #include <QAbstractItemView>
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
+#include <QTextLayout>
+#include <QTextOption>
 
 namespace kinema::ui {
 
@@ -40,7 +45,16 @@ void EpisodeDelegate::resetRequestTracking()
 
 QSize EpisodeDelegate::sizeHint(const QStyleOptionViewItem& option, const QModelIndex&) const
 {
-    return { option.rect.width(), kRowHeight };
+    // Only the row height matters here. Returning `option.rect.width()`
+    // combined with QListView::setUniformItemSizes(true) creates a
+    // feedback loop: the first sizeHint is cached at the initial
+    // viewport width, then when the vertical scrollbar appears the
+    // viewport shrinks but items stay at the wider cached width,
+    // producing a spurious horizontal scrollbar. A zero width lets the
+    // view fall back to viewport width, which is what we actually
+    // want — each row fills the list horizontally.
+    Q_UNUSED(option);
+    return { 0, kRowHeight };
 }
 
 void EpisodeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
@@ -97,6 +111,9 @@ void EpisodeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& optio
     const auto title = index.data(EpisodesModel::TitleRole).toString();
     const auto released = index.data(EpisodesModel::ReleasedRole).toString();
     const auto description = index.data(EpisodesModel::DescriptionRole).toString();
+    const bool isFuture = index.data(EpisodesModel::FutureReleaseRole).toBool();
+    const auto fullEpisode = index.data(EpisodesModel::EpisodeRole)
+                                 .value<api::Episode>();
 
     auto titleFont = option.font;
     titleFont.setBold(true);
@@ -105,14 +122,37 @@ void EpisodeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& optio
             ? palette.color(QPalette::HighlightedText)
             : palette.color(QPalette::Text));
 
-    const QString headline = number > 0
-        ? QStringLiteral("%1 — %2").arg(number).arg(title)
+    // Fall back to a localized "Episode N" when Cinemeta didn't give
+    // us a name (happens for a handful of shows). Better than a bare
+    // "1 — " with nothing after the em-dash.
+    const QString displayName = title.isEmpty()
+        ? i18nc("@label fallback when episode has no title",
+              "Episode %1", number)
         : title;
+    const QString headline = number > 0
+        ? QStringLiteral("%1 — %2").arg(number).arg(displayName)
+        : displayName;
     const QFontMetrics tfm(titleFont);
     const int titleH = tfm.lineSpacing();
-    painter->drawText(QRect(textRect.left(), textRect.top(), textRect.width(), titleH),
+
+    // Reserve room for the "Upcoming" badge on the title row so the
+    // title elides around it rather than under it.
+    int titleWidth = textRect.width();
+    QRect badgeRect;
+    if (isFuture && fullEpisode.released.has_value()) {
+        const QSize bs = upcomingBadgeSize(*fullEpisode.released, option.font);
+        badgeRect = QRect(textRect.right() - bs.width(),
+            textRect.top() + (titleH - bs.height()) / 2,
+            bs.width(), bs.height());
+        titleWidth = std::max(0, textRect.width() - bs.width() - 8);
+    }
+    painter->drawText(QRect(textRect.left(), textRect.top(), titleWidth, titleH),
         Qt::AlignLeft | Qt::AlignVCenter,
-        tfm.elidedText(headline, Qt::ElideRight, textRect.width()));
+        tfm.elidedText(headline, Qt::ElideRight, titleWidth));
+    if (isFuture && fullEpisode.released.has_value()) {
+        paintUpcomingBadge(painter, badgeRect, *fullEpisode.released,
+            palette, option.font);
+    }
 
     // Release date + description lines. Use a dimmed variant of the
     // primary text colour for visual hierarchy. QPalette::Mid would be
@@ -134,13 +174,71 @@ void EpisodeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& optio
             Qt::AlignLeft | Qt::AlignVCenter, released);
     }
 
-    // Description excerpt (third line).
+    // Description excerpt — up to two wrapped lines, eliding the last
+    // line if the text overflows. Fixed row height means we can't
+    // word-wrap indefinitely; two lines fit comfortably in the text
+    // column alongside the 72 px thumbnail.
     if (!description.isEmpty()) {
         const int descY = textRect.top() + titleH + sfm.lineSpacing() + 6;
-        if (descY + sfm.lineSpacing() <= textRect.bottom()) {
-            painter->drawText(QRect(textRect.left(), descY, textRect.width(), sfm.lineSpacing()),
-                Qt::AlignLeft | Qt::AlignVCenter,
-                sfm.elidedText(description, Qt::ElideRight, textRect.width()));
+        const int descMaxH = textRect.bottom() - descY;
+        const int lineH = sfm.lineSpacing();
+        const int maxLines = std::max(1, std::min(2, descMaxH / lineH));
+
+        QTextOption opt;
+        opt.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+
+        QTextLayout layout(description, subFont);
+        layout.setTextOption(opt);
+        layout.beginLayout();
+
+        QList<QTextLine> lines;
+        while (lines.size() < maxLines) {
+            QTextLine line = layout.createLine();
+            if (!line.isValid()) {
+                break;
+            }
+            line.setLineWidth(textRect.width());
+            lines.append(line);
+        }
+        // Probe one more line to detect overflow: if createLine() still
+        // returns a valid line, there's more text than we kept.
+        bool overflowedBeyondMax = false;
+        if (lines.size() == maxLines) {
+            QTextLine extra = layout.createLine();
+            if (extra.isValid()) {
+                overflowedBeyondMax = true;
+            }
+        }
+        layout.endLayout();
+
+        // Detect overflow by either the probe above or a short-read
+        // from createLine() that hit a natural end before maxLines.
+        int consumed = 0;
+        for (const auto& l : lines) {
+            consumed += l.textLength();
+        }
+        const bool overflowed = overflowedBeyondMax
+            || consumed < description.length();
+
+        qreal y = descY;
+        for (int i = 0; i < lines.size(); ++i) {
+            const auto& line = lines.at(i);
+            const bool isLast = (i == lines.size() - 1);
+            const QString segment = description.mid(
+                line.textStart(), line.textLength());
+            if (isLast && overflowed) {
+                painter->drawText(
+                    QRect(textRect.left(), int(y), textRect.width(), lineH),
+                    Qt::AlignLeft | Qt::AlignVCenter,
+                    sfm.elidedText(
+                        description.mid(line.textStart()),
+                        Qt::ElideRight, textRect.width()));
+            } else {
+                painter->drawText(
+                    QRect(textRect.left(), int(y), textRect.width(), lineH),
+                    Qt::AlignLeft | Qt::AlignVCenter, segment);
+            }
+            y += lineH;
         }
     }
 

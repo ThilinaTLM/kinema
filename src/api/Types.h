@@ -31,6 +31,10 @@ struct MetaSummary {
     MediaKind kind = MediaKind::Movie;
     QString title;
     std::optional<int> year;
+    /// Full release date (movie `released` / series first-air date) when
+    /// Cinemeta exposes one. Consumed by the future-release UI so the
+    /// app can badge unreleased titles and skip Torrentio for them.
+    std::optional<QDate> released;
     QUrl poster;
     QString description;
     std::optional<double> imdbRating;

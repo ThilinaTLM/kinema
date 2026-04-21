@@ -8,6 +8,7 @@
 set(kinema_core_SRCS
     config/Config.cpp
 
+    core/DateFormat.cpp
     core/DateWindow.cpp
     core/HttpClient.cpp
     core/Magnet.cpp
@@ -45,6 +46,7 @@ set(kinema_core_SRCS
     ui/TorrentsModel.cpp
     ui/SearchBar.cpp
     ui/StateWidget.cpp
+    ui/UpcomingBadge.cpp
     ui/DetailPane.cpp
     ui/MainWindow.cpp
 

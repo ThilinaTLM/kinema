@@ -4,12 +4,14 @@
 #include "ui/SeriesDetailPane.h"
 
 #include "config/Config.h"
+#include "core/DateFormat.h"
 #include "core/StreamFilter.h"
 #include "ui/ImageLoader.h"
 #include "ui/SeriesPicker.h"
 #include "ui/SimilarStrip.h"
 #include "ui/StateWidget.h"
 #include "ui/TorrentsModel.h"
+#include "ui/UpcomingBadge.h"
 
 #include <KLocalizedString>
 
@@ -82,6 +84,14 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
     }
     m_titleLabel->setWordWrap(true);
 
+    m_upcomingBadge = makeUpcomingBadge(this);
+
+    auto* titleRow = new QHBoxLayout;
+    titleRow->setSpacing(8);
+    titleRow->setContentsMargins(0, 0, 0, 0);
+    titleRow->addWidget(m_titleLabel, 1);
+    titleRow->addWidget(m_upcomingBadge, 0, Qt::AlignTop);
+
     m_metaLineLabel = new QLabel(this);
     m_metaLineLabel->setWordWrap(true);
     m_metaLineLabel->setTextFormat(Qt::PlainText);
@@ -94,7 +104,7 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
     auto* metaTextColumn = new QVBoxLayout;
     metaTextColumn->setContentsMargins(0, 0, 0, 0);
     metaTextColumn->setSpacing(6);
-    metaTextColumn->addWidget(m_titleLabel);
+    metaTextColumn->addLayout(titleRow);
     metaTextColumn->addWidget(m_metaLineLabel);
     metaTextColumn->addWidget(m_descLabel, 1);
 
@@ -376,6 +386,13 @@ void SeriesDetailPane::setSeries(const api::SeriesDetail& series)
     m_metaLineLabel->setText(metaLine.join(QStringLiteral("  ·  ")));
     m_descLabel->setText(sum.description);
 
+    if (core::isFutureRelease(sum.released)) {
+        setUpcomingBadgeDate(m_upcomingBadge, *sum.released);
+        m_upcomingBadge->show();
+    } else {
+        m_upcomingBadge->hide();
+    }
+
     m_pendingPosterUrl = sum.poster;
     m_posterLabel->clear();
     updatePoster();
@@ -426,6 +443,20 @@ bool SeriesDetailPane::tryPopStreamsPage()
         return true;
     }
     return false;
+}
+
+void SeriesDetailPane::showTorrentsUnreleased(const QDate& releaseDate)
+{
+    m_torrentsState->showIdle(
+        i18nc("@info:status when an episode has not aired yet",
+            "Not released yet"),
+        i18nc("@info:status body. %1 is a formatted date",
+            "Streams will be available from %1.",
+            core::formatReleaseDate(releaseDate)));
+    m_torrentsStack->setCurrentWidget(m_torrentsState);
+    m_rawStreams.clear();
+    m_torrents->reset({});
+    rebuildCachedOnlyVisibility();
 }
 
 void SeriesDetailPane::updatePoster()

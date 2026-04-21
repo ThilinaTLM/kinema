@@ -7,6 +7,7 @@
 #include "api/TmdbClient.h"
 #include "api/TorrentioClient.h"
 #include "config/Config.h"
+#include "core/DateFormat.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
 #include "core/Magnet.h"
@@ -688,6 +689,15 @@ QCoro::Task<void> MainWindow::loadMovieDetail(api::MetaSummary summary)
         m_detailPane->setSimilarContext(
             api::MediaKind::Movie, summary.imdbId);
 
+        // Short-circuit Torrentio for unreleased movies. Streams won't
+        // exist before theatrical/streaming release, and the empty
+        // result would read as an error. Show a dedicated "not yet
+        // released" state instead, keyed on the actual release date.
+        if (core::isFutureRelease(detail.summary.released)) {
+            m_detailPane->showTorrentsUnreleased(*detail.summary.released);
+            co_return;
+        }
+
         auto streams = co_await m_torrentio->streams(
             api::MediaKind::Movie, summary.imdbId, currentConfig());
         if (myEpoch != m_detailEpoch) {
@@ -750,6 +760,14 @@ QCoro::Task<void> MainWindow::loadEpisodeStreams(api::Episode episode, QString i
 {
     const auto myEpoch = ++m_episodeEpoch;
     m_currentEpisode = episode;
+
+    // Same short-circuit as movies: unaired episodes produce no useful
+    // Torrentio result; surface the air date directly instead.
+    if (core::isFutureRelease(episode.released)) {
+        m_seriesDetailPane->showTorrentsUnreleased(*episode.released);
+        co_return;
+    }
+
     m_seriesDetailPane->showTorrentsLoading();
 
     const auto streamId = episode.streamId(imdbId);

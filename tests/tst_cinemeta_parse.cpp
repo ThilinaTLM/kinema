@@ -89,9 +89,13 @@ private Q_SLOTS:
         QCOMPARE(sd.meta.summary.title, QStringLiteral("Breaking Bad"));
         QCOMPARE(sd.meta.genres.size(), 3);
 
-        // Fixture has 1 special + 3 S1 + 3 S2 = 7 valid episodes.
-        // The 8th "bad" row is dropped because it lacks season/number.
-        QCOMPARE(sd.episodes.size(), 7);
+        // Top-level `released` is parsed into MetaSummary.released.
+        QVERIFY(sd.meta.summary.released.has_value());
+        QCOMPARE(*sd.meta.summary.released, QDate(2008, 1, 20));
+
+        // Fixture has 1 special + 3 S1 + 4 S2 = 8 valid episodes.
+        // The 9th "bad" row is dropped because it lacks season/number.
+        QCOMPARE(sd.episodes.size(), 8);
 
         // Sorted by (season, number): specials first, then S1, then S2.
         QCOMPARE(sd.episodes.at(0).season, 0);
@@ -141,6 +145,23 @@ private Q_SLOTS:
             [](const Episode& e) { return e.season == 1 && e.number == 3; });
         QVERIFY(s1e3 != sd.episodes.end());
         QVERIFY(s1e3->thumbnail.isEmpty());
+    }
+
+    void series_acceptsLiveNameAndFirstAiredKeys()
+    {
+        // Live Cinemeta uses `name` and `firstAired`; the legacy shape
+        // our other fixture rows use is `title` and `released`. S2E4
+        // in the fixture exercises the live shape; the parser must
+        // accept both.
+        const auto doc = loadFixture("cinemeta_meta_tt0903747_breaking_bad.json");
+        const auto sd = cinemeta::parseSeriesMeta(doc);
+
+        const auto down = std::find_if(sd.episodes.begin(), sd.episodes.end(),
+            [](const Episode& e) { return e.season == 2 && e.number == 4; });
+        QVERIFY(down != sd.episodes.end());
+        QCOMPARE(down->title, QStringLiteral("Down"));
+        QVERIFY(down->released.has_value());
+        QCOMPARE(*down->released, QDate(2009, 3, 29));
     }
 };
 

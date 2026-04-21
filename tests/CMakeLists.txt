@@ -56,8 +56,14 @@ ecm_add_test(tst_stream_filter.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_date_format.cpp
+    TEST_NAME tst_date_format
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
-         tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter)
+         tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
+         tst_date_format)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

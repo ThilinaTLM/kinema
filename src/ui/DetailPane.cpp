@@ -5,10 +5,12 @@
 
 #include "config/Config.h"
 #include "core/StreamFilter.h"
+#include "core/DateFormat.h"
 #include "ui/ImageLoader.h"
 #include "ui/SimilarStrip.h"
 #include "ui/StateWidget.h"
 #include "ui/TorrentsModel.h"
+#include "ui/UpcomingBadge.h"
 
 #include <KLocalizedString>
 
@@ -78,6 +80,16 @@ DetailPane::DetailPane(ImageLoader* loader,
     m_titleLabel->setFont(tf);
     m_titleLabel->setWordWrap(true);
 
+    m_upcomingBadge = makeUpcomingBadge(this);
+
+    // Title row: title takes the stretch so the badge stays pinned to
+    // the right of the visible title text regardless of wrap width.
+    auto* titleRow = new QHBoxLayout;
+    titleRow->setSpacing(8);
+    titleRow->setContentsMargins(0, 0, 0, 0);
+    titleRow->addWidget(m_titleLabel, 1);
+    titleRow->addWidget(m_upcomingBadge, 0, Qt::AlignTop);
+
     m_metaLineLabel = new QLabel(this);
     m_metaLineLabel->setWordWrap(true);
     m_metaLineLabel->setTextFormat(Qt::PlainText);
@@ -89,7 +101,7 @@ DetailPane::DetailPane(ImageLoader* loader,
 
     auto* metaRight = new QVBoxLayout;
     metaRight->setSpacing(6);
-    metaRight->addWidget(m_titleLabel);
+    metaRight->addLayout(titleRow);
     metaRight->addWidget(m_metaLineLabel);
     metaRight->addWidget(m_descLabel, 1);
 
@@ -293,11 +305,32 @@ void DetailPane::setMeta(const api::MetaDetail& meta)
 
     m_descLabel->setText(meta.summary.description);
 
+    if (core::isFutureRelease(meta.summary.released)) {
+        setUpcomingBadgeDate(m_upcomingBadge, *meta.summary.released);
+        m_upcomingBadge->show();
+    } else {
+        m_upcomingBadge->hide();
+    }
+
     m_pendingPosterUrl = meta.summary.poster;
     m_posterLabel->clear();
     updatePoster();
 
     m_leftStack->setCurrentWidget(m_leftScroll);
+}
+
+void DetailPane::showTorrentsUnreleased(const QDate& releaseDate)
+{
+    m_torrentsState->showIdle(
+        i18nc("@info:status when a movie has not been released yet",
+            "Not released yet"),
+        i18nc("@info:status body. %1 is a formatted date",
+            "Streams will be available from %1.",
+            core::formatReleaseDate(releaseDate)));
+    m_torrentsStack->setCurrentWidget(m_torrentsState);
+    m_rawStreams.clear();
+    m_torrents->reset({});
+    rebuildCachedOnlyVisibility();
 }
 
 void DetailPane::setRealDebridConfigured(bool on)

@@ -40,6 +40,9 @@ SeriesPicker::SeriesPicker(ImageLoader* loader, QWidget* parent)
     m_episodeList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_episodeList->setAlternatingRowColors(true);
     m_episodeList->setMouseTracking(true);
+    // Rows always fill the viewport; horizontal scrolling would only
+    // ever show up as a glitch from stale uniform-item-size caching.
+    m_episodeList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     m_episodeDelegate = new EpisodeDelegate(loader, m_episodeList);
     m_episodeList->setItemDelegate(m_episodeDelegate);

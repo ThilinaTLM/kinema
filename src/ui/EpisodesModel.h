@@ -27,6 +27,9 @@ public:
         TitleRole,
         DescriptionRole,
         ReleasedRole,
+        /// True when the release date is strictly after today. Used by
+        /// EpisodeDelegate to draw the "Upcoming" pill.
+        FutureReleaseRole,
         ThumbnailUrlRole,
         EpisodeRole, ///< full Episode struct
     };

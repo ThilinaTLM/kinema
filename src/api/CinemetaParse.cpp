@@ -78,6 +78,27 @@ MediaKind kindFromType(const QString& type, MediaKind fallback)
     return fallback;
 }
 
+std::optional<QDate> parseReleased(const QJsonValue& v)
+{
+    if (!v.isString()) {
+        return std::nullopt;
+    }
+    const auto s = v.toString();
+    if (s.isEmpty()) {
+        return std::nullopt;
+    }
+    // Cinemeta emits either "2008-01-20T00:00:00.000Z" or just "2008-01-20".
+    auto dt = QDateTime::fromString(s, Qt::ISODate);
+    if (dt.isValid()) {
+        return dt.date();
+    }
+    auto d = QDate::fromString(s, Qt::ISODate);
+    if (d.isValid()) {
+        return d;
+    }
+    return std::nullopt;
+}
+
 MetaSummary summaryFromObject(const QJsonObject& obj, MediaKind requestedKind)
 {
     MetaSummary m;
@@ -85,6 +106,7 @@ MetaSummary summaryFromObject(const QJsonObject& obj, MediaKind requestedKind)
     m.kind = kindFromType(obj.value(QStringLiteral("type")).toString(), requestedKind);
     m.title = obj.value(QStringLiteral("name")).toString();
     m.year = parseYear(obj.value(QStringLiteral("year")));
+    m.released = parseReleased(obj.value(QStringLiteral("released")));
     m.description = obj.value(QStringLiteral("description")).toString();
     m.imdbRating = parseRating(obj.value(QStringLiteral("imdbRating")));
 
@@ -172,27 +194,6 @@ MetaDetail parseMeta(const QJsonDocument& doc, MediaKind kind)
 
 namespace {
 
-std::optional<QDate> parseReleased(const QJsonValue& v)
-{
-    if (!v.isString()) {
-        return std::nullopt;
-    }
-    const auto s = v.toString();
-    if (s.isEmpty()) {
-        return std::nullopt;
-    }
-    // Cinemeta emits either "2008-01-20T00:00:00.000Z" or just "2008-01-20".
-    auto dt = QDateTime::fromString(s, Qt::ISODate);
-    if (dt.isValid()) {
-        return dt.date();
-    }
-    auto d = QDate::fromString(s, Qt::ISODate);
-    if (d.isValid()) {
-        return d;
-    }
-    return std::nullopt;
-}
-
 Episode episodeFromObject(const QJsonObject& obj)
 {
     Episode e;
@@ -201,7 +202,12 @@ Episode episodeFromObject(const QJsonObject& obj)
     const auto nv = obj.value(QStringLiteral("number"));
     e.number = nv.isDouble() ? nv.toInt() : obj.value(QStringLiteral("episode")).toInt(-1);
 
-    e.title = obj.value(QStringLiteral("title")).toString();
+    // Live Cinemeta uses `name` for the episode title; older/legacy
+    // payloads (and some fixtures) use `title`. Prefer `name`.
+    e.title = obj.value(QStringLiteral("name")).toString();
+    if (e.title.isEmpty()) {
+        e.title = obj.value(QStringLiteral("title")).toString();
+    }
     // "overview" in some fixtures, "description" in others.
     const auto ov = obj.value(QStringLiteral("overview")).toString();
     e.description = ov.isEmpty()
@@ -212,7 +218,12 @@ Episode episodeFromObject(const QJsonObject& obj)
     if (!thumb.isEmpty()) {
         e.thumbnail = QUrl(thumb);
     }
-    e.released = parseReleased(obj.value(QStringLiteral("released")));
+    // `firstAired` is the TV-specific field used by live Cinemeta;
+    // `released` is the older / movie-style key. Prefer firstAired.
+    e.released = parseReleased(obj.value(QStringLiteral("firstAired")));
+    if (!e.released) {
+        e.released = parseReleased(obj.value(QStringLiteral("released")));
+    }
     return e;
 }
 
