@@ -207,8 +207,6 @@ void MainWindow::buildLayout()
         this, &MainWindow::onOpenDirectUrl);
     connect(m_detailPane, &DetailPane::playRequested,
         this, &MainWindow::onPlayRequested);
-    connect(m_detailPane, &DetailPane::closeRequested,
-        this, &MainWindow::closeDetailPanel);
 
     m_seriesDetailPane = new SeriesDetailPane(m_imageLoader, m_tmdb, this);
     connect(m_seriesDetailPane, &SeriesDetailPane::similarActivated, this,
@@ -230,8 +228,6 @@ void MainWindow::buildLayout()
         this, &MainWindow::onOpenDirectUrl);
     connect(m_seriesDetailPane, &SeriesDetailPane::playRequested,
         this, &MainWindow::onPlayRequested);
-    connect(m_seriesDetailPane, &SeriesDetailPane::closeRequested,
-        this, &MainWindow::closeDetailPanel);
 
     // ---- Center stack: results (page 0) + detail panes (1, 2) ------------
     m_centerStack = new QStackedWidget(this);
@@ -241,6 +237,14 @@ void MainWindow::buildLayout()
     m_centerStack->setCurrentWidget(m_resultsStack);
 
     setCentralWidget(m_centerStack);
+
+    // Refresh the toolbar Back action whenever the navigation surface
+    // changes (detail opens/closes, or the results stack flips between
+    // Discover / search state / search results).
+    connect(m_centerStack, &QStackedWidget::currentChanged,
+        this, [this] { updateBackActionEnabled(); });
+    connect(m_resultsStack, &QStackedWidget::currentChanged,
+        this, [this] { updateBackActionEnabled(); });
 
     statusBar()->showMessage(i18nc("@info:status", "Ready"), 2000);
 }
@@ -303,6 +307,48 @@ void MainWindow::onBackToEpisodes()
     m_currentEpisode.reset();
 }
 
+void MainWindow::onBackRequested()
+{
+    // 1. Series streams page → episodes list (stays in the pane).
+    if (m_centerStack
+        && m_centerStack->currentWidget() == m_seriesDetailPane
+        && m_seriesDetailPane->tryPopStreamsPage()) {
+        onBackToEpisodes();
+        updateBackActionEnabled();
+        return;
+    }
+
+    // 2. Any detail pane → results stack (whatever sub-page was
+    //    showing before the pane opened).
+    if (m_centerStack
+        && m_centerStack->currentWidget() != m_resultsStack) {
+        closeDetailPanel();
+        // currentChanged fires → updateBackActionEnabled runs.
+        return;
+    }
+
+    // 3. Search state / search results → Discover home.
+    if (m_resultsStack
+        && m_resultsStack->currentWidget() != m_discoverPage) {
+        showDiscoverHome();
+        return;
+    }
+
+    // 4. Already at Discover home — button should have been disabled.
+}
+
+void MainWindow::updateBackActionEnabled()
+{
+    if (!m_backAction) {
+        return;
+    }
+    const bool atDiscoverHome = m_centerStack
+        && m_centerStack->currentWidget() == m_resultsStack
+        && m_resultsStack
+        && m_resultsStack->currentWidget() == m_discoverPage;
+    m_backAction->setEnabled(!atDiscoverHome);
+}
+
 void MainWindow::buildActions()
 {
     m_actions = new KActionCollection(this);
@@ -334,6 +380,19 @@ void MainWindow::buildActions()
         this, &MainWindow::showDiscoverHome, m_actions);
     homeAction->setToolTip(i18nc("@info:tooltip", "Back to Discover"));
 
+    // Back — browser-style "one level up" walker, sibling to Home.
+    m_backAction = new QAction(
+        QIcon::fromTheme(QStringLiteral("go-previous")),
+        i18nc("@action:inmenu", "&Back"), this);
+    m_backAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Left));
+    m_backAction->setToolTip(i18nc("@info:tooltip", "Go back"));
+    m_backAction->setWhatsThis(i18nc("@info:whatsthis",
+        "Walk one step back through the navigation: streams → episodes, "
+        "detail → results, search → Discover."));
+    connect(m_backAction, &QAction::triggered,
+        this, &MainWindow::onBackRequested);
+    m_actions->addAction(QStringLiteral("go_back"), m_backAction);
+
     // Esc anywhere in the window walks back one navigation level:
     //   streams page → episode list, then detail view → results.
     // No modal flows live inside the main window (Settings is a
@@ -358,6 +417,7 @@ void MainWindow::buildActions()
     fileMenu->addAction(quitAction);
 
     auto* goMenu = menuBar()->addMenu(i18nc("@title:menu", "&Go"));
+    goMenu->addAction(m_backAction);
     goMenu->addAction(homeAction);
 
     auto* editMenu = menuBar()->addMenu(i18nc("@title:menu", "&Edit"));
@@ -388,6 +448,7 @@ void MainWindow::buildActions()
             [this, hamburger, focusSearch, homeAction, prefsAction,
              aboutAction, quitAction] {
         auto* menu = new QMenu;
+        menu->addAction(m_backAction);
         menu->addAction(homeAction);
         menu->addAction(focusSearch);
         menu->addSeparator();
@@ -406,12 +467,14 @@ void MainWindow::buildActions()
     });
 
     if (m_toolbar) {
-        // Prepend Home so it sits before the SearchBar and is easy to
-        // reach with a single click.
-        if (m_searchBar) {
-            m_toolbar->insertAction(
-                m_toolbar->actions().value(0), homeAction);
+        // Prepend [Back][Home] so they sit before the SearchBar and
+        // are easy to reach with a single click (browser-style).
+        QAction* firstAction = m_toolbar->actions().value(0);
+        if (firstAction) {
+            m_toolbar->insertAction(firstAction, m_backAction);
+            m_toolbar->insertAction(firstAction, homeAction);
         } else {
+            m_toolbar->addAction(m_backAction);
             m_toolbar->addAction(homeAction);
         }
         auto* spacer = new QWidget(m_toolbar);
@@ -430,6 +493,9 @@ void MainWindow::buildActions()
     const bool showBar = group.readEntry("ShowMenuBar", false);
     m_showMenubarAction->setChecked(showBar);
     menuBar()->setVisible(showBar);
+
+    // Cold start lands on Discover home, so Back has nowhere to go.
+    updateBackActionEnabled();
 }
 
 void MainWindow::onShowMenubarToggled(bool visible)

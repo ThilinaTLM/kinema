@@ -74,6 +74,10 @@ private Q_SLOTS:
     void showSettings();
     void onTorrentioOptionsChanged();
     void onShowMenubarToggled(bool visible);
+    /// Toolbar / menu "Back" action — walks one level up through the
+    /// nav chain: streams page → episodes, detail → results, search
+    /// results → Discover home.
+    void onBackRequested();
 
 private:
     QCoro::Task<void> runSearch(QString text, api::MediaKind kind);
@@ -90,6 +94,10 @@ private:
     void showSeriesDetail();
     void closeDetailPanel();
     void onBackToEpisodes();
+    /// Refresh the toolbar Back action's enabled state so it matches
+    /// the current navigation position (disabled only on Discover
+    /// home with no detail pane open).
+    void updateBackActionEnabled();
     core::torrentio::ConfigOptions currentConfig() const;
 
     // Ownership (parented to this window)
@@ -105,6 +113,7 @@ private:
     QToolBar* m_toolbar {};
     KActionCollection* m_actions {};
     QAction* m_showMenubarAction {};
+    QAction* m_backAction {};
     SearchBar* m_searchBar {};
     ResultsModel* m_resultsModel {};
     ResultCardDelegate* m_resultsDelegate {};

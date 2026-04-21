@@ -66,14 +66,6 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
         connect(m_similar, &SimilarStrip::itemActivated,
             this, &SeriesDetailPane::similarActivated);
     }
-    // ---- Close button (top-right of the pane) -----------------------------
-    m_closeButton = new QToolButton(this);
-    m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
-    m_closeButton->setToolTip(i18nc("@info:tooltip", "Close details"));
-    m_closeButton->setAutoRaise(true);
-    connect(m_closeButton, &QToolButton::clicked,
-        this, &SeriesDetailPane::closeRequested);
-
     // ---- Left column widgets ----------------------------------------------
     m_leftState = new StateWidget(this);
 
@@ -282,15 +274,9 @@ SeriesDetailPane::SeriesDetailPane(ImageLoader* loader,
         [this] { saveSplitterState(); });
 
     // ---- Root -------------------------------------------------------------
-    auto* headerRow = new QHBoxLayout;
-    headerRow->setContentsMargins(6, 6, 6, 0);
-    headerRow->addStretch(1);
-    headerRow->addWidget(m_closeButton, 0, Qt::AlignTop);
-
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(2);
-    root->addLayout(headerRow, 0);
+    root->setSpacing(0);
     root->addWidget(m_split, 1);
 
     // Repaint the poster when it finishes loading.

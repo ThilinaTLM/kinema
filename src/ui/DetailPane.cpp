@@ -28,7 +28,6 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTableView>
-#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace kinema::ui {
@@ -65,14 +64,6 @@ DetailPane::DetailPane(ImageLoader* loader,
         connect(m_similar, &SimilarStrip::itemActivated,
             this, &DetailPane::similarActivated);
     }
-    // ---- Header (always-visible close button) ------------------------------
-    m_closeButton = new QToolButton(this);
-    m_closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
-    m_closeButton->setToolTip(i18nc("@info:tooltip", "Close details"));
-    m_closeButton->setAutoRaise(true);
-    connect(m_closeButton, &QToolButton::clicked,
-        this, &DetailPane::closeRequested);
-
     // ---- Left column widgets ----------------------------------------------
     m_metaState = new StateWidget(this);
 
@@ -227,15 +218,9 @@ DetailPane::DetailPane(ImageLoader* loader,
     });
 
     // ---- Root --------------------------------------------------------------
-    auto* headerRow = new QHBoxLayout;
-    headerRow->setContentsMargins(6, 6, 6, 0);
-    headerRow->addStretch(1);
-    headerRow->addWidget(m_closeButton, 0, Qt::AlignTop);
-
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(2);
-    root->addLayout(headerRow, 0);
+    root->setSpacing(0);
     root->addWidget(m_split, 1);
 
     showIdle();

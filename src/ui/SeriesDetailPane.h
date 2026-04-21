@@ -100,8 +100,6 @@ public:
     void focusEpisodeList();
 
 Q_SIGNALS:
-    /// Emitted when the user clicks the [×] button in the header.
-    void closeRequested();
     void episodeSelected(const api::Episode& episode);
     /// Emitted when the user backs out of the streams page (via the
     /// back button or Esc). MainWindow uses this to cancel any
@@ -132,7 +130,6 @@ private:
     QStackedWidget* m_leftStack {};  // state | content-scroll
     StateWidget* m_leftState {};
     QScrollArea* m_leftScroll {};
-    QToolButton* m_closeButton {};
     QLabel* m_posterLabel {};
     QLabel* m_titleLabel {};
     QLabel* m_metaLineLabel {};
