@@ -830,11 +830,31 @@ QCoro::Task<void> MainWindow::openFromDiscover(api::DiscoverItem item)
             ? co_await m_tmdb->imdbIdForTmdbMovie(item.tmdbId)
             : co_await m_tmdb->imdbIdForTmdbSeries(item.tmdbId);
     } catch (const core::HttpError& e) {
-        qCWarning(KINEMA) << "TMDB external_ids lookup failed:" << e.message();
-        statusBar()->showMessage(
-            i18nc("@info:status", "Could not open “%1”: %2",
-                item.title, e.message()),
-            6000);
+        // 404 from /movie/{id} or /tv/{id}/external_ids means TMDB has no
+        // record for this (kind, id) pair — usually a stale/ghost entry
+        // in a list endpoint. Treat it like "no IMDB id" rather than a
+        // hard error: no red log, soft status-bar message. Log the item
+        // at warning level so the offending list/row can be identified.
+        const bool notFound
+            = e.kind() == core::HttpError::Kind::HttpStatus
+            && e.httpStatus() == 404;
+        qCWarning(KINEMA).nospace()
+            << "TMDB external_ids lookup failed: "
+            << (item.kind == api::MediaKind::Movie ? "movie" : "tv")
+            << "/" << item.tmdbId << " (\"" << item.title << "\") — "
+            << e.httpStatus() << " " << e.message();
+        if (notFound) {
+            statusBar()->showMessage(
+                i18nc("@info:status",
+                    "“%1” isn't reachable on TMDB — can't fetch streams.",
+                    item.title),
+                6000);
+        } else {
+            statusBar()->showMessage(
+                i18nc("@info:status", "Could not open “%1”: %2",
+                    item.title, e.message()),
+                6000);
+        }
         co_return;
     } catch (const std::exception& e) {
         statusBar()->showMessage(QString::fromUtf8(e.what()), 6000);
@@ -842,6 +862,10 @@ QCoro::Task<void> MainWindow::openFromDiscover(api::DiscoverItem item)
     }
 
     if (imdbId.isEmpty()) {
+        qCWarning(KINEMA).nospace()
+            << "TMDB has no IMDB id for "
+            << (item.kind == api::MediaKind::Movie ? "movie" : "tv")
+            << "/" << item.tmdbId << " (\"" << item.title << "\")";
         statusBar()->showMessage(
             i18nc("@info:status",
                 "“%1” has no IMDB id on TMDB — can't fetch streams.",
