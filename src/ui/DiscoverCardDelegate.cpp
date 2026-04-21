@@ -28,7 +28,12 @@ DiscoverCardDelegate::DiscoverCardDelegate(ImageLoader* loader, QObject* parent)
 {
     if (m_loader) {
         QObject::connect(m_loader, &ImageLoader::posterReady, this,
-            [this](const QUrl&) {
+            [this](const QUrl& url) {
+                // Release the in-flight marker so a later QPixmapCache
+                // eviction can re-request the poster. ImageLoader's
+                // m_inFlight already de-dupes concurrent fetches, so
+                // re-issuing after eviction is free (disk-cache hit).
+                m_requested.remove(url);
                 auto* view = qobject_cast<QAbstractItemView*>(this->parent());
                 if (view && view->viewport()) {
                     view->viewport()->update();

@@ -30,7 +30,12 @@ ResultCardDelegate::ResultCardDelegate(ImageLoader* loader, QObject* parent)
         // which row(s) the URL belongs to, so we just repaint the whole
         // viewport — cheap, and only triggered on genuinely-new posters.
         QObject::connect(m_loader, &ImageLoader::posterReady, this,
-            [this](const QUrl&) {
+            [this](const QUrl& url) {
+                // Release the in-flight marker so a later QPixmapCache
+                // eviction can re-request the poster. ImageLoader's
+                // m_inFlight already de-dupes concurrent fetches, so
+                // re-issuing after eviction is free (disk-cache hit).
+                m_requested.remove(url);
                 auto* view = qobject_cast<QAbstractItemView*>(this->parent());
                 if (view && view->viewport()) {
                     view->viewport()->update();

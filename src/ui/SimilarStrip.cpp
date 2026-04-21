@@ -8,15 +8,13 @@
 #include "kinema_debug.h"
 #include "ui/DiscoverCardDelegate.h"
 #include "ui/DiscoverRowModel.h"
+#include "ui/DiscoverSection.h"
 #include "ui/ImageLoader.h"
 #include "ui/StateWidget.h"
 
 #include <KLocalizedString>
 
-#include <QFrame>
-#include <QLabel>
-#include <QListView>
-#include <QStackedWidget>
+#include <QModelIndex>
 #include <QVBoxLayout>
 
 namespace kinema::ui {
@@ -27,70 +25,38 @@ SimilarStrip::SimilarStrip(
     , m_tmdb(tmdb)
     , m_images(images)
 {
-    m_title = new QLabel(i18nc("@label", "More like this"), this);
-    auto f = m_title->font();
-    f.setBold(true);
-    f.setPointSizeF(f.pointSizeF() * 1.05);
-    m_title->setFont(f);
+    m_section = new DiscoverSection(
+        i18nc("@label", "More like this"), m_images, this);
 
-    m_model = new DiscoverRowModel(this);
-
-    m_view = new QListView(this);
-    m_view->setModel(m_model);
-    m_view->setFlow(QListView::LeftToRight);
-    m_view->setWrapping(false);
-    m_view->setMovement(QListView::Static);
-    m_view->setUniformItemSizes(true);
-    m_view->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_view->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    m_view->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    m_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_view->setMouseTracking(true);
-    m_view->setFrameShape(QFrame::NoFrame);
-    m_view->setResizeMode(QListView::Adjust);
-    m_view->setSpacing(4);
-    m_view->setFixedHeight(DiscoverCardDelegate::kCardHeight + 12);
-
-    m_delegate = new DiscoverCardDelegate(m_images, m_view);
-    m_view->setItemDelegate(m_delegate);
-
-    auto emitActivated = [this](const QModelIndex& idx) {
-        if (!idx.isValid()) {
-            return;
-        }
-        if (const auto* item = m_model->at(idx.row())) {
-            Q_EMIT itemActivated(*item);
-        }
-    };
-    connect(m_view, &QListView::activated, this, emitActivated);
-    connect(m_view, &QListView::clicked, this, emitActivated);
-
-    m_state = new StateWidget(this);
-    m_state->setFixedHeight(DiscoverCardDelegate::kCardHeight + 12);
-
-    m_stack = new QStackedWidget(this);
-    m_stack->addWidget(m_state);
-    m_stack->addWidget(m_view);
-    m_stack->setFixedHeight(DiscoverCardDelegate::kCardHeight + 12);
+    connect(m_section, &DiscoverSection::itemActivated,
+        this, &SimilarStrip::onActivated);
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(12, 4, 12, 8);
     root->setSpacing(4);
-    root->addWidget(m_title);
-    root->addWidget(m_stack);
+    root->addWidget(m_section);
 
-    // Default to hidden \u2014 shown only once a non-empty recommendation
-    // list comes back. Keeps the pane from growing a dead section when
-    // TMDB is unconfigured or has nothing to offer.
+    // Default to hidden — shown only once a non-empty recommendation
+    // list comes back. Keeps the pane from growing a dead section
+    // when TMDB is unconfigured or has nothing to offer.
     hide();
+}
+
+void SimilarStrip::onActivated(const QModelIndex& idx)
+{
+    if (!idx.isValid()) {
+        return;
+    }
+    if (const auto* item = m_section->model()->at(idx.row())) {
+        Q_EMIT itemActivated(*item);
+    }
 }
 
 void SimilarStrip::setContextImdb(api::MediaKind kind, QString imdbId)
 {
     if (imdbId.isEmpty() || !m_tmdb || !m_tmdb->hasToken()) {
         hide();
-        m_model->reset({});
+        m_section->model()->reset({});
         m_lastContextKey.clear();
         return;
     }
@@ -98,8 +64,8 @@ void SimilarStrip::setContextImdb(api::MediaKind kind, QString imdbId)
         .arg(kind == api::MediaKind::Movie
                 ? QLatin1Char('m') : QLatin1Char('s'))
         .arg(imdbId);
-    if (key == m_lastContextKey && !m_model->rows().isEmpty()) {
-        // Same item, already populated \u2014 nothing to do.
+    if (key == m_lastContextKey && !m_section->model()->rows().isEmpty()) {
+        // Same item, already populated — nothing to do.
         return;
     }
     m_lastContextKey = key;
@@ -112,12 +78,11 @@ QCoro::Task<void> SimilarStrip::loadFor(api::MediaKind kind, QString imdbId)
 {
     const auto myEpoch = ++m_epoch;
 
-    m_delegate->resetRequestTracking();
-    m_state->showLoading(QString {});
-    m_stack->setCurrentWidget(m_state);
+    m_section->delegate()->resetRequestTracking();
+    m_section->showLoading();
     show();
 
-    // Step 1: resolve IMDB id \u2192 TMDB id via /find.
+    // Step 1: resolve IMDB id → TMDB id via /find.
     int tmdbId = 0;
     try {
         const auto [id, found] = co_await m_tmdb->findByImdb(imdbId, kind);
@@ -126,9 +91,9 @@ QCoro::Task<void> SimilarStrip::loadFor(api::MediaKind kind, QString imdbId)
         }
         tmdbId = id;
         if (tmdbId == 0) {
-            // Nothing to recommend on \u2014 hide the whole strip silently.
+            // Nothing to recommend on — hide the whole strip silently.
             hide();
-            m_model->reset({});
+            m_section->model()->reset({});
             co_return;
         }
         // /find may return the item under the opposite array; respect
@@ -141,14 +106,14 @@ QCoro::Task<void> SimilarStrip::loadFor(api::MediaKind kind, QString imdbId)
         qCDebug(KINEMA) << "Similar: /find failed:" << e.httpStatus()
                         << e.message();
         hide();
-        m_model->reset({});
+        m_section->model()->reset({});
         co_return;
     } catch (const std::exception&) {
         if (myEpoch != m_epoch) {
             co_return;
         }
         hide();
-        m_model->reset({});
+        m_section->model()->reset({});
         co_return;
     }
 
@@ -172,25 +137,25 @@ QCoro::Task<void> SimilarStrip::loadFor(api::MediaKind kind, QString imdbId)
         qCDebug(KINEMA) << "Similar: recommendations failed:"
                         << e.httpStatus() << e.message();
         hide();
-        m_model->reset({});
+        m_section->model()->reset({});
         co_return;
     } catch (const std::exception&) {
         if (myEpoch != m_epoch) {
             co_return;
         }
         hide();
-        m_model->reset({});
+        m_section->model()->reset({});
         co_return;
     }
 
     if (items.isEmpty()) {
         hide();
-        m_model->reset({});
+        m_section->model()->reset({});
         co_return;
     }
 
-    m_model->reset(std::move(items));
-    m_stack->setCurrentWidget(m_view);
+    m_section->model()->reset(std::move(items));
+    m_section->showItems();
     show();
 }
 

@@ -9,9 +9,7 @@
 
 #include <QCoro/QCoroTask>
 
-class QLabel;
-class QListView;
-class QStackedWidget;
+class QModelIndex;
 
 namespace kinema::api {
 class TmdbClient;
@@ -19,15 +17,13 @@ class TmdbClient;
 
 namespace kinema::ui {
 
-class DiscoverCardDelegate;
-class DiscoverRowModel;
+class DiscoverSection;
 class ImageLoader;
-class StateWidget;
 
 /**
- * "More like this" strip for the movie and series detail panes.
- * Shown below the torrents table; fed by TMDB recommendations with a
- * `/similar` fallback.
+ * "More like this" section for the movie and series detail panes.
+ * Shown below the meta/description area; fed by TMDB recommendations
+ * with a `/similar` fallback.
  *
  * Self-contained:
  *   - Call setContextImdb(kind, imdbId) when the pane loads a new
@@ -37,6 +33,10 @@ class StateWidget;
  *     IMDB id is missing, the whole strip hides itself silently.
  *   - An internal epoch counter guards against stale loads when the
  *     user clicks rapidly through items.
+ *
+ * Visually, uses the same DiscoverSection as DiscoverPage: a titled
+ * wrap-grid of cards, collapsed to a couple of rows by default with
+ * a "Show more" toggle.
  *
  * Emits itemActivated(DiscoverItem). The owning pane forwards this to
  * MainWindow, which resolves the TMDB id of the clicked item back to
@@ -58,16 +58,12 @@ Q_SIGNALS:
 
 private:
     QCoro::Task<void> loadFor(api::MediaKind kind, QString imdbId);
+    void onActivated(const QModelIndex& idx);
 
     api::TmdbClient* m_tmdb;
     ImageLoader* m_images;
 
-    QLabel* m_title {};
-    QStackedWidget* m_stack {};   // { state, view }
-    StateWidget* m_state {};
-    QListView* m_view {};
-    DiscoverRowModel* m_model {};
-    DiscoverCardDelegate* m_delegate {};
+    DiscoverSection* m_section {};
 
     quint64 m_epoch = 0;
     /// Cached last successful lookup so rapidly re-opening the same

@@ -26,8 +26,10 @@ set(kinema_core_SRCS
     api/TorrentioParse.cpp
 
     ui/DiscoverCardDelegate.cpp
+    ui/DiscoverGridView.cpp
     ui/DiscoverPage.cpp
     ui/DiscoverRowModel.cpp
+    ui/DiscoverSection.cpp
     ui/EpisodeDelegate.cpp
     ui/EpisodesModel.cpp
     ui/ImageLoader.cpp

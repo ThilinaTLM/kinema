@@ -8,6 +8,7 @@
 #include "kinema_debug.h"
 #include "ui/DiscoverCardDelegate.h"
 #include "ui/DiscoverRowModel.h"
+#include "ui/DiscoverSection.h"
 #include "ui/ImageLoader.h"
 #include "ui/StateWidget.h"
 
@@ -16,37 +17,12 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QListView>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
 namespace kinema::ui {
-
-namespace {
-
-QListView* makeStripView(QWidget* parent)
-{
-    auto* v = new QListView(parent);
-    v->setFlow(QListView::LeftToRight);
-    v->setWrapping(false);
-    v->setMovement(QListView::Static);
-    v->setUniformItemSizes(true);
-    v->setSelectionMode(QAbstractItemView::SingleSelection);
-    v->setSelectionBehavior(QAbstractItemView::SelectItems);
-    v->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    v->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    v->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    v->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    v->setMouseTracking(true);
-    v->setFrameShape(QFrame::NoFrame);
-    v->setResizeMode(QListView::Adjust);
-    v->setSpacing(4);
-    return v;
-}
-
-} // namespace
 
 DiscoverPage::DiscoverPage(
     api::TmdbClient* tmdb, ImageLoader* images, QWidget* parent)
@@ -98,11 +74,11 @@ DiscoverPage::DiscoverPage(
         v->addStretch();
     }
 
-    // Rows surface.
+    // Sections surface.
     m_rowsContainer = new QWidget;
     m_rowsLayout = new QVBoxLayout(m_rowsContainer);
     m_rowsLayout->setContentsMargins(16, 12, 16, 16);
-    m_rowsLayout->setSpacing(12);
+    m_rowsLayout->setSpacing(16);
 
     m_rowsScroll = new QScrollArea(this);
     m_rowsScroll->setWidgetResizable(true);
@@ -111,33 +87,33 @@ DiscoverPage::DiscoverPage(
     m_rowsScroll->setWidget(m_rowsContainer);
 
     m_pageStack = new QStackedWidget(this);
-    m_pageStack->addWidget(m_rowsScroll); // idx 0 = rows
+    m_pageStack->addWidget(m_rowsScroll); // idx 0 = sections
     m_pageStack->addWidget(m_pageCta);    // idx 1 = call-to-action
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->addWidget(m_pageStack);
 
-    buildRows();
+    buildSections();
 
-    // Initial state: show rows with per-row loading placeholders. The
-    // owning MainWindow is expected to call refresh() or
-    // showNotConfigured() once it has resolved the effective token.
+    // Initial state: show sections with per-section loading
+    // placeholders. The owning MainWindow is expected to call
+    // refresh() or showNotConfigured() once it has resolved the
+    // effective token.
     m_pageStack->setCurrentWidget(m_rowsScroll);
-    for (auto& row : m_rows) {
-        row.state->showLoading(QString {});
-        row.stack->setCurrentWidget(row.state);
+    for (auto& s : m_sections) {
+        s.widget->showLoading();
     }
 }
 
-void DiscoverPage::buildRows()
+void DiscoverPage::buildSections()
 {
-    struct RowSpec {
+    struct Spec {
         QString label;
         std::function<QCoro::Task<QList<api::DiscoverItem>>(api::TmdbClient*)> fetch;
     };
 
-    const QVector<RowSpec> specs = {
+    const QVector<Spec> specs = {
         { i18nc("@label discover row", "Trending this week"),
             [](api::TmdbClient* c) {
                 return c->trending(api::MediaKind::Movie, /*weekly=*/true);
@@ -160,72 +136,41 @@ void DiscoverPage::buildRows()
             } },
     };
 
-    m_rows.reserve(specs.size());
+    m_sections.reserve(specs.size());
 
     for (int i = 0; i < specs.size(); ++i) {
         const auto& spec = specs.at(i);
-        Row r;
+        Section s;
+        s.widget = new DiscoverSection(spec.label, m_images, m_rowsContainer);
 
-        r.title = new QLabel(spec.label, m_rowsContainer);
-        auto f = r.title->font();
-        f.setBold(true);
-        f.setPointSizeF(f.pointSizeF() * 1.1);
-        r.title->setFont(f);
-
-        r.model = new DiscoverRowModel(this);
-        r.view = makeStripView(m_rowsContainer);
-        r.view->setModel(r.model);
-        r.view->setFixedHeight(DiscoverCardDelegate::kCardHeight + 12);
-        r.delegate = new DiscoverCardDelegate(m_images, r.view);
-        r.view->setItemDelegate(r.delegate);
-
-        r.state = new StateWidget(m_rowsContainer);
-
-        r.stack = new QStackedWidget(m_rowsContainer);
-        r.stack->addWidget(r.state); // idx 0
-        r.stack->addWidget(r.view);  // idx 1
-        r.stack->setFixedHeight(DiscoverCardDelegate::kCardHeight + 12);
-
-        // Capture the fetch callable with the client bound in; the row
-        // doesn't need to know which endpoint it represents.
         auto* tmdb = m_tmdb;
         const auto fetcher = spec.fetch;
-        r.fetch = [tmdb, fetcher]() { return fetcher(tmdb); };
+        s.fetch = [tmdb, fetcher]() { return fetcher(tmdb); };
 
-        // Click / Enter → itemActivated. Passing the row index so we can
-        // look up the item on the correct model.
-        const int rowIndex = i;
-        connect(r.view, &QListView::activated, this,
-            [this, rowIndex](const QModelIndex& idx) {
-                onRowActivated(rowIndex, idx);
+        const int sectionIndex = i;
+        connect(s.widget, &DiscoverSection::itemActivated, this,
+            [this, sectionIndex](const QModelIndex& idx) {
+                onSectionActivated(sectionIndex, idx);
             });
-        connect(r.view, &QListView::clicked, this,
-            [this, rowIndex](const QModelIndex& idx) {
-                onRowActivated(rowIndex, idx);
-            });
-
-        // Per-row retry reloads just this row.
-        connect(r.state, &StateWidget::retryRequested, this,
-            [this, rowIndex] {
-                auto t = loadRow(rowIndex);
+        connect(s.widget, &DiscoverSection::retryRequested, this,
+            [this, sectionIndex] {
+                auto t = loadSection(sectionIndex);
                 Q_UNUSED(t);
             });
 
-        m_rowsLayout->addWidget(r.title);
-        m_rowsLayout->addWidget(r.stack);
-
-        m_rows.append(std::move(r));
+        m_rowsLayout->addWidget(s.widget);
+        m_sections.append(std::move(s));
     }
 
     m_rowsLayout->addStretch(1);
 }
 
-void DiscoverPage::onRowActivated(int rowIndex, const QModelIndex& idx)
+void DiscoverPage::onSectionActivated(int sectionIndex, const QModelIndex& idx)
 {
-    if (rowIndex < 0 || rowIndex >= m_rows.size() || !idx.isValid()) {
+    if (sectionIndex < 0 || sectionIndex >= m_sections.size() || !idx.isValid()) {
         return;
     }
-    const auto* item = m_rows.at(rowIndex).model->at(idx.row());
+    const auto* item = m_sections.at(sectionIndex).widget->model()->at(idx.row());
     if (!item) {
         return;
     }
@@ -257,48 +202,45 @@ void DiscoverPage::refresh()
     m_pageAuthFailed = false;
     m_pageStack->setCurrentWidget(m_rowsScroll);
 
-    for (auto& row : m_rows) {
-        row.delegate->resetRequestTracking();
-        row.state->showLoading(QString {});
-        row.stack->setCurrentWidget(row.state);
+    for (auto& s : m_sections) {
+        s.widget->delegate()->resetRequestTracking();
+        s.widget->showLoading();
     }
-    // Fire all rows concurrently.
-    for (int i = 0; i < m_rows.size(); ++i) {
-        auto t = loadRow(i);
+    // Fire all sections concurrently.
+    for (int i = 0; i < m_sections.size(); ++i) {
+        auto t = loadSection(i);
         Q_UNUSED(t);
     }
 }
 
-QCoro::Task<void> DiscoverPage::loadRow(int index)
+QCoro::Task<void> DiscoverPage::loadSection(int index)
 {
-    if (index < 0 || index >= m_rows.size()) {
+    if (index < 0 || index >= m_sections.size()) {
         co_return;
     }
-    auto& row = m_rows[index];
-    const auto myEpoch = ++row.epoch;
+    auto& s = m_sections[index];
+    const auto myEpoch = ++s.epoch;
 
-    row.state->showLoading(QString {});
-    row.stack->setCurrentWidget(row.state);
+    s.widget->showLoading();
 
     try {
-        auto items = co_await row.fetch();
-        if (myEpoch != row.epoch) {
+        auto items = co_await s.fetch();
+        if (myEpoch != s.epoch) {
             co_return;
         }
         if (items.isEmpty()) {
-            row.model->reset({});
-            row.state->showIdle(
-                i18nc("@info", "Nothing here right now."), QString {});
-            row.stack->setCurrentWidget(row.state);
+            s.widget->model()->reset({});
+            s.widget->showEmpty(
+                i18nc("@info", "Nothing here right now."));
             co_return;
         }
-        row.model->reset(std::move(items));
-        row.stack->setCurrentWidget(row.view);
+        s.widget->model()->reset(std::move(items));
+        s.widget->showItems();
     } catch (const core::HttpError& e) {
-        if (myEpoch != row.epoch) {
+        if (myEpoch != s.epoch) {
             co_return;
         }
-        qCWarning(KINEMA) << "Discover row" << index << "failed:"
+        qCWarning(KINEMA) << "Discover section" << index << "failed:"
                           << e.httpStatus() << e.message();
         if ((e.httpStatus() == 401 || e.httpStatus() == 403)
             && !m_pageAuthFailed) {
@@ -315,14 +257,12 @@ QCoro::Task<void> DiscoverPage::loadRow(int index)
             // Page-level error already shown; don't clobber.
             co_return;
         }
-        row.state->showError(e.message(), /*retryable=*/true);
-        row.stack->setCurrentWidget(row.state);
+        s.widget->showError(e.message(), /*retryable=*/true);
     } catch (const std::exception& e) {
-        if (myEpoch != row.epoch) {
+        if (myEpoch != s.epoch) {
             co_return;
         }
-        row.state->showError(QString::fromUtf8(e.what()), /*retryable=*/true);
-        row.stack->setCurrentWidget(row.state);
+        s.widget->showError(QString::fromUtf8(e.what()), /*retryable=*/true);
     }
 }
 
