@@ -129,6 +129,52 @@ QList<DiscoverItem> parseList(const QJsonDocument& doc, MediaKind kind)
     return out;
 }
 
+DiscoverPageResult parsePagedList(const QJsonDocument& doc, MediaKind kind)
+{
+    if (!doc.isObject()) {
+        throw core::HttpError(core::HttpError::Kind::Json, 0,
+            i18n("TMDB paged list response was not a JSON object."));
+    }
+    const auto obj = doc.object();
+
+    DiscoverPageResult r;
+    r.items = parseList(doc, kind);
+    r.page = obj.value(QStringLiteral("page")).toInt(1);
+    r.totalPages = obj.value(QStringLiteral("total_pages")).toInt(0);
+    r.totalResults = obj.value(QStringLiteral("total_results")).toInt(0);
+    return r;
+}
+
+QList<TmdbGenre> parseGenreList(const QJsonDocument& doc)
+{
+    if (!doc.isObject()) {
+        throw core::HttpError(core::HttpError::Kind::Json, 0,
+            i18n("TMDB genre list response was not a JSON object."));
+    }
+    const auto genres = doc.object().value(QStringLiteral("genres"));
+    if (!genres.isArray()) {
+        return {};
+    }
+
+    QList<TmdbGenre> out;
+    const auto arr = genres.toArray();
+    out.reserve(arr.size());
+    for (const auto& v : arr) {
+        if (!v.isObject()) {
+            continue;
+        }
+        const auto o = v.toObject();
+        TmdbGenre g;
+        g.id = o.value(QStringLiteral("id")).toInt(0);
+        g.name = o.value(QStringLiteral("name")).toString();
+        if (g.id <= 0 || g.name.isEmpty()) {
+            continue;
+        }
+        out.append(std::move(g));
+    }
+    return out;
+}
+
 QString parseMovieExternalIds(const QJsonDocument& doc)
 {
     if (!doc.isObject()) {

@@ -33,6 +33,7 @@ class TorrentioClient;
 
 namespace kinema::ui {
 
+class BrowsePage;
 class DetailPane;
 class DiscoverPage;
 class ImageLoader;
@@ -65,6 +66,9 @@ private Q_SLOTS:
     /// Toolbar / menu "Home" action — swaps the results stack back to
     /// the Discover page and closes any open detail panel.
     void showDiscoverHome();
+    /// Toolbar / menu "Browse" action — swaps the results stack to
+    /// the filter-bar Browse page and closes any open detail panel.
+    void showBrowsePage();
     void onCopyMagnet(const api::Stream& stream);
     void onOpenMagnet(const api::Stream& stream);
     void onCopyDirectUrl(const api::Stream& stream);
@@ -114,6 +118,7 @@ private:
     KActionCollection* m_actions {};
     QAction* m_showMenubarAction {};
     QAction* m_backAction {};
+    QAction* m_browseAction {};
     SearchBar* m_searchBar {};
     ResultsModel* m_resultsModel {};
     ResultCardDelegate* m_resultsDelegate {};
@@ -121,6 +126,7 @@ private:
     StateWidget* m_resultsState {};
     QStackedWidget* m_resultsStack {};
     DiscoverPage* m_discoverPage {};
+    BrowsePage* m_browsePage {};
     DetailPane* m_detailPane {};
     SeriesDetailPane* m_seriesDetailPane {};
 

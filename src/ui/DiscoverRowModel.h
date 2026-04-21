@@ -45,6 +45,12 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     void reset(QList<api::DiscoverItem> rows);
+
+    /// Append more rows to the existing list (used by the Browse page's
+    /// "Load more" pagination). Emits standard rowsInserted signals so
+    /// the attached DiscoverGridView reflows its fixed height.
+    void append(const QList<api::DiscoverItem>& more);
+
     const QList<api::DiscoverItem>& rows() const noexcept { return m_rows; }
     const api::DiscoverItem* at(int row) const;
 

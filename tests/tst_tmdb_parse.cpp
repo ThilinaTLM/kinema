@@ -173,6 +173,59 @@ private Q_SLOTS:
         QCOMPARE(rows.at(0).tmdbId, 604);
         QCOMPARE(rows.at(0).title, QStringLiteral("The Matrix Reloaded"));
     }
+
+    void parsePagedList_extracts_items_and_paging_metadata()
+    {
+        const auto doc = loadFixture("tmdb_discover_movie_page1.json");
+        const auto r = tmdb::parsePagedList(doc, MediaKind::Movie);
+
+        // 3 results in the fixture; the third is dropped for missing
+        // poster_path, so we expect 2.
+        QCOMPARE(r.items.size(), 2);
+        QCOMPARE(r.items.at(0).tmdbId, 1000001);
+        QCOMPARE(r.items.at(0).title, QStringLiteral("Alpha Protocol"));
+        QVERIFY(r.items.at(0).year.has_value());
+        QCOMPARE(*r.items.at(0).year, 2026);
+
+        QCOMPARE(r.page, 1);
+        QCOMPARE(r.totalPages, 42);
+        QCOMPARE(r.totalResults, 831);
+    }
+
+    void parsePagedList_throws_on_non_object()
+    {
+        const auto doc = QJsonDocument::fromJson(QByteArray("[]"));
+        QVERIFY_EXCEPTION_THROWN(
+            tmdb::parsePagedList(doc, MediaKind::Movie),
+            kinema::core::HttpError);
+    }
+
+    void parseGenreList_skips_rows_missing_id_or_name()
+    {
+        const auto doc = loadFixture("tmdb_genre_movie_list.json");
+        const auto genres = tmdb::parseGenreList(doc);
+
+        // Fixture has 8 entries; 2 are invalid (id=0, empty name).
+        QCOMPARE(genres.size(), 6);
+        QCOMPARE(genres.at(0).id, 28);
+        QCOMPARE(genres.at(0).name, QStringLiteral("Action"));
+        QCOMPARE(genres.at(5).id, 18);
+        QCOMPARE(genres.at(5).name, QStringLiteral("Drama"));
+    }
+
+    void parseGenreList_throws_on_non_object()
+    {
+        const auto doc = QJsonDocument::fromJson(QByteArray("[]"));
+        QVERIFY_EXCEPTION_THROWN(
+            tmdb::parseGenreList(doc),
+            kinema::core::HttpError);
+    }
+
+    void parseGenreList_missing_array_returns_empty()
+    {
+        const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
+        QVERIFY(tmdb::parseGenreList(doc).isEmpty());
+    }
 };
 
 QTEST_APPLESS_MAIN(TstTmdbParse)

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "api/Types.h"
+#include "core/DateWindow.h"
 #include "core/Player.h"
 #include "core/TorrentioConfig.h"
 
@@ -38,6 +39,13 @@ namespace kinema::config {
  *     customCommand = <free-form command line>   (only for preferred="custom")
  *   [RealDebrid]
  *     configured    = true|false                 (mirrors "is a token in the keyring?")
+ *   [Browse]
+ *     kind          = "Movie" | "Series"          (BrowsePage kind toggle)
+ *     genreIds      = "28,12,35"                  (CSV of TMDB genre ids)
+ *     dateWindow    = "month1"|"month3"|"year"|"year3"|"any"
+ *     minRatingPct  = 0 | 60 | 70 | 75 | 80       (rating*10, 0 = Any)
+ *     sort          = "popularity"|"releaseDate"|"rating"|"title"
+ *     hideObscure   = true|false                  (vote_count.gte=200 toggle)
  *
  * Token material lives in the system keyring, never in this config.
  */
@@ -106,6 +114,33 @@ public:
     // substituted; otherwise the URL is appended as a final argument.
     QString customPlayerCommand() const;
     void setCustomPlayerCommand(const QString& command);
+
+    // ---- Browse page state -----------------------------------------------
+    //
+    // Persisted filter-bar state for the Browse surface. Every setter
+    // is cheap and write-through; BrowsePage writes these directly as
+    // the user changes controls so the last-used slice survives
+    // restarts. No signal — BrowsePage drives its own refetches.
+
+    api::MediaKind browseKind() const;
+    void setBrowseKind(api::MediaKind);
+
+    QList<int> browseGenreIds() const;
+    void setBrowseGenreIds(QList<int>);
+
+    core::DateWindow browseDateWindow() const;
+    void setBrowseDateWindow(core::DateWindow);
+
+    /// Minimum rating expressed as rating * 10 (so the file holds ints).
+    /// 0 means "any"; 60/70/75/80 are the buckets the UI offers.
+    int browseMinRatingPct() const;
+    void setBrowseMinRatingPct(int);
+
+    api::DiscoverSort browseSort() const;
+    void setBrowseSort(api::DiscoverSort);
+
+    bool browseHideObscure() const;
+    void setBrowseHideObscure(bool);
 
     /// Options used to build the Torrentio URL. M2 still uses defaults
     /// (sort = Seeders, no quality/provider filters); the RD token is

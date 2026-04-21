@@ -75,6 +75,18 @@ public:
     QCoro::Task<QList<DiscoverItem>> nowPlayingMovies();
     QCoro::Task<QList<DiscoverItem>> onTheAirSeries();
 
+    // ---- Browse (filterable /discover) ------------------------------------
+
+    /// Hit /discover/{movie|tv} with the caller's filters. Returns the
+    /// requested page plus paging metadata. See TmdbDiscoverUrl.h for
+    /// the exact query-string mapping.
+    QCoro::Task<DiscoverPageResult> discover(DiscoverQuery q);
+
+    /// Fetch the genre list for a given kind. Results are memoised per
+    /// kind; the second call returns immediately. Invalidated by
+    /// setLanguage() since names are localised server-side.
+    QCoro::Task<QList<TmdbGenre>> genreList(MediaKind kind);
+
     // ---- Click-through resolution -----------------------------------------
 
     /// Fetch /movie/{id}?append_to_response=external_ids and return the
@@ -106,11 +118,21 @@ private:
         std::initializer_list<std::pair<QString, QString>> extra = {}) const;
     QNetworkRequest authed(const QUrl& url) const;
 
+    /// Overload that accepts arbitrary extra query items (used by
+    /// /discover where params like `sort_by`, `with_genres`, etc. are
+    /// pre-built into a QUrlQuery).
+    QUrl buildUrl(const QString& path, const QUrlQuery& extra) const;
+
     core::HttpClient* m_http;
     QUrl m_baseUrl;
     QString m_token;
     QString m_language;
     QString m_region;
+
+    // Per-kind genre-list cache. Empty = not yet fetched. Populated on
+    // first genreList(kind) call; cleared by setLanguage().
+    QList<TmdbGenre> m_genresMovie;
+    QList<TmdbGenre> m_genresSeries;
 };
 
 } // namespace kinema::api

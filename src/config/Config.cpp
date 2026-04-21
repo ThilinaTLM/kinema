@@ -14,6 +14,7 @@ constexpr auto kGroupGeneral = "General";
 constexpr auto kGroupFilters = "Filters";
 constexpr auto kGroupRD = "RealDebrid";
 constexpr auto kGroupPlayer = "Player";
+constexpr auto kGroupBrowse = "Browse";
 
 constexpr auto kKeyCachedOnly = "cachedOnly";
 constexpr auto kKeySearchKind = "searchKind";
@@ -27,6 +28,41 @@ constexpr auto kKeyKeywordBlocklist = "keywordBlocklist";
 constexpr auto kKeyRDConfigured = "configured";
 constexpr auto kKeyPlayerPreferred = "preferred";
 constexpr auto kKeyPlayerCustomCmd = "customCommand";
+constexpr auto kKeyBrowseKind = "kind";
+constexpr auto kKeyBrowseGenres = "genreIds";
+constexpr auto kKeyBrowseDateWindow = "dateWindow";
+constexpr auto kKeyBrowseMinRatingPct = "minRatingPct";
+constexpr auto kKeyBrowseSort = "sort";
+constexpr auto kKeyBrowseHideObscure = "hideObscure";
+
+QString discoverSortToToken(api::DiscoverSort s)
+{
+    switch (s) {
+    case api::DiscoverSort::Popularity:
+        return QStringLiteral("popularity");
+    case api::DiscoverSort::ReleaseDate:
+        return QStringLiteral("releaseDate");
+    case api::DiscoverSort::Rating:
+        return QStringLiteral("rating");
+    case api::DiscoverSort::TitleAsc:
+        return QStringLiteral("title");
+    }
+    return QStringLiteral("popularity");
+}
+
+api::DiscoverSort discoverSortFromToken(const QString& s)
+{
+    if (s == QLatin1String("releaseDate")) {
+        return api::DiscoverSort::ReleaseDate;
+    }
+    if (s == QLatin1String("rating")) {
+        return api::DiscoverSort::Rating;
+    }
+    if (s == QLatin1String("title")) {
+        return api::DiscoverSort::TitleAsc;
+    }
+    return api::DiscoverSort::Popularity;
+}
 
 QStringList normalize(QStringList list)
 {
@@ -238,6 +274,122 @@ void Config::setCustomPlayerCommand(const QString& command)
 {
     auto g = group(kGroupPlayer);
     g.writeEntry(kKeyPlayerCustomCmd, command);
+    g.sync();
+}
+
+// ---- Browse state -------------------------------------------------------
+
+api::MediaKind Config::browseKind() const
+{
+    const auto s = group(kGroupBrowse).readEntry(
+        kKeyBrowseKind, QStringLiteral("Movie"));
+    return s == QLatin1String("Series")
+        ? api::MediaKind::Series
+        : api::MediaKind::Movie;
+}
+
+void Config::setBrowseKind(api::MediaKind k)
+{
+    auto g = group(kGroupBrowse);
+    g.writeEntry(kKeyBrowseKind,
+        k == api::MediaKind::Series
+            ? QStringLiteral("Series")
+            : QStringLiteral("Movie"));
+    g.sync();
+}
+
+QList<int> Config::browseGenreIds() const
+{
+    const auto raw = group(kGroupBrowse).readEntry(
+        kKeyBrowseGenres, QString {});
+    if (raw.isEmpty()) {
+        return {};
+    }
+    QList<int> out;
+    const auto parts = raw.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    out.reserve(parts.size());
+    for (const auto& p : parts) {
+        bool ok = false;
+        const int id = p.trimmed().toInt(&ok);
+        if (ok && id > 0) {
+            out.append(id);
+        }
+    }
+    return out;
+}
+
+void Config::setBrowseGenreIds(QList<int> ids)
+{
+    QStringList parts;
+    parts.reserve(ids.size());
+    for (int id : ids) {
+        if (id > 0) {
+            parts.append(QString::number(id));
+        }
+    }
+    auto g = group(kGroupBrowse);
+    g.writeEntry(kKeyBrowseGenres, parts.join(QLatin1Char(',')));
+    g.sync();
+}
+
+core::DateWindow Config::browseDateWindow() const
+{
+    const auto s = group(kGroupBrowse).readEntry(
+        kKeyBrowseDateWindow, QStringLiteral("year"));
+    return core::dateWindowFromString(s, core::DateWindow::ThisYear);
+}
+
+void Config::setBrowseDateWindow(core::DateWindow w)
+{
+    auto g = group(kGroupBrowse);
+    g.writeEntry(kKeyBrowseDateWindow, core::dateWindowToString(w));
+    g.sync();
+}
+
+int Config::browseMinRatingPct() const
+{
+    const int raw = group(kGroupBrowse).readEntry(kKeyBrowseMinRatingPct, 0);
+    // Clamp to sane bounds — if someone hand-edits the config we don't
+    // want to feed a garbage vote_average.gte to TMDB.
+    if (raw < 0) {
+        return 0;
+    }
+    if (raw > 100) {
+        return 100;
+    }
+    return raw;
+}
+
+void Config::setBrowseMinRatingPct(int pct)
+{
+    auto g = group(kGroupBrowse);
+    g.writeEntry(kKeyBrowseMinRatingPct, pct);
+    g.sync();
+}
+
+api::DiscoverSort Config::browseSort() const
+{
+    const auto s = group(kGroupBrowse).readEntry(
+        kKeyBrowseSort, QStringLiteral("popularity"));
+    return discoverSortFromToken(s);
+}
+
+void Config::setBrowseSort(api::DiscoverSort s)
+{
+    auto g = group(kGroupBrowse);
+    g.writeEntry(kKeyBrowseSort, discoverSortToToken(s));
+    g.sync();
+}
+
+bool Config::browseHideObscure() const
+{
+    return group(kGroupBrowse).readEntry(kKeyBrowseHideObscure, true);
+}
+
+void Config::setBrowseHideObscure(bool on)
+{
+    auto g = group(kGroupBrowse);
+    g.writeEntry(kKeyBrowseHideObscure, on);
     g.sync();
 }
 

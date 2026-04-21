@@ -3,6 +3,7 @@
 
 #include "api/TmdbClient.h"
 
+#include "api/TmdbDiscoverUrl.h"
 #include "api/TmdbParse.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
@@ -56,7 +57,14 @@ void TmdbClient::setToken(QString token)
 
 void TmdbClient::setLanguage(QString language)
 {
+    if (m_language == language) {
+        return;
+    }
     m_language = std::move(language);
+    // Genre names are localised on the server, so the cache is no
+    // longer valid under the new language.
+    m_genresMovie.clear();
+    m_genresSeries.clear();
 }
 
 void TmdbClient::setRegion(QString region)
@@ -77,6 +85,21 @@ QUrl TmdbClient::buildUrl(const QString& path,
         if (!v.isEmpty()) {
             q.addQueryItem(k, v);
         }
+    }
+    url.setQuery(q);
+    return url;
+}
+
+QUrl TmdbClient::buildUrl(const QString& path, const QUrlQuery& extra) const
+{
+    QUrl url = m_baseUrl;
+    url.setPath(m_baseUrl.path() + path);
+
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("language"), m_language);
+    const auto items = extra.queryItems();
+    for (const auto& [k, v] : items) {
+        q.addQueryItem(k, v);
     }
     url.setQuery(q);
     return url;
@@ -226,6 +249,38 @@ QCoro::Task<QList<DiscoverItem>> TmdbClient::similar(MediaKind kind, int tmdbId)
         prefix + QString::number(tmdbId) + QStringLiteral("/similar"));
     const auto doc = co_await m_http->getJson(authed(url));
     co_return tmdb::parseList(doc, kind);
+}
+
+QCoro::Task<DiscoverPageResult> TmdbClient::discover(DiscoverQuery q)
+{
+    if (!hasToken()) {
+        throw notConfigured();
+    }
+    const auto path = tmdb::discoverPath(q.kind);
+    const auto params = tmdb::discoverQueryToQuery(q);
+    const auto url = buildUrl(path, params);
+    const auto doc = co_await m_http->getJson(authed(url));
+    co_return tmdb::parsePagedList(doc, q.kind);
+}
+
+QCoro::Task<QList<TmdbGenre>> TmdbClient::genreList(MediaKind kind)
+{
+    // Serve from cache when available — the list changes ~never and
+    // localisation is tied to setLanguage() which invalidates both.
+    auto& cache = kind == MediaKind::Movie ? m_genresMovie : m_genresSeries;
+    if (!cache.isEmpty()) {
+        co_return cache;
+    }
+    if (!hasToken()) {
+        throw notConfigured();
+    }
+    const auto path = kind == MediaKind::Movie
+        ? QStringLiteral("/genre/movie/list")
+        : QStringLiteral("/genre/tv/list");
+    const auto url = buildUrl(path);
+    const auto doc = co_await m_http->getJson(authed(url));
+    cache = tmdb::parseGenreList(doc);
+    co_return cache;
 }
 
 QCoro::Task<void> TmdbClient::testAuth()

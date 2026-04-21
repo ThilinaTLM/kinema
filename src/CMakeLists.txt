@@ -8,6 +8,7 @@
 set(kinema_core_SRCS
     config/Config.cpp
 
+    core/DateWindow.cpp
     core/HttpClient.cpp
     core/Magnet.cpp
     core/Player.cpp
@@ -21,10 +22,13 @@ set(kinema_core_SRCS
     api/RealDebridClient.cpp
     api/RealDebridParse.cpp
     api/TmdbClient.cpp
+    api/TmdbDiscoverUrl.cpp
     api/TmdbParse.cpp
     api/TorrentioClient.cpp
     api/TorrentioParse.cpp
 
+    ui/BrowseFilterBar.cpp
+    ui/BrowsePage.cpp
     ui/DiscoverCardDelegate.cpp
     ui/DiscoverGridView.cpp
     ui/DiscoverPage.cpp

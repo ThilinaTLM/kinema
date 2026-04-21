@@ -70,6 +70,18 @@ void DiscoverRowModel::reset(QList<api::DiscoverItem> rows)
     endResetModel();
 }
 
+void DiscoverRowModel::append(const QList<api::DiscoverItem>& more)
+{
+    if (more.isEmpty()) {
+        return;
+    }
+    const int first = static_cast<int>(m_rows.size());
+    const int last = first + static_cast<int>(more.size()) - 1;
+    beginInsertRows(QModelIndex(), first, last);
+    m_rows.append(more);
+    endInsertRows();
+}
+
 const api::DiscoverItem* DiscoverRowModel::at(int row) const
 {
     if (row < 0 || row >= m_rows.size()) {

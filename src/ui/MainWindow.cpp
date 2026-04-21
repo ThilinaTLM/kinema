@@ -14,6 +14,7 @@
 #include "core/TmdbConfig.h"
 #include "core/TokenStore.h"
 #include "kinema_debug.h"
+#include "ui/BrowsePage.h"
 #include "ui/DetailPane.h"
 #include "ui/DiscoverPage.h"
 #include "ui/ImageLoader.h"
@@ -185,10 +186,20 @@ void MainWindow::buildLayout()
     connect(m_discoverPage, &DiscoverPage::settingsRequested,
         this, &MainWindow::showSettings);
 
+    // Browse page (TMDB /discover with filters). Added to the
+    // results stack alongside Discover / search state / search
+    // results so Back naturally walks Browse → Discover.
+    m_browsePage = new BrowsePage(m_tmdb, m_imageLoader, this);
+    connect(m_browsePage, &BrowsePage::itemActivated,
+        this, &MainWindow::onDiscoverItemActivated);
+    connect(m_browsePage, &BrowsePage::settingsRequested,
+        this, &MainWindow::showSettings);
+
     m_resultsStack = new QStackedWidget(this);
     m_resultsStack->addWidget(m_discoverPage); // idx 0 = home
     m_resultsStack->addWidget(m_resultsState); // idx 1 = search state
     m_resultsStack->addWidget(m_resultsView);  // idx 2 = search results
+    m_resultsStack->addWidget(m_browsePage);   // idx 3 = browse
 
     // ---- Detail panes (movies + series) ----------------------------------
     m_detailPane = new DetailPane(m_imageLoader, m_tmdb, this);
@@ -380,6 +391,24 @@ void MainWindow::buildActions()
         this, &MainWindow::showDiscoverHome, m_actions);
     homeAction->setToolTip(i18nc("@info:tooltip", "Back to Discover"));
 
+    // Browse — third top-level surface (after Discover home and
+    // free-text search). Drives the TMDB /discover filter grid.
+    // Icon: a grid-of-squares (Breeze: `view-list-icons`) — visually
+    // matches the wrap-grid of posters the user lands on. We
+    // deliberately avoid `view-filter` here since that's the icon
+    // used by the Genres button *inside* the filter bar; reusing it
+    // on the toolbar would conflate "navigate to Browse" with
+    // "apply a filter".
+    m_browseAction = new QAction(
+        QIcon::fromTheme(QStringLiteral("view-list-icons")),
+        i18nc("@action:inmenu", "&Browse"), this);
+    m_browseAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_B));
+    m_browseAction->setToolTip(i18nc("@info:tooltip",
+        "Browse movies and TV with filters (Ctrl+B)"));
+    connect(m_browseAction, &QAction::triggered,
+        this, &MainWindow::showBrowsePage);
+    m_actions->addAction(QStringLiteral("browse_page"), m_browseAction);
+
     // Back — browser-style "one level up" walker, sibling to Home.
     m_backAction = new QAction(
         QIcon::fromTheme(QStringLiteral("go-previous")),
@@ -419,6 +448,7 @@ void MainWindow::buildActions()
     auto* goMenu = menuBar()->addMenu(i18nc("@title:menu", "&Go"));
     goMenu->addAction(m_backAction);
     goMenu->addAction(homeAction);
+    goMenu->addAction(m_browseAction);
 
     auto* editMenu = menuBar()->addMenu(i18nc("@title:menu", "&Edit"));
     editMenu->addAction(focusSearch);
@@ -450,6 +480,7 @@ void MainWindow::buildActions()
         auto* menu = new QMenu;
         menu->addAction(m_backAction);
         menu->addAction(homeAction);
+        menu->addAction(m_browseAction);
         menu->addAction(focusSearch);
         menu->addSeparator();
         menu->addAction(m_showMenubarAction);
@@ -467,15 +498,17 @@ void MainWindow::buildActions()
     });
 
     if (m_toolbar) {
-        // Prepend [Back][Home] so they sit before the SearchBar and
-        // are easy to reach with a single click (browser-style).
+        // Prepend [Back][Home][Browse] so they sit before the SearchBar
+        // and are easy to reach with a single click (browser-style).
         QAction* firstAction = m_toolbar->actions().value(0);
         if (firstAction) {
             m_toolbar->insertAction(firstAction, m_backAction);
             m_toolbar->insertAction(firstAction, homeAction);
+            m_toolbar->insertAction(firstAction, m_browseAction);
         } else {
             m_toolbar->addAction(m_backAction);
             m_toolbar->addAction(homeAction);
+            m_toolbar->addAction(m_browseAction);
         }
         auto* spacer = new QWidget(m_toolbar);
         spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -792,6 +825,19 @@ QCoro::Task<void> MainWindow::loadTmdbToken()
             m_discoverPage->refresh();
         }
     }
+    if (m_browsePage) {
+        // Browse is lazy — don't refetch until the user visits it.
+        // But the CTA needs to reflect the current token state so the
+        // first visit lands on the right page.
+        if (m_tmdbToken.isEmpty()) {
+            m_browsePage->showNotConfigured();
+        } else if (m_resultsStack
+            && m_resultsStack->currentWidget() == m_browsePage) {
+            // If the user is already on Browse when the token settles,
+            // refetch immediately so they see results, not loading.
+            m_browsePage->refresh();
+        }
+    }
 }
 
 void MainWindow::showDiscoverHome()
@@ -807,6 +853,24 @@ void MainWindow::showDiscoverHome()
     }
     statusBar()->clearMessage();
     setWindowTitle(QStringLiteral("Kinema"));
+}
+
+void MainWindow::showBrowsePage()
+{
+    // Swap the results stack to Browse and close any detail pane so
+    // the full content area is given over to the filter grid.
+    closeDetailPanel();
+    if (m_resultsStack && m_browsePage) {
+        m_resultsStack->setCurrentWidget(m_browsePage);
+        // Fetch page 1 under the current filter state. refresh() is
+        // idempotent and respects the not-configured CTA.
+        m_browsePage->refresh();
+    }
+    if (m_searchBar) {
+        m_searchBar->clearFocus();
+    }
+    statusBar()->clearMessage();
+    setWindowTitle(i18nc("@title:window", "Kinema — Browse"));
 }
 
 void MainWindow::onDiscoverItemActivated(const api::DiscoverItem& item)

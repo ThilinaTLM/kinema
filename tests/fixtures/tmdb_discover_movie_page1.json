@@ -1,0 +1,38 @@
+{
+    "page": 1,
+    "results": [
+        {
+            "adult": false,
+            "backdrop_path": "/alpha_bd.jpg",
+            "genre_ids": [28, 12],
+            "id": 1000001,
+            "original_language": "en",
+            "original_title": "Alpha Protocol",
+            "overview": "Spies. Guns. Questionable decisions.",
+            "popularity": 987.654,
+            "poster_path": "/alpha.jpg",
+            "release_date": "2026-02-14",
+            "title": "Alpha Protocol",
+            "video": false,
+            "vote_average": 7.9,
+            "vote_count": 842
+        },
+        {
+            "id": 1000002,
+            "original_title": "Bravo Descent",
+            "title": "Bravo Descent",
+            "poster_path": "/bravo.jpg",
+            "release_date": "2026-03-01",
+            "vote_average": 6.5,
+            "vote_count": 301
+        },
+        {
+            "id": 1000003,
+            "title": "No Poster, Skip Me",
+            "release_date": "2026-01-05",
+            "vote_average": 5.5
+        }
+    ],
+    "total_pages": 42,
+    "total_results": 831
+}

@@ -43,6 +43,25 @@ QUrl composeImageUrl(const QString& size, const QString& path);
 QList<DiscoverItem> parseList(const QJsonDocument& doc, MediaKind kind);
 
 /**
+ * Parse a paginated TMDB list response (/discover/{movie|tv}, and any
+ * other endpoint that returns the standard `{ results, page,
+ * total_pages, total_results }` envelope). Items are filtered the
+ * same way `parseList` filters them (missing id / title / poster).
+ *
+ * Throws HttpError(Kind::Json) if the document is not a JSON object.
+ */
+DiscoverPageResult parsePagedList(const QJsonDocument& doc, MediaKind kind);
+
+/**
+ * Parse a TMDB /genre/{movie|tv}/list response:
+ * `{ "genres": [ { "id": 28, "name": "Action" }, … ] }`.
+ *
+ * Throws HttpError(Kind::Json) if the document is not a JSON object.
+ * Rows missing `id` or `name` are skipped.
+ */
+QList<TmdbGenre> parseGenreList(const QJsonDocument& doc);
+
+/**
  * Parse /movie/{id}?append_to_response=external_ids and extract the
  * IMDB id. Returns empty if absent. Throws HttpError on malformed body.
  */
