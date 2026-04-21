@@ -22,7 +22,6 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPixmap>
-#include <QPixmapCache>
 #include <QScrollArea>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
@@ -314,14 +313,13 @@ void DetailPane::updatePoster()
         return;
     }
     // Kick off a (possibly cache-hitting) fetch, then set the pixmap in a
-    // continuation. We don't await in this non-coroutine method.
+    // continuation. We don't await in this non-coroutine method — the
+    // posterReady handler installed in the constructor calls us again
+    // once the fetch completes.
     auto task = m_loader->requestPoster(m_pendingPosterUrl);
     Q_UNUSED(task);
-    // Synchronous cache hit path: query QPixmapCache directly.
-    QPixmap pm;
-    const auto key = QStringLiteral("kinema:poster:")
-        + m_pendingPosterUrl.toString(QUrl::FullyEncoded);
-    if (QPixmapCache::find(key, &pm) && !pm.isNull()) {
+    const QPixmap pm = m_loader->cached(m_pendingPosterUrl);
+    if (!pm.isNull()) {
         m_posterLabel->setPixmap(pm.scaled(m_posterLabel->size(),
             Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }

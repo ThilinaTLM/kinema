@@ -10,16 +10,8 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
-#include <QPixmapCache>
 
 namespace kinema::ui {
-
-namespace {
-QString pixmapCacheKey(const QUrl& url)
-{
-    return QStringLiteral("kinema:poster:") + url.toString(QUrl::FullyEncoded);
-}
-} // namespace
 
 EpisodeDelegate::EpisodeDelegate(ImageLoader* loader, QObject* parent)
     : QStyledItemDelegate(parent)
@@ -28,7 +20,7 @@ EpisodeDelegate::EpisodeDelegate(ImageLoader* loader, QObject* parent)
     if (m_loader) {
         QObject::connect(m_loader, &ImageLoader::posterReady, this,
             [this](const QUrl& url) {
-                // Release the in-flight marker so a later QPixmapCache
+                // Release the in-flight marker so a later cache
                 // eviction can re-request the thumbnail. ImageLoader's
                 // m_inFlight already de-dupes concurrent fetches, so
                 // re-issuing after eviction is free (disk-cache hit).
@@ -73,9 +65,9 @@ void EpisodeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& optio
     // Thumbnail.
     const auto thumbUrl = index.data(EpisodesModel::ThumbnailUrlRole).toUrl();
     QPixmap pm;
-    if (!thumbUrl.isEmpty()) {
-        QPixmapCache::find(pixmapCacheKey(thumbUrl), &pm);
-        if (pm.isNull() && !m_requested.contains(thumbUrl) && m_loader) {
+    if (!thumbUrl.isEmpty() && m_loader) {
+        pm = m_loader->cached(thumbUrl);
+        if (pm.isNull() && !m_requested.contains(thumbUrl)) {
             m_requested.insert(thumbUrl);
             m_loader->requestPoster(thumbUrl);
         }

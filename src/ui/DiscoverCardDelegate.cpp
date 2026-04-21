@@ -10,17 +10,8 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
-#include <QPixmapCache>
 
 namespace kinema::ui {
-
-namespace {
-// Matches ImageLoader's internal key format.
-QString pixmapCacheKey(const QUrl& url)
-{
-    return QStringLiteral("kinema:poster:") + url.toString(QUrl::FullyEncoded);
-}
-} // namespace
 
 DiscoverCardDelegate::DiscoverCardDelegate(ImageLoader* loader, QObject* parent)
     : QStyledItemDelegate(parent)
@@ -29,7 +20,7 @@ DiscoverCardDelegate::DiscoverCardDelegate(ImageLoader* loader, QObject* parent)
     if (m_loader) {
         QObject::connect(m_loader, &ImageLoader::posterReady, this,
             [this](const QUrl& url) {
-                // Release the in-flight marker so a later QPixmapCache
+                // Release the in-flight marker so a later cache
                 // eviction can re-request the poster. ImageLoader's
                 // m_inFlight already de-dupes concurrent fetches, so
                 // re-issuing after eviction is free (disk-cache hit).
@@ -73,9 +64,9 @@ void DiscoverCardDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
 
     const auto posterUrl = index.data(DiscoverRowModel::PosterUrlRole).toUrl();
     QPixmap pm;
-    if (!posterUrl.isEmpty()) {
-        QPixmapCache::find(pixmapCacheKey(posterUrl), &pm);
-        if (pm.isNull() && !m_requested.contains(posterUrl) && m_loader) {
+    if (!posterUrl.isEmpty() && m_loader) {
+        pm = m_loader->cached(posterUrl);
+        if (pm.isNull() && !m_requested.contains(posterUrl)) {
             m_requested.insert(posterUrl);
             m_loader->requestPoster(posterUrl);
         }

@@ -15,7 +15,21 @@
 #include <QImage>
 #include <QStandardPaths>
 
+#include <algorithm>
+
 namespace kinema::ui {
+
+namespace {
+// Rough KB estimate used as QCache cost. A null/zero-depth pixmap still
+// costs 1 so it can be inserted (QCache ignores items with cost > maxCost).
+int costKB(const QPixmap& pm)
+{
+    const int depth = pm.depth() > 0 ? pm.depth() : 32;
+    const qint64 bytes = static_cast<qint64>(pm.width())
+        * static_cast<qint64>(pm.height()) * depth / 8;
+    return static_cast<int>(std::max<qint64>(1, bytes / 1024));
+}
+} // namespace
 
 ImageLoader::ImageLoader(core::HttpClient* http, QObject* parent)
     : QObject(parent)
@@ -25,13 +39,10 @@ ImageLoader::ImageLoader(core::HttpClient* http, QObject* parent)
     m_diskDir = base + QStringLiteral("/posters");
     QDir().mkpath(m_diskDir);
 
-    // 50 MB feels generous for posters but is cheap.
-    QPixmapCache::setCacheLimit(50 * 1024);
-}
-
-QString ImageLoader::cacheKeyFor(const QUrl& url) const
-{
-    return QStringLiteral("kinema:poster:") + url.toString(QUrl::FullyEncoded);
+    // 256 MB KB budget. Big enough to hold the full Discover page plus
+    // detail-pane posters and episode thumbnails without churn; small
+    // enough that a wild scroll session can't balloon RSS unbounded.
+    m_memCache.setMaxCost(256 * 1024);
 }
 
 QString ImageLoader::diskPathFor(const QUrl& url) const
@@ -41,9 +52,17 @@ QString ImageLoader::diskPathFor(const QUrl& url) const
     return m_diskDir + QLatin1Char('/') + QString::fromLatin1(hash.toHex()) + QStringLiteral(".img");
 }
 
+QPixmap ImageLoader::cached(const QUrl& url) const
+{
+    if (auto* pm = m_memCache.object(url)) {
+        return *pm;
+    }
+    return {};
+}
+
 void ImageLoader::clearMemoryCache()
 {
-    QPixmapCache::clear();
+    m_memCache.clear();
 }
 
 QCoro::Task<QPixmap> ImageLoader::requestPoster(QUrl url)
@@ -52,12 +71,15 @@ QCoro::Task<QPixmap> ImageLoader::requestPoster(QUrl url)
         co_return QPixmap();
     }
 
-    const auto key = cacheKeyFor(url);
-
-    // 1. Memory cache
-    QPixmap cached;
-    if (QPixmapCache::find(key, &cached) && !cached.isNull()) {
-        co_return cached;
+    // 1. Memory cache. We deliberately do NOT emit posterReady here:
+    // the caller either co_awaits (and gets the pixmap via co_return)
+    // or probes synchronously via cached() — no fetch actually ran, and
+    // emitting here would re-enter handlers like DetailPane's that call
+    // updatePoster() → requestPoster() in response, causing unbounded
+    // recursion when the first real emission (disk hit / HTTP) has
+    // already populated the memory cache.
+    if (auto* pm = m_memCache.object(url)) {
+        co_return *pm;
     }
 
     // 2. Disk cache
@@ -65,14 +87,16 @@ QCoro::Task<QPixmap> ImageLoader::requestPoster(QUrl url)
     if (QFileInfo::exists(diskPath)) {
         QPixmap pm;
         if (pm.load(diskPath) && !pm.isNull()) {
-            QPixmapCache::insert(key, pm);
+            m_memCache.insert(url, new QPixmap(pm), costKB(pm));
+            Q_EMIT posterReady(url);
             co_return pm;
         }
         // Corrupt file — remove and fall through to refetch.
         QFile::remove(diskPath);
     }
 
-    // 3. In-flight de-dup
+    // 3. In-flight de-dup. Secondary awaiters don't emit posterReady —
+    // the original initiator will do so exactly once when it finishes.
     if (auto it = m_inFlight.find(url); it != m_inFlight.end()) {
         auto promise = it.value().promise;
         auto fut = promise->future();
@@ -91,7 +115,7 @@ QCoro::Task<QPixmap> ImageLoader::requestPoster(QUrl url)
         if (img.loadFromData(bytes)) {
             result = QPixmap::fromImage(img);
             if (!result.isNull()) {
-                QPixmapCache::insert(key, result);
+                m_memCache.insert(url, new QPixmap(result), costKB(result));
                 QFile f(diskPath);
                 if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                     f.write(bytes);

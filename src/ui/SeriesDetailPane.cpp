@@ -22,7 +22,6 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPixmap>
-#include <QPixmapCache>
 #include <QScrollArea>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
@@ -436,10 +435,8 @@ void SeriesDetailPane::updatePoster()
     }
     auto task = m_loader->requestPoster(m_pendingPosterUrl);
     Q_UNUSED(task);
-    QPixmap pm;
-    const auto key = QStringLiteral("kinema:poster:")
-        + m_pendingPosterUrl.toString(QUrl::FullyEncoded);
-    if (QPixmapCache::find(key, &pm) && !pm.isNull()) {
+    const QPixmap pm = m_loader->cached(m_pendingPosterUrl);
+    if (!pm.isNull()) {
         m_posterLabel->setPixmap(pm.scaled(m_posterLabel->size(),
             Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
