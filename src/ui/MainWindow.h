@@ -5,12 +5,14 @@
 
 #include "api/Discover.h"
 #include "api/Media.h"
+#include "api/PlaybackContext.h"
 
 #include <QMainWindow>
 
 #include <QCoro/QCoroTask>
 
 #include <memory>
+#include <optional>
 
 class KActionCollection;
 class KHamburgerMenu;
@@ -19,6 +21,8 @@ class QStackedWidget;
 class QToolBar;
 
 namespace kinema::core {
+class Database;
+class HistoryStore;
 class HttpClient;
 class PlayerLauncher;
 class TokenStore;
@@ -35,6 +39,7 @@ class AppSettings;
 }
 
 namespace kinema::controllers {
+class HistoryController;
 class MovieDetailController;
 class NavigationController;
 class SearchController;
@@ -101,6 +106,10 @@ private Q_SLOTS:
     /// results → Discover home.
     void onBackRequested();
 
+    /// Tools → Clear watch history… — drops every row from the
+    /// history DB after a confirmation dialog.
+    void onClearHistoryRequested();
+
 private:
     void buildCoreServices();
     void buildActions();
@@ -132,8 +141,10 @@ private:
 
 #ifdef KINEMA_HAVE_LIBMPV
     /// Lazily create the detached player window, point mpv at `url`,
-    /// and show/raise it. Re-used for subsequent Plays.
-    void openEmbeddedPlayer(const QUrl& url, const QString& title);
+    /// and show/raise it. Re-used for subsequent Plays. `ctx`
+    /// carries display title + optional resume-from timestamp.
+    void openEmbeddedPlayer(const QUrl& url,
+        const api::PlaybackContext& ctx);
 #endif
 
     // ---- Window lifecycle -------------------------------------------------
@@ -163,6 +174,8 @@ private:
     std::unique_ptr<core::HttpClient> m_http;
     std::unique_ptr<core::TokenStore> m_tokens;
     std::unique_ptr<core::PlayerLauncher> m_player;
+    std::unique_ptr<core::Database> m_db;
+    std::unique_ptr<core::HistoryStore> m_history;
     api::CinemetaClient* m_cinemeta {};
     api::TorrentioClient* m_torrentio {};
     api::TmdbClient* m_tmdb {};
@@ -174,6 +187,7 @@ private:
     QAction* m_showMenubarAction {};
     QAction* m_backAction {};
     QAction* m_browseAction {};
+    QAction* m_clearHistoryAction {};
     SearchBar* m_searchBar {};
     ResultsModel* m_resultsModel {};
     ResultCardDelegate* m_resultsDelegate {};
@@ -191,6 +205,7 @@ private:
     controllers::SeriesDetailController* m_seriesCtrl {};
     controllers::TokenController* m_tokenCtrl {};
     controllers::TrayController* m_tray {};
+    controllers::HistoryController* m_historyCtrl {};
     services::StreamActions* m_streamActions {};
 
     // Central stack: page 0 = results (Discover / state / grid);
@@ -206,6 +221,13 @@ private:
     // Kind::Embedded selected; reused for subsequent plays. Null
     // when the build was configured without libmpv.
     player::PlayerWindow* m_playerWindow {};
+
+#ifdef KINEMA_HAVE_LIBMPV
+    // Context of the most recent embedded-play handoff. Remembered
+    // so an "error" endOfFile can offer "Choose another release…"
+    // for the right media.
+    std::optional<api::PlaybackContext> m_lastEmbeddedPlay;
+#endif
 
     // Set by quitApplication() so closeEvent accepts the close
     // instead of hiding the main window.

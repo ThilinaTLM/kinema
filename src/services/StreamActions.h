@@ -4,8 +4,13 @@
 #pragma once
 
 #include "api/Media.h"
+#include "api/PlaybackContext.h"
 
 #include <QObject>
+
+namespace kinema::controllers {
+class HistoryController;
+}
 
 namespace kinema::core {
 class PlayerLauncher;
@@ -22,7 +27,8 @@ namespace kinema::services {
  * pane no longer needs five signals and MainWindow no longer needs
  * five handler slots.
  *
- * Status-bar messages flow out via statusMessage(); MainWindow\n * connects it once to its status bar.
+ * Status-bar messages flow out via statusMessage(); MainWindow
+ * connects it once to its status bar.
  */
 class StreamActions : public QObject
 {
@@ -31,12 +37,22 @@ public:
     StreamActions(core::PlayerLauncher* launcher,
         QObject* parent = nullptr);
 
+    /// Wire the history controller used to seed resume-from and
+    /// record play-start entries. Two-phase init because the
+    /// controller depends on `this` via resumeFromHistory.
+    void setHistoryController(controllers::HistoryController* history);
+
 public Q_SLOTS:
     void copyMagnet(const api::Stream& stream);
     void openMagnet(const api::Stream& stream);
     void copyDirectUrl(const api::Stream& stream);
     void openDirectUrl(const api::Stream& stream);
-    void play(const api::Stream& stream);
+
+    /// Play `stream` with the identity/title information in `ctx`.
+    /// Fills `ctx.streamRef` from the stream and asks the history
+    /// controller (if wired) for a resume position before handing
+    /// off to PlayerLauncher.
+    void play(const api::Stream& stream, const api::PlaybackContext& ctx);
 
 Q_SIGNALS:
     /// Status-bar message. MainWindow connects this once.
@@ -44,6 +60,7 @@ Q_SIGNALS:
 
 private:
     core::PlayerLauncher* m_launcher;
+    controllers::HistoryController* m_history {};
 };
 
 } // namespace kinema::services

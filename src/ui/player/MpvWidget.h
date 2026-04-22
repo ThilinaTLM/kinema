@@ -9,6 +9,8 @@
 #include <QString>
 #include <QUrl>
 
+#include <optional>
+
 struct mpv_handle;
 struct mpv_render_context;
 
@@ -38,7 +40,13 @@ public:
     /// Replace the currently playing file with `url`. If playback is
     /// idle the file just starts; otherwise the current file is
     /// stopped and the new one loaded.
-    void loadFile(const QUrl& url);
+    ///
+    /// `startSeconds` resumes playback at the given offset when set.
+    /// We pass it via mpv's `loadfile` options (`start=<seconds>`)
+    /// so mpv can seek without decoding leading frames. Out-of-range
+    /// values are silently clamped by mpv.
+    void loadFile(const QUrl& url,
+        std::optional<double> startSeconds = std::nullopt);
 
     /// Stop playback and return to idle. Safe to call repeatedly.
     void stop();
@@ -57,6 +65,13 @@ Q_SIGNALS:
     /// Playback has ended. `reason` is mpv's stop reason ("eof",
     /// "stop", "quit", "error" …).
     void endOfFile(const QString& reason);
+    /// Current playback position, in seconds. Fires at roughly the
+    /// cadence mpv reports time-pos changes, throttled by a small
+    /// epsilon to avoid UI flooding.
+    void positionChanged(double seconds);
+    /// Total duration of the currently loaded file, in seconds. Fires
+    /// once per loaded file as soon as the duration becomes known.
+    void durationChanged(double seconds);
     /// The `fullscreen` property flipped inside mpv (e.g. the user
     /// pressed `f` with default bindings). The outer window mirrors
     /// this into `showFullScreen()` / `showNormal()`.
@@ -106,6 +121,8 @@ private:
     // Cached property state, updated from property-change events.
     bool m_paused {false};
     bool m_fullscreen {false};
+    double m_lastPosition {-1.0};
+    double m_lastDuration {-1.0};
 
     // When true we've requested fullscreen via setMpvFullscreen() and
     // should suppress the resulting property-change echo to avoid a

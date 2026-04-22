@@ -4,6 +4,7 @@
 #pragma once
 
 #include "api/Media.h"
+#include "api/PlaybackContext.h"
 
 #include <QDate>
 #include <QWidget>
@@ -68,6 +69,19 @@ public:
     /// to filter.
     void setRealDebridConfigured(bool on);
 
+    /// Set the playback context (media identity + display title +
+    /// poster) that every stream in this panel belongs to. The
+    /// context is merged with each chosen api::Stream before handing
+    /// off to StreamActions::play, so the history layer can record
+    /// a well-identified entry and the embedded player can resume.
+    ///
+    /// Panes call this when they swap the current movie or episode.
+    void setPlaybackContext(const api::PlaybackContext& ctx);
+    const api::PlaybackContext& playbackContext() const noexcept
+    {
+        return m_context;
+    }
+
     TorrentsModel* model() const { return m_torrents; }
 
 private:
@@ -90,6 +104,11 @@ private:
     /// Unfiltered raw results, so the cached-only checkbox can toggle
     /// without a refetch.
     QList<api::Stream> m_rawStreams;
+
+    /// Media identity + display metadata shared by every stream in
+    /// this panel. Cleared between panes; updated by the owning
+    /// DetailPane / SeriesDetailPane.
+    api::PlaybackContext m_context;
 };
 
 } // namespace kinema::ui

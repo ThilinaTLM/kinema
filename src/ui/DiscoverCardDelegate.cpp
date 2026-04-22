@@ -43,13 +43,9 @@ QSize DiscoverCardDelegate::sizeHint(const QStyleOptionViewItem&, const QModelIn
     return { kCardWidth, kCardHeight };
 }
 
-void DiscoverCardDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
-    const QModelIndex& index) const
+void DiscoverCardDelegate::paintBackground(QPainter* painter,
+    const QStyleOptionViewItem& option) const
 {
-    painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
-    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
-
     const auto palette = option.palette;
     if (option.state & QStyle::State_Selected) {
         painter->fillRect(option.rect, palette.highlight());
@@ -58,11 +54,12 @@ void DiscoverCardDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
         hover.setAlpha(40);
         painter->fillRect(option.rect, hover);
     }
+}
 
-    const QRect r = option.rect.adjusted(4, 6, -4, -6);
-    const QRect posterRect(r.left(), r.top(), r.width(), kPosterHeight);
-
-    const auto posterUrl = index.data(DiscoverRowModel::PosterUrlRole).toUrl();
+void DiscoverCardDelegate::paintPoster(QPainter* painter,
+    const QRect& posterRect, const QUrl& posterUrl,
+    const QPalette& palette) const
+{
     QPixmap pm;
     if (!posterUrl.isEmpty() && m_loader) {
         pm = m_loader->cached(posterUrl);
@@ -91,21 +88,47 @@ void DiscoverCardDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
         auto f = painter->font();
         f.setPointSizeF(f.pointSizeF() * 2.0);
         painter->setFont(f);
-        painter->drawText(posterRect, Qt::AlignCenter, QStringLiteral("🎬"));
+        painter->drawText(posterRect, Qt::AlignCenter,
+            QStringLiteral("🎬"));
         painter->restore();
     }
+}
 
-    // Title label.
-    const QRect labelRect(r.left(), r.top() + kPosterHeight + 6, r.width(), kLabelHeight);
+void DiscoverCardDelegate::paintTitle(QPainter* painter,
+    const QRect& labelRect, const QStyleOptionViewItem& option,
+    const QString& title) const
+{
+    const auto palette = option.palette;
     auto font = option.font;
     font.setBold(true);
     painter->setFont(font);
     painter->setPen((option.state & QStyle::State_Selected)
             ? palette.color(QPalette::HighlightedText)
             : palette.color(QPalette::Text));
-    const auto title = index.data(DiscoverRowModel::TitleRole).toString();
     painter->drawText(labelRect,
         Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, title);
+}
+
+void DiscoverCardDelegate::paint(QPainter* painter,
+    const QStyleOptionViewItem& option,
+    const QModelIndex& index) const
+{
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+    paintBackground(painter, option);
+
+    const QRect r = option.rect.adjusted(4, 6, -4, -6);
+    const QRect posterRect(r.left(), r.top(), r.width(), kPosterHeight);
+    paintPoster(painter, posterRect,
+        index.data(DiscoverRowModel::PosterUrlRole).toUrl(),
+        option.palette);
+
+    const QRect labelRect(r.left(), r.top() + kPosterHeight + 6,
+        r.width(), kLabelHeight);
+    paintTitle(painter, labelRect, option,
+        index.data(DiscoverRowModel::TitleRole).toString());
 
     painter->restore();
 }

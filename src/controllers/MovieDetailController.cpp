@@ -52,6 +52,22 @@ void MovieDetailController::openFromDiscover(const api::DiscoverItem& item)
     Q_UNUSED(t);
 }
 
+void MovieDetailController::openFromHistory(const api::HistoryEntry& entry)
+{
+    if (entry.key.imdbId.isEmpty()) {
+        return;
+    }
+    // Synthesise a MetaSummary from the history row so the pane has
+    // something to render immediately. The real Cinemeta meta will
+    // overwrite the poster / description once it lands.
+    api::MetaSummary s;
+    s.imdbId = entry.key.imdbId;
+    s.kind = api::MediaKind::Movie;
+    s.title = entry.title;
+    s.poster = entry.poster;
+    openFromSummary(s);
+}
+
 void MovieDetailController::refetchCurrent()
 {
     if (!m_current) {
@@ -84,6 +100,19 @@ QCoro::Task<void> MovieDetailController::loadTask(api::MetaSummary summary)
         m_pane->setMeta(detail);
         m_pane->setSimilarContext(
             api::MediaKind::Movie, summary.imdbId);
+
+        // Feed the history-aware playback context into the streams
+        // panel so any Play action carries a well-formed key.
+        api::PlaybackContext ctx;
+        ctx.key.kind = api::MediaKind::Movie;
+        ctx.key.imdbId = summary.imdbId;
+        ctx.title = detail.summary.title.isEmpty()
+            ? summary.title
+            : detail.summary.title;
+        ctx.poster = detail.summary.poster.isValid()
+            ? detail.summary.poster
+            : summary.poster;
+        m_pane->setPlaybackContext(ctx);
 
         // Unreleased movies produce no useful Torrentio result.
         if (core::isFutureRelease(detail.summary.released)) {

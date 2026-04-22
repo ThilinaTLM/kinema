@@ -5,6 +5,7 @@
 
 #include "api/Discover.h"
 #include "api/Media.h"
+#include "api/PlaybackContext.h"
 
 #include <QObject>
 #include <QString>
@@ -65,6 +66,12 @@ public Q_SLOTS:
     /// Entry from a Discover card (resolves imdb via TMDB then hands
     /// off to openFromSummary).
     void openFromDiscover(const api::DiscoverItem& item);
+
+    /// Entry from a Continue-Watching card when the saved release is
+    /// no longer available and we need the detail pane to pick an
+    /// alternate. Uses the history entry as a light MetaSummary so
+    /// the pane renders immediately, even if Cinemeta is slow.
+    void openFromHistory(const api::HistoryEntry& entry);
 
     /// Re-run the current movie's fetch (used by the
     /// Torrentio-options-changed debounce).

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "api/PlaybackContext.h"
 #include "core/Player.h"
 
 #include <QObject>
@@ -44,16 +45,20 @@ public:
      * @param url    the stream URL to hand to the player. Must be a
      *               non-empty, absolute URL — magnet links are not
      *               accepted (mpv/VLC don't play them directly).
-     * @param title  a human-readable description shown in
-     *               notifications (release name or episode label).
-     *               Optional; defaults to the URL itself.
+     * @param ctx    playback context (media identity, display title,
+     *               optional resume position). `ctx.title` is used
+     *               for notifications and the embedded window title;
+     *               it falls back to the URL string when empty.
+     *               `ctx.resumeSeconds` is forwarded to the embedded
+     *               player only; external players don't support a
+     *               reliable resume handoff.
      *
      * The call never blocks. On success `launched` is emitted
      * (typically within a few ms, once the fork+exec has returned);
      * on failure `launchFailed` is emitted with a human-readable
      * message. Both also surface as desktop notifications.
      */
-    void play(const QUrl& url, const QString& title = {});
+    void play(const QUrl& url, const api::PlaybackContext& ctx);
 
     /**
      * Best-effort availability check used at startup so the UI can grey
@@ -74,8 +79,9 @@ Q_SIGNALS:
     /// instead of spawning a process. Kept separate from `launched`
     /// because the window owner (not the launcher) fires the
     /// "playback started" notification so the display name can be
-    /// "Kinema" rather than "mpv".
-    void embeddedRequested(const QUrl& url, const QString& title);
+    /// "Kinema" rather than "mpv". The full PlaybackContext is
+    /// forwarded so the UI can seed resume-from into mpv.
+    void embeddedRequested(const QUrl& url, const kinema::api::PlaybackContext& ctx);
 
 private:
     /// Resolve which player to actually use for this invocation.

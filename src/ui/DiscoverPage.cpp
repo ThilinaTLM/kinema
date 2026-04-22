@@ -6,6 +6,7 @@
 #include "api/TmdbClient.h"
 #include "core/HttpErrorPresenter.h"
 #include "kinema_debug.h"
+#include "ui/ContinueWatchingSection.h"
 #include "ui/DiscoverCardDelegate.h"
 #include "ui/DiscoverRowModel.h"
 #include "ui/DiscoverSection.h"
@@ -26,10 +27,12 @@
 namespace kinema::ui {
 
 DiscoverPage::DiscoverPage(
-    api::TmdbClient* tmdb, ImageLoader* images, QWidget* parent)
+    api::TmdbClient* tmdb, ImageLoader* images,
+    controllers::HistoryController* history, QWidget* parent)
     : QWidget(parent)
     , m_tmdb(tmdb)
     , m_images(images)
+    , m_history(history)
 {
     // Page-level call-to-action (shown when TMDB is not configured
     // or the token was rejected). Unlike StateWidget, this widget has
@@ -97,6 +100,23 @@ DiscoverPage::DiscoverPage(
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->addWidget(m_pageStack);
+
+    // Continue-Watching section goes first so it lives above every
+    // TMDB row. Hidden when the history is empty (ContinueWatchingSection
+    // toggles its own visibility).
+    m_continueWatching = new ContinueWatchingSection(
+        i18nc("@label discover row", "Continue Watching"),
+        m_images, m_history, m_rowsContainer);
+    connect(m_continueWatching,
+        &ContinueWatchingSection::resumeRequested,
+        this, &DiscoverPage::historyResumeRequested);
+    connect(m_continueWatching,
+        &ContinueWatchingSection::detailRequested,
+        this, &DiscoverPage::historyDetailRequested);
+    connect(m_continueWatching,
+        &ContinueWatchingSection::removeRequested,
+        this, &DiscoverPage::historyRemoveRequested);
+    m_rowsLayout->addWidget(m_continueWatching);
 
     buildSections();
 

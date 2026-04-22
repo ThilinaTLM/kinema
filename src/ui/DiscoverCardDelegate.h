@@ -51,6 +51,21 @@ public:
     static constexpr int kLabelHeight = 40;
     static constexpr int kCardHeight = kPosterHeight + kLabelHeight + 12;
 
+protected:
+    /// Draw the selection / hover background appropriate for `option`
+    /// into `option.rect`. Shared with ContinueWatchingCardDelegate.
+    void paintBackground(QPainter* painter,
+        const QStyleOptionViewItem& option) const;
+    /// Draw the poster at `posterRect`, fetching through ImageLoader
+    /// on miss. Falls back to a stylised placeholder.
+    void paintPoster(QPainter* painter,
+        const QRect& posterRect, const QUrl& posterUrl,
+        const QPalette& palette) const;
+    /// Draw the title at `labelRect` in the bold card font.
+    void paintTitle(QPainter* painter, const QRect& labelRect,
+        const QStyleOptionViewItem& option,
+        const QString& title) const;
+
 private:
     ImageLoader* m_loader;
     mutable QSet<QUrl> m_requested;

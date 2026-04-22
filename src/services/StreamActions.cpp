@@ -3,6 +3,7 @@
 
 #include "services/StreamActions.h"
 
+#include "controllers/HistoryController.h"
 #include "core/Magnet.h"
 #include "core/PlayerLauncher.h"
 #include "kinema_debug.h"
@@ -20,6 +21,12 @@ StreamActions::StreamActions(core::PlayerLauncher* launcher, QObject* parent)
     : QObject(parent)
     , m_launcher(launcher)
 {
+}
+
+void StreamActions::setHistoryController(
+    controllers::HistoryController* history)
+{
+    m_history = history;
 }
 
 void StreamActions::copyMagnet(const api::Stream& stream)
@@ -94,7 +101,8 @@ void StreamActions::openDirectUrl(const api::Stream& stream)
     job->start();
 }
 
-void StreamActions::play(const api::Stream& stream)
+void StreamActions::play(const api::Stream& stream,
+    const api::PlaybackContext& ctxIn)
 {
     if (stream.directUrl.isEmpty()) {
         Q_EMIT statusMessage(
@@ -104,10 +112,27 @@ void StreamActions::play(const api::Stream& stream)
             5000);
         return;
     }
-    m_launcher->play(stream.directUrl,
-        stream.releaseName.isEmpty()
+
+    // Build a local copy so we can fill in the fields the caller
+    // can't know (streamRef and resumeSeconds).
+    api::PlaybackContext ctx = ctxIn;
+    ctx.streamRef = api::HistoryStreamRef::fromStream(stream);
+
+    // Fall back to the stream's release name for display when the
+    // caller didn't set a title (e.g. legacy paths that haven't been
+    // updated to thread identity through).
+    if (ctx.title.isEmpty()) {
+        ctx.title = stream.releaseName.isEmpty()
             ? stream.qualityLabel
-            : stream.releaseName);
+            : stream.releaseName;
+    }
+
+    if (m_history) {
+        ctx.resumeSeconds = m_history->resumeSecondsFor(ctx.key);
+        m_history->onPlayStarting(ctx);
+    }
+
+    m_launcher->play(stream.directUrl, ctx);
 }
 
 } // namespace kinema::services

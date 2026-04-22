@@ -35,6 +35,14 @@ public:
         VoteAverageRole,
         KindRole,
         ItemRole, ///< returns the full DiscoverItem as a QVariant
+        /// double in [0.0, 1.0]; -1.0 (or absent) means "no progress
+        /// information available". Delegates paint a progress bar
+        /// when > 0. Ordinary Discover strips leave this unset.
+        ProgressRole,
+        /// Display string shown on Continue-Watching cards below the
+        /// title, e.g. "1080p — The.Movie.2024.BluRay.x264". Empty
+        /// for regular Discover rows.
+        LastReleaseRole,
     };
     Q_ENUM(Roles)
 
@@ -54,8 +62,18 @@ public:
     const QList<api::DiscoverItem>& rows() const noexcept { return m_rows; }
     const api::DiscoverItem* at(int row) const;
 
+    /// Per-row progress fractions (same ordering as rows()). Absent
+    /// entries (or -1 values) indicate no progress information. Used
+    /// by the Continue-Watching section; regular Discover strips
+    /// leave this empty.
+    void setProgressList(const QList<double>& progress);
+    /// Per-row last-release display strings.
+    void setLastReleaseList(const QStringList& releases);
+
 private:
     QList<api::DiscoverItem> m_rows;
+    QList<double> m_progress;
+    QStringList m_lastReleases;
 };
 
 } // namespace kinema::ui

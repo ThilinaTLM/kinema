@@ -147,6 +147,11 @@ void SeriesDetailPane::setRealDebridConfigured(bool on)
     m_streams->setRealDebridConfigured(on);
 }
 
+void SeriesDetailPane::setPlaybackContext(const api::PlaybackContext& ctx)
+{
+    m_streams->setPlaybackContext(ctx);
+}
+
 void SeriesDetailPane::focusEpisodeList()
 {
     m_picker->setFocus();

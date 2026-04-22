@@ -5,6 +5,8 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
+#include "api/PlaybackContext.h"
+
 #include <QWidget>
 #include <QString>
 #include <QUrl>
@@ -47,10 +49,12 @@ public:
     PlayerWindow& operator=(const PlayerWindow&) = delete;
 
     /// Load `url` into mpv and show the window (raising + activating
-    /// it if already visible). Title is used verbatim in the window
-    /// title bar, suffixed with " — Kinema". Empty title collapses to
-    /// just "Kinema".
-    void play(const QUrl& url, const QString& title);
+    /// it if already visible). `ctx.title` is used verbatim in the
+    /// window title bar, suffixed with " — Kinema". Empty title
+    /// collapses to just "Kinema". When `ctx.resumeSeconds` is set,
+    /// mpv is asked to start at that offset (clamped below the end
+    /// of the file when duration is known).
+    void play(const QUrl& url, const kinema::api::PlaybackContext& ctx);
 
     /// Stop playback, leave fullscreen if needed, and hide the
     /// window. Safe to call repeatedly or before any play().
@@ -76,6 +80,10 @@ Q_SIGNALS:
     /// the tray context menu (the "Show Player" entry depends on
     /// visibility).
     void visibilityChanged(bool visible);
+    /// Forwarded from MpvWidget. HistoryController consumes these to
+    /// keep the persisted progress current during playback.
+    void positionChanged(double seconds);
+    void durationChanged(double seconds);
 
 protected:
     void closeEvent(QCloseEvent* e) override;

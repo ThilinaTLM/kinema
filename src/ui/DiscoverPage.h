@@ -4,6 +4,7 @@
 #pragma once
 
 #include "api/Discover.h"
+#include "api/PlaybackContext.h"
 
 #include <QModelIndex>
 #include <QVector>
@@ -20,8 +21,13 @@ namespace kinema::api {
 class TmdbClient;
 }
 
+namespace kinema::controllers {
+class HistoryController;
+}
+
 namespace kinema::ui {
 
+class ContinueWatchingSection;
 class DiscoverSection;
 class ImageLoader;
 
@@ -58,6 +64,7 @@ class DiscoverPage : public QWidget
 public:
     DiscoverPage(api::TmdbClient* tmdb,
         ImageLoader* images,
+        controllers::HistoryController* history,
         QWidget* parent = nullptr);
 
     /// Re-fetch all sections. Safe to call repeatedly; in-flight
@@ -78,6 +85,14 @@ Q_SIGNALS:
     /// auth-failed state. MainWindow shows the SettingsDialog.
     void settingsRequested();
 
+    /// Continue-Watching card activations. MainWindow forwards to
+    /// `HistoryController::resumeFromHistory` (resume), the detail
+    /// pane (choose another release), or `HistoryStore::remove`
+    /// (remove from history).
+    void historyResumeRequested(const api::HistoryEntry& entry);
+    void historyDetailRequested(const api::HistoryEntry& entry);
+    void historyRemoveRequested(const api::HistoryEntry& entry);
+
 private:
     /// Descriptor for a single section. Populated in buildSections().
     struct Section {
@@ -96,6 +111,7 @@ private:
 
     api::TmdbClient* m_tmdb;
     ImageLoader* m_images;
+    controllers::HistoryController* m_history {};
 
     QStackedWidget* m_pageStack {}; // { rowsScroll, pageCta }
     QWidget* m_pageCta {};
@@ -104,6 +120,10 @@ private:
     QScrollArea* m_rowsScroll {};
     QWidget* m_rowsContainer {};
     QVBoxLayout* m_rowsLayout {};
+
+    /// Pinned to the top of m_rowsLayout so it appears above the
+    /// TMDB rows. Hidden when the history is empty.
+    ContinueWatchingSection* m_continueWatching {};
 
     QVector<Section> m_sections;
 

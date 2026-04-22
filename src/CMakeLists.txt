@@ -15,8 +15,10 @@ set(kinema_core_SRCS
     config/SearchSettings.cpp
     config/TorrentioSettings.cpp
 
+    core/Database.cpp
     core/DateFormat.cpp
     core/DateWindow.cpp
+    core/HistoryStore.cpp
     core/HttpClient.cpp
     core/HttpErrorPresenter.cpp
     core/Magnet.cpp
@@ -28,6 +30,7 @@ set(kinema_core_SRCS
 
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp
+    api/PlaybackContext.cpp
     api/RealDebridClient.cpp
     api/RealDebridParse.cpp
     api/TmdbClient.cpp
@@ -38,6 +41,8 @@ set(kinema_core_SRCS
 
     ui/BrowseFilterBar.cpp
     ui/BrowsePage.cpp
+    ui/ContinueWatchingCardDelegate.cpp
+    ui/ContinueWatchingSection.cpp
     ui/DiscoverCardDelegate.cpp
     ui/DiscoverGridView.cpp
     ui/DiscoverPage.cpp
@@ -70,6 +75,7 @@ set(kinema_core_SRCS
 
     app/KinemaApplication.cpp
 
+    controllers/HistoryController.cpp
     controllers/MovieDetailController.cpp
     controllers/NavigationController.cpp
     controllers/SearchController.cpp
@@ -120,6 +126,7 @@ target_link_libraries(kinema_core
         Qt6::Gui
         Qt6::Widgets
         Qt6::Network
+        Qt6::Sql
         Qt6::Svg
         KF6::CoreAddons
         KF6::I18n

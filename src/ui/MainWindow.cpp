@@ -7,6 +7,7 @@
 #include "api/TmdbClient.h"
 #include "api/TorrentioClient.h"
 #include "config/AppSettings.h"
+#include "controllers/HistoryController.h"
 #include "controllers/MovieDetailController.h"
 #include "controllers/NavigationController.h"
 #include "controllers/Page.h"
@@ -15,7 +16,9 @@
 #include "controllers/TokenController.h"
 #include "controllers/TrayController.h"
 #include "services/StreamActions.h"
+#include "core/Database.h"
 #include "core/DateFormat.h"
+#include "core/HistoryStore.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
@@ -56,6 +59,7 @@
 #include <QListView>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QPalette>
 #include <QShortcut>
 #include <QStackedWidget>
@@ -98,6 +102,36 @@ void MainWindow::buildCoreServices()
     m_tmdb = new api::TmdbClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
     m_streamActions = new services::StreamActions(m_player.get(), this);
+
+    // History database + DAO. Open is best-effort: a broken DB means
+    // history is disabled for this session, not that the app refuses
+    // to start. HistoryStore handles !isOpen() gracefully as no-ops.
+    m_db = std::make_unique<core::Database>(this);
+    if (!m_db->open()) {
+        qCWarning(KINEMA)
+            << "MainWindow: history database unavailable; "
+               "history / resume features are disabled this session";
+    }
+    m_history = std::make_unique<core::HistoryStore>(*m_db, this);
+    m_history->runRetentionPass();
+
+    // TokenController owns the in-memory RD + TMDB token strings
+    // referenced by HistoryController and the detail controllers.
+    // Built here (rather than in buildControllers) so DiscoverPage
+    // can receive a live HistoryController before the UI goes up.
+    m_tokenCtrl = new controllers::TokenController(
+        m_tokens.get(), m_tmdb, m_settings.realDebrid(), this);
+
+    // History controller. Depends on the Torrentio client +
+    // AppSettings + RD token alias already built above. Two-phase
+    // init with StreamActions + PlayerWindow: both are wired once
+    // they exist (StreamActions below; PlayerWindow in
+    // openEmbeddedPlayer()).
+    m_historyCtrl = new controllers::HistoryController(
+        *m_history, m_torrentio, m_settings,
+        m_tokenCtrl->realDebridToken(), this);
+    m_streamActions->setHistoryController(m_historyCtrl);
+    m_historyCtrl->setStreamActions(m_streamActions);
 }
 
 void MainWindow::wireStatusSignals()
@@ -236,11 +270,28 @@ void MainWindow::buildResultsPages()
     // 0 so it's the app's default landing surface; runSearch() swaps
     // to m_resultsState / m_resultsView; showDiscoverHome() swaps
     // back.
-    m_discoverPage = new DiscoverPage(m_tmdb, m_imageLoader, this);
+    m_discoverPage = new DiscoverPage(
+        m_tmdb, m_imageLoader, m_historyCtrl, this);
     connect(m_discoverPage, &DiscoverPage::itemActivated,
         this, &MainWindow::onDiscoverItemActivated);
     connect(m_discoverPage, &DiscoverPage::settingsRequested,
         this, &MainWindow::showSettings);
+    connect(m_discoverPage, &DiscoverPage::historyResumeRequested,
+        this, [this](const api::HistoryEntry& entry) {
+            m_historyCtrl->resumeFromHistory(entry);
+        });
+    connect(m_discoverPage, &DiscoverPage::historyDetailRequested,
+        this, [this](const api::HistoryEntry& entry) {
+            if (entry.key.kind == api::MediaKind::Series) {
+                m_seriesCtrl->openFromHistory(entry);
+            } else {
+                m_movieCtrl->openFromHistory(entry);
+            }
+        });
+    connect(m_discoverPage, &DiscoverPage::historyRemoveRequested,
+        this, [this](const api::HistoryEntry& entry) {
+            m_history->remove(entry.key);
+        });
 
     // Browse page (TMDB /discover with filters). Added to the
     // results stack alongside Discover / search state / search
@@ -315,11 +366,10 @@ void MainWindow::buildControllers()
             statusBar()->showMessage(text, timeoutMs);
         });
 
-    // TokenController owns the in-memory RD + TMDB tokens. It must
-    // outlive the detail controllers below because they alias its
-    // realDebridToken() by const reference.
-    m_tokenCtrl = new controllers::TokenController(
-        m_tokens.get(), m_tmdb, m_settings.realDebrid(), this);
+    // TokenController was created in buildCoreServices() so
+    // DiscoverPage could receive a live HistoryController during
+    // layout construction. Wire its reaction to token changes here,
+    // now that the UI surfaces exist to respond.
     connect(m_tokenCtrl,
         &controllers::TokenController::tmdbTokenChanged,
         this, [this](const QString& token) {
@@ -362,6 +412,45 @@ void MainWindow::buildControllers()
     connect(m_seriesCtrl,
         &controllers::SeriesDetailController::statusMessage,
         this, forwardStatus);
+
+    // HistoryController was built in buildCoreServices (before
+    // DiscoverPage). Wire its UI-facing signals here.
+    connect(m_historyCtrl,
+        &controllers::HistoryController::statusMessage,
+        this, forwardStatus);
+    // Resume miss — stored release can't be resolved right now. Do
+    // NOT auto-open the detail pane: "Continue Watching" is meant to
+    // be one-click playback, not a detour through the streams list.
+    // Instead, surface a notification with a "Choose another
+    // release" action button so the user can still reach the detail
+    // pane on demand, and the right-click "Choose another release\u2026"
+    // menu stays as a keyboard-free alternative.
+    connect(m_historyCtrl,
+        &controllers::HistoryController::resumeFallbackRequested,
+        this, [this](const api::HistoryEntry& entry) {
+            auto* n = new KNotification(
+                QStringLiteral("playbackFailed"),
+                KNotification::CloseOnTimeout);
+            n->setTitle(i18nc("@title:window notification",
+                "Can\u2019t resume \u201c%1\u201d", entry.title));
+            n->setText(i18nc("@info",
+                "The release you watched last isn\u2019t available "
+                "right now."));
+            n->setIconName(QStringLiteral("dialog-information"));
+
+            auto* pick = n->addAction(
+                i18nc("@action:button notification",
+                    "Choose another release\u2026"));
+            connect(pick, &KNotificationAction::activated,
+                this, [this, entry] {
+                    if (entry.key.kind == api::MediaKind::Series) {
+                        m_seriesCtrl->openFromHistory(entry);
+                    } else {
+                        m_movieCtrl->openFromHistory(entry);
+                    }
+                });
+            n->sendEvent();
+        });
 }
 
 void MainWindow::showMovieDetail()
@@ -412,8 +501,10 @@ void MainWindow::closeDetailPanel()
 
 #ifdef KINEMA_HAVE_LIBMPV
 
-void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
+void MainWindow::openEmbeddedPlayer(const QUrl& url,
+    const api::PlaybackContext& ctx)
 {
+    const auto title = ctx.title;
     // Lazy construction: the MpvWidget (inside PlayerWindow)
     // initialises libmpv + an OpenGL render context in its ctor /
     // initializeGL, so we pay nothing until the user actually picks
@@ -424,6 +515,11 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
         // Let the tray controller surface a "Show Player" entry
         // whenever the player is hidden but has played something.
         m_tray->setPlayerWindow(m_playerWindow);
+        // The history controller observes fileLoaded / endOfFile /
+        // positionChanged / durationChanged on the player window.
+        if (m_historyCtrl) {
+            m_historyCtrl->setPlayerWindow(m_playerWindow);
+        }
 
         connect(m_playerWindow, &player::PlayerWindow::fileLoaded,
             this, [this] {
@@ -453,14 +549,56 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
         connect(m_playerWindow, &player::PlayerWindow::endOfFile,
             this, [this](const QString& reason) {
                 // PlayerWindow has already stopped playback and
-                // hidden itself by now — just surface an error
-                // status for abnormal exits.
-                if (reason == QLatin1String("error")) {
-                    statusBar()->showMessage(
-                        i18nc("@info:status",
-                            "Playback ended with an error."),
-                        6000);
+                // hidden itself by now. Normal EOF / user-stop paths
+                // are silent. An "error" reason means the URL failed
+                // to play (typically an upstream Torrentio / RD
+                // issue like a 502 Bad Gateway) — surface a
+                // notification with a "Choose another release" action
+                // so the user has an obvious next step, same as the
+                // saved-release-unavailable path.
+                if (reason != QLatin1String("error")) {
+                    return;
                 }
+                statusBar()->showMessage(
+                    i18nc("@info:status",
+                        "Playback ended with an error."),
+                    6000);
+                if (!m_lastEmbeddedPlay
+                    || !m_lastEmbeddedPlay->key.isValid()) {
+                    return;
+                }
+                // Reconstruct a minimal HistoryEntry from the play
+                // context so the detail-pane fallback has the
+                // identity + display metadata it needs.
+                api::HistoryEntry entry;
+                entry.key = m_lastEmbeddedPlay->key;
+                entry.title = m_lastEmbeddedPlay->title;
+                entry.seriesTitle = m_lastEmbeddedPlay->seriesTitle;
+                entry.episodeTitle = m_lastEmbeddedPlay->episodeTitle;
+                entry.poster = m_lastEmbeddedPlay->poster;
+                entry.lastStream = m_lastEmbeddedPlay->streamRef;
+
+                auto* n = new KNotification(
+                    QStringLiteral("playbackFailed"),
+                    KNotification::CloseOnTimeout);
+                n->setTitle(i18nc("@title:window notification",
+                    "Couldn\u2019t play \u201c%1\u201d", entry.title));
+                n->setText(i18nc("@info",
+                    "The upstream stream failed. Try a different "
+                    "release."));
+                n->setIconName(QStringLiteral("dialog-error"));
+                auto* pick = n->addAction(
+                    i18nc("@action:button notification",
+                        "Choose another release\u2026"));
+                connect(pick, &KNotificationAction::activated,
+                    this, [this, entry] {
+                        if (entry.key.kind == api::MediaKind::Series) {
+                            m_seriesCtrl->openFromHistory(entry);
+                        } else {
+                            m_movieCtrl->openFromHistory(entry);
+                        }
+                    });
+                n->sendEvent();
             });
         connect(m_playerWindow, &player::PlayerWindow::visibilityChanged,
             this, [this](bool) { m_tray->refreshMenu(); });
@@ -469,7 +607,12 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url, const QString& title)
     statusBar()->showMessage(
         i18nc("@info:status", "Loading “%1”…", title), 3000);
 
-    m_playerWindow->play(url, title);
+    // Remember the context so the endOfFile("error") handler can
+    // surface a "Choose another release" notification for the right
+    // media.
+    m_lastEmbeddedPlay = ctx;
+
+    m_playerWindow->play(url, ctx);
 }
 
 #endif // KINEMA_HAVE_LIBMPV
@@ -479,6 +622,24 @@ void MainWindow::onBackToEpisodes()
     // Delegate to SeriesDetailController — it owns the episode epoch
     // and syncs nav when the back path came from the in-pane button.
     m_seriesCtrl->onBackToEpisodes();
+}
+
+void MainWindow::onClearHistoryRequested()
+{
+    const auto ret = QMessageBox::question(this,
+        i18nc("@title:window", "Clear watch history"),
+        i18nc("@info",
+            "Remove every item from Continue Watching?\n"
+            "Real-Debrid tokens and settings are unaffected."),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+    if (m_history) {
+        m_history->clear();
+    }
+    statusBar()->showMessage(
+        i18nc("@info:status", "Watch history cleared."), 3000);
 }
 
 void MainWindow::onBackRequested()
@@ -568,6 +729,17 @@ void MainWindow::buildActions()
         this, &MainWindow::onBackRequested);
     m_actions->addAction(QStringLiteral("go_back"), m_backAction);
 
+    m_clearHistoryAction = new QAction(
+        QIcon::fromTheme(QStringLiteral("edit-clear-history"),
+            QIcon::fromTheme(QStringLiteral("edit-clear"))),
+        i18nc("@action:inmenu", "Clear &watch history\u2026"), this);
+    m_clearHistoryAction->setToolTip(i18nc("@info:tooltip",
+        "Remove every item from Continue Watching."));
+    connect(m_clearHistoryAction, &QAction::triggered,
+        this, &MainWindow::onClearHistoryRequested);
+    m_actions->addAction(QStringLiteral("clear_history"),
+        m_clearHistoryAction);
+
     buildEscapeShortcut();
     buildMenuBar(quitAction, focusSearch, homeAction, prefsAction, aboutAction);
     auto* hamburger = buildHamburgerMenu(
@@ -625,6 +797,9 @@ void MainWindow::buildMenuBar(QAction* quitAction,
     auto* editMenu = menuBar()->addMenu(i18nc("@title:menu", "&Edit"));
     editMenu->addAction(focusSearch);
 
+    auto* toolsMenu = menuBar()->addMenu(i18nc("@title:menu", "&Tools"));
+    toolsMenu->addAction(m_clearHistoryAction);
+
     auto* settingsMenu = menuBar()->addMenu(i18nc("@title:menu", "&Settings"));
     settingsMenu->addAction(m_showMenubarAction);
     settingsMenu->addSeparator();
@@ -656,6 +831,8 @@ KHamburgerMenu* MainWindow::buildHamburgerMenu(QAction* quitAction,
             menu->addAction(homeAction);
             menu->addAction(m_browseAction);
             menu->addAction(focusSearch);
+            menu->addSeparator();
+            menu->addAction(m_clearHistoryAction);
             menu->addSeparator();
             menu->addAction(m_showMenubarAction);
             menu->addAction(prefsAction);

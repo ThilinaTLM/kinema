@@ -44,6 +44,18 @@ QVariant DiscoverRowModel::data(const QModelIndex& index, int role) const
         return QVariant::fromValue(r.kind);
     case ItemRole:
         return QVariant::fromValue(r);
+    case ProgressRole: {
+        if (index.row() < m_progress.size()) {
+            return m_progress.at(index.row());
+        }
+        return -1.0;
+    }
+    case LastReleaseRole: {
+        if (index.row() < m_lastReleases.size()) {
+            return m_lastReleases.at(index.row());
+        }
+        return QString();
+    }
     default:
         return {};
     }
@@ -60,6 +72,8 @@ QHash<int, QByteArray> DiscoverRowModel::roleNames() const
     names.insert(VoteAverageRole, "voteAverage");
     names.insert(KindRole, "kind");
     names.insert(ItemRole, "item");
+    names.insert(ProgressRole, "progress");
+    names.insert(LastReleaseRole, "lastRelease");
     return names;
 }
 
@@ -67,7 +81,29 @@ void DiscoverRowModel::reset(QList<api::DiscoverItem> rows)
 {
     beginResetModel();
     m_rows = std::move(rows);
+    // Per-row overlays are tied to the row set; clearing avoids a
+    // stale progress bar appearing on the wrong card after reset.
+    m_progress.clear();
+    m_lastReleases.clear();
     endResetModel();
+}
+
+void DiscoverRowModel::setProgressList(const QList<double>& progress)
+{
+    m_progress = progress;
+    if (!m_rows.isEmpty()) {
+        Q_EMIT dataChanged(index(0), index(rowCount() - 1),
+            { ProgressRole });
+    }
+}
+
+void DiscoverRowModel::setLastReleaseList(const QStringList& releases)
+{
+    m_lastReleases = releases;
+    if (!m_rows.isEmpty()) {
+        Q_EMIT dataChanged(index(0), index(rowCount() - 1),
+            { LastReleaseRole });
+    }
 }
 
 void DiscoverRowModel::append(const QList<api::DiscoverItem>& more)

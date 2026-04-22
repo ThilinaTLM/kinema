@@ -137,6 +137,13 @@ QByteArray mpvMouseButton(Qt::MouseButton b)
 // Property-change observer userdata tags.
 constexpr uint64_t kPropPause = 1;
 constexpr uint64_t kPropFullscreen = 2;
+constexpr uint64_t kPropTimePos = 3;
+constexpr uint64_t kPropDuration = 4;
+
+/// Minimum delta (seconds) before we emit positionChanged. mpv fires
+/// time-pos updates at decoding cadence; 250 ms granularity is plenty
+/// for progress persistence and keeps signal traffic tame.
+constexpr double kPositionEpsilonSec = 0.25;
 
 } // namespace
 
@@ -182,6 +189,8 @@ MpvWidget::MpvWidget(QWidget* parent)
 
     mpv_observe_property(m_mpv, kPropPause, "pause", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, kPropFullscreen, "fullscreen", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, kPropTimePos, "time-pos", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, kPropDuration, "duration", MPV_FORMAT_DOUBLE);
 
     mpv_set_wakeup_callback(m_mpv, &onMpvWakeup, this);
 }
@@ -342,18 +351,34 @@ void MpvWidget::onMpvEvents()
         }
         case MPV_EVENT_PROPERTY_CHANGE: {
             const auto* p = static_cast<mpv_event_property*>(ev->data);
-            if (!p || p->format != MPV_FORMAT_FLAG || !p->data) {
+            if (!p || !p->data) {
                 break;
             }
-            const bool on = *static_cast<int*>(p->data) != 0;
-            if (ev->reply_userdata == kPropPause) {
-                m_paused = on;
-            } else if (ev->reply_userdata == kPropFullscreen) {
-                m_fullscreen = on;
-                if (m_suppressFullscreenEcho) {
-                    m_suppressFullscreenEcho = false;
-                } else {
-                    Q_EMIT fullscreenChanged(on);
+            if (p->format == MPV_FORMAT_FLAG) {
+                const bool on = *static_cast<int*>(p->data) != 0;
+                if (ev->reply_userdata == kPropPause) {
+                    m_paused = on;
+                } else if (ev->reply_userdata == kPropFullscreen) {
+                    m_fullscreen = on;
+                    if (m_suppressFullscreenEcho) {
+                        m_suppressFullscreenEcho = false;
+                    } else {
+                        Q_EMIT fullscreenChanged(on);
+                    }
+                }
+            } else if (p->format == MPV_FORMAT_DOUBLE) {
+                const double v = *static_cast<double*>(p->data);
+                if (ev->reply_userdata == kPropTimePos) {
+                    if (m_lastPosition < 0.0
+                        || qAbs(v - m_lastPosition) >= kPositionEpsilonSec) {
+                        m_lastPosition = v;
+                        Q_EMIT positionChanged(v);
+                    }
+                } else if (ev->reply_userdata == kPropDuration) {
+                    if (v > 0.0 && qAbs(v - m_lastDuration) > 0.01) {
+                        m_lastDuration = v;
+                        Q_EMIT durationChanged(v);
+                    }
                 }
             }
             break;
@@ -364,12 +389,44 @@ void MpvWidget::onMpvEvents()
     }
 }
 
-void MpvWidget::loadFile(const QUrl& url)
+void MpvWidget::loadFile(const QUrl& url,
+    std::optional<double> startSeconds)
 {
     if (!m_mpv) {
         return;
     }
-    const auto urlStr = url.toString().toUtf8();
+    // Every loadfile starts a fresh timeline; invalidate the cached
+    // position/duration so the first new sample is always forwarded.
+    m_lastPosition = -1.0;
+    m_lastDuration = -1.0;
+
+    // Use the fully-encoded form when handing off to mpv/ffmpeg.
+    // QUrl::toString()'s default (PrettyDecoded) leaves spaces and
+    // other reserved characters literal; libmpv / ffmpeg's HTTP
+    // stack expects a properly percent-encoded URL and some upstream
+    // servers reject the decoded form outright.
+    const auto urlStr = url.toEncoded();
+
+    if (startSeconds && *startSeconds > 0.0) {
+        // `loadfile <url> [<flags> [<index> [<options>]]]` — options
+        // are the FOURTH positional arg, and the third must be an
+        // integer playlist index. Pass "-1" (mpv's "end of playlist"
+        // sentinel) since `replace` doesn't use it. options is a
+        // comma-separated list of key=value; mpv clamps negative /
+        // out-of-range `start` values on its own.
+        QByteArray opts = QByteArrayLiteral("start=")
+            + QByteArray::number(*startSeconds, 'f', 3);
+        const char* cmd[] = {
+            "loadfile", urlStr.constData(), "replace", "-1",
+            opts.constData(), nullptr,
+        };
+        if (mpv_command_async(m_mpv, 0, cmd) < 0) {
+            Q_EMIT mpvError(
+                QStringLiteral("Could not load file into mpv"));
+        }
+        return;
+    }
+
     const char* cmd[] = { "loadfile", urlStr.constData(), nullptr };
     if (mpv_command_async(m_mpv, 0, cmd) < 0) {
         Q_EMIT mpvError(QStringLiteral("Could not load file into mpv"));

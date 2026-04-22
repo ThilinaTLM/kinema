@@ -5,6 +5,7 @@
 
 #include "api/Discover.h"
 #include "api/Media.h"
+#include "api/PlaybackContext.h"
 
 #include <QObject>
 #include <QString>
@@ -69,6 +70,11 @@ public Q_SLOTS:
     /// off to openFromSummary).
     void openFromDiscover(const api::DiscoverItem& item);
 
+    /// Entry from a Continue-Watching card. Opens the series pane
+    /// and, once episodes load, auto-selects the stored season +
+    /// episode so the user lands on the streams sub-page.
+    void openFromHistory(const api::HistoryEntry& entry);
+
     /// User picked an episode inside the pane.
     void selectEpisode(const api::Episode& ep);
 
@@ -105,6 +111,18 @@ private:
 
     QString m_currentImdbId;
     std::optional<api::Episode> m_currentEpisode;
+
+    /// Latest series-level display metadata used to build per-episode
+    /// PlaybackContext entries. Sourced from the opening summary and
+    /// refreshed once Cinemeta returns.
+    QString m_currentSeriesTitle;
+    QUrl m_currentSeriesPoster;
+
+    /// Pending (season, episode) to auto-select once Cinemeta returns
+    /// the series episode list. Set by openFromHistory(); cleared
+    /// after successful selection.
+    std::optional<int> m_pendingSeason;
+    std::optional<int> m_pendingEpisode;
 };
 
 } // namespace kinema::controllers

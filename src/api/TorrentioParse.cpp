@@ -114,6 +114,14 @@ Stream parseOne(const QJsonObject& obj)
     s.provider = parseProvider(titleRaw);
 
     s.infoHash = obj.value(QStringLiteral("infoHash")).toString();
+    // Some Torrentio responses tuck infoHash inside behaviorHints
+    // (notably certain RD/AD-resolved entries). Fall back to that
+    // nested location when the top-level field is absent so the
+    // history layer can still key resume on a stable identifier.
+    if (s.infoHash.isEmpty()) {
+        const auto bh = obj.value(QStringLiteral("behaviorHints")).toObject();
+        s.infoHash = bh.value(QStringLiteral("infoHash")).toString();
+    }
     const auto urlStr = obj.value(QStringLiteral("url")).toString();
     if (!urlStr.isEmpty()) {
         s.directUrl = QUrl(urlStr);

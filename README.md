@@ -8,6 +8,9 @@ subscribers — streaming straight into **mpv** or **VLC**.
 ## Features
 
 - TMDB-powered Discover home with recommendations on every detail pane
+- **Continue Watching** row surfacing in-progress movies and series
+- **Resume playback** at the exact timestamp in the embedded player,
+  even when you switch to a different release of the same title
 - Movie and TV series search (title or IMDB id)
 - Series view with seasons, episodes, and per-episode torrents
 - Real-Debrid integration with cached-only filter and direct URLs

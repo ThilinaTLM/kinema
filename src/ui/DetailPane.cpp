@@ -118,6 +118,11 @@ void DetailPane::setRealDebridConfigured(bool on)
     m_streams->setRealDebridConfigured(on);
 }
 
+void DetailPane::setPlaybackContext(const api::PlaybackContext& ctx)
+{
+    m_streams->setPlaybackContext(ctx);
+}
+
 TorrentsModel* DetailPane::torrentsModel() const
 {
     return m_streams->model();

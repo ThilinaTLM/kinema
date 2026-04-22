@@ -5,6 +5,7 @@
 
 #include "api/Discover.h"
 #include "api/Media.h"
+#include "api/PlaybackContext.h"
 
 #include <QWidget>
 
@@ -94,6 +95,10 @@ public:
     void showTorrentsUnreleased(const QDate& releaseDate);
 
     void setRealDebridConfigured(bool on);
+
+    /// Forwarded to the embedded StreamsPanel so play actions can
+    /// build a full PlaybackContext (identity + title + poster).
+    void setPlaybackContext(const api::PlaybackContext& ctx);
 
     /// Give keyboard focus to the episode list. Called by MainWindow
     /// just after opening the pane.

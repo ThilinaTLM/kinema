@@ -73,8 +73,10 @@ bool PlayerLauncher::playerAvailable(player::Kind kind) const
     return player::isAvailable(kind, custom);
 }
 
-void PlayerLauncher::play(const QUrl& url, const QString& title)
+void PlayerLauncher::play(const QUrl& url, const api::PlaybackContext& ctx)
 {
+    const auto title = ctx.title;
+
     if (!url.isValid() || url.isEmpty()) {
         const auto reason = i18nc("@info:status",
             "No playable URL available for this item.");
@@ -113,7 +115,7 @@ void PlayerLauncher::play(const QUrl& url, const QString& title)
     if (kind == player::Kind::Embedded) {
         qCInfo(KINEMA) << "handing off to embedded player for"
                        << (title.isEmpty() ? url.toString() : title);
-        Q_EMIT embeddedRequested(url, title);
+        Q_EMIT embeddedRequested(url, ctx);
         return;
     }
 

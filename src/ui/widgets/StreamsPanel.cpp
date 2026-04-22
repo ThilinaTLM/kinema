@@ -121,7 +121,7 @@ StreamsPanel::StreamsPanel(config::TorrentioSettings& torrentio,
             const auto src = proxy->mapToSource(idx);
             const auto* s = m_torrents->at(src.row());
             if (s && !s->directUrl.isEmpty()) {
-                m_actions.play(*s);
+                m_actions.play(*s, m_context);
             }
         });
 
@@ -191,6 +191,11 @@ void StreamsPanel::setRealDebridConfigured(bool on)
     m_rdConfigured = on;
     rebuildCachedOnlyVisibility();
     applyClientFilters();
+}
+
+void StreamsPanel::setPlaybackContext(const api::PlaybackContext& ctx)
+{
+    m_context = ctx;
 }
 
 void StreamsPanel::applyClientFilters()
@@ -284,7 +289,7 @@ void StreamsPanel::onTorrentContextMenu(const QPoint& pos)
     const api::Stream stream = *s;
     if (auto* chosen = menu.exec(m_view->viewport()->mapToGlobal(pos))) {
         if (chosen == play) {
-            m_actions.play(stream);
+            m_actions.play(stream, m_context);
         } else if (chosen == copyMagnet) {
             m_actions.copyMagnet(stream);
         } else if (chosen == openMagnet) {

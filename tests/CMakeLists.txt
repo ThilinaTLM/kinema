@@ -126,6 +126,16 @@ ecm_add_test(tst_realdebrid_client.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_database.cpp
+    TEST_NAME tst_database
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
+ecm_add_test(tst_history_store.cpp
+    TEST_NAME tst_history_store
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
 foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
@@ -134,6 +144,7 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_meta_header tst_streams_panel
          tst_movie_detail_controller tst_series_detail_controller
          tst_token_controller tst_cinemeta_client tst_tmdb_client
-         tst_torrentio_client tst_realdebrid_client)
+         tst_torrentio_client tst_realdebrid_client
+         tst_database tst_history_store)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

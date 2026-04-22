@@ -113,7 +113,10 @@ private Q_SLOTS:
         Stream s; // no directUrl
         QSignalSpy spy(m_actions.get(), &StreamActions::statusMessage);
 
-        m_actions->play(s);
+        kinema::api::PlaybackContext ctx;
+        ctx.key.kind = kinema::api::MediaKind::Movie;
+        ctx.key.imdbId = QStringLiteral("tt0000001");
+        m_actions->play(s, ctx);
 
         // One status message (the "no direct URL" branch); no
         // launcher call attempted.

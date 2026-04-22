@@ -62,6 +62,24 @@ void SeriesDetailController::openFromDiscover(const api::DiscoverItem& item)
     Q_UNUSED(t);
 }
 
+void SeriesDetailController::openFromHistory(const api::HistoryEntry& entry)
+{
+    if (entry.key.imdbId.isEmpty()) {
+        return;
+    }
+    // Stash the season/episode to select once Cinemeta returns the
+    // full episode list (see loadSeriesTask).
+    m_pendingSeason = entry.key.season;
+    m_pendingEpisode = entry.key.episode;
+
+    api::MetaSummary s;
+    s.imdbId = entry.key.imdbId;
+    s.kind = api::MediaKind::Series;
+    s.title = entry.seriesTitle.isEmpty() ? entry.title : entry.seriesTitle;
+    s.poster = entry.poster;
+    openFromSummary(s);
+}
+
 void SeriesDetailController::selectEpisode(const api::Episode& ep)
 {
     if (m_currentImdbId.isEmpty()) {
@@ -72,6 +90,33 @@ void SeriesDetailController::selectEpisode(const api::Episode& ep)
     // the toolbar tooltip are correct).
     m_pane->showEpisodeStreamsPage(ep);
     m_nav->goTo(Page::SeriesStreams);
+
+    // Feed a per-episode playback context into the panel so Play
+    // carries the right identity / display metadata.
+    api::PlaybackContext ctx;
+    ctx.key.kind = api::MediaKind::Series;
+    ctx.key.imdbId = m_currentImdbId;
+    ctx.key.season = ep.season;
+    ctx.key.episode = ep.number;
+    ctx.seriesTitle = m_currentSeriesTitle;
+    ctx.episodeTitle = ep.title;
+    // Display title: "Series — S01E03 — Pilot" is the cleanest
+    // notification line; panes use it verbatim.
+    QString display = m_currentSeriesTitle;
+    if (!display.isEmpty()) {
+        display += QStringLiteral(" — ");
+    }
+    display += QStringLiteral("S%1E%2")
+                   .arg(ep.season, 2, 10, QLatin1Char('0'))
+                   .arg(ep.number, 2, 10, QLatin1Char('0'));
+    if (!ep.title.isEmpty()) {
+        display += QStringLiteral(" — ") + ep.title;
+    }
+    ctx.title = display;
+    ctx.poster = m_currentSeriesPoster.isValid()
+        ? m_currentSeriesPoster
+        : ep.thumbnail;
+    m_pane->setPlaybackContext(ctx);
 
     auto t = loadEpisodeTask(ep, m_currentImdbId);
     Q_UNUSED(t);
@@ -102,6 +147,8 @@ void SeriesDetailController::clear()
     ++m_episodeEpoch;
     m_currentImdbId.clear();
     m_currentEpisode.reset();
+    m_pendingSeason.reset();
+    m_pendingEpisode.reset();
 }
 
 QCoro::Task<void> SeriesDetailController::loadSeriesTask(
@@ -110,6 +157,8 @@ QCoro::Task<void> SeriesDetailController::loadSeriesTask(
     const auto myEpoch = ++m_seriesEpoch;
     m_currentImdbId = summary.imdbId;
     m_currentEpisode.reset();
+    m_currentSeriesTitle = summary.title;
+    m_currentSeriesPoster = summary.poster;
 
     m_pane->showMetaLoading();
 
@@ -118,9 +167,32 @@ QCoro::Task<void> SeriesDetailController::loadSeriesTask(
         if (myEpoch != m_seriesEpoch) {
             co_return;
         }
+        if (!sd.meta.summary.title.isEmpty()) {
+            m_currentSeriesTitle = sd.meta.summary.title;
+        }
+        if (sd.meta.summary.poster.isValid()) {
+            m_currentSeriesPoster = sd.meta.summary.poster;
+        }
         m_pane->setSeries(sd);
         m_pane->setSimilarContext(summary.imdbId);
         m_pane->focusEpisodeList();
+
+        // Auto-select a pending episode (from openFromHistory) now
+        // that the episode list is populated. One-shot: clear the
+        // pending values so a later Cinemeta refetch doesn't
+        // re-trigger the jump.
+        if (m_pendingSeason && m_pendingEpisode) {
+            const int wantS = *m_pendingSeason;
+            const int wantE = *m_pendingEpisode;
+            m_pendingSeason.reset();
+            m_pendingEpisode.reset();
+            for (const auto& ep : sd.episodes) {
+                if (ep.season == wantS && ep.number == wantE) {
+                    selectEpisode(ep);
+                    break;
+                }
+            }
+        }
 
     } catch (const std::exception& e) {
         if (myEpoch != m_seriesEpoch) {

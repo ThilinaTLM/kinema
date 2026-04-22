@@ -65,14 +65,20 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
         this, &PlayerWindow::leaveFullscreenOrClose);
     connect(m_mpv, &MpvWidget::fullscreenChanged,
         this, &PlayerWindow::mirrorMpvFullscreen);
+    // Re-emit progress signals up to HistoryController.
+    connect(m_mpv, &MpvWidget::positionChanged,
+        this, &PlayerWindow::positionChanged);
+    connect(m_mpv, &MpvWidget::durationChanged,
+        this, &PlayerWindow::durationChanged);
 }
 
 PlayerWindow::~PlayerWindow() = default;
 
-void PlayerWindow::play(const QUrl& url, const QString& title)
+void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
 {
     m_hasEverLoaded = true;
 
+    const auto& title = ctx.title;
     setWindowTitle(title.isEmpty()
         ? QStringLiteral("Kinema")
         : i18nc("@title:window window title with media title",
@@ -88,7 +94,11 @@ void PlayerWindow::play(const QUrl& url, const QString& title)
         loadGeometry();
     }
 
-    m_mpv->loadFile(url);
+    std::optional<double> startSec;
+    if (ctx.resumeSeconds && *ctx.resumeSeconds > 0) {
+        startSec = static_cast<double>(*ctx.resumeSeconds);
+    }
+    m_mpv->loadFile(url, startSec);
 
     show();
     raise();
