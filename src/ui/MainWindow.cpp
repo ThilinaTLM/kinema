@@ -56,6 +56,7 @@
 #include <QListView>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPalette>
 #include <QShortcut>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -202,6 +203,9 @@ void MainWindow::buildSearchSurface()
     // ---- Results view ----------------------------------------------------
     m_resultsModel = new ResultsModel(this);
     m_resultsView = new QListView(this);
+    // Blend the results grid viewport with the surrounding window
+    // chrome instead of the darker QPalette::Base default.
+    m_resultsView->viewport()->setBackgroundRole(QPalette::Window);
     m_resultsView->setModel(m_resultsModel);
     m_resultsView->setViewMode(QListView::IconMode);
     m_resultsView->setResizeMode(QListView::Adjust);

@@ -13,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QPalette>
 #include <QResizeEvent>
 #include <QStackedWidget>
 #include <QToolButton>
@@ -54,6 +55,9 @@ DiscoverSection::DiscoverSection(
     m_model = new DiscoverRowModel(this);
 
     m_view = new DiscoverGridView(this);
+    // Blend the grid viewport with the surrounding window chrome
+    // instead of the darker QPalette::Base default.
+    m_view->viewport()->setBackgroundRole(QPalette::Window);
     m_view->setModel(m_model);
     m_view->setMaxVisibleRows(m_collapsedRows);
     m_delegate = new DiscoverCardDelegate(images, m_view);

@@ -15,6 +15,7 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPalette>
 #include <QPixmap>
 #include <QScrollArea>
 #include <QStackedWidget>
@@ -95,6 +96,9 @@ MetaHeaderWidget::MetaHeaderWidget(ImageLoader* loader,
     m_scroll->setWidgetResizable(true);
     m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scroll->setWidget(content);
+    // Blend the scroll viewport with the surrounding window chrome
+    // instead of the darker QPalette::Base default.
+    m_scroll->viewport()->setBackgroundRole(QPalette::Window);
 
     m_stack = new QStackedWidget(this);
     m_stack->addWidget(m_state);    // idx 0 = state

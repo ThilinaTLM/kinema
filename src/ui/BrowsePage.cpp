@@ -22,6 +22,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QPalette>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
@@ -104,6 +105,9 @@ BrowsePage::BrowsePage(
         &BrowsePage::refresh);
 
     m_grid = new DiscoverGridView(m_scrollContents);
+    // Blend the grid viewport with the surrounding window chrome
+    // instead of the darker QPalette::Base default.
+    m_grid->viewport()->setBackgroundRole(QPalette::Window);
     m_grid->setMaxVisibleRows(-1); // show all rows
     m_grid->setModel(m_model);
     m_grid->setItemDelegate(m_delegate);
@@ -145,6 +149,8 @@ BrowsePage::BrowsePage(
     m_scroll->setFrameShape(QFrame::NoFrame);
     m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scroll->setWidget(m_scrollContents);
+    // Match the window background so the page reads as one surface.
+    m_scroll->viewport()->setBackgroundRole(QPalette::Window);
 
     auto* col = new QVBoxLayout(content);
     col->setContentsMargins(0, 0, 0, 0);

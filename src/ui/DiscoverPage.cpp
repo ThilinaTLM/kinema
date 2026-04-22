@@ -17,6 +17,7 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPalette>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
@@ -85,6 +86,9 @@ DiscoverPage::DiscoverPage(
     m_rowsScroll->setFrameShape(QFrame::NoFrame);
     m_rowsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_rowsScroll->setWidget(m_rowsContainer);
+    // Blend the rows scroll viewport with the surrounding window
+    // chrome instead of the darker QPalette::Base default.
+    m_rowsScroll->viewport()->setBackgroundRole(QPalette::Window);
 
     m_pageStack = new QStackedWidget(this);
     m_pageStack->addWidget(m_rowsScroll); // idx 0 = sections

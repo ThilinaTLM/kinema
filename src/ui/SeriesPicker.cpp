@@ -13,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListView>
+#include <QPalette>
 #include <QVBoxLayout>
 
 namespace kinema::ui {
@@ -35,6 +36,10 @@ SeriesPicker::SeriesPicker(ImageLoader* loader, QWidget* parent)
     m_episodesModel = new EpisodesModel(this);
 
     m_episodeList = new QListView(this);
+    // Blend the empty viewport area below the last row with the
+    // window chrome. Per-row colours still come from Base /
+    // AlternateBase via setAlternatingRowColors() below.
+    m_episodeList->viewport()->setBackgroundRole(QPalette::Window);
     m_episodeList->setModel(m_episodesModel);
     m_episodeList->setUniformItemSizes(true);
     m_episodeList->setSelectionMode(QAbstractItemView::SingleSelection);
