@@ -33,15 +33,14 @@ DiscoverSection::DiscoverSection(
     f.setPointSizeF(f.pointSizeF() * 1.1);
     m_title->setFont(f);
 
-    // Toggle lives in a footer row below the grid — sized like a
-    // compact card so it reads as the natural "next action" at the
-    // end of the section's content, without stealing a grid slot.
+    // Toggle lives in a footer row below the grid as a compact
+    // inline action — small enough to read as a secondary control,
+    // not another card.
     m_toggle = new QToolButton(this);
-    m_toggle->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-    m_toggle->setIconSize(QSize(28, 28));
-    m_toggle->setMinimumSize(200, 72);
+    m_toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_toggle->setIconSize(QSize(16, 16));
     m_toggle->setCursor(Qt::PointingHandCursor);
-    m_toggle->setAutoRaise(false);
+    m_toggle->setAutoRaise(true);
     m_toggle->hide(); // shown by updateToggleVisibility() once items land
     connect(m_toggle, &QToolButton::clicked, this, [this] {
         setCollapsed(!m_collapsed);
