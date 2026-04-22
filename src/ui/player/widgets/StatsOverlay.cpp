@@ -109,7 +109,6 @@ StatsOverlay::StatsOverlay(QWidget* parent)
     setAttribute(Qt::WA_NoSystemBackground);
     setAutoFillBackground(false);
     setFocusPolicy(Qt::NoFocus);
-    hide();
 
     auto* grid = new QGridLayout(this);
     grid->setContentsMargins(12, 8, 12, 8);
@@ -145,6 +144,10 @@ StatsOverlay::StatsOverlay(QWidget* parent)
         this, &StatsOverlay::refreshLabels);
 
     refreshLabels();
+    // Keep the overlay explicitly hidden until the user toggles it,
+    // but only after m_refresh exists: hide() delivers hideEvent()
+    // synchronously during construction.
+    hide();
 }
 
 void StatsOverlay::toggleVisibility()
@@ -168,7 +171,9 @@ void StatsOverlay::showEvent(QShowEvent* e)
 
 void StatsOverlay::hideEvent(QHideEvent* e)
 {
-    m_refresh->stop();
+    if (m_refresh) {
+        m_refresh->stop();
+    }
     QWidget::hideEvent(e);
 }
 

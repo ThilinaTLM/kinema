@@ -51,8 +51,10 @@ public Q_SLOTS:
     /// Play `stream` with the identity/title information in `ctx`.
     /// Fills `ctx.streamRef` from the stream and asks the history
     /// controller (if wired) for a resume position before handing
-    /// off to PlayerLauncher.
-    void play(const api::Stream& stream, const api::PlaybackContext& ctx);
+    /// off to PlayerLauncher. Virtual so controller tests can record
+    /// auto-next dispatches without spinning up a real launcher.
+    virtual void play(const api::Stream& stream,
+        const api::PlaybackContext& ctx);
 
 Q_SIGNALS:
     /// Status-bar message. MainWindow connects this once.

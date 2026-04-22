@@ -25,6 +25,7 @@ set(kinema_core_SRCS
     core/MpvChapterList.cpp
     core/MpvConfigPaths.cpp
     core/MpvTrackList.cpp
+    core/NextEpisode.cpp
     core/Player.cpp
     core/PlayerLauncher.cpp
     core/StreamFilter.cpp
@@ -103,11 +104,15 @@ list(APPEND kinema_core_SRCS
 
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
+        controllers/PlaybackController.cpp
         ui/player/MpvWidget.cpp
         ui/player/PlayerWindow.cpp
         ui/player/widgets/BufferingOverlay.cpp
+        ui/player/widgets/NextEpisodeBanner.cpp
         ui/player/widgets/PlayerOverlay.cpp
         ui/player/widgets/PlayerTitleBar.cpp
+        ui/player/widgets/ResumePrompt.cpp
+        ui/player/widgets/SkipChapterButton.cpp
         ui/player/widgets/StatsOverlay.cpp
         ui/player/widgets/TransportBar.cpp
     )

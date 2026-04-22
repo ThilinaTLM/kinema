@@ -42,6 +42,7 @@ namespace kinema::controllers {
 class HistoryController;
 class MovieDetailController;
 class NavigationController;
+class PlaybackController;
 class SearchController;
 class SeriesDetailController;
 class TokenController;
@@ -206,6 +207,9 @@ private:
     controllers::TokenController* m_tokenCtrl {};
     controllers::TrayController* m_tray {};
     controllers::HistoryController* m_historyCtrl {};
+#ifdef KINEMA_HAVE_LIBMPV
+    controllers::PlaybackController* m_playbackCtrl {};
+#endif
     services::StreamActions* m_streamActions {};
 
     // Central stack: page 0 = results (Discover / state / grid);
@@ -221,13 +225,6 @@ private:
     // Kind::Embedded selected; reused for subsequent plays. Null
     // when the build was configured without libmpv.
     player::PlayerWindow* m_playerWindow {};
-
-#ifdef KINEMA_HAVE_LIBMPV
-    // Context of the most recent embedded-play handoff. Remembered
-    // so an "error" endOfFile can offer "Choose another release…"
-    // for the right media.
-    std::optional<api::PlaybackContext> m_lastEmbeddedPlay;
-#endif
 
     // Set by quitApplication() so closeEvent accepts the close
     // instead of hiding the main window.

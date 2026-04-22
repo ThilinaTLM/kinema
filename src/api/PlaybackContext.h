@@ -82,6 +82,8 @@ struct HistoryEntry {
     bool finished = false;
     QDateTime lastWatchedAt;    ///< UTC
     HistoryStreamRef lastStream;
+    QString rememberedAudioLang;    ///< e.g. "eng" / "jpn"; empty = unset
+    QString rememberedSubtitleLang; ///< empty = unset; "off" = subtitles disabled
 
     /// Progress fraction in [0, 1], or -1 when duration is unknown.
     double progressFraction() const

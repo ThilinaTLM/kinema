@@ -9,6 +9,7 @@ class QCheckBox;
 class QGroupBox;
 class QLineEdit;
 class QRadioButton;
+class QSpinBox;
 
 namespace kinema::config {
 class PlayerSettings;
@@ -49,6 +50,12 @@ private:
     QCheckBox* m_hwDecodeCheckBox {};
     QLineEdit* m_audioLangEdit {};
     QLineEdit* m_subLangEdit {};
+
+    QGroupBox* m_seriesGroup {};
+    QCheckBox* m_autoplayNextCheckBox {};
+    QCheckBox* m_skipIntroCheckBox {};
+    QSpinBox* m_resumePromptSpinBox {};
+    QSpinBox* m_autoNextCountdownSpinBox {};
 };
 
 } // namespace kinema::ui::settings

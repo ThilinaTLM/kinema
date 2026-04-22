@@ -57,6 +57,10 @@ QList<Row> bindingRows()
               "Leave fullscreen / close") },
         { i18nc("@label cheat sheet key", "I"),
           i18nc("@label cheat sheet action", "Stats overlay") },
+        { i18nc("@label cheat sheet key", "N"),
+          i18nc("@label cheat sheet action", "Play next episode now") },
+        { i18nc("@label cheat sheet key", "Shift+N"),
+          i18nc("@label cheat sheet action", "Cancel auto-next") },
         { i18nc("@label cheat sheet key", "?"),
           i18nc("@label cheat sheet action", "This help") },
     };

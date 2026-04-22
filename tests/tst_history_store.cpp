@@ -6,7 +6,11 @@
 #include "core/HistoryStore.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QTemporaryDir>
 #include <QTest>
 
 using namespace kinema;
@@ -56,6 +60,106 @@ api::HistoryEntry makeEpisodeEntry(const QString& imdb, int season, int episode,
     return e;
 }
 
+bool createLegacyHistoryDb(const QString& path, const api::HistoryEntry& entry)
+{
+    const QString connName = QStringLiteral("tst_history_store_legacy_seed");
+    const auto nullSafe = [](const QString& s) {
+        return s.isNull() ? QStringLiteral("") : s;
+    };
+    bool ok = false;
+    {
+        auto db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
+        db.setDatabaseName(path);
+        if (!db.open()) {
+            return false;
+        }
+
+        QSqlQuery q(db);
+        const QStringList stmts = {
+            QStringLiteral(R"(CREATE TABLE schema_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            ))"),
+            QStringLiteral(R"(CREATE TABLE history (
+                key                  TEXT PRIMARY KEY,
+                kind                 TEXT NOT NULL,
+                imdb_id              TEXT NOT NULL,
+                season               INTEGER,
+                episode              INTEGER,
+                title                TEXT NOT NULL,
+                series_title         TEXT NOT NULL DEFAULT '',
+                episode_title        TEXT NOT NULL DEFAULT '',
+                poster_url           TEXT NOT NULL DEFAULT '',
+                position_sec         REAL NOT NULL DEFAULT 0,
+                duration_sec         REAL NOT NULL DEFAULT 0,
+                finished             INTEGER NOT NULL DEFAULT 0,
+                last_watched_at      TEXT NOT NULL,
+                stream_info_hash     TEXT NOT NULL DEFAULT '',
+                stream_release_name  TEXT NOT NULL DEFAULT '',
+                stream_resolution    TEXT NOT NULL DEFAULT '',
+                stream_quality_label TEXT NOT NULL DEFAULT '',
+                stream_size_bytes    INTEGER,
+                stream_provider      TEXT NOT NULL DEFAULT ''
+            ))"),
+            QStringLiteral(
+                "INSERT INTO schema_meta (key, value) VALUES ('version', '1')"),
+        };
+        ok = true;
+        for (const auto& stmt : stmts) {
+            if (!q.exec(stmt)) {
+                ok = false;
+                break;
+            }
+        }
+
+        if (ok) {
+            q.prepare(QStringLiteral(R"(
+                INSERT INTO history (
+                    key, kind, imdb_id, season, episode,
+                    title, series_title, episode_title, poster_url,
+                    position_sec, duration_sec, finished, last_watched_at,
+                    stream_info_hash, stream_release_name, stream_resolution,
+                    stream_quality_label, stream_size_bytes, stream_provider
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?
+                )
+            )"));
+            q.addBindValue(entry.key.storageKey());
+            q.addBindValue(entry.key.kind == api::MediaKind::Series
+                    ? QStringLiteral("series")
+                    : QStringLiteral("movie"));
+            q.addBindValue(entry.key.imdbId);
+            q.addBindValue(entry.key.season ? QVariant(*entry.key.season) : QVariant());
+            q.addBindValue(entry.key.episode ? QVariant(*entry.key.episode) : QVariant());
+            q.addBindValue(nullSafe(entry.title));
+            q.addBindValue(nullSafe(entry.seriesTitle));
+            q.addBindValue(nullSafe(entry.episodeTitle));
+            q.addBindValue(nullSafe(entry.poster.toString()));
+            q.addBindValue(entry.positionSec);
+            q.addBindValue(entry.durationSec);
+            q.addBindValue(entry.finished ? 1 : 0);
+            q.addBindValue(entry.lastWatchedAt.toUTC().toString(Qt::ISODate));
+            q.addBindValue(nullSafe(entry.lastStream.infoHash));
+            q.addBindValue(nullSafe(entry.lastStream.releaseName));
+            q.addBindValue(nullSafe(entry.lastStream.resolution));
+            q.addBindValue(nullSafe(entry.lastStream.qualityLabel));
+            q.addBindValue(entry.lastStream.sizeBytes
+                    ? QVariant(*entry.lastStream.sizeBytes)
+                    : QVariant());
+            q.addBindValue(nullSafe(entry.lastStream.provider));
+            ok = q.exec();
+        }
+
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+    return ok;
+}
+
 } // namespace
 
 class TstHistoryStore : public QObject
@@ -100,6 +204,8 @@ private Q_SLOTS:
     void testProgressTickPreservesStreamRef()
     {
         auto e = makeMovieEntry(QStringLiteral("tt1000002"), 100, 5000);
+        e.rememberedAudioLang = QStringLiteral("eng");
+        e.rememberedSubtitleLang = QStringLiteral("off");
         m_store->record(e);
 
         // Simulate a position-observer tick with no stream metadata.
@@ -119,6 +225,54 @@ private Q_SLOTS:
         QCOMPARE(got->lastStream.resolution, QStringLiteral("1080p"));
         // Title also preserved (tick had no title either).
         QCOMPARE(got->title, e.title);
+        QCOMPARE(got->rememberedAudioLang, QStringLiteral("eng"));
+        QCOMPARE(got->rememberedSubtitleLang, QStringLiteral("off"));
+    }
+
+    void testRememberedTrackLanguagesRoundTrip()
+    {
+        auto e = makeEpisodeEntry(QStringLiteral("tt1000999"), 1, 4, 600, 2700);
+        e.rememberedAudioLang = QStringLiteral("jpn");
+        e.rememberedSubtitleLang = QStringLiteral("eng");
+        m_store->record(e);
+
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QCOMPARE(got->rememberedAudioLang, QStringLiteral("jpn"));
+        QCOMPARE(got->rememberedSubtitleLang, QStringLiteral("eng"));
+    }
+
+    void testUpgradeFromSchemaV1LeavesTrackLanguagesEmpty()
+    {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        const auto path = tmp.filePath(QStringLiteral("kinema-history-v1.db"));
+
+        const auto legacy = makeEpisodeEntry(
+            QStringLiteral("tt1001000"), 2, 7, 1234, 2700,
+            QDateTime::currentDateTimeUtc().addSecs(-60));
+        QVERIFY(createLegacyHistoryDb(path, legacy));
+
+        core::Database db(path, nullptr);
+        QVERIFY(db.open());
+        QCOMPARE(db.currentSchemaVersion(), core::Database::latestSchemaVersion());
+
+        auto q = db.query();
+        QVERIFY(q.exec(QStringLiteral("PRAGMA table_info(history)")));
+        QStringList columns;
+        while (q.next()) {
+            columns << q.value(1).toString();
+        }
+        QVERIFY(columns.contains(QStringLiteral("audio_lang")));
+        QVERIFY(columns.contains(QStringLiteral("sub_lang")));
+
+        core::HistoryStore store(db);
+        const auto got = store.find(legacy.key);
+        QVERIFY(got.has_value());
+        QCOMPARE(got->key, legacy.key);
+        QCOMPARE(got->positionSec, legacy.positionSec);
+        QCOMPARE(got->rememberedAudioLang, QString());
+        QCOMPARE(got->rememberedSubtitleLang, QString());
     }
 
     // ---- Auto-flip finished at threshold --------------------------------

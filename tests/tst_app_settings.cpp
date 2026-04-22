@@ -59,10 +59,14 @@ private Q_SLOTS:
         QCOMPARE(s.browse().hideObscure(), true);
 
         // Embedded-player defaults: hardware decoding on, language
-        // overrides empty, volume unset.
+        // overrides empty, series helpers on, volume unset.
         QCOMPARE(s.player().hardwareDecoding(), true);
         QVERIFY(s.player().preferredAudioLang().isEmpty());
         QVERIFY(s.player().preferredSubtitleLang().isEmpty());
+        QCOMPARE(s.player().autoplayNextEpisode(), true);
+        QCOMPARE(s.player().skipIntroChapters(), true);
+        QCOMPARE(s.player().resumePromptThresholdSec(), 30);
+        QCOMPARE(s.player().autoNextCountdownSec(), 10);
         QCOMPARE(s.player().rememberedVolume(), -1.0);
     }
 
@@ -120,6 +124,10 @@ private Q_SLOTS:
         s.player().setHardwareDecoding(false);
         s.player().setPreferredAudioLang(QStringLiteral("ja,en"));
         s.player().setPreferredSubtitleLang(QStringLiteral("en"));
+        s.player().setAutoplayNextEpisode(false);
+        s.player().setSkipIntroChapters(false);
+        s.player().setResumePromptThresholdSec(45);
+        s.player().setAutoNextCountdownSec(7);
         s.player().setRememberedVolume(72.5);
 
         config::AppSettings s2(m_config);
@@ -128,6 +136,10 @@ private Q_SLOTS:
             QStringLiteral("ja,en"));
         QCOMPARE(s2.player().preferredSubtitleLang(),
             QStringLiteral("en"));
+        QCOMPARE(s2.player().autoplayNextEpisode(), false);
+        QCOMPARE(s2.player().skipIntroChapters(), false);
+        QCOMPARE(s2.player().resumePromptThresholdSec(), 45);
+        QCOMPARE(s2.player().autoNextCountdownSec(), 7);
         QCOMPARE(s2.player().rememberedVolume(), 72.5);
     }
 
@@ -154,6 +166,15 @@ private Q_SLOTS:
         QCOMPARE(s.player().rememberedVolume(), 0.0);
         s.player().setRememberedVolume(-1.0);
         QCOMPARE(s.player().rememberedVolume(), -1.0);
+    }
+
+    void testSeriesThresholdClamp()
+    {
+        config::AppSettings s(m_config);
+        s.player().setResumePromptThresholdSec(-5);
+        QCOMPARE(s.player().resumePromptThresholdSec(), 0);
+        s.player().setAutoNextCountdownSec(-1);
+        QCOMPARE(s.player().autoNextCountdownSec(), 0);
     }
 
     void testPlayerWindowGeometryRoundtrip()

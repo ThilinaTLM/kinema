@@ -20,6 +20,7 @@ class MpvWidget;
 namespace kinema::ui::player::widgets {
 
 class PlayerSeekBar;
+class SkipChapterButton;
 
 /**
  * Kinema's bottom transport strip: play/pause, seek, current / total
@@ -42,6 +43,7 @@ public:
 Q_SIGNALS:
     void toggleFullscreenRequested();
     void closeRequested();
+    void skipRequested();
 
 protected:
     void paintEvent(QPaintEvent* e) override;
@@ -51,6 +53,8 @@ public Q_SLOTS:
     /// bar itself doesn't use them but we centralise the plumbing
     /// so PlayerOverlay has a single sink.
     void setChapters(const QList<double>& chapterStartsSec);
+    void showSkipChapter(const QString& label);
+    void hideSkipChapter();
 
 private Q_SLOTS:
     void onPositionChanged(double seconds);
@@ -74,6 +78,7 @@ private:
     QLabel* m_timeLabel {nullptr};
     QToolButton* m_muteButton {nullptr};
     QSlider* m_volumeSlider {nullptr};
+    SkipChapterButton* m_skipButton {nullptr};
     QToolButton* m_fullscreenButton {nullptr};
     QToolButton* m_closeButton {nullptr};
 

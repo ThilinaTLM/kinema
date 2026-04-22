@@ -82,11 +82,15 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
         this, &PlayerWindow::leaveFullscreenOrClose);
     connect(m_mpv, &MpvWidget::fullscreenChanged,
         this, &PlayerWindow::mirrorMpvFullscreen);
-    // Re-emit progress signals up to HistoryController.
+    // Re-emit progress / track metadata signals up to controllers.
     connect(m_mpv, &MpvWidget::positionChanged,
         this, &PlayerWindow::positionChanged);
     connect(m_mpv, &MpvWidget::durationChanged,
         this, &PlayerWindow::durationChanged);
+    connect(m_mpv, &MpvWidget::trackListChanged,
+        this, &PlayerWindow::trackListChanged);
+    connect(m_mpv, &MpvWidget::chaptersChanged,
+        this, &PlayerWindow::chaptersChanged);
 }
 
 PlayerWindow::~PlayerWindow() = default;
@@ -129,6 +133,84 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
     m_mpv->setFocus();
 }
 
+void PlayerWindow::setPaused(bool paused)
+{
+    if (m_mpv) {
+        m_mpv->setPaused(paused);
+    }
+}
+
+void PlayerWindow::seekAbsolute(double seconds)
+{
+    if (m_mpv) {
+        m_mpv->seekAbsolute(seconds);
+    }
+}
+
+void PlayerWindow::setAudioTrack(int id)
+{
+    if (m_mpv) {
+        m_mpv->setAudioTrack(id);
+    }
+}
+
+void PlayerWindow::setSubtitleTrack(int id)
+{
+    if (m_mpv) {
+        m_mpv->setSubtitleTrack(id);
+    }
+}
+
+void PlayerWindow::showResumePrompt(qint64 seconds)
+{
+    if (m_overlay) {
+        m_overlay->showResumePrompt(seconds);
+    }
+}
+
+void PlayerWindow::hideResumePrompt()
+{
+    if (m_overlay) {
+        m_overlay->hideResumePrompt();
+    }
+}
+
+void PlayerWindow::showNextEpisodeBanner(
+    const api::PlaybackContext& ctx, int countdownSec)
+{
+    if (m_overlay) {
+        m_overlay->showNextEpisodeBanner(ctx, countdownSec);
+    }
+}
+
+void PlayerWindow::updateNextEpisodeCountdown(int seconds)
+{
+    if (m_overlay) {
+        m_overlay->updateNextEpisodeCountdown(seconds);
+    }
+}
+
+void PlayerWindow::hideNextEpisodeBanner()
+{
+    if (m_overlay) {
+        m_overlay->hideNextEpisodeBanner();
+    }
+}
+
+void PlayerWindow::showSkipChapter(const QString& label)
+{
+    if (m_overlay) {
+        m_overlay->showSkipChapter(label);
+    }
+}
+
+void PlayerWindow::hideSkipChapter()
+{
+    if (m_overlay) {
+        m_overlay->hideSkipChapter();
+    }
+}
+
 void PlayerWindow::stopAndHide()
 {
     if (isFullScreen()) {
@@ -163,7 +245,21 @@ void PlayerWindow::closeEvent(QCloseEvent* e)
 void PlayerWindow::keyPressEvent(QKeyEvent* e)
 {
     if (e->key() == Qt::Key_Escape) {
+        if (m_overlay && m_overlay->cancelNextEpisodeBanner()) {
+            e->accept();
+            return;
+        }
         leaveFullscreenOrClose();
+        e->accept();
+        return;
+    }
+    if (e->key() == Qt::Key_N && e->modifiers() == Qt::NoModifier
+        && m_overlay && m_overlay->acceptNextEpisodeBanner()) {
+        e->accept();
+        return;
+    }
+    if (e->key() == Qt::Key_N && (e->modifiers() & Qt::ShiftModifier)
+        && m_overlay && m_overlay->cancelNextEpisodeBanner()) {
         e->accept();
         return;
     }

@@ -12,6 +12,7 @@
 #include "services/StreamActions.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
+#include "ui/player/MpvWidget.h"
 #include "ui/player/PlayerWindow.h"
 #endif
 
@@ -33,6 +34,33 @@ constexpr double kPersistIntervalSec = 5.0;
 /// ticks. Avoids recording "I opened a stream for 2 seconds" as
 /// resume-able progress.
 constexpr double kMinProgressFraction = 0.005;
+
+#ifdef KINEMA_HAVE_LIBMPV
+QString selectedAudioLang(const core::tracks::TrackList& tracks)
+{
+    for (const auto& track : tracks) {
+        if (track.type == QLatin1String("audio") && track.selected) {
+            return track.lang;
+        }
+    }
+    return {};
+}
+
+QString selectedSubtitleLang(const core::tracks::TrackList& tracks)
+{
+    bool sawSubtitle = false;
+    for (const auto& track : tracks) {
+        if (track.type != QLatin1String("sub")) {
+            continue;
+        }
+        sawSubtitle = true;
+        if (track.selected) {
+            return track.lang;
+        }
+    }
+    return sawSubtitle ? QStringLiteral("off") : QString {};
+}
+#endif
 
 } // namespace
 
@@ -374,6 +402,14 @@ void HistoryController::persistActive(bool force)
     e.positionSec = m_lastPosition;
     e.durationSec = m_duration;
     e.lastWatchedAt = QDateTime::currentDateTimeUtc();
+
+#ifdef KINEMA_HAVE_LIBMPV
+    if (m_player && m_player->mpv()) {
+        const auto& tracks = m_player->mpv()->trackList();
+        e.rememberedAudioLang = selectedAudioLang(tracks);
+        e.rememberedSubtitleLang = selectedSubtitleLang(tracks);
+    }
+#endif
 
     m_store.record(e);
     m_lastPersistedPosition = m_lastPosition;

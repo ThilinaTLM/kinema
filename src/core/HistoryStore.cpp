@@ -64,7 +64,8 @@ constexpr const char* kSelectColumns =
     "title, series_title, episode_title, poster_url, "
     "position_sec, duration_sec, finished, last_watched_at, "
     "stream_info_hash, stream_release_name, stream_resolution, "
-    "stream_quality_label, stream_size_bytes, stream_provider";
+    "stream_quality_label, stream_size_bytes, stream_provider, "
+    "audio_lang, sub_lang";
 
 api::HistoryEntry hydrate(const QSqlQuery& q)
 {
@@ -96,6 +97,8 @@ api::HistoryEntry hydrate(const QSqlQuery& q)
         e.lastStream.sizeBytes = q.value(17).toLongLong();
     }
     e.lastStream.provider = q.value(18).toString();
+    e.rememberedAudioLang = q.value(19).toString();
+    e.rememberedSubtitleLang = q.value(20).toString();
     return e;
 }
 
@@ -249,13 +252,15 @@ void HistoryStore::record(const api::HistoryEntry& entry)
             title, series_title, episode_title, poster_url,
             position_sec, duration_sec, finished, last_watched_at,
             stream_info_hash, stream_release_name, stream_resolution,
-            stream_quality_label, stream_size_bytes, stream_provider
+            stream_quality_label, stream_size_bytes, stream_provider,
+            audio_lang, sub_lang
         ) VALUES (
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?,
-            ?, ?, ?
+            ?, ?, ?,
+            ?, ?
         )
         ON CONFLICT(key) DO UPDATE SET
             kind = excluded.kind,
@@ -296,7 +301,13 @@ void HistoryStore::record(const api::HistoryEntry& entry)
                                      ELSE history.stream_size_bytes END,
             stream_provider = CASE WHEN excluded.stream_info_hash != ''
                                    THEN excluded.stream_provider
-                                   ELSE history.stream_provider END
+                                   ELSE history.stream_provider END,
+            audio_lang = CASE WHEN excluded.audio_lang != ''
+                              THEN excluded.audio_lang
+                              ELSE history.audio_lang END,
+            sub_lang = CASE WHEN excluded.sub_lang != ''
+                            THEN excluded.sub_lang
+                            ELSE history.sub_lang END
     )"));
 
     q.addBindValue(keyStr);
@@ -320,6 +331,8 @@ void HistoryStore::record(const api::HistoryEntry& entry)
             ? QVariant(*e.lastStream.sizeBytes)
             : QVariant());
     q.addBindValue(nullSafe(e.lastStream.provider));
+    q.addBindValue(nullSafe(e.rememberedAudioLang));
+    q.addBindValue(nullSafe(e.rememberedSubtitleLang));
 
     if (!q.exec()) {
         qCWarning(KINEMA)

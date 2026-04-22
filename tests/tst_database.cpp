@@ -30,7 +30,7 @@ private Q_SLOTS:
         m_tmp.reset();
     }
 
-    // ---- Opening a fresh file creates schema v1 --------------------------
+    // ---- Opening a fresh file creates the latest schema ------------------
 
     void testFreshOpenCreatesSchema()
     {
@@ -38,7 +38,7 @@ private Q_SLOTS:
         QVERIFY(db.open());
         QVERIFY(db.isOpen());
         QCOMPARE(db.currentSchemaVersion(), Database::latestSchemaVersion());
-        QCOMPARE(db.currentSchemaVersion(), 1);
+        QCOMPARE(db.currentSchemaVersion(), 2);
 
         // history table must exist and have the key column.
         auto q = db.query();
@@ -55,6 +55,8 @@ private Q_SLOTS:
         QVERIFY(columns.contains(QStringLiteral("key")));
         QVERIFY(columns.contains(QStringLiteral("position_sec")));
         QVERIFY(columns.contains(QStringLiteral("stream_info_hash")));
+        QVERIFY(columns.contains(QStringLiteral("audio_lang")));
+        QVERIFY(columns.contains(QStringLiteral("sub_lang")));
     }
 
     // ---- Reopen is idempotent -------------------------------------------
@@ -68,7 +70,7 @@ private Q_SLOTS:
         {
             Database db(m_path, nullptr);
             QVERIFY(db.open());
-            QCOMPARE(db.currentSchemaVersion(), 1);
+            QCOMPARE(db.currentSchemaVersion(), 2);
         }
     }
 
@@ -90,7 +92,7 @@ private Q_SLOTS:
     {
         Database db(QStringLiteral(":memory:"), nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 1);
+        QCOMPARE(db.currentSchemaVersion(), 2);
     }
 
     // ---- Corrupt file is quarantined and a fresh DB is created ---------
@@ -108,7 +110,7 @@ private Q_SLOTS:
 
         Database db(m_path, nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 1);
+        QCOMPARE(db.currentSchemaVersion(), 2);
 
         // A file named *.corrupt-* should now exist next to the fresh DB.
         const QFileInfo fi(m_path);

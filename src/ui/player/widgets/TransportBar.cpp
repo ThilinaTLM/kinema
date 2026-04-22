@@ -7,6 +7,7 @@
 
 #include "ui/player/MpvWidget.h"
 #include "ui/player/widgets/PlayerSeekBar.h"
+#include "ui/player/widgets/SkipChapterButton.h"
 
 #include <KLocalizedString>
 
@@ -114,6 +115,10 @@ TransportBar::TransportBar(MpvWidget* mpv, QWidget* parent)
         }
     });
 
+    m_skipButton = new SkipChapterButton(this);
+    connect(m_skipButton, &QPushButton::clicked,
+        this, &TransportBar::skipRequested);
+
     m_fullscreenButton = makeIconButton(
         QStringLiteral("view-fullscreen"),
         i18nc("@info:tooltip", "Fullscreen (F)"),
@@ -138,6 +143,7 @@ TransportBar::TransportBar(MpvWidget* mpv, QWidget* parent)
     lay->addWidget(m_muteButton);
     lay->addWidget(m_volumeSlider);
     lay->addSpacing(8);
+    lay->addWidget(m_skipButton);
     lay->addWidget(m_fullscreenButton);
     lay->addWidget(m_closeButton);
 
@@ -176,6 +182,16 @@ void TransportBar::paintEvent(QPaintEvent* /*e*/)
 void TransportBar::setChapters(const QList<double>& chapterStartsSec)
 {
     m_seekBar->setChapters(chapterStartsSec);
+}
+
+void TransportBar::showSkipChapter(const QString& label)
+{
+    m_skipButton->showLabel(label);
+}
+
+void TransportBar::hideSkipChapter()
+{
+    m_skipButton->hide();
 }
 
 void TransportBar::onPositionChanged(double seconds)

@@ -9,7 +9,9 @@
 #include "ui/player/MpvWidget.h"
 #include "ui/player/widgets/BufferingOverlay.h"
 #include "ui/player/widgets/CheatSheetOverlay.h"
+#include "ui/player/widgets/NextEpisodeBanner.h"
 #include "ui/player/widgets/PlayerTitleBar.h"
+#include "ui/player/widgets/ResumePrompt.h"
 #include "ui/player/widgets/StatsOverlay.h"
 #include "ui/player/widgets/TransportBar.h"
 
@@ -32,6 +34,10 @@ constexpr int kBufferingHeightHint = 56;
 constexpr int kStatsWidthHint = 260;
 constexpr int kStatsHeightHint = 140;
 constexpr int kStatsMargin = 12;
+constexpr int kResumePromptWidth = 360;
+constexpr int kResumePromptHeight = 150;
+constexpr int kNextEpisodeWidth = 320;
+constexpr int kNextEpisodeHeight = 145;
 
 } // namespace
 
@@ -52,6 +58,8 @@ PlayerOverlay::PlayerOverlay(MpvWidget* mpv, QWidget* parent)
     m_titleBar = new PlayerTitleBar(this);
     m_stats = new StatsOverlay(this);
     m_cheatSheet = new CheatSheetOverlay(this);
+    m_resumePrompt = new ResumePrompt(this);
+    m_nextEpisodeBanner = new NextEpisodeBanner(this);
 
     // Re-emit the user-driven actions up to PlayerWindow.
     connect(m_transport, &TransportBar::toggleFullscreenRequested,
@@ -63,6 +71,16 @@ PlayerOverlay::PlayerOverlay(MpvWidget* mpv, QWidget* parent)
     // overlay-toggle requests route back into mpv or the sub-overlays.
     connect(m_titleBar, &PlayerTitleBar::closeRequested,
         this, &PlayerOverlay::closeRequested);
+    connect(m_transport, &TransportBar::skipRequested,
+        this, &PlayerOverlay::skipRequested);
+    connect(m_resumePrompt, &ResumePrompt::resumeRequested,
+        this, &PlayerOverlay::resumeRequested);
+    connect(m_resumePrompt, &ResumePrompt::restartRequested,
+        this, &PlayerOverlay::restartRequested);
+    connect(m_nextEpisodeBanner, &NextEpisodeBanner::playNowRequested,
+        this, &PlayerOverlay::nextEpisodeAccepted);
+    connect(m_nextEpisodeBanner, &NextEpisodeBanner::cancelRequested,
+        this, &PlayerOverlay::nextEpisodeCancelled);
     connect(m_titleBar, &PlayerTitleBar::audioTrackRequested,
         this, [this](int id) {
             if (m_mpv) m_mpv->setAudioTrack(id);
@@ -133,6 +151,52 @@ void PlayerOverlay::setContext(const api::PlaybackContext& ctx)
     m_titleBar->setContext(ctx);
 }
 
+void PlayerOverlay::showResumePrompt(qint64 seconds)
+{
+    m_resumePrompt->showPrompt(seconds);
+}
+
+void PlayerOverlay::hideResumePrompt()
+{
+    m_resumePrompt->hidePrompt();
+}
+
+void PlayerOverlay::showNextEpisodeBanner(
+    const api::PlaybackContext& ctx, int countdownSec)
+{
+    m_nextEpisodeBanner->showBanner(ctx, countdownSec);
+}
+
+void PlayerOverlay::updateNextEpisodeCountdown(int seconds)
+{
+    m_nextEpisodeBanner->setCountdown(seconds);
+}
+
+void PlayerOverlay::hideNextEpisodeBanner()
+{
+    m_nextEpisodeBanner->hideBanner();
+}
+
+bool PlayerOverlay::acceptNextEpisodeBanner()
+{
+    return m_nextEpisodeBanner->acceptVisibleBanner();
+}
+
+bool PlayerOverlay::cancelNextEpisodeBanner()
+{
+    return m_nextEpisodeBanner->cancelVisibleBanner();
+}
+
+void PlayerOverlay::showSkipChapter(const QString& label)
+{
+    m_transport->showSkipChapter(label);
+}
+
+void PlayerOverlay::hideSkipChapter()
+{
+    m_transport->hideSkipChapter();
+}
+
 void PlayerOverlay::toggleCheatSheet()
 {
     m_cheatSheet->toggleVisibility();
@@ -148,6 +212,9 @@ void PlayerOverlay::resetForNewSession()
     m_buffering->setBuffering(false, 0);
     m_stats->hide();
     m_cheatSheet->hide();
+    m_resumePrompt->hidePrompt();
+    m_nextEpisodeBanner->hideBanner();
+    m_transport->hideSkipChapter();
     setChromeVisible(true);
     m_hideTimer->start();
 }
@@ -180,6 +247,16 @@ void PlayerOverlay::resizeEvent(QResizeEvent* e)
     // Cheat sheet covers the full surface; its own layout centres
     // the panel.
     m_cheatSheet->setGeometry(r);
+
+    m_resumePrompt->setGeometry(
+        (r.width() - kResumePromptWidth) / 2,
+        (r.height() - kResumePromptHeight) / 2,
+        kResumePromptWidth, kResumePromptHeight);
+
+    m_nextEpisodeBanner->setGeometry(
+        r.width() - kNextEpisodeWidth - kStatsMargin,
+        r.height() - kTransportHeightHint - kNextEpisodeHeight - kStatsMargin,
+        kNextEpisodeWidth, kNextEpisodeHeight);
 }
 
 bool PlayerOverlay::eventFilter(QObject* watched, QEvent* e)
@@ -209,6 +286,21 @@ bool PlayerOverlay::eventFilter(QObject* watched, QEvent* e)
             if (k->key() == Qt::Key_I
                 && k->modifiers() == Qt::NoModifier) {
                 m_stats->toggleVisibility();
+                return true;
+            }
+            if (k->key() == Qt::Key_Escape
+                && k->modifiers() == Qt::NoModifier
+                && m_nextEpisodeBanner->cancelVisibleBanner()) {
+                return true;
+            }
+            if (k->key() == Qt::Key_N
+                && k->modifiers() == Qt::NoModifier
+                && m_nextEpisodeBanner->acceptVisibleBanner()) {
+                return true;
+            }
+            if (k->key() == Qt::Key_N
+                && (k->modifiers() & Qt::ShiftModifier)
+                && m_nextEpisodeBanner->cancelVisibleBanner()) {
                 return true;
             }
             break;

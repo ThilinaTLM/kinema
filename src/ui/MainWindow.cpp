@@ -11,6 +11,9 @@
 #include "controllers/MovieDetailController.h"
 #include "controllers/NavigationController.h"
 #include "controllers/Page.h"
+#ifdef KINEMA_HAVE_LIBMPV
+#include "controllers/PlaybackController.h"
+#endif
 #include "controllers/SearchController.h"
 #include "controllers/SeriesDetailController.h"
 #include "controllers/TokenController.h"
@@ -418,6 +421,86 @@ void MainWindow::buildControllers()
     connect(m_historyCtrl,
         &controllers::HistoryController::statusMessage,
         this, forwardStatus);
+#ifdef KINEMA_HAVE_LIBMPV
+    m_playbackCtrl = new controllers::PlaybackController(
+        *m_cinemeta, *m_torrentio, *m_streamActions, *m_historyCtrl,
+        m_settings, m_tokenCtrl->realDebridToken(), this);
+    connect(m_playbackCtrl,
+        &controllers::PlaybackController::statusMessage,
+        this, forwardStatus);
+    connect(m_playbackCtrl,
+        &controllers::PlaybackController::fileLoaded,
+        this, [this](const api::PlaybackContext&) {
+            auto* n = new KNotification(
+                QStringLiteral("playbackStarted"),
+                KNotification::CloseOnTimeout);
+            n->setTitle(i18nc("@title:window notification",
+                "Playing in Kinema"));
+            // m_playerWindow's title is already "<media> — Kinema".
+            n->setText(m_playerWindow->windowTitle());
+            n->setIconName(
+                QStringLiteral("media-playback-start"));
+            n->sendEvent();
+        });
+    connect(m_playbackCtrl,
+        &controllers::PlaybackController::playbackError,
+        this, [this](const QString& reason,
+                  const api::PlaybackContext&) {
+            statusBar()->showMessage(reason, 6000);
+            auto* n = new KNotification(
+                QStringLiteral("playbackFailed"),
+                KNotification::CloseOnTimeout);
+            n->setTitle(i18nc("@title:window notification",
+                "Embedded playback failed"));
+            n->setText(reason);
+            n->setIconName(QStringLiteral("dialog-error"));
+            n->sendEvent();
+        });
+    connect(m_playbackCtrl,
+        &controllers::PlaybackController::endOfFile,
+        this, [this](const QString& reason,
+                  const api::PlaybackContext& ctx) {
+            if (reason != QLatin1String("error")) {
+                return;
+            }
+            statusBar()->showMessage(
+                i18nc("@info:status",
+                    "Playback ended with an error."),
+                6000);
+            if (!ctx.key.isValid()) {
+                return;
+            }
+            api::HistoryEntry entry;
+            entry.key = ctx.key;
+            entry.title = ctx.title;
+            entry.seriesTitle = ctx.seriesTitle;
+            entry.episodeTitle = ctx.episodeTitle;
+            entry.poster = ctx.poster;
+            entry.lastStream = ctx.streamRef;
+
+            auto* n = new KNotification(
+                QStringLiteral("playbackFailed"),
+                KNotification::CloseOnTimeout);
+            n->setTitle(i18nc("@title:window notification",
+                "Couldn’t play “%1”", entry.title));
+            n->setText(i18nc("@info",
+                "The upstream stream failed. Try a different "
+                "release."));
+            n->setIconName(QStringLiteral("dialog-error"));
+            auto* pick = n->addAction(
+                i18nc("@action:button notification",
+                    "Choose another release…"));
+            connect(pick, &KNotificationAction::activated,
+                this, [this, entry] {
+                    if (entry.key.kind == api::MediaKind::Series) {
+                        m_seriesCtrl->openFromHistory(entry);
+                    } else {
+                        m_movieCtrl->openFromHistory(entry);
+                    }
+                });
+            n->sendEvent();
+        });
+#endif
     // Resume miss — stored release can't be resolved right now. Do
     // NOT auto-open the detail pane: "Continue Watching" is meant to
     // be one-click playback, not a detour through the streams list.
@@ -504,7 +587,6 @@ void MainWindow::closeDetailPanel()
 void MainWindow::openEmbeddedPlayer(const QUrl& url,
     const api::PlaybackContext& ctx)
 {
-    const auto title = ctx.title;
     // Lazy construction: the MpvWidget (inside PlayerWindow)
     // initialises libmpv + an OpenGL render context in its ctor /
     // initializeGL, so we pay nothing until the user actually picks
@@ -520,99 +602,17 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url,
         if (m_historyCtrl) {
             m_historyCtrl->setPlayerWindow(m_playerWindow);
         }
-
-        connect(m_playerWindow, &player::PlayerWindow::fileLoaded,
-            this, [this] {
-                auto* n = new KNotification(
-                    QStringLiteral("playbackStarted"),
-                    KNotification::CloseOnTimeout);
-                n->setTitle(i18nc("@title:window notification",
-                    "Playing in Kinema"));
-                // m_playerWindow's title is already "<media> — Kinema".
-                n->setText(m_playerWindow->windowTitle());
-                n->setIconName(
-                    QStringLiteral("media-playback-start"));
-                n->sendEvent();
-            });
-        connect(m_playerWindow, &player::PlayerWindow::mpvError,
-            this, [this](const QString& reason) {
-                statusBar()->showMessage(reason, 6000);
-                auto* n = new KNotification(
-                    QStringLiteral("playbackFailed"),
-                    KNotification::CloseOnTimeout);
-                n->setTitle(i18nc("@title:window notification",
-                    "Embedded playback failed"));
-                n->setText(reason);
-                n->setIconName(QStringLiteral("dialog-error"));
-                n->sendEvent();
-            });
-        connect(m_playerWindow, &player::PlayerWindow::endOfFile,
-            this, [this](const QString& reason) {
-                // PlayerWindow has already stopped playback and
-                // hidden itself by now. Normal EOF / user-stop paths
-                // are silent. An "error" reason means the URL failed
-                // to play (typically an upstream Torrentio / RD
-                // issue like a 502 Bad Gateway) — surface a
-                // notification with a "Choose another release" action
-                // so the user has an obvious next step, same as the
-                // saved-release-unavailable path.
-                if (reason != QLatin1String("error")) {
-                    return;
-                }
-                statusBar()->showMessage(
-                    i18nc("@info:status",
-                        "Playback ended with an error."),
-                    6000);
-                if (!m_lastEmbeddedPlay
-                    || !m_lastEmbeddedPlay->key.isValid()) {
-                    return;
-                }
-                // Reconstruct a minimal HistoryEntry from the play
-                // context so the detail-pane fallback has the
-                // identity + display metadata it needs.
-                api::HistoryEntry entry;
-                entry.key = m_lastEmbeddedPlay->key;
-                entry.title = m_lastEmbeddedPlay->title;
-                entry.seriesTitle = m_lastEmbeddedPlay->seriesTitle;
-                entry.episodeTitle = m_lastEmbeddedPlay->episodeTitle;
-                entry.poster = m_lastEmbeddedPlay->poster;
-                entry.lastStream = m_lastEmbeddedPlay->streamRef;
-
-                auto* n = new KNotification(
-                    QStringLiteral("playbackFailed"),
-                    KNotification::CloseOnTimeout);
-                n->setTitle(i18nc("@title:window notification",
-                    "Couldn\u2019t play \u201c%1\u201d", entry.title));
-                n->setText(i18nc("@info",
-                    "The upstream stream failed. Try a different "
-                    "release."));
-                n->setIconName(QStringLiteral("dialog-error"));
-                auto* pick = n->addAction(
-                    i18nc("@action:button notification",
-                        "Choose another release\u2026"));
-                connect(pick, &KNotificationAction::activated,
-                    this, [this, entry] {
-                        if (entry.key.kind == api::MediaKind::Series) {
-                            m_seriesCtrl->openFromHistory(entry);
-                        } else {
-                            m_movieCtrl->openFromHistory(entry);
-                        }
-                    });
-                n->sendEvent();
-            });
-        connect(m_playerWindow, &player::PlayerWindow::visibilityChanged,
-            this, [this](bool) { m_tray->refreshMenu(); });
+        if (m_playbackCtrl) {
+            m_playbackCtrl->setPlayerWindow(m_playerWindow);
+            connect(m_playbackCtrl,
+                &controllers::PlaybackController::visibilityChanged,
+                this, [this](bool) { m_tray->refreshMenu(); });
+        }
     }
 
-    statusBar()->showMessage(
-        i18nc("@info:status", "Loading “%1”…", title), 3000);
-
-    // Remember the context so the endOfFile("error") handler can
-    // surface a "Choose another release" notification for the right
-    // media.
-    m_lastEmbeddedPlay = ctx;
-
-    m_playerWindow->play(url, ctx);
+    if (m_playbackCtrl) {
+        m_playbackCtrl->play(url, ctx);
+    }
 }
 
 #endif // KINEMA_HAVE_LIBMPV

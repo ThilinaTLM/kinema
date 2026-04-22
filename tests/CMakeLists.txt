@@ -136,6 +136,11 @@ ecm_add_test(tst_history_store.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
+ecm_add_test(tst_next_episode.cpp
+    TEST_NAME tst_next_episode
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_mpv_config_paths.cpp
     TEST_NAME tst_mpv_config_paths
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -156,6 +161,13 @@ ecm_add_test(tst_player_menus.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+if(KINEMA_ENABLE_MPV_EMBED)
+    ecm_add_test(tst_stats_overlay.cpp
+        TEST_NAME tst_stats_overlay
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
+endif()
+
 foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
@@ -165,7 +177,12 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_movie_detail_controller tst_series_detail_controller
          tst_token_controller tst_cinemeta_client tst_tmdb_client
          tst_torrentio_client tst_realdebrid_client
-         tst_database tst_history_store tst_mpv_config_paths
-         tst_mpv_track_list_parse tst_player_seek_bar tst_player_menus)
+         tst_database tst_history_store
+         tst_next_episode tst_mpv_config_paths tst_mpv_track_list_parse
+         tst_player_seek_bar tst_player_menus)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
+
+if(TARGET tst_stats_overlay)
+    target_compile_definitions(tst_stats_overlay PRIVATE ${test_defs})
+endif()

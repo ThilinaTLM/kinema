@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QRadioButton>
+#include <QSpinBox>
 #include <QVBoxLayout>
 
 namespace kinema::ui::settings {
@@ -52,7 +53,7 @@ PlayerSettingsPage::PlayerSettingsPage(
     m_embeddedRadio = new QRadioButton(embeddedLabel, this);
     m_embeddedRadio->setEnabled(embeddedAvailable);
     m_embeddedRadio->setToolTip(i18nc("@info:tooltip",
-        "Plays inside Kinema. Uses your local mpv config and keybindings."));
+        "Plays inside Kinema using Kinema’s built-in mpv configuration and overlay."));
 
     m_mpvRadio = new QRadioButton(
         labelWithAvailability(core::player::displayName(core::player::Kind::Mpv),
@@ -135,12 +136,54 @@ PlayerSettingsPage::PlayerSettingsPage(
         groupHint->setWordWrap(true);
         groupHint->setEnabled(false);
         gform->addRow(QString {}, groupHint);
+
+        m_seriesGroup = new QGroupBox(
+            i18nc("@title:group", "Series"), this);
+        auto* sform = new QFormLayout(m_seriesGroup);
+
+        m_autoplayNextCheckBox = new QCheckBox(
+            i18nc("@option:check", "Autoplay next episode"),
+            m_seriesGroup);
+        sform->addRow(m_autoplayNextCheckBox);
+
+        m_skipIntroCheckBox = new QCheckBox(
+            i18nc("@option:check", "Offer skip intro / credits"),
+            m_seriesGroup);
+        sform->addRow(m_skipIntroCheckBox);
+
+        m_resumePromptSpinBox = new QSpinBox(m_seriesGroup);
+        m_resumePromptSpinBox->setRange(0, 24 * 60 * 60);
+        m_resumePromptSpinBox->setSuffix(
+            i18nc("@item:suffix", " s"));
+        sform->addRow(
+            i18nc("@label:spinbox", "Resume prompt after:"),
+            m_resumePromptSpinBox);
+
+        m_autoNextCountdownSpinBox = new QSpinBox(m_seriesGroup);
+        m_autoNextCountdownSpinBox->setRange(0, 600);
+        m_autoNextCountdownSpinBox->setSuffix(
+            i18nc("@item:suffix", " s"));
+        sform->addRow(
+            i18nc("@label:spinbox", "Next-episode countdown:"),
+            m_autoNextCountdownSpinBox);
+
+        auto* seriesHint = new QLabel(i18nc("@info",
+            "These options affect resume prompts, next-episode "
+            "countdown, and skip-intro controls for embedded series "
+            "playback."),
+            m_seriesGroup);
+        seriesHint->setWordWrap(true);
+        seriesHint->setEnabled(false);
+        sform->addRow(QString {}, seriesHint);
     }
 
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(form);
     if (m_embeddedGroup) {
         layout->addWidget(m_embeddedGroup);
+    }
+    if (m_seriesGroup) {
+        layout->addWidget(m_seriesGroup);
     }
     layout->addStretch(1);
 
@@ -180,6 +223,16 @@ void PlayerSettingsPage::load()
         m_audioLangEdit->setText(m_settings.preferredAudioLang());
         m_subLangEdit->setText(m_settings.preferredSubtitleLang());
     }
+    if (m_seriesGroup) {
+        m_autoplayNextCheckBox->setChecked(
+            m_settings.autoplayNextEpisode());
+        m_skipIntroCheckBox->setChecked(
+            m_settings.skipIntroChapters());
+        m_resumePromptSpinBox->setValue(
+            m_settings.resumePromptThresholdSec());
+        m_autoNextCountdownSpinBox->setValue(
+            m_settings.autoNextCountdownSec());
+    }
 }
 
 void PlayerSettingsPage::apply()
@@ -202,6 +255,16 @@ void PlayerSettingsPage::apply()
         m_settings.setPreferredSubtitleLang(
             m_subLangEdit->text().trimmed());
     }
+    if (m_seriesGroup) {
+        m_settings.setAutoplayNextEpisode(
+            m_autoplayNextCheckBox->isChecked());
+        m_settings.setSkipIntroChapters(
+            m_skipIntroCheckBox->isChecked());
+        m_settings.setResumePromptThresholdSec(
+            m_resumePromptSpinBox->value());
+        m_settings.setAutoNextCountdownSec(
+            m_autoNextCountdownSpinBox->value());
+    }
 }
 
 void PlayerSettingsPage::resetToDefaults()
@@ -214,6 +277,12 @@ void PlayerSettingsPage::resetToDefaults()
         m_hwDecodeCheckBox->setChecked(true);
         m_audioLangEdit->clear();
         m_subLangEdit->clear();
+    }
+    if (m_seriesGroup) {
+        m_autoplayNextCheckBox->setChecked(true);
+        m_skipIntroCheckBox->setChecked(true);
+        m_resumePromptSpinBox->setValue(30);
+        m_autoNextCountdownSpinBox->setValue(10);
     }
 }
 

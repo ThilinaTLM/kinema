@@ -6,6 +6,8 @@
 #ifdef KINEMA_HAVE_LIBMPV
 
 #include "api/PlaybackContext.h"
+#include "core/MpvChapterList.h"
+#include "core/MpvTrackList.h"
 
 #include <QWidget>
 #include <QString>
@@ -54,6 +56,7 @@ public:
     /// need to issue transport commands or read the log tail. Nullable
     /// only in the degraded build where mpv_create failed.
     MpvWidget* mpv() const { return m_mpv; }
+    widgets::PlayerOverlay* overlay() const { return m_overlay; }
 
     PlayerWindow(const PlayerWindow&) = delete;
     PlayerWindow& operator=(const PlayerWindow&) = delete;
@@ -64,7 +67,24 @@ public:
     /// collapses to just "Kinema". When `ctx.resumeSeconds` is set,
     /// mpv is asked to start at that offset (clamped below the end
     /// of the file when duration is known).
-    void play(const QUrl& url, const kinema::api::PlaybackContext& ctx);
+    virtual void play(const QUrl& url,
+        const kinema::api::PlaybackContext& ctx);
+
+    // Thin command surface used by PlaybackController. These forward
+    // to MpvWidget / PlayerOverlay so tests can override them on a
+    // fake PlayerWindow without depending on libmpv behaviour.
+    virtual void setPaused(bool paused);
+    virtual void seekAbsolute(double seconds);
+    virtual void setAudioTrack(int id);
+    virtual void setSubtitleTrack(int id);
+    virtual void showResumePrompt(qint64 seconds);
+    virtual void hideResumePrompt();
+    virtual void showNextEpisodeBanner(
+        const kinema::api::PlaybackContext& ctx, int countdownSec);
+    virtual void updateNextEpisodeCountdown(int seconds);
+    virtual void hideNextEpisodeBanner();
+    virtual void showSkipChapter(const QString& label);
+    virtual void hideSkipChapter();
 
     /// Stop playback, leave fullscreen if needed, and hide the
     /// window. Safe to call repeatedly or before any play().
@@ -94,6 +114,8 @@ Q_SIGNALS:
     /// keep the persisted progress current during playback.
     void positionChanged(double seconds);
     void durationChanged(double seconds);
+    void trackListChanged(const core::tracks::TrackList& tracks);
+    void chaptersChanged(const core::chapters::ChapterList& chapters);
 
 protected:
     void closeEvent(QCloseEvent* e) override;

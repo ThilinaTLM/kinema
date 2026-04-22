@@ -23,6 +23,8 @@ class BufferingOverlay;
 class PlayerTitleBar;
 class StatsOverlay;
 class CheatSheetOverlay;
+class ResumePrompt;
+class NextEpisodeBanner;
 
 /**
  * Transparent top-level overlay pinned to the video surface. Hosts
@@ -70,6 +72,17 @@ public:
     /// Called from PlayerWindow::stopAndHide.
     void resetForNewSession();
 
+    /// Series overlays controlled by PlaybackController.
+    void showResumePrompt(qint64 seconds);
+    void hideResumePrompt();
+    void showNextEpisodeBanner(const api::PlaybackContext& ctx, int countdownSec);
+    void updateNextEpisodeCountdown(int seconds);
+    void hideNextEpisodeBanner();
+    bool acceptNextEpisodeBanner();
+    bool cancelNextEpisodeBanner();
+    void showSkipChapter(const QString& label);
+    void hideSkipChapter();
+
     /// Toggle the cheat-sheet / stats overlays. Exposed so
     /// PlayerWindow can route keyboard shortcuts it captures when
     /// focus sits on the window instead of MpvWidget.
@@ -83,6 +96,11 @@ Q_SIGNALS:
     void toggleFullscreenRequested();
     /// Emitted when the user clicks the close button.
     void closeRequested();
+    void resumeRequested(qint64 seconds);
+    void restartRequested();
+    void nextEpisodeAccepted();
+    void nextEpisodeCancelled();
+    void skipRequested();
 
 protected:
     void resizeEvent(QResizeEvent* e) override;
@@ -101,6 +119,8 @@ private:
     PlayerTitleBar* m_titleBar {nullptr};
     StatsOverlay* m_stats {nullptr};
     CheatSheetOverlay* m_cheatSheet {nullptr};
+    ResumePrompt* m_resumePrompt {nullptr};
+    NextEpisodeBanner* m_nextEpisodeBanner {nullptr};
 
     QTimer* m_hideTimer {nullptr};
     bool m_chromeVisible {true};

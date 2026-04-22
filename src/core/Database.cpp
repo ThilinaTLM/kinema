@@ -296,6 +296,23 @@ bool Database::applyMigration(int toVersion)
         }
         return true;
     }
+    case 2: {
+        const QStringList stmts = {
+            QStringLiteral(
+                "ALTER TABLE history ADD COLUMN audio_lang TEXT NOT NULL DEFAULT ''"),
+            QStringLiteral(
+                "ALTER TABLE history ADD COLUMN sub_lang TEXT NOT NULL DEFAULT ''"),
+        };
+        for (const auto& s : stmts) {
+            if (!q.exec(s)) {
+                qCWarning(KINEMA)
+                    << "Database: migration v2 failed on" << s
+                    << "\u2014" << q.lastError().text();
+                return false;
+            }
+        }
+        return true;
+    }
     default:
         qCWarning(KINEMA)
             << "Database: no migration registered for version"
