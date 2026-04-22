@@ -78,6 +78,8 @@ set(kinema_core_SRCS
     controllers/TrayController.cpp
 
     services/StreamActions.cpp
+
+    tray_resources.qrc
 )
 
 if(KINEMA_ENABLE_MPV_EMBED)
@@ -118,6 +120,7 @@ target_link_libraries(kinema_core
         Qt6::Gui
         Qt6::Widgets
         Qt6::Network
+        Qt6::Svg
         KF6::CoreAddons
         KF6::I18n
         KF6::KIOCore

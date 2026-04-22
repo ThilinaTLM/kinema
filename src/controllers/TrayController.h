@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <QIcon>
 #include <QObject>
 
 class KStatusNotifierItem;
@@ -60,8 +61,16 @@ Q_SIGNALS:
     /// User clicked "Quit Kinema" in the tray menu.
     void quitRequested();
 
+protected:
+    // Re-render the tray icon when the application palette changes
+    // (theme switch, light/dark toggle) so the monochrome glyph
+    // stays legible on the panel foreground.
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void build();
+    void applyTrayIcon();
+    QIcon renderSymbolicIcon() const;
 
     QWidget* m_mainWindow;
     bool m_available = false;

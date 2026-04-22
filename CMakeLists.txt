@@ -40,6 +40,7 @@ find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS
     Network
     OpenGL
     OpenGLWidgets
+    Svg
     Test
 )
 

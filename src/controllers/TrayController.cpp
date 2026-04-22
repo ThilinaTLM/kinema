@@ -13,8 +13,16 @@
 #include <KStatusNotifierItem>
 
 #include <QAction>
+#include <QApplication>
+#include <QByteArray>
+#include <QEvent>
+#include <QFile>
 #include <QIcon>
 #include <QMenu>
+#include <QPainter>
+#include <QPalette>
+#include <QPixmap>
+#include <QSvgRenderer>
 #include <QSystemTrayIcon>
 #include <QWidget>
 
@@ -58,7 +66,20 @@ void TrayController::build()
     m_tray->setCategory(KStatusNotifierItem::ApplicationStatus);
     m_tray->setStatus(KStatusNotifierItem::Active);
     m_tray->setTitle(QStringLiteral("Kinema"));
-    m_tray->setIconByName(QStringLiteral("dev.tlmtech.kinema"));
+    // KDE convention: the tray icon itself is monochrome so it can
+    // be recolored to match the panel foreground. Plasma's SNI host
+    // does this server-side via KIconLoader's Breeze stylesheet
+    // substitution, but xembed proxies and non-Plasma hosts do not —
+    // and QSvgRenderer renders `.ColorScheme-Text` as its literal
+    // default (#232629), which is invisible on dark panels. We
+    // therefore rasterize the SVG ourselves with the current palette
+    // color and hand the tray a ready-made QIcon.
+    applyTrayIcon();
+    if (auto* app = qApp) {
+        app->installEventFilter(this);
+    }
+    // Tooltip keeps the colored app mark — it's shown in a popup
+    // where full color reads better than a flat glyph.
     m_tray->setToolTipIconByName(QStringLiteral("dev.tlmtech.kinema"));
     m_tray->setToolTipTitle(QStringLiteral("Kinema"));
     m_tray->setToolTipSubTitle(
@@ -96,6 +117,68 @@ void TrayController::build()
     menu->addAction(trayQuit);
 
     refreshMenu();
+}
+
+bool TrayController::eventFilter(QObject* watched, QEvent* event)
+{
+    if (m_available && event
+        && event->type() == QEvent::ApplicationPaletteChange) {
+        applyTrayIcon();
+    }
+    return QObject::eventFilter(watched, event);
+}
+
+void TrayController::applyTrayIcon()
+{
+    if (!m_tray) {
+        return;
+    }
+    m_tray->setIconByPixmap(renderSymbolicIcon());
+}
+
+QIcon TrayController::renderSymbolicIcon() const
+{
+    QFile f(QStringLiteral(":/kinema/tray-icon.svg"));
+    if (!f.open(QIODevice::ReadOnly)) {
+        qCWarning(KINEMA) << "tray: symbolic SVG resource missing;"
+                          << "falling back to themed icon";
+        return QIcon::fromTheme(
+            QStringLiteral("dev.tlmtech.kinema-symbolic"),
+            QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema")));
+    }
+    QByteArray svg = f.readAll();
+    f.close();
+
+    // Swap the Breeze ColorScheme-Text default (#232629) with the
+    // current palette's window-text color. This is the same swap
+    // KIconLoader performs on Breeze icons; doing it here means we
+    // do not depend on the SNI host's render pipeline.
+    const QColor fg = QApplication::palette().color(
+        QPalette::Active, QPalette::WindowText);
+    svg.replace(QByteArrayLiteral("#232629"),
+        fg.name(QColor::HexRgb).toUtf8());
+
+    QSvgRenderer renderer(svg);
+    if (!renderer.isValid()) {
+        qCWarning(KINEMA) << "tray: symbolic SVG failed to parse";
+        return QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema"));
+    }
+
+    QIcon icon;
+    // Cover the sizes SNI hosts typically request. KStatusNotifierItem
+    // serializes these as ARGB32 pixmaps over D-Bus; providing a
+    // range keeps the icon crisp across panel heights and HiDPI.
+    for (int size : {16, 22, 24, 32, 48, 64, 128, 256}) {
+        QPixmap pm(size, size);
+        pm.fill(Qt::transparent);
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        renderer.render(&p);
+        p.end();
+        icon.addPixmap(pm);
+    }
+    return icon;
 }
 
 void TrayController::refreshMenu()

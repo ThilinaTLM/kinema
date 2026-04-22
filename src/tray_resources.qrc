@@ -1,0 +1,16 @@
+<!--
+    SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+    SPDX-License-Identifier: Apache-2.0
+
+    Embed the monochrome tray SVG so TrayController can render it with
+    the current palette's text color. Plasma's KIconLoader does this
+    recoloring server-side for Breeze icons it recognizes, but xembed
+    SNI proxies and non-Plasma hosts do not — rendering ourselves keeps
+    the icon visible on every panel.
+-->
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/kinema">
+    <file alias="tray-icon.svg">../data/icons/sc-apps-dev.tlmtech.kinema-symbolic.svg</file>
+  </qresource>
+</RCC>
