@@ -5,14 +5,23 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
+#include "core/MpvChapterList.h"
+#include "core/MpvTrackList.h"
+
 #include <QOpenGLWidget>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
+#include <deque>
 #include <optional>
 
 struct mpv_handle;
 struct mpv_render_context;
+
+namespace kinema::config {
+class PlayerSettings;
+}
 
 namespace kinema::ui::player {
 
@@ -31,7 +40,13 @@ class MpvWidget : public QOpenGLWidget
 {
     Q_OBJECT
 public:
-    explicit MpvWidget(QWidget* parent = nullptr);
+    /// `settings` is injected so the widget can translate the user's
+    /// Kinema-level preferences (hardware decoding, preferred audio /
+    /// subtitle language) into mpv options at construction time and
+    /// apply the remembered volume on every load. The widget does not
+    /// write back to settings — PlayerWindow persists on hide.
+    explicit MpvWidget(const config::PlayerSettings& settings,
+        QWidget* parent = nullptr);
     ~MpvWidget() override;
 
     MpvWidget(const MpvWidget&) = delete;
@@ -59,6 +74,53 @@ public:
     /// fullscreen toggle; this keeps the OSC's indicator in sync.
     void setMpvFullscreen(bool on);
 
+    // ---- Transport helpers used by the Qt overlay ----------------------
+    //
+    // Every helper issues an async mpv command / property write and
+    // returns immediately. Cached state is NEVER updated here — the
+    // property-change observer is the single source of truth so the
+    // UI never drifts from mpv.
+
+    void seekAbsolute(double seconds);
+    void setVolumePercent(double v);
+    void setMuted(bool m);
+    void setSpeed(double s);
+    void cyclePause();
+
+    /// Select an mpv audio track by id, or pass -1 to disable audio
+    /// entirely. Idempotent; the matching property-change observer
+    /// drives UI updates.
+    void setAudioTrack(int id);
+    /// Select / disable subtitle track. -1 = off.
+    void setSubtitleTrack(int id);
+
+    // ---- Cached state accessors ---------------------------------------
+
+    double currentVolume() const { return m_lastVolume; }
+    bool isMuted() const { return m_muted; }
+    double currentSpeed() const { return m_lastSpeed; }
+    const core::tracks::TrackList& trackList() const { return m_tracks; }
+    const core::chapters::ChapterList& chapters() const { return m_chapters; }
+
+    /// Snapshot of the video / audio stats StatsOverlay renders.
+    /// Fields are zero when mpv hasn't reported them yet; consumers
+    /// should treat zero as "unknown".
+    struct VideoStats {
+        int width = 0;
+        int height = 0;
+        QString videoCodec;
+        QString audioCodec;
+        double fps = 0.0;
+        double videoBitrate = 0.0;   ///< bits/sec
+        double audioBitrate = 0.0;   ///< bits/sec
+        double cacheSeconds = 0.0;   ///< demuxer-cache-time
+    };
+    VideoStats currentStats() const { return m_stats; }
+
+    /// Most recent log lines (up to ~64) for post-hoc classification
+    /// by PlaybackController when an end-file error fires.
+    QStringList recentLogLines() const;
+
 Q_SIGNALS:
     /// mpv has loaded the file and playback is running.
     void fileLoaded();
@@ -85,6 +147,35 @@ Q_SIGNALS:
     /// A libmpv call failed; payload is a short human-readable
     /// description. The launcher surfaces this in the status bar.
     void mpvError(const QString& message);
+
+    // ---- Property-change mirrors --------------------------------------
+    //
+    // Everything the Qt overlay needs to repaint. Fired on the GUI
+    // thread from onMpvEvents; values are the ones libmpv reported.
+
+    void pausedChanged(bool paused);
+    void volumeChanged(double percent);
+    void muteChanged(bool muted);
+    void speedChanged(double factor);
+    /// True while mpv is stalled waiting for the demuxer cache; second
+    /// arg is the percentage mpv reports (0 when `paused-for-cache` is
+    /// false, so a single signal is enough to drive the UI).
+    void bufferingChanged(bool waiting, int percent);
+    /// Seconds of demuxer cache ahead of the current position; used by
+    /// the seek bar to shade the buffered-ahead region.
+    void cacheAheadChanged(double seconds);
+    /// mpv's `track-list` changed — either a new file loaded or the
+    /// selected track flipped. Payload mirrors MpvWidget::trackList().
+    void trackListChanged(const core::tracks::TrackList& tracks);
+    /// mpv's `chapter-list` changed.
+    void chaptersChanged(const core::chapters::ChapterList& chapters);
+    /// Selected audio / subtitle track ids. -1 when audio / subs are
+    /// disabled (mpv's "no" value).
+    void audioTrackChanged(int id);
+    void subtitleTrackChanged(int id);
+    /// Video / audio stats refreshed. Consumers hold the struct by
+    /// value; zero fields indicate "not reported yet".
+    void videoStatsChanged(const VideoStats& stats);
 
 protected:
     // QOpenGLWidget
@@ -114,6 +205,16 @@ private:
     void forwardKey(QKeyEvent* e, bool down);
     void forwardMouseButton(QMouseEvent* e, bool down);
     void updateMousePos(const QPoint& pos);
+    void appendLogLine(const QString& line);
+    /// Re-fetch the named list property via
+    /// `mpv_get_property_string` (which serialises any mpv node to
+    /// JSON) and hand it to the matching pure parser. Called on
+    /// track-list / chapter-list property-change events.
+    QByteArray fetchPropertyJson(const char* name);
+    void refreshTrackList();
+    void refreshChapterList();
+
+    const config::PlayerSettings& m_settings;
 
     mpv_handle* m_mpv {nullptr};
     mpv_render_context* m_renderCtx {nullptr};
@@ -121,13 +222,30 @@ private:
     // Cached property state, updated from property-change events.
     bool m_paused {false};
     bool m_fullscreen {false};
+    bool m_muted {false};
     double m_lastPosition {-1.0};
     double m_lastDuration {-1.0};
+    double m_lastVolume {-1.0};
+    double m_lastSpeed {1.0};
+    double m_lastCacheAhead {-1.0};
+    bool m_bufferingWaiting {false};
+    int m_bufferingPct {0};
+
+    core::tracks::TrackList m_tracks;
+    core::chapters::ChapterList m_chapters;
+    int m_lastAid {-1};
+    int m_lastSid {-1};
+    VideoStats m_stats;
 
     // When true we've requested fullscreen via setMpvFullscreen() and
     // should suppress the resulting property-change echo to avoid a
     // feedback loop with the outer window.
     bool m_suppressFullscreenEcho {false};
+
+    // Ring buffer of recent log lines, consumed by PlaybackController
+    // to classify end-file errors. Bounded so the widget's memory
+    // footprint stays flat across long playbacks.
+    std::deque<QString> m_logTail;
 };
 
 } // namespace kinema::ui::player

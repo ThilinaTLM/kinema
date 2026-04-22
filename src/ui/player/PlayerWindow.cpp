@@ -6,8 +6,11 @@
 #include "ui/player/PlayerWindow.h"
 
 #include "ui/player/MpvWidget.h"
+#include "ui/player/widgets/PlayerOverlay.h"
+#include "ui/player/widgets/TransportBar.h"
 
 #include "config/AppearanceSettings.h"
+#include "config/PlayerSettings.h"
 
 #include <KLocalizedString>
 
@@ -17,6 +20,7 @@
 #include <QHideEvent>
 #include <QIcon>
 #include <QKeyEvent>
+#include <QResizeEvent>
 #include <QScreen>
 #include <QShowEvent>
 #include <QString>
@@ -26,9 +30,10 @@
 namespace kinema::ui::player {
 
 PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
-    QWidget* parent)
+    config::PlayerSettings& player, QWidget* parent)
     : QWidget(parent, Qt::Window)
     , m_appearanceSettings(appearance)
+    , m_playerSettings(player)
 {
     // App-consistent window chrome. The actual title is set per-play
     // by play(); the placeholder here is what shows if someone
@@ -36,14 +41,26 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     setWindowTitle(i18nc("@title:window", "Kinema Player"));
     setWindowIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema")));
 
-    // Full-bleed video. The MpvWidget owns its own OSC; we don't
-    // render any Qt-side controls.
+    // Full-bleed video. The MpvWidget fills the window; the Qt
+    // overlay (transport bar + buffering spinner) sits on top of it
+    // as a sibling, positioned manually in resizeEvent so mpv's
+    // OpenGL content and the overlay don't fight over a single
+    // layout slot.
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    m_mpv = new MpvWidget(this);
+    m_mpv = new MpvWidget(m_playerSettings, this);
     layout->addWidget(m_mpv);
+
+    m_overlay = new widgets::PlayerOverlay(m_mpv, this);
+    m_overlay->raise();
+    m_overlay->show();
+
+    connect(m_overlay, &widgets::PlayerOverlay::toggleFullscreenRequested,
+        this, &PlayerWindow::toggleFullscreen);
+    connect(m_overlay, &widgets::PlayerOverlay::closeRequested,
+        this, [this] { close(); });
 
     // Route mpv-side signals up to MainWindow (KNotification / status
     // bar) and into our own fullscreen/close handling.
@@ -98,6 +115,12 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
     if (ctx.resumeSeconds && *ctx.resumeSeconds > 0) {
         startSec = static_cast<double>(*ctx.resumeSeconds);
     }
+    // Seed the title bar with the new context *before* we kick mpv,
+    // so the first visible frame of chrome already reflects the new
+    // media instead of the previous session's title.
+    if (m_overlay) {
+        m_overlay->setContext(ctx);
+    }
     m_mpv->loadFile(url, startSec);
 
     show();
@@ -117,6 +140,9 @@ void PlayerWindow::stopAndHide()
             m_mpv->setMpvFullscreen(false);
         }
         m_applyingFullscreen = false;
+    }
+    if (m_overlay) {
+        m_overlay->resetForNewSession();
     }
     if (m_mpv) {
         m_mpv->stop();
@@ -141,6 +167,26 @@ void PlayerWindow::keyPressEvent(QKeyEvent* e)
         e->accept();
         return;
     }
+    // `?` and `I` are owned by the overlay (cheat sheet / stats)
+    // and must never reach mpv's input.conf. The overlay's event
+    // filter catches them when focus sits on MpvWidget; when focus
+    // is on the window itself (e.g. immediately after show() before
+    // the child grabs focus) we toggle directly.
+    const bool questionMarked
+        = e->key() == Qt::Key_Question
+        || (e->key() == Qt::Key_Slash
+            && (e->modifiers() & Qt::ShiftModifier));
+    if (questionMarked && m_overlay) {
+        m_overlay->toggleCheatSheet();
+        e->accept();
+        return;
+    }
+    if (e->key() == Qt::Key_I && e->modifiers() == Qt::NoModifier
+        && m_overlay) {
+        m_overlay->toggleStats();
+        e->accept();
+        return;
+    }
     QWidget::keyPressEvent(e);
 }
 
@@ -157,10 +203,22 @@ void PlayerWindow::hideEvent(QHideEvent* e)
 {
     // Persist on every hide (covers both the close-button path and
     // explicit hide() calls from stopAndHide()), so crashes between
-    // open and quit don't lose the user's sizing.
+    // open and quit don't lose the user's sizing or volume.
     saveGeometryToConfig();
+    saveVolumeToConfig();
     QWidget::hideEvent(e);
     Q_EMIT visibilityChanged(false);
+}
+
+void PlayerWindow::resizeEvent(QResizeEvent* e)
+{
+    QWidget::resizeEvent(e);
+    if (m_overlay) {
+        // Keep the overlay pinned to the video surface. Geometry is
+        // the MpvWidget's rect expressed in our own coordinates.
+        m_overlay->setGeometry(m_mpv->geometry());
+        m_overlay->raise();
+    }
 }
 
 void PlayerWindow::toggleFullscreen()
@@ -249,6 +307,20 @@ void PlayerWindow::loadGeometry()
 void PlayerWindow::saveGeometryToConfig()
 {
     m_appearanceSettings.setPlayerWindowGeometry(saveGeometry());
+}
+
+void PlayerWindow::saveVolumeToConfig()
+{
+    if (!m_mpv) {
+        return;
+    }
+    const double v = m_mpv->currentVolume();
+    // -1.0 in MpvWidget means "no volume sample observed yet" — don't
+    // overwrite a previously-saved value with junk in that case.
+    if (v < 0.0) {
+        return;
+    }
+    m_playerSettings.setRememberedVolume(v);
 }
 
 } // namespace kinema::ui::player

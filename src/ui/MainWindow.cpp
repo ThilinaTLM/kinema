@@ -511,7 +511,7 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url,
     // "Embedded" and hits Play.
     if (!m_playerWindow) {
         m_playerWindow = new player::PlayerWindow(
-            m_settings.appearance(), this);
+            m_settings.appearance(), m_settings.player(), this);
         // Let the tray controller surface a "Show Player" entry
         // whenever the player is hidden but has played something.
         m_tray->setPlayerWindow(m_playerWindow);

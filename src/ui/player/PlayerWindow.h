@@ -13,11 +13,15 @@
 
 namespace kinema::config {
 class AppearanceSettings;
+class PlayerSettings;
 }
 
 namespace kinema::ui::player {
 
 class MpvWidget;
+namespace widgets {
+class PlayerOverlay;
+}
 
 /**
  * Top-level window that hosts the in-process libmpv player. Owns a
@@ -42,8 +46,14 @@ class PlayerWindow : public QWidget
     Q_OBJECT
 public:
     explicit PlayerWindow(config::AppearanceSettings& appearance,
+        config::PlayerSettings& player,
         QWidget* parent = nullptr);
     ~PlayerWindow() override;
+
+    /// Direct access for callers (e.g. PlaybackController in M4) that
+    /// need to issue transport commands or read the log tail. Nullable
+    /// only in the degraded build where mpv_create failed.
+    MpvWidget* mpv() const { return m_mpv; }
 
     PlayerWindow(const PlayerWindow&) = delete;
     PlayerWindow& operator=(const PlayerWindow&) = delete;
@@ -90,6 +100,7 @@ protected:
     void keyPressEvent(QKeyEvent* e) override;
     void showEvent(QShowEvent* e) override;
     void hideEvent(QHideEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
 
 private:
     void toggleFullscreen();
@@ -98,9 +109,12 @@ private:
 
     void loadGeometry();
     void saveGeometryToConfig();
+    void saveVolumeToConfig();
 
     config::AppearanceSettings& m_appearanceSettings;
+    config::PlayerSettings& m_playerSettings;
     MpvWidget* m_mpv {nullptr};
+    widgets::PlayerOverlay* m_overlay {nullptr};
 
     // Re-entrancy guard for fullscreen toggles driven both by Qt
     // (F key / double-click via MpvWidget) and mpv

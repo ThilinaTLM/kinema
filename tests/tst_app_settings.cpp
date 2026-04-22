@@ -57,6 +57,13 @@ private Q_SLOTS:
         QCOMPARE(static_cast<int>(s.browse().sort()),
             static_cast<int>(api::DiscoverSort::Popularity));
         QCOMPARE(s.browse().hideObscure(), true);
+
+        // Embedded-player defaults: hardware decoding on, language
+        // overrides empty, volume unset.
+        QCOMPARE(s.player().hardwareDecoding(), true);
+        QVERIFY(s.player().preferredAudioLang().isEmpty());
+        QVERIFY(s.player().preferredSubtitleLang().isEmpty());
+        QCOMPARE(s.player().rememberedVolume(), -1.0);
     }
 
     // ---- Roundtrip -------------------------------------------------------
@@ -105,6 +112,48 @@ private Q_SLOTS:
         QCOMPARE(static_cast<int>(s2.browse().sort()),
             static_cast<int>(api::DiscoverSort::Rating));
         QCOMPARE(s2.browse().hideObscure(), false);
+    }
+
+    void testPlayerSettingsRoundtrip()
+    {
+        config::AppSettings s(m_config);
+        s.player().setHardwareDecoding(false);
+        s.player().setPreferredAudioLang(QStringLiteral("ja,en"));
+        s.player().setPreferredSubtitleLang(QStringLiteral("en"));
+        s.player().setRememberedVolume(72.5);
+
+        config::AppSettings s2(m_config);
+        QCOMPARE(s2.player().hardwareDecoding(), false);
+        QCOMPARE(s2.player().preferredAudioLang(),
+            QStringLiteral("ja,en"));
+        QCOMPARE(s2.player().preferredSubtitleLang(),
+            QStringLiteral("en"));
+        QCOMPARE(s2.player().rememberedVolume(), 72.5);
+    }
+
+    void testPlayerSettingsSignals()
+    {
+        config::AppSettings s(m_config);
+        QSignalSpy hwSpy(&s.player(),
+            &config::PlayerSettings::hardwareDecodingChanged);
+        s.player().setHardwareDecoding(false);
+        QCOMPARE(hwSpy.count(), 1);
+        // Idempotent write does not re-emit.
+        s.player().setHardwareDecoding(false);
+        QCOMPARE(hwSpy.count(), 1);
+    }
+
+    void testRememberedVolumeClamp()
+    {
+        // Out-of-range writes are clamped to the legal domain; -1
+        // passes through untouched as the "never set" sentinel.
+        config::AppSettings s(m_config);
+        s.player().setRememberedVolume(150.0);
+        QCOMPARE(s.player().rememberedVolume(), 100.0);
+        s.player().setRememberedVolume(-42.0);
+        QCOMPARE(s.player().rememberedVolume(), 0.0);
+        s.player().setRememberedVolume(-1.0);
+        QCOMPARE(s.player().rememberedVolume(), -1.0);
     }
 
     void testPlayerWindowGeometryRoundtrip()

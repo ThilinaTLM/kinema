@@ -5,6 +5,8 @@
 
 #include <QWidget>
 
+class QCheckBox;
+class QGroupBox;
 class QLineEdit;
 class QRadioButton;
 
@@ -41,6 +43,12 @@ private:
     QRadioButton* m_vlcRadio {};
     QRadioButton* m_customRadio {};
     QLineEdit* m_customCmdEdit {};
+
+    // Embedded-player group — only shown when libmpv is available.
+    QGroupBox* m_embeddedGroup {};
+    QCheckBox* m_hwDecodeCheckBox {};
+    QLineEdit* m_audioLangEdit {};
+    QLineEdit* m_subLangEdit {};
 };
 
 } // namespace kinema::ui::settings

@@ -1,0 +1,79 @@
+[
+  {
+    "id": 1,
+    "type": "video",
+    "src-id": 1,
+    "title": "",
+    "default": true,
+    "forced": false,
+    "dependent": false,
+    "selected": true,
+    "external": false,
+    "albumart": false,
+    "codec": "h264",
+    "demux-w": 1920,
+    "demux-h": 1080,
+    "demux-fps": 23.976
+  },
+  {
+    "id": 1,
+    "type": "audio",
+    "src-id": 2,
+    "title": "Main",
+    "lang": "eng",
+    "default": true,
+    "forced": false,
+    "selected": true,
+    "external": false,
+    "codec": "ac3",
+    "demux-channel-count": 6,
+    "demux-samplerate": 48000
+  },
+  {
+    "id": 2,
+    "type": "audio",
+    "src-id": 3,
+    "lang": "jpn",
+    "default": false,
+    "forced": false,
+    "selected": false,
+    "external": false,
+    "codec": "aac",
+    "demux-channel-count": 2,
+    "demux-samplerate": 48000
+  },
+  {
+    "id": 1,
+    "type": "sub",
+    "src-id": 4,
+    "title": "English",
+    "lang": "eng",
+    "default": true,
+    "forced": false,
+    "selected": true,
+    "external": false,
+    "codec": "subrip"
+  },
+  {
+    "id": 2,
+    "type": "sub",
+    "src-id": 5,
+    "lang": "eng",
+    "default": false,
+    "forced": true,
+    "selected": false,
+    "external": false,
+    "codec": "subrip"
+  },
+  {
+    "id": 3,
+    "type": "sub",
+    "title": "Director commentary",
+    "lang": "fre",
+    "default": false,
+    "forced": false,
+    "selected": false,
+    "external": true,
+    "codec": "ass"
+  }
+]

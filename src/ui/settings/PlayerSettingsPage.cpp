@@ -9,7 +9,9 @@
 #include <KLocalizedString>
 
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QRadioButton>
@@ -90,8 +92,56 @@ PlayerSettingsPage::PlayerSettingsPage(
     form->addRow(i18nc("@label:textbox", "Custom command:"), m_customCmdEdit);
     form->addRow(QString {}, customHint);
 
+    // ---- Embedded player group ------------------------------------------
+    //
+    // Only rendered when the build actually includes libmpv. The
+    // preferences here are Kinema-level knobs that the embedded
+    // player translates into mpv options at construction time; they
+    // take effect on the next time playback starts.
+    if (embeddedAvailable) {
+        m_embeddedGroup = new QGroupBox(
+            i18nc("@title:group", "Embedded player"), this);
+        auto* gform = new QFormLayout(m_embeddedGroup);
+
+        m_hwDecodeCheckBox = new QCheckBox(
+            i18nc("@option:check", "Use hardware decoding"),
+            m_embeddedGroup);
+        m_hwDecodeCheckBox->setToolTip(i18nc("@info:tooltip",
+            "Uses the GPU to decode video when supported. Disable "
+            "this only if you see driver issues (black screen, "
+            "stutter) — software decoding works everywhere but "
+            "consumes more CPU."));
+        gform->addRow(m_hwDecodeCheckBox);
+
+        m_audioLangEdit = new QLineEdit(m_embeddedGroup);
+        m_audioLangEdit->setPlaceholderText(
+            i18nc("@info:placeholder", "e.g. en,ja"));
+        gform->addRow(
+            i18nc("@label:textbox", "Preferred audio language:"),
+            m_audioLangEdit);
+
+        m_subLangEdit = new QLineEdit(m_embeddedGroup);
+        m_subLangEdit->setPlaceholderText(
+            i18nc("@info:placeholder", "e.g. en"));
+        gform->addRow(
+            i18nc("@label:textbox", "Preferred subtitle language:"),
+            m_subLangEdit);
+
+        auto* groupHint = new QLabel(i18nc("@info",
+            "Use ISO-639 codes (en, ja, es…), comma-separated to "
+            "list fallbacks. Changes apply the next time you start "
+            "playback."),
+            m_embeddedGroup);
+        groupHint->setWordWrap(true);
+        groupHint->setEnabled(false);
+        gform->addRow(QString {}, groupHint);
+    }
+
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(form);
+    if (m_embeddedGroup) {
+        layout->addWidget(m_embeddedGroup);
+    }
     layout->addStretch(1);
 
     connect(m_customRadio, &QRadioButton::toggled,
@@ -124,6 +174,12 @@ void PlayerSettingsPage::load()
     }
     m_customCmdEdit->setText(m_settings.customCommand());
     updateCustomEnabled();
+
+    if (m_embeddedGroup) {
+        m_hwDecodeCheckBox->setChecked(m_settings.hardwareDecoding());
+        m_audioLangEdit->setText(m_settings.preferredAudioLang());
+        m_subLangEdit->setText(m_settings.preferredSubtitleLang());
+    }
 }
 
 void PlayerSettingsPage::apply()
@@ -138,6 +194,14 @@ void PlayerSettingsPage::apply()
     }
     m_settings.setPreferred(chosen);
     m_settings.setCustomCommand(m_customCmdEdit->text());
+
+    if (m_embeddedGroup) {
+        m_settings.setHardwareDecoding(m_hwDecodeCheckBox->isChecked());
+        m_settings.setPreferredAudioLang(
+            m_audioLangEdit->text().trimmed());
+        m_settings.setPreferredSubtitleLang(
+            m_subLangEdit->text().trimmed());
+    }
 }
 
 void PlayerSettingsPage::resetToDefaults()
@@ -145,6 +209,12 @@ void PlayerSettingsPage::resetToDefaults()
     m_mpvRadio->setChecked(true);
     m_customCmdEdit->clear();
     updateCustomEnabled();
+
+    if (m_embeddedGroup) {
+        m_hwDecodeCheckBox->setChecked(true);
+        m_audioLangEdit->clear();
+        m_subLangEdit->clear();
+    }
 }
 
 void PlayerSettingsPage::updateCustomEnabled()

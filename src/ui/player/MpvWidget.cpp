@@ -5,6 +5,8 @@
 
 #include "ui/player/MpvWidget.h"
 
+#include "config/PlayerSettings.h"
+#include "core/MpvConfigPaths.h"
 #include "kinema_debug.h"
 
 #include <mpv/client.h>
@@ -139,16 +141,53 @@ constexpr uint64_t kPropPause = 1;
 constexpr uint64_t kPropFullscreen = 2;
 constexpr uint64_t kPropTimePos = 3;
 constexpr uint64_t kPropDuration = 4;
+constexpr uint64_t kPropVolume = 5;
+constexpr uint64_t kPropMute = 6;
+constexpr uint64_t kPropSpeed = 7;
+constexpr uint64_t kPropPausedForCache = 8;
+constexpr uint64_t kPropCacheBufferingState = 9;
+constexpr uint64_t kPropDemuxerCacheTime = 10;
+constexpr uint64_t kPropTrackList = 11;
+constexpr uint64_t kPropChapterList = 12;
+constexpr uint64_t kPropAid = 13;
+constexpr uint64_t kPropSid = 14;
+constexpr uint64_t kPropWidth = 15;
+constexpr uint64_t kPropHeight = 16;
+constexpr uint64_t kPropVideoCodec = 17;
+constexpr uint64_t kPropAudioCodec = 18;
+constexpr uint64_t kPropVfFps = 19;
+constexpr uint64_t kPropVideoBitrate = 20;
+constexpr uint64_t kPropAudioBitrate = 21;
+
+int parseTrackIdString(const char* s)
+{
+    // mpv reports aid/sid as a string so it can encode "no" / "auto"
+    // alongside concrete integers. Anything not numeric maps to -1
+    // ("off") — that includes the auto-selection placeholder, which
+    // the UI doesn't distinguish from off.
+    if (!s || *s == 0) {
+        return -1;
+    }
+    const QString v = QString::fromUtf8(s);
+    bool ok = false;
+    const int n = v.toInt(&ok);
+    return ok ? n : -1;
+}
 
 /// Minimum delta (seconds) before we emit positionChanged. mpv fires
 /// time-pos updates at decoding cadence; 250 ms granularity is plenty
 /// for progress persistence and keeps signal traffic tame.
 constexpr double kPositionEpsilonSec = 0.25;
 
+/// Bound on the log-line ring buffer. 64 lines covers the typical
+/// failure envelope (URL open, HTTP probe, demuxer retry) comfortably.
+constexpr size_t kLogTailMax = 64;
+
 } // namespace
 
-MpvWidget::MpvWidget(QWidget* parent)
+MpvWidget::MpvWidget(const config::PlayerSettings& settings, QWidget* parent)
     : QOpenGLWidget(parent)
+    , m_settings(settings)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
@@ -160,23 +199,59 @@ MpvWidget::MpvWidget(QWidget* parent)
         return;
     }
 
-    // Options must be set before mpv_initialize(). Keep this minimal —
-    // the user's ~/.config/mpv/mpv.conf + input.conf are loaded by
-    // default (config=yes) so keybindings and scripts behave as in
-    // standalone mpv.
-    mpv_set_option_string(m_mpv, "config", "yes");
+    // Kinema owns the mpv config entirely. User ~/.config/mpv is
+    // never consulted — we ship our own mpv.conf / input.conf and
+    // translate Kinema-level preferences into mpv options below.
+    // For a custom mpv experience users should pick the external mpv
+    // backend in Settings.
+    mpv_set_option_string(m_mpv, "config", "no");
     mpv_set_option_string(m_mpv, "terminal", "no");
     mpv_set_option_string(m_mpv, "msg-level", "all=no,cplayer=info");
-    mpv_set_option_string(m_mpv, "input-default-bindings", "yes");
+    mpv_set_option_string(m_mpv, "input-default-bindings", "no");
     mpv_set_option_string(m_mpv, "input-vo-keyboard", "yes");
-    mpv_set_option_string(m_mpv, "osc", "yes");
-    mpv_set_option_string(m_mpv, "osd-bar", "yes");
-    mpv_set_option_string(m_mpv, "hwdec", "auto-safe");
-    mpv_set_option_string(m_mpv, "vo", "libmpv");
-    // We feed direct URLs only — never YouTube pages — so ytdl is
-    // unnecessary overhead and an extra dependency.
-    mpv_set_option_string(m_mpv, "ytdl", "no");
-    mpv_set_option_string(m_mpv, "keep-open", "no");
+
+    const auto mpvConf = core::mpv_config::mpvConfPath();
+    if (!mpvConf.isEmpty()) {
+        qCInfo(KINEMA) << "loading shipped mpv config from" << mpvConf;
+        mpv_load_config_file(m_mpv, mpvConf.toLocal8Bit().constData());
+    } else {
+        // Packaging bug or running from a bare tree without an
+        // install. Keep the embedded player usable with a handful of
+        // safe defaults; log once so the failure is traceable.
+        qCWarning(KINEMA)
+            << "Kinema mpv.conf not found — falling back to built-in defaults";
+        mpv_set_option_string(m_mpv, "vo", "libmpv");
+        mpv_set_option_string(m_mpv, "hwdec", "auto-safe");
+        mpv_set_option_string(m_mpv, "osc", "no");
+        mpv_set_option_string(m_mpv, "osd-bar", "yes");
+        mpv_set_option_string(m_mpv, "cursor-autohide", "no");
+        mpv_set_option_string(m_mpv, "ytdl", "no");
+        mpv_set_option_string(m_mpv, "keep-open", "no");
+    }
+
+    const auto inputConf = core::mpv_config::inputConfPath();
+    if (!inputConf.isEmpty()) {
+        mpv_set_option_string(m_mpv, "input-conf",
+            inputConf.toLocal8Bit().constData());
+    }
+
+    // Translate Kinema-level preferences into mpv options before
+    // initialize(). Live-applying these requires re-creating the
+    // context, so the settings page notes that the preference takes
+    // effect on the next play.
+    if (!m_settings.hardwareDecoding()) {
+        mpv_set_option_string(m_mpv, "hwdec", "no");
+    }
+    const auto alang = m_settings.preferredAudioLang();
+    if (!alang.isEmpty()) {
+        mpv_set_option_string(m_mpv, "alang",
+            alang.toLocal8Bit().constData());
+    }
+    const auto slang = m_settings.preferredSubtitleLang();
+    if (!slang.isEmpty()) {
+        mpv_set_option_string(m_mpv, "slang",
+            slang.toLocal8Bit().constData());
+    }
 
     mpv_request_log_messages(m_mpv, "info");
 
@@ -191,6 +266,40 @@ MpvWidget::MpvWidget(QWidget* parent)
     mpv_observe_property(m_mpv, kPropFullscreen, "fullscreen", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, kPropTimePos, "time-pos", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, kPropDuration, "duration", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, kPropVolume, "volume", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, kPropMute, "mute", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, kPropSpeed, "speed", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, kPropPausedForCache, "paused-for-cache",
+        MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, kPropCacheBufferingState,
+        "cache-buffering-state", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, kPropDemuxerCacheTime,
+        "demuxer-cache-time", MPV_FORMAT_DOUBLE);
+    // Track / chapter lists as NODE: we only need the change event,
+    // and re-fetch the serialised JSON via mpv_get_property_string
+    // when the event fires. This keeps the parser in core/ free of
+    // any mpv_node traversal.
+    mpv_observe_property(m_mpv, kPropTrackList, "track-list",
+        MPV_FORMAT_NODE);
+    mpv_observe_property(m_mpv, kPropChapterList, "chapter-list",
+        MPV_FORMAT_NODE);
+    // aid / sid as string so we can distinguish "no" from integer ids.
+    mpv_observe_property(m_mpv, kPropAid, "aid", MPV_FORMAT_STRING);
+    mpv_observe_property(m_mpv, kPropSid, "sid", MPV_FORMAT_STRING);
+    // Video stats. width / height as INT64, fps / bitrate as DOUBLE,
+    // codecs as STRING.
+    mpv_observe_property(m_mpv, kPropWidth, "width", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, kPropHeight, "height", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, kPropVideoCodec, "video-codec",
+        MPV_FORMAT_STRING);
+    mpv_observe_property(m_mpv, kPropAudioCodec, "audio-codec",
+        MPV_FORMAT_STRING);
+    mpv_observe_property(m_mpv, kPropVfFps, "estimated-vf-fps",
+        MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, kPropVideoBitrate, "video-bitrate",
+        MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, kPropAudioBitrate, "audio-bitrate",
+        MPV_FORMAT_DOUBLE);
 
     mpv_set_wakeup_callback(m_mpv, &onMpvWakeup, this);
 }
@@ -320,15 +429,18 @@ void MpvWidget::onMpvEvents()
             const auto level = msg->log_level;
             const bool isRenderModule = msg->prefix
                 && std::strcmp(msg->prefix, "libmpv_render") == 0;
-            if (isRenderModule && level >= MPV_LOG_LEVEL_INFO) {
-                const auto text = QString::fromUtf8(msg->text);
-                if (text.contains(QLatin1String("OpenGL error"))) {
-                    break;
-                }
+            const auto text = QString::fromUtf8(msg->text).trimmed();
+            if (isRenderModule && level >= MPV_LOG_LEVEL_INFO
+                && text.contains(QLatin1String("OpenGL error"))) {
+                break;
             }
-            qCInfo(KINEMA).nospace()
-                << "[mpv/" << msg->prefix << "] "
-                << QString::fromUtf8(msg->text).trimmed();
+            qCInfo(KINEMA).nospace() << "[mpv/" << msg->prefix << "] "
+                                     << text;
+            // Retain a short tail so PlaybackController can classify
+            // an end-file error against the leading HTTP / network
+            // messages mpv emitted just before the failure.
+            appendLogLine(QString::fromLatin1(msg->prefix)
+                + QLatin1String(": ") + text);
             break;
         }
         case MPV_EVENT_FILE_LOADED:
@@ -351,34 +463,159 @@ void MpvWidget::onMpvEvents()
         }
         case MPV_EVENT_PROPERTY_CHANGE: {
             const auto* p = static_cast<mpv_event_property*>(ev->data);
-            if (!p || !p->data) {
+            if (!p) {
+                break;
+            }
+            // NODE-format notifications arrive with `p->data` pointing
+            // at an mpv_node; we don't read the node here — we
+            // re-fetch via mpv_get_property_string for the pure
+            // parser. Handle that before the generic data-null guard.
+            if (p->format == MPV_FORMAT_NODE) {
+                if (ev->reply_userdata == kPropTrackList) {
+                    refreshTrackList();
+                } else if (ev->reply_userdata == kPropChapterList) {
+                    refreshChapterList();
+                }
+                break;
+            }
+            // STRING-format notifications deliver a char** that may
+            // legitimately hold a null payload when the underlying
+            // property has no value yet (e.g. aid before a file
+            // loads). Tolerate that case per-tag below rather than
+            // bailing out wholesale.
+            if (!p->data && p->format != MPV_FORMAT_STRING) {
                 break;
             }
             if (p->format == MPV_FORMAT_FLAG) {
                 const bool on = *static_cast<int*>(p->data) != 0;
-                if (ev->reply_userdata == kPropPause) {
+                switch (ev->reply_userdata) {
+                case kPropPause:
                     m_paused = on;
-                } else if (ev->reply_userdata == kPropFullscreen) {
+                    Q_EMIT pausedChanged(on);
+                    break;
+                case kPropFullscreen:
                     m_fullscreen = on;
                     if (m_suppressFullscreenEcho) {
                         m_suppressFullscreenEcho = false;
                     } else {
                         Q_EMIT fullscreenChanged(on);
                     }
+                    break;
+                case kPropMute:
+                    m_muted = on;
+                    Q_EMIT muteChanged(on);
+                    break;
+                case kPropPausedForCache:
+                    m_bufferingWaiting = on;
+                    Q_EMIT bufferingChanged(
+                        m_bufferingWaiting, m_bufferingPct);
+                    break;
+                default:
+                    break;
                 }
             } else if (p->format == MPV_FORMAT_DOUBLE) {
                 const double v = *static_cast<double*>(p->data);
-                if (ev->reply_userdata == kPropTimePos) {
+                switch (ev->reply_userdata) {
+                case kPropTimePos:
                     if (m_lastPosition < 0.0
                         || qAbs(v - m_lastPosition) >= kPositionEpsilonSec) {
                         m_lastPosition = v;
                         Q_EMIT positionChanged(v);
                     }
-                } else if (ev->reply_userdata == kPropDuration) {
+                    break;
+                case kPropDuration:
                     if (v > 0.0 && qAbs(v - m_lastDuration) > 0.01) {
                         m_lastDuration = v;
                         Q_EMIT durationChanged(v);
                     }
+                    break;
+                case kPropVolume:
+                    // Small dead-band to keep slider jitter out of the UI.
+                    if (qAbs(v - m_lastVolume) > 0.05) {
+                        m_lastVolume = v;
+                        Q_EMIT volumeChanged(v);
+                    }
+                    break;
+                case kPropSpeed:
+                    if (qAbs(v - m_lastSpeed) > 0.005) {
+                        m_lastSpeed = v;
+                        Q_EMIT speedChanged(v);
+                    }
+                    break;
+                case kPropDemuxerCacheTime:
+                    if (m_lastCacheAhead < 0.0
+                        || qAbs(v - m_lastCacheAhead) > 0.25) {
+                        m_lastCacheAhead = v;
+                        Q_EMIT cacheAheadChanged(v);
+                    }
+                    m_stats.cacheSeconds = v;
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                case kPropVfFps:
+                    m_stats.fps = v;
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                case kPropVideoBitrate:
+                    m_stats.videoBitrate = v;
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                case kPropAudioBitrate:
+                    m_stats.audioBitrate = v;
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                default:
+                    break;
+                }
+            } else if (p->format == MPV_FORMAT_INT64) {
+                const auto v = *static_cast<int64_t*>(p->data);
+                switch (ev->reply_userdata) {
+                case kPropCacheBufferingState:
+                    m_bufferingPct = static_cast<int>(v);
+                    Q_EMIT bufferingChanged(
+                        m_bufferingWaiting, m_bufferingPct);
+                    break;
+                case kPropWidth:
+                    m_stats.width = static_cast<int>(v);
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                case kPropHeight:
+                    m_stats.height = static_cast<int>(v);
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                default:
+                    break;
+                }
+            } else if (p->format == MPV_FORMAT_STRING) {
+                // `p->data` is a `char**` per mpv_event_property docs.
+                const char* const* pp = static_cast<char**>(p->data);
+                const char* s = pp ? *pp : nullptr;
+                switch (ev->reply_userdata) {
+                case kPropAid: {
+                    const int id = parseTrackIdString(s);
+                    if (id != m_lastAid) {
+                        m_lastAid = id;
+                        Q_EMIT audioTrackChanged(id);
+                    }
+                    break;
+                }
+                case kPropSid: {
+                    const int id = parseTrackIdString(s);
+                    if (id != m_lastSid) {
+                        m_lastSid = id;
+                        Q_EMIT subtitleTrackChanged(id);
+                    }
+                    break;
+                }
+                case kPropVideoCodec:
+                    m_stats.videoCodec = s ? QString::fromUtf8(s) : QString();
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                case kPropAudioCodec:
+                    m_stats.audioCodec = s ? QString::fromUtf8(s) : QString();
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                default:
+                    break;
                 }
             }
             break;
@@ -399,6 +636,28 @@ void MpvWidget::loadFile(const QUrl& url,
     // position/duration so the first new sample is always forwarded.
     m_lastPosition = -1.0;
     m_lastDuration = -1.0;
+    m_lastCacheAhead = -1.0;
+    m_bufferingWaiting = false;
+    m_bufferingPct = 0;
+    m_tracks.clear();
+    m_chapters.clear();
+    m_lastAid = -1;
+    m_lastSid = -1;
+    m_stats = VideoStats {};
+    // Notify UI so residual chrome from the previous session clears
+    // before the new property-change storm arrives.
+    Q_EMIT trackListChanged(m_tracks);
+    Q_EMIT chaptersChanged(m_chapters);
+
+    // Seed the persisted volume before loadfile so the first decoded
+    // frames come out at the expected level. -1 means "never saved";
+    // leave mpv's own default (100) alone in that case.
+    const double savedVolume = m_settings.rememberedVolume();
+    if (savedVolume >= 0.0) {
+        double v = savedVolume;
+        mpv_set_property_async(m_mpv, 0, "volume",
+            MPV_FORMAT_DOUBLE, &v);
+    }
 
     // Use the fully-encoded form when handing off to mpv/ffmpeg.
     // QUrl::toString()'s default (PrettyDecoded) leaves spaces and
@@ -462,6 +721,125 @@ void MpvWidget::setMpvFullscreen(bool on)
     m_suppressFullscreenEcho = true;
     int flag = on ? 1 : 0;
     mpv_set_property_async(m_mpv, 0, "fullscreen", MPV_FORMAT_FLAG, &flag);
+}
+
+// ---- Transport helpers ----------------------------------------------------
+
+void MpvWidget::seekAbsolute(double seconds)
+{
+    if (!m_mpv || seconds < 0.0) {
+        return;
+    }
+    const auto target = QByteArray::number(seconds, 'f', 3);
+    const char* cmd[] = { "seek", target.constData(), "absolute", nullptr };
+    mpv_command_async(m_mpv, 0, cmd);
+}
+
+void MpvWidget::setVolumePercent(double v)
+{
+    if (!m_mpv) {
+        return;
+    }
+    if (v < 0.0) {
+        v = 0.0;
+    } else if (v > 100.0) {
+        v = 100.0;
+    }
+    mpv_set_property_async(m_mpv, 0, "volume", MPV_FORMAT_DOUBLE, &v);
+}
+
+void MpvWidget::setMuted(bool m)
+{
+    if (!m_mpv) {
+        return;
+    }
+    int flag = m ? 1 : 0;
+    mpv_set_property_async(m_mpv, 0, "mute", MPV_FORMAT_FLAG, &flag);
+}
+
+void MpvWidget::setSpeed(double s)
+{
+    if (!m_mpv || s <= 0.0) {
+        return;
+    }
+    mpv_set_property_async(m_mpv, 0, "speed", MPV_FORMAT_DOUBLE, &s);
+}
+
+void MpvWidget::cyclePause()
+{
+    if (!m_mpv) {
+        return;
+    }
+    const char* cmd[] = { "cycle", "pause", nullptr };
+    mpv_command_async(m_mpv, 0, cmd);
+}
+
+void MpvWidget::setAudioTrack(int id)
+{
+    if (!m_mpv) {
+        return;
+    }
+    const QByteArray v = id < 0
+        ? QByteArrayLiteral("no")
+        : QByteArray::number(id);
+    mpv_set_property_string(m_mpv, "aid", v.constData());
+}
+
+void MpvWidget::setSubtitleTrack(int id)
+{
+    if (!m_mpv) {
+        return;
+    }
+    const QByteArray v = id < 0
+        ? QByteArrayLiteral("no")
+        : QByteArray::number(id);
+    mpv_set_property_string(m_mpv, "sid", v.constData());
+}
+
+QByteArray MpvWidget::fetchPropertyJson(const char* name)
+{
+    if (!m_mpv) {
+        return {};
+    }
+    char* s = mpv_get_property_string(m_mpv, name);
+    if (!s) {
+        return {};
+    }
+    QByteArray out(s);
+    mpv_free(s);
+    return out;
+}
+
+void MpvWidget::refreshTrackList()
+{
+    const auto json = fetchPropertyJson("track-list");
+    m_tracks = core::tracks::parseTrackList(json);
+    Q_EMIT trackListChanged(m_tracks);
+}
+
+void MpvWidget::refreshChapterList()
+{
+    const auto json = fetchPropertyJson("chapter-list");
+    m_chapters = core::chapters::parseChapterList(json);
+    Q_EMIT chaptersChanged(m_chapters);
+}
+
+void MpvWidget::appendLogLine(const QString& line)
+{
+    m_logTail.push_back(line);
+    while (m_logTail.size() > kLogTailMax) {
+        m_logTail.pop_front();
+    }
+}
+
+QStringList MpvWidget::recentLogLines() const
+{
+    QStringList out;
+    out.reserve(static_cast<int>(m_logTail.size()));
+    for (const auto& s : m_logTail) {
+        out.push_back(s);
+    }
+    return out;
 }
 
 // ---- input forwarding -----------------------------------------------------

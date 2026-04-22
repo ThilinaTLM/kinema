@@ -22,6 +22,9 @@ set(kinema_core_SRCS
     core/HttpClient.cpp
     core/HttpErrorPresenter.cpp
     core/Magnet.cpp
+    core/MpvChapterList.cpp
+    core/MpvConfigPaths.cpp
+    core/MpvTrackList.cpp
     core/Player.cpp
     core/PlayerLauncher.cpp
     core/StreamFilter.cpp
@@ -88,10 +91,25 @@ set(kinema_core_SRCS
     tray_resources.qrc
 )
 
+# PlayerSeekBar, PlayerMenus, and CheatSheetOverlay are plain Qt
+# widgets with no libmpv dependency — compile them unconditionally so
+# the unit tests (tst_player_seek_bar, tst_player_menus) don't require
+# KINEMA_ENABLE_MPV_EMBED to be ON.
+list(APPEND kinema_core_SRCS
+    ui/player/widgets/CheatSheetOverlay.cpp
+    ui/player/widgets/PlayerMenus.cpp
+    ui/player/widgets/PlayerSeekBar.cpp
+)
+
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
         ui/player/MpvWidget.cpp
         ui/player/PlayerWindow.cpp
+        ui/player/widgets/BufferingOverlay.cpp
+        ui/player/widgets/PlayerOverlay.cpp
+        ui/player/widgets/PlayerTitleBar.cpp
+        ui/player/widgets/StatsOverlay.cpp
+        ui/player/widgets/TransportBar.cpp
     )
 endif()
 
@@ -160,6 +178,16 @@ target_compile_definitions(kinema_core
         QT_NO_CAST_FROM_BYTEARRAY
         QT_STRICT_ITERATORS
         QT_USE_QSTRINGBUILDER
+)
+
+# Build-tree fallback for core::mpv_config: when the user runs
+# ./build/bin/kinema without installing, GenericDataLocation can't see
+# our shipped mpv configs. This bakes the build's share/ directory in
+# so the resolver can fall back to it. Installed builds find the files
+# via GenericDataLocation first and ignore this path.
+target_compile_definitions(kinema_core
+    PRIVATE
+        KINEMA_BUILD_DATA_DIR="${CMAKE_BINARY_DIR}/share"
 )
 
 # KDECompilerSettings disables exceptions by default. We use them narrowly
