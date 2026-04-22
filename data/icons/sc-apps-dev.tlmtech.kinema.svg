@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com> -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <!-- Flat rounded-square background, Breeze blue -->
-  <rect x="2" y="2" width="28" height="28" rx="6" fill="#1d99f3"/>
-  <!-- K-shaped play mark: vertical stem fused with a play triangle -->
-  <path d="M 9 8 h 3 v 6.5 l 11 1.5 l -11 1.5 v 6.5 h -3 z" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1224 1224">
+  <!-- Breeze-blue rounded-square tile -->
+  <rect x="0" y="0" width="1224" height="1224" rx="140" fill="#1d99f3"/>
+  <!-- K fused with forward-pointing play triangle, traced from reference render -->
+  <g transform="translate(0,1225) scale(0.1,-0.1)" fill="#ffffff">
+    <path d="M3258 10216 c-57 -20 -85 -42 -116 -88 l-27 -42 -3 -3773 c-2 -3740
+-2 -3774 18 -3812 27 -55 84 -98 144 -111 35 -8 273 -10 756 -8 l706 3 49 26
+c35 18 59 39 80 74 l30 48 5 1215 5 1214 101 -139 c56 -76 179 -246 274 -378
+96 -132 238 -328 315 -435 78 -107 348 -483 600 -835 251 -352 472 -658 490
+-680 18 -22 57 -54 86 -70 l54 -30 655 -3 c457 -2 662 1 681 8 26 11 47 40 50
+70 5 51 -3 64 -315 484 -61 83 -148 201 -193 261 -45 61 -168 228 -275 372
+-106 144 -235 318 -287 388 -112 152 -122 179 -89 241 21 41 79 81 818 572
+437 290 982 650 1210 801 228 150 428 285 443 300 46 42 67 93 67 161 0 68
+-21 119 -67 161 -26 25 -257 171 -1063 676 -284 178 -555 348 -1109 699 -52
+33 -102 72 -113 89 -23 39 -23 92 1 130 11 17 289 311 619 655 l600 625 -751
+3 -752 2 -90 -92 c-49 -51 -297 -304 -550 -563 -944 -964 -1313 -1341 -1361
+-1394 l-49 -53 -5 1543 -5 1544 -28 47 c-18 31 -44 57 -75 75 l-47 28 -725 2
+c-588 2 -732 0 -762 -11z"/>
+  </g>
 </svg>
