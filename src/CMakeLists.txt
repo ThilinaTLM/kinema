@@ -15,6 +15,7 @@ set(kinema_core_SRCS
     config/SearchSettings.cpp
     config/TorrentioSettings.cpp
 
+    core/CheatSheetText.cpp
     core/Database.cpp
     core/DateFormat.cpp
     core/DateWindow.cpp
@@ -92,29 +93,17 @@ set(kinema_core_SRCS
     tray_resources.qrc
 )
 
-# PlayerSeekBar, PlayerMenus, and CheatSheetOverlay are plain Qt
-# widgets with no libmpv dependency — compile them unconditionally so
-# the unit tests (tst_player_seek_bar, tst_player_menus) don't require
-# KINEMA_ENABLE_MPV_EMBED to be ON.
-list(APPEND kinema_core_SRCS
-    ui/player/widgets/CheatSheetOverlay.cpp
-    ui/player/widgets/PlayerMenus.cpp
-    ui/player/widgets/PlayerSeekBar.cpp
-)
-
+# Embedded-player sources. The IPC bridge (core::MpvIpc) lives under
+# core/ but pulls in <mpv/client.h>, so it is gated together with
+# MpvWidget / PlayerWindow / PlaybackController. Player chrome is
+# rendered inside mpv by data/kinema/mpv/scripts/kinema-overlays.lua
+# — no Qt widgets stack over the video surface.
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
         controllers/PlaybackController.cpp
+        core/MpvIpc.cpp
         ui/player/MpvWidget.cpp
         ui/player/PlayerWindow.cpp
-        ui/player/widgets/BufferingOverlay.cpp
-        ui/player/widgets/NextEpisodeBanner.cpp
-        ui/player/widgets/PlayerOverlay.cpp
-        ui/player/widgets/PlayerTitleBar.cpp
-        ui/player/widgets/ResumePrompt.cpp
-        ui/player/widgets/SkipChapterButton.cpp
-        ui/player/widgets/StatsOverlay.cpp
-        ui/player/widgets/TransportBar.cpp
     )
 endif()
 

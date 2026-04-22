@@ -77,8 +77,8 @@ private Q_SLOTS:
     void onDurationChanged(double seconds);
     void onTrackListChanged(const core::tracks::TrackList& tracks);
     void onChaptersChanged(const core::chapters::ChapterList& chapters);
-    void onResumeRequested(qint64 seconds);
-    void onRestartRequested();
+    void onResumeAccepted();
+    void onResumeDeclined();
     void onSkipRequested();
     void onNextEpisodeAccepted();
     void onNextEpisodeCancelled();

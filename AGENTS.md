@@ -84,6 +84,11 @@ agent is likely to miss.
 - `rg "Config::instance\("` must return zero hits.
 - `rg -l "Types.h"` must return zero hits under `src/` — use the
   narrower `api/Media.h`, `api/Discover.h`, or `api/RealDebrid.h`.
+- `rg PlayerOverlay src/` and
+  `rg WA_TransparentForMouseEvents src/` must return zero hits.
+- `luac -p` must exit 0 for every file under
+  `data/kinema/mpv/scripts/kinema-overlays/`. The CMake
+  `lua-syntax-check` target runs this over the full module list.
 
 ## Build system
 
@@ -105,3 +110,75 @@ agent is likely to miss.
   translate via `core::describeError`.
 - Do not introduce a QML layer without a plan — there is no
   `src/ui/quick/` tree today.
+
+## Embedded player chrome
+
+The embedded player's chrome is rendered **inside mpv** by the
+script **directory** at
+`data/kinema/mpv/scripts/kinema-overlays/`. mpv loads `main.lua`
+in that directory; sibling modules are `require`d by name. It is
+not a Qt widget tree; there are no widgets stacked over
+`MpvWidget`, and no `src/ui/player/widgets/` directory.
+
+Chrome modules (keep each one small and single-purpose):
+
+- `main.lua` — redraw dispatcher, mpv observers, IPC handlers,
+  key bindings (including mouse wheel / right-click dispatch).
+- `theme.lua` — palette, sizing, icon codepoints.
+- `state.lua` — shared mutable state (`state`, `props`, `mouse`,
+  `visibility`), zones (with optional `on_wheel` / `on_rclick`),
+  and hit-test / time / chapter / chrome-visibility helpers.
+- `ass.lua` — drawing vocabulary (primitives, composites, button,
+  `band` for timeline range fills).
+- `render_timeline.lua` — hero timeline (filled block, chapter /
+  skip-range bands, scrub tooltip) and the persistent thin
+  progress line drawn when chrome is hidden.
+- `render_transport.lua` — flat transport backing + control row
+  (play / skip / volume cluster / audio / subs / speed /
+  fullscreen). Delegates timeline rendering to
+  `render_timeline.lua`.
+- `render_overlay.lua` — top header (fullscreen and windowed-
+  on-proximity), plus popup surfaces (resume, next-episode,
+  skip pill, buffering, cheatsheet).
+- `render_picker.lua` — audio / subtitle / speed picker as a
+  right-side full-height sheet with keyboard navigation.
+- `render_pause_indicator.lua` — centre play/pause flash shown
+  briefly when the pause property toggles while the control row
+  is hidden.
+
+New modules must be added to `_kinema_mpv_script_files` in
+`data/CMakeLists.txt` so they land in the install and the dev-tree
+mirror, and so the `lua-syntax-check` target covers them.
+
+C++ talks to the script over a typed IPC protocol via
+`core::MpvIpc`:
+
+- Host → script: `MpvIpc::set*()` / `show*()` / `hide*()` helpers
+  send `script-message-to kinema-overlays <cmd> <args…>` over
+  `mpv_command_async`. The target name is the **directory**
+  basename, not any file name inside it.
+- Script → host: `MpvWidget::onMpvEvents` routes each
+  `MPV_EVENT_CLIENT_MESSAGE` into `MpvIpc::deliver`, which emits
+  typed signals (`resumeAccepted`, `nextEpisodeAccepted`,
+  `skipRequested`, `audioPicked(int)`, `subtitlePicked(int)`,
+  `speedPicked(double)`, `closeRequested`,
+  `fullscreenToggleRequested`).
+
+Do not parent QWidgets to `MpvWidget`. Do not add pixels on top of
+the video surface from the Qt side. When a new player feature
+needs UI, extend the appropriate `kinema-overlays/` module (or add
+a new one and register it in `data/CMakeLists.txt`) and add a
+matching `MpvIpc` message pair (host helper + Lua
+`register_script_message` handler, or Lua send + `MpvIpc` signal)
+in the same commit.
+
+The primary libmpv handle is always named `"main"` (there is no
+`client-name` option). The Lua script targets the host with
+`script-message-to main …`; the host targets the script by its
+own name — `"kinema-overlays"` (the basename of the **script
+directory**). Renaming the directory is a breaking change: update
+`kScriptName` in `core/MpvIpc.cpp`, the `KINEMA` constant in
+`main.lua` / renderer modules, and the test suite in lockstep.
+
+Protocol details and Lua script layout are documented in the
+migration plan: `/home/tlm/.pi/plans/mpv-osc-migration.md`.

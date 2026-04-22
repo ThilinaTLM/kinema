@@ -69,4 +69,22 @@ TrackList parseTrackList(const QByteArray& json);
  */
 QString formatLabel(const Entry& e);
 
+/**
+ * Serialise a track list into the compact JSON shape the
+ * `kinema-overlays` Lua script consumes via its `set-tracks`
+ * message. Only audio and subtitle tracks are emitted; video
+ * tracks are dropped because the pickers never offer them.
+ *
+ * Shape (stable — versioned by the IPC protocol):
+ *
+ *     {
+ *       "audio":    [{ id, lang, title, codec, channels, selected }, ...],
+ *       "subtitle": [{ id, lang, title, codec, forced, selected }, ...]
+ *     }
+ *
+ * Fields that aren't known are omitted rather than emitted as
+ * empty strings, so the Lua side can cheaply test presence.
+ */
+QByteArray toIpcJson(const TrackList& list);
+
 } // namespace kinema::core::tracks

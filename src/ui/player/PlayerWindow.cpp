@@ -6,21 +6,25 @@
 #include "ui/player/PlayerWindow.h"
 
 #include "ui/player/MpvWidget.h"
-#include "ui/player/widgets/PlayerOverlay.h"
-#include "ui/player/widgets/TransportBar.h"
 
 #include "config/AppearanceSettings.h"
 #include "config/PlayerSettings.h"
+#include "core/CheatSheetText.h"
+#include "core/MpvIpc.h"
+#include "core/MpvTrackList.h"
 
 #include <KLocalizedString>
 
 #include <QByteArray>
 #include <QCloseEvent>
+#include <QColor>
+#include <QEvent>
 #include <QGuiApplication>
 #include <QHideEvent>
 #include <QIcon>
 #include <QKeyEvent>
-#include <QResizeEvent>
+#include <QLatin1Char>
+#include <QPalette>
 #include <QScreen>
 #include <QShowEvent>
 #include <QString>
@@ -28,6 +32,46 @@
 #include <QWidget>
 
 namespace kinema::ui::player {
+
+namespace {
+
+/// Format a QColor as ASS `BBGGRR` (hex, uppercase). ASS colour
+/// literals swap the R/B order relative to HTML; the Lua chrome
+/// consumes them verbatim.
+QString toBbggrr(const QColor& c)
+{
+    return QStringLiteral("%1%2%3")
+        .arg(c.blue(), 2, 16, QLatin1Char('0'))
+        .arg(c.green(), 2, 16, QLatin1Char('0'))
+        .arg(c.red(), 2, 16, QLatin1Char('0'))
+        .toUpper();
+}
+
+/// Build the short subtitle line the title strip renders under the
+/// primary title. Movies have no subtitle; series get
+/// `"S01E03 \u2014 Episode title"` when we know both the key and the
+/// episode title, falling back to the numeric part alone otherwise.
+QString buildSubtitleLabel(const api::PlaybackContext& ctx)
+{
+    if (ctx.key.kind != api::MediaKind::Series) {
+        return {};
+    }
+    if (!ctx.key.season.has_value() || !ctx.key.episode.has_value()) {
+        return ctx.episodeTitle;
+    }
+    const QString code = QStringLiteral("S%1E%2")
+                             .arg(*ctx.key.season, 2, 10, QLatin1Char('0'))
+                             .arg(*ctx.key.episode, 2, 10, QLatin1Char('0'));
+    if (ctx.episodeTitle.isEmpty()) {
+        return code;
+    }
+    return i18nc(
+        "@label subtitle on the in-mpv title strip, e.g. "
+        "\"S01E03 \u2014 Episode Title\"",
+        "%1 \u2014 %2", code, ctx.episodeTitle);
+}
+
+} // namespace
 
 PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     config::PlayerSettings& player, QWidget* parent)
@@ -41,11 +85,11 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     setWindowTitle(i18nc("@title:window", "Kinema Player"));
     setWindowIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema")));
 
-    // Full-bleed video. The MpvWidget fills the window; the Qt
-    // overlay (transport bar + buffering spinner) sits on top of it
-    // as a sibling, positioned manually in resizeEvent so mpv's
-    // OpenGL content and the overlay don't fight over a single
-    // layout slot.
+    // Full-bleed video. MpvWidget is the *only* child of this window
+    // \u2014 all player chrome is rendered inside mpv by the
+    // `kinema-overlays` Lua script. Parenting any Qt widget to
+    // MpvWidget is now banned; see the "Embedded player chrome"
+    // section in AGENTS.md.
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -53,14 +97,34 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     m_mpv = new MpvWidget(m_playerSettings, this);
     layout->addWidget(m_mpv);
 
-    m_overlay = new widgets::PlayerOverlay(m_mpv, this);
-    m_overlay->raise();
-    m_overlay->show();
+    // Wire IPC \u2194 window-level actions the Lua script can request
+    // (close, fullscreen toggle). These always go to the PlayerWindow
+    // rather than the controller because they manipulate Qt window
+    // state.
+    if (auto* ipc = m_mpv->ipc()) {
+        connect(ipc, &core::MpvIpc::closeRequested,
+            this, [this] { close(); });
+        connect(ipc, &core::MpvIpc::fullscreenToggleRequested,
+            this, &PlayerWindow::toggleFullscreen);
+    }
 
-    connect(m_overlay, &widgets::PlayerOverlay::toggleFullscreenRequested,
-        this, &PlayerWindow::toggleFullscreen);
-    connect(m_overlay, &widgets::PlayerOverlay::closeRequested,
-        this, [this] { close(); });
+    // Track-list changes feed the Lua pickers. Serialise to compact
+    // JSON and push on every change \u2014 mpv emits track-list edits
+    // sparsely, and the script's picker re-renders only when open.
+    connect(m_mpv, &MpvWidget::trackListChanged,
+        this, [this](const core::tracks::TrackList& tracks) {
+            if (auto* ipc = m_mpv->ipc()) {
+                ipc->setTracks(core::tracks::toIpcJson(tracks));
+            }
+        });
+
+    // Re-push the palette on every application-level change so a
+    // Breeze \u2194 Breeze-dark flip recolours the chrome within the
+    // next Lua redraw (\u2264 150 ms).
+    // Application-level palette flips are picked up via
+    // changeEvent(QEvent::PaletteChange) below; no explicit
+    // QGuiApplication::paletteChanged connect is needed, which lets
+    // us avoid the Qt 6.9+ deprecation on that signal.
 
     // Route mpv-side signals up to MainWindow (KNotification / status
     // bar) and into our own fullscreen/close handling.
@@ -70,7 +134,7 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
         this, &PlayerWindow::mpvError);
     connect(m_mpv, &MpvWidget::endOfFile,
         this, [this](const QString& reason) {
-            // Window has already served its purpose — stop + hide,
+            // Window has already served its purpose \u2014 stop + hide,
             // then let MainWindow react to the reason (e.g. show an
             // "ended with an error" status message).
             stopAndHide();
@@ -103,7 +167,7 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
     setWindowTitle(title.isEmpty()
         ? QStringLiteral("Kinema")
         : i18nc("@title:window window title with media title",
-              "%1 — Kinema", title));
+              "%1 \u2014 Kinema", title));
 
     // On first show, apply persisted or default geometry before the
     // window actually becomes visible (showEvent does this via
@@ -119,13 +183,26 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
     if (ctx.resumeSeconds && *ctx.resumeSeconds > 0) {
         startSec = static_cast<double>(*ctx.resumeSeconds);
     }
-    // Seed the title bar with the new context *before* we kick mpv,
-    // so the first visible frame of chrome already reflects the new
-    // media instead of the previous session's title.
-    if (m_overlay) {
-        m_overlay->setContext(ctx);
-    }
+
+    // Push the media title into mpv's `force-media-title` *before*
+    // loadfile so the Lua title strip has the new value ready by the
+    // time the first frame arrives. This also keeps mpv's own stats
+    // HUD (bound to `I`) consistent with the Qt window title.
+    m_mpv->setMediaTitle(ctx.title);
     m_mpv->loadFile(url, startSec);
+
+    // Seed the Lua chrome with the new context + palette + cheat
+    // sheet. We resend palette / cheat-sheet text on every play so
+    // a late-loading script picks them up on its first redraw.
+    if (auto* ipc = m_mpv->ipc()) {
+        ipc->setContext(ctx.title,
+            buildSubtitleLabel(ctx),
+            ctx.key.kind == api::MediaKind::Series
+                ? QStringLiteral("series")
+                : QStringLiteral("movie"));
+        pushPalette();
+        pushCheatSheetText();
+    }
 
     show();
     raise();
@@ -163,51 +240,58 @@ void PlayerWindow::setSubtitleTrack(int id)
 
 void PlayerWindow::showResumePrompt(qint64 seconds)
 {
-    if (m_overlay) {
-        m_overlay->showResumePrompt(seconds);
+    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
+        // Duration is read directly from mpv's `duration` property
+        // by the Lua script (`mp.observe_property('duration', …)`),
+        // so we just send 0 here. The wire arg is preserved for a
+        // future "resume at X of Y" affordance that wants the host
+        // to dictate the figure.
+        ipc->showResume(seconds, 0);
     }
 }
 
 void PlayerWindow::hideResumePrompt()
 {
-    if (m_overlay) {
-        m_overlay->hideResumePrompt();
+    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
+        ipc->hideResume();
     }
 }
 
 void PlayerWindow::showNextEpisodeBanner(
     const api::PlaybackContext& ctx, int countdownSec)
 {
-    if (m_overlay) {
-        m_overlay->showNextEpisodeBanner(ctx, countdownSec);
+    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
+        ipc->showNextEpisode(ctx.title, buildSubtitleLabel(ctx),
+            countdownSec);
     }
 }
 
 void PlayerWindow::updateNextEpisodeCountdown(int seconds)
 {
-    if (m_overlay) {
-        m_overlay->updateNextEpisodeCountdown(seconds);
+    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
+        ipc->updateNextEpisodeCountdown(seconds);
     }
 }
 
 void PlayerWindow::hideNextEpisodeBanner()
 {
-    if (m_overlay) {
-        m_overlay->hideNextEpisodeBanner();
+    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
+        ipc->hideNextEpisode();
     }
 }
 
-void PlayerWindow::showSkipChapter(const QString& label)
+void PlayerWindow::showSkipChapter(const QString& label,
+    qint64 startSec, qint64 endSec)
 {
-    if (m_overlay) {
-        m_overlay->showSkipChapter(label);
+    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
+        ipc->showSkip(label, startSec, endSec);
     }
 }
 
 void PlayerWindow::hideSkipChapter()
 {
-    if (m_overlay) {
-        m_overlay->hideSkipChapter();
+    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
+        ipc->hideSkip();
     }
 }
 
@@ -223,19 +307,54 @@ void PlayerWindow::stopAndHide()
         }
         m_applyingFullscreen = false;
     }
-    if (m_overlay) {
-        m_overlay->resetForNewSession();
-    }
     if (m_mpv) {
         m_mpv->stop();
     }
     hide();
 }
 
+void PlayerWindow::pushPalette()
+{
+    if (!m_mpv) {
+        return;
+    }
+    auto* ipc = m_mpv->ipc();
+    if (!ipc) {
+        return;
+    }
+    const QPalette& p = qApp->palette();
+    // Warn is a fixed Kinema orange (matches the previous Qt chrome's
+    // warning accent); the Lua script treats it as an overlay-local
+    // tint for skip / next-episode banners.
+    ipc->setPalette(
+        toBbggrr(p.color(QPalette::Highlight)),
+        toBbggrr(p.color(QPalette::WindowText)),
+        toBbggrr(p.color(QPalette::Window)),
+        toBbggrr(QColor(246, 116, 0)));
+}
+
+void PlayerWindow::pushCheatSheetText()
+{
+    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
+        ipc->setCheatSheetText(core::cheatsheet::render());
+    }
+}
+
+void PlayerWindow::changeEvent(QEvent* e)
+{
+    QWidget::changeEvent(e);
+    if (e
+        && (e->type() == QEvent::PaletteChange
+            || e->type() == QEvent::ApplicationPaletteChange
+            || e->type() == QEvent::StyleChange)) {
+        pushPalette();
+    }
+}
+
 void PlayerWindow::closeEvent(QCloseEvent* e)
 {
     // X button / window manager close. Persist geometry, stop
-    // playback, hide. Never destroy — we want to reuse the libmpv
+    // playback, hide. Never destroy \u2014 we want to reuse the libmpv
     // context for the next play.
     saveGeometryToConfig();
     stopAndHide();
@@ -244,42 +363,14 @@ void PlayerWindow::closeEvent(QCloseEvent* e)
 
 void PlayerWindow::keyPressEvent(QKeyEvent* e)
 {
+    // The Lua chrome owns `F`, `Esc`, `?`, `I`, `N`, `Shift+N` via
+    // mpv's input layer once MpvWidget has focus (play() grabs focus
+    // immediately). This override only fires when the PlayerWindow
+    // itself has focus (e.g. the very first paint cycle before the
+    // child widget receives it), so we only keep the `Esc \u2192 close`
+    // fallback \u2014 everything else is expected to reach mpv directly.
     if (e->key() == Qt::Key_Escape) {
-        if (m_overlay && m_overlay->cancelNextEpisodeBanner()) {
-            e->accept();
-            return;
-        }
         leaveFullscreenOrClose();
-        e->accept();
-        return;
-    }
-    if (e->key() == Qt::Key_N && e->modifiers() == Qt::NoModifier
-        && m_overlay && m_overlay->acceptNextEpisodeBanner()) {
-        e->accept();
-        return;
-    }
-    if (e->key() == Qt::Key_N && (e->modifiers() & Qt::ShiftModifier)
-        && m_overlay && m_overlay->cancelNextEpisodeBanner()) {
-        e->accept();
-        return;
-    }
-    // `?` and `I` are owned by the overlay (cheat sheet / stats)
-    // and must never reach mpv's input.conf. The overlay's event
-    // filter catches them when focus sits on MpvWidget; when focus
-    // is on the window itself (e.g. immediately after show() before
-    // the child grabs focus) we toggle directly.
-    const bool questionMarked
-        = e->key() == Qt::Key_Question
-        || (e->key() == Qt::Key_Slash
-            && (e->modifiers() & Qt::ShiftModifier));
-    if (questionMarked && m_overlay) {
-        m_overlay->toggleCheatSheet();
-        e->accept();
-        return;
-    }
-    if (e->key() == Qt::Key_I && e->modifiers() == Qt::NoModifier
-        && m_overlay) {
-        m_overlay->toggleStats();
         e->accept();
         return;
     }
@@ -304,17 +395,6 @@ void PlayerWindow::hideEvent(QHideEvent* e)
     saveVolumeToConfig();
     QWidget::hideEvent(e);
     Q_EMIT visibilityChanged(false);
-}
-
-void PlayerWindow::resizeEvent(QResizeEvent* e)
-{
-    QWidget::resizeEvent(e);
-    if (m_overlay) {
-        // Keep the overlay pinned to the video surface. Geometry is
-        // the MpvWidget's rect expressed in our own coordinates.
-        m_overlay->setGeometry(m_mpv->geometry());
-        m_overlay->raise();
-    }
 }
 
 void PlayerWindow::toggleFullscreen()
@@ -342,9 +422,9 @@ void PlayerWindow::toggleFullscreen()
 
 void PlayerWindow::leaveFullscreenOrClose()
 {
-    // Esc / mpv "leave fullscreen" request. Windowed → close the
+    // Esc / mpv "leave fullscreen" request. Windowed \u2192 close the
     // window (which in turn stops playback and hides). Fullscreen
-    // → just leave fullscreen, keep playing.
+    // \u2192 just leave fullscreen, keep playing.
     if (isFullScreen()) {
         m_applyingFullscreen = true;
         showNormal();
@@ -411,7 +491,7 @@ void PlayerWindow::saveVolumeToConfig()
         return;
     }
     const double v = m_mpv->currentVolume();
-    // -1.0 in MpvWidget means "no volume sample observed yet" — don't
+    // -1.0 in MpvWidget means "no volume sample observed yet" \u2014 don't
     // overwrite a previously-saved value with junk in that case.
     if (v < 0.0) {
         return;

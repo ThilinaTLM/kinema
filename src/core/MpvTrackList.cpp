@@ -186,4 +186,61 @@ QString formatLabel(const Entry& e)
         "%1 (%2)", primary, decorations.join(QStringLiteral(", ")));
 }
 
+namespace {
+
+// Fill fields common to every entry (id, lang/title/codec, selected).
+// Callers add the type-specific ones (`channels`, `forced`) afterwards.
+QJsonObject commonJson(const Entry& e)
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("id"), e.id);
+    if (!e.lang.isEmpty()) {
+        o.insert(QStringLiteral("lang"), e.lang);
+    }
+    if (!e.title.isEmpty()) {
+        o.insert(QStringLiteral("title"), e.title);
+    }
+    if (!e.codec.isEmpty()) {
+        o.insert(QStringLiteral("codec"), e.codec);
+    }
+    if (e.selected) {
+        o.insert(QStringLiteral("selected"), true);
+    }
+    if (e.isDefault) {
+        o.insert(QStringLiteral("default"), true);
+    }
+    if (e.external) {
+        o.insert(QStringLiteral("external"), true);
+    }
+    return o;
+}
+
+} // namespace
+
+QByteArray toIpcJson(const TrackList& list)
+{
+    QJsonArray audio;
+    QJsonArray subs;
+    for (const auto& e : list) {
+        if (e.type == QLatin1String("audio")) {
+            QJsonObject o = commonJson(e);
+            if (e.channelCount > 0) {
+                o.insert(QStringLiteral("channels"), e.channelCount);
+            }
+            audio.append(o);
+        } else if (e.type == QLatin1String("sub")) {
+            QJsonObject o = commonJson(e);
+            if (e.forced) {
+                o.insert(QStringLiteral("forced"), true);
+            }
+            subs.append(o);
+        }
+        // Video tracks deliberately omitted — no picker for them.
+    }
+    QJsonObject root;
+    root.insert(QStringLiteral("audio"), audio);
+    root.insert(QStringLiteral("subtitle"), subs);
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
 } // namespace kinema::core::tracks

@@ -6,6 +6,10 @@
 
 #include <QByteArray>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QString>
 #include <QTest>
 
@@ -190,6 +194,108 @@ private Q_SLOTS:
         const auto times = chapters::chapterTimes(list);
         QCOMPARE(times.size(), 4);
         QCOMPARE(times[1], 92.0);
+    }
+
+    // --- toIpcJson ----------------------------------------------------
+
+    // Empty list collapses to the documented `{"audio":[],"subtitle":[]}`
+    // shape — the Lua side assumes both keys are always present.
+    void toIpcJsonEmpty()
+    {
+        const auto bytes = tracks::toIpcJson({});
+        QJsonParseError err {};
+        const auto doc = QJsonDocument::fromJson(bytes, &err);
+        QCOMPARE(err.error, QJsonParseError::NoError);
+        QVERIFY(doc.isObject());
+        const auto root = doc.object();
+        QVERIFY(root.value(QStringLiteral("audio")).isArray());
+        QVERIFY(root.value(QStringLiteral("subtitle")).isArray());
+        QCOMPARE(root.value(QStringLiteral("audio")).toArray().size(), 0);
+        QCOMPARE(root.value(QStringLiteral("subtitle")).toArray().size(), 0);
+    }
+
+    // Single audio + single subtitle with no selection. Field
+    // presence is tested via `contains`, not string comparison, so
+    // Qt's JSON serialiser key ordering doesn't matter.
+    void toIpcJsonSingleOfEach()
+    {
+        tracks::Entry a;
+        a.id = 1;
+        a.type = QStringLiteral("audio");
+        a.lang = QStringLiteral("eng");
+        a.codec = QStringLiteral("eac3");
+        a.channelCount = 6;
+
+        tracks::Entry s;
+        s.id = 1;
+        s.type = QStringLiteral("sub");
+        s.lang = QStringLiteral("eng");
+        s.codec = QStringLiteral("subrip");
+
+        const auto bytes = tracks::toIpcJson({ a, s });
+        const auto root = QJsonDocument::fromJson(bytes).object();
+        const auto audio = root.value(QStringLiteral("audio")).toArray();
+        const auto subs = root.value(QStringLiteral("subtitle")).toArray();
+        QCOMPARE(audio.size(), 1);
+        QCOMPARE(subs.size(), 1);
+
+        const auto ao = audio.at(0).toObject();
+        QCOMPARE(ao.value(QStringLiteral("id")).toInt(), 1);
+        QCOMPARE(ao.value(QStringLiteral("lang")).toString(),
+            QStringLiteral("eng"));
+        QCOMPARE(ao.value(QStringLiteral("codec")).toString(),
+            QStringLiteral("eac3"));
+        QCOMPARE(ao.value(QStringLiteral("channels")).toInt(), 6);
+        QVERIFY(!ao.contains(QStringLiteral("selected")));
+
+        const auto so = subs.at(0).toObject();
+        QCOMPARE(so.value(QStringLiteral("id")).toInt(), 1);
+        QVERIFY(!so.contains(QStringLiteral("selected")));
+        QVERIFY(!so.contains(QStringLiteral("forced")));
+    }
+
+    // Multi-track: selected audio, forced subtitle, and a video
+    // track that must be dropped.
+    void toIpcJsonMultiDropsVideoAndKeepsSelection()
+    {
+        tracks::Entry video;
+        video.id = 1;
+        video.type = QStringLiteral("video");
+
+        tracks::Entry aSel;
+        aSel.id = 1;
+        aSel.type = QStringLiteral("audio");
+        aSel.lang = QStringLiteral("eng");
+        aSel.selected = true;
+
+        tracks::Entry aOther;
+        aOther.id = 2;
+        aOther.type = QStringLiteral("audio");
+        aOther.lang = QStringLiteral("jpn");
+
+        tracks::Entry sForced;
+        sForced.id = 1;
+        sForced.type = QStringLiteral("sub");
+        sForced.lang = QStringLiteral("eng");
+        sForced.forced = true;
+
+        const auto bytes
+            = tracks::toIpcJson({ video, aSel, aOther, sForced });
+        const auto root = QJsonDocument::fromJson(bytes).object();
+        const auto audio = root.value(QStringLiteral("audio")).toArray();
+        const auto subs = root.value(QStringLiteral("subtitle")).toArray();
+        QCOMPARE(audio.size(), 2);
+        QCOMPARE(subs.size(), 1);
+
+        // Video dropped — check ids emitted are strictly audio/sub.
+        QCOMPARE(audio.at(0).toObject().value(QStringLiteral("id")).toInt(), 1);
+        QVERIFY(audio.at(0).toObject().value(QStringLiteral("selected")).toBool());
+        QCOMPARE(audio.at(1).toObject().value(QStringLiteral("id")).toInt(), 2);
+        QVERIFY(!audio.at(1).toObject().contains(QStringLiteral("selected")));
+
+        const auto so = subs.at(0).toObject();
+        QVERIFY(so.value(QStringLiteral("forced")).toBool());
+        QVERIFY(!so.contains(QStringLiteral("selected")));
     }
 
     void malformedChaptersAreDropped()

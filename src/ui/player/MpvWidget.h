@@ -6,6 +6,7 @@
 #ifdef KINEMA_HAVE_LIBMPV
 
 #include "core/MpvChapterList.h"
+#include "core/MpvIpc.h"
 #include "core/MpvTrackList.h"
 
 #include <QOpenGLWidget>
@@ -94,6 +95,18 @@ public:
     /// Select / disable subtitle track. -1 = off.
     void setSubtitleTrack(int id);
 
+    /// Push a human-readable title into mpv's `force-media-title`
+    /// property. The Lua chrome reads `media-title` so this keeps
+    /// the in-mpv display consistent with the Qt window title.
+    void setMediaTitle(const QString& title);
+
+    /// Typed IPC bridge to the `kinema-overlays` Lua script. Owned
+    /// by this widget; destroyed before the mpv handle in the dtor
+    /// so no pending send races `mpv_terminate_destroy`. Null only
+    /// in the degraded build where `mpv_create()` or
+    /// `mpv_initialize()` failed.
+    core::MpvIpc* ipc() const { return m_ipc; }
+
     // ---- Cached state accessors ---------------------------------------
 
     double currentVolume() const { return m_lastVolume; }
@@ -102,9 +115,12 @@ public:
     const core::tracks::TrackList& trackList() const { return m_tracks; }
     const core::chapters::ChapterList& chapters() const { return m_chapters; }
 
-    /// Snapshot of the video / audio stats StatsOverlay renders.
-    /// Fields are zero when mpv hasn't reported them yet; consumers
-    /// should treat zero as "unknown".
+    /// Snapshot of the video / audio stats (width/height, codec,
+    /// fps, bitrate, cache). Fields are zero when mpv hasn't
+    /// reported them yet; consumers should treat zero as "unknown".
+    /// The visible stats HUD is rendered by mpv's own `stats.lua`
+    /// (toggled with `I`); this snapshot is kept so controllers
+    /// can still reason about codec / resolution.
     struct VideoStats {
         int width = 0;
         int height = 0;
@@ -230,6 +246,8 @@ private:
     double m_lastCacheAhead {-1.0};
     bool m_bufferingWaiting {false};
     int m_bufferingPct {0};
+
+    core::MpvIpc* m_ipc {nullptr};
 
     core::tracks::TrackList m_tracks;
     core::chapters::ChapterList m_chapters;

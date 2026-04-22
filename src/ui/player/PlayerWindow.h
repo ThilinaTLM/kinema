@@ -21,9 +21,6 @@ class PlayerSettings;
 namespace kinema::ui::player {
 
 class MpvWidget;
-namespace widgets {
-class PlayerOverlay;
-}
 
 /**
  * Top-level window that hosts the in-process libmpv player. Owns a
@@ -56,7 +53,6 @@ public:
     /// need to issue transport commands or read the log tail. Nullable
     /// only in the degraded build where mpv_create failed.
     MpvWidget* mpv() const { return m_mpv; }
-    widgets::PlayerOverlay* overlay() const { return m_overlay; }
 
     PlayerWindow(const PlayerWindow&) = delete;
     PlayerWindow& operator=(const PlayerWindow&) = delete;
@@ -71,8 +67,13 @@ public:
         const kinema::api::PlaybackContext& ctx);
 
     // Thin command surface used by PlaybackController. These forward
-    // to MpvWidget / PlayerOverlay so tests can override them on a
-    // fake PlayerWindow without depending on libmpv behaviour.
+    // to MpvWidget (transport) and the Lua overlays via MpvIpc
+    // (prompts / banners), so tests can override them on a fake
+    // PlayerWindow without depending on libmpv behaviour.
+    //
+    // The prompt/banner/skip methods are fire-and-forget
+    // `script-message-to kinema-overlays …` sends; the Lua chrome
+    // renders and replies via `MpvIpc` signals.
     virtual void setPaused(bool paused);
     virtual void seekAbsolute(double seconds);
     virtual void setAudioTrack(int id);
@@ -83,7 +84,8 @@ public:
         const kinema::api::PlaybackContext& ctx, int countdownSec);
     virtual void updateNextEpisodeCountdown(int seconds);
     virtual void hideNextEpisodeBanner();
-    virtual void showSkipChapter(const QString& label);
+    virtual void showSkipChapter(const QString& label,
+        qint64 startSec, qint64 endSec);
     virtual void hideSkipChapter();
 
     /// Stop playback, leave fullscreen if needed, and hide the
@@ -122,7 +124,11 @@ protected:
     void keyPressEvent(QKeyEvent* e) override;
     void showEvent(QShowEvent* e) override;
     void hideEvent(QHideEvent* e) override;
-    void resizeEvent(QResizeEvent* e) override;
+    // Qt dispatches `QEvent::PaletteChange` to every widget when the
+    // application palette flips (Breeze ↔ Breeze-dark, etc.). We
+    // use it instead of `QGuiApplication::paletteChanged`, which is
+    // deprecated in Qt 6.9+.
+    void changeEvent(QEvent* e) override;
 
 private:
     void toggleFullscreen();
@@ -133,10 +139,18 @@ private:
     void saveGeometryToConfig();
     void saveVolumeToConfig();
 
+    // Push the current Qt palette (BBGGRR strings) into the Lua
+    // chrome. Called on every `play()` and whenever the application
+    // palette changes at runtime.
+    void pushPalette();
+    // Send the translated cheat-sheet text once per `play()` so the
+    // `?` overlay has its strings. Cheap enough to resend on every
+    // load without optimising.
+    void pushCheatSheetText();
+
     config::AppearanceSettings& m_appearanceSettings;
     config::PlayerSettings& m_playerSettings;
     MpvWidget* m_mpv {nullptr};
-    widgets::PlayerOverlay* m_overlay {nullptr};
 
     // Re-entrancy guard for fullscreen toggles driven both by Qt
     // (F key / double-click via MpvWidget) and mpv

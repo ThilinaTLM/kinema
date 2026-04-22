@@ -12,9 +12,10 @@
 #include "core/HttpErrorPresenter.h"
 #include "core/NextEpisode.h"
 #include "core/StreamFilter.h"
+#include "core/MpvIpc.h"
 #include "services/StreamActions.h"
+#include "ui/player/MpvWidget.h"
 #include "ui/player/PlayerWindow.h"
-#include "ui/player/widgets/PlayerOverlay.h"
 
 #include <KLocalizedString>
 
@@ -211,17 +212,40 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
         this, &PlaybackController::onTrackListChanged);
     connect(m_window, &ui::player::PlayerWindow::chaptersChanged,
         this, &PlaybackController::onChaptersChanged);
-    if (auto* overlay = m_window->overlay()) {
-        connect(overlay, &ui::player::widgets::PlayerOverlay::skipRequested,
+    // IPC-side signals from the in-mpv Lua chrome replace the
+    // previous QWidget overlay's signal surface. Track-list-driven
+    // pickers (audio / subtitle / speed) route through the window's
+    // command surface / MpvWidget so tests can stub the window
+    // without an mpv handle.
+    if (auto* ipc = m_window->mpv() ? m_window->mpv()->ipc() : nullptr) {
+        connect(ipc, &core::MpvIpc::skipRequested,
             this, &PlaybackController::onSkipRequested);
-        connect(overlay, &ui::player::widgets::PlayerOverlay::resumeRequested,
-            this, &PlaybackController::onResumeRequested);
-        connect(overlay, &ui::player::widgets::PlayerOverlay::restartRequested,
-            this, &PlaybackController::onRestartRequested);
-        connect(overlay, &ui::player::widgets::PlayerOverlay::nextEpisodeAccepted,
+        connect(ipc, &core::MpvIpc::resumeAccepted,
+            this, &PlaybackController::onResumeAccepted);
+        connect(ipc, &core::MpvIpc::resumeDeclined,
+            this, &PlaybackController::onResumeDeclined);
+        connect(ipc, &core::MpvIpc::nextEpisodeAccepted,
             this, &PlaybackController::onNextEpisodeAccepted);
-        connect(overlay, &ui::player::widgets::PlayerOverlay::nextEpisodeCancelled,
+        connect(ipc, &core::MpvIpc::nextEpisodeCancelled,
             this, &PlaybackController::onNextEpisodeCancelled);
+        connect(ipc, &core::MpvIpc::audioPicked,
+            this, [this](int aid) {
+                if (m_window) {
+                    m_window->setAudioTrack(aid);
+                }
+            });
+        connect(ipc, &core::MpvIpc::subtitlePicked,
+            this, [this](int sid) {
+                if (m_window) {
+                    m_window->setSubtitleTrack(sid);
+                }
+            });
+        connect(ipc, &core::MpvIpc::speedPicked,
+            this, [this](double s) {
+                if (m_window && m_window->mpv()) {
+                    m_window->mpv()->setSpeed(s);
+                }
+            });
     }
     connect(m_window, &QObject::destroyed, this, [this](QObject* obj) {
         if (obj == m_window) {
@@ -353,7 +377,11 @@ void PlaybackController::onPositionChanged(double seconds)
         }
         if (seconds >= start && seconds < end) {
             m_skipChapterEnd = end;
-            m_window->showSkipChapter(skipButtonLabel(title));
+            // Cast to qint64 truncates towards zero; fine for
+            // timeline-band rendering which is in whole seconds.
+            m_window->showSkipChapter(skipButtonLabel(title),
+                static_cast<qint64>(start),
+                static_cast<qint64>(end));
             return;
         }
     }
@@ -418,8 +446,12 @@ void PlaybackController::onChaptersChanged(
     m_chapters = chapters;
 }
 
-void PlaybackController::onResumeRequested(qint64 seconds)
+void PlaybackController::onResumeAccepted()
 {
+    // The controller tracks the pending resume offset itself; the
+    // IPC signal from Lua carries no payload, which keeps the
+    // wire format minimal and matches the existing state machine.
+    const qint64 seconds = m_pendingResumeSeconds;
     m_pendingResumeSeconds = 0;
     if (!m_window) {
         m_phase = Phase::Playing;
@@ -431,7 +463,7 @@ void PlaybackController::onResumeRequested(qint64 seconds)
     m_phase = Phase::Playing;
 }
 
-void PlaybackController::onRestartRequested()
+void PlaybackController::onResumeDeclined()
 {
     m_pendingResumeSeconds = 0;
     if (!m_window) {

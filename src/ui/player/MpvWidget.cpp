@@ -14,6 +14,7 @@
 #include <mpv/render_gl.h>
 
 #include <QByteArray>
+#include <QFileInfo>
 #include <QKeyEvent>
 #include <QMetaObject>
 #include <QMouseEvent>
@@ -199,6 +200,12 @@ MpvWidget::MpvWidget(const config::PlayerSettings& settings, QWidget* parent)
         return;
     }
 
+    // The primary libmpv handle is always named "main" — there is no
+    // `client-name` option and `mpv_client_name()` is read-only. The
+    // Lua chrome targets us back with `script-message-to main …`;
+    // the host targets the script by *its* name
+    // ("kinema-overlays") via `MpvIpc::send`.
+
     // Kinema owns the mpv config entirely. User ~/.config/mpv is
     // never consulted — we ship our own mpv.conf / input.conf and
     // translate Kinema-level preferences into mpv options below.
@@ -235,6 +242,57 @@ MpvWidget::MpvWidget(const config::PlayerSettings& settings, QWidget* parent)
             inputConf.toLocal8Bit().constData());
     }
 
+    // Point mpv at the bundled icon font so libass can resolve the
+    // `Kinema Icons` family the overlay script references. With
+    // `config=no` mpv does not scan `~/.config/mpv/fonts`, so the
+    // default font provider would otherwise miss our shipped font
+    // and fontconfig would fall back to some unrelated family whose
+    // glyph coverage happens to include the PUA codepoints we use
+    // (typically a CJK font — the chrome then renders as Han
+    // characters instead of Material Symbols).
+    //
+    // mpv 0.38 renamed `sub-font-dir` to `sub-fonts-dir` (plural)
+    // and split the OSD font pipeline out behind `osd-fonts-dir`.
+    // The overlay script draws through `mp.set_osd_ass`, so the
+    // OSD provider is the one that matters; we set both so the
+    // shipped font is visible to subtitle rendering too.
+    const auto fontsDir = core::mpv_config::dataDir()
+        + QLatin1String("/fonts");
+    if (QFileInfo(fontsDir).isDir()) {
+        const auto fontsDirBytes = fontsDir.toLocal8Bit();
+        mpv_set_option_string(m_mpv, "sub-fonts-dir",
+            fontsDirBytes.constData());
+        mpv_set_option_string(m_mpv, "osd-fonts-dir",
+            fontsDirBytes.constData());
+    } else {
+        qCWarning(KINEMA)
+            << "kinema fonts dir missing at" << fontsDir
+            << "\u2014 chrome icons will render as tofu";
+    }
+
+    // Point mpv at the Kinema overlay script imperatively.
+    //
+    // The chrome lives in a **script directory** — mpv treats any
+    // directory passed via `scripts` as a Lua script bundle and
+    // loads `main.lua` inside. The directory basename becomes the
+    // mpv-side script name (`kinema-overlays`), which is what the
+    // host targets via `script-message-to` in `core/MpvIpc.cpp`.
+    //
+    // Splitting the chrome across several sibling files keeps each
+    // module small; `main.lua` prepends its own directory to
+    // `package.path` so `require 'theme'` / `require 'ass'` etc.
+    // resolve on every supported mpv release.
+    const auto overlayDir = core::mpv_config::dataDir()
+        + QLatin1String("/scripts/kinema-overlays");
+    if (QFileInfo(overlayDir).isDir()) {
+        mpv_set_option_string(m_mpv, "scripts",
+            overlayDir.toLocal8Bit().constData());
+    } else {
+        qCWarning(KINEMA) << "kinema-overlays script dir not found at"
+                          << overlayDir
+                          << "\u2014 in-mpv chrome will not render";
+    }
+
     // Translate Kinema-level preferences into mpv options before
     // initialize(). Live-applying these requires re-creating the
     // context, so the settings page notes that the preference takes
@@ -261,6 +319,12 @@ MpvWidget::MpvWidget(const config::PlayerSettings& settings, QWidget* parent)
         m_mpv = nullptr;
         return;
     }
+
+    m_ipc = new core::MpvIpc(m_mpv, this);
+    // CLIENT_MESSAGE is enabled by default; requesting it explicitly
+    // keeps the IPC surface honest across future mpv releases that
+    // may flip the default off.
+    mpv_request_event(m_mpv, MPV_EVENT_CLIENT_MESSAGE, 1);
 
     mpv_observe_property(m_mpv, kPropPause, "pause", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, kPropFullscreen, "fullscreen", MPV_FORMAT_FLAG);
@@ -306,6 +370,14 @@ MpvWidget::MpvWidget(const config::PlayerSettings& settings, QWidget* parent)
 
 MpvWidget::~MpvWidget()
 {
+    // Destroy the IPC bridge before tearing down the mpv context so
+    // no late `mpv_command_async` from a queued signal races
+    // `mpv_terminate_destroy`. Relying on Qt parent ownership would
+    // fire ~MpvIpc from ~QObject, which runs after our own dtor
+    // body — too late to be safe.
+    delete m_ipc;
+    m_ipc = nullptr;
+
     // Render context must be freed with the GL context current; if we
     // still hold an mpv handle after that, destroy it cleanly.
     maybeTeardownRenderContext();
@@ -445,6 +517,12 @@ void MpvWidget::onMpvEvents()
         }
         case MPV_EVENT_FILE_LOADED:
             Q_EMIT fileLoaded();
+            break;
+        case MPV_EVENT_CLIENT_MESSAGE:
+            if (m_ipc) {
+                m_ipc->deliver(
+                    static_cast<mpv_event_client_message*>(ev->data));
+            }
             break;
         case MPV_EVENT_END_FILE: {
             const auto* ef = static_cast<mpv_event_end_file*>(ev->data);
@@ -794,6 +872,16 @@ void MpvWidget::setSubtitleTrack(int id)
         ? QByteArrayLiteral("no")
         : QByteArray::number(id);
     mpv_set_property_string(m_mpv, "sid", v.constData());
+}
+
+void MpvWidget::setMediaTitle(const QString& title)
+{
+    if (!m_mpv) {
+        return;
+    }
+    const QByteArray utf8 = title.toUtf8();
+    mpv_set_property_string(m_mpv, "force-media-title",
+        utf8.constData());
 }
 
 QByteArray MpvWidget::fetchPropertyJson(const char* name)

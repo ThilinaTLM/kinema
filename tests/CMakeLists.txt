@@ -151,19 +151,9 @@ ecm_add_test(tst_mpv_track_list_parse.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_player_seek_bar.cpp
-    TEST_NAME tst_player_seek_bar
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
-ecm_add_test(tst_player_menus.cpp
-    TEST_NAME tst_player_menus
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
 if(KINEMA_ENABLE_MPV_EMBED)
-    ecm_add_test(tst_stats_overlay.cpp
-        TEST_NAME tst_stats_overlay
+    ecm_add_test(tst_mpv_ipc.cpp
+        TEST_NAME tst_mpv_ipc
         LINK_LIBRARIES kinema_core Qt6::Test
     )
 endif()
@@ -178,11 +168,10 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_token_controller tst_cinemeta_client tst_tmdb_client
          tst_torrentio_client tst_realdebrid_client
          tst_database tst_history_store
-         tst_next_episode tst_mpv_config_paths tst_mpv_track_list_parse
-         tst_player_seek_bar tst_player_menus)
+         tst_next_episode tst_mpv_config_paths tst_mpv_track_list_parse)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 
-if(TARGET tst_stats_overlay)
-    target_compile_definitions(tst_stats_overlay PRIVATE ${test_defs})
+if(TARGET tst_mpv_ipc)
+    target_compile_definitions(tst_mpv_ipc PRIVATE ${test_defs})
 endif()
