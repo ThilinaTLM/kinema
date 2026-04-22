@@ -41,6 +41,24 @@ sudo cmake --install build --prefix /usr
 To build without the embedded player, configure with
 `-DKINEMA_ENABLE_MPV_EMBED=OFF`.
 
+### Install locally (no sudo)
+
+Helper scripts in `scripts/` build and install Kinema into
+`$HOME/.local` by default, refresh the KDE/XDG caches, and make
+Kinema appear in the Plasma launcher:
+
+```bash
+./scripts/install.sh              # build + install into ~/.local
+./scripts/install.sh --test       # run ctest before installing
+./scripts/install.sh --prefix /opt/kinema
+./scripts/uninstall.sh            # remove what install.sh placed
+./scripts/uninstall.sh --dry-run  # preview without deleting
+```
+
+Both scripts accept `-h/--help`. Uninstall uses
+`build/install_manifest.txt` as the source of truth and leaves user
+config (`~/.config/kinemarc`) and keyring tokens untouched.
+
 ## Configuration
 
 - **TMDB**: works out of the box when built with a bundled token.
