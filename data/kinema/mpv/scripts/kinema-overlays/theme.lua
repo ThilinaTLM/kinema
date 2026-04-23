@@ -10,20 +10,8 @@
 -- defaults.
 --
 -- Alpha values are ASS alpha bytes: `00` = opaque, `FF` = fully
--- transparent. We keep a semantic alpha scale rather than magic
--- numbers so a future palette tweak is a one-line change.
---
--- Icon codepoints come from the bundled `Kinema Icons` font
--- (data/kinema/mpv/fonts/KinemaIcons.ttf). Any change here must be
--- mirrored in `data/kinema/mpv/fonts/README.md`.
+-- transparent.
 
--- ----------------------------------------------------------------------
--- UTF-8 encode a codepoint as a plain Lua string.
---
--- LuaJIT handles `\u{}` escapes, but going through this helper keeps
--- the icon table readable and avoids any version-sensitive lexer
--- quirks across Lua runtimes.
--- ----------------------------------------------------------------------
 local function utf8(cp)
     if cp < 0x80 then return string.char(cp) end
     if cp < 0x800 then
@@ -52,24 +40,34 @@ local theme = {
     warn   = '0074F6',
 
     -- alpha scale
-    a_opaque   = '00',   -- 100%
-    a_elevated = '18',   -- ~90%
-    a_chrome   = '28',   -- ~85%
-    a_dim      = '60',   -- ~62%
-    a_subtle   = 'B0',   -- ~30%
-    a_track    = 'C8',   -- ~22% (timeline unplayed body)
-    a_faint    = 'D8',   -- ~15%
-    a_ghost    = 'E8',   -- ~ 9%
+    a_opaque = '00',
+    a_panel    = '34', -- ~80% opaque
+    a_elevated = '34', -- compatibility alias for modal flashes
+    a_card     = '40', -- ~75% opaque
+    a_chrome   = '56', -- ~66% opaque
+    a_dim    = '78',   -- ~53% opaque
+    a_subtle = 'B8',   -- ~28% opaque
+    a_track  = 'C8',   -- ~22% opaque
+    a_faint  = 'D8',   -- ~15% opaque
+    a_ghost  = 'EC',   -- ~ 8% opaque
 
     -- radii
-    r_card = 12, r_btn = 8, r_pill = 18, r_chip = 6,
+    r_surface = 18,
+    r_card    = 16,
+    r_btn     = 12,
+    r_pill    = 22,
+    r_chip    = 14,
 
-    -- spacing (4-pt grid)
+    -- spacing
     sp1 = 4, sp2 = 8, sp3 = 12, sp4 = 16, sp5 = 24, sp6 = 32,
 
     -- type
-    fs_kicker = 11, fs_label = 13, fs_body = 14,
-    fs_time   = 14, fs_title = 18, fs_big   = 22,
+    fs_kicker = 11,
+    fs_label  = 13,
+    fs_body   = 14,
+    fs_time   = 13,
+    fs_title  = 18,
+    fs_big    = 22,
 
     -- icon font
     icon_font = 'Kinema Icons',
@@ -77,8 +75,39 @@ local theme = {
     icon_md   = 22,
     icon_lg   = 28,
 
-    -- icon codepoints; keep in sync with
-    -- data/kinema/mpv/fonts/README.md.
+    -- main chrome sizing
+    rail_h            = 68,
+    rail_margin_x     = 20,
+    rail_margin_y     = 18,
+    rail_pad_x        = 14,
+    rail_gradient_h   = 180,
+    btn_lg            = 52,
+    btn_md            = 44,
+    time_w            = 54,
+    compact_breakpoint = 980,
+    tight_breakpoint   = 760,
+
+    -- timeline sizing
+    timeline_h       = 4,
+    timeline_hover_h = 8,
+    timeline_zone_h  = 28,
+
+    -- metadata
+    meta_x      = 20,
+    meta_y      = 18,
+    meta_pad_x  = 14,
+    meta_pad_y  = 10,
+    meta_max_w  = 520,
+
+    -- volume overlay
+    volume_w         = 58,
+    volume_h         = 196,
+    volume_margin_r  = 18,
+    volume_margin_b  = 18,
+    volume_track_w   = 6,
+    volume_thumb_r   = 9,
+
+    -- icon codepoints
     icon = {
         play_arrow      = utf8(0xE037),
         pause           = utf8(0xE034),

@@ -1,20 +1,7 @@
 -- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Bottom transport bar: gradient backing + hero timeline + control
--- row.
---
--- Layout (bottom-anchored):
---   • 140 px soft bottom gradient (visual lift only, no hit zone)
---   • hero timeline (28 / 36 px) — owned by render_timeline.lua.
---     Time labels live under the timeline, not in the control row.
---   • control row (44 px) — play / replay_10 / forward_10 on the
---     left; mute / volume / audio / subs / speed / fullscreen on
---     the right, with a 1-px separator between the volume cluster
---     and the picker cluster.
---
--- No windowed-mode title strip is rendered here; that lives in
--- `render_overlay.lua` and only shows in fullscreen.
+-- Modern single-rail bottom transport.
 
 local mp       = require 'mp'
 local theme    = require 'theme'
@@ -24,238 +11,203 @@ local timeline = require 'render_timeline'
 
 local M = {}
 
--- Signal used by picker toggles. Injected by main.lua at startup.
-M.schedule_redraw = function() end
-
--- Keep the remote-control target name in sync with main.lua's
--- `KINEMA` constant.
 local KINEMA = 'main'
 
--- ----------------------------------------------------------------------
--- Flat transport backing.
---
--- Replaces the old 140 px soft gradient with a flat solid band
--- covering the combined timeline + control-row footprint, plus a
--- 1 px top stroke so the chrome has a clean edge against the
--- video. The flat band reads as "edge-to-edge player UI" instead
--- of "floating panel", matching uosc's aesthetic.
--- ----------------------------------------------------------------------
-function M.render_bg(out, w, h, band_h)
-    local y = h - band_h
-    out[#out + 1] = ass.rect(0, y, w, band_h,
-        theme.bg, theme.a_chrome)
-    out[#out + 1] = ass.rect(0, y, w, 1,
-        theme.fg, theme.a_subtle)
+local function rail_rect(w, h)
+    local x = theme.rail_margin_x
+    local y = h - theme.rail_margin_y - theme.rail_h
+    local rw = w - theme.rail_margin_x * 2
+    return x, y, rw, theme.rail_h
 end
 
--- Seek row rendering now lives in render_timeline.lua; the
--- transport just picks the Y anchor so timeline + control row
--- share a bottom edge.
+function M.render_bg(out, w, h)
+    ass.gradient(out,
+        0, h - theme.rail_gradient_h,
+        w, theme.rail_gradient_h,
+        theme.bg, 'FF', 'A8', 6)
 
--- ----------------------------------------------------------------------
--- Control row.
--- ----------------------------------------------------------------------
-function M.render_control_row(out, w, h, y_top)
-    local row_h = 44
-    local pad_x = theme.sp4   -- 16
-    local btn   = 44
-    local small = 36
-    local cy    = y_top + math.floor(row_h / 2)
+    local x, y, rw, rh = rail_rect(w, h)
+    ass.surface(out, x, y, rw, rh, {
+        radius = theme.r_surface,
+        alpha = theme.a_chrome,
+        color = theme.bg,
+        gloss_alpha = theme.a_ghost,
+    })
+end
 
-    -- ---- Left group ------------------------------------------------
-    local lx = pad_x
+function M.render(out, w, h)
+    M.render_bg(out, w, h)
+
+    local x, y, rw, rh = rail_rect(w, h)
+    local cy = y + math.floor(rh / 2)
+    local pad_x = theme.rail_pad_x
+    local gap = theme.sp1
+    local compact = w < theme.compact_breakpoint
+    local tight = w < theme.tight_breakpoint
+
+    local left = x + pad_x
     local play_cp = S.props.paused and theme.icon.play_arrow
                                     or theme.icon.pause
     ass.button(out, {
-        x = lx, y = y_top + (row_h - btn) / 2, w = btn, h = btn,
+        x = left, y = y + math.floor((rh - theme.btn_lg) / 2),
+        w = theme.btn_lg, h = theme.btn_lg,
         icon_cp = play_cp, icon_size = theme.icon_lg,
         on_click = function() mp.command('cycle pause') end,
     })
-    lx = lx + btn + theme.sp1
+    left = left + theme.btn_lg + gap
 
-    ass.button(out, {
-        x = lx, y = y_top + (row_h - small) / 2, w = small, h = small,
-        icon_cp = theme.icon.replay_10, icon_size = theme.icon_md,
-        on_click = function() mp.command('seek -10') end,
-    })
-    lx = lx + small
-
-    ass.button(out, {
-        x = lx, y = y_top + (row_h - small) / 2, w = small, h = small,
-        icon_cp = theme.icon.forward_10, icon_size = theme.icon_md,
-        on_click = function() mp.command('seek 10') end,
-    })
-    -- (Combined time label lives under the timeline now.)
-
-    -- ---- Right group (reverse-laid) --------------------------------
-    local rx = w - pad_x
-
-    -- Fullscreen toggle.
-    rx = rx - small
-    local fs_cp = S.props.fullscreen and theme.icon.fullscreen_exit
-                                     or theme.icon.fullscreen
-    ass.button(out, {
-        x = rx, y = y_top + (row_h - small) / 2, w = small, h = small,
-        icon_cp = fs_cp, icon_size = theme.icon_md,
-        on_click = function()
-            mp.commandv('script-message-to', KINEMA,
-                'toggle-fullscreen')
-        end,
-    })
-
-    -- Speed chip.
-    local speed_w = 48
-    rx = rx - speed_w - theme.sp1
-    local speed_label = string.format('%.2gx', S.props.speed or 1)
-    ass.button(out, {
-        x = rx, y = y_top + (row_h - small) / 2,
-        w = speed_w, h = small,
-        label = speed_label, label_size = theme.fs_label,
-        active = S.state.picker_open == 'speed',
-        on_click = function()
-            S.state.picker_open = (S.state.picker_open == 'speed')
-                and nil or 'speed'
-        end,
-        -- Scroll-wheel adjusts speed in 0.25 steps, clamped to
-        -- mpv's sensible range.
-        on_wheel = function(dir)
-            local cur = tonumber(S.props.speed) or 1.0
-            local nv = math.max(0.25,
-                math.min(4.0, cur + dir * 0.25))
-            mp.commandv('set', 'speed', tostring(nv))
-        end,
-        -- Right-click resets to 1.0x.
-        on_rclick = function()
-            mp.commandv('set', 'speed', '1.0')
-        end,
-    })
-
-    -- Subtitles picker.
-    rx = rx - small - theme.sp1
-    ass.button(out, {
-        x = rx, y = y_top + (row_h - small) / 2,
-        w = small, h = small,
-        icon_cp = theme.icon.closed_caption, icon_size = theme.icon_md,
-        active = S.state.picker_open == 'sub',
-        on_click = function()
-            S.state.picker_open = (S.state.picker_open == 'sub')
-                and nil or 'sub'
-        end,
-    })
-
-    -- Audio picker.
-    rx = rx - small - theme.sp1
-    ass.button(out, {
-        x = rx, y = y_top + (row_h - small) / 2,
-        w = small, h = small,
-        icon_cp = theme.icon.music_note, icon_size = theme.icon_md,
-        active = S.state.picker_open == 'audio',
-        on_click = function()
-            S.state.picker_open = (S.state.picker_open == 'audio')
-                and nil or 'audio'
-        end,
-    })
-
-    -- Separator rule between pickers and volume cluster.
-    rx = rx - theme.sp2
-    out[#out + 1] = ass.rect(rx, y_top + row_h / 2 - 10, 1, 20,
-        theme.fg, theme.a_subtle)
-    rx = rx - theme.sp2
-
-    -- Volume cluster: mute icon (always rendered) with a
-    -- proximity-expanding slider to its left. The slider width is
-    -- reserved in the layout at all times so the cluster does not
-    -- shift sibling buttons around as the cursor moves; we just
-    -- skip drawing the slider when the cursor is not near the
-    -- cluster.
-    local vol_w = 72
-    local vol_x = rx - vol_w
-    local vol_y = cy - 2
-    local vol = math.max(0, math.min(150, S.props.volume or 100))
-    local mute_x = vol_x - small - theme.sp1
-
-    -- "Near" = cursor anywhere inside the union rect of the mute
-    -- icon and the slider. Gives the cluster a single hit area.
-    local cluster_x = mute_x
-    local cluster_w = (vol_x + vol_w) - mute_x
-    local cluster_near = S.is_hover(cluster_x, y_top,
-        cluster_w, row_h)
-
-    if cluster_near then
-        local vol_track_h = 6
-        out[#out + 1] = ass.rounded_rect(vol_x, vol_y,
-            vol_w, vol_track_h,
-            math.floor(vol_track_h / 2),
-            theme.fg, theme.a_subtle)
-        local played_vol_w = math.floor(vol_w * vol / 150)
-        out[#out + 1] = ass.rounded_rect(vol_x, vol_y,
-            played_vol_w, vol_track_h,
-            math.floor(vol_track_h / 2), theme.accent)
-        local vol_thumb_r = 7
-        out[#out + 1] = ass.circle(vol_x + played_vol_w,
-            vol_y + math.floor(vol_track_h / 2),
-            vol_thumb_r, theme.accent)
-        out[#out + 1] = ass.circle(vol_x + played_vol_w,
-            vol_y + math.floor(vol_track_h / 2),
-            math.max(2, vol_thumb_r - 2), theme.fg)
-        -- Register the slider zone only when it is visible;
-        -- otherwise it would swallow clicks that should pass
-        -- through the invisible reserved area.
-        S.add_zone(vol_x, y_top, vol_w, row_h, {
-            on_click = function()
-                local mx, _ = mp.get_mouse_pos()
-                local pct = math.max(0, math.min(1,
-                    (mx - vol_x) / vol_w))
-                mp.commandv('set', 'volume',
-                    tostring(math.floor(pct * 150)))
-            end,
-            on_wheel = function(dir)
-                mp.commandv('add', 'volume', tostring(dir * 5))
-            end,
+    if not tight then
+        ass.button(out, {
+            x = left, y = y + math.floor((rh - theme.btn_md) / 2),
+            w = theme.btn_md, h = theme.btn_md,
+            icon_cp = theme.icon.replay_10,
+            icon_size = theme.icon_md,
+            on_click = function() mp.command('seek -10') end,
         })
+        left = left + theme.btn_md
+
+        ass.button(out, {
+            x = left, y = y + math.floor((rh - theme.btn_md) / 2),
+            w = theme.btn_md, h = theme.btn_md,
+            icon_cp = theme.icon.forward_10,
+            icon_size = theme.icon_md,
+            on_click = function() mp.command('seek 10') end,
+        })
+        left = left + theme.btn_md + theme.sp2
+
+        out[#out + 1] = ass.text(left, cy, theme.fs_time,
+            S.fmt_time(S.props.time_pos or 0),
+            theme.fg, 4, theme.a_dim, 'monospace')
+        left = left + theme.time_w + theme.sp2
     end
 
-    -- Mute icon (always drawn, at the cluster's left edge).
-    rx = mute_x
-    local mute_cp = S.props.mute and theme.icon.volume_off
-                                 or theme.icon.volume_up
-    ass.button(out, {
-        x = rx, y = y_top + (row_h - small) / 2, w = small, h = small,
-        icon_cp = mute_cp, icon_size = theme.icon_md,
-        on_click = function() mp.command('cycle mute') end,
+    local right = x + rw - pad_x
+
+    local function put_button(opts)
+        local bw = opts.w or theme.btn_md
+        local bh = opts.h or theme.btn_md
+        right = right - bw
+        ass.button(out, {
+            x = right,
+            y = y + math.floor((rh - bh) / 2),
+            w = bw,
+            h = bh,
+            icon_cp = opts.icon_cp,
+            icon_size = opts.icon_size,
+            label = opts.label,
+            label_size = opts.label_size,
+            active = opts.active,
+            on_click = opts.on_click,
+            on_wheel = opts.on_wheel,
+            on_rclick = opts.on_rclick,
+        })
+        right = right - (opts.gap_after or gap)
+    end
+
+    put_button({
+        icon_cp = theme.icon.close,
+        on_click = function()
+            mp.commandv('script-message-to', KINEMA, 'close-player')
+        end,
+    })
+
+    local fs_cp = S.props.fullscreen and theme.icon.fullscreen_exit
+                                     or theme.icon.fullscreen
+    put_button({
+        icon_cp = fs_cp,
+        on_click = function()
+            mp.commandv('script-message-to', KINEMA, 'toggle-fullscreen')
+        end,
+    })
+
+    put_button({
+        icon_cp = S.props.mute and theme.icon.volume_off
+                               or theme.icon.volume_up,
+        active = S.volume_visible(),
+        on_click = function()
+            S.visibility.volume_until = mp.get_time() + S.VOLUME_GRACE_S
+            mp.command('cycle mute')
+        end,
         on_wheel = function(dir)
+            S.visibility.volume_until = mp.get_time() + S.VOLUME_GRACE_S
             mp.commandv('add', 'volume', tostring(dir * 5))
         end,
         on_rclick = function()
+            S.visibility.volume_until = mp.get_time() + S.VOLUME_GRACE_S
             mp.commandv('set', 'volume', '100')
         end,
+        gap_after = theme.sp2,
     })
+
+    if compact then
+        put_button({
+            icon_cp = theme.icon.more_vert,
+            active = S.state.picker_open == 'overflow',
+            on_click = function()
+                S.state.picker_open = (S.state.picker_open == 'overflow')
+                    and nil or 'overflow'
+            end,
+            gap_after = theme.sp2,
+        })
+    else
+        local speed_label = string.format('%.2gx', S.props.speed or 1)
+        local speed_w = math.max(54, 20 + #speed_label * 8)
+        put_button({
+            w = speed_w,
+            label = speed_label,
+            label_size = theme.fs_label,
+            active = S.state.picker_open == 'speed',
+            on_click = function()
+                S.state.picker_open = (S.state.picker_open == 'speed')
+                    and nil or 'speed'
+            end,
+            on_wheel = function(dir)
+                local cur = tonumber(S.props.speed) or 1.0
+                local nv = math.max(0.25, math.min(4.0, cur + dir * 0.25))
+                mp.commandv('set', 'speed', tostring(nv))
+            end,
+            on_rclick = function()
+                mp.commandv('set', 'speed', '1.0')
+            end,
+        })
+
+        put_button({
+            icon_cp = theme.icon.closed_caption,
+            active = S.state.picker_open == 'sub',
+            on_click = function()
+                S.state.picker_open = (S.state.picker_open == 'sub')
+                    and nil or 'sub'
+            end,
+        })
+
+        put_button({
+            icon_cp = theme.icon.music_note,
+            active = S.state.picker_open == 'audio',
+            on_click = function()
+                S.state.picker_open = (S.state.picker_open == 'audio')
+                    and nil or 'audio'
+            end,
+            gap_after = theme.sp2,
+        })
+    end
+
+    if not tight and (S.props.duration or 0) > 0 then
+        right = right - theme.time_w
+        out[#out + 1] = ass.text(right + theme.time_w, cy, theme.fs_time,
+            '-' .. S.fmt_time(math.max(0,
+                (S.props.duration or 0) - (S.props.time_pos or 0))),
+            theme.fg, 6, theme.a_dim, 'monospace')
+        right = right - theme.sp2
+    end
+
+    local timeline_x = left
+    local timeline_w = right - left
+    if timeline_w < 100 then return end
+    timeline.render_inline(out, timeline_x, cy, timeline_w)
 end
 
--- ----------------------------------------------------------------------
--- Convenience: render the whole transport bar in one call.
--- ----------------------------------------------------------------------
-function M.render(out, w, h)
-    local control_row_h  = 44
-    local label_strip_h  = theme.fs_time + 6   -- 14 + 6 below timeline
-    -- Timeline's rest height; the renderer grows upward on hover
-    -- so bottom alignment is stable at any height.
-    local timeline_rest  = timeline.REST_H
-    local band_h = control_row_h + label_strip_h + timeline_rest
-    M.render_bg(out, w, h, band_h)
-    local timeline_y     = h - control_row_h - label_strip_h
-        - timeline_rest
-    timeline.render(out, w, h, timeline_y)
-    M.render_control_row(out, w, h, h - control_row_h)
-end
-
--- Total vertical footprint of the transport. Other modules (skip
--- pill, next-episode banner) use this to park above the chrome
--- without hard-coding pixel constants.
 function M.footprint_h()
-    local control_row_h = 44
-    local label_strip_h = theme.fs_time + 6
-    return control_row_h + label_strip_h + timeline.REST_H
+    return theme.rail_h + theme.rail_margin_y
 end
 
 return M

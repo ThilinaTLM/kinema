@@ -1,16 +1,7 @@
 -- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Non-transport chrome surfaces that share the card vocabulary:
---   • Fullscreen-only title header (top)
---   • Resume prompt
---   • Next-episode banner
---   • Skip pill
---   • Buffering indicator
---   • Keyboard cheat sheet
---
--- The audio/subtitle/speed picker is large enough to live in its
--- own file (`render_picker.lua`).
+-- Non-transport chrome surfaces.
 
 local mp    = require 'mp'
 local theme = require 'theme'
@@ -19,100 +10,54 @@ local ass   = require 'ass'
 
 local M = {}
 
--- Height of the bottom transport, computed on-demand from
--- `render_transport.footprint_h()`. Module is required lazily to
--- avoid a circular require (render_transport pulls in
--- render_timeline which in turn is pulled in here via chain).
 local function transport_footprint()
     local ok, transport = pcall(require, 'render_transport')
     if ok and transport and transport.footprint_h then
         return transport.footprint_h()
     end
-    return 92  -- safe fallback; matches current layout
+    return theme.rail_h + theme.rail_margin_y
 end
 
 local KINEMA = 'main'
 
--- ----------------------------------------------------------------------
--- Top header. In fullscreen this is the primary title surface;
--- in windowed mode we only show it on cursor proximity (top strip)
--- so the WM title bar isn't duplicated at rest.
---
--- Visual differences between modes:
---   • fullscreen: gradient backing (gives the text lift against
---     the video), back arrow on the left, settings gear on the
---     right.
---   • windowed:   flat solid backing, no back arrow (the WM
---     provides a close button), settings gear kept.
--- ----------------------------------------------------------------------
-function M.render_fullscreen_header(out, w, h)
-    local fullscreen = S.props.fullscreen and true or false
-
-    local pad_x = theme.sp4
-    local bar_h = 64
-
-    if fullscreen then
-        -- Soft top gradient in fullscreen so the text lifts off
-        -- the video.
-        ass.gradient(out, 0, 0, w, 96, theme.bg,
-            theme.a_chrome, 'FF', 4)
-    else
-        -- Flat solid band in windowed mode, matching the
-        -- transport's flat backing, with a 1 px bottom stroke.
-        out[#out + 1] = ass.rect(0, 0, w, bar_h,
-            theme.bg, theme.a_chrome)
-        out[#out + 1] = ass.rect(0, bar_h - 1, w, 1,
-            theme.fg, theme.a_subtle)
+function M.render_metadata_label(out, w, h)
+    if S.state.context.title == '' and S.state.context.subtitle == '' then
+        return
     end
 
-    -- Back arrow (fullscreen only; the WM already has a close
-    -- button in windowed mode).
-    local title_x = pad_x
-    if fullscreen then
-        ass.button(out, {
-            x = pad_x, y = (bar_h - 40) / 2, w = 40, h = 40,
-            icon_cp = theme.icon.arrow_back,
-            icon_size = theme.icon_md,
-            on_click = function()
-                mp.commandv('script-message-to', KINEMA,
-                    'close-player')
-            end,
-        })
-        title_x = pad_x + 40 + theme.sp2
-    end
+    local line1 = S.state.context.title or ''
+    local line2 = S.state.context.subtitle or ''
+    local chars = math.max(#line1, #line2)
+    local bw = math.min(theme.meta_max_w,
+        math.max(180, chars * 8 + theme.meta_pad_x * 2))
+    local lines = (line2 ~= '' and 2 or 1)
+    local bh = theme.meta_pad_y * 2 + (lines == 2 and 42 or 22)
+    local bx = theme.meta_x
+    local by = theme.meta_y
 
-    -- Title + subtitle.
-    if S.state.context.title ~= '' then
-        out[#out + 1] = ass.text(title_x, 14, theme.fs_title,
-            S.state.context.title, theme.fg, 4)
-    end
-    if S.state.context.subtitle ~= '' then
-        out[#out + 1] = ass.text(title_x, 34, theme.fs_label,
-            S.state.context.subtitle, theme.fg, 4, theme.a_dim)
-    end
-
-    -- Settings / speed-picker gear on the right (both modes).
-    ass.button(out, {
-        x = w - pad_x - 40, y = (bar_h - 40) / 2,
-        w = 40, h = 40,
-        icon_cp = theme.icon.settings, icon_size = theme.icon_md,
-        active = S.state.picker_open == 'speed',
-        on_click = function()
-            S.state.picker_open = (S.state.picker_open == 'speed')
-                and nil or 'speed'
-        end,
+    ass.surface(out, bx, by, bw, bh, {
+        radius = 14,
+        alpha = theme.a_panel,
+        color = theme.bg,
+        gloss_alpha = theme.a_ghost,
     })
+
+    out[#out + 1] = ass.text(bx + theme.meta_pad_x,
+        by + theme.meta_pad_y + 3,
+        theme.fs_title, line1, theme.fg, 7)
+    if line2 ~= '' then
+        out[#out + 1] = ass.text(bx + theme.meta_pad_x,
+            by + theme.meta_pad_y + 24,
+            theme.fs_label, line2, theme.fg, 7, theme.a_dim)
+    end
 end
 
--- ----------------------------------------------------------------------
--- Resume prompt.
--- ----------------------------------------------------------------------
 function M.render_resume(out, w, h)
     if not S.state.resume then return end
-    local bw, bh = 440, 200
+    local bw, bh = 448, 204
     local bx = math.floor((w - bw) / 2)
     local by = math.floor((h - bh) / 2)
-    ass.card(out, bx, by, bw, bh)
+    ass.card(out, bx, by, bw, bh, { gloss_alpha = theme.a_ghost })
 
     out[#out + 1] = ass.text(bx + theme.sp4, by + theme.sp4 + 4,
         theme.fs_title, 'Resume playback', theme.fg)
@@ -121,40 +66,31 @@ function M.render_resume(out, w, h)
         'Continue from ' .. S.fmt_time(S.state.resume.seconds),
         theme.fg, 7, theme.a_dim)
     if S.state.context.title ~= '' then
-        out[#out + 1] = ass.text(bx + theme.sp4, by + theme.sp4 + 56,
+        out[#out + 1] = ass.text(bx + theme.sp4, by + theme.sp4 + 58,
             theme.fs_label, S.state.context.title,
             theme.fg, 7, theme.a_dim)
     end
 
     local btn_w, btn_h = 150, 40
     local by_btn = by + bh - btn_h - theme.sp4
-    -- Secondary on the left, primary on the right (Breeze HIG).
     ass.secondary_btn(out,
         bx + theme.sp4, by_btn, btn_w, btn_h,
         'Start over', function()
-            mp.commandv('script-message-to', KINEMA,
-                'resume-declined')
+            mp.commandv('script-message-to', KINEMA, 'resume-declined')
         end)
     ass.primary_btn(out,
         bx + bw - btn_w - theme.sp4, by_btn, btn_w, btn_h,
         'Resume', function()
-            mp.commandv('script-message-to', KINEMA,
-                'resume-accepted')
+            mp.commandv('script-message-to', KINEMA, 'resume-accepted')
         end)
 end
 
--- ----------------------------------------------------------------------
--- Next-episode banner (bottom-right, above the transport).
--- ----------------------------------------------------------------------
 function M.render_next_episode(out, w, h)
     if not S.state.next_ep then return end
-    local bw, bh = 360, 170
+    local bw, bh = 368, 174
     local bx = w - bw - theme.sp4
-    -- Park above the transport bar; height comes from the
-    -- transport module so both stay in step if the chrome is
-    -- resized later.
     local by = h - transport_footprint() - bh - theme.sp3
-    ass.card(out, bx, by, bw, bh)
+    ass.card(out, bx, by, bw, bh, { gloss_alpha = theme.a_ghost })
 
     out[#out + 1] = ass.text(bx + theme.sp4, by + theme.sp3,
         theme.fs_kicker, 'UP NEXT', theme.accent)
@@ -165,13 +101,12 @@ function M.render_next_episode(out, w, h)
             theme.fs_label, S.state.next_ep.subtitle,
             theme.fg, 7, theme.a_dim)
     end
-    out[#out + 1] = ass.text(bx + theme.sp4, by + theme.sp3 + 64,
+    out[#out + 1] = ass.text(bx + theme.sp4, by + theme.sp3 + 66,
         theme.fs_label,
-        string.format('Playing in %ds',
-            S.state.next_ep.countdown or 0),
+        string.format('Playing in %ds', S.state.next_ep.countdown or 0),
         theme.accent)
 
-    local btn_w, btn_h = 140, 34
+    local btn_w, btn_h = 144, 36
     local by_btn = by + bh - btn_h - theme.sp3
     ass.secondary_btn(out,
         bx + theme.sp3, by_btn, btn_w, btn_h,
@@ -187,23 +122,17 @@ function M.render_next_episode(out, w, h)
         end)
 end
 
--- ----------------------------------------------------------------------
--- Skip pill (centred, above the transport).
--- ----------------------------------------------------------------------
 function M.render_skip(out, w, h)
     if not S.state.skip then return end
     local label = S.state.skip.label or ''
-    -- Auto-width from label length (ASS has no metrics API;
-    -- 8 px/char is a safe over-estimate at theme.fs_label).
-    local icon_slot = 28
-    local bw = math.max(200, icon_slot + #label * 8 + theme.sp5)
-    local bh = 44
+    local bw = math.max(210, 38 + #label * 8 + theme.sp5)
+    local bh = 46
     local bx = math.floor((w - bw) / 2)
     local by = h - transport_footprint() - bh - theme.sp3
 
     local hover   = S.is_hover(bx, by, bw, bh)
     local pressed = S.is_pressed(bx, by, bw, bh)
-    local fill_alpha = pressed and theme.a_elevated or theme.a_opaque
+    local fill_alpha = pressed and theme.a_panel or theme.a_opaque
     ass.pill(out, bx, by, bw, bh, theme.accent, fill_alpha)
     if hover and not pressed then
         ass.pill(out, bx, by, bw, bh, theme.fg, theme.a_faint)
@@ -220,29 +149,23 @@ function M.render_skip(out, w, h)
     end)
 end
 
--- ----------------------------------------------------------------------
--- Buffering indicator.
--- ----------------------------------------------------------------------
 function M.render_buffering(out, w, h)
-    local bw, bh = 180, 48
+    local bw, bh = 190, 54
     local bx = math.floor((w - bw) / 2)
     local by = math.floor((h - bh) / 2)
     ass.card(out, bx, by, bw, bh)
-    out[#out + 1] = ass.text(bx + bw / 2, by + bh / 2, theme.fs_body,
-        'Buffering…', theme.fg, 5)
+    out[#out + 1] = ass.text(bx + bw / 2, by + bh / 2,
+        theme.fs_body, 'Buffering…', theme.fg, 5)
 end
 
--- ----------------------------------------------------------------------
--- Keyboard cheat sheet.
--- ----------------------------------------------------------------------
 function M.render_cheatsheet(out, w, h)
-    out[#out + 1] = ass.rect(0, 0, w, h, '000000', theme.a_dim)
+    out[#out + 1] = ass.rect(0, 0, w, h, '000000', '90')
 
     local pw = 560
     local ph = math.min(h - 120, 420)
     local px = math.floor((w - pw) / 2)
     local py = math.floor((h - ph) / 2)
-    ass.card(out, px, py, pw, ph)
+    ass.card(out, px, py, pw, ph, { gloss_alpha = theme.a_ghost })
 
     out[#out + 1] = ass.text(px + theme.sp4, py + theme.sp4 + 2,
         theme.fs_title, 'Keyboard shortcuts', theme.fg)
@@ -276,13 +199,9 @@ function M.render_cheatsheet(out, w, h)
         theme.fs_kicker, 'Press ? or Esc to close',
         theme.fg, 5, theme.a_dim)
 
-    -- Dismiss on any click outside the card.
     S.add_zone(0, 0, w, h, function()
         S.state.cheat_on = false
     end)
-    -- Trap clicks inside the card so the outer dismiss doesn't fire.
-    -- Registered AFTER the outer dismiss, so `zone_at` (walks
-    -- last-first) matches the inner rect first.
     S.add_zone(px, py, pw, ph, function() end)
 end
 
