@@ -7,6 +7,7 @@ local mp    = require 'mp'
 local theme = require 'theme'
 local S     = require 'state'
 local ass   = require 'ass'
+local chips = require 'render_chips'
 
 local M = {}
 
@@ -15,40 +16,70 @@ local function transport_footprint()
     if ok and transport and transport.footprint_h then
         return transport.footprint_h()
     end
-    return theme.rail_h + theme.rail_margin_y
+    return theme.btn_lg + theme.bottom_margin_y
+end
+
+local function format_remaining(seconds)
+    -- "<n> min left" for non-trivial remaining time; fall back to
+    -- HH:MM for shorter stretches.
+    if not seconds or seconds <= 0 then return '' end
+    local mins = math.floor(seconds / 60 + 0.5)
+    if mins >= 1 then
+        return string.format('%d min left', mins)
+    end
+    return string.format('%d s left', math.floor(seconds))
 end
 
 local KINEMA = 'main'
 
-function M.render_metadata_label(out, w, h)
-    if S.state.context.title == '' and S.state.context.subtitle == '' then
+function M.render_title_strip(out, w, h)
+    local line1 = S.state.context.title or ''
+    local line2 = S.state.context.subtitle or ''
+    if line1 == '' and line2 == '' and #(S.state.chips or {}) == 0 then
         return
     end
 
-    local line1 = S.state.context.title or ''
-    local line2 = S.state.context.subtitle or ''
-    local chars = math.max(#line1, #line2)
-    local bw = math.min(theme.meta_max_w,
-        math.max(180, chars * 8 + theme.meta_pad_x * 2))
-    local lines = (line2 ~= '' and 2 or 1)
-    local bh = theme.meta_pad_y * 2 + (lines == 2 and 42 or 22)
-    local bx = theme.meta_x
-    local by = theme.meta_y
+    local x = theme.title_x
+    local y = theme.title_y
 
-    ass.surface(out, bx, by, bw, bh, {
-        radius = 14,
-        alpha = theme.a_panel,
-        color = theme.bg,
-        gloss_alpha = theme.a_ghost,
-    })
-
-    out[#out + 1] = ass.text(bx + theme.meta_pad_x,
-        by + theme.meta_pad_y + 3,
-        theme.fs_title, line1, theme.fg, 7)
+    -- Shadowed text over the video; no card surface. `ass.text`
+    -- already draws with a 1px border + shadow which reads well
+    -- against mixed backgrounds.
+    if line1 ~= '' then
+        out[#out + 1] = ass.text(x, y,
+            theme.fs_title, line1, theme.fg, 7)
+        y = y + theme.fs_title + theme.title_gap
+    end
     if line2 ~= '' then
-        out[#out + 1] = ass.text(bx + theme.meta_pad_x,
-            by + theme.meta_pad_y + 24,
+        out[#out + 1] = ass.text(x, y,
             theme.fs_label, line2, theme.fg, 7, theme.a_dim)
+        y = y + theme.fs_label + theme.title_gap
+    end
+
+    if S.state.chips and #S.state.chips > 0 then
+        chips.render(out, x, y + theme.sp1, S.state.chips)
+        y = y + theme.chip_h + theme.title_gap
+    end
+
+    -- When paused and duration is known, append a "<n> min left"
+    -- line so the HUD gives the viewer a sense of pacing.
+    local dur = S.props.duration or 0
+    local pos = S.props.time_pos or 0
+    if S.props.paused and dur > 0 and pos >= 0 and pos < dur then
+        local remaining = math.max(0, dur - pos)
+        local tail = format_remaining(remaining)
+        if tail ~= '' then
+            local end_ts = ''
+            local ok, now = pcall(os.time)
+            if ok and now then
+                end_ts = os.date('%H:%M', now + math.floor(remaining))
+            end
+            local txt = end_ts ~= ''
+                and string.format('%s \xc2\xb7 ends %s', tail, end_ts)
+                or tail
+            out[#out + 1] = ass.text(x, y + theme.sp1,
+                theme.fs_label, txt, theme.accent, 7)
+        end
     end
 end
 
@@ -125,27 +156,67 @@ end
 function M.render_skip(out, w, h)
     if not S.state.skip then return end
     local label = S.state.skip.label or ''
-    local bw = math.max(210, 38 + #label * 8 + theme.sp5)
-    local bh = 46
-    local bx = math.floor((w - bw) / 2)
-    local by = h - transport_footprint() - bh - theme.sp3
+    local kind  = S.state.skip.kind or 'intro'
+    local pill_w = math.max(210, 38 + #label * 8 + theme.sp5)
+    local pill_h = 46
+    local gap = theme.sp2
+    local toggle_label = (S.state.auto_skip and S.state.auto_skip[kind])
+        and 'Always skip \xe2\x9c\x93' or 'Always skip'
+    local toggle_w = math.max(140, 20 + #toggle_label * 7)
+    local toggle_h = 34
+    local total_w = pill_w + gap + toggle_w
+    local bx = math.floor((w - total_w) / 2)
+    local by = h - transport_footprint() - pill_h - theme.sp3
 
-    local hover   = S.is_hover(bx, by, bw, bh)
-    local pressed = S.is_pressed(bx, by, bw, bh)
+    -- Primary: Skip pill.
+    local hover   = S.is_hover(bx, by, pill_w, pill_h)
+    local pressed = S.is_pressed(bx, by, pill_w, pill_h)
     local fill_alpha = pressed and theme.a_panel or theme.a_opaque
-    ass.pill(out, bx, by, bw, bh, theme.accent, fill_alpha)
+    ass.pill(out, bx, by, pill_w, pill_h, theme.accent, fill_alpha)
     if hover and not pressed then
-        ass.pill(out, bx, by, bw, bh, theme.fg, theme.a_faint)
+        ass.pill(out, bx, by, pill_w, pill_h, theme.fg, theme.a_faint)
     end
     local dy = pressed and 1 or 0
     out[#out + 1] = ass.icon(bx + theme.sp3 + 12,
-        by + bh / 2 + dy, theme.icon_md,
+        by + pill_h / 2 + dy, theme.icon_md,
         theme.icon.skip_next, theme.fg, 5)
     out[#out + 1] = ass.text(bx + theme.sp3 + 28,
-        by + bh / 2 + dy, theme.fs_label,
-        label, theme.fg, 4)
-    S.add_zone(bx, by, bw, bh, function()
+        by + pill_h / 2 + dy, theme.fs_label,
+        label .. '  (S)', theme.fg, 4)
+    S.add_zone(bx, by, pill_w, pill_h, function()
         mp.commandv('script-message-to', KINEMA, 'skip-requested')
+    end)
+
+    -- Secondary: "Always skip <kind>" toggle.
+    local tx = bx + pill_w + gap
+    local ty = by + math.floor((pill_h - toggle_h) / 2)
+    local active = S.state.auto_skip and S.state.auto_skip[kind]
+    local t_hover   = S.is_hover(tx, ty, toggle_w, toggle_h)
+    local t_pressed = S.is_pressed(tx, ty, toggle_w, toggle_h)
+    if active then
+        ass.pill(out, tx, ty, toggle_w, toggle_h,
+            theme.accent, t_pressed and theme.a_panel or theme.a_dim)
+    else
+        ass.pill(out, tx, ty, toggle_w, toggle_h,
+            theme.fg, t_pressed and theme.a_dim or theme.a_subtle)
+    end
+    if t_hover and not t_pressed then
+        ass.pill(out, tx, ty, toggle_w, toggle_h,
+            theme.fg, theme.a_faint)
+    end
+    out[#out + 1] = ass.text(tx + toggle_w / 2,
+        ty + toggle_h / 2 + (t_pressed and 1 or 0),
+        theme.fs_label, toggle_label, theme.fg, 5)
+    S.add_zone(tx, ty, toggle_w, toggle_h, function()
+        S.state.auto_skip = S.state.auto_skip
+            or { intro = false, outro = false, credits = false }
+        local now = not S.state.auto_skip[kind]
+        S.state.auto_skip[kind] = now
+        -- Toggling ON also triggers the current range; toggling
+        -- OFF leaves the pill in place for manual dismissal.
+        if now then
+            mp.commandv('script-message-to', KINEMA, 'skip-requested')
+        end
     end)
 end
 

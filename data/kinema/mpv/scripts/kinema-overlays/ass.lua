@@ -9,8 +9,32 @@ local S     = require 'state'
 
 local M = {}
 
+-- Module-level opacity multiplier for fade animations. The
+-- redraw dispatcher in `main.lua` sets this before rendering
+-- each chrome layer and resets to 1 before modals. Values are
+-- 0..1; 1 = fully visible, 0 = fully transparent.
+M.opacity = 1.0
+
+function M.set_opacity(v)
+    if not v then v = 1.0 end
+    if v < 0 then v = 0 end
+    if v > 1 then v = 1 end
+    M.opacity = v
+end
+
+-- Blend a BB alpha hex with the current opacity. opacity=1 leaves
+-- the input untouched; opacity=0 returns `FF` (fully transparent).
+local function mul_alpha(hex)
+    if M.opacity >= 1 then return hex end
+    local a = tonumber(hex or '00', 16) or 0
+    a = a + (255 - a) * (1 - M.opacity)
+    if a > 255 then a = 255 end
+    if a < 0 then a = 0 end
+    return string.format('%02X', math.floor(a + 0.5))
+end
+
 function M.rect(x, y, w, h, bbggrr, alpha)
-    alpha = alpha or theme.a_opaque
+    alpha = mul_alpha(alpha or theme.a_opaque)
     return string.format(
         '{\\an7\\pos(%d,%d)\\bord0\\shad0\\1a&H%s&\\1c&H%s&\\p1}'
         .. 'm 0 0 l %d 0 l %d %d l 0 %d{\\p0}',
@@ -18,7 +42,7 @@ function M.rect(x, y, w, h, bbggrr, alpha)
 end
 
 function M.rounded_rect(x, y, w, h, r, bbggrr, alpha)
-    alpha = alpha or theme.a_opaque
+    alpha = mul_alpha(alpha or theme.a_opaque)
     if r * 2 > w then r = math.floor(w / 2) end
     if r * 2 > h then r = math.floor(h / 2) end
     return string.format(
@@ -39,7 +63,7 @@ function M.rounded_rect(x, y, w, h, r, bbggrr, alpha)
 end
 
 function M.circle(cx, cy, r, bbggrr, alpha)
-    alpha = alpha or theme.a_opaque
+    alpha = mul_alpha(alpha or theme.a_opaque)
     local k = r * 0.5522847498
     return string.format(
         '{\\an7\\pos(%d,%d)\\bord0\\shad0\\1a&H%s&\\1c&H%s&\\p1}'
@@ -58,7 +82,7 @@ end
 
 function M.triangle(x, y, p1x, p1y, p2x, p2y, p3x, p3y,
                     bbggrr, alpha)
-    alpha = alpha or theme.a_opaque
+    alpha = mul_alpha(alpha or theme.a_opaque)
     return string.format(
         '{\\an7\\pos(%d,%d)\\bord0\\shad0\\1a&H%s&\\1c&H%s&\\p1}'
         .. 'm %d %d l %d %d l %d %d{\\p0}',
@@ -68,7 +92,7 @@ end
 
 function M.text(x, y, size, str, bbggrr, align, alpha, font)
     align = align or 7
-    alpha = alpha or theme.a_opaque
+    alpha = mul_alpha(alpha or theme.a_opaque)
     str = tostring(str or '')
     str = str:gsub('\\', '\\\\'):gsub('{', '\\{'):gsub('}', '\\}')
     local font_override = font and ('\\fn' .. font) or ''
@@ -81,7 +105,7 @@ end
 
 function M.icon(x, y, size, cp, bbggrr, align, alpha)
     align = align or 5
-    alpha = alpha or theme.a_opaque
+    alpha = mul_alpha(alpha or theme.a_opaque)
     return string.format(
         '{\\an%d\\pos(%d,%d)\\fs%d\\fn%s\\bord0\\shad0'
         .. '\\1a&H%s&\\1c&H%s&}%s',

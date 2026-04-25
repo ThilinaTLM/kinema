@@ -159,6 +159,11 @@ constexpr uint64_t kPropAudioCodec = 18;
 constexpr uint64_t kPropVfFps = 19;
 constexpr uint64_t kPropVideoBitrate = 20;
 constexpr uint64_t kPropAudioBitrate = 21;
+constexpr uint64_t kPropHdrPrimaries = 22;
+constexpr uint64_t kPropHdrGamma = 23;
+constexpr uint64_t kPropAudioChannels = 24;
+constexpr uint64_t kPropAudioDelay = 25;
+constexpr uint64_t kPropSubDelay = 26;
 
 int parseTrackIdString(const char* s)
 {
@@ -362,6 +367,16 @@ MpvWidget::MpvWidget(const config::PlayerSettings& settings, QWidget* parent)
         MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, kPropVideoBitrate, "video-bitrate",
         MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, kPropHdrPrimaries,
+        "video-params/primaries", MPV_FORMAT_STRING);
+    mpv_observe_property(m_mpv, kPropHdrGamma,
+        "video-params/gamma", MPV_FORMAT_STRING);
+    mpv_observe_property(m_mpv, kPropAudioChannels,
+        "audio-params/channel-count", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, kPropAudioDelay,
+        "audio-delay", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, kPropSubDelay,
+        "sub-delay", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, kPropAudioBitrate, "audio-bitrate",
         MPV_FORMAT_DOUBLE);
 
@@ -641,6 +656,15 @@ void MpvWidget::onMpvEvents()
                     m_stats.audioBitrate = v;
                     Q_EMIT videoStatsChanged(m_stats);
                     break;
+                case kPropAudioDelay:
+                case kPropSubDelay:
+                    // Delay values are consumed by the Lua picker
+                    // footers via mpv's own `audio-delay` /
+                    // `sub-delay` observers; no host-side cache is
+                    // needed. The observation still serves to keep
+                    // mpv's internal event mask aware the property
+                    // is interesting.
+                    break;
                 default:
                     break;
                 }
@@ -658,6 +682,10 @@ void MpvWidget::onMpvEvents()
                     break;
                 case kPropHeight:
                     m_stats.height = static_cast<int>(v);
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                case kPropAudioChannels:
+                    m_stats.audioChannels = static_cast<int>(v);
                     Q_EMIT videoStatsChanged(m_stats);
                     break;
                 default:
@@ -690,6 +718,14 @@ void MpvWidget::onMpvEvents()
                     break;
                 case kPropAudioCodec:
                     m_stats.audioCodec = s ? QString::fromUtf8(s) : QString();
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                case kPropHdrPrimaries:
+                    m_stats.hdrPrimaries = s ? QString::fromUtf8(s) : QString();
+                    Q_EMIT videoStatsChanged(m_stats);
+                    break;
+                case kPropHdrGamma:
+                    m_stats.hdrGamma = s ? QString::fromUtf8(s) : QString();
                     Q_EMIT videoStatsChanged(m_stats);
                     break;
                 default:

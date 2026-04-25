@@ -71,11 +71,9 @@ void MpvIpc::setContext(const QString& title, const QString& subtitle,
         { title.toUtf8(), subtitle.toUtf8(), kind.toUtf8() });
 }
 
-void MpvIpc::setPalette(const QString& accent, const QString& fg,
-    const QString& bg, const QString& warn)
+void MpvIpc::setMediaChips(const QByteArray& json)
 {
-    send("palette",
-        { accent.toUtf8(), fg.toUtf8(), bg.toUtf8(), warn.toUtf8() });
+    send("set-media-chips", { json });
 }
 
 void MpvIpc::setCheatSheetText(const QString& text)
@@ -112,11 +110,11 @@ void MpvIpc::hideNextEpisode()
     send("hide-next-episode", {});
 }
 
-void MpvIpc::showSkip(const QString& label,
+void MpvIpc::showSkip(const QString& kind, const QString& label,
     qint64 startSec, qint64 endSec)
 {
     send("show-skip",
-        { label.toUtf8(),
+        { kind.toUtf8(), label.toUtf8(),
             QByteArray::number(startSec),
             QByteArray::number(endSec) });
 }

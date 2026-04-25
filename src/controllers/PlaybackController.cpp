@@ -81,6 +81,24 @@ QString skipButtonLabel(const QString& chapterTitle)
     return i18nc("@action:button", "Skip intro");
 }
 
+/// Return the stable kind string the Lua chrome uses as the auto-
+/// skip toggle key. Matches the regex families in `skipButtonLabel`.
+QString skipChapterKind(const QString& chapterTitle)
+{
+    const QString t = chapterTitle.trimmed();
+    if (t.contains(QRegularExpression(
+            QStringLiteral("^(credits|end credits)\\b"),
+            QRegularExpression::CaseInsensitiveOption))) {
+        return QStringLiteral("credits");
+    }
+    if (t.contains(QRegularExpression(
+            QStringLiteral("^(outro|ending)\\b"),
+            QRegularExpression::CaseInsensitiveOption))) {
+        return QStringLiteral("outro");
+    }
+    return QStringLiteral("intro");
+}
+
 int resolutionScore(const api::Stream& s)
 {
     const auto& r = s.resolution;
@@ -379,7 +397,8 @@ void PlaybackController::onPositionChanged(double seconds)
             m_skipChapterEnd = end;
             // Cast to qint64 truncates towards zero; fine for
             // timeline-band rendering which is in whole seconds.
-            m_window->showSkipChapter(skipButtonLabel(title),
+            m_window->showSkipChapter(skipChapterKind(title),
+                skipButtonLabel(title),
                 static_cast<qint64>(start),
                 static_cast<qint64>(end));
             return;

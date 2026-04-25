@@ -130,6 +130,9 @@ public:
         double videoBitrate = 0.0;   ///< bits/sec
         double audioBitrate = 0.0;   ///< bits/sec
         double cacheSeconds = 0.0;   ///< demuxer-cache-time
+        int audioChannels = 0;       ///< audio-params/channel-count
+        QString hdrPrimaries;        ///< video-params/primaries
+        QString hdrGamma;            ///< video-params/gamma
     };
     VideoStats currentStats() const { return m_stats; }
 

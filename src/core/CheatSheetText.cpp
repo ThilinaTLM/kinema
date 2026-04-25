@@ -47,6 +47,13 @@ QString render()
               "Play next episode now") },
         { i18nc("@label cheat sheet key", "Shift+N"),
           i18nc("@label cheat sheet action", "Cancel auto-next") },
+        { i18nc("@label cheat sheet key", "S"),
+          i18nc("@label cheat sheet action",
+              "Skip intro / outro") },
+        { i18nc("@label cheat sheet key",
+              "Double-click left / right"),
+          i18nc("@label cheat sheet action",
+              "Seek \u00b110 s") },
         { i18nc("@label cheat sheet key", "?"),
           i18nc("@label cheat sheet action", "This help") },
     };

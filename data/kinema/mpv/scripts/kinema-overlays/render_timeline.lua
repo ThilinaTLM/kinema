@@ -53,7 +53,7 @@ local function skip_ranges(duration)
     return out
 end
 
-function M.render_inline(out, x, center_y, w)
+function M.render_hero(out, x, center_y, w)
     if w <= 0 then return end
 
     local duration = S.props.duration or 0
@@ -120,11 +120,13 @@ function M.render_inline(out, x, center_y, w)
         if hover and S.mouse.x >= 0 then
             local pct = math.max(0, math.min(1, (S.mouse.x - x) / w))
             local t = pct * duration
-            local lines = { S.fmt_time(t) }
-            local ch_title = S.chapter_at(t)
+            local lines = {}
+            local ch_title, ch_index = S.chapter_at(t)
             if ch_title and ch_title ~= '' then
-                lines[#lines + 1] = ch_title
+                lines[#lines + 1] = string.format(
+                    'Ch %d \xc2\xb7 %s', ch_index or 0, ch_title)
             end
+            lines[#lines + 1] = S.fmt_time(t)
             ass.tooltip(out, S.mouse.x, track_y - 2, lines)
             local thumb_x = x + math.floor(w * pct)
             out[#out + 1] = ass.circle(thumb_x, center_y,

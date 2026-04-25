@@ -10,6 +10,7 @@
 #include "config/AppearanceSettings.h"
 #include "config/PlayerSettings.h"
 #include "core/CheatSheetText.h"
+#include "core/MediaChips.h"
 #include "core/MpvIpc.h"
 #include "core/MpvTrackList.h"
 
@@ -17,14 +18,11 @@
 
 #include <QByteArray>
 #include <QCloseEvent>
-#include <QColor>
-#include <QEvent>
 #include <QGuiApplication>
 #include <QHideEvent>
 #include <QIcon>
 #include <QKeyEvent>
 #include <QLatin1Char>
-#include <QPalette>
 #include <QScreen>
 #include <QShowEvent>
 #include <QString>
@@ -34,18 +32,6 @@
 namespace kinema::ui::player {
 
 namespace {
-
-/// Format a QColor as ASS `BBGGRR` (hex, uppercase). ASS colour
-/// literals swap the R/B order relative to HTML; the Lua chrome
-/// consumes them verbatim.
-QString toBbggrr(const QColor& c)
-{
-    return QStringLiteral("%1%2%3")
-        .arg(c.blue(), 2, 16, QLatin1Char('0'))
-        .arg(c.green(), 2, 16, QLatin1Char('0'))
-        .arg(c.red(), 2, 16, QLatin1Char('0'))
-        .toUpper();
-}
 
 /// Build the short subtitle line the title strip renders under the
 /// primary title. Movies have no subtitle; series get
@@ -111,21 +97,28 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     // Track-list changes feed the Lua pickers. Serialise to compact
     // JSON and push on every change \u2014 mpv emits track-list edits
     // sparsely, and the script's picker re-renders only when open.
+    // We also rebuild the media-info chip row whenever the track
+    // list changes so codec / audio chips stay in sync with the
+    // selected tracks.
     connect(m_mpv, &MpvWidget::trackListChanged,
         this, [this](const core::tracks::TrackList& tracks) {
             if (auto* ipc = m_mpv->ipc()) {
                 ipc->setTracks(core::tracks::toIpcJson(tracks));
             }
+            pushMediaChips();
         });
 
-    // Re-push the palette on every application-level change so a
-    // Breeze \u2194 Breeze-dark flip recolours the chrome within the
-    // next Lua redraw (\u2264 150 ms).
-    // Application-level palette flips are picked up via
-    // changeEvent(QEvent::PaletteChange) below; no explicit
-    // QGuiApplication::paletteChanged connect is needed, which lets
-    // us avoid the Qt 6.9+ deprecation on that signal.
+    // Video / audio params and codec strings drive the chip row too.
+    // MpvWidget emits `videoStatsChanged` whenever any observed
+    // property in the stats struct updates; piggyback on it instead
+    // of adding a dedicated signal.
+    connect(m_mpv, &MpvWidget::videoStatsChanged,
+        this, [this](const MpvWidget::VideoStats&) {
+            pushMediaChips();
+        });
 
+    // (The `palette` IPC path is retired; the Lua script bakes a
+    // curated HUD palette in `theme.lua`.)
     // Route mpv-side signals up to MainWindow (KNotification / status
     // bar) and into our own fullscreen/close handling.
     connect(m_mpv, &MpvWidget::fileLoaded,
@@ -191,16 +184,16 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
     m_mpv->setMediaTitle(ctx.title);
     m_mpv->loadFile(url, startSec);
 
-    // Seed the Lua chrome with the new context + palette + cheat
-    // sheet. We resend palette / cheat-sheet text on every play so
-    // a late-loading script picks them up on its first redraw.
+    // Seed the Lua chrome with the new context, media chips, and
+    // cheat sheet. We resend these on every play so a late-loading
+    // script picks them up on its first redraw.
     if (auto* ipc = m_mpv->ipc()) {
         ipc->setContext(ctx.title,
             buildSubtitleLabel(ctx),
             ctx.key.kind == api::MediaKind::Series
                 ? QStringLiteral("series")
                 : QStringLiteral("movie"));
-        pushPalette();
+        pushMediaChips();
         pushCheatSheetText();
     }
 
@@ -280,11 +273,11 @@ void PlayerWindow::hideNextEpisodeBanner()
     }
 }
 
-void PlayerWindow::showSkipChapter(const QString& label,
-    qint64 startSec, qint64 endSec)
+void PlayerWindow::showSkipChapter(const QString& kind,
+    const QString& label, qint64 startSec, qint64 endSec)
 {
     if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        ipc->showSkip(label, startSec, endSec);
+        ipc->showSkip(kind, label, startSec, endSec);
     }
 }
 
@@ -313,7 +306,7 @@ void PlayerWindow::stopAndHide()
     hide();
 }
 
-void PlayerWindow::pushPalette()
+void PlayerWindow::pushMediaChips()
 {
     if (!m_mpv) {
         return;
@@ -322,32 +315,21 @@ void PlayerWindow::pushPalette()
     if (!ipc) {
         return;
     }
-    const QPalette& p = qApp->palette();
-    // Warn is a fixed Kinema orange (matches the previous Qt chrome's
-    // warning accent); the Lua script treats it as an overlay-local
-    // tint for skip / next-episode banners.
-    ipc->setPalette(
-        toBbggrr(p.color(QPalette::Highlight)),
-        toBbggrr(p.color(QPalette::WindowText)),
-        toBbggrr(p.color(QPalette::Window)),
-        toBbggrr(QColor(246, 116, 0)));
+    const auto stats = m_mpv->currentStats();
+    core::media_chips::ChipInputs in;
+    in.videoHeight   = stats.height;
+    in.videoCodec    = stats.videoCodec;
+    in.audioCodec    = stats.audioCodec;
+    in.audioChannels = stats.audioChannels;
+    in.hdrPrimaries  = stats.hdrPrimaries;
+    in.hdrGamma      = stats.hdrGamma;
+    ipc->setMediaChips(core::media_chips::toIpcJson(in));
 }
 
 void PlayerWindow::pushCheatSheetText()
 {
     if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
         ipc->setCheatSheetText(core::cheatsheet::render());
-    }
-}
-
-void PlayerWindow::changeEvent(QEvent* e)
-{
-    QWidget::changeEvent(e);
-    if (e
-        && (e->type() == QEvent::PaletteChange
-            || e->type() == QEvent::ApplicationPaletteChange
-            || e->type() == QEvent::StyleChange)) {
-        pushPalette();
     }
 }
 

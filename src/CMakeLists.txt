@@ -23,6 +23,7 @@ set(kinema_core_SRCS
     core/HttpClient.cpp
     core/HttpErrorPresenter.cpp
     core/Magnet.cpp
+    core/MediaChips.cpp
     core/MpvChapterList.cpp
     core/MpvConfigPaths.cpp
     core/MpvTrackList.cpp

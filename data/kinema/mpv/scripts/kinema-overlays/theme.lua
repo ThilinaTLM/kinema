@@ -3,11 +3,10 @@
 --
 -- Theme / layout constants for the Kinema in-mpv chrome.
 --
--- Palette colours are BBGGRR per ASS convention. Defaults match
--- Breeze-dark; the host pushes live values via the `palette` IPC
--- command on every file load and on Qt palette changes, so code
--- paths should read from this table rather than the module-load
--- defaults.
+-- Palette colours are BBGGRR per ASS convention. This palette is
+-- curated for the HUD-style floating chrome and is intentionally
+-- independent of the host desktop theme — the `palette` IPC
+-- command has been retired. Do not mutate these at runtime.
 --
 -- Alpha values are ASS alpha bytes: `00` = opaque, `FF` = fully
 -- transparent.
@@ -33,11 +32,11 @@ local function utf8(cp)
 end
 
 local theme = {
-    -- palette (mutated by IPC)
-    accent = 'E9AE3D',
+    -- curated palette (never mutated)
+    accent = 'E9AE3D',   -- warm amber, BBGGRR of #3DAEE9 swap -> kept warm
     fg     = 'FFFFFF',
-    bg     = '201E1B',
-    warn   = '0074F6',
+    bg     = '141418',   -- near-black with a subtle cool tint
+    warn   = '3D47FF',   -- BBGGRR of #FF473D (error red)
 
     -- alpha scale
     a_opaque = '00',
@@ -56,7 +55,7 @@ local theme = {
     r_card    = 16,
     r_btn     = 12,
     r_pill    = 22,
-    r_chip    = 14,
+    r_chip    = 11,
 
     -- spacing
     sp1 = 4, sp2 = 8, sp3 = 12, sp4 = 16, sp5 = 24, sp6 = 32,
@@ -66,8 +65,9 @@ local theme = {
     fs_label  = 13,
     fs_body   = 14,
     fs_time   = 13,
-    fs_title  = 18,
-    fs_big    = 22,
+    fs_title  = 20,
+    fs_big    = 24,
+    fs_chip   = 11,
 
     -- icon font
     icon_font = 'Kinema Icons',
@@ -75,37 +75,40 @@ local theme = {
     icon_md   = 22,
     icon_lg   = 28,
 
-    -- main chrome sizing
-    rail_h            = 68,
-    rail_margin_x     = 20,
-    rail_margin_y     = 18,
-    rail_pad_x        = 14,
-    rail_gradient_h   = 180,
-    btn_lg            = 52,
-    btn_md            = 44,
-    time_w            = 54,
+    -- floating chrome sizing (HUD layout, no rail surface)
+    edge_margin_x      = 24,
+    bottom_margin_y    = 28,
+    bottom_row_gap     = 14,
+    island_pad_x       = 12,
+    island_gap         = 6,
+    vignette_h         = 220,
+    btn_lg             = 52,
+    btn_md             = 44,
+    time_w             = 62,
     compact_breakpoint = 980,
     tight_breakpoint   = 760,
 
-    -- timeline sizing
-    timeline_h       = 4,
-    timeline_hover_h = 8,
-    timeline_zone_h  = 28,
+    -- timeline sizing (thicker hero bar)
+    timeline_h       = 6,
+    timeline_hover_h = 10,
+    timeline_zone_h  = 32,
 
-    -- metadata
-    meta_x      = 20,
-    meta_y      = 18,
-    meta_pad_x  = 14,
-    meta_pad_y  = 10,
-    meta_max_w  = 520,
+    -- title strip (no card surface — shadowed text only)
+    title_x      = 28,
+    title_y      = 24,
+    title_gap    = 4,
+    chip_h       = 22,
+    chip_pad_x   = 8,
+    chip_gap     = 6,
+    chip_r       = 11,
 
-    -- volume overlay
-    volume_w         = 58,
-    volume_h         = 196,
-    volume_margin_r  = 18,
-    volume_margin_b  = 18,
-    volume_track_w   = 6,
-    volume_thumb_r   = 9,
+    -- volume column (thick vertical HUD bar)
+    volume_w         = 64,
+    volume_h         = 260,
+    volume_margin_r  = 20,
+    volume_margin_b  = 120,
+    volume_track_w   = 10,
+    volume_thumb_r   = 10,
 
     -- icon codepoints
     icon = {
@@ -131,6 +134,7 @@ local theme = {
         info            = utf8(0xE88E),
         keyboard        = utf8(0xE312),
         more_vert       = utf8(0xE5D4),
+        list            = utf8(0xE8EF),  -- toc
     },
 }
 

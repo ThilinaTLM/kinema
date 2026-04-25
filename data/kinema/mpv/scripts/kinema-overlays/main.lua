@@ -20,12 +20,14 @@ end
 
 local theme       = require 'theme'
 local S           = require 'state'
+local ass         = require 'ass'
 local transport   = require 'render_transport'
 local timeline    = require 'render_timeline'
 local overlay     = require 'render_overlay'
 local picker      = require 'render_picker'
 local volume      = require 'render_volume'
 local pause_flash = require 'render_pause_indicator'
+local gesture     = require 'render_gesture'
 
 local KINEMA = 'main'
 
@@ -135,6 +137,8 @@ observe('demuxer-cache-time', 'cache_time',       'number')
 observe('paused-for-cache',   'paused_for_cache', 'bool')
 observe('aid',                'aid')
 observe('sid',                'sid')
+observe('audio-delay',        'audio_delay',      'number')
+observe('sub-delay',          'sub_delay',        'number')
 
 mp.observe_property('volume', 'number', function(_, v)
     S.props.volume = v
@@ -162,23 +166,89 @@ mp.observe_property('osd-height', 'number', function()
     schedule_redraw()
 end)
 
+local FADE_SEC = 0.18
+local fade_timer = nil
+local last_fade_tick = 0
+
+local function stop_fade_timer()
+    if fade_timer then
+        fade_timer:kill()
+        fade_timer = nil
+    end
+end
+
+local function fade_tick()
+    local now = mp.get_time()
+    local dt  = math.max(0.001, now - last_fade_tick)
+    last_fade_tick = now
+    local step = dt / FADE_SEC
+    local function ease(cur, target)
+        if cur < target then
+            cur = cur + step
+            if cur > target then cur = target end
+        elseif cur > target then
+            cur = cur - step
+            if cur < target then cur = target end
+        end
+        return cur
+    end
+    S.chrome_opacity = ease(S.chrome_opacity, S.chrome_opacity_target)
+    S.title_opacity  = ease(S.title_opacity,  S.title_opacity_target)
+    redraw()
+    if S.chrome_opacity == S.chrome_opacity_target
+       and S.title_opacity == S.title_opacity_target then
+        stop_fade_timer()
+    end
+end
+
+local function ensure_fade_timer()
+    if fade_timer then return end
+    last_fade_tick = mp.get_time()
+    fade_timer = mp.add_periodic_timer(1.0 / 30.0, fade_tick)
+end
+
 redraw = function()
     S.reset_zones()
     local w = mp.get_property_number('osd-width', 1920)
     local h = mp.get_property_number('osd-height', 1080)
     local out = {}
 
-    if S.chrome_visible() then
+    -- Compute fade targets. If either differs from its current
+    -- value, kick a periodic timer to tween towards it; otherwise
+    -- keep the static value and render as-is.
+    S.chrome_opacity_target = S.chrome_visible() and 1 or 0
+    S.title_opacity_target  = S.metadata_visible() and 1 or 0
+    if S.chrome_opacity ~= S.chrome_opacity_target
+       or S.title_opacity ~= S.title_opacity_target then
+        ensure_fade_timer()
+    end
+
+    -- Bottom chrome (transport + persistent progress) fades with
+    -- `chrome_opacity`. The thin progress line is rendered even at
+    -- zero opacity because chrome visibility itself is what toggles
+    -- its role; no extra opacity gating needed on that path.
+    ass.set_opacity(S.chrome_opacity)
+    if S.chrome_visible() or S.chrome_opacity > 0.01 then
         transport.render(out, w, h)
-    else
+    end
+    ass.set_opacity(1.0)
+    if not S.chrome_visible() and S.chrome_opacity < 0.05 then
         timeline.render_progress_line(out, w, h)
         pause_flash.render(out, w, h)
     end
 
-    if S.metadata_visible() then
-        overlay.render_metadata_label(out, w, h)
+    ass.set_opacity(S.title_opacity)
+    if S.metadata_visible() or S.title_opacity > 0.01 then
+        overlay.render_title_strip(out, w, h)
     end
+    ass.set_opacity(1.0)
+
+    -- The volume column rides with chrome opacity; when chrome is
+    -- transiently visible via right-edge proximity or wheel grace,
+    -- `volume_visible()` still gates the call entirely.
+    ass.set_opacity(S.chrome_opacity)
     volume.render(out, w, h)
+    ass.set_opacity(1.0)
 
     if S.props.paused_for_cache then overlay.render_buffering(out, w, h) end
     if S.state.resume           then overlay.render_resume(out, w, h) end
@@ -186,6 +256,12 @@ redraw = function()
     if S.state.skip             then overlay.render_skip(out, w, h) end
     if S.state.picker_open      then picker.render(out, w, h) end
     if S.state.cheat_on         then overlay.render_cheatsheet(out, w, h) end
+    gesture.render(out, w, h)
+
+    -- Keep redrawing while a ripple is still fading.
+    if S.state.ripple and S.state.ripple.until_t > mp.get_time() then
+        schedule_redraw()
+    end
 
     mp.set_osd_ass(w, h, table.concat(out, '\n'))
 end
@@ -198,11 +274,25 @@ mp.register_script_message('set-context', function(t, s, k)
     schedule_redraw()
 end)
 
-mp.register_script_message('palette', function(a, fg, bg, wn)
-    theme.accent = a  or theme.accent
-    theme.fg     = fg or theme.fg
-    theme.bg     = bg or theme.bg
-    theme.warn   = wn or theme.warn
+mp.register_script_message('set-media-chips', function(json)
+    if not json or json == '' then
+        S.state.chips = {}
+        schedule_redraw()
+        return
+    end
+    local parsed, err = utils.parse_json(json)
+    if type(parsed) == 'table' then
+        local list = {}
+        for _, v in ipairs(parsed) do
+            if type(v) == 'string' and v ~= '' then
+                list[#list + 1] = v
+            end
+        end
+        S.state.chips = list
+    else
+        msg.warn('bad chips json: ' .. tostring(err))
+        S.state.chips = {}
+    end
     schedule_redraw()
 end)
 
@@ -245,16 +335,39 @@ mp.register_script_message('hide-next-episode', function()
     schedule_redraw()
 end)
 
-mp.register_script_message('show-skip', function(label, s, e)
+local auto_skip_trigger_timer = nil
+local function cancel_auto_skip_timer()
+    if auto_skip_trigger_timer then
+        auto_skip_trigger_timer:kill()
+        auto_skip_trigger_timer = nil
+    end
+end
+
+mp.register_script_message('show-skip', function(kind, label, s, e)
     S.state.skip = {
+        kind    = kind or 'intro',
         label   = label or '',
         start_s = tonumber(s) or 0,
         end_s   = tonumber(e) or 0,
     }
+    -- If the user has opted into always-skip for this kind, fire
+    -- the skip automatically after a short grace so they still see
+    -- a flash of the pill and can cancel by hovering it.
+    cancel_auto_skip_timer()
+    if S.state.auto_skip and S.state.auto_skip[S.state.skip.kind] then
+        auto_skip_trigger_timer = mp.add_timeout(0.35, function()
+            auto_skip_trigger_timer = nil
+            if S.state.skip then
+                mp.commandv('script-message-to', KINEMA,
+                    'skip-requested')
+            end
+        end)
+    end
     schedule_redraw()
 end)
 
 mp.register_script_message('hide-skip', function()
+    cancel_auto_skip_timer()
     S.state.skip = nil
     schedule_redraw()
 end)
@@ -348,12 +461,43 @@ mp.add_forced_key_binding('MBTN_LEFT', 'kinema-overlays-click',
                     S.mouse.press_rect) then
                 if z.on_click then z.on_click() end
             elseif not z and not S.mouse.press_rect then
-                mp.command('cycle pause')
+                -- No zone hit: either single-click-to-pause or
+                -- double-click-to-seek (±10 s, left/right half).
+                local now = mp.get_time()
+                local dt = now - (S.mouse.last_click_t or 0)
+                local dx = math.abs(
+                    x - (S.mouse.last_click_x or -9999))
+                local dy = math.abs(
+                    y - (S.mouse.last_click_y or -9999))
+                if dt < 0.4 and dx < 80 and dy < 80 then
+                    local ow = mp.get_property_number(
+                        'osd-width', 1920)
+                    local dir = (x < ow / 2) and -1 or 1
+                    mp.commandv('seek',
+                        tostring(dir * 10), 'relative')
+                    S.state.ripple = {
+                        until_t = now + gesture.DURATION,
+                        x = x, y = y, dir = dir,
+                    }
+                    S.mouse.last_click_t = 0 -- swallow triple
+                else
+                    mp.command('cycle pause')
+                    S.mouse.last_click_t = now
+                    S.mouse.last_click_x = x
+                    S.mouse.last_click_y = y
+                end
             end
             S.mouse.press_rect = nil
             schedule_redraw()
         end
     end, { complex = true })
+
+mp.add_forced_key_binding('s', 'kinema-skip', function()
+    bump_keyboard_grace()
+    if S.state.skip then
+        mp.commandv('script-message-to', KINEMA, 'skip-requested')
+    end
+end)
 
 mp.add_forced_key_binding('n', 'kinema-accept-next', function()
     bump_keyboard_grace()
@@ -408,6 +552,10 @@ mp.register_event('start-file', function()
     S.state.skip        = nil
     S.state.picker_open = nil
     S.state.cheat_on    = false
+    -- "Always skip" is a session preference within a single file;
+    -- we do not carry it across loadfiles because the next file
+    -- may have different chapter semantics.
+    S.state.auto_skip   = { intro = false, outro = false, credits = false }
     S.mouse.press_rect  = nil
     bump_metadata_grace()
     schedule_redraw()

@@ -9,14 +9,18 @@ local M = {}
 
 M.state = {
     context     = { title = '', subtitle = '', kind = '' },
+    chips       = {},   -- media-info pills (4K, HDR10, EAC3 5.1 ...)
     resume      = nil,
     next_ep     = nil,
     skip        = nil,
     cheat_text  = '',
     cheat_on    = false,
-    picker_open = nil,   -- 'audio' / 'sub' / 'speed' / 'overflow'
+    picker_open = nil,   -- 'audio' / 'sub' / 'speed' / 'overflow' / 'chapters'
     tracks      = { audio = {}, subtitle = {} },
     pause_flash_until = 0,
+    -- Session-level "always skip" preferences keyed by skip kind
+    -- ("intro" / "outro" / "credits"). Cleared on start-file.
+    auto_skip   = { intro = false, outro = false, credits = false },
 }
 
 M.props = {
@@ -32,13 +36,18 @@ M.props = {
     aid               = nil,
     sid               = nil,
     chapters          = {},
+    audio_delay       = 0,
+    sub_delay         = 0,
 }
 
 M.mouse = {
-    x          = -1,
-    y          = -1,
-    pressed    = false,
-    press_rect = nil,
+    x              = -1,
+    y              = -1,
+    pressed        = false,
+    press_rect     = nil,
+    last_click_t   = 0,
+    last_click_x   = -1,
+    last_click_y   = -1,
 }
 
 M.visibility = {
@@ -56,6 +65,16 @@ M.BOTTOM_STRIP_PX  = 180
 M.RIGHT_STRIP_PX   = 84
 M.METADATA_GRACE_S = 2.5
 M.VOLUME_GRACE_S   = 1.5
+
+-- Animation-driven opacity values. `chrome_opacity` fades the
+-- bottom clusters (including the vignette, volume bar, and
+-- always-visible persistent progress line); `title_opacity` fades
+-- the top-left title strip. `main.lua` tweens them towards their
+-- `*_target` values on a periodic timer.
+M.chrome_opacity        = 0
+M.chrome_opacity_target = 0
+M.title_opacity         = 0
+M.title_opacity_target  = 0
 
 function M.chrome_sticky()
     return M.props.paused_for_cache
@@ -90,6 +109,11 @@ function M.volume_visible()
        or M.state.resume or M.state.next_ep then
         return false
     end
+    -- The thick HUD bar rides with the bottom chrome: when the
+    -- floating controls are visible, so is the volume column.
+    -- When chrome is hidden, fall back to right-edge proximity or
+    -- a transient grace window from the last wheel / mute action.
+    if M.chrome_visible() then return true end
     local now = mp.get_time()
     return M.visibility.right_near
         or now < M.visibility.volume_until
@@ -165,14 +189,16 @@ function M.fmt_progress(pos, dur)
 end
 
 function M.chapter_at(t)
-    if not t then return '' end
+    if not t then return '', 0 end
     local title = ''
-    for _, ch in ipairs(M.props.chapters or {}) do
+    local idx = 0
+    for i, ch in ipairs(M.props.chapters or {}) do
         if ch.time and ch.time <= t then
             title = ch.title or title
+            idx = i
         end
     end
-    return title
+    return title, idx
 end
 
 return M

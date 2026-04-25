@@ -1,7 +1,9 @@
 -- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Modern single-rail bottom transport.
+-- HUD-style floating bottom chrome: hero timeline on top, two
+-- floating button clusters below, over a soft bottom vignette.
+-- No rail surface, no gloss.
 
 local mp       = require 'mp'
 local theme    = require 'theme'
@@ -13,75 +15,94 @@ local M = {}
 
 local KINEMA = 'main'
 
-local function rail_rect(w, h)
-    local x = theme.rail_margin_x
-    local y = h - theme.rail_margin_y - theme.rail_h
-    local rw = w - theme.rail_margin_x * 2
-    return x, y, rw, theme.rail_h
+local function ctrl_rect(w, h)
+    -- Control row vertical layout: the play button (btn_lg) drives
+    -- row height; smaller buttons centre-align against its midpoint.
+    local y = h - theme.bottom_margin_y - theme.btn_lg
+    return theme.edge_margin_x, y,
+        w - theme.edge_margin_x * 2, theme.btn_lg
 end
 
 function M.render_bg(out, w, h)
+    -- Soft bottom vignette keeps icons legible over bright footage
+    -- without a panel surface.
     ass.gradient(out,
-        0, h - theme.rail_gradient_h,
-        w, theme.rail_gradient_h,
-        theme.bg, 'FF', 'A8', 6)
+        0, h - theme.vignette_h,
+        w, theme.vignette_h,
+        theme.bg, 'FF', 'A8', 8)
+end
 
-    local x, y, rw, rh = rail_rect(w, h)
-    ass.surface(out, x, y, rw, rh, {
-        radius = theme.r_surface,
-        alpha = theme.a_chrome,
-        color = theme.bg,
-        gloss_alpha = theme.a_ghost,
-    })
+-- Local helpers
+local function time_chip(out, x, y, label, align)
+    out[#out + 1] = ass.text(x, y,
+        theme.fs_time, label, theme.fg, align or 4,
+        theme.a_dim, 'monospace')
 end
 
 function M.render(out, w, h)
     M.render_bg(out, w, h)
 
-    local x, y, rw, rh = rail_rect(w, h)
-    local cy = y + math.floor(rh / 2)
-    local pad_x = theme.rail_pad_x
-    local gap = theme.sp1
+    local cx, cy, rw, rh = ctrl_rect(w, h)
+    local mid = cy + math.floor(rh / 2)
+    local gap = theme.island_gap
     local compact = w < theme.compact_breakpoint
     local tight = w < theme.tight_breakpoint
 
-    local left = x + pad_x
+    -- --- Timeline row (above the control cluster) --------------------
+    local tl_y = cy - theme.bottom_row_gap
+        - theme.timeline_hover_h
+    timeline.render_hero(out, cx, tl_y + theme.timeline_hover_h / 2, rw)
+
+    -- --- Left cluster ------------------------------------------------
+    local left = cx
+    local elapsed = S.fmt_time(S.props.time_pos or 0)
+    if not tight then
+        time_chip(out, left, mid, elapsed, 4)
+        left = left + theme.time_w + theme.sp2
+    end
+
     local play_cp = S.props.paused and theme.icon.play_arrow
                                     or theme.icon.pause
     ass.button(out, {
-        x = left, y = y + math.floor((rh - theme.btn_lg) / 2),
+        x = left, y = cy,
         w = theme.btn_lg, h = theme.btn_lg,
         icon_cp = play_cp, icon_size = theme.icon_lg,
         on_click = function() mp.command('cycle pause') end,
+        -- Wheel over the play button preserves ±10 s seek as a
+        -- quick-seek fallback now that the rail ±10 s buttons
+        -- are gone in favour of chapter-step transport.
+        on_wheel = function(dir)
+            mp.commandv('seek', tostring(dir * 10), 'relative')
+        end,
+        on_rclick = function()
+            mp.commandv('seek', '-10', 'relative')
+        end,
     })
     left = left + theme.btn_lg + gap
 
-    if not tight then
+    local has_chapters = (S.props.chapters and #S.props.chapters >= 2)
+    if has_chapters then
         ass.button(out, {
-            x = left, y = y + math.floor((rh - theme.btn_md) / 2),
+            x = left, y = cy + math.floor((rh - theme.btn_md) / 2),
             w = theme.btn_md, h = theme.btn_md,
-            icon_cp = theme.icon.replay_10,
+            icon_cp = theme.icon.skip_previous,
             icon_size = theme.icon_md,
-            on_click = function() mp.command('seek -10') end,
+            on_click = function() mp.command('add chapter -1') end,
         })
         left = left + theme.btn_md
 
         ass.button(out, {
-            x = left, y = y + math.floor((rh - theme.btn_md) / 2),
+            x = left, y = cy + math.floor((rh - theme.btn_md) / 2),
             w = theme.btn_md, h = theme.btn_md,
-            icon_cp = theme.icon.forward_10,
+            icon_cp = theme.icon.skip_next,
             icon_size = theme.icon_md,
-            on_click = function() mp.command('seek 10') end,
+            on_click = function() mp.command('add chapter 1') end,
         })
         left = left + theme.btn_md + theme.sp2
-
-        out[#out + 1] = ass.text(left, cy, theme.fs_time,
-            S.fmt_time(S.props.time_pos or 0),
-            theme.fg, 4, theme.a_dim, 'monospace')
-        left = left + theme.time_w + theme.sp2
     end
 
-    local right = x + rw - pad_x
+    -- --- Right cluster (laid out right-to-left) ----------------------
+    local right = cx + rw
 
     local function put_button(opts)
         local bw = opts.w or theme.btn_md
@@ -89,7 +110,7 @@ function M.render(out, w, h)
         right = right - bw
         ass.button(out, {
             x = right,
-            y = y + math.floor((rh - bh) / 2),
+            y = cy + math.floor((rh - bh) / 2),
             w = bw,
             h = bh,
             icon_cp = opts.icon_cp,
@@ -102,6 +123,16 @@ function M.render(out, w, h)
             on_rclick = opts.on_rclick,
         })
         right = right - (opts.gap_after or gap)
+    end
+
+    -- Remaining time chip first (it flanks the right cluster).
+    if not tight and (S.props.duration or 0) > 0 then
+        right = right - theme.time_w
+        time_chip(out, right + theme.time_w, mid,
+            '-' .. S.fmt_time(math.max(0,
+                (S.props.duration or 0) - (S.props.time_pos or 0))),
+            6)
+        right = right - theme.sp2
     end
 
     put_button({
@@ -117,24 +148,6 @@ function M.render(out, w, h)
         icon_cp = fs_cp,
         on_click = function()
             mp.commandv('script-message-to', KINEMA, 'toggle-fullscreen')
-        end,
-    })
-
-    put_button({
-        icon_cp = S.props.mute and theme.icon.volume_off
-                               or theme.icon.volume_up,
-        active = S.volume_visible(),
-        on_click = function()
-            S.visibility.volume_until = mp.get_time() + S.VOLUME_GRACE_S
-            mp.command('cycle mute')
-        end,
-        on_wheel = function(dir)
-            S.visibility.volume_until = mp.get_time() + S.VOLUME_GRACE_S
-            mp.commandv('add', 'volume', tostring(dir * 5))
-        end,
-        on_rclick = function()
-            S.visibility.volume_until = mp.get_time() + S.VOLUME_GRACE_S
-            mp.commandv('set', 'volume', '100')
         end,
         gap_after = theme.sp2,
     })
@@ -187,27 +200,27 @@ function M.render(out, w, h)
                 S.state.picker_open = (S.state.picker_open == 'audio')
                     and nil or 'audio'
             end,
-            gap_after = theme.sp2,
         })
-    end
 
-    if not tight and (S.props.duration or 0) > 0 then
-        right = right - theme.time_w
-        out[#out + 1] = ass.text(right + theme.time_w, cy, theme.fs_time,
-            '-' .. S.fmt_time(math.max(0,
-                (S.props.duration or 0) - (S.props.time_pos or 0))),
-            theme.fg, 6, theme.a_dim, 'monospace')
-        right = right - theme.sp2
+        if has_chapters then
+            put_button({
+                icon_cp = theme.icon.list,
+                active = S.state.picker_open == 'chapters',
+                on_click = function()
+                    S.state.picker_open = (S.state.picker_open == 'chapters')
+                        and nil or 'chapters'
+                end,
+                gap_after = theme.sp2,
+            })
+        end
     end
-
-    local timeline_x = left
-    local timeline_w = right - left
-    if timeline_w < 100 then return end
-    timeline.render_inline(out, timeline_x, cy, timeline_w)
 end
 
 function M.footprint_h()
-    return theme.rail_h + theme.rail_margin_y
+    -- Used by render_overlay / render_volume to reserve space above
+    -- the floating chrome. Timeline row + control row + margins.
+    return theme.btn_lg + theme.bottom_margin_y
+        + theme.bottom_row_gap + theme.timeline_hover_h
 end
 
 return M

@@ -84,7 +84,8 @@ public:
         const kinema::api::PlaybackContext& ctx, int countdownSec);
     virtual void updateNextEpisodeCountdown(int seconds);
     virtual void hideNextEpisodeBanner();
-    virtual void showSkipChapter(const QString& label,
+    virtual void showSkipChapter(const QString& kind,
+        const QString& label,
         qint64 startSec, qint64 endSec);
     virtual void hideSkipChapter();
 
@@ -124,11 +125,6 @@ protected:
     void keyPressEvent(QKeyEvent* e) override;
     void showEvent(QShowEvent* e) override;
     void hideEvent(QHideEvent* e) override;
-    // Qt dispatches `QEvent::PaletteChange` to every widget when the
-    // application palette flips (Breeze ↔ Breeze-dark, etc.). We
-    // use it instead of `QGuiApplication::paletteChanged`, which is
-    // deprecated in Qt 6.9+.
-    void changeEvent(QEvent* e) override;
 
 private:
     void toggleFullscreen();
@@ -139,10 +135,11 @@ private:
     void saveGeometryToConfig();
     void saveVolumeToConfig();
 
-    // Push the current Qt palette (BBGGRR strings) into the Lua
-    // chrome. Called on every `play()` and whenever the application
-    // palette changes at runtime.
-    void pushPalette();
+    // Rebuild the media-info chip JSON from the current track list
+    // and cached mpv params, and push it to the Lua chrome. Called
+    // on every `play()` and whenever track-list / video-params /
+    // audio-params change.
+    void pushMediaChips();
     // Send the translated cheat-sheet text once per `play()` so the
     // `?` overlay has its strings. Cheap enough to resend on every
     // load without optimising.

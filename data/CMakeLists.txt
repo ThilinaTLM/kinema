@@ -43,6 +43,8 @@ set(_kinema_mpv_script_files
     kinema/mpv/scripts/kinema-overlays/render_overlay.lua
     kinema/mpv/scripts/kinema-overlays/render_picker.lua
     kinema/mpv/scripts/kinema-overlays/render_volume.lua
+    kinema/mpv/scripts/kinema-overlays/render_chips.lua
+    kinema/mpv/scripts/kinema-overlays/render_gesture.lua
     kinema/mpv/scripts/kinema-overlays/render_pause_indicator.lua
 )
 

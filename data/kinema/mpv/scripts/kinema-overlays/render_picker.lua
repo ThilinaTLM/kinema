@@ -44,9 +44,44 @@ local function build_overflow_entries()
             selected = false,
         },
     }
+    if S.props.chapters and #S.props.chapters >= 2 then
+        entries[#entries + 1] = {
+            id = 'chapters',
+            label = 'Chapters',
+            hint = string.format('%d chapters', #S.props.chapters),
+            icon_cp = theme.icon.list,
+            selected = false,
+        }
+    end
     return entries, function(id)
         S.state.picker_open = id
     end, 'Controls'
+end
+
+local function build_chapter_entries()
+    local entries = {}
+    local chs = S.props.chapters or {}
+    local pos = S.props.time_pos or 0
+    local _, cur_idx = S.chapter_at(pos)
+    for i, ch in ipairs(chs) do
+        local t = ch.time or 0
+        local title = ch.title or ''
+        local label = title ~= ''
+            and string.format('Ch %d \xc2\xb7 %s', i, title)
+            or string.format('Ch %d', i)
+        entries[#entries + 1] = {
+            id       = t,
+            label    = label,
+            hint     = S.fmt_time(t),
+            icon_cp  = theme.icon.list,
+            selected = (i == cur_idx),
+        }
+    end
+    return entries, function(t)
+        mp.commandv('seek', tostring(t), 'absolute')
+        S.state.picker_open = nil
+        M.ensure_bindings(false)
+    end, 'Chapters'
 end
 
 local function build_audio_entries()
@@ -77,7 +112,9 @@ local function build_audio_entries()
             id == -1 and 'no' or tostring(id))
         S.state.picker_open = nil
         M.ensure_bindings(false)
-    end, 'Audio'
+    end, 'Audio', {
+        extra_bottom = delay_footer('audio-delay', 'Audio delay'),
+    }
 end
 
 local function build_subtitle_entries()
@@ -109,7 +146,26 @@ local function build_subtitle_entries()
             id == -1 and 'no' or tostring(id))
         S.state.picker_open = nil
         M.ensure_bindings(false)
-    end, 'Subtitles'
+    end, 'Subtitles', {
+        extra_bottom = delay_footer('sub-delay', 'Subtitle delay'),
+    }
+end
+
+-- Small horizontal pill button used inside picker extras (slider
+-- step controls, delay adjust). Returns nothing; callers supply a
+-- fresh x per button.
+local function small_btn(out, x, y, w, h, label, on_click)
+    local hover   = S.is_hover(x, y, w, h)
+    local pressed = S.is_pressed(x, y, w, h)
+    ass.pill(out, x, y, w, h, theme.fg,
+        pressed and theme.a_dim or theme.a_subtle)
+    if hover and not pressed then
+        ass.pill(out, x, y, w, h, theme.fg, theme.a_faint)
+    end
+    out[#out + 1] = ass.text(x + w / 2,
+        y + h / 2 + (pressed and 1 or 0),
+        theme.fs_label, label, theme.fg, 5)
+    S.add_zone(x, y, w, h, on_click)
 end
 
 local function build_speed_entries()
@@ -123,11 +179,93 @@ local function build_speed_entries()
             selected = math.abs((S.props.speed or 1) - s) < 0.01,
         }
     end
+    -- Extra header: live slider + fine-step buttons. The slider
+    -- height is ~ ROW_H so the list layout math stays simple.
+    local extra_top = function(out, x, y, w)
+        local cur = tonumber(S.props.speed) or 1.0
+        local track_x = x + ROW_PAD_X
+        local track_w = w - ROW_PAD_X * 2
+        local track_y = y + 18
+        local track_h = 6
+        local pct = math.max(0,
+            math.min(1, (cur - 0.25) / (4.0 - 0.25)))
+        out[#out + 1] = ass.rounded_rect(track_x, track_y,
+            track_w, track_h, track_h / 2, theme.fg, theme.a_track)
+        local fill_w = math.floor(track_w * pct)
+        if fill_w > 0 then
+            out[#out + 1] = ass.rounded_rect(track_x, track_y,
+                fill_w, track_h, track_h / 2,
+                theme.accent, theme.a_opaque)
+        end
+        local thumb_x = track_x + fill_w
+        out[#out + 1] = ass.circle(thumb_x, track_y + track_h / 2,
+            7, theme.fg, theme.a_opaque)
+        out[#out + 1] = ass.circle(thumb_x, track_y + track_h / 2,
+            4, theme.accent, theme.a_opaque)
+        -- Drag/click: set speed along the slider.
+        S.add_zone(track_x, track_y - 12, track_w, track_h + 24, {
+            on_click = function()
+                local mx, _ = mp.get_mouse_pos()
+                local p = math.max(0,
+                    math.min(1, (mx - track_x) / track_w))
+                local v = 0.25 + p * (4.0 - 0.25)
+                mp.commandv('set', 'speed', tostring(v))
+            end,
+            on_wheel = function(dir)
+                mp.commandv('add', 'speed',
+                    tostring(dir * 0.05))
+            end,
+        })
+        -- Step controls and hint labels.
+        local btn_y = track_y + track_h + 10
+        local btn_h = 26
+        local btn_w = 48
+        small_btn(out, track_x, btn_y, btn_w, btn_h, '[ \xe2\x88\x92 ]',
+            function() mp.commandv('add', 'speed', '-0.1') end)
+        small_btn(out, track_x + btn_w + theme.sp2,
+            btn_y, btn_w, btn_h, '[ + ]',
+            function() mp.commandv('add', 'speed', '0.1') end)
+        small_btn(out, track_x + (btn_w + theme.sp2) * 2,
+            btn_y, 64, btn_h, 'Reset',
+            function() mp.commandv('set', 'speed', '1.0') end)
+        out[#out + 1] = ass.text(track_x + track_w,
+            btn_y + btn_h / 2, theme.fs_label,
+            string.format('%.2fx', cur), theme.fg, 6, theme.a_dim)
+        return 64 -- approximate header-extra height
+    end
     return entries, function(s)
         mp.commandv('script-message-to', KINEMA, 'pick-speed', tostring(s))
         S.state.picker_open = nil
         M.ensure_bindings(false)
-    end, 'Playback speed'
+    end, 'Playback speed', { extra_top = extra_top }
+end
+
+-- Delay control footer shared by the audio and subtitle pickers.
+local function delay_footer(prop_name, label_prefix)
+    return function(out, x, y_bottom, w)
+        local h = 44
+        local y = y_bottom - h
+        local cur = tonumber(S.props[prop_name:gsub('-', '_')]) or 0.0
+        out[#out + 1] = ass.text(x + ROW_PAD_X, y + h / 2,
+            theme.fs_label,
+            string.format('%s: %+.2f s', label_prefix, cur),
+            theme.fg, 4, theme.a_dim)
+        local btn_w = 40
+        local btn_h = 28
+        local btn_y = y + (h - btn_h) / 2
+        local right = x + w - ROW_PAD_X
+        right = right - btn_w
+        small_btn(out, right, btn_y, btn_w, btn_h, '+',
+            function() mp.commandv('add', prop_name, '0.1') end)
+        right = right - btn_w - theme.sp1
+        small_btn(out, right, btn_y, btn_w + 16, btn_h, 'Reset',
+            function() mp.commandv('set', prop_name, '0') end)
+        right = right - (btn_w + theme.sp1 + 16)
+        small_btn(out, right, btn_y, btn_w, btn_h,
+            '\xe2\x88\x92',
+            function() mp.commandv('add', prop_name, '-0.1') end)
+        return h
+    end
 end
 
 local KB_PREFIX = 'kinema-picker-'
@@ -188,18 +326,21 @@ function M.render(out, w, h)
         return
     end
 
-    local entries, activate, header
+    local entries, activate, header, opts
     if S.state.picker_open == 'overflow' then
-        entries, activate, header = build_overflow_entries()
+        entries, activate, header, opts = build_overflow_entries()
     elseif S.state.picker_open == 'audio' then
-        entries, activate, header = build_audio_entries()
+        entries, activate, header, opts = build_audio_entries()
     elseif S.state.picker_open == 'sub' then
-        entries, activate, header = build_subtitle_entries()
+        entries, activate, header, opts = build_subtitle_entries()
     elseif S.state.picker_open == 'speed' then
-        entries, activate, header = build_speed_entries()
+        entries, activate, header, opts = build_speed_entries()
+    elseif S.state.picker_open == 'chapters' then
+        entries, activate, header, opts = build_chapter_entries()
     else
         return
     end
+    opts = opts or {}
 
     current_entries_ptr  = entries
     current_activate_ptr = activate
@@ -232,16 +373,32 @@ function M.render(out, w, h)
         end,
     })
 
+    local extra_top_h = 0
+    if opts.extra_top then
+        extra_top_h = opts.extra_top(out,
+            px, py + HEADER_H, pw) or 0
+    end
+    local extra_bottom_h = 0
+    if opts.extra_bottom then
+        -- Render is deferred until after the list so it can claim
+        -- space at the bottom of the sheet.
+        extra_bottom_h = 48 -- reserve; actual draw below knows real h
+    end
+
     if #entries == 0 then
         out[#out + 1] = ass.text(px + pw / 2,
-            py + HEADER_H + ROW_H / 2,
+            py + HEADER_H + extra_top_h + ROW_H / 2,
             theme.fs_label, 'No tracks available',
             theme.fg, 5, theme.a_dim)
+        if opts.extra_bottom then
+            opts.extra_bottom(out, px, py + ph - theme.sp1, pw)
+        end
         return
     end
 
-    local list_y = py + HEADER_H + theme.sp1
-    local list_max_h = ph - HEADER_H - theme.sp1
+    local list_y = py + HEADER_H + extra_top_h + theme.sp1
+    local list_max_h = ph - HEADER_H - extra_top_h - extra_bottom_h
+        - theme.sp1
     local rows_fit = math.max(1, math.floor(list_max_h / ROW_H))
     local sel_idx = M.selected[S.state.picker_open] or 1
 
@@ -312,6 +469,10 @@ function M.render(out, w, h)
                 M.selected[S.state.picker_open] = ei
                 activate(eid)
             end)
+    end
+
+    if opts.extra_bottom then
+        opts.extra_bottom(out, px, py + ph - theme.sp1, pw)
     end
 end
 

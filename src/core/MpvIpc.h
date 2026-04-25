@@ -46,9 +46,10 @@ public:
     /// Prime the title strip. `kind` is "movie" or "series".
     void setContext(const QString& title, const QString& subtitle,
         const QString& kind);
-    /// Push ASS `BBGGRR` colour strings for the palette slots.
-    void setPalette(const QString& accent, const QString& fg,
-        const QString& bg, const QString& warn);
+    /// Push the media-info chip row (JSON array of short strings
+    /// such as `["4K","HDR10","H.265","EAC3 5.1"]`). The Lua
+    /// chrome renders one pill per entry beneath the subtitle.
+    void setMediaChips(const QByteArray& json);
     /// Newline-separated pre-translated shortcut list.
     void setCheatSheetText(const QString& text);
     /// Resume prompt lifecycle.
@@ -61,12 +62,14 @@ public:
     void hideNextEpisode();
     /// Skip-chapter pill lifecycle.
     ///
-    /// `startSec` / `endSec` bracket the chapter range so the
-    /// timeline renderer can tint the band, in addition to the
-    /// floating action pill. Values are whole seconds to keep
-    /// the wire format tidy; sub-second precision is not needed
-    /// for a skip band that is at least a few seconds wide.
-    void showSkip(const QString& label,
+    /// `kind` is `"intro"` / `"outro"` / `"credits"`; the Lua side
+    /// uses it to persist an "always skip" toggle per kind for the
+    /// current session. `startSec` / `endSec` bracket the chapter
+    /// range so the timeline renderer can tint the band in addition
+    /// to the floating action pill. Whole seconds — sub-second
+    /// precision is not needed for a skip band that is at least a
+    /// few seconds wide.
+    void showSkip(const QString& kind, const QString& label,
         qint64 startSec, qint64 endSec);
     void hideSkip();
     /// Feed the audio / subtitle picker lists. JSON shape is
