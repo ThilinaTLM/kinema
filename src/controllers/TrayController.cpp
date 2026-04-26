@@ -26,12 +26,18 @@
 #include <QSystemTrayIcon>
 #include <QWindow>
 
+static void initTrayResources()
+{
+    Q_INIT_RESOURCE(tray_resources);
+}
+
 namespace kinema::controllers {
 
 TrayController::TrayController(QWindow* mainWindow, QObject* parent)
     : QObject(parent)
     , m_mainWindow(mainWindow)
 {
+    initTrayResources();
     // Respect desktops that don't expose any tray at all (minimal
     // window managers, GNOME without extensions). KStatusNotifierItem
     // falls back from SNI to legacy QSystemTrayIcon automatically

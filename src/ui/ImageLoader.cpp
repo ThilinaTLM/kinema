@@ -4,6 +4,7 @@
 #include "ui/ImageLoader.h"
 
 #include "core/HttpClient.h"
+#include "core/UrlRedactor.h"
 #include "kinema_debug.h"
 
 #include <QCoro/QCoroFuture>
@@ -20,13 +21,13 @@
 namespace kinema::ui {
 
 namespace {
-// Rough KB estimate used as QCache cost. A null/zero-depth pixmap still
-// costs 1 so it can be inserted (QCache ignores items with cost > maxCost).
-int costKB(const QPixmap& pm)
+// Rough KB estimate used as QCache cost. A null/zero-size image still costs
+// 1 so it can be inserted (QCache ignores items with cost > maxCost).
+int costKB(const QImage& image)
 {
-    const int depth = pm.depth() > 0 ? pm.depth() : 32;
-    const qint64 bytes = static_cast<qint64>(pm.width())
-        * static_cast<qint64>(pm.height()) * depth / 8;
+    const qint64 bytes = image.isNull()
+        ? 1
+        : std::max<qsizetype>(1, image.sizeInBytes());
     return static_cast<int>(std::max<qint64>(1, bytes / 1024));
 }
 } // namespace
@@ -52,10 +53,10 @@ QString ImageLoader::diskPathFor(const QUrl& url) const
     return m_diskDir + QLatin1Char('/') + QString::fromLatin1(hash.toHex()) + QStringLiteral(".img");
 }
 
-QPixmap ImageLoader::cached(const QUrl& url) const
+QImage ImageLoader::cached(const QUrl& url) const
 {
-    if (auto* pm = m_memCache.object(url)) {
-        return *pm;
+    if (auto* image = m_memCache.object(url)) {
+        return *image;
     }
     return {};
 }
@@ -65,42 +66,31 @@ void ImageLoader::clearMemoryCache()
     m_memCache.clear();
 }
 
-QCoro::Task<QPixmap> ImageLoader::requestPoster(QUrl url)
+QCoro::Task<QImage> ImageLoader::requestPoster(QUrl url)
 {
     if (!url.isValid() || url.isEmpty()) {
-        co_return QPixmap();
+        co_return QImage();
     }
 
     // 1. Memory cache. We deliberately do NOT emit posterReady here:
-    // the caller either co_awaits (and gets the pixmap via co_return)
+    // the caller either co_awaits (and gets the image via co_return)
     // or probes synchronously via cached() — no fetch actually ran, and
-    // emitting here would re-enter handlers like DetailPane's that call
-    // updatePoster() → requestPoster() in response, causing unbounded
-    // recursion when the first real emission (disk hit / HTTP) has
-    // already populated the memory cache.
-    if (const auto* pm = m_memCache.object(url)) {
-        // Return a deliberate copy rather than `co_return *pm;`. QCoro's
-        // TaskPromise<T>::return_value<U>(U&&) template picks up the lvalue
-        // `*pm` with U = QPixmap& and then calls `T(std::move(value))`,
-        // move-constructing from the cache entry. Since QPixmap is
-        // implicitly shared, the move leaves the cached QPixmap null —
-        // any later cached()/object() probe for this URL returns an empty
-        // pixmap, even though the cache slot still exists at the same
-        // pointer. That breaks DetailPane::updatePoster, which probes
-        // the memory cache synchronously after requestPoster() and finds
-        // a null pixmap it just "saw" moments earlier.
-        const QPixmap copy = *pm;
+    // emitting here would re-enter handlers that call requestPoster() in
+    // response, causing unbounded recursion when the first real emission
+    // (disk hit / HTTP) has already populated the memory cache.
+    if (const auto* image = m_memCache.object(url)) {
+        const QImage copy = *image;
         co_return copy;
     }
 
     // 2. Disk cache
     const auto diskPath = diskPathFor(url);
     if (QFileInfo::exists(diskPath)) {
-        QPixmap pm;
-        if (pm.load(diskPath) && !pm.isNull()) {
-            m_memCache.insert(url, new QPixmap(pm), costKB(pm));
+        QImage image;
+        if (image.load(diskPath) && !image.isNull()) {
+            m_memCache.insert(url, new QImage(image), costKB(image));
             Q_EMIT posterReady(url);
-            co_return pm;
+            co_return image;
         }
         // Corrupt file — remove and fall through to refetch.
         QFile::remove(diskPath);
@@ -112,21 +102,19 @@ QCoro::Task<QPixmap> ImageLoader::requestPoster(QUrl url)
         auto promise = it.value().promise;
         auto fut = promise->future();
         co_await qCoro(fut).waitForFinished();
-        co_return fut.isValid() && !fut.isCanceled() ? fut.result() : QPixmap();
+        co_return fut.isValid() && !fut.isCanceled() ? fut.result() : QImage();
     }
 
-    auto promise = QSharedPointer<QPromise<QPixmap>>::create();
+    auto promise = QSharedPointer<QPromise<QImage>>::create();
     promise->start();
     m_inFlight.insert(url, InFlight { promise });
 
-    QPixmap result;
+    QImage result;
     try {
         const auto bytes = co_await m_http->get(url);
-        QImage img;
-        if (img.loadFromData(bytes)) {
-            result = QPixmap::fromImage(img);
+        if (result.loadFromData(bytes)) {
             if (!result.isNull()) {
-                m_memCache.insert(url, new QPixmap(result), costKB(result));
+                m_memCache.insert(url, new QImage(result), costKB(result));
                 QFile f(diskPath);
                 if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                     f.write(bytes);
@@ -134,7 +122,8 @@ QCoro::Task<QPixmap> ImageLoader::requestPoster(QUrl url)
                 }
             }
         } else {
-            qCDebug(KINEMA) << "poster decode failed for" << url;
+            qCDebug(KINEMA) << "poster decode failed for"
+                            << core::redactUrlForLog(url);
         }
     } catch (const std::exception& e) {
         qCDebug(KINEMA) << "poster fetch failed:" << e.what();

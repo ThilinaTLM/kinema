@@ -39,6 +39,7 @@ set(kinema_core_SRCS
     core/SubtitleCacheStore.cpp
     core/TokenStore.cpp
     core/TorrentioConfig.cpp
+    core/UrlRedactor.cpp
 
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp

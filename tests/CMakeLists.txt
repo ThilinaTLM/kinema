@@ -16,6 +16,11 @@ ecm_add_test(tst_magnet.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_url_redactor.cpp
+    TEST_NAME tst_url_redactor
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_torrentio_config.cpp
     TEST_NAME tst_torrentio_config
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -236,7 +241,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
     )
 endif()
 
-foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
+foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
          tst_date_format tst_app_settings

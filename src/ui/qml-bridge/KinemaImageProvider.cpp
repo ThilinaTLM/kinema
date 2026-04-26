@@ -5,10 +5,9 @@
 
 #include "ui/ImageLoader.h"
 
-#include <QCoro/QCoroTask>
-
 #include <QImage>
-#include <QPixmap>
+#include <QMetaObject>
+#include <QPointer>
 #include <QQuickTextureFactory>
 #include <QUrl>
 #include <QUrlQuery>
@@ -18,9 +17,11 @@ namespace kinema::ui::qml {
 namespace {
 
 // The async response type lives in the cpp because nothing outside
-// this provider needs to construct or hold one. It owns the
-// connection back to ImageLoader and resolves itself when the
-// pixmap arrives.
+// this provider needs to construct or hold one. QQuick calls async
+// image providers from its pixmap-reader thread, while ImageLoader
+// and the shared HttpClient live on the GUI thread. All cache/network
+// interactions are therefore marshalled back to ImageLoader's thread;
+// only the final QImage crosses back to this response object.
 class KinemaImageResponse : public QQuickImageResponse
 {
 public:
@@ -34,16 +35,6 @@ public:
             return;
         }
 
-        // Memory-cache fast path: avoids spinning the coroutine and
-        // a queued signal trip just to return an already-decoded
-        // pixmap.
-        const auto cached = loader->cached(url);
-        if (!cached.isNull()) {
-            QMetaObject::invokeMethod(this, [this, cached] { resolve(cached); },
-                Qt::QueuedConnection);
-            return;
-        }
-
         // Disk-cache hits and HTTP fetches both eventually fire
         // posterReady(url). Subscribe BEFORE kicking the coroutine
         // so we never miss the signal on a fast in-process path.
@@ -52,18 +43,13 @@ public:
                 if (finishedUrl != m_url) {
                     return;
                 }
-                if (!m_loader) {
-                    resolve({});
-                    return;
-                }
-                resolve(m_loader->cached(m_url));
-            });
+                resolveCachedOnLoaderThread();
+            }, Qt::QueuedConnection);
 
-        // Fire the fetch and discard the returned task — completion
-        // is observed via `posterReady` above. QCoro's task is
-        // started eagerly when the caller doesn't co_await, so this
-        // begins immediately.
-        loader->requestPoster(url);
+        // Memory-cache fast path plus fetch kickoff. This deliberately runs
+        // on the loader thread because QCache is not thread-safe and the
+        // fetch path touches QNetworkAccessManager through HttpClient.
+        cachedOrFetchOnLoaderThread();
     }
 
     ~KinemaImageResponse() override
@@ -91,15 +77,71 @@ public:
     }
 
 private:
-    void resolve(const QPixmap& pm)
+    void cachedOrFetchOnLoaderThread()
+    {
+        auto* loader = m_loader.data();
+        if (!loader) {
+            resolve({});
+            return;
+        }
+
+        const QPointer<KinemaImageResponse> self(this);
+        const QPointer<ui::ImageLoader> guardedLoader(loader);
+        const QUrl url = m_url;
+        QMetaObject::invokeMethod(loader, [self, guardedLoader, url] {
+            if (!self || !guardedLoader) {
+                return;
+            }
+
+            const QImage cached = guardedLoader->cached(url);
+            if (!cached.isNull()) {
+                QMetaObject::invokeMethod(self.data(), [self, cached] {
+                    if (self) {
+                        self->resolve(cached);
+                    }
+                }, Qt::QueuedConnection);
+                return;
+            }
+
+            // Fire the fetch and discard the returned task — completion is
+            // observed via posterReady above. This mirrors the app's existing
+            // QCoro fire-and-forget pattern.
+            auto task = guardedLoader->requestPoster(url);
+            Q_UNUSED(task);
+        }, Qt::QueuedConnection);
+    }
+
+    void resolveCachedOnLoaderThread()
+    {
+        auto* loader = m_loader.data();
+        if (!loader) {
+            resolve({});
+            return;
+        }
+
+        const QPointer<KinemaImageResponse> self(this);
+        const QPointer<ui::ImageLoader> guardedLoader(loader);
+        const QUrl url = m_url;
+        QMetaObject::invokeMethod(loader, [self, guardedLoader, url] {
+            const QImage cached = guardedLoader ? guardedLoader->cached(url) : QImage();
+            if (!self) {
+                return;
+            }
+            QMetaObject::invokeMethod(self.data(), [self, cached] {
+                if (self) {
+                    self->resolve(cached);
+                }
+            }, Qt::QueuedConnection);
+        }, Qt::QueuedConnection);
+    }
+
+    void resolve(const QImage& image)
     {
         if (m_resolved) {
             return;
         }
         m_resolved = true;
-        if (!pm.isNull()) {
-            m_image = pm.toImage();
-        }
+        m_image = image;
         if (m_conn) {
             QObject::disconnect(m_conn);
             m_conn = {};

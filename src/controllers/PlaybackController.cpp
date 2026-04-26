@@ -14,6 +14,7 @@
 #include "core/Moviehash.h"
 #include "core/NextEpisode.h"
 #include "core/StreamFilter.h"
+#include "core/UrlRedactor.h"
 #include "services/StreamActions.h"
 #include "ui/player/PlayerWindow.h"
 #include "kinema_debug.h"
@@ -404,7 +405,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
         co_return;
     }
     qCDebug(KINEMA) << "moviehash: computed" << hex << "for"
-                    << url.toString(QUrl::RemoveQuery);
+                    << core::redactUrlForLog(url);
     Q_EMIT moviehashComputed(hex);
 }
 

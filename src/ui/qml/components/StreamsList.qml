@@ -106,8 +106,8 @@ ColumnLayout {
 
         // 3 — Empty (no rows after filters / upstream returned 0).
         Kirigami.PlaceholderMessage {
-            anchors.centerIn: parent
-            width: Math.min(parent.width
+            Layout.alignment: Qt.AlignCenter
+            Layout.preferredWidth: Math.min(parent.width
                     - Kirigami.Units.gridUnit * 4,
                 Kirigami.Units.gridUnit * 28)
             icon.name: "edit-find"
@@ -118,8 +118,8 @@ ColumnLayout {
 
         // 4 — Error.
         Kirigami.PlaceholderMessage {
-            anchors.centerIn: parent
-            width: Math.min(parent.width
+            Layout.alignment: Qt.AlignCenter
+            Layout.preferredWidth: Math.min(parent.width
                     - Kirigami.Units.gridUnit * 4,
                 Kirigami.Units.gridUnit * 28)
             icon.name: "dialog-error"
@@ -135,8 +135,8 @@ ColumnLayout {
 
         // 5 — Unreleased.
         Kirigami.PlaceholderMessage {
-            anchors.centerIn: parent
-            width: Math.min(parent.width
+            Layout.alignment: Qt.AlignCenter
+            Layout.preferredWidth: Math.min(parent.width
                     - Kirigami.Units.gridUnit * 4,
                 Kirigami.Units.gridUnit * 28)
             icon.name: "appointment-soon"

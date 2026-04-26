@@ -87,8 +87,8 @@ Kirigami.ScrollablePage {
 
         // 0 — Idle: no query yet.
         Kirigami.PlaceholderMessage {
-            anchors.centerIn: parent
-            width: Math.min(parent.width
+            Layout.alignment: Qt.AlignCenter
+            Layout.preferredWidth: Math.min(parent.width
                     - Kirigami.Units.gridUnit * 4,
                 Kirigami.Units.gridUnit * 28)
             icon.name: "search"
@@ -113,8 +113,8 @@ Kirigami.ScrollablePage {
 
         // 3 — Empty.
         Kirigami.PlaceholderMessage {
-            anchors.centerIn: parent
-            width: Math.min(parent.width
+            Layout.alignment: Qt.AlignCenter
+            Layout.preferredWidth: Math.min(parent.width
                     - Kirigami.Units.gridUnit * 4,
                 Kirigami.Units.gridUnit * 28)
             icon.name: "edit-find"
@@ -126,8 +126,8 @@ Kirigami.ScrollablePage {
 
         // 4 — Error.
         Kirigami.PlaceholderMessage {
-            anchors.centerIn: parent
-            width: Math.min(parent.width
+            Layout.alignment: Qt.AlignCenter
+            Layout.preferredWidth: Math.min(parent.width
                     - Kirigami.Units.gridUnit * 4,
                 Kirigami.Units.gridUnit * 28)
             icon.name: "dialog-error"

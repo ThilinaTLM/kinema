@@ -44,7 +44,6 @@ Item {
         || mpv.buffering
         || audioPicker.opened
         || subtitlePicker.opened
-        || subtitleSearchSheet.opened
         || speedPicker.opened
 
     // Whether the chrome bar is visible right now. Driven by the

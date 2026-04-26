@@ -150,11 +150,45 @@ Kirigami.ApplicationWindow {
     // narrow widths automatically. The drawer's checked state and
     // the `showPage` helper rely on the top-of-stack page's
     // `objectName` which is set on every placeholder page.
-    pageStack.initialPage: discoverComp
-
     readonly property string currentNavKey: pageStack.currentItem
         ? (pageStack.currentItem.objectName || "")
         : ""
+
+    Component.onCompleted: {
+        const page = root.createPage(discoverComp, {});
+        if (page) {
+            pageStack.push(page, {});
+        }
+    }
+
+    function createPage(component, properties) {
+        // Kirigami.PageRow accepts Component objects, but on the current
+        // Qt/Kirigami stack it creates them with a non-visual helper
+        // parent first, which produces noisy "not placed in scene"
+        // warnings. Create with a temporary visual parent so the page is
+        // in-scene at birth, then detach before handing it to PageRow so it
+        // can own insertion without thinking the page is already present.
+        const page = component.createObject(root.contentItem,
+            properties || {});
+        if (page) {
+            page.parent = null;
+        }
+        return page;
+    }
+
+    function replaceWith(component, properties) {
+        const page = root.createPage(component, properties || {});
+        if (page) {
+            pageStack.replace(page, {});
+        }
+    }
+
+    function pushCreated(component, properties) {
+        const page = root.createPage(component, properties || {});
+        if (page) {
+            pageStack.push(page, {});
+        }
+    }
 
     function showPage(key) {
         if (currentNavKey === key) {
@@ -164,13 +198,13 @@ Kirigami.ApplicationWindow {
         }
         switch (key) {
         case "discover":
-            pageStack.replace(discoverComp);
+            root.replaceWith(discoverComp, {});
             break;
         case "search":
-            pageStack.replace(searchComp);
+            root.replaceWith(searchComp, {});
             break;
         case "browse":
-            pageStack.replace(browseComp);
+            root.replaceWith(browseComp, {});
             break;
         }
     }
@@ -223,7 +257,7 @@ Kirigami.ApplicationWindow {
                 && root.pageStack.currentItem.objectName === "settings") {
                 return;
             }
-            root.pageStack.push(settingsComp, { objectName: "settings" });
+            root.pushCreated(settingsComp, {});
         }
         function onShowSubtitlesRequested() {
             if (root.pageStack.currentItem
@@ -232,7 +266,7 @@ Kirigami.ApplicationWindow {
                 // context, no further push needed.
                 return;
             }
-            root.pageStack.push(subtitlesComp, { objectName: "subtitles" });
+            root.pushCreated(subtitlesComp, {});
         }
         function onPopPageRequested() {
             if (root.pageStack.depth > 1) {
@@ -244,7 +278,7 @@ Kirigami.ApplicationWindow {
                 && root.pageStack.currentItem.objectName === "about") {
                 return;
             }
-            root.pageStack.push(aboutComp, { objectName: "about" });
+            root.pushCreated(aboutComp, { objectName: "about" });
         }
         function onFocusSearchRequested() {
             // Prefer focusing the field on the current Search page
@@ -273,12 +307,10 @@ Kirigami.ApplicationWindow {
             // If we're already showing a movie detail (e.g. user
             // clicked a similar carousel card), push a fresh page
             // so Esc walks back through the breadcrumb of titles.
-            root.pageStack.push(movieDetailComp,
-                { objectName: "movieDetail" });
+            root.pushCreated(movieDetailComp, {});
         }
         function onShowSeriesDetailRequested() {
-            root.pageStack.push(seriesDetailComp,
-                { objectName: "seriesDetail" });
+            root.pushCreated(seriesDetailComp, {});
         }
         function onPassiveMessage(text, durationMs) {
             root.showPassiveNotification(text, durationMs);

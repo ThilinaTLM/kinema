@@ -4,6 +4,7 @@
 #include "core/HttpClient.h"
 
 #include "core/HttpError.h"
+#include "core/UrlRedactor.h"
 #include "kinema_debug.h"
 #include "kinema_version.h"
 
@@ -64,7 +65,8 @@ QCoro::Task<QByteArray> HttpClient::get(QNetworkRequest request)
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
-    qCDebug(KINEMA) << "HTTP GET" << url.toString(QUrl::RemoveQuery);
+    const QString logUrl = redactUrlForLog(url);
+    qCDebug(KINEMA) << "HTTP GET" << logUrl;
 
     QNetworkReply* reply = m_nam.get(request);
     co_await qCoro(reply).waitForFinished();
@@ -79,14 +81,14 @@ QCoro::Task<QByteArray> HttpClient::get(QNetworkRequest request)
         const auto kind = reply->error() == QNetworkReply::OperationCanceledError
             ? HttpError::Kind::Cancelled
             : HttpError::Kind::Network;
-        qCWarning(KINEMA) << "HTTP failed" << url.toString(QUrl::RemoveQuery)
+        qCWarning(KINEMA) << "HTTP failed" << logUrl
                           << reply->error() << reply->errorString();
         throw HttpError(kind, status, reply->errorString());
     }
 
     if (status < 200 || status >= 300) {
         throw HttpError(HttpError::Kind::HttpStatus, status,
-            i18n("Server returned HTTP %1 for %2", status, url.toString(QUrl::RemoveQuery)));
+            i18n("Server returned HTTP %1 for %2", status, logUrl));
     }
 
     co_return reply->readAll();
@@ -123,7 +125,8 @@ QCoro::Task<QByteArray> HttpClient::postJson(QNetworkRequest request,
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
-    qCDebug(KINEMA) << "HTTP POST" << url.toString(QUrl::RemoveQuery);
+    const QString logUrl = redactUrlForLog(url);
+    qCDebug(KINEMA) << "HTTP POST" << logUrl;
 
     QNetworkReply* reply = m_nam.post(request, body);
     co_await qCoro(reply).waitForFinished();
@@ -142,15 +145,14 @@ QCoro::Task<QByteArray> HttpClient::postJson(QNetworkRequest request,
             ? reply->errorString()
             : respBody;
         qCWarning(KINEMA) << "HTTP POST failed"
-                          << url.toString(QUrl::RemoveQuery)
+                          << logUrl
                           << reply->error() << msg;
         throw HttpError(kind, status, msg);
     }
     if (status < 200 || status >= 300) {
         const auto respBody = QString::fromUtf8(reply->readAll());
         const auto msg = respBody.isEmpty()
-            ? i18n("Server returned HTTP %1 for %2", status,
-                  url.toString(QUrl::RemoveQuery))
+            ? i18n("Server returned HTTP %1 for %2", status, logUrl)
             : respBody;
         throw HttpError(HttpError::Kind::HttpStatus, status, msg);
     }
@@ -185,7 +187,8 @@ QCoro::Task<QList<QPair<QByteArray, QByteArray>>> HttpClient::head(
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
-    qCDebug(KINEMA) << "HTTP HEAD" << url.toString(QUrl::RemoveQuery);
+    const QString logUrl = redactUrlForLog(url);
+    qCDebug(KINEMA) << "HTTP HEAD" << logUrl;
 
     QNetworkReply* reply = m_nam.head(request);
     co_await qCoro(reply).waitForFinished();
@@ -201,8 +204,7 @@ QCoro::Task<QList<QPair<QByteArray, QByteArray>>> HttpClient::head(
     }
     if (status < 200 || status >= 300) {
         throw HttpError(HttpError::Kind::HttpStatus, status,
-            i18n("Server returned HTTP %1 for %2", status,
-                url.toString(QUrl::RemoveQuery)));
+            i18n("Server returned HTTP %1 for %2", status, logUrl));
     }
     co_return reply->rawHeaderPairs();
 }

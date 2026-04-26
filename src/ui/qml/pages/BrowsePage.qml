@@ -179,8 +179,8 @@ Kirigami.ScrollablePage {
 
             // 2 — Empty.
             Kirigami.PlaceholderMessage {
-                anchors.centerIn: parent
-                width: Math.min(parent.width
+                Layout.alignment: Qt.AlignCenter
+                Layout.preferredWidth: Math.min(parent.width
                         - Kirigami.Units.gridUnit * 4,
                     Kirigami.Units.gridUnit * 28)
                 icon.name: "edit-find"
@@ -197,8 +197,8 @@ Kirigami.ScrollablePage {
 
             // 3 — Error.
             Kirigami.PlaceholderMessage {
-                anchors.centerIn: parent
-                width: Math.min(parent.width
+                Layout.alignment: Qt.AlignCenter
+                Layout.preferredWidth: Math.min(parent.width
                         - Kirigami.Units.gridUnit * 4,
                     Kirigami.Units.gridUnit * 28)
                 icon.name: "dialog-error"
