@@ -23,6 +23,7 @@
 #include <QSortFilterProxyModel>
 #include <QStackedWidget>
 #include <QTableView>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace kinema::ui {
@@ -132,16 +133,34 @@ StreamsPanel::StreamsPanel(config::TorrentioSettings& torrentio,
     m_stack->addWidget(m_view);
 
     // ---- Layout ----------------------------------------------------------
-    auto* cachedRow = new QHBoxLayout;
-    cachedRow->setContentsMargins(0, 0, 0, 0);
-    cachedRow->addWidget(m_cachedOnlyCheck);
-    cachedRow->addStretch(1);
+    m_actionRow = new QHBoxLayout;
+    m_actionRow->setContentsMargins(0, 0, 0, 0);
+    m_actionRow->addWidget(m_cachedOnlyCheck);
+    m_actionRow->addStretch(1);
+    // m_subtitleButton is appended later via setSubtitleAction(…).
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(6);
-    root->addLayout(cachedRow, 0);
+    root->addLayout(m_actionRow, 0);
     root->addWidget(m_stack, 1);
+}
+
+void StreamsPanel::setSubtitleAction(QAction* action)
+{
+    if (m_subtitleButton) {
+        m_actionRow->removeWidget(m_subtitleButton);
+        m_subtitleButton->deleteLater();
+        m_subtitleButton = nullptr;
+    }
+    if (!action) {
+        return;
+    }
+    m_subtitleButton = new QToolButton(this);
+    m_subtitleButton->setDefaultAction(action);
+    m_subtitleButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_subtitleButton->setAutoRaise(false);
+    m_actionRow->addWidget(m_subtitleButton);
 }
 
 void StreamsPanel::showLoading()

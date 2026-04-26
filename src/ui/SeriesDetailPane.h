@@ -99,6 +99,13 @@ public:
     /// Forwarded to the embedded StreamsPanel so play actions can
     /// build a full PlaybackContext (identity + title + poster).
     void setPlaybackContext(const api::PlaybackContext& ctx);
+    /// Live read of the currently-set playback context. Used by
+    /// MainWindow to feed the subtitles dialog.
+    const api::PlaybackContext& playbackContext() const;
+
+    /// Underlying streams panel — used by MainWindow to install the
+    /// shared "Subtitles…" action.
+    StreamsPanel* streamsPanel() const { return m_streams; }
 
     /// Give keyboard focus to the episode list. Called by MainWindow
     /// just after opening the pane.

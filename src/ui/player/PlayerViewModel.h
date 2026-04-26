@@ -5,15 +5,12 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
-#include "api/Subtitle.h"
 #include "core/MpvChapterList.h"
 #include "core/MpvTrackList.h"
 
 #include <QAbstractListModel>
-#include <QList>
 #include <QObject>
 #include <QPointer>
-#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -25,7 +22,6 @@ namespace kinema::ui::player {
 class AudioTracksModel;
 class ChaptersModel;
 class MpvVideoItem;
-class SubtitleSearchModel;
 class SubtitleTracksModel;
 
 /**
@@ -112,21 +108,14 @@ class PlayerViewModel : public QObject
     Q_PROPERTY(QVariantMap streamInfo READ streamInfo
         NOTIFY streamInfoChanged)
 
-    // ---- Subtitle search & download ---------------------------------
-    // The picker sheet opens against `subtitleSearchActive`; hits
-    // come through `subtitleSearchModel`. Hard-gated by
-    // `subtitleDownloadEnabled`, which the controller flips after a
-    // successful login.
-    Q_PROPERTY(bool subtitleSearchActive READ subtitleSearchActive
-        NOTIFY subtitleSearchActiveChanged)
-    Q_PROPERTY(QAbstractListModel* subtitleSearchModel
-        READ subtitleSearchModel CONSTANT)
+    // ---- Subtitle download gating -----------------------------------
+    // The QML picker shows a "Download subtitle…" footer entry that
+    // bubbles through `requestSubtitlesDialog()` to MainWindow,
+    // which opens the Qt Widgets `SubtitlesDialog`. The gate flag
+    // mirrors `SubtitleController::downloadEnabled()` so the entry
+    // can disable itself when OpenSubtitles isn't configured.
     Q_PROPERTY(bool subtitleDownloadEnabled READ subtitleDownloadEnabled
         NOTIFY subtitleDownloadEnabledChanged)
-    Q_PROPERTY(QString subtitleSearchError READ subtitleSearchError
-        NOTIFY subtitleSearchErrorChanged)
-    Q_PROPERTY(bool subtitleSearchSheetOpen READ subtitleSearchSheetOpen
-        NOTIFY subtitleSearchSheetOpenChanged)
 
 public:
     explicit PlayerViewModel(QObject* parent = nullptr);
@@ -177,16 +166,9 @@ public:
     QVariantList shortcutSections() const { return m_shortcutSections; }
     QVariantMap streamInfo() const { return m_streamInfo; }
 
-    bool subtitleSearchActive() const noexcept { return m_subtitleSearchActive; }
-    QAbstractListModel* subtitleSearchModel() const;
     bool subtitleDownloadEnabled() const noexcept
     {
         return m_subtitleDownloadEnabled;
-    }
-    QString subtitleSearchError() const { return m_subtitleSearchError; }
-    bool subtitleSearchSheetOpen() const noexcept
-    {
-        return m_subtitleSearchSheetOpen;
     }
 
 public Q_SLOTS:
@@ -212,27 +194,20 @@ public Q_SLOTS:
     void toggleInfoOverlay();
     void setInfoOverlayVisible(bool on);
 
-    // Subtitle-search state mutators (driven by SubtitleController
-    // signals via MainWindow).
-    void setSubtitleSearchActive(bool on);
+    // Subtitle download gate (driven by SubtitleController via
+    // MainWindow). Controls whether the QML "Download subtitle…"
+    // entry is enabled.
     void setSubtitleDownloadEnabled(bool on);
-    void setSubtitleSearchError(const QString& msg);
-    /// Apply hits + flag sets to the search model.
-    void updateSubtitleSearchModel(const QList<api::SubtitleHit>& hits,
-        const QSet<QString>& cached,
-        const QSet<QString>& activePaths);
-    /// Open / close the picker sheet.
-    void openSubtitleSearchSheet();
-    void closeSubtitleSearchSheet();
 
-    // Subtitle-search action slots invoked from QML.
-    Q_INVOKABLE void requestSubtitleSearch(const QStringList& languages,
-        const QString& hearingImpaired,
-        const QString& foreignPartsOnly,
-        const QString& releaseFilter);
-    Q_INVOKABLE void requestSubtitleDownload(const QString& fileId);
-    Q_INVOKABLE void requestSubtitleSearchSheet();
+    // Subtitle action slots invoked from QML.
+    /// Asks MainWindow to open the Qt Widgets `SubtitlesDialog`
+    /// parented to this player window.
+    Q_INVOKABLE void requestSubtitlesDialog();
+    /// Asks MainWindow to open a QFileDialog for sideloading a
+    /// local subtitle file directly into mpv.
     Q_INVOKABLE void requestLocalSubtitleFile();
+    /// Sideload an external subtitle file (called from MainWindow
+    /// after the dialog or QFileDialog returns a path).
     Q_INVOKABLE void attachExternalSubtitle(const QString& path,
         const QString& title, const QString& lang, bool select);
 
@@ -287,20 +262,16 @@ Q_SIGNALS:
     void closeRequested();
     void fullscreenToggleRequested();
 
-    // Subtitle-search action signals.
-    void subtitleSearchRequested(const QStringList& languages,
-        const QString& hearingImpaired,
-        const QString& foreignPartsOnly,
-        const QString& releaseFilter);
-    void subtitleDownloadRequested(const QString& fileId);
-    void subtitleSearchSheetRequested();
+    /// Emitted from the QML "Download subtitle…" picker entry.
+    /// MainWindow opens the Qt Widgets `SubtitlesDialog` in
+    /// response.
+    void subtitlesDialogRequested();
+    /// Emitted from the QML "Open subtitle file…" picker entry.
+    /// MainWindow opens a QFileDialog and (on accept) calls
+    /// `attachExternalSubtitle()` back on this VM.
     void localSubtitleFileRequested();
 
-    // Property notifications for the new properties.
-    void subtitleSearchActiveChanged();
     void subtitleDownloadEnabledChanged();
-    void subtitleSearchErrorChanged();
-    void subtitleSearchSheetOpenChanged();
 
 private Q_SLOTS:
     void onTrackListChanged(const core::tracks::TrackList& tracks);
@@ -314,7 +285,6 @@ private:
     AudioTracksModel* m_audioModel = nullptr;
     SubtitleTracksModel* m_subtitleModel = nullptr;
     ChaptersModel* m_chaptersModel = nullptr;
-    SubtitleSearchModel* m_subtitleSearchModel = nullptr;
 
     int m_currentAudioId = -1;
     int m_currentSubtitleId = -1;
@@ -342,10 +312,7 @@ private:
     QVariantList m_shortcutSections;
     QVariantMap m_streamInfo;
 
-    bool m_subtitleSearchActive = false;
     bool m_subtitleDownloadEnabled = false;
-    bool m_subtitleSearchSheetOpen = false;
-    QString m_subtitleSearchError;
 };
 
 } // namespace kinema::ui::player

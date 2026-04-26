@@ -9,9 +9,13 @@
 #include <QDate>
 #include <QWidget>
 
+class QHBoxLayout;
+
+class QAction;
 class QCheckBox;
 class QStackedWidget;
 class QTableView;
+class QToolButton;
 
 namespace kinema::config {
 class FilterSettings;
@@ -69,6 +73,13 @@ public:
     /// to filter.
     void setRealDebridConfigured(bool on);
 
+    /// Install the "Subtitles…" action shown on the action row next
+    /// to the cached-only checkbox. The panel doesn't own the action
+    /// (MainWindow does), so its enabled state stays bound to the
+    /// SubtitleController via MainWindow's wiring. Safe to call once;
+    /// repeated calls replace the button.
+    void setSubtitleAction(QAction* action);
+
     /// Set the playback context (media identity + display title +
     /// poster) that every stream in this panel belongs to. The
     /// context is merged with each chosen api::Stream before handing
@@ -96,6 +107,8 @@ private:
     bool m_rdConfigured = false;
 
     QCheckBox* m_cachedOnlyCheck {};
+    QToolButton* m_subtitleButton {};
+    QHBoxLayout* m_actionRow {};
     QStackedWidget* m_stack {};
     StateWidget* m_state {};
     QTableView* m_view {};

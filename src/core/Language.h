@@ -4,6 +4,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 namespace kinema::core::language {
 
@@ -23,5 +24,14 @@ QString displayName(const QString& iso639_2);
 /// empty string when no mapping is known. Currently unused outside
 /// tests but kept symmetric with `displayName`.
 QString codeForDisplayName(const QString& englishName);
+
+/// Curated list of the most common ISO 639-2 codes used across the
+/// app (settings page, subtitles dialog "+ Add" popup). Stable
+/// English-name order. Each pair is `<code, display>`.
+struct CommonLanguage {
+    QString code;
+    QString display;
+};
+QList<CommonLanguage> commonLanguages();
 
 } // namespace kinema::core::language

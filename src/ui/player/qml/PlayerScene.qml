@@ -281,31 +281,14 @@ Item {
         currentId: playerVm.currentSubtitleId
         downloadEnabled: playerVm.subtitleDownloadEnabled
         onPicked: id => playerVm.pickSubtitle(id)
+        // Hands off to MainWindow which opens the Qt Widgets
+        // SubtitlesDialog parented to this player window.
         onDownloadSubtitleRequested: {
-            playerVm.requestSubtitleSearchSheet();
+            playerVm.requestSubtitlesDialog();
         }
         onOpenLocalFileRequested: {
             playerVm.requestLocalSubtitleFile();
         }
-    }
-
-    SubtitleSearchSheet {
-        id: subtitleSearchSheet
-        anchors.centerIn: parent
-        // Open / close is driven by the C++ side flipping
-        // `subtitleSearchSheetOpen` (e.g. when the picker footer
-        // fires "Download subtitle…").
-        Connections {
-            target: playerVm
-            function onSubtitleSearchSheetOpenChanged() {
-                if (playerVm.subtitleSearchSheetOpen) {
-                    subtitleSearchSheet.open();
-                } else {
-                    subtitleSearchSheet.close();
-                }
-            }
-        }
-        onClosed: playerVm.closeSubtitleSearchSheet()
     }
 
     SpeedPicker {

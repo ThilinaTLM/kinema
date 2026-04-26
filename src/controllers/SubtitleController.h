@@ -38,9 +38,10 @@ namespace kinema::controllers {
  *   - `download` resolves a `fileId` against the cache first; on miss
  *     it requests a signed link, fetches the bytes, writes to disk,
  *     persists a row, runs an opportunistic LRU pass, and emits
- *     `downloadFinished`. The QML / `PlayerViewModel` layer wires
- *     that signal up to mpv's `sub-add` — the controller never
- *     includes any `ui/player/*.h`.
+ *     `downloadFinished`. `MainWindow` routes that signal to the
+ *     QtWidgets `SubtitlesDialog` (which forwards to the player's
+ *     `attachExternalSubtitle` for sideloading). The controller
+ *     never includes any `ui/player/...` header.
  *   - `reconcileCacheOnStartup` walks the cache directory + table to
  *     drop orphan rows / orphan files and run an LRU pass if the
  *     budget is exceeded.
@@ -80,6 +81,15 @@ public:
     /// downloaded subs that mpv has loaded, of which one is selected.
     /// The search model uses this to show a ✓ badge.
     QSet<QString> activeLocalPaths() const { return m_activeLocalPaths; }
+
+    /// Last-seen `remaining` field on a `SubtitleDownloadTicket`. -1 if
+    /// no successful download has happened this session. The dialog
+    /// surfaces this in its status footer so users can see how close
+    /// they are to OpenSubtitles' daily cap.
+    int dailyDownloadsRemaining() const noexcept
+    {
+        return m_dailyDownloadsRemaining;
+    }
 
 public Q_SLOTS:
     /// Top-level entry from QML. Forwards every filter the picker
@@ -134,6 +144,10 @@ Q_SIGNALS:
         QString languageName);
     void downloadFailed(QString fileId, QString reason);
 
+    /// Fired when the daily quota counter is updated from a fresh
+    /// `SubtitleDownloadTicket`. -1 means "unknown".
+    void quotaChanged(int remaining);
+
     /// Status-bar / toast text. MainWindow forwards to the status bar.
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
@@ -159,6 +173,7 @@ private:
     QString m_lastError;
     QString m_moviehash;
     quint64 m_epoch = 0;
+    int m_dailyDownloadsRemaining = -1;
 };
 
 } // namespace kinema::controllers

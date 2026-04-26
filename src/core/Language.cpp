@@ -89,4 +89,43 @@ QString codeForDisplayName(const QString& englishName)
     return {};
 }
 
+QList<CommonLanguage> commonLanguages()
+{
+    // Ordered by English display name to match the settings page
+    // dropdown. Codes use OpenSubtitles' preferred bibliographic
+    // 639-2/B variants where the API differs (fre/ger/dut/cze/rum/chi/may).
+    return {
+        { QStringLiteral("ara"), QStringLiteral("Arabic") },
+        { QStringLiteral("bul"), QStringLiteral("Bulgarian") },
+        { QStringLiteral("chi"), QStringLiteral("Chinese") },
+        { QStringLiteral("cze"), QStringLiteral("Czech") },
+        { QStringLiteral("dan"), QStringLiteral("Danish") },
+        { QStringLiteral("dut"), QStringLiteral("Dutch") },
+        { QStringLiteral("eng"), QStringLiteral("English") },
+        { QStringLiteral("fin"), QStringLiteral("Finnish") },
+        { QStringLiteral("fre"), QStringLiteral("French") },
+        { QStringLiteral("ger"), QStringLiteral("German") },
+        { QStringLiteral("gre"), QStringLiteral("Greek") },
+        { QStringLiteral("heb"), QStringLiteral("Hebrew") },
+        { QStringLiteral("hin"), QStringLiteral("Hindi") },
+        { QStringLiteral("hun"), QStringLiteral("Hungarian") },
+        { QStringLiteral("ind"), QStringLiteral("Indonesian") },
+        { QStringLiteral("ita"), QStringLiteral("Italian") },
+        { QStringLiteral("jpn"), QStringLiteral("Japanese") },
+        { QStringLiteral("kor"), QStringLiteral("Korean") },
+        { QStringLiteral("nor"), QStringLiteral("Norwegian") },
+        { QStringLiteral("pol"), QStringLiteral("Polish") },
+        { QStringLiteral("por"), QStringLiteral("Portuguese") },
+        { QStringLiteral("pob"), QStringLiteral("Portuguese (BR)") },
+        { QStringLiteral("rum"), QStringLiteral("Romanian") },
+        { QStringLiteral("rus"), QStringLiteral("Russian") },
+        { QStringLiteral("spa"), QStringLiteral("Spanish") },
+        { QStringLiteral("swe"), QStringLiteral("Swedish") },
+        { QStringLiteral("tha"), QStringLiteral("Thai") },
+        { QStringLiteral("tur"), QStringLiteral("Turkish") },
+        { QStringLiteral("ukr"), QStringLiteral("Ukrainian") },
+        { QStringLiteral("vie"), QStringLiteral("Vietnamese") },
+    };
+}
+
 } // namespace kinema::core::language

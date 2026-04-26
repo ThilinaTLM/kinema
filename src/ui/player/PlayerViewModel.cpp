@@ -8,7 +8,6 @@
 #include "ui/player/AudioTracksModel.h"
 #include "ui/player/ChaptersModel.h"
 #include "ui/player/MpvVideoItem.h"
-#include "ui/player/SubtitleSearchModel.h"
 #include "ui/player/SubtitleTracksModel.h"
 
 namespace kinema::ui::player {
@@ -18,7 +17,6 @@ PlayerViewModel::PlayerViewModel(QObject* parent)
     , m_audioModel(new AudioTracksModel(this))
     , m_subtitleModel(new SubtitleTracksModel(this))
     , m_chaptersModel(new ChaptersModel(this))
-    , m_subtitleSearchModel(new SubtitleSearchModel(this))
 {
 }
 
@@ -60,11 +58,6 @@ QAbstractListModel* PlayerViewModel::subtitleTracks() const
 QAbstractListModel* PlayerViewModel::chapters() const
 {
     return m_chaptersModel;
-}
-
-QAbstractListModel* PlayerViewModel::subtitleSearchModel() const
-{
-    return m_subtitleSearchModel;
 }
 
 // ---- Mutators driven by PlayerWindow ------------------------------------
@@ -221,16 +214,7 @@ void PlayerViewModel::setInfoOverlayVisible(bool on)
     Q_EMIT infoOverlayVisibleChanged();
 }
 
-// ---- Subtitle search state mutators ------------------------------------
-
-void PlayerViewModel::setSubtitleSearchActive(bool on)
-{
-    if (m_subtitleSearchActive == on) {
-        return;
-    }
-    m_subtitleSearchActive = on;
-    Q_EMIT subtitleSearchActiveChanged();
-}
+// ---- Subtitle download gate + dialog hand-off --------------------------
 
 void PlayerViewModel::setSubtitleDownloadEnabled(bool on)
 {
@@ -241,75 +225,9 @@ void PlayerViewModel::setSubtitleDownloadEnabled(bool on)
     Q_EMIT subtitleDownloadEnabledChanged();
 }
 
-void PlayerViewModel::setSubtitleSearchError(const QString& msg)
+void PlayerViewModel::requestSubtitlesDialog()
 {
-    if (m_subtitleSearchError == msg) {
-        return;
-    }
-    m_subtitleSearchError = msg;
-    Q_EMIT subtitleSearchErrorChanged();
-}
-
-void PlayerViewModel::updateSubtitleSearchModel(
-    const QList<api::SubtitleHit>& hits,
-    const QSet<QString>& cached,
-    const QSet<QString>& activePaths)
-{
-    if (m_subtitleSearchModel) {
-        m_subtitleSearchModel->setHits(hits);
-        m_subtitleSearchModel->setCachedFileIds(cached);
-        // The active flag is keyed by file_id; the controller keeps
-        // file-id <-> local-path mapping in the cache store. Here we
-        // surface the *paths*; the model maps these into file ids by
-        // checking each row’s localPath — except the model only
-        // carries file ids. Keep it simple: derive an ActiveFileIds
-        // set from cached ∩ (paths exist in cache). If a downloaded
-        // sub is loaded, its fileId is in `cached`; the picker shows
-        // a generic "✓" only when the *local path* matches one of
-        // mpv’s loaded externals. Without per-row local_path on the
-        // model we approximate "active" as "the most recently
-        // attached fileId".
-        QSet<QString> activeIds;
-        Q_UNUSED(activePaths);
-        m_subtitleSearchModel->setActiveFileIds(activeIds);
-    }
-}
-
-void PlayerViewModel::openSubtitleSearchSheet()
-{
-    if (m_subtitleSearchSheetOpen) {
-        return;
-    }
-    m_subtitleSearchSheetOpen = true;
-    Q_EMIT subtitleSearchSheetOpenChanged();
-}
-
-void PlayerViewModel::closeSubtitleSearchSheet()
-{
-    if (!m_subtitleSearchSheetOpen) {
-        return;
-    }
-    m_subtitleSearchSheetOpen = false;
-    Q_EMIT subtitleSearchSheetOpenChanged();
-}
-
-void PlayerViewModel::requestSubtitleSearch(const QStringList& languages,
-    const QString& hearingImpaired,
-    const QString& foreignPartsOnly,
-    const QString& releaseFilter)
-{
-    Q_EMIT subtitleSearchRequested(languages, hearingImpaired,
-        foreignPartsOnly, releaseFilter);
-}
-
-void PlayerViewModel::requestSubtitleDownload(const QString& fileId)
-{
-    Q_EMIT subtitleDownloadRequested(fileId);
-}
-
-void PlayerViewModel::requestSubtitleSearchSheet()
-{
-    Q_EMIT subtitleSearchSheetRequested();
+    Q_EMIT subtitlesDialogRequested();
 }
 
 void PlayerViewModel::requestLocalSubtitleFile()

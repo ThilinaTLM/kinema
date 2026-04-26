@@ -123,6 +123,11 @@ void DetailPane::setPlaybackContext(const api::PlaybackContext& ctx)
     m_streams->setPlaybackContext(ctx);
 }
 
+const api::PlaybackContext& DetailPane::playbackContext() const
+{
+    return m_streams->playbackContext();
+}
+
 TorrentsModel* DetailPane::torrentsModel() const
 {
     return m_streams->model();

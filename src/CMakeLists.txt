@@ -77,8 +77,12 @@ set(kinema_core_SRCS
     ui/DetailPane.cpp
     ui/MainWindow.cpp
 
+    ui/widgets/LanguageChipBar.cpp
     ui/widgets/MetaHeaderWidget.cpp
     ui/widgets/StreamsPanel.cpp
+    ui/widgets/SubtitleResultDelegate.cpp
+    ui/widgets/SubtitleResultsModel.cpp
+    ui/widgets/SubtitlesDialog.cpp
 
     ui/settings/FiltersSettingsPage.cpp
     ui/settings/GeneralSettingsPage.cpp
@@ -118,7 +122,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
         ui/player/MpvVideoItem.cpp
         ui/player/PlayerViewModel.cpp
         ui/player/PlayerWindow.cpp
-        ui/player/SubtitleSearchModel.cpp
         ui/player/SubtitleTracksModel.cpp
     )
 endif()
@@ -225,7 +228,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
             ui/player/qml/pickers/AudioPicker.qml
             ui/player/qml/pickers/SpeedPicker.qml
             ui/player/qml/pickers/SubtitlePicker.qml
-            ui/player/qml/pickers/SubtitleSearchSheet.qml
             ui/player/qml/prompts/InfoOverlay.qml
             ui/player/qml/prompts/NextEpisodeBanner.qml
             ui/player/qml/prompts/ResumePrompt.qml

@@ -40,6 +40,8 @@
 #include "ui/SearchBar.h"
 #include "ui/SeriesDetailPane.h"
 #include "ui/StateWidget.h"
+#include "ui/widgets/StreamsPanel.h"
+#include "ui/widgets/SubtitlesDialog.h"
 #include "ui/settings/SettingsDialog.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
@@ -677,17 +679,26 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url,
                 this, [this](bool) { m_tray->refreshMenu(); });
         }
 
-        // ---- Subtitle search / download wiring -------------------
-        // PlayerViewModel <—> SubtitleController. The controller
-        // never includes player headers; we connect the two here in
-        // the wiring shell.
+        // ---- Player → SubtitlesDialog routing -------------------
+        // The QML player chrome only carries an "Open the dialog"
+        // signal now; the search / download / attach pipeline lives
+        // in the Qt Widgets `SubtitlesDialog`. "Open file…" stays
+        // routed through the player VM because it must sideload the
+        // file directly.
         if (m_subtitleCtrl && m_playerWindow->viewModel()) {
             auto* vm = m_playerWindow->viewModel();
 
-            // QML "Download subtitle…" footer entry → open the
-            // search sheet and immediately fire a query.
-            connect(vm, &player::PlayerViewModel::subtitleSearchSheetRequested,
-                this, [this, vm] {
+            // Seed + sync the picker's "Download subtitle…" gate
+            // with the controller's auth state.
+            vm->setSubtitleDownloadEnabled(
+                m_subtitleCtrl->downloadEnabled());
+            connect(m_subtitleCtrl,
+                &controllers::SubtitleController::downloadEnabledChanged,
+                vm, &player::PlayerViewModel::setSubtitleDownloadEnabled);
+
+            connect(vm,
+                &player::PlayerViewModel::subtitlesDialogRequested,
+                this, [this] {
                     if (!m_playbackCtrl) {
                         return;
                     }
@@ -695,43 +706,15 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url,
                     if (!key.isValid()) {
                         return;
                     }
-                    vm->setSubtitleSearchError(QString {});
-                    vm->openSubtitleSearchSheet();
-                    // Initial query uses the user’s preferred langs +
-                    // default HI / FPO modes.
-                    m_subtitleCtrl->runQuery(key,
-                        m_settings.subtitle().preferredLanguages(),
-                        m_settings.subtitle().hearingImpaired(),
-                        m_settings.subtitle().foreignPartsOnly(),
-                        QString {});
-                });
-
-            // QML re-issue (filters changed) → controller.
-            connect(vm, &player::PlayerViewModel::subtitleSearchRequested,
-                this, [this](const QStringList& langs,
-                          const QString& hi, const QString& fpo,
-                          const QString& release) {
-                    if (!m_playbackCtrl) {
-                        return;
-                    }
-                    const auto key = m_playbackCtrl->currentKey();
-                    if (!key.isValid()) {
-                        return;
-                    }
-                    m_subtitleCtrl->runQuery(key, langs, hi, fpo, release);
-                });
-
-            // QML row click → download.
-            connect(vm, &player::PlayerViewModel::subtitleDownloadRequested,
-                this, [this](const QString& fileId) {
-                    if (!m_playbackCtrl) {
-                        return;
-                    }
-                    m_subtitleCtrl->download(fileId,
-                        m_playbackCtrl->currentKey());
+                    api::PlaybackContext ctx;
+                    ctx.key = key;
+                    ctx.title = m_playerWindow->title();
+                    openSubtitlesDialog(ctx, /*fromPlayer=*/true);
                 });
 
             // "Open subtitle file…" → QFileDialog → attach.
+            // QFileDialog parent must be a QWidget; the player is a
+            // QQuickView, so we use MainWindow as the modal owner.
             connect(vm, &player::PlayerViewModel::localSubtitleFileRequested,
                 this, [this, vm] {
                     const auto path = QFileDialog::getOpenFileName(this,
@@ -746,58 +729,6 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url,
                     vm->attachExternalSubtitle(path,
                         QFileInfo(path).fileName(),
                         QStringLiteral("und"), /*select=*/true);
-                });
-
-            // Controller → PlayerViewModel state.
-            connect(m_subtitleCtrl,
-                &controllers::SubtitleController::hitsChanged,
-                this, [this, vm] {
-                    vm->updateSubtitleSearchModel(
-                        m_subtitleCtrl->hits(),
-                        m_subtitleCtrl->cachedFileIds(),
-                        QSet<QString> {});
-                });
-            connect(m_subtitleCtrl,
-                &controllers::SubtitleController::cacheChanged,
-                this, [this, vm] {
-                    vm->updateSubtitleSearchModel(
-                        m_subtitleCtrl->hits(),
-                        m_subtitleCtrl->cachedFileIds(),
-                        QSet<QString> {});
-                });
-            connect(m_subtitleCtrl,
-                &controllers::SubtitleController::searchingChanged,
-                this, [this, vm] {
-                    vm->setSubtitleSearchActive(
-                        m_subtitleCtrl->isSearching());
-                });
-            connect(m_subtitleCtrl,
-                &controllers::SubtitleController::errorChanged,
-                this, [this, vm] {
-                    vm->setSubtitleSearchError(
-                        m_subtitleCtrl->lastError());
-                });
-            connect(m_subtitleCtrl,
-                &controllers::SubtitleController::downloadEnabledChanged,
-                vm, &player::PlayerViewModel::setSubtitleDownloadEnabled);
-            // Seed the initial state.
-            vm->setSubtitleDownloadEnabled(
-                m_subtitleCtrl->downloadEnabled());
-
-            // downloadFinished → attach the file via the VM, and
-            // remember the language for next time.
-            connect(m_subtitleCtrl,
-                &controllers::SubtitleController::downloadFinished,
-                this, [this, vm](const QString& /*fileId*/,
-                          const QString& path,
-                          const QString& lang,
-                          const QString& languageName) {
-                    vm->attachExternalSubtitle(path, languageName,
-                        lang, /*select=*/true);
-                    if (m_history && m_playbackCtrl) {
-                        m_history->setRememberedSubtitleLang(
-                            m_playbackCtrl->currentKey(), lang);
-                    }
                 });
         }
     }
@@ -932,6 +863,8 @@ void MainWindow::buildActions()
     m_actions->addAction(QStringLiteral("clear_history"),
         m_clearHistoryAction);
 
+    buildSubtitlesAction();
+
     buildEscapeShortcut();
     buildMenuBar(quitAction, focusSearch, homeAction, prefsAction, aboutAction);
     auto* hamburger = buildHamburgerMenu(
@@ -1065,6 +998,170 @@ void MainWindow::buildToolbarActions(QAction* homeAction, KHamburgerMenu* hambur
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_toolbar->addWidget(spacer);
     m_toolbar->addAction(hamburger);
+}
+
+void MainWindow::buildSubtitlesAction()
+{
+    m_subtitlesAction = new QAction(
+        QIcon::fromTheme(QStringLiteral("add-subtitle"),
+            QIcon::fromTheme(QStringLiteral("media-view-subtitles-symbolic"),
+                QIcon::fromTheme(QStringLiteral("document-edit")))),
+        i18nc("@action:button download subtitles for the current title",
+            "Subtitles…"),
+        this);
+    m_subtitlesAction->setToolTip(i18nc("@info:tooltip",
+        "Search and download subtitles for this title"));
+
+    auto refreshEnabled = [this] {
+        const bool ok = m_subtitleCtrl
+            && m_subtitleCtrl->downloadEnabled();
+        m_subtitlesAction->setEnabled(ok);
+        if (!ok) {
+            m_subtitlesAction->setToolTip(i18nc("@info:tooltip",
+                "Configure OpenSubtitles in Settings to enable"));
+        } else {
+            m_subtitlesAction->setToolTip(i18nc("@info:tooltip",
+                "Search and download subtitles for this title"));
+        }
+    };
+    refreshEnabled();
+    if (m_subtitleCtrl) {
+        connect(m_subtitleCtrl,
+            &controllers::SubtitleController::downloadEnabledChanged,
+            this, [refreshEnabled](bool) { refreshEnabled(); });
+    }
+
+    connect(m_subtitlesAction, &QAction::triggered, this, [this] {
+        if (!m_nav) {
+            return;
+        }
+        const auto page = m_nav->current();
+        if (page == controllers::Page::MovieDetail && m_detailPane) {
+            openSubtitlesDialog(m_detailPane->playbackContext(),
+                /*fromPlayer=*/false);
+        } else if ((page == controllers::Page::SeriesEpisodes
+                       || page == controllers::Page::SeriesStreams)
+            && m_seriesDetailPane) {
+            openSubtitlesDialog(m_seriesDetailPane->playbackContext(),
+                /*fromPlayer=*/false);
+        }
+    });
+
+    // Install on both detail panes so the same action shows up in
+    // both streams panels.
+    if (m_detailPane && m_detailPane->streamsPanel()) {
+        m_detailPane->streamsPanel()->setSubtitleAction(m_subtitlesAction);
+    }
+    if (m_seriesDetailPane && m_seriesDetailPane->streamsPanel()) {
+        m_seriesDetailPane->streamsPanel()->setSubtitleAction(
+            m_subtitlesAction);
+    }
+}
+
+void MainWindow::openSubtitlesDialog(const api::PlaybackContext& ctx,
+    bool fromPlayer)
+{
+    if (!m_subtitleCtrl || !ctx.key.isValid()) {
+        return;
+    }
+    const bool attachOnDownload = fromPlayer;
+    if (!m_subtitlesDialog) {
+        m_subtitlesDialog = new widgets::SubtitlesDialog(
+            m_subtitleCtrl, m_settings.subtitle(), this);
+        connect(m_subtitlesDialog,
+            &widgets::SubtitlesDialog::settingsRequested,
+            this, &MainWindow::showSettings);
+        connect(m_subtitlesDialog,
+            &widgets::SubtitlesDialog::downloadCompleted,
+            this, [this](const api::PlaybackKey& key,
+                      const QString& /*fileId*/, const QString& path,
+                      const QString& lang, const QString& languageName) {
+                // Always remember the language for next play.
+                if (m_history && key.isValid()) {
+                    m_history->setRememberedSubtitleLang(key, lang);
+                }
+#ifdef KINEMA_HAVE_LIBMPV
+                // If the player is up and the dialog was opened over
+                // it, sideload immediately. Match by current key so
+                // we don't attach the wrong subtitle to a stream the
+                // user has already swapped to.
+                if (m_playerWindow && m_playerWindow->viewModel()
+                    && m_playbackCtrl
+                    && m_playbackCtrl->currentKey() == key) {
+                    m_playerWindow->viewModel()->attachExternalSubtitle(
+                        path, languageName, lang, /*select=*/true);
+                }
+#else
+                Q_UNUSED(path);
+                Q_UNUSED(languageName);
+#endif
+            });
+        connect(m_subtitlesDialog,
+            &widgets::SubtitlesDialog::localFileChosen,
+            this, [this](const api::PlaybackKey& key,
+                      const QString& path) {
+#ifdef KINEMA_HAVE_LIBMPV
+                if (m_playerWindow && m_playerWindow->viewModel()
+                    && m_playbackCtrl
+                    && m_playbackCtrl->currentKey() == key) {
+                    m_playerWindow->viewModel()->attachExternalSubtitle(
+                        path, QFileInfo(path).fileName(),
+                        QStringLiteral("und"), /*select=*/true);
+                }
+#else
+                Q_UNUSED(key);
+                Q_UNUSED(path);
+#endif
+            });
+    }
+
+    // The dialog is always a QWidget child of MainWindow (the player
+    // is a QQuickView, not a QWidget, so it can't own QWidget
+    // children). When invoked from the player we route the WM
+    // relationship via `transientParent` so the dialog stacks above
+    // the player and follows it on focus-stealing-prevention WMs.
+#ifdef KINEMA_HAVE_LIBMPV
+    bool restoreFullscreen = false;
+    if (fromPlayer && m_playerWindow
+        && (m_playerWindow->windowStates() & Qt::WindowFullScreen)) {
+        restoreFullscreen = true;
+        // QQuickView/QWindow uses singular Qt::WindowState in
+        // setWindowState; downgrade to NoState (windowed) and back
+        // to FullScreen on dialog close.
+        m_playerWindow->setWindowState(Qt::WindowNoState);
+    }
+#else
+    Q_UNUSED(fromPlayer);
+#endif
+
+    m_subtitlesDialog->setAttachOnDownload(attachOnDownload);
+    m_subtitlesDialog->setMedia(ctx);
+    m_subtitlesDialog->show();
+#ifdef KINEMA_HAVE_LIBMPV
+    if (fromPlayer && m_playerWindow
+        && m_subtitlesDialog->windowHandle()) {
+        m_subtitlesDialog->windowHandle()->setTransientParent(m_playerWindow);
+    } else if (m_subtitlesDialog->windowHandle()) {
+        m_subtitlesDialog->windowHandle()->setTransientParent(
+            this->windowHandle());
+    }
+#endif
+    m_subtitlesDialog->raise();
+    m_subtitlesDialog->activateWindow();
+
+#ifdef KINEMA_HAVE_LIBMPV
+    if (restoreFullscreen) {
+        // Fire on dialog close — single-shot, disconnected after
+        // the first run via Qt::SingleShotConnection.
+        connect(m_subtitlesDialog, &QDialog::finished,
+            this, [this] {
+                if (m_playerWindow) {
+                    m_playerWindow->setWindowState(
+                        Qt::WindowFullScreen);
+                }
+            }, Qt::SingleShotConnection);
+    }
+#endif
 }
 
 void MainWindow::restoreMenubarVisibility()

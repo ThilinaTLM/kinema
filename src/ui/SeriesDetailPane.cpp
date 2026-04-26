@@ -152,6 +152,11 @@ void SeriesDetailPane::setPlaybackContext(const api::PlaybackContext& ctx)
     m_streams->setPlaybackContext(ctx);
 }
 
+const api::PlaybackContext& SeriesDetailPane::playbackContext() const
+{
+    return m_streams->playbackContext();
+}
+
 void SeriesDetailPane::focusEpisodeList()
 {
     m_picker->setFocus();

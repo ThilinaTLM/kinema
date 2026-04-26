@@ -73,6 +73,10 @@ class SearchBar;
 class SeriesDetailPane;
 class StateWidget;
 
+namespace widgets {
+class SubtitlesDialog;
+}
+
 namespace settings {
 class SettingsDialog;
 }
@@ -114,6 +118,10 @@ private Q_SLOTS:
     /// history DB after a confirmation dialog.
     void onClearHistoryRequested();
 
+    /// Toolbar / menu / streams-panel "Subtitles…" action handler.
+    /// Pulls the current playback context from the visible detail
+    /// pane and opens the SubtitlesDialog parented to MainWindow.
+
 private:
     void buildCoreServices();
     void buildActions();
@@ -136,6 +144,19 @@ private:
         QAction* prefsAction,
         QAction* aboutAction);
     void buildToolbarActions(QAction* homeAction, KHamburgerMenu* hamburger);
+    /// Build the shared "Subtitles…" action used by the streams
+    /// panels (and the player). Wires its enabled state to the
+    /// SubtitleController's `downloadEnabledChanged`.
+    void buildSubtitlesAction();
+    /// Open (lazily-construct) the SubtitlesDialog for `ctx`. The
+    /// dialog is always a QWidget child of MainWindow; `fromPlayer`
+    /// controls the WM relationship (transientParent on the player
+    /// window) and whether downloads auto-attach to mpv. The flag
+    /// also drives the temporary fullscreen exit on the player.
+    void openSubtitlesDialog(const api::PlaybackContext& ctx,
+        bool fromPlayer);
+    /// Slot fired by the streams-panel action. Routes to the
+    /// currently-visible detail pane's playback context.
     void restoreMenubarVisibility();
     void buildEscapeShortcut();
     void showMovieDetail();
@@ -194,6 +215,7 @@ private:
     QAction* m_backAction {};
     QAction* m_browseAction {};
     QAction* m_clearHistoryAction {};
+    QAction* m_subtitlesAction {};
     SearchBar* m_searchBar {};
     ResultsModel* m_resultsModel {};
     ResultCardDelegate* m_resultsDelegate {};
@@ -224,6 +246,11 @@ private:
     QStackedWidget* m_centerStack {};
     // Settings dialog is created lazily and reused across invocations.
     settings::SettingsDialog* m_settingsDialog {};
+    // Subtitles dialog is created lazily on first "Subtitles…"
+    // invocation and reused thereafter. Re-parented per-call so the
+    // same instance can show as a child of either MainWindow or the
+    // PlayerWindow.
+    widgets::SubtitlesDialog* m_subtitlesDialog {};
 
     // Detached embedded-mpv player window. Top-level QWidget that
     // hosts the MpvWidget so playback happens in its own window

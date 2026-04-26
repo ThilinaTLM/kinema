@@ -37,47 +37,6 @@ namespace kinema::ui::settings {
 
 namespace {
 
-struct LanguageOption {
-    QString code;
-    QString display;
-};
-
-QList<LanguageOption> commonLanguages()
-{
-    return {
-        { QStringLiteral("eng"), QStringLiteral("English") },
-        { QStringLiteral("spa"), QStringLiteral("Spanish") },
-        { QStringLiteral("fre"), QStringLiteral("French") },
-        { QStringLiteral("ger"), QStringLiteral("German") },
-        { QStringLiteral("ita"), QStringLiteral("Italian") },
-        { QStringLiteral("por"), QStringLiteral("Portuguese") },
-        { QStringLiteral("pob"), QStringLiteral("Portuguese (BR)") },
-        { QStringLiteral("rus"), QStringLiteral("Russian") },
-        { QStringLiteral("ukr"), QStringLiteral("Ukrainian") },
-        { QStringLiteral("pol"), QStringLiteral("Polish") },
-        { QStringLiteral("dut"), QStringLiteral("Dutch") },
-        { QStringLiteral("swe"), QStringLiteral("Swedish") },
-        { QStringLiteral("nor"), QStringLiteral("Norwegian") },
-        { QStringLiteral("dan"), QStringLiteral("Danish") },
-        { QStringLiteral("fin"), QStringLiteral("Finnish") },
-        { QStringLiteral("ara"), QStringLiteral("Arabic") },
-        { QStringLiteral("heb"), QStringLiteral("Hebrew") },
-        { QStringLiteral("tur"), QStringLiteral("Turkish") },
-        { QStringLiteral("gre"), QStringLiteral("Greek") },
-        { QStringLiteral("hun"), QStringLiteral("Hungarian") },
-        { QStringLiteral("ces"), QStringLiteral("Czech") },
-        { QStringLiteral("rum"), QStringLiteral("Romanian") },
-        { QStringLiteral("bul"), QStringLiteral("Bulgarian") },
-        { QStringLiteral("hin"), QStringLiteral("Hindi") },
-        { QStringLiteral("jpn"), QStringLiteral("Japanese") },
-        { QStringLiteral("kor"), QStringLiteral("Korean") },
-        { QStringLiteral("chi"), QStringLiteral("Chinese") },
-        { QStringLiteral("vie"), QStringLiteral("Vietnamese") },
-        { QStringLiteral("tha"), QStringLiteral("Thai") },
-        { QStringLiteral("ind"), QStringLiteral("Indonesian") },
-    };
-}
-
 void populateModeCombo(QComboBox* combo)
 {
     combo->addItem(i18nc("@item:inlistbox subtitle filter mode",
@@ -181,7 +140,7 @@ SubtitlesSettingsPage::SubtitlesSettingsPage(core::HttpClient* http,
     m_langList->setMinimumHeight(120);
 
     m_addLangCombo = new QComboBox(langBox);
-    for (const auto& opt : commonLanguages()) {
+    for (const auto& opt : core::language::commonLanguages()) {
         m_addLangCombo->addItem(
             QStringLiteral("%1 (%2)").arg(opt.display, opt.code), opt.code);
     }
