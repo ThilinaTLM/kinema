@@ -15,9 +15,11 @@
 #include <KLocalizedString>
 
 #include <QCloseEvent>
+#include <QCursor>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMetaMethod>
 #include <QHideEvent>
 #include <QIcon>
 #include <QKeyEvent>
@@ -159,6 +161,28 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     }
 
     if (auto* root = rootObject()) {
+        // Mirror the QML root's `chromeVisible` property to the
+        // window cursor. The property is declared in PlayerScene.qml
+        // (`property bool chromeVisible: true`); Qt auto-generates a
+        // `chromeVisibleChanged()` notify signal we can connect to
+        // by name via the meta-object.
+        const int notifyIdx = root->metaObject()->indexOfSignal(
+            "chromeVisibleChanged()");
+        if (notifyIdx >= 0) {
+            const QMetaMethod notify =
+                root->metaObject()->method(notifyIdx);
+            const int slotIdx = this->metaObject()->indexOfSlot(
+                "onChromeVisibleChanged()");
+            if (slotIdx >= 0) {
+                const QMetaMethod slot =
+                    this->metaObject()->method(slotIdx);
+                QObject::connect(root, notify, this, slot);
+            }
+        }
+        // Sync once for the initial state (the property starts true,
+        // so this just unsets the cursor; harmless either way).
+        onChromeVisibleChanged();
+
         if (auto* video = root->findChild<MpvVideoItem*>(
                 QStringLiteral("kinemaMpvVideoItem"))) {
             m_video = video;
@@ -334,6 +358,9 @@ void PlayerWindow::stopAndHide()
     if (m_video) {
         m_video->stop();
     }
+    // Don't leak a blank cursor onto the desktop / parent if the
+    // user closed the window mid-auto-hide.
+    unsetCursor();
     hide();
 }
 
@@ -468,6 +495,20 @@ void PlayerWindow::pushMediaChips()
     in.hdrGamma      = stats.hdrGamma;
     const auto json = core::media_chips::toIpcJson(in);
     m_viewModel->setMediaChips(chipsFromJson(json));
+}
+
+void PlayerWindow::onChromeVisibleChanged()
+{
+    auto* root = rootObject();
+    if (!root) {
+        return;
+    }
+    const bool visible = root->property("chromeVisible").toBool();
+    if (visible) {
+        unsetCursor();
+    } else {
+        setCursor(QCursor(Qt::BlankCursor));
+    }
 }
 
 void PlayerWindow::pushCheatSheetText()

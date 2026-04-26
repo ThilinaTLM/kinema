@@ -119,6 +119,13 @@ Q_SIGNALS:
     void subtitlePicked(int trackId);
     void speedPicked(double factor);
 
+private Q_SLOTS:
+    /// Mirror QML's `chromeVisible` to the QQuickWindow cursor:
+    /// blank cursor when chrome is hidden, default cursor when it
+    /// is visible. Connected to the root item's
+    /// `chromeVisibleChanged` notify signal after `setSource`.
+    void onChromeVisibleChanged();
+
 protected:
     void closeEvent(QCloseEvent* e) override;
     void keyPressEvent(QKeyEvent* e) override;

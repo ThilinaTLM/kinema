@@ -31,6 +31,10 @@ Item {
     opacity: chromeVisible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
 
+    // Stop intercepting hover / clicks once fully transparent so
+    // invisible buttons don't catch the cursor on its way out.
+    visible: opacity > 0.001
+
     // Gradient backdrop, like the top bar.
     Rectangle {
         anchors.fill: parent

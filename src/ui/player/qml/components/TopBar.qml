@@ -22,6 +22,10 @@ Rectangle {
     opacity: chromeVisible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
 
+    // Stop intercepting hover / clicks once fully transparent so
+    // invisible buttons don't catch the cursor on its way out.
+    visible: opacity > 0.001
+
     // Gradient fade so text reads against bright frames without a
     // hard chrome bar shape competing with the video.
     Rectangle {

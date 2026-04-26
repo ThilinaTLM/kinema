@@ -34,6 +34,10 @@ QtObject {
     readonly property int popMs:     220
     readonly property int slowMs:    320
 
+    // Chrome auto-hide delay: how long the top bar / transport bar
+    // stay visible after the last mouse / wheel / key activity.
+    readonly property int chromeAutoHideMs: 1000
+
     // ---- Sizes / spacing ---------------------------------------------
     // Pixel values are at logical 1:1 scale; QML containers consume
     // them via anchors / margins so HiDPI handling is automatic.

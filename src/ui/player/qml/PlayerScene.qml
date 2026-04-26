@@ -34,11 +34,6 @@ Item {
     width: 1280
     height: 720
 
-    // Mouse / keyboard activity bumps this. Chrome auto-hides after
-    // `Theme.slowMs * N` of inactivity unless we are paused or a
-    // prompt is up.
-    property double lastActivity: Date.now()
-
     // True while a chrome-keeping condition is active. Auto-hide
     // never wins over these.
     readonly property bool chromeForcedVisible:
@@ -47,29 +42,91 @@ Item {
         || playerVm.nextEpisodeVisible
         || playerVm.cheatSheetVisible
         || mpv.buffering
+        || audioPicker.opened
+        || subtitlePicker.opened
+        || speedPicker.opened
 
-    // Whether the chrome bar is visible right now. Computed from
-    // last activity, the forced-visible flags, and the timer below.
+    // Whether the chrome bar is visible right now. Driven by the
+    // single-shot hide timer below and the forced-visible flags.
     property bool chromeVisible: true
 
+    // Last hover position seen by the scene HoverHandler. Used to
+    // dedupe spurious `onPointChanged` emissions (velocity etc.)
+    // so a stationary cursor still triggers auto-hide.
+    property real _lastHoverX: -1
+    property real _lastHoverY: -1
+
+    // Single-shot debounced timer: each `bumpActivity()` restarts it,
+    // so the chrome fades out exactly `Theme.chromeAutoHideMs` after
+    // the last activity, instead of polling and giving up to 2x that
+    // in worst-case latency.
     Timer {
         id: hideTimer
-        interval: 2500
-        repeat: true
-        running: true
+        interval: Theme.chromeAutoHideMs
+        repeat: false
         onTriggered: {
-            if (root.chromeForcedVisible) {
-                root.chromeVisible = true;
-                return;
+            if (!root.chromeForcedVisible) {
+                root.chromeVisible = false;
             }
-            const idleMs = Date.now() - root.lastActivity;
-            root.chromeVisible = idleMs < interval;
         }
     }
 
     function bumpActivity() {
-        root.lastActivity = Date.now();
         root.chromeVisible = true;
+        if (!root.chromeForcedVisible) {
+            hideTimer.restart();
+        } else {
+            hideTimer.stop();
+        }
+    }
+
+    // Whenever a forced-visible condition flips, sync the timer:
+    // - flipping ON  → chrome stays up, kill the countdown.
+    // - flipping OFF → resume the countdown from this moment.
+    onChromeForcedVisibleChanged: {
+        if (chromeForcedVisible) {
+            chromeVisible = true;
+            hideTimer.stop();
+        } else {
+            bumpActivity();
+        }
+    }
+
+    // Scene-wide pointer handlers. Pointer handlers are non-grabbing,
+    // so they coexist with the chrome's child MouseAreas
+    // (IconButton, SeekBar hover, VolumeControl thumbs, …) — every
+    // mouse move / wheel / tap anywhere in the scene bumps activity,
+    // even when the cursor is parked on a chrome button.
+    //
+    // We watch `point.position` specifically (not `point` itself).
+    // The `point` group also contains `velocity`, which keeps
+    // updating for a moment after the cursor stops moving — if we
+    // bound to `onPointChanged` we'd keep restarting the hide timer
+    // forever while the cursor sits still on the window.
+    HoverHandler {
+        id: sceneHover
+        acceptedDevices: PointerDevice.AllDevices
+    }
+    Connections {
+        target: sceneHover
+        function onPointChanged() {
+            const p = sceneHover.point.position;
+            if (p.x !== root._lastHoverX || p.y !== root._lastHoverY) {
+                root._lastHoverX = p.x;
+                root._lastHoverY = p.y;
+                root.bumpActivity();
+            }
+        }
+    }
+    TapHandler {
+        acceptedButtons: Qt.AllButtons
+        gesturePolicy: TapHandler.DragThreshold
+        onTapped: root.bumpActivity()
+        onPressedChanged: if (pressed) root.bumpActivity()
+    }
+    WheelHandler {
+        acceptedDevices: PointerDevice.AllDevices
+        onWheel: root.bumpActivity()
     }
 
     // ---- Layer 1: video ----------------------------------------------

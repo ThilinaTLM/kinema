@@ -5,9 +5,16 @@ import QtQuick
 import dev.tlmtech.kinema.player
 
 /**
- * Central key + mouse handler. Lives at the back of the scene so
- * it never blocks chrome interactions, but covers the full area so
- * mouse activity always bumps the chrome-visibility timer.
+ * Central key + click + wheel handler.
+ *
+ * Hover / move tracking for the chrome auto-hide timer is handled by
+ * scene-level pointer handlers in PlayerScene.qml — those don't grab
+ * events, so they coexist with the chrome's own MouseAreas. This
+ * component owns:
+ *
+ *   - Keyboard shortcuts (space/k pause, j/l seek, arrows, m, f, ?)
+ *   - Single-click → toggle pause, double-click → toggle fullscreen
+ *   - Wheel → volume
  *
  * Most keys translate directly to MpvVideoItem methods; a few
  * window-level actions (close, fullscreen, cheat sheet) bubble out
@@ -32,7 +39,6 @@ Item {
         hoverEnabled: true
         propagateComposedEvents: true
 
-        onPositionChanged: root.activity()
         onPressed: mouse => {
             root.activity();
             mouse.accepted = false; // let other items see clicks
