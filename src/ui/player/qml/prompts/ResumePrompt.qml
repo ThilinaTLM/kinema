@@ -18,8 +18,12 @@ Item {
     signal resumeClicked()
     signal startOverClicked()
 
-    width: 460
-    height: 200
+    // Responsive: cap at ~28 grid units, never wider than the parent
+    // less standard chrome margins. Height tracks the same scale.
+    width: Math.min(Theme.gridUnit * 28,
+        parent ? parent.width - Theme.spacingLg * 2 : Theme.gridUnit * 28)
+    height: Math.min(Theme.gridUnit * 13,
+        parent ? parent.height - Theme.spacingLg * 2 : Theme.gridUnit * 13)
     visible: opacity > 0
     opacity: visible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }

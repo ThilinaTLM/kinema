@@ -178,6 +178,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
             Qt6::Qml
             Qt6::Quick
             Qt6::QuickControls2
+            KF6::Kirigami
             PkgConfig::MPV
             MpvQt::MpvQt
     )

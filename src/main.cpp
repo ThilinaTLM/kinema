@@ -9,6 +9,7 @@
 #include <QCommandLineParser>
 
 #ifdef KINEMA_HAVE_LIBMPV
+#include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <clocale>
@@ -33,6 +34,19 @@ int main(int argc, char* argv[])
     // Linux already, so this is a belt-and-braces guard rather
     // than a behaviour change on the primary target platform.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+
+    // Pin the Qt Quick Controls 2 style to KDE's `org.kde.desktop`
+    // (qqc2-desktop-style). Without this, stock QQC2 controls inside
+    // our overlays (TextField / ComboBox / Button in
+    // SubtitleSearchSheet, etc.) fall back to the `Default` style and
+    // clash visually with the bespoke chrome — they ignore the
+    // surrounding `Kirigami.Theme.colorSet = Header` and render light
+    // over the dark video chrome. With desktop style they pick up
+    // Breeze and inherit the colorSet override from PopupPanel.
+    // Must run before any QQuickWindow / QQmlEngine is constructed.
+    // If qqc2-desktop-style isn't installed the engine silently falls
+    // back to `Default` — soft runtime dependency, no fatal.
+    QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
 
     // Force-link the QML module's auto-generated registration. Side
     // effect: the `QQmlModuleRegistration` static at the bottom of

@@ -16,8 +16,12 @@ Popup {
 
     modal: true
     padding: 0
-    width: 360
-    height: Math.min(480, list.contentHeight + 96)
+    // Responsive: cap at ~22 grid units, never wider than the scene
+    // less standard chrome margins.
+    width: Math.min(Theme.gridUnit * 22,
+        parent ? parent.width - Theme.spacingLg * 2 : Theme.gridUnit * 22)
+    height: Math.min(Theme.gridUnit * 30,
+        list.contentHeight + Theme.spacingLg * 6)
 
     // PopupPanel paints the panel chrome (radius, border, shadow,
     // header). Setting the background to a transparent Item lets it

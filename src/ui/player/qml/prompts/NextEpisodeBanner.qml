@@ -22,8 +22,12 @@ Item {
     signal acceptClicked()
     signal cancelClicked()
 
-    width: 380
-    height: 150
+    // Responsive: cap at ~24 grid units, never wider than the parent
+    // less standard chrome margins.
+    width: Math.min(Theme.gridUnit * 24,
+        parent ? parent.width - Theme.spacingLg * 2 : Theme.gridUnit * 24)
+    height: Math.min(Theme.gridUnit * 9,
+        parent ? parent.height - Theme.spacingLg * 2 : Theme.gridUnit * 9)
     visible: opacity > 0
     opacity: visible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }

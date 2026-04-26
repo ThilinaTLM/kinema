@@ -24,8 +24,16 @@ Popup {
 
     modal: true
     padding: 0
-    width: 540
-    height: Math.min(640, parent ? parent.height * 0.8 : 640)
+    // Responsive: cap at ~34 grid units, never wider than the scene
+    // less standard chrome margins.
+    width: Math.min(Theme.gridUnit * 34,
+        parent ? parent.width - Theme.spacingLg * 2 : Theme.gridUnit * 34)
+    height: Math.min(Theme.gridUnit * 40,
+        parent ? parent.height * 0.85 : Theme.gridUnit * 40)
+
+    // Below the compact breakpoint the form grid collapses to one
+    // column so labels stack above their inputs instead of clipping.
+    readonly property bool isCompact: width < Theme.compactBreakpoint
 
     background: Item {}
 
@@ -72,9 +80,10 @@ Popup {
 
             // ---- Filter row ------------------------------------------
             GridLayout {
+                id: filterGrid
                 Layout.fillWidth: true
-                columns: 2
-                columnSpacing: Theme.spacing
+                columns: root.isCompact ? 1 : 2
+                columnSpacing: root.isCompact ? 0 : Theme.spacing
                 rowSpacing: Theme.spacingSm
 
                 Label { text: qsTr("Languages:") ; color: Theme.foregroundDim }
@@ -130,7 +139,9 @@ Popup {
                     onAccepted: root.submit()
                 }
 
-                Item {} // spacer in column 0
+                // Spacer for the second column in 2-col mode; hidden
+                // in compact mode so the Search button hugs the grid.
+                Item { visible: !root.isCompact }
                 Button {
                     Layout.alignment: Qt.AlignRight
                     text: qsTr("Search")

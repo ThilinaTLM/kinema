@@ -30,6 +30,11 @@ Item {
     opacity: playerVm.infoOverlayVisible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
 
+    // Below the compact breakpoint the stream-info grid and the
+    // per-shortcut-row grid collapse to one column so labels stack
+    // above their values / actions instead of clipping.
+    readonly property bool isCompact: width < Theme.compactBreakpoint
+
     // Backdrop dim — clicking outside the panel closes the overlay.
     Rectangle {
         anchors.fill: parent
@@ -48,8 +53,12 @@ Item {
 
     PopupPanel {
         anchors.centerIn: parent
-        width: Math.min(640, root.width - 96)
-        height: Math.min(620, root.height - 96)
+        // Cap at ~40 grid units, never wider than the scene less the
+        // standard outer breathing room (3× large spacing each side).
+        width: Math.min(Theme.gridUnit * 40,
+            root.width - Theme.spacingLg * 6)
+        height: Math.min(Theme.gridUnit * 38,
+            root.height - Theme.spacingLg * 6)
         title: qsTr("Player info")
         onCloseRequested: playerVm.setInfoOverlayVisible(false)
 
@@ -104,7 +113,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.leftMargin: Theme.spacingXs
                         Layout.topMargin: Theme.spacing
-                        columns: 2
+                        columns: root.isCompact ? 1 : 2
                         rowSpacing: Theme.spacingXs
                         columnSpacing: Theme.spacingLg
 
@@ -244,13 +253,24 @@ Item {
 
                             Repeater {
                                 model: sectionDelegate.modelData.rows
-                                delegate: RowLayout {
+                                // GridLayout (not RowLayout) so the
+                                // column count flips with isCompact:
+                                // 2-col on wide screens, stacked
+                                // (keys above action) when compact.
+                                delegate: GridLayout {
                                     id: rowDelegate
                                     required property var modelData
                                     Layout.fillWidth: true
                                     Layout.leftMargin: Theme.spacingXs
+                                    columns: root.isCompact ? 1 : 2
+                                    rowSpacing: 0
+                                    columnSpacing: Theme.spacing
                                     Label {
-                                        Layout.preferredWidth: 220
+                                        Layout.preferredWidth:
+                                            root.isCompact
+                                                ? -1
+                                                : Theme.gridUnit * 14
+                                        Layout.fillWidth: root.isCompact
                                         text: rowDelegate.modelData.keys
                                         color: Theme.accent
                                         font: Theme.monoFont

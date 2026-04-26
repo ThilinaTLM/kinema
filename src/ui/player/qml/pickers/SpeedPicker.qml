@@ -18,8 +18,11 @@ Popup {
 
     modal: true
     padding: 0
-    width: 280
-    height: list.contentHeight + 96
+    // Responsive: cap at ~18 grid units, never wider than the scene
+    // less standard chrome margins.
+    width: Math.min(Theme.gridUnit * 18,
+        parent ? parent.width - Theme.spacingLg * 2 : Theme.gridUnit * 18)
+    height: list.contentHeight + Theme.spacingLg * 6
 
     readonly property var values: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 

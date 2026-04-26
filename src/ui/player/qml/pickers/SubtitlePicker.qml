@@ -20,8 +20,14 @@ Popup {
 
     modal: true
     padding: 0
-    width: 360
-    height: Math.min(480, list.contentHeight + 132)
+    // Responsive: cap at ~22 grid units, never wider than the scene
+    // less standard chrome margins.
+    width: Math.min(Theme.gridUnit * 22,
+        parent ? parent.width - Theme.spacingLg * 2 : Theme.gridUnit * 22)
+    // Extra +8 grid units vs. AudioPicker to fit the synthetic "Off"
+    // row plus the two footer entries (Download / Open file).
+    height: Math.min(Theme.gridUnit * 30,
+        list.contentHeight + Theme.spacingLg * 8)
 
     background: Item {}
 

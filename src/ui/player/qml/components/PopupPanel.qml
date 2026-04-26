@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
 import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
 import dev.tlmtech.kinema.player
 
 /**
@@ -31,6 +32,17 @@ Item {
     default property alias contentChildren: contentArea.data
     signal closeRequested()
 
+    // Pin the panel subtree to the titlebar palette so any stock
+    // QQC2 control inside (Label, TextField, ComboBox, Button …)
+    // resolves through the same dark register as our bespoke chrome.
+    // Combined with `QQuickStyle::setStyle("org.kde.desktop")` in
+    // main.cpp this keeps SubtitleSearchSheet's text inputs dark and
+    // Breeze-styled instead of falling back to the default light QQC2
+    // look. `inherit: false` blocks any outer override from leaking
+    // back in.
+    Kirigami.Theme.colorSet: Kirigami.Theme.Header
+    Kirigami.Theme.inherit: false
+
     Rectangle {
         id: panelBg
         anchors.fill: parent
@@ -53,7 +65,15 @@ Item {
         }
     }
 
+    // Implicit size from inner content + symmetric margins so callers
+    // can size the panel to fit ("width: panel.implicitWidth") rather
+    // than hardcoding pixels. Only used by overlays that opt into
+    // content-driven sizing; fixed-size callers ignore these.
+    implicitWidth:  layoutColumn.implicitWidth + 2 * Theme.spacing
+    implicitHeight: layoutColumn.implicitHeight + 2 * Theme.spacing
+
     ColumnLayout {
+        id: layoutColumn
         anchors.fill: parent
         anchors.margins: Theme.spacing
         spacing: Theme.spacing
