@@ -6,7 +6,7 @@
 #include "config/SubtitleSettings.h"
 #include "controllers/SubtitleController.h"
 #include "core/Language.h"
-#include "ui/widgets/SubtitleResultsModel.h"
+#include "ui/qml-bridge/SubtitleResultsModel.h"
 
 #include <KLocalizedString>
 
@@ -22,7 +22,7 @@ SubtitlesViewModel::SubtitlesViewModel(
     : QObject(parent)
     , m_controller(controller)
     , m_settings(settings)
-    , m_model(new widgets::SubtitleResultsModel(this))
+    , m_model(new SubtitleResultsModel(this))
 {
     m_languages = m_settings.preferredLanguages();
     m_hi = m_settings.hearingImpaired();

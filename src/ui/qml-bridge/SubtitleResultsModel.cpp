@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "ui/widgets/SubtitleResultsModel.h"
+#include "ui/qml-bridge/SubtitleResultsModel.h"
 
 #include <KLocalizedString>
 
@@ -11,7 +11,7 @@
 #include <QPixmap>
 #include <QStringList>
 
-namespace kinema::ui::widgets {
+namespace kinema::ui::qml {
 
 namespace {
 
@@ -303,4 +303,4 @@ void SubtitleResultsModel::setActiveFileIds(const QSet<QString>& ids)
     }
 }
 
-} // namespace kinema::ui::widgets
+} // namespace kinema::ui::qml

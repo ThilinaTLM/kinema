@@ -116,18 +116,8 @@ ecm_add_test(tst_stream_actions.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_meta_header.cpp
-    TEST_NAME tst_meta_header
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
 ecm_add_test(tst_subtitle_results_model.cpp
     TEST_NAME tst_subtitle_results_model
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
-ecm_add_test(tst_streams_panel.cpp
-    TEST_NAME tst_streams_panel
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -221,6 +211,12 @@ ecm_add_test(tst_continue_watching_view_model.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
+ecm_add_test(tst_application_boot.cpp
+    TEST_NAME tst_application_boot
+    LINK_LIBRARIES kinema_core kinema_qml_app Qt6::Test
+)
+qt_import_qml_plugins(tst_application_boot)
+
 if(KINEMA_ENABLE_MPV_EMBED)
     ecm_add_test(tst_player_view_model.cpp
         TEST_NAME tst_player_view_model
@@ -247,8 +243,7 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_search_view_model tst_browse_view_model tst_results_list_model
          tst_streams_list_model tst_episodes_list_model
          tst_movie_detail_view_model tst_series_detail_view_model
-         tst_stream_actions
-         tst_meta_header tst_streams_panel tst_subtitle_results_model
+         tst_stream_actions tst_subtitle_results_model
          tst_token_controller tst_cinemeta_client tst_tmdb_client
          tst_torrentio_client tst_realdebrid_client
          tst_database tst_history_store
@@ -256,7 +251,8 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
          tst_next_episode tst_mpv_config_paths tst_mpv_track_list_parse
          tst_media_chips tst_main_controller_close_logic
-         tst_discover_view_model tst_continue_watching_view_model)
+         tst_discover_view_model tst_continue_watching_view_model
+         tst_application_boot)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 

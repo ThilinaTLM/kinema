@@ -39,7 +39,6 @@ find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS
     Widgets
     Network
     OpenGL
-    OpenGLWidgets
     Qml
     Quick
     QuickControls2
@@ -55,12 +54,10 @@ find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS
     CoreAddons
     I18n
     KIO
-    ConfigWidgets
+    Config
     Kirigami
     Notifications
     StatusNotifierItem
-    WidgetsAddons
-    XmlGui
 )
 
 find_package(QCoro6 ${QCORO_MIN_VERSION} REQUIRED COMPONENTS

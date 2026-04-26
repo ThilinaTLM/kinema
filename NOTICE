@@ -19,14 +19,15 @@ licensed under its own terms. Those licenses are NOT altered by this
 project's relicensing, and redistributors must continue to comply with
 them when shipping a combined binary.
 
-  * Qt 6 (Core, Gui, Widgets, Network, Concurrent, Test)
+  * Qt 6 (Core, Gui, Widgets, Network, OpenGL, Qml, Quick,
+    QuickControls2, Sql, Svg, Test)
       Copyright The Qt Company Ltd. and contributors.
       Licensed under LGPL-3.0-only (or GPL-2.0-or-later / GPL-3.0, or a
       commercial license from The Qt Company).
       https://www.qt.io/licensing/
 
-  * KDE Frameworks 6 (CoreAddons, I18n, KIO, ConfigWidgets,
-    Notifications, StatusNotifierItem, WidgetsAddons, XmlGui)
+  * KDE Frameworks 6 (CoreAddons, I18n, KIO, Config, Kirigami,
+    Notifications, StatusNotifierItem)
       Copyright the KDE contributors.
       Primarily licensed under LGPL-2.1-or-later; individual modules
       may carry additional permissive licenses. See each framework's

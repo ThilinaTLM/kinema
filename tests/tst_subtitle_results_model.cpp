@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "ui/widgets/SubtitleResultsModel.h"
+#include "ui/qml-bridge/SubtitleResultsModel.h"
 
 #include "api/Subtitle.h"
 
@@ -10,7 +10,7 @@
 #include <QtTest>
 
 using kinema::api::SubtitleHit;
-using kinema::ui::widgets::SubtitleResultsModel;
+using kinema::ui::qml::SubtitleResultsModel;
 
 namespace {
 

@@ -53,37 +53,7 @@ set(kinema_core_SRCS
     api/TorrentioClient.cpp
     api/TorrentioParse.cpp
 
-    # `DiscoverCardDelegate`, `DiscoverGridView`, `DiscoverRowModel`,
-    # `DiscoverSection`, and `SimilarStrip` outlive phase 05: they're
-    # still consumed by `widgets/MetaHeaderWidget`'s embedded
-    # `SimilarStrip` (a phase 06 surface). `TorrentsModel` survives
-    # because `widgets/StreamsPanel` (also phase 06) still holds it.
-    # The whole block dies in phase 06's cleanup pass alongside
-    # `widgets/MetaHeaderWidget` / `widgets/StreamsPanel` /
-    # `widgets/SubtitlesDialog` / `StateWidget` / `UpcomingBadge`.
-    ui/DiscoverCardDelegate.cpp
-    ui/DiscoverGridView.cpp
-    ui/DiscoverRowModel.cpp
-    ui/DiscoverSection.cpp
     ui/ImageLoader.cpp
-    ui/SimilarStrip.cpp
-    ui/StateWidget.cpp
-    ui/TorrentsModel.cpp
-    ui/UpcomingBadge.cpp
-
-    ui/widgets/LanguagePickerButton.cpp
-    ui/widgets/MetaHeaderWidget.cpp
-    ui/widgets/StreamsPanel.cpp
-    ui/widgets/SubtitleResultsModel.cpp
-    ui/widgets/SubtitlesDialog.cpp
-
-    ui/settings/FiltersSettingsPage.cpp
-    ui/settings/GeneralSettingsPage.cpp
-    ui/settings/PlayerSettingsPage.cpp
-    ui/settings/RealDebridSettingsPage.cpp
-    ui/settings/SettingsDialog.cpp
-    ui/settings/SubtitlesSettingsPage.cpp
-    ui/settings/TmdbSettingsPage.cpp
 
     app/KinemaApplication.cpp
 
@@ -107,6 +77,7 @@ set(kinema_core_SRCS
     ui/qml-bridge/SeriesDetailViewModel.cpp
     ui/qml-bridge/SettingsViewModels.cpp
     ui/qml-bridge/StreamsListModel.cpp
+    ui/qml-bridge/SubtitleResultsModel.cpp
     ui/qml-bridge/SubtitlesViewModel.cpp
 
     tray_resources.qrc
@@ -170,12 +141,10 @@ target_link_libraries(kinema_core
         KF6::I18n
         KF6::KIOCore
         KF6::KIOGui
-        KF6::ConfigWidgets
+        KF6::ConfigCore
         KF6::Kirigami
         KF6::Notifications
         KF6::StatusNotifierItem
-        KF6::WidgetsAddons
-        KF6::XmlGui
         QCoro6::Core
         QCoro6::Network
         Qt6Keychain::Qt6Keychain

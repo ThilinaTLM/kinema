@@ -10,20 +10,17 @@
 #include <QSet>
 #include <QString>
 
-namespace kinema::ui::widgets {
+namespace kinema::ui::qml {
 
 /**
- * Multi-column QAbstractListModel exposing the current
- * `controllers::SubtitleController` hits to `SubtitlesDialog`.
+ * QAbstractListModel exposing the current
+ * `controllers::SubtitleController` hits to `SubtitlesPage.qml`.
  *
- * Six columns drive a plain `QTreeView` with native row rendering
- * (no custom delegate): Release | Lang | Format | Downloads | Rating
- * | Flags. All custom `Roles` (FileIdRole, CachedRole, …) resolve
- * on column 0 only — selection lookup uses
- * `current.siblingAtColumn(0).data(FileIdRole)`. The cached / active
- * sets live alongside the hits list rather than being baked into
- * `SubtitleHit` so the controller's hits remain a pure mirror of
- * the API response.
+ * The model keeps the legacy multi-column shape for existing tests
+ * and proxy consumers, while QML uses the named roles exposed by
+ * roleNames(). The cached / active sets live alongside the hits list
+ * rather than being baked into `SubtitleHit` so the controller's hits
+ * remain a pure mirror of the API response.
  */
 class SubtitleResultsModel : public QAbstractListModel
 {
@@ -86,4 +83,4 @@ private:
     QSet<QString> m_active;
 };
 
-} // namespace kinema::ui::widgets
+} // namespace kinema::ui::qml

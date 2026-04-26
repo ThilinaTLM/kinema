@@ -38,7 +38,7 @@
 #include "ui/qml-bridge/SettingsViewModels.h"
 #include "ui/qml-bridge/StreamsListModel.h"
 #include "ui/qml-bridge/SubtitlesViewModel.h"
-#include "ui/widgets/SubtitleResultsModel.h"
+#include "ui/qml-bridge/SubtitleResultsModel.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "ui/player/PlayerViewModel.h"
 #include "ui/player/PlayerWindow.h"
@@ -780,7 +780,7 @@ void MainController::exposeContextProperties(
         "dev.tlmtech.kinema.app", 1, 0,
         "SubtitlesViewModel",
         QStringLiteral("SubtitlesViewModel is owned by C++."));
-    qmlRegisterUncreatableType<widgets::SubtitleResultsModel>(
+    qmlRegisterUncreatableType<SubtitleResultsModel>(
         "dev.tlmtech.kinema.app", 1, 0,
         "SubtitleResultsModel",
         QStringLiteral("SubtitleResultsModel is owned by C++."));

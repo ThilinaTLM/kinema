@@ -18,20 +18,17 @@ namespace kinema::controllers {
 class SubtitleController;
 }
 
-namespace kinema::ui::widgets {
-class SubtitleResultsModel;
-}
-
 namespace kinema::ui::qml {
+
+class SubtitleResultsModel;
 
 /**
  * QML-side view-model for the Subtitles page.
  *
- * Wraps `controllers::SubtitleController` and the existing
- * `SubtitleResultsModel` (still nominally in `ui::widgets` — moved
- * to `ui::qml` in phase 07's cleanup pass). Owns no business logic
- * of its own: every action is forwarded to the controller, every
- * piece of derived state is read back through `NOTIFY` signals.
+ * Wraps `controllers::SubtitleController` and `SubtitleResultsModel`.
+ * Owns no business logic of its own: every action is forwarded to the
+ * controller, every piece of derived state is read back through
+ * `NOTIFY` signals.
  *
  * State machine — exposed as the single `state` string property
  * for `StackLayout.currentIndex` switching in QML:
@@ -186,7 +183,7 @@ private:
 
     controllers::SubtitleController* m_controller;
     config::SubtitleSettings& m_settings;
-    widgets::SubtitleResultsModel* m_model {};
+    SubtitleResultsModel* m_model {};
 
     api::PlaybackContext m_context;
     QString m_contextTitle;
