@@ -1,0 +1,143 @@
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+#include "ui/qml-bridge/SearchViewModel.h"
+
+#include "api/CinemetaClient.h"
+#include "core/HttpErrorPresenter.h"
+#include "ui/qml-bridge/ResultsListModel.h"
+
+#include <KLocalizedString>
+
+#include <QRegularExpression>
+
+namespace kinema::ui::qml {
+
+namespace {
+
+bool looksLikeImdbId(const QString& s)
+{
+    static const QRegularExpression re(QStringLiteral("^tt\\d{5,}$"));
+    return re.match(s).hasMatch();
+}
+
+} // namespace
+
+SearchViewModel::SearchViewModel(api::CinemetaClient* cinemeta,
+    QObject* parent)
+    : QObject(parent)
+    , m_cinemeta(cinemeta)
+    , m_results(new ResultsListModel(this))
+{
+}
+
+void SearchViewModel::setQuery(const QString& q)
+{
+    if (m_query == q) {
+        return;
+    }
+    m_query = q;
+    Q_EMIT queryChanged();
+}
+
+void SearchViewModel::setKind(int kind)
+{
+    const auto k = (kind == static_cast<int>(api::MediaKind::Series))
+        ? api::MediaKind::Series
+        : api::MediaKind::Movie;
+    if (m_kind == k) {
+        return;
+    }
+    m_kind = k;
+    Q_EMIT kindChanged();
+}
+
+void SearchViewModel::submit()
+{
+    const auto trimmed = m_query.trimmed();
+    if (trimmed.isEmpty()) {
+        // Empty submit lands us back on the Idle placeholder so the
+        // Search-page binding doesn't get stuck on a stale result
+        // grid after the user clears the field and presses Enter.
+        m_results->setIdle();
+        return;
+    }
+    auto t = runSearchTask(trimmed, m_kind);
+    Q_UNUSED(t);
+}
+
+void SearchViewModel::clear()
+{
+    if (!m_query.isEmpty()) {
+        m_query.clear();
+        Q_EMIT queryChanged();
+    }
+    // Bumping the epoch makes any in-flight response a no-op when
+    // it lands.
+    ++m_epoch;
+    m_results->setIdle();
+}
+
+void SearchViewModel::activate(int row)
+{
+    const auto* item = m_results->at(row);
+    if (!item) {
+        return;
+    }
+    if (item->kind == api::MediaKind::Series) {
+        Q_EMIT openSeriesRequested(item->imdbId, item->title);
+    } else {
+        Q_EMIT openMovieRequested(item->imdbId, item->title);
+    }
+}
+
+QCoro::Task<void> SearchViewModel::runSearchTask(QString text,
+    api::MediaKind kind)
+{
+    const auto myEpoch = ++m_epoch;
+    m_results->setLoading();
+    Q_EMIT statusMessage(
+        i18nc("@info:status",
+            "Searching for \u201c%1\u201d\u2026", text),
+        0);
+
+    try {
+        QList<api::MetaSummary> results;
+        if (looksLikeImdbId(text)) {
+            auto detail = co_await m_cinemeta->meta(kind, text);
+            if (myEpoch != m_epoch) {
+                co_return;
+            }
+            results.append(detail.summary);
+        } else {
+            results = co_await m_cinemeta->search(kind, text);
+            if (myEpoch != m_epoch) {
+                co_return;
+            }
+        }
+
+        if (results.isEmpty()) {
+            m_results->setResults({});
+            Q_EMIT statusMessage(
+                i18nc("@info:status", "No matches"), 4000);
+            co_return;
+        }
+
+        m_results->setResults(std::move(results));
+        Q_EMIT statusMessage(
+            i18ncp("@info:status", "%1 result", "%1 results",
+                m_results->rowCount()),
+            3000);
+
+    } catch (const std::exception& e) {
+        if (myEpoch != m_epoch) {
+            co_return;
+        }
+        const auto msg = core::describeError(e, "search");
+        m_results->setError(msg);
+        Q_EMIT statusMessage(
+            i18nc("@info:status", "Search failed"), 4000);
+    }
+}
+
+} // namespace kinema::ui::qml

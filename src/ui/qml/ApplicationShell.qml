@@ -178,11 +178,11 @@ Kirigami.ApplicationWindow {
     // Page factories. Re-instantiated on each navigation so a
     // returning visit lands on a fresh state. Phases 03–06 swap
     // these out for the real Kirigami pages backed by view-models.
-    // Phase 03 swaps the Discover placeholder for the real page.
-    // Search / Browse stay on placeholders until phase 04.
-    Component { id: discoverComp; DiscoverPage           { } }
-    Component { id: searchComp;   SearchPagePlaceholder  { objectName: "search" } }
-    Component { id: browseComp;   BrowsePagePlaceholder  { objectName: "browse" } }
+    // Phase 03 brought up the Discover page; phase 04 brought up
+    // Search and Browse. Detail pages remain stubbed until phase 05.
+    Component { id: discoverComp; DiscoverPage { } }
+    Component { id: searchComp;   SearchPage   { } }
+    Component { id: browseComp;   BrowsePage   { } }
 
     // About / Settings — pushed on top of the current nav stack.
     // The Settings stub is a placeholder page until phase 06
@@ -231,16 +231,26 @@ Kirigami.ApplicationWindow {
             root.pageStack.push(aboutComp, { objectName: "about" });
         }
         function onFocusSearchRequested() {
-            // Phase 02: there is no Search field yet, so the
-            // Ctrl+F shortcut just navigates to the Search page.
-            // Phase 04 wires `focusSearchField()` on the real
-            // SearchPage and prefers it over re-pushing.
+            // Prefer focusing the field on the current Search page
+            // when one is visible; otherwise navigate to it. The
+            // SearchPage exposes `focusSearchField()` for this
+            // exact handshake.
             const top = root.pageStack.currentItem;
             if (top && typeof top.focusSearchField === "function") {
                 top.focusSearchField();
                 return;
             }
             root.showPage("search");
+            // After replace() the new page is the top item; it
+            // auto-focuses on `Component.onCompleted`, so no extra
+            // call is needed here.
+        }
+        function onNavigateToBrowseRequested() {
+            // "Show all →" from a Discover rail. The preset has
+            // already been applied to `browseVm` by
+            // `MainController::applyBrowsePreset` before this
+            // signal fires; we just swap the page row.
+            root.showPage("browse");
         }
         function onPassiveMessage(text, durationMs) {
             root.showPassiveNotification(text, durationMs);

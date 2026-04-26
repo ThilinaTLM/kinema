@@ -135,6 +135,25 @@ void DiscoverSectionModel::setItems(QList<api::DiscoverItem> items)
     resetState(m_items.isEmpty() ? State::Empty : State::Ready);
 }
 
+void DiscoverSectionModel::appendItems(QList<api::DiscoverItem> items)
+{
+    if (items.isEmpty()) {
+        return;
+    }
+    const int first = static_cast<int>(m_items.size());
+    const int last = first + static_cast<int>(items.size()) - 1;
+    beginInsertRows({}, first, last);
+    m_items.append(items);
+    endInsertRows();
+    Q_EMIT countChanged();
+
+    if (!m_errorMessage.isEmpty()) {
+        m_errorMessage.clear();
+        Q_EMIT errorMessageChanged();
+    }
+    resetState(State::Ready);
+}
+
 void DiscoverSectionModel::setError(const QString& message)
 {
     if (m_errorMessage != message) {

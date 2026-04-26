@@ -25,10 +25,13 @@
 #include "kinema_debug.h"
 #include "services/StreamActions.h"
 #include "ui/ImageLoader.h"
+#include "ui/qml-bridge/BrowseViewModel.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
+#include "ui/qml-bridge/ResultsListModel.h"
+#include "ui/qml-bridge/SearchViewModel.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "ui/player/PlayerViewModel.h"
 #include "ui/player/PlayerWindow.h"
@@ -166,6 +169,15 @@ void MainController::requestFocusSearch()
     Q_EMIT focusSearchRequested();
 }
 
+void MainController::applyBrowsePreset(int kind, int sort)
+{
+    if (!m_browseVm) {
+        return;
+    }
+    m_browseVm->applyPreset(kind, sort);
+    Q_EMIT navigateToBrowseRequested();
+}
+
 void MainController::attachWindow(QQuickWindow* window)
 {
     m_window = window;
@@ -247,12 +259,34 @@ void MainController::buildCoreServices()
     m_streamActions->setHistoryController(m_historyCtrl);
     m_historyCtrl->setStreamActions(m_streamActions);
 
-    // Discover surface VMs. They sit on top of the existing
-    // controllers; both forward their action signals back into
-    // `MainController` for routing.
+    // Discover / Search / Browse surface VMs. They sit on top of
+    // the existing service graph; action signals route back into
+    // `MainController` either for direct controller forwarding
+    // (resume / remove) or for navigation events the QML shell
+    // listens for.
     m_discoverVm = new DiscoverViewModel(m_tmdb, m_tokenCtrl, this);
     m_continueWatchingVm
         = new ContinueWatchingViewModel(m_historyCtrl, this);
+    m_searchVm = new SearchViewModel(m_cinemeta, this);
+    m_browseVm = new BrowseViewModel(m_tmdb, m_settings.browse(), this);
+
+    // TMDB token gain/loss propagates from `TokenController` to
+    // both the Discover VM (which already handles it internally)
+    // and the Browse VM. We refresh on token gain and clear on
+    // loss; the Browse VM's own `tmdbConfigured` property toggles
+    // the placeholder visibility from QML.
+    connect(m_tokenCtrl,
+        &controllers::TokenController::tmdbTokenChanged, this,
+        [this](const QString& token) {
+            if (!m_browseVm) {
+                return;
+            }
+            if (token.isEmpty()) {
+                m_browseVm->results()->setItems({});
+            } else {
+                m_browseVm->refresh();
+            }
+        });
 
     // Continue Watching action routing. Resume / remove go straight
     // to the controller; “Choose another release…” falls back to a
@@ -291,37 +325,71 @@ void MainController::buildCoreServices()
                 6000);
         });
 
-    // Discover navigation routing. Phase 03 stubs Show-all and
-    // poster activation with passive notifications; phase 04 wires
-    // browseRequested into the real Browse page, phase 05 wires the
-    // open*Requested signals into the real detail pages.
-    connect(m_discoverVm, &DiscoverViewModel::browseRequested, this,
-        [this](api::MediaKind, const QString& title) {
-            Q_EMIT passiveMessage(
-                i18nc("@info:status",
-                    "Browse view lands in the next migration phase — "
-                    "cannot show all of “%1” yet.",
-                    title),
-                4000);
-        });
+    // Discover navigation routing. "Show all" forwards into the
+    // Browse VM via a typed (kind, sort) preset and asks the shell
+    // to navigate. Poster activation routes through Discover → the
+    // (still-stubbed) detail-page slot until phase 05.
+    connect(m_discoverVm, &DiscoverViewModel::browseRequested,
+        this, &MainController::applyBrowsePreset);
+    const auto detailStub = [this](int /*tmdbId*/, const QString& title) {
+        Q_EMIT passiveMessage(
+            i18nc("@info:status",
+                "Detail pages land in a later migration phase — cannot "
+                "open “%1” yet.",
+                title),
+            4000);
+    };
     connect(m_discoverVm, &DiscoverViewModel::openMovieRequested,
-        this, [this](int /*tmdbId*/, const QString& title) {
-            Q_EMIT passiveMessage(
-                i18nc("@info:status",
-                    "Detail pages land in a later migration phase — cannot "
-                    "open “%1” yet.",
-                    title),
-                4000);
-        });
+        this, detailStub);
     connect(m_discoverVm, &DiscoverViewModel::openSeriesRequested,
-        this, [this](int /*tmdbId*/, const QString& title) {
-            Q_EMIT passiveMessage(
-                i18nc("@info:status",
-                    "Detail pages land in a later migration phase — cannot "
-                    "open “%1” yet.",
-                    title),
-                4000);
-        });
+        this, detailStub);
+
+    // Search VM action routing. Phase 04 stubs detail navigation;
+    // status messages funnel through the same passive-notification
+    // sink the rest of the controllers use.
+    connect(m_searchVm, &SearchViewModel::statusMessage, this,
+        &MainController::passiveMessage);
+    connect(m_searchVm, &SearchViewModel::openMovieRequested,
+        this, &MainController::openMovieDetailRequested);
+    connect(m_searchVm, &SearchViewModel::openSeriesRequested,
+        this, &MainController::openSeriesDetailRequested);
+
+    // Browse VM action routing. Browse hands off TMDB ids rather
+    // than IMDB ids, so until phase 05 wires real detail pages we
+    // route them through a Browse-specific passive-notification
+    // stub (Search uses the IMDB-id signal pair on `this` instead).
+    connect(m_browseVm, &BrowseViewModel::statusMessage, this,
+        &MainController::passiveMessage);
+    const auto browseDetailStub = [this](int /*tmdbId*/,
+                                      const QString& title) {
+        Q_EMIT passiveMessage(
+            i18nc("@info:status",
+                "Detail pages land in a later migration phase — cannot "
+                "open “%1” yet.",
+                title),
+            4000);
+    };
+    connect(m_browseVm, &BrowseViewModel::openMovieRequested,
+        this, browseDetailStub);
+    connect(m_browseVm, &BrowseViewModel::openSeriesRequested,
+        this, browseDetailStub);
+
+    // Search-side detail stubs. The signals carry IMDB ids so they
+    // can route directly to the phase-05 detail page once it
+    // exists; for now we surface the same passive notification.
+    const auto searchDetailStub = [this](const QString& /*imdbId*/,
+                                      const QString& title) {
+        Q_EMIT passiveMessage(
+            i18nc("@info:status",
+                "Detail pages land in a later migration phase — cannot "
+                "open “%1” yet.",
+                title),
+            4000);
+    };
+    connect(this, &MainController::openMovieDetailRequested, this,
+        searchDetailStub);
+    connect(this, &MainController::openSeriesDetailRequested, this,
+        searchDetailStub);
 
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
@@ -503,6 +571,10 @@ void MainController::exposeContextProperties(
         "dev.tlmtech.kinema.app", 1, 0,
         "DiscoverSectionModel",
         QStringLiteral("DiscoverSectionModel is owned by C++."));
+    qmlRegisterUncreatableType<ResultsListModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "ResultsListModel",
+        QStringLiteral("ResultsListModel is owned by C++."));
 
     engine.rootContext()->setContextProperty(
         QStringLiteral("mainController"), this);
@@ -510,12 +582,17 @@ void MainController::exposeContextProperties(
         QStringLiteral("discoverVm"), m_discoverVm);
     engine.rootContext()->setContextProperty(
         QStringLiteral("continueWatchingVm"), m_continueWatchingVm);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("searchVm"), m_searchVm);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("browseVm"), m_browseVm);
 
-    // Kick the initial Discover fetch once everything's wired so
-    // the page lands populated rather than empty-spinner. Token
-    // resolution may finish later via `loadAll()`; the model's
-    // listener on `tmdbTokenChanged` will refresh again then.
+    // Kick the initial Discover + Browse fetches once everything's
+    // wired so each page lands populated rather than empty-spinner.
+    // Token resolution may finish later via `loadAll()`; both VMs
+    // listen on `tmdbTokenChanged` for a delayed-arrival refresh.
     m_discoverVm->refresh();
+    m_browseVm->refresh();
 }
 
 } // namespace kinema::ui::qml

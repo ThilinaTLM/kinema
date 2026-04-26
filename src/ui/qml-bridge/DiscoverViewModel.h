@@ -65,9 +65,16 @@ public:
     /// Used by tests / `MainController` to feed the section list at
     /// construction without spinning a real TMDB client.
     using Fetcher = std::function<QCoro::Task<QList<api::DiscoverItem>>()>;
+    /// Each Discover rail carries a preset that maps it to a Browse
+    /// query when the user clicks `Show all →`. The trending /
+    /// popular / now-playing / on-the-air / top-rated endpoints
+    /// don't have a 1:1 `/discover` equivalent, so we pick the
+    /// closest pair (kind + sort) and let the filter drawer refine.
     struct SectionSpec {
         QString title;
         Fetcher fetch;
+        api::MediaKind browseKind = api::MediaKind::Movie;
+        api::DiscoverSort browseSort = api::DiscoverSort::Popularity;
     };
 
 public Q_SLOTS:
@@ -91,9 +98,11 @@ Q_SIGNALS:
     void authFailedChanged();
     void placeholderChanged();
 
-    /// Routed by `MainController` to a Kirigami passive notification
-    /// or, in phase 04+, a real navigation push.
-    void browseRequested(api::MediaKind kind, const QString& sectionTitle);
+    /// Routed by `MainController` to `BrowseViewModel::applyPreset`
+    /// + a navigation push. Preset is the closest (kind, sort)
+    /// pair for the section's TMDB endpoint; QML interface uses
+    /// raw ints to avoid leaking `api::*` enums to QML.
+    void browseRequested(int browseKind, int browseSort);
     void openMovieRequested(int tmdbId, const QString& title);
     void openSeriesRequested(int tmdbId, const QString& title);
 
@@ -113,6 +122,8 @@ private:
 
     QList<DiscoverSectionModel*> m_sections;
     QList<Fetcher> m_fetchers;
+    QList<api::MediaKind> m_browseKinds;
+    QList<api::DiscoverSort> m_browseSorts;
     QList<quint64> m_epochs;
 
     bool m_tmdbConfigured = false;

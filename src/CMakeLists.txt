@@ -53,14 +53,12 @@ set(kinema_core_SRCS
     api/TorrentioClient.cpp
     api/TorrentioParse.cpp
 
-    ui/BrowseFilterBar.cpp
-    ui/BrowsePage.cpp
     # `DiscoverCardDelegate`, `DiscoverGridView`, `DiscoverRowModel`,
-    # and `DiscoverSection` stay until Browse (phase 04) and
-    # SimilarStrip (phase 05) are migrated; they're still consumed
-    # by `BrowsePage` and `SimilarStrip`. Their Continue-Watching
-    # subclasses + the legacy `DiscoverPage` shell are gone in
-    # phase 03.
+    # and `DiscoverSection` stay until SimilarStrip (phase 05) is
+    # migrated. `DiscoverGridView` and `DiscoverCardDelegate` are
+    # still consumed by `DiscoverSection`; `DiscoverRowModel` is
+    # consumed by `SimilarStrip` directly. Browse's consumers were
+    # retired in phase 04.
     ui/DiscoverCardDelegate.cpp
     ui/DiscoverGridView.cpp
     ui/DiscoverRowModel.cpp
@@ -68,16 +66,18 @@ set(kinema_core_SRCS
     ui/EpisodeDelegate.cpp
     ui/EpisodesModel.cpp
     ui/ImageLoader.cpp
-    ui/ResultsModel.cpp
-    ui/ResultCardDelegate.cpp
     ui/SeriesDetailPane.cpp
     ui/SeriesPicker.cpp
     ui/SimilarStrip.cpp
     ui/TorrentsModel.cpp
-    ui/SearchBar.cpp
+    ui/DetailPane.cpp
+    # `StateWidget` and `UpcomingBadge` outlive phase 04: they're
+    # consumed by `SeriesDetailPane` / `SimilarStrip` /
+    # `DiscoverSection` / `EpisodeDelegate` (phase 05 surfaces) and
+    # by `widgets/MetaHeaderWidget` / `widgets/StreamsPanel` (phase
+    # 06 surfaces). They go away once those last consumers do.
     ui/StateWidget.cpp
     ui/UpcomingBadge.cpp
-    ui/DetailPane.cpp
 
     ui/widgets/LanguagePickerButton.cpp
     ui/widgets/MetaHeaderWidget.cpp
@@ -97,8 +97,12 @@ set(kinema_core_SRCS
 
     controllers/HistoryController.cpp
     controllers/MovieDetailController.cpp
+    # `NavigationController` stays alive for one more phase: the
+    # detail controllers (`MovieDetailController` /
+    # `SeriesDetailController`) and their tests still consume it.
+    # Phase 05 retires those alongside the new detail VMs and
+    # `NavigationController` + `Page.h` go with them.
     controllers/NavigationController.cpp
-    controllers/SearchController.cpp
     controllers/SeriesDetailController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
@@ -106,11 +110,14 @@ set(kinema_core_SRCS
 
     services/StreamActions.cpp
 
+    ui/qml-bridge/BrowseViewModel.cpp
     ui/qml-bridge/ContinueWatchingViewModel.cpp
     ui/qml-bridge/DiscoverSectionModel.cpp
     ui/qml-bridge/DiscoverViewModel.cpp
     ui/qml-bridge/KinemaImageProvider.cpp
     ui/qml-bridge/MainController.cpp
+    ui/qml-bridge/ResultsListModel.cpp
+    ui/qml-bridge/SearchViewModel.cpp
 
     tray_resources.qrc
 )
@@ -217,16 +224,20 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/Theme.qml
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
+        ui/qml/components/FilterChipRow.qml
+        ui/qml/components/FilterDrawer.qml
         ui/qml/components/KAboutPage.qml
         ui/qml/components/KEmptyState.qml
         ui/qml/components/KErrorState.qml
         ui/qml/components/KSpinner.qml
+        ui/qml/components/MediaKindSwitch.qml
         ui/qml/components/PosterCard.qml
+        ui/qml/components/PosterGrid.qml
         ui/qml/components/ProgressPosterCard.qml
         ui/qml/components/RatingChip.qml
-        ui/qml/pages/BrowsePagePlaceholder.qml
+        ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
-        ui/qml/pages/SearchPagePlaceholder.qml
+        ui/qml/pages/SearchPage.qml
     OUTPUT_DIRECTORY
         "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/app"
     NO_PLUGIN

@@ -78,6 +78,10 @@ public:
     // ---- Mutators (called by view-models) --------------------------
     void setLoading();
     void setItems(QList<api::DiscoverItem> items);
+    /// Append rows after `setItems`. Used by paginated consumers
+    /// (`BrowseViewModel::loadMore`) so existing scroll position is
+    /// preserved across additional pages. Flips state to `Ready`.
+    void appendItems(QList<api::DiscoverItem> items);
     void setError(const QString& message);
 
     /// Continue-Watching overlay data; ignored by other rails.

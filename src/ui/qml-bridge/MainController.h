@@ -56,8 +56,10 @@ class PlayerWindow;
 
 namespace kinema::ui::qml {
 
+class BrowseViewModel;
 class ContinueWatchingViewModel;
 class DiscoverViewModel;
+class SearchViewModel;
 
 /**
  * Top-level QML host. Replaces `MainWindow`'s composition role:
@@ -137,10 +139,15 @@ public Q_SLOTS:
     /// Drawer About action / `F1`. ApplicationShell pushes
     /// `KAboutPage` which reads `aboutData` from this controller.
     void requestAbout();
-    /// `Ctrl+F`. ApplicationShell either focuses the search field
-    /// on the currently-visible Search page (once phase 04 lands)
-    /// or pushes the Search page from another stack.
+    /// `Ctrl+F`. ApplicationShell tries `focusSearchField()` on
+    /// the current page first; falls back to navigating to the
+    /// Search page so the field is reachable from any context.
     void requestFocusSearch();
+
+    /// Routed from a Discover rail's "Show all →" via
+    /// `DiscoverViewModel::browseRequested`. Applies the preset
+    /// to `BrowseViewModel` and asks the QML shell to navigate.
+    void applyBrowsePreset(int kind, int sort);
 
     /// Called from QML's `onClosing` handler. Returns true when
     /// the close should proceed (real quit), false when the
@@ -152,6 +159,14 @@ Q_SIGNALS:
     void showSettingsRequested();
     void showAboutRequested();
     void focusSearchRequested();
+    /// Sent after `applyBrowsePreset` so the shell can swap the
+    /// page row to Browse with the freshly-applied filters.
+    void navigateToBrowseRequested();
+    /// Sent when a search-result poster is activated. Wired to a
+    /// passive notification stub for phase 04; phase 05 swaps in
+    /// the real detail-page push.
+    void openMovieDetailRequested(const QString& imdbId, const QString& title);
+    void openSeriesDetailRequested(const QString& imdbId, const QString& title);
 
     /// Fan-in for status messages coming out of `StreamActions`,
     /// `PlayerLauncher`, `SubtitleController`, and (from phase 03)
@@ -204,6 +219,8 @@ private:
     // Subtitles / Settings here as their pages land.
     DiscoverViewModel* m_discoverVm {};
     ContinueWatchingViewModel* m_continueWatchingVm {};
+    SearchViewModel* m_searchVm {};
+    BrowseViewModel* m_browseVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::PlaybackController* m_playbackCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};

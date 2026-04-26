@@ -102,52 +102,68 @@ void DiscoverViewModel::buildSections()
                 }
                 co_return co_await tmdb->trending(
                     api::MediaKind::Movie, /*weekly=*/true);
-            } },
+            },
+            api::MediaKind::Movie,
+            api::DiscoverSort::Popularity },
         { i18nc("@label discover row", "Popular series"),
             [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
                 if (!tmdb) {
                     co_return QList<api::DiscoverItem> {};
                 }
                 co_return co_await tmdb->popular(api::MediaKind::Series);
-            } },
+            },
+            api::MediaKind::Series,
+            api::DiscoverSort::Popularity },
         { i18nc("@label discover row", "Now playing in theaters"),
             [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
                 if (!tmdb) {
                     co_return QList<api::DiscoverItem> {};
                 }
                 co_return co_await tmdb->nowPlayingMovies();
-            } },
+            },
+            api::MediaKind::Movie,
+            api::DiscoverSort::ReleaseDate },
         { i18nc("@label discover row", "On the air"),
             [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
                 if (!tmdb) {
                     co_return QList<api::DiscoverItem> {};
                 }
                 co_return co_await tmdb->onTheAirSeries();
-            } },
+            },
+            api::MediaKind::Series,
+            api::DiscoverSort::ReleaseDate },
         { i18nc("@label discover row", "Top rated movies"),
             [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
                 if (!tmdb) {
                     co_return QList<api::DiscoverItem> {};
                 }
                 co_return co_await tmdb->topRated(api::MediaKind::Movie);
-            } },
+            },
+            api::MediaKind::Movie,
+            api::DiscoverSort::Rating },
         { i18nc("@label discover row", "Top rated series"),
             [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
                 if (!tmdb) {
                     co_return QList<api::DiscoverItem> {};
                 }
                 co_return co_await tmdb->topRated(api::MediaKind::Series);
-            } },
+            },
+            api::MediaKind::Series,
+            api::DiscoverSort::Rating },
     };
 
     m_sections.reserve(specs.size());
     m_fetchers.reserve(specs.size());
+    m_browseKinds.reserve(specs.size());
+    m_browseSorts.reserve(specs.size());
     m_epochs.reserve(specs.size());
 
     for (const auto& spec : specs) {
         auto* model = new DiscoverSectionModel(spec.title, this);
         m_sections.append(model);
         m_fetchers.append(spec.fetch);
+        m_browseKinds.append(spec.browseKind);
+        m_browseSorts.append(spec.browseSort);
         m_epochs.append(0);
     }
 
@@ -243,21 +259,9 @@ void DiscoverViewModel::browseSection(int sectionIndex)
     if (sectionIndex < 0 || sectionIndex >= m_sections.size()) {
         return;
     }
-    // The endpoint itself isn't surfaced through the section spec
-    // (the fetchers are opaque QCoro tasks). For now we route the
-    // section title and infer the kind from the title's content;
-    // phase 04 replaces this with a structured Browse query.
-    const auto title = m_sections.at(sectionIndex)->title();
-    // Title-based heuristic is lossy on purpose: phase 03 only
-    // stubs this with a passive notification, the real wiring lands
-    // in phase 04 alongside the Browse page.
-    const auto kind = title.contains(QStringLiteral("series"),
-                          Qt::CaseInsensitive)
-            || title.contains(QStringLiteral("on the air"),
-                Qt::CaseInsensitive)
-        ? api::MediaKind::Series
-        : api::MediaKind::Movie;
-    Q_EMIT browseRequested(kind, title);
+    Q_EMIT browseRequested(
+        static_cast<int>(m_browseKinds.at(sectionIndex)),
+        static_cast<int>(m_browseSorts.at(sectionIndex)));
 }
 
 void DiscoverViewModel::activateItem(int sectionIndex, int row)
