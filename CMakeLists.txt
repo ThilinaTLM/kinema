@@ -40,10 +40,16 @@ find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS
     Network
     OpenGL
     OpenGLWidgets
+    Qml
+    Quick
+    QuickControls2
     Sql
     Svg
     Test
 )
+
+# qt_add_qml_module / Qt Quick QML scenegraph helpers (Qt 6.5+).
+qt_standard_project_setup(REQUIRES 6.5)
 
 find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS
     CoreAddons
@@ -67,17 +73,29 @@ find_package(Qt6Keychain REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Optional libmpv for the in-app "Embedded" player. When present, Kinema
-# can render mpv into a QOpenGLWidget with the built-in OSC providing
-# playback controls. When absent, the Embedded option is greyed out in
+# renders mpv into a QtQuick scene via the KDE-maintained `mpvqt` library;
+# the chrome (transport bar, prompts, pickers) is QtQuick / QML composed
+# in the same scene. When absent, the Embedded option is greyed out in
 # Settings and PlayerLauncher falls back to the external mpv/VLC path.
+#
+# We require BOTH libmpv (≥ 0.36) AND MpvQt6 — the QtQuick wrapper that
+# manages the offscreen FBO + worker thread. Rolling our own mpv
+# integration is rejected; see plans/qml-player-chrome-migration.md.
 # ---------------------------------------------------------------------------
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
     pkg_check_modules(MPV IMPORTED_TARGET mpv>=0.36)
 endif()
+find_package(MpvQt QUIET)
+set(_kinema_have_mpvqt ${MpvQt_FOUND})
+if(MPV_FOUND AND _kinema_have_mpvqt)
+    set(_kinema_default_embed ON)
+else()
+    set(_kinema_default_embed OFF)
+endif()
 option(KINEMA_ENABLE_MPV_EMBED
-    "Build the in-app mpv player (requires libmpv ≥ 0.36)"
-    ${MPV_FOUND})
+    "Build the in-app mpv player (requires libmpv ≥ 0.36 and MpvQt)"
+    ${_kinema_default_embed})
 if(KINEMA_ENABLE_MPV_EMBED AND NOT MPV_FOUND)
     message(FATAL_ERROR
         "KINEMA_ENABLE_MPV_EMBED=ON was requested but libmpv (≥ 0.36) "
@@ -85,8 +103,16 @@ if(KINEMA_ENABLE_MPV_EMBED AND NOT MPV_FOUND)
         "package (e.g. `libmpv-dev` on Debian/Ubuntu, `mpv-libs` / "
         "`mpv` on Fedora/Arch) or pass -DKINEMA_ENABLE_MPV_EMBED=OFF.")
 endif()
+if(KINEMA_ENABLE_MPV_EMBED AND NOT _kinema_have_mpvqt)
+    message(FATAL_ERROR
+        "KINEMA_ENABLE_MPV_EMBED=ON was requested but MpvQt was not "
+        "found. Install the mpvqt development package (e.g. `mpvqt` on "
+        "Arch / Fedora / openSUSE, `libmpvqt6-dev` on Debian / Ubuntu) "
+        "or pass -DKINEMA_ENABLE_MPV_EMBED=OFF.\n"
+        "Source: https://invent.kde.org/libraries/mpvqt")
+endif()
 add_feature_info("Embedded mpv player" KINEMA_ENABLE_MPV_EMBED
-    "in-app playback using libmpv's render API")
+    "in-app playback using libmpv via QtQuick + mpvqt")
 
 qcoro_enable_coroutines()
 

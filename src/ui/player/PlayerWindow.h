@@ -9,9 +9,13 @@
 #include "core/MpvChapterList.h"
 #include "core/MpvTrackList.h"
 
-#include <QWidget>
+#include <QPointer>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
+#include <QtQuick/QQuickView>
+
+class QWidget;
 
 namespace kinema::config {
 class AppearanceSettings;
@@ -20,64 +24,53 @@ class PlayerSettings;
 
 namespace kinema::ui::player {
 
-class MpvWidget;
+class MpvVideoItem;
+class PlayerViewModel;
 
 /**
- * Top-level window that hosts the in-process libmpv player. Owns a
- * single MpvWidget as its only child and manages window-level concerns
- * (title, icon, geometry persistence, fullscreen, close semantics)
- * that are orthogonal to the mpv plumbing.
+ * Top-level window that hosts the embedded player. Subclasses
+ * `QQuickView` so the entire player surface (video + chrome) lives
+ * in one Qt Quick scene graph backed by a single Wayland surface.
  *
- * Lifecycle: constructed lazily by MainWindow on the first embedded
- * Play. Re-used for subsequent plays. Closing the window (X button,
- * Esc in windowed mode, or end-of-file) stops playback and hides the
- * window, keeping the libmpv context warm for fast re-open. The
- * context is torn down when this widget is destroyed (i.e. when the
- * owning MainWindow goes away).
+ * Public slots / signals are preserved verbatim from the previous
+ * QWidget-based implementation so `PlaybackController`,
+ * `TrayController`, `HistoryController`, and `MainWindow` are not
+ * touched. Internally, the slots forward to `PlayerViewModel`
+ * (chrome state) and `MpvVideoItem` (transport).
  *
- * Geometry: first-time default is 1280x720 centred on the parent
- * window's screen; subsequent sessions restore the last
- * saveGeometry() blob through config::AppearanceSettings, preserving
- * the existing [PlayerWindow]/Geometry on-disk storage.
+ * Geometry persistence and remembered-volume behaviour matches the
+ * old window: applied on first show, saved on every hide, never
+ * destroyed between plays so the libmpv context stays warm.
  */
-class PlayerWindow : public QWidget
+class PlayerWindow : public QQuickView
 {
     Q_OBJECT
 public:
+    /// `parent` is the `QWidget` that owns the lifetime; we grab
+    /// its `windowHandle()` and use it as the transient parent so
+    /// the window manager places the player relative to the main
+    /// window. `QQuickView` only accepts a `QWindow*` parent, so a
+    /// QWidget owner is wired via `setTransientParent` instead.
     explicit PlayerWindow(config::AppearanceSettings& appearance,
         config::PlayerSettings& player,
         QWidget* parent = nullptr);
     ~PlayerWindow() override;
 
-    /// Direct access for callers (e.g. PlaybackController in M4) that
-    /// need to issue transport commands or read the log tail. Nullable
-    /// only in the degraded build where mpv_create failed.
-    MpvWidget* mpv() const { return m_mpv; }
-
     PlayerWindow(const PlayerWindow&) = delete;
     PlayerWindow& operator=(const PlayerWindow&) = delete;
 
-    /// Load `url` into mpv and show the window (raising + activating
-    /// it if already visible). `ctx.title` is used verbatim in the
-    /// window title bar, suffixed with " — Kinema". Empty title
-    /// collapses to just "Kinema". When `ctx.resumeSeconds` is set,
-    /// mpv is asked to start at that offset (clamped below the end
-    /// of the file when duration is known).
+    /// Load `url` into mpv and show the window.
     virtual void play(const QUrl& url,
         const kinema::api::PlaybackContext& ctx);
 
-    // Thin command surface used by PlaybackController. These forward
-    // to MpvWidget (transport) and the Lua overlays via MpvIpc
-    // (prompts / banners), so tests can override them on a fake
-    // PlayerWindow without depending on libmpv behaviour.
-    //
-    // The prompt/banner/skip methods are fire-and-forget
-    // `script-message-to kinema-overlays …` sends; the Lua chrome
-    // renders and replies via `MpvIpc` signals.
+    // Imperative control surface (matches the previous public API).
     virtual void setPaused(bool paused);
     virtual void seekAbsolute(double seconds);
     virtual void setAudioTrack(int id);
     virtual void setSubtitleTrack(int id);
+    /// Programmatic playback-speed setter, used by
+    /// `PlaybackController` when the QML speed picker emits.
+    virtual void setSpeed(double factor);
     virtual void showResumePrompt(qint64 seconds);
     virtual void hideResumePrompt();
     virtual void showNextEpisodeBanner(
@@ -85,40 +78,46 @@ public:
     virtual void updateNextEpisodeCountdown(int seconds);
     virtual void hideNextEpisodeBanner();
     virtual void showSkipChapter(const QString& kind,
-        const QString& label,
-        qint64 startSec, qint64 endSec);
+        const QString& label, qint64 startSec, qint64 endSec);
     virtual void hideSkipChapter();
 
-    /// Stop playback, leave fullscreen if needed, and hide the
-    /// window. Safe to call repeatedly or before any play().
+    /// Stop playback, leave fullscreen if needed, hide the window.
     void stopAndHide();
 
-    /// True after the first play() call. Used by MainWindow's tray
-    /// menu to decide whether to expose a "Show Player" action.
-    bool hasEverLoaded() const { return m_hasEverLoaded; }
+    bool hasEverLoaded() const noexcept { return m_hasEverLoaded; }
+
+    /// Track-list snapshot (used by `HistoryController` to remember
+    /// the user's selected audio / subtitle language). Empty when
+    /// no file has loaded yet.
+    const core::tracks::TrackList& trackList() const;
+    /// Most recent log lines from libmpv. Used by
+    /// `PlaybackController` to classify end-file errors.
+    QStringList recentLogLines() const;
 
 Q_SIGNALS:
-    /// mpv has loaded the file and playback is running. Forwarded
-    /// verbatim from MpvWidget so MainWindow can still raise
-    /// KNotifications.
+    // Playback signals (forwarded from MpvVideoItem).
     void fileLoaded();
-    /// Playback ended. `reason` is mpv's stop reason ("eof",
-    /// "stop", "quit", "error" …). Forwarded from MpvWidget; the
-    /// window has already hidden itself by the time this fires.
     void endOfFile(const QString& reason);
-    /// libmpv call failed; payload is a short human-readable
-    /// description. MainWindow surfaces this in the status bar.
     void mpvError(const QString& message);
-    /// Emitted from showEvent / hideEvent so MainWindow can refresh
-    /// the tray context menu (the "Show Player" entry depends on
-    /// visibility).
-    void visibilityChanged(bool visible);
-    /// Forwarded from MpvWidget. HistoryController consumes these to
-    /// keep the persisted progress current during playback.
     void positionChanged(double seconds);
     void durationChanged(double seconds);
     void trackListChanged(const core::tracks::TrackList& tracks);
     void chaptersChanged(const core::chapters::ChapterList& chapters);
+    /// Emitted from showEvent / hideEvent so MainWindow can refresh
+    /// the tray context menu.
+    void visibilityChanged(bool visible);
+
+    // User-action signals re-emitted from PlayerViewModel.
+    // PlaybackController consumes these eight to drive the resume,
+    // skip-chapter, next-episode, and picker flows.
+    void resumeAccepted();
+    void resumeDeclined();
+    void skipRequested();
+    void nextEpisodeAccepted();
+    void nextEpisodeCancelled();
+    void audioPicked(int trackId);
+    void subtitlePicked(int trackId);
+    void speedPicked(double factor);
 
 protected:
     void closeEvent(QCloseEvent* e) override;
@@ -129,38 +128,26 @@ protected:
 private:
     void toggleFullscreen();
     void leaveFullscreenOrClose();
-    void mirrorMpvFullscreen(bool on);
-
     void loadGeometry();
     void saveGeometryToConfig();
     void saveVolumeToConfig();
-
-    // Rebuild the media-info chip JSON from the current track list
-    // and cached mpv params, and push it to the Lua chrome. Called
-    // on every `play()` and whenever track-list / video-params /
-    // audio-params change.
     void pushMediaChips();
-    // Send the translated cheat-sheet text once per `play()` so the
-    // `?` overlay has its strings. Cheap enough to resend on every
-    // load without optimising.
     void pushCheatSheetText();
 
     config::AppearanceSettings& m_appearanceSettings;
     config::PlayerSettings& m_playerSettings;
-    MpvWidget* m_mpv {nullptr};
 
-    // Re-entrancy guard for fullscreen toggles driven both by Qt
-    // (F key / double-click via MpvWidget) and mpv
-    // (fullscreen property change from scripts / OSC).
-    bool m_applyingFullscreen {false};
+    PlayerViewModel* m_viewModel = nullptr;
+    QPointer<MpvVideoItem> m_video;
+    QWidget* m_widgetParent = nullptr;
 
-    // Set on first play() so MainWindow's tray menu knows whether
-    // a "Show Player" entry is meaningful.
-    bool m_hasEverLoaded {false};
+    // Public-API stability check: zero-overhead empty fallback
+    // returned from `trackList()` / `recentLogLines()` when no
+    // video item is wired yet.
+    core::tracks::TrackList m_emptyTracks;
 
-    // One-shot flag: true until the first showEvent(), used to
-    // apply the centred-default or restored geometry exactly once.
-    bool m_geometryApplied {false};
+    bool m_hasEverLoaded = false;
+    bool m_geometryApplied = false;
 };
 
 } // namespace kinema::ui::player

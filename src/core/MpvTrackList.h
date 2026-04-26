@@ -70,10 +70,10 @@ TrackList parseTrackList(const QByteArray& json);
 QString formatLabel(const Entry& e);
 
 /**
- * Serialise a track list into the compact JSON shape the
- * `kinema-overlays` Lua script consumes via its `set-tracks`
- * message. Only audio and subtitle tracks are emitted; video
- * tracks are dropped because the pickers never offer them.
+ * Serialise a track list into the compact JSON shape the QML chrome
+ * consumes via the audio / subtitle track models. Only audio and
+ * subtitle tracks are emitted; video tracks are dropped because
+ * the pickers never offer them.
  *
  * Shape (stable — versioned by the IPC protocol):
  *

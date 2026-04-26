@@ -12,7 +12,7 @@
 #include "services/StreamActions.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
-#include "ui/player/MpvWidget.h"
+
 #include "ui/player/PlayerWindow.h"
 #endif
 
@@ -404,8 +404,8 @@ void HistoryController::persistActive(bool force)
     e.lastWatchedAt = QDateTime::currentDateTimeUtc();
 
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_player && m_player->mpv()) {
-        const auto& tracks = m_player->mpv()->trackList();
+    if (m_player) {
+        const auto& tracks = m_player->trackList();
         e.rememberedAudioLang = selectedAudioLang(tracks);
         e.rememberedSubtitleLang = selectedSubtitleLang(tracks);
     }

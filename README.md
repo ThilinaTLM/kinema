@@ -23,9 +23,11 @@ subscribers — streaming straight into **mpv** or **VLC**.
 - KDE Plasma 6 (or Qt 6.5+ with KDE Frameworks 6)
 - C++20 compiler, CMake ≥ 3.22
 - `extra-cmake-modules`, `qcoro6`, `qtkeychain` (Qt 6)
-- **libmpv** (optional, for the embedded player) built with Lua
-  scripting support (default on all mainstream distros) — the
-  embedded player renders its chrome via a shipped Lua script
+- **libmpv** (optional, for the embedded player) and the KDE
+  **mpvqt** library — the embedded player composes its chrome in
+  Qt Quick / QML on top of `MpvAbstractItem` from mpvqt. Packages:
+  `mpvqt` (Arch / Fedora / openSUSE), `libmpvqt6-dev`
+  (Debian / Ubuntu).
 - **mpv** or **VLC** at runtime
 
 ## Build & run

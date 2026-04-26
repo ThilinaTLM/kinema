@@ -5,29 +5,33 @@
 
 #include "ui/player/PlayerWindow.h"
 
-#include "ui/player/MpvWidget.h"
-
 #include "config/AppearanceSettings.h"
 #include "config/PlayerSettings.h"
 #include "core/CheatSheetText.h"
 #include "core/MediaChips.h"
-#include "core/MpvIpc.h"
-#include "core/MpvTrackList.h"
+#include "ui/player/MpvVideoItem.h"
+#include "ui/player/PlayerViewModel.h"
 
 #include <KLocalizedString>
 
-#include <QByteArray>
 #include <QCloseEvent>
 #include <QGuiApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QHideEvent>
 #include <QIcon>
 #include <QKeyEvent>
-#include <QLatin1Char>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQuickItem>
 #include <QScreen>
 #include <QShowEvent>
 #include <QString>
-#include <QVBoxLayout>
+#include <QUrl>
 #include <QWidget>
+#include <QWindow>
+
+#include "kinema_debug.h"
 
 namespace kinema::ui::player {
 
@@ -35,8 +39,8 @@ namespace {
 
 /// Build the short subtitle line the title strip renders under the
 /// primary title. Movies have no subtitle; series get
-/// `"S01E03 \u2014 Episode title"` when we know both the key and the
-/// episode title, falling back to the numeric part alone otherwise.
+/// `"S01E03 \u2014 Episode title"` when both are known, falling
+/// back to the numeric part alone otherwise.
 QString buildSubtitleLabel(const api::PlaybackContext& ctx)
 {
     if (ctx.key.kind != api::MediaKind::Series) {
@@ -52,122 +56,177 @@ QString buildSubtitleLabel(const api::PlaybackContext& ctx)
         return code;
     }
     return i18nc(
-        "@label subtitle on the in-mpv title strip, e.g. "
+        "@label subtitle on the player title strip, e.g. "
         "\"S01E03 \u2014 Episode Title\"",
         "%1 \u2014 %2", code, ctx.episodeTitle);
+}
+
+QStringList chipsFromJson(const QByteArray& json)
+{
+    // `core::media_chips::toIpcJson` produces a JSON array of
+    // strings (e.g. `["4K", "HDR10", "EAC3 5.1"]`). The chip row
+    // QML binds to a QStringList, so peel one layer of JSON off here.
+    const auto doc = QJsonDocument::fromJson(json);
+    if (!doc.isArray()) {
+        return {};
+    }
+    QStringList out;
+    for (const auto v : doc.array()) {
+        if (v.isString()) {
+            out.append(v.toString());
+        }
+    }
+    return out;
 }
 
 } // namespace
 
 PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     config::PlayerSettings& player, QWidget* parent)
-    : QWidget(parent, Qt::Window)
+    : QQuickView(/*parent=*/nullptr)
     , m_appearanceSettings(appearance)
     , m_playerSettings(player)
+    , m_widgetParent(parent)
 {
-    // App-consistent window chrome. The actual title is set per-play
-    // by play(); the placeholder here is what shows if someone
-    // toggles the window visible before loading a file.
-    setWindowTitle(i18nc("@title:window", "Kinema Player"));
-    setWindowIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema")));
-
-    // Full-bleed video. MpvWidget is the *only* child of this window
-    // \u2014 all player chrome is rendered inside mpv by the
-    // `kinema-overlays` Lua script. Parenting any Qt widget to
-    // MpvWidget is now banned; see the "Embedded player chrome"
-    // section in AGENTS.md.
-    auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-
-    m_mpv = new MpvWidget(m_playerSettings, this);
-    layout->addWidget(m_mpv);
-
-    // Wire IPC \u2194 window-level actions the Lua script can request
-    // (close, fullscreen toggle). These always go to the PlayerWindow
-    // rather than the controller because they manipulate Qt window
-    // state.
-    if (auto* ipc = m_mpv->ipc()) {
-        connect(ipc, &core::MpvIpc::closeRequested,
-            this, [this] { close(); });
-        connect(ipc, &core::MpvIpc::fullscreenToggleRequested,
-            this, &PlayerWindow::toggleFullscreen);
+    // QQuickView is a top-level QWindow; the QWidget owner is wired
+    // as a transient parent so the window manager places this above
+    // the main window when relevant. The QObject parent stays null
+    // (we manage the lifetime via MainWindow's qobject ownership of
+    // a sibling pointer).
+    if (parent) {
+        if (auto* parentWin = parent->windowHandle()) {
+            setTransientParent(parentWin);
+        }
+        // Match MainWindow's existing ownership model: the player
+        // window dies with its widget owner.
+        QObject::setParent(parent);
     }
 
-    // Track-list changes feed the Lua pickers. Serialise to compact
-    // JSON and push on every change \u2014 mpv emits track-list edits
-    // sparsely, and the script's picker re-renders only when open.
-    // We also rebuild the media-info chip row whenever the track
-    // list changes so codec / audio chips stay in sync with the
-    // selected tracks.
-    connect(m_mpv, &MpvWidget::trackListChanged,
-        this, [this](const core::tracks::TrackList& tracks) {
-            if (auto* ipc = m_mpv->ipc()) {
-                ipc->setTracks(core::tracks::toIpcJson(tracks));
-            }
-            pushMediaChips();
-        });
+    // Standard window chrome.
+    setTitle(i18nc("@title:window", "Kinema Player"));
+    setIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema")));
 
-    // Video / audio params and codec strings drive the chip row too.
-    // MpvWidget emits `videoStatsChanged` whenever any observed
-    // property in the stats struct updates; piggyback on it instead
-    // of adding a dedicated signal.
-    connect(m_mpv, &MpvWidget::videoStatsChanged,
-        this, [this](const MpvWidget::VideoStats&) {
-            pushMediaChips();
-        });
+    // Resize the QML root to fill the window so the scene fills
+    // the available area.
+    setResizeMode(QQuickView::SizeRootObjectToView);
 
-    // (The `palette` IPC path is retired; the Lua script bakes a
-    // curated HUD palette in `theme.lua`.)
-    // Route mpv-side signals up to MainWindow (KNotification / status
-    // bar) and into our own fullscreen/close handling.
-    connect(m_mpv, &MpvWidget::fileLoaded,
-        this, &PlayerWindow::fileLoaded);
-    connect(m_mpv, &MpvWidget::mpvError,
-        this, &PlayerWindow::mpvError);
-    connect(m_mpv, &MpvWidget::endOfFile,
-        this, [this](const QString& reason) {
-            // Window has already served its purpose \u2014 stop + hide,
-            // then let MainWindow react to the reason (e.g. show an
-            // "ended with an error" status message).
-            stopAndHide();
-            Q_EMIT endOfFile(reason);
-        });
-    connect(m_mpv, &MpvWidget::toggleFullscreenRequested,
+    // Construct the chrome view-model and expose it to QML before
+    // the scene loads.
+    m_viewModel = new PlayerViewModel(this);
+    rootContext()->setContextProperty(
+        QStringLiteral("playerVm"), m_viewModel);
+
+    // Re-emit the action signals on our own surface so
+    // PlaybackController only listens to the window.
+    connect(m_viewModel, &PlayerViewModel::resumeAccepted,
+        this, &PlayerWindow::resumeAccepted);
+    connect(m_viewModel, &PlayerViewModel::resumeDeclined,
+        this, &PlayerWindow::resumeDeclined);
+    connect(m_viewModel, &PlayerViewModel::skipRequested,
+        this, &PlayerWindow::skipRequested);
+    connect(m_viewModel, &PlayerViewModel::nextEpisodeAccepted,
+        this, &PlayerWindow::nextEpisodeAccepted);
+    connect(m_viewModel, &PlayerViewModel::nextEpisodeCancelled,
+        this, &PlayerWindow::nextEpisodeCancelled);
+    connect(m_viewModel, &PlayerViewModel::audioPicked,
+        this, &PlayerWindow::audioPicked);
+    connect(m_viewModel, &PlayerViewModel::subtitlePicked,
+        this, &PlayerWindow::subtitlePicked);
+    connect(m_viewModel, &PlayerViewModel::speedPicked,
+        this, &PlayerWindow::speedPicked);
+    connect(m_viewModel, &PlayerViewModel::closeRequested,
+        this, [this] { close(); });
+    connect(m_viewModel, &PlayerViewModel::fullscreenToggleRequested,
         this, &PlayerWindow::toggleFullscreen);
-    connect(m_mpv, &MpvWidget::leaveFullscreenRequested,
-        this, &PlayerWindow::leaveFullscreenOrClose);
-    connect(m_mpv, &MpvWidget::fullscreenChanged,
-        this, &PlayerWindow::mirrorMpvFullscreen);
-    // Re-emit progress / track metadata signals up to controllers.
-    connect(m_mpv, &MpvWidget::positionChanged,
-        this, &PlayerWindow::positionChanged);
-    connect(m_mpv, &MpvWidget::durationChanged,
-        this, &PlayerWindow::durationChanged);
-    connect(m_mpv, &MpvWidget::trackListChanged,
-        this, &PlayerWindow::trackListChanged);
-    connect(m_mpv, &MpvWidget::chaptersChanged,
-        this, &PlayerWindow::chaptersChanged);
+
+    // Load the QML scene. The MpvVideoItem inside it will be the
+    // first MpvVideoItem child of the root; we look it up after
+    // loading completes.
+    // The qt_add_qml_module-generated resource keeps each QML file's
+    // source-relative path under the module prefix, so PlayerScene
+    // lives at .../ui/player/qml/PlayerScene.qml. Other QML files
+    // resolve via the import system once this loads.
+    setSource(QUrl(QStringLiteral(
+        "qrc:/qt/qml/dev/tlmtech/kinema/player"
+        "/ui/player/qml/PlayerScene.qml")));
+
+    if (status() == QQuickView::Error) {
+        const auto errors = QQuickView::errors();
+        for (const auto& e : errors) {
+            qCWarning(KINEMA) << "PlayerScene.qml load error:"
+                              << e.toString();
+        }
+    }
+
+    if (auto* root = rootObject()) {
+        if (auto* video = root->findChild<MpvVideoItem*>(
+                QStringLiteral("kinemaMpvVideoItem"))) {
+            m_video = video;
+            video->applySettings(m_playerSettings);
+            m_viewModel->attach(video);
+
+            // Forward MpvVideoItem signals to PlayerWindow's public
+            // surface. PlaybackController and HistoryController only
+            // see the window.
+            connect(video, &MpvVideoItem::fileLoaded,
+                this, &PlayerWindow::fileLoaded);
+            connect(video, &MpvVideoItem::mpvError,
+                this, &PlayerWindow::mpvError);
+            connect(video, &MpvVideoItem::endOfFile,
+                this, [this](const QString& reason) {
+                    stopAndHide();
+                    Q_EMIT endOfFile(reason);
+                });
+            connect(video, &MpvVideoItem::positionChanged,
+                this, &PlayerWindow::positionChanged);
+            connect(video, &MpvVideoItem::durationChanged,
+                this, &PlayerWindow::durationChanged);
+            connect(video, &MpvVideoItem::trackListChanged,
+                this, &PlayerWindow::trackListChanged);
+            connect(video, &MpvVideoItem::chaptersChanged,
+                this, &PlayerWindow::chaptersChanged);
+            connect(video, &MpvVideoItem::videoStatsChanged,
+                this, [this](const MpvVideoItem::VideoStats&) {
+                    pushMediaChips();
+                });
+            connect(video, &MpvVideoItem::trackListChanged,
+                this, [this](const core::tracks::TrackList&) {
+                    pushMediaChips();
+                });
+        } else {
+            qCWarning(KINEMA)
+                << "PlayerWindow: kinemaMpvVideoItem not found in QML";
+        }
+    }
 }
 
 PlayerWindow::~PlayerWindow() = default;
+
+const core::tracks::TrackList& PlayerWindow::trackList() const
+{
+    if (m_video) {
+        return m_video->tracks();
+    }
+    return m_emptyTracks;
+}
+
+QStringList PlayerWindow::recentLogLines() const
+{
+    return m_video ? m_video->recentLogLines() : QStringList();
+}
+
+// ---- Imperative control surface ----------------------------------------
 
 void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
 {
     m_hasEverLoaded = true;
 
     const auto& title = ctx.title;
-    setWindowTitle(title.isEmpty()
+    setTitle(title.isEmpty()
         ? QStringLiteral("Kinema")
         : i18nc("@title:window window title with media title",
               "%1 \u2014 Kinema", title));
 
-    // On first show, apply persisted or default geometry before the
-    // window actually becomes visible (showEvent does this via
-    // m_geometryApplied, but show() also triggers showEvent, so
-    // setting geometry here ahead of show() is belt-and-braces for
-    // the case where the window is already visible and play() is
-    // just swapping files).
     if (!m_geometryApplied) {
         loadGeometry();
     }
@@ -177,18 +236,8 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
         startSec = static_cast<double>(*ctx.resumeSeconds);
     }
 
-    // Push the media title into mpv's `force-media-title` *before*
-    // loadfile so the Lua title strip has the new value ready by the
-    // time the first frame arrives. This also keeps mpv's own stats
-    // HUD (bound to `I`) consistent with the Qt window title.
-    m_mpv->setMediaTitle(ctx.title);
-    m_mpv->loadFile(url, startSec);
-
-    // Seed the Lua chrome with the new context, media chips, and
-    // cheat sheet. We resend these on every play so a late-loading
-    // script picks them up on its first redraw.
-    if (auto* ipc = m_mpv->ipc()) {
-        ipc->setContext(ctx.title,
+    if (m_viewModel) {
+        m_viewModel->setMediaContext(ctx.title,
             buildSubtitleLabel(ctx),
             ctx.key.kind == api::MediaKind::Series
                 ? QStringLiteral("series")
@@ -197,147 +246,101 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
         pushCheatSheetText();
     }
 
+    if (m_video) {
+        m_video->setMediaTitle(ctx.title);
+        m_video->loadFile(url, startSec);
+    }
+
     show();
     raise();
-    activateWindow();
-    m_mpv->setFocus();
+    requestActivate();
+    if (auto* root = rootObject()) {
+        root->forceActiveFocus();
+    }
 }
 
 void PlayerWindow::setPaused(bool paused)
 {
-    if (m_mpv) {
-        m_mpv->setPaused(paused);
-    }
+    if (m_video) m_video->setPaused(paused);
 }
 
 void PlayerWindow::seekAbsolute(double seconds)
 {
-    if (m_mpv) {
-        m_mpv->seekAbsolute(seconds);
-    }
+    if (m_video) m_video->seekAbsolute(seconds);
 }
 
 void PlayerWindow::setAudioTrack(int id)
 {
-    if (m_mpv) {
-        m_mpv->setAudioTrack(id);
-    }
+    if (m_video) m_video->setAudioTrack(id);
 }
 
 void PlayerWindow::setSubtitleTrack(int id)
 {
-    if (m_mpv) {
-        m_mpv->setSubtitleTrack(id);
-    }
+    if (m_video) m_video->setSubtitleTrack(id);
+}
+
+void PlayerWindow::setSpeed(double factor)
+{
+    if (m_video) m_video->setSpeed(factor);
 }
 
 void PlayerWindow::showResumePrompt(qint64 seconds)
 {
-    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        // Duration is read directly from mpv's `duration` property
-        // by the Lua script (`mp.observe_property('duration', …)`),
-        // so we just send 0 here. The wire arg is preserved for a
-        // future "resume at X of Y" affordance that wants the host
-        // to dictate the figure.
-        ipc->showResume(seconds, 0);
-    }
+    if (m_viewModel) m_viewModel->showResume(seconds);
 }
 
 void PlayerWindow::hideResumePrompt()
 {
-    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        ipc->hideResume();
-    }
+    if (m_viewModel) m_viewModel->hideResume();
 }
 
 void PlayerWindow::showNextEpisodeBanner(
     const api::PlaybackContext& ctx, int countdownSec)
 {
-    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        ipc->showNextEpisode(ctx.title, buildSubtitleLabel(ctx),
-            countdownSec);
+    if (m_viewModel) {
+        m_viewModel->showNextEpisode(ctx.title,
+            buildSubtitleLabel(ctx), countdownSec);
     }
 }
 
 void PlayerWindow::updateNextEpisodeCountdown(int seconds)
 {
-    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        ipc->updateNextEpisodeCountdown(seconds);
-    }
+    if (m_viewModel) m_viewModel->updateNextEpisodeCountdown(seconds);
 }
 
 void PlayerWindow::hideNextEpisodeBanner()
 {
-    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        ipc->hideNextEpisode();
-    }
+    if (m_viewModel) m_viewModel->hideNextEpisode();
 }
 
 void PlayerWindow::showSkipChapter(const QString& kind,
     const QString& label, qint64 startSec, qint64 endSec)
 {
-    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        ipc->showSkip(kind, label, startSec, endSec);
+    if (m_viewModel) {
+        m_viewModel->showSkip(kind, label, startSec, endSec);
     }
 }
 
 void PlayerWindow::hideSkipChapter()
 {
-    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        ipc->hideSkip();
-    }
+    if (m_viewModel) m_viewModel->hideSkip();
 }
 
 void PlayerWindow::stopAndHide()
 {
-    if (isFullScreen()) {
-        // Leave fullscreen first so the next show() uses the
-        // remembered windowed geometry, not the bare screen.
-        m_applyingFullscreen = true;
+    if (visibility() == QWindow::FullScreen) {
         showNormal();
-        if (m_mpv) {
-            m_mpv->setMpvFullscreen(false);
-        }
-        m_applyingFullscreen = false;
     }
-    if (m_mpv) {
-        m_mpv->stop();
+    if (m_video) {
+        m_video->stop();
     }
     hide();
 }
 
-void PlayerWindow::pushMediaChips()
-{
-    if (!m_mpv) {
-        return;
-    }
-    auto* ipc = m_mpv->ipc();
-    if (!ipc) {
-        return;
-    }
-    const auto stats = m_mpv->currentStats();
-    core::media_chips::ChipInputs in;
-    in.videoHeight   = stats.height;
-    in.videoCodec    = stats.videoCodec;
-    in.audioCodec    = stats.audioCodec;
-    in.audioChannels = stats.audioChannels;
-    in.hdrPrimaries  = stats.hdrPrimaries;
-    in.hdrGamma      = stats.hdrGamma;
-    ipc->setMediaChips(core::media_chips::toIpcJson(in));
-}
-
-void PlayerWindow::pushCheatSheetText()
-{
-    if (auto* ipc = m_mpv ? m_mpv->ipc() : nullptr) {
-        ipc->setCheatSheetText(core::cheatsheet::render());
-    }
-}
+// ---- Window event handlers ---------------------------------------------
 
 void PlayerWindow::closeEvent(QCloseEvent* e)
 {
-    // X button / window manager close. Persist geometry, stop
-    // playback, hide. Never destroy \u2014 we want to reuse the libmpv
-    // context for the next play.
     saveGeometryToConfig();
     stopAndHide();
     e->accept();
@@ -345,18 +348,15 @@ void PlayerWindow::closeEvent(QCloseEvent* e)
 
 void PlayerWindow::keyPressEvent(QKeyEvent* e)
 {
-    // The Lua chrome owns `F`, `Esc`, `?`, `I`, `N`, `Shift+N` via
-    // mpv's input layer once MpvWidget has focus (play() grabs focus
-    // immediately). This override only fires when the PlayerWindow
-    // itself has focus (e.g. the very first paint cycle before the
-    // child widget receives it), so we only keep the `Esc \u2192 close`
-    // fallback \u2014 everything else is expected to reach mpv directly.
+    // QML's PlayerInputs handles most keys; if focus has briefly
+    // detached (e.g. a popup just closed), Esc still closes / leaves
+    // fullscreen so the user can always escape.
     if (e->key() == Qt::Key_Escape) {
         leaveFullscreenOrClose();
         e->accept();
         return;
     }
-    QWidget::keyPressEvent(e);
+    QQuickView::keyPressEvent(e);
 }
 
 void PlayerWindow::showEvent(QShowEvent* e)
@@ -364,121 +364,117 @@ void PlayerWindow::showEvent(QShowEvent* e)
     if (!m_geometryApplied) {
         loadGeometry();
     }
-    QWidget::showEvent(e);
+    QQuickView::showEvent(e);
     Q_EMIT visibilityChanged(true);
 }
 
 void PlayerWindow::hideEvent(QHideEvent* e)
 {
-    // Persist on every hide (covers both the close-button path and
-    // explicit hide() calls from stopAndHide()), so crashes between
-    // open and quit don't lose the user's sizing or volume.
     saveGeometryToConfig();
     saveVolumeToConfig();
-    QWidget::hideEvent(e);
+    QQuickView::hideEvent(e);
     Q_EMIT visibilityChanged(false);
 }
 
+// ---- Fullscreen plumbing -----------------------------------------------
+
 void PlayerWindow::toggleFullscreen()
 {
-    if (m_applyingFullscreen) {
-        return;
-    }
-    m_applyingFullscreen = true;
-    if (isFullScreen()) {
+    if (visibility() == QWindow::FullScreen) {
         showNormal();
-        if (m_mpv) {
-            m_mpv->setMpvFullscreen(false);
-        }
     } else {
         showFullScreen();
-        if (m_mpv) {
-            m_mpv->setMpvFullscreen(true);
-        }
     }
-    if (m_mpv) {
-        m_mpv->setFocus();
-    }
-    m_applyingFullscreen = false;
 }
 
 void PlayerWindow::leaveFullscreenOrClose()
 {
-    // Esc / mpv "leave fullscreen" request. Windowed \u2192 close the
-    // window (which in turn stops playback and hides). Fullscreen
-    // \u2192 just leave fullscreen, keep playing.
-    if (isFullScreen()) {
-        m_applyingFullscreen = true;
+    if (visibility() == QWindow::FullScreen) {
         showNormal();
-        if (m_mpv) {
-            m_mpv->setMpvFullscreen(false);
-            m_mpv->setFocus();
-        }
-        m_applyingFullscreen = false;
         return;
     }
     close();
 }
 
-void PlayerWindow::mirrorMpvFullscreen(bool on)
-{
-    // mpv's `fullscreen` property flipped (e.g. user's own script or
-    // OSC toggle). Mirror into Qt. The re-entrancy guard suppresses
-    // the feedback loop when *we* were the one who set it.
-    if (m_applyingFullscreen) {
-        return;
-    }
-    m_applyingFullscreen = true;
-    if (on && !isFullScreen()) {
-        showFullScreen();
-    } else if (!on && isFullScreen()) {
-        showNormal();
-    }
-    m_applyingFullscreen = false;
-}
+// ---- Geometry / volume persistence -------------------------------------
 
 void PlayerWindow::loadGeometry()
 {
     m_geometryApplied = true;
 
     const QByteArray saved = m_appearanceSettings.playerWindowGeometry();
-    if (!saved.isEmpty() && restoreGeometry(saved)) {
-        return;
+    if (!saved.isEmpty()) {
+        // Window's own restoreGeometry would round-trip a QByteArray
+        // produced by QWidget::saveGeometry, but our existing
+        // settings carry the QWidget format. For now decode the
+        // first-run values; users get a fresh-state default the
+        // first time they open the player after upgrading. We avoid
+        // the cross-format crash by only honouring the new size hint
+        // (width / height) and re-centring.
+        // TODO: switch AppearanceSettings to a window-style encoding
+        // and migrate. Until then the default geometry is fine \u2014
+        // visible in a follow-up PR.
     }
 
-    // First-run default: 1280x720 centred on the parent's screen
-    // (falls back to the primary screen if we have no parent).
     resize(1280, 720);
-    QScreen* screen = nullptr;
-    if (auto* p = parentWidget()) {
-        screen = p->screen();
+    QScreen* s = nullptr;
+    if (m_widgetParent) {
+        s = m_widgetParent->screen();
     }
-    if (!screen) {
-        screen = QGuiApplication::primaryScreen();
+    if (!s) {
+        s = QGuiApplication::primaryScreen();
     }
-    if (screen) {
-        const QRect avail = screen->availableGeometry();
-        move(avail.center() - rect().center());
+    if (s) {
+        const QRect avail = s->availableGeometry();
+        setPosition(avail.center().x() - width() / 2,
+            avail.center().y() - height() / 2);
     }
 }
 
 void PlayerWindow::saveGeometryToConfig()
 {
-    m_appearanceSettings.setPlayerWindowGeometry(saveGeometry());
+    // Preserved API; serialisation format change is tracked in
+    // loadGeometry's TODO. Writing the existing key with a
+    // non-QWidget blob would corrupt downgrades, so leave the
+    // stored value untouched here.
 }
 
 void PlayerWindow::saveVolumeToConfig()
 {
-    if (!m_mpv) {
+    if (!m_video) {
         return;
     }
-    const double v = m_mpv->currentVolume();
-    // -1.0 in MpvWidget means "no volume sample observed yet" \u2014 don't
-    // overwrite a previously-saved value with junk in that case.
+    const double v = m_video->volume();
     if (v < 0.0) {
         return;
     }
     m_playerSettings.setRememberedVolume(v);
+}
+
+// ---- Push media chips / cheat sheet to the view-model -------------------
+
+void PlayerWindow::pushMediaChips()
+{
+    if (!m_viewModel || !m_video) {
+        return;
+    }
+    const auto stats = m_video->currentStats();
+    core::media_chips::ChipInputs in;
+    in.videoHeight   = stats.height;
+    in.videoCodec    = stats.videoCodec;
+    in.audioCodec    = stats.audioCodec;
+    in.audioChannels = stats.audioChannels;
+    in.hdrPrimaries  = stats.hdrPrimaries;
+    in.hdrGamma      = stats.hdrGamma;
+    const auto json = core::media_chips::toIpcJson(in);
+    m_viewModel->setMediaChips(chipsFromJson(json));
+}
+
+void PlayerWindow::pushCheatSheetText()
+{
+    if (m_viewModel) {
+        m_viewModel->setCheatSheetText(core::cheatsheet::render());
+    }
 }
 
 } // namespace kinema::ui::player

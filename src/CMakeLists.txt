@@ -94,17 +94,21 @@ set(kinema_core_SRCS
     tray_resources.qrc
 )
 
-# Embedded-player sources. The IPC bridge (core::MpvIpc) lives under
-# core/ but pulls in <mpv/client.h>, so it is gated together with
-# MpvWidget / PlayerWindow / PlaybackController. Player chrome is
-# rendered inside mpv by data/kinema/mpv/scripts/kinema-overlays.lua
-# — no Qt widgets stack over the video surface.
+# Embedded-player sources. The video surface is `MpvVideoItem`
+# (subclass of `mpvqt`'s `MpvAbstractItem`); the chrome is composed
+# in QtQuick / QML inside the same `QQuickView`-based
+# `PlayerWindow`. `PlayerViewModel` plus the three list models drive
+# chrome state. No QWidget overlays the video surface; no Lua
+# scripts; no IPC bridge.
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
         controllers/PlaybackController.cpp
-        core/MpvIpc.cpp
-        ui/player/MpvWidget.cpp
+        ui/player/AudioTracksModel.cpp
+        ui/player/ChaptersModel.cpp
+        ui/player/MpvVideoItem.cpp
+        ui/player/PlayerViewModel.cpp
         ui/player/PlayerWindow.cpp
+        ui/player/SubtitleTracksModel.cpp
     )
 endif()
 
@@ -160,8 +164,57 @@ if(KINEMA_ENABLE_MPV_EMBED)
     target_link_libraries(kinema_core
         PUBLIC
             Qt6::OpenGL
-            Qt6::OpenGLWidgets
+            Qt6::Qml
+            Qt6::Quick
+            Qt6::QuickControls2
             PkgConfig::MPV
+            MpvQt::MpvQt
+    )
+    # Qt's QML type-registration generator includes player headers by
+    # basename (e.g. `<MpvVideoItem.h>`), so the directory must be on
+    # the include path or the auto-generated reg file won't see the
+    # namespaced classes.
+    target_include_directories(kinema_core
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ui/player
+    )
+
+    # Player QML module. Files are listed explicitly so a missing
+    # entry is a build error, not a silent runtime miss. The URI
+    # `dev.tlmtech.kinema.player` matches the resource path under
+    # `qrc:/qt/qml/dev/tlmtech/kinema/player/`. C++ types are
+    # auto-registered via QML_ELEMENT macros in their headers.
+    # Theme.qml is a QML singleton; the property must be set on the
+    # source before qt_add_qml_module is called so the generated
+    # qmldir picks it up.
+    set_source_files_properties(ui/player/qml/Theme.qml
+        PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
+    qt_add_qml_module(kinema_core
+        URI dev.tlmtech.kinema.player
+        VERSION 1.0
+        QML_FILES
+            ui/player/qml/PlayerScene.qml
+            ui/player/qml/Theme.qml
+            ui/player/qml/components/BufferingIndicator.qml
+            ui/player/qml/components/CenterFlash.qml
+            ui/player/qml/components/IconGlyph.qml
+            ui/player/qml/components/KeyboardCheatSheet.qml
+            ui/player/qml/components/MediaChips.qml
+            ui/player/qml/components/PlayerInputs.qml
+            ui/player/qml/components/SeekBar.qml
+            ui/player/qml/components/TopBar.qml
+            ui/player/qml/components/TransportBar.qml
+            ui/player/qml/components/VolumeControl.qml
+            ui/player/qml/components/VolumeHUD.qml
+            ui/player/qml/pickers/AudioPicker.qml
+            ui/player/qml/pickers/SpeedPicker.qml
+            ui/player/qml/pickers/SubtitlePicker.qml
+            ui/player/qml/prompts/NextEpisodeBanner.qml
+            ui/player/qml/prompts/ResumePrompt.qml
+            ui/player/qml/prompts/SkipChapterPill.qml
+        OUTPUT_DIRECTORY
+            "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/player"
+        NO_PLUGIN
     )
 endif()
 
@@ -201,5 +254,16 @@ set_target_properties(kinema PROPERTIES
 )
 
 target_link_libraries(kinema PRIVATE kinema_core)
+
+# kinema_core is a STATIC library; the linker discards the QML
+# module's registration object (`QQmlModuleRegistration`) by default
+# because no symbol references it. `qt_import_qml_plugins` emits the
+# right link directives to force-link every QML module the static
+# library carries, including our in-tree `dev.tlmtech.kinema.player`
+# module. Without it the engine reports `<C++ type> is not a type`
+# for everything declared with `QML_ELEMENT`.
+if(KINEMA_ENABLE_MPV_EMBED)
+    qt_import_qml_plugins(kinema)
+endif()
 
 install(TARGETS kinema ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})

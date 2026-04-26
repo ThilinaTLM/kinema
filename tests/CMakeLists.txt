@@ -157,8 +157,20 @@ ecm_add_test(tst_media_chips.cpp
 )
 
 if(KINEMA_ENABLE_MPV_EMBED)
-    ecm_add_test(tst_mpv_ipc.cpp
-        TEST_NAME tst_mpv_ipc
+    ecm_add_test(tst_player_view_model.cpp
+        TEST_NAME tst_player_view_model
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
+    ecm_add_test(tst_player_audio_tracks_model.cpp
+        TEST_NAME tst_player_audio_tracks_model
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
+    ecm_add_test(tst_player_subtitle_tracks_model.cpp
+        TEST_NAME tst_player_subtitle_tracks_model
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
+    ecm_add_test(tst_player_chapters_model.cpp
+        TEST_NAME tst_player_chapters_model
         LINK_LIBRARIES kinema_core Qt6::Test
     )
 endif()
@@ -178,6 +190,9 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 
-if(TARGET tst_mpv_ipc)
-    target_compile_definitions(tst_mpv_ipc PRIVATE ${test_defs})
-endif()
+foreach(t tst_player_view_model tst_player_audio_tracks_model
+         tst_player_subtitle_tracks_model tst_player_chapters_model)
+    if(TARGET ${t})
+        target_compile_definitions(${t} PRIVATE ${test_defs})
+    endif()
+endforeach()

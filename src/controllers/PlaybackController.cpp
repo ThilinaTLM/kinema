@@ -12,9 +12,7 @@
 #include "core/HttpErrorPresenter.h"
 #include "core/NextEpisode.h"
 #include "core/StreamFilter.h"
-#include "core/MpvIpc.h"
 #include "services/StreamActions.h"
-#include "ui/player/MpvWidget.h"
 #include "ui/player/PlayerWindow.h"
 
 #include <KLocalizedString>
@@ -230,41 +228,39 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
         this, &PlaybackController::onTrackListChanged);
     connect(m_window, &ui::player::PlayerWindow::chaptersChanged,
         this, &PlaybackController::onChaptersChanged);
-    // IPC-side signals from the in-mpv Lua chrome replace the
-    // previous QWidget overlay's signal surface. Track-list-driven
-    // pickers (audio / subtitle / speed) route through the window's
-    // command surface / MpvWidget so tests can stub the window
-    // without an mpv handle.
-    if (auto* ipc = m_window->mpv() ? m_window->mpv()->ipc() : nullptr) {
-        connect(ipc, &core::MpvIpc::skipRequested,
-            this, &PlaybackController::onSkipRequested);
-        connect(ipc, &core::MpvIpc::resumeAccepted,
-            this, &PlaybackController::onResumeAccepted);
-        connect(ipc, &core::MpvIpc::resumeDeclined,
-            this, &PlaybackController::onResumeDeclined);
-        connect(ipc, &core::MpvIpc::nextEpisodeAccepted,
-            this, &PlaybackController::onNextEpisodeAccepted);
-        connect(ipc, &core::MpvIpc::nextEpisodeCancelled,
-            this, &PlaybackController::onNextEpisodeCancelled);
-        connect(ipc, &core::MpvIpc::audioPicked,
-            this, [this](int aid) {
-                if (m_window) {
-                    m_window->setAudioTrack(aid);
-                }
-            });
-        connect(ipc, &core::MpvIpc::subtitlePicked,
-            this, [this](int sid) {
-                if (m_window) {
-                    m_window->setSubtitleTrack(sid);
-                }
-            });
-        connect(ipc, &core::MpvIpc::speedPicked,
-            this, [this](double s) {
-                if (m_window && m_window->mpv()) {
-                    m_window->mpv()->setSpeed(s);
-                }
-            });
-    }
+    // User-action signals from the QML chrome reach us as plain
+    // signals on `PlayerWindow` (which re-emits them from its
+    // `PlayerViewModel`). The picker selections (audio / subtitle /
+    // speed) get routed back through the window's transport API
+    // so tests can stub `PlayerWindow` without needing libmpv.
+    connect(m_window, &ui::player::PlayerWindow::skipRequested,
+        this, &PlaybackController::onSkipRequested);
+    connect(m_window, &ui::player::PlayerWindow::resumeAccepted,
+        this, &PlaybackController::onResumeAccepted);
+    connect(m_window, &ui::player::PlayerWindow::resumeDeclined,
+        this, &PlaybackController::onResumeDeclined);
+    connect(m_window, &ui::player::PlayerWindow::nextEpisodeAccepted,
+        this, &PlaybackController::onNextEpisodeAccepted);
+    connect(m_window, &ui::player::PlayerWindow::nextEpisodeCancelled,
+        this, &PlaybackController::onNextEpisodeCancelled);
+    connect(m_window, &ui::player::PlayerWindow::audioPicked,
+        this, [this](int aid) {
+            if (m_window) {
+                m_window->setAudioTrack(aid);
+            }
+        });
+    connect(m_window, &ui::player::PlayerWindow::subtitlePicked,
+        this, [this](int sid) {
+            if (m_window) {
+                m_window->setSubtitleTrack(sid);
+            }
+        });
+    connect(m_window, &ui::player::PlayerWindow::speedPicked,
+        this, [this](double s) {
+            if (m_window) {
+                m_window->setSpeed(s);
+            }
+        });
     connect(m_window, &QObject::destroyed, this, [this](QObject* obj) {
         if (obj == m_window) {
             m_window = nullptr;

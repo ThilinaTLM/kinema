@@ -202,7 +202,7 @@ void MainWindow::wireTray()
             if (m_playerWindow) {
                 m_playerWindow->show();
                 m_playerWindow->raise();
-                m_playerWindow->activateWindow();
+                m_playerWindow->requestActivate();
                 m_tray->refreshMenu();
             }
 #endif
@@ -437,7 +437,7 @@ void MainWindow::buildControllers()
             n->setTitle(i18nc("@title:window notification",
                 "Playing in Kinema"));
             // m_playerWindow's title is already "<media> — Kinema".
-            n->setText(m_playerWindow->windowTitle());
+            n->setText(m_playerWindow->title());
             n->setIconName(
                 QStringLiteral("media-playback-start"));
             n->sendEvent();
