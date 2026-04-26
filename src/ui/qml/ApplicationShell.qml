@@ -10,11 +10,11 @@ import dev.tlmtech.kinema.app
 
 // Phase 02 shell. Owns:
 //
-//  * primary navigation between Discover / Search / Browse
-//    placeholder pages via `Kirigami.PageRow`
-//  * drawer footer with Settings / About / Quit actions
+//  * top-level navigation between Discover / Search / Browse / Settings
+//    pages via `Kirigami.PageRow`
+//  * icon-only primary navigation with a bottom Settings action
 //  * application-wide keyboard shortcuts (Quit, Preferences,
-//    Find, Help, Esc-pop, Alt+M drawer)
+//    Find, Help, Esc-pop)
 //  * close-to-tray decision routed through `mainController`
 //  * passive notifications surfaced from the C++ side
 //
@@ -75,23 +75,18 @@ Kirigami.ApplicationWindow {
             }
         }
     }
-    Shortcut {
-        sequence: "Alt+M"
-        context: Qt.ApplicationShortcut
-        onActivated: drawer.collapsed = !drawer.collapsed
-    }
-
     // ---- global drawer --------------------------------------------------
-    // Banner = app icon + name. Top `actions` list = primary
-    // navigation. Bottom inline action bar = app-level entries
-    // (Settings · About · Quit) — Kirigami's drawer renders any
-    // visible child below the actions list.
+    // Always-collapsed icon rail: top `actions` list = primary
+    // navigation, bottom footer button = Settings. The default
+    // collapse/expand affordance is hidden so the rail stays compact.
     globalDrawer: Kirigami.GlobalDrawer {
         id: drawer
         title: i18n("Kinema")
         titleIcon: "dev.tlmtech.kinema"
         modal: false
         collapsible: true
+        collapsed: true
+        collapseButtonVisible: false
 
         actions: [
             Kirigami.Action {
@@ -117,49 +112,42 @@ Kirigami.ApplicationWindow {
             }
         ]
 
-        // Footer row: rendered inline below the nav list. Kirigami
-        // hides icon labels in collapsed mode; tooltips fall back
-        // to the localized text. Settings + About push pages onto
-        // the stack via `mainController`.
-        Kirigami.ActionToolBar {
-            Layout.fillWidth: true
-            display: QQC2.AbstractButton.TextBesideIcon
-            alignment: Qt.AlignLeft
-            actions: [
-                Kirigami.Action {
-                    icon.name: "settings-configure"
-                    text: i18nc("@action drawer footer", "Settings")
-                    onTriggered: mainController.requestSettings()
-                },
-                Kirigami.Action {
-                    icon.name: "help-about"
-                    text: i18nc("@action drawer footer", "About")
-                    onTriggered: mainController.requestAbout()
-                },
-                Kirigami.Action {
-                    icon.name: "application-exit"
-                    text: i18nc("@action drawer footer", "Quit")
-                    onTriggered: mainController.requestQuit()
-                }
-            ]
+        footer: ColumnLayout {
+            spacing: 0
+
+            QQC2.ItemDelegate {
+                Layout.fillWidth: true
+                display: QQC2.AbstractButton.IconOnly
+                icon.name: "settings-configure"
+                text: i18nc("@action drawer footer", "Settings")
+                Accessible.name: text
+                checkable: true
+                checked: root.currentNavKey === "settings"
+                highlighted: checked
+                onClicked: mainController.requestSettings()
+
+                QQC2.ToolTip.visible: hovered
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.minimumHeight: Kirigami.Units.largeSpacing
+            }
         }
     }
 
     // ---- pageStack and navigation --------------------------------------
-    // Single-column push-style. Kirigami collapses to overlay on
-    // narrow widths automatically. The drawer's checked state and
-    // the `showPage` helper rely on the top-of-stack page's
-    // `objectName` which is set on every placeholder page.
+    // Primary pages are single top-level surfaces. Detail and helper
+    // pages can still be pushed on top of them, but Discover / Search /
+    // Browse / Settings unwind to the stack root and replace it so they
+    // always take the complete PageRow width, even on wide windows.
     readonly property string currentNavKey: pageStack.currentItem
         ? (pageStack.currentItem.objectName || "")
         : ""
 
-    Component.onCompleted: {
-        const page = root.createPage(discoverComp, {});
-        if (page) {
-            pageStack.push(page, {});
-        }
-    }
+    Component.onCompleted: root.setTopLevelPage(discoverComp, {})
 
     function createPage(component, properties) {
         // Kirigami.PageRow accepts Component objects, but on the current
@@ -176,11 +164,26 @@ Kirigami.ApplicationWindow {
         return page;
     }
 
-    function replaceWith(component, properties) {
+    function setTopLevelPage(component, properties) {
         const page = root.createPage(component, properties || {});
-        if (page) {
-            pageStack.replace(page, {});
+        if (!page) {
+            return;
         }
+
+        // Do not call pageStack.clear() here: Kirigami's global toolbar
+        // briefly sees an empty PageRow and emits binding/type warnings.
+        // `PageRow.pop(null)` is documented as unwinding to the first
+        // page, but on the current Kirigami/ColumnView stack it can leave
+        // the row transiently empty before replace(), which produces
+        // "There's no page to replace" and toolbar null-binding noise.
+        // Instead make the root page current and let PageRow.replace()
+        // remove anything above it while replacing the root in one step.
+        if (pageStack.depth === 0) {
+            pageStack.push(page, {});
+            return;
+        }
+        pageStack.currentIndex = 0;
+        pageStack.replace(page, {});
     }
 
     function pushCreated(component, properties) {
@@ -198,13 +201,16 @@ Kirigami.ApplicationWindow {
         }
         switch (key) {
         case "discover":
-            root.replaceWith(discoverComp, {});
+            root.setTopLevelPage(discoverComp, {});
             break;
         case "search":
-            root.replaceWith(searchComp, {});
+            root.setTopLevelPage(searchComp, {});
             break;
         case "browse":
-            root.replaceWith(browseComp, {});
+            root.setTopLevelPage(browseComp, {});
+            break;
+        case "settings":
+            root.setTopLevelPage(settingsComp, {});
             break;
         }
     }
@@ -224,10 +230,9 @@ Kirigami.ApplicationWindow {
     Component { id: movieDetailComp;  MovieDetailPage  { } }
     Component { id: seriesDetailComp; SeriesDetailPage { } }
 
-    // About / Settings / Subtitles — pushed on top of the current
-    // nav stack. Settings is `Kirigami.CategorizedSettings` (lives
-    // in the kirigamiaddons.settings module). Subtitles is a
-    // pushed `Kirigami.ScrollablePage` from phase 06.
+    // About / Subtitles are pushed helper pages. Settings is a top-level
+    // `Kirigami.CategorizedSettings` (from kirigamiaddons.settings), so
+    // opening it replaces the stack root just like Discover / Search / Browse.
     Component {
         id: aboutComp
         KAboutPage { }
@@ -246,18 +251,19 @@ Kirigami.ApplicationWindow {
         target: mainController
 
         function onShowSettingsRequested(category) {
-            // Single Settings instance on top of the stack; if
-            // already visible, re-pushing is a no-op so the back
-            // button still pops to the previous nav page. The
-            // `initialCategory` set on `settingsVm` from
-            // `MainController::requestSettings(category)` is
-            // consumed by `SettingsPage.qml` on push to land on
-            // the requested sub-page.
+            // Settings is primary navigation, not a detail/helper page:
+            // it replaces the whole root stack so it gets the full window
+            // width. The `initialCategory` set on `settingsVm` from
+            // `MainController::requestSettings(category)` is consumed by
+            // `SettingsPage.qml` on creation to land on the requested
+            // sub-page. If an explicit category is requested while already
+            // on Settings, recreate the page so `defaultPage` is reapplied.
             if (root.pageStack.currentItem
-                && root.pageStack.currentItem.objectName === "settings") {
+                && root.pageStack.currentItem.objectName === "settings"
+                && category.length === 0) {
                 return;
             }
-            root.pushCreated(settingsComp, {});
+            root.setTopLevelPage(settingsComp, {});
         }
         function onShowSubtitlesRequested() {
             if (root.pageStack.currentItem
