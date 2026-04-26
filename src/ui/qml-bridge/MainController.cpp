@@ -25,6 +25,9 @@
 #include "kinema_debug.h"
 #include "services/StreamActions.h"
 #include "ui/ImageLoader.h"
+#include "ui/qml-bridge/ContinueWatchingViewModel.h"
+#include "ui/qml-bridge/DiscoverSectionModel.h"
+#include "ui/qml-bridge/DiscoverViewModel.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "ui/player/PlayerViewModel.h"
@@ -39,6 +42,7 @@
 #include <QCoreApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlEngine>
 #include <QQuickWindow>
 #include <QTimer>
 #include <QUrl>
@@ -243,6 +247,82 @@ void MainController::buildCoreServices()
     m_streamActions->setHistoryController(m_historyCtrl);
     m_historyCtrl->setStreamActions(m_streamActions);
 
+    // Discover surface VMs. They sit on top of the existing
+    // controllers; both forward their action signals back into
+    // `MainController` for routing.
+    m_discoverVm = new DiscoverViewModel(m_tmdb, m_tokenCtrl, this);
+    m_continueWatchingVm
+        = new ContinueWatchingViewModel(m_historyCtrl, this);
+
+    // Continue Watching action routing. Resume / remove go straight
+    // to the controller; “Choose another release…” falls back to a
+    // passive notification until the detail pages land in phase 05.
+    connect(m_continueWatchingVm,
+        &ContinueWatchingViewModel::resumeRequested, m_historyCtrl,
+        &controllers::HistoryController::resumeFromHistory);
+    connect(m_continueWatchingVm,
+        &ContinueWatchingViewModel::removeRequested, m_historyCtrl,
+        &controllers::HistoryController::removeEntry);
+    connect(m_continueWatchingVm,
+        &ContinueWatchingViewModel::detailRequested, this,
+        [this](const api::HistoryEntry& entry) {
+            const auto title
+                = entry.seriesTitle.isEmpty() ? entry.title : entry.seriesTitle;
+            Q_EMIT passiveMessage(
+                i18nc("@info:status",
+                    "Detail pages land in a later migration phase — cannot "
+                    "open “%1” yet.",
+                    title),
+                4000);
+        });
+    // The fallback path from `HistoryController::resumeFromHistory`
+    // (saved release no longer reachable) used to open the detail
+    // pane on MainWindow. With detail still on the widget side until
+    // phase 05, surface a passive notification so the user knows
+    // why nothing happened.
+    connect(m_historyCtrl,
+        &controllers::HistoryController::resumeFallbackRequested,
+        this, [this](const api::HistoryEntry& entry) {
+            Q_EMIT passiveMessage(
+                i18nc("@info:status",
+                    "Saved release for “%1” is no longer available — "
+                    "alternatives appear once the detail page is back.",
+                    entry.title),
+                6000);
+        });
+
+    // Discover navigation routing. Phase 03 stubs Show-all and
+    // poster activation with passive notifications; phase 04 wires
+    // browseRequested into the real Browse page, phase 05 wires the
+    // open*Requested signals into the real detail pages.
+    connect(m_discoverVm, &DiscoverViewModel::browseRequested, this,
+        [this](api::MediaKind, const QString& title) {
+            Q_EMIT passiveMessage(
+                i18nc("@info:status",
+                    "Browse view lands in the next migration phase — "
+                    "cannot show all of “%1” yet.",
+                    title),
+                4000);
+        });
+    connect(m_discoverVm, &DiscoverViewModel::openMovieRequested,
+        this, [this](int /*tmdbId*/, const QString& title) {
+            Q_EMIT passiveMessage(
+                i18nc("@info:status",
+                    "Detail pages land in a later migration phase — cannot "
+                    "open “%1” yet.",
+                    title),
+                4000);
+        });
+    connect(m_discoverVm, &DiscoverViewModel::openSeriesRequested,
+        this, [this](int /*tmdbId*/, const QString& title) {
+            Q_EMIT passiveMessage(
+                i18nc("@info:status",
+                    "Detail pages land in a later migration phase — cannot "
+                    "open “%1” yet.",
+                    title),
+                4000);
+        });
+
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
         *m_cinemeta, *m_torrentio, *m_streamActions, *m_historyCtrl,
@@ -412,8 +492,30 @@ void MainController::installLocalizedContext(
 void MainController::exposeContextProperties(
     QQmlApplicationEngine& engine)
 {
+    // Register the section model as an uncreatable QML type so
+    // QML can read its `State` enum by name (e.g.
+    // `DiscoverSectionModel.Loading`). This is a runtime
+    // registration scoped to the engine's type system; it does
+    // NOT route through `QML_ELEMENT` and therefore stays
+    // compatible with the kinema_core / kinema_qml_app target
+    // split. Calling it once per engine is fine; Qt deduplicates.
+    qmlRegisterUncreatableType<DiscoverSectionModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "DiscoverSectionModel",
+        QStringLiteral("DiscoverSectionModel is owned by C++."));
+
     engine.rootContext()->setContextProperty(
         QStringLiteral("mainController"), this);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("discoverVm"), m_discoverVm);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("continueWatchingVm"), m_continueWatchingVm);
+
+    // Kick the initial Discover fetch once everything's wired so
+    // the page lands populated rather than empty-spinner. Token
+    // resolution may finish later via `loadAll()`; the model's
+    // listener on `tmdbTokenChanged` will refresh again then.
+    m_discoverVm->refresh();
 }
 
 } // namespace kinema::ui::qml

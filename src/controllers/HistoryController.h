@@ -103,6 +103,12 @@ public Q_SLOTS:
     /// the detail pane instead.
     void resumeFromHistory(const api::HistoryEntry& entry);
 
+    /// Forget a Continue-Watching entry. Thin wrapper over
+    /// `HistoryStore::remove`; the store fires `changed()` which
+    /// drives the rail to re-pull. Exposed as a slot so QML view-
+    /// models can invoke it without holding a `HistoryStore&`.
+    void removeEntry(const api::HistoryEntry& entry);
+
 Q_SIGNALS:
     /// Forwarded from HistoryStore::changed. Drives UI refreshes.
     void changed();

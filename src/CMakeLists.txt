@@ -55,11 +55,14 @@ set(kinema_core_SRCS
 
     ui/BrowseFilterBar.cpp
     ui/BrowsePage.cpp
-    ui/ContinueWatchingCardDelegate.cpp
-    ui/ContinueWatchingSection.cpp
+    # `DiscoverCardDelegate`, `DiscoverGridView`, `DiscoverRowModel`,
+    # and `DiscoverSection` stay until Browse (phase 04) and
+    # SimilarStrip (phase 05) are migrated; they're still consumed
+    # by `BrowsePage` and `SimilarStrip`. Their Continue-Watching
+    # subclasses + the legacy `DiscoverPage` shell are gone in
+    # phase 03.
     ui/DiscoverCardDelegate.cpp
     ui/DiscoverGridView.cpp
-    ui/DiscoverPage.cpp
     ui/DiscoverRowModel.cpp
     ui/DiscoverSection.cpp
     ui/EpisodeDelegate.cpp
@@ -103,6 +106,9 @@ set(kinema_core_SRCS
 
     services/StreamActions.cpp
 
+    ui/qml-bridge/ContinueWatchingViewModel.cpp
+    ui/qml-bridge/DiscoverSectionModel.cpp
+    ui/qml-bridge/DiscoverViewModel.cpp
     ui/qml-bridge/KinemaImageProvider.cpp
     ui/qml-bridge/MainController.cpp
 
@@ -209,12 +215,17 @@ qt_add_qml_module(kinema_qml_app
     QML_FILES
         ui/qml/ApplicationShell.qml
         ui/qml/Theme.qml
+        ui/qml/components/ContentRail.qml
+        ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/KAboutPage.qml
         ui/qml/components/KEmptyState.qml
         ui/qml/components/KErrorState.qml
         ui/qml/components/KSpinner.qml
+        ui/qml/components/PosterCard.qml
+        ui/qml/components/ProgressPosterCard.qml
+        ui/qml/components/RatingChip.qml
         ui/qml/pages/BrowsePagePlaceholder.qml
-        ui/qml/pages/DiscoverPagePlaceholder.qml
+        ui/qml/pages/DiscoverPage.qml
         ui/qml/pages/SearchPagePlaceholder.qml
     OUTPUT_DIRECTORY
         "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/app"

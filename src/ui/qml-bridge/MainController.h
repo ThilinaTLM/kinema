@@ -56,6 +56,9 @@ class PlayerWindow;
 
 namespace kinema::ui::qml {
 
+class ContinueWatchingViewModel;
+class DiscoverViewModel;
+
 /**
  * Top-level QML host. Replaces `MainWindow`'s composition role:
  * owns every long-lived service the app needs (HTTP, DB, tokens,
@@ -195,6 +198,12 @@ private:
     controllers::HistoryController* m_historyCtrl {};
     controllers::SubtitleController* m_subtitleCtrl {};
     controllers::TrayController* m_tray {};
+
+    // Per-page view-models. Phase 03 adds Discover + Continue
+    // Watching; phases 04–06 add Search / Browse / Detail /
+    // Subtitles / Settings here as their pages land.
+    DiscoverViewModel* m_discoverVm {};
+    ContinueWatchingViewModel* m_continueWatchingVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::PlaybackController* m_playbackCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};

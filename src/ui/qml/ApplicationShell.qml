@@ -178,9 +178,11 @@ Kirigami.ApplicationWindow {
     // Page factories. Re-instantiated on each navigation so a
     // returning visit lands on a fresh state. Phases 03–06 swap
     // these out for the real Kirigami pages backed by view-models.
-    Component { id: discoverComp; DiscoverPagePlaceholder { objectName: "discover" } }
-    Component { id: searchComp;   SearchPagePlaceholder   { objectName: "search"   } }
-    Component { id: browseComp;   BrowsePagePlaceholder   { objectName: "browse"   } }
+    // Phase 03 swaps the Discover placeholder for the real page.
+    // Search / Browse stay on placeholders until phase 04.
+    Component { id: discoverComp; DiscoverPage           { } }
+    Component { id: searchComp;   SearchPagePlaceholder  { objectName: "search" } }
+    Component { id: browseComp;   BrowsePagePlaceholder  { objectName: "browse" } }
 
     // About / Settings — pushed on top of the current nav stack.
     // The Settings stub is a placeholder page until phase 06

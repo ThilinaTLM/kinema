@@ -213,6 +213,14 @@ QList<api::HistoryEntry> HistoryController::continueWatching(
     return m_store.continueWatching(maxItems);
 }
 
+void HistoryController::removeEntry(const api::HistoryEntry& entry)
+{
+    if (!entry.key.isValid()) {
+        return;
+    }
+    m_store.remove(entry.key);
+}
+
 void HistoryController::resumeFromHistory(const api::HistoryEntry& entry)
 {
     if (!entry.key.isValid()) {
