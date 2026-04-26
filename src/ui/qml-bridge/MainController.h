@@ -137,8 +137,8 @@ public Q_SLOTS:
     /// branch. Wired to the drawer's Quit action and `Ctrl+Q`.
     void requestQuit();
     /// Drawer Settings action / `Ctrl+,`. ApplicationShell.qml
-    /// pushes the `Kirigami.CategorizedSettings` page. The
-    /// optional `category` arg lands the page on a specific
+    /// opens the top-level Settings page. The optional `category`
+    /// arg lands the page on a specific
     /// sub-page (`"general"`, `"tmdb"`, `"realdebrid"`, `"filters"`,
     /// `"player"`, `"subtitles"`, `"appearance"`); empty selects
     /// the default.

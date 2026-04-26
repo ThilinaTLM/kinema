@@ -23,7 +23,13 @@ bool isTargetWarning(const QString& message)
         || message.contains(QStringLiteral(
                "Detected anchors on an item that is managed by a layout"))
         || message.contains(QStringLiteral(
-               "ReferenceError: subtitleSearchSheet is not defined"));
+               "ReferenceError: subtitleSearchSheet is not defined"))
+        || (message.contains(QStringLiteral("ToolBarPageHeader.qml"))
+            && message.contains(QStringLiteral(
+                "Unable to assign [undefined] to bool")))
+        || (message.contains(QStringLiteral("PageRow.qml"))
+            && message.contains(QStringLiteral(
+                "Value is null and could not be converted to an object")));
 }
 
 QStringList& capturedWarnings()
@@ -116,6 +122,7 @@ void TestApplicationBoot::loadsApplicationShell()
 
     evaluate(engine, window, QStringLiteral("showPage('search')"));
     evaluate(engine, window, QStringLiteral("showPage('browse')"));
+    evaluate(engine, window, QStringLiteral("showPage('settings')"));
     evaluate(engine, window, QStringLiteral("showPage('discover')"));
 
     const auto warnings = warningCollector.messages();

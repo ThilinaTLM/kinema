@@ -231,8 +231,8 @@ Kirigami.ApplicationWindow {
     Component { id: seriesDetailComp; SeriesDetailPage { } }
 
     // About / Subtitles are pushed helper pages. Settings is a top-level
-    // `Kirigami.CategorizedSettings` (from kirigamiaddons.settings), so
-    // opening it replaces the stack root just like Discover / Search / Browse.
+    // Kirigami.Page too, so opening it replaces the stack root just like
+    // Discover / Search / Browse.
     Component {
         id: aboutComp
         KAboutPage { }
@@ -257,7 +257,7 @@ Kirigami.ApplicationWindow {
             // `MainController::requestSettings(category)` is consumed by
             // `SettingsPage.qml` on creation to land on the requested
             // sub-page. If an explicit category is requested while already
-            // on Settings, recreate the page so `defaultPage` is reapplied.
+            // on Settings, recreate the page so the selection is reapplied.
             if (root.pageStack.currentItem
                 && root.pageStack.currentItem.objectName === "settings"
                 && category.length === 0) {
