@@ -70,6 +70,12 @@ public:
     /// a default-constructed (invalid) key when nothing is playing.
     const api::PlaybackKey& currentKey() const noexcept { return m_ctx.key; }
 
+    /// Full context (key + display titles + poster + stream ref)
+    /// for the actively loaded media. Used by the subtitles flow
+    /// to build a `Kirigami` page header on top of the player's
+    /// in-flight stream.
+    const api::PlaybackContext& currentContext() const noexcept { return m_ctx; }
+
 public Q_SLOTS:
     /// Entry point for embedded playback. The controller remembers the
     /// active context so later end-of-file / error signals carry media

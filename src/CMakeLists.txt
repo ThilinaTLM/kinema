@@ -105,7 +105,9 @@ set(kinema_core_SRCS
     ui/qml-bridge/ResultsListModel.cpp
     ui/qml-bridge/SearchViewModel.cpp
     ui/qml-bridge/SeriesDetailViewModel.cpp
+    ui/qml-bridge/SettingsViewModels.cpp
     ui/qml-bridge/StreamsListModel.cpp
+    ui/qml-bridge/SubtitlesViewModel.cpp
 
     tray_resources.qrc
 )
@@ -234,11 +236,23 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/StreamSortMenu.qml
         ui/qml/components/StreamsList.qml
         ui/qml/components/UpcomingBadge.qml
+        ui/qml/components/LanguagePicker.qml
+        ui/qml/components/SubtitleResultRow.qml
+        ui/qml/components/ThreeStateChips.qml
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
         ui/qml/pages/MovieDetailPage.qml
         ui/qml/pages/SearchPage.qml
         ui/qml/pages/SeriesDetailPage.qml
+        ui/qml/pages/SettingsPage.qml
+        ui/qml/pages/SubtitlesPage.qml
+        ui/qml/pages/settings/AppearanceSettingsPage.qml
+        ui/qml/pages/settings/FiltersSettingsPage.qml
+        ui/qml/pages/settings/GeneralSettingsPage.qml
+        ui/qml/pages/settings/PlayerSettingsPage.qml
+        ui/qml/pages/settings/RealDebridSettingsPage.qml
+        ui/qml/pages/settings/SubtitlesSettingsPage.qml
+        ui/qml/pages/settings/TmdbSettingsPage.qml
     OUTPUT_DIRECTORY
         "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/app"
     NO_PLUGIN

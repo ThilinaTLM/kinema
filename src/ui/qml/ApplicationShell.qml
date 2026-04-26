@@ -190,44 +190,54 @@ Kirigami.ApplicationWindow {
     Component { id: movieDetailComp;  MovieDetailPage  { } }
     Component { id: seriesDetailComp; SeriesDetailPage { } }
 
-    // About / Settings — pushed on top of the current nav stack.
-    // The Settings stub is a placeholder page until phase 06
-    // ships `Kirigami.CategorizedSettings` against the real VMs.
+    // About / Settings / Subtitles — pushed on top of the current
+    // nav stack. Settings is `Kirigami.CategorizedSettings` (lives
+    // in the kirigamiaddons.settings module). Subtitles is a
+    // pushed `Kirigami.ScrollablePage` from phase 06.
     Component {
         id: aboutComp
         KAboutPage { }
     }
     Component {
         id: settingsComp
-        Kirigami.Page {
-            title: i18nc("@title:window", "Settings")
-            Kirigami.PlaceholderMessage {
-                anchors.centerIn: parent
-                width: parent.width - Kirigami.Units.largeSpacing * 4
-                icon.name: "settings-configure"
-                text: i18nc("@info placeholder",
-                    "Settings are coming back in a later phase of the "
-                    + "Kirigami migration.")
-                explanation: i18nc("@info placeholder",
-                    "Existing tokens and preferences continue to apply; "
-                    + "they just can't be edited from the app right now.")
-            }
-        }
+        SettingsPage { }
+    }
+    Component {
+        id: subtitlesComp
+        SubtitlesPage { }
     }
 
     // ---- C++-driven flows ----------------------------------------------
     Connections {
         target: mainController
 
-        function onShowSettingsRequested() {
+        function onShowSettingsRequested(category) {
             // Single Settings instance on top of the stack; if
             // already visible, re-pushing is a no-op so the back
-            // button still pops to the previous nav page.
+            // button still pops to the previous nav page. The
+            // `initialCategory` set on `settingsVm` from
+            // `MainController::requestSettings(category)` is
+            // consumed by `SettingsPage.qml` on push to land on
+            // the requested sub-page.
             if (root.pageStack.currentItem
                 && root.pageStack.currentItem.objectName === "settings") {
                 return;
             }
             root.pageStack.push(settingsComp, { objectName: "settings" });
+        }
+        function onShowSubtitlesRequested() {
+            if (root.pageStack.currentItem
+                && root.pageStack.currentItem.objectName === "subtitles") {
+                // Already on the page — the VM has refreshed its
+                // context, no further push needed.
+                return;
+            }
+            root.pageStack.push(subtitlesComp, { objectName: "subtitles" });
+        }
+        function onPopPageRequested() {
+            if (root.pageStack.depth > 1) {
+                root.pageStack.pop();
+            }
         }
         function onShowAboutRequested() {
             if (root.pageStack.currentItem

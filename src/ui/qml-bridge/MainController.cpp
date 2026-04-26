@@ -35,7 +35,10 @@
 #include "ui/qml-bridge/ResultsListModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
 #include "ui/qml-bridge/SeriesDetailViewModel.h"
+#include "ui/qml-bridge/SettingsViewModels.h"
 #include "ui/qml-bridge/StreamsListModel.h"
+#include "ui/qml-bridge/SubtitlesViewModel.h"
+#include "ui/widgets/SubtitleResultsModel.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "ui/player/PlayerViewModel.h"
 #include "ui/player/PlayerWindow.h"
@@ -158,9 +161,23 @@ void MainController::requestQuit()
     QCoreApplication::quit();
 }
 
-void MainController::requestSettings()
+void MainController::requestSettings(const QString& category)
 {
-    Q_EMIT showSettingsRequested();
+    if (m_settingsVm) {
+        m_settingsVm->setInitialCategory(category);
+    }
+    Q_EMIT showSettingsRequested(category);
+}
+
+void MainController::pushSubtitlesPage(
+    const api::PlaybackContext& ctx, bool fromPlayer)
+{
+    if (!m_subtitlesVm) {
+        return;
+    }
+    m_subtitlesVm->setAttachOnDownload(fromPlayer);
+    m_subtitlesVm->setMedia(ctx);
+    Q_EMIT showSubtitlesRequested();
 }
 
 void MainController::requestAbout()
@@ -423,15 +440,12 @@ void MainController::buildCoreServices()
     // Detail VM → host. Status messages forward, similar carousels
     // re-push a fresh detail page (recursing through the TMDB
     // resolvers so movie↔series transitions Just Work), and
-    // `subtitlesRequested` is stubbed until phase 06's SubtitlesPage
-    // lands.
-    const auto subtitleStub = [this](const api::PlaybackContext& ctx) {
-        Q_EMIT passiveMessage(
-            i18nc("@info:status",
-                "Subtitles for “%1” land in phase 06.",
-                ctx.title),
-            4000);
-    };
+    // `subtitlesRequested` pushes the Kirigami subtitles page on
+    // top of the current detail surface.
+    const auto pushSubtitlesFromDetail
+        = [this](const api::PlaybackContext& ctx) {
+              pushSubtitlesPage(ctx, /*fromPlayer=*/false);
+          };
     connect(m_movieDetailVm,
         &MovieDetailViewModel::statusMessage, this,
         &MainController::passiveMessage);
@@ -443,7 +457,7 @@ void MainController::buildCoreServices()
         &MainController::openSeriesDetailByTmdb);
     connect(m_movieDetailVm,
         &MovieDetailViewModel::subtitlesRequested, this,
-        subtitleStub);
+        pushSubtitlesFromDetail);
 
     connect(m_seriesDetailVm,
         &SeriesDetailViewModel::statusMessage, this,
@@ -456,7 +470,42 @@ void MainController::buildCoreServices()
         &MainController::openSeriesDetailByTmdb);
     connect(m_seriesDetailVm,
         &SeriesDetailViewModel::subtitlesRequested, this,
-        subtitleStub);
+        pushSubtitlesFromDetail);
+
+    // Subtitles VM. Wraps `SubtitleController` and routes
+    // download / local-file / settings requests back through this
+    // controller. The settings request lands the Subtitles
+    // sub-page directly so the user can fix credentials and
+    // bounce straight back to the search.
+    m_subtitlesVm = new SubtitlesViewModel(m_subtitleCtrl,
+        m_settings.subtitle(), this);
+    connect(m_subtitlesVm,
+        &SubtitlesViewModel::settingsRequested, this, [this] {
+            requestSettings(QStringLiteral("subtitles"));
+        });
+    connect(m_subtitlesVm,
+        &SubtitlesViewModel::closeRequested, this,
+        [this] { Q_EMIT popPageRequested(); });
+
+    // Settings root + token routing back to the live
+    // TokenController. RD / TMDB / OS credential changes refresh
+    // their respective in-memory aliases without a keyring
+    // round-trip, matching the legacy SettingsDialog -> MainWindow
+    // wiring.
+    m_settingsVm = new SettingsRootViewModel(m_http.get(),
+        m_tokens.get(), m_settings, m_subtitleCache.get(), this);
+    connect(m_settingsVm,
+        &SettingsRootViewModel::tmdbTokenChanged, m_tokenCtrl,
+        [this](const QString&) { m_tokenCtrl->refreshTmdb(); });
+    connect(m_settingsVm,
+        &SettingsRootViewModel::realDebridTokenChanged,
+        m_tokenCtrl,
+        [this](const QString&) { m_tokenCtrl->refreshRealDebrid(); });
+    connect(m_settingsVm,
+        &SettingsRootViewModel::subtitleCredentialsChanged,
+        m_tokenCtrl, [this] {
+            m_tokenCtrl->refreshOpenSubtitlesCredentials();
+        });
 
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
@@ -589,13 +638,82 @@ void MainController::openEmbeddedPlayer(const QUrl& url,
                 });
         }
 
-        // Phase 02 leaves the player → SubtitlesDialog routing
-        // unwired: with `MainWindow` gone there's no QWidget to
-        // own the dialog, and the SubtitlesDialog widget itself
-        // is being replaced by a Kirigami page in phase 06. The
-        // QML player chrome's `subtitlesDialogRequested` signal
-        // therefore fires into the void here; phase 06 hooks it
-        // up to the new pushed `SubtitlesPage`.
+        // Player chrome's `SubtitlePicker → Download…` lands on the
+        // main window. We restore + raise the main window first so
+        // the user can see the pushed page; the player keeps its
+        // separate window visible behind it. The pushed Subtitles
+        // page tracks the live `PlaybackController` context so its
+        // header reflects whatever is currently playing.
+        connect(m_playerWindow->viewModel(),
+            &ui::player::PlayerViewModel::subtitlesDialogRequested,
+            this, [this] {
+                if (m_window) {
+                    m_window->setVisible(true);
+                    m_window->raise();
+                    m_window->requestActivate();
+                }
+                if (m_playbackCtrl) {
+                    pushSubtitlesPage(m_playbackCtrl->currentContext(),
+                        /*fromPlayer=*/true);
+                }
+            });
+
+        // Subtitles VM → player. On a successful download with
+        // attach-on-download semantics, sideload the file into mpv
+        // via the player's view-model. Local-file picks follow the
+        // same path. The connect lambda lives here so it captures
+        // the freshly-built `m_playerWindow`; phase 02 deferred the
+        // wiring entirely.
+        if (m_subtitlesVm) {
+            connect(m_subtitlesVm,
+                &SubtitlesViewModel::downloadCompleted, this,
+                [this](api::PlaybackKey key, const QString& fileId,
+                    const QString& localPath, const QString& lang,
+                    const QString& langName) {
+                    Q_UNUSED(fileId);
+                    if (!m_subtitlesVm->attachOnDownload()
+                        || !m_playerWindow) {
+                        return;
+                    }
+                    if (m_playbackCtrl
+                        && m_playbackCtrl->currentKey() != key) {
+                        return;
+                    }
+                    m_playerWindow->viewModel()->attachExternalSubtitle(
+                        localPath, langName, lang, /*select=*/true);
+                });
+            connect(m_subtitlesVm,
+                &SubtitlesViewModel::localFileChosen, this,
+                [this](api::PlaybackKey key, const QString& path) {
+                    if (!m_subtitlesVm->attachOnDownload()
+                        || !m_playerWindow) {
+                        return;
+                    }
+                    if (m_playbackCtrl
+                        && m_playbackCtrl->currentKey() != key) {
+                        return;
+                    }
+                    m_playerWindow->viewModel()->attachExternalSubtitle(
+                        path, QString {}, QString {},
+                        /*select=*/true);
+                });
+        }
+
+        // Mirror the subtitle-controller gate onto the player VM so
+        // its `Download…` picker entry can disable itself when
+        // OpenSubtitles isn't configured.
+        if (m_subtitleCtrl) {
+            const auto applyGate = [this](bool enabled) {
+                if (m_playerWindow) {
+                    m_playerWindow->viewModel()
+                        ->setSubtitleDownloadEnabled(enabled);
+                }
+            };
+            applyGate(m_subtitleCtrl->downloadEnabled());
+            connect(m_subtitleCtrl,
+                &controllers::SubtitleController::downloadEnabledChanged,
+                m_playerWindow->viewModel(), applyGate);
+        }
     }
 
     if (m_playbackCtrl) {
@@ -658,6 +776,46 @@ void MainController::exposeContextProperties(
         "dev.tlmtech.kinema.app", 1, 0,
         "EpisodesListModel",
         QStringLiteral("EpisodesListModel is owned by C++."));
+    qmlRegisterUncreatableType<SubtitlesViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "SubtitlesViewModel",
+        QStringLiteral("SubtitlesViewModel is owned by C++."));
+    qmlRegisterUncreatableType<widgets::SubtitleResultsModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "SubtitleResultsModel",
+        QStringLiteral("SubtitleResultsModel is owned by C++."));
+    qmlRegisterUncreatableType<SettingsRootViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "SettingsRootViewModel",
+        QStringLiteral("SettingsRootViewModel is owned by C++."));
+    qmlRegisterUncreatableType<GeneralSettingsViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "GeneralSettingsViewModel",
+        QStringLiteral("GeneralSettingsViewModel is owned by C++."));
+    qmlRegisterUncreatableType<TmdbSettingsViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "TmdbSettingsViewModel",
+        QStringLiteral("TmdbSettingsViewModel is owned by C++."));
+    qmlRegisterUncreatableType<RealDebridSettingsViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "RealDebridSettingsViewModel",
+        QStringLiteral("RealDebridSettingsViewModel is owned by C++."));
+    qmlRegisterUncreatableType<FiltersSettingsViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "FiltersSettingsViewModel",
+        QStringLiteral("FiltersSettingsViewModel is owned by C++."));
+    qmlRegisterUncreatableType<PlayerSettingsViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "PlayerSettingsViewModel",
+        QStringLiteral("PlayerSettingsViewModel is owned by C++."));
+    qmlRegisterUncreatableType<SubtitlesSettingsViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "SubtitlesSettingsViewModel",
+        QStringLiteral("SubtitlesSettingsViewModel is owned by C++."));
+    qmlRegisterUncreatableType<AppearanceSettingsViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "AppearanceSettingsViewModel",
+        QStringLiteral("AppearanceSettingsViewModel is owned by C++."));
 
     engine.rootContext()->setContextProperty(
         QStringLiteral("mainController"), this);
@@ -673,6 +831,10 @@ void MainController::exposeContextProperties(
         QStringLiteral("movieDetailVm"), m_movieDetailVm);
     engine.rootContext()->setContextProperty(
         QStringLiteral("seriesDetailVm"), m_seriesDetailVm);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("subtitlesVm"), m_subtitlesVm);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("settingsVm"), m_settingsVm);
 
     // Kick the initial Discover + Browse fetches once everything's
     // wired so each page lands populated rather than empty-spinner.

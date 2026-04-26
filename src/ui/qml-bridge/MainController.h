@@ -62,6 +62,8 @@ class DiscoverViewModel;
 class MovieDetailViewModel;
 class SearchViewModel;
 class SeriesDetailViewModel;
+class SubtitlesViewModel;
+class SettingsRootViewModel;
 
 /**
  * Top-level QML host. Replaces `MainWindow`'s composition role:
@@ -134,10 +136,19 @@ public Q_SLOTS:
     /// Quit the app immediately, bypassing the close-to-tray
     /// branch. Wired to the drawer's Quit action and `Ctrl+Q`.
     void requestQuit();
-    /// Drawer Settings action / `Ctrl+,`. Phase 02 only emits the
-    /// signal; ApplicationShell.qml pushes the placeholder page.
-    /// Phase 06 swaps in the real `Kirigami.CategorizedSettings`.
-    void requestSettings();
+    /// Drawer Settings action / `Ctrl+,`. ApplicationShell.qml
+    /// pushes the `Kirigami.CategorizedSettings` page. The
+    /// optional `category` arg lands the page on a specific
+    /// sub-page (`"general"`, `"tmdb"`, `"realdebrid"`, `"filters"`,
+    /// `"player"`, `"subtitles"`, `"appearance"`); empty selects
+    /// the default.
+    void requestSettings(const QString& category = QString());
+
+    /// Push the Subtitles page on top of the current nav stack
+    /// against `ctx`. `fromPlayer` toggles attach-on-download
+    /// semantics so the embedded player picks up the file.
+    void pushSubtitlesPage(const api::PlaybackContext& ctx,
+        bool fromPlayer);
     /// Drawer About action / `F1`. ApplicationShell pushes
     /// `KAboutPage` which reads `aboutData` from this controller.
     void requestAbout();
@@ -176,7 +187,11 @@ public Q_SLOTS:
     bool handleWindowCloseRequested();
 
 Q_SIGNALS:
-    void showSettingsRequested();
+    /// `category` is the optional sub-page key from
+    /// `requestSettings(category)`; empty for the default landing.
+    void showSettingsRequested(const QString& category);
+    void showSubtitlesRequested();
+    void popPageRequested();
     void showAboutRequested();
     void focusSearchRequested();
     /// Sent after `applyBrowsePreset` so the shell can swap the
@@ -245,6 +260,8 @@ private:
     BrowseViewModel* m_browseVm {};
     MovieDetailViewModel* m_movieDetailVm {};
     SeriesDetailViewModel* m_seriesDetailVm {};
+    SubtitlesViewModel* m_subtitlesVm {};
+    SettingsRootViewModel* m_settingsVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::PlaybackController* m_playbackCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};
