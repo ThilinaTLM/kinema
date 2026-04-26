@@ -27,9 +27,14 @@ Item {
         ? Math.max(0, Math.min(1, (position + cacheAhead) / duration))
         : 0
 
-    height: Theme.seekBarHeightHover + 8
+    height: Theme.seekBarHeightHover + Theme.spacingSm
 
     // Track row vertically centred so the bar grows symmetrically.
+    //
+    // Hit-target padding: even when the visual bar is 10 px tall,
+    // the surrounding MouseAreas anchor to `parent` so the user can
+    // grab the bar by clicking anywhere within this Item's height.
+
     Item {
         id: trackRow
         anchors.left: parent.left
@@ -83,7 +88,7 @@ Item {
     // Drag handle (grows on hover/drag)
     Rectangle {
         id: handle
-        width: root._hover ? 16 : 0
+        width: root._hover ? Theme.seekHandleSize : 0
         height: width
         radius: width / 2
         color: Theme.accentHover
@@ -102,7 +107,9 @@ Item {
         width: tooltipText.implicitWidth + 12
         x: Math.max(0, Math.min(root.width - width,
             hoverArea.mouseX - width / 2))
-        y: -32
+        // Float clear of the (now thicker) bar; the tooltip lives
+        // above the transport row regardless of where the bar sits.
+        y: -(Theme.seekBarHeightHover + Theme.spacing + 24)
 
         Text {
             id: tooltipText

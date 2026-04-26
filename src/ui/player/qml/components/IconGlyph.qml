@@ -6,11 +6,25 @@ import QtQuick.Shapes
 import dev.tlmtech.kinema.player
 
 /**
- * Vector icon glyphs for the transport bar. Each `kind` resolves to
- * a small shape drawn with QtQuick Shapes / Rectangles. Keeping
- * icons in code (instead of a font or SVG resources) means zero
- * runtime asset dependencies, perfect HiDPI fidelity, and
- * theme-coloured strokes for free.
+ * Vector icon glyphs for the player chrome. Every kind is a single
+ * `Shape` with one or more `ShapePath { PathSvg }` entries authored
+ * against a fixed 24 x 24 logical viewBox. The whole glyph wrapper
+ * is scaled to whatever pixel size the host `Item` was given via a
+ * uniform `scale:` on a 24 x 24 inner Item — this keeps every
+ * glyph's coordinate space identical regardless of host size.
+ *
+ * Why PathSvg and not pre-baked SVG / icon fonts:
+ *
+ *   - No runtime asset dependencies — the player chrome's design
+ *     contract.
+ *   - Theme-coloured strokes for free (`Theme.foreground`,
+ *     `Theme.iconStroke`).
+ *   - Perfect HiDPI fidelity at any item size.
+ *
+ * Stroke language: 1.8 px (`Theme.iconStroke`) at the 24 px viewBox,
+ * round caps + round joins, monochrome. Filled silhouettes only
+ * for play / pause and for the speaker body. Everything else is
+ * outline-stroke for consistent visual weight in a row.
  */
 Item {
     id: root
@@ -19,178 +33,255 @@ Item {
     width: 22
     height: 22
 
-    // Play: filled triangle
-    Shape {
-        anchors.fill: parent
-        visible: root.kind === "play"
-        ShapePath {
-            strokeWidth: 0
-            fillColor: root.color
-            startX: 5; startY: 3
-            PathLine { x: 19; y: 11 }
-            PathLine { x: 5;  y: 19 }
-            PathLine { x: 5;  y: 3 }
-        }
-    }
-
-    // Pause: two rounded rectangles
+    // Inner 24 x 24 canvas, uniformly scaled to fill the host. All
+    // Shapes below anchor to this so their PathSvg coordinates
+    // (authored against a 24-unit viewBox) land where they should.
     Item {
-        anchors.fill: parent
-        visible: root.kind === "pause"
-        Rectangle {
-            x: 5; y: 4; width: 4; height: 14; radius: 1.5
-            color: root.color
-        }
-        Rectangle {
-            x: 13; y: 4; width: 4; height: 14; radius: 1.5
-            color: root.color
-        }
-    }
+        id: vb
+        width: 24
+        height: 24
+        anchors.centerIn: parent
+        scale: Math.min(root.width, root.height) / 24
+        transformOrigin: Item.Center
 
-    // Speed: stylised "1x" / arrow
-    Item {
-        anchors.fill: parent
-        visible: root.kind === "speed"
+        // ---- Play: filled rounded triangle ------------------------
         Shape {
             anchors.fill: parent
+            visible: root.kind === "play"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeWidth: 0
+                fillColor: root.color
+                joinStyle: ShapePath.RoundJoin
+                capStyle: ShapePath.RoundCap
+                PathSvg {
+                    path: "M 7 4.6 L 19.2 11.4 Q 20 12 19.2 12.6 L 7 19.4 Q 6 20 6 18.8 L 6 5.2 Q 6 4 7 4.6 Z"
+                }
+            }
+        }
+
+        // ---- Pause: two rounded bars ------------------------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "pause"
+            ShapePath {
+                strokeWidth: 0
+                fillColor: root.color
+                PathSvg {
+                    path: "M 7 4 H 10 Q 11 4 11 5 V 19 Q 11 20 10 20 H 7 Q 6 20 6 19 V 5 Q 6 4 7 4 Z M 14 4 H 17 Q 18 4 18 5 V 19 Q 18 20 17 20 H 14 Q 13 20 13 19 V 5 Q 13 4 14 4 Z"
+                }
+            }
+        }
+
+        // ---- Audio (high volume): speaker + 2 curved waves --------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "audio"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeWidth: 0
+                fillColor: root.color
+                PathSvg {
+                    path: "M 4 9 H 7 L 11 5.5 Q 12 4.7 12 5.8 V 18.2 Q 12 19.3 11 18.5 L 7 15 H 4 Q 3 15 3 14 V 10 Q 3 9 4 9 Z"
+                }
+            }
             ShapePath {
                 strokeColor: root.color
-                strokeWidth: 2
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M 14.5 9.2 Q 16.2 12 14.5 14.8" }
+            }
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M 17 7 Q 20 12 17 17" }
+            }
+        }
+
+        // ---- Volume low: speaker + single short wave --------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "volumeLow"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeWidth: 0
+                fillColor: root.color
+                PathSvg {
+                    path: "M 4 9 H 7 L 11 5.5 Q 12 4.7 12 5.8 V 18.2 Q 12 19.3 11 18.5 L 7 15 H 4 Q 3 15 3 14 V 10 Q 3 9 4 9 Z"
+                }
+            }
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M 14.5 9.2 Q 16.2 12 14.5 14.8" }
+            }
+        }
+
+        // ---- Mute: speaker + single diagonal slash ----------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "mute"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeWidth: 0
+                fillColor: root.color
+                PathSvg {
+                    path: "M 4 9 H 7 L 11 5.5 Q 12 4.7 12 5.8 V 18.2 Q 12 19.3 11 18.5 L 7 15 H 4 Q 3 15 3 14 V 10 Q 3 9 4 9 Z"
+                }
+            }
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M 14 8 L 21 18" }
+            }
+        }
+
+        // ---- Audio tracks: list lines + tiny musical-note mark.
+        //      Distinct from the volume speaker so the two never
+        //      look like duplicate icons in the row. -----------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "audioTracks"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M 4 7 H 14" }
+                PathSvg { path: "M 4 12 H 11" }
+                PathSvg { path: "M 4 17 H 14" }
+                // Note stem on the right
+                PathSvg { path: "M 18 6 V 14.5" }
+                // Beam from stem-top to a small flag
+                PathSvg { path: "M 18 6 L 21 7.5" }
+            }
+            // Filled note head
+            ShapePath {
+                strokeWidth: 0
+                fillColor: root.color
+                PathSvg {
+                    path: "M 18 14.5 m -1.6 0 a 1.6 1.6 0 1 0 3.2 0 a 1.6 1.6 0 1 0 -3.2 0 Z"
+                }
+            }
+        }
+
+        // ---- Subtitle: rounded rect + two interior caption lines
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "subtitle"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                joinStyle: ShapePath.RoundJoin
+                capStyle: ShapePath.RoundCap
+                PathSvg {
+                    path: "M 4 6 H 20 Q 21 6 21 7 V 17 Q 21 18 20 18 H 4 Q 3 18 3 17 V 7 Q 3 6 4 6 Z"
+                }
+                PathSvg { path: "M 6 11 H 10" }
+                PathSvg { path: "M 12 11 H 18" }
+                PathSvg { path: "M 6 14.5 H 14" }
+                PathSvg { path: "M 16 14.5 H 18" }
+            }
+        }
+
+        // ---- Speed: half-circle gauge + needle --------------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "speed"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M 4 16 A 8 8 0 0 1 20 16" }
+                PathSvg { path: "M 6.5 11 L 7.4 11.7" }
+                PathSvg { path: "M 12 8 V 9.2" }
+                PathSvg { path: "M 17.5 11 L 16.6 11.7" }
+                PathSvg { path: "M 12 16 L 16 11.5" }
+            }
+            ShapePath {
+                strokeWidth: 0
+                fillColor: root.color
+                PathSvg {
+                    path: "M 12 16 m -1.4 0 a 1.4 1.4 0 1 0 2.8 0 a 1.4 1.4 0 1 0 -2.8 0 Z"
+                }
+            }
+        }
+
+        // ---- Info: circled lowercase i ----------------------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "info"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M 12 4 m -8 0 a 8 8 0 1 0 16 0 a 8 8 0 1 0 -16 0 Z" }
+                PathSvg { path: "M 12 11 V 17" }
+            }
+            ShapePath {
+                strokeWidth: 0
+                fillColor: root.color
+                PathSvg { path: "M 12 7.5 m -1 0 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 Z" }
+            }
+        }
+
+        // ---- Fullscreen: four outward corner arrows ---------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "fullscreen"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
                 fillColor: "transparent"
                 capStyle: ShapePath.RoundCap
                 joinStyle: ShapePath.RoundJoin
-                startX: 4; startY: 11
-                PathLine { x: 14; y: 11 }
-                PathLine { x: 11; y: 8 }
-                PathMove { x: 14; y: 11 }
-                PathLine { x: 11; y: 14 }
+                PathSvg { path: "M 9 4 H 4 V 9" }
+                PathSvg { path: "M 15 4 H 20 V 9" }
+                PathSvg { path: "M 20 15 V 20 H 15" }
+                PathSvg { path: "M 4 15 V 20 H 9" }
             }
         }
-    }
 
-    // Audio: speaker glyph
-    Item {
-        anchors.fill: parent
-        visible: root.kind === "audio"
+        // ---- Exit fullscreen: four inward corner arrows -----------
         Shape {
             anchors.fill: parent
-            ShapePath {
-                strokeWidth: 0
-                fillColor: root.color
-                startX: 4;  startY: 9
-                PathLine { x: 8;  y: 9 }
-                PathLine { x: 13; y: 4 }
-                PathLine { x: 13; y: 18 }
-                PathLine { x: 8;  y: 13 }
-                PathLine { x: 4;  y: 13 }
-                PathLine { x: 4;  y: 9 }
-            }
+            visible: root.kind === "exitFullscreen"
             ShapePath {
                 strokeColor: root.color
-                strokeWidth: 1.6
+                strokeWidth: Theme.iconStroke
                 fillColor: "transparent"
                 capStyle: ShapePath.RoundCap
-                startX: 15; startY: 8
-                PathQuad { x: 15; y: 14; controlX: 18; controlY: 11 }
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 4 9 H 9 V 4" }
+                PathSvg { path: "M 15 4 V 9 H 20" }
+                PathSvg { path: "M 20 15 H 15 V 20" }
+                PathSvg { path: "M 9 20 V 15 H 4" }
             }
         }
-    }
 
-    // Subtitle: "CC" pill
-    Rectangle {
-        anchors.fill: parent
-        visible: root.kind === "subtitle"
-        color: "transparent"
-        border.color: root.color
-        border.width: 1.6
-        radius: 4
-        Text {
-            anchors.centerIn: parent
-            text: "CC"
-            color: root.color
-            font.pixelSize: 11
-            font.weight: Font.Bold
-        }
-    }
-
-    // Info: lowercase "i"
-    Item {
-        anchors.fill: parent
-        visible: root.kind === "info"
-        Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: 3; width: 3; height: 3; radius: 1.5
-            color: root.color
-        }
-        Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: 8; width: 3; height: 11; radius: 1
-            color: root.color
-        }
-    }
-
-    // Fullscreen: four corner brackets
-    Item {
-        anchors.fill: parent
-        visible: root.kind === "fullscreen"
-        property color c: root.color
-        Rectangle { x: 3;  y: 3;  width: 6; height: 2; color: parent.c }
-        Rectangle { x: 3;  y: 3;  width: 2; height: 6; color: parent.c }
-        Rectangle { x: 13; y: 3;  width: 6; height: 2; color: parent.c }
-        Rectangle { x: 17; y: 3;  width: 2; height: 6; color: parent.c }
-        Rectangle { x: 3;  y: 17; width: 6; height: 2; color: parent.c }
-        Rectangle { x: 3;  y: 13; width: 2; height: 6; color: parent.c }
-        Rectangle { x: 13; y: 17; width: 6; height: 2; color: parent.c }
-        Rectangle { x: 17; y: 13; width: 2; height: 6; color: parent.c }
-    }
-
-    // X: simple cross used by close pills.
-    Item {
-        anchors.fill: parent
-        visible: root.kind === "x"
-        Rectangle {
-            anchors.centerIn: parent
-            width: 14; height: 2; radius: 1
-            color: root.color
-            rotation: 45
-            antialiasing: true
-        }
-        Rectangle {
-            anchors.centerIn: parent
-            width: 14; height: 2; radius: 1
-            color: root.color
-            rotation: -45
-            antialiasing: true
-        }
-    }
-
-    // Mute: speaker with X
-    Item {
-        anchors.fill: parent
-        visible: root.kind === "mute"
+        // ---- Close pill cross -------------------------------------
         Shape {
             anchors.fill: parent
+            visible: root.kind === "x"
             ShapePath {
-                strokeWidth: 0
-                fillColor: root.color
-                startX: 4;  startY: 9
-                PathLine { x: 8;  y: 9 }
-                PathLine { x: 13; y: 4 }
-                PathLine { x: 13; y: 18 }
-                PathLine { x: 8;  y: 13 }
-                PathLine { x: 4;  y: 13 }
-                PathLine { x: 4;  y: 9 }
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathSvg { path: "M 6 6 L 18 18" }
+                PathSvg { path: "M 18 6 L 6 18" }
             }
-        }
-        Rectangle {
-            x: 15; y: 9; width: 6; height: 2; color: root.color
-            rotation: 45
-            transformOrigin: Item.Center
-        }
-        Rectangle {
-            x: 15; y: 9; width: 6; height: 2; color: root.color
-            rotation: -45
-            transformOrigin: Item.Center
         }
     }
 }

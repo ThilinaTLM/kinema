@@ -72,12 +72,19 @@ QtObject {
     readonly property int radius:      5
     readonly property int radiusLg:    8
 
-    readonly property int transportHeight: 92
+    readonly property int transportHeight: 64
     readonly property int topBarHeight:    72
-    readonly property int seekBarHeight:   6
-    readonly property int seekBarHeightHover: 10
+    readonly property int seekBarHeight:   10
+    readonly property int seekBarHeightHover: 14
+    readonly property int seekHandleSize:  18
     readonly property int iconButton:      40
     readonly property int iconButtonLg:    52
+    readonly property int volumeSliderWidth: 110
+
+    // Shared stroke width for PathSvg-based icon glyphs in
+    // IconGlyph.qml. Centralised so a future "thicker icons" pass
+    // is one edit.
+    readonly property real iconStroke:     1.8
 
     // ---- Drop shadow tokens (PopupPanel, MultiEffect) ----------------
     readonly property int   popupShadowSize:   16
