@@ -30,6 +30,19 @@ Kirigami.ApplicationWindow {
     minimumWidth: Kirigami.Units.gridUnit * 30
     minimumHeight: Kirigami.Units.gridUnit * 24
 
+    // Kirigami.ApplicationWindow's pageStack is a PageRow. By default it
+    // adapts pushed pages into multiple side-by-side columns on wide windows.
+    // Kinema's title/detail flow wants stack semantics without that external
+    // split: detail pages are full-width, and any useful split happens inside
+    // the detail page itself.
+    Binding {
+        target: root.pageStack
+        property: "defaultColumnWidth"
+        value: Math.max(root.pageStack.width,
+            Kirigami.Units.gridUnit * 20)
+        restoreMode: Binding.RestoreBindingOrValue
+    }
+
     // ---- close-to-tray --------------------------------------------------
     // The C++ side owns the decision matrix (reallyQuit /
     // closeToTray pref / tray availability / first-time toast).
@@ -140,9 +153,9 @@ Kirigami.ApplicationWindow {
 
     // ---- pageStack and navigation --------------------------------------
     // Primary pages are single top-level surfaces. Detail and helper
-    // pages can still be pushed on top of them, but Discover / Search /
-    // Browse / Settings unwind to the stack root and replace it so they
-    // always take the complete PageRow width, even on wide windows.
+    // pages are pushed on top to preserve back navigation, but the PageRow
+    // is configured above to behave like a single full-width stack. Discover /
+    // Search / Browse / Settings still unwind to the stack root and replace it.
     readonly property string currentNavKey: pageStack.currentItem
         ? (pageStack.currentItem.objectName || "")
         : ""
@@ -266,10 +279,22 @@ Kirigami.ApplicationWindow {
             root.setTopLevelPage(settingsComp, {});
         }
         function onShowSubtitlesRequested() {
-            if (root.pageStack.currentItem
-                && root.pageStack.currentItem.objectName === "subtitles") {
-                // Already on the page — the VM has refreshed its
-                // context, no further push needed.
+            const top = root.pageStack.currentItem;
+
+            // Detail pages expose an inline subtitles panel. The C++ side has
+            // already prepared subtitlesVm with the requested playback context.
+            // Player requests set attachOnDownload=true and must keep using the
+            // standalone page so completed downloads attach back to the player.
+            if (!subtitlesVm.attachOnDownload
+                && top
+                && typeof top.openSubtitlesPanel === "function") {
+                top.openSubtitlesPanel();
+                return;
+            }
+
+            if (top && top.objectName === "subtitles") {
+                // Already on the page — the VM has refreshed its context, no
+                // further push needed.
                 return;
             }
             root.pushCreated(subtitlesComp, {});

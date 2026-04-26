@@ -185,6 +185,9 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/BackdropHero.qml
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
+        ui/qml/components/DetailOverview.qml
+        ui/qml/components/DetailScaffold.qml
+        ui/qml/components/DetailWorkPanel.qml
         ui/qml/components/EpisodeRow.qml
         ui/qml/components/FilterChipRow.qml
         ui/qml/components/FilterDrawer.qml
@@ -208,6 +211,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/UpcomingBadge.qml
         ui/qml/components/LanguagePicker.qml
         ui/qml/components/SubtitleResultRow.qml
+        ui/qml/components/SubtitlesPanel.qml
         ui/qml/components/ThreeStateChips.qml
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
