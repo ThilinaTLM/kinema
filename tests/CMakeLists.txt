@@ -96,6 +96,16 @@ ecm_add_test(tst_results_list_model.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_streams_list_model.cpp
+    TEST_NAME tst_streams_list_model
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_movie_detail_view_model.cpp
+    TEST_NAME tst_movie_detail_view_model
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_stream_actions.cpp
     TEST_NAME tst_stream_actions
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -113,11 +123,6 @@ ecm_add_test(tst_subtitle_results_model.cpp
 
 ecm_add_test(tst_streams_panel.cpp
     TEST_NAME tst_streams_panel
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
-ecm_add_test(tst_movie_detail_controller.cpp
-    TEST_NAME tst_movie_detail_controller
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -240,9 +245,10 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
          tst_date_format tst_app_settings tst_navigation
          tst_search_view_model tst_browse_view_model tst_results_list_model
+         tst_streams_list_model tst_movie_detail_view_model
          tst_stream_actions
          tst_meta_header tst_streams_panel tst_subtitle_results_model
-         tst_movie_detail_controller tst_series_detail_controller
+         tst_series_detail_controller
          tst_token_controller tst_cinemeta_client tst_tmdb_client
          tst_torrentio_client tst_realdebrid_client
          tst_database tst_history_store

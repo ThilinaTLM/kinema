@@ -184,6 +184,12 @@ Kirigami.ApplicationWindow {
     Component { id: searchComp;   SearchPage   { } }
     Component { id: browseComp;   BrowsePage   { } }
 
+    // Detail pages are pushed on top of the current nav page so Esc
+    // pops back to it with state preserved (the shell-level Esc
+    // shortcut handles depth>1 already). The SeriesDetailPage
+    // component lands in commit B of phase 05.
+    Component { id: movieDetailComp; MovieDetailPage { } }
+
     // About / Settings — pushed on top of the current nav stack.
     // The Settings stub is a placeholder page until phase 06
     // ships `Kirigami.CategorizedSettings` against the real VMs.
@@ -251,6 +257,14 @@ Kirigami.ApplicationWindow {
             // `MainController::applyBrowsePreset` before this
             // signal fires; we just swap the page row.
             root.showPage("browse");
+        }
+        function onShowMovieDetailRequested() {
+            // Detail pages stack on top of the current nav surface.
+            // If we're already showing a movie detail (e.g. user
+            // clicked a similar carousel card), push a fresh page
+            // so Esc walks back through the breadcrumb of titles.
+            root.pageStack.push(movieDetailComp,
+                { objectName: "movieDetail" });
         }
         function onPassiveMessage(text, durationMs) {
             root.showPassiveNotification(text, durationMs);

@@ -59,6 +59,7 @@ namespace kinema::ui::qml {
 class BrowseViewModel;
 class ContinueWatchingViewModel;
 class DiscoverViewModel;
+class MovieDetailViewModel;
 class SearchViewModel;
 
 /**
@@ -149,6 +150,16 @@ public Q_SLOTS:
     /// to `BrowseViewModel` and asks the QML shell to navigate.
     void applyBrowsePreset(int kind, int sort);
 
+    /// Open the movie detail page for `imdbId`. Loads the VM
+    /// against the id and emits `showMovieDetailRequested` so
+    /// `ApplicationShell.qml` pushes the detail page on top of the
+    /// current Discover / Search / Browse base. Title is forwarded
+    /// for the in-flight "Looking up …" status message only.
+    void openMovieDetail(const QString& imdbId, const QString& title);
+    /// Same shape, but resolves a TMDB id to the IMDB id first
+    /// (Browse / Discover hand off TMDB ids).
+    void openMovieDetailByTmdb(int tmdbId, const QString& title);
+
     /// Called from QML's `onClosing` handler. Returns true when
     /// the close should proceed (real quit), false when the
     /// controller has already hidden the window and the close
@@ -162,11 +173,16 @@ Q_SIGNALS:
     /// Sent after `applyBrowsePreset` so the shell can swap the
     /// page row to Browse with the freshly-applied filters.
     void navigateToBrowseRequested();
-    /// Sent when a search-result poster is activated. Wired to a
-    /// passive notification stub for phase 04; phase 05 swaps in
-    /// the real detail-page push.
-    void openMovieDetailRequested(const QString& imdbId, const QString& title);
+    /// Sent when a search-result poster is activated. The series
+    /// variant is still stubbed in phase 05's first commit; phase
+    /// 05's second commit replaces it with a real series-page push.
     void openSeriesDetailRequested(const QString& imdbId, const QString& title);
+
+    /// Asks `ApplicationShell.qml` to push the movie detail page
+    /// on top of the current nav page. The view-model has already
+    /// been told to load by the time this fires; the QML shell
+    /// just needs to surface the page so its bindings paint.
+    void showMovieDetailRequested();
 
     /// Fan-in for status messages coming out of `StreamActions`,
     /// `PlayerLauncher`, `SubtitleController`, and (from phase 03)
@@ -221,6 +237,7 @@ private:
     ContinueWatchingViewModel* m_continueWatchingVm {};
     SearchViewModel* m_searchVm {};
     BrowseViewModel* m_browseVm {};
+    MovieDetailViewModel* m_movieDetailVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::PlaybackController* m_playbackCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};

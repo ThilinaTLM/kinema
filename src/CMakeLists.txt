@@ -54,11 +54,13 @@ set(kinema_core_SRCS
     api/TorrentioParse.cpp
 
     # `DiscoverCardDelegate`, `DiscoverGridView`, `DiscoverRowModel`,
-    # and `DiscoverSection` stay until SimilarStrip (phase 05) is
-    # migrated. `DiscoverGridView` and `DiscoverCardDelegate` are
-    # still consumed by `DiscoverSection`; `DiscoverRowModel` is
-    # consumed by `SimilarStrip` directly. Browse's consumers were
-    # retired in phase 04.
+    # `DiscoverSection`, and `SimilarStrip` go in phase 05's commit B
+    # (with the SeriesDetailPane retirement). They're still consumed
+    # by `SeriesDetailPane` indirectly via `MetaHeaderWidget`'s
+    # `SimilarStrip`, so they outlive commit A. `TorrentsModel`,
+    # `EpisodesModel`, `EpisodeDelegate`, `SeriesPicker`,
+    # `SeriesDetailPane`, and the `widgets/StreamsPanel` /
+    # `widgets/MetaHeaderWidget` block all retire alongside.
     ui/DiscoverCardDelegate.cpp
     ui/DiscoverGridView.cpp
     ui/DiscoverRowModel.cpp
@@ -70,11 +72,9 @@ set(kinema_core_SRCS
     ui/SeriesPicker.cpp
     ui/SimilarStrip.cpp
     ui/TorrentsModel.cpp
-    ui/DetailPane.cpp
-    # `StateWidget` and `UpcomingBadge` outlive phase 04: they're
-    # consumed by `SeriesDetailPane` / `SimilarStrip` /
-    # `DiscoverSection` / `EpisodeDelegate` (phase 05 surfaces) and
-    # by `widgets/MetaHeaderWidget` / `widgets/StreamsPanel` (phase
+    # `StateWidget` and `UpcomingBadge` outlive phase 05: they're
+    # consumed by the surviving series-side widgets above plus
+    # `widgets/MetaHeaderWidget` / `widgets/StreamsPanel` (phase
     # 06 surfaces). They go away once those last consumers do.
     ui/StateWidget.cpp
     ui/UpcomingBadge.cpp
@@ -96,12 +96,10 @@ set(kinema_core_SRCS
     app/KinemaApplication.cpp
 
     controllers/HistoryController.cpp
-    controllers/MovieDetailController.cpp
-    # `NavigationController` stays alive for one more phase: the
-    # detail controllers (`MovieDetailController` /
-    # `SeriesDetailController`) and their tests still consume it.
-    # Phase 05 retires those alongside the new detail VMs and
-    # `NavigationController` + `Page.h` go with them.
+    # `NavigationController` + `SeriesDetailController` survive into
+    # commit B of phase 05 — they're tied together (the controller
+    # uses the nav controller for the episode/streams sub-page flip)
+    # and retire as a unit alongside the SeriesDetailViewModel.
     controllers/NavigationController.cpp
     controllers/SeriesDetailController.cpp
     controllers/SubtitleController.cpp
@@ -116,8 +114,10 @@ set(kinema_core_SRCS
     ui/qml-bridge/DiscoverViewModel.cpp
     ui/qml-bridge/KinemaImageProvider.cpp
     ui/qml-bridge/MainController.cpp
+    ui/qml-bridge/MovieDetailViewModel.cpp
     ui/qml-bridge/ResultsListModel.cpp
     ui/qml-bridge/SearchViewModel.cpp
+    ui/qml-bridge/StreamsListModel.cpp
 
     tray_resources.qrc
 )
@@ -222,6 +222,7 @@ qt_add_qml_module(kinema_qml_app
     QML_FILES
         ui/qml/ApplicationShell.qml
         ui/qml/Theme.qml
+        ui/qml/components/BackdropHero.qml
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/FilterChipRow.qml
@@ -231,12 +232,21 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/KErrorState.qml
         ui/qml/components/KSpinner.qml
         ui/qml/components/MediaKindSwitch.qml
+        ui/qml/components/MetaChip.qml
+        ui/qml/components/MetaSection.qml
         ui/qml/components/PosterCard.qml
         ui/qml/components/PosterGrid.qml
         ui/qml/components/ProgressPosterCard.qml
         ui/qml/components/RatingChip.qml
+        ui/qml/components/SimilarCarousel.qml
+        ui/qml/components/StreamCard.qml
+        ui/qml/components/StreamRowActions.qml
+        ui/qml/components/StreamSortMenu.qml
+        ui/qml/components/StreamsList.qml
+        ui/qml/components/UpcomingBadge.qml
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
+        ui/qml/pages/MovieDetailPage.qml
         ui/qml/pages/SearchPage.qml
     OUTPUT_DIRECTORY
         "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/app"
