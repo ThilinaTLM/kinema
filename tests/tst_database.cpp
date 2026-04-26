@@ -38,7 +38,7 @@ private Q_SLOTS:
         QVERIFY(db.open());
         QVERIFY(db.isOpen());
         QCOMPARE(db.currentSchemaVersion(), Database::latestSchemaVersion());
-        QCOMPARE(db.currentSchemaVersion(), 2);
+        QCOMPARE(db.currentSchemaVersion(), 3);
 
         // history table must exist and have the key column.
         auto q = db.query();
@@ -57,6 +57,23 @@ private Q_SLOTS:
         QVERIFY(columns.contains(QStringLiteral("stream_info_hash")));
         QVERIFY(columns.contains(QStringLiteral("audio_lang")));
         QVERIFY(columns.contains(QStringLiteral("sub_lang")));
+
+        // subtitle_cache table from v3 migration.
+        QVERIFY(q.exec(QStringLiteral(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='subtitle_cache'")));
+        QVERIFY(q.next());
+        QVERIFY(q.exec(QStringLiteral("PRAGMA table_info(subtitle_cache)")));
+        QStringList subColumns;
+        while (q.next()) {
+            subColumns << q.value(1).toString();
+        }
+        QVERIFY(subColumns.contains(QStringLiteral("file_id")));
+        QVERIFY(subColumns.contains(QStringLiteral("imdb_id")));
+        QVERIFY(subColumns.contains(QStringLiteral("language")));
+        QVERIFY(subColumns.contains(QStringLiteral("file_name")));
+        QVERIFY(subColumns.contains(QStringLiteral("local_path")));
+        QVERIFY(subColumns.contains(QStringLiteral("last_used_at")));
     }
 
     // ---- Reopen is idempotent -------------------------------------------
@@ -70,7 +87,7 @@ private Q_SLOTS:
         {
             Database db(m_path, nullptr);
             QVERIFY(db.open());
-            QCOMPARE(db.currentSchemaVersion(), 2);
+            QCOMPARE(db.currentSchemaVersion(), 3);
         }
     }
 
@@ -92,7 +109,7 @@ private Q_SLOTS:
     {
         Database db(QStringLiteral(":memory:"), nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 2);
+        QCOMPARE(db.currentSchemaVersion(), 3);
     }
 
     // ---- Corrupt file is quarantined and a fresh DB is created ---------
@@ -110,7 +127,7 @@ private Q_SLOTS:
 
         Database db(m_path, nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 2);
+        QCOMPARE(db.currentSchemaVersion(), 3);
 
         // A file named *.corrupt-* should now exist next to the fresh DB.
         const QFileInfo fi(m_path);

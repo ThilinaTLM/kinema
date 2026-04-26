@@ -16,9 +16,11 @@
 #endif
 #include "controllers/SearchController.h"
 #include "controllers/SeriesDetailController.h"
+#include "controllers/SubtitleController.h"
 #include "controllers/TokenController.h"
 #include "controllers/TrayController.h"
 #include "services/StreamActions.h"
+#include "api/OpenSubtitlesClient.h"
 #include "core/Database.h"
 #include "core/DateFormat.h"
 #include "core/HistoryStore.h"
@@ -26,6 +28,7 @@
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/PlayerLauncher.h"
+#include "core/SubtitleCacheStore.h"
 #include "core/TokenStore.h"
 #include "kinema_debug.h"
 #include "ui/BrowsePage.h"
@@ -40,6 +43,7 @@
 #include "ui/settings/SettingsDialog.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
+#include "ui/player/PlayerViewModel.h"
 #include "ui/player/PlayerWindow.h"
 #endif
 
@@ -57,6 +61,8 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QIcon>
 #include <QKeySequence>
 #include <QListView>
@@ -117,6 +123,13 @@ void MainWindow::buildCoreServices()
     }
     m_history = std::make_unique<core::HistoryStore>(*m_db, this);
     m_history->runRetentionPass();
+    m_subtitleCache = std::make_unique<core::SubtitleCacheStore>(*m_db, this);
+
+    // OpenSubtitles client + controller. Token aliases come from
+    // TokenController (created below). Both are constructed here so
+    // SettingsDialog can talk to the controller / client without an
+    // app restart.
+    m_openSubtitles = nullptr; // built once TokenController exists
 
     // TokenController owns the in-memory RD + TMDB token strings
     // referenced by HistoryController and the detail controllers.
@@ -124,6 +137,47 @@ void MainWindow::buildCoreServices()
     // can receive a live HistoryController before the UI goes up.
     m_tokenCtrl = new controllers::TokenController(
         m_tokens.get(), m_tmdb, m_settings.realDebrid(), this);
+
+    // OpenSubtitles client + subtitle controller — credentials come
+    // through TokenController as live `const QString&` aliases, the
+    // same way RD / TMDB do.
+    m_openSubtitles = new api::OpenSubtitlesClient(m_http.get(),
+        m_tokenCtrl->openSubtitlesApiKey(),
+        m_tokenCtrl->openSubtitlesUsername(),
+        m_tokenCtrl->openSubtitlesPassword(), this);
+    m_subtitleCtrl = new controllers::SubtitleController(
+        m_openSubtitles, m_subtitleCache.get(),
+        m_settings.subtitle(), m_settings.cache(), this);
+    connect(m_subtitleCtrl,
+        &controllers::SubtitleController::statusMessage,
+        this, [this](const QString& text, int timeoutMs) {
+            statusBar()->showMessage(text, timeoutMs);
+        });
+    // Run the cache reconcile on the next event-loop tick so the DB
+    // connection is fully open and we don't block layout setup.
+    QTimer::singleShot(0, this, [this] {
+        m_subtitleCtrl->reconcileCacheOnStartup();
+    });
+    // Credentials change → drop JWT so the next request re-logs in,
+    // and tell the controller to re-evaluate downloadEnabled.
+    connect(m_tokenCtrl,
+        &controllers::TokenController::openSubtitlesApiKeyChanged,
+        m_openSubtitles, [this](const QString&) {
+            m_openSubtitles->clearJwt();
+            m_subtitleCtrl->notifyAuthChanged();
+        });
+    connect(m_tokenCtrl,
+        &controllers::TokenController::openSubtitlesUsernameChanged,
+        m_openSubtitles, [this](const QString&) {
+            m_openSubtitles->clearJwt();
+            m_subtitleCtrl->notifyAuthChanged();
+        });
+    connect(m_tokenCtrl,
+        &controllers::TokenController::openSubtitlesPasswordChanged,
+        m_openSubtitles, [this](const QString&) {
+            m_openSubtitles->clearJwt();
+            m_subtitleCtrl->notifyAuthChanged();
+        });
 
     // History controller. Depends on the Torrentio client +
     // AppSettings + RD token alias already built above. Two-phase
@@ -424,7 +478,21 @@ void MainWindow::buildControllers()
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
         *m_cinemeta, *m_torrentio, *m_streamActions, *m_historyCtrl,
-        m_settings, m_tokenCtrl->realDebridToken(), this);
+        m_settings, m_tokenCtrl->realDebridToken(), m_http.get(), this);
+
+    // PlaybackController computes a best-effort moviehash for each
+    // active stream; SubtitleController consumes it as a ranking
+    // boost on the next search.
+    if (m_subtitleCtrl) {
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::moviehashComputed,
+            m_subtitleCtrl,
+            &controllers::SubtitleController::setMoviehash);
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::streamCleared,
+            m_subtitleCtrl,
+            &controllers::SubtitleController::clearMoviehash);
+    }
     connect(m_playbackCtrl,
         &controllers::PlaybackController::statusMessage,
         this, forwardStatus);
@@ -607,6 +675,130 @@ void MainWindow::openEmbeddedPlayer(const QUrl& url,
             connect(m_playbackCtrl,
                 &controllers::PlaybackController::visibilityChanged,
                 this, [this](bool) { m_tray->refreshMenu(); });
+        }
+
+        // ---- Subtitle search / download wiring -------------------
+        // PlayerViewModel <—> SubtitleController. The controller
+        // never includes player headers; we connect the two here in
+        // the wiring shell.
+        if (m_subtitleCtrl && m_playerWindow->viewModel()) {
+            auto* vm = m_playerWindow->viewModel();
+
+            // QML "Download subtitle…" footer entry → open the
+            // search sheet and immediately fire a query.
+            connect(vm, &player::PlayerViewModel::subtitleSearchSheetRequested,
+                this, [this, vm] {
+                    if (!m_playbackCtrl) {
+                        return;
+                    }
+                    const auto key = m_playbackCtrl->currentKey();
+                    if (!key.isValid()) {
+                        return;
+                    }
+                    vm->setSubtitleSearchError(QString {});
+                    vm->openSubtitleSearchSheet();
+                    // Initial query uses the user’s preferred langs +
+                    // default HI / FPO modes.
+                    m_subtitleCtrl->runQuery(key,
+                        m_settings.subtitle().preferredLanguages(),
+                        m_settings.subtitle().hearingImpaired(),
+                        m_settings.subtitle().foreignPartsOnly(),
+                        QString {});
+                });
+
+            // QML re-issue (filters changed) → controller.
+            connect(vm, &player::PlayerViewModel::subtitleSearchRequested,
+                this, [this](const QStringList& langs,
+                          const QString& hi, const QString& fpo,
+                          const QString& release) {
+                    if (!m_playbackCtrl) {
+                        return;
+                    }
+                    const auto key = m_playbackCtrl->currentKey();
+                    if (!key.isValid()) {
+                        return;
+                    }
+                    m_subtitleCtrl->runQuery(key, langs, hi, fpo, release);
+                });
+
+            // QML row click → download.
+            connect(vm, &player::PlayerViewModel::subtitleDownloadRequested,
+                this, [this](const QString& fileId) {
+                    if (!m_playbackCtrl) {
+                        return;
+                    }
+                    m_subtitleCtrl->download(fileId,
+                        m_playbackCtrl->currentKey());
+                });
+
+            // "Open subtitle file…" → QFileDialog → attach.
+            connect(vm, &player::PlayerViewModel::localSubtitleFileRequested,
+                this, [this, vm] {
+                    const auto path = QFileDialog::getOpenFileName(this,
+                        i18nc("@title:window",
+                            "Open subtitle file"),
+                        QString {},
+                        i18nc("@info file dialog filter",
+                            "Subtitles (*.srt *.vtt *.ass *.ssa *.sub)"));
+                    if (path.isEmpty()) {
+                        return;
+                    }
+                    vm->attachExternalSubtitle(path,
+                        QFileInfo(path).fileName(),
+                        QStringLiteral("und"), /*select=*/true);
+                });
+
+            // Controller → PlayerViewModel state.
+            connect(m_subtitleCtrl,
+                &controllers::SubtitleController::hitsChanged,
+                this, [this, vm] {
+                    vm->updateSubtitleSearchModel(
+                        m_subtitleCtrl->hits(),
+                        m_subtitleCtrl->cachedFileIds(),
+                        QSet<QString> {});
+                });
+            connect(m_subtitleCtrl,
+                &controllers::SubtitleController::cacheChanged,
+                this, [this, vm] {
+                    vm->updateSubtitleSearchModel(
+                        m_subtitleCtrl->hits(),
+                        m_subtitleCtrl->cachedFileIds(),
+                        QSet<QString> {});
+                });
+            connect(m_subtitleCtrl,
+                &controllers::SubtitleController::searchingChanged,
+                this, [this, vm] {
+                    vm->setSubtitleSearchActive(
+                        m_subtitleCtrl->isSearching());
+                });
+            connect(m_subtitleCtrl,
+                &controllers::SubtitleController::errorChanged,
+                this, [this, vm] {
+                    vm->setSubtitleSearchError(
+                        m_subtitleCtrl->lastError());
+                });
+            connect(m_subtitleCtrl,
+                &controllers::SubtitleController::downloadEnabledChanged,
+                vm, &player::PlayerViewModel::setSubtitleDownloadEnabled);
+            // Seed the initial state.
+            vm->setSubtitleDownloadEnabled(
+                m_subtitleCtrl->downloadEnabled());
+
+            // downloadFinished → attach the file via the VM, and
+            // remember the language for next time.
+            connect(m_subtitleCtrl,
+                &controllers::SubtitleController::downloadFinished,
+                this, [this, vm](const QString& /*fileId*/,
+                          const QString& path,
+                          const QString& lang,
+                          const QString& languageName) {
+                    vm->attachExternalSubtitle(path, languageName,
+                        lang, /*select=*/true);
+                    if (m_history && m_playbackCtrl) {
+                        m_history->setRememberedSubtitleLang(
+                            m_playbackCtrl->currentKey(), lang);
+                    }
+                });
         }
     }
 
@@ -983,7 +1175,8 @@ void MainWindow::showSettings()
 {
     if (!m_settingsDialog) {
         m_settingsDialog = new settings::SettingsDialog(
-            m_http.get(), m_tokens.get(), m_settings, this);
+            m_http.get(), m_tokens.get(), m_settings,
+            m_subtitleCache.get(), this);
         m_settingsDialog->setAttribute(Qt::WA_DeleteOnClose);
         connect(m_settingsDialog, &settings::SettingsDialog::tokenChanged,
             this, [this](const QString& token) {
@@ -1006,6 +1199,15 @@ void MainWindow::showSettings()
                 m_tokenCtrl->refreshTmdb();
                 statusBar()->showMessage(
                     i18nc("@info:status", "TMDB token updated."), 3000);
+            });
+        connect(m_settingsDialog,
+            &settings::SettingsDialog::subtitleCredentialsChanged,
+            this, [this] {
+                m_tokenCtrl->refreshOpenSubtitlesCredentials();
+                statusBar()->showMessage(
+                    i18nc("@info:status",
+                        "OpenSubtitles credentials updated."),
+                    3000);
             });
         connect(m_settingsDialog, &QObject::destroyed, this,
             [this] { m_settingsDialog = nullptr; });

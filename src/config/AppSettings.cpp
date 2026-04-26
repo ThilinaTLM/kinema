@@ -19,6 +19,8 @@ AppSettings::AppSettings(KSharedConfigPtr config, QObject* parent)
     , m_torrentio(config, this)
     , m_appearance(config, this)
     , m_realDebrid(config, this)
+    , m_subtitle(config, this)
+    , m_cache(config, this)
 {
     connectAggregateSignals();
 }

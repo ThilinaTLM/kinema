@@ -61,8 +61,12 @@ private Q_SLOTS:
         controller.loadAll();
         drainEvents();
 
-        QCOMPARE(f.tokens.readKeys,
-            QStringList { QString::fromLatin1(TokenStore::kTmdbKey) });
+        // RD must NOT be read when not configured. TMDB and the
+        // OpenSubtitles credentials triple are always read.
+        QVERIFY(!f.tokens.readKeys.contains(
+            QString::fromLatin1(TokenStore::kRealDebridKey)));
+        QVERIFY(f.tokens.readKeys.contains(
+            QString::fromLatin1(TokenStore::kTmdbKey)));
         QVERIFY(controller.realDebridToken().isEmpty());
         QCOMPARE(controller.tmdbToken(), QStringLiteral("tmdb-user"));
     }

@@ -1,0 +1,44 @@
+{
+  "total_pages": 1,
+  "total_count": 2,
+  "page": 1,
+  "data": [
+    {
+      "id": "1",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "1",
+        "language": "eng",
+        "download_count": 1234,
+        "ratings": 9.2,
+        "fps": 23,
+        "release": "The.Matrix.1999.1080p.BluRay.x264-FOO",
+        "hearing_impaired": false,
+        "foreign_parts_only": false,
+        "moviehash_match": true,
+        "uploader": { "name": "alice" },
+        "files": [
+          { "file_id": 555111, "file_name": "the.matrix.1999.1080p.eng.srt" }
+        ]
+      }
+    },
+    {
+      "id": "2",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "2",
+        "language": "spa",
+        "download_count": 800,
+        "ratings": 8.4,
+        "release": "The.Matrix.1999.1080p.BluRay.x264-BAR",
+        "hearing_impaired": true,
+        "foreign_parts_only": false,
+        "moviehash_match": false,
+        "uploader": { "name": "bob" },
+        "files": [
+          { "file_id": 555222, "file_name": "the.matrix.1999.1080p.spa.srt" }
+        ]
+      }
+    }
+  ]
+}

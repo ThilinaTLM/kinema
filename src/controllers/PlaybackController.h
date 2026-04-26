@@ -22,6 +22,10 @@ class CinemetaClient;
 class TorrentioClient;
 }
 
+namespace kinema::core {
+class HttpClient;
+}
+
 namespace kinema::config {
 class AppSettings;
 }
@@ -50,11 +54,21 @@ public:
         HistoryController& history,
         const config::AppSettings& settings,
         const QString& rdTokenRef,
+        core::HttpClient* http = nullptr,
         QObject* parent = nullptr);
 
     /// Wires / unwires the detached player window. Safe to call
     /// repeatedly with the same pointer or with null during teardown.
     void setPlayerWindow(ui::player::PlayerWindow* window);
+
+    /// The current player window, or nullptr when none is wired.
+    /// Used by `MainWindow` to forward subtitle attaches into the
+    /// chrome view-model.
+    ui::player::PlayerWindow* playerWindow() const noexcept { return m_window; }
+
+    /// The PlaybackKey of the actively loaded media. Falls back to
+    /// a default-constructed (invalid) key when nothing is playing.
+    const api::PlaybackKey& currentKey() const noexcept { return m_ctx.key; }
 
 public Q_SLOTS:
     /// Entry point for embedded playback. The controller remembers the
@@ -68,6 +82,15 @@ Q_SIGNALS:
     void playbackError(const QString& reason, const api::PlaybackContext& ctx);
     void endOfFile(const QString& reason, const api::PlaybackContext& ctx);
     void visibilityChanged(bool visible);
+
+    /// Best-effort moviehash for the active stream. Empty hex when
+    /// the hoster doesn't expose Content-Length or the Range probe
+    /// fails. Consumed by `SubtitleController::setMoviehash`.
+    void moviehashComputed(QString hex);
+    /// Fired from `setPlayerWindow(nullptr)` and on end-of-file when
+    /// the stream is no longer relevant. SubtitleController clears
+    /// its cached hash.
+    void streamCleared();
 
 private Q_SLOTS:
     void onFileLoaded();
@@ -99,9 +122,11 @@ private:
     HistoryController& m_history;
     const config::AppSettings& m_settings;
     const QString& m_rdToken;
+    core::HttpClient* m_http = nullptr;
     ui::player::PlayerWindow* m_window = nullptr;
 
     QCoro::Task<void> playNextEpisodeTask(api::PlaybackKey from);
+    QCoro::Task<void> kickoffMoviehashCompute(QUrl url, quint64 epoch);
 
     api::PlaybackContext m_ctx;
     api::PlaybackContext m_nextEpisodeCtx;
@@ -116,6 +141,7 @@ private:
     bool m_nextEpisodeTriggered = false;
     bool m_trackMemoryApplied = false;
     quint64 m_epoch = 0;
+    quint64 m_streamEpoch = 0;
 };
 
 } // namespace kinema::controllers

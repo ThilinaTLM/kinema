@@ -79,6 +79,13 @@ public:
     void remove(const api::PlaybackKey& key);
     void clear();
 
+    /// Update only the remembered subtitle language for `key`.
+    /// No-op when no row exists; emits `changed()` on success.
+    /// Used by the subtitle download flow so the next visit pre-ticks
+    /// the language filter on the picker.
+    void setRememberedSubtitleLang(const api::PlaybackKey& key,
+        const QString& lang);
+
 Q_SIGNALS:
     /// Fired once per event-loop tick regardless of how many
     /// record/remove calls happened. Drives UI refresh.

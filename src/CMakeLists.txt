@@ -9,21 +9,26 @@ set(kinema_core_SRCS
     config/AppearanceSettings.cpp
     config/AppSettings.cpp
     config/BrowseSettings.cpp
+    config/CacheSettings.cpp
     config/FilterSettings.cpp
     config/PlayerSettings.cpp
     config/RealDebridSettings.cpp
     config/SearchSettings.cpp
+    config/SubtitleSettings.cpp
     config/TorrentioSettings.cpp
 
     core/ShortcutSections.cpp
+    core/CachePaths.cpp
     core/Database.cpp
     core/DateFormat.cpp
     core/DateWindow.cpp
     core/HistoryStore.cpp
     core/HttpClient.cpp
     core/HttpErrorPresenter.cpp
+    core/Language.cpp
     core/Magnet.cpp
     core/MediaChips.cpp
+    core/Moviehash.cpp
     core/MpvChapterList.cpp
     core/MpvConfigPaths.cpp
     core/MpvTrackList.cpp
@@ -31,11 +36,14 @@ set(kinema_core_SRCS
     core/Player.cpp
     core/PlayerLauncher.cpp
     core/StreamFilter.cpp
+    core/SubtitleCacheStore.cpp
     core/TokenStore.cpp
     core/TorrentioConfig.cpp
 
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp
+    api/OpenSubtitlesClient.cpp
+    api/OpenSubtitlesParse.cpp
     api/PlaybackContext.cpp
     api/RealDebridClient.cpp
     api/RealDebridParse.cpp
@@ -77,6 +85,7 @@ set(kinema_core_SRCS
     ui/settings/PlayerSettingsPage.cpp
     ui/settings/RealDebridSettingsPage.cpp
     ui/settings/SettingsDialog.cpp
+    ui/settings/SubtitlesSettingsPage.cpp
     ui/settings/TmdbSettingsPage.cpp
 
     app/KinemaApplication.cpp
@@ -86,6 +95,7 @@ set(kinema_core_SRCS
     controllers/NavigationController.cpp
     controllers/SearchController.cpp
     controllers/SeriesDetailController.cpp
+    controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
 
@@ -108,6 +118,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
         ui/player/MpvVideoItem.cpp
         ui/player/PlayerViewModel.cpp
         ui/player/PlayerWindow.cpp
+        ui/player/SubtitleSearchModel.cpp
         ui/player/SubtitleTracksModel.cpp
     )
 endif()
@@ -213,6 +224,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
             ui/player/qml/pickers/AudioPicker.qml
             ui/player/qml/pickers/SpeedPicker.qml
             ui/player/qml/pickers/SubtitlePicker.qml
+            ui/player/qml/pickers/SubtitleSearchSheet.qml
             ui/player/qml/prompts/InfoOverlay.qml
             ui/player/qml/prompts/NextEpisodeBanner.qml
             ui/player/qml/prompts/ResumePrompt.qml

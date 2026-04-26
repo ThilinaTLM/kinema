@@ -25,11 +25,13 @@ class Database;
 class HistoryStore;
 class HttpClient;
 class PlayerLauncher;
+class SubtitleCacheStore;
 class TokenStore;
 }
 
 namespace kinema::api {
 class CinemetaClient;
+class OpenSubtitlesClient;
 class TmdbClient;
 class TorrentioClient;
 }
@@ -45,6 +47,7 @@ class NavigationController;
 class PlaybackController;
 class SearchController;
 class SeriesDetailController;
+class SubtitleController;
 class TokenController;
 class TrayController;
 }
@@ -177,9 +180,11 @@ private:
     std::unique_ptr<core::PlayerLauncher> m_player;
     std::unique_ptr<core::Database> m_db;
     std::unique_ptr<core::HistoryStore> m_history;
+    std::unique_ptr<core::SubtitleCacheStore> m_subtitleCache;
     api::CinemetaClient* m_cinemeta {};
     api::TorrentioClient* m_torrentio {};
     api::TmdbClient* m_tmdb {};
+    api::OpenSubtitlesClient* m_openSubtitles {};
     ImageLoader* m_imageLoader {};
 
     // UI
@@ -207,6 +212,7 @@ private:
     controllers::TokenController* m_tokenCtrl {};
     controllers::TrayController* m_tray {};
     controllers::HistoryController* m_historyCtrl {};
+    controllers::SubtitleController* m_subtitleCtrl {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::PlaybackController* m_playbackCtrl {};
 #endif

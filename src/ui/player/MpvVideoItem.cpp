@@ -306,6 +306,24 @@ void MpvVideoItem::setMediaTitle(const QString& title)
     setProperty(QStringLiteral("force-media-title"), title);
 }
 
+void MpvVideoItem::addSubtitleFile(const QString& path,
+    const QString& title, const QString& lang, bool select)
+{
+    if (path.isEmpty()) {
+        return;
+    }
+    QStringList args;
+    args << QStringLiteral("sub-add") << path
+         << (select ? QStringLiteral("select") : QStringLiteral("auto"));
+    if (!title.isEmpty() || !lang.isEmpty()) {
+        args << title;
+    }
+    if (!lang.isEmpty()) {
+        args << lang;
+    }
+    command(args);
+}
+
 QStringList MpvVideoItem::recentLogLines() const
 {
     QStringList out;

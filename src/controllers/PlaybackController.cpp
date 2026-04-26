@@ -9,11 +9,14 @@
 #include "api/TorrentioClient.h"
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
+#include "core/HttpClient.h"
 #include "core/HttpErrorPresenter.h"
+#include "core/Moviehash.h"
 #include "core/NextEpisode.h"
 #include "core/StreamFilter.h"
 #include "services/StreamActions.h"
 #include "ui/player/PlayerWindow.h"
+#include "kinema_debug.h"
 
 #include <KLocalizedString>
 
@@ -183,6 +186,7 @@ PlaybackController::PlaybackController(api::CinemetaClient& cinemeta,
     HistoryController& history,
     const config::AppSettings& settings,
     const QString& rdTokenRef,
+    core::HttpClient* http,
     QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
@@ -191,6 +195,7 @@ PlaybackController::PlaybackController(api::CinemetaClient& cinemeta,
     , m_history(history)
     , m_settings(settings)
     , m_rdToken(rdTokenRef)
+    , m_http(http)
 {
     m_nextEpisodeTimer = new QTimer(this);
     m_nextEpisodeTimer->setInterval(1000);
@@ -208,6 +213,8 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
     }
     m_window = window;
     if (!m_window) {
+        ++m_streamEpoch;
+        Q_EMIT streamCleared();
         m_phase = Phase::Idle;
         return;
     }
@@ -309,11 +316,96 @@ void PlaybackController::play(const QUrl& url,
         loadCtx.resumeSeconds.reset();
     }
 
+    // Bump stream epoch + kick off best-effort moviehash compute.
+    // Any failure is logged at debug level and silently dropped —
+    // never user-visible. SubtitleController clears its cached hash
+    // on streamCleared() and on a fresh hash arrival.
+    ++m_streamEpoch;
+    Q_EMIT streamCleared();
+    if (m_http) {
+        auto t = kickoffMoviehashCompute(url, m_streamEpoch);
+        Q_UNUSED(t);
+    }
+
     m_phase = Phase::Loading;
     Q_EMIT statusMessage(
         i18nc("@info:status", "Loading “%1”…", ctx.title),
         3000);
     m_window->play(url, loadCtx);
+}
+
+QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
+    quint64 epoch)
+{
+    if (!m_http) {
+        co_return;
+    }
+    constexpr qint64 kBlock = 65536;
+
+    qint64 size = 0;
+    try {
+        QNetworkRequest headReq(url);
+        const auto headers = co_await m_http->head(headReq);
+        for (const auto& h : headers) {
+            if (h.first.compare("Content-Length", Qt::CaseInsensitive) == 0) {
+                bool ok = false;
+                size = h.second.toLongLong(&ok);
+                if (!ok) {
+                    size = 0;
+                }
+                break;
+            }
+        }
+    } catch (const std::exception& e) {
+        qCDebug(KINEMA) << "moviehash: HEAD failed:" << e.what();
+        co_return;
+    }
+    if (epoch != m_streamEpoch) {
+        co_return;
+    }
+    if (size <= 2 * kBlock) {
+        qCDebug(KINEMA) << "moviehash: Content-Length too small or absent";
+        co_return;
+    }
+
+    QByteArray head, tail;
+    try {
+        QNetworkRequest headReq(url);
+        headReq.setRawHeader("Range",
+            QByteArrayLiteral("bytes=0-")
+                + QByteArray::number(kBlock - 1));
+        head = co_await m_http->get(headReq);
+    } catch (const std::exception& e) {
+        qCDebug(KINEMA) << "moviehash: head Range GET failed:" << e.what();
+        co_return;
+    }
+    if (epoch != m_streamEpoch || head.size() != kBlock) {
+        co_return;
+    }
+    try {
+        QNetworkRequest tailReq(url);
+        const auto start = size - kBlock;
+        tailReq.setRawHeader("Range",
+            QByteArrayLiteral("bytes=")
+                + QByteArray::number(start)
+                + "-"
+                + QByteArray::number(size - 1));
+        tail = co_await m_http->get(tailReq);
+    } catch (const std::exception& e) {
+        qCDebug(KINEMA) << "moviehash: tail Range GET failed:" << e.what();
+        co_return;
+    }
+    if (epoch != m_streamEpoch || tail.size() != kBlock) {
+        co_return;
+    }
+
+    const QString hex = core::moviehash::compute(head, tail, size);
+    if (hex.isEmpty() || epoch != m_streamEpoch) {
+        co_return;
+    }
+    qCDebug(KINEMA) << "moviehash: computed" << hex << "for"
+                    << url.toString(QUrl::RemoveQuery);
+    Q_EMIT moviehashComputed(hex);
 }
 
 void PlaybackController::onFileLoaded()

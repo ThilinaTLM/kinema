@@ -313,6 +313,42 @@ bool Database::applyMigration(int toVersion)
         }
         return true;
     }
+    case 3: {
+        const QStringList stmts = {
+            QStringLiteral(R"(CREATE TABLE IF NOT EXISTS subtitle_cache (
+                file_id            TEXT PRIMARY KEY,
+                imdb_id            TEXT NOT NULL,
+                season             INTEGER,
+                episode            INTEGER,
+                language           TEXT NOT NULL,
+                language_name      TEXT NOT NULL,
+                release_name       TEXT NOT NULL DEFAULT '',
+                file_name          TEXT NOT NULL DEFAULT '',
+                format             TEXT NOT NULL,
+                hearing_impaired   INTEGER NOT NULL DEFAULT 0,
+                foreign_parts_only INTEGER NOT NULL DEFAULT 0,
+                local_path         TEXT NOT NULL,
+                size_bytes         INTEGER NOT NULL,
+                added_at           TEXT NOT NULL,
+                last_used_at       TEXT NOT NULL
+            ))"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS subtitle_cache_by_key "
+                "ON subtitle_cache (imdb_id, season, episode, language)"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS subtitle_cache_by_lru "
+                "ON subtitle_cache (last_used_at)"),
+        };
+        for (const auto& s : stmts) {
+            if (!q.exec(s)) {
+                qCWarning(KINEMA)
+                    << "Database: migration v3 failed on" << s
+                    << "\u2014" << q.lastError().text();
+                return false;
+            }
+        }
+        return true;
+    }
     default:
         qCWarning(KINEMA)
             << "Database: no migration registered for version"

@@ -48,6 +48,20 @@ public:
     virtual QCoro::Task<QByteArray> get(QNetworkRequest request);
     virtual QCoro::Task<QJsonDocument> getJson(QNetworkRequest request);
 
+    /// POST a JSON body. The Content-Type header is set automatically
+    /// when the caller hasn't already supplied one.
+    virtual QCoro::Task<QByteArray> postJson(QNetworkRequest request,
+        const QByteArray& body);
+    virtual QCoro::Task<QJsonDocument> postJsonForJson(
+        QNetworkRequest request, const QByteArray& body);
+
+    /// HEAD on the given request. Returns the QNetworkReply's status
+    /// code via the throwing path (HttpError on non-2xx) and the
+    /// response headers map on success. Used by the moviehash compute
+    /// path for `Content-Length`.
+    virtual QCoro::Task<QList<QPair<QByteArray, QByteArray>>> head(
+        QNetworkRequest request);
+
     void setTimeout(std::chrono::milliseconds timeout);
     std::chrono::milliseconds timeout() const noexcept { return m_timeout; }
 

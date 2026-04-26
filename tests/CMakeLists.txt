@@ -46,6 +46,16 @@ ecm_add_test(tst_realdebrid_parse.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_opensubtitles_parse.cpp
+    TEST_NAME tst_opensubtitles_parse
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_subtitle_controller.cpp
+    TEST_NAME tst_subtitle_controller
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
 ecm_add_test(tst_player.cpp
     TEST_NAME tst_player
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -136,6 +146,26 @@ ecm_add_test(tst_history_store.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
+ecm_add_test(tst_subtitle_cache_store.cpp
+    TEST_NAME tst_subtitle_cache_store
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
+ecm_add_test(tst_cache_paths.cpp
+    TEST_NAME tst_cache_paths
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_language.cpp
+    TEST_NAME tst_language
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_moviehash.cpp
+    TEST_NAME tst_moviehash
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_next_episode.cpp
     TEST_NAME tst_next_episode
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -185,6 +215,8 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_token_controller tst_cinemeta_client tst_tmdb_client
          tst_torrentio_client tst_realdebrid_client
          tst_database tst_history_store
+         tst_subtitle_cache_store tst_cache_paths tst_language
+         tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
          tst_next_episode tst_mpv_config_paths tst_mpv_track_list_parse
          tst_media_chips)
     target_compile_definitions(${t} PRIVATE ${test_defs})

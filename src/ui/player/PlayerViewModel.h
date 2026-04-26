@@ -5,12 +5,15 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
+#include "api/Subtitle.h"
 #include "core/MpvChapterList.h"
 #include "core/MpvTrackList.h"
 
 #include <QAbstractListModel>
+#include <QList>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -22,6 +25,7 @@ namespace kinema::ui::player {
 class AudioTracksModel;
 class ChaptersModel;
 class MpvVideoItem;
+class SubtitleSearchModel;
 class SubtitleTracksModel;
 
 /**
@@ -108,6 +112,22 @@ class PlayerViewModel : public QObject
     Q_PROPERTY(QVariantMap streamInfo READ streamInfo
         NOTIFY streamInfoChanged)
 
+    // ---- Subtitle search & download ---------------------------------
+    // The picker sheet opens against `subtitleSearchActive`; hits
+    // come through `subtitleSearchModel`. Hard-gated by
+    // `subtitleDownloadEnabled`, which the controller flips after a
+    // successful login.
+    Q_PROPERTY(bool subtitleSearchActive READ subtitleSearchActive
+        NOTIFY subtitleSearchActiveChanged)
+    Q_PROPERTY(QAbstractListModel* subtitleSearchModel
+        READ subtitleSearchModel CONSTANT)
+    Q_PROPERTY(bool subtitleDownloadEnabled READ subtitleDownloadEnabled
+        NOTIFY subtitleDownloadEnabledChanged)
+    Q_PROPERTY(QString subtitleSearchError READ subtitleSearchError
+        NOTIFY subtitleSearchErrorChanged)
+    Q_PROPERTY(bool subtitleSearchSheetOpen READ subtitleSearchSheetOpen
+        NOTIFY subtitleSearchSheetOpenChanged)
+
 public:
     explicit PlayerViewModel(QObject* parent = nullptr);
     ~PlayerViewModel() override;
@@ -157,6 +177,18 @@ public:
     QVariantList shortcutSections() const { return m_shortcutSections; }
     QVariantMap streamInfo() const { return m_streamInfo; }
 
+    bool subtitleSearchActive() const noexcept { return m_subtitleSearchActive; }
+    QAbstractListModel* subtitleSearchModel() const;
+    bool subtitleDownloadEnabled() const noexcept
+    {
+        return m_subtitleDownloadEnabled;
+    }
+    QString subtitleSearchError() const { return m_subtitleSearchError; }
+    bool subtitleSearchSheetOpen() const noexcept
+    {
+        return m_subtitleSearchSheetOpen;
+    }
+
 public Q_SLOTS:
     // Slots driven by `PlayerWindow` (forwarding from controllers).
     void setMediaContext(const QString& title,
@@ -179,6 +211,30 @@ public Q_SLOTS:
 
     void toggleInfoOverlay();
     void setInfoOverlayVisible(bool on);
+
+    // Subtitle-search state mutators (driven by SubtitleController
+    // signals via MainWindow).
+    void setSubtitleSearchActive(bool on);
+    void setSubtitleDownloadEnabled(bool on);
+    void setSubtitleSearchError(const QString& msg);
+    /// Apply hits + flag sets to the search model.
+    void updateSubtitleSearchModel(const QList<api::SubtitleHit>& hits,
+        const QSet<QString>& cached,
+        const QSet<QString>& activePaths);
+    /// Open / close the picker sheet.
+    void openSubtitleSearchSheet();
+    void closeSubtitleSearchSheet();
+
+    // Subtitle-search action slots invoked from QML.
+    Q_INVOKABLE void requestSubtitleSearch(const QStringList& languages,
+        const QString& hearingImpaired,
+        const QString& foreignPartsOnly,
+        const QString& releaseFilter);
+    Q_INVOKABLE void requestSubtitleDownload(const QString& fileId);
+    Q_INVOKABLE void requestSubtitleSearchSheet();
+    Q_INVOKABLE void requestLocalSubtitleFile();
+    Q_INVOKABLE void attachExternalSubtitle(const QString& path,
+        const QString& title, const QString& lang, bool select);
 
     // Slots invoked by QML (button clicks, picker selections). Each
     // emits a matching signal `PlayerWindow` re-emits on its own
@@ -231,6 +287,21 @@ Q_SIGNALS:
     void closeRequested();
     void fullscreenToggleRequested();
 
+    // Subtitle-search action signals.
+    void subtitleSearchRequested(const QStringList& languages,
+        const QString& hearingImpaired,
+        const QString& foreignPartsOnly,
+        const QString& releaseFilter);
+    void subtitleDownloadRequested(const QString& fileId);
+    void subtitleSearchSheetRequested();
+    void localSubtitleFileRequested();
+
+    // Property notifications for the new properties.
+    void subtitleSearchActiveChanged();
+    void subtitleDownloadEnabledChanged();
+    void subtitleSearchErrorChanged();
+    void subtitleSearchSheetOpenChanged();
+
 private Q_SLOTS:
     void onTrackListChanged(const core::tracks::TrackList& tracks);
     void onChaptersChanged(const core::chapters::ChapterList& chapters);
@@ -243,6 +314,7 @@ private:
     AudioTracksModel* m_audioModel = nullptr;
     SubtitleTracksModel* m_subtitleModel = nullptr;
     ChaptersModel* m_chaptersModel = nullptr;
+    SubtitleSearchModel* m_subtitleSearchModel = nullptr;
 
     int m_currentAudioId = -1;
     int m_currentSubtitleId = -1;
@@ -269,6 +341,11 @@ private:
     bool m_infoOverlayVisible = false;
     QVariantList m_shortcutSections;
     QVariantMap m_streamInfo;
+
+    bool m_subtitleSearchActive = false;
+    bool m_subtitleDownloadEnabled = false;
+    bool m_subtitleSearchSheetOpen = false;
+    QString m_subtitleSearchError;
 };
 
 } // namespace kinema::ui::player

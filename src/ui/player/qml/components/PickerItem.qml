@@ -22,6 +22,9 @@ Item {
     property string label: ""
     property string trailing: ""
     property bool selected: false
+    // Mirrors the internal HoverHandler so callers can show their
+    // own tooltips / opacity tweaks without re-implementing hover.
+    readonly property bool hovered: hover.hovered
     signal clicked()
 
     implicitWidth: parent ? parent.width : 0

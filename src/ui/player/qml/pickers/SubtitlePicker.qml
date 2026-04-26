@@ -35,6 +35,16 @@ Popup {
         NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.fadeMs }
     }
 
+    // Emitted when the user picks the "Download subtitle…" footer
+    // entry. PlayerScene wires this up to open the search sheet.
+    signal downloadSubtitleRequested()
+    // Emitted when the user picks the "Open subtitle file…" entry.
+    signal openLocalFileRequested()
+
+    // Bound from PlayerScene; controls the disabled state on the
+    // "Download subtitle…" footer entry.
+    property bool downloadEnabled: false
+
     contentItem: PopupPanel {
         title: qsTr("Subtitles")
         onCloseRequested: root.close()
@@ -70,6 +80,38 @@ Popup {
                         root.picked(trackId);
                         root.close();
                     }
+                }
+            }
+
+            // ---- Footer: external subtitle entries -------------------
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: Qt.rgba(1, 1, 1, 0.08)
+                Layout.topMargin: 4
+                Layout.bottomMargin: 4
+            }
+
+            PickerItem {
+                Layout.fillWidth: true
+                label: qsTr("Download subtitle\u2026")
+                enabled: root.downloadEnabled
+                opacity: enabled ? 1.0 : 0.5
+                ToolTip.visible: hovered && !root.downloadEnabled
+                ToolTip.text: qsTr(
+                    "Configure OpenSubtitles in Settings to enable")
+                onClicked: {
+                    root.close();
+                    root.downloadSubtitleRequested();
+                }
+            }
+
+            PickerItem {
+                Layout.fillWidth: true
+                label: qsTr("Open subtitle file\u2026")
+                onClicked: {
+                    root.close();
+                    root.openLocalFileRequested();
                 }
             }
         }

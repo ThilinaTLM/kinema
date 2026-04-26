@@ -5,10 +5,12 @@
 
 #include "config/AppearanceSettings.h"
 #include "config/BrowseSettings.h"
+#include "config/CacheSettings.h"
 #include "config/FilterSettings.h"
 #include "config/PlayerSettings.h"
 #include "config/RealDebridSettings.h"
 #include "config/SearchSettings.h"
+#include "config/SubtitleSettings.h"
 #include "config/TorrentioSettings.h"
 #include "core/TorrentioConfig.h"
 
@@ -58,6 +60,12 @@ public:
     RealDebridSettings& realDebrid() noexcept { return m_realDebrid; }
     const RealDebridSettings& realDebrid() const noexcept { return m_realDebrid; }
 
+    SubtitleSettings& subtitle() noexcept { return m_subtitle; }
+    const SubtitleSettings& subtitle() const noexcept { return m_subtitle; }
+
+    CacheSettings& cache() noexcept { return m_cache; }
+    const CacheSettings& cache() const noexcept { return m_cache; }
+
     /// Build the Torrentio options from the current Torrentio + Filter
     /// state. The RD token is NOT filled — callers merge it in from
     /// TokenController.
@@ -79,6 +87,8 @@ private:
     TorrentioSettings m_torrentio;
     AppearanceSettings m_appearance;
     RealDebridSettings m_realDebrid;
+    SubtitleSettings m_subtitle;
+    CacheSettings m_cache;
 };
 
 } // namespace kinema::config

@@ -101,6 +101,14 @@ public:
     Q_INVOKABLE void setSubtitleTrack(int id);
     Q_INVOKABLE void setMediaTitle(const QString& title);
 
+    /// Sideload a subtitle file via mpv's `sub-add` command. `select`
+    /// true makes the new track active; `auto` lets mpv decide based
+    /// on its own slang/forced rules. `lang` is the ISO 639-2 code
+    /// ("eng"); `title` is the display label that shows up in
+    /// `track-list`.
+    Q_INVOKABLE void addSubtitleFile(const QString& path,
+        const QString& title, const QString& lang, bool select);
+
     // ---- Cached property accessors -----------------------------------
 
     bool isPaused() const noexcept { return m_paused; }

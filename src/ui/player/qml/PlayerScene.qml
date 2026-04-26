@@ -44,6 +44,7 @@ Item {
         || mpv.buffering
         || audioPicker.opened
         || subtitlePicker.opened
+        || subtitleSearchSheet.opened
         || speedPicker.opened
 
     // Whether the chrome bar is visible right now. Driven by the
@@ -278,7 +279,33 @@ Item {
         anchors.centerIn: parent
         model: playerVm.subtitleTracks
         currentId: playerVm.currentSubtitleId
+        downloadEnabled: playerVm.subtitleDownloadEnabled
         onPicked: id => playerVm.pickSubtitle(id)
+        onDownloadSubtitleRequested: {
+            playerVm.requestSubtitleSearchSheet();
+        }
+        onOpenLocalFileRequested: {
+            playerVm.requestLocalSubtitleFile();
+        }
+    }
+
+    SubtitleSearchSheet {
+        id: subtitleSearchSheet
+        anchors.centerIn: parent
+        // Open / close is driven by the C++ side flipping
+        // `subtitleSearchSheetOpen` (e.g. when the picker footer
+        // fires "Download subtitle…").
+        Connections {
+            target: playerVm
+            function onSubtitleSearchSheetOpenChanged() {
+                if (playerVm.subtitleSearchSheetOpen) {
+                    subtitleSearchSheet.open();
+                } else {
+                    subtitleSearchSheet.close();
+                }
+            }
+        }
+        onClosed: playerVm.closeSubtitleSearchSheet()
     }
 
     SpeedPicker {

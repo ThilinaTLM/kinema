@@ -1,0 +1,25 @@
+{
+  "total_pages": 1,
+  "total_count": 1,
+  "page": 1,
+  "data": [
+    {
+      "id": "10",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "10",
+        "language": "eng",
+        "download_count": 567,
+        "ratings": 9.0,
+        "release": "Game.of.Thrones.S01E02.The.Kingsroad.1080p",
+        "hearing_impaired": false,
+        "foreign_parts_only": false,
+        "moviehash_match": false,
+        "uploader": { "name": "carol" },
+        "files": [
+          { "file_id": 777333, "file_name": "got.s01e02.eng.srt" }
+        ]
+      }
+    }
+  ]
+}

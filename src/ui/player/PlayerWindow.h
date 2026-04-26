@@ -86,6 +86,11 @@ public:
 
     bool hasEverLoaded() const noexcept { return m_hasEverLoaded; }
 
+    /// Access the chrome view-model so wiring in `MainWindow` can
+    /// hook subtitle-search signals through it without poking at
+    /// private state. Lifetime is tied to this window.
+    PlayerViewModel* viewModel() const noexcept { return m_viewModel; }
+
     /// Track-list snapshot (used by `HistoryController` to remember
     /// the user's selected audio / subtitle language). Empty when
     /// no file has loaded yet.

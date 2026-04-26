@@ -361,6 +361,28 @@ void HistoryStore::remove(const api::PlaybackKey& key)
     }
 }
 
+void HistoryStore::setRememberedSubtitleLang(const api::PlaybackKey& key,
+    const QString& lang)
+{
+    if (!m_db.isOpen() || !key.isValid()) {
+        return;
+    }
+    auto q = m_db.query();
+    q.prepare(QStringLiteral(
+        "UPDATE history SET sub_lang = ? WHERE key = ?"));
+    q.addBindValue(nullSafe(lang));
+    q.addBindValue(key.storageKey());
+    if (!q.exec()) {
+        qCWarning(KINEMA)
+            << "HistoryStore: setRememberedSubtitleLang failed:"
+            << q.lastError().text();
+        return;
+    }
+    if (q.numRowsAffected() > 0) {
+        scheduleChanged();
+    }
+}
+
 void HistoryStore::clear()
 {
     if (!m_db.isOpen()) {

@@ -33,7 +33,11 @@ void TokenController::loadAll()
         auto t = loadRdTask();
         Q_UNUSED(t);
     }
-    auto t = loadTmdbTask();
+    {
+        auto t = loadTmdbTask();
+        Q_UNUSED(t);
+    }
+    auto t = loadOpenSubtitlesTask();
     Q_UNUSED(t);
 }
 
@@ -46,6 +50,12 @@ void TokenController::refreshRealDebrid()
 void TokenController::refreshTmdb()
 {
     auto t = loadTmdbTask();
+    Q_UNUSED(t);
+}
+
+void TokenController::refreshOpenSubtitlesCredentials()
+{
+    auto t = loadOpenSubtitlesTask();
     Q_UNUSED(t);
 }
 
@@ -90,6 +100,42 @@ QCoro::Task<void> TokenController::loadTmdbTask()
     if (next != m_tmdbToken) {
         m_tmdbToken = std::move(next);
         Q_EMIT tmdbTokenChanged(m_tmdbToken);
+    }
+}
+
+QCoro::Task<void> TokenController::loadOpenSubtitlesTask()
+{
+    QString apiKey, username, password;
+    try {
+        apiKey = co_await m_tokens->read(
+            QString::fromLatin1(core::TokenStore::kOpenSubtitlesApiKey));
+    } catch (const std::exception& e) {
+        qCWarning(KINEMA) << "OpenSubtitles api-key read failed:" << e.what();
+    }
+    try {
+        username = co_await m_tokens->read(
+            QString::fromLatin1(core::TokenStore::kOpenSubtitlesUsername));
+    } catch (const std::exception& e) {
+        qCWarning(KINEMA) << "OpenSubtitles username read failed:" << e.what();
+    }
+    try {
+        password = co_await m_tokens->read(
+            QString::fromLatin1(core::TokenStore::kOpenSubtitlesPassword));
+    } catch (const std::exception& e) {
+        qCWarning(KINEMA) << "OpenSubtitles password read failed:" << e.what();
+    }
+
+    if (apiKey != m_osApiKey) {
+        m_osApiKey = std::move(apiKey);
+        Q_EMIT openSubtitlesApiKeyChanged(m_osApiKey);
+    }
+    if (username != m_osUsername) {
+        m_osUsername = std::move(username);
+        Q_EMIT openSubtitlesUsernameChanged(m_osUsername);
+    }
+    if (password != m_osPassword) {
+        m_osPassword = std::move(password);
+        Q_EMIT openSubtitlesPasswordChanged(m_osPassword);
     }
 }
 

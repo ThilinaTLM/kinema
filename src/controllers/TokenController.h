@@ -49,6 +49,9 @@ public:
 
     const QString& realDebridToken() const noexcept { return m_rdToken; }
     const QString& tmdbToken() const noexcept { return m_tmdbToken; }
+    const QString& openSubtitlesApiKey() const noexcept { return m_osApiKey; }
+    const QString& openSubtitlesUsername() const noexcept { return m_osUsername; }
+    const QString& openSubtitlesPassword() const noexcept { return m_osPassword; }
 
 public Q_SLOTS:
     /// Kick off both keyring reads. Fire-and-forget.
@@ -62,6 +65,10 @@ public Q_SLOTS:
     /// default). Called after Save / Remove from the TMDB settings page.
     void refreshTmdb();
 
+    /// Re-read the OpenSubtitles credentials triple from the keyring.
+    /// Called after Save / Remove on the Subtitles settings page.
+    void refreshOpenSubtitlesCredentials();
+
 Q_SIGNALS:
     /// Fires whenever the effective RD token changes. Empty string =
     /// token removed or never set.
@@ -71,9 +78,14 @@ Q_SIGNALS:
     /// = no user override and no compile-time default.
     void tmdbTokenChanged(const QString&);
 
+    void openSubtitlesApiKeyChanged(const QString&);
+    void openSubtitlesUsernameChanged(const QString&);
+    void openSubtitlesPasswordChanged(const QString&);
+
 private:
     QCoro::Task<void> loadRdTask();
     QCoro::Task<void> loadTmdbTask();
+    QCoro::Task<void> loadOpenSubtitlesTask();
 
     core::TokenStore* m_tokens;
     api::TmdbClient* m_tmdb;
@@ -82,6 +94,9 @@ private:
     QString m_rdToken;
     QString m_tmdbToken;
     QString m_tmdbCompiledDefaultToken;
+    QString m_osApiKey;
+    QString m_osUsername;
+    QString m_osPassword;
 };
 
 } // namespace kinema::controllers

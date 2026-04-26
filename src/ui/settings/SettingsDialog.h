@@ -7,6 +7,7 @@
 
 namespace kinema::core {
 class HttpClient;
+class SubtitleCacheStore;
 class TokenStore;
 }
 
@@ -20,6 +21,7 @@ class GeneralSettingsPage;
 class FiltersSettingsPage;
 class PlayerSettingsPage;
 class RealDebridSettingsPage;
+class SubtitlesSettingsPage;
 class TmdbSettingsPage;
 
 /**
@@ -45,6 +47,7 @@ public:
     SettingsDialog(core::HttpClient* http,
         core::TokenStore* tokens,
         config::AppSettings& settings,
+        core::SubtitleCacheStore* subtitleCache,
         QWidget* parent = nullptr);
 
 Q_SIGNALS:
@@ -54,6 +57,10 @@ Q_SIGNALS:
     /// removed their override — the effective token falls back to the
     /// compile-time default (if any).
     void tmdbTokenChanged(const QString& token);
+    /// Forwarded from SubtitlesSettingsPage. Fired on Save / Remove
+    /// of the OpenSubtitles credentials triple — MainWindow drives
+    /// `TokenController::refreshOpenSubtitlesCredentials()` on it.
+    void subtitleCredentialsChanged();
 
 private:
     void applyAll();
@@ -64,6 +71,7 @@ private:
     PlayerSettingsPage* m_playerPage {};
     RealDebridSettingsPage* m_rdPage {};
     TmdbSettingsPage* m_tmdbPage {};
+    SubtitlesSettingsPage* m_subsPage {};
 };
 
 } // namespace kinema::ui::settings
