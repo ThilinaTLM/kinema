@@ -9,6 +9,7 @@
 #include "ui/widgets/LanguagePickerButton.h"
 #include "ui/widgets/SubtitleResultsModel.h"
 
+#include <KCollapsibleGroupBox>
 #include <KLocalizedString>
 
 #include <QButtonGroup>
@@ -89,16 +90,42 @@ void SubtitlesDialog::buildUi()
     root->setContentsMargins(16, 12, 16, 12);
     root->setSpacing(10);
 
-    // ---- Filter form -----------------------------------------------------
-    auto* form = new QFormLayout;
-    form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    form->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+    // ---- Filter chrome ---------------------------------------------------
+    // Layout: one always-visible row with the most-used filters,
+    // plus a KCollapsibleGroupBox for the niche per-search overrides.
+    // The release-name filter is the dialog's primary input so it
+    // stretches; the language picker and action buttons sit beside
+    // it as compact tool buttons.
+    auto* filterRow = new QHBoxLayout;
+    filterRow->setContentsMargins(0, 0, 0, 0);
+    filterRow->setSpacing(8);
+
+    m_releaseEdit = new QLineEdit(this);
+    m_releaseEdit->setPlaceholderText(i18nc("@info:placeholder",
+        "Filter releases — e.g. 1080p, BluRay, REMUX"));
+    m_releaseEdit->setClearButtonEnabled(true);
+    filterRow->addWidget(m_releaseEdit, 1);
 
     m_languagePicker = new LanguagePickerButton(this);
-    form->addRow(i18nc("@label", "Languages:"), m_languagePicker);
+    filterRow->addWidget(m_languagePicker);
 
-    auto modeRow = [&](QButtonGroup* group) {
-        auto* host = new QWidget(this);
+    m_resetButton = new QPushButton(
+        i18nc("@action:button reset subtitle filters", "Reset"), this);
+    m_searchButton = new QPushButton(
+        QIcon::fromTheme(QStringLiteral("edit-find")),
+        i18nc("@action:button", "Search"), this);
+    filterRow->addWidget(m_resetButton);
+    filterRow->addWidget(m_searchButton);
+
+    root->addLayout(filterRow);
+
+    // ---- Advanced filters (collapsible) ---------------------------------
+    // Hearing-impaired and foreign-parts-only are niche per-search
+    // overrides; defaults already live in SubtitleSettings. Hide
+    // them behind a disclosure so the dialog isn't dominated by
+    // controls most users never touch.
+    auto modeRow = [&](QButtonGroup* group, QWidget* parent) {
+        auto* host = new QWidget(parent);
         auto* row = new QHBoxLayout(host);
         row->setContentsMargins(0, 0, 0, 0);
         row->setSpacing(8);
@@ -115,39 +142,25 @@ void SubtitlesDialog::buildUi()
         return host;
     };
 
+    m_advancedBox = new KCollapsibleGroupBox(this);
+    m_advancedBox->setTitle(i18nc("@title:group subtitle dialog "
+                                  "secondary filters",
+        "Advanced filters"));
+
+    auto* adv = new QFormLayout;
+    adv->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    adv->setContentsMargins(0, 4, 0, 0);
+
     m_hiGroup = new QButtonGroup(this);
-    form->addRow(i18nc("@label radio group", "Hearing impaired:"),
-        modeRow(m_hiGroup));
+    adv->addRow(i18nc("@label radio group", "Hearing impaired:"),
+        modeRow(m_hiGroup, m_advancedBox));
 
     m_fpoGroup = new QButtonGroup(this);
-    form->addRow(i18nc("@label radio group", "Foreign parts only:"),
-        modeRow(m_fpoGroup));
+    adv->addRow(i18nc("@label radio group", "Foreign parts only:"),
+        modeRow(m_fpoGroup, m_advancedBox));
 
-    m_releaseEdit = new QLineEdit(this);
-    m_releaseEdit->setPlaceholderText(i18nc("@info:placeholder",
-        "e.g. 1080p, BluRay, REMUX"));
-    m_releaseEdit->setClearButtonEnabled(true);
-    form->addRow(i18nc("@label", "Release filter:"), m_releaseEdit);
-
-    {
-        auto* host = new QWidget(this);
-        auto* row = new QHBoxLayout(host);
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(8);
-        row->addStretch(1);
-        m_resetButton = new QPushButton(
-            i18nc("@action:button reset subtitle filters", "Reset"), host);
-        m_searchButton = new QPushButton(
-            QIcon::fromTheme(QStringLiteral("edit-find")),
-            i18nc("@action:button", "Search"), host);
-        row->addWidget(m_resetButton);
-        row->addWidget(m_searchButton);
-        // Empty label keeps the buttons in the field column, aligned
-        // with the rest of the form.
-        form->addRow(QString {}, host);
-    }
-
-    root->addLayout(form);
+    m_advancedBox->setLayout(adv);
+    root->addWidget(m_advancedBox);
 
     // ---- Results stack ----------------------------------------------------
     m_resultsStack = new QStackedWidget(this);
@@ -231,6 +244,7 @@ void SubtitlesDialog::buildUi()
         setHi(m_settings.hearingImpaired());
         setFpo(m_settings.foreignPartsOnly());
         m_releaseEdit->clear();
+        syncAdvancedExpansion();
     });
     connect(m_openFileButton, &QPushButton::clicked, this,
         &SubtitlesDialog::onLocalFile);
@@ -269,6 +283,7 @@ void SubtitlesDialog::setMedia(const api::PlaybackContext& ctx)
     setHi(m_settings.hearingImpaired());
     setFpo(m_settings.foreignPartsOnly());
     m_releaseEdit->clear();
+    syncAdvancedExpansion();
     refreshGate();
     refreshStatusLine();
     updatePrimaryAction();
@@ -460,6 +475,9 @@ void SubtitlesDialog::refreshGate()
     if (m_fpoGroup) {
         for (auto* b : m_fpoGroup->buttons()) b->setEnabled(enabled);
     }
+    if (m_advancedBox) {
+        m_advancedBox->setEnabled(enabled);
+    }
 
     // Add / remove the "Open settings…" button on the button box
     // depending on whether the controller is configured. Lazy: we
@@ -573,6 +591,18 @@ QString SubtitlesDialog::currentFpo() const
     auto* checked = m_fpoGroup ? m_fpoGroup->checkedButton() : nullptr;
     return checked ? checked->property("modeValue").toString()
                    : QStringLiteral("off");
+}
+
+void SubtitlesDialog::syncAdvancedExpansion()
+{
+    if (!m_advancedBox) {
+        return;
+    }
+    const bool nonDefault = currentHi() != QStringLiteral("off")
+        || currentFpo() != QStringLiteral("off");
+    if (nonDefault && !m_advancedBox->isExpanded()) {
+        m_advancedBox->setExpanded(true);
+    }
 }
 
 void SubtitlesDialog::setHi(const QString& mode)

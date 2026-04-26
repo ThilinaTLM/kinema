@@ -7,6 +7,7 @@
 
 #include <QDialog>
 
+class KCollapsibleGroupBox;
 class QButtonGroup;
 class QDialogButtonBox;
 class QLabel;
@@ -110,6 +111,11 @@ private:
     void refreshStatusLine();
     void updatePrimaryAction();
 
+    /// Open the advanced-filters collapsible if the current HI/FPO
+    /// state is non-default, so users with a saved non-`off` preset
+    /// see those controls without hunting. Never auto-collapses.
+    void syncAdvancedExpansion();
+
     QString currentHi() const;
     QString currentFpo() const;
     void setHi(const QString& mode);
@@ -132,6 +138,7 @@ private:
     QLineEdit* m_releaseEdit {};
     QPushButton* m_searchButton {};
     QPushButton* m_resetButton {};
+    KCollapsibleGroupBox* m_advancedBox {};
 
     QStackedWidget* m_resultsStack {};
     ui::StateWidget* m_state {};

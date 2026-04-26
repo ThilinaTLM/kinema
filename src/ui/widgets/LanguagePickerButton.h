@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QToolButton>
 
+class QAction;
 class QMenu;
 
 namespace kinema::ui::widgets {
@@ -48,6 +49,7 @@ private:
 
     QStringList m_codes;
     QMenu* m_menu {};
+    QAction* m_clearAction {};
 };
 
 } // namespace kinema::ui::widgets

@@ -91,6 +91,18 @@ void LanguagePickerButton::rebuildMenu()
             setLanguages(next);
         });
     }
+
+    // Disable the language filter entirely. Empty selection is
+    // already a valid "no filter" state in the controller; this
+    // entry just makes it reachable in one click instead of
+    // unchecking every entry by hand.
+    m_menu->addSeparator();
+    m_clearAction = m_menu->addAction(
+        i18nc("@action language picker, drop selection",
+            "Clear (any language)"));
+    connect(m_clearAction, &QAction::triggered, this, [this] {
+        setLanguages({});
+    });
 }
 
 void LanguagePickerButton::refreshButton()
@@ -109,6 +121,10 @@ void LanguagePickerButton::refreshButton()
     } else {
         setText(i18ncp("@action:button language picker, count summary",
             "%1 language", "%1 languages", n));
+    }
+
+    if (m_clearAction) {
+        m_clearAction->setEnabled(n > 0);
     }
 
     // Tooltip always shows the full localised list.
