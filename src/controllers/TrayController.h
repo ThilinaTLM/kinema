@@ -8,7 +8,7 @@
 
 class KStatusNotifierItem;
 class QAction;
-class QWidget;
+class QWindow;
 
 namespace kinema::ui::player {
 class PlayerWindow;
@@ -36,7 +36,10 @@ class TrayController : public QObject
 public:
     /// `mainWindow` is used only to query visibility state for the
     /// Show/Hide menu label. TrayController does NOT take ownership.
-    TrayController(QWidget* mainWindow, QObject* parent = nullptr);
+    /// Accepts the QML application window's `QQuickWindow` (a
+    /// `QWindow`) as the canonical handle since phase 02; the
+    /// previous QWidget overload is gone with `MainWindow`.
+    TrayController(QWindow* mainWindow, QObject* parent = nullptr);
 
     bool available() const noexcept { return m_available; }
 
@@ -72,7 +75,7 @@ private:
     void applyTrayIcon();
     QIcon renderSymbolicIcon() const;
 
-    QWidget* m_mainWindow;
+    QWindow* m_mainWindow;
     bool m_available = false;
 
     KStatusNotifierItem* m_tray {};

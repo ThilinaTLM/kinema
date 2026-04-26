@@ -75,7 +75,6 @@ set(kinema_core_SRCS
     ui/StateWidget.cpp
     ui/UpcomingBadge.cpp
     ui/DetailPane.cpp
-    ui/MainWindow.cpp
 
     ui/widgets/LanguagePickerButton.cpp
     ui/widgets/MetaHeaderWidget.cpp
@@ -210,6 +209,7 @@ qt_add_qml_module(kinema_qml_app
     QML_FILES
         ui/qml/ApplicationShell.qml
         ui/qml/Theme.qml
+        ui/qml/components/KAboutPage.qml
         ui/qml/components/KEmptyState.qml
         ui/qml/components/KErrorState.qml
         ui/qml/components/KSpinner.qml

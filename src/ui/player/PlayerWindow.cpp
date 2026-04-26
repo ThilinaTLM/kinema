@@ -84,24 +84,22 @@ QStringList chipsFromJson(const QByteArray& json)
 } // namespace
 
 PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
-    config::PlayerSettings& player, QWidget* parent)
+    config::PlayerSettings& player, QWindow* transientFor)
     : QQuickView(/*parent=*/nullptr)
     , m_appearanceSettings(appearance)
     , m_playerSettings(player)
-    , m_widgetParent(parent)
+    , m_windowParent(transientFor)
 {
-    // QQuickView is a top-level QWindow; the QWidget owner is wired
-    // as a transient parent so the window manager places this above
-    // the main window when relevant. The QObject parent stays null
-    // (we manage the lifetime via MainWindow's qobject ownership of
-    // a sibling pointer).
-    if (parent) {
-        if (auto* parentWin = parent->windowHandle()) {
-            setTransientParent(parentWin);
-        }
-        // Match MainWindow's existing ownership model: the player
-        // window dies with its widget owner.
-        QObject::setParent(parent);
+    // The application's main QML window is a `QQuickWindow` (a
+    // `QWindow`), so we can wire it directly as the transient
+    // parent — no `windowHandle()` indirection like the old
+    // QWidget-owned MainWindow needed. The QObject parent is
+    // owned by `MainController` (passed via
+    // `PlaybackController::setPlayerWindow`); we deliberately do
+    // not also set it as a QObject child of the QML window since
+    // its destruction order is engine-driven.
+    if (transientFor) {
+        setTransientParent(transientFor);
     }
 
     // Standard window chrome.
@@ -453,8 +451,8 @@ void PlayerWindow::loadGeometry()
 
     resize(1280, 720);
     QScreen* s = nullptr;
-    if (m_widgetParent) {
-        s = m_widgetParent->screen();
+    if (m_windowParent) {
+        s = m_windowParent->screen();
     }
     if (!s) {
         s = QGuiApplication::primaryScreen();

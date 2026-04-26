@@ -24,11 +24,11 @@
 #include <QPixmap>
 #include <QSvgRenderer>
 #include <QSystemTrayIcon>
-#include <QWidget>
+#include <QWindow>
 
 namespace kinema::controllers {
 
-TrayController::TrayController(QWidget* mainWindow, QObject* parent)
+TrayController::TrayController(QWindow* mainWindow, QObject* parent)
     : QObject(parent)
     , m_mainWindow(mainWindow)
 {
@@ -187,8 +187,10 @@ void TrayController::refreshMenu()
         return;
     }
     if (m_toggleAction && m_mainWindow) {
+        // QWindow::windowState() returns a single Qt::WindowState
+        // (no isMinimized() helper): compare the bit directly.
         const bool shown = m_mainWindow->isVisible()
-            && !m_mainWindow->isMinimized();
+            && (m_mainWindow->windowState() != Qt::WindowMinimized);
         if (shown) {
             m_toggleAction->setText(
                 i18nc("@action:inmenu tray", "Hide Kinema"));

@@ -15,7 +15,7 @@
 #include <QUrl>
 #include <QtQuick/QQuickView>
 
-class QWidget;
+class QWindow;
 
 namespace kinema::config {
 class AppearanceSettings;
@@ -46,14 +46,16 @@ class PlayerWindow : public QQuickView
 {
     Q_OBJECT
 public:
-    /// `parent` is the `QWidget` that owns the lifetime; we grab
-    /// its `windowHandle()` and use it as the transient parent so
-    /// the window manager places the player relative to the main
-    /// window. `QQuickView` only accepts a `QWindow*` parent, so a
-    /// QWidget owner is wired via `setTransientParent` instead.
+    /// `transientFor` is the application's main `QWindow` (the
+    /// QML `Kirigami.ApplicationWindow`). It is wired as the
+    /// `transientParent` so the window manager places the player
+    /// relative to the main window and follows focus rules. The
+    /// player is NOT owned by it as a QObject parent: it lives
+    /// for the lifetime of `MainController` like every other
+    /// long-running service.
     explicit PlayerWindow(config::AppearanceSettings& appearance,
         config::PlayerSettings& player,
-        QWidget* parent = nullptr);
+        QWindow* transientFor = nullptr);
     ~PlayerWindow() override;
 
     PlayerWindow(const PlayerWindow&) = delete;
@@ -152,7 +154,7 @@ private:
 
     PlayerViewModel* m_viewModel = nullptr;
     QPointer<MpvVideoItem> m_video;
-    QWidget* m_widgetParent = nullptr;
+    QPointer<QWindow> m_windowParent;
 
     // Public-API stability check: zero-overhead empty fallback
     // returned from `trackList()` / `recentLogLines()` when no

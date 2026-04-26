@@ -191,6 +191,11 @@ ecm_add_test(tst_media_chips.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_main_controller_close_logic.cpp
+    TEST_NAME tst_main_controller_close_logic
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 if(KINEMA_ENABLE_MPV_EMBED)
     ecm_add_test(tst_player_view_model.cpp
         TEST_NAME tst_player_view_model
@@ -223,7 +228,7 @@ foreach(t tst_magnet tst_torrentio_config tst_cinemeta_parse
          tst_subtitle_cache_store tst_cache_paths tst_language
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
          tst_next_episode tst_mpv_config_paths tst_mpv_track_list_parse
-         tst_media_chips)
+         tst_media_chips tst_main_controller_close_logic)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 

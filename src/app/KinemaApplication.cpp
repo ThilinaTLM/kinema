@@ -62,11 +62,11 @@ void KinemaApplication::configure()
 
     KAboutData::setApplicationData(about);
 
-    // When a system tray is available, MainWindow hides to tray on
-    // close (see MainWindow::closeEvent) and we want the app to keep
-    // running even if every window is hidden. When no tray host is
-    // available, the current behaviour — quit when the last window
-    // closes — remains correct.
+    // When a system tray is available, the QML application window
+    // hides to tray on close (see
+    // `MainController::handleWindowCloseRequested`) and we want the
+    // app to keep running even if every window is hidden. When no
+    // tray host is available, quit when the last window closes.
     setQuitOnLastWindowClosed(
         !QSystemTrayIcon::isSystemTrayAvailable());
 }
