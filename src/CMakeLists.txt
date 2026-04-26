@@ -77,10 +77,9 @@ set(kinema_core_SRCS
     ui/DetailPane.cpp
     ui/MainWindow.cpp
 
-    ui/widgets/LanguageChipBar.cpp
+    ui/widgets/LanguagePickerButton.cpp
     ui/widgets/MetaHeaderWidget.cpp
     ui/widgets/StreamsPanel.cpp
-    ui/widgets/SubtitleResultDelegate.cpp
     ui/widgets/SubtitleResultsModel.cpp
     ui/widgets/SubtitlesDialog.cpp
 

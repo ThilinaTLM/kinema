@@ -53,6 +53,7 @@ private Q_SLOTS:
     void activeFlagFlipsFromSet();
     void displayRoleFallsBackToFileName();
     void roleNamesContainKnownKeys();
+    void multiColumnLayout();
 };
 
 void TestSubtitleResultsModel::emptyByDefault()
@@ -60,6 +61,7 @@ void TestSubtitleResultsModel::emptyByDefault()
     SubtitleResultsModel m;
     QCOMPARE(m.rowCount(), 0);
     QCOMPARE(m.count(), 0);
+    QCOMPARE(m.columnCount(), int(SubtitleResultsModel::ColumnCount));
     QCOMPARE(m.data(m.index(0)), QVariant {});
 }
 
@@ -140,6 +142,69 @@ void TestSubtitleResultsModel::roleNamesContainKnownKeys()
     QVERIFY(names.contains(SubtitleResultsModel::ActiveRole));
     QCOMPARE(names.value(SubtitleResultsModel::FileIdRole),
         QByteArray("fileId"));
+}
+
+void TestSubtitleResultsModel::multiColumnLayout()
+{
+    SubtitleResultsModel m;
+    m.setHits(sampleHits());
+
+    QCOMPARE(m.columnCount(), int(SubtitleResultsModel::ColumnCount));
+
+    // Release column shows the release name (or filename fallback).
+    QCOMPARE(m.data(m.index(0, SubtitleResultsModel::ReleaseColumn),
+                 Qt::DisplayRole)
+                 .toString(),
+        QStringLiteral("Inception.2010.1080p.BluRay.x264-SPARKS"));
+
+    // Lang column shows the upper-cased ISO 639-2 code.
+    QCOMPARE(m.data(m.index(0, SubtitleResultsModel::LangColumn),
+                 Qt::DisplayRole)
+                 .toString(),
+        QStringLiteral("ENG"));
+
+    // Format column shows the file format.
+    QCOMPARE(m.data(m.index(0, SubtitleResultsModel::FormatColumn),
+                 Qt::DisplayRole)
+                 .toString(),
+        QStringLiteral("srt"));
+
+    // Downloads column EditRole returns the raw int for proxy sort.
+    QCOMPARE(m.data(m.index(0, SubtitleResultsModel::DownloadsColumn),
+                 Qt::EditRole)
+                 .toInt(),
+        24531);
+    // …and DisplayRole returns a localized, plural-correct string.
+    QVERIFY(!m.data(m.index(0, SubtitleResultsModel::DownloadsColumn),
+                  Qt::DisplayRole)
+                  .toString()
+                  .isEmpty());
+
+    // Rating column shows star + decimal (or empty when zero).
+    QCOMPARE(m.data(m.index(0, SubtitleResultsModel::RatingColumn),
+                 Qt::EditRole)
+                 .toDouble(),
+        8.4);
+    QVERIFY(m.data(m.index(0, SubtitleResultsModel::RatingColumn),
+                 Qt::DisplayRole)
+                 .toString()
+                 .contains(QStringLiteral("8.4")));
+
+    // Custom roles only resolve on column 0.
+    QCOMPARE(m.data(m.index(0, SubtitleResultsModel::ReleaseColumn),
+                 SubtitleResultsModel::FileIdRole)
+                 .toString(),
+        QStringLiteral("100"));
+    QCOMPARE(m.data(m.index(0, SubtitleResultsModel::LangColumn),
+                 SubtitleResultsModel::FileIdRole),
+        QVariant {});
+
+    // Header text is provided for every column.
+    for (int c = 0; c < SubtitleResultsModel::ColumnCount; ++c) {
+        QVERIFY(!m.headerData(c, Qt::Horizontal, Qt::DisplayRole)
+                     .toString()
+                     .isEmpty());
+    }
 }
 
 QTEST_MAIN(TestSubtitleResultsModel)

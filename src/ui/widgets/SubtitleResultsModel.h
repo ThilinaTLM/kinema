@@ -13,19 +13,32 @@
 namespace kinema::ui::widgets {
 
 /**
- * Single-column QAbstractListModel exposing the current
+ * Multi-column QAbstractListModel exposing the current
  * `controllers::SubtitleController` hits to `SubtitlesDialog`.
  *
- * The model is column-less by design — `SubtitleResultDelegate` paints
- * each row as a card using the role data, and `SubtitlesDialog` drives
- * the QTreeView in single-column mode. The cached / active flags are
- * stored as side sets here (rather than baked into `SubtitleHit`) so
- * the controller's hits list stays a pure mirror of the API response.
+ * Six columns drive a plain `QTreeView` with native row rendering
+ * (no custom delegate): Release | Lang | Format | Downloads | Rating
+ * | Flags. All custom `Roles` (FileIdRole, CachedRole, …) resolve
+ * on column 0 only — selection lookup uses
+ * `current.siblingAtColumn(0).data(FileIdRole)`. The cached / active
+ * sets live alongside the hits list rather than being baked into
+ * `SubtitleHit` so the controller's hits remain a pure mirror of
+ * the API response.
  */
 class SubtitleResultsModel : public QAbstractListModel
 {
     Q_OBJECT
 public:
+    enum Column {
+        ReleaseColumn = 0,
+        LangColumn,
+        FormatColumn,
+        DownloadsColumn,
+        RatingColumn,
+        FlagsColumn,
+        ColumnCount,
+    };
+
     enum Roles {
         FileIdRole = Qt::UserRole + 1,
         ReleaseRole,
@@ -48,7 +61,10 @@ public:
     explicit SubtitleResultsModel(QObject* parent = nullptr);
 
     int rowCount(const QModelIndex& parent = {}) const override;
+    int columnCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index,
+        int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation,
         int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
 

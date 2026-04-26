@@ -8,9 +8,11 @@
 #include <QDialog>
 
 class QButtonGroup;
+class QDialogButtonBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QSortFilterProxyModel;
 class QStackedWidget;
 class QTreeView;
 
@@ -28,12 +30,11 @@ class StateWidget;
 
 namespace kinema::ui::widgets {
 
-class LanguageChipBar;
-class SubtitleResultDelegate;
+class LanguagePickerButton;
 class SubtitleResultsModel;
 
 /**
- * Qt Widgets dialog for searching and downloading OpenSubtitles
+ * Native Breeze dialog for searching and downloading OpenSubtitles
  * results. Reused across both windows: opened from
  * `StreamsPanel`'s "Subtitles…" action (pre-play) and from the
  * player's `SubtitlePicker → Download…` entry (mid-play).
@@ -43,6 +44,11 @@ class SubtitleResultsModel;
  * never owns the controller; it consumes its signals while open and
  * disconnects on close to avoid double-paints when the controller
  * keeps fielding events for another media item.
+ *
+ * UI shape: window title carries the media; body is a `QFormLayout`
+ * for filters, a multi-column `QTreeView` for results (no custom
+ * delegate), and a `QDialogButtonBox` footer with a selection-driven
+ * primary action (`Download` / `Use` / `Re-attach`).
  */
 class SubtitlesDialog : public QDialog
 {
@@ -52,7 +58,7 @@ public:
         config::SubtitleSettings& settings,
         QWidget* parent = nullptr);
 
-    /// Set the media this dialog targets. Updates the title strip
+    /// Set the media this dialog targets. Updates the window title
     /// and stashes the playback key for download requests. Safe to
     /// call repeatedly; clears the previous result list.
     void setMedia(const api::PlaybackContext& ctx);
@@ -97,17 +103,22 @@ private:
     void unwireController();
 
     void runSearch();
-    void onRowActivated(const QModelIndex& index);
-    void onViewClicked(const QModelIndex& index);
+    void runPrimaryAction();
     void onLocalFile();
     void refreshState();
     void refreshGate();
     void refreshStatusLine();
+    void updatePrimaryAction();
 
     QString currentHi() const;
     QString currentFpo() const;
     void setHi(const QString& mode);
     void setFpo(const QString& mode);
+
+    /// Map the view's `currentIndex()` to the source model's
+    /// column-0 index (where custom roles resolve). Returns an
+    /// invalid index when nothing is selected.
+    QModelIndex currentSourceIndex() const;
 
     controllers::SubtitleController* m_controller;
     config::SubtitleSettings& m_settings;
@@ -115,23 +126,24 @@ private:
     api::PlaybackContext m_context;
     bool m_attachOnDownload = false;
 
-    QLabel* m_titleLabel {};
-    LanguageChipBar* m_chipBar {};
+    LanguagePickerButton* m_languagePicker {};
     QButtonGroup* m_hiGroup {};
     QButtonGroup* m_fpoGroup {};
     QLineEdit* m_releaseEdit {};
     QPushButton* m_searchButton {};
     QPushButton* m_resetButton {};
-    QPushButton* m_openFileButton {};
-    QPushButton* m_closeButton {};
 
     QStackedWidget* m_resultsStack {};
     ui::StateWidget* m_state {};
     QTreeView* m_view {};
     SubtitleResultsModel* m_model {};
-    SubtitleResultDelegate* m_delegate {};
+    QSortFilterProxyModel* m_proxy {};
 
     QLabel* m_statusLabel {};
+    QDialogButtonBox* m_buttonBox {};
+    QPushButton* m_primaryButton {};
+    QPushButton* m_openFileButton {};
+    QPushButton* m_settingsButton {};
 };
 
 } // namespace kinema::ui::widgets

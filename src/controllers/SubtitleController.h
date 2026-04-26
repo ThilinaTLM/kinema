@@ -50,9 +50,10 @@ namespace kinema::controllers {
  *     `moviehash_match` rows.
  *
  * `downloadEnabled()` is the gate: true iff the OpenSubtitles client
- * has credentials AND a JWT (i.e. a successful login has happened
- * this session). The settings page's "Test connection" button is
- * what flips the JWT bit.
+ * has all three credentials (api key + username + password). The
+ * actual login is lazy — `OpenSubtitlesClient::ensureLoggedIn()`
+ * runs on the first `search()` / `requestDownload()` and surfaces a
+ * normal error if the password is wrong.
  */
 class SubtitleController : public QObject
 {

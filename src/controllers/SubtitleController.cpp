@@ -76,8 +76,12 @@ SubtitleController::SubtitleController(api::OpenSubtitlesClient* client,
 
 bool SubtitleController::downloadEnabled() const
 {
-    return m_client && m_client->hasCredentials()
-        && m_client->isAuthenticated();
+    // Gate on credentials only — login is lazy inside
+    // OpenSubtitlesClient::search() / requestDownload(). Requiring a
+    // cached JWT here would create a chicken-and-egg: the entry would
+    // stay disabled until the first successful call, which the user
+    // can't make because it's disabled.
+    return m_client && m_client->hasCredentials();
 }
 
 void SubtitleController::setSearching(bool s)

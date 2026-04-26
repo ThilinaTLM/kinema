@@ -6,25 +6,25 @@
 #include "config/SubtitleSettings.h"
 #include "controllers/SubtitleController.h"
 #include "ui/StateWidget.h"
-#include "ui/widgets/LanguageChipBar.h"
-#include "ui/widgets/SubtitleResultDelegate.h"
+#include "ui/widgets/LanguagePickerButton.h"
 #include "ui/widgets/SubtitleResultsModel.h"
 
 #include <KLocalizedString>
 
 #include <QButtonGroup>
-#include <QCursor>
 #include <QDialogButtonBox>
 #include <QFileDialog>
-#include <QFileInfo>
-#include <QFrame>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPalette>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QSortFilterProxyModel>
 #include <QStackedWidget>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -89,115 +89,100 @@ void SubtitlesDialog::buildUi()
     root->setContentsMargins(16, 12, 16, 12);
     root->setSpacing(10);
 
-    // ---- Title strip ------------------------------------------------------
-    auto* header = new QLabel(this);
-    header->setText(i18nc("@info dialog header label", "Subtitles for"));
-    auto headerFont = header->font();
-    headerFont.setPointSizeF(headerFont.pointSizeF() * 0.95);
-    auto headerColour = palette().color(QPalette::Disabled, QPalette::WindowText);
-    {
-        QPalette p = header->palette();
-        p.setColor(QPalette::WindowText, headerColour);
-        header->setPalette(p);
-    }
-    root->addWidget(header);
+    // ---- Filter form -----------------------------------------------------
+    auto* form = new QFormLayout;
+    form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    form->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
 
-    m_titleLabel = new QLabel(this);
-    auto titleFont = m_titleLabel->font();
-    titleFont.setPointSizeF(titleFont.pointSizeF() + 3.0);
-    titleFont.setBold(true);
-    m_titleLabel->setFont(titleFont);
-    m_titleLabel->setWordWrap(true);
-    root->addWidget(m_titleLabel);
+    m_languagePicker = new LanguagePickerButton(this);
+    form->addRow(i18nc("@label", "Languages:"), m_languagePicker);
 
-    // ---- Filter card ------------------------------------------------------
-    auto* filterFrame = new QFrame(this);
-    filterFrame->setObjectName(QStringLiteral("FilterCard"));
-    filterFrame->setFrameShape(QFrame::StyledPanel);
-    filterFrame->setStyleSheet(QStringLiteral(
-        "QFrame#FilterCard { border-radius: 8px;"
-        " background: palette(alternate-base); padding: 12px; }"));
-    auto* filterLayout = new QVBoxLayout(filterFrame);
-    filterLayout->setContentsMargins(12, 10, 12, 10);
-    filterLayout->setSpacing(8);
-
-    {
-        auto* row = new QHBoxLayout;
-        row->addWidget(new QLabel(i18nc("@label", "Languages:"), filterFrame));
-        m_chipBar = new LanguageChipBar(filterFrame);
-        row->addWidget(m_chipBar, 1);
-        filterLayout->addLayout(row);
-    }
-
-    auto modeRow = [&](const QString& label, QButtonGroup* group) {
-        auto* row = new QHBoxLayout;
-        row->addWidget(new QLabel(label, filterFrame));
-        row->addSpacing(8);
+    auto modeRow = [&](QButtonGroup* group) {
+        auto* host = new QWidget(this);
+        auto* row = new QHBoxLayout(host);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(8);
         row->addWidget(makeModeRadio(i18nc("@option:radio subtitle filter mode",
                                         "Off"),
-            QStringLiteral("off"), group, 0, filterFrame));
+            QStringLiteral("off"), group, 0, host));
         row->addWidget(makeModeRadio(i18nc("@option:radio subtitle filter mode",
                                         "Include"),
-            QStringLiteral("include"), group, 1, filterFrame));
+            QStringLiteral("include"), group, 1, host));
         row->addWidget(makeModeRadio(i18nc("@option:radio subtitle filter mode",
                                         "Only"),
-            QStringLiteral("only"), group, 2, filterFrame));
+            QStringLiteral("only"), group, 2, host));
         row->addStretch(1);
-        filterLayout->addLayout(row);
+        return host;
     };
 
     m_hiGroup = new QButtonGroup(this);
-    modeRow(i18nc("@label radio group", "Hearing impaired:"), m_hiGroup);
+    form->addRow(i18nc("@label radio group", "Hearing impaired:"),
+        modeRow(m_hiGroup));
 
     m_fpoGroup = new QButtonGroup(this);
-    modeRow(i18nc("@label radio group", "Foreign parts only:"), m_fpoGroup);
+    form->addRow(i18nc("@label radio group", "Foreign parts only:"),
+        modeRow(m_fpoGroup));
+
+    m_releaseEdit = new QLineEdit(this);
+    m_releaseEdit->setPlaceholderText(i18nc("@info:placeholder",
+        "e.g. 1080p, BluRay, REMUX"));
+    m_releaseEdit->setClearButtonEnabled(true);
+    form->addRow(i18nc("@label", "Release filter:"), m_releaseEdit);
 
     {
-        auto* row = new QHBoxLayout;
-        row->addWidget(new QLabel(i18nc("@label", "Release filter:"),
-            filterFrame));
-        m_releaseEdit = new QLineEdit(filterFrame);
-        m_releaseEdit->setPlaceholderText(i18nc("@info:placeholder",
-            "e.g. 1080p, BluRay, REMUX"));
-        row->addWidget(m_releaseEdit, 1);
-        filterLayout->addLayout(row);
-    }
-
-    {
-        auto* row = new QHBoxLayout;
+        auto* host = new QWidget(this);
+        auto* row = new QHBoxLayout(host);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(8);
         row->addStretch(1);
         m_resetButton = new QPushButton(
-            i18nc("@action:button reset subtitle filters", "Reset"),
-            filterFrame);
+            i18nc("@action:button reset subtitle filters", "Reset"), host);
         m_searchButton = new QPushButton(
             QIcon::fromTheme(QStringLiteral("edit-find")),
-            i18nc("@action:button", "Search"), filterFrame);
-        m_searchButton->setDefault(true);
+            i18nc("@action:button", "Search"), host);
         row->addWidget(m_resetButton);
         row->addWidget(m_searchButton);
-        filterLayout->addLayout(row);
+        // Empty label keeps the buttons in the field column, aligned
+        // with the rest of the form.
+        form->addRow(QString {}, host);
     }
 
-    root->addWidget(filterFrame);
+    root->addLayout(form);
 
     // ---- Results stack ----------------------------------------------------
     m_resultsStack = new QStackedWidget(this);
     m_state = new ui::StateWidget(m_resultsStack);
     m_model = new SubtitleResultsModel(this);
-    m_delegate = new SubtitleResultDelegate(this);
+    m_proxy = new QSortFilterProxyModel(this);
+    m_proxy->setSourceModel(m_model);
+    m_proxy->setSortRole(Qt::EditRole);
+    m_proxy->setDynamicSortFilter(false);
 
     m_view = new QTreeView(m_resultsStack);
-    m_view->setModel(m_model);
-    m_view->setItemDelegate(m_delegate);
-    m_view->setHeaderHidden(true);
+    m_view->setModel(m_proxy);
     m_view->setRootIsDecorated(false);
     m_view->setAllColumnsShowFocus(true);
     m_view->setUniformRowHeights(true);
-    m_view->setMouseTracking(true);
+    m_view->setAlternatingRowColors(true);
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_view->setSelectionMode(QAbstractItemView::SingleSelection);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_view->header()->setSectionResizeMode(QHeaderView::Stretch);
+    m_view->setSortingEnabled(true);
+    m_view->sortByColumn(SubtitleResultsModel::DownloadsColumn,
+        Qt::DescendingOrder);
+    auto* header = m_view->header();
+    header->setSectionResizeMode(SubtitleResultsModel::ReleaseColumn,
+        QHeaderView::Stretch);
+    header->setSectionResizeMode(SubtitleResultsModel::LangColumn,
+        QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(SubtitleResultsModel::FormatColumn,
+        QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(SubtitleResultsModel::DownloadsColumn,
+        QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(SubtitleResultsModel::RatingColumn,
+        QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(SubtitleResultsModel::FlagsColumn,
+        QHeaderView::ResizeToContents);
 
     m_resultsStack->addWidget(m_state);
     m_resultsStack->addWidget(m_view);
@@ -205,7 +190,6 @@ void SubtitlesDialog::buildUi()
     root->addWidget(m_resultsStack, 1);
 
     // ---- Footer -----------------------------------------------------------
-    auto* footer = new QHBoxLayout;
     m_statusLabel = new QLabel(this);
     {
         QPalette p = m_statusLabel->palette();
@@ -213,15 +197,28 @@ void SubtitlesDialog::buildUi()
             palette().color(QPalette::Disabled, QPalette::WindowText));
         m_statusLabel->setPalette(p);
     }
-    footer->addWidget(m_statusLabel, 1);
 
-    m_openFileButton = new QPushButton(
-        QIcon::fromTheme(QStringLiteral("document-open")),
-        i18nc("@action:button", "Open file…"), this);
-    m_closeButton = new QPushButton(
-        i18nc("@action:button", "Close"), this);
-    footer->addWidget(m_openFileButton);
-    footer->addWidget(m_closeButton);
+    m_buttonBox = new QDialogButtonBox(this);
+    m_openFileButton = m_buttonBox->addButton(
+        i18nc("@action:button", "Open file…"),
+        QDialogButtonBox::ActionRole);
+    m_openFileButton->setIcon(
+        QIcon::fromTheme(QStringLiteral("document-open")));
+
+    m_primaryButton = m_buttonBox->addButton(
+        i18nc("@action:button subtitle row primary action default label",
+            "Download"),
+        QDialogButtonBox::AcceptRole);
+    m_primaryButton->setIcon(
+        QIcon::fromTheme(QStringLiteral("download")));
+    m_primaryButton->setDefault(true);
+    m_primaryButton->setEnabled(false);
+
+    m_buttonBox->addButton(QDialogButtonBox::Close);
+
+    auto* footer = new QHBoxLayout;
+    footer->addWidget(m_statusLabel, 1);
+    footer->addWidget(m_buttonBox);
     root->addLayout(footer);
 
     // ---- Wires ------------------------------------------------------------
@@ -230,19 +227,29 @@ void SubtitlesDialog::buildUi()
     connect(m_releaseEdit, &QLineEdit::returnPressed, this,
         &SubtitlesDialog::runSearch);
     connect(m_resetButton, &QPushButton::clicked, this, [this] {
-        m_chipBar->setLanguages(m_settings.preferredLanguages());
+        m_languagePicker->setLanguages(m_settings.preferredLanguages());
         setHi(m_settings.hearingImpaired());
         setFpo(m_settings.foreignPartsOnly());
         m_releaseEdit->clear();
     });
     connect(m_openFileButton, &QPushButton::clicked, this,
         &SubtitlesDialog::onLocalFile);
-    connect(m_closeButton, &QPushButton::clicked, this, &QDialog::accept);
+
+    // QDialogButtonBox accept = primary action. We override the
+    // standard QDialog::accept() flow so the dialog stays open
+    // after a download — the user typically wants to inspect status
+    // or pick a different language.
+    connect(m_buttonBox, &QDialogButtonBox::accepted, this,
+        &SubtitlesDialog::runPrimaryAction);
+    connect(m_buttonBox, &QDialogButtonBox::rejected, this,
+        &QDialog::reject);
 
     connect(m_view, &QAbstractItemView::activated, this,
-        &SubtitlesDialog::onRowActivated);
-    connect(m_view, &QAbstractItemView::clicked, this,
-        &SubtitlesDialog::onViewClicked);
+        [this](const QModelIndex&) {
+            if (m_primaryButton && m_primaryButton->isEnabled()) {
+                m_primaryButton->animateClick();
+            }
+        });
 
     connect(m_state, &ui::StateWidget::retryRequested,
         this, &SubtitlesDialog::runSearch);
@@ -251,18 +258,20 @@ void SubtitlesDialog::buildUi()
 void SubtitlesDialog::setMedia(const api::PlaybackContext& ctx)
 {
     m_context = ctx;
-    m_titleLabel->setText(formatTitle(ctx));
+    setWindowTitle(i18nc("@title:window subtitles dialog with media name",
+        "Subtitles — %1", formatTitle(ctx)));
     // Reset result set so the previous media doesn't show up briefly
     // when the dialog is reopened.
     m_model->setHits({});
     m_state->showIdle(QString {});
     m_resultsStack->setCurrentWidget(m_state);
-    m_chipBar->setLanguages(m_settings.preferredLanguages());
+    m_languagePicker->setLanguages(m_settings.preferredLanguages());
     setHi(m_settings.hearingImpaired());
     setFpo(m_settings.foreignPartsOnly());
     m_releaseEdit->clear();
     refreshGate();
     refreshStatusLine();
+    updatePrimaryAction();
 }
 
 void SubtitlesDialog::setAttachOnDownload(bool on)
@@ -277,6 +286,7 @@ void SubtitlesDialog::showEvent(QShowEvent* event)
     refreshGate();
     refreshState();
     refreshStatusLine();
+    updatePrimaryAction();
     // Auto-search the moment we open against a configured account.
     if (m_controller && m_controller->downloadEnabled()
         && m_context.key.isValid() && m_model->count() == 0) {
@@ -309,16 +319,21 @@ void SubtitlesDialog::wireController()
         this, &SubtitlesDialog::refreshGate, Qt::UniqueConnection);
     connect(m_controller, &controllers::SubtitleController::quotaChanged,
         this, &SubtitlesDialog::refreshStatusLine, Qt::UniqueConnection);
+    // Note: Qt::UniqueConnection is incompatible with lambda slots; rely on
+    // unwireController()'s blanket disconnect() to keep these from stacking.
     connect(m_controller, &controllers::SubtitleController::downloadFinished,
         this, [this](const QString& fileId, const QString& localPath,
                   const QString& language, const QString& languageName) {
             Q_EMIT downloadCompleted(m_context.key, fileId, localPath,
                 language, languageName);
             refreshStatusLine();
-        }, Qt::UniqueConnection);
+            updatePrimaryAction();
+        });
     connect(m_controller, &controllers::SubtitleController::downloadFailed,
-        this, [this](const QString&, const QString&) { refreshStatusLine(); },
-        Qt::UniqueConnection);
+        this, [this](const QString&, const QString&) {
+            refreshStatusLine();
+            updatePrimaryAction();
+        });
 }
 
 void SubtitlesDialog::unwireController()
@@ -334,36 +349,24 @@ void SubtitlesDialog::runSearch()
     if (!m_controller || !m_context.key.isValid()) {
         return;
     }
-    m_controller->runQuery(m_context.key, m_chipBar->languages(),
+    m_controller->runQuery(m_context.key, m_languagePicker->languages(),
         currentHi(), currentFpo(), m_releaseEdit->text().trimmed());
 }
 
-void SubtitlesDialog::onRowActivated(const QModelIndex& index)
+void SubtitlesDialog::runPrimaryAction()
 {
-    if (!index.isValid() || !m_controller) {
+    if (!m_controller) {
         return;
     }
-    const auto fileId = index.data(SubtitleResultsModel::FileIdRole).toString();
-    if (!fileId.isEmpty()) {
-        m_controller->download(fileId, m_context.key);
-    }
-}
-
-void SubtitlesDialog::onViewClicked(const QModelIndex& index)
-{
-    if (!index.isValid()) {
+    const auto src = currentSourceIndex();
+    if (!src.isValid()) {
         return;
     }
-    const QRect rect = m_view->visualRect(index);
-    QStyleOptionViewItem opt;
-    opt.rect = rect;
-    opt.font = m_view->font();
-    opt.widget = m_view;
-    const QRect actionRect = m_delegate->actionRectFor(opt, index);
-    const QPoint cursor = m_view->viewport()->mapFromGlobal(QCursor::pos());
-    if (actionRect.contains(cursor)) {
-        onRowActivated(index);
+    const auto fileId = src.data(SubtitleResultsModel::FileIdRole).toString();
+    if (fileId.isEmpty()) {
+        return;
     }
+    m_controller->download(fileId, m_context.key);
 }
 
 void SubtitlesDialog::onLocalFile()
@@ -384,6 +387,7 @@ void SubtitlesDialog::refreshState()
     if (!m_controller) {
         m_state->showIdle(i18nc("@info", "Subtitle controller unavailable."));
         m_resultsStack->setCurrentWidget(m_state);
+        updatePrimaryAction();
         return;
     }
 
@@ -394,6 +398,7 @@ void SubtitlesDialog::refreshState()
                 "Add an API key and credentials in Settings to search "
                 "and download subtitles."));
         m_resultsStack->setCurrentWidget(m_state);
+        updatePrimaryAction();
         return;
     }
 
@@ -401,6 +406,7 @@ void SubtitlesDialog::refreshState()
         m_state->showLoading(
             i18nc("@info:status", "Searching OpenSubtitles…"));
         m_resultsStack->setCurrentWidget(m_state);
+        updatePrimaryAction();
         return;
     }
 
@@ -408,28 +414,16 @@ void SubtitlesDialog::refreshState()
     if (!err.isEmpty()) {
         m_state->showError(err, /*retryable=*/true);
         m_resultsStack->setCurrentWidget(m_state);
+        updatePrimaryAction();
         return;
     }
 
     m_model->setHits(m_controller->hits());
-    // Translate active local-paths to active fileIds for the model
-    // by matching against the cache view of the controller.
-    QSet<QString> activeFileIds;
-    const auto cached = m_controller->cachedFileIds();
-    const auto activePaths = m_controller->activeLocalPaths();
-    if (!activePaths.isEmpty()) {
-        for (const auto& hit : m_controller->hits()) {
-            // We don't have a direct fileId→localPath in the
-            // controller's public API; the row's "active" badge is
-            // driven by `cached + activePaths` overlap which the
-            // model already approximates via cachedFileIds. Keep
-            // empty here; the player path bumps activeFileIds via
-            // `setActiveFileIds` directly when needed (future work).
-            Q_UNUSED(hit);
-        }
-    }
-    m_model->setCachedFileIds(cached);
-    m_model->setActiveFileIds(activeFileIds);
+    m_model->setCachedFileIds(m_controller->cachedFileIds());
+    // The controller's `activeLocalPaths()` is keyed by local path;
+    // the model wants fileIds. The player path bumps activeFileIds
+    // via `setActiveFileIds` directly when needed (future work).
+    m_model->setActiveFileIds({});
 
     if (m_controller->hits().isEmpty()) {
         m_state->showIdle(
@@ -439,8 +433,17 @@ void SubtitlesDialog::refreshState()
         m_resultsStack->setCurrentWidget(m_state);
     } else {
         m_resultsStack->setCurrentWidget(m_view);
+        // Re-attach selection handler each time the model resets so
+        // the primary button reflects the new selection model.
+        if (auto* sm = m_view->selectionModel()) {
+            connect(sm, &QItemSelectionModel::currentChanged, this,
+                [this](const QModelIndex&, const QModelIndex&) {
+                    updatePrimaryAction();
+                }, Qt::UniqueConnection);
+        }
     }
     refreshStatusLine();
+    updatePrimaryAction();
 }
 
 void SubtitlesDialog::refreshGate()
@@ -449,13 +452,31 @@ void SubtitlesDialog::refreshGate()
         && m_context.key.isValid();
     m_searchButton->setEnabled(enabled);
     m_resetButton->setEnabled(enabled);
-    m_chipBar->setEnabled(enabled);
+    m_languagePicker->setEnabled(enabled);
     m_releaseEdit->setEnabled(enabled);
     if (m_hiGroup) {
         for (auto* b : m_hiGroup->buttons()) b->setEnabled(enabled);
     }
     if (m_fpoGroup) {
         for (auto* b : m_fpoGroup->buttons()) b->setEnabled(enabled);
+    }
+
+    // Add / remove the "Open settings…" button on the button box
+    // depending on whether the controller is configured. Lazy: we
+    // only ever construct it once, then toggle visibility.
+    const bool needsSettings = m_controller && !m_controller->downloadEnabled();
+    if (needsSettings && !m_settingsButton) {
+        m_settingsButton = m_buttonBox->addButton(
+            i18nc("@action:button open settings dialog from subtitles",
+                "Open settings…"),
+            QDialogButtonBox::HelpRole);
+        m_settingsButton->setIcon(
+            QIcon::fromTheme(QStringLiteral("configure")));
+        connect(m_settingsButton, &QPushButton::clicked, this,
+            [this] { Q_EMIT settingsRequested(); });
+    }
+    if (m_settingsButton) {
+        m_settingsButton->setVisible(needsSettings);
     }
 }
 
@@ -479,6 +500,65 @@ void SubtitlesDialog::refreshStatusLine()
             "Daily quota: %1 remaining", remaining);
     }
     m_statusLabel->setText(parts.join(QStringLiteral("  ·  ")));
+}
+
+void SubtitlesDialog::updatePrimaryAction()
+{
+    if (!m_primaryButton) {
+        return;
+    }
+    const auto src = currentSourceIndex();
+    const bool gate = m_controller && m_controller->downloadEnabled()
+        && m_context.key.isValid();
+    if (!src.isValid() || !gate) {
+        m_primaryButton->setText(
+            i18nc("@action:button subtitle row primary action default label",
+                "Download"));
+        m_primaryButton->setIcon(
+            QIcon::fromTheme(QStringLiteral("download")));
+        m_primaryButton->setEnabled(false);
+        return;
+    }
+
+    const bool active = src.data(SubtitleResultsModel::ActiveRole).toBool();
+    const bool cached = src.data(SubtitleResultsModel::CachedRole).toBool();
+    if (active) {
+        m_primaryButton->setText(
+            i18nc("@action:button subtitle row action when already loaded "
+                  "in the player",
+                "Re-attach"));
+        m_primaryButton->setIcon(
+            QIcon::fromTheme(QStringLiteral("view-refresh")));
+    } else if (cached) {
+        m_primaryButton->setText(
+            i18nc("@action:button subtitle row action for cached entry",
+                "Use"));
+        m_primaryButton->setIcon(
+            QIcon::fromTheme(QStringLiteral("dialog-ok-apply")));
+    } else {
+        m_primaryButton->setText(
+            i18nc("@action:button subtitle row action for fresh download",
+                "Download"));
+        m_primaryButton->setIcon(
+            QIcon::fromTheme(QStringLiteral("download")));
+    }
+    m_primaryButton->setEnabled(true);
+}
+
+QModelIndex SubtitlesDialog::currentSourceIndex() const
+{
+    if (!m_view || !m_proxy) {
+        return {};
+    }
+    const auto current = m_view->currentIndex();
+    if (!current.isValid()) {
+        return {};
+    }
+    const auto src = m_proxy->mapToSource(current);
+    if (!src.isValid()) {
+        return {};
+    }
+    return m_model->index(src.row(), SubtitleResultsModel::ReleaseColumn);
 }
 
 QString SubtitlesDialog::currentHi() const
