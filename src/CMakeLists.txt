@@ -104,6 +104,9 @@ set(kinema_core_SRCS
 
     services/StreamActions.cpp
 
+    ui/qml-bridge/KinemaImageProvider.cpp
+    ui/qml-bridge/MainController.cpp
+
     tray_resources.qrc
 )
 
@@ -156,6 +159,9 @@ target_link_libraries(kinema_core
         Qt6::Gui
         Qt6::Widgets
         Qt6::Network
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
         Qt6::Sql
         Qt6::Svg
         KF6::CoreAddons
@@ -163,6 +169,7 @@ target_link_libraries(kinema_core
         KF6::KIOCore
         KF6::KIOGui
         KF6::ConfigWidgets
+        KF6::Kirigami
         KF6::Notifications
         KF6::StatusNotifierItem
         KF6::WidgetsAddons
@@ -172,15 +179,54 @@ target_link_libraries(kinema_core
         Qt6Keychain::Qt6Keychain
 )
 
+# ---- App-side QML module (always built) ----------------------------------
+# Carried by a dedicated static library so it can coexist with the
+# player module on `kinema_core`: `qt_add_qml_module` permits only
+# one module per target. C++ types this module needs (the engine-
+# side `KinemaImageProvider` and the `mainController` context-
+# property `MainController`) live in `kinema_core` and are exposed
+# via context properties — so this module is QML-only and depends
+# on `kinema_core` for the engine-side wiring done from `main.cpp`.
+#
+# `Theme.qml` is a QML singleton — the property must be set on the
+# source before `qt_add_qml_module()` so the generated qmldir picks
+# it up.
+add_library(kinema_qml_app STATIC)
+set_target_properties(kinema_qml_app PROPERTIES
+    AUTOMOC ON
+    POSITION_INDEPENDENT_CODE ON
+)
+# Suppress QTP0004 ("need qmldir for each subdirectory with QML
+# files") — we keep components/ and pages/ as plain folders inside
+# one module URI on purpose; opting NEW makes Qt generate the extra
+# qmldir files automatically.
+qt_policy(SET QTP0004 NEW)
+set_source_files_properties(ui/qml/Theme.qml
+    PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
+qt_add_qml_module(kinema_qml_app
+    URI dev.tlmtech.kinema.app
+    VERSION 1.0
+    QML_FILES
+        ui/qml/ApplicationShell.qml
+        ui/qml/Theme.qml
+        ui/qml/components/KEmptyState.qml
+        ui/qml/components/KErrorState.qml
+        ui/qml/components/KSpinner.qml
+        ui/qml/pages/BrowsePagePlaceholder.qml
+        ui/qml/pages/DiscoverPagePlaceholder.qml
+        ui/qml/pages/SearchPagePlaceholder.qml
+    OUTPUT_DIRECTORY
+        "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/app"
+    NO_PLUGIN
+)
+target_link_libraries(kinema_qml_app PUBLIC kinema_core)
+
 if(KINEMA_ENABLE_MPV_EMBED)
     target_compile_definitions(kinema_core PUBLIC KINEMA_HAVE_LIBMPV)
     target_link_libraries(kinema_core
         PUBLIC
             Qt6::OpenGL
-            Qt6::Qml
-            Qt6::Quick
-            Qt6::QuickControls2
-            KF6::Kirigami
             PkgConfig::MPV
             MpvQt::MpvQt
     )
@@ -272,17 +318,16 @@ set_target_properties(kinema PROPERTIES
     AUTOMOC ON
 )
 
-target_link_libraries(kinema PRIVATE kinema_core)
+target_link_libraries(kinema PRIVATE kinema_core kinema_qml_app)
 
 # kinema_core is a STATIC library; the linker discards the QML
 # module's registration object (`QQmlModuleRegistration`) by default
 # because no symbol references it. `qt_import_qml_plugins` emits the
 # right link directives to force-link every QML module the static
-# library carries, including our in-tree `dev.tlmtech.kinema.player`
-# module. Without it the engine reports `<C++ type> is not a type`
-# for everything declared with `QML_ELEMENT`.
-if(KINEMA_ENABLE_MPV_EMBED)
-    qt_import_qml_plugins(kinema)
-endif()
+# library carries — both the always-built `dev.tlmtech.kinema.app`
+# shell module and (when libmpv is enabled) the player chrome.
+# Without it the engine reports `<C++ type> is not a type` for
+# everything declared with `QML_ELEMENT`.
+qt_import_qml_plugins(kinema)
 
 install(TARGETS kinema ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
