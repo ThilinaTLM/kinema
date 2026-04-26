@@ -61,6 +61,7 @@ class ContinueWatchingViewModel;
 class DiscoverViewModel;
 class MovieDetailViewModel;
 class SearchViewModel;
+class SeriesDetailViewModel;
 
 /**
  * Top-level QML host. Replaces `MainWindow`'s composition role:
@@ -160,6 +161,14 @@ public Q_SLOTS:
     /// (Browse / Discover hand off TMDB ids).
     void openMovieDetailByTmdb(int tmdbId, const QString& title);
 
+    /// Series counterparts. The 4-argument overload accepts a
+    /// season + episode seed (Continue Watching for a series
+    /// episode) so the page lands pre-selected on the right row.
+    void openSeriesDetail(const QString& imdbId, const QString& title);
+    void openSeriesDetailAt(const QString& imdbId, const QString& title,
+        int season, int episode);
+    void openSeriesDetailByTmdb(int tmdbId, const QString& title);
+
     /// Called from QML's `onClosing` handler. Returns true when
     /// the close should proceed (real quit), false when the
     /// controller has already hidden the window and the close
@@ -173,16 +182,13 @@ Q_SIGNALS:
     /// Sent after `applyBrowsePreset` so the shell can swap the
     /// page row to Browse with the freshly-applied filters.
     void navigateToBrowseRequested();
-    /// Sent when a search-result poster is activated. The series
-    /// variant is still stubbed in phase 05's first commit; phase
-    /// 05's second commit replaces it with a real series-page push.
-    void openSeriesDetailRequested(const QString& imdbId, const QString& title);
-
-    /// Asks `ApplicationShell.qml` to push the movie detail page
-    /// on top of the current nav page. The view-model has already
-    /// been told to load by the time this fires; the QML shell
-    /// just needs to surface the page so its bindings paint.
+    /// Asks `ApplicationShell.qml` to push the matching detail
+    /// page on top of the current nav page. The view-model has
+    /// already been told to load by the time the signal fires; the
+    /// QML shell just needs to surface the page so its bindings
+    /// paint.
     void showMovieDetailRequested();
+    void showSeriesDetailRequested();
 
     /// Fan-in for status messages coming out of `StreamActions`,
     /// `PlayerLauncher`, `SubtitleController`, and (from phase 03)
@@ -238,6 +244,7 @@ private:
     SearchViewModel* m_searchVm {};
     BrowseViewModel* m_browseVm {};
     MovieDetailViewModel* m_movieDetailVm {};
+    SeriesDetailViewModel* m_seriesDetailVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::PlaybackController* m_playbackCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};

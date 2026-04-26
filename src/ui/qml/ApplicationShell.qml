@@ -186,9 +186,9 @@ Kirigami.ApplicationWindow {
 
     // Detail pages are pushed on top of the current nav page so Esc
     // pops back to it with state preserved (the shell-level Esc
-    // shortcut handles depth>1 already). The SeriesDetailPage
-    // component lands in commit B of phase 05.
-    Component { id: movieDetailComp; MovieDetailPage { } }
+    // shortcut handles depth>1 already).
+    Component { id: movieDetailComp;  MovieDetailPage  { } }
+    Component { id: seriesDetailComp; SeriesDetailPage { } }
 
     // About / Settings — pushed on top of the current nav stack.
     // The Settings stub is a placeholder page until phase 06
@@ -265,6 +265,10 @@ Kirigami.ApplicationWindow {
             // so Esc walks back through the breadcrumb of titles.
             root.pageStack.push(movieDetailComp,
                 { objectName: "movieDetail" });
+        }
+        function onShowSeriesDetailRequested() {
+            root.pageStack.push(seriesDetailComp,
+                { objectName: "seriesDetail" });
         }
         function onPassiveMessage(text, durationMs) {
             root.showPassiveNotification(text, durationMs);

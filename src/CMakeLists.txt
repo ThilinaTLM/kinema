@@ -54,29 +54,21 @@ set(kinema_core_SRCS
     api/TorrentioParse.cpp
 
     # `DiscoverCardDelegate`, `DiscoverGridView`, `DiscoverRowModel`,
-    # `DiscoverSection`, and `SimilarStrip` go in phase 05's commit B
-    # (with the SeriesDetailPane retirement). They're still consumed
-    # by `SeriesDetailPane` indirectly via `MetaHeaderWidget`'s
-    # `SimilarStrip`, so they outlive commit A. `TorrentsModel`,
-    # `EpisodesModel`, `EpisodeDelegate`, `SeriesPicker`,
-    # `SeriesDetailPane`, and the `widgets/StreamsPanel` /
-    # `widgets/MetaHeaderWidget` block all retire alongside.
+    # `DiscoverSection`, and `SimilarStrip` outlive phase 05: they're
+    # still consumed by `widgets/MetaHeaderWidget`'s embedded
+    # `SimilarStrip` (a phase 06 surface). `TorrentsModel` survives
+    # because `widgets/StreamsPanel` (also phase 06) still holds it.
+    # The whole block dies in phase 06's cleanup pass alongside
+    # `widgets/MetaHeaderWidget` / `widgets/StreamsPanel` /
+    # `widgets/SubtitlesDialog` / `StateWidget` / `UpcomingBadge`.
     ui/DiscoverCardDelegate.cpp
     ui/DiscoverGridView.cpp
     ui/DiscoverRowModel.cpp
     ui/DiscoverSection.cpp
-    ui/EpisodeDelegate.cpp
-    ui/EpisodesModel.cpp
     ui/ImageLoader.cpp
-    ui/SeriesDetailPane.cpp
-    ui/SeriesPicker.cpp
     ui/SimilarStrip.cpp
-    ui/TorrentsModel.cpp
-    # `StateWidget` and `UpcomingBadge` outlive phase 05: they're
-    # consumed by the surviving series-side widgets above plus
-    # `widgets/MetaHeaderWidget` / `widgets/StreamsPanel` (phase
-    # 06 surfaces). They go away once those last consumers do.
     ui/StateWidget.cpp
+    ui/TorrentsModel.cpp
     ui/UpcomingBadge.cpp
 
     ui/widgets/LanguagePickerButton.cpp
@@ -96,12 +88,6 @@ set(kinema_core_SRCS
     app/KinemaApplication.cpp
 
     controllers/HistoryController.cpp
-    # `NavigationController` + `SeriesDetailController` survive into
-    # commit B of phase 05 — they're tied together (the controller
-    # uses the nav controller for the episode/streams sub-page flip)
-    # and retire as a unit alongside the SeriesDetailViewModel.
-    controllers/NavigationController.cpp
-    controllers/SeriesDetailController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
@@ -112,11 +98,13 @@ set(kinema_core_SRCS
     ui/qml-bridge/ContinueWatchingViewModel.cpp
     ui/qml-bridge/DiscoverSectionModel.cpp
     ui/qml-bridge/DiscoverViewModel.cpp
+    ui/qml-bridge/EpisodesListModel.cpp
     ui/qml-bridge/KinemaImageProvider.cpp
     ui/qml-bridge/MainController.cpp
     ui/qml-bridge/MovieDetailViewModel.cpp
     ui/qml-bridge/ResultsListModel.cpp
     ui/qml-bridge/SearchViewModel.cpp
+    ui/qml-bridge/SeriesDetailViewModel.cpp
     ui/qml-bridge/StreamsListModel.cpp
 
     tray_resources.qrc
@@ -225,6 +213,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/BackdropHero.qml
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
+        ui/qml/components/EpisodeRow.qml
         ui/qml/components/FilterChipRow.qml
         ui/qml/components/FilterDrawer.qml
         ui/qml/components/KAboutPage.qml
@@ -238,6 +227,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/PosterGrid.qml
         ui/qml/components/ProgressPosterCard.qml
         ui/qml/components/RatingChip.qml
+        ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
         ui/qml/components/StreamCard.qml
         ui/qml/components/StreamRowActions.qml
@@ -248,6 +238,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/DiscoverPage.qml
         ui/qml/pages/MovieDetailPage.qml
         ui/qml/pages/SearchPage.qml
+        ui/qml/pages/SeriesDetailPage.qml
     OUTPUT_DIRECTORY
         "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/app"
     NO_PLUGIN

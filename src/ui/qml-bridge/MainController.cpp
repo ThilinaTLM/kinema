@@ -29,10 +29,12 @@
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
+#include "ui/qml-bridge/EpisodesListModel.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
+#include "ui/qml-bridge/SeriesDetailViewModel.h"
 #include "ui/qml-bridge/StreamsListModel.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "ui/player/PlayerViewModel.h"
@@ -202,6 +204,36 @@ void MainController::openMovieDetailByTmdb(int tmdbId, const QString& title)
     Q_EMIT showMovieDetailRequested();
 }
 
+void MainController::openSeriesDetail(const QString& imdbId,
+    const QString& /*title*/)
+{
+    if (!m_seriesDetailVm || imdbId.isEmpty()) {
+        return;
+    }
+    m_seriesDetailVm->load(imdbId);
+    Q_EMIT showSeriesDetailRequested();
+}
+
+void MainController::openSeriesDetailAt(const QString& imdbId,
+    const QString& /*title*/, int season, int episode)
+{
+    if (!m_seriesDetailVm || imdbId.isEmpty()) {
+        return;
+    }
+    m_seriesDetailVm->loadAt(imdbId, season, episode);
+    Q_EMIT showSeriesDetailRequested();
+}
+
+void MainController::openSeriesDetailByTmdb(int tmdbId,
+    const QString& title)
+{
+    if (!m_seriesDetailVm || tmdbId <= 0) {
+        return;
+    }
+    m_seriesDetailVm->loadByTmdbId(tmdbId, title);
+    Q_EMIT showSeriesDetailRequested();
+}
+
 void MainController::attachWindow(QQuickWindow* window)
 {
     m_window = window;
@@ -296,6 +328,9 @@ void MainController::buildCoreServices()
     m_movieDetailVm = new MovieDetailViewModel(m_cinemeta,
         m_torrentio, m_tmdb, m_streamActions, m_tokenCtrl,
         m_settings, m_tokenCtrl->realDebridToken(), this);
+    m_seriesDetailVm = new SeriesDetailViewModel(m_cinemeta,
+        m_torrentio, m_tmdb, m_streamActions, m_tokenCtrl,
+        m_settings, m_tokenCtrl->realDebridToken(), this);
 
     // TMDB token gain/loss propagates from `TokenController` to
     // both the Discover VM (which already handles it internally)
@@ -316,9 +351,9 @@ void MainController::buildCoreServices()
         });
 
     // Continue Watching action routing. Resume / remove go straight
-    // to the controller; movie detail / resume-fallback push the new
-    // movie detail page (phase 05). Series detail is still stubbed
-    // in commit A and lands in commit B with `SeriesDetailViewModel`.
+    // to the controller; detail / resume-fallback push the matching
+    // detail page. Series entries thread the saved season + episode
+    // through `openSeriesDetailAt` so the page lands pre-selected.
     connect(m_continueWatchingVm,
         &ContinueWatchingViewModel::resumeRequested, m_historyCtrl,
         &controllers::HistoryController::resumeFromHistory);
@@ -334,15 +369,13 @@ void MainController::buildCoreServices()
             }
             const auto title = entry.seriesTitle.isEmpty()
                 ? entry.title : entry.seriesTitle;
-            Q_EMIT passiveMessage(
-                i18nc("@info:status",
-                    "Series detail page lands in the next phase 05 "
-                    "commit — cannot open “%1” yet.",
-                    title),
-                4000);
+            openSeriesDetailAt(entry.key.imdbId, title,
+                entry.key.season.value_or(-1),
+                entry.key.episode.value_or(-1));
         });
     // Resume-from-history fallback: the saved release is gone, so
-    // open the detail page so the user can pick another stream.
+    // open the matching detail page so the user can pick another
+    // stream. Same season / episode threading for series entries.
     connect(m_historyCtrl,
         &controllers::HistoryController::resumeFallbackRequested,
         this, [this](const api::HistoryEntry& entry) {
@@ -350,73 +383,55 @@ void MainController::buildCoreServices()
                 openMovieDetail(entry.key.imdbId, entry.title);
                 return;
             }
-            Q_EMIT passiveMessage(
-                i18nc("@info:status",
-                    "Saved release for “%1” is no longer available — "
-                    "alternatives appear once the series detail page "
-                    "lands in the next commit.",
-                    entry.title),
-                6000);
+            const auto title = entry.seriesTitle.isEmpty()
+                ? entry.title : entry.seriesTitle;
+            openSeriesDetailAt(entry.key.imdbId, title,
+                entry.key.season.value_or(-1),
+                entry.key.episode.value_or(-1));
         });
 
     // Discover navigation routing. "Show all" forwards into the
     // Browse VM via a typed (kind, sort) preset and asks the shell
-    // to navigate. Poster activation: movies route into the new
-    // detail page; series stay on the passive-notification stub
-    // until commit B.
+    // to navigate. Poster activation routes movies and series into
+    // their respective detail VMs.
     connect(m_discoverVm, &DiscoverViewModel::browseRequested,
         this, &MainController::applyBrowsePreset);
     connect(m_discoverVm, &DiscoverViewModel::openMovieRequested,
         this, &MainController::openMovieDetailByTmdb);
-    const auto seriesDetailStub
-        = [this](int /*tmdbId*/, const QString& title) {
-            Q_EMIT passiveMessage(
-                i18nc("@info:status",
-                    "Series detail page lands in the next phase 05 "
-                    "commit — cannot open “%1” yet.",
-                    title),
-                4000);
-        };
     connect(m_discoverVm, &DiscoverViewModel::openSeriesRequested,
-        this, seriesDetailStub);
+        this, &MainController::openSeriesDetailByTmdb);
 
-    // Search VM action routing. Movie activations push the new
-    // detail page; series activations still surface a passive-
-    // notification stub until commit B replaces it with the
-    // series detail page.
+    // Search VM action routing. Both movie and series activations
+    // now push their respective detail page directly.
     connect(m_searchVm, &SearchViewModel::statusMessage, this,
         &MainController::passiveMessage);
     connect(m_searchVm, &SearchViewModel::openMovieRequested,
         this, &MainController::openMovieDetail);
     connect(m_searchVm, &SearchViewModel::openSeriesRequested,
-        this, &MainController::openSeriesDetailRequested);
+        this, &MainController::openSeriesDetail);
 
-    // Browse VM action routing. Movies route into the TMDB-id
-    // detail flow (which resolves the IMDB id internally); series
-    // stay on a passive-notification stub until commit B.
+    // Browse VM action routing. Movies and series both route into
+    // their TMDB-id detail flow (which resolves the IMDB id
+    // internally) before pushing the matching detail page.
     connect(m_browseVm, &BrowseViewModel::statusMessage, this,
         &MainController::passiveMessage);
     connect(m_browseVm, &BrowseViewModel::openMovieRequested,
         this, &MainController::openMovieDetailByTmdb);
     connect(m_browseVm, &BrowseViewModel::openSeriesRequested,
-        this, seriesDetailStub);
+        this, &MainController::openSeriesDetailByTmdb);
 
-    // Series-side IMDB-id detail stub (search activates with IMDB
-    // ids). Replaced in commit B by a series detail-page push.
-    connect(this, &MainController::openSeriesDetailRequested, this,
-        [this](const QString& /*imdbId*/, const QString& title) {
-            Q_EMIT passiveMessage(
-                i18nc("@info:status",
-                    "Series detail page lands in the next phase 05 "
-                    "commit — cannot open “%1” yet.",
-                    title),
-                4000);
-        });
-
-    // Movie detail VM → host. Status messages forward, similar
-    // carousel re-pushes a fresh detail page (recursing through
-    // `openMovieDetailByTmdb`), and `subtitlesRequested` is stubbed
-    // until phase 06's SubtitlesPage lands.
+    // Detail VM → host. Status messages forward, similar carousels
+    // re-push a fresh detail page (recursing through the TMDB
+    // resolvers so movie↔series transitions Just Work), and
+    // `subtitlesRequested` is stubbed until phase 06's SubtitlesPage
+    // lands.
+    const auto subtitleStub = [this](const api::PlaybackContext& ctx) {
+        Q_EMIT passiveMessage(
+            i18nc("@info:status",
+                "Subtitles for “%1” land in phase 06.",
+                ctx.title),
+            4000);
+    };
     connect(m_movieDetailVm,
         &MovieDetailViewModel::statusMessage, this,
         &MainController::passiveMessage);
@@ -425,16 +440,23 @@ void MainController::buildCoreServices()
         &MainController::openMovieDetailByTmdb);
     connect(m_movieDetailVm,
         &MovieDetailViewModel::openSeriesByTmdbRequested, this,
-        seriesDetailStub);
+        &MainController::openSeriesDetailByTmdb);
     connect(m_movieDetailVm,
         &MovieDetailViewModel::subtitlesRequested, this,
-        [this](const api::PlaybackContext& ctx) {
-            Q_EMIT passiveMessage(
-                i18nc("@info:status",
-                    "Subtitles for “%1” land in phase 06.",
-                    ctx.title),
-                4000);
-        });
+        subtitleStub);
+
+    connect(m_seriesDetailVm,
+        &SeriesDetailViewModel::statusMessage, this,
+        &MainController::passiveMessage);
+    connect(m_seriesDetailVm,
+        &SeriesDetailViewModel::openMovieByTmdbRequested, this,
+        &MainController::openMovieDetailByTmdb);
+    connect(m_seriesDetailVm,
+        &SeriesDetailViewModel::openSeriesByTmdbRequested, this,
+        &MainController::openSeriesDetailByTmdb);
+    connect(m_seriesDetailVm,
+        &SeriesDetailViewModel::subtitlesRequested, this,
+        subtitleStub);
 
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
@@ -628,6 +650,14 @@ void MainController::exposeContextProperties(
         "dev.tlmtech.kinema.app", 1, 0,
         "MovieDetailViewModel",
         QStringLiteral("MovieDetailViewModel is owned by C++."));
+    qmlRegisterUncreatableType<SeriesDetailViewModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "SeriesDetailViewModel",
+        QStringLiteral("SeriesDetailViewModel is owned by C++."));
+    qmlRegisterUncreatableType<EpisodesListModel>(
+        "dev.tlmtech.kinema.app", 1, 0,
+        "EpisodesListModel",
+        QStringLiteral("EpisodesListModel is owned by C++."));
 
     engine.rootContext()->setContextProperty(
         QStringLiteral("mainController"), this);
@@ -641,6 +671,8 @@ void MainController::exposeContextProperties(
         QStringLiteral("browseVm"), m_browseVm);
     engine.rootContext()->setContextProperty(
         QStringLiteral("movieDetailVm"), m_movieDetailVm);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("seriesDetailVm"), m_seriesDetailVm);
 
     // Kick the initial Discover + Browse fetches once everything's
     // wired so each page lands populated rather than empty-spinner.
