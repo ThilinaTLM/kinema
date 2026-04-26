@@ -295,18 +295,17 @@ private Q_SLOTS:
         tmdb.setToken(QStringLiteral("token"));
         BrowseViewModel vm(&tmdb, *m_settings, nullptr);
 
-        // Default chips: just the Kind chip is present.
+        // Default chips: none. The kind is shown by the segmented
+        // control in the BrowseFilterBar, not as a chip; only
+        // non-default filters surface here.
         const auto baseline = vm.activeChipsList();
-        QCOMPARE(baseline.size(), 1);
-        QCOMPARE(baseline.first().toMap()
-                     .value(QStringLiteral("kind")).toString(),
-            QStringLiteral("kind"));
+        QCOMPARE(baseline.size(), 0);
 
         vm.setMinRatingPct(70);
         vm.setSort(static_cast<int>(DiscoverSort::Rating));
         const auto chips = vm.activeChipsList();
-        // Kind + sort + rating
-        QCOMPARE(chips.size(), 3);
+        // sort + rating
+        QCOMPARE(chips.size(), 2);
     }
 
     void testRemoveChipUndoesFilter()
@@ -315,7 +314,7 @@ private Q_SLOTS:
         tmdb.setToken(QStringLiteral("token"));
         BrowseViewModel vm(&tmdb, *m_settings, nullptr);
         vm.setMinRatingPct(70);
-        QCOMPARE(vm.activeChipsList().size(), 2);
+        QCOMPARE(vm.activeChipsList().size(), 1);
 
         // Find the rating chip by `kind == "rating"` and remove it.
         const auto chips = vm.activeChipsList();

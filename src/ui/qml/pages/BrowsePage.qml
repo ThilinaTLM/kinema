@@ -8,17 +8,24 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Filterable TMDB browse page. The header surfaces a single
-// "Filters" action that toggles the right-edge `FilterDrawer`. The
-// page body is the active-chip strip + a `PosterGrid` over
-// `browseVm.results`; placeholder messages cover the loading /
-// empty / error / not-configured states without nesting a separate
-// state widget.
+// Browse: filter-driven TMDB grid. Chrome:
 //
-// `Show all →` from a Discover rail lands here via
-// `MainController::navigateToBrowseRequested` after applying its
-// preset; the chip row is the user-visible record of what's
-// active.
+//   * `header:` is `BrowseFilterBar` — segmented Movies / TV Series
+//     toggle, horizontal genre chip strip, sort combo, and a
+//     "More filters" button that opens `BrowseFiltersSheet` for
+//     date window / min rating / hide-obscure.
+//   * `ActiveFiltersBar` sits between the header and the grid and
+//     paints removable chips for every non-default filter, with a
+//     trailing "Clear all" button.
+//   * Body is the responsive `PosterGrid` over `browseVm.results`,
+//     swapped out via `StackLayout` for the loading / empty / error
+//     placeholders.
+//   * The not-configured / auth-failed `Kirigami.PlaceholderMessage`
+//     branch covers the entire page when TMDB isn't usable.
+//
+// `Show all →` from a Discover rail still lands here via
+// `MainController::navigateToBrowseRequested` after applying the
+// preset; the chip row is the user-visible record of what's active.
 Kirigami.ScrollablePage {
     id: page
 
@@ -37,24 +44,20 @@ Kirigami.ScrollablePage {
             displayHint: Kirigami.DisplayHint.IconOnly
             shortcut: StandardKey.Refresh
             onTriggered: browseVm.refresh()
-        },
-        Kirigami.Action {
-            icon.name: "view-filter"
-            text: i18nc("@action:button", "Filters")
-            displayHint: Kirigami.DisplayHint.KeepVisible
-            checkable: true
-            checked: filterDrawer.drawerOpen
-            onTriggered: filterDrawer.drawerOpen
-                = !filterDrawer.drawerOpen
         }
     ]
 
-    FilterDrawer {
-        id: filterDrawer
-        // Parented to the application window so the overlay sits
-        // outside the page's content layer (matches Kirigami's
-        // recommended pattern for `OverlayDrawer`s).
-        parent: applicationWindow().overlay
+    // The filter bar is the page header. The "More filters" button
+    // inside it opens this sheet; the sheet is parented to the
+    // application overlay so it survives header re-instantiation.
+    BrowseFiltersSheet { id: moreFiltersSheet }
+
+    header: BrowseFilterBar {
+        moreFiltersSheet: moreFiltersSheet
+        visible: browseVm.tmdbConfigured && !browseVm.authFailed
+        // Collapse to zero height when hidden so the placeholder
+        // takes the whole page surface.
+        Layout.preferredHeight: visible ? implicitHeight : 0
     }
 
     // ---- not-configured / auth-failed placeholder ----------------
@@ -94,13 +97,11 @@ Kirigami.ScrollablePage {
         spacing: 0
         visible: browseVm.tmdbConfigured && !browseVm.authFailed
 
-        FilterChipRow {
+        ActiveFiltersBar {
             Layout.fillWidth: true
             chips: browseVm.activeChips
             onChipRemoved: function (idx) { browseVm.removeChip(idx); }
-            // A small bottom margin so the chips don't kiss the grid.
-            Layout.bottomMargin: chips.length > 0
-                ? Kirigami.Units.smallSpacing : 0
+            onClearAllRequested: browseVm.resetFilters()
         }
 
         StackLayout {

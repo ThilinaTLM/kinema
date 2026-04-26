@@ -53,13 +53,6 @@ QString sortLabel(api::DiscoverSort s)
     return {};
 }
 
-QString kindLabel(api::MediaKind k)
-{
-    return k == api::MediaKind::Series
-        ? i18nc("@label browse kind chip", "TV Series")
-        : i18nc("@label browse kind chip", "Movies");
-}
-
 QString ratingLabel(int pct)
 {
     // pct is 0,60,70,75,80 — same scale BrowseSettings persists.
@@ -226,7 +219,11 @@ QVariantList BrowseViewModel::activeChipsList() const
         out.append(m);
     };
 
-    addChip(QStringLiteral("kind"), kindLabel(m_kind));
+    // The kind is shown by the segmented control in `BrowseFilterBar`;
+    // emitting a redundant chip with no remove affordance read as a
+    // label rather than a token, so it's intentionally not surfaced
+    // here. `removeChip` no longer handles the "kind" kind for the
+    // same reason.
     if (m_dateWindow != core::DateWindow::ThisYear) {
         addChip(QStringLiteral("dateWindow"), windowLabel(m_dateWindow));
     }
@@ -313,13 +310,7 @@ void BrowseViewModel::removeChip(int index)
     const auto chip = chips.at(index).toMap();
     const auto kind = chip.value(QStringLiteral("kind")).toString();
 
-    if (kind == QLatin1String("kind")) {
-        // Toggling kind is the only way to "remove" the kind chip;
-        // the chip exists primarily as a visible reminder.
-        setKind(m_kind == api::MediaKind::Movie
-                ? static_cast<int>(api::MediaKind::Series)
-                : static_cast<int>(api::MediaKind::Movie));
-    } else if (kind == QLatin1String("dateWindow")) {
+    if (kind == QLatin1String("dateWindow")) {
         setDateWindow(static_cast<int>(core::DateWindow::ThisYear));
     } else if (kind == QLatin1String("sort")) {
         setSort(static_cast<int>(api::DiscoverSort::Popularity));

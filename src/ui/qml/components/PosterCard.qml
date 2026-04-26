@@ -8,17 +8,25 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// One TMDB row tile: 2:3 poster image, title, secondary line, and
-// a corner rating chip. The hover lift mirrors what
-// `Kirigami.AbstractCard` provides on desktop without bringing in a
-// full card chrome (which adds a frame line we don't want over the
-// poster's own border).
+// One TMDB / Cinemeta tile: 2:3 poster image, two-line title, a
+// caption subtitle and a corner rating chip. Visual chrome leans
+// on Kirigami theme tokens so it tracks the user's Plasma colour
+// scheme without any hand-rolled palette:
 //
-// `signal clicked()` is forwarded by the rail's delegate.
+//   * `Kirigami.ShadowedRectangle` for the poster frame so we get a
+//     proper subtle drop shadow that lifts on hover instead of a
+//     scale transform (scale would bleed into adjacent grid cells).
+//   * `Kirigami.Theme.colorSet: View` so the surface inherits the
+//     content area's background, not the page header's.
+//   * `hoverColor` / `focusColor` for hover + keyboard focus.
+//
+// Public surface is intentionally identical to the previous version
+// so `PosterGrid`, `ContentRail`, and `SimilarCarousel` can keep
+// using the delegate without changes.
 Item {
     id: card
 
-    // Inputs.
+    // ---- Inputs --------------------------------------------------
     property string posterUrl
     property string title
     property string subtitle
@@ -26,74 +34,115 @@ Item {
 
     signal clicked()
 
-    // Geometry.
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
+    // Geometry. The grid / rail sets `width`/`height` directly; this
+    // keeps a sensible default for ad-hoc consumers.
     implicitWidth: Theme.posterMin
     implicitHeight: poster.height + meta.implicitHeight
         + Kirigami.Units.smallSpacing * 2
 
-    // Hover lift via an attached scale; small enough to feel like
-    // the desktop card hover state without introducing a layout
-    // shift inside a horizontal `ListView`.
-    transform: Scale {
-        origin.x: card.width / 2
-        origin.y: card.height / 2
-        xScale: hoverArea.containsMouse ? 1.02 : 1.0
-        yScale: hoverArea.containsMouse ? 1.02 : 1.0
-
-        Behavior on xScale { NumberAnimation { duration: Kirigami.Units.shortDuration } }
-        Behavior on yScale { NumberAnimation { duration: Kirigami.Units.shortDuration } }
+    // Keyboard focus support: the parent grid forwards arrow keys
+    // through `GridView` and we only need to react to activation.
+    activeFocusOnTab: true
+    Keys.onPressed: function (event) {
+        if (event.key === Qt.Key_Return
+            || event.key === Qt.Key_Enter
+            || event.key === Qt.Key_Space) {
+            card.clicked();
+            event.accepted = true;
+        }
     }
 
+    // ---- Visual chrome ------------------------------------------
     ColumnLayout {
         anchors.fill: parent
         spacing: Kirigami.Units.smallSpacing
 
-        // ---- Poster ------------------------------------------------
-        Item {
+        // Poster frame. ShadowedRectangle gives us a real elevation
+        // shadow that we can animate on hover.
+        Kirigami.ShadowedRectangle {
             id: poster
             Layout.fillWidth: true
-            // 2:3 portrait aspect; clamped so absurdly tall containers
-            // (e.g. Show all → grid pages) don't stretch the image.
+            // 2:3 portrait aspect, computed from current width so
+            // the card stays crisp at every grid density.
             Layout.preferredHeight: Math.round(width * 1.5)
 
-            Rectangle {
-                anchors.fill: parent
-                radius: Kirigami.Units.cornerRadius
-                color: Kirigami.Theme.alternateBackgroundColor
-                border.color: Qt.alpha(Theme.foreground, 0.10)
-                border.width: 1
+            radius: Kirigami.Units.cornerRadius
+            color: Kirigami.Theme.alternateBackgroundColor
+            border.color: hoverHandler.hovered || card.activeFocus
+                ? Kirigami.Theme.focusColor
+                : Qt.alpha(Kirigami.Theme.textColor, 0.12)
+            border.width: card.activeFocus ? 2 : 1
+
+            shadow.size: hoverHandler.hovered
+                ? Kirigami.Units.gridUnit
+                : Kirigami.Units.smallSpacing
+            shadow.yOffset: hoverHandler.hovered
+                ? Kirigami.Units.smallSpacing
+                : 1
+            shadow.color: Qt.alpha(Kirigami.Theme.textColor,
+                hoverHandler.hovered ? 0.35 : 0.18)
+
+            Behavior on shadow.size {
+                NumberAnimation { duration: Kirigami.Units.shortDuration }
+            }
+            Behavior on shadow.yOffset {
+                NumberAnimation { duration: Kirigami.Units.shortDuration }
             }
 
             Image {
                 id: posterImage
                 anchors.fill: parent
-                anchors.margins: 1   // sit inside the border
+                anchors.margins: 1
                 source: card.posterUrl
                     ? "image://kinema/poster?u=" + encodeURIComponent(card.posterUrl)
                     : ""
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 cache: true
-                sourceSize.width: Theme.posterMax
-                sourceSize.height: Math.round(Theme.posterMax * 1.5)
+                // Source size derives from the actual width so wide
+                // grids don't pull blurry thumbnails. Capped at the
+                // theme's `posterMax` to avoid pulling needlessly
+                // large TMDB renditions on dense displays.
+                sourceSize.width: Math.min(card.width * 2,
+                    Theme.posterMax * 2)
+                sourceSize.height: Math.round(sourceSize.width * 1.5)
                 visible: status === Image.Ready
+
+                // Clip the image to the rounded frame.
+                layer.enabled: true
+                layer.smooth: true
             }
 
-            // Skeleton + missing-poster fallback. Shows a neutral
-            // film icon in the same slot as the image so the rail
-            // doesn't acquire empty rectangles for cards whose TMDB
-            // row lacked a poster URL.
+            // Skeleton + missing-poster fallback. A neutral icon
+            // sits in the same slot as the image so cards without
+            // a TMDB poster don't render an empty rectangle.
             Kirigami.Icon {
                 visible: posterImage.status !== Image.Ready
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.huge
                 height: width
                 source: "applications-multimedia"
-                color: Qt.alpha(Theme.foreground, 0.35)
+                color: Kirigami.Theme.disabledTextColor
             }
 
-            // Rating overlay (top-right). Sits inside the poster's
-            // padded inset so it doesn't clip the rounded corner.
+            // Subtle hover tint on the poster surface so the
+            // hover affordance is felt over both light and dark art.
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius
+                color: Kirigami.Theme.hoverColor
+                opacity: hoverHandler.hovered ? 0.18 : 0
+                Behavior on opacity {
+                    NumberAnimation { duration: Kirigami.Units.shortDuration }
+                }
+            }
+
+            // Rating overlay (top-right). Sits inside the inset so
+            // it does not clip the rounded corner.
             RatingChip {
                 rating: card.rating
                 anchors {
@@ -111,15 +160,14 @@ Item {
             spacing: 0
             Layout.fillWidth: true
 
-            QQC2.Label {
+            Kirigami.Heading {
                 Layout.fillWidth: true
+                level: 5
                 text: card.title
                 elide: Text.ElideRight
                 maximumLineCount: 2
                 wrapMode: Text.Wrap
-                font.pointSize: Theme.captionFont.pointSize + 1
-                font.weight: Font.DemiBold
-                color: Theme.foreground
+                color: Kirigami.Theme.textColor
             }
 
             QQC2.Label {
@@ -127,33 +175,20 @@ Item {
                 visible: card.subtitle.length > 0
                 text: card.subtitle
                 elide: Text.ElideRight
-                font.pointSize: Theme.captionFont.pointSize
-                color: Theme.disabled
+                font: Kirigami.Theme.smallFont
+                color: Kirigami.Theme.disabledTextColor
             }
         }
     }
 
-    MouseArea {
-        id: hoverArea
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
+    // Click + hover handlers. TapHandler covers click + keyboard
+    // synthesised activation via `Keys.onPressed` above.
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onTapped: card.clicked()
+    }
+    HoverHandler {
+        id: hoverHandler
         cursorShape: Qt.PointingHandCursor
-        onClicked: function (mouse) {
-            if (mouse.button === Qt.LeftButton) {
-                card.clicked();
-            }
-        }
-    }
-
-    // Subtle focus ring for keyboard nav.
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: -2
-        radius: Kirigami.Units.cornerRadius + 2
-        color: "transparent"
-        border.color: Theme.accent
-        border.width: 2
-        visible: card.activeFocus
     }
 }

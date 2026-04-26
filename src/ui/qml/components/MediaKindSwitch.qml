@@ -5,41 +5,53 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.components as Components
 
-// Two-segment Movies/Series toggle. `kind` is an int that mirrors
-// `api::MediaKind` (0 = Movie, 1 = Series) so the consuming
-// view-model property can bind to it directly. Emits `activated`
-// with the new value when the user picks a button; the binding
-// itself stays write-once-from-the-VM to avoid dueling updates.
+// Native Plasma segmented control for the Movies / TV Series toggle.
 //
-// Used by the Search page header today; the Browse drawer reuses
-// the same component.
-RowLayout {
+// Backed by `org.kde.kirigamiaddons.components.RadioSelector` —
+// the official KDE segmented selector — so the look matches every
+// other Plasma app the user has installed (Discover, Tokodon,
+// NeoChat, etc.) instead of a hand-rolled pill.
+//
+// Public API kept stable so both `SearchPage` (header) and
+// `BrowseFilterBar` consume it the same way:
+//
+//   property int kind             // 0 = Movie, 1 = Series
+//   signal activated(int newKind)
+Components.RadioSelector {
     id: root
 
     property int kind: 0
     signal activated(int newKind)
 
-    spacing: 0
+    consistentWidth: false
 
-    QQC2.ButtonGroup { id: group }
+    // Use a separate Binding object so user clicks (which write to
+    // `selectedIndex` directly) don't permanently break the
+    // incoming `kind → selectedIndex` link. Without this, an
+    // external state change from `applyPreset` would fail to
+    // update the segmented control once the user has interacted
+    // with it.
+    Binding {
+        target: root
+        property: "selectedIndex"
+        value: root.kind
+        restoreMode: Binding.RestoreNone
+    }
 
-    QQC2.Button {
-        Layout.fillWidth: false
-        text: i18nc("@option:radio media kind", "Movies")
-        icon.name: "video-x-generic"
-        QQC2.ButtonGroup.group: group
-        checkable: true
-        checked: root.kind === 0
-        onClicked: if (root.kind !== 0) root.activated(0)
+    onSelectedIndexChanged: if (selectedIndex !== kind) {
+        root.activated(selectedIndex);
     }
-    QQC2.Button {
-        Layout.fillWidth: false
-        text: i18nc("@option:radio media kind", "TV Series")
-        icon.name: "view-media-recent"
-        QQC2.ButtonGroup.group: group
-        checkable: true
-        checked: root.kind === 1
-        onClicked: if (root.kind !== 1) root.activated(1)
-    }
+
+    actions: [
+        Kirigami.Action {
+            text: i18nc("@option:radio media kind", "Movies")
+            icon.name: "video-x-generic"
+        },
+        Kirigami.Action {
+            text: i18nc("@option:radio media kind", "TV Series")
+            icon.name: "view-media-recent"
+        }
+    ]
 }

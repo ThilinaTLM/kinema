@@ -8,13 +8,14 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Cinemeta search page. The header carries a `Kirigami.SearchField`
-// + a Movies/Series segmented control bound to `searchVm`. Below
-// it, the body renders one of five surfaces (idle / loading /
-// results / empty / error) chosen by `searchVm.results.state`.
+// Cinemeta search page. The page header is a `QQC2.ToolBar` with a
+// large `Kirigami.SearchField` and the segmented `MediaKindSwitch`
+// alongside it; below the field a small hint subline explains the
+// IMDB-id shortcut. The body renders one of five surfaces (idle /
+// loading / results / empty / error) chosen by `searchVm.results.state`.
 //
 // `focusSearchField()` is the hook `ApplicationShell.qml`'s
-// `onFocusSearchRequested` looks for; declaring it here means the
+// `onFocusSearchRequested` calls; declaring it here means the
 // `Ctrl+F` shortcut focuses the existing field instead of pushing
 // a fresh page when the user is already on Search.
 Kirigami.ScrollablePage {
@@ -37,42 +38,58 @@ Kirigami.ScrollablePage {
 
     Component.onCompleted: focusSearchField()
 
-    header: Kirigami.AbstractApplicationHeader {
-        // The default Kirigami header height plus a smidge for the
-        // segmented control, so two-line wrapping doesn't clip the
-        // input on Plasma's compact font sizes.
-        Layout.preferredHeight: contentRow.implicitHeight
-            + Kirigami.Units.largeSpacing * 2
+    header: QQC2.ToolBar {
+        Kirigami.Theme.colorSet: Kirigami.Theme.Header
+        Kirigami.Theme.inherit: false
 
-        contentItem: RowLayout {
-            id: contentRow
-            spacing: Kirigami.Units.largeSpacing
-            anchors.leftMargin: Kirigami.Units.largeSpacing
-            anchors.rightMargin: Kirigami.Units.largeSpacing
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing
 
-            Kirigami.SearchField {
-                id: searchField
+            RowLayout {
                 Layout.fillWidth: true
-                placeholderText: i18nc("@info:placeholder",
-                    "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
-                text: searchVm.query
-                onTextEdited: searchVm.query = text
-                onAccepted: searchVm.submit()
-                Keys.onEscapePressed: function (event) {
-                    if (text.length > 0) {
-                        searchVm.clear();
-                        event.accepted = true;
-                    } else {
-                        event.accepted = false;
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.largeSpacing
+
+                Kirigami.SearchField {
+                    id: searchField
+                    Layout.fillWidth: true
+                    placeholderText: i18nc("@info:placeholder",
+                        "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
+                    text: searchVm.query
+                    onTextEdited: searchVm.query = text
+                    onAccepted: searchVm.submit()
+                    Keys.onEscapePressed: function (event) {
+                        if (text.length > 0) {
+                            searchVm.clear();
+                            event.accepted = true;
+                        } else {
+                            event.accepted = false;
+                        }
+                    }
+                }
+
+                MediaKindSwitch {
+                    kind: searchVm.kind
+                    onActivated: function (newKind) {
+                        searchVm.kind = newKind;
                     }
                 }
             }
 
-            MediaKindSwitch {
-                kind: searchVm.kind
-                onActivated: function (newKind) {
-                    searchVm.kind = newKind;
-                }
+            QQC2.Label {
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                Layout.bottomMargin: Kirigami.Units.smallSpacing
+                visible: searchVm.query.length === 0
+                text: i18nc("@info:hint search bar",
+                    "Tip: paste an IMDB id (ttXXXXXXX) for a direct lookup, "
+                    + "or press Esc to clear.")
+                font: Kirigami.Theme.smallFont
+                color: Kirigami.Theme.disabledTextColor
+                elide: Text.ElideRight
             }
         }
     }
