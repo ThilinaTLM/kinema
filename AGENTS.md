@@ -127,24 +127,41 @@ Chrome modules (keep each one small and single-purpose):
 - `theme.lua` — palette, sizing, icon codepoints.
 - `state.lua` — shared mutable state (`state`, `props`, `mouse`,
   `visibility`), zones (with optional `on_wheel` / `on_rclick`),
-  and hit-test / time / chapter / chrome-visibility helpers.
-- `ass.lua` — drawing vocabulary (primitives, composites, button,
-  `band` for timeline range fills).
-- `render_timeline.lua` — hero timeline (filled block, chapter /
+  hit-test / time / chapter / chrome-visibility helpers, and
+  the named-tween registry (`register_tween`,
+  `set_tween_target`, `tween`, `tweens_settled`,
+  `tick_tweens`).
+- `ass.lua` — drawing vocabulary (primitives, composites,
+  button, `band` / `flat_strip` / `hairline` for chrome edges,
+  `pill` for the skip pill).
+- `layout.lua` — single source of truth for screen-rect
+  geometry (`top_bar`, `bottom_chrome`, `volume_column`,
+  `video_safe`). Renderers consume rectangles from here
+  instead of reaching across modules.
+- `render_timeline.lua` — timeline (filled block, chapter /
   skip-range bands, scrub tooltip) and the persistent thin
   progress line drawn when chrome is hidden.
-- `render_transport.lua` — flat transport backing + control row
-  (play / skip / volume cluster / audio / subs / speed /
-  fullscreen). Delegates timeline rendering to
-  `render_timeline.lua`.
-- `render_overlay.lua` — top header (fullscreen and windowed-
-  on-proximity), plus popup surfaces (resume, next-episode,
-  skip pill, buffering, cheatsheet).
-- `render_picker.lua` — audio / subtitle / speed picker as a
-  right-side full-height sheet with keyboard navigation.
+- `render_transport.lua` — control row (play / skip / volume
+  cluster / audio / subs / speed / fullscreen). Delegates
+  timeline rendering to `render_timeline.lua`.
+- `render_top_bar.lua` — top chrome surface: title, optional
+  subtitle, media-info chips, paused-time hint.
+- `render_resume.lua` — centre-screen "Resume from <time> /
+  Start over" prompt.
+- `render_next_episode.lua` — bottom-right "UP NEXT" countdown
+  pill.
+- `render_skip.lua` — "Skip intro / outro / credits" pill plus
+  its "Always skip" toggle.
+- `render_buffering.lua` — buffering indicator shown while
+  `paused-for-cache` is true.
+- `render_cheatsheet.lua` — full-screen keyboard-shortcut
+  reference triggered by `?`.
+- `render_picker.lua` — audio / subtitle / speed / chapters
+  picker as a right-side full-height sheet with keyboard
+  navigation.
 - `render_pause_indicator.lua` — centre play/pause flash shown
-  briefly when the pause property toggles while the control row
-  is hidden.
+  briefly when the pause property toggles while the control
+  row is hidden.
 
 New modules must be added to `_kinema_mpv_script_files` in
 `data/CMakeLists.txt` so they land in the install and the dev-tree

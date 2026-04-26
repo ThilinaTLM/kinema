@@ -40,7 +40,8 @@ local theme = {
 
     -- alpha scale
     a_opaque = '00',
-    a_panel    = '34', -- ~80% opaque
+    a_sheet    = '1A', -- ~90% opaque (uosc-style menu/picker sheet)
+    a_panel    = '34', -- ~80% opaque (top/bottom flat strips)
     a_elevated = '34', -- compatibility alias for modal flashes
     a_card     = '40', -- ~75% opaque
     a_chrome   = '56', -- ~66% opaque
@@ -51,23 +52,29 @@ local theme = {
     a_ghost  = 'EC',   -- ~ 8% opaque
 
     -- radii
-    r_surface = 18,
-    r_card    = 16,
-    r_btn     = 12,
+    --
+    -- The chrome uses uosc-flavoured 4 px corners on every flat
+    -- surface, button, and card. The pill radius is preserved
+    -- because it shapes the kinema-distinctive skip pill, which
+    -- is the one element where uosc-style flat reads worse.
+    r_surface = 4,
+    r_card    = 4,
+    r_btn     = 4,
     r_pill    = 22,
-    r_chip    = 11,
+    r_chip    = 4,
 
     -- spacing
     sp1 = 4, sp2 = 8, sp3 = 12, sp4 = 16, sp5 = 24, sp6 = 32,
 
     -- type
-    fs_kicker = 11,
-    fs_label  = 13,
-    fs_body   = 14,
-    fs_time   = 13,
-    fs_title  = 20,
-    fs_big    = 24,
-    fs_chip   = 11,
+    fs_kicker  = 11,
+    fs_label   = 13,
+    fs_body    = 14,
+    fs_time    = 13,
+    fs_title   = 20,   -- modal headers (resume, cheatsheet)
+    fs_top_bar = 16,   -- top-bar title in the flat strip
+    fs_big     = 24,
+    fs_chip    = 11,
 
     -- icon font
     icon_font = 'Kinema Icons',
@@ -75,23 +82,39 @@ local theme = {
     icon_md   = 22,
     icon_lg   = 28,
 
-    -- floating chrome sizing (HUD layout, no rail surface)
-    edge_margin_x      = 24,
-    bottom_margin_y    = 28,
-    bottom_row_gap     = 14,
-    island_pad_x       = 12,
-    island_gap         = 6,
-    vignette_h         = 220,
-    btn_lg             = 52,
-    btn_md             = 44,
-    time_w             = 62,
-    compact_breakpoint = 980,
-    tight_breakpoint   = 760,
+    -- uosc-flavoured edge strips and flat icon buttons.
+    --
+    -- The chrome is composed of two flat full-width strips at
+    -- the top and bottom edges, plus a vertical right-edge
+    -- volume column. There are no floating islands and no
+    -- vignette; the HUD-era constants (`edge_margin_x`,
+    -- `bottom_margin_y`, `bottom_row_gap`, `island_*`,
+    -- `vignette_h`, `btn_lg`, `btn_md`,
+    -- `compact_breakpoint`, `tight_breakpoint`) have been
+    -- removed.
+    top_bar_h        = 40,
+    bottom_strip_h   = 32,
+    controls_btn     = 40,
+    controls_margin  = 8,
+    controls_spacing = 2,
+    picker_row_h     = 36,
+    -- Time labels render inside the timeline bar (uosc-style)
+    -- and no longer occupy a fixed-width chip in the control
+    -- row, so `time_w` has been retired.
 
-    -- timeline sizing (thicker hero bar)
-    timeline_h       = 6,
-    timeline_hover_h = 10,
-    timeline_zone_h  = 32,
+
+    -- timeline sizing
+    --
+    -- The bar is bottom-edge anchored and full-width. Idle
+    -- height matches the persistent thin progress line; on hover
+    -- (or when the chrome is visible) the bar grows to
+    -- `timeline_hover_h` so the played fill, chapter ticks, and
+    -- scrub tooltip have room to read. The zone is taller than
+    -- the bar so the cursor can approach from inside the
+    -- transport row above without losing focus.
+    timeline_h       = 2,
+    timeline_hover_h = 40,
+    timeline_zone_h  = 48,
 
     -- title strip (no card surface — shadowed text only)
     title_x      = 28,
@@ -102,13 +125,18 @@ local theme = {
     chip_gap     = 6,
     chip_r       = 11,
 
-    -- volume column (thick vertical HUD bar)
-    volume_w         = 64,
-    volume_h         = 260,
-    volume_margin_r  = 20,
-    volume_margin_b  = 120,
-    volume_track_w   = 10,
-    volume_thumb_r   = 10,
+    -- volume column (uosc-flavoured flat right-edge strip)
+    --
+    -- The column is docked to the right edge between the top
+    -- bar and the bottom chrome. The track is a thin 4 px
+    -- white-at-`a_track` rail that fills upward from the
+    -- bottom; the thumb is a 2 × 12 px horizontal pillar at the
+    -- volume position, replacing the previous dual-circle
+    -- thumb. `volume_h` is no longer a fixed pixel value — the
+    -- column takes the full vertical gap between top bar and
+    -- bottom chrome (computed in `layout.volume_column`).
+    volume_w       = 40,
+    volume_track_w = 4,
 
     -- icon codepoints
     icon = {

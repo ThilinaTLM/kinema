@@ -66,15 +66,69 @@ M.RIGHT_STRIP_PX   = 84
 M.METADATA_GRACE_S = 2.5
 M.VOLUME_GRACE_S   = 1.5
 
--- Animation-driven opacity values. `chrome_opacity` fades the
--- bottom clusters (including the vignette, volume bar, and
--- always-visible persistent progress line); `title_opacity` fades
--- the top-left title strip. `main.lua` tweens them towards their
--- `*_target` values on a periodic timer.
-M.chrome_opacity        = 0
-M.chrome_opacity_target = 0
-M.title_opacity         = 0
-M.title_opacity_target  = 0
+-- Tween registry.
+--
+-- Renderers and `main.lua` register named eased values (current
+-- + target, both in [0, 1]). A single periodic ticker in
+-- `main.lua` advances every registered tween towards its target
+-- and stops when `tweens_settled()` returns true. Easing is
+-- linear because each tween runs for 100–200 ms and a curve
+-- adds complexity for negligible perceptual gain.
+--
+-- Use `register_tween(name, duration_s)` once at startup,
+-- `set_tween_target(name, value)` from the renderer that owns
+-- the visibility decision, and `tween(name)` from any renderer
+-- that needs the current eased value.
+local _tweens = {}
+
+function M.register_tween(name, duration_s)
+    _tweens[name] = {
+        current  = 0,
+        target   = 0,
+        duration = duration_s or 0.18,
+    }
+end
+
+function M.set_tween_target(name, value)
+    local t = _tweens[name]
+    if not t then return end
+    if value < 0 then value = 0 end
+    if value > 1 then value = 1 end
+    t.target = value
+end
+
+function M.tween(name)
+    local t = _tweens[name]
+    return t and t.current or 0
+end
+
+function M.tweens_settled()
+    for _, t in pairs(_tweens) do
+        if t.current ~= t.target then return false end
+    end
+    return true
+end
+
+-- Advance every registered tween towards its target by `dt`
+-- seconds. Returns true while any tween is still in motion;
+-- false when everything has settled.
+function M.tick_tweens(dt)
+    local any_moving = false
+    for _, t in pairs(_tweens) do
+        if t.current ~= t.target then
+            local step = dt / math.max(0.001, t.duration)
+            if t.current < t.target then
+                t.current = t.current + step
+                if t.current > t.target then t.current = t.target end
+            else
+                t.current = t.current - step
+                if t.current < t.target then t.current = t.target end
+            end
+            if t.current ~= t.target then any_moving = true end
+        end
+    end
+    return any_moving
+end
 
 function M.chrome_sticky()
     return M.props.paused_for_cache

@@ -5,11 +5,11 @@
 --
 -- When the pause property toggles, main.lua stamps
 -- `state.pause_flash_until = mp.get_time() + FLASH_SEC`. Until
--- that deadline passes we draw an 80 px round card at the video's
--- centre with the current paused/playing glyph inside it. Alpha
--- ramps from opaque at t=0 to fully transparent at t=FLASH_SEC —
--- libass has no tween, so we discretise to four alpha steps,
--- which is enough at the 7 Hz redraw cadence.
+-- that deadline passes we draw a uosc-flavoured circular backdrop
+-- at the video's centre with the current paused/playing glyph
+-- inside it. Alpha ramps from opaque at t=0 to fully transparent
+-- at t=FLASH_SEC — libass has no tween, so we discretise to four
+-- alpha steps, which is enough at the 7 Hz redraw cadence.
 --
 -- The flash is suppressed while the control row is visible because
 -- that row already has the real play/pause button and the two
@@ -23,17 +23,13 @@ local ass   = require 'ass'
 local M = {}
 
 -- How long the centre flash stays on screen after a pause toggle.
--- Short enough that frame-stepping (pause / unpause in rapid
--- succession) does not strobe; long enough to read the glyph.
 M.FLASH_SEC = 0.5
 
--- Discretised alpha ramp. `theme.a_*` strings (hex byte pairs) are
--- arranged from most-opaque to most-transparent.
 local ALPHA_STEPS = {
-    theme.a_opaque,   -- 100%
-    theme.a_elevated, -- ~90%
-    theme.a_dim,      -- ~62%
-    theme.a_subtle,   -- ~30%
+    theme.a_opaque,
+    theme.a_elevated,
+    theme.a_dim,
+    theme.a_subtle,
 }
 
 function M.render(out, w, h)
@@ -48,19 +44,17 @@ function M.render(out, w, h)
         math.max(1, math.floor(t * #ALPHA_STEPS) + 1))
     local alpha = ALPHA_STEPS[idx]
 
-    local r = 40
+    local r = 36
     local cx = math.floor(w / 2)
     local cy = math.floor(h / 2)
 
+    -- Single flat backdrop disc plus the glyph. uosc has no
+    -- inner ring or border on this surface; the icon's own 1 px
+    -- shadow gives it enough lift against the bg.
     out[#out + 1] = ass.circle(cx, cy, r, theme.bg, alpha)
-    -- Inner stroke approximation: a slightly smaller translucent
-    -- ring to lift the card off the video.
-    out[#out + 1] = ass.circle(cx, cy, r - 1, theme.fg, theme.a_subtle)
-    out[#out + 1] = ass.circle(cx, cy, r - 2, theme.bg, alpha)
-
     local cp = S.props.paused and theme.icon.pause
                               or theme.icon.play_arrow
-    out[#out + 1] = ass.icon(cx, cy, theme.icon_lg + 10,
+    out[#out + 1] = ass.icon(cx, cy, theme.icon_lg + 6,
         cp, theme.fg, 5, alpha)
 end
 

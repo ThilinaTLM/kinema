@@ -18,16 +18,30 @@ do
     end
 end
 
-local theme       = require 'theme'
-local S           = require 'state'
-local ass         = require 'ass'
-local transport   = require 'render_transport'
-local timeline    = require 'render_timeline'
-local overlay     = require 'render_overlay'
-local picker      = require 'render_picker'
-local volume      = require 'render_volume'
-local pause_flash = require 'render_pause_indicator'
-local gesture     = require 'render_gesture'
+local theme        = require 'theme'
+local S            = require 'state'
+local ass          = require 'ass'
+local layout       = require 'layout'
+local transport    = require 'render_transport'
+local timeline     = require 'render_timeline'
+local top_bar      = require 'render_top_bar'
+local resume       = require 'render_resume'
+local next_episode = require 'render_next_episode'
+local skip         = require 'render_skip'
+local buffering    = require 'render_buffering'
+local cheatsheet   = require 'render_cheatsheet'
+local picker       = require 'render_picker'
+local volume       = require 'render_volume'
+local pause_flash  = require 'render_pause_indicator'
+local gesture      = require 'render_gesture'
+
+-- Tween durations. `chrome_opacity` and `title_opacity` mirror
+-- the pre-registry FADE_SEC of 0.18 s; later steps register
+-- additional tweens (e.g. `timeline_grow`) without touching the
+-- ticker.
+S.register_tween('chrome_opacity', 0.18)
+S.register_tween('title_opacity',  0.18)
+S.register_tween('timeline_grow',  0.12)
 
 local KINEMA = 'main'
 
@@ -134,8 +148,26 @@ observe('duration',           'duration',         'number')
 observe('speed',              'speed',            'number')
 observe('fullscreen',         'fullscreen',       'bool')
 observe('demuxer-cache-time', 'cache_time',       'number')
-observe('paused-for-cache',   'paused_for_cache', 'bool')
 observe('aid',                'aid')
+
+-- `paused-for-cache` is a special case: as long as buffering is
+-- active we want the spinner arc to animate. Spawn a periodic
+-- redraw timer when it goes true and stop it when it clears.
+local buffering_timer = nil
+mp.observe_property('paused-for-cache', 'bool', function(_, v)
+    S.props.paused_for_cache = v
+    if v and not buffering_timer then
+        buffering_timer = mp.add_periodic_timer(0.06, function()
+            if S.props.paused_for_cache then
+                schedule_redraw()
+            elseif buffering_timer then
+                buffering_timer:kill()
+                buffering_timer = nil
+            end
+        end)
+    end
+    schedule_redraw()
+end)
 observe('sid',                'sid')
 observe('audio-delay',        'audio_delay',      'number')
 observe('sub-delay',          'sub_delay',        'number')
@@ -166,7 +198,10 @@ mp.observe_property('osd-height', 'number', function()
     schedule_redraw()
 end)
 
-local FADE_SEC = 0.18
+-- Periodic ticker that advances every registered tween. Started
+-- on demand whenever a render reveals a tween out of sync with
+-- its target; stops automatically once `S.tweens_settled()`
+-- returns true.
 local fade_timer = nil
 local last_fade_tick = 0
 
@@ -181,22 +216,9 @@ local function fade_tick()
     local now = mp.get_time()
     local dt  = math.max(0.001, now - last_fade_tick)
     last_fade_tick = now
-    local step = dt / FADE_SEC
-    local function ease(cur, target)
-        if cur < target then
-            cur = cur + step
-            if cur > target then cur = target end
-        elseif cur > target then
-            cur = cur - step
-            if cur < target then cur = target end
-        end
-        return cur
-    end
-    S.chrome_opacity = ease(S.chrome_opacity, S.chrome_opacity_target)
-    S.title_opacity  = ease(S.title_opacity,  S.title_opacity_target)
+    S.tick_tweens(dt)
     redraw()
-    if S.chrome_opacity == S.chrome_opacity_target
-       and S.title_opacity == S.title_opacity_target then
+    if S.tweens_settled() then
         stop_fade_timer()
     end
 end
@@ -213,49 +235,55 @@ redraw = function()
     local h = mp.get_property_number('osd-height', 1080)
     local out = {}
 
-    -- Compute fade targets. If either differs from its current
-    -- value, kick a periodic timer to tween towards it; otherwise
-    -- keep the static value and render as-is.
-    S.chrome_opacity_target = S.chrome_visible() and 1 or 0
-    S.title_opacity_target  = S.metadata_visible() and 1 or 0
-    if S.chrome_opacity ~= S.chrome_opacity_target
-       or S.title_opacity ~= S.title_opacity_target then
+    -- Compute tween targets and kick the ticker if anything is
+    -- out of sync. Renderers consume the *current* eased value
+    -- via `S.tween(name)`.
+    S.set_tween_target('chrome_opacity', S.chrome_visible() and 1 or 0)
+    S.set_tween_target('title_opacity',  S.metadata_visible() and 1 or 0)
+    if not S.tweens_settled() then
         ensure_fade_timer()
     end
 
-    -- Bottom chrome (transport + persistent progress) fades with
-    -- `chrome_opacity`. The thin progress line is rendered even at
-    -- zero opacity because chrome visibility itself is what toggles
-    -- its role; no extra opacity gating needed on that path.
-    ass.set_opacity(S.chrome_opacity)
-    if S.chrome_visible() or S.chrome_opacity > 0.01 then
+    local chrome_a = S.tween('chrome_opacity')
+    local title_a  = S.tween('title_opacity')
+
+    -- Bottom chrome:
+    --   * Timeline always renders (the bar collapses to a 2 px
+    --     line when `timeline_grow` settles at 0; that line
+    --     doubles as the "chrome hidden" persistent progress).
+    --   * Transport control row fades with `chrome_opacity`.
+    --
+    -- The pause flash piggy-backs on the chrome-hidden state so
+    -- it only flashes when the controls aren't already visible.
+    timeline.render_bar(out, w, h)
+    ass.set_opacity(chrome_a)
+    if S.chrome_visible() or chrome_a > 0.01 then
         transport.render(out, w, h)
     end
     ass.set_opacity(1.0)
-    if not S.chrome_visible() and S.chrome_opacity < 0.05 then
-        timeline.render_progress_line(out, w, h)
+    if not S.chrome_visible() and chrome_a < 0.05 then
         pause_flash.render(out, w, h)
     end
 
-    ass.set_opacity(S.title_opacity)
-    if S.metadata_visible() or S.title_opacity > 0.01 then
-        overlay.render_title_strip(out, w, h)
+    ass.set_opacity(title_a)
+    if S.metadata_visible() or title_a > 0.01 then
+        top_bar.render(out, w, h)
     end
     ass.set_opacity(1.0)
 
     -- The volume column rides with chrome opacity; when chrome is
     -- transiently visible via right-edge proximity or wheel grace,
     -- `volume_visible()` still gates the call entirely.
-    ass.set_opacity(S.chrome_opacity)
+    ass.set_opacity(chrome_a)
     volume.render(out, w, h)
     ass.set_opacity(1.0)
 
-    if S.props.paused_for_cache then overlay.render_buffering(out, w, h) end
-    if S.state.resume           then overlay.render_resume(out, w, h) end
-    if S.state.next_ep          then overlay.render_next_episode(out, w, h) end
-    if S.state.skip             then overlay.render_skip(out, w, h) end
+    if S.props.paused_for_cache then buffering.render(out, w, h) end
+    if S.state.resume           then resume.render(out, w, h) end
+    if S.state.next_ep          then next_episode.render(out, w, h) end
+    if S.state.skip             then skip.render(out, w, h) end
     if S.state.picker_open      then picker.render(out, w, h) end
-    if S.state.cheat_on         then overlay.render_cheatsheet(out, w, h) end
+    if S.state.cheat_on         then cheatsheet.render(out, w, h) end
     gesture.render(out, w, h)
 
     -- Keep redrawing while a ripple is still fading.

@@ -38,9 +38,15 @@ set(_kinema_mpv_script_files
     kinema/mpv/scripts/kinema-overlays/theme.lua
     kinema/mpv/scripts/kinema-overlays/state.lua
     kinema/mpv/scripts/kinema-overlays/ass.lua
+    kinema/mpv/scripts/kinema-overlays/layout.lua
     kinema/mpv/scripts/kinema-overlays/render_transport.lua
     kinema/mpv/scripts/kinema-overlays/render_timeline.lua
-    kinema/mpv/scripts/kinema-overlays/render_overlay.lua
+    kinema/mpv/scripts/kinema-overlays/render_top_bar.lua
+    kinema/mpv/scripts/kinema-overlays/render_resume.lua
+    kinema/mpv/scripts/kinema-overlays/render_next_episode.lua
+    kinema/mpv/scripts/kinema-overlays/render_skip.lua
+    kinema/mpv/scripts/kinema-overlays/render_buffering.lua
+    kinema/mpv/scripts/kinema-overlays/render_cheatsheet.lua
     kinema/mpv/scripts/kinema-overlays/render_picker.lua
     kinema/mpv/scripts/kinema-overlays/render_volume.lua
     kinema/mpv/scripts/kinema-overlays/render_chips.lua

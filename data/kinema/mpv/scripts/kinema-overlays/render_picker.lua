@@ -15,7 +15,7 @@ local KINEMA = 'main'
 local SHEET_W   = 360
 local GUTTER_Y  = 26
 local HEADER_H  = 56
-local ROW_H     = 48
+local ROW_H     = theme.picker_row_h
 local ROW_PAD_X = theme.sp4
 
 M.selected = { audio = 1, sub = 1, speed = 1, overflow = 1 }
@@ -49,7 +49,10 @@ local function build_overflow_entries()
             id = 'chapters',
             label = 'Chapters',
             hint = string.format('%d chapters', #S.props.chapters),
-            icon_cp = theme.icon.list,
+            -- `theme.icon.list` (U+E8EF) is not shipped in
+            -- `KinemaIcons.ttf`; `more_vert` renders cleanly and
+            -- reads as a generic "more" affordance.
+            icon_cp = theme.icon.more_vert,
             selected = false,
         }
     end
@@ -73,7 +76,11 @@ local function build_chapter_entries()
             id       = t,
             label    = label,
             hint     = S.fmt_time(t),
-            icon_cp  = theme.icon.list,
+            -- No leading icon for chapter rows: the timestamp
+            -- hint and "Ch N" prefix already convey the row's
+            -- purpose, and the `list` glyph isn't in the bundled
+            -- icon font.
+            icon_cp  = nil,
             selected = (i == cur_idx),
         }
     end
@@ -151,21 +158,16 @@ local function build_subtitle_entries()
     }
 end
 
--- Small horizontal pill button used inside picker extras (slider
--- step controls, delay adjust). Returns nothing; callers supply a
--- fresh x per button.
+-- Small flat button used inside picker extras (slider step
+-- controls, delay adjust). 4 px-radius hover/press halo to match
+-- the rest of the chrome; no rounded-pill backing at rest.
 local function small_btn(out, x, y, w, h, label, on_click)
-    local hover   = S.is_hover(x, y, w, h)
-    local pressed = S.is_pressed(x, y, w, h)
-    ass.pill(out, x, y, w, h, theme.fg,
-        pressed and theme.a_dim or theme.a_subtle)
-    if hover and not pressed then
-        ass.pill(out, x, y, w, h, theme.fg, theme.a_faint)
-    end
-    out[#out + 1] = ass.text(x + w / 2,
-        y + h / 2 + (pressed and 1 or 0),
-        theme.fs_label, label, theme.fg, 5)
-    S.add_zone(x, y, w, h, on_click)
+    ass.button(out, {
+        x = x, y = y, w = w, h = h,
+        label = label,
+        label_size = theme.fs_label,
+        on_click = on_click,
+    })
 end
 
 local function build_speed_entries()
@@ -186,22 +188,22 @@ local function build_speed_entries()
         local track_x = x + ROW_PAD_X
         local track_w = w - ROW_PAD_X * 2
         local track_y = y + 18
-        local track_h = 6
+        local track_h = 4
         local pct = math.max(0,
             math.min(1, (cur - 0.25) / (4.0 - 0.25)))
-        out[#out + 1] = ass.rounded_rect(track_x, track_y,
-            track_w, track_h, track_h / 2, theme.fg, theme.a_track)
+        out[#out + 1] = ass.rect(track_x, track_y,
+            track_w, track_h, theme.fg, theme.a_track)
         local fill_w = math.floor(track_w * pct)
         if fill_w > 0 then
-            out[#out + 1] = ass.rounded_rect(track_x, track_y,
-                fill_w, track_h, track_h / 2,
-                theme.accent, theme.a_opaque)
+            out[#out + 1] = ass.rect(track_x, track_y,
+                fill_w, track_h, theme.fg, theme.a_opaque)
         end
+        -- Vertical pillar thumb (matches timeline / volume).
         local thumb_x = track_x + fill_w
-        out[#out + 1] = ass.circle(thumb_x, track_y + track_h / 2,
-            7, theme.fg, theme.a_opaque)
-        out[#out + 1] = ass.circle(thumb_x, track_y + track_h / 2,
-            4, theme.accent, theme.a_opaque)
+        local pillar_h = track_h + 6
+        out[#out + 1] = ass.rect(thumb_x - 1,
+            track_y - 3, 2, pillar_h,
+            theme.fg, theme.a_opaque)
         -- Drag/click: set speed along the slider.
         S.add_zone(track_x, track_y - 12, track_w, track_h + 24, {
             on_click = function()
@@ -357,13 +359,13 @@ function M.render(out, w, h)
     local ph = h - GUTTER_Y * 2
     local pw = SHEET_W
 
-    ass.card(out, px, py, pw, ph, { gloss_alpha = theme.a_ghost })
+    ass.card(out, px, py, pw, ph, { alpha = theme.a_sheet })
     S.add_zone(px, py, pw, ph, function() end)
 
     out[#out + 1] = ass.text(px + ROW_PAD_X, py + HEADER_H / 2,
         theme.fs_title, header, theme.fg, 4)
     ass.button(out, {
-        x = px + pw - 44 - theme.sp2,
+        x = px + pw - 40 - theme.sp2,
         y = py + math.floor((HEADER_H - 40) / 2),
         w = 40, h = 40,
         icon_cp = theme.icon.close, icon_size = theme.icon_md,
@@ -372,6 +374,9 @@ function M.render(out, w, h)
             M.ensure_bindings(false)
         end,
     })
+    -- Hairline separator under the header.
+    ass.hairline(out, px + theme.sp3, py + HEADER_H,
+        pw - theme.sp3 * 2, theme.a_subtle)
 
     local extra_top_h = 0
     if opts.extra_top then
@@ -420,37 +425,43 @@ function M.render(out, w, h)
         if pressed then
             ass.surface(out, px + theme.sp2, row_y,
                 pw - theme.sp2 * 2, ROW_H, {
-                    radius = 12,
+                    radius = theme.r_btn,
                     color = theme.fg,
                     alpha = theme.a_dim,
                 })
         elseif hover then
             ass.surface(out, px + theme.sp2, row_y,
                 pw - theme.sp2 * 2, ROW_H, {
-                    radius = 12,
+                    radius = theme.r_btn,
                     color = theme.fg,
                     alpha = theme.a_faint,
                 })
         elseif keyboard_cursor then
             ass.surface(out, px + theme.sp2, row_y,
                 pw - theme.sp2 * 2, ROW_H, {
-                    radius = 12,
-                    color = theme.fg,
+                    radius = theme.r_btn,
+                    color = theme.accent,
                     alpha = theme.a_ghost,
                 })
         end
 
         if e.icon_cp then
-            out[#out + 1] = ass.icon(px + 28, row_y + ROW_H / 2,
-                theme.icon_md, e.icon_cp, theme.fg, 5,
+            out[#out + 1] = ass.icon(px + ROW_PAD_X,
+                row_y + ROW_H / 2,
+                theme.icon_sm, e.icon_cp, theme.fg, 5,
                 e.selected and theme.a_opaque or theme.a_dim)
         end
 
-        local text_x = px + ROW_PAD_X + 32
+        local text_x = px + ROW_PAD_X + 28
+        -- Two-line rows fit a 36 px tall card by tucking the
+        -- label into the upper third and the hint into the
+        -- lower third (both vertically baselined via align 4).
         if e.hint and e.hint ~= '' then
-            out[#out + 1] = ass.text(text_x, row_y + 16,
+            out[#out + 1] = ass.text(text_x,
+                row_y + math.floor(ROW_H * 0.35),
                 theme.fs_body, e.label, theme.fg, 4)
-            out[#out + 1] = ass.text(text_x, row_y + ROW_H - 14,
+            out[#out + 1] = ass.text(text_x,
+                row_y + math.floor(ROW_H * 0.72),
                 theme.fs_kicker, e.hint, theme.fg, 4, theme.a_dim)
         else
             out[#out + 1] = ass.text(text_x, row_y + ROW_H / 2,

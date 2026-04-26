@@ -130,6 +130,13 @@ function M.gradient(out, x, y, w, h, bbggrr, a_top, a_bot, steps)
     end
 end
 
+-- Flat rounded surface used by every modal / sheet / panel.
+--
+-- The previous HUD aesthetic layered a top-edge `gloss` highlight
+-- inside the surface to suggest depth. The uosc-flavoured chrome
+-- is intentionally flat, so the gloss branch (and the
+-- `opts.gloss_alpha` parameter) has been removed. Callers that
+-- used to pass `gloss_alpha` simply drop the key.
 function M.surface(out, x, y, w, h, opts)
     opts = opts or {}
     out[#out + 1] = M.rounded_rect(
@@ -137,12 +144,6 @@ function M.surface(out, x, y, w, h, opts)
         opts.radius or theme.r_surface,
         opts.color or theme.bg,
         opts.alpha or theme.a_chrome)
-    if opts.gloss_alpha then
-        out[#out + 1] = M.rounded_rect(
-            x + 1, y + 1, w - 2, math.max(2, math.floor(h * 0.45)),
-            math.max(4, (opts.radius or theme.r_surface) - 2),
-            theme.fg, opts.gloss_alpha)
-    end
 end
 
 function M.card(out, x, y, w, h, opts)
@@ -151,8 +152,25 @@ function M.card(out, x, y, w, h, opts)
         radius = opts.radius or theme.r_card,
         color = opts.color or theme.bg,
         alpha = opts.alpha or theme.a_card,
-        gloss_alpha = opts.gloss_alpha,
     })
+end
+
+-- Full-width flat strip used by the new top bar and transport
+-- control row. A square-cornered band; callers position it
+-- against an edge of the screen.
+function M.flat_strip(out, x, y, w, h, alpha, color)
+    if w <= 0 or h <= 0 then return end
+    out[#out + 1] = M.rect(x, y, w, h,
+        color or theme.bg, alpha or theme.a_panel)
+end
+
+-- 1 px hairline used as a separator below the top bar / picker
+-- header. Defaults to the foreground colour at a subtle alpha so
+-- it reads against any backing.
+function M.hairline(out, x, y, w, alpha, color)
+    if w <= 0 then return end
+    out[#out + 1] = M.rect(x, y, w, 1,
+        color or theme.fg, alpha or theme.a_subtle)
 end
 
 function M.pill(out, x, y, w, h, bbggrr, alpha)
