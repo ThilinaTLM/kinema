@@ -6,48 +6,37 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import dev.tlmtech.kinema.player
 
+import "../components"
+
 /**
- * "Resume from X:XX" / "Start over" prompt. Centred dialog drawn
- * directly in-scene (no Popup) so the surrounding chrome stays
- * visible.
+ * "Resume from X:XX" / "Start over" prompt. Centred in-scene panel
+ * (no Popup) so the surrounding chrome stays visible underneath.
  */
 Item {
     id: root
-    // QML's `int` is 32-bit; fine for any realistic playback offset
-    // (≈ 68 years at 1 s resolution).
     property int seconds: 0
     signal resumeClicked()
     signal startOverClicked()
 
     width: 460
-    height: 180
+    height: 200
     visible: opacity > 0
     opacity: visible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
 
-    Rectangle {
+    PopupPanel {
         anchors.fill: parent
-        radius: Theme.radiusLg
-        color: Theme.surfaceElev
+        title: qsTr("Resume playback?")
+        closable: false
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: Theme.spacingLg
             spacing: Theme.spacingLg
 
-            Text {
+            Label {
                 Layout.fillWidth: true
-                text: qsTr("Resume where you left off?")
-                color: Theme.foreground
-                font.pixelSize: Theme.fontSizeLg
-                font.weight: Font.DemiBold
-                horizontalAlignment: Text.AlignHCenter
-            }
-            Text {
-                Layout.fillWidth: true
-                text: qsTr("at ") + _fmt(root.seconds)
+                text: qsTr("at %1").arg(_fmt(root.seconds))
                 color: Theme.foregroundDim
-                font.pixelSize: Theme.fontSize
                 horizontalAlignment: Text.AlignHCenter
                 function _fmt(t) {
                     if (!isFinite(t) || t < 0) t = 0;
@@ -61,19 +50,20 @@ Item {
                         : pad(m) + ":" + pad(s);
                 }
             }
+            Item { Layout.fillHeight: true }
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
 
                 Item { Layout.fillWidth: true }
 
-                Button {
+                AccentButton {
                     text: qsTr("Start over")
                     onClicked: root.startOverClicked()
                 }
-                Button {
+                AccentButton {
                     text: qsTr("Resume")
-                    highlighted: true
+                    primary: true
                     onClicked: root.resumeClicked()
                 }
             }

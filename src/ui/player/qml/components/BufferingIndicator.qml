@@ -56,7 +56,6 @@ Item {
         anchors.centerIn: parent
         text: root.percent + "%"
         color: Theme.foreground
-        font.pixelSize: Theme.fontSize
         font.weight: Font.Medium
         visible: root.percent > 0
     }

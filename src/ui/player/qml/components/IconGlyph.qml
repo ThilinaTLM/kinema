@@ -144,6 +144,26 @@ Item {
         Rectangle { x: 17; y: 13; width: 2; height: 6; color: parent.c }
     }
 
+    // X: simple cross used by close pills.
+    Item {
+        anchors.fill: parent
+        visible: root.kind === "x"
+        Rectangle {
+            anchors.centerIn: parent
+            width: 14; height: 2; radius: 1
+            color: root.color
+            rotation: 45
+            antialiasing: true
+        }
+        Rectangle {
+            anchors.centerIn: parent
+            width: 14; height: 2; radius: 1
+            color: root.color
+            rotation: -45
+            antialiasing: true
+        }
+    }
+
     // Mute: speaker with X
     Item {
         anchors.fill: parent

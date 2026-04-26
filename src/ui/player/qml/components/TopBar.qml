@@ -10,6 +10,12 @@ import dev.tlmtech.kinema.player
  * Title strip across the top of the video. Auto-hides with the rest
  * of the chrome via `chromeVisible`. Title / subtitle bind directly
  * to PlayerViewModel; chips render under the subtitle when present.
+ *
+ * The right-hand cell is the player's info button: it opens the
+ * shortcuts + stream-info overlay. The previous close X has been
+ * removed — Esc and the window-manager X cover that role, and a
+ * single-purpose info affordance is more discoverable in
+ * fullscreen.
  */
 Rectangle {
     id: root
@@ -17,7 +23,7 @@ Rectangle {
     color: "transparent"
 
     property bool chromeVisible: true
-    signal closeClicked()
+    signal infoClicked()
 
     opacity: chromeVisible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
@@ -50,8 +56,7 @@ Rectangle {
                 Layout.fillWidth: true
                 text: playerVm.mediaTitle
                 color: Theme.foreground
-                font.pixelSize: Theme.fontSizeLg
-                font.weight: Font.DemiBold
+                font: Theme.titleFont
                 elide: Text.ElideRight
                 visible: text.length > 0
             }
@@ -59,7 +64,7 @@ Rectangle {
                 Layout.fillWidth: true
                 text: playerVm.mediaSubtitle
                 color: Theme.foregroundDim
-                font.pixelSize: Theme.fontSize
+                font: Theme.smallFont
                 elide: Text.ElideRight
                 visible: text.length > 0
             }
@@ -70,50 +75,11 @@ Rectangle {
             }
         }
 
-        // Close button. The window-manager X is still there, but the
-        // overlay close keeps fullscreen-mode discoverability honest.
-        Item {
-            Layout.preferredWidth: Theme.iconButton
-            Layout.preferredHeight: Theme.iconButton
-
-            Rectangle {
-                anchors.fill: parent
-                radius: width / 2
-                color: closeArea.containsMouse
-                    ? Theme.surfaceElev : "transparent"
-                Behavior on color {
-                    ColorAnimation { duration: Theme.fadeMs }
-                }
-            }
-            // Plain X glyph drawn from two crossed lines for a
-            // chrome-pure look without an icon font.
-            Item {
-                anchors.centerIn: parent
-                width: 16; height: 16
-                Rectangle {
-                    anchors.centerIn: parent
-                    width: parent.width
-                    height: 2
-                    color: Theme.foreground
-                    rotation: 45
-                    antialiasing: true
-                }
-                Rectangle {
-                    anchors.centerIn: parent
-                    width: parent.width
-                    height: 2
-                    color: Theme.foreground
-                    rotation: -45
-                    antialiasing: true
-                }
-            }
-            MouseArea {
-                id: closeArea
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: root.closeClicked()
-                cursorShape: Qt.PointingHandCursor
-            }
+        IconButton {
+            Layout.alignment: Qt.AlignVCenter
+            iconKind: "info"
+            checked: playerVm.infoOverlayVisible
+            onClicked: root.infoClicked()
         }
     }
 }

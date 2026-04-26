@@ -6,6 +6,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import dev.tlmtech.kinema.player
 
+import "../components"
+
 /**
  * Hard-coded speed picker. Values mirror the previous Lua chrome.
  */
@@ -17,70 +19,41 @@ Popup {
     modal: true
     padding: 0
     width: 280
-    height: list.contentHeight + 60
+    height: list.contentHeight + 96
 
     readonly property var values: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
-    background: Rectangle {
-        color: Theme.surfaceElev
-        radius: Theme.radiusLg
+    background: Item {}
+
+    enter: Transition {
+        ParallelAnimation {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.fadeMs }
+            NumberAnimation { property: "scale";   from: 0.98; to: 1; duration: Theme.fadeMs }
+        }
+    }
+    exit: Transition {
+        NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.fadeMs }
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Theme.spacing
-        spacing: 2
-
-        Text {
-            Layout.fillWidth: true
-            Layout.leftMargin: Theme.spacing
-            text: qsTr("Playback speed")
-            color: Theme.foreground
-            font.pixelSize: Theme.fontSizeLg
-            font.weight: Font.DemiBold
-        }
+    contentItem: PopupPanel {
+        title: qsTr("Playback speed")
+        onCloseRequested: root.close()
 
         ListView {
             id: list
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            anchors.fill: parent
             clip: true
-            model: root.values
             spacing: 2
+            model: root.values
+            boundsBehavior: Flickable.StopAtBounds
 
-            delegate: Rectangle {
-                width: list.width
-                height: 40
-                radius: 6
-                color: rowMouse.containsMouse
-                    ? Qt.rgba(1, 1, 1, 0.06) : "transparent"
-                Behavior on color { ColorAnimation { duration: Theme.fadeMs } }
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Theme.spacing
-                    anchors.rightMargin: Theme.spacing
-                    Text {
-                        Layout.preferredWidth: 18
-                        text: Math.abs(root.currentSpeed - modelData) < 0.01
-                            ? "\u2713" : ""
-                        color: Theme.accent
-                        font.pixelSize: Theme.fontSizeLg
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: modelData + "x"
-                        color: Theme.foreground
-                        font.pixelSize: Theme.fontSize
-                    }
-                }
-                MouseArea {
-                    id: rowMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: { root.picked(modelData); root.close(); }
-                }
+            delegate: PickerItem {
+                width: ListView.view ? ListView.view.width : 0
+                label: modelData + "x"
+                trailing: Math.abs(modelData - 1.0) < 0.01
+                    ? qsTr("Normal") : ""
+                selected: Math.abs(root.currentSpeed - modelData) < 0.01
+                onClicked: { root.picked(modelData); root.close(); }
             }
         }
     }

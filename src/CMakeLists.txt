@@ -15,7 +15,7 @@ set(kinema_core_SRCS
     config/SearchSettings.cpp
     config/TorrentioSettings.cpp
 
-    core/CheatSheetText.cpp
+    core/ShortcutSections.cpp
     core/Database.cpp
     core/DateFormat.cpp
     core/DateWindow.cpp
@@ -195,12 +195,16 @@ if(KINEMA_ENABLE_MPV_EMBED)
         QML_FILES
             ui/player/qml/PlayerScene.qml
             ui/player/qml/Theme.qml
+            ui/player/qml/components/AccentButton.qml
             ui/player/qml/components/BufferingIndicator.qml
             ui/player/qml/components/CenterFlash.qml
+            ui/player/qml/components/IconButton.qml
             ui/player/qml/components/IconGlyph.qml
-            ui/player/qml/components/KeyboardCheatSheet.qml
             ui/player/qml/components/MediaChips.qml
+            ui/player/qml/components/PickerItem.qml
             ui/player/qml/components/PlayerInputs.qml
+            ui/player/qml/components/PopupPanel.qml
+            ui/player/qml/components/SectionHeader.qml
             ui/player/qml/components/SeekBar.qml
             ui/player/qml/components/TopBar.qml
             ui/player/qml/components/TransportBar.qml
@@ -209,6 +213,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
             ui/player/qml/pickers/AudioPicker.qml
             ui/player/qml/pickers/SpeedPicker.qml
             ui/player/qml/pickers/SubtitlePicker.qml
+            ui/player/qml/prompts/InfoOverlay.qml
             ui/player/qml/prompts/NextEpisodeBanner.qml
             ui/player/qml/prompts/ResumePrompt.qml
             ui/player/qml/prompts/SkipChapterPill.qml

@@ -40,7 +40,7 @@ Item {
         mpv.paused
         || playerVm.resumeVisible
         || playerVm.nextEpisodeVisible
-        || playerVm.cheatSheetVisible
+        || playerVm.infoOverlayVisible
         || mpv.buffering
         || audioPicker.opened
         || subtitlePicker.opened
@@ -156,7 +156,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         chromeVisible: root.chromeVisible
-        onCloseClicked: playerVm.requestClose()
+        onInfoClicked: playerVm.toggleInfoOverlay()
     }
 
     TransportBar {
@@ -166,7 +166,6 @@ Item {
         anchors.bottom: parent.bottom
         chromeVisible: root.chromeVisible
         mpv: mpv
-        onCheatSheetRequested: playerVm.toggleCheatSheet()
         onAudioPickerRequested: audioPicker.open()
         onSubtitlePickerRequested: subtitlePicker.open()
         onSpeedPickerRequested: speedPicker.open()
@@ -242,12 +241,12 @@ Item {
         onCancelClicked: playerVm.requestNextEpisodeCancel()
     }
 
-    // ---- Layer 8: cheat sheet ---------------------------------------
-    KeyboardCheatSheet {
-        anchors.centerIn: parent
-        visible: playerVm.cheatSheetVisible
-        text: playerVm.cheatSheetText
-        onCloseRequested: playerVm.setCheatSheetVisible(false)
+    // ---- Layer 8: info overlay --------------------------------------
+    // Combines the keyboard cheat sheet and "about this stream"
+    // details. Driven by `playerVm.infoOverlayVisible`; opened from
+    // the top-bar info button and the `?` shortcut.
+    InfoOverlay {
+        id: infoOverlay
     }
 
     // ---- Layer 9: input handling -------------------------------------
@@ -260,7 +259,7 @@ Item {
         onTogglePauseRequested: mpv.cyclePause()
         onToggleFullscreenRequested: playerVm.requestToggleFullscreen()
         onCloseRequested: playerVm.requestClose()
-        onCheatSheetRequested: playerVm.toggleCheatSheet()
+        onInfoOverlayRequested: playerVm.toggleInfoOverlay()
     }
 
     // ---- Pickers (modal popups) --------------------------------------

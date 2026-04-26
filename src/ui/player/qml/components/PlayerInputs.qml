@@ -28,7 +28,7 @@ Item {
     signal togglePauseRequested()
     signal toggleFullscreenRequested()
     signal closeRequested()
-    signal cheatSheetRequested()
+    signal infoOverlayRequested()
 
     focus: true
 
@@ -131,7 +131,7 @@ Item {
         case Qt.Key_Slash: // some layouts emit / for ?
             if (event.modifiers & Qt.ShiftModifier
                 || event.key === Qt.Key_Question) {
-                root.cheatSheetRequested();
+                root.infoOverlayRequested();
                 event.accepted = true;
             }
             break;

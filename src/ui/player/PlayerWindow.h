@@ -139,7 +139,8 @@ private:
     void saveGeometryToConfig();
     void saveVolumeToConfig();
     void pushMediaChips();
-    void pushCheatSheetText();
+    void pushShortcutSections();
+    void pushStreamInfo();
 
     config::AppearanceSettings& m_appearanceSettings;
     config::PlayerSettings& m_playerSettings;
@@ -155,6 +156,10 @@ private:
 
     bool m_hasEverLoaded = false;
     bool m_geometryApplied = false;
+
+    // Last-loaded source context, mirrored into
+    // `PlayerViewModel::streamInfo` whenever video stats refresh.
+    QUrl m_currentSourceUrl;
 };
 
 } // namespace kinema::ui::player

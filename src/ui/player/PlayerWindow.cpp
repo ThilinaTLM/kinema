@@ -7,7 +7,7 @@
 
 #include "config/AppearanceSettings.h"
 #include "config/PlayerSettings.h"
-#include "core/CheatSheetText.h"
+#include "core/ShortcutSections.h"
 #include "core/MediaChips.h"
 #include "ui/player/MpvVideoItem.h"
 #include "ui/player/PlayerViewModel.h"
@@ -212,10 +212,12 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
             connect(video, &MpvVideoItem::videoStatsChanged,
                 this, [this](const MpvVideoItem::VideoStats&) {
                     pushMediaChips();
+                    pushStreamInfo();
                 });
             connect(video, &MpvVideoItem::trackListChanged,
                 this, [this](const core::tracks::TrackList&) {
                     pushMediaChips();
+                    pushStreamInfo();
                 });
         } else {
             qCWarning(KINEMA)
@@ -267,12 +269,18 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
                 ? QStringLiteral("series")
                 : QStringLiteral("movie"));
         pushMediaChips();
-        pushCheatSheetText();
+        pushShortcutSections();
     }
+
+    m_currentSourceUrl = url;
 
     if (m_video) {
         m_video->setMediaTitle(ctx.title);
         m_video->loadFile(url, startSec);
+    }
+
+    if (m_viewModel) {
+        pushStreamInfo();
     }
 
     show();
@@ -511,11 +519,49 @@ void PlayerWindow::onChromeVisibleChanged()
     }
 }
 
-void PlayerWindow::pushCheatSheetText()
+void PlayerWindow::pushShortcutSections()
 {
     if (m_viewModel) {
-        m_viewModel->setCheatSheetText(core::cheatsheet::render());
+        m_viewModel->setShortcutSections(
+            core::shortcuts::renderSections());
     }
+}
+
+void PlayerWindow::pushStreamInfo()
+{
+    if (!m_viewModel) {
+        return;
+    }
+    QVariantMap info;
+    if (m_video) {
+        const auto stats = m_video->currentStats();
+        info[QStringLiteral("videoCodec")]    = stats.videoCodec;
+        info[QStringLiteral("audioCodec")]    = stats.audioCodec;
+        info[QStringLiteral("width")]         = stats.width;
+        info[QStringLiteral("height")]        = stats.height;
+        info[QStringLiteral("fps")]           = stats.fps;
+        info[QStringLiteral("audioChannels")] = stats.audioChannels;
+        info[QStringLiteral("hdr")]
+            = !stats.hdrPrimaries.isEmpty()
+                || !stats.hdrGamma.isEmpty();
+        int audioCount = 0;
+        int subCount = 0;
+        for (const auto& t : m_video->tracks()) {
+            if (t.type == QLatin1String("audio")) ++audioCount;
+            else if (t.type == QLatin1String("sub")) ++subCount;
+        }
+        info[QStringLiteral("audioTrackCount")]    = audioCount;
+        info[QStringLiteral("subtitleTrackCount")] = subCount;
+    }
+    info[QStringLiteral("sourceUrl")] = m_currentSourceUrl.toString();
+    // Best-effort container: the path's suffix is what the user
+    // sees in Settings and is enough for an "about" panel until
+    // we expose mpv's `file-format` property.
+    QString container = m_currentSourceUrl.fileName();
+    const int dot = container.lastIndexOf(QLatin1Char('.'));
+    container = (dot >= 0 ? container.mid(dot + 1).toUpper() : QString());
+    info[QStringLiteral("container")] = container;
+    m_viewModel->setStreamInfo(info);
 }
 
 } // namespace kinema::ui::player

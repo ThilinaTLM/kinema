@@ -33,7 +33,8 @@ Item {
                     anchors.centerIn: parent
                     text: modelData
                     color: Theme.foreground
-                    font.pixelSize: Theme.fontSizeSm
+                    font.family: Theme.smallFont.family
+                    font.pointSize: Theme.smallFont.pointSize
                     font.weight: Font.Medium
                 }
             }

@@ -6,6 +6,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import dev.tlmtech.kinema.player
 
+import "../components"
+
 /**
  * Subtitle picker. Includes a synthetic "Off" row at the top whose
  * selected state binds to `currentId === -1`.
@@ -19,101 +21,55 @@ Popup {
     modal: true
     padding: 0
     width: 360
-    height: Math.min(480, list.contentHeight + 100)
+    height: Math.min(480, list.contentHeight + 132)
 
-    background: Rectangle {
-        color: Theme.surfaceElev
-        radius: Theme.radiusLg
+    background: Item {}
+
+    enter: Transition {
+        ParallelAnimation {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.fadeMs }
+            NumberAnimation { property: "scale";   from: 0.98; to: 1; duration: Theme.fadeMs }
+        }
+    }
+    exit: Transition {
+        NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.fadeMs }
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Theme.spacing
-        spacing: 2
+    contentItem: PopupPanel {
+        title: qsTr("Subtitles")
+        onCloseRequested: root.close()
 
-        Text {
-            Layout.fillWidth: true
-            Layout.leftMargin: Theme.spacing
-            text: qsTr("Subtitles")
-            color: Theme.foreground
-            font.pixelSize: Theme.fontSizeLg
-            font.weight: Font.DemiBold
-        }
-
-        // Synthetic "Off" row.
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 44
-            color: offMouse.containsMouse
-                ? Qt.rgba(1, 1, 1, 0.06) : "transparent"
-            radius: 6
-            Behavior on color { ColorAnimation { duration: Theme.fadeMs } }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: Theme.spacing
-                Text {
-                    Layout.preferredWidth: 18
-                    text: root.currentId === -1 ? "\u2713" : ""
-                    color: Theme.accent
-                    font.pixelSize: Theme.fontSizeLg
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: qsTr("Off")
-                    color: Theme.foreground
-                    font.pixelSize: Theme.fontSize
-                }
-            }
-            MouseArea {
-                id: offMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: { root.picked(-1); root.close(); }
-            }
-        }
-
-        ListView {
-            id: list
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            clip: true
-            model: root.model
+        ColumnLayout {
+            anchors.fill: parent
             spacing: 2
 
-            delegate: Rectangle {
-                width: list.width
-                height: 44
-                color: rowMouse.containsMouse
-                    ? Qt.rgba(1, 1, 1, 0.06) : "transparent"
-                radius: 6
-                Behavior on color { ColorAnimation { duration: Theme.fadeMs } }
+            // Synthetic "Off" row pinned at the top.
+            PickerItem {
+                Layout.fillWidth: true
+                label: qsTr("Off")
+                selected: root.currentId === -1
+                onClicked: { root.picked(-1); root.close(); }
+            }
 
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Theme.spacing
-                    anchors.rightMargin: Theme.spacing
-                    Text {
-                        Layout.preferredWidth: 18
-                        text: root.currentId === trackId ? "\u2713" : ""
-                        color: Theme.accent
-                        font.pixelSize: Theme.fontSizeLg
+            ListView {
+                id: list
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 2
+                model: root.model
+                boundsBehavior: Flickable.StopAtBounds
+
+                delegate: PickerItem {
+                    width: ListView.view ? ListView.view.width : 0
+                    label: forced
+                        ? title + "  \u2014  " + qsTr("forced")
+                        : title
+                    selected: root.currentId === trackId
+                    onClicked: {
+                        root.picked(trackId);
+                        root.close();
                     }
-                    Text {
-                        Layout.fillWidth: true
-                        text: forced ? title + " \u2014 " + qsTr("forced") : title
-                        color: Theme.foreground
-                        font.pixelSize: Theme.fontSize
-                        elide: Text.ElideRight
-                    }
-                }
-                MouseArea {
-                    id: rowMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: { root.picked(trackId); root.close(); }
                 }
             }
         }

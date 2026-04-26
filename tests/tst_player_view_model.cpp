@@ -16,7 +16,7 @@ private Q_SLOTS:
     void resumeAcceptSignal();
     void nextEpisodeBannerLifecycle();
     void skipPillLifecycle();
-    void cheatSheetToggle();
+    void infoOverlayToggle();
     void mediaContextEmitsOnce();
     void chipsListChange();
     void noActionWhenAlreadyVisible();
@@ -104,19 +104,19 @@ void TestPlayerViewModel::skipPillLifecycle()
     QVERIFY(!vm.skipVisible());
 }
 
-void TestPlayerViewModel::cheatSheetToggle()
+void TestPlayerViewModel::infoOverlayToggle()
 {
     PlayerViewModel vm;
-    QVERIFY(!vm.cheatSheetVisible());
-    QSignalSpy spy(&vm, &PlayerViewModel::cheatSheetVisibleChanged);
+    QVERIFY(!vm.infoOverlayVisible());
+    QSignalSpy spy(&vm, &PlayerViewModel::infoOverlayVisibleChanged);
 
-    vm.toggleCheatSheet();
-    QVERIFY(vm.cheatSheetVisible());
-    vm.toggleCheatSheet();
-    QVERIFY(!vm.cheatSheetVisible());
+    vm.toggleInfoOverlay();
+    QVERIFY(vm.infoOverlayVisible());
+    vm.toggleInfoOverlay();
+    QVERIFY(!vm.infoOverlayVisible());
     QCOMPARE(spy.count(), 2);
 
-    vm.setCheatSheetVisible(false);
+    vm.setInfoOverlayVisible(false);
     QCOMPARE(spy.count(), 2); // no-op when already hidden
 }
 

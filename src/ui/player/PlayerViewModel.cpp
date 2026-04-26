@@ -88,13 +88,22 @@ void PlayerViewModel::setMediaChips(const QStringList& chips)
     Q_EMIT mediaChipsChanged();
 }
 
-void PlayerViewModel::setCheatSheetText(const QString& text)
+void PlayerViewModel::setShortcutSections(const QVariantList& sections)
 {
-    if (m_cheatSheetText == text) {
+    if (m_shortcutSections == sections) {
         return;
     }
-    m_cheatSheetText = text;
-    Q_EMIT cheatSheetTextChanged();
+    m_shortcutSections = sections;
+    Q_EMIT shortcutSectionsChanged();
+}
+
+void PlayerViewModel::setStreamInfo(const QVariantMap& info)
+{
+    if (m_streamInfo == info) {
+        return;
+    }
+    m_streamInfo = info;
+    Q_EMIT streamInfoChanged();
 }
 
 void PlayerViewModel::showResume(qint64 seconds)
@@ -191,18 +200,18 @@ void PlayerViewModel::hideSkip()
     Q_EMIT skipVisibleChanged();
 }
 
-void PlayerViewModel::toggleCheatSheet()
+void PlayerViewModel::toggleInfoOverlay()
 {
-    setCheatSheetVisible(!m_cheatSheetVisible);
+    setInfoOverlayVisible(!m_infoOverlayVisible);
 }
 
-void PlayerViewModel::setCheatSheetVisible(bool on)
+void PlayerViewModel::setInfoOverlayVisible(bool on)
 {
-    if (m_cheatSheetVisible == on) {
+    if (m_infoOverlayVisible == on) {
         return;
     }
-    m_cheatSheetVisible = on;
-    Q_EMIT cheatSheetVisibleChanged();
+    m_infoOverlayVisible = on;
+    Q_EMIT infoOverlayVisibleChanged();
 }
 
 // ---- QML-side actions ---------------------------------------------------

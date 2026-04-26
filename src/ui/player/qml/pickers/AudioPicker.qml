@@ -6,6 +6,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import dev.tlmtech.kinema.player
 
+import "../components"
+
 Popup {
     id: root
     property var model: null
@@ -15,76 +17,42 @@ Popup {
     modal: true
     padding: 0
     width: 360
-    height: Math.min(480, list.contentHeight + 64)
+    height: Math.min(480, list.contentHeight + 96)
 
-    background: Rectangle {
-        color: Theme.surfaceElev
-        radius: Theme.radiusLg
-    }
+    // PopupPanel paints the panel chrome (radius, border, shadow,
+    // header). Setting the background to a transparent Item lets it
+    // show through.
+    background: Item {}
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.fadeMs }
+        ParallelAnimation {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.fadeMs }
+            NumberAnimation { property: "scale";   from: 0.98; to: 1; duration: Theme.fadeMs }
+        }
+    }
+    exit: Transition {
+        NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.fadeMs }
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Theme.spacing
-        spacing: Theme.spacing
-
-        Text {
-            Layout.fillWidth: true
-            Layout.leftMargin: Theme.spacing
-            text: qsTr("Audio track")
-            color: Theme.foreground
-            font.pixelSize: Theme.fontSizeLg
-            font.weight: Font.DemiBold
-        }
+    contentItem: PopupPanel {
+        title: qsTr("Audio track")
+        onCloseRequested: root.close()
 
         ListView {
+            anchors.fill: parent
             id: list
-            Layout.fillWidth: true
-            Layout.fillHeight: true
             clip: true
-            model: root.model
             spacing: 2
+            model: root.model
+            boundsBehavior: Flickable.StopAtBounds
 
-            delegate: Rectangle {
-                width: list.width
-                height: 44
-                color: rowMouse.containsMouse
-                    ? Qt.rgba(1, 1, 1, 0.06) : "transparent"
-                radius: 6
-                Behavior on color { ColorAnimation { duration: Theme.fadeMs } }
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Theme.spacing
-                    anchors.rightMargin: Theme.spacing
-
-                    Text {
-                        Layout.preferredWidth: 18
-                        text: root.currentId === trackId ? "\u2713" : ""
-                        color: Theme.accent
-                        font.pixelSize: Theme.fontSizeLg
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: title
-                        color: Theme.foreground
-                        font.pixelSize: Theme.fontSize
-                        elide: Text.ElideRight
-                    }
-                }
-
-                MouseArea {
-                    id: rowMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.picked(trackId);
-                        root.close();
-                    }
+            delegate: PickerItem {
+                width: ListView.view ? ListView.view.width : 0
+                label: title
+                selected: root.currentId === trackId
+                onClicked: {
+                    root.picked(trackId);
+                    root.close();
                 }
             }
         }

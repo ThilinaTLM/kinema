@@ -14,13 +14,15 @@ import dev.tlmtech.kinema.player
  * Auto-hides via `chromeVisible`. Owns the seek-bar drag-to-seek
  * and emits picker-open requests upward so the modal popups remain
  * scene-level (they overlay everything else).
+ *
+ * The info button used to live here; it has moved to the top bar.
+ * Buttons share the round-icon idiom via `IconButton.qml`.
  */
 Item {
     id: root
     property var mpv: null
     property bool chromeVisible: true
 
-    signal cheatSheetRequested()
     signal audioPickerRequested()
     signal subtitlePickerRequested()
     signal speedPickerRequested()
@@ -31,11 +33,8 @@ Item {
     opacity: chromeVisible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
 
-    // Stop intercepting hover / clicks once fully transparent so
-    // invisible buttons don't catch the cursor on its way out.
     visible: opacity > 0.001
 
-    // Gradient backdrop, like the top bar.
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
@@ -71,9 +70,7 @@ Item {
             Layout.preferredHeight: Theme.iconButton
             spacing: Theme.spacing
 
-            // Play / pause
             IconButton {
-                id: playPause
                 iconKind: root.mpv && root.mpv.paused ? "play" : "pause"
                 onClicked: if (root.mpv) root.mpv.cyclePause()
             }
@@ -82,8 +79,7 @@ Item {
             Text {
                 Layout.alignment: Qt.AlignVCenter
                 color: Theme.foreground
-                font.pixelSize: Theme.fontSize
-                font.family: "Monospace"
+                font: Theme.monoFont
                 text: {
                     const pos = root.mpv ? Math.max(0, root.mpv.position) : 0;
                     const dur = root.mpv ? Math.max(0, root.mpv.duration) : 0;
@@ -104,7 +100,6 @@ Item {
 
             Item { Layout.fillWidth: true }
 
-            // Volume control (compact)
             VolumeControl {
                 Layout.preferredWidth: 140
                 Layout.preferredHeight: Theme.iconButton
@@ -118,8 +113,6 @@ Item {
                 }
             }
 
-            // Tracks / speed buttons. Only show track buttons when
-            // there's something to pick.
             IconButton {
                 iconKind: "audio"
                 visible: playerVm.audioTracks.count > 0
@@ -135,40 +128,9 @@ Item {
                 onClicked: root.speedPickerRequested()
             }
             IconButton {
-                iconKind: "info"
-                onClicked: root.cheatSheetRequested()
-            }
-            IconButton {
                 iconKind: "fullscreen"
                 onClicked: root.fullscreenToggled()
             }
-        }
-    }
-
-    // Local component: tiny icon button used everywhere in the
-    // transport row. Each `iconKind` resolves to a Shape inside.
-    component IconButton: Rectangle {
-        id: btn
-        property string iconKind
-        signal clicked()
-
-        Layout.preferredWidth: Theme.iconButton
-        Layout.preferredHeight: Theme.iconButton
-        radius: width / 2
-        color: ma.containsMouse ? Theme.surfaceElev : "transparent"
-        Behavior on color { ColorAnimation { duration: Theme.fadeMs } }
-
-        IconGlyph {
-            anchors.centerIn: parent
-            kind: btn.iconKind
-        }
-
-        MouseArea {
-            id: ma
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: btn.clicked()
         }
     }
 }

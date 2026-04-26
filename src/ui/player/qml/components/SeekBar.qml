@@ -86,7 +86,7 @@ Item {
         width: root._hover ? 16 : 0
         height: width
         radius: width / 2
-        color: Theme.accentBright
+        color: Theme.accentHover
         anchors.verticalCenter: trackRow.verticalCenter
         x: trackRow.width * root._ratio - width / 2
         Behavior on width { NumberAnimation { duration: Theme.growMs } }
@@ -108,8 +108,7 @@ Item {
             id: tooltipText
             anchors.centerIn: parent
             color: Theme.foreground
-            font.pixelSize: Theme.fontSizeSm
-            font.family: "Monospace"
+            font: Theme.monoSmallFont
             text: {
                 if (root.duration <= 0) return "";
                 const t = root.duration *

@@ -24,15 +24,14 @@ Item {
         width: pillText.implicitWidth + 28
         height: 36
         radius: height / 2
-        color: pillArea.containsMouse ? Theme.accentBright : Theme.accent
+        color: pillArea.containsMouse ? Theme.accentHover : Theme.accent
         Behavior on color { ColorAnimation { duration: Theme.fadeMs } }
 
         Text {
             id: pillText
             anchors.centerIn: parent
             text: root.label
-            color: "#0D0F12"
-            font.pixelSize: Theme.fontSize
+            color: Theme.background
             font.weight: Font.DemiBold
         }
 

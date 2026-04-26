@@ -13,6 +13,8 @@
 #include <QPointer>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 namespace kinema::ui::player {
@@ -91,10 +93,20 @@ class PlayerViewModel : public QObject
     Q_PROPERTY(qint64 skipEndSec READ skipEndSec
         NOTIFY skipEndSecChanged)
 
-    Q_PROPERTY(bool cheatSheetVisible READ cheatSheetVisible
-        NOTIFY cheatSheetVisibleChanged)
-    Q_PROPERTY(QString cheatSheetText READ cheatSheetText
-        NOTIFY cheatSheetTextChanged)
+    // ---- Info overlay (keyboard shortcuts + stream details) ---------
+    // The overlay collapses two things the user wants discoverable
+    // without leaving the player: the keyboard shortcut cheat sheet
+    // (sectioned, populated by `core::shortcuts::renderSections`)
+    // and an "about this stream" map populated from
+    // `MpvVideoItem::VideoStats` plus the load context. QVariantList
+    // / QVariantMap is enough for ~16 static rows + a flat dict;
+    // a full QAbstractListModel would be overkill.
+    Q_PROPERTY(bool infoOverlayVisible READ infoOverlayVisible
+        NOTIFY infoOverlayVisibleChanged)
+    Q_PROPERTY(QVariantList shortcutSections READ shortcutSections
+        NOTIFY shortcutSectionsChanged)
+    Q_PROPERTY(QVariantMap streamInfo READ streamInfo
+        NOTIFY streamInfoChanged)
 
 public:
     explicit PlayerViewModel(QObject* parent = nullptr);
@@ -138,18 +150,20 @@ public:
     qint64 skipStartSec() const noexcept { return m_skipStartSec; }
     qint64 skipEndSec() const noexcept { return m_skipEndSec; }
 
-    bool cheatSheetVisible() const noexcept
+    bool infoOverlayVisible() const noexcept
     {
-        return m_cheatSheetVisible;
+        return m_infoOverlayVisible;
     }
-    QString cheatSheetText() const { return m_cheatSheetText; }
+    QVariantList shortcutSections() const { return m_shortcutSections; }
+    QVariantMap streamInfo() const { return m_streamInfo; }
 
 public Q_SLOTS:
     // Slots driven by `PlayerWindow` (forwarding from controllers).
     void setMediaContext(const QString& title,
         const QString& subtitle, const QString& kind);
     void setMediaChips(const QStringList& chips);
-    void setCheatSheetText(const QString& text);
+    void setShortcutSections(const QVariantList& sections);
+    void setStreamInfo(const QVariantMap& info);
 
     void showResume(qint64 seconds);
     void hideResume();
@@ -163,8 +177,8 @@ public Q_SLOTS:
         qint64 startSec, qint64 endSec);
     void hideSkip();
 
-    void toggleCheatSheet();
-    void setCheatSheetVisible(bool on);
+    void toggleInfoOverlay();
+    void setInfoOverlayVisible(bool on);
 
     // Slots invoked by QML (button clicks, picker selections). Each
     // emits a matching signal `PlayerWindow` re-emits on its own
@@ -199,8 +213,9 @@ Q_SIGNALS:
     void skipLabelChanged();
     void skipStartSecChanged();
     void skipEndSecChanged();
-    void cheatSheetVisibleChanged();
-    void cheatSheetTextChanged();
+    void infoOverlayVisibleChanged();
+    void shortcutSectionsChanged();
+    void streamInfoChanged();
 
     // User-action signals re-emitted by `PlayerWindow`. The eight
     // signals `PlaybackController` consumes drive resume, skip,
@@ -251,8 +266,9 @@ private:
     qint64 m_skipStartSec = 0;
     qint64 m_skipEndSec = 0;
 
-    bool m_cheatSheetVisible = false;
-    QString m_cheatSheetText;
+    bool m_infoOverlayVisible = false;
+    QVariantList m_shortcutSections;
+    QVariantMap m_streamInfo;
 };
 
 } // namespace kinema::ui::player

@@ -6,6 +6,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import dev.tlmtech.kinema.player
 
+import "../components"
+
 /**
  * Bottom-right card that previews the next episode and counts down
  * to auto-advance. The countdown is owned by `PlaybackController`
@@ -20,62 +22,55 @@ Item {
     signal acceptClicked()
     signal cancelClicked()
 
-    width: 360
-    height: 130
+    width: 380
+    height: 150
     visible: opacity > 0
     opacity: visible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
 
-    Rectangle {
+    PopupPanel {
         anchors.fill: parent
-        radius: Theme.radiusLg
-        color: Theme.surfaceElev
+        title: qsTr("Up next")
+        closable: false
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: Theme.spacing
-            spacing: 2
+            spacing: Theme.spacingXs
 
-            Text {
-                Layout.fillWidth: true
-                text: qsTr("Up next")
-                color: Theme.accent
-                font.pixelSize: Theme.fontSizeSm
-                font.weight: Font.Bold
-            }
-            Text {
+            Label {
                 Layout.fillWidth: true
                 text: root.title
                 color: Theme.foreground
-                font.pixelSize: Theme.fontSize
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
-            Text {
+            Label {
                 Layout.fillWidth: true
                 text: root.subtitle
                 color: Theme.foregroundDim
-                font.pixelSize: Theme.fontSizeSm
+                font: Theme.smallFont
                 elide: Text.ElideRight
                 visible: text.length > 0
             }
+
             Item { Layout.fillHeight: true }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
-                Text {
+                Label {
                     Layout.fillWidth: true
                     text: qsTr("In %1s").arg(root.countdown)
                     color: Theme.foregroundDim
-                    font.pixelSize: Theme.fontSizeSm
+                    font: Theme.smallFont
                 }
-                Button {
+                AccentButton {
                     text: qsTr("Cancel")
                     onClicked: root.cancelClicked()
                 }
-                Button {
+                AccentButton {
                     text: qsTr("Play now")
-                    highlighted: true
+                    primary: true
                     onClicked: root.acceptClicked()
                 }
             }
