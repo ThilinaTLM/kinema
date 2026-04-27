@@ -7,11 +7,17 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
+#include <QTimer>
 
 #include <QCoro/QCoroTask>
 
 namespace kinema::api {
 class CinemetaClient;
+}
+
+namespace kinema::config {
+class SearchSettings;
 }
 
 namespace kinema::ui::qml {
@@ -28,10 +34,12 @@ class ResultsListModel;
  * Bound to the `searchVm` context property; the matching results
  * grid binds to `searchVm.results` (a `ResultsListModel*`).
  *
- * The page submits on Enter (or via the search button); there's no
- * keystroke debounce — `submit()` is what the QML `onAccepted`
- * handler calls. `clear()` empties both query and grid back to the
- * "Idle" placeholder.
+ * Live search-as-you-type: `setQuery` debounces submission through
+ * `m_debounce` (250 ms, minimum 2 trimmed chars). IMDB ids are
+ * detected eagerly and submitted without waiting; `submit()` (Enter
+ * or `useRecent`) also bypasses the timer. Successful searches
+ * push the query into `SearchSettings::addRecentQuery`, exposed
+ * back to QML through `recentQueries`.
  */
 class SearchViewModel : public QObject
 {
@@ -39,9 +47,12 @@ class SearchViewModel : public QObject
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
     Q_PROPERTY(int kind READ kind WRITE setKind NOTIFY kindChanged)
     Q_PROPERTY(ResultsListModel* results READ results CONSTANT)
+    Q_PROPERTY(QStringList recentQueries READ recentQueries
+        NOTIFY recentQueriesChanged)
 
 public:
     SearchViewModel(api::CinemetaClient* cinemeta,
+        config::SearchSettings& settings,
         QObject* parent = nullptr);
 
     QString query() const { return m_query; }
@@ -54,9 +65,15 @@ public:
 
     ResultsListModel* results() const noexcept { return m_results; }
 
+    /// MRU list of recently-submitted queries (newest first).
+    /// Forwards to `SearchSettings::recentQueries()`.
+    QStringList recentQueries() const;
+
 public Q_SLOTS:
     /// Run the current `query` + `kind` against Cinemeta. No-op on
     /// empty query (the page leaves the Idle placeholder up).
+    /// Stops the debounce timer so Enter / IMDB-id paths submit
+    /// immediately.
     void submit();
 
     /// Reset query to empty, results model to `Idle`. Does not
@@ -68,9 +85,17 @@ public Q_SLOTS:
     /// or `openSeriesRequested` based on the row's stored kind.
     void activate(int row);
 
+    /// Re-run a recent search. Sets `query` and submits without
+    /// waiting for the debounce window.
+    Q_INVOKABLE void useRecent(const QString& q);
+
+    /// Wipe the recent-queries list (forwards to settings).
+    Q_INVOKABLE void clearRecent();
+
 Q_SIGNALS:
     void queryChanged();
     void kindChanged();
+    void recentQueriesChanged();
 
     /// Routed by `MainController` to a passive notification (phase
     /// 04) and, in phase 05, to the real detail page push.
@@ -85,7 +110,9 @@ private:
     QCoro::Task<void> runSearchTask(QString text, api::MediaKind kind);
 
     api::CinemetaClient* m_cinemeta;
+    config::SearchSettings* m_settings;
     ResultsListModel* m_results;
+    QTimer m_debounce;
 
     QString m_query;
     api::MediaKind m_kind = api::MediaKind::Movie;

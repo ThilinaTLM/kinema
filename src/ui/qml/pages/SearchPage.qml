@@ -8,11 +8,12 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Cinemeta search page. The page header is a `QQC2.ToolBar` with a
-// large `Kirigami.SearchField` and the segmented `MediaKindSwitch`
-// alongside it; below the field a small hint subline explains the
-// IMDB-id shortcut. The body renders one of five surfaces (idle /
-// loading / results / empty / error) chosen by `searchVm.results.state`.
+// Cinemeta search page. The page header is a `QQC2.ToolBar` with
+// the segmented `MediaKindSwitch` on the left followed by a
+// fill-width `Kirigami.SearchField`. The body renders one of five
+// surfaces (idle / loading / results / empty / error) chosen by
+// `searchVm.results.state`. Idle additionally shows a recent-
+// searches strip from `SearchSettings`.
 //
 // `focusSearchField()` is the hook `ApplicationShell.qml`'s
 // `onFocusSearchRequested` calls; declaring it here means the
@@ -42,54 +43,32 @@ Kirigami.ScrollablePage {
         Kirigami.Theme.colorSet: Kirigami.Theme.Header
         Kirigami.Theme.inherit: false
 
-        contentItem: ColumnLayout {
-            spacing: Kirigami.Units.smallSpacing
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.largeSpacing
 
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.largeSpacing
-                Layout.rightMargin: Kirigami.Units.largeSpacing
-                Layout.topMargin: Kirigami.Units.smallSpacing
-                spacing: Kirigami.Units.largeSpacing
-
-                Kirigami.SearchField {
-                    id: searchField
-                    Layout.fillWidth: true
-                    placeholderText: i18nc("@info:placeholder",
-                        "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
-                    text: searchVm.query
-                    onTextEdited: searchVm.query = text
-                    onAccepted: searchVm.submit()
-                    Keys.onEscapePressed: function (event) {
-                        if (text.length > 0) {
-                            searchVm.clear();
-                            event.accepted = true;
-                        } else {
-                            event.accepted = false;
-                        }
-                    }
-                }
-
-                MediaKindSwitch {
-                    kind: searchVm.kind
-                    onActivated: function (newKind) {
-                        searchVm.kind = newKind;
-                    }
+            MediaKindSwitch {
+                kind: searchVm.kind
+                onActivated: function (newKind) {
+                    searchVm.kind = newKind;
                 }
             }
 
-            QQC2.Label {
+            Kirigami.SearchField {
+                id: searchField
                 Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.largeSpacing
-                Layout.rightMargin: Kirigami.Units.largeSpacing
-                Layout.bottomMargin: Kirigami.Units.smallSpacing
-                visible: searchVm.query.length === 0
-                text: i18nc("@info:hint search bar",
-                    "Tip: paste an IMDB id (ttXXXXXXX) for a direct lookup, "
-                    + "or press Esc to clear.")
-                font: Kirigami.Theme.smallFont
-                color: Kirigami.Theme.disabledTextColor
-                elide: Text.ElideRight
+                placeholderText: i18nc("@info:placeholder",
+                    "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
+                text: searchVm.query
+                onTextEdited: searchVm.query = text
+                onAccepted: searchVm.submit()
+                Keys.onEscapePressed: function (event) {
+                    if (text.length > 0) {
+                        searchVm.clear();
+                        event.accepted = true;
+                    } else {
+                        event.accepted = false;
+                    }
+                }
             }
         }
     }
@@ -102,16 +81,72 @@ Kirigami.ScrollablePage {
             ? searchVm.results.state
             : 0
 
-        // 0 — Idle: no query yet.
-        Kirigami.PlaceholderMessage {
-            Layout.alignment: Qt.AlignCenter
-            Layout.preferredWidth: Math.min(parent.width
-                    - Kirigami.Units.gridUnit * 4,
-                Kirigami.Units.gridUnit * 28)
-            icon.name: "search"
-            text: i18nc("@info placeholder",
-                "Type a title or paste an IMDB id (ttXXXXXXX) "
-                + "and press Enter.")
+        // 0 — Idle: no query yet. Centred placeholder + a
+        // recent-searches strip when there is history.
+        ColumnLayout {
+            spacing: Kirigami.Units.largeSpacing
+
+            Item { Layout.fillHeight: true }
+
+            Kirigami.PlaceholderMessage {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.min(
+                    page.width - Kirigami.Units.gridUnit * 4,
+                    Kirigami.Units.gridUnit * 28)
+                icon.name: "search"
+                text: i18nc("@info placeholder",
+                    "Find something to watch")
+                explanation: i18nc("@info placeholder",
+                    "Type a title or paste an IMDB id (ttXXXXXXX).")
+            }
+
+            // Recent searches — only shown when history exists.
+            ColumnLayout {
+                visible: searchVm.recentQueries.length > 0
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.min(
+                    page.width - Kirigami.Units.gridUnit * 4,
+                    Kirigami.Units.gridUnit * 36)
+                spacing: Kirigami.Units.smallSpacing
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        text: i18nc("@label", "Recent searches")
+                        font: Kirigami.Theme.smallFont
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+                    QQC2.ToolButton {
+                        text: i18nc("@action:button",
+                            "Clear recent searches")
+                        icon.name: "edit-clear-history"
+                        display: QQC2.AbstractButton.IconOnly
+                        QQC2.ToolTip.text: text
+                        QQC2.ToolTip.visible: hovered
+                        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        onClicked: searchVm.clearRecent()
+                    }
+                }
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Repeater {
+                        model: searchVm.recentQueries
+                        delegate: Kirigami.Chip {
+                            required property string modelData
+                            text: modelData
+                            checkable: false
+                            closable: false
+                            onClicked: searchVm.useRecent(modelData)
+                        }
+                    }
+                }
+            }
+
+            Item { Layout.fillHeight: true }
         }
 
         // 1 — Loading.
@@ -138,7 +173,17 @@ Kirigami.ScrollablePage {
             text: i18nc("@info placeholder", "No results")
             explanation: i18nc("@info placeholder",
                 "Cinemeta returned no matches for this query. "
-                + "Try a different spelling or switch the kind toggle.")
+                + "Try a different spelling, or browse the catalog.")
+            helpfulAction: Kirigami.Action {
+                icon.name: "view-list-details"
+                text: searchVm.kind === 0
+                    ? i18nc("@action:button",
+                        "Browse movies instead")
+                    : i18nc("@action:button",
+                        "Browse TV series instead")
+                onTriggered: mainController.applyBrowsePreset(
+                    searchVm.kind, 0)
+            }
         }
 
         // 4 — Error.

@@ -4,6 +4,7 @@
 #include "ui/qml-bridge/SearchViewModel.h"
 
 #include "api/CinemetaClient.h"
+#include "config/SearchSettings.h"
 #include "core/HttpErrorPresenter.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 
@@ -15,6 +16,9 @@ namespace kinema::ui::qml {
 
 namespace {
 
+constexpr int kDebounceMs = 250;
+constexpr int kMinChars = 2;
+
 bool looksLikeImdbId(const QString& s)
 {
     static const QRegularExpression re(QStringLiteral("^tt\\d{5,}$"));
@@ -24,11 +28,20 @@ bool looksLikeImdbId(const QString& s)
 } // namespace
 
 SearchViewModel::SearchViewModel(api::CinemetaClient* cinemeta,
+    config::SearchSettings& settings,
     QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
+    , m_settings(&settings)
     , m_results(new ResultsListModel(this))
 {
+    m_debounce.setSingleShot(true);
+    m_debounce.setInterval(kDebounceMs);
+    connect(&m_debounce, &QTimer::timeout, this,
+        &SearchViewModel::submit);
+
+    connect(m_settings, &config::SearchSettings::recentQueriesChanged,
+        this, &SearchViewModel::recentQueriesChanged);
 }
 
 void SearchViewModel::setQuery(const QString& q)
@@ -38,6 +51,33 @@ void SearchViewModel::setQuery(const QString& q)
     }
     m_query = q;
     Q_EMIT queryChanged();
+
+    // Reset the debounce window every time the user edits.
+    m_debounce.stop();
+
+    const auto trimmed = m_query.trimmed();
+    if (trimmed.isEmpty()) {
+        // Cancel any in-flight result and drop back to Idle so the
+        // recent-searches strip / placeholder show through.
+        ++m_epoch;
+        m_results->setIdle();
+        return;
+    }
+
+    if (looksLikeImdbId(trimmed)) {
+        // IMDB ids are deterministic — no point waiting.
+        submit();
+        return;
+    }
+
+    if (trimmed.size() < kMinChars) {
+        // Don't pummel Cinemeta with single-character requests;
+        // leave the model in its current state until the user
+        // types more.
+        return;
+    }
+
+    m_debounce.start();
 }
 
 void SearchViewModel::setKind(int kind)
@@ -54,6 +94,10 @@ void SearchViewModel::setKind(int kind)
 
 void SearchViewModel::submit()
 {
+    // Enter / IMDB-id / useRecent all converge here — cancel any
+    // pending debounce so we don't fire a duplicate request.
+    m_debounce.stop();
+
     const auto trimmed = m_query.trimmed();
     if (trimmed.isEmpty()) {
         // Empty submit lands us back on the Idle placeholder so the
@@ -68,6 +112,7 @@ void SearchViewModel::submit()
 
 void SearchViewModel::clear()
 {
+    m_debounce.stop();
     if (!m_query.isEmpty()) {
         m_query.clear();
         Q_EMIT queryChanged();
@@ -76,6 +121,25 @@ void SearchViewModel::clear()
     // it lands.
     ++m_epoch;
     m_results->setIdle();
+}
+
+QStringList SearchViewModel::recentQueries() const
+{
+    return m_settings->recentQueries();
+}
+
+void SearchViewModel::useRecent(const QString& q)
+{
+    if (m_query != q) {
+        m_query = q;
+        Q_EMIT queryChanged();
+    }
+    submit();
+}
+
+void SearchViewModel::clearRecent()
+{
+    m_settings->clearRecentQueries();
 }
 
 void SearchViewModel::activate(int row)
@@ -124,6 +188,9 @@ QCoro::Task<void> SearchViewModel::runSearchTask(QString text,
         }
 
         m_results->setResults(std::move(results));
+        // Successful result — record the query in MRU history so
+        // the idle state can surface it next time.
+        m_settings->addRecentQuery(text);
         Q_EMIT statusMessage(
             i18ncp("@info:status", "%1 result", "%1 results",
                 m_results->rowCount()),
