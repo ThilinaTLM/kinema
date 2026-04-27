@@ -8,111 +8,86 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Full-width movie detail surface. The application PageRow stays single-column;
-// this page owns the responsive split between overview and streams/subtitles.
-Kirigami.Page {
+// Single-column movie detail surface. Streams have been split out into a
+// dedicated `StreamsPage` reached via the `Play` action; subtitles use the
+// pushed `SubtitlesPage` flow that `MainController` already provides. This
+// page is intentionally focused on "what is this title?" — not "how do I
+// watch it right now?".
+Kirigami.ScrollablePage {
     id: page
 
     objectName: "movieDetail"
     title: movieDetailVm.title.length > 0
         ? movieDetailVm.title
-        : i18nc("@title:window detail loading", "Loading…")
+        : i18nc("@title:window detail loading", "Loading\u2026")
 
-    padding: 0
+    leftPadding: 0
+    rightPadding: 0
+    topPadding: 0
+    bottomPadding: 0
 
-    actions: [
-        Kirigami.Action {
-            icon.name: "media-playback-start"
-            text: i18nc("@action:button", "Play best")
-            displayHint: Kirigami.DisplayHint.IconOnly
-                | Kirigami.DisplayHint.KeepVisible
-            enabled: movieDetailVm.streams
-                && movieDetailVm.streams.count > 0
-            onTriggered: movieDetailVm.playBest()
-        },
-        Kirigami.Action {
-            icon.name: "subtitles"
-            text: i18nc("@action:button", "Subtitles…")
-            enabled: movieDetailVm.metaState === MovieDetailViewModel.Ready
-            onTriggered: movieDetailVm.requestSubtitles()
-        }
-    ]
-
-    function openSubtitlesPanel() {
-        if (scaffold.workItem && scaffold.workItem.showSubtitles) {
-            scaffold.workItem.showSubtitles();
-        }
+    // Action set is intentionally minimal. `Streams` is the only verb
+    // the detail page exposes — it pushes the streams page, where
+    // subtitles becomes a header action against a chosen stream
+    // context. Surfacing subtitles on the detail page added a second
+    // verb without a useful target (no stream picked yet). The label
+    // says "Streams" rather than "Play" because the action opens a
+    // picker, not the player itself.
+    readonly property Kirigami.Action streamsAction: Kirigami.Action {
+        icon.name: "media-playback-start"
+        text: i18nc("@action:button open the streams page",
+            "Streams")
+        displayHint: Kirigami.DisplayHint.IconOnly
+            | Kirigami.DisplayHint.KeepVisible
+        enabled: movieDetailVm.metaState === MovieDetailViewModel.Ready
+        onTriggered: movieDetailVm.requestStreams()
     }
+
+    actions: [ streamsAction ]
 
     Component.onDestruction: movieDetailVm.clear()
 
-    DetailScaffold {
-        id: scaffold
-        anchors.fill: parent
+    // ---- Ready -----------------------------------------------------
+    ColumnLayout {
+        id: stack
+        width: page.width
+        spacing: Kirigami.Units.largeSpacing * 2
         visible: movieDetailVm.metaState === MovieDetailViewModel.Ready
 
-        overviewComponent: Component {
-            ColumnLayout {
-                spacing: Kirigami.Units.largeSpacing * 2
+        DetailOverview {
+            Layout.fillWidth: true
+            posterUrl: movieDetailVm.posterUrl
+            backdropUrl: movieDetailVm.backdropUrl
+            title: movieDetailVm.title
+            year: movieDetailVm.year
+            genres: movieDetailVm.genres
+            cast: movieDetailVm.cast
+            runtimeMinutes: movieDetailVm.runtimeMinutes
+            rating: movieDetailVm.rating
+            description: movieDetailVm.description
+            isUpcoming: movieDetailVm.isUpcoming
+            releaseDateText: movieDetailVm.releaseDateText
 
-                DetailOverview {
-                    Layout.fillWidth: true
-                    posterUrl: movieDetailVm.posterUrl
-                    backdropUrl: movieDetailVm.backdropUrl
-                    title: movieDetailVm.title
-                    year: movieDetailVm.year
-                    genres: movieDetailVm.genres
-                    cast: movieDetailVm.cast
-                    runtimeMinutes: movieDetailVm.runtimeMinutes
-                    rating: movieDetailVm.rating
-                    description: movieDetailVm.description
-                    isUpcoming: movieDetailVm.isUpcoming
-                    releaseDateText: movieDetailVm.releaseDateText
+            primaryAction: page.streamsAction
+        }
 
-                    primaryAction: Kirigami.Action {
-                        icon.name: "media-playback-start"
-                        text: i18nc("@action:button", "Play best")
-                        enabled: movieDetailVm.streams
-                            && movieDetailVm.streams.count > 0
-                        onTriggered: movieDetailVm.playBest()
-                    }
-                    secondaryAction: Kirigami.Action {
-                        icon.name: "subtitles"
-                        text: i18nc("@action:button", "Subtitles…")
-                        enabled: movieDetailVm.metaState
-                            === MovieDetailViewModel.Ready
-                        onTriggered: movieDetailVm.requestSubtitles()
-                    }
-                }
-
-                SimilarCarousel {
-                    Layout.fillWidth: true
-                    visible: movieDetailVm.similarVisible
-                    sourceModel: movieDetailVm.similar
-                    onItemActivated: function (row) {
-                        movieDetailVm.activateSimilar(row);
-                    }
-                }
-
-                Item {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: Kirigami.Units.largeSpacing
-                }
+        SimilarCarousel {
+            Layout.fillWidth: true
+            visible: movieDetailVm.similarVisible
+            sourceModel: movieDetailVm.similar
+            onItemActivated: function (row) {
+                movieDetailVm.activateSimilar(row);
             }
         }
 
-        workComponent: Component {
-            DetailWorkPanel {
-                detailVm: movieDetailVm
-                subtitleVm: subtitlesVm
-                subtitlesAvailable: movieDetailVm.metaState
-                    === MovieDetailViewModel.Ready
-                subtitlesUnavailableText: i18nc("@info", "Movie details are still loading.")
-                onSubtitlesTabRequested: movieDetailVm.requestSubtitles()
-            }
+        // Bottom breathing room so the last rail clears the scroll edge.
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Kirigami.Units.gridUnit
         }
     }
 
+    // ---- Error -----------------------------------------------------
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
         width: Math.min(parent.width - Kirigami.Units.gridUnit * 4,
@@ -128,6 +103,7 @@ Kirigami.Page {
         }
     }
 
+    // ---- Loading ---------------------------------------------------
     Kirigami.LoadingPlaceholder {
         anchors.centerIn: parent
         visible: movieDetailVm.metaState === MovieDetailViewModel.Loading

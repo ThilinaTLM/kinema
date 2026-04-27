@@ -246,6 +246,64 @@ private Q_SLOTS:
             StreamsListModel::State::Idle);
     }
 
+    void testSelectEpisodeAndOpenStreamsEmitsSignal()
+    {
+        Fixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
+        f.torrentio.scriptedCalls = {
+            { { makeStream(QStringLiteral("R"), 1, 1) } }
+        };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        QSignalSpy streamsSpy(&f.vm,
+            &SeriesDetailViewModel::streamsRequested);
+        f.vm.selectEpisodeAndOpenStreams(0);
+        QCOMPARE(f.vm.selectedEpisodeRow(), 0);
+        QCOMPARE(streamsSpy.count(), 1);
+    }
+
+    void testSelectEpisodeAndOpenStreamsBailsOnInvalidRow()
+    {
+        Fixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        QSignalSpy streamsSpy(&f.vm,
+            &SeriesDetailViewModel::streamsRequested);
+        f.vm.selectEpisodeAndOpenStreams(99);
+        QCOMPARE(f.vm.selectedEpisodeRow(), -1);
+        QCOMPARE(streamsSpy.count(), 0);
+    }
+
+    void testRequestStreamsRequiresSelection()
+    {
+        Fixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
+        f.torrentio.scriptedCalls = {
+            { { makeStream(QStringLiteral("R"), 1, 1) } }
+        };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        QSignalSpy streamsSpy(&f.vm,
+            &SeriesDetailViewModel::streamsRequested);
+        f.vm.requestStreams();
+        QCOMPARE(streamsSpy.count(), 0);
+
+        f.vm.selectEpisode(0);
+        drainEvents();
+        f.vm.requestStreams();
+        QCOMPARE(streamsSpy.count(), 1);
+    }
+
     void testLoadAtAutoSelectsEpisode()
     {
         Fixture f;

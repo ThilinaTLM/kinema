@@ -304,12 +304,16 @@ private Q_SLOTS:
             QStringLiteral("Cached.1080p"));
     }
 
-    void testPlayBestEmitsStatusOnEmpty()
+    void testRequestStreamsEmitsSignal()
     {
+        // `requestStreams()` is the QML "Play" handler on the
+        // movie detail page. It must always emit
+        // `streamsRequested` so MainController can push the
+        // Streams page; the slot itself does no validation.
         Fixture f;
         QSignalSpy spy(&f.vm,
-            &MovieDetailViewModel::statusMessage);
-        f.vm.playBest();
+            &MovieDetailViewModel::streamsRequested);
+        f.vm.requestStreams();
         QCOMPARE(spy.count(), 1);
     }
 

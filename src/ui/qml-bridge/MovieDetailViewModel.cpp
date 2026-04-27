@@ -506,16 +506,9 @@ api::PlaybackContext MovieDetailViewModel::currentContext() const
     return ctx;
 }
 
-void MovieDetailViewModel::playBest()
+void MovieDetailViewModel::requestStreams()
 {
-    if (m_streams->rowCount() == 0) {
-        Q_EMIT statusMessage(
-            i18nc("@info:status",
-                "No streams available to play."),
-            4000);
-        return;
-    }
-    play(0);
+    Q_EMIT streamsRequested();
 }
 
 void MovieDetailViewModel::play(int row)

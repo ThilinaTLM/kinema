@@ -189,6 +189,15 @@ public Q_SLOTS:
     void selectEpisode(int row);
     /// Collapse the streams region by clearing the selected episode.
     void clearEpisode();
+    /// Convenience for the QML episode tap handler: select the row
+    /// (kicking off the streams fetch as `selectEpisode` does) and
+    /// immediately ask the host to push the Streams page.
+    void selectEpisodeAndOpenStreams(int row);
+
+    /// Header action: ask the host to push the Streams page for
+    /// the currently-selected episode. No-op when no episode is
+    /// selected.
+    void requestStreams();
 
     /// Per-row action handlers driven by `StreamCard.qml`'s ⋮ menu.
     void play(int row);
@@ -220,6 +229,14 @@ Q_SIGNALS:
     void openSeriesByTmdbRequested(int tmdbId, const QString& title);
 
     void subtitlesRequested(const api::PlaybackContext& ctx);
+
+    /// Emitted from `requestStreams()` /
+    /// `selectEpisodeAndOpenStreams()`. `MainController` connects
+    /// to a lambda that forwards as
+    /// `showStreamsRequested(QObject* detailVm)`, identifying
+    /// `this` so the QML shell can bind the pushed `StreamsPage`
+    /// to the right view-model.
+    void streamsRequested();
 
 private:
     QCoro::Task<void> loadSeriesMetaTask(QString imdbId,

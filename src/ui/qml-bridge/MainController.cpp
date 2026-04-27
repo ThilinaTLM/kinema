@@ -458,6 +458,10 @@ void MainController::buildCoreServices()
     connect(m_movieDetailVm,
         &MovieDetailViewModel::subtitlesRequested, this,
         pushSubtitlesFromDetail);
+    connect(m_movieDetailVm,
+        &MovieDetailViewModel::streamsRequested, this, [this] {
+            Q_EMIT showStreamsRequested(m_movieDetailVm);
+        });
 
     connect(m_seriesDetailVm,
         &SeriesDetailViewModel::statusMessage, this,
@@ -471,6 +475,10 @@ void MainController::buildCoreServices()
     connect(m_seriesDetailVm,
         &SeriesDetailViewModel::subtitlesRequested, this,
         pushSubtitlesFromDetail);
+    connect(m_seriesDetailVm,
+        &SeriesDetailViewModel::streamsRequested, this, [this] {
+            Q_EMIT showStreamsRequested(m_seriesDetailVm);
+        });
 
     // Subtitles VM. Wraps `SubtitleController` and routes
     // download / local-file / settings requests back through this

@@ -433,6 +433,25 @@ void SeriesDetailViewModel::clearEpisode()
     Q_EMIT rawStreamsCountChanged();
 }
 
+void SeriesDetailViewModel::selectEpisodeAndOpenStreams(int row)
+{
+    selectEpisode(row);
+    if (m_selectedEpisodeRow < 0) {
+        // selectEpisode bails when the row index is bad; do not
+        // navigate without a selection.
+        return;
+    }
+    Q_EMIT streamsRequested();
+}
+
+void SeriesDetailViewModel::requestStreams()
+{
+    if (m_selectedEpisodeRow < 0) {
+        return;
+    }
+    Q_EMIT streamsRequested();
+}
+
 QCoro::Task<void> SeriesDetailViewModel::loadEpisodeStreamsTask(
     api::Episode ep)
 {

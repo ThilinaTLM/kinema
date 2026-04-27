@@ -8,9 +8,10 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// One episode row: thumbnail · "1 \u00b7 Title" · release date / upcoming
-// pill, with a one-line description below. Selecting a row drives the
-// expanding streams region in `SeriesDetailPage.qml`.
+// One episode row: thumbnail · "1 \u00b7 Title" · release date /
+// upcoming pill, with a one-line description below. Tapping the row
+// pushes `StreamsPage` for that episode — the trailing `go-next`
+// glyph signals that forward navigation.
 QQC2.ItemDelegate {
     id: row
 
@@ -116,13 +117,14 @@ QQC2.ItemDelegate {
             }
         }
 
-        // Selection chevron \u2014 nudges the user into recognising the
-        // expand/collapse affordance on click.
+        // Open-affordance chevron. Tapping a row pushes `StreamsPage`,
+        // so a forward-navigation arrow is more honest than an
+        // expand/collapse glyph (the row never expands inline).
         Kirigami.Icon {
             Layout.alignment: Qt.AlignVCenter
             width: Kirigami.Units.iconSizes.small
             height: width
-            source: row.selected ? "go-up" : "go-down"
+            source: "go-next"
             color: row.selected ? Theme.accent : Theme.disabled
         }
     }

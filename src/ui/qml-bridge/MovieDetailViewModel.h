@@ -172,8 +172,10 @@ public Q_SLOTS:
     /// an empty surface.
     void clear();
 
-    /// Header action: play the top stream after the current sort.
-    void playBest();
+    /// Header action: ask the host to push the Streams page on
+    /// top of the current detail page. Emits `streamsRequested()`;
+    /// `MainController` forwards as `showStreamsRequested(this)`.
+    void requestStreams();
 
     /// Per-row action handlers driven by `StreamCard.qml`'s ⋮ menu.
     void play(int row);
@@ -220,6 +222,13 @@ Q_SIGNALS:
     /// playback context. Phase 05 stubs the connection in
     /// `MainController` with a passive notification.
     void subtitlesRequested(const api::PlaybackContext& ctx);
+
+    /// Emitted from `requestStreams()`. `MainController` connects
+    /// to a lambda that forwards as
+    /// `showStreamsRequested(QObject* detailVm)`, identifying
+    /// `this` so the QML shell can bind the pushed `StreamsPage`
+    /// to the right view-model.
+    void streamsRequested();
 
 private:
     QCoro::Task<void> loadMetaAndStreams(QString imdbId);

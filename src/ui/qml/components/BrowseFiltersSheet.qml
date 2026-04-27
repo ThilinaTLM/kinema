@@ -38,15 +38,22 @@ Kirigami.OverlaySheet {
     }
 
     ColumnLayout {
+        id: contentColumn
+
         // Pin a sensible width so OverlaySheet can compute its size
-        // hint without bouncing between parent and content. Without
-        // this, Kirigami's `implicitHeight` calculation in
-        // OverlaySheet.qml feeds back through the contentItem's
-        // implicit size and emits a binding-loop warning at first
-        // open.
-        Layout.preferredWidth: Math.min(
+        // hint without bouncing between parent and content. We set
+        // both `implicitWidth` and `Layout.preferredWidth` because
+        // OverlaySheet's `implicitWidth`/`implicitHeight` blocks
+        // (templates/OverlaySheet.qml) check both. Pinning a stable
+        // size hint that does not depend on the contentItem's
+        // actual width breaks the chain that previously triggered
+        // a "Binding loop detected for property 'implicitHeight'"
+        // warning every time the sheet was relaid out.
+        readonly property real targetWidth: Math.min(
             applicationWindow().width - Kirigami.Units.gridUnit * 4,
             Kirigami.Units.gridUnit * 26)
+        implicitWidth: targetWidth
+        Layout.preferredWidth: targetWidth
         spacing: Kirigami.Units.largeSpacing
 
         // ---- Date window -----------------------------------------
@@ -151,7 +158,13 @@ Kirigami.OverlaySheet {
                         "Skip results with fewer than 200 ratings.")
                     font: Kirigami.Theme.smallFont
                     color: Kirigami.Theme.disabledTextColor
-                    wrapMode: Text.Wrap
+                    // Use elide instead of wrap: wrapping makes
+                    // implicitHeight depend on actual width, which
+                    // feeds back through OverlaySheet's size-hint
+                    // calculation and triggers a binding-loop
+                    // warning. The description is short and fits
+                    // comfortably at our pinned sheet width.
+                    elide: Text.ElideRight
                     Layout.fillWidth: true
                 }
             }

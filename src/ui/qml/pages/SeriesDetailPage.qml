@@ -8,145 +8,125 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Full-width series detail surface. The overview pane owns series metadata and
-// episode picking; the work pane shows streams/subtitles for the selected episode.
-Kirigami.Page {
+// Single-column series detail surface. The episode list IS the play
+// affordance: tapping an episode selects it AND pushes the streams page,
+// matching the previous "auto-switch to Streams tab" UX from the work
+// panel. Esc returns to this page with the selection preserved.
+Kirigami.ScrollablePage {
     id: page
 
     objectName: "seriesDetail"
     title: seriesDetailVm.title.length > 0
         ? seriesDetailVm.title
-        : i18nc("@title:window detail loading", "Loading…")
+        : i18nc("@title:window detail loading", "Loading\u2026")
 
-    padding: 0
+    leftPadding: 0
+    rightPadding: 0
+    topPadding: 0
+    bottomPadding: 0
 
-    actions: [
-        Kirigami.Action {
-            icon.name: "subtitles"
-            text: i18nc("@action:button", "Subtitles…")
-            displayHint: Kirigami.DisplayHint.IconOnly
-                | Kirigami.DisplayHint.KeepVisible
-            enabled: seriesDetailVm.selectedEpisodeRow >= 0
-            onTriggered: seriesDetailVm.requestSubtitles()
-        }
-    ]
-
-    function openSubtitlesPanel() {
-        if (scaffold.workItem && scaffold.workItem.showSubtitles) {
-            scaffold.workItem.showSubtitles();
-        }
-    }
+    // No page-level actions: the episode list IS the play affordance,
+    // and subtitles only have a meaningful context once a stream is
+    // chosen, so it lives on `StreamsPage` instead.
 
     Component.onDestruction: seriesDetailVm.clear()
 
-    DetailScaffold {
-        id: scaffold
-        anchors.fill: parent
+    // ---- Ready -----------------------------------------------------
+    ColumnLayout {
+        id: stack
+        width: page.width
+        spacing: Kirigami.Units.largeSpacing * 2
         visible: seriesDetailVm.metaState === SeriesDetailViewModel.Ready
 
-        overviewComponent: Component {
-            ColumnLayout {
-                spacing: Kirigami.Units.largeSpacing * 2
+        DetailOverview {
+            Layout.fillWidth: true
+            posterUrl: seriesDetailVm.posterUrl
+            backdropUrl: seriesDetailVm.backdropUrl
+            title: seriesDetailVm.title
+            year: seriesDetailVm.year
+            genres: seriesDetailVm.genres
+            cast: seriesDetailVm.cast
+            runtimeMinutes: 0
+            rating: seriesDetailVm.rating
+            description: seriesDetailVm.description
+            isUpcoming: false
+            releaseDateText: seriesDetailVm.releaseDateText
 
-                DetailOverview {
-                    Layout.fillWidth: true
-                    posterUrl: seriesDetailVm.posterUrl
-                    backdropUrl: seriesDetailVm.backdropUrl
-                    title: seriesDetailVm.title
-                    year: seriesDetailVm.year
-                    genres: seriesDetailVm.genres
-                    cast: seriesDetailVm.cast
-                    runtimeMinutes: 0
-                    rating: seriesDetailVm.rating
-                    description: seriesDetailVm.description
-                    isUpcoming: false
-                    releaseDateText: seriesDetailVm.releaseDateText
+            // No primary / secondary action: the episode list below
+            // is the play affordance, and subtitles live on the
+            // `StreamsPage` that an episode tap pushes.
+        }
 
-                    secondaryAction: Kirigami.Action {
-                        icon.name: "subtitles"
-                        text: i18nc("@action:button", "Subtitles…")
-                        enabled: seriesDetailVm.selectedEpisodeRow >= 0
-                        onTriggered: seriesDetailVm.requestSubtitles()
+        // The episode list and season tabs already indent their
+        // content via internal padding (`EpisodeRow.padding`,
+        // `SeasonTabs` Row `leftPadding`), so this column only adds
+        // page-edge margin to the heading. Letting the list span
+        // edge-to-edge keeps episode content aligned with the title
+        // above and lets row hover backgrounds reach the page edge.
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.largeSpacing
+
+            Kirigami.Heading {
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                level: 3
+                text: i18nc("@title:section", "Episodes")
+            }
+
+            SeasonTabs {
+                Layout.fillWidth: true
+                vm: seriesDetailVm
+                visible: seriesDetailVm.seasonLabels.length > 0
+            }
+
+            ListView {
+                id: episodeList
+                Layout.fillWidth: true
+                Layout.preferredHeight: contentHeight
+                interactive: false
+                model: seriesDetailVm.episodes
+                spacing: Kirigami.Units.smallSpacing
+                cacheBuffer: Kirigami.Units.gridUnit * 40
+
+                delegate: EpisodeRow {
+                    episodeNumber: model.number
+                    episodeTitle: model.title
+                    description: model.description
+                    releasedText: model.releasedText
+                    isUpcoming: model.isUpcoming
+                    thumbnailUrl: model.thumbnailUrl
+                    selected: index === seriesDetailVm.selectedEpisodeRow
+                    onClicked: {
+                        // Tap = "show me how to play this one." The VM
+                        // selects the episode (kicking off the streams
+                        // fetch) and emits `streamsRequested`, which
+                        // MainController forwards to the shell to push
+                        // `StreamsPage` on top of this page.
+                        seriesDetailVm.selectEpisodeAndOpenStreams(index);
                     }
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.largeSpacing
-                    Layout.rightMargin: Kirigami.Units.largeSpacing
-                    spacing: Kirigami.Units.largeSpacing
-
-                    Kirigami.Heading {
-                        Layout.fillWidth: true
-                        level: 3
-                        text: i18nc("@title:section", "Episodes")
-                    }
-
-                    SeasonTabs {
-                        Layout.fillWidth: true
-                        vm: seriesDetailVm
-                        visible: seriesDetailVm.seasonLabels.length > 0
-                    }
-
-                    ListView {
-                        id: episodeList
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: contentHeight
-                        interactive: false
-                        model: seriesDetailVm.episodes
-                        spacing: Kirigami.Units.smallSpacing
-                        cacheBuffer: Kirigami.Units.gridUnit * 40
-
-                        delegate: EpisodeRow {
-                            episodeNumber: model.number
-                            episodeTitle: model.title
-                            description: model.description
-                            releasedText: model.releasedText
-                            isUpcoming: model.isUpcoming
-                            thumbnailUrl: model.thumbnailUrl
-                            selected: index === seriesDetailVm.selectedEpisodeRow
-                            onClicked: {
-                                if (selected) {
-                                    seriesDetailVm.clearEpisode();
-                                } else {
-                                    seriesDetailVm.selectEpisode(index);
-                                    if (scaffold.workItem
-                                        && scaffold.workItem.showStreams) {
-                                        scaffold.workItem.showStreams();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                SimilarCarousel {
-                    Layout.fillWidth: true
-                    visible: seriesDetailVm.similarVisible
-                    sourceModel: seriesDetailVm.similar
-                    onItemActivated: function (row) {
-                        seriesDetailVm.activateSimilar(row);
-                    }
-                }
-
-                Item {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: Kirigami.Units.largeSpacing
                 }
             }
         }
 
-        workComponent: Component {
-            DetailWorkPanel {
-                detailVm: seriesDetailVm
-                subtitleVm: subtitlesVm
-                subtitlesAvailable: seriesDetailVm.selectedEpisodeRow >= 0
-                subtitlesUnavailableText: i18nc("@info", "Pick an episode first.")
-                onSubtitlesTabRequested: seriesDetailVm.requestSubtitles()
+        SimilarCarousel {
+            Layout.fillWidth: true
+            visible: seriesDetailVm.similarVisible
+            sourceModel: seriesDetailVm.similar
+            onItemActivated: function (row) {
+                seriesDetailVm.activateSimilar(row);
             }
+        }
+
+        // Bottom breathing room so the last rail clears the scroll edge.
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Kirigami.Units.gridUnit
         }
     }
 
+    // ---- Error -----------------------------------------------------
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
         width: Math.min(parent.width - Kirigami.Units.gridUnit * 4,
@@ -162,6 +142,7 @@ Kirigami.Page {
         }
     }
 
+    // ---- Loading ---------------------------------------------------
     Kirigami.LoadingPlaceholder {
         anchors.centerIn: parent
         visible: seriesDetailVm.metaState === SeriesDetailViewModel.Loading

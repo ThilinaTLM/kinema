@@ -186,8 +186,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/DetailOverview.qml
-        ui/qml/components/DetailScaffold.qml
-        ui/qml/components/DetailWorkPanel.qml
         ui/qml/components/ActiveFiltersBar.qml
         ui/qml/components/BrowseFilterBar.qml
         ui/qml/components/BrowseFiltersSheet.qml
@@ -221,6 +219,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/SearchPage.qml
         ui/qml/pages/SeriesDetailPage.qml
         ui/qml/pages/SettingsPage.qml
+        ui/qml/pages/StreamsPage.qml
         ui/qml/pages/SubtitlesPage.qml
         ui/qml/pages/settings/AppearanceSettingsPage.qml
         ui/qml/pages/settings/FiltersSettingsPage.qml

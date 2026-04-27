@@ -258,6 +258,10 @@ Kirigami.ApplicationWindow {
         id: subtitlesComp
         SubtitlesPage { }
     }
+    Component {
+        id: streamsComp
+        StreamsPage { }
+    }
 
     // ---- C++-driven flows ----------------------------------------------
     Connections {
@@ -342,6 +346,23 @@ Kirigami.ApplicationWindow {
         }
         function onShowSeriesDetailRequested() {
             root.pushCreated(seriesDetailComp, {});
+        }
+        function onShowStreamsRequested(detailVm) {
+            // If we are already showing a streams page, replace its
+            // VM binding instead of stacking another one. This
+            // happens when a series detail page tap-selects a new
+            // episode while the previous streams page is still on
+            // top via Esc-back navigation — in practice the page
+            // is popped first, so this is just defensive.
+            const top = root.pageStack.currentItem;
+            if (top && top.objectName === "streams") {
+                top.detailVm = detailVm;
+                return;
+            }
+            root.pushCreated(streamsComp, {
+                detailVm: detailVm,
+                objectName: "streams"
+            });
         }
         function onPassiveMessage(text, durationMs) {
             root.showPassiveNotification(text, durationMs);

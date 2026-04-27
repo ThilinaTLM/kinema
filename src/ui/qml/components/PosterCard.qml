@@ -105,10 +105,14 @@ Item {
                 // Source size derives from the actual width so wide
                 // grids don't pull blurry thumbnails. Capped at the
                 // theme's `posterMax` to avoid pulling needlessly
-                // large TMDB renditions on dense displays.
-                sourceSize.width: Math.min(card.width * 2,
-                    Theme.posterMax * 2)
-                sourceSize.height: Math.round(sourceSize.width * 1.5)
+                // large TMDB renditions on dense displays. Both
+                // dimensions derive from `_srcW` rather than from
+                // each other so QQuickImage doesn't see a
+                // sourceSize.height ← sourceSize.width binding loop.
+                readonly property int _srcW: Math.min(
+                    card.width * 2, Theme.posterMax * 2)
+                sourceSize.width: _srcW
+                sourceSize.height: Math.round(_srcW * 1.5)
                 visible: status === Image.Ready
 
                 // Clip the image to the rounded frame.
