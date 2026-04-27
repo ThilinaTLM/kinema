@@ -15,21 +15,19 @@ import dev.tlmtech.kinema.app
 // Layout (left to right):
 //   1. Quality block        \u2014 resolution as a bold label, with a
 //                              prominent RD+ / RD badge stacked
-//                              under it. Cached rows get a thin
-//                              accent stripe at the leading edge so
-//                              they pop out of a wall of similar
-//                              uncached releases.
+//                              under it.
 //   2. Summary column       \u2014 line 1: pre-joined human summary
 //                              (`source \u00b7 codec \u00b7 hdr \u00b7 audio`).
-//                              line 2: a row of small chips (codec,
-//                              HDR, language, multi-audio, group).
-//                              line 3: technical subtitle
-//                              (`size \u00b7 \u21ea seeders \u00b7 provider`).
+//                              line 2: small chips (codec, HDR,
+//                              language, multi-audio, group) inline
+//                              with the provider name as a quiet
+//                              trailing caption.
 //                              The full release name lives in a
 //                              tooltip so it's available on demand
-//                              without eating two lines of vertical
-//                              space.
-//   3. Action column        \u2014 a primary "Play" / "Open magnet"
+//                              without eating extra vertical space.
+//   3. Metrics column       \u2014 size (prominent) and seeders
+//                              (`\u21ea N`) stacked, right-aligned.
+//   4. Action column        \u2014 a primary "Play" / "Open magnet"
 //                              button + the existing `\u22ee` overflow
 //                              that opens `StreamRowActions`.
 //
@@ -86,17 +84,6 @@ QQC2.ItemDelegate {
             actionMenu.popup();
             mouse.accepted = true;
         }
-    }
-
-    // Subtle leading accent stripe for cached rows. Drawn on top of
-    // the delegate's background so it's visible against highlight.
-    Rectangle {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: 3
-        color: card.rdCached ? Theme.positive : "transparent"
-        z: 1
     }
 
     contentItem: RowLayout {
@@ -175,12 +162,15 @@ QQC2.ItemDelegate {
                 color: Theme.foreground
             }
 
-            // Line 2: small chips for codec / HDR / lang / group.
-            // Only rendered when the parser produced any.
+            // Line 2: small chips (codec / HDR / lang / group) plus
+            // the provider name as a trailing caption, all on one
+            // wrapping row. Size and seeders live in the dedicated
+            // metrics column so they line up vertically across rows.
             Flow {
                 Layout.fillWidth: true
                 spacing: Theme.inlineSpacing
                 visible: card.tags.length > 0
+                    || (card.provider && card.provider.length > 0)
                 Repeater {
                     model: card.tags
                     delegate: MetaChip {
@@ -195,33 +185,43 @@ QQC2.ItemDelegate {
                                 ? "accent" : "neutral")
                     }
                 }
-            }
-
-            // Line 3: technical subtitle. Skips empty fields cleanly.
-            QQC2.Label {
-                Layout.fillWidth: true
-                wrapMode: Text.NoWrap
-                elide: Text.ElideRight
-                font.pointSize: Theme.captionFont.pointSize
-                color: Theme.disabled
-                text: {
-                    var parts = [];
-                    if (card.sizeText && card.sizeText.length > 0) {
-                        parts.push(card.sizeText);
-                    }
-                    if (card.seeders >= 0) {
-                        parts.push(i18nc("@info seeders",
-                            "\u21ea %1", card.seeders));
-                    }
-                    if (card.provider && card.provider.length > 0) {
-                        parts.push(card.provider);
-                    }
-                    return parts.join(" \u00b7 ");
+                QQC2.Label {
+                    visible: card.provider && card.provider.length > 0
+                    text: card.provider
+                    font.pointSize: Theme.captionFont.pointSize
+                    color: Theme.disabled
+                    verticalAlignment: Text.AlignVCenter
+                    height: Theme.defaultFont.pixelSize + Theme.inlineSpacing
                 }
             }
         }
 
-        // ---- 3. Primary action + overflow ---------------------
+        // ---- 3. Metrics column (size / seeders) ---------------
+        ColumnLayout {
+            Layout.alignment: Qt.AlignVCenter
+            spacing: Math.round(Theme.inlineSpacing / 2)
+
+            QQC2.Label {
+                Layout.alignment: Qt.AlignRight
+                visible: card.sizeText && card.sizeText.length > 0
+                text: card.sizeText
+                font.pointSize: Theme.defaultFont.pointSize
+                font.weight: Font.DemiBold
+                color: Theme.foreground
+                horizontalAlignment: Text.AlignRight
+            }
+
+            QQC2.Label {
+                Layout.alignment: Qt.AlignRight
+                visible: card.seeders >= 0
+                text: i18nc("@info seeders", "\u21ea %1", card.seeders)
+                font.pointSize: Theme.captionFont.pointSize
+                color: Theme.disabled
+                horizontalAlignment: Text.AlignRight
+            }
+        }
+
+        // ---- 4. Primary action + overflow ---------------------
         RowLayout {
             Layout.alignment: Qt.AlignVCenter
             spacing: Theme.inlineSpacing
