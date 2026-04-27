@@ -115,7 +115,7 @@ Item {
             id: tooltipText
             anchors.centerIn: parent
             color: Theme.foreground
-            font: Theme.monoSmallFont
+            font: Theme.tabularSmallFont
             text: {
                 if (root.duration <= 0) return "";
                 const t = root.duration *

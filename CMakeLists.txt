@@ -10,7 +10,7 @@ project(kinema
     LANGUAGES CXX
 )
 
-set(QT_MIN_VERSION 6.5.0)
+set(QT_MIN_VERSION 6.6.0)
 set(KF_MIN_VERSION 6.0.0)
 set(QCORO_MIN_VERSION 0.10.0)
 

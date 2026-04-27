@@ -83,7 +83,7 @@ Item {
         Text {
             Layout.alignment: Qt.AlignVCenter
             color: Theme.foreground
-            font: Theme.monoFont
+            font: Theme.tabularFont
             text: {
                 const pos = root.mpv ? Math.max(0, root.mpv.position) : 0;
                 const dur = root.mpv ? Math.max(0, root.mpv.duration) : 0;

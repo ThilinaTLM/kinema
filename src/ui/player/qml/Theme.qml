@@ -136,7 +136,7 @@ QtObject {
     //
     // Call sites usually want one of the prebuilt font groups
     // (`defaultFont` / `smallFont` / `titleFont` / `headerFont` /
-    // `monoFont`). For one-off combos the raw `fontPoint*` values
+    // `tabularFont`). For one-off combos the raw `fontPoint*` values
     // can be paired with a per-element `font.weight` /
     // `font.capitalization` override.
     readonly property real fontPointSm:
@@ -174,15 +174,31 @@ QtObject {
         weight:    Font.DemiBold
     })
 
-    // Monospace for timecodes, codec names, source URL. "Monospace"
-    // is Qt's logical family that resolves to the system's chosen
-    // fixed-width font on KDE.
-    readonly property font monoFont: ({
-        family:    "Monospace",
-        pointSize: Qt.application.font.pointSize
+    // Tabular (fixed-width) numerals in the user's proportional font,
+    // for timecodes / durations / volume percent — anywhere digits
+    // change in place and would otherwise jitter the layout because
+    // proportional fonts give each digit a different advance width.
+    //
+    // `tnum` is the OpenType "tabular figures" feature, supported by
+    // every modern UI font Plasma ships (Noto Sans, Cantarell, Inter,
+    // Open Sans, IBM Plex …). `lnum` forces lining (cap-height)
+    // figures, in case the font defaults to old-style figures for the
+    // body weight. This matches what Plex / Netflix / YouTube do for
+    // their on-screen timecodes — proportional sans, tabular digits,
+    // not monospace.
+    //
+    // Requires Qt 6.6+ (font.features). The project's QT_MIN_VERSION
+    // is pinned accordingly.
+    readonly property var _tabularFeatures: ({ "tnum": 1, "lnum": 1 })
+
+    readonly property font tabularFont: ({
+        family:    Qt.application.font.family,
+        pointSize: Qt.application.font.pointSize,
+        features:  _tabularFeatures
     })
-    readonly property font monoSmallFont: ({
-        family:    "Monospace",
-        pointSize: Math.max(7, Qt.application.font.pointSize - 1)
+    readonly property font tabularSmallFont: ({
+        family:    Qt.application.font.family,
+        pointSize: Math.max(7, Qt.application.font.pointSize - 1),
+        features:  _tabularFeatures
     })
 }

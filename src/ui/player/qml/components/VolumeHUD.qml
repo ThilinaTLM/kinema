@@ -66,7 +66,7 @@ Rectangle {
             anchors.bottom: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
             color: Theme.foreground
-            font: Theme.smallFont
+            font: Theme.tabularSmallFont
             text: root.muted ? "M" : Math.round(root.volumePercent)
         }
     }
