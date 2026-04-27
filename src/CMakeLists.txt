@@ -36,6 +36,7 @@ set(kinema_core_SRCS
     core/Player.cpp
     core/PlayerLauncher.cpp
     core/StreamFilter.cpp
+    core/StreamTokens.cpp
     core/SubtitleCacheStore.cpp
     core/TokenStore.cpp
     core/TorrentioConfig.cpp
@@ -204,6 +205,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
         ui/qml/components/StreamCard.qml
+        ui/qml/components/StreamFilterBar.qml
         ui/qml/components/StreamRowActions.qml
         ui/qml/components/StreamSortMenu.qml
         ui/qml/components/StreamsList.qml

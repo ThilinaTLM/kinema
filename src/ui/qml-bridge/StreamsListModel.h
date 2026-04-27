@@ -4,6 +4,7 @@
 #pragma once
 
 #include "api/Media.h"
+#include "core/StreamTokens.h"
 
 #include <QAbstractListModel>
 #include <QDate>
@@ -63,7 +64,17 @@ public:
         RdDownloadRole,
         HasMagnetRole,
         HasDirectUrlRole,
-        ChipsRole,        ///< QStringList of small label pills
+        ChipsRole,        ///< QStringList of small label pills (legacy)
+        // Token-derived roles populated from `core::stream_tokens::parse`.
+        SourceRole,        ///< QString human label, e.g. "WEB-DL"; empty if unknown
+        CodecRole,         ///< QString, e.g. "x265 10-bit"; empty if unknown
+        HdrRole,           ///< QString, e.g. "Dolby Vision"; empty for SDR
+        AudioSummaryRole,  ///< QString, joined audio list, e.g. "DDP 5.1 · Atmos"
+        LanguagesRole,     ///< QStringList of ISO 639-1 codes
+        MultiAudioRole,    ///< bool
+        ReleaseGroupRole,  ///< QString
+        SummaryLineRole,   ///< QString — source · codec · hdr · audio joined
+        TagsRole,          ///< QStringList of small chip labels (codec/hdr/lang/group)
     };
     Q_ENUM(Roles)
 
@@ -81,8 +92,11 @@ public:
 
     /// Client-side sort axes. Values carry no semantic meaning; the
     /// view-model maps each to a comparator over `api::Stream`.
+    /// `Smart` is the default — cached rows first, then by resolution
+    /// rank, then by size descending. It ignores the descending toggle.
     enum class SortMode {
-        Seeders = 0,
+        Smart = 0,
+        Seeders,
         Size,
         Quality,
         Provider,
@@ -124,7 +138,23 @@ public:
     /// Build the per-row chip list (resolution + RD flag + provider
     /// + extras parsed from the details line). Pure helper so unit
     /// tests can poke it.
+    ///
+    /// Legacy, kept for back-compatibility with `chips` role consumers.
+    /// New row layouts should use `tagsFor` + `summaryLineFor` instead.
     static QStringList chipsFor(const api::Stream& s);
+
+    /// Build the small chip strip shown next to the release name in
+    /// the redesigned `StreamCard`. Carries codec / HDR / language
+    /// codes / multi-audio / release-group — NOT resolution or RD
+    /// (those live in the dedicated leading quality block).
+    static QStringList tagsFor(const api::Stream& s,
+        const core::stream_tokens::Tokens& t);
+
+    /// Build the single-line human summary (source · codec · hdr ·
+    /// audio) shown above the technical subtitle. Empty when no
+    /// tokens parsed.
+    static QString summaryLineFor(const api::Stream& s,
+        const core::stream_tokens::Tokens& t);
 
 Q_SIGNALS:
     void stateChanged();
@@ -135,12 +165,18 @@ Q_SIGNALS:
 
 private:
     void resetState(State newState);
+    /// Lazily parse and cache tokens for row `index`.
+    const core::stream_tokens::Tokens& tokensAt(int index) const;
 
     QList<api::Stream> m_items;
     State m_state = State::Idle;
     QString m_errorMessage;
     QString m_emptyExplanation;
     QDate m_releaseDate;
+    /// Per-row token cache, cleared on every `setItems`. Keyed by row
+    /// index because `data()` is called per-role and we don't want to
+    /// re-parse the same stream three or four times per paint pass.
+    mutable QHash<int, core::stream_tokens::Tokens> m_tokenCache;
 };
 
 } // namespace kinema::ui::qml

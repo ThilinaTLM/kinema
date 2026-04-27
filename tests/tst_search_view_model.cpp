@@ -3,17 +3,23 @@
 
 #include "api/CinemetaClient.h"
 #include "api/Media.h"
+#include "config/SearchSettings.h"
 #include "core/HttpError.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
 
+#include <KConfig>
+#include <KSharedConfig>
+
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
 
 using kinema::api::CinemetaClient;
 using kinema::api::MediaKind;
 using kinema::api::MetaDetail;
 using kinema::api::MetaSummary;
+using kinema::config::SearchSettings;
 using kinema::core::HttpError;
 using kinema::ui::qml::ResultsListModel;
 using kinema::ui::qml::SearchViewModel;
@@ -95,7 +101,10 @@ private Q_SLOTS:
     void testInitialStateIdle()
     {
         FakeCinemeta cinemeta;
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         QCOMPARE(vm.results()->state(), ResultsListModel::State::Idle);
         QVERIFY(vm.query().isEmpty());
         QCOMPARE(vm.kind(), 0);
@@ -104,7 +113,10 @@ private Q_SLOTS:
     void testSubmitWithEmptyQueryStaysIdle()
     {
         FakeCinemeta cinemeta;
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         vm.setQuery(QStringLiteral("   "));
         vm.submit();
         drain();
@@ -120,7 +132,10 @@ private Q_SLOTS:
             makeRow(QStringLiteral("tt0111161"),
                 QStringLiteral("The Shawshank Redemption")),
         };
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         vm.setQuery(QStringLiteral("shawshank"));
 
         QSignalSpy statusSpy(&vm, &SearchViewModel::statusMessage);
@@ -141,7 +156,10 @@ private Q_SLOTS:
     {
         FakeCinemeta cinemeta;
         cinemeta.cannedSearch = {};
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         vm.setQuery(QStringLiteral("nothing-matches"));
         vm.submit();
         drain();
@@ -158,9 +176,14 @@ private Q_SLOTS:
             QStringLiteral("Shawshank"));
         cinemeta.cannedMeta = d;
 
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
+        // setQuery detects the IMDB shortcut and submits eagerly
+        // (no debounce) — calling submit() afterwards would be a
+        // redundant second fetch.
         vm.setQuery(QStringLiteral("tt0111161"));
-        vm.submit();
         drain();
 
         QCOMPARE(cinemeta.metaCalls, 1);
@@ -175,7 +198,10 @@ private Q_SLOTS:
         FakeCinemeta cinemeta;
         cinemeta.cannedSearch
             = { makeRow(QStringLiteral("tt1"), QStringLiteral("X")) };
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         // 'tt' alone (no digits) shouldn't trigger the IMDB-id
         // shortcut — same regression-guard the widget controller
         // had.
@@ -190,7 +216,10 @@ private Q_SLOTS:
     {
         FakeCinemeta cinemeta;
         cinemeta.throwHttpError = true;
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         vm.setQuery(QStringLiteral("anything"));
         vm.submit();
         drain();
@@ -202,7 +231,10 @@ private Q_SLOTS:
     void testKindFlipsBetweenMovieAndSeries()
     {
         FakeCinemeta cinemeta;
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         QSignalSpy kindSpy(&vm, &SearchViewModel::kindChanged);
         vm.setKind(static_cast<int>(MediaKind::Series));
         QCOMPARE(vm.kind(), static_cast<int>(MediaKind::Series));
@@ -223,7 +255,10 @@ private Q_SLOTS:
             makeRow(QStringLiteral("tt2"), QStringLiteral("Show"),
                 MediaKind::Series),
         };
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         QSignalSpy movieSpy(&vm,
             &SearchViewModel::openMovieRequested);
         QSignalSpy seriesSpy(&vm,
@@ -258,7 +293,10 @@ private Q_SLOTS:
         cinemeta.cannedSearch
             = { makeRow(QStringLiteral("tt1"),
                 QStringLiteral("First")) };
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
 
         vm.setQuery(QStringLiteral("first"));
         vm.submit();
@@ -284,7 +322,10 @@ private Q_SLOTS:
         cinemeta.cannedSearch
             = { makeRow(QStringLiteral("tt1"),
                 QStringLiteral("Anything")) };
-        SearchViewModel vm(&cinemeta, nullptr);
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
         vm.setQuery(QStringLiteral("foo"));
         vm.submit();
         drain();

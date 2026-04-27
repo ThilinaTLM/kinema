@@ -48,6 +48,68 @@ QStringList StreamsListModel::chipsFor(const api::Stream& s)
     return chips;
 }
 
+QStringList StreamsListModel::tagsFor(const api::Stream& s,
+    const core::stream_tokens::Tokens& t)
+{
+    Q_UNUSED(s);
+    QStringList tags;
+    // Codec (with 10-bit suffix when applicable).
+    const auto codec = core::stream_tokens::codecLabel(t.codec, t.tenBit);
+    if (!codec.isEmpty()) {
+        tags << codec;
+    }
+    // HDR profile (DV / HDR10+ / HDR10).
+    const auto hdr = core::stream_tokens::hdrLabel(t.hdr);
+    if (!hdr.isEmpty()) {
+        tags << hdr;
+    }
+    // Languages — small uppercased ISO codes ("EN", "FR").
+    for (const auto& lang : t.languages) {
+        tags << lang.toUpper();
+    }
+    // Multi-audio marker (Dual / Multi).
+    if (t.multiAudio) {
+        tags << i18nc("@label stream chip multi audio", "Multi");
+    }
+    // Release group (only when meaningful).
+    if (!t.releaseGroup.isEmpty()) {
+        tags << t.releaseGroup;
+    }
+    return tags;
+}
+
+QString StreamsListModel::summaryLineFor(const api::Stream& s,
+    const core::stream_tokens::Tokens& t)
+{
+    Q_UNUSED(s);
+    QStringList parts;
+    const auto src = core::stream_tokens::sourceLabel(t.source);
+    if (!src.isEmpty()) {
+        parts << src;
+    }
+    const auto codec = core::stream_tokens::codecLabel(t.codec, t.tenBit);
+    if (!codec.isEmpty()) {
+        parts << codec;
+    }
+    const auto hdr = core::stream_tokens::hdrLabel(t.hdr);
+    if (!hdr.isEmpty()) {
+        parts << hdr;
+    }
+    if (!t.audio.isEmpty()) {
+        parts << t.audio.join(QStringLiteral(" \u00b7 "));
+    }
+    return parts.join(QStringLiteral(" \u00b7 "));
+}
+
+const core::stream_tokens::Tokens& StreamsListModel::tokensAt(int index) const
+{
+    auto it = m_tokenCache.find(index);
+    if (it == m_tokenCache.end()) {
+        it = m_tokenCache.insert(index, core::stream_tokens::parse(m_items.at(index)));
+    }
+    return it.value();
+}
+
 QVariant StreamsListModel::data(const QModelIndex& index, int role) const
 {
     if (!index.isValid() || index.row() < 0
@@ -95,6 +157,26 @@ QVariant StreamsListModel::data(const QModelIndex& index, int role) const
         return !s.directUrl.isEmpty();
     case ChipsRole:
         return chipsFor(s);
+    case SourceRole:
+        return core::stream_tokens::sourceLabel(tokensAt(index.row()).source);
+    case CodecRole: {
+        const auto& t = tokensAt(index.row());
+        return core::stream_tokens::codecLabel(t.codec, t.tenBit);
+    }
+    case HdrRole:
+        return core::stream_tokens::hdrLabel(tokensAt(index.row()).hdr);
+    case AudioSummaryRole:
+        return tokensAt(index.row()).audio.join(QStringLiteral(" \u00b7 "));
+    case LanguagesRole:
+        return tokensAt(index.row()).languages;
+    case MultiAudioRole:
+        return tokensAt(index.row()).multiAudio;
+    case ReleaseGroupRole:
+        return tokensAt(index.row()).releaseGroup;
+    case SummaryLineRole:
+        return summaryLineFor(s, tokensAt(index.row()));
+    case TagsRole:
+        return tagsFor(s, tokensAt(index.row()));
     case StreamRole:
         return QVariant::fromValue(s);
     default:
@@ -121,6 +203,15 @@ QHash<int, QByteArray> StreamsListModel::roleNames() const
         { HasMagnetRole, "hasMagnet" },
         { HasDirectUrlRole, "hasDirectUrl" },
         { ChipsRole, "chips" },
+        { SourceRole, "source" },
+        { CodecRole, "codec" },
+        { HdrRole, "hdr" },
+        { AudioSummaryRole, "audioSummary" },
+        { LanguagesRole, "languages" },
+        { MultiAudioRole, "multiAudio" },
+        { ReleaseGroupRole, "releaseGroup" },
+        { SummaryLineRole, "summaryLine" },
+        { TagsRole, "tags" },
     };
 }
 
@@ -138,6 +229,7 @@ void StreamsListModel::setIdle()
     if (!m_items.isEmpty()) {
         beginResetModel();
         m_items.clear();
+        m_tokenCache.clear();
         endResetModel();
         Q_EMIT countChanged();
     }
@@ -178,6 +270,7 @@ void StreamsListModel::setItems(QList<api::Stream> visible,
 {
     beginResetModel();
     m_items = std::move(visible);
+    m_tokenCache.clear();
     endResetModel();
     Q_EMIT countChanged();
 
@@ -201,6 +294,7 @@ void StreamsListModel::setError(const QString& message)
     if (!m_items.isEmpty()) {
         beginResetModel();
         m_items.clear();
+        m_tokenCache.clear();
         endResetModel();
         Q_EMIT countChanged();
     }
@@ -224,6 +318,7 @@ void StreamsListModel::setUnreleased(const QDate& date)
     if (!m_items.isEmpty()) {
         beginResetModel();
         m_items.clear();
+        m_tokenCache.clear();
         endResetModel();
         Q_EMIT countChanged();
     }

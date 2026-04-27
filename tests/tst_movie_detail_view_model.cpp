@@ -429,6 +429,157 @@ private Q_SLOTS:
             StreamsListModel::State::Idle);
         QVERIFY(!f.vm.similarVisible());
     }
+
+    void testDefaultSortIsSmart()
+    {
+        Fixture f;
+        QCOMPARE(f.vm.sortMode(),
+            static_cast<int>(StreamsListModel::SortMode::Smart));
+        QCOMPARE(f.vm.sortDescending(), false);
+    }
+
+    void testSmartSortPutsCachedFirstThenResolutionThenSize()
+    {
+        Fixture f;
+        f.cinemeta.metaScripts = {
+            { makeDetail(QStringLiteral("tt1"),
+                QStringLiteral("X")) }
+        };
+        Stream cached1080 = makeStream(
+            QStringLiteral("Cached.1080p.small"),
+            QStringLiteral("1080p"), 5, 1'000'000'000);
+        cached1080.rdCached = true;
+        Stream uncached2160 = makeStream(
+            QStringLiteral("Uncached.2160p.huge"),
+            QStringLiteral("2160p"), 99, 8'000'000'000);
+        Stream uncached1080big = makeStream(
+            QStringLiteral("Uncached.1080p.big"),
+            QStringLiteral("1080p"), 50, 3'000'000'000);
+        Stream uncached1080small = makeStream(
+            QStringLiteral("Uncached.1080p.small"),
+            QStringLiteral("1080p"), 50, 1'500'000'000);
+        f.torrentio.scriptedCalls = {
+            { { uncached2160, uncached1080small, cached1080,
+                  uncached1080big } }
+        };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        // Smart: cached row leads, then 2160p, then 1080p ordered
+        // by size desc.
+        QCOMPARE(f.vm.streams()->rowCount(), 4);
+        QCOMPARE(f.vm.streams()->at(0)->releaseName,
+            QStringLiteral("Cached.1080p.small"));
+        QCOMPARE(f.vm.streams()->at(1)->releaseName,
+            QStringLiteral("Uncached.2160p.huge"));
+        QCOMPARE(f.vm.streams()->at(2)->releaseName,
+            QStringLiteral("Uncached.1080p.big"));
+        QCOMPARE(f.vm.streams()->at(3)->releaseName,
+            QStringLiteral("Uncached.1080p.small"));
+    }
+
+    void testSmartSortIgnoresDescendingToggle()
+    {
+        Fixture f;
+        f.cinemeta.metaScripts = {
+            { makeDetail(QStringLiteral("tt1"),
+                QStringLiteral("X")) }
+        };
+        Stream cached = makeStream(QStringLiteral("Cached"),
+            QStringLiteral("1080p"), 1, 1);
+        cached.rdCached = true;
+        Stream uncached = makeStream(QStringLiteral("Uncached"),
+            QStringLiteral("1080p"), 1, 1);
+        f.torrentio.scriptedCalls = { { { uncached, cached } } };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        QCOMPARE(f.vm.streams()->at(0)->releaseName,
+            QStringLiteral("Cached"));
+        f.vm.setSortDescending(true);
+        // Smart still ignores it: cached must remain first.
+        QCOMPARE(f.vm.streams()->at(0)->releaseName,
+            QStringLiteral("Cached"));
+    }
+
+    void testUiResolutionFilterNarrowsList()
+    {
+        Fixture f;
+        f.cinemeta.metaScripts = {
+            { makeDetail(QStringLiteral("tt1"),
+                QStringLiteral("X")) }
+        };
+        f.torrentio.scriptedCalls = {
+            { { makeStream(QStringLiteral("R1.2160p"),
+                    QStringLiteral("2160p"), 5, 8'000'000'000),
+                makeStream(QStringLiteral("R2.1080p"),
+                    QStringLiteral("1080p"), 5, 2'000'000'000),
+                makeStream(QStringLiteral("R3.720p"),
+                    QStringLiteral("720p"), 5, 1'000'000'000) } }
+        };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+        QCOMPARE(f.vm.streams()->rowCount(), 3);
+
+        f.vm.setUiResolutionFilter(QStringLiteral("1080p"));
+        QCOMPARE(f.vm.streams()->rowCount(), 1);
+        QCOMPARE(f.vm.streams()->at(0)->releaseName,
+            QStringLiteral("R2.1080p"));
+        QVERIFY(f.vm.uiAnyFilterActive());
+
+        f.vm.clearUiFilters();
+        QCOMPARE(f.vm.streams()->rowCount(), 3);
+        QVERIFY(!f.vm.uiAnyFilterActive());
+    }
+
+    void testUiHdrAndDolbyVisionFilters()
+    {
+        Fixture f;
+        f.cinemeta.metaScripts = {
+            { makeDetail(QStringLiteral("tt1"),
+                QStringLiteral("X")) }
+        };
+        f.torrentio.scriptedCalls = {
+            { { makeStream(QStringLiteral("Plain.1080p.x265"),
+                    QStringLiteral("1080p"), 5, 1),
+                makeStream(QStringLiteral("HDR.2160p.HDR10.x265"),
+                    QStringLiteral("2160p"), 5, 1),
+                makeStream(QStringLiteral("DV.2160p.DV.x265"),
+                    QStringLiteral("2160p"), 5, 1) } }
+        };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        f.vm.setUiHdrOnly(true);
+        QCOMPARE(f.vm.streams()->rowCount(), 2); // HDR10 + DV
+
+        f.vm.setUiHdrOnly(false);
+        f.vm.setUiDolbyVisionOnly(true);
+        QCOMPARE(f.vm.streams()->rowCount(), 1);
+        QCOMPARE(f.vm.streams()->at(0)->releaseName,
+            QStringLiteral("DV.2160p.DV.x265"));
+    }
+
+    void testUiFiltersResetOnClear()
+    {
+        Fixture f;
+        f.cinemeta.metaScripts = {
+            { makeDetail(QStringLiteral("tt1"),
+                QStringLiteral("X")) }
+        };
+        f.torrentio.scriptedCalls = { { {} } };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        f.vm.setUiResolutionFilter(QStringLiteral("1080p"));
+        f.vm.setUiHdrOnly(true);
+        QVERIFY(f.vm.uiAnyFilterActive());
+
+        f.vm.clear();
+        QVERIFY(!f.vm.uiAnyFilterActive());
+        QVERIFY(f.vm.uiResolutionFilter().isEmpty());
+        QVERIFY(!f.vm.uiHdrOnly());
+    }
 };
 
 QTEST_MAIN(TstMovieDetailViewModel)

@@ -22,6 +22,8 @@
 
 #include <QPointer>
 
+#include "core/StreamTokens.h"
+
 #include <algorithm>
 
 namespace kinema::ui::qml {
@@ -130,6 +132,65 @@ void MovieDetailViewModel::setSortDescending(bool desc)
     rebuildVisibleStreams();
 }
 
+void MovieDetailViewModel::setUiResolutionFilter(const QString& res)
+{
+    if (m_uiResolutionFilter == res) {
+        return;
+    }
+    m_uiResolutionFilter = res;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
+void MovieDetailViewModel::setUiHdrOnly(bool on)
+{
+    if (m_uiHdrOnly == on) {
+        return;
+    }
+    m_uiHdrOnly = on;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
+void MovieDetailViewModel::setUiDolbyVisionOnly(bool on)
+{
+    if (m_uiDolbyVisionOnly == on) {
+        return;
+    }
+    m_uiDolbyVisionOnly = on;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
+void MovieDetailViewModel::setUiMultiAudioOnly(bool on)
+{
+    if (m_uiMultiAudioOnly == on) {
+        return;
+    }
+    m_uiMultiAudioOnly = on;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
+bool MovieDetailViewModel::uiAnyFilterActive() const noexcept
+{
+    return !m_uiResolutionFilter.isEmpty()
+        || m_uiHdrOnly || m_uiDolbyVisionOnly || m_uiMultiAudioOnly;
+}
+
+void MovieDetailViewModel::clearUiFilters()
+{
+    if (!uiAnyFilterActive()) {
+        return;
+    }
+    m_uiResolutionFilter.clear();
+    m_uiHdrOnly = false;
+    m_uiDolbyVisionOnly = false;
+    m_uiMultiAudioOnly = false;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
 void MovieDetailViewModel::clear()
 {
     ++m_epoch;
@@ -141,6 +202,15 @@ void MovieDetailViewModel::clear()
     Q_EMIT rawStreamsCountChanged();
     m_similar->setItems({});
     setSimilarVisible(false);
+    // Transient UI filters are page-scoped: a fresh title starts
+    // with no chips active.
+    if (uiAnyFilterActive()) {
+        m_uiResolutionFilter.clear();
+        m_uiHdrOnly = false;
+        m_uiDolbyVisionOnly = false;
+        m_uiMultiAudioOnly = false;
+        Q_EMIT uiFiltersChanged();
+    }
 }
 
 void MovieDetailViewModel::resetMeta()
@@ -465,13 +535,74 @@ QList<api::Stream> MovieDetailViewModel::applyFilters() const
     core::stream_filter::ClientFilters f;
     f.cachedOnly = realDebridConfigured() && cachedOnly();
     f.keywordBlocklist = m_settings.filter().keywordBlocklist();
-    return core::stream_filter::apply(m_rawStreams, f);
+    auto rows = core::stream_filter::apply(m_rawStreams, f);
+
+    if (!uiAnyFilterActive()) {
+        return rows;
+    }
+
+    // Transient UI filters — evaluated by parsing each surviving
+    // row's tokens once. The cost is bounded by `rows.size()`,
+    // which is already the post-blocklist subset.
+    QList<api::Stream> out;
+    out.reserve(rows.size());
+    for (auto& s : rows) {
+        if (!m_uiResolutionFilter.isEmpty()) {
+            const auto& res = s.resolution;
+            if (m_uiResolutionFilter == QStringLiteral("sd")) {
+                // "SD" bucket = anything below 720p (incl. unknown).
+                if (res == QStringLiteral("2160p") || res == QStringLiteral("1440p")
+                    || res == QStringLiteral("1080p") || res == QStringLiteral("720p")) {
+                    continue;
+                }
+            } else if (res != m_uiResolutionFilter) {
+                continue;
+            }
+        }
+        if (m_uiHdrOnly || m_uiDolbyVisionOnly || m_uiMultiAudioOnly) {
+            const auto t = core::stream_tokens::parse(s);
+            if (m_uiDolbyVisionOnly
+                && t.hdr != core::stream_tokens::Hdr::DolbyVision) {
+                continue;
+            }
+            if (m_uiHdrOnly
+                && t.hdr == core::stream_tokens::Hdr::Sdr) {
+                continue;
+            }
+            if (m_uiMultiAudioOnly && !t.multiAudio) {
+                continue;
+            }
+        }
+        out.append(std::move(s));
+    }
+    return out;
 }
 
 void MovieDetailViewModel::sortInPlace(QList<api::Stream>& rows) const
 {
+    if (m_sortMode == SortMode::Smart) {
+        // Cached first, then resolution rank desc, then size desc.
+        // The descending toggle is intentionally ignored — "Smart"
+        // has a fixed shape.
+        std::stable_sort(rows.begin(), rows.end(),
+            [](const api::Stream& a, const api::Stream& b) {
+                const int aCached = a.rdCached ? 2 : (a.rdDownload ? 1 : 0);
+                const int bCached = b.rdCached ? 2 : (b.rdDownload ? 1 : 0);
+                if (aCached != bCached) return aCached > bCached;
+                const int aRes = resolutionRank(a.resolution);
+                const int bRes = resolutionRank(b.resolution);
+                if (aRes != bRes) return aRes > bRes;
+                return a.sizeBytes.value_or(-1)
+                    > b.sizeBytes.value_or(-1);
+            });
+        return;
+    }
+
     auto cmp = [this](const api::Stream& a, const api::Stream& b) {
         switch (m_sortMode) {
+        case SortMode::Smart:
+            // Handled above; unreachable.
+            return false;
         case SortMode::Seeders:
             return a.seeders.value_or(-1) < b.seeders.value_or(-1);
         case SortMode::Size:

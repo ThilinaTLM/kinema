@@ -14,6 +14,7 @@
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/StreamFilter.h"
+#include "core/StreamTokens.h"
 #include "kinema_debug.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
@@ -135,6 +136,65 @@ void SeriesDetailViewModel::setSortDescending(bool desc)
     rebuildVisibleStreams();
 }
 
+void SeriesDetailViewModel::setUiResolutionFilter(const QString& res)
+{
+    if (m_uiResolutionFilter == res) {
+        return;
+    }
+    m_uiResolutionFilter = res;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
+void SeriesDetailViewModel::setUiHdrOnly(bool on)
+{
+    if (m_uiHdrOnly == on) {
+        return;
+    }
+    m_uiHdrOnly = on;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
+void SeriesDetailViewModel::setUiDolbyVisionOnly(bool on)
+{
+    if (m_uiDolbyVisionOnly == on) {
+        return;
+    }
+    m_uiDolbyVisionOnly = on;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
+void SeriesDetailViewModel::setUiMultiAudioOnly(bool on)
+{
+    if (m_uiMultiAudioOnly == on) {
+        return;
+    }
+    m_uiMultiAudioOnly = on;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
+bool SeriesDetailViewModel::uiAnyFilterActive() const noexcept
+{
+    return !m_uiResolutionFilter.isEmpty()
+        || m_uiHdrOnly || m_uiDolbyVisionOnly || m_uiMultiAudioOnly;
+}
+
+void SeriesDetailViewModel::clearUiFilters()
+{
+    if (!uiAnyFilterActive()) {
+        return;
+    }
+    m_uiResolutionFilter.clear();
+    m_uiHdrOnly = false;
+    m_uiDolbyVisionOnly = false;
+    m_uiMultiAudioOnly = false;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
 void SeriesDetailViewModel::setMetaState(MetaState s, const QString& error)
 {
     bool changed = false;
@@ -201,6 +261,13 @@ void SeriesDetailViewModel::clear()
     Q_EMIT rawStreamsCountChanged();
     m_similar->setItems({});
     setSimilarVisible(false);
+    if (uiAnyFilterActive()) {
+        m_uiResolutionFilter.clear();
+        m_uiHdrOnly = false;
+        m_uiDolbyVisionOnly = false;
+        m_uiMultiAudioOnly = false;
+        Q_EMIT uiFiltersChanged();
+    }
 }
 
 void SeriesDetailViewModel::applyMeta(const api::SeriesDetail& sd)
@@ -645,13 +712,66 @@ QList<api::Stream> SeriesDetailViewModel::applyFilters() const
     core::stream_filter::ClientFilters f;
     f.cachedOnly = realDebridConfigured() && cachedOnly();
     f.keywordBlocklist = m_settings.filter().keywordBlocklist();
-    return core::stream_filter::apply(m_rawStreams, f);
+    auto rows = core::stream_filter::apply(m_rawStreams, f);
+
+    if (!uiAnyFilterActive()) {
+        return rows;
+    }
+
+    QList<api::Stream> out;
+    out.reserve(rows.size());
+    for (auto& s : rows) {
+        if (!m_uiResolutionFilter.isEmpty()) {
+            const auto& res = s.resolution;
+            if (m_uiResolutionFilter == QStringLiteral("sd")) {
+                if (res == QStringLiteral("2160p") || res == QStringLiteral("1440p")
+                    || res == QStringLiteral("1080p") || res == QStringLiteral("720p")) {
+                    continue;
+                }
+            } else if (res != m_uiResolutionFilter) {
+                continue;
+            }
+        }
+        if (m_uiHdrOnly || m_uiDolbyVisionOnly || m_uiMultiAudioOnly) {
+            const auto t = core::stream_tokens::parse(s);
+            if (m_uiDolbyVisionOnly
+                && t.hdr != core::stream_tokens::Hdr::DolbyVision) {
+                continue;
+            }
+            if (m_uiHdrOnly
+                && t.hdr == core::stream_tokens::Hdr::Sdr) {
+                continue;
+            }
+            if (m_uiMultiAudioOnly && !t.multiAudio) {
+                continue;
+            }
+        }
+        out.append(std::move(s));
+    }
+    return out;
 }
 
 void SeriesDetailViewModel::sortInPlace(QList<api::Stream>& rows) const
 {
+    if (m_sortMode == SortMode::Smart) {
+        std::stable_sort(rows.begin(), rows.end(),
+            [](const api::Stream& a, const api::Stream& b) {
+                const int aCached = a.rdCached ? 2 : (a.rdDownload ? 1 : 0);
+                const int bCached = b.rdCached ? 2 : (b.rdDownload ? 1 : 0);
+                if (aCached != bCached) return aCached > bCached;
+                const int aRes = resolutionRank(a.resolution);
+                const int bRes = resolutionRank(b.resolution);
+                if (aRes != bRes) return aRes > bRes;
+                return a.sizeBytes.value_or(-1)
+                    > b.sizeBytes.value_or(-1);
+            });
+        return;
+    }
+
     auto cmp = [this](const api::Stream& a, const api::Stream& b) {
         switch (m_sortMode) {
+        case SortMode::Smart:
+            return false;
         case SortMode::Seeders:
             return a.seeders.value_or(-1) < b.seeders.value_or(-1);
         case SortMode::Size:

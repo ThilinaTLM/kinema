@@ -108,6 +108,17 @@ class SeriesDetailViewModel : public QObject
     Q_PROPERTY(bool cachedOnly READ cachedOnly WRITE setCachedOnly NOTIFY cachedOnlyChanged)
     Q_PROPERTY(bool realDebridConfigured READ realDebridConfigured NOTIFY realDebridConfiguredChanged)
     Q_PROPERTY(int rawStreamsCount READ rawStreamsCount NOTIFY rawStreamsCountChanged)
+    // Transient UI-only filter axes consumed by `StreamFilterBar`.
+    // Reset every time `clear()` runs and on every episode switch;
+    // never persisted.
+    Q_PROPERTY(QString uiResolutionFilter READ uiResolutionFilter
+        WRITE setUiResolutionFilter NOTIFY uiFiltersChanged)
+    Q_PROPERTY(bool uiHdrOnly READ uiHdrOnly WRITE setUiHdrOnly NOTIFY uiFiltersChanged)
+    Q_PROPERTY(bool uiDolbyVisionOnly READ uiDolbyVisionOnly
+        WRITE setUiDolbyVisionOnly NOTIFY uiFiltersChanged)
+    Q_PROPERTY(bool uiMultiAudioOnly READ uiMultiAudioOnly
+        WRITE setUiMultiAudioOnly NOTIFY uiFiltersChanged)
+    Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
 
 public:
     enum class MetaState {
@@ -167,6 +178,17 @@ public:
         return static_cast<int>(m_rawStreams.size());
     }
 
+    QString uiResolutionFilter() const { return m_uiResolutionFilter; }
+    void setUiResolutionFilter(const QString& res);
+    bool uiHdrOnly() const noexcept { return m_uiHdrOnly; }
+    void setUiHdrOnly(bool on);
+    bool uiDolbyVisionOnly() const noexcept { return m_uiDolbyVisionOnly; }
+    void setUiDolbyVisionOnly(bool on);
+    bool uiMultiAudioOnly() const noexcept { return m_uiMultiAudioOnly; }
+    void setUiMultiAudioOnly(bool on);
+    bool uiAnyFilterActive() const noexcept;
+    Q_INVOKABLE void clearUiFilters();
+
 public Q_SLOTS:
     /// Open the series detail page for `imdbId`. Optional `season` /
     /// `episode` seed (used by Continue Watching) auto-selects the
@@ -222,6 +244,7 @@ Q_SIGNALS:
     void cachedOnlyChanged();
     void realDebridConfiguredChanged();
     void rawStreamsCountChanged();
+    void uiFiltersChanged();
 
     void statusMessage(const QString& text, int durationMs);
 
@@ -311,8 +334,14 @@ private:
     // Streams config.
     QList<api::Stream> m_rawStreams;
     StreamsListModel::SortMode m_sortMode
-        = StreamsListModel::SortMode::Seeders;
-    bool m_sortDescending = true;
+        = StreamsListModel::SortMode::Smart;
+    bool m_sortDescending = false;
+
+    // Transient UI filter state — not persisted.
+    QString m_uiResolutionFilter;
+    bool m_uiHdrOnly = false;
+    bool m_uiDolbyVisionOnly = false;
+    bool m_uiMultiAudioOnly = false;
 };
 
 } // namespace kinema::ui::qml

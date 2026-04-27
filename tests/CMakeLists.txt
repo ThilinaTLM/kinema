@@ -71,6 +71,11 @@ ecm_add_test(tst_stream_filter.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_stream_tokens.cpp
+    TEST_NAME tst_stream_tokens
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_date_format.cpp
     TEST_NAME tst_date_format
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -244,6 +249,7 @@ endif()
 foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
+         tst_stream_tokens
          tst_date_format tst_app_settings
          tst_search_view_model tst_browse_view_model tst_results_list_model
          tst_streams_list_model tst_episodes_list_model

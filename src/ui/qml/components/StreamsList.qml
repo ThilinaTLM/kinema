@@ -8,52 +8,39 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Streams region for a detail page: a header row (count + cached-on-RD
-// toggle), then a state-switched body that renders one of the five
+// Streams region for the streams page: a quick-filter bar pinned to
+// the top, then a state-switched body that renders one of the five
 // `StreamsListModel.State` cases (Loading / Ready / Empty / Error /
 // Unreleased).
 //
-// Sort UX lives on the parent page (a `Kirigami.Action` that opens
+// Sort UX lives on the parent page (`Kirigami.Action` opens
 // `StreamSortMenu`); the list itself is unaware of how the rows
-// arrived in their current order.
+// arrived in their current order. When the active sort is `Smart`
+// or `Quality` the inner `ListView` groups rows under
+// `Kirigami.ListSectionHeader` per-resolution; for other sorts the
+// list renders flat.
 ColumnLayout {
     id: streams
 
     /// View-model exposing `streams` (StreamsListModel*),
-    /// `cachedOnly`, `realDebridConfigured`, and `rawStreamsCount`.
-    /// Defaults to `movieDetailVm`; commit B's SeriesDetailPage
-    /// rebinds it.
+    /// `cachedOnly`, `realDebridConfigured`, `rawStreamsCount`,
+    /// `sortMode`, and the new `uiResolutionFilter` /
+    /// `uiHdrOnly` / `uiDolbyVisionOnly` / `uiMultiAudioOnly`
+    /// transient filters. Defaults to `movieDetailVm`.
     property var vm: movieDetailVm
 
-    spacing: Kirigami.Units.smallSpacing
+    spacing: 0
 
-    // ---- header row -------------------------------------------
-    RowLayout {
+    // ---- top: quick-filter chip strip --------------------------
+    StreamFilterBar {
         Layout.fillWidth: true
-        Layout.leftMargin: Kirigami.Units.largeSpacing
-        Layout.rightMargin: Kirigami.Units.largeSpacing
-        spacing: Kirigami.Units.largeSpacing
+        vm: streams.vm
+    }
 
-        Kirigami.Heading {
-            level: 3
-            text: streams.vm.streams && streams.vm.streams.count > 0
-                ? i18ncp("@title:section",
-                    "%1 stream", "%1 streams",
-                    streams.vm.streams.count)
-                : i18nc("@title:section", "Streams")
-            color: Theme.foreground
-        }
-
-        Item { Layout.fillWidth: true }
-
-        QQC2.CheckBox {
-            text: i18nc("@option:check",
-                "Cached on Real-Debrid only")
-            visible: streams.vm.realDebridConfigured
-                && streams.vm.rawStreamsCount > 0
-            checked: streams.vm.cachedOnly
-            onToggled: streams.vm.cachedOnly = checked
-        }
+    // Subtle separator between the filter bar and the list, so the
+    // sticky bar reads as a distinct region rather than floating.
+    Kirigami.Separator {
+        Layout.fillWidth: true
     }
 
     // ---- state-switched body ----------------------------------
@@ -62,17 +49,16 @@ ColumnLayout {
         Layout.fillHeight: true
 
         // The model state enum order is Idle / Loading / Ready /
-        // Empty / Error / Unreleased — the indices below mirror it
-        // 1:1 so an extra state added later only needs the new
-        // child appended in matching order.
+        // Empty / Error / Unreleased \u2014 the indices below mirror it
+        // 1:1.
         currentIndex: streams.vm.streams
             ? streams.vm.streams.state
             : 0
 
-        // 0 — Idle (no title loaded yet).
+        // 0 \u2014 Idle (no title loaded yet).
         Item { }
 
-        // 1 — Loading.
+        // 1 \u2014 Loading.
         Item {
             QQC2.BusyIndicator {
                 anchors.centerIn: parent
@@ -80,7 +66,8 @@ ColumnLayout {
             }
         }
 
-        // 2 — Ready: virtualised list of StreamCards.
+        // 2 \u2014 Ready: virtualised list of StreamCards, optionally
+        // grouped by resolution under section headers.
         ListView {
             id: list
             model: streams.vm.streams
@@ -89,22 +76,40 @@ ColumnLayout {
             cacheBuffer: Kirigami.Units.gridUnit * 20
             boundsBehavior: Flickable.StopAtBounds
 
+            // Section grouping: only meaningful when rows are
+            // ordered by quality (Smart / Quality sorts). For
+            // other sorts we render a flat list \u2014 grouping by
+            // resolution under a "Provider" sort would just spam
+            // headers.
+            section.property: (streams.vm.sortMode === StreamsListModel.Smart
+                    || streams.vm.sortMode === StreamsListModel.Quality)
+                ? "resolution" : ""
+            section.criteria: ViewSection.FullString
+            section.delegate: Kirigami.ListSectionHeader {
+                width: ListView.view ? ListView.view.width : implicitWidth
+                text: (section === "\u2014" || section === "")
+                    ? i18nc("@title:section unknown resolution", "Other")
+                    : section.toUpperCase()
+            }
+
             delegate: StreamCard {
                 row: index
                 releaseName: model.releaseName
-                detailsText: model.detailsText
-                chips: model.chips
+                summaryLine: model.summaryLine
+                tags: model.tags
                 sizeText: model.sizeText
                 seeders: model.seeders
+                provider: model.provider
                 rdCached: model.rdCached
                 rdDownload: model.rdDownload
                 hasMagnet: model.hasMagnet
                 hasDirectUrl: model.hasDirectUrl
+                resolution: model.resolution
                 vm: streams.vm
             }
         }
 
-        // 3 — Empty (no rows after filters / upstream returned 0).
+        // 3 \u2014 Empty (no rows after filters / upstream returned 0).
         Kirigami.PlaceholderMessage {
             Layout.alignment: Qt.AlignCenter
             Layout.preferredWidth: Math.min(parent.width
@@ -114,9 +119,20 @@ ColumnLayout {
             text: i18nc("@info placeholder", "No streams")
             explanation: streams.vm.streams
                 ? streams.vm.streams.emptyExplanation : ""
+            // When the user has narrowed via the filter chips, give
+            // them a one-click out instead of forcing a manual untoggle
+            // of each chip.
+            helpfulAction: streams.vm.uiAnyFilterActive
+                ? clearFiltersAction : null
+            Kirigami.Action {
+                id: clearFiltersAction
+                icon.name: "edit-clear-all"
+                text: i18nc("@action:button reset stream filters", "Reset filters")
+                onTriggered: streams.vm.clearUiFilters()
+            }
         }
 
-        // 4 — Error.
+        // 4 \u2014 Error.
         Kirigami.PlaceholderMessage {
             Layout.alignment: Qt.AlignCenter
             Layout.preferredWidth: Math.min(parent.width
@@ -133,7 +149,7 @@ ColumnLayout {
             }
         }
 
-        // 5 — Unreleased.
+        // 5 \u2014 Unreleased.
         Kirigami.PlaceholderMessage {
             Layout.alignment: Qt.AlignCenter
             Layout.preferredWidth: Math.min(parent.width

@@ -9,19 +9,28 @@ import dev.tlmtech.kinema.app
 
 // Menu of sort options + asc/desc toggle. Bound to the owning
 // view-model's `sortMode` (int) and `sortDescending` (bool)
-// properties; choosing an item rewrites both. Used by
-// `MovieDetailPage`'s header `Sort streams` action.
+// properties; choosing an item rewrites both. Used by the
+// `StreamsPage` header `Sort streams` action.
 //
-// The enum values come from `StreamsListModel.SortMode.*` so QML
-// reads them by name rather than hard-coded integers.
+// `Smart` is the default: it puts cached rows first, then orders
+// by resolution rank desc, then size desc. The descending toggle
+// is meaningless under Smart (its shape is fixed) so the toggle
+// item disables itself when Smart is active.
 QQC2.Menu {
     id: menu
 
     /// View-model with `sortMode` (int) + `sortDescending` (bool)
-    /// + `sortChanged` notify. Defaults to `movieDetailVm`; commit
-    /// B's SeriesDetailPage rebinds it.
+    /// + `sortChanged` notify. Defaults to `movieDetailVm`.
     property var vm: movieDetailVm
 
+    QQC2.MenuItem {
+        text: i18nc("@action:inmenu sort streams",
+            "Smart (cached, then quality)")
+        checkable: true
+        checked: menu.vm.sortMode === StreamsListModel.Smart
+        onTriggered: menu.vm.sortMode = StreamsListModel.Smart
+    }
+    QQC2.MenuSeparator { }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu sort streams", "Seeders")
         checkable: true
@@ -57,6 +66,9 @@ QQC2.Menu {
         text: i18nc("@action:inmenu sort streams", "Descending")
         checkable: true
         checked: menu.vm.sortDescending
+        // Smart has a fixed shape \u2014 disable the toggle so the user
+        // doesn't think they're affecting anything when they aren't.
+        enabled: menu.vm.sortMode !== StreamsListModel.Smart
         onTriggered: menu.vm.sortDescending = !menu.vm.sortDescending
     }
 }

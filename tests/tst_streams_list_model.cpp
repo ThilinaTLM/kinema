@@ -142,7 +142,16 @@ private Q_SLOTS:
                                  QByteArrayLiteral("hasMagnet"),
                                  QByteArrayLiteral("hasDirectUrl"),
                                  QByteArrayLiteral("rdCached"),
-                                 QByteArrayLiteral("chips") }) {
+                                 QByteArrayLiteral("chips"),
+                                 QByteArrayLiteral("source"),
+                                 QByteArrayLiteral("codec"),
+                                 QByteArrayLiteral("hdr"),
+                                 QByteArrayLiteral("audioSummary"),
+                                 QByteArrayLiteral("languages"),
+                                 QByteArrayLiteral("multiAudio"),
+                                 QByteArrayLiteral("releaseGroup"),
+                                 QByteArrayLiteral("summaryLine"),
+                                 QByteArrayLiteral("tags") }) {
             QVERIFY2(names.values().contains(key),
                 key.constData());
         }
@@ -185,6 +194,79 @@ private Q_SLOTS:
             StreamsListModel::QualityLabelRole).toString();
         QVERIFY2(label.contains(QStringLiteral("[RD+]")),
             qPrintable(label));
+    }
+
+    void testSummaryLineAndTagsRoles()
+    {
+        StreamsListModel m;
+        Stream s = makeStream(
+            QStringLiteral("From.S01.1080p.WEB-DL.x265.10bit.EAC3-QxR"),
+            QStringLiteral("1080p"),
+            QStringLiteral("TorrentGalaxy"),
+            1'500'000'000, 42, /*rdCached=*/true);
+        m.setItems({ s });
+
+        const auto summary = m.data(m.index(0),
+            StreamsListModel::SummaryLineRole).toString();
+        QVERIFY2(summary.contains(QStringLiteral("WEB-DL")), qPrintable(summary));
+        QVERIFY2(summary.contains(QStringLiteral("x265 10-bit")),
+            qPrintable(summary));
+        QVERIFY2(summary.contains(QStringLiteral("EAC3")), qPrintable(summary));
+
+        const auto tags = m.data(m.index(0),
+            StreamsListModel::TagsRole).toStringList();
+        // Tags do NOT include resolution or RD — those have dedicated
+        // visual treatment in the leading quality block.
+        QVERIFY(!tags.contains(QStringLiteral("1080p")));
+        QVERIFY(!tags.contains(QStringLiteral("RD+")));
+        // Tags DO include codec, release group.
+        QVERIFY(tags.contains(QStringLiteral("x265 10-bit")));
+        QVERIFY(tags.contains(QStringLiteral("QxR")));
+    }
+
+    void testEmptySummaryWhenNoTokens()
+    {
+        StreamsListModel m;
+        m.setItems({ makeStream(QStringLiteral("NoMetadataHere"),
+            QStringLiteral("\u2014"),
+            QString {}, 1, 0) });
+        const auto summary = m.data(m.index(0),
+            StreamsListModel::SummaryLineRole).toString();
+        QVERIFY(summary.isEmpty());
+    }
+
+    void testTokenCacheClearsOnSetItems()
+    {
+        StreamsListModel m;
+        m.setItems({ makeStream(
+            QStringLiteral("A.1080p.WEB-DL.x265"),
+            QStringLiteral("1080p"), QStringLiteral("p"), 1, 1) });
+        const auto first = m.data(m.index(0),
+            StreamsListModel::SummaryLineRole).toString();
+        QVERIFY(first.contains(QStringLiteral("x265")));
+
+        // Replace with a different release — the cache must be wiped
+        // so role 0 reflects the new row's tokens, not the old.
+        m.setItems({ makeStream(
+            QStringLiteral("B.1080p.BluRay.x264"),
+            QStringLiteral("1080p"), QStringLiteral("p"), 1, 1) });
+        const auto second = m.data(m.index(0),
+            StreamsListModel::SummaryLineRole).toString();
+        QVERIFY(second.contains(QStringLiteral("x264")));
+        QVERIFY(!second.contains(QStringLiteral("x265")));
+    }
+
+    void testSortModeEnumOrder()
+    {
+        // Smart is the new default and lives at index 0; the rest
+        // shifted up by one. Tests / QML that read the enum by value
+        // rather than name need to know.
+        QCOMPARE(static_cast<int>(StreamsListModel::SortMode::Smart), 0);
+        QCOMPARE(static_cast<int>(StreamsListModel::SortMode::Seeders), 1);
+        QCOMPARE(static_cast<int>(StreamsListModel::SortMode::Size), 2);
+        QCOMPARE(static_cast<int>(StreamsListModel::SortMode::Quality), 3);
+        QCOMPARE(static_cast<int>(StreamsListModel::SortMode::Provider), 4);
+        QCOMPARE(static_cast<int>(StreamsListModel::SortMode::ReleaseName), 5);
     }
 };
 
