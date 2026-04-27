@@ -12,9 +12,25 @@ import dev.tlmtech.kinema.player
  * events, so they coexist with the chrome's own MouseAreas. This
  * component owns:
  *
- *   - Keyboard shortcuts (space/k pause, j/l seek, arrows, m, f)
- *   - Single-click → toggle pause, double-click → toggle fullscreen
- *   - Wheel → volume
+ *   - Keyboard shortcuts:
+ *       Space / K           pause toggle
+ *       Left  / Right       seek ±5s
+ *       J     / L           seek ±10s
+ *       Down  / Up          seek ±60s
+ *       -     / + (or =)    volume ±5%
+ *       M                   mute toggle
+ *       F                   fullscreen toggle
+ *       Esc                 close
+ *       [     / ]           speed ±0.25x
+ *   - Mouse:
+ *       LMB single-click    pause toggle
+ *       LMB double-click    fullscreen toggle
+ *       RMB                 pause toggle
+ *       Wheel               volume ±5%
+ *
+ * Up/Down map to large seek instead of volume because Left/Right
+ * already cover small seek and the user wanted all four arrows on
+ * the timeline. Keyboard volume falls back to +/- and the wheel.
  *
  * Most keys translate directly to MpvVideoItem methods; a few
  * window-level actions (close, fullscreen) bubble out via signals
@@ -43,11 +59,19 @@ Item {
             mouse.accepted = false; // let other items see clicks
         }
         onClicked: mouse => {
-            // Single-click toggles pause; double-click toggles fullscreen.
+            // LMB: single-click toggles pause; double-click toggles
+            // fullscreen — disambiguated by clickTimer below.
+            // RMB: pause toggle, fired immediately (no double-click
+            // role, so no need to wait).
             if (mouse.button === Qt.LeftButton) {
                 clickTimer.restart();
+                mouse.accepted = false;
+            } else if (mouse.button === Qt.RightButton) {
+                root.togglePauseRequested();
+                mouse.accepted = true;
+            } else {
+                mouse.accepted = false;
             }
-            mouse.accepted = false;
         }
         onDoubleClicked: mouse => {
             clickTimer.stop();
@@ -101,13 +125,22 @@ Item {
             event.accepted = true;
             break;
         case Qt.Key_Up:
+            if (root.mpv) root.mpv.seekRelative(60);
+            event.accepted = true;
+            break;
+        case Qt.Key_Down:
+            if (root.mpv) root.mpv.seekRelative(-60);
+            event.accepted = true;
+            break;
+        case Qt.Key_Plus:
+        case Qt.Key_Equal:    // unshifted '+' on most layouts
             if (root.mpv) {
                 root.mpv.setVolumePercent(
                     Math.min(100, root.mpv.volume + 5));
             }
             event.accepted = true;
             break;
-        case Qt.Key_Down:
+        case Qt.Key_Minus:
             if (root.mpv) {
                 root.mpv.setVolumePercent(
                     Math.max(0, root.mpv.volume - 5));
