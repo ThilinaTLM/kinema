@@ -11,9 +11,9 @@ import dev.tlmtech.kinema.app
 // Browse: filter-driven TMDB grid. Chrome:
 //
 //   * `header:` is `BrowseFilterBar` — segmented Movies / TV Series
-//     toggle, horizontal genre chip strip, sort combo, and a
-//     "More filters" button that opens `BrowseFiltersSheet` for
-//     date window / min rating / hide-obscure.
+//     toggle, genre chip strip, Released combo, ★ Min rating popup,
+//     sort combo, and a Hide-obscure toggle. Every filter lives
+//     inline; there is no overflow sheet.
 //   * `ActiveFiltersBar` sits between the header and the grid and
 //     paints removable chips for every non-default filter, with a
 //     trailing "Clear all" button.
@@ -47,13 +47,7 @@ Kirigami.ScrollablePage {
         }
     ]
 
-    // The filter bar is the page header. The "More filters" button
-    // inside it opens this sheet; the sheet is parented to the
-    // application overlay so it survives header re-instantiation.
-    BrowseFiltersSheet { id: moreFiltersSheet }
-
     header: BrowseFilterBar {
-        moreFiltersSheet: moreFiltersSheet
         visible: browseVm.tmdbConfigured && !browseVm.authFailed
         // Collapse to zero height when hidden so the placeholder
         // takes the whole page surface.

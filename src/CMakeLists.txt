@@ -188,7 +188,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/DetailOverview.qml
         ui/qml/components/ActiveFiltersBar.qml
         ui/qml/components/BrowseFilterBar.qml
-        ui/qml/components/BrowseFiltersSheet.qml
         ui/qml/components/EpisodeRow.qml
         ui/qml/components/GenresMenuButton.qml
         ui/qml/components/KAboutPage.qml
