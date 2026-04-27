@@ -72,7 +72,11 @@ ColumnLayout {
             id: list
             model: streams.vm.streams
             clip: true
-            spacing: 0
+            spacing: Theme.inlineSpacing
+            leftMargin: Theme.pageMargin
+            rightMargin: Theme.pageMargin
+            topMargin: Theme.inlineSpacing
+            bottomMargin: Theme.groupSpacing
             cacheBuffer: Kirigami.Units.gridUnit * 20
             boundsBehavior: Flickable.StopAtBounds
 
@@ -113,8 +117,8 @@ ColumnLayout {
         Kirigami.PlaceholderMessage {
             Layout.alignment: Qt.AlignCenter
             Layout.preferredWidth: Math.min(parent.width
-                    - Kirigami.Units.gridUnit * 4,
-                Kirigami.Units.gridUnit * 28)
+                    - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "edit-find"
             text: i18nc("@info placeholder", "No streams")
             explanation: streams.vm.streams
@@ -136,8 +140,8 @@ ColumnLayout {
         Kirigami.PlaceholderMessage {
             Layout.alignment: Qt.AlignCenter
             Layout.preferredWidth: Math.min(parent.width
-                    - Kirigami.Units.gridUnit * 4,
-                Kirigami.Units.gridUnit * 28)
+                    - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "dialog-error"
             text: i18nc("@info placeholder", "Couldn't fetch streams")
             explanation: streams.vm.streams
@@ -153,8 +157,8 @@ ColumnLayout {
         Kirigami.PlaceholderMessage {
             Layout.alignment: Qt.AlignCenter
             Layout.preferredWidth: Math.min(parent.width
-                    - Kirigami.Units.gridUnit * 4,
-                Kirigami.Units.gridUnit * 28)
+                    - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "appointment-soon"
             text: i18nc("@info placeholder",
                 "Not released yet")

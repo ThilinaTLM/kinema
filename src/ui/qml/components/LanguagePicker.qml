@@ -7,6 +7,8 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.formcard as FormCard
 
+import dev.tlmtech.kinema.app
+
 // Multi-select language picker for the subtitles flow. Drops in
 // inside a FormCard.FormCard as a single delegate; the popup is a
 // menu of checkable common-language entries pulled from the VM's
@@ -28,7 +30,7 @@ FormCard.AbstractFormDelegate {
 
     background: null
     contentItem: RowLayout {
-        spacing: Kirigami.Units.smallSpacing
+        spacing: Theme.inlineSpacing
 
         ColumnLayout {
             Layout.fillWidth: true

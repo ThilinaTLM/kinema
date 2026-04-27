@@ -22,12 +22,12 @@ ColumnLayout {
     /// into a `MovieDetailViewModel.activateSimilar(row)` call.
     signal itemActivated(int row)
 
-    spacing: Kirigami.Units.smallSpacing
+    spacing: Theme.inlineSpacing
 
     Kirigami.Heading {
         Layout.fillWidth: true
-        Layout.leftMargin: Kirigami.Units.largeSpacing
-        Layout.rightMargin: Kirigami.Units.largeSpacing
+        Layout.leftMargin: Theme.pageMargin
+        Layout.rightMargin: Theme.pageMargin
         level: 3
         text: sourceModel ? sourceModel.title : ""
         color: Theme.foreground
@@ -40,11 +40,11 @@ ColumnLayout {
         orientation: ListView.Horizontal
         model: sourceModel
         clip: true
-        spacing: Kirigami.Units.largeSpacing
+        spacing: Theme.groupSpacing
         cacheBuffer: Theme.posterMax * 4
         boundsBehavior: Flickable.StopAtBounds
-        leftMargin: Kirigami.Units.largeSpacing
-        rightMargin: Kirigami.Units.largeSpacing
+        leftMargin: Theme.pageMargin
+        rightMargin: Theme.pageMargin
 
         delegate: PosterCard {
             width: Theme.posterMax

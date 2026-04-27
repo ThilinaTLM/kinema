@@ -37,10 +37,10 @@ GridView {
 
     // Visual breathing room around the whole grid so cards do not
     // kiss the page edge.
-    leftMargin:   Kirigami.Units.largeSpacing
-    rightMargin:  Kirigami.Units.largeSpacing
-    topMargin:    Kirigami.Units.largeSpacing
-    bottomMargin: Kirigami.Units.largeSpacing
+    leftMargin:   Theme.pageMargin
+    rightMargin:  Theme.pageMargin
+    topMargin:    Theme.pageMargin
+    bottomMargin: Theme.pageMargin
 
     // ---- Responsive sizing --------------------------------------
     // The minimum cell footprint a poster wants. We then split the

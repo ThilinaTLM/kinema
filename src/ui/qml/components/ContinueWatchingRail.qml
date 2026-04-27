@@ -21,13 +21,13 @@ import dev.tlmtech.kinema.app
 // page binds `visible` accordingly.
 ColumnLayout {
     id: rail
-    spacing: Kirigami.Units.smallSpacing
+    spacing: Theme.inlineSpacing
 
     // ---- Header ---------------------------------------------------
     RowLayout {
         Layout.fillWidth: true
-        Layout.leftMargin: Kirigami.Units.gridUnit
-        Layout.rightMargin: Kirigami.Units.gridUnit
+        Layout.leftMargin: Theme.pageMargin
+        Layout.rightMargin: Theme.pageMargin
 
         Kirigami.Heading {
             level: 3
@@ -48,9 +48,9 @@ ColumnLayout {
 
         orientation: ListView.Horizontal
         clip: true
-        spacing: Kirigami.Units.largeSpacing
-        leftMargin: Kirigami.Units.gridUnit
-        rightMargin: Kirigami.Units.gridUnit
+        spacing: Theme.groupSpacing
+        leftMargin: Theme.pageMargin
+        rightMargin: Theme.pageMargin
         boundsBehavior: Flickable.StopAtBounds
         cacheBuffer: width
         model: continueWatchingVm.model

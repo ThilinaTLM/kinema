@@ -13,16 +13,21 @@ import dev.tlmtech.kinema.app
 // on Kirigami theme tokens so it tracks the user's Plasma colour
 // scheme without any hand-rolled palette:
 //
-//   * `Kirigami.ShadowedRectangle` for the poster frame so we get a
-//     proper subtle drop shadow that lifts on hover instead of a
-//     scale transform (scale would bleed into adjacent grid cells).
+//   * `Kirigami.ShadowedImage` renders the artwork through a
+//     distance-field shader so the pixels are clipped to the
+//     rounded corners (a plain `Image` inside a `ShadowedRectangle`
+//     leaks square corners on top of the rounded frame).
+//   * The shadow lifts on hover instead of a scale transform —
+//     scale would bleed into adjacent grid cells.
 //   * `Kirigami.Theme.colorSet: View` so the surface inherits the
 //     content area's background, not the page header's.
 //   * `hoverColor` / `focusColor` for hover + keyboard focus.
 //
 // Public surface is intentionally identical to the previous version
 // so `PosterGrid`, `ContentRail`, and `SimilarCarousel` can keep
-// using the delegate without changes.
+// using the delegate without changes. `ProgressPosterCard` reuses
+// the same hover/elevation pattern so the two card variants feel
+// like siblings.
 Item {
     id: card
 
@@ -33,6 +38,10 @@ Item {
     property real rating: -1
 
     signal clicked()
+
+    // Single source of truth for the hover-elevation state so the
+    // shadow, border, and tint can all flip together.
+    readonly property bool _hovered: hoverHandler.hovered
 
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.inherit: false
@@ -60,9 +69,10 @@ Item {
         anchors.fill: parent
         spacing: Kirigami.Units.smallSpacing
 
-        // Poster frame. ShadowedRectangle gives us a real elevation
-        // shadow that we can animate on hover.
-        Kirigami.ShadowedRectangle {
+        // Poster frame. `ShadowedImage` renders the artwork through
+        // a distance-field shader, so pixels are clipped to the
+        // rounded corners — no square overhang at the corners.
+        Kirigami.ShadowedImage {
             id: poster
             Layout.fillWidth: true
             // 2:3 portrait aspect, computed from current width so
@@ -71,19 +81,37 @@ Item {
 
             radius: Kirigami.Units.cornerRadius
             color: Kirigami.Theme.alternateBackgroundColor
-            border.color: hoverHandler.hovered || card.activeFocus
+
+            source: card.posterUrl
+                ? "image://kinema/poster?u=" + encodeURIComponent(card.posterUrl)
+                : ""
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            // Source size derives from the actual width so wide
+            // grids don't pull blurry thumbnails. Capped at the
+            // theme's `posterMax` to avoid pulling needlessly large
+            // TMDB renditions on dense displays. Both dimensions
+            // derive from `_srcW` rather than from each other so
+            // QQuickImage doesn't see a sourceSize.height ←
+            // sourceSize.width binding loop.
+            readonly property int _srcW: Math.min(
+                card.width * 2, Theme.posterMax * 2)
+            sourceSize.width: _srcW
+            sourceSize.height: Math.round(_srcW * 1.5)
+
+            border.color: card._hovered || card.activeFocus
                 ? Kirigami.Theme.focusColor
                 : Qt.alpha(Kirigami.Theme.textColor, 0.12)
             border.width: card.activeFocus ? 2 : 1
 
-            shadow.size: hoverHandler.hovered
+            shadow.size: card._hovered
                 ? Kirigami.Units.gridUnit
                 : Kirigami.Units.smallSpacing
-            shadow.yOffset: hoverHandler.hovered
+            shadow.yOffset: card._hovered
                 ? Kirigami.Units.smallSpacing
                 : 1
             shadow.color: Qt.alpha(Kirigami.Theme.textColor,
-                hoverHandler.hovered ? 0.35 : 0.18)
+                card._hovered ? 0.40 : 0.18)
 
             Behavior on shadow.size {
                 NumberAnimation { duration: Kirigami.Units.shortDuration }
@@ -92,39 +120,11 @@ Item {
                 NumberAnimation { duration: Kirigami.Units.shortDuration }
             }
 
-            Image {
-                id: posterImage
-                anchors.fill: parent
-                anchors.margins: 1
-                source: card.posterUrl
-                    ? "image://kinema/poster?u=" + encodeURIComponent(card.posterUrl)
-                    : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                // Source size derives from the actual width so wide
-                // grids don't pull blurry thumbnails. Capped at the
-                // theme's `posterMax` to avoid pulling needlessly
-                // large TMDB renditions on dense displays. Both
-                // dimensions derive from `_srcW` rather than from
-                // each other so QQuickImage doesn't see a
-                // sourceSize.height ← sourceSize.width binding loop.
-                readonly property int _srcW: Math.min(
-                    card.width * 2, Theme.posterMax * 2)
-                sourceSize.width: _srcW
-                sourceSize.height: Math.round(_srcW * 1.5)
-                visible: status === Image.Ready
-
-                // Clip the image to the rounded frame.
-                layer.enabled: true
-                layer.smooth: true
-            }
-
             // Skeleton + missing-poster fallback. A neutral icon
             // sits in the same slot as the image so cards without
             // a TMDB poster don't render an empty rectangle.
             Kirigami.Icon {
-                visible: posterImage.status !== Image.Ready
+                visible: poster.status !== Image.Ready
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.huge
                 height: width
@@ -132,14 +132,13 @@ Item {
                 color: Kirigami.Theme.disabledTextColor
             }
 
-            // Subtle hover tint on the poster surface so the
-            // hover affordance is felt over both light and dark art.
-            Rectangle {
+            // Hover tint, also rounded-corner-clipped via the same
+            // distance-field shader so it never escapes the frame.
+            Kirigami.ShadowedRectangle {
                 anchors.fill: parent
-                anchors.margins: 1
-                radius: parent.radius
+                radius: poster.radius
                 color: Kirigami.Theme.hoverColor
-                opacity: hoverHandler.hovered ? 0.18 : 0
+                opacity: card._hovered ? 0.18 : 0
                 Behavior on opacity {
                     NumberAnimation { duration: Kirigami.Units.shortDuration }
                 }
@@ -169,8 +168,7 @@ Item {
                 level: 5
                 text: card.title
                 elide: Text.ElideRight
-                maximumLineCount: 2
-                wrapMode: Text.Wrap
+                maximumLineCount: 1
                 color: Kirigami.Theme.textColor
             }
 

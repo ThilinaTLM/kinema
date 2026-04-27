@@ -41,6 +41,26 @@ QtObject {
     readonly property int gridUnit:    Kirigami.Units.gridUnit
     readonly property int radius:      Kirigami.Units.cornerRadius
 
+    // ---- Layout rhythm -------------------------------------------
+    // Page and component spacing tokens. They are still Kirigami.Unit-
+    // derived, but centralising the names keeps page gutters and state
+    // surfaces aligned across Discover, Search, Browse, details,
+    // streams, subtitles, and settings.
+    readonly property int pageMargin:        Kirigami.Units.gridUnit
+    readonly property int pageWideMargin:    Kirigami.Units.gridUnit * 2
+    readonly property int pageTopSpacing:    Kirigami.Units.smallSpacing
+    readonly property int pageBottomSpacing: Kirigami.Units.gridUnit
+    readonly property int inlineSpacing:     Kirigami.Units.smallSpacing
+    readonly property int groupSpacing:      Kirigami.Units.largeSpacing
+    readonly property int sectionSpacing:    Kirigami.Units.largeSpacing * 2
+
+    readonly property int placeholderMaxWidth:
+        Kirigami.Units.gridUnit * 28
+    readonly property int detailPlaceholderMaxWidth:
+        Kirigami.Units.gridUnit * 30
+    readonly property int wideContentMaxWidth:
+        Kirigami.Units.gridUnit * 36
+
     // Poster / hero structural sizes — gridUnit-derived so they
     // scale with the user's font size.
     readonly property int posterMin:   Kirigami.Units.gridUnit * 8

@@ -8,16 +8,19 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// PosterCard variant for the Continue Watching rail: adds a thin
-// progress bar overlay at the bottom of the poster and a "release
-// line" subtitle beneath the title (e.g. "1080p — Movie.Name.2024").
+// PosterCard variant for the Continue Watching rail. Shares the
+// same `Kirigami.ShadowedImage` chrome and hover-elevation pattern
+// as `PosterCard` so the two card variants feel like siblings, and
+// adds:
 //
-// Forwards `clicked` (resume) and `removeRequested` /
-// `chooseAnotherRequested` from the right-click context menu so the
-// view-model can route each to `HistoryController`.
+//   * a thin progress bar overlay along the poster's bottom edge,
+//   * a release-line subtitle ("1080p — Movie.Name.2024"),
+//   * a right-click context menu that forwards remove / pick-another
+//     actions to the view-model.
 Item {
     id: card
 
+    // ---- Inputs --------------------------------------------------
     property string posterUrl
     property string title
     property string lastRelease    // e.g. "1080p — Some.Release.Name"
@@ -27,101 +30,140 @@ Item {
     signal removeRequested()
     signal chooseAnotherRequested()
 
+    // Single source of truth for the hover-elevation state.
+    readonly property bool _hovered: hoverArea.containsMouse
+
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     implicitWidth: Theme.posterMin
     implicitHeight: poster.height + meta.implicitHeight
         + Kirigami.Units.smallSpacing * 2
 
-    transform: Scale {
-        origin.x: card.width / 2
-        origin.y: card.height / 2
-        xScale: hoverArea.containsMouse ? 1.02 : 1.0
-        yScale: hoverArea.containsMouse ? 1.02 : 1.0
-
-        Behavior on xScale { NumberAnimation { duration: Kirigami.Units.shortDuration } }
-        Behavior on yScale { NumberAnimation { duration: Kirigami.Units.shortDuration } }
+    activeFocusOnTab: true
+    Keys.onPressed: function (event) {
+        if (event.key === Qt.Key_Return
+            || event.key === Qt.Key_Enter
+            || event.key === Qt.Key_Space) {
+            card.clicked();
+            event.accepted = true;
+        }
     }
 
+    // ---- Visual chrome ------------------------------------------
     ColumnLayout {
         anchors.fill: parent
         spacing: Kirigami.Units.smallSpacing
 
-        Item {
+        // Same poster frame as `PosterCard`: distance-field shader
+        // means the artwork is clipped to the rounded corners and
+        // the shadow lifts cleanly on hover.
+        Kirigami.ShadowedImage {
             id: poster
             Layout.fillWidth: true
             Layout.preferredHeight: Math.round(width * 1.5)
 
-            Rectangle {
-                anchors.fill: parent
-                radius: Kirigami.Units.cornerRadius
-                color: Kirigami.Theme.alternateBackgroundColor
-                border.color: Qt.alpha(Theme.foreground, 0.10)
-                border.width: 1
-            }
+            radius: Kirigami.Units.cornerRadius
+            color: Kirigami.Theme.alternateBackgroundColor
 
-            Image {
-                id: posterImage
-                anchors.fill: parent
-                anchors.margins: 1
-                source: card.posterUrl
-                    ? "image://kinema/poster?u=" + encodeURIComponent(card.posterUrl)
-                    : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                sourceSize.width: Theme.posterMax
-                sourceSize.height: Math.round(Theme.posterMax * 1.5)
-                visible: status === Image.Ready
+            source: card.posterUrl
+                ? "image://kinema/poster?u=" + encodeURIComponent(card.posterUrl)
+                : ""
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            readonly property int _srcW: Math.min(
+                card.width * 2, Theme.posterMax * 2)
+            sourceSize.width: _srcW
+            sourceSize.height: Math.round(_srcW * 1.5)
+
+            border.color: card._hovered || card.activeFocus
+                ? Kirigami.Theme.focusColor
+                : Qt.alpha(Kirigami.Theme.textColor, 0.12)
+            border.width: card.activeFocus ? 2 : 1
+
+            shadow.size: card._hovered
+                ? Kirigami.Units.gridUnit
+                : Kirigami.Units.smallSpacing
+            shadow.yOffset: card._hovered
+                ? Kirigami.Units.smallSpacing
+                : 1
+            shadow.color: Qt.alpha(Kirigami.Theme.textColor,
+                card._hovered ? 0.40 : 0.18)
+
+            Behavior on shadow.size {
+                NumberAnimation { duration: Kirigami.Units.shortDuration }
+            }
+            Behavior on shadow.yOffset {
+                NumberAnimation { duration: Kirigami.Units.shortDuration }
             }
 
             Kirigami.Icon {
-                visible: posterImage.status !== Image.Ready
+                visible: poster.status !== Image.Ready
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.huge
                 height: width
                 source: "applications-multimedia"
-                color: Qt.alpha(Theme.foreground, 0.35)
+                color: Kirigami.Theme.disabledTextColor
+            }
+
+            // Hover tint, rounded-corner-clipped via the same shader.
+            Kirigami.ShadowedRectangle {
+                anchors.fill: parent
+                radius: poster.radius
+                color: Kirigami.Theme.hoverColor
+                opacity: card._hovered ? 0.18 : 0
+                Behavior on opacity {
+                    NumberAnimation { duration: Kirigami.Units.shortDuration }
+                }
             }
 
             // Progress bar overlay along the poster's bottom edge.
-            // Mirrors `ContinueWatchingCardDelegate`'s 4px thick bar.
-            Rectangle {
+            // Mirrors the original 4px-thick bar; the track sits
+            // inside the inset so it doesn't clip the rounded
+            // corners.
+            Item {
                 visible: card.progress > 0
                 anchors {
                     left: parent.left
                     right: parent.right
                     bottom: parent.bottom
-                    leftMargin: 1
-                    rightMargin: 1
-                    bottomMargin: 1
+                    leftMargin: Kirigami.Units.smallSpacing
+                    rightMargin: Kirigami.Units.smallSpacing
+                    bottomMargin: Kirigami.Units.smallSpacing
                 }
                 height: 4
-                radius: 2
-                color: Qt.alpha(Theme.background, 0.62)
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 2
+                    color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.62)
+                }
 
                 Rectangle {
                     anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
-                    width: parent.width * Math.max(0, Math.min(1, card.progress))
+                    width: parent.width
+                        * Math.max(0, Math.min(1, card.progress))
                     radius: 2
-                    color: Theme.accent
+                    color: Kirigami.Theme.highlightColor
                 }
             }
         }
 
+        // ---- Title + release line ----------------------------------
         ColumnLayout {
             id: meta
             spacing: 0
             Layout.fillWidth: true
 
-            QQC2.Label {
+            Kirigami.Heading {
                 Layout.fillWidth: true
+                level: 5
                 text: card.title
                 elide: Text.ElideRight
                 maximumLineCount: 1
-                font.pointSize: Theme.captionFont.pointSize + 1
-                font.weight: Font.DemiBold
-                color: Theme.foreground
+                color: Kirigami.Theme.textColor
             }
 
             QQC2.Label {
@@ -129,12 +171,15 @@ Item {
                 visible: card.lastRelease.length > 0
                 text: card.lastRelease
                 elide: Text.ElideRight
-                font.pointSize: Theme.captionFont.pointSize
-                color: Theme.disabled
+                font: Kirigami.Theme.smallFont
+                color: Kirigami.Theme.disabledTextColor
             }
         }
     }
 
+    // Click + hover + right-click handling. We keep `MouseArea`
+    // here (instead of `TapHandler` like `PosterCard`) so the
+    // right-button context menu works.
     MouseArea {
         id: hoverArea
         anchors.fill: parent
@@ -168,15 +213,5 @@ Item {
             icon.name: "edit-delete"
             onTriggered: card.removeRequested()
         }
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: -2
-        radius: Kirigami.Units.cornerRadius + 2
-        color: "transparent"
-        border.color: Theme.accent
-        border.width: 2
-        visible: card.activeFocus
     }
 }

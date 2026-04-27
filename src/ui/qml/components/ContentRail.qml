@@ -24,13 +24,13 @@ ColumnLayout {
     signal itemActivated(int row)
     signal showAllRequested()
 
-    spacing: Kirigami.Units.smallSpacing
+    spacing: Theme.inlineSpacing
 
     // ---- Header ---------------------------------------------------
     RowLayout {
         Layout.fillWidth: true
-        Layout.leftMargin: Kirigami.Units.gridUnit
-        Layout.rightMargin: Kirigami.Units.gridUnit
+        Layout.leftMargin: Theme.pageMargin
+        Layout.rightMargin: Theme.pageMargin
 
         Kirigami.Heading {
             level: 3
@@ -85,9 +85,9 @@ ColumnLayout {
             id: list
             orientation: ListView.Horizontal
             clip: true
-            spacing: Kirigami.Units.largeSpacing
-            leftMargin: Kirigami.Units.gridUnit
-            rightMargin: Kirigami.Units.gridUnit
+            spacing: Theme.groupSpacing
+            leftMargin: Theme.pageMargin
+            rightMargin: Theme.pageMargin
             boundsBehavior: Flickable.StopAtBounds
             // Cache one viewport's worth of delegates either side
             // so flicking doesn't drop posters in/out at the edges.
@@ -133,7 +133,7 @@ ColumnLayout {
         id: errorComp
         ColumnLayout {
             anchors.centerIn: parent
-            spacing: Kirigami.Units.smallSpacing
+            spacing: Theme.inlineSpacing
 
             Kirigami.Icon {
                 Layout.alignment: Qt.AlignHCenter
@@ -149,7 +149,7 @@ ColumnLayout {
                 color: Theme.disabled
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter
-                Layout.maximumWidth: rail.width - Kirigami.Units.gridUnit * 4
+                Layout.maximumWidth: rail.width - Theme.pageWideMargin * 2
             }
         }
     }

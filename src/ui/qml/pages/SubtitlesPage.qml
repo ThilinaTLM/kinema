@@ -13,6 +13,7 @@ Kirigami.Page {
     id: page
 
     objectName: "subtitles"
+    padding: 0
     title: i18nc("@title:window subtitles search page",
         "Subtitles for %1", subtitlesVm.contextTitle)
 

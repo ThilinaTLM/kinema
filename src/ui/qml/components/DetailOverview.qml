@@ -29,7 +29,7 @@ ColumnLayout {
     property Kirigami.Action secondaryAction
     property Kirigami.Action tertiaryAction
 
-    spacing: Kirigami.Units.largeSpacing
+    spacing: Theme.groupSpacing
 
     Item {
         Layout.fillWidth: true
@@ -67,8 +67,8 @@ ColumnLayout {
             id: posterFrame
             anchors.left: parent.left
             anchors.bottom: parent.bottom
-            anchors.leftMargin: Kirigami.Units.largeSpacing
-            anchors.bottomMargin: Kirigami.Units.largeSpacing
+            anchors.leftMargin: Theme.pageMargin
+            anchors.bottomMargin: Theme.pageMargin
             width: Theme.posterMin
             height: Math.round(width * 1.5)
 
@@ -105,9 +105,9 @@ ColumnLayout {
 
     ColumnLayout {
         Layout.fillWidth: true
-        Layout.leftMargin: Kirigami.Units.largeSpacing
-        Layout.rightMargin: Kirigami.Units.largeSpacing
-        spacing: Kirigami.Units.largeSpacing
+        Layout.leftMargin: Theme.pageMargin
+        Layout.rightMargin: Theme.pageMargin
+        spacing: Theme.groupSpacing
 
         MetaSection {
             Layout.fillWidth: true
@@ -125,7 +125,7 @@ ColumnLayout {
             Layout.fillWidth: true
             visible: overview.primaryAction || overview.secondaryAction
                 || overview.tertiaryAction
-            spacing: Kirigami.Units.smallSpacing
+            spacing: Theme.inlineSpacing
 
             QQC2.Button {
                 visible: overview.primaryAction !== null
@@ -163,7 +163,7 @@ ColumnLayout {
         ColumnLayout {
             Layout.fillWidth: true
             visible: castLabel.visible
-            spacing: Kirigami.Units.smallSpacing
+            spacing: Theme.inlineSpacing
 
             Kirigami.Heading {
                 level: 4

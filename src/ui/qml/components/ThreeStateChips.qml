@@ -6,13 +6,15 @@ import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
+import dev.tlmtech.kinema.app
+
 // Three-state segmented control. Maps to `controllers::SubtitleController`'s
 // "off" / "include" / "only" filter modes for hearing-impaired and
 // foreign-parts-only subtitles. Used inside a FormCard delegate so
 // it inherits the right padding from `AbstractFormDelegate`.
 RowLayout {
     id: chips
-    spacing: Kirigami.Units.smallSpacing
+    spacing: Theme.inlineSpacing
 
     /// Localized label for the row ("Hearing impaired", "Foreign parts only").
     property string label

@@ -33,10 +33,8 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: panel.compact
-            ? Kirigami.Units.largeSpacing
-            : 0
-        spacing: Kirigami.Units.largeSpacing
+        anchors.margins: Theme.pageMargin
+        spacing: Theme.groupSpacing
 
         Kirigami.Heading {
             Layout.fillWidth: true
@@ -148,7 +146,7 @@ Item {
         QQC2.ToolBar {
             Layout.fillWidth: true
             contentItem: RowLayout {
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Theme.inlineSpacing
 
                 QQC2.Button {
                     text: i18nc("@action:button subtitles open local file",
@@ -178,7 +176,8 @@ Item {
         id: idleComp
         Kirigami.PlaceholderMessage {
             anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.largeSpacing * 4
+            width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "edit-find"
             text: i18nc("@info subtitles idle state",
                 "Pick a language and search.")
@@ -195,7 +194,8 @@ Item {
         id: errorComp
         Kirigami.PlaceholderMessage {
             anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.largeSpacing * 4
+            width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "dialog-error"
             text: i18nc("@info subtitles error state", "Search failed.")
             explanation: panel.vm ? panel.vm.errorText : ""
@@ -210,7 +210,8 @@ Item {
         id: emptyComp
         Kirigami.PlaceholderMessage {
             anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.largeSpacing * 4
+            width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "edit-find"
             text: i18nc("@info subtitles empty state", "No subtitles found.")
             explanation: i18nc("@info subtitles empty state explanation",
@@ -221,7 +222,8 @@ Item {
         id: notConfiguredComp
         Kirigami.PlaceholderMessage {
             anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.largeSpacing * 4
+            width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "configure"
             text: i18nc("@info subtitles not configured state",
                 "OpenSubtitles isn't configured yet.")

@@ -33,17 +33,17 @@ Item {
     property var vm: movieDetailVm
 
     implicitHeight: flow.implicitHeight
-        + Kirigami.Units.smallSpacing * 2
+        + Theme.inlineSpacing * 2
 
     // Wrap to a second line on narrow widths instead of truncating.
     Flow {
         id: flow
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: Kirigami.Units.largeSpacing
-        anchors.rightMargin: Kirigami.Units.largeSpacing
+        anchors.leftMargin: Theme.pageMargin
+        anchors.rightMargin: Theme.pageMargin
         anchors.verticalCenter: parent.verticalCenter
-        spacing: Kirigami.Units.smallSpacing
+        spacing: Theme.inlineSpacing
 
         // ---- Cached on RD --------------------------------------
         QQC2.Button {
@@ -121,9 +121,9 @@ Item {
     // chips wrap onto a second line.
     QQC2.ToolButton {
         anchors.right: parent.right
-        anchors.rightMargin: Kirigami.Units.largeSpacing
+        anchors.rightMargin: Theme.pageMargin
         anchors.top: parent.top
-        anchors.topMargin: Kirigami.Units.smallSpacing
+        anchors.topMargin: Theme.inlineSpacing
         text: i18nc("@action:button reset stream filters", "Reset")
         icon.name: "edit-clear-all"
         display: QQC2.AbstractButton.TextBesideIcon

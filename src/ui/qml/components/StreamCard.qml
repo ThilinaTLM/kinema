@@ -56,8 +56,10 @@ QQC2.ItemDelegate {
     /// movie detail VM; the series page rebinds it.
     property var vm: movieDetailVm
 
-    width: ListView.view ? ListView.view.width : implicitWidth
-    padding: Kirigami.Units.largeSpacing
+    width: ListView.view
+        ? ListView.view.width - ListView.view.leftMargin - ListView.view.rightMargin
+        : implicitWidth
+    padding: Theme.groupSpacing
     implicitHeight: layout.implicitHeight + padding * 2
 
     onDoubleClicked: card._activatePrimary()
@@ -99,13 +101,13 @@ QQC2.ItemDelegate {
 
     contentItem: RowLayout {
         id: layout
-        spacing: Kirigami.Units.largeSpacing
+        spacing: Theme.groupSpacing
 
         // ---- 1. Quality block ----------------------------------
         ColumnLayout {
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: Kirigami.Units.gridUnit * 5
-            spacing: Math.round(Kirigami.Units.smallSpacing / 2)
+            spacing: Math.round(Theme.inlineSpacing / 2)
 
             QQC2.Label {
                 Layout.alignment: Qt.AlignHCenter
@@ -125,9 +127,9 @@ QQC2.ItemDelegate {
                 radius: height / 2
                 color: card.rdCached ? Theme.positive : Theme.accent
                 implicitHeight: rdLabel.implicitHeight
-                    + Kirigami.Units.smallSpacing
+                    + Theme.inlineSpacing
                 implicitWidth: rdLabel.implicitWidth
-                    + Kirigami.Units.smallSpacing * 3
+                    + Theme.inlineSpacing * 3
                 QQC2.Label {
                     id: rdLabel
                     anchors.centerIn: parent
@@ -146,7 +148,7 @@ QQC2.ItemDelegate {
             id: middleColumn
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
-            spacing: Math.round(Kirigami.Units.smallSpacing / 2)
+            spacing: Math.round(Theme.inlineSpacing / 2)
 
             // Tooltip exposes the raw release name on hover or focus.
             HoverHandler {
@@ -177,7 +179,7 @@ QQC2.ItemDelegate {
             // Only rendered when the parser produced any.
             Flow {
                 Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Theme.inlineSpacing
                 visible: card.tags.length > 0
                 Repeater {
                     model: card.tags
@@ -222,7 +224,7 @@ QQC2.ItemDelegate {
         // ---- 3. Primary action + overflow ---------------------
         RowLayout {
             Layout.alignment: Qt.AlignVCenter
-            spacing: Kirigami.Units.smallSpacing
+            spacing: Theme.inlineSpacing
 
             QQC2.Button {
                 id: primaryButton

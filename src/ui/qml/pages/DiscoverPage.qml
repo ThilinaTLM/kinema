@@ -48,8 +48,8 @@ Kirigami.ScrollablePage {
     Kirigami.PlaceholderMessage {
         id: placeholder
         anchors.centerIn: parent
-        width: Math.min(parent.width - Kirigami.Units.gridUnit * 4,
-            Kirigami.Units.gridUnit * 28)
+        width: Math.min(parent.width - Theme.pageWideMargin * 2,
+            Theme.placeholderMaxWidth)
         visible: !discoverVm.tmdbConfigured || discoverVm.authFailed
 
         icon.name: discoverVm.authFailed ? "dialog-warning" : "configure"
@@ -67,14 +67,14 @@ Kirigami.ScrollablePage {
     ColumnLayout {
         id: stack
         width: page.width
-        spacing: Kirigami.Units.largeSpacing * 2
+        spacing: Theme.sectionSpacing
         visible: discoverVm.tmdbConfigured && !discoverVm.authFailed
 
         // Top padding so the first rail isn't crammed against the
         // page header.
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.smallSpacing
+            Layout.preferredHeight: Theme.pageTopSpacing
         }
 
         // Continue Watching hero. Hidden when history is empty so
@@ -107,7 +107,7 @@ Kirigami.ScrollablePage {
         // Bottom spacer so the last rail keeps its breathing room.
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.gridUnit
+            Layout.preferredHeight: Theme.pageBottomSpacing
         }
     }
 }

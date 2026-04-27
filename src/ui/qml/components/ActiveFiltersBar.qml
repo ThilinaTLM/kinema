@@ -26,7 +26,7 @@ Item {
 
     visible: chips.length > 0
     implicitHeight: visible
-        ? row.implicitHeight + Kirigami.Units.smallSpacing
+        ? row.implicitHeight + Theme.inlineSpacing
         : 0
 
     Behavior on implicitHeight {
@@ -38,9 +38,9 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: Kirigami.Units.largeSpacing
-        anchors.rightMargin: Kirigami.Units.largeSpacing
-        spacing: Kirigami.Units.smallSpacing
+        anchors.leftMargin: Theme.pageMargin
+        anchors.rightMargin: Theme.pageMargin
+        spacing: Theme.inlineSpacing
 
         QQC2.Label {
             text: i18nc("@label prefix for active filter chip list",
@@ -59,7 +59,7 @@ Item {
 
             Row {
                 id: chipFlow
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Theme.inlineSpacing
 
                 Repeater {
                     model: root.chips
@@ -82,7 +82,7 @@ Item {
                         // LayoutMirroring, which would also affect
                         // text reading direction.
                         contentItem: RowLayout {
-                            spacing: Kirigami.Units.smallSpacing
+                            spacing: Theme.inlineSpacing
                             QQC2.Label {
                                 text: chip.chipLabel
                                 color: Kirigami.Theme.textColor

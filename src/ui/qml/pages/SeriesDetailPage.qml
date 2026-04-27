@@ -35,7 +35,7 @@ Kirigami.ScrollablePage {
     ColumnLayout {
         id: stack
         width: page.width
-        spacing: Kirigami.Units.largeSpacing * 2
+        spacing: Theme.sectionSpacing
         visible: seriesDetailVm.metaState === SeriesDetailViewModel.Ready
 
         DetailOverview {
@@ -65,12 +65,12 @@ Kirigami.ScrollablePage {
         // above and lets row hover backgrounds reach the page edge.
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: Kirigami.Units.largeSpacing
+            spacing: Theme.groupSpacing
 
             Kirigami.Heading {
                 Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.largeSpacing
-                Layout.rightMargin: Kirigami.Units.largeSpacing
+                Layout.leftMargin: Theme.pageMargin
+                Layout.rightMargin: Theme.pageMargin
                 level: 3
                 text: i18nc("@title:section", "Episodes")
             }
@@ -87,7 +87,7 @@ Kirigami.ScrollablePage {
                 Layout.preferredHeight: contentHeight
                 interactive: false
                 model: seriesDetailVm.episodes
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Theme.inlineSpacing
                 cacheBuffer: Kirigami.Units.gridUnit * 40
 
                 delegate: EpisodeRow {
@@ -122,15 +122,15 @@ Kirigami.ScrollablePage {
         // Bottom breathing room so the last rail clears the scroll edge.
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.gridUnit
+            Layout.preferredHeight: Theme.pageBottomSpacing
         }
     }
 
     // ---- Error -----------------------------------------------------
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
-        width: Math.min(parent.width - Kirigami.Units.gridUnit * 4,
-            Kirigami.Units.gridUnit * 30)
+        width: Math.min(parent.width - Theme.pageWideMargin * 2,
+            Theme.detailPlaceholderMaxWidth)
         visible: seriesDetailVm.metaState === SeriesDetailViewModel.Error
         icon.name: "dialog-error"
         text: i18nc("@info placeholder", "Couldn't load this series.")

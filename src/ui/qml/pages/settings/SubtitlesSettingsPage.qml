@@ -81,7 +81,7 @@ FormCard.FormCardPage {
                 required property int index
                 required property var modelData
                 contentItem: RowLayout {
-                    spacing: Kirigami.Units.smallSpacing
+                    spacing: Theme.inlineSpacing
                     QQC2.Label {
                         Layout.fillWidth: true
                         text: `${vm.languageDisplayName(modelData)} (${modelData.toUpperCase()})`
@@ -109,7 +109,7 @@ FormCard.FormCardPage {
             id: addRow
             property string pendingCode: ""
             contentItem: RowLayout {
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Theme.inlineSpacing
                 QQC2.ComboBox {
                     Layout.fillWidth: true
                     model: vm.commonLanguages

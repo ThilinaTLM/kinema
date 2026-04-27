@@ -30,14 +30,14 @@ QQC2.ToolBar {
     Kirigami.Theme.colorSet: Kirigami.Theme.Header
     Kirigami.Theme.inherit: false
 
-    // Padding matches the standard Kirigami toolbar so the bar
-    // visually aligns with the global header above it.
-    padding: Kirigami.Units.smallSpacing
-    leftPadding: Kirigami.Units.largeSpacing
-    rightPadding: Kirigami.Units.largeSpacing
+    // Keep filter chrome aligned with the app-wide page gutter while
+    // retaining compact toolbar height.
+    padding: Theme.inlineSpacing
+    leftPadding: Theme.pageMargin
+    rightPadding: Theme.pageMargin
 
     contentItem: RowLayout {
-        spacing: Kirigami.Units.largeSpacing
+        spacing: Theme.groupSpacing
 
         MediaKindSwitch {
             kind: browseVm.kind
@@ -93,12 +93,12 @@ QQC2.ToolBar {
             QQC2.Popup {
                 id: ratingPopup
                 y: ratingBtn.height
-                padding: Kirigami.Units.largeSpacing
+                padding: Theme.groupSpacing
                 modal: false
                 focus: true
 
                 contentItem: ColumnLayout {
-                    spacing: Kirigami.Units.smallSpacing
+                    spacing: Theme.inlineSpacing
                     implicitWidth: Kirigami.Units.gridUnit * 16
 
                     RowLayout {

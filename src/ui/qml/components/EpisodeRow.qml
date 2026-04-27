@@ -24,7 +24,7 @@ QQC2.ItemDelegate {
     property bool selected: false
 
     width: ListView.view ? ListView.view.width : implicitWidth
-    padding: Kirigami.Units.largeSpacing
+    padding: Theme.pageMargin
     implicitHeight: layout.implicitHeight + padding * 2
 
     background: Rectangle {
@@ -38,7 +38,7 @@ QQC2.ItemDelegate {
 
     contentItem: RowLayout {
         id: layout
-        spacing: Kirigami.Units.largeSpacing
+        spacing: Theme.groupSpacing
 
         // Thumbnail. 16:9 to match Cinemeta's `still` shape; sized off
         // gridUnit so it scales with the user's KDE font / DPI.
@@ -78,10 +78,10 @@ QQC2.ItemDelegate {
         // Meta column.
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: Kirigami.Units.smallSpacing
+            spacing: Theme.inlineSpacing
 
             RowLayout {
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Theme.inlineSpacing
                 QQC2.Label {
                     text: i18nc("@info episode title prefix",
                         "%1 \u00b7 %2",

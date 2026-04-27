@@ -110,6 +110,8 @@ Kirigami.Page {
                 id: categoryList
                 model: page.categories
                 currentIndex: page.selectedIndex
+                topMargin: Theme.inlineSpacing
+                bottomMargin: Theme.inlineSpacing
                 boundsBehavior: Flickable.StopAtBounds
 
                 delegate: QQC2.ItemDelegate {

@@ -51,7 +51,7 @@ Kirigami.ScrollablePage {
     ColumnLayout {
         id: stack
         width: page.width
-        spacing: Kirigami.Units.largeSpacing * 2
+        spacing: Theme.sectionSpacing
         visible: movieDetailVm.metaState === MovieDetailViewModel.Ready
 
         DetailOverview {
@@ -83,15 +83,15 @@ Kirigami.ScrollablePage {
         // Bottom breathing room so the last rail clears the scroll edge.
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.gridUnit
+            Layout.preferredHeight: Theme.pageBottomSpacing
         }
     }
 
     // ---- Error -----------------------------------------------------
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
-        width: Math.min(parent.width - Kirigami.Units.gridUnit * 4,
-            Kirigami.Units.gridUnit * 30)
+        width: Math.min(parent.width - Theme.pageWideMargin * 2,
+            Theme.detailPlaceholderMaxWidth)
         visible: movieDetailVm.metaState === MovieDetailViewModel.Error
         icon.name: "dialog-error"
         text: i18nc("@info placeholder", "Couldn't load this title.")

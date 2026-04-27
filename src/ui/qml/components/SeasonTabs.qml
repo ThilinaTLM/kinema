@@ -36,11 +36,11 @@ Item {
 
         Row {
             id: row
-            spacing: Kirigami.Units.smallSpacing
-            leftPadding: Kirigami.Units.largeSpacing
-            rightPadding: Kirigami.Units.largeSpacing
-            topPadding: Kirigami.Units.smallSpacing
-            bottomPadding: Kirigami.Units.smallSpacing
+            spacing: Theme.inlineSpacing
+            leftPadding: Theme.pageMargin
+            rightPadding: Theme.pageMargin
+            topPadding: Theme.inlineSpacing
+            bottomPadding: Theme.inlineSpacing
 
             Repeater {
                 model: tabs.vm.seasonLabels

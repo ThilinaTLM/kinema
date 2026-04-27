@@ -14,6 +14,9 @@ FormCard.FormCardPage {
 
     readonly property var vm: settingsVm.tmdb
 
+    FormCard.FormHeader {
+        title: i18nc("@title:group tmdb token settings", "Token")
+    }
     FormCard.FormCard {
         FormCard.FormTextDelegate {
             text: i18nc("@info tmdb settings intro",

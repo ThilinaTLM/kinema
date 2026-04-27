@@ -6,6 +6,8 @@ import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
+import dev.tlmtech.kinema.app
+
 // One row in the subtitles list. Displays the release name, file
 // name fallback, language, format, downloads, rating, and badges
 // for HI / FPO / cached / active / moviehash-match. Clicking the
@@ -36,10 +38,10 @@ QQC2.ItemDelegate {
     onDoubleClicked: row.activated()
 
     contentItem: ColumnLayout {
-        spacing: Kirigami.Units.smallSpacing
+        spacing: Theme.inlineSpacing
 
         RowLayout {
-            spacing: Kirigami.Units.smallSpacing
+            spacing: Theme.inlineSpacing
             Layout.fillWidth: true
 
             Kirigami.Icon {
@@ -75,7 +77,7 @@ QQC2.ItemDelegate {
         }
 
         RowLayout {
-            spacing: Kirigami.Units.smallSpacing
+            spacing: Theme.inlineSpacing
             Layout.fillWidth: true
 
             QQC2.Label {

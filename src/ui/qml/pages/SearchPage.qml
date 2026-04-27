@@ -42,9 +42,13 @@ Kirigami.ScrollablePage {
     header: QQC2.ToolBar {
         Kirigami.Theme.colorSet: Kirigami.Theme.Header
         Kirigami.Theme.inherit: false
+        leftPadding: Theme.pageMargin
+        rightPadding: Theme.pageMargin
+        topPadding: Theme.inlineSpacing
+        bottomPadding: Theme.inlineSpacing
 
         contentItem: RowLayout {
-            spacing: Kirigami.Units.largeSpacing
+            spacing: Theme.groupSpacing
 
             MediaKindSwitch {
                 kind: searchVm.kind
@@ -84,15 +88,15 @@ Kirigami.ScrollablePage {
         // 0 — Idle: no query yet. Centred placeholder + a
         // recent-searches strip when there is history.
         ColumnLayout {
-            spacing: Kirigami.Units.largeSpacing
+            spacing: Theme.groupSpacing
 
             Item { Layout.fillHeight: true }
 
             Kirigami.PlaceholderMessage {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: Math.min(
-                    page.width - Kirigami.Units.gridUnit * 4,
-                    Kirigami.Units.gridUnit * 28)
+                    page.width - Theme.pageWideMargin * 2,
+                    Theme.placeholderMaxWidth)
                 icon.name: "search"
                 text: i18nc("@info placeholder",
                     "Find something to watch")
@@ -105,9 +109,9 @@ Kirigami.ScrollablePage {
                 visible: searchVm.recentQueries.length > 0
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: Math.min(
-                    page.width - Kirigami.Units.gridUnit * 4,
-                    Kirigami.Units.gridUnit * 36)
-                spacing: Kirigami.Units.smallSpacing
+                    page.width - Theme.pageWideMargin * 2,
+                    Theme.wideContentMaxWidth)
+                spacing: Theme.inlineSpacing
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -131,7 +135,7 @@ Kirigami.ScrollablePage {
 
                 Flow {
                     Layout.fillWidth: true
-                    spacing: Kirigami.Units.smallSpacing
+                    spacing: Theme.inlineSpacing
 
                     Repeater {
                         model: searchVm.recentQueries
@@ -167,8 +171,8 @@ Kirigami.ScrollablePage {
         Kirigami.PlaceholderMessage {
             Layout.alignment: Qt.AlignCenter
             Layout.preferredWidth: Math.min(parent.width
-                    - Kirigami.Units.gridUnit * 4,
-                Kirigami.Units.gridUnit * 28)
+                    - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "edit-find"
             text: i18nc("@info placeholder", "No results")
             explanation: i18nc("@info placeholder",
@@ -190,8 +194,8 @@ Kirigami.ScrollablePage {
         Kirigami.PlaceholderMessage {
             Layout.alignment: Qt.AlignCenter
             Layout.preferredWidth: Math.min(parent.width
-                    - Kirigami.Units.gridUnit * 4,
-                Kirigami.Units.gridUnit * 28)
+                    - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
             icon.name: "dialog-error"
             text: i18nc("@info placeholder", "Search failed")
             explanation: searchVm.results

@@ -58,8 +58,8 @@ Kirigami.ScrollablePage {
     Kirigami.PlaceholderMessage {
         id: placeholder
         anchors.centerIn: parent
-        width: Math.min(parent.width - Kirigami.Units.gridUnit * 4,
-            Kirigami.Units.gridUnit * 28)
+        width: Math.min(parent.width - Theme.pageWideMargin * 2,
+            Theme.placeholderMaxWidth)
         visible: !browseVm.tmdbConfigured || browseVm.authFailed
 
         icon.name: browseVm.authFailed
@@ -142,7 +142,7 @@ Kirigami.ScrollablePage {
                 // Inline footer status when paginating.
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.margins: Kirigami.Units.smallSpacing
+                    Layout.margins: Theme.inlineSpacing
                     visible: browseVm.canLoadMore || browseVm.loading
 
                     Item { Layout.fillWidth: true }
@@ -176,8 +176,8 @@ Kirigami.ScrollablePage {
             Kirigami.PlaceholderMessage {
                 Layout.alignment: Qt.AlignCenter
                 Layout.preferredWidth: Math.min(parent.width
-                        - Kirigami.Units.gridUnit * 4,
-                    Kirigami.Units.gridUnit * 28)
+                        - Theme.pageWideMargin * 2,
+                    Theme.placeholderMaxWidth)
                 icon.name: "edit-find"
                 text: i18nc("@info placeholder", "No matches")
                 explanation: i18nc("@info placeholder",
@@ -194,8 +194,8 @@ Kirigami.ScrollablePage {
             Kirigami.PlaceholderMessage {
                 Layout.alignment: Qt.AlignCenter
                 Layout.preferredWidth: Math.min(parent.width
-                        - Kirigami.Units.gridUnit * 4,
-                    Kirigami.Units.gridUnit * 28)
+                        - Theme.pageWideMargin * 2,
+                    Theme.placeholderMaxWidth)
                 icon.name: "dialog-error"
                 text: i18nc("@info placeholder", "Browse failed")
                 explanation: browseVm.results

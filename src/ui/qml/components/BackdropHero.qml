@@ -86,9 +86,9 @@ Item {
     // ---- foreground content -----------------------------------
     GridLayout {
         anchors.fill: parent
-        anchors.margins: Kirigami.Units.largeSpacing * 2
-        columnSpacing: Kirigami.Units.largeSpacing * 2
-        rowSpacing: Kirigami.Units.largeSpacing
+        anchors.margins: Theme.sectionSpacing
+        columnSpacing: Theme.sectionSpacing
+        rowSpacing: Theme.groupSpacing
         columns: hero.narrow ? 1 : 2
 
         // Poster.
@@ -133,7 +133,7 @@ Item {
         ColumnLayout {
             Layout.alignment: Qt.AlignBottom
             Layout.fillWidth: true
-            spacing: Kirigami.Units.largeSpacing
+            spacing: Theme.groupSpacing
 
             MetaSection {
                 Layout.fillWidth: true
@@ -153,7 +153,7 @@ Item {
             // wiring visibility.
             RowLayout {
                 Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Theme.inlineSpacing
                 visible: hero.primaryAction || hero.secondaryAction
                     || hero.tertiaryAction
 

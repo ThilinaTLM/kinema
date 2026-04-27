@@ -13,6 +13,9 @@ FormCard.FormCardPage {
 
     readonly property var vm: settingsVm.realDebrid
 
+    FormCard.FormHeader {
+        title: i18nc("@title:group real-debrid token settings", "API token")
+    }
     FormCard.FormCard {
         FormCard.FormTextDelegate {
             text: i18nc("@info rd settings intro",
