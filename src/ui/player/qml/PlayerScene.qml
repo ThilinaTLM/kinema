@@ -90,10 +90,11 @@ Item {
     }
 
     // Scene-wide pointer handlers. Pointer handlers are non-grabbing,
-    // so they coexist with the chrome's child MouseAreas
-    // (IconButton, SeekBar hover, VolumeControl thumbs, …) — every
-    // mouse move / wheel / tap anywhere in the scene bumps activity,
-    // even when the cursor is parked on a chrome button.
+    // so they coexist with the chrome's child MouseAreas /
+    // TapHandlers (IconButton, SeekBar hover, VolumeControl thumbs,
+    // …) — every mouse move / wheel / tap anywhere in the scene
+    // bumps activity, even when the cursor is parked on a chrome
+    // button.
     //
     // We watch `point.position` specifically (not `point` itself).
     // The `point` group also contains `velocity`, which keeps
@@ -115,16 +116,49 @@ Item {
             }
         }
     }
+
+    // RMB toggles pause; LMB double-tap toggles fullscreen. LMB
+    // single-tap intentionally does nothing beyond bumping activity
+    // — a stray click on the video should not pause the movie, and
+    // skipping the single-tap action also lets the double-tap fire
+    // immediately instead of waiting on a disambiguation timer.
+    // Pause-on-keypress (Space / K) and pause-on-RMB cover the
+    // "pause from the couch" need.
+    //
+    // `gesturePolicy: DragThreshold` keeps this handler from
+    // claiming the press until the pointer moves past the drag
+    // threshold, so child handlers on chrome buttons (IconButton's
+    // own TapHandler) get the tap when the user clicks on them.
     TapHandler {
+        id: sceneTap
         acceptedButtons: Qt.AllButtons
         gesturePolicy: TapHandler.DragThreshold
-        onTapped: root.bumpActivity()
         onPressedChanged: if (pressed) root.bumpActivity()
+        onTapped: (eventPoint, button) => {
+            root.bumpActivity();
+            if (button === Qt.RightButton) {
+                inputs.handleRightTap();
+            } else if (button === Qt.LeftButton
+                       && sceneTap.tapCount >= 2) {
+                inputs.handleDoubleLeftTap();
+            }
+        }
     }
+
     WheelHandler {
         acceptedDevices: PointerDevice.AllDevices
-        onWheel: root.bumpActivity()
+        onWheel: wheel => {
+            root.bumpActivity();
+            inputs.handleWheel(wheel.angleDelta.y);
+            wheel.accepted = true;
+        }
     }
+
+    // Keyboard. PlayerWindow.cpp calls `forceActiveFocus()` on this
+    // root after `show()`, so this is the item that actually has
+    // active focus when no popup is open. Routing into PlayerInputs
+    // keeps the binding table in one place.
+    Keys.onPressed: event => inputs.handleKey(event)
 
     // ---- Layer 1: video ----------------------------------------------
     MpvVideoItem {
@@ -224,12 +258,14 @@ Item {
         onStartOverClicked: playerVm.requestResumeDecline()
     }
 
-    // ---- Layer 8: input handling -------------------------------------
+    // ---- Layer 8: input routing --------------------------------------
+    // PlayerInputs is now a non-visual logic module (QtObject). The
+    // actual handlers (Keys, TapHandler, WheelHandler) live on this
+    // root above, because they need to be on the item that has
+    // active focus / receives scene-wide pointer events.
     PlayerInputs {
         id: inputs
-        anchors.fill: parent
         mpv: mpv
-        focus: true
         onActivity: root.bumpActivity()
         onTogglePauseRequested: mpv.cyclePause()
         onToggleFullscreenRequested: playerVm.requestToggleFullscreen()

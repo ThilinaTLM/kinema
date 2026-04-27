@@ -5,14 +5,37 @@ import QtQuick
 import dev.tlmtech.kinema.player
 
 /**
- * Central key + click + wheel handler.
+ * Input router for the player chrome.
  *
- * Hover / move tracking for the chrome auto-hide timer is handled by
- * scene-level pointer handlers in PlayerScene.qml — those don't grab
- * events, so they coexist with the chrome's own MouseAreas. This
- * component owns:
+ * This component owns the *logic* for keyboard / mouse / wheel input
+ * but does not own the input handlers themselves. The handlers live
+ * on the PlayerScene root, which is the item that actually gets
+ * active focus (via PlayerWindow.cpp's `forceActiveFocus` on the QML
+ * root). PlayerScene calls into the public functions below.
  *
- *   - Keyboard shortcuts:
+ * Why not just attach `Keys.onPressed` and a scene-wide `MouseArea`
+ * to this Item directly?
+ *
+ *   1. `Keys.onPressed` only fires on the item with active focus.
+ *      `Item` is not a focus scope, so setting `focus: true` on a
+ *      nested child does not propagate active focus down from the
+ *      window's root focus scope to that child. The PlayerScene
+ *      root *does* receive active focus, so that's where the key
+ *      handler has to live.
+ *
+ *   2. A scene-wide `MouseArea` that wants composed clicks but also
+ *      wants to let chrome buttons receive the same press is a
+ *      contradiction in `MouseArea` semantics: setting
+ *      `mouse.accepted = false` in `onPressed` to propagate the
+ *      press also forfeits the subsequent `clicked` /
+ *      `doubleClicked` for the gesture. `TapHandler` doesn't have
+ *      that gotcha — it's non-grabbing by default and coexists
+ *      naturally with the chrome's own `TapHandler`s on
+ *      IconButton, etc.
+ *
+ * Bindings (wired in PlayerScene):
+ *
+ *   - Keyboard:
  *       Space / K           pause toggle
  *       Left  / Right       seek ±5s
  *       J     / L           seek ±10s
@@ -23,7 +46,7 @@ import dev.tlmtech.kinema.player
  *       Esc                 close
  *       [     / ]           speed ±0.25x
  *   - Mouse:
- *       LMB single-click    pause toggle
+ *       LMB single-click    (no-op — just bumps chrome auto-hide)
  *       LMB double-click    fullscreen toggle
  *       RMB                 pause toggle
  *       Wheel               volume ±5%
@@ -31,12 +54,8 @@ import dev.tlmtech.kinema.player
  * Up/Down map to large seek instead of volume because Left/Right
  * already cover small seek and the user wanted all four arrows on
  * the timeline. Keyboard volume falls back to +/- and the wheel.
- *
- * Most keys translate directly to MpvVideoItem methods; a few
- * window-level actions (close, fullscreen) bubble out via signals
- * so the scene composer can route them.
  */
-Item {
+QtObject {
     id: root
     property var mpv: null
 
@@ -45,62 +64,9 @@ Item {
     signal toggleFullscreenRequested()
     signal closeRequested()
 
-    focus: true
+    // ---- Public entry points (called from PlayerScene) ----------------
 
-    // Mouse activity → bump chrome.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-        hoverEnabled: true
-        propagateComposedEvents: true
-
-        onPressed: mouse => {
-            root.activity();
-            mouse.accepted = false; // let other items see clicks
-        }
-        onClicked: mouse => {
-            // LMB: single-click toggles pause; double-click toggles
-            // fullscreen — disambiguated by clickTimer below.
-            // RMB: pause toggle, fired immediately (no double-click
-            // role, so no need to wait).
-            if (mouse.button === Qt.LeftButton) {
-                clickTimer.restart();
-                mouse.accepted = false;
-            } else if (mouse.button === Qt.RightButton) {
-                root.togglePauseRequested();
-                mouse.accepted = true;
-            } else {
-                mouse.accepted = false;
-            }
-        }
-        onDoubleClicked: mouse => {
-            clickTimer.stop();
-            if (mouse.button === Qt.LeftButton) {
-                root.toggleFullscreenRequested();
-            }
-            mouse.accepted = true;
-        }
-        onWheel: wheel => {
-            const step = wheel.angleDelta.y > 0 ? 5 : -5;
-            if (root.mpv) {
-                root.mpv.setVolumePercent(
-                    Math.max(0,
-                        Math.min(100, root.mpv.volume + step)));
-            }
-            root.activity();
-            wheel.accepted = true;
-        }
-
-        Timer {
-            id: clickTimer
-            interval: 220
-            onTriggered: root.togglePauseRequested()
-        }
-    }
-
-    // Key handling. We attach to the root Item so any focused child
-    // (no popup open) sees these.
-    Keys.onPressed: event => {
+    function handleKey(event) {
         root.activity();
         switch (event.key) {
         case Qt.Key_Space:
@@ -172,5 +138,21 @@ Item {
             event.accepted = true;
             break;
         }
+    }
+
+    function handleDoubleLeftTap() {
+        root.toggleFullscreenRequested();
+    }
+
+    function handleRightTap() {
+        root.togglePauseRequested();
+    }
+
+    function handleWheel(angleDeltaY) {
+        if (!root.mpv) return;
+        const step = angleDeltaY > 0 ? 5 : -5;
+        root.mpv.setVolumePercent(
+            Math.max(0, Math.min(100, root.mpv.volume + step)));
+        root.activity();
     }
 }
