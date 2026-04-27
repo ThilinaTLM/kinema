@@ -17,7 +17,6 @@ set(kinema_core_SRCS
     config/SubtitleSettings.cpp
     config/TorrentioSettings.cpp
 
-    core/ShortcutSections.cpp
     core/CachePaths.cpp
     core/Database.cpp
     core/DateFormat.cpp
@@ -32,7 +31,6 @@ set(kinema_core_SRCS
     core/MpvChapterList.cpp
     core/MpvConfigPaths.cpp
     core/MpvTrackList.cpp
-    core/NextEpisode.cpp
     core/Player.cpp
     core/PlayerLauncher.cpp
     core/StreamFilter.cpp
@@ -286,8 +284,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
             ui/player/qml/pickers/AudioPicker.qml
             ui/player/qml/pickers/SpeedPicker.qml
             ui/player/qml/pickers/SubtitlePicker.qml
-            ui/player/qml/prompts/InfoOverlay.qml
-            ui/player/qml/prompts/NextEpisodeBanner.qml
             ui/player/qml/prompts/ResumePrompt.qml
             ui/player/qml/prompts/SkipChapterPill.qml
         OUTPUT_DIRECTORY

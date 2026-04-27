@@ -719,10 +719,6 @@ QString PlayerSettingsViewModel::preferredSubtitleLang() const
 {
     return m_settings.preferredSubtitleLang();
 }
-bool PlayerSettingsViewModel::autoplayNextEpisode() const
-{
-    return m_settings.autoplayNextEpisode();
-}
 bool PlayerSettingsViewModel::skipIntroChapters() const
 {
     return m_settings.skipIntroChapters();
@@ -730,10 +726,6 @@ bool PlayerSettingsViewModel::skipIntroChapters() const
 int PlayerSettingsViewModel::resumePromptThresholdSec() const
 {
     return m_settings.resumePromptThresholdSec();
-}
-int PlayerSettingsViewModel::autoNextCountdownSec() const
-{
-    return m_settings.autoNextCountdownSec();
 }
 
 void PlayerSettingsViewModel::setPreferredPlayer(int kind)
@@ -777,14 +769,6 @@ void PlayerSettingsViewModel::setPreferredSubtitleLang(const QString& v)
     m_settings.setPreferredSubtitleLang(v);
     Q_EMIT preferredSubtitleLangChanged();
 }
-void PlayerSettingsViewModel::setAutoplayNextEpisode(bool on)
-{
-    if (m_settings.autoplayNextEpisode() == on) {
-        return;
-    }
-    m_settings.setAutoplayNextEpisode(on);
-    Q_EMIT autoplayNextEpisodeChanged();
-}
 void PlayerSettingsViewModel::setSkipIntroChapters(bool on)
 {
     if (m_settings.skipIntroChapters() == on) {
@@ -800,14 +784,6 @@ void PlayerSettingsViewModel::setResumePromptThresholdSec(int v)
     }
     m_settings.setResumePromptThresholdSec(v);
     Q_EMIT resumePromptThresholdSecChanged();
-}
-void PlayerSettingsViewModel::setAutoNextCountdownSec(int v)
-{
-    if (m_settings.autoNextCountdownSec() == v) {
-        return;
-    }
-    m_settings.setAutoNextCountdownSec(v);
-    Q_EMIT autoNextCountdownSecChanged();
 }
 
 // ============================== Subtitles =================================

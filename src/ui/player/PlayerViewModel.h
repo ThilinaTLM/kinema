@@ -13,8 +13,6 @@
 #include <QPointer>
 #include <QString>
 #include <QStringList>
-#include <QVariantList>
-#include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 namespace kinema::ui::player {
@@ -75,15 +73,6 @@ class PlayerViewModel : public QObject
     Q_PROPERTY(qint64 resumeSeconds READ resumeSeconds
         NOTIFY resumeSecondsChanged)
 
-    Q_PROPERTY(bool nextEpisodeVisible READ nextEpisodeVisible
-        NOTIFY nextEpisodeVisibleChanged)
-    Q_PROPERTY(QString nextEpisodeTitle READ nextEpisodeTitle
-        NOTIFY nextEpisodeTitleChanged)
-    Q_PROPERTY(QString nextEpisodeSubtitle READ nextEpisodeSubtitle
-        NOTIFY nextEpisodeSubtitleChanged)
-    Q_PROPERTY(int nextEpisodeCountdown READ nextEpisodeCountdown
-        NOTIFY nextEpisodeCountdownChanged)
-
     Q_PROPERTY(bool skipVisible READ skipVisible
         NOTIFY skipVisibleChanged)
     Q_PROPERTY(QString skipKind READ skipKind NOTIFY skipKindChanged)
@@ -92,21 +81,6 @@ class PlayerViewModel : public QObject
         NOTIFY skipStartSecChanged)
     Q_PROPERTY(qint64 skipEndSec READ skipEndSec
         NOTIFY skipEndSecChanged)
-
-    // ---- Info overlay (keyboard shortcuts + stream details) ---------
-    // The overlay collapses two things the user wants discoverable
-    // without leaving the player: the keyboard shortcut cheat sheet
-    // (sectioned, populated by `core::shortcuts::renderSections`)
-    // and an "about this stream" map populated from
-    // `MpvVideoItem::VideoStats` plus the load context. QVariantList
-    // / QVariantMap is enough for ~16 static rows + a flat dict;
-    // a full QAbstractListModel would be overkill.
-    Q_PROPERTY(bool infoOverlayVisible READ infoOverlayVisible
-        NOTIFY infoOverlayVisibleChanged)
-    Q_PROPERTY(QVariantList shortcutSections READ shortcutSections
-        NOTIFY shortcutSectionsChanged)
-    Q_PROPERTY(QVariantMap streamInfo READ streamInfo
-        NOTIFY streamInfoChanged)
 
     // ---- Subtitle download gating -----------------------------------
     // The QML picker shows a "Download subtitle…" footer entry that
@@ -142,29 +116,11 @@ public:
     bool resumeVisible() const noexcept { return m_resumeVisible; }
     qint64 resumeSeconds() const noexcept { return m_resumeSeconds; }
 
-    bool nextEpisodeVisible() const noexcept
-    {
-        return m_nextEpisodeVisible;
-    }
-    QString nextEpisodeTitle() const { return m_nextEpisodeTitle; }
-    QString nextEpisodeSubtitle() const { return m_nextEpisodeSubtitle; }
-    int nextEpisodeCountdown() const noexcept
-    {
-        return m_nextEpisodeCountdown;
-    }
-
     bool skipVisible() const noexcept { return m_skipVisible; }
     QString skipKind() const { return m_skipKind; }
     QString skipLabel() const { return m_skipLabel; }
     qint64 skipStartSec() const noexcept { return m_skipStartSec; }
     qint64 skipEndSec() const noexcept { return m_skipEndSec; }
-
-    bool infoOverlayVisible() const noexcept
-    {
-        return m_infoOverlayVisible;
-    }
-    QVariantList shortcutSections() const { return m_shortcutSections; }
-    QVariantMap streamInfo() const { return m_streamInfo; }
 
     bool subtitleDownloadEnabled() const noexcept
     {
@@ -176,23 +132,13 @@ public Q_SLOTS:
     void setMediaContext(const QString& title,
         const QString& subtitle, const QString& kind);
     void setMediaChips(const QStringList& chips);
-    void setShortcutSections(const QVariantList& sections);
-    void setStreamInfo(const QVariantMap& info);
 
     void showResume(qint64 seconds);
     void hideResume();
 
-    void showNextEpisode(const QString& title,
-        const QString& subtitle, int countdownSec);
-    void updateNextEpisodeCountdown(int seconds);
-    void hideNextEpisode();
-
     void showSkip(const QString& kind, const QString& label,
         qint64 startSec, qint64 endSec);
     void hideSkip();
-
-    void toggleInfoOverlay();
-    void setInfoOverlayVisible(bool on);
 
     // Subtitle download gate (driven by SubtitleController via
     // MainWindow). Controls whether the QML "Download subtitle…"
@@ -217,8 +163,6 @@ public Q_SLOTS:
     void requestResumeAccept();
     void requestResumeDecline();
     void requestSkip();
-    void requestNextEpisodeAccept();
-    void requestNextEpisodeCancel();
     void pickAudio(int trackId);
     void pickSubtitle(int trackId);
     void pickSpeed(double factor);
@@ -235,18 +179,11 @@ Q_SIGNALS:
     void currentSubtitleIdChanged();
     void resumeVisibleChanged();
     void resumeSecondsChanged();
-    void nextEpisodeVisibleChanged();
-    void nextEpisodeTitleChanged();
-    void nextEpisodeSubtitleChanged();
-    void nextEpisodeCountdownChanged();
     void skipVisibleChanged();
     void skipKindChanged();
     void skipLabelChanged();
     void skipStartSecChanged();
     void skipEndSecChanged();
-    void infoOverlayVisibleChanged();
-    void shortcutSectionsChanged();
-    void streamInfoChanged();
 
     // User-action signals re-emitted by `PlayerWindow`. The eight
     // signals `PlaybackController` consumes drive resume, skip,
@@ -254,8 +191,6 @@ Q_SIGNALS:
     void resumeAccepted();
     void resumeDeclined();
     void skipRequested();
-    void nextEpisodeAccepted();
-    void nextEpisodeCancelled();
     void audioPicked(int trackId);
     void subtitlePicked(int trackId);
     void speedPicked(double factor);
@@ -297,20 +232,11 @@ private:
     bool m_resumeVisible = false;
     qint64 m_resumeSeconds = 0;
 
-    bool m_nextEpisodeVisible = false;
-    QString m_nextEpisodeTitle;
-    QString m_nextEpisodeSubtitle;
-    int m_nextEpisodeCountdown = 0;
-
     bool m_skipVisible = false;
     QString m_skipKind;
     QString m_skipLabel;
     qint64 m_skipStartSec = 0;
     qint64 m_skipEndSec = 0;
-
-    bool m_infoOverlayVisible = false;
-    QVariantList m_shortcutSections;
-    QVariantMap m_streamInfo;
 
     bool m_subtitleDownloadEnabled = false;
 };

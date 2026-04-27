@@ -88,24 +88,6 @@ void PlayerViewModel::setMediaChips(const QStringList& chips)
     Q_EMIT mediaChipsChanged();
 }
 
-void PlayerViewModel::setShortcutSections(const QVariantList& sections)
-{
-    if (m_shortcutSections == sections) {
-        return;
-    }
-    m_shortcutSections = sections;
-    Q_EMIT shortcutSectionsChanged();
-}
-
-void PlayerViewModel::setStreamInfo(const QVariantMap& info)
-{
-    if (m_streamInfo == info) {
-        return;
-    }
-    m_streamInfo = info;
-    Q_EMIT streamInfoChanged();
-}
-
 void PlayerViewModel::showResume(qint64 seconds)
 {
     if (m_resumeSeconds != seconds) {
@@ -125,45 +107,6 @@ void PlayerViewModel::hideResume()
     }
     m_resumeVisible = false;
     Q_EMIT resumeVisibleChanged();
-}
-
-void PlayerViewModel::showNextEpisode(const QString& title,
-    const QString& subtitle, int countdownSec)
-{
-    if (m_nextEpisodeTitle != title) {
-        m_nextEpisodeTitle = title;
-        Q_EMIT nextEpisodeTitleChanged();
-    }
-    if (m_nextEpisodeSubtitle != subtitle) {
-        m_nextEpisodeSubtitle = subtitle;
-        Q_EMIT nextEpisodeSubtitleChanged();
-    }
-    if (m_nextEpisodeCountdown != countdownSec) {
-        m_nextEpisodeCountdown = countdownSec;
-        Q_EMIT nextEpisodeCountdownChanged();
-    }
-    if (!m_nextEpisodeVisible) {
-        m_nextEpisodeVisible = true;
-        Q_EMIT nextEpisodeVisibleChanged();
-    }
-}
-
-void PlayerViewModel::updateNextEpisodeCountdown(int seconds)
-{
-    if (m_nextEpisodeCountdown == seconds) {
-        return;
-    }
-    m_nextEpisodeCountdown = seconds;
-    Q_EMIT nextEpisodeCountdownChanged();
-}
-
-void PlayerViewModel::hideNextEpisode()
-{
-    if (!m_nextEpisodeVisible) {
-        return;
-    }
-    m_nextEpisodeVisible = false;
-    Q_EMIT nextEpisodeVisibleChanged();
 }
 
 void PlayerViewModel::showSkip(const QString& kind,
@@ -198,20 +141,6 @@ void PlayerViewModel::hideSkip()
     }
     m_skipVisible = false;
     Q_EMIT skipVisibleChanged();
-}
-
-void PlayerViewModel::toggleInfoOverlay()
-{
-    setInfoOverlayVisible(!m_infoOverlayVisible);
-}
-
-void PlayerViewModel::setInfoOverlayVisible(bool on)
-{
-    if (m_infoOverlayVisible == on) {
-        return;
-    }
-    m_infoOverlayVisible = on;
-    Q_EMIT infoOverlayVisibleChanged();
 }
 
 // ---- Subtitle download gate + dialog hand-off --------------------------
@@ -259,16 +188,6 @@ void PlayerViewModel::requestResumeDecline()
 void PlayerViewModel::requestSkip()
 {
     Q_EMIT skipRequested();
-}
-
-void PlayerViewModel::requestNextEpisodeAccept()
-{
-    Q_EMIT nextEpisodeAccepted();
-}
-
-void PlayerViewModel::requestNextEpisodeCancel()
-{
-    Q_EMIT nextEpisodeCancelled();
 }
 
 void PlayerViewModel::pickAudio(int trackId)

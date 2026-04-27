@@ -19,9 +19,8 @@ import "prompts"
  *   4. Skip pill                            — chapter shortcuts
  *   5. Buffering / volume HUD               — transient feedback
  *   6. Center flash                         — pause/play glyph
- *   7. Resume + Next-episode banners        — modal-ish prompts
- *   8. Cheat sheet                          — shortcut help
- *   9. PlayerInputs                         — focus + key handling
+ *   7. Resume prompt                        — modal-ish prompt
+ *   8. PlayerInputs                         — focus + key handling
  *
  * `playerVm` is set as a context property by `PlayerWindow`.
  * `MpvVideoItem` lives entirely in QML so chrome can bind to its
@@ -39,8 +38,6 @@ Item {
     readonly property bool chromeForcedVisible:
         mpv.paused
         || playerVm.resumeVisible
-        || playerVm.nextEpisodeVisible
-        || playerVm.infoOverlayVisible
         || mpv.buffering
         || audioPicker.opened
         || subtitlePicker.opened
@@ -156,7 +153,6 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         chromeVisible: root.chromeVisible
-        onInfoClicked: playerVm.toggleInfoOverlay()
     }
 
     TransportBar {
@@ -228,28 +224,7 @@ Item {
         onStartOverClicked: playerVm.requestResumeDecline()
     }
 
-    NextEpisodeBanner {
-        anchors.right: parent.right
-        anchors.rightMargin: Theme.spacingLg
-        anchors.bottom: transport.top
-        anchors.bottomMargin: Theme.spacingLg
-        visible: playerVm.nextEpisodeVisible
-        title: playerVm.nextEpisodeTitle
-        subtitle: playerVm.nextEpisodeSubtitle
-        countdown: playerVm.nextEpisodeCountdown
-        onAcceptClicked: playerVm.requestNextEpisodeAccept()
-        onCancelClicked: playerVm.requestNextEpisodeCancel()
-    }
-
-    // ---- Layer 8: info overlay --------------------------------------
-    // Combines the keyboard cheat sheet and "about this stream"
-    // details. Driven by `playerVm.infoOverlayVisible`; opened from
-    // the top-bar info button and the `?` shortcut.
-    InfoOverlay {
-        id: infoOverlay
-    }
-
-    // ---- Layer 9: input handling -------------------------------------
+    // ---- Layer 8: input handling -------------------------------------
     PlayerInputs {
         id: inputs
         anchors.fill: parent
@@ -259,7 +234,6 @@ Item {
         onTogglePauseRequested: mpv.cyclePause()
         onToggleFullscreenRequested: playerVm.requestToggleFullscreen()
         onCloseRequested: playerVm.requestClose()
-        onInfoOverlayRequested: playerVm.toggleInfoOverlay()
     }
 
     // ---- Pickers (modal popups) --------------------------------------

@@ -38,9 +38,11 @@ class PlayerViewModel;
  * touched. Internally, the slots forward to `PlayerViewModel`
  * (chrome state) and `MpvVideoItem` (transport).
  *
- * Geometry persistence and remembered-volume behaviour matches the
- * old window: applied on first show, saved on every hide, never
- * destroyed between plays so the libmpv context stays warm.
+ * Geometry persistence and remembered-volume behaviour: applied on
+ * first show, saved on every hide. Each playback gets a fresh
+ * window (and therefore a fresh libmpv context); on close the
+ * window calls `deleteLater()` on itself so the host can rebuild
+ * cleanly for the next stream.
  */
 class PlayerWindow : public QQuickView
 {
@@ -75,10 +77,6 @@ public:
     virtual void setSpeed(double factor);
     virtual void showResumePrompt(qint64 seconds);
     virtual void hideResumePrompt();
-    virtual void showNextEpisodeBanner(
-        const kinema::api::PlaybackContext& ctx, int countdownSec);
-    virtual void updateNextEpisodeCountdown(int seconds);
-    virtual void hideNextEpisodeBanner();
     virtual void showSkipChapter(const QString& kind,
         const QString& label, qint64 startSec, qint64 endSec);
     virtual void hideSkipChapter();
@@ -120,8 +118,6 @@ Q_SIGNALS:
     void resumeAccepted();
     void resumeDeclined();
     void skipRequested();
-    void nextEpisodeAccepted();
-    void nextEpisodeCancelled();
     void audioPicked(int trackId);
     void subtitlePicked(int trackId);
     void speedPicked(double factor);
@@ -146,8 +142,6 @@ private:
     void saveGeometryToConfig();
     void saveVolumeToConfig();
     void pushMediaChips();
-    void pushShortcutSections();
-    void pushStreamInfo();
 
     config::AppearanceSettings& m_appearanceSettings;
     config::PlayerSettings& m_playerSettings;
@@ -163,10 +157,6 @@ private:
 
     bool m_hasEverLoaded = false;
     bool m_geometryApplied = false;
-
-    // Last-loaded source context, mirrored into
-    // `PlayerViewModel::streamInfo` whenever video stats refresh.
-    QUrl m_currentSourceUrl;
 };
 
 } // namespace kinema::ui::player

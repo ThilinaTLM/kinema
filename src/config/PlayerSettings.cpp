@@ -14,10 +14,8 @@ constexpr auto kKeyCustomCmd = "customCommand";
 constexpr auto kKeyHwDecode = "hardwareDecoding";
 constexpr auto kKeyAudioLang = "preferredAudioLang";
 constexpr auto kKeySubLang = "preferredSubtitleLang";
-constexpr auto kKeyAutoplayNext = "autoplayNextEpisode";
 constexpr auto kKeySkipIntro = "skipIntroChapters";
 constexpr auto kKeyResumePromptThreshold = "resumePromptThresholdSec";
-constexpr auto kKeyAutoNextCountdown = "autoNextCountdownSec";
 constexpr auto kKeyVolume = "rememberedVolume";
 } // namespace
 
@@ -109,19 +107,6 @@ void PlayerSettings::setPreferredSubtitleLang(const QString& lang)
     Q_EMIT preferredSubtitleLangChanged(lang);
 }
 
-bool PlayerSettings::autoplayNextEpisode() const
-{
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyAutoplayNext, true);
-}
-
-void PlayerSettings::setAutoplayNextEpisode(bool on)
-{
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyAutoplayNext, on);
-    g.sync();
-}
-
 bool PlayerSettings::skipIntroChapters() const
 {
     return m_config->group(QString::fromLatin1(kGroup))
@@ -145,19 +130,6 @@ void PlayerSettings::setResumePromptThresholdSec(int seconds)
 {
     auto g = m_config->group(QString::fromLatin1(kGroup));
     g.writeEntry(kKeyResumePromptThreshold, qMax(0, seconds));
-    g.sync();
-}
-
-int PlayerSettings::autoNextCountdownSec() const
-{
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyAutoNextCountdown, 10);
-}
-
-void PlayerSettings::setAutoNextCountdownSec(int seconds)
-{
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyAutoNextCountdown, qMax(0, seconds));
     g.sync();
 }
 

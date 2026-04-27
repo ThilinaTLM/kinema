@@ -85,8 +85,7 @@ QtObject {
     // ---- Sizes / spacing -----------------------------------------
     // Re-derived from Kirigami.Units. `gridUnit` and
     // `compactBreakpoint` are exposed for overlay roots that need
-    // to compute responsive layout (see `isCompact` pattern in
-    // SubtitleSearchSheet / InfoOverlay).
+    // to compute responsive layout.
     readonly property int gridUnit:           Kirigami.Units.gridUnit
     readonly property int compactBreakpoint:  Kirigami.Units.gridUnit * 30
 

@@ -186,11 +186,6 @@ ecm_add_test(tst_moviehash.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_next_episode.cpp
-    TEST_NAME tst_next_episode
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
 ecm_add_test(tst_mpv_config_paths.cpp
     TEST_NAME tst_mpv_config_paths
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -260,7 +255,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_database tst_history_store
          tst_subtitle_cache_store tst_cache_paths tst_language
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
-         tst_next_episode tst_mpv_config_paths tst_mpv_track_list_parse
+         tst_mpv_config_paths tst_mpv_track_list_parse
          tst_media_chips tst_main_controller_close_logic
          tst_discover_view_model tst_continue_watching_view_model
          tst_application_boot)

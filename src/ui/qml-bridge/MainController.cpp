@@ -518,9 +518,7 @@ void MainController::buildCoreServices()
 
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
-        *m_cinemeta, *m_torrentio, *m_streamActions, *m_historyCtrl,
-        m_settings, m_tokenCtrl->realDebridToken(), m_http.get(),
-        this);
+        *m_historyCtrl, m_settings, m_http.get(), this);
     if (m_subtitleCtrl) {
         connect(m_playbackCtrl,
             &controllers::PlaybackController::moviehashComputed,
@@ -624,105 +622,149 @@ void MainController::wireTray()
 void MainController::openEmbeddedPlayer(const QUrl& url,
     const api::PlaybackContext& ctx)
 {
-    // Lazy construction. The MpvVideoItem inside `PlayerWindow`
-    // initialises libmpv + an OpenGL render context in its ctor,
-    // so we pay nothing until the user actually picks Embedded.
-    if (!m_playerWindow) {
-        m_playerWindow = new ui::player::PlayerWindow(
-            m_settings.appearance(), m_settings.player(), m_window);
+    // Each playback gets its own `PlayerWindow` (and therefore its
+    // own libmpv context). Tear down any prior instance first so
+    // there is no carry-over of mpv state, picker selections, or
+    // chrome view-model values between sessions.
+    if (m_playerWindow) {
+        // Detach all subscribers from the doomed window. Tray /
+        // history hold raw pointers, so they must be cleared
+        // explicitly; PlaybackController's own destroyed-handler
+        // would clear it eventually, but we drive the cleanup here
+        // synchronously so the new window's wiring lands on a
+        // fully detached graph.
         if (m_tray) {
-            m_tray->setPlayerWindow(m_playerWindow);
+            m_tray->setPlayerWindow(nullptr);
         }
         if (m_historyCtrl) {
-            m_historyCtrl->setPlayerWindow(m_playerWindow);
+            m_historyCtrl->setPlayerWindow(nullptr);
         }
         if (m_playbackCtrl) {
-            m_playbackCtrl->setPlayerWindow(m_playerWindow);
-            connect(m_playbackCtrl,
-                &controllers::PlaybackController::visibilityChanged,
-                this, [this](bool) {
-                    if (m_tray) {
-                        m_tray->refreshMenu();
-                    }
-                });
+            m_playbackCtrl->setPlayerWindow(nullptr);
         }
+        auto* doomed = m_playerWindow;
+        m_playerWindow = nullptr;
+        doomed->stopAndHide();
+        doomed->deleteLater();
+    }
 
-        // Player chrome's `SubtitlePicker → Download…` lands on the
-        // main window. We restore + raise the main window first so
-        // the user can see the pushed page; the player keeps its
-        // separate window visible behind it. The pushed Subtitles
-        // page tracks the live `PlaybackController` context so its
-        // header reflects whatever is currently playing.
-        connect(m_playerWindow->viewModel(),
-            &ui::player::PlayerViewModel::subtitlesDialogRequested,
-            this, [this] {
-                if (m_window) {
-                    m_window->setVisible(true);
-                    m_window->raise();
-                    m_window->requestActivate();
+    m_playerWindow = new ui::player::PlayerWindow(
+        m_settings.appearance(), m_settings.player(), m_window);
+
+    // The window self-destructs from `closeEvent` so the user X
+    // button drops the libmpv context for real. Clear our caches
+    // when that happens; the next `openEmbeddedPlayer` call will
+    // build a fresh window from scratch.
+    connect(m_playerWindow, &QObject::destroyed, this,
+        [this](QObject* obj) {
+            if (obj != m_playerWindow) {
+                return;
+            }
+            m_playerWindow = nullptr;
+            if (m_tray) {
+                m_tray->setPlayerWindow(nullptr);
+            }
+            if (m_historyCtrl) {
+                m_historyCtrl->setPlayerWindow(nullptr);
+            }
+            // PlaybackController auto-clears via its own destroyed
+            // hook; nothing to do here.
+        });
+
+    if (m_tray) {
+        m_tray->setPlayerWindow(m_playerWindow);
+    }
+    if (m_historyCtrl) {
+        m_historyCtrl->setPlayerWindow(m_playerWindow);
+    }
+    if (m_playbackCtrl) {
+        m_playbackCtrl->setPlayerWindow(m_playerWindow);
+        // The visibilityChanged forwarding only needs to be wired
+        // once for the lifetime of the controller; PlaybackController
+        // re-emits the new window's signal as `visibilityChanged`.
+        // Use a unique connection so repeated openEmbeddedPlayer
+        // calls don't stack duplicate handlers.
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::visibilityChanged,
+            this, [this](bool) {
+                if (m_tray) {
+                    m_tray->refreshMenu();
                 }
-                if (m_playbackCtrl) {
-                    pushSubtitlesPage(m_playbackCtrl->currentContext(),
-                        /*fromPlayer=*/true);
+            }, Qt::UniqueConnection);
+    }
+
+    // Player chrome's `SubtitlePicker → Download…` lands on the
+    // main window. We restore + raise the main window first so the
+    // user can see the pushed page; the player keeps its separate
+    // window visible behind it. The pushed Subtitles page tracks
+    // the live `PlaybackController` context so its header reflects
+    // whatever is currently playing.
+    connect(m_playerWindow->viewModel(),
+        &ui::player::PlayerViewModel::subtitlesDialogRequested,
+        this, [this] {
+            if (m_window) {
+                m_window->setVisible(true);
+                m_window->raise();
+                m_window->requestActivate();
+            }
+            if (m_playbackCtrl) {
+                pushSubtitlesPage(m_playbackCtrl->currentContext(),
+                    /*fromPlayer=*/true);
+            }
+        });
+
+    // Subtitles VM → player. On a successful download with
+    // attach-on-download semantics, sideload the file into mpv via
+    // the player's view-model. Local-file picks follow the same
+    // path. We bind to the freshly-built `m_playerWindow` and
+    // automatically lose the connection when it's destroyed (the
+    // sender is `m_subtitlesVm`, but the receiver context object is
+    // the player VM, so Qt drops the slot when that VM dies).
+    if (m_subtitlesVm) {
+        auto* playerVm = m_playerWindow->viewModel();
+        connect(m_subtitlesVm,
+            &SubtitlesViewModel::downloadCompleted, playerVm,
+            [this, playerVm](api::PlaybackKey key, const QString& fileId,
+                const QString& localPath, const QString& lang,
+                const QString& langName) {
+                Q_UNUSED(fileId);
+                if (!m_subtitlesVm->attachOnDownload()) {
+                    return;
                 }
+                if (m_playbackCtrl
+                    && m_playbackCtrl->currentKey() != key) {
+                    return;
+                }
+                playerVm->attachExternalSubtitle(
+                    localPath, langName, lang, /*select=*/true);
             });
-
-        // Subtitles VM → player. On a successful download with
-        // attach-on-download semantics, sideload the file into mpv
-        // via the player's view-model. Local-file picks follow the
-        // same path. The connect lambda lives here so it captures
-        // the freshly-built `m_playerWindow`; phase 02 deferred the
-        // wiring entirely.
-        if (m_subtitlesVm) {
-            connect(m_subtitlesVm,
-                &SubtitlesViewModel::downloadCompleted, this,
-                [this](api::PlaybackKey key, const QString& fileId,
-                    const QString& localPath, const QString& lang,
-                    const QString& langName) {
-                    Q_UNUSED(fileId);
-                    if (!m_subtitlesVm->attachOnDownload()
-                        || !m_playerWindow) {
-                        return;
-                    }
-                    if (m_playbackCtrl
-                        && m_playbackCtrl->currentKey() != key) {
-                        return;
-                    }
-                    m_playerWindow->viewModel()->attachExternalSubtitle(
-                        localPath, langName, lang, /*select=*/true);
-                });
-            connect(m_subtitlesVm,
-                &SubtitlesViewModel::localFileChosen, this,
-                [this](api::PlaybackKey key, const QString& path) {
-                    if (!m_subtitlesVm->attachOnDownload()
-                        || !m_playerWindow) {
-                        return;
-                    }
-                    if (m_playbackCtrl
-                        && m_playbackCtrl->currentKey() != key) {
-                        return;
-                    }
-                    m_playerWindow->viewModel()->attachExternalSubtitle(
-                        path, QString {}, QString {},
-                        /*select=*/true);
-                });
-        }
-
-        // Mirror the subtitle-controller gate onto the player VM so
-        // its `Download…` picker entry can disable itself when
-        // OpenSubtitles isn't configured.
-        if (m_subtitleCtrl) {
-            const auto applyGate = [this](bool enabled) {
-                if (m_playerWindow) {
-                    m_playerWindow->viewModel()
-                        ->setSubtitleDownloadEnabled(enabled);
+        connect(m_subtitlesVm,
+            &SubtitlesViewModel::localFileChosen, playerVm,
+            [this, playerVm](api::PlaybackKey key, const QString& path) {
+                if (!m_subtitlesVm->attachOnDownload()) {
+                    return;
                 }
-            };
-            applyGate(m_subtitleCtrl->downloadEnabled());
-            connect(m_subtitleCtrl,
-                &controllers::SubtitleController::downloadEnabledChanged,
-                m_playerWindow->viewModel(), applyGate);
-        }
+                if (m_playbackCtrl
+                    && m_playbackCtrl->currentKey() != key) {
+                    return;
+                }
+                playerVm->attachExternalSubtitle(
+                    path, QString {}, QString {},
+                    /*select=*/true);
+            });
+    }
+
+    // Mirror the subtitle-controller gate onto the player VM so its
+    // `Download…` picker entry can disable itself when
+    // OpenSubtitles isn't configured.
+    if (m_subtitleCtrl) {
+        auto* playerVm = m_playerWindow->viewModel();
+        playerVm->setSubtitleDownloadEnabled(
+            m_subtitleCtrl->downloadEnabled());
+        connect(m_subtitleCtrl,
+            &controllers::SubtitleController::downloadEnabledChanged,
+            playerVm,
+            &ui::player::PlayerViewModel::setSubtitleDownloadEnabled);
     }
 
     if (m_playbackCtrl) {

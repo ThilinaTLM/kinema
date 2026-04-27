@@ -12,13 +12,13 @@ import dev.tlmtech.kinema.player
  * events, so they coexist with the chrome's own MouseAreas. This
  * component owns:
  *
- *   - Keyboard shortcuts (space/k pause, j/l seek, arrows, m, f, ?)
+ *   - Keyboard shortcuts (space/k pause, j/l seek, arrows, m, f)
  *   - Single-click → toggle pause, double-click → toggle fullscreen
  *   - Wheel → volume
  *
  * Most keys translate directly to MpvVideoItem methods; a few
- * window-level actions (close, fullscreen, cheat sheet) bubble out
- * via signals so the scene composer can route them.
+ * window-level actions (close, fullscreen) bubble out via signals
+ * so the scene composer can route them.
  */
 Item {
     id: root
@@ -28,7 +28,6 @@ Item {
     signal togglePauseRequested()
     signal toggleFullscreenRequested()
     signal closeRequested()
-    signal infoOverlayRequested()
 
     focus: true
 
@@ -126,14 +125,6 @@ Item {
         case Qt.Key_Escape:
             root.closeRequested();
             event.accepted = true;
-            break;
-        case Qt.Key_Question:
-        case Qt.Key_Slash: // some layouts emit / for ?
-            if (event.modifiers & Qt.ShiftModifier
-                || event.key === Qt.Key_Question) {
-                root.infoOverlayRequested();
-                event.accepted = true;
-            }
             break;
         case Qt.Key_BracketLeft:
             if (root.mpv) {

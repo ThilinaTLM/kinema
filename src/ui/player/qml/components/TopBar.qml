@@ -11,11 +11,8 @@ import dev.tlmtech.kinema.player
  * of the chrome via `chromeVisible`. Title / subtitle bind directly
  * to PlayerViewModel; chips render under the subtitle when present.
  *
- * The right-hand cell is the player's info button: it opens the
- * shortcuts + stream-info overlay. The previous close X has been
- * removed — Esc and the window-manager X cover that role, and a
- * single-purpose info affordance is more discoverable in
- * fullscreen.
+ * The previous close X has been removed — Esc and the window
+ * manager's X cover that role.
  */
 Rectangle {
     id: root
@@ -23,7 +20,6 @@ Rectangle {
     color: "transparent"
 
     property bool chromeVisible: true
-    signal infoClicked()
 
     opacity: chromeVisible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
@@ -73,13 +69,6 @@ Rectangle {
                 chips: playerVm.mediaChips
                 visible: chips.length > 0
             }
-        }
-
-        IconButton {
-            Layout.alignment: Qt.AlignVCenter
-            iconKind: "info"
-            checked: playerVm.infoOverlayVisible
-            onClicked: root.infoClicked()
         }
     }
 }

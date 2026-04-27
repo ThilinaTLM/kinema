@@ -23,8 +23,7 @@ import dev.tlmtech.kinema.player
  *      "I clicked it" pulse instead of nothing changing.
  *
  * `checked` paints the resting state with the soft accent fill —
- * meant for toggle-state buttons (e.g. the info-overlay button on
- * the top bar that mirrors `playerVm.infoOverlayVisible`).
+ * meant for toggle-state buttons.
  */
 Item {
     id: root

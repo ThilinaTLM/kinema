@@ -96,11 +96,6 @@ FormCard.FormCardPage {
     FormCard.FormCard {
         visible: vm.embeddedAvailable
         FormCard.FormSwitchDelegate {
-            text: i18nc("@option:check", "Autoplay next episode")
-            checked: vm.autoplayNextEpisode
-            onToggled: vm.autoplayNextEpisode = checked
-        }
-        FormCard.FormSwitchDelegate {
             text: i18nc("@option:check", "Offer skip intro / credits")
             checked: vm.skipIntroChapters
             onToggled: vm.skipIntroChapters = checked
@@ -111,13 +106,6 @@ FormCard.FormCardPage {
             from: 0
             to: 24 * 60 * 60
             onValueChanged: vm.resumePromptThresholdSec = value
-        }
-        FormCard.FormSpinBoxDelegate {
-            label: i18nc("@label:spinbox", "Next-episode countdown (s)")
-            value: vm.autoNextCountdownSec
-            from: 0
-            to: 600
-            onValueChanged: vm.autoNextCountdownSec = value
         }
     }
 }

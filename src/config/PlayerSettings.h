@@ -22,10 +22,8 @@ namespace kinema::config {
  *   hardwareDecoding       bool (default true). Off → mpv hwdec=no.
  *   preferredAudioLang     ISO-639 list forwarded to mpv `alang`.
  *   preferredSubtitleLang  ISO-639 list forwarded to mpv `slang`.
- *   autoplayNextEpisode    bool (default true).
  *   skipIntroChapters      bool (default true).
  *   resumePromptThresholdSec  int seconds (default 30).
- *   autoNextCountdownSec   int seconds (default 10).
  *   rememberedVolume       double in [0, 100]; -1 = "never set".
  *                          Written from PlayerWindow::hideEvent, read
  *                          back on next load. Not live-editable, so no
@@ -54,17 +52,11 @@ public:
     QString preferredSubtitleLang() const;
     void setPreferredSubtitleLang(const QString& lang);
 
-    bool autoplayNextEpisode() const;
-    void setAutoplayNextEpisode(bool on);
-
     bool skipIntroChapters() const;
     void setSkipIntroChapters(bool on);
 
     int resumePromptThresholdSec() const;
     void setResumePromptThresholdSec(int seconds);
-
-    int autoNextCountdownSec() const;
-    void setAutoNextCountdownSec(int seconds);
 
     /// -1.0 sentinel means "never initialised"; callers should leave
     /// mpv's default (100) in that case.

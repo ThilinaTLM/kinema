@@ -14,9 +14,7 @@ class TestPlayerViewModel : public QObject
 private Q_SLOTS:
     void resumeShowHide();
     void resumeAcceptSignal();
-    void nextEpisodeBannerLifecycle();
     void skipPillLifecycle();
-    void infoOverlayToggle();
     void mediaContextEmitsOnce();
     void chipsListChange();
     void noActionWhenAlreadyVisible();
@@ -56,33 +54,6 @@ void TestPlayerViewModel::resumeAcceptSignal()
     QCOMPARE(declineSpy.count(), 1);
 }
 
-void TestPlayerViewModel::nextEpisodeBannerLifecycle()
-{
-    PlayerViewModel vm;
-
-    QSignalSpy visSpy(&vm, &PlayerViewModel::nextEpisodeVisibleChanged);
-    QSignalSpy countSpy(&vm,
-        &PlayerViewModel::nextEpisodeCountdownChanged);
-
-    vm.showNextEpisode(QStringLiteral("S01E02"),
-        QStringLiteral("\u2014 Episode title"), 10);
-    QVERIFY(vm.nextEpisodeVisible());
-    QCOMPARE(vm.nextEpisodeTitle(), QStringLiteral("S01E02"));
-    QCOMPARE(vm.nextEpisodeCountdown(), 10);
-    QCOMPARE(visSpy.count(), 1);
-
-    vm.updateNextEpisodeCountdown(9);
-    QCOMPARE(vm.nextEpisodeCountdown(), 9);
-    QCOMPARE(countSpy.count(), 2); // 10 \u2192 emitted on showNextEpisode, 9 \u2192 update
-
-    vm.updateNextEpisodeCountdown(9);
-    QCOMPARE(countSpy.count(), 2); // no-op when value is unchanged
-
-    vm.hideNextEpisode();
-    QVERIFY(!vm.nextEpisodeVisible());
-    QCOMPARE(visSpy.count(), 2);
-}
-
 void TestPlayerViewModel::skipPillLifecycle()
 {
     PlayerViewModel vm;
@@ -102,22 +73,6 @@ void TestPlayerViewModel::skipPillLifecycle()
 
     vm.hideSkip();
     QVERIFY(!vm.skipVisible());
-}
-
-void TestPlayerViewModel::infoOverlayToggle()
-{
-    PlayerViewModel vm;
-    QVERIFY(!vm.infoOverlayVisible());
-    QSignalSpy spy(&vm, &PlayerViewModel::infoOverlayVisibleChanged);
-
-    vm.toggleInfoOverlay();
-    QVERIFY(vm.infoOverlayVisible());
-    vm.toggleInfoOverlay();
-    QVERIFY(!vm.infoOverlayVisible());
-    QCOMPARE(spy.count(), 2);
-
-    vm.setInfoOverlayVisible(false);
-    QCOMPARE(spy.count(), 2); // no-op when already hidden
 }
 
 void TestPlayerViewModel::mediaContextEmitsOnce()

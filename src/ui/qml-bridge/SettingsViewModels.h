@@ -258,14 +258,10 @@ class PlayerSettingsViewModel : public QObject
     Q_PROPERTY(QString preferredSubtitleLang READ preferredSubtitleLang
         WRITE setPreferredSubtitleLang NOTIFY preferredSubtitleLangChanged)
 
-    Q_PROPERTY(bool autoplayNextEpisode READ autoplayNextEpisode
-        WRITE setAutoplayNextEpisode NOTIFY autoplayNextEpisodeChanged)
     Q_PROPERTY(bool skipIntroChapters READ skipIntroChapters
         WRITE setSkipIntroChapters NOTIFY skipIntroChaptersChanged)
     Q_PROPERTY(int resumePromptThresholdSec READ resumePromptThresholdSec
         WRITE setResumePromptThresholdSec NOTIFY resumePromptThresholdSecChanged)
-    Q_PROPERTY(int autoNextCountdownSec READ autoNextCountdownSec
-        WRITE setAutoNextCountdownSec NOTIFY autoNextCountdownSecChanged)
 
 public:
     PlayerSettingsViewModel(config::PlayerSettings& settings,
@@ -279,20 +275,16 @@ public:
     bool hardwareDecoding() const;
     QString preferredAudioLang() const;
     QString preferredSubtitleLang() const;
-    bool autoplayNextEpisode() const;
     bool skipIntroChapters() const;
     int resumePromptThresholdSec() const;
-    int autoNextCountdownSec() const;
 
     void setPreferredPlayer(int kind);
     void setCustomCommand(const QString& cmd);
     void setHardwareDecoding(bool on);
     void setPreferredAudioLang(const QString& v);
     void setPreferredSubtitleLang(const QString& v);
-    void setAutoplayNextEpisode(bool on);
     void setSkipIntroChapters(bool on);
     void setResumePromptThresholdSec(int v);
-    void setAutoNextCountdownSec(int v);
 
 Q_SIGNALS:
     void preferredPlayerChanged();
@@ -300,10 +292,8 @@ Q_SIGNALS:
     void hardwareDecodingChanged();
     void preferredAudioLangChanged();
     void preferredSubtitleLangChanged();
-    void autoplayNextEpisodeChanged();
     void skipIntroChaptersChanged();
     void resumePromptThresholdSecChanged();
-    void autoNextCountdownSecChanged();
 
 private:
     config::PlayerSettings& m_settings;
