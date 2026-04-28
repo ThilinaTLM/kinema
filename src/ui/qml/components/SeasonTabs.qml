@@ -9,11 +9,12 @@ import org.kde.kirigami as Kirigami
 import dev.tlmtech.kinema.app
 
 // Season picker. Renders the `seriesDetailVm.seasonLabels`
-// `QStringList` as a horizontal scrolling row of toggle buttons
-// (Kirigami.NavigationTabBar would be the natural fit, but the
-// Kirigami version shipped with Plasma 6 has alignment quirks under
-// `ScrollablePage`; a plain `Repeater` of `Kirigami.Action`-driven
-// buttons inside a `Flickable` is more portable).
+// `QStringList` as a horizontal scrolling row of toggle buttons.
+// `Kirigami.NavigationTabBar` is documented for 3–5 actions with
+// centred fixed-width segments — series with many seasons (Doctor
+// Who, GoT, etc.) need a horizontally-scrollable strip, which the
+// builtin doesn't provide. A `Repeater` of `Kirigami.Action`-driven
+// buttons inside a `Flickable` is the right primitive here.
 //
 // Keyboard navigation: Left/Right while focused walks the picker.
 // Selecting a tab writes back to `vm.currentSeason`.

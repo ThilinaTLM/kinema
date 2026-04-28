@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.components as Components
 
 import dev.tlmtech.kinema.app
 
@@ -12,7 +13,7 @@ import dev.tlmtech.kinema.app
 // can tweak lives directly on the bar — there is no overflow
 // sheet. Layout (left to right):
 //
-//   * Movies / TV Series  — `MediaKindSwitch` (segmented pill).
+//   * Movies / TV Series  — `Components.SegmentedButton` (segmented pill).
 //   * Genres ▾            — `GenresMenuButton` popup.
 //   * Released ▾          — `QQC2.ComboBox` over the 5 date windows.
 //   * ★ Min ▾             — `QQC2.ToolButton` whose attached popup
@@ -39,13 +40,28 @@ QQC2.ToolBar {
     contentItem: RowLayout {
         spacing: Theme.groupSpacing
 
-        MediaKindSwitch {
-            kind: browseVm.kind
-            onActivated: function (newKind) {
-                if (browseVm.kind !== newKind) {
-                    browseVm.kind = newKind;
+        Components.SegmentedButton {
+            Layout.alignment: Qt.AlignVCenter
+            actions: [
+                Kirigami.Action {
+                    text: i18nc("@option:radio media kind", "Movies")
+                    icon.name: "video-x-generic"
+                    checkable: true
+                    checked: browseVm.kind === 0
+                    onTriggered: if (browseVm.kind !== 0) {
+                        browseVm.kind = 0;
+                    }
+                },
+                Kirigami.Action {
+                    text: i18nc("@option:radio media kind", "TV Series")
+                    icon.name: "view-media-recent"
+                    checkable: true
+                    checked: browseVm.kind === 1
+                    onTriggered: if (browseVm.kind !== 1) {
+                        browseVm.kind = 1;
+                    }
                 }
-            }
+            ]
         }
 
         GenresMenuButton {

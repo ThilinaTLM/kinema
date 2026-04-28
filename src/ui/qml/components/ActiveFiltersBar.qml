@@ -13,9 +13,9 @@ import dev.tlmtech.kinema.app
 // active; collapses to zero height otherwise so the grid takes the
 // full available area in the common case.
 //
-// Each chip is a native `QQC2.ToolButton` with a trailing × icon —
-// styling tracks the user's Plasma theme automatically. No custom
-// rectangles, no hand-rolled palette.
+// Each chip is a native `Kirigami.Chip` with the built-in close
+// affordance enabled — styling tracks the user's Plasma theme
+// automatically. No custom rectangles, no hand-rolled palette.
 Item {
     id: root
 
@@ -64,40 +64,17 @@ Item {
                 Repeater {
                     model: root.chips
 
-                    delegate: QQC2.ToolButton {
-                        id: chip
+                    delegate: Kirigami.Chip {
                         required property int index
                         required property var modelData
 
-                        readonly property string chipLabel:
-                            modelData.label !== undefined
-                                ? modelData.label : ""
-
+                        text: modelData.label !== undefined
+                            ? modelData.label : ""
+                        closable: true
+                        checkable: false
                         Accessible.name: i18nc("@info:whatsthis",
-                            "Remove filter %1", chipLabel)
-                        onClicked: root.chipRemoved(index)
-
-                        // Custom contentItem so the × icon sits
-                        // *after* the label without resorting to
-                        // LayoutMirroring, which would also affect
-                        // text reading direction.
-                        contentItem: RowLayout {
-                            spacing: Theme.inlineSpacing
-                            QQC2.Label {
-                                text: chip.chipLabel
-                                color: Kirigami.Theme.textColor
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-                            Kirigami.Icon {
-                                source: "edit-delete-remove-symbolic"
-                                Layout.preferredWidth:
-                                    Kirigami.Units.iconSizes.small
-                                Layout.preferredHeight:
-                                    Kirigami.Units.iconSizes.small
-                                color: Kirigami.Theme.disabledTextColor
-                            }
-                        }
+                            "Remove filter %1", text)
+                        onRemoved: root.chipRemoved(index)
                     }
                 }
             }

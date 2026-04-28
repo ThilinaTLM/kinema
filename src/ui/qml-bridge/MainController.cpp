@@ -163,9 +163,8 @@ void MainController::requestQuit()
 
 void MainController::requestSettings(const QString& category)
 {
-    if (m_settingsVm) {
-        m_settingsVm->setInitialCategory(category);
-    }
+    // QML-side `KirigamiSettings.ConfigurationView` consumes the
+    // category string as its `defaultModule` argument.
     Q_EMIT showSettingsRequested(category);
 }
 

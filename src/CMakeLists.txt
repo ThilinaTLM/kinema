@@ -189,11 +189,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/BrowseFilterBar.qml
         ui/qml/components/EpisodeRow.qml
         ui/qml/components/GenresMenuButton.qml
-        ui/qml/components/KAboutPage.qml
-        ui/qml/components/KEmptyState.qml
-        ui/qml/components/KErrorState.qml
-        ui/qml/components/KSpinner.qml
-        ui/qml/components/MediaKindSwitch.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
         ui/qml/components/PosterCard.qml
@@ -211,13 +206,11 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/LanguagePicker.qml
         ui/qml/components/SubtitleResultRow.qml
         ui/qml/components/SubtitlesPanel.qml
-        ui/qml/components/ThreeStateChips.qml
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
         ui/qml/pages/MovieDetailPage.qml
         ui/qml/pages/SearchPage.qml
         ui/qml/pages/SeriesDetailPage.qml
-        ui/qml/pages/SettingsPage.qml
         ui/qml/pages/StreamsPage.qml
         ui/qml/pages/SubtitlesPage.qml
         ui/qml/pages/settings/AppearanceSettingsPage.qml

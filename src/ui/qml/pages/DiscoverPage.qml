@@ -26,11 +26,10 @@ Kirigami.ScrollablePage {
 
     leftPadding: 0
     rightPadding: 0
-    topPadding: 0
-    // Bottom padding lives on the inner column so the scroll
-    // content keeps clean spacing without leaving an empty band
-    // when the placeholder takes over.
-    bottomPadding: 0
+    // Page padding gives the first/last rail their breathing room
+    // without spacer Items inside the ColumnLayout.
+    topPadding: Theme.pageTopSpacing
+    bottomPadding: Theme.pageBottomSpacing
 
     actions: [
         Kirigami.Action {
@@ -70,13 +69,6 @@ Kirigami.ScrollablePage {
         spacing: Theme.sectionSpacing
         visible: discoverVm.tmdbConfigured && !discoverVm.authFailed
 
-        // Top padding so the first rail isn't crammed against the
-        // page header.
-        Item {
-            Layout.fillWidth: true
-            Layout.preferredHeight: Theme.pageTopSpacing
-        }
-
         // Continue Watching hero. Hidden when history is empty so
         // the rest of the page reflows without an empty band.
         ContinueWatchingRail {
@@ -102,12 +94,6 @@ Kirigami.ScrollablePage {
                 }
                 onShowAllRequested: discoverVm.browseSection(index)
             }
-        }
-
-        // Bottom spacer so the last rail keeps its breathing room.
-        Item {
-            Layout.fillWidth: true
-            Layout.preferredHeight: Theme.pageBottomSpacing
         }
     }
 }

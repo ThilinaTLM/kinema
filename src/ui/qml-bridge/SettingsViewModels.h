@@ -435,9 +435,6 @@ class SettingsRootViewModel : public QObject
     Q_PROPERTY(PlayerSettingsViewModel* player READ player CONSTANT)
     Q_PROPERTY(SubtitlesSettingsViewModel* subtitles READ subtitles CONSTANT)
     Q_PROPERTY(AppearanceSettingsViewModel* appearance READ appearance CONSTANT)
-    /// Optional sub-page key the shell should select on push.
-    /// Cleared after consumption so re-pushes default again.
-    Q_PROPERTY(QString initialCategory READ initialCategory NOTIFY initialCategoryChanged)
 
 public:
     SettingsRootViewModel(core::HttpClient* http,
@@ -453,13 +450,8 @@ public:
     PlayerSettingsViewModel* player() const { return m_player; }
     SubtitlesSettingsViewModel* subtitles() const { return m_subs; }
     AppearanceSettingsViewModel* appearance() const { return m_appear; }
-    QString initialCategory() const { return m_initialCategory; }
-
-    void setInitialCategory(const QString& key);
-    Q_INVOKABLE void clearInitialCategory();
 
 Q_SIGNALS:
-    void initialCategoryChanged();
     /// Forwarded from `TmdbSettingsViewModel::tokenChanged`.
     void tmdbTokenChanged(const QString& token);
     /// Forwarded from `RealDebridSettingsViewModel::tokenChanged`.
@@ -475,7 +467,6 @@ private:
     PlayerSettingsViewModel* m_player {};
     SubtitlesSettingsViewModel* m_subs {};
     AppearanceSettingsViewModel* m_appear {};
-    QString m_initialCategory;
 };
 
 } // namespace kinema::ui::qml

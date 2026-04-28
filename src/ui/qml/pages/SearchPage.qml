@@ -5,12 +5,13 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.components as Components
 
 import dev.tlmtech.kinema.app
 
 // Cinemeta search page. The page header is a `QQC2.ToolBar` with
-// the segmented `MediaKindSwitch` on the left followed by a
-// fill-width `Kirigami.SearchField`. The body renders one of five
+// the segmented `Components.SegmentedButton` on the left followed
+// by a fill-width `Kirigami.SearchField`. The body renders one of five
 // surfaces (idle / loading / results / empty / error) chosen by
 // `searchVm.results.state`. Idle additionally shows a recent-
 // searches strip from `SearchSettings`.
@@ -19,7 +20,12 @@ import dev.tlmtech.kinema.app
 // `onFocusSearchRequested` calls; declaring it here means the
 // `Ctrl+F` shortcut focuses the existing field instead of pushing
 // a fresh page when the user is already on Search.
-Kirigami.ScrollablePage {
+// The body's results state is a `PosterGrid` (a GridView) that handles
+// its own flicking, so the outer page is a plain `Kirigami.Page`.
+// Wrapping a self-flickable view in `Kirigami.ScrollablePage` produces
+// a parent Flickable that intercepts wheel/flick events without ever
+// scrolling.
+Kirigami.Page {
     id: page
 
     title: i18nc("@title:window", "Search")
@@ -50,11 +56,28 @@ Kirigami.ScrollablePage {
         contentItem: RowLayout {
             spacing: Theme.groupSpacing
 
-            MediaKindSwitch {
-                kind: searchVm.kind
-                onActivated: function (newKind) {
-                    searchVm.kind = newKind;
-                }
+            Components.SegmentedButton {
+                Layout.alignment: Qt.AlignVCenter
+                actions: [
+                    Kirigami.Action {
+                        text: i18nc("@option:radio media kind", "Movies")
+                        icon.name: "video-x-generic"
+                        checkable: true
+                        checked: searchVm.kind === 0
+                        onTriggered: if (searchVm.kind !== 0) {
+                            searchVm.kind = 0;
+                        }
+                    },
+                    Kirigami.Action {
+                        text: i18nc("@option:radio media kind", "TV Series")
+                        icon.name: "view-media-recent"
+                        checkable: true
+                        checked: searchVm.kind === 1
+                        onTriggered: if (searchVm.kind !== 1) {
+                            searchVm.kind = 1;
+                        }
+                    }
+                ]
             }
 
             Kirigami.SearchField {

@@ -6,6 +6,7 @@ import QtQuick.Controls as QQC2
 import QtQuick.Dialogs as QQDialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.components as Components
 import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
@@ -78,20 +79,80 @@ Item {
                     FormCard.FormDelegateSeparator {}
                     FormCard.AbstractFormDelegate {
                         background: null
-                        contentItem: ThreeStateChips {
-                            label: i18nc("@label subtitles filter row",
-                                "Hearing impaired")
-                            value: panel.vm ? panel.vm.hi : "any"
-                            onValuePicked: v => panel.vm.hi = v
+                        contentItem: RowLayout {
+                            spacing: Theme.inlineSpacing
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                text: i18nc("@label subtitles filter row",
+                                    "Hearing impaired")
+                            }
+                            Components.RadioSelector {
+                                readonly property var modes: [
+                                    "off", "include", "only"
+                                ]
+                                selectedIndex: Math.max(0,
+                                    modes.indexOf(panel.vm ? panel.vm.hi : "off"))
+                                actions: [
+                                    Kirigami.Action {
+                                        text: i18nc("@option:radio subtitle filter mode", "Off")
+                                        onTriggered: if (panel.vm && panel.vm.hi !== "off") {
+                                            panel.vm.hi = "off";
+                                        }
+                                    },
+                                    Kirigami.Action {
+                                        text: i18nc("@option:radio subtitle filter mode", "Include")
+                                        onTriggered: if (panel.vm && panel.vm.hi !== "include") {
+                                            panel.vm.hi = "include";
+                                        }
+                                    },
+                                    Kirigami.Action {
+                                        text: i18nc("@option:radio subtitle filter mode", "Only")
+                                        onTriggered: if (panel.vm && panel.vm.hi !== "only") {
+                                            panel.vm.hi = "only";
+                                        }
+                                    }
+                                ]
+                            }
                         }
                     }
                     FormCard.AbstractFormDelegate {
                         background: null
-                        contentItem: ThreeStateChips {
-                            label: i18nc("@label subtitles filter row",
-                                "Foreign parts only")
-                            value: panel.vm ? panel.vm.fpo : "any"
-                            onValuePicked: v => panel.vm.fpo = v
+                        contentItem: RowLayout {
+                            spacing: Theme.inlineSpacing
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                text: i18nc("@label subtitles filter row",
+                                    "Foreign parts only")
+                            }
+                            Components.RadioSelector {
+                                readonly property var modes: [
+                                    "off", "include", "only"
+                                ]
+                                selectedIndex: Math.max(0,
+                                    modes.indexOf(panel.vm ? panel.vm.fpo : "off"))
+                                actions: [
+                                    Kirigami.Action {
+                                        text: i18nc("@option:radio subtitle filter mode", "Off")
+                                        onTriggered: if (panel.vm && panel.vm.fpo !== "off") {
+                                            panel.vm.fpo = "off";
+                                        }
+                                    },
+                                    Kirigami.Action {
+                                        text: i18nc("@option:radio subtitle filter mode", "Include")
+                                        onTriggered: if (panel.vm && panel.vm.fpo !== "include") {
+                                            panel.vm.fpo = "include";
+                                        }
+                                    },
+                                    Kirigami.Action {
+                                        text: i18nc("@option:radio subtitle filter mode", "Only")
+                                        onTriggered: if (panel.vm && panel.vm.fpo !== "only") {
+                                            panel.vm.fpo = "only";
+                                        }
+                                    }
+                                ]
+                            }
                         }
                     }
                     FormCard.FormDelegateSeparator {}

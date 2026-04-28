@@ -1190,18 +1190,4 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     m_subs->load();
 }
 
-void SettingsRootViewModel::setInitialCategory(const QString& key)
-{
-    if (m_initialCategory == key) {
-        return;
-    }
-    m_initialCategory = key;
-    Q_EMIT initialCategoryChanged();
-}
-
-void SettingsRootViewModel::clearInitialCategory()
-{
-    setInitialCategory(QString {});
-}
-
 } // namespace kinema::ui::qml

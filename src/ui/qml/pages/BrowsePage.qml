@@ -26,7 +26,11 @@ import dev.tlmtech.kinema.app
 // `Show all →` from a Discover rail still lands here via
 // `MainController::navigateToBrowseRequested` after applying the
 // preset; the chip row is the user-visible record of what's active.
-Kirigami.ScrollablePage {
+// Browse uses an inner `PosterGrid` (a GridView) that handles its own
+// flicking, so the outer page is a plain `Kirigami.Page`. Wrapping a
+// self-flickable view in `Kirigami.ScrollablePage` produces a parent
+// Flickable that intercepts wheel/flick events without ever scrolling.
+Kirigami.Page {
     id: page
 
     title: i18nc("@title:window", "Browse")

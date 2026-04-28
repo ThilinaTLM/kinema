@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.settings as KirigamiSettings
 
 import dev.tlmtech.kinema.app
 
@@ -122,40 +123,99 @@ Kirigami.ApplicationWindow {
                 checkable: true
                 checked: root.currentNavKey === "browse"
                 onTriggered: root.showPage("browse")
+            },
+            // Settings opens a separate `KirigamiSettings.ConfigurationView`
+            // window on desktop (layer push on mobile) — it is not a top-
+            // level page in this PageRow, so the action is non-checkable.
+            Kirigami.Action {
+                icon.name: "settings-configure"
+                text: i18nc("@action drawer entry", "Settings")
+                onTriggered: mainController.requestSettings()
             }
         ]
+    }
 
-        footer: ColumnLayout {
-            spacing: 0
-
-            QQC2.ItemDelegate {
-                Layout.fillWidth: true
-                display: QQC2.AbstractButton.IconOnly
-                icon.name: "settings-configure"
-                text: i18nc("@action drawer footer", "Settings")
-                Accessible.name: text
-                checkable: true
-                checked: root.currentNavKey === "settings"
-                highlighted: checked
-                onClicked: mainController.requestSettings()
-
-                QQC2.ToolTip.visible: hovered
-                QQC2.ToolTip.text: text
-                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+    // ---- settings configuration view -----------------------------------
+    // KDE6 settings pattern: a separate ConfigWindow on desktop, layer push
+    // on mobile. `MainController::requestSettings(category)` lands here via
+    // `onShowSettingsRequested` and forwards to `open(category)`.
+    KirigamiSettings.ConfigurationView {
+        id: configurationView
+        window: root
+        modules: [
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "general"
+                text: i18nc("@title:tab settings page", "General")
+                icon.name: "preferences-other"
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "GeneralSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "tmdb"
+                text: i18nc("@title:tab settings page", "TMDB (Discover)")
+                icon.name: "applications-multimedia"
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "TmdbSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "realdebrid"
+                text: i18nc("@title:tab settings page", "Real-Debrid")
+                icon.name: "network-server"
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "RealDebridSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "filters"
+                text: i18nc("@title:tab settings page", "Filters")
+                icon.name: "view-filter"
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "FiltersSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "player"
+                text: i18nc("@title:tab settings page", "Player")
+                icon.name: "media-playback-start"
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "PlayerSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "subtitles"
+                text: i18nc("@title:tab settings page", "Subtitles")
+                icon.name: "media-view-subtitles-symbolic"
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "SubtitlesSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "appearance"
+                text: i18nc("@title:tab settings page", "Appearance")
+                icon.name: "preferences-desktop-theme"
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "AppearanceSettingsPage")
+            },
+            // The About page lives inside the settings dialog — the modern
+            // KDE6 convention. F1 still opens it via
+            // `mainController.requestAbout()` which routes here.
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "about"
+                text: i18nc("@title:tab settings page", "About Kinema")
+                icon.name: "help-about"
+                category: i18nc("@title:group settings categories", "About")
+                page: () => Qt.createComponent(
+                    "org.kde.kirigamiaddons.formcard", "AboutPage")
+                initialProperties: () => ({
+                    aboutData: mainController.aboutData
+                })
             }
-
-            Item {
-                Layout.fillWidth: true
-                Layout.minimumHeight: Kirigami.Units.largeSpacing
-            }
-        }
+        ]
     }
 
     // ---- pageStack and navigation --------------------------------------
     // Primary pages are single top-level surfaces. Detail and helper
     // pages are pushed on top to preserve back navigation, but the PageRow
-    // is configured above to behave like a single full-width stack. Discover /
-    // Search / Browse / Settings still unwind to the stack root and replace it.
+    // is configured above to behave like a single full-width stack.
+    // Discover / Search / Browse unwind to the stack root and replace it.
+    // Settings and About open in a separate `KirigamiSettings.ConfigurationView`
+    // window and never enter this page stack.
     readonly property string currentNavKey: pageStack.currentItem
         ? (pageStack.currentItem.objectName || "")
         : ""
@@ -222,9 +282,6 @@ Kirigami.ApplicationWindow {
         case "browse":
             root.setTopLevelPage(browseComp, {});
             break;
-        case "settings":
-            root.setTopLevelPage(settingsComp, {});
-            break;
         }
     }
 
@@ -243,17 +300,8 @@ Kirigami.ApplicationWindow {
     Component { id: movieDetailComp;  MovieDetailPage  { } }
     Component { id: seriesDetailComp; SeriesDetailPage { } }
 
-    // About / Subtitles are pushed helper pages. Settings is a top-level
-    // Kirigami.Page too, so opening it replaces the stack root just like
-    // Discover / Search / Browse.
-    Component {
-        id: aboutComp
-        KAboutPage { }
-    }
-    Component {
-        id: settingsComp
-        SettingsPage { }
-    }
+    // Subtitles is a pushed helper page. About and Settings open in the
+    // ConfigurationView window (see above), not the page stack.
     Component {
         id: subtitlesComp
         SubtitlesPage { }
@@ -268,19 +316,10 @@ Kirigami.ApplicationWindow {
         target: mainController
 
         function onShowSettingsRequested(category) {
-            // Settings is primary navigation, not a detail/helper page:
-            // it replaces the whole root stack so it gets the full window
-            // width. The `initialCategory` set on `settingsVm` from
-            // `MainController::requestSettings(category)` is consumed by
-            // `SettingsPage.qml` on creation to land on the requested
-            // sub-page. If an explicit category is requested while already
-            // on Settings, recreate the page so the selection is reapplied.
-            if (root.pageStack.currentItem
-                && root.pageStack.currentItem.objectName === "settings"
-                && category.length === 0) {
-                return;
-            }
-            root.setTopLevelPage(settingsComp, {});
+            // Open the addons ConfigurationView. Empty category lands on
+            // the first module; an explicit category is the
+            // `defaultModule` and the dialog opens directly on it.
+            configurationView.open(category);
         }
         function onShowSubtitlesRequested() {
             const top = root.pageStack.currentItem;
@@ -309,11 +348,9 @@ Kirigami.ApplicationWindow {
             }
         }
         function onShowAboutRequested() {
-            if (root.pageStack.currentItem
-                && root.pageStack.currentItem.objectName === "about") {
-                return;
-            }
-            root.pushCreated(aboutComp, { objectName: "about" });
+            // About lives inside Settings. F1 opens the dialog on the
+            // "about" module.
+            configurationView.open("about");
         }
         function onFocusSearchRequested() {
             // Prefer focusing the field on the current Search page
