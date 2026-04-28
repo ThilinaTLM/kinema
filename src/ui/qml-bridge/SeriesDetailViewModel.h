@@ -287,6 +287,11 @@ private:
     void sortInPlace(QList<api::Stream>& rows) const;
     api::PlaybackContext currentContext() const;
 
+    /// Forwards a row's stream to a `services::StreamActions`
+    /// pointer-to-member.
+    template <typename Method>
+    void dispatchStreamAction(int row, Method method);
+
     api::CinemetaClient* m_cinemeta;
     api::TorrentioClient* m_torrentio;
     api::TmdbClient* m_tmdb;

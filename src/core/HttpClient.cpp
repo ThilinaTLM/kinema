@@ -18,12 +18,42 @@
 
 namespace kinema::core {
 
+namespace {
+
+HttpError::Kind kindFromReply(QNetworkReply* reply) noexcept
+{
+    return reply->error() == QNetworkReply::OperationCanceledError
+        ? HttpError::Kind::Cancelled
+        : HttpError::Kind::Network;
+}
+
+QJsonDocument parseJsonOrThrow(const QByteArray& body)
+{
+    QJsonParseError perr;
+    auto doc = QJsonDocument::fromJson(body, &perr);
+    if (perr.error != QJsonParseError::NoError) {
+        throw HttpError(HttpError::Kind::Json, 0,
+            i18n("Could not parse JSON response: %1", perr.errorString()));
+    }
+    return doc;
+}
+
+void requireHttps(const QUrl& url)
+{
+    if (url.scheme() != QLatin1String("https")) {
+        throw HttpError(HttpError::Kind::Network, 0,
+            i18n("Refusing non-HTTPS URL: %1", url.toString()));
+    }
+}
+
+} // namespace
+
 HttpClient::HttpClient(QObject* parent)
     : QObject(parent)
     , m_userAgent(QStringLiteral("Kinema/%1").arg(QStringLiteral(KINEMA_VERSION_STRING)))
 {
     m_nam.setTransferTimeout(m_timeout);
-    m_nam.setAutoDeleteReplies(false); // replies are deleted explicitly after co_await
+    m_nam.setAutoDeleteReplies(false);
     m_nam.setRedirectPolicy(QNetworkRequest::NoLessSafeRedirectPolicy);
 }
 
@@ -40,50 +70,36 @@ void HttpClient::setUserAgent(QString ua)
 
 QCoro::Task<QByteArray> HttpClient::get(QUrl url)
 {
-    QNetworkRequest request(url);
-    co_return co_await get(std::move(request));
+    co_return co_await get(QNetworkRequest(url));
 }
 
 QCoro::Task<QJsonDocument> HttpClient::getJson(QUrl url)
 {
-    QNetworkRequest request(url);
-    co_return co_await getJson(std::move(request));
+    co_return co_await getJson(QNetworkRequest(url));
 }
 
 QCoro::Task<QByteArray> HttpClient::get(QNetworkRequest request)
 {
-    const QUrl url = request.url();
-    if (url.scheme() != QLatin1String("https")) {
-        throw HttpError(HttpError::Kind::Network, 0,
-            i18n("Refusing non-HTTPS URL: %1", url.toString()));
-    }
-
-    // Inject our defaults without clobbering caller-set headers.
+    requireHttps(request.url());
     if (!request.hasRawHeader("User-Agent")) {
         request.setHeader(QNetworkRequest::UserAgentHeader, m_userAgent);
     }
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
-    const QString logUrl = redactUrlForLog(url);
+    const QString logUrl = redactUrlForLog(request.url());
     qCDebug(KINEMA) << "HTTP GET" << logUrl;
 
     QNetworkReply* reply = m_nam.get(request);
     co_await qCoro(reply).waitForFinished();
-
-    // Take ownership so the reply is released regardless of how we exit.
     const std::unique_ptr<QNetworkReply> replyGuard { reply };
 
     const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
     if (reply->error() != QNetworkReply::NoError) {
-        // Map OperationCanceledError to Cancelled so callers can distinguish.
-        const auto kind = reply->error() == QNetworkReply::OperationCanceledError
-            ? HttpError::Kind::Cancelled
-            : HttpError::Kind::Network;
         qCWarning(KINEMA) << "HTTP failed" << logUrl
                           << reply->error() << reply->errorString();
-        throw HttpError(kind, status, reply->errorString());
+        throw HttpError(kindFromReply(reply), status, reply->errorString());
     }
 
     if (status < 200 || status >= 300) {
@@ -97,24 +113,13 @@ QCoro::Task<QByteArray> HttpClient::get(QNetworkRequest request)
 QCoro::Task<QJsonDocument> HttpClient::getJson(QNetworkRequest request)
 {
     const QByteArray body = co_await get(std::move(request));
-
-    QJsonParseError perr;
-    auto doc = QJsonDocument::fromJson(body, &perr);
-    if (perr.error != QJsonParseError::NoError) {
-        throw HttpError(HttpError::Kind::Json, 0,
-            i18n("Could not parse JSON response: %1", perr.errorString()));
-    }
-    co_return doc;
+    co_return parseJsonOrThrow(body);
 }
 
 QCoro::Task<QByteArray> HttpClient::postJson(QNetworkRequest request,
     const QByteArray& body)
 {
-    const QUrl url = request.url();
-    if (url.scheme() != QLatin1String("https")) {
-        throw HttpError(HttpError::Kind::Network, 0,
-            i18n("Refusing non-HTTPS URL: %1", url.toString()));
-    }
+    requireHttps(request.url());
     if (!request.hasRawHeader("User-Agent")) {
         request.setHeader(QNetworkRequest::UserAgentHeader, m_userAgent);
     }
@@ -125,7 +130,7 @@ QCoro::Task<QByteArray> HttpClient::postJson(QNetworkRequest request,
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
-    const QString logUrl = redactUrlForLog(url);
+    const QString logUrl = redactUrlForLog(request.url());
     qCDebug(KINEMA) << "HTTP POST" << logUrl;
 
     QNetworkReply* reply = m_nam.post(request, body);
@@ -135,19 +140,11 @@ QCoro::Task<QByteArray> HttpClient::postJson(QNetworkRequest request,
         QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
     if (reply->error() != QNetworkReply::NoError) {
-        const auto kind = reply->error() == QNetworkReply::OperationCanceledError
-            ? HttpError::Kind::Cancelled
-            : HttpError::Kind::Network;
-        // Surface the response body when the server returned one — it
-        // usually carries a structured error message.
         const auto respBody = QString::fromUtf8(reply->readAll());
-        const auto msg = respBody.isEmpty()
-            ? reply->errorString()
-            : respBody;
-        qCWarning(KINEMA) << "HTTP POST failed"
-                          << logUrl
+        const auto msg = respBody.isEmpty() ? reply->errorString() : respBody;
+        qCWarning(KINEMA) << "HTTP POST failed" << logUrl
                           << reply->error() << msg;
-        throw HttpError(kind, status, msg);
+        throw HttpError(kindFromReply(reply), status, msg);
     }
     if (status < 200 || status >= 300) {
         const auto respBody = QString::fromUtf8(reply->readAll());
@@ -163,13 +160,7 @@ QCoro::Task<QJsonDocument> HttpClient::postJsonForJson(
     QNetworkRequest request, const QByteArray& body)
 {
     const QByteArray respBody = co_await postJson(std::move(request), body);
-    QJsonParseError perr;
-    auto doc = QJsonDocument::fromJson(respBody, &perr);
-    if (perr.error != QJsonParseError::NoError) {
-        throw HttpError(HttpError::Kind::Json, 0,
-            i18n("Could not parse JSON response: %1", perr.errorString()));
-    }
-    co_return doc;
+    co_return parseJsonOrThrow(respBody);
 }
 
 QCoro::Task<QList<QPair<QByteArray, QByteArray>>> HttpClient::head(
@@ -197,10 +188,7 @@ QCoro::Task<QList<QPair<QByteArray, QByteArray>>> HttpClient::head(
         QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
     if (reply->error() != QNetworkReply::NoError) {
-        const auto kind = reply->error() == QNetworkReply::OperationCanceledError
-            ? HttpError::Kind::Cancelled
-            : HttpError::Kind::Network;
-        throw HttpError(kind, status, reply->errorString());
+        throw HttpError(kindFromReply(reply), status, reply->errorString());
     }
     if (status < 200 || status >= 300) {
         throw HttpError(HttpError::Kind::HttpStatus, status,

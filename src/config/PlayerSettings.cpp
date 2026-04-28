@@ -3,7 +3,7 @@
 
 #include "config/PlayerSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 namespace kinema::config {
 
@@ -27,8 +27,8 @@ PlayerSettings::PlayerSettings(KSharedConfigPtr config, QObject* parent)
 
 core::player::Kind PlayerSettings::preferred() const
 {
-    const auto s = m_config->group(QString::fromLatin1(kGroup))
-                       .readEntry(kKeyPreferred, QStringLiteral("mpv"));
+    const auto s = detail::read(m_config, kGroup, kKeyPreferred,
+        QStringLiteral("mpv"));
     return core::player::fromString(s).value_or(core::player::Kind::Mpv);
 }
 
@@ -37,29 +37,23 @@ void PlayerSettings::setPreferred(core::player::Kind k)
     if (preferred() == k) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyPreferred, core::player::toString(k));
-    g.sync();
+    detail::write(m_config, kGroup, kKeyPreferred, core::player::toString(k));
     Q_EMIT preferredChanged(k);
 }
 
 QString PlayerSettings::customCommand() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyCustomCmd, QString {});
+    return detail::read(m_config, kGroup, kKeyCustomCmd, QString {});
 }
 
 void PlayerSettings::setCustomCommand(const QString& command)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyCustomCmd, command);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyCustomCmd, command);
 }
 
 bool PlayerSettings::hardwareDecoding() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyHwDecode, true);
+    return detail::read(m_config, kGroup, kKeyHwDecode, true);
 }
 
 void PlayerSettings::setHardwareDecoding(bool on)
@@ -67,16 +61,13 @@ void PlayerSettings::setHardwareDecoding(bool on)
     if (hardwareDecoding() == on) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyHwDecode, on);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyHwDecode, on);
     Q_EMIT hardwareDecodingChanged(on);
 }
 
 QString PlayerSettings::preferredAudioLang() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyAudioLang, QString {});
+    return detail::read(m_config, kGroup, kKeyAudioLang, QString {});
 }
 
 void PlayerSettings::setPreferredAudioLang(const QString& lang)
@@ -84,16 +75,13 @@ void PlayerSettings::setPreferredAudioLang(const QString& lang)
     if (preferredAudioLang() == lang) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyAudioLang, lang);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyAudioLang, lang);
     Q_EMIT preferredAudioLangChanged(lang);
 }
 
 QString PlayerSettings::preferredSubtitleLang() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeySubLang, QString {});
+    return detail::read(m_config, kGroup, kKeySubLang, QString {});
 }
 
 void PlayerSettings::setPreferredSubtitleLang(const QString& lang)
@@ -101,56 +89,44 @@ void PlayerSettings::setPreferredSubtitleLang(const QString& lang)
     if (preferredSubtitleLang() == lang) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeySubLang, lang);
-    g.sync();
+    detail::write(m_config, kGroup, kKeySubLang, lang);
     Q_EMIT preferredSubtitleLangChanged(lang);
 }
 
 bool PlayerSettings::skipIntroChapters() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeySkipIntro, true);
+    return detail::read(m_config, kGroup, kKeySkipIntro, true);
 }
 
 void PlayerSettings::setSkipIntroChapters(bool on)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeySkipIntro, on);
-    g.sync();
+    detail::write(m_config, kGroup, kKeySkipIntro, on);
 }
 
 int PlayerSettings::resumePromptThresholdSec() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyResumePromptThreshold, 30);
+    return detail::read(m_config, kGroup, kKeyResumePromptThreshold, 30);
 }
 
 void PlayerSettings::setResumePromptThresholdSec(int seconds)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyResumePromptThreshold, qMax(0, seconds));
-    g.sync();
+    detail::write(m_config, kGroup, kKeyResumePromptThreshold,
+        qMax(0, seconds));
 }
 
 double PlayerSettings::rememberedVolume() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyVolume, -1.0);
+    return detail::read(m_config, kGroup, kKeyVolume, -1.0);
 }
 
 void PlayerSettings::setRememberedVolume(double percent)
 {
-    // Clamp to [-1, 100]: -1 is the "never set" sentinel, anything
-    // above 100 would only surprise mpv on next load.
     if (percent > 100.0) {
         percent = 100.0;
     } else if (percent < 0.0 && percent != -1.0) {
         percent = 0.0;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyVolume, percent);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyVolume, percent);
 }
 
 } // namespace kinema::config

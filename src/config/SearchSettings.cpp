@@ -3,7 +3,7 @@
 
 #include "config/SearchSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 namespace kinema::config {
 
@@ -23,8 +23,8 @@ SearchSettings::SearchSettings(KSharedConfigPtr config, QObject* parent)
 
 api::MediaKind SearchSettings::kind() const
 {
-    const auto s = m_config->group(QString::fromLatin1(kGroup))
-                       .readEntry(kKey, QStringLiteral("Movie"));
+    const auto s = detail::read(m_config, kGroup, kKey,
+        QStringLiteral("Movie"));
     return s == QLatin1String("Series")
         ? api::MediaKind::Series
         : api::MediaKind::Movie;
@@ -32,18 +32,15 @@ api::MediaKind SearchSettings::kind() const
 
 void SearchSettings::setKind(api::MediaKind k)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKey,
+    detail::write(m_config, kGroup, kKey,
         k == api::MediaKind::Series
             ? QStringLiteral("Series")
             : QStringLiteral("Movie"));
-    g.sync();
 }
 
 QStringList SearchSettings::recentQueries() const
 {
-    return m_config->group(QString::fromLatin1(kRecentGroup))
-        .readEntry(kRecentKey, QStringList{});
+    return detail::read(m_config, kRecentGroup, kRecentKey, QStringList {});
 }
 
 void SearchSettings::addRecentQuery(const QString& q)
@@ -60,17 +57,13 @@ void SearchSettings::addRecentQuery(const QString& q)
         list.removeLast();
     }
 
-    auto g = m_config->group(QString::fromLatin1(kRecentGroup));
-    g.writeEntry(kRecentKey, list);
-    g.sync();
+    detail::write(m_config, kRecentGroup, kRecentKey, list);
     Q_EMIT recentQueriesChanged();
 }
 
 void SearchSettings::clearRecentQueries()
 {
-    auto g = m_config->group(QString::fromLatin1(kRecentGroup));
-    g.deleteEntry(kRecentKey);
-    g.sync();
+    detail::erase(m_config, kRecentGroup, kRecentKey);
     Q_EMIT recentQueriesChanged();
 }
 

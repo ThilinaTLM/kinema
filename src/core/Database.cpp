@@ -251,9 +251,22 @@ bool Database::applyMigration(int toVersion)
     auto db = QSqlDatabase::database(m_connectionName);
     QSqlQuery q(db);
 
+    const auto runAll = [&](int version, const QStringList& stmts) {
+        for (const auto& s : stmts) {
+            if (!q.exec(s)) {
+                qCWarning(KINEMA)
+                    << "Database: migration v" << version
+                    << "failed on" << s
+                    << "\u2014" << q.lastError().text();
+                return false;
+            }
+        }
+        return true;
+    };
+
     switch (toVersion) {
-    case 1: {
-        const QStringList stmts = {
+    case 1:
+        return runAll(1, {
             QStringLiteral(R"(CREATE TABLE IF NOT EXISTS schema_meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -285,36 +298,16 @@ bool Database::applyMigration(int toVersion)
             QStringLiteral(
                 "CREATE INDEX IF NOT EXISTS history_by_imdb "
                 "ON history (imdb_id, last_watched_at DESC)"),
-        };
-        for (const auto& s : stmts) {
-            if (!q.exec(s)) {
-                qCWarning(KINEMA)
-                    << "Database: migration v1 failed on" << s
-                    << "\u2014" << q.lastError().text();
-                return false;
-            }
-        }
-        return true;
-    }
-    case 2: {
-        const QStringList stmts = {
+        });
+    case 2:
+        return runAll(2, {
             QStringLiteral(
                 "ALTER TABLE history ADD COLUMN audio_lang TEXT NOT NULL DEFAULT ''"),
             QStringLiteral(
                 "ALTER TABLE history ADD COLUMN sub_lang TEXT NOT NULL DEFAULT ''"),
-        };
-        for (const auto& s : stmts) {
-            if (!q.exec(s)) {
-                qCWarning(KINEMA)
-                    << "Database: migration v2 failed on" << s
-                    << "\u2014" << q.lastError().text();
-                return false;
-            }
-        }
-        return true;
-    }
-    case 3: {
-        const QStringList stmts = {
+        });
+    case 3:
+        return runAll(3, {
             QStringLiteral(R"(CREATE TABLE IF NOT EXISTS subtitle_cache (
                 file_id            TEXT PRIMARY KEY,
                 imdb_id            TEXT NOT NULL,
@@ -338,17 +331,7 @@ bool Database::applyMigration(int toVersion)
             QStringLiteral(
                 "CREATE INDEX IF NOT EXISTS subtitle_cache_by_lru "
                 "ON subtitle_cache (last_used_at)"),
-        };
-        for (const auto& s : stmts) {
-            if (!q.exec(s)) {
-                qCWarning(KINEMA)
-                    << "Database: migration v3 failed on" << s
-                    << "\u2014" << q.lastError().text();
-                return false;
-            }
-        }
-        return true;
-    }
+        });
     default:
         qCWarning(KINEMA)
             << "Database: no migration registered for version"

@@ -3,7 +3,7 @@
 
 #include "config/BrowseSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 #include <QStringList>
 
@@ -58,8 +58,8 @@ BrowseSettings::BrowseSettings(KSharedConfigPtr config, QObject* parent)
 
 api::MediaKind BrowseSettings::kind() const
 {
-    const auto s = m_config->group(QString::fromLatin1(kGroup))
-                       .readEntry(kKeyKind, QStringLiteral("Movie"));
+    const auto s = detail::read(m_config, kGroup, kKeyKind,
+        QStringLiteral("Movie"));
     return s == QLatin1String("Series")
         ? api::MediaKind::Series
         : api::MediaKind::Movie;
@@ -67,18 +67,15 @@ api::MediaKind BrowseSettings::kind() const
 
 void BrowseSettings::setKind(api::MediaKind k)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyKind,
+    detail::write(m_config, kGroup, kKeyKind,
         k == api::MediaKind::Series
             ? QStringLiteral("Series")
             : QStringLiteral("Movie"));
-    g.sync();
 }
 
 QList<int> BrowseSettings::genreIds() const
 {
-    const auto raw = m_config->group(QString::fromLatin1(kGroup))
-                         .readEntry(kKeyGenres, QString {});
+    const auto raw = detail::read(m_config, kGroup, kKeyGenres, QString {});
     if (raw.isEmpty()) {
         return {};
     }
@@ -104,70 +101,53 @@ void BrowseSettings::setGenreIds(QList<int> ids)
             parts.append(QString::number(id));
         }
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyGenres, parts.join(QLatin1Char(',')));
-    g.sync();
+    detail::write(m_config, kGroup, kKeyGenres, parts.join(QLatin1Char(',')));
 }
 
 core::DateWindow BrowseSettings::dateWindow() const
 {
-    const auto s = m_config->group(QString::fromLatin1(kGroup))
-                       .readEntry(kKeyDateWindow, QStringLiteral("year"));
+    const auto s = detail::read(m_config, kGroup, kKeyDateWindow,
+        QStringLiteral("year"));
     return core::dateWindowFromString(s, core::DateWindow::ThisYear);
 }
 
 void BrowseSettings::setDateWindow(core::DateWindow w)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyDateWindow, core::dateWindowToString(w));
-    g.sync();
+    detail::write(m_config, kGroup, kKeyDateWindow,
+        core::dateWindowToString(w));
 }
 
 int BrowseSettings::minRatingPct() const
 {
-    const int raw = m_config->group(QString::fromLatin1(kGroup))
-                        .readEntry(kKeyMinRatingPct, 0);
-    if (raw < 0) {
-        return 0;
-    }
-    if (raw > 100) {
-        return 100;
-    }
-    return raw;
+    const int raw = detail::read(m_config, kGroup, kKeyMinRatingPct, 0);
+    return std::clamp(raw, 0, 100);
 }
 
 void BrowseSettings::setMinRatingPct(int pct)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyMinRatingPct, pct);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyMinRatingPct, pct);
 }
 
 api::DiscoverSort BrowseSettings::sort() const
 {
-    const auto s = m_config->group(QString::fromLatin1(kGroup))
-                       .readEntry(kKeySort, QStringLiteral("popularity"));
+    const auto s = detail::read(m_config, kGroup, kKeySort,
+        QStringLiteral("popularity"));
     return discoverSortFromToken(s);
 }
 
 void BrowseSettings::setSort(api::DiscoverSort s)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeySort, discoverSortToToken(s));
-    g.sync();
+    detail::write(m_config, kGroup, kKeySort, discoverSortToToken(s));
 }
 
 bool BrowseSettings::hideObscure() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyHideObscure, true);
+    return detail::read(m_config, kGroup, kKeyHideObscure, true);
 }
 
 void BrowseSettings::setHideObscure(bool on)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyHideObscure, on);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyHideObscure, on);
 }
 
 } // namespace kinema::config

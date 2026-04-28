@@ -13,6 +13,8 @@
 
 #include <QPointer>
 
+#include <functional>
+
 namespace kinema::ui::qml {
 
 DiscoverViewModel::DiscoverViewModel(api::TmdbClient* tmdb,
@@ -89,65 +91,51 @@ QString DiscoverViewModel::placeholderBody() const
 
 void DiscoverViewModel::buildSections()
 {
-    // Same list and order as the legacy widget DiscoverPage::buildSections.
-    // QPointer guards the lambdas so a future cancellation during
-    // teardown doesn't dereference a deleted client.
+    // QPointer guards the lambdas so a teardown cancellation
+    // doesn't dereference a deleted client.
     QPointer<api::TmdbClient> tmdb(m_tmdb);
+
+    using FetchFn = std::function<QCoro::Task<QList<api::DiscoverItem>>()>;
+    const auto wrap = [tmdb](auto endpoint) -> FetchFn {
+        return [tmdb, endpoint]() -> QCoro::Task<QList<api::DiscoverItem>> {
+            if (!tmdb) {
+                co_return QList<api::DiscoverItem> {};
+            }
+            co_return co_await endpoint(tmdb.data());
+        };
+    };
 
     const QList<SectionSpec> specs = {
         { i18nc("@label discover row", "Trending this week"),
-            [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
-                if (!tmdb) {
-                    co_return QList<api::DiscoverItem> {};
-                }
-                co_return co_await tmdb->trending(
-                    api::MediaKind::Movie, /*weekly=*/true);
-            },
+            wrap([](api::TmdbClient* c) {
+                return c->trending(api::MediaKind::Movie, true);
+            }),
             api::MediaKind::Movie,
             api::DiscoverSort::Popularity },
         { i18nc("@label discover row", "Popular series"),
-            [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
-                if (!tmdb) {
-                    co_return QList<api::DiscoverItem> {};
-                }
-                co_return co_await tmdb->popular(api::MediaKind::Series);
-            },
+            wrap([](api::TmdbClient* c) {
+                return c->popular(api::MediaKind::Series);
+            }),
             api::MediaKind::Series,
             api::DiscoverSort::Popularity },
         { i18nc("@label discover row", "Now playing in theaters"),
-            [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
-                if (!tmdb) {
-                    co_return QList<api::DiscoverItem> {};
-                }
-                co_return co_await tmdb->nowPlayingMovies();
-            },
+            wrap([](api::TmdbClient* c) { return c->nowPlayingMovies(); }),
             api::MediaKind::Movie,
             api::DiscoverSort::ReleaseDate },
         { i18nc("@label discover row", "On the air"),
-            [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
-                if (!tmdb) {
-                    co_return QList<api::DiscoverItem> {};
-                }
-                co_return co_await tmdb->onTheAirSeries();
-            },
+            wrap([](api::TmdbClient* c) { return c->onTheAirSeries(); }),
             api::MediaKind::Series,
             api::DiscoverSort::ReleaseDate },
         { i18nc("@label discover row", "Top rated movies"),
-            [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
-                if (!tmdb) {
-                    co_return QList<api::DiscoverItem> {};
-                }
-                co_return co_await tmdb->topRated(api::MediaKind::Movie);
-            },
+            wrap([](api::TmdbClient* c) {
+                return c->topRated(api::MediaKind::Movie);
+            }),
             api::MediaKind::Movie,
             api::DiscoverSort::Rating },
         { i18nc("@label discover row", "Top rated series"),
-            [tmdb]() -> QCoro::Task<QList<api::DiscoverItem>> {
-                if (!tmdb) {
-                    co_return QList<api::DiscoverItem> {};
-                }
-                co_return co_await tmdb->topRated(api::MediaKind::Series);
-            },
+            wrap([](api::TmdbClient* c) {
+                return c->topRated(api::MediaKind::Series);
+            }),
             api::MediaKind::Series,
             api::DiscoverSort::Rating },
     };

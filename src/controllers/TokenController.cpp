@@ -11,6 +11,21 @@
 
 namespace kinema::controllers {
 
+namespace {
+
+QCoro::Task<QString> safeRead(core::TokenStore& store, const char* key,
+    const char* label)
+{
+    try {
+        co_return co_await store.read(QString::fromLatin1(key));
+    } catch (const std::exception& e) {
+        qCWarning(KINEMA) << label << "read failed:" << e.what();
+    }
+    co_return QString {};
+}
+
+} // namespace
+
 TokenController::TokenController(
     core::TokenStore* tokens,
     api::TmdbClient* tmdb,
@@ -30,44 +45,31 @@ TokenController::TokenController(
 void TokenController::loadAll()
 {
     if (m_rdSettings.configured()) {
-        auto t = loadRdTask();
-        Q_UNUSED(t);
+        [[maybe_unused]] auto rd = loadRdTask();
     }
-    {
-        auto t = loadTmdbTask();
-        Q_UNUSED(t);
-    }
-    auto t = loadOpenSubtitlesTask();
-    Q_UNUSED(t);
+    [[maybe_unused]] auto tmdb = loadTmdbTask();
+    [[maybe_unused]] auto os = loadOpenSubtitlesTask();
 }
 
 void TokenController::refreshRealDebrid()
 {
-    auto t = loadRdTask();
-    Q_UNUSED(t);
+    [[maybe_unused]] auto t = loadRdTask();
 }
 
 void TokenController::refreshTmdb()
 {
-    auto t = loadTmdbTask();
-    Q_UNUSED(t);
+    [[maybe_unused]] auto t = loadTmdbTask();
 }
 
 void TokenController::refreshOpenSubtitlesCredentials()
 {
-    auto t = loadOpenSubtitlesTask();
-    Q_UNUSED(t);
+    [[maybe_unused]] auto t = loadOpenSubtitlesTask();
 }
 
 QCoro::Task<void> TokenController::loadRdTask()
 {
-    QString next;
-    try {
-        next = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kRealDebridKey));
-    } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "RD token read failed:" << e.what();
-    }
+    auto next = co_await safeRead(*m_tokens,
+        core::TokenStore::kRealDebridKey, "RD token");
     if (next != m_rdToken) {
         m_rdToken = std::move(next);
         Q_EMIT realDebridTokenChanged(m_rdToken);
@@ -78,20 +80,11 @@ QCoro::Task<void> TokenController::loadTmdbTask()
 {
     // User override wins if present; otherwise the compile-time
     // default; otherwise empty (Discover shows not-configured state).
-    QString user;
-    try {
-        user = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kTmdbKey));
-    } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "TMDB token read failed:" << e.what();
-    }
+    auto user = co_await safeRead(*m_tokens,
+        core::TokenStore::kTmdbKey, "TMDB token");
 
-    QString next;
-    if (!user.isEmpty()) {
-        next = std::move(user);
-    } else {
-        next = m_tmdbCompiledDefaultToken;
-    }
+    QString next = user.isEmpty() ? m_tmdbCompiledDefaultToken
+                                  : std::move(user);
 
     if (m_tmdb) {
         m_tmdb->setToken(next);
@@ -105,25 +98,12 @@ QCoro::Task<void> TokenController::loadTmdbTask()
 
 QCoro::Task<void> TokenController::loadOpenSubtitlesTask()
 {
-    QString apiKey, username, password;
-    try {
-        apiKey = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesApiKey));
-    } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "OpenSubtitles api-key read failed:" << e.what();
-    }
-    try {
-        username = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesUsername));
-    } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "OpenSubtitles username read failed:" << e.what();
-    }
-    try {
-        password = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesPassword));
-    } catch (const std::exception& e) {
-        qCWarning(KINEMA) << "OpenSubtitles password read failed:" << e.what();
-    }
+    auto apiKey = co_await safeRead(*m_tokens,
+        core::TokenStore::kOpenSubtitlesApiKey, "OpenSubtitles api-key");
+    auto username = co_await safeRead(*m_tokens,
+        core::TokenStore::kOpenSubtitlesUsername, "OpenSubtitles username");
+    auto password = co_await safeRead(*m_tokens,
+        core::TokenStore::kOpenSubtitlesPassword, "OpenSubtitles password");
 
     if (apiKey != m_osApiKey) {
         m_osApiKey = std::move(apiKey);

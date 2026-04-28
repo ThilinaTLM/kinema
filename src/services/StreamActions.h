@@ -7,6 +7,7 @@
 #include "api/PlaybackContext.h"
 
 #include <QObject>
+#include <QUrl>
 
 namespace kinema::controllers {
 class HistoryController;
@@ -61,6 +62,11 @@ Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
 private:
+    void launchOpenUrlJob(const QUrl& url,
+        const QString& successMsg,
+        const QString& failurePrefix,
+        const char* failureLogTag);
+
     core::PlayerLauncher* m_launcher;
     controllers::HistoryController* m_history {};
 };

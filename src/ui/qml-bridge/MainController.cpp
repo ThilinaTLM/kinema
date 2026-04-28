@@ -304,24 +304,19 @@ void MainController::buildCoreServices()
         [this] { m_subtitleCtrl->reconcileCacheOnStartup(); });
     // Credentials change → drop JWT so the next request re-logs
     // in, and tell the controller to re-evaluate downloadEnabled.
+    const auto onOsCredentialChanged = [this](const QString&) {
+        m_openSubtitles->clearJwt();
+        m_subtitleCtrl->notifyAuthChanged();
+    };
     connect(m_tokenCtrl,
         &controllers::TokenController::openSubtitlesApiKeyChanged,
-        m_openSubtitles, [this](const QString&) {
-            m_openSubtitles->clearJwt();
-            m_subtitleCtrl->notifyAuthChanged();
-        });
+        m_openSubtitles, onOsCredentialChanged);
     connect(m_tokenCtrl,
         &controllers::TokenController::openSubtitlesUsernameChanged,
-        m_openSubtitles, [this](const QString&) {
-            m_openSubtitles->clearJwt();
-            m_subtitleCtrl->notifyAuthChanged();
-        });
+        m_openSubtitles, onOsCredentialChanged);
     connect(m_tokenCtrl,
         &controllers::TokenController::openSubtitlesPasswordChanged,
-        m_openSubtitles, [this](const QString&) {
-            m_openSubtitles->clearJwt();
-            m_subtitleCtrl->notifyAuthChanged();
-        });
+        m_openSubtitles, onOsCredentialChanged);
 
     // History controller. Two-phase: StreamActions is wired now;
     // `setPlayerWindow` lands in `openEmbeddedPlayer`.
@@ -377,35 +372,26 @@ void MainController::buildCoreServices()
     connect(m_continueWatchingVm,
         &ContinueWatchingViewModel::removeRequested, m_historyCtrl,
         &controllers::HistoryController::removeEntry);
+    const auto openHistoryDetail = [this](const api::HistoryEntry& entry) {
+        if (entry.key.kind == api::MediaKind::Movie) {
+            openMovieDetail(entry.key.imdbId, entry.title);
+            return;
+        }
+        const auto title = entry.seriesTitle.isEmpty()
+            ? entry.title : entry.seriesTitle;
+        openSeriesDetailAt(entry.key.imdbId, title,
+            entry.key.season.value_or(-1),
+            entry.key.episode.value_or(-1));
+    };
     connect(m_continueWatchingVm,
         &ContinueWatchingViewModel::detailRequested, this,
-        [this](const api::HistoryEntry& entry) {
-            if (entry.key.kind == api::MediaKind::Movie) {
-                openMovieDetail(entry.key.imdbId, entry.title);
-                return;
-            }
-            const auto title = entry.seriesTitle.isEmpty()
-                ? entry.title : entry.seriesTitle;
-            openSeriesDetailAt(entry.key.imdbId, title,
-                entry.key.season.value_or(-1),
-                entry.key.episode.value_or(-1));
-        });
+        openHistoryDetail);
     // Resume-from-history fallback: the saved release is gone, so
     // open the matching detail page so the user can pick another
-    // stream. Same season / episode threading for series entries.
+    // stream.
     connect(m_historyCtrl,
         &controllers::HistoryController::resumeFallbackRequested,
-        this, [this](const api::HistoryEntry& entry) {
-            if (entry.key.kind == api::MediaKind::Movie) {
-                openMovieDetail(entry.key.imdbId, entry.title);
-                return;
-            }
-            const auto title = entry.seriesTitle.isEmpty()
-                ? entry.title : entry.seriesTitle;
-            openSeriesDetailAt(entry.key.imdbId, title,
-                entry.key.season.value_or(-1),
-                entry.key.episode.value_or(-1));
-        });
+        this, openHistoryDetail);
 
     // Discover navigation routing. "Show all" forwards into the
     // Browse VM via a typed (kind, sort) preset and asks the shell
@@ -807,89 +793,44 @@ void MainController::exposeContextProperties(
     // NOT route through `QML_ELEMENT` and therefore stays
     // compatible with the kinema_core / kinema_qml_app target
     // split. Calling it once per engine is fine; Qt deduplicates.
-    qmlRegisterUncreatableType<DiscoverSectionModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "DiscoverSectionModel",
-        QStringLiteral("DiscoverSectionModel is owned by C++."));
-    qmlRegisterUncreatableType<ResultsListModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "ResultsListModel",
-        QStringLiteral("ResultsListModel is owned by C++."));
-    qmlRegisterUncreatableType<StreamsListModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "StreamsListModel",
-        QStringLiteral("StreamsListModel is owned by C++."));
-    qmlRegisterUncreatableType<MovieDetailViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "MovieDetailViewModel",
-        QStringLiteral("MovieDetailViewModel is owned by C++."));
-    qmlRegisterUncreatableType<SeriesDetailViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "SeriesDetailViewModel",
-        QStringLiteral("SeriesDetailViewModel is owned by C++."));
-    qmlRegisterUncreatableType<EpisodesListModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "EpisodesListModel",
-        QStringLiteral("EpisodesListModel is owned by C++."));
-    qmlRegisterUncreatableType<SubtitlesViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "SubtitlesViewModel",
-        QStringLiteral("SubtitlesViewModel is owned by C++."));
-    qmlRegisterUncreatableType<SubtitleResultsModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "SubtitleResultsModel",
-        QStringLiteral("SubtitleResultsModel is owned by C++."));
-    qmlRegisterUncreatableType<SettingsRootViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "SettingsRootViewModel",
-        QStringLiteral("SettingsRootViewModel is owned by C++."));
-    qmlRegisterUncreatableType<GeneralSettingsViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "GeneralSettingsViewModel",
-        QStringLiteral("GeneralSettingsViewModel is owned by C++."));
-    qmlRegisterUncreatableType<TmdbSettingsViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "TmdbSettingsViewModel",
-        QStringLiteral("TmdbSettingsViewModel is owned by C++."));
-    qmlRegisterUncreatableType<RealDebridSettingsViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "RealDebridSettingsViewModel",
-        QStringLiteral("RealDebridSettingsViewModel is owned by C++."));
-    qmlRegisterUncreatableType<FiltersSettingsViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "FiltersSettingsViewModel",
-        QStringLiteral("FiltersSettingsViewModel is owned by C++."));
-    qmlRegisterUncreatableType<PlayerSettingsViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "PlayerSettingsViewModel",
-        QStringLiteral("PlayerSettingsViewModel is owned by C++."));
-    qmlRegisterUncreatableType<SubtitlesSettingsViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "SubtitlesSettingsViewModel",
-        QStringLiteral("SubtitlesSettingsViewModel is owned by C++."));
-    qmlRegisterUncreatableType<AppearanceSettingsViewModel>(
-        "dev.tlmtech.kinema.app", 1, 0,
-        "AppearanceSettingsViewModel",
-        QStringLiteral("AppearanceSettingsViewModel is owned by C++."));
+#define KINEMA_REGISTER_QML_TYPE(Type) \
+    qmlRegisterUncreatableType<Type>("dev.tlmtech.kinema.app", 1, 0, \
+        #Type, QStringLiteral(#Type " is owned by C++."))
 
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("mainController"), this);
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("discoverVm"), m_discoverVm);
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("continueWatchingVm"), m_continueWatchingVm);
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("searchVm"), m_searchVm);
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("browseVm"), m_browseVm);
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("movieDetailVm"), m_movieDetailVm);
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("seriesDetailVm"), m_seriesDetailVm);
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("subtitlesVm"), m_subtitlesVm);
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("settingsVm"), m_settingsVm);
+    KINEMA_REGISTER_QML_TYPE(DiscoverSectionModel);
+    KINEMA_REGISTER_QML_TYPE(ResultsListModel);
+    KINEMA_REGISTER_QML_TYPE(StreamsListModel);
+    KINEMA_REGISTER_QML_TYPE(MovieDetailViewModel);
+    KINEMA_REGISTER_QML_TYPE(SeriesDetailViewModel);
+    KINEMA_REGISTER_QML_TYPE(EpisodesListModel);
+    KINEMA_REGISTER_QML_TYPE(SubtitlesViewModel);
+    KINEMA_REGISTER_QML_TYPE(SubtitleResultsModel);
+    KINEMA_REGISTER_QML_TYPE(SettingsRootViewModel);
+    KINEMA_REGISTER_QML_TYPE(GeneralSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(TmdbSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(RealDebridSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(FiltersSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(PlayerSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(SubtitlesSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(AppearanceSettingsViewModel);
+
+#undef KINEMA_REGISTER_QML_TYPE
+
+    auto* rootCtx = engine.rootContext();
+    const std::pair<const char*, QObject*> contextProps[] = {
+        { "mainController", this },
+        { "discoverVm", m_discoverVm },
+        { "continueWatchingVm", m_continueWatchingVm },
+        { "searchVm", m_searchVm },
+        { "browseVm", m_browseVm },
+        { "movieDetailVm", m_movieDetailVm },
+        { "seriesDetailVm", m_seriesDetailVm },
+        { "subtitlesVm", m_subtitlesVm },
+        { "settingsVm", m_settingsVm },
+    };
+    for (const auto& [name, obj] : contextProps) {
+        rootCtx->setContextProperty(QString::fromLatin1(name), obj);
+    }
 
     // Kick the initial Discover + Browse fetches once everything's
     // wired so each page lands populated rather than empty-spinner.

@@ -60,37 +60,49 @@ bool hasTrackType(const core::tracks::TrackList& tracks,
 const QRegularExpression kSkipRx(
     QStringLiteral("^(intro|opening|outro|ending|credits|end credits)\\b"),
     QRegularExpression::CaseInsensitiveOption);
+const QRegularExpression kCreditsRx(
+    QStringLiteral("^(credits|end credits)\\b"),
+    QRegularExpression::CaseInsensitiveOption);
+const QRegularExpression kOutroRx(
+    QStringLiteral("^(outro|ending)\\b"),
+    QRegularExpression::CaseInsensitiveOption);
 
-QString skipButtonLabel(const QString& chapterTitle)
+enum class SkipKind { Intro, Outro, Credits };
+
+SkipKind classifySkipChapter(const QString& chapterTitle)
 {
     const QString t = chapterTitle.trimmed();
-    if (t.contains(QRegularExpression(
-            QStringLiteral("^(credits|end credits)\\b"),
-            QRegularExpression::CaseInsensitiveOption))) {
-        return i18nc("@action:button", "Skip credits");
+    if (t.contains(kCreditsRx)) {
+        return SkipKind::Credits;
     }
-    if (t.contains(QRegularExpression(
-            QStringLiteral("^(outro|ending)\\b"),
-            QRegularExpression::CaseInsensitiveOption))) {
+    if (t.contains(kOutroRx)) {
+        return SkipKind::Outro;
+    }
+    return SkipKind::Intro;
+}
+
+QString skipButtonLabel(SkipKind kind)
+{
+    switch (kind) {
+    case SkipKind::Credits:
+        return i18nc("@action:button", "Skip credits");
+    case SkipKind::Outro:
         return i18nc("@action:button", "Skip outro");
+    case SkipKind::Intro:
+        break;
     }
     return i18nc("@action:button", "Skip intro");
 }
 
-/// Return the stable kind string the Lua chrome uses as the auto-
-/// skip toggle key. Matches the regex families in `skipButtonLabel`.
-QString skipChapterKind(const QString& chapterTitle)
+QString skipChapterKind(SkipKind kind)
 {
-    const QString t = chapterTitle.trimmed();
-    if (t.contains(QRegularExpression(
-            QStringLiteral("^(credits|end credits)\\b"),
-            QRegularExpression::CaseInsensitiveOption))) {
+    switch (kind) {
+    case SkipKind::Credits:
         return QStringLiteral("credits");
-    }
-    if (t.contains(QRegularExpression(
-            QStringLiteral("^(outro|ending)\\b"),
-            QRegularExpression::CaseInsensitiveOption))) {
+    case SkipKind::Outro:
         return QStringLiteral("outro");
+    case SkipKind::Intro:
+        break;
     }
     return QStringLiteral("intro");
 }
@@ -361,10 +373,9 @@ void PlaybackController::onPositionChanged(double seconds)
         }
         if (seconds >= start && seconds < end) {
             m_skipChapterEnd = end;
-            // Cast to qint64 truncates towards zero; fine for
-            // timeline-band rendering which is in whole seconds.
-            m_window->showSkipChapter(skipChapterKind(title),
-                skipButtonLabel(title),
+            const auto kind = classifySkipChapter(title);
+            m_window->showSkipChapter(skipChapterKind(kind),
+                skipButtonLabel(kind),
                 static_cast<qint64>(start),
                 static_cast<qint64>(end));
             return;

@@ -3,7 +3,7 @@
 
 #include "config/CacheSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 namespace kinema::config {
 
@@ -21,10 +21,8 @@ CacheSettings::CacheSettings(KSharedConfigPtr config, QObject* parent)
 
 int CacheSettings::subtitleBudgetMb() const
 {
-    const auto v = m_config->group(QString::fromLatin1(kGroup))
-                       .readEntry(kSubtitleBudget,
-                           kDefaultSubtitleBudgetMb);
-    return qMax(1, v);
+    return qMax(1, detail::read(m_config, kGroup, kSubtitleBudget,
+                       kDefaultSubtitleBudgetMb));
 }
 
 void CacheSettings::setSubtitleBudgetMb(int mb)
@@ -33,9 +31,7 @@ void CacheSettings::setSubtitleBudgetMb(int mb)
     if (subtitleBudgetMb() == mb) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kSubtitleBudget, mb);
-    g.sync();
+    detail::write(m_config, kGroup, kSubtitleBudget, mb);
     Q_EMIT subtitleBudgetMbChanged(mb);
 }
 

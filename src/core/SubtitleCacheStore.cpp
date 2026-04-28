@@ -5,6 +5,7 @@
 
 #include "core/CachePaths.h"
 #include "core/Database.h"
+#include "core/SqlUtil.h"
 #include "kinema_debug.h"
 
 #include <QDateTime>
@@ -12,7 +13,6 @@
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
-#include <QTimeZone>
 #include <QTimer>
 #include <QVariant>
 
@@ -20,29 +20,9 @@ namespace kinema::core {
 
 namespace {
 
-constexpr const char* kIsoFmt = "yyyy-MM-ddTHH:mm:ssZ";
-
-QString isoUtc(const QDateTime& dt)
-{
-    return dt.toUTC().toString(QString::fromLatin1(kIsoFmt));
-}
-
-QDateTime parseIsoUtc(const QString& s)
-{
-    auto dt = QDateTime::fromString(s, Qt::ISODate);
-    if (!dt.isValid()) {
-        dt = QDateTime::fromString(s, QString::fromLatin1(kIsoFmt));
-    }
-    if (dt.isValid()) {
-        dt.setTimeZone(QTimeZone::utc());
-    }
-    return dt;
-}
-
-QString nullSafe(const QString& s)
-{
-    return s.isNull() ? QString::fromLatin1("") : s;
-}
+using sql::isoUtc;
+using sql::nullSafe;
+using sql::parseIsoUtc;
 
 constexpr const char* kSelectColumns =
     "file_id, imdb_id, season, episode, "
@@ -178,23 +158,15 @@ QList<SubtitleCacheStore::Entry> SubtitleCacheStore::findFor(
     QString sql = QStringLiteral("SELECT ")
         + QString::fromLatin1(kSelectColumns)
         + QStringLiteral(" FROM subtitle_cache WHERE imdb_id = ?");
-    if (key.season.has_value()) {
-        sql += QStringLiteral(" AND season = ?");
-    } else {
-        sql += QStringLiteral(" AND season IS NULL");
-    }
-    if (key.episode.has_value()) {
-        sql += QStringLiteral(" AND episode = ?");
-    } else {
-        sql += QStringLiteral(" AND episode IS NULL");
-    }
+    sql::appendKeyFilter(sql, key);
     if (!languages.isEmpty()) {
         QStringList placeholders;
         placeholders.reserve(languages.size());
         for (int i = 0; i < languages.size(); ++i) {
             placeholders << QStringLiteral("?");
         }
-        sql += QStringLiteral(" AND language IN (") + placeholders.join(QLatin1Char(','))
+        sql += QStringLiteral(" AND language IN (")
+            + placeholders.join(QLatin1Char(','))
             + QStringLiteral(")");
     }
     sql += QStringLiteral(" ORDER BY last_used_at DESC");
@@ -202,12 +174,7 @@ QList<SubtitleCacheStore::Entry> SubtitleCacheStore::findFor(
     auto q = m_db.query();
     q.prepare(sql);
     q.addBindValue(key.imdbId);
-    if (key.season.has_value()) {
-        q.addBindValue(*key.season);
-    }
-    if (key.episode.has_value()) {
-        q.addBindValue(*key.episode);
-    }
+    sql::bindKeyFilter(q, key);
     for (const auto& l : languages) {
         q.addBindValue(l);
     }
@@ -232,25 +199,11 @@ QSet<QString> SubtitleCacheStore::cachedFileIds(
     }
     QString sql = QStringLiteral(
         "SELECT file_id FROM subtitle_cache WHERE imdb_id = ?");
-    if (key.season.has_value()) {
-        sql += QStringLiteral(" AND season = ?");
-    } else {
-        sql += QStringLiteral(" AND season IS NULL");
-    }
-    if (key.episode.has_value()) {
-        sql += QStringLiteral(" AND episode = ?");
-    } else {
-        sql += QStringLiteral(" AND episode IS NULL");
-    }
+    sql::appendKeyFilter(sql, key);
     auto q = m_db.query();
     q.prepare(sql);
     q.addBindValue(key.imdbId);
-    if (key.season.has_value()) {
-        q.addBindValue(*key.season);
-    }
-    if (key.episode.has_value()) {
-        q.addBindValue(*key.episode);
-    }
+    sql::bindKeyFilter(q, key);
     if (!q.exec()) {
         return out;
     }

@@ -27,12 +27,10 @@ AppSettings::AppSettings(KSharedConfigPtr config, QObject* parent)
 
 void AppSettings::connectAggregateSignals()
 {
-    // torrentioOptions() reads defaultSort + excludedResolutions +
-    // excludedCategories. Any of those changing should refetch.
     connect(&m_torrentio, &TorrentioSettings::defaultSortChanged,
-        this, [this] { Q_EMIT torrentioOptionsChanged(); });
+        this, &AppSettings::torrentioOptionsChanged);
     connect(&m_filter, &FilterSettings::exclusionsChanged,
-        this, [this] { Q_EMIT torrentioOptionsChanged(); });
+        this, &AppSettings::torrentioOptionsChanged);
 }
 
 core::torrentio::ConfigOptions AppSettings::torrentioOptions() const

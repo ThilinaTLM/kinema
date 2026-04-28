@@ -168,6 +168,14 @@ private:
     /// Lazily parse and cache tokens for row `index`.
     const core::stream_tokens::Tokens& tokensAt(int index) const;
 
+    /// Field clearers used by the lifecycle setters. Each emits the
+    /// corresponding change signal only when there was something to
+    /// reset, so callers can chain them without repeating guards.
+    void clearItemsIfAny();
+    void clearErrorIfAny();
+    void clearEmptyExplanationIfAny();
+    void clearReleaseDateIfAny();
+
     QList<api::Stream> m_items;
     State m_state = State::Idle;
     QString m_errorMessage;

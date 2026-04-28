@@ -224,44 +224,59 @@ void StreamsListModel::resetState(State newState)
     Q_EMIT stateChanged();
 }
 
+void StreamsListModel::clearItemsIfAny()
+{
+    if (m_items.isEmpty()) {
+        return;
+    }
+    beginResetModel();
+    m_items.clear();
+    m_tokenCache.clear();
+    endResetModel();
+    Q_EMIT countChanged();
+}
+
+void StreamsListModel::clearErrorIfAny()
+{
+    if (m_errorMessage.isEmpty()) {
+        return;
+    }
+    m_errorMessage.clear();
+    Q_EMIT errorMessageChanged();
+}
+
+void StreamsListModel::clearEmptyExplanationIfAny()
+{
+    if (m_emptyExplanation.isEmpty()) {
+        return;
+    }
+    m_emptyExplanation.clear();
+    Q_EMIT emptyExplanationChanged();
+}
+
+void StreamsListModel::clearReleaseDateIfAny()
+{
+    if (!m_releaseDate.isValid()) {
+        return;
+    }
+    m_releaseDate = {};
+    Q_EMIT releaseDateChanged();
+}
+
 void StreamsListModel::setIdle()
 {
-    if (!m_items.isEmpty()) {
-        beginResetModel();
-        m_items.clear();
-        m_tokenCache.clear();
-        endResetModel();
-        Q_EMIT countChanged();
-    }
-    if (!m_errorMessage.isEmpty()) {
-        m_errorMessage.clear();
-        Q_EMIT errorMessageChanged();
-    }
-    if (!m_emptyExplanation.isEmpty()) {
-        m_emptyExplanation.clear();
-        Q_EMIT emptyExplanationChanged();
-    }
-    if (m_releaseDate.isValid()) {
-        m_releaseDate = {};
-        Q_EMIT releaseDateChanged();
-    }
+    clearItemsIfAny();
+    clearErrorIfAny();
+    clearEmptyExplanationIfAny();
+    clearReleaseDateIfAny();
     resetState(State::Idle);
 }
 
 void StreamsListModel::setLoading()
 {
-    if (!m_errorMessage.isEmpty()) {
-        m_errorMessage.clear();
-        Q_EMIT errorMessageChanged();
-    }
-    if (!m_emptyExplanation.isEmpty()) {
-        m_emptyExplanation.clear();
-        Q_EMIT emptyExplanationChanged();
-    }
-    if (m_releaseDate.isValid()) {
-        m_releaseDate = {};
-        Q_EMIT releaseDateChanged();
-    }
+    clearErrorIfAny();
+    clearEmptyExplanationIfAny();
+    clearReleaseDateIfAny();
     resetState(State::Loading);
 }
 
@@ -274,14 +289,8 @@ void StreamsListModel::setItems(QList<api::Stream> visible,
     endResetModel();
     Q_EMIT countChanged();
 
-    if (!m_errorMessage.isEmpty()) {
-        m_errorMessage.clear();
-        Q_EMIT errorMessageChanged();
-    }
-    if (m_releaseDate.isValid()) {
-        m_releaseDate = {};
-        Q_EMIT releaseDateChanged();
-    }
+    clearErrorIfAny();
+    clearReleaseDateIfAny();
     if (m_emptyExplanation != emptyExplanation) {
         m_emptyExplanation = emptyExplanation;
         Q_EMIT emptyExplanationChanged();
@@ -291,45 +300,21 @@ void StreamsListModel::setItems(QList<api::Stream> visible,
 
 void StreamsListModel::setError(const QString& message)
 {
-    if (!m_items.isEmpty()) {
-        beginResetModel();
-        m_items.clear();
-        m_tokenCache.clear();
-        endResetModel();
-        Q_EMIT countChanged();
-    }
+    clearItemsIfAny();
     if (m_errorMessage != message) {
         m_errorMessage = message;
         Q_EMIT errorMessageChanged();
     }
-    if (!m_emptyExplanation.isEmpty()) {
-        m_emptyExplanation.clear();
-        Q_EMIT emptyExplanationChanged();
-    }
-    if (m_releaseDate.isValid()) {
-        m_releaseDate = {};
-        Q_EMIT releaseDateChanged();
-    }
+    clearEmptyExplanationIfAny();
+    clearReleaseDateIfAny();
     resetState(State::Error);
 }
 
 void StreamsListModel::setUnreleased(const QDate& date)
 {
-    if (!m_items.isEmpty()) {
-        beginResetModel();
-        m_items.clear();
-        m_tokenCache.clear();
-        endResetModel();
-        Q_EMIT countChanged();
-    }
-    if (!m_errorMessage.isEmpty()) {
-        m_errorMessage.clear();
-        Q_EMIT errorMessageChanged();
-    }
-    if (!m_emptyExplanation.isEmpty()) {
-        m_emptyExplanation.clear();
-        Q_EMIT emptyExplanationChanged();
-    }
+    clearItemsIfAny();
+    clearErrorIfAny();
+    clearEmptyExplanationIfAny();
     if (m_releaseDate != date) {
         m_releaseDate = date;
         Q_EMIT releaseDateChanged();

@@ -17,10 +17,43 @@
 
 namespace kinema::services {
 
+namespace {
+
+QString clipboardCopyMessage(bool isMagnet)
+{
+    return isMagnet
+        ? i18nc("@info:status", "Magnet link copied to clipboard")
+        : i18nc("@info:status", "Direct URL copied to clipboard");
+}
+
+} // namespace
+
 StreamActions::StreamActions(core::PlayerLauncher* launcher, QObject* parent)
     : QObject(parent)
     , m_launcher(launcher)
 {
+}
+
+void StreamActions::launchOpenUrlJob(const QUrl& url,
+    const QString& successMsg, const QString& failurePrefix,
+    const char* failureLogTag)
+{
+    auto* job = new KIO::OpenUrlJob(url, this);
+    job->setRunExecutables(false);
+    connect(job, &KJob::result, this, [this, job, successMsg,
+                                          failurePrefix, failureLogTag] {
+        if (job->error()) {
+            Q_EMIT statusMessage(
+                i18nc("@info:status", "%1: %2",
+                    failurePrefix, job->errorString()),
+                6000);
+            qCWarning(KINEMA) << failureLogTag << "failed:"
+                              << job->errorString();
+            return;
+        }
+        Q_EMIT statusMessage(successMsg, 3000);
+    });
+    job->start();
 }
 
 void StreamActions::setHistoryController(
@@ -34,11 +67,9 @@ void StreamActions::copyMagnet(const api::Stream& stream)
     if (stream.infoHash.isEmpty()) {
         return;
     }
-    const auto magnet = core::magnet::build(
-        stream.infoHash, stream.releaseName);
-    QGuiApplication::clipboard()->setText(magnet);
-    Q_EMIT statusMessage(
-        i18nc("@info:status", "Magnet link copied to clipboard"), 3000);
+    QGuiApplication::clipboard()->setText(
+        core::magnet::build(stream.infoHash, stream.releaseName));
+    Q_EMIT statusMessage(clipboardCopyMessage(true), 3000);
 }
 
 void StreamActions::openMagnet(const api::Stream& stream)
@@ -48,24 +79,10 @@ void StreamActions::openMagnet(const api::Stream& stream)
     }
     const auto magnet = core::magnet::build(
         stream.infoHash, stream.releaseName);
-    auto* job = new KIO::OpenUrlJob(QUrl(magnet), this);
-    job->setRunExecutables(false);
-    connect(job, &KJob::result, this, [this, job] {
-        if (job->error()) {
-            Q_EMIT statusMessage(
-                i18nc("@info:status", "Could not open magnet: %1",
-                    job->errorString()),
-                6000);
-            qCWarning(KINEMA) << "OpenUrlJob failed:"
-                              << job->errorString();
-        } else {
-            Q_EMIT statusMessage(
-                i18nc("@info:status",
-                    "Magnet sent to default handler"),
-                3000);
-        }
-    });
-    job->start();
+    launchOpenUrlJob(QUrl(magnet),
+        i18nc("@info:status", "Magnet sent to default handler"),
+        i18nc("@info:status", "Could not open magnet"),
+        "OpenUrlJob (magnet)");
 }
 
 void StreamActions::copyDirectUrl(const api::Stream& stream)
@@ -74,8 +91,7 @@ void StreamActions::copyDirectUrl(const api::Stream& stream)
         return;
     }
     QGuiApplication::clipboard()->setText(stream.directUrl.toString());
-    Q_EMIT statusMessage(
-        i18nc("@info:status", "Direct URL copied to clipboard"), 3000);
+    Q_EMIT statusMessage(clipboardCopyMessage(false), 3000);
 }
 
 void StreamActions::openDirectUrl(const api::Stream& stream)
@@ -83,22 +99,10 @@ void StreamActions::openDirectUrl(const api::Stream& stream)
     if (stream.directUrl.isEmpty()) {
         return;
     }
-    auto* job = new KIO::OpenUrlJob(stream.directUrl, this);
-    job->setRunExecutables(false);
-    connect(job, &KJob::result, this, [this, job] {
-        if (job->error()) {
-            Q_EMIT statusMessage(
-                i18nc("@info:status", "Could not open URL: %1",
-                    job->errorString()),
-                6000);
-            qCWarning(KINEMA) << "OpenUrlJob (direct) failed:"
-                              << job->errorString();
-        } else {
-            Q_EMIT statusMessage(
-                i18nc("@info:status", "Opening stream\u2026"), 3000);
-        }
-    });
-    job->start();
+    launchOpenUrlJob(stream.directUrl,
+        i18nc("@info:status", "Opening stream\u2026"),
+        i18nc("@info:status", "Could not open URL"),
+        "OpenUrlJob (direct)");
 }
 
 void StreamActions::play(const api::Stream& stream,

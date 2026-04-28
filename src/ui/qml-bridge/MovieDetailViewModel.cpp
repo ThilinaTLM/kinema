@@ -661,44 +661,35 @@ void MovieDetailViewModel::play(int row)
     m_actions->play(*s, currentContext());
 }
 
-void MovieDetailViewModel::copyMagnet(int row)
+template <typename Method>
+void MovieDetailViewModel::dispatchStreamAction(int row, Method method)
 {
     if (!m_actions) {
         return;
     }
     if (const auto* s = m_streams->at(row)) {
-        m_actions->copyMagnet(*s);
+        (m_actions->*method)(*s);
     }
+}
+
+void MovieDetailViewModel::copyMagnet(int row)
+{
+    dispatchStreamAction(row, &services::StreamActions::copyMagnet);
 }
 
 void MovieDetailViewModel::openMagnet(int row)
 {
-    if (!m_actions) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        m_actions->openMagnet(*s);
-    }
+    dispatchStreamAction(row, &services::StreamActions::openMagnet);
 }
 
 void MovieDetailViewModel::copyDirectUrl(int row)
 {
-    if (!m_actions) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        m_actions->copyDirectUrl(*s);
-    }
+    dispatchStreamAction(row, &services::StreamActions::copyDirectUrl);
 }
 
 void MovieDetailViewModel::openDirectUrl(int row)
 {
-    if (!m_actions) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        m_actions->openDirectUrl(*s);
-    }
+    dispatchStreamAction(row, &services::StreamActions::openDirectUrl);
 }
 
 void MovieDetailViewModel::requestSubtitles()

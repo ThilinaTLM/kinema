@@ -3,7 +3,7 @@
 
 #include "config/TorrentioSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 namespace kinema::config {
 
@@ -21,8 +21,8 @@ TorrentioSettings::TorrentioSettings(KSharedConfigPtr config, QObject* parent)
 
 core::torrentio::SortMode TorrentioSettings::defaultSort() const
 {
-    const auto s = m_config->group(QString::fromLatin1(kGroup))
-                       .readEntry(kKeyDefaultSort, QStringLiteral("seeders"));
+    const auto s = detail::read(m_config, kGroup, kKeyDefaultSort,
+        QStringLiteral("seeders"));
     if (s == QLatin1String("size")) {
         return core::torrentio::SortMode::Size;
     }
@@ -37,16 +37,14 @@ void TorrentioSettings::setDefaultSort(core::torrentio::SortMode m)
     if (defaultSort() == m) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyDefaultSort, core::torrentio::toString(m));
-    g.sync();
+    detail::write(m_config, kGroup, kKeyDefaultSort,
+        core::torrentio::toString(m));
     Q_EMIT defaultSortChanged(m);
 }
 
 bool TorrentioSettings::cachedOnly() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyCachedOnly, false);
+    return detail::read(m_config, kGroup, kKeyCachedOnly, false);
 }
 
 void TorrentioSettings::setCachedOnly(bool on)
@@ -54,9 +52,7 @@ void TorrentioSettings::setCachedOnly(bool on)
     if (cachedOnly() == on) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyCachedOnly, on);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyCachedOnly, on);
     Q_EMIT cachedOnlyChanged(on);
 }
 

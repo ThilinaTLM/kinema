@@ -3,7 +3,7 @@
 
 #include "config/FilterSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 namespace kinema::config {
 
@@ -37,8 +37,8 @@ FilterSettings::FilterSettings(KSharedConfigPtr config, QObject* parent)
 
 QStringList FilterSettings::excludedResolutions() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyExcludedResolutions, QStringList {});
+    return detail::read(m_config, kGroup, kKeyExcludedResolutions,
+        QStringList {});
 }
 
 void FilterSettings::setExcludedResolutions(QStringList list)
@@ -47,16 +47,14 @@ void FilterSettings::setExcludedResolutions(QStringList list)
     if (excludedResolutions() == list) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyExcludedResolutions, list);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyExcludedResolutions, list);
     Q_EMIT exclusionsChanged();
 }
 
 QStringList FilterSettings::excludedCategories() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyExcludedCategories, QStringList {});
+    return detail::read(m_config, kGroup, kKeyExcludedCategories,
+        QStringList {});
 }
 
 void FilterSettings::setExcludedCategories(QStringList list)
@@ -65,16 +63,14 @@ void FilterSettings::setExcludedCategories(QStringList list)
     if (excludedCategories() == list) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyExcludedCategories, list);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyExcludedCategories, list);
     Q_EMIT exclusionsChanged();
 }
 
 QStringList FilterSettings::keywordBlocklist() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKeyKeywordBlocklist, QStringList {});
+    return detail::read(m_config, kGroup, kKeyKeywordBlocklist,
+        QStringList {});
 }
 
 void FilterSettings::setKeywordBlocklist(QStringList list)
@@ -83,9 +79,7 @@ void FilterSettings::setKeywordBlocklist(QStringList list)
     if (keywordBlocklist() == list) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKeyKeywordBlocklist, list);
-    g.sync();
+    detail::write(m_config, kGroup, kKeyKeywordBlocklist, list);
     Q_EMIT keywordBlocklistChanged(list);
 }
 

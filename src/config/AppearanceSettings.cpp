@@ -3,7 +3,7 @@
 
 #include "config/AppearanceSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 namespace kinema::config {
 
@@ -27,8 +27,7 @@ AppearanceSettings::AppearanceSettings(KSharedConfigPtr config, QObject* parent)
 
 bool AppearanceSettings::closeToTray() const
 {
-    return m_config->group(QString::fromLatin1(kGroupGeneral))
-        .readEntry(kKeyCloseToTray, true);
+    return detail::read(m_config, kGroupGeneral, kKeyCloseToTray, true);
 }
 
 void AppearanceSettings::setCloseToTray(bool on)
@@ -36,74 +35,62 @@ void AppearanceSettings::setCloseToTray(bool on)
     if (closeToTray() == on) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroupGeneral));
-    g.writeEntry(kKeyCloseToTray, on);
-    g.sync();
+    detail::write(m_config, kGroupGeneral, kKeyCloseToTray, on);
 }
 
 QByteArray AppearanceSettings::browseSplitterState() const
 {
-    return m_config->group(QString::fromLatin1(kGroupGeneral))
-        .readEntry(kKeyBrowseSplitter, QByteArray {});
+    return detail::read(m_config, kGroupGeneral, kKeyBrowseSplitter,
+        QByteArray {});
 }
 
 void AppearanceSettings::setBrowseSplitterState(QByteArray state)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroupGeneral));
-    g.writeEntry(kKeyBrowseSplitter, state);
-    g.sync();
+    detail::write(m_config, kGroupGeneral, kKeyBrowseSplitter, state);
 }
 
 QByteArray AppearanceSettings::seriesPaneSplitterState() const
 {
-    return m_config->group(QString::fromLatin1(kGroupGeneral))
-        .readEntry(kKeySeriesPaneSplitter, QByteArray {});
+    return detail::read(m_config, kGroupGeneral, kKeySeriesPaneSplitter,
+        QByteArray {});
 }
 
 void AppearanceSettings::setSeriesPaneSplitterState(QByteArray state)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroupGeneral));
-    g.writeEntry(kKeySeriesPaneSplitter, state);
-    g.sync();
+    detail::write(m_config, kGroupGeneral, kKeySeriesPaneSplitter, state);
 }
 
 QByteArray AppearanceSettings::detailSplitterState() const
 {
-    return m_config->group(QString::fromLatin1(kGroupGeneral))
-        .readEntry(kKeyDetailSplitter, QByteArray {});
+    return detail::read(m_config, kGroupGeneral, kKeyDetailSplitter,
+        QByteArray {});
 }
 
 void AppearanceSettings::setDetailSplitterState(QByteArray state)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroupGeneral));
-    g.writeEntry(kKeyDetailSplitter, state);
-    g.sync();
+    detail::write(m_config, kGroupGeneral, kKeyDetailSplitter, state);
 }
 
 bool AppearanceSettings::showMenuBar() const
 {
-    return m_config->group(QString::fromLatin1(kGroupMainWindow))
-        .readEntry(kKeyShowMenuBar, false);
+    return detail::read(m_config, kGroupMainWindow, kKeyShowMenuBar, false);
 }
 
 void AppearanceSettings::setShowMenuBar(bool on)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroupMainWindow));
-    g.writeEntry(kKeyShowMenuBar, on);
-    g.sync();
+    detail::write(m_config, kGroupMainWindow, kKeyShowMenuBar, on);
 }
 
 QByteArray AppearanceSettings::playerWindowGeometry() const
 {
-    return m_config->group(QString::fromLatin1(kGroupPlayerWindow))
-        .readEntry(kKeyPlayerWindowGeometry, QByteArray {});
+    return detail::read(m_config, kGroupPlayerWindow,
+        kKeyPlayerWindowGeometry, QByteArray {});
 }
 
 void AppearanceSettings::setPlayerWindowGeometry(QByteArray geometry)
 {
-    auto g = m_config->group(QString::fromLatin1(kGroupPlayerWindow));
-    g.writeEntry(kKeyPlayerWindowGeometry, geometry);
-    g.sync();
+    detail::write(m_config, kGroupPlayerWindow,
+        kKeyPlayerWindowGeometry, geometry);
 }
 
 } // namespace kinema::config

@@ -4,12 +4,12 @@
 #include "core/HistoryStore.h"
 
 #include "core/Database.h"
+#include "core/SqlUtil.h"
 #include "kinema_debug.h"
 
 #include <QDateTime>
 #include <QSqlError>
 #include <QSqlQuery>
-#include <QTimeZone>
 #include <QTimer>
 #include <QVariant>
 
@@ -17,7 +17,9 @@ namespace kinema::core {
 
 namespace {
 
-constexpr const char* kIsoFmt = "yyyy-MM-ddTHH:mm:ssZ";
+using sql::isoUtc;
+using sql::nullSafe;
+using sql::parseIsoUtc;
 
 QString mediaKindToDb(api::MediaKind k)
 {
@@ -31,30 +33,6 @@ api::MediaKind mediaKindFromDb(const QString& s)
     return s == QStringLiteral("series")
         ? api::MediaKind::Series
         : api::MediaKind::Movie;
-}
-
-QString isoUtc(const QDateTime& dt)
-{
-    return dt.toUTC().toString(QString::fromLatin1(kIsoFmt));
-}
-
-/// Qt's QSQLITE driver binds a null QString as SQL NULL, which
-/// clashes with our `NOT NULL DEFAULT ''` columns. Normalise first.
-QString nullSafe(const QString& s)
-{
-    return s.isNull() ? QString::fromLatin1("") : s;
-}
-
-QDateTime parseIsoUtc(const QString& s)
-{
-    auto dt = QDateTime::fromString(s, Qt::ISODate);
-    if (!dt.isValid()) {
-        dt = QDateTime::fromString(s, QString::fromLatin1(kIsoFmt));
-    }
-    if (dt.isValid()) {
-        dt.setTimeZone(QTimeZone::utc());
-    }
-    return dt;
 }
 
 /// Column layout consumed by `hydrate()`. Any SELECT that feeds

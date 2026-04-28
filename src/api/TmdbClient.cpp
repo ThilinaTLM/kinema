@@ -122,176 +122,137 @@ core::HttpError notConfigured()
         i18n("No TMDB token configured."));
 }
 
+QString kindMovieOrTv(MediaKind kind)
+{
+    return kind == MediaKind::Movie
+        ? QStringLiteral("movie")
+        : QStringLiteral("tv");
+}
+
 } // namespace
 
-QCoro::Task<QList<DiscoverItem>> TmdbClient::trending(MediaKind kind, bool weekly)
+void TmdbClient::requireToken() const
 {
     if (!hasToken()) {
         throw notConfigured();
     }
-    const auto kindSeg = kind == MediaKind::Movie
-        ? QStringLiteral("movie")
-        : QStringLiteral("tv");
+}
+
+QCoro::Task<QJsonDocument> TmdbClient::fetch(QUrl url)
+{
+    co_return co_await m_http->getJson(authed(url));
+}
+
+QCoro::Task<QList<DiscoverItem>> TmdbClient::trending(MediaKind kind, bool weekly)
+{
+    requireToken();
     const auto window = weekly
         ? QStringLiteral("week")
         : QStringLiteral("day");
-    const auto url = buildUrl(QStringLiteral("/trending/%1/%2").arg(kindSeg, window));
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseList(doc, kind);
+    const auto url = buildUrl(
+        QStringLiteral("/trending/%1/%2").arg(kindMovieOrTv(kind), window));
+    co_return tmdb::parseList(co_await fetch(url), kind);
 }
 
 QCoro::Task<QList<DiscoverItem>> TmdbClient::popular(MediaKind kind)
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
-    const auto path = kind == MediaKind::Movie
-        ? QStringLiteral("/movie/popular")
-        : QStringLiteral("/tv/popular");
-    const auto url = buildUrl(path);
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseList(doc, kind);
+    requireToken();
+    const auto url = buildUrl(
+        QStringLiteral("/%1/popular").arg(kindMovieOrTv(kind)));
+    co_return tmdb::parseList(co_await fetch(url), kind);
 }
 
 QCoro::Task<QList<DiscoverItem>> TmdbClient::topRated(MediaKind kind)
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
-    const auto path = kind == MediaKind::Movie
-        ? QStringLiteral("/movie/top_rated")
-        : QStringLiteral("/tv/top_rated");
-    const auto url = buildUrl(path);
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseList(doc, kind);
+    requireToken();
+    const auto url = buildUrl(
+        QStringLiteral("/%1/top_rated").arg(kindMovieOrTv(kind)));
+    co_return tmdb::parseList(co_await fetch(url), kind);
 }
 
 QCoro::Task<QList<DiscoverItem>> TmdbClient::nowPlayingMovies()
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
+    requireToken();
     const auto url = buildUrl(QStringLiteral("/movie/now_playing"),
         { { QStringLiteral("region"), m_region } });
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseList(doc, MediaKind::Movie);
+    co_return tmdb::parseList(co_await fetch(url), MediaKind::Movie);
 }
 
 QCoro::Task<QList<DiscoverItem>> TmdbClient::onTheAirSeries()
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
+    requireToken();
     const auto url = buildUrl(QStringLiteral("/tv/on_the_air"));
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseList(doc, MediaKind::Series);
+    co_return tmdb::parseList(co_await fetch(url), MediaKind::Series);
 }
 
 QCoro::Task<QString> TmdbClient::imdbIdForTmdbMovie(int tmdbId)
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
+    requireToken();
     const auto url = buildUrl(QStringLiteral("/movie/%1").arg(tmdbId),
         { { QStringLiteral("append_to_response"),
             QStringLiteral("external_ids") } });
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseMovieExternalIds(doc);
+    co_return tmdb::parseMovieExternalIds(co_await fetch(url));
 }
 
 QCoro::Task<QString> TmdbClient::imdbIdForTmdbSeries(int tmdbId)
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
+    requireToken();
     const auto url = buildUrl(
         QStringLiteral("/tv/%1/external_ids").arg(tmdbId));
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseSeriesExternalIds(doc);
+    co_return tmdb::parseSeriesExternalIds(co_await fetch(url));
 }
 
 QCoro::Task<std::pair<int, MediaKind>> TmdbClient::findByImdb(
     QString imdbId, MediaKind preferredKind)
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
+    requireToken();
     const auto url = buildUrl(QStringLiteral("/find/%1").arg(imdbId),
         { { QStringLiteral("external_source"),
             QStringLiteral("imdb_id") } });
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseFindResult(doc, preferredKind);
+    co_return tmdb::parseFindResult(co_await fetch(url), preferredKind);
 }
 
 QCoro::Task<QList<DiscoverItem>> TmdbClient::recommendations(MediaKind kind, int tmdbId)
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
-    const auto prefix = kind == MediaKind::Movie
-        ? QStringLiteral("/movie/")
-        : QStringLiteral("/tv/");
-    const auto url = buildUrl(
-        prefix + QString::number(tmdbId) + QStringLiteral("/recommendations"));
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseList(doc, kind);
+    requireToken();
+    const auto url = buildUrl(QStringLiteral("/%1/%2/recommendations")
+            .arg(kindMovieOrTv(kind), QString::number(tmdbId)));
+    co_return tmdb::parseList(co_await fetch(url), kind);
 }
 
 QCoro::Task<QList<DiscoverItem>> TmdbClient::similar(MediaKind kind, int tmdbId)
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
-    const auto prefix = kind == MediaKind::Movie
-        ? QStringLiteral("/movie/")
-        : QStringLiteral("/tv/");
-    const auto url = buildUrl(
-        prefix + QString::number(tmdbId) + QStringLiteral("/similar"));
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parseList(doc, kind);
+    requireToken();
+    const auto url = buildUrl(QStringLiteral("/%1/%2/similar")
+            .arg(kindMovieOrTv(kind), QString::number(tmdbId)));
+    co_return tmdb::parseList(co_await fetch(url), kind);
 }
 
 QCoro::Task<DiscoverPageResult> TmdbClient::discover(DiscoverQuery q)
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
-    const auto path = tmdb::discoverPath(q.kind);
-    const auto params = tmdb::discoverQueryToQuery(q);
-    const auto url = buildUrl(path, params);
-    const auto doc = co_await m_http->getJson(authed(url));
-    co_return tmdb::parsePagedList(doc, q.kind);
+    requireToken();
+    const auto url = buildUrl(tmdb::discoverPath(q.kind),
+        tmdb::discoverQueryToQuery(q));
+    co_return tmdb::parsePagedList(co_await fetch(url), q.kind);
 }
 
 QCoro::Task<QList<TmdbGenre>> TmdbClient::genreList(MediaKind kind)
 {
-    // Serve from cache when available — the list changes ~never and
-    // localisation is tied to setLanguage() which invalidates both.
     auto& cache = kind == MediaKind::Movie ? m_genresMovie : m_genresSeries;
     if (!cache.isEmpty()) {
         co_return cache;
     }
-    if (!hasToken()) {
-        throw notConfigured();
-    }
-    const auto path = kind == MediaKind::Movie
-        ? QStringLiteral("/genre/movie/list")
-        : QStringLiteral("/genre/tv/list");
-    const auto url = buildUrl(path);
-    const auto doc = co_await m_http->getJson(authed(url));
-    cache = tmdb::parseGenreList(doc);
+    requireToken();
+    const auto url = buildUrl(
+        QStringLiteral("/genre/%1/list").arg(kindMovieOrTv(kind)));
+    cache = tmdb::parseGenreList(co_await fetch(url));
     co_return cache;
 }
 
 QCoro::Task<void> TmdbClient::testAuth()
 {
-    if (!hasToken()) {
-        throw notConfigured();
-    }
-    // /authentication is a no-argument endpoint that returns 200 with
-    // { "success": true } when the bearer is valid. We ignore the body.
-    const auto url = buildUrl(QStringLiteral("/authentication"));
-    (void)co_await m_http->getJson(authed(url));
+    requireToken();
+    (void)co_await fetch(buildUrl(QStringLiteral("/authentication")));
 }
 
 } // namespace kinema::api

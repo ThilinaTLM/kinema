@@ -17,6 +17,27 @@ namespace kinema::api::tmdb {
 
 namespace {
 
+QJsonObject requireObject(const QJsonDocument& doc, const QString& msg)
+{
+    if (!doc.isObject()) {
+        throw core::HttpError(core::HttpError::Kind::Json, 0, msg);
+    }
+    return doc.object();
+}
+
+QString extractImdbId(const QJsonObject& obj)
+{
+    const auto direct = obj.value(QStringLiteral("imdb_id")).toString();
+    if (!direct.isEmpty()) {
+        return direct;
+    }
+    const auto ext = obj.value(QStringLiteral("external_ids"));
+    if (ext.isObject()) {
+        return ext.toObject().value(QStringLiteral("imdb_id")).toString();
+    }
+    return {};
+}
+
 std::optional<int> yearFromDate(const QJsonValue& v)
 {
     if (!v.isString()) {
@@ -103,11 +124,9 @@ QUrl composeImageUrl(const QString& size, const QString& path)
 
 QList<DiscoverItem> parseList(const QJsonDocument& doc, MediaKind kind)
 {
-    if (!doc.isObject()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("TMDB list response was not a JSON object."));
-    }
-    const auto results = doc.object().value(QStringLiteral("results"));
+    const auto obj = requireObject(doc,
+        i18n("TMDB list response was not a JSON object."));
+    const auto results = obj.value(QStringLiteral("results"));
     if (!results.isArray()) {
         return {};
     }
@@ -120,7 +139,6 @@ QList<DiscoverItem> parseList(const QJsonDocument& doc, MediaKind kind)
             continue;
         }
         auto d = itemFromObject(v.toObject(), kind);
-        // Skip items we can't render or can't open.
         if (d.tmdbId <= 0 || d.title.isEmpty() || d.poster.isEmpty()) {
             continue;
         }
@@ -131,11 +149,8 @@ QList<DiscoverItem> parseList(const QJsonDocument& doc, MediaKind kind)
 
 DiscoverPageResult parsePagedList(const QJsonDocument& doc, MediaKind kind)
 {
-    if (!doc.isObject()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("TMDB paged list response was not a JSON object."));
-    }
-    const auto obj = doc.object();
+    const auto obj = requireObject(doc,
+        i18n("TMDB paged list response was not a JSON object."));
 
     DiscoverPageResult r;
     r.items = parseList(doc, kind);
@@ -147,11 +162,9 @@ DiscoverPageResult parsePagedList(const QJsonDocument& doc, MediaKind kind)
 
 QList<TmdbGenre> parseGenreList(const QJsonDocument& doc)
 {
-    if (!doc.isObject()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("TMDB genre list response was not a JSON object."));
-    }
-    const auto genres = doc.object().value(QStringLiteral("genres"));
+    const auto obj = requireObject(doc,
+        i18n("TMDB genre list response was not a JSON object."));
+    const auto genres = obj.value(QStringLiteral("genres"));
     if (!genres.isArray()) {
         return {};
     }
@@ -177,52 +190,21 @@ QList<TmdbGenre> parseGenreList(const QJsonDocument& doc)
 
 QString parseMovieExternalIds(const QJsonDocument& doc)
 {
-    if (!doc.isObject()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("TMDB movie response was not a JSON object."));
-    }
-    const auto obj = doc.object();
-    // Two layouts are possible: top-level (GET /movie/{id} has imdb_id
-    // directly), or nested under "external_ids" (append_to_response).
-    const auto direct = obj.value(QStringLiteral("imdb_id")).toString();
-    if (!direct.isEmpty()) {
-        return direct;
-    }
-    const auto ext = obj.value(QStringLiteral("external_ids"));
-    if (ext.isObject()) {
-        return ext.toObject().value(QStringLiteral("imdb_id")).toString();
-    }
-    return {};
+    return extractImdbId(requireObject(doc,
+        i18n("TMDB movie response was not a JSON object.")));
 }
 
 QString parseSeriesExternalIds(const QJsonDocument& doc)
 {
-    if (!doc.isObject()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("TMDB series response was not a JSON object."));
-    }
-    // /tv/{id}/external_ids returns imdb_id at the top level; /tv/{id}
-    // with append_to_response nests it under external_ids.
-    const auto obj = doc.object();
-    const auto direct = obj.value(QStringLiteral("imdb_id")).toString();
-    if (!direct.isEmpty()) {
-        return direct;
-    }
-    const auto ext = obj.value(QStringLiteral("external_ids"));
-    if (ext.isObject()) {
-        return ext.toObject().value(QStringLiteral("imdb_id")).toString();
-    }
-    return {};
+    return extractImdbId(requireObject(doc,
+        i18n("TMDB series response was not a JSON object.")));
 }
 
 std::pair<int, MediaKind> parseFindResult(const QJsonDocument& doc,
     MediaKind preferredKind)
 {
-    if (!doc.isObject()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("TMDB /find response was not a JSON object."));
-    }
-    const auto obj = doc.object();
+    const auto obj = requireObject(doc,
+        i18n("TMDB /find response was not a JSON object."));
 
     auto firstId = [&obj](const char* key) -> int {
         const auto arr = obj.value(QLatin1StringView(key)).toArray();

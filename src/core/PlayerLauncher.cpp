@@ -77,41 +77,35 @@ void PlayerLauncher::play(const QUrl& url, const api::PlaybackContext& ctx)
 {
     const auto title = ctx.title;
 
+    const auto fail = [this](player::Kind kind, const QString& reason) {
+        Q_EMIT launchFailed(kind, reason);
+        notifyFailed(kind, reason);
+    };
+
     if (!url.isValid() || url.isEmpty()) {
-        const auto reason = i18nc("@info:status",
-            "No playable URL available for this item.");
         qCWarning(KINEMA) << "PlayerLauncher::play called with empty URL";
-        Q_EMIT launchFailed(player::Kind::Mpv, reason);
-        notifyFailed(player::Kind::Mpv, reason);
+        fail(player::Kind::Mpv, i18nc("@info:status",
+            "No playable URL available for this item."));
         return;
     }
 
-    // mpv / VLC don't natively play magnet URIs — catch that early so
-    // the user sees a useful message instead of a failed process.
     if (url.scheme() == QLatin1String("magnet")) {
-        const auto reason = i18nc("@info:status",
+        fail(player::Kind::Mpv, i18nc("@info:status",
             "mpv and VLC can't play magnet links directly. "
-            "Use \u201cOpen magnet link\u201d or a Real-Debrid direct URL.");
-        Q_EMIT launchFailed(player::Kind::Mpv, reason);
-        notifyFailed(player::Kind::Mpv, reason);
+            "Use \u201cOpen magnet link\u201d or a Real-Debrid direct URL."));
         return;
     }
 
     const auto picked = resolvePlayer();
     if (!picked) {
-        const auto reason = i18nc("@info:status",
+        fail(player::Kind::Mpv, i18nc("@info:status",
             "No supported media player found. "
-            "Install mpv or VLC, then try again.");
-        Q_EMIT launchFailed(player::Kind::Mpv, reason);
-        notifyFailed(player::Kind::Mpv, reason);
+            "Install mpv or VLC, then try again."));
         return;
     }
 
     const auto kind = *picked;
 
-    // Embedded playback bypasses QProcess entirely — the UI layer
-    // owns the PlayerWindow and fires its own notification once the
-    // file has loaded.
     if (kind == player::Kind::Embedded) {
         qCInfo(KINEMA) << "handing off to embedded player for"
                        << (title.isEmpty() ? url.toString() : title);
@@ -124,11 +118,9 @@ void PlayerLauncher::play(const QUrl& url, const api::PlaybackContext& ctx)
         : QString {};
     const auto inv = player::buildInvocation(kind, url, custom);
     if (!inv.isValid()) {
-        const auto reason = i18nc("@info:status",
+        fail(kind, i18nc("@info:status",
             "Could not build a launch command for %1.",
-            player::displayName(kind));
-        Q_EMIT launchFailed(kind, reason);
-        notifyFailed(kind, reason);
+            player::displayName(kind)));
         return;
     }
 
@@ -137,14 +129,12 @@ void PlayerLauncher::play(const QUrl& url, const api::PlaybackContext& ctx)
 
     qint64 pid = 0;
     const bool ok = QProcess::startDetached(inv.program, inv.args,
-        /*workingDirectory=*/QString {}, &pid);
+        QString {}, &pid);
     if (!ok) {
-        const auto reason = i18nc("@info:status",
-            "Failed to launch %1 — is it installed and on $PATH?",
-            player::displayName(kind));
         qCWarning(KINEMA) << "startDetached failed for" << inv.program;
-        Q_EMIT launchFailed(kind, reason);
-        notifyFailed(kind, reason);
+        fail(kind, i18nc("@info:status",
+            "Failed to launch %1 — is it installed and on $PATH?",
+            player::displayName(kind)));
         return;
     }
 

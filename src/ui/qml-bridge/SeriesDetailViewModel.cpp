@@ -833,44 +833,35 @@ void SeriesDetailViewModel::play(int row)
     m_actions->play(*s, currentContext());
 }
 
-void SeriesDetailViewModel::copyMagnet(int row)
+template <typename Method>
+void SeriesDetailViewModel::dispatchStreamAction(int row, Method method)
 {
     if (!m_actions) {
         return;
     }
     if (const auto* s = m_streams->at(row)) {
-        m_actions->copyMagnet(*s);
+        (m_actions->*method)(*s);
     }
+}
+
+void SeriesDetailViewModel::copyMagnet(int row)
+{
+    dispatchStreamAction(row, &services::StreamActions::copyMagnet);
 }
 
 void SeriesDetailViewModel::openMagnet(int row)
 {
-    if (!m_actions) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        m_actions->openMagnet(*s);
-    }
+    dispatchStreamAction(row, &services::StreamActions::openMagnet);
 }
 
 void SeriesDetailViewModel::copyDirectUrl(int row)
 {
-    if (!m_actions) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        m_actions->copyDirectUrl(*s);
-    }
+    dispatchStreamAction(row, &services::StreamActions::copyDirectUrl);
 }
 
 void SeriesDetailViewModel::openDirectUrl(int row)
 {
-    if (!m_actions) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        m_actions->openDirectUrl(*s);
-    }
+    dispatchStreamAction(row, &services::StreamActions::openDirectUrl);
 }
 
 void SeriesDetailViewModel::requestSubtitles()

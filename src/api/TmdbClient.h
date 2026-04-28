@@ -7,6 +7,7 @@
 #include "api/Media.h"
 
 #include <QHash>
+#include <QJsonDocument>
 #include <QNetworkRequest>
 #include <QObject>
 #include <QString>
@@ -125,6 +126,12 @@ private:
     /// /discover where params like `sort_by`, `with_genres`, etc. are
     /// pre-built into a QUrlQuery).
     QUrl buildUrl(const QString& path, const QUrlQuery& extra) const;
+
+    /// Throws if no bearer token has been configured.
+    void requireToken() const;
+
+    /// Authenticated GET helper used by every endpoint method.
+    QCoro::Task<QJsonDocument> fetch(QUrl url);
 
     core::HttpClient* m_http;
     QUrl m_baseUrl;

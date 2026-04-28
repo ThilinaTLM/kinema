@@ -3,7 +3,7 @@
 
 #include "config/RealDebridSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 namespace kinema::config {
 
@@ -20,8 +20,7 @@ RealDebridSettings::RealDebridSettings(KSharedConfigPtr config, QObject* parent)
 
 bool RealDebridSettings::configured() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kKey, false);
+    return detail::read(m_config, kGroup, kKey, false);
 }
 
 void RealDebridSettings::setConfigured(bool on)
@@ -29,9 +28,7 @@ void RealDebridSettings::setConfigured(bool on)
     if (configured() == on) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kKey, on);
-    g.sync();
+    detail::write(m_config, kGroup, kKey, on);
     Q_EMIT configuredChanged(on);
 }
 

@@ -3,7 +3,7 @@
 
 #include "config/SubtitleSettings.h"
 
-#include <KConfigGroup>
+#include "config/ConfigAccess.h"
 
 namespace kinema::config {
 
@@ -32,8 +32,7 @@ SubtitleSettings::SubtitleSettings(KSharedConfigPtr config, QObject* parent)
 
 QStringList SubtitleSettings::preferredLanguages() const
 {
-    return m_config->group(QString::fromLatin1(kGroup))
-        .readEntry(kPreferredLangs, QStringList {});
+    return detail::read(m_config, kGroup, kPreferredLangs, QStringList {});
 }
 
 void SubtitleSettings::setPreferredLanguages(const QStringList& langs)
@@ -41,17 +40,14 @@ void SubtitleSettings::setPreferredLanguages(const QStringList& langs)
     if (preferredLanguages() == langs) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kPreferredLangs, langs);
-    g.sync();
+    detail::write(m_config, kGroup, kPreferredLangs, langs);
     Q_EMIT preferredLanguagesChanged(langs);
 }
 
 QString SubtitleSettings::hearingImpaired() const
 {
-    return clampMode(m_config->group(QString::fromLatin1(kGroup))
-                         .readEntry(kHearingImpaired,
-                             QString::fromLatin1(kDefaultMode)));
+    return clampMode(detail::read(m_config, kGroup, kHearingImpaired,
+        QString::fromLatin1(kDefaultMode)));
 }
 
 void SubtitleSettings::setHearingImpaired(const QString& mode)
@@ -60,17 +56,14 @@ void SubtitleSettings::setHearingImpaired(const QString& mode)
     if (hearingImpaired() == m) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kHearingImpaired, m);
-    g.sync();
+    detail::write(m_config, kGroup, kHearingImpaired, m);
     Q_EMIT hearingImpairedChanged(m);
 }
 
 QString SubtitleSettings::foreignPartsOnly() const
 {
-    return clampMode(m_config->group(QString::fromLatin1(kGroup))
-                         .readEntry(kForeignPartsOnly,
-                             QString::fromLatin1(kDefaultMode)));
+    return clampMode(detail::read(m_config, kGroup, kForeignPartsOnly,
+        QString::fromLatin1(kDefaultMode)));
 }
 
 void SubtitleSettings::setForeignPartsOnly(const QString& mode)
@@ -79,9 +72,7 @@ void SubtitleSettings::setForeignPartsOnly(const QString& mode)
     if (foreignPartsOnly() == m) {
         return;
     }
-    auto g = m_config->group(QString::fromLatin1(kGroup));
-    g.writeEntry(kForeignPartsOnly, m);
-    g.sync();
+    detail::write(m_config, kGroup, kForeignPartsOnly, m);
     Q_EMIT foreignPartsOnlyChanged(m);
 }
 
