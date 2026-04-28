@@ -17,34 +17,14 @@
 #include "kinema_debug.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
+#include "ui/qml-bridge/StreamSorting.h"
 
 #include <KLocalizedString>
-
-#include <QPointer>
-
-#include "core/StreamTokens.h"
-
-#include <algorithm>
 
 namespace kinema::ui::qml {
 
 namespace {
-
 using SortMode = StreamsListModel::SortMode;
-
-/// Resolution string ("1080p", "2160p", "—") to numeric height.
-/// Larger sorts higher; missing/unknown becomes 0.
-int resolutionRank(const QString& res)
-{
-    if (res == QLatin1String("2160p")) return 2160;
-    if (res == QLatin1String("1440p")) return 1440;
-    if (res == QLatin1String("1080p")) return 1080;
-    if (res == QLatin1String("720p"))  return 720;
-    if (res == QLatin1String("480p"))  return 480;
-    if (res == QLatin1String("360p"))  return 360;
-    return 0;
-}
-
 } // namespace
 
 MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
@@ -537,94 +517,14 @@ QList<api::Stream> MovieDetailViewModel::applyFilters() const
     f.keywordBlocklist = m_settings.filter().keywordBlocklist();
     auto rows = core::stream_filter::apply(m_rawStreams, f);
 
-    if (!uiAnyFilterActive()) {
-        return rows;
-    }
-
-    // Transient UI filters — evaluated by parsing each surviving
-    // row's tokens once. The cost is bounded by `rows.size()`,
-    // which is already the post-blocklist subset.
-    QList<api::Stream> out;
-    out.reserve(rows.size());
-    for (auto& s : rows) {
-        if (!m_uiResolutionFilter.isEmpty()) {
-            const auto& res = s.resolution;
-            if (m_uiResolutionFilter == QStringLiteral("sd")) {
-                // "SD" bucket = anything below 720p (incl. unknown).
-                if (res == QStringLiteral("2160p") || res == QStringLiteral("1440p")
-                    || res == QStringLiteral("1080p") || res == QStringLiteral("720p")) {
-                    continue;
-                }
-            } else if (res != m_uiResolutionFilter) {
-                continue;
-            }
-        }
-        if (m_uiHdrOnly || m_uiDolbyVisionOnly || m_uiMultiAudioOnly) {
-            const auto t = core::stream_tokens::parse(s);
-            if (m_uiDolbyVisionOnly
-                && t.hdr != core::stream_tokens::Hdr::DolbyVision) {
-                continue;
-            }
-            if (m_uiHdrOnly
-                && t.hdr == core::stream_tokens::Hdr::Sdr) {
-                continue;
-            }
-            if (m_uiMultiAudioOnly && !t.multiAudio) {
-                continue;
-            }
-        }
-        out.append(std::move(s));
-    }
-    return out;
+    return stream_sorting::applyUiFilters(std::move(rows),
+        { m_uiResolutionFilter, m_uiHdrOnly,
+            m_uiDolbyVisionOnly, m_uiMultiAudioOnly });
 }
 
 void MovieDetailViewModel::sortInPlace(QList<api::Stream>& rows) const
 {
-    if (m_sortMode == SortMode::Smart) {
-        // Cached first, then resolution rank desc, then size desc.
-        // The descending toggle is intentionally ignored — "Smart"
-        // has a fixed shape.
-        std::stable_sort(rows.begin(), rows.end(),
-            [](const api::Stream& a, const api::Stream& b) {
-                const int aCached = a.rdCached ? 2 : (a.rdDownload ? 1 : 0);
-                const int bCached = b.rdCached ? 2 : (b.rdDownload ? 1 : 0);
-                if (aCached != bCached) return aCached > bCached;
-                const int aRes = resolutionRank(a.resolution);
-                const int bRes = resolutionRank(b.resolution);
-                if (aRes != bRes) return aRes > bRes;
-                return a.sizeBytes.value_or(-1)
-                    > b.sizeBytes.value_or(-1);
-            });
-        return;
-    }
-
-    auto cmp = [this](const api::Stream& a, const api::Stream& b) {
-        switch (m_sortMode) {
-        case SortMode::Smart:
-            // Handled above; unreachable.
-            return false;
-        case SortMode::Seeders:
-            return a.seeders.value_or(-1) < b.seeders.value_or(-1);
-        case SortMode::Size:
-            return a.sizeBytes.value_or(-1) < b.sizeBytes.value_or(-1);
-        case SortMode::Quality:
-            return resolutionRank(a.resolution)
-                < resolutionRank(b.resolution);
-        case SortMode::Provider:
-            return a.provider.localeAwareCompare(b.provider) < 0;
-        case SortMode::ReleaseName:
-            return a.releaseName.localeAwareCompare(b.releaseName) < 0;
-        }
-        return false;
-    };
-    if (m_sortDescending) {
-        std::stable_sort(rows.begin(), rows.end(),
-            [cmp](const api::Stream& a, const api::Stream& b) {
-                return cmp(b, a);
-            });
-    } else {
-        std::stable_sort(rows.begin(), rows.end(), cmp);
-    }
+    stream_sorting::sortInPlace(rows, m_sortMode, m_sortDescending);
 }
 
 api::PlaybackContext MovieDetailViewModel::currentContext() const

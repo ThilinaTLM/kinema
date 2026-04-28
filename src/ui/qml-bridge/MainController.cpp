@@ -529,13 +529,7 @@ void MainController::wireStatusForwarding()
 {
     // Every controller / service that emits user-facing status
     // messages funnels through `passiveMessage` to a single
-    // `Kirigami.PassiveNotification` in QML. The legacy
-    // `statusBar()->showMessage` calls in `MainWindow` collapse
-    // into this one signal.
-    const auto forward = [this](const QString& text, int ms) {
-        Q_EMIT passiveMessage(text, ms);
-    };
-
+    // `Kirigami.PassiveNotification` in QML.
     connect(m_player.get(), &core::PlayerLauncher::launched, this,
         [this](core::player::Kind, const QString& title) {
             Q_EMIT passiveMessage(
@@ -545,18 +539,18 @@ void MainController::wireStatusForwarding()
         this, [this](core::player::Kind, const QString& reason) {
             Q_EMIT passiveMessage(reason, 6000);
         });
-    connect(m_streamActions,
-        &services::StreamActions::statusMessage, this, forward);
+    connect(m_streamActions, &services::StreamActions::statusMessage,
+        this, &MainController::passiveMessage);
     connect(m_subtitleCtrl,
         &controllers::SubtitleController::statusMessage, this,
-        forward);
+        &MainController::passiveMessage);
     connect(m_historyCtrl,
         &controllers::HistoryController::statusMessage, this,
-        forward);
+        &MainController::passiveMessage);
 #ifdef KINEMA_HAVE_LIBMPV
     connect(m_playbackCtrl,
         &controllers::PlaybackController::statusMessage, this,
-        forward);
+        &MainController::passiveMessage);
 #endif
 }
 

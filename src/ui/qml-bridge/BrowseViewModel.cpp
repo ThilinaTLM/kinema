@@ -15,10 +15,26 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <initializer_list>
+#include <optional>
 
 namespace kinema::ui::qml {
 
 namespace {
+
+// Validate an int matches one of the listed enum values; returns the
+// enum form when in-range, or `std::nullopt` so callers can early-out.
+template <typename Enum>
+std::optional<Enum> safeEnumCast(int value,
+    std::initializer_list<Enum> valid)
+{
+    for (auto v : valid) {
+        if (static_cast<int>(v) == value) {
+            return v;
+        }
+    }
+    return std::nullopt;
+}
 
 QString windowLabel(core::DateWindow w)
 {
@@ -112,26 +128,14 @@ void BrowseViewModel::setGenreIds(QList<int> ids)
 void BrowseViewModel::setDateWindow(int window)
 {
     using core::DateWindow;
-    DateWindow w = DateWindow::ThisYear;
-    switch (window) {
-    case static_cast<int>(DateWindow::PastMonth):
-        w = DateWindow::PastMonth; break;
-    case static_cast<int>(DateWindow::Past3Months):
-        w = DateWindow::Past3Months; break;
-    case static_cast<int>(DateWindow::ThisYear):
-        w = DateWindow::ThisYear; break;
-    case static_cast<int>(DateWindow::Past3Years):
-        w = DateWindow::Past3Years; break;
-    case static_cast<int>(DateWindow::Any):
-        w = DateWindow::Any; break;
-    default:
+    const auto w = safeEnumCast<DateWindow>(window, {
+        DateWindow::PastMonth, DateWindow::Past3Months,
+        DateWindow::ThisYear, DateWindow::Past3Years, DateWindow::Any });
+    if (!w || m_dateWindow == *w) {
         return;
     }
-    if (m_dateWindow == w) {
-        return;
-    }
-    m_dateWindow = w;
-    m_settings.setDateWindow(w);
+    m_dateWindow = *w;
+    m_settings.setDateWindow(*w);
     Q_EMIT filtersChanged();
     refresh();
 }
@@ -150,24 +154,15 @@ void BrowseViewModel::setMinRatingPct(int pct)
 
 void BrowseViewModel::setSort(int sort)
 {
-    api::DiscoverSort s = api::DiscoverSort::Popularity;
-    switch (sort) {
-    case static_cast<int>(api::DiscoverSort::Popularity):
-        s = api::DiscoverSort::Popularity; break;
-    case static_cast<int>(api::DiscoverSort::ReleaseDate):
-        s = api::DiscoverSort::ReleaseDate; break;
-    case static_cast<int>(api::DiscoverSort::Rating):
-        s = api::DiscoverSort::Rating; break;
-    case static_cast<int>(api::DiscoverSort::TitleAsc):
-        s = api::DiscoverSort::TitleAsc; break;
-    default:
+    using api::DiscoverSort;
+    const auto s = safeEnumCast<DiscoverSort>(sort, {
+        DiscoverSort::Popularity, DiscoverSort::ReleaseDate,
+        DiscoverSort::Rating, DiscoverSort::TitleAsc });
+    if (!s || m_sort == *s) {
         return;
     }
-    if (m_sort == s) {
-        return;
-    }
-    m_sort = s;
-    m_settings.setSort(s);
+    m_sort = *s;
+    m_settings.setSort(*s);
     Q_EMIT filtersChanged();
     refresh();
 }
@@ -342,20 +337,14 @@ void BrowseViewModel::activate(int row)
 
 void BrowseViewModel::applyPreset(int kind, int sort)
 {
+    using api::DiscoverSort;
     const auto k = (kind == static_cast<int>(api::MediaKind::Series))
         ? api::MediaKind::Series
         : api::MediaKind::Movie;
-    api::DiscoverSort s = api::DiscoverSort::Popularity;
-    switch (sort) {
-    case static_cast<int>(api::DiscoverSort::Popularity):
-        s = api::DiscoverSort::Popularity; break;
-    case static_cast<int>(api::DiscoverSort::ReleaseDate):
-        s = api::DiscoverSort::ReleaseDate; break;
-    case static_cast<int>(api::DiscoverSort::Rating):
-        s = api::DiscoverSort::Rating; break;
-    case static_cast<int>(api::DiscoverSort::TitleAsc):
-        s = api::DiscoverSort::TitleAsc; break;
-    }
+    const auto s = safeEnumCast<DiscoverSort>(sort, {
+        DiscoverSort::Popularity, DiscoverSort::ReleaseDate,
+        DiscoverSort::Rating, DiscoverSort::TitleAsc })
+        .value_or(DiscoverSort::Popularity);
 
     m_kind = k;
     m_sort = s;

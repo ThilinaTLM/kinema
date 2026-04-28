@@ -247,10 +247,20 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     }
     constexpr qint64 kBlock = 65536;
 
+    const auto rangeGet = [this, &url](qint64 start, qint64 end)
+        -> QCoro::Task<QByteArray> {
+        QNetworkRequest req(url);
+        req.setRawHeader("Range",
+            QByteArrayLiteral("bytes=")
+                + QByteArray::number(start)
+                + "-"
+                + QByteArray::number(end));
+        co_return co_await m_http->get(req);
+    };
+
     qint64 size = 0;
     try {
-        QNetworkRequest headReq(url);
-        const auto headers = co_await m_http->head(headReq);
+        const auto headers = co_await m_http->head(QNetworkRequest(url));
         for (const auto& h : headers) {
             if (h.first.compare("Content-Length", Qt::CaseInsensitive) == 0) {
                 bool ok = false;
@@ -273,13 +283,10 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
         co_return;
     }
 
-    QByteArray head, tail;
+    QByteArray head;
+    QByteArray tail;
     try {
-        QNetworkRequest headReq(url);
-        headReq.setRawHeader("Range",
-            QByteArrayLiteral("bytes=0-")
-                + QByteArray::number(kBlock - 1));
-        head = co_await m_http->get(headReq);
+        head = co_await rangeGet(0, kBlock - 1);
     } catch (const std::exception& e) {
         qCDebug(KINEMA) << "moviehash: head Range GET failed:" << e.what();
         co_return;
@@ -288,14 +295,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
         co_return;
     }
     try {
-        QNetworkRequest tailReq(url);
-        const auto start = size - kBlock;
-        tailReq.setRawHeader("Range",
-            QByteArrayLiteral("bytes=")
-                + QByteArray::number(start)
-                + "-"
-                + QByteArray::number(size - 1));
-        tail = co_await m_http->get(tailReq);
+        tail = co_await rangeGet(size - kBlock, size - 1);
     } catch (const std::exception& e) {
         qCDebug(KINEMA) << "moviehash: tail Range GET failed:" << e.what();
         co_return;

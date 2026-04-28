@@ -76,6 +76,7 @@ set(kinema_core_SRCS
     ui/qml-bridge/SearchViewModel.cpp
     ui/qml-bridge/SeriesDetailViewModel.cpp
     ui/qml-bridge/SettingsViewModels.cpp
+    ui/qml-bridge/StreamSorting.cpp
     ui/qml-bridge/StreamsListModel.cpp
     ui/qml-bridge/SubtitleResultsModel.cpp
     ui/qml-bridge/SubtitlesViewModel.cpp

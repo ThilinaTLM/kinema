@@ -18,6 +18,19 @@ namespace {
 constexpr auto kEventLaunched = "playbackStarted";
 constexpr auto kEventFailed = "playbackFailed";
 
+void sendNotification(const char* eventId,
+    const QString& title,
+    const QString& text,
+    const QString& iconName)
+{
+    auto* n = new KNotification(QString::fromLatin1(eventId),
+        KNotification::CloseOnTimeout);
+    n->setTitle(title);
+    n->setText(text);
+    n->setIconName(iconName);
+    n->sendEvent();
+}
+
 } // namespace
 
 PlayerLauncher::PlayerLauncher(const config::PlayerSettings& settings,
@@ -146,24 +159,20 @@ void PlayerLauncher::play(const QUrl& url, const api::PlaybackContext& ctx)
 
 void PlayerLauncher::notifyLaunched(player::Kind kind, const QString& title)
 {
-    auto* n = new KNotification(QString::fromLatin1(kEventLaunched),
-        KNotification::CloseOnTimeout);
-    n->setTitle(i18nc("@title:window notification",
-        "Playing in %1", player::displayName(kind)));
-    n->setText(title);
-    n->setIconName(QStringLiteral("media-playback-start"));
-    n->sendEvent();
+    sendNotification(kEventLaunched,
+        i18nc("@title:window notification",
+            "Playing in %1", player::displayName(kind)),
+        title,
+        QStringLiteral("media-playback-start"));
 }
 
 void PlayerLauncher::notifyFailed(player::Kind kind, const QString& reason)
 {
-    auto* n = new KNotification(QString::fromLatin1(kEventFailed),
-        KNotification::CloseOnTimeout);
-    n->setTitle(i18nc("@title:window notification",
-        "Could not start %1", player::displayName(kind)));
-    n->setText(reason);
-    n->setIconName(QStringLiteral("dialog-error"));
-    n->sendEvent();
+    sendNotification(kEventFailed,
+        i18nc("@title:window notification",
+            "Could not start %1", player::displayName(kind)),
+        reason,
+        QStringLiteral("dialog-error"));
 }
 
 } // namespace kinema::core

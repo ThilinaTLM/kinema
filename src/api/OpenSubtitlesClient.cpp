@@ -170,30 +170,26 @@ QCoro::Task<SubtitleDownloadTicket> OpenSubtitlesClient::requestDownload(
     body[QStringLiteral("file_id")] = fileId.toLongLong();
     const QByteArray bytes = QJsonDocument(body).toJson(QJsonDocument::Compact);
 
-    auto req = baseRequest(buildUrl(QStringLiteral("/download")),
-        /*authed=*/true);
+    const auto post = [&]() -> QCoro::Task<QJsonDocument> {
+        auto req = baseRequest(buildUrl(QStringLiteral("/download")),
+            /*authed=*/true);
+        co_return co_await m_http->postJsonForJson(
+            std::move(req), bytes);
+    };
 
-    bool retry = false;
     try {
-        const auto doc = co_await m_http->postJsonForJson(std::move(req), bytes);
-        co_return opensubtitles::parseDownload(doc);
+        co_return opensubtitles::parseDownload(co_await post());
     } catch (const core::HttpError& e) {
         if (e.httpStatus() != 401) {
             throw;
         }
-        retry = true;
     }
 
     // JWT expired or revoked — clear and try once more.
     qCDebug(KINEMA) << "OpenSubtitles 401 on /download \u2014 refreshing JWT";
     m_jwt.clear();
     co_await ensureLoggedIn();
-    auto retryReq = baseRequest(buildUrl(QStringLiteral("/download")),
-        /*authed=*/true);
-    const auto doc = co_await m_http->postJsonForJson(
-        std::move(retryReq), bytes);
-    Q_UNUSED(retry);
-    co_return opensubtitles::parseDownload(doc);
+    co_return opensubtitles::parseDownload(co_await post());
 }
 
 QCoro::Task<QByteArray> OpenSubtitlesClient::fetchFileBytes(QUrl link)

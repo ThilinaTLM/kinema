@@ -389,23 +389,12 @@ void SubtitlesViewModel::updatePrimarySemantics()
         icon = QStringLiteral("download");
     } else {
         const auto& hit = m_model->hitAt(m_selectedRow);
-        const auto cached = m_controller->cachedFileIds();
-        const auto active = m_controller->activeLocalPaths();
-        const bool isCached = cached.contains(hit.fileId);
-        const bool isActive = !hit.fileId.isEmpty() && [&] {
-            // m_active stores local paths, not fileIds; an exact
-            // match here is approximate (best-effort: whatever the
-            // model thinks is active). Falling through to the
-            // cached branch is acceptable.
-            Q_UNUSED(active);
-            return false;
-        }();
-        if (isActive) {
-            text = i18nc("@action:button subtitle row action when already loaded "
-                         "in the player",
-                "Re-attach");
-            icon = QStringLiteral("view-refresh");
-        } else if (isCached) {
+        // Active-state by fileId isn't tracked yet (the controller
+        // stores active subtitles by local path); falling through to
+        // the cached / download branches is the documented behaviour.
+        const bool isCached
+            = m_controller->cachedFileIds().contains(hit.fileId);
+        if (isCached) {
             text = i18nc("@action:button subtitle row action for cached entry",
                 "Use");
             icon = QStringLiteral("dialog-ok-apply");
