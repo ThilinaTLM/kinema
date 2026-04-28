@@ -682,15 +682,13 @@ void MainController::openEmbeddedPlayer(const QUrl& url,
         // The visibilityChanged forwarding only needs to be wired
         // once for the lifetime of the controller; PlaybackController
         // re-emits the new window's signal as `visibilityChanged`.
-        // Use a unique connection so repeated openEmbeddedPlayer
-        // calls don't stack duplicate handlers.
+        // `Qt::UniqueConnection` requires PMF on both ends, hence
+        // the dedicated `onPlayerVisibilityChanged` slot rather
+        // than an inline lambda.
         connect(m_playbackCtrl,
             &controllers::PlaybackController::visibilityChanged,
-            this, [this](bool) {
-                if (m_tray) {
-                    m_tray->refreshMenu();
-                }
-            }, Qt::UniqueConnection);
+            this, &MainController::onPlayerVisibilityChanged,
+            Qt::UniqueConnection);
     }
 
     // Player chrome's `SubtitlePicker → Download…` lands on the
@@ -769,6 +767,13 @@ void MainController::openEmbeddedPlayer(const QUrl& url,
 
     if (m_playbackCtrl) {
         m_playbackCtrl->play(url, ctx);
+    }
+}
+
+void MainController::onPlayerVisibilityChanged(bool /*visible*/)
+{
+    if (m_tray) {
+        m_tray->refreshMenu();
     }
 }
 #endif

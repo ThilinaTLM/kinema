@@ -229,6 +229,13 @@ private:
     /// the same way `MainWindow::openEmbeddedPlayer` was.
     void openEmbeddedPlayer(const QUrl& url,
         const api::PlaybackContext& ctx);
+
+    /// Refresh the tray menu when the player window's visibility
+    /// changes. Member function (rather than a lambda) so the
+    /// connection in `openEmbeddedPlayer` can use
+    /// `Qt::UniqueConnection` — Qt only enforces uniqueness when
+    /// both ends are pointer-to-member-function.
+    void onPlayerVisibilityChanged(bool visible);
 #endif
 
     config::AppSettings& m_settings;
