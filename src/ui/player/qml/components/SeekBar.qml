@@ -71,49 +71,17 @@ Item {
             color: Theme.trackRest
         }
 
-        // ---- Layer 2: buffered span (dim base + tiled dots) ------
-        // Clipped to the buffered ratio. The Canvas paints a 6 x 6
-        // tile of small dots and tiles itself across the layer's
-        // full width (cheap; only repaints on size change).
-        Item {
-            id: bufferedLayer
+        // ---- Layer 2: buffered span (flat dim) -------------------
+        // Slightly less dim than the rest layer so the eye can
+        // tell "loaded ahead" from "not yet loaded" without the
+        // dot texture competing with the rest of the chrome.
+        Rectangle {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: trackRow.bufferedWidth
-            clip: true
-
-            Rectangle {
-                anchors.fill: parent
-                color: Theme.trackBufferBg
-                // Match parent radius on the left edge; right edge
-                // is clipped flush by the parent Item, so radius on
-                // the right doesn't matter.
-                radius: trackRow.radius
-            }
-
-            Canvas {
-                id: dotCanvas
-                anchors.fill: parent
-                onWidthChanged: requestPaint()
-                onHeightChanged: requestPaint()
-                onPaint: {
-                    const ctx = getContext("2d");
-                    ctx.reset();
-                    ctx.fillStyle = Theme.trackBufferDot;
-                    const tile = 6;
-                    const r = 1.1;
-                    // Two-row staggered grid for a softer texture.
-                    for (let y = tile / 2; y < height; y += tile) {
-                        for (let x = (Math.floor(y / tile) % 2) ? 0 : tile / 2;
-                             x < width; x += tile) {
-                            ctx.beginPath();
-                            ctx.arc(x, y, r, 0, Math.PI * 2);
-                            ctx.fill();
-                        }
-                    }
-                }
-            }
+            radius: trackRow.radius
+            color: Theme.trackBufferBg
         }
 
         // ---- Layer 3: played fill --------------------------------
@@ -128,6 +96,8 @@ Item {
         }
 
         // ---- Chapter ticks ---------------------------------------
+        // Subtle by design — the bar already conveys progress; the
+        // ticks are a navigational hint, not a primary visual.
         Repeater {
             model: root.chapters
             delegate: Rectangle {
@@ -136,90 +106,54 @@ Item {
                 width: 2
                 height: trackRow.height
                 color: Theme.foreground
-                opacity: 0.65
+                opacity: 0.30
                 x: root.duration > 0
                     ? trackRow.width * (time / root.duration) - 1
                     : 0
             }
         }
 
-        // ---- Internal time labels (dual-colour clipping) ---------
-        // Two sibling clip-Items per label, each anchored to the
-        // played boundary. The "on-played" copy uses
-        // `trackTextOnPlayed` (dark over white); the "on-rest" copy
-        // uses `trackTextOnRest` (light over dim). The text payload
-        // is identical, geometry identical — only the clip rect and
-        // colour differ. As `_ratio` moves, the boundary slides
-        // and each side renders the visible portion.
-
-        // Elapsed (left)
-        Item {
+        // ---- Internal time labels --------------------------------
+        // White text on a translucent dark pill so the labels read
+        // clearly regardless of what's underneath (white played
+        // fill, dim rest, chapter tick). The pill auto-sizes to
+        // the text plus small padding; both labels use the
+        // standard tabular font for a more substantial weight than
+        // the previous small variant.
+        Rectangle {
+            id: elapsedPill
             anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: trackRow.playedWidth
-            clip: true
+            anchors.leftMargin: Theme.spacingSm
+            anchors.verticalCenter: parent.verticalCenter
+            radius: Theme.radius
+            color: Theme.trackLabelBg
+            width: elapsedText.implicitWidth + Theme.spacing
+            height: elapsedText.implicitHeight + Theme.spacingXs
             Text {
-                id: elapsedTextOnPlayed
-                anchors.left: parent.left
-                anchors.leftMargin: Theme.spacingSm
-                anchors.verticalCenter: parent.verticalCenter
-                color: Theme.trackTextOnPlayed
-                font: Theme.tabularSmallFont
-                text: _fmt(root.position)
-            }
-        }
-        Item {
-            anchors.left: parent.left
-            anchors.leftMargin: trackRow.playedWidth
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            clip: true
-            Text {
-                anchors.left: parent.left
-                // Compensate so the rest-side copy lines up with
-                // the played-side copy (same screen position).
-                anchors.leftMargin: Theme.spacingSm - trackRow.playedWidth
-                anchors.verticalCenter: parent.verticalCenter
-                color: Theme.trackTextOnRest
-                font: Theme.tabularSmallFont
-                text: elapsedTextOnPlayed.text
+                id: elapsedText
+                anchors.centerIn: parent
+                color: Theme.foreground
+                font: Theme.tabularFont
+                text: root._fmt(root.position)
             }
         }
 
-        // Remaining (right)
-        Item {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: trackRow.playedWidth
-            clip: true
-            Text {
-                id: remainingTextOnPlayed
-                anchors.right: parent.right
-                anchors.rightMargin:
-                    Theme.spacingSm + (trackRow.width - trackRow.playedWidth)
-                anchors.verticalCenter: parent.verticalCenter
-                color: Theme.trackTextOnPlayed
-                font: Theme.tabularSmallFont
-                text: "-" + _fmt(Math.max(0, root.duration - root.position))
-            }
-        }
-        Item {
-            anchors.left: parent.left
-            anchors.leftMargin: trackRow.playedWidth
+        Rectangle {
+            id: remainingPill
             anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            clip: true
+            anchors.rightMargin: Theme.spacingSm
+            anchors.verticalCenter: parent.verticalCenter
+            radius: Theme.radius
+            color: Theme.trackLabelBg
+            width: remainingText.implicitWidth + Theme.spacing
+            height: remainingText.implicitHeight + Theme.spacingXs
             Text {
-                anchors.right: parent.right
-                anchors.rightMargin: Theme.spacingSm
-                anchors.verticalCenter: parent.verticalCenter
-                color: Theme.trackTextOnRest
-                font: Theme.tabularSmallFont
-                text: remainingTextOnPlayed.text
+                id: remainingText
+                anchors.centerIn: parent
+                color: Theme.foreground
+                font: Theme.tabularFont
+                text: "-" + root._fmt(
+                    Math.max(0, root.duration - root.position))
             }
         }
     }

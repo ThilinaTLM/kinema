@@ -77,8 +77,12 @@ QtObject {
         theme.withAlpha(Kirigami.Theme.textColor, 0.18)
     readonly property color trackBufferDot:
         Qt.rgba(1.0, 1.0, 1.0, 0.55)
-    readonly property color trackTextOnPlayed: Kirigami.Theme.backgroundColor
-    readonly property color trackTextOnRest:   Kirigami.Theme.textColor
+    // Translucent pill behind in-bar labels (SeekBar time labels,
+    // VolumeControl volume number). Dark on every theme so the
+    // white text on top reads clearly regardless of what's under
+    // it — played span, dim rest, chapter tick, or a chapter
+    // boundary in the seek bar.
+    readonly property color trackLabelBg:      Qt.rgba(0.0, 0.0, 0.0, 0.55)
 
     // Backdrop dim under modal overlays. Not a theme colour — always
     // pure black at 55 % alpha so it reads against any video frame.

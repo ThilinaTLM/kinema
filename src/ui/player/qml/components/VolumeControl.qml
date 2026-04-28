@@ -93,50 +93,27 @@ Item {
         }
     }
 
-    // ---- Internal volume number (dual-colour clipping) ------------
-    // Anchored to the inner bottom of the bar with a small inset.
-    // Same trick as SeekBar's time labels: render the same Text
-    // twice, each clipped to one side of the played boundary, so
-    // the number reads dark over the white played fill and light
-    // over the dim rest. The on-played copy is what the user sees
-    // virtually all of the time — the on-rest copy only shows up
-    // when the played fill is shorter than the label's bottom
-    // inset (i.e. roughly volume == 0 or muted).
-    readonly property real _labelBottomInset: Theme.spacingSm
-
-    Item {
-        id: textOnRest
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        height: parent.height - root._playedHeight
-        clip: true
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            // Anchor to the bar's inner bottom, not this clip
-            // Item's, so the value stays put as the played
-            // boundary slides.
-            y: root.height - height - root._labelBottomInset
-            color: Theme.trackTextOnRest
-            font: Theme.tabularSmallFont
-            text: Math.round(root.volumePercent)
-        }
-    }
-    Item {
-        id: textOnPlayed
-        anchors.left: parent.left
-        anchors.right: parent.right
+    // ---- Internal volume number ----------------------------------
+    // White text on a translucent dark pill, anchored to the inner
+    // bottom of the bar. Same idiom as the SeekBar's time labels:
+    // the pill provides contrast on any underlying span (white
+    // played fill, dim rest, or the played/rest boundary), so the
+    // value stays legible at every position without the dual-
+    // colour clipping trick the previous implementation needed.
+    Rectangle {
+        id: volumePill
+        anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        height: root._playedHeight
-        clip: true
+        anchors.bottomMargin: Theme.spacingSm
+        radius: Theme.radius
+        color: Theme.trackLabelBg
+        width: volumeText.implicitWidth + Theme.spacing
+        height: volumeText.implicitHeight + Theme.spacingXs
         Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            // Inverse offset so the rest-side copy and the
-            // played-side copy land at the same screen y.
-            y: (root.height - height - root._labelBottomInset)
-               - (root.height - root._playedHeight)
-            color: Theme.trackTextOnPlayed
-            font: Theme.tabularSmallFont
+            id: volumeText
+            anchors.centerIn: parent
+            color: Theme.foreground
+            font: Theme.tabularFont
             text: Math.round(root.volumePercent)
         }
     }
