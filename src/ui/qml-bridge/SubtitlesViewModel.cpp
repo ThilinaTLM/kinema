@@ -16,6 +16,12 @@
 
 namespace kinema::ui::qml {
 
+namespace {
+
+constexpr int kReleaseDebounceMs = 500;
+
+} // namespace
+
 SubtitlesViewModel::SubtitlesViewModel(
     controllers::SubtitleController* controller,
     config::SubtitleSettings& settings, QObject* parent)
@@ -27,6 +33,11 @@ SubtitlesViewModel::SubtitlesViewModel(
     m_languages = m_settings.preferredLanguages();
     m_hi = m_settings.hearingImpaired();
     m_fpo = m_settings.foreignPartsOnly();
+
+    m_releaseDebounce.setSingleShot(true);
+    m_releaseDebounce.setInterval(kReleaseDebounceMs);
+    connect(&m_releaseDebounce, &QTimer::timeout, this,
+        &SubtitlesViewModel::runSearch);
 
     if (m_controller) {
         connect(m_controller,
@@ -104,6 +115,7 @@ void SubtitlesViewModel::setMedia(const api::PlaybackContext& ctx)
     // Reset filters from settings on every open so a previous
     // session's release filter doesn't carry over to a different
     // title.
+    m_releaseDebounce.stop();
     m_languages = m_settings.preferredLanguages();
     m_hi = m_settings.hearingImpaired();
     m_fpo = m_settings.foreignPartsOnly();
@@ -176,6 +188,11 @@ void SubtitlesViewModel::setRelease(const QString& release)
     }
     m_release = release;
     Q_EMIT filtersChanged();
+
+    if (m_controller && m_controller->downloadEnabled()
+        && m_context.key.isValid()) {
+        m_releaseDebounce.start();
+    }
 }
 
 void SubtitlesViewModel::setSelectedRow(int row)
@@ -190,6 +207,7 @@ void SubtitlesViewModel::setSelectedRow(int row)
 
 void SubtitlesViewModel::runSearch()
 {
+    m_releaseDebounce.stop();
     if (!m_controller || !m_context.key.isValid()) {
         return;
     }
@@ -199,6 +217,7 @@ void SubtitlesViewModel::runSearch()
 
 void SubtitlesViewModel::resetFilters()
 {
+    m_releaseDebounce.stop();
     m_languages = m_settings.preferredLanguages();
     m_hi = m_settings.hearingImpaired();
     m_fpo = m_settings.foreignPartsOnly();

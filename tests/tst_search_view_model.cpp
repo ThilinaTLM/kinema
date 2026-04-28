@@ -193,6 +193,51 @@ private Q_SLOTS:
         QCOMPARE(vm.results()->rowCount(), 1);
     }
 
+    void testDebounceCoalescesRapidQueryEdits()
+    {
+        FakeCinemeta cinemeta;
+        cinemeta.cannedSearch
+            = { makeRow(QStringLiteral("tt1"), QStringLiteral("X")) };
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
+
+        vm.setQuery(QStringLiteral("mat"));
+        drain();
+        QCOMPARE(cinemeta.searchCalls, 0);
+
+        QTest::qWait(100);
+        vm.setQuery(QStringLiteral("matrix"));
+        drain();
+        QCOMPARE(cinemeta.searchCalls, 0);
+
+        QTest::qWait(300);
+        drain();
+        QCOMPARE(cinemeta.searchCalls, 1);
+        QCOMPARE(cinemeta.lastQuery, QStringLiteral("matrix"));
+    }
+
+    void testSubmitCancelsPendingDebounce()
+    {
+        FakeCinemeta cinemeta;
+        cinemeta.cannedSearch
+            = { makeRow(QStringLiteral("tt1"), QStringLiteral("X")) };
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
+
+        vm.setQuery(QStringLiteral("matrix"));
+        vm.submit();
+        drain();
+        QCOMPARE(cinemeta.searchCalls, 1);
+
+        QTest::qWait(300);
+        drain();
+        QCOMPARE(cinemeta.searchCalls, 1);
+    }
+
     void testNonImdbQueryUsesSearch()
     {
         FakeCinemeta cinemeta;

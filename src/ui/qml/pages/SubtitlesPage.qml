@@ -123,10 +123,9 @@ Kirigami.Page {
             spacing: Theme.groupSpacing
 
             // ---- Release-name filter ------------------------------
-            // Bound to `subtitlesVm.release`. Enter (or the Search page
-            // action) runs the query; we disable the field's autoAccept
-            // timer so the user doesn't fire a network call on every
-            // keystroke.
+            // Bound to `subtitlesVm.release`. The view-model debounces
+            // edits before re-running the search; Enter (or the Search
+            // page action) bypasses the debounce and runs immediately.
             Kirigami.SearchField {
                 Layout.fillWidth: true
                 placeholderText: i18nc(
@@ -135,7 +134,12 @@ Kirigami.Page {
                 text: subtitlesVm.release
                 autoAccept: false
                 onTextEdited: subtitlesVm.release = text
-                onAccepted: subtitlesVm.runSearch()
+                onAccepted: {
+                    if (subtitlesVm.release !== text) {
+                        subtitlesVm.release = text;
+                    }
+                    subtitlesVm.runSearch();
+                }
             }
 
             // ---- Languages / HI / FPO -----------------------------

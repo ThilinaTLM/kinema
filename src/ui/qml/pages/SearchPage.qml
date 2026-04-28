@@ -86,8 +86,17 @@ Kirigami.Page {
                 placeholderText: i18nc("@info:placeholder",
                     "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
                 text: searchVm.query
+                // SearchViewModel owns the network debounce; disable
+                // SearchField's shorter auto-accept timer so it does
+                // not bypass that debounce and submit duplicates.
+                autoAccept: false
                 onTextEdited: searchVm.query = text
-                onAccepted: searchVm.submit()
+                onAccepted: {
+                    if (searchVm.query !== text) {
+                        searchVm.query = text;
+                    }
+                    searchVm.submit();
+                }
                 Keys.onEscapePressed: function (event) {
                     if (text.length > 0) {
                         searchVm.clear();

@@ -8,6 +8,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <QVariantList>
 
 namespace kinema::config {
@@ -43,6 +44,10 @@ class SubtitleResultsModel;
  *
  * Primary action label / enabled state mirrors `SubtitlesDialog`'s
  * `updatePrimaryAction` exactly: Download / Use / Re-attach.
+ *
+ * Release-name edits are debounced before re-running the search so a
+ * user can type a filter without issuing one OpenSubtitles request per
+ * keystroke. Explicit Search/Enter still runs immediately.
  */
 class SubtitlesViewModel : public QObject
 {
@@ -193,6 +198,7 @@ private:
     QString m_hi = QStringLiteral("off");
     QString m_fpo = QStringLiteral("off");
     QString m_release;
+    QTimer m_releaseDebounce;
 
     QString m_state = QStringLiteral("idle");
     QString m_statusLine;
