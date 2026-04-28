@@ -33,3 +33,5 @@
 - Tests link against `kinema_core` and register via `ecm_add_test(...)` in `tests/CMakeLists.txt`. Add the test name to the bottom `foreach` loop so it picks up `KINEMA_TEST_FIXTURES_DIR`. Fixtures live in `tests/fixtures/`.
 
 - Validate with `cmake --build build -j$(nproc)` then `ctest --test-dir build --output-on-failure`. One-shot configure + build + (optional) test + run: `./scripts/run.sh` (`-t` to add ctest, `-n` to skip launch, `-r` to reconfigure).
+
+- Refer `/home/tlm/Projects/Kirigami/kirigami/` and  `/home/tlm/Projects/Kirigami/kirigami-addons/` for Kirigami source code.
