@@ -266,7 +266,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
         QML_FILES
             ui/player/qml/PlayerScene.qml
             ui/player/qml/Theme.qml
-            ui/player/qml/components/AccentButton.qml
             ui/player/qml/components/BufferingIndicator.qml
             ui/player/qml/components/CenterFlash.qml
             ui/player/qml/components/IconButton.qml

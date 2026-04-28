@@ -84,12 +84,15 @@ Item {
             spacing: Theme.spacing
             visible: root.title.length > 0 || root.closable
 
-            Label {
+            // Heading typography resolves through the inherited Header
+            // colorSet (pinned on the panel root above), so the title
+            // picks Plasma's heading rhythm without losing the
+            // dark-over-video surface.
+            Kirigami.Heading {
                 Layout.fillWidth: true
                 Layout.leftMargin: Theme.spacingXs
                 text: root.title
-                color: Theme.foreground
-                font: Theme.headerFont
+                level: 2
                 elide: Text.ElideRight
             }
             IconButton {
@@ -99,10 +102,8 @@ Item {
             }
         }
 
-        Rectangle {
+        Kirigami.Separator {
             Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            color: Theme.border
             visible: root.title.length > 0 || root.closable
         }
 

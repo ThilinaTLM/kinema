@@ -4,6 +4,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
 import dev.tlmtech.kinema.player
 
 import "../components"
@@ -90,12 +91,10 @@ Popup {
             }
 
             // ---- Footer: external subtitle entries -------------------
-            Rectangle {
+            Kirigami.Separator {
                 Layout.fillWidth: true
-                height: 1
-                color: Qt.rgba(1, 1, 1, 0.08)
-                Layout.topMargin: 4
-                Layout.bottomMargin: 4
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                Layout.bottomMargin: Kirigami.Units.smallSpacing
             }
 
             PickerItem {
