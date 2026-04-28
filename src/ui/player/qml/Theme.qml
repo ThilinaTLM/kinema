@@ -128,7 +128,7 @@ QtObject {
     // labels). The `TransportBar` host adds its own vertical
     // padding around this height.
     readonly property int seekBarHeightThick:
-        Math.round(Kirigami.Units.gridUnit * 2.5)
+        Math.round(Kirigami.Units.gridUnit * 2.0)
     readonly property int iconButton:
         Kirigami.Units.gridUnit * 2 + Kirigami.Units.smallSpacing
     readonly property int iconButtonLg:    Kirigami.Units.gridUnit * 3
