@@ -187,6 +187,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/DetailOverview.qml
         ui/qml/components/EpisodeRow.qml
+        ui/qml/components/MediaKindSelect.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
         ui/qml/components/PosterCard.qml

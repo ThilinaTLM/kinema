@@ -5,13 +5,13 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import org.kde.kirigamiaddons.components as Components
 
 import dev.tlmtech.kinema.app
 
 // Cinemeta search page. The page header is a `QQC2.ToolBar` with
-// the segmented `Components.SegmentedButton` on the left followed
-// by a fill-width `Kirigami.SearchField`. The body renders one of five
+// the `MediaKindSelect` (Movies / TV Series) toggle on the left
+// followed by a fill-width `Kirigami.SearchField`. The body renders
+// one of five
 // surfaces (idle / loading / results / empty / error) chosen by
 // `searchVm.results.state`. Idle additionally shows a recent-
 // searches strip from `SearchSettings`.
@@ -56,28 +56,10 @@ Kirigami.Page {
         contentItem: RowLayout {
             spacing: Theme.groupSpacing
 
-            Components.SegmentedButton {
+            MediaKindSelect {
                 Layout.alignment: Qt.AlignVCenter
-                actions: [
-                    Kirigami.Action {
-                        text: i18nc("@option:radio media kind", "Movies")
-                        icon.name: "video-x-generic"
-                        checkable: true
-                        checked: searchVm.kind === 0
-                        onTriggered: if (searchVm.kind !== 0) {
-                            searchVm.kind = 0;
-                        }
-                    },
-                    Kirigami.Action {
-                        text: i18nc("@option:radio media kind", "TV Series")
-                        icon.name: "view-media-recent"
-                        checkable: true
-                        checked: searchVm.kind === 1
-                        onTriggered: if (searchVm.kind !== 1) {
-                            searchVm.kind = 1;
-                        }
-                    }
-                ]
+                kind: searchVm.kind
+                onActivated: newKind => searchVm.kind = newKind
             }
 
             Kirigami.SearchField {

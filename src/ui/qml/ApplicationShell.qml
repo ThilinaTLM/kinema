@@ -91,8 +91,9 @@ Kirigami.ApplicationWindow {
     }
     // ---- global drawer --------------------------------------------------
     // Always-collapsed icon rail: top `actions` list = primary
-    // navigation, bottom footer button = Settings. The default
-    // collapse/expand affordance is hidden so the rail stays compact.
+    // navigation, footer button = Settings pinned to the bottom.
+    // The default collapse/expand affordance is hidden so the rail
+    // stays compact.
     globalDrawer: Kirigami.GlobalDrawer {
         id: drawer
         title: i18n("Kinema")
@@ -123,16 +124,38 @@ Kirigami.ApplicationWindow {
                 checkable: true
                 checked: root.currentNavKey === "browse"
                 onTriggered: root.showPage("browse")
-            },
-            // Settings opens a separate `KirigamiSettings.ConfigurationView`
-            // window on desktop (layer push on mobile) — it is not a top-
-            // level page in this PageRow, so the action is non-checkable.
-            Kirigami.Action {
-                icon.name: "settings-configure"
-                text: i18nc("@action drawer entry", "Settings")
-                onTriggered: mainController.requestSettings()
             }
         ]
+
+        // Settings opens a separate `KirigamiSettings.ConfigurationView`
+        // window on desktop (layer push on mobile) — it is not a top-
+        // level page in this PageRow, so the button is non-checkable.
+        // Put it in the drawer's bottom content instead of `footer`: this
+        // keeps it below the GlobalDrawer's stretch spacer while letting it
+        // use the same ItemDelegate styling and width as the primary actions.
+        showContentWhenCollapsed: true
+
+        QQC2.ItemDelegate {
+            id: settingsButton
+
+            Layout.fillWidth: true
+
+            icon.name: "settings-configure"
+            text: i18nc("@action drawer entry", "Settings")
+            display: drawer.collapsed
+                ? QQC2.AbstractButton.IconOnly
+                : QQC2.AbstractButton.TextBesideIcon
+            onClicked: mainController.requestSettings()
+
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: drawer.collapsed && hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+        }
+
+        Item {
+            Layout.fillWidth: true
+            Layout.minimumHeight: Kirigami.Units.smallSpacing
+        }
     }
 
     // ---- settings configuration view -----------------------------------

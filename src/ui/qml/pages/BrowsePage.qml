@@ -5,14 +5,13 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import org.kde.kirigamiaddons.components as Components
 
 import dev.tlmtech.kinema.app
 
 // Browse: filter-driven TMDB grid. Chrome:
 //
-//   * `header:` is a `QQC2.ToolBar` (Header colorSet) that pairs a
-//     `Components.SegmentedButton` (Movies / TV Series) with a
+//   * `header:` is a `QQC2.ToolBar` (Header colorSet) that pairs the
+//     `MediaKindSelect` (Movies / TV Series) toggle with a
 //     `Kirigami.ActionToolBar` of filter actions: Genres ▾, Released ▾,
 //     ★ Min ▾, Sort ▾, and a Hide-obscure toggle. Every filter is a
 //     `Kirigami.Action`; `ActionToolBar` collapses overflow into its
@@ -74,28 +73,10 @@ Kirigami.Page {
             spacing: Theme.groupSpacing
 
             // ---- Movies / TV Series ---------------------------------
-            Components.SegmentedButton {
+            MediaKindSelect {
                 Layout.alignment: Qt.AlignVCenter
-                actions: [
-                    Kirigami.Action {
-                        text: i18nc("@option:radio media kind", "Movies")
-                        icon.name: "video-x-generic"
-                        checkable: true
-                        checked: browseVm.kind === 0
-                        onTriggered: if (browseVm.kind !== 0) {
-                            browseVm.kind = 0;
-                        }
-                    },
-                    Kirigami.Action {
-                        text: i18nc("@option:radio media kind", "TV Series")
-                        icon.name: "view-media-recent"
-                        checkable: true
-                        checked: browseVm.kind === 1
-                        onTriggered: if (browseVm.kind !== 1) {
-                            browseVm.kind = 1;
-                        }
-                    }
-                ]
+                kind: browseVm.kind
+                onActivated: newKind => browseVm.kind = newKind
             }
 
             // ---- filter actions (with overflow menu on narrow) -----
