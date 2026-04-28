@@ -40,8 +40,12 @@ Item {
     id: root
     property string kind: ""
     property color color: Theme.foreground
-    width: 22
-    height: 22
+    // Match the inner 24-unit viewBox 1:1 by default so glyphs
+    // render at integer scale. Sub-pixel scaling (e.g. 22 / 24)
+    // pushes strokes off the pixel grid and produces the
+    // soft / pixelated look the Lucide source SVGs avoid.
+    width: 24
+    height: 24
 
     // Inner 24 x 24 canvas, uniformly scaled to fill the host. All
     // Shapes below anchor to this so their PathSvg coordinates
@@ -75,6 +79,7 @@ Item {
         Shape {
             anchors.fill: parent
             visible: root.kind === "pause"
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeColor: root.color
                 strokeWidth: Theme.iconStroke
@@ -112,6 +117,7 @@ Item {
         Shape {
             anchors.fill: parent
             visible: root.kind === "pauseSolid"
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeWidth: 0
                 fillColor: root.color
@@ -221,6 +227,7 @@ Item {
         Shape {
             anchors.fill: parent
             visible: root.kind === "audioLines"
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeColor: root.color
                 strokeWidth: Theme.iconStroke
@@ -240,6 +247,7 @@ Item {
         Shape {
             anchors.fill: parent
             visible: root.kind === "captions"
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeColor: root.color
                 strokeWidth: Theme.iconStroke
@@ -277,6 +285,7 @@ Item {
         Shape {
             anchors.fill: parent
             visible: root.kind === "maximize"
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeColor: root.color
                 strokeWidth: Theme.iconStroke
@@ -294,6 +303,7 @@ Item {
         Shape {
             anchors.fill: parent
             visible: root.kind === "minimize"
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeColor: root.color
                 strokeWidth: Theme.iconStroke
@@ -311,6 +321,7 @@ Item {
         Shape {
             anchors.fill: parent
             visible: root.kind === "x"
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeColor: root.color
                 strokeWidth: Theme.iconStroke

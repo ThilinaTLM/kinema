@@ -147,8 +147,10 @@ QtObject {
 
     // Shared stroke width for PathSvg-based icon glyphs in
     // IconGlyph.qml. Centralised so a future "thicker icons" pass
-    // is one edit.
-    readonly property real iconStroke:     1.8
+    // is one edit. Set to 2.0 to match Lucide's native stroke and
+    // land on integer pixel boundaries at the default 24 px glyph
+    // size — fractional widths straddle pixels and look soft.
+    readonly property real iconStroke:     2.0
 
     // ---- Drop shadow tokens (PopupPanel, MultiEffect) ------------
     readonly property int   popupShadowSize:   Kirigami.Units.gridUnit * 2
