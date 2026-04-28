@@ -164,20 +164,23 @@ Item {
             currentIndex: panel.vm ? panel.vm.selectedRow : -1
             boundsBehavior: Flickable.StopAtBounds
             delegate: SubtitleResultRow {
-                selected: index === panel.vm.selectedRow
-                release: model.release
-                fileName: model.fileName
-                language: model.language
-                languageName: model.languageName
-                format: model.format
-                downloadCount: model.downloadCount
-                rating: model.rating
-                hearingImpaired: model.hearingImpaired
-                foreignPartsOnly: model.foreignPartsOnly
-                moviehashMatch: model.moviehashMatch
-                cached: model.cached
-                active: model.active
-                onClicked: panel.vm.selectedRow = index
+                id: subtitleRow
+                required property int index
+                required property var model
+                selected: subtitleRow.index === panel.vm.selectedRow
+                release: subtitleRow.model.release
+                fileName: subtitleRow.model.fileName
+                language: subtitleRow.model.language
+                languageName: subtitleRow.model.languageName
+                format: subtitleRow.model.format
+                downloadCount: subtitleRow.model.downloadCount
+                rating: subtitleRow.model.rating
+                hearingImpaired: subtitleRow.model.hearingImpaired
+                foreignPartsOnly: subtitleRow.model.foreignPartsOnly
+                moviehashMatch: subtitleRow.model.moviehashMatch
+                cached: subtitleRow.model.cached
+                active: subtitleRow.model.active
+                onClicked: panel.vm.selectedRow = subtitleRow.index
                 onActivated: panel.vm.runPrimaryAction()
             }
         }
