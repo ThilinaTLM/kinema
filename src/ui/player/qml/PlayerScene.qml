@@ -221,20 +221,50 @@ Item {
         percent: mpv.bufferingPercent
     }
 
-    VolumeHUD {
-        id: volumeHud
+    // Always-visible vertical volume cluster on the right edge,
+    // vertically centred. Width matches the seek-bar thickness so
+    // the volume number reads inside it (same idiom rotated 90°).
+    // The mute speaker `IconButton` directly below the bar acts as
+    // the toggle; its glyph adapts to volume / mute state via
+    // `_volumeGlyph`. The whole cluster fades with chrome.
+    Item {
+        id: volumeCluster
         anchors.right: parent.right
         anchors.rightMargin: Theme.spacingLg
         anchors.verticalCenter: parent.verticalCenter
-        volumePercent: mpv.volume
-        muted: mpv.muted
-        // Bumped by TransportBar when the user changes volume.
-    }
+        width: Theme.volumeBarWidth
+        // Bar + small gap + speaker IconButton.
+        height: Theme.volumeBarHeight + Theme.spacingSm + Theme.iconButton
 
-    Connections {
-        target: mpv
-        function onVolumeChanged() { volumeHud.flash(); }
-        function onMuteChanged() { volumeHud.flash(); }
+        opacity: root.chromeVisible ? 1.0 : 0.0
+        Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
+        visible: opacity > 0.001
+
+        function _volumeGlyph() {
+            if (mpv.muted) return "volumeX";
+            if (mpv.volume <= 0) return "volume";
+            if (mpv.volume <= 50) return "volume1";
+            return "volume2";
+        }
+
+        VolumeControl {
+            id: vol
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            width: Theme.volumeBarWidth
+            height: Theme.volumeBarHeight
+            volumePercent: mpv.volume
+            muted: mpv.muted
+            onVolumeChanged: v => mpv.setVolumePercent(v)
+        }
+
+        IconButton {
+            id: muteBtn
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            iconKind: volumeCluster._volumeGlyph()
+            onClicked: mpv.setMuted(!mpv.muted)
+        }
     }
 
     // ---- Layer 6: center flash ---------------------------------------

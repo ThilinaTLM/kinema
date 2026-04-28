@@ -8,22 +8,21 @@ import QtQuick.Window
 import dev.tlmtech.kinema.player
 
 /**
- * Single-row playback chrome:
+ * Two-row playback chrome:
  *
- *   [play] [time]  ━━━━━●━━━━━━━━  [vol-icon] [vol-slider] \
- *       [audio-tracks] [subtitle] [speed] [fullscreen]
+ *   [play] [captions] [audio-lines]              [gauge] [maximize]
+ *   [12:03 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -42:29]
  *
- * Inlining the seek bar with the controls trades full-bar width for
- * a more compact, modern chrome. The seek bar still gets the
- * majority of the row via `Layout.fillWidth: true` and grows to a
- * thicker 14 px on hover (10 px resting); see `Theme.seekBarHeight`.
+ * Top row hosts the action buttons (left cluster + spacer + right
+ * cluster). Bottom row is the thick `SeekBar` with internal time
+ * labels.
  *
- * Auto-hides via `chromeVisible`. Owns the seek-bar drag-to-seek
- * and emits picker-open requests upward so the modal popups remain
- * scene-level (they overlay everything else).
+ * Volume lives outside this bar entirely now — the always-visible
+ * vertical volume cluster floats on the right edge of the scene
+ * (`PlayerScene.qml`).
  *
- * Buttons share the round-icon idiom via `IconButton.qml`. Glyphs
- * are PathSvg-based — see `IconGlyph.qml`.
+ * Auto-hides via `chromeVisible`. Picker-open requests bubble up to
+ * the scene as signals so the modal popups stay scene-level.
  */
 Item {
     id: root
@@ -35,7 +34,15 @@ Item {
     signal speedPickerRequested()
     signal fullscreenToggled()
 
-    height: Theme.transportHeight
+    // Two stacked rows + vertical padding. Computed dynamically so
+    // a future change to icon-button or seek-bar height tracks
+    // automatically. The bottom margin matches the side padding so
+    // the seek bar sits visually centred in its breathing room
+    // (top margin stays tight — the gradient backdrop already
+    // softens that edge).
+    implicitHeight:
+        Theme.iconButton + Theme.seekBarHeightThick
+        + Theme.spacingSm * 3 + Theme.spacingLg
 
     opacity: chromeVisible ? 1.0 : 0.0
     Behavior on opacity { NumberAnimation { duration: Theme.fadeMs } }
@@ -43,22 +50,12 @@ Item {
     visible: opacity > 0.001
 
     // True when the player window is in OS fullscreen — used to
-    // pick between the `fullscreen` (enter) and `exitFullscreen`
-    // (leave) glyphs. Derived from the window's visibility because
+    // pick between the `maximize` (enter) and `minimize` (leave)
+    // glyphs. Derived from the window's visibility because
     // PlayerViewModel does not expose an `isFullscreen` property.
     readonly property bool _isFullscreen:
         Window.window
         && Window.window.visibility === Window.FullScreen
-
-    // Volume-aware speaker glyph. `<= 0` or `muted` → mute icon;
-    // `<= 50 %` → low-volume single-wave speaker; otherwise the
-    // full two-wave speaker.
-    function _volumeGlyph() {
-        if (!root.mpv) return "audio";
-        if (root.mpv.muted || root.mpv.volume <= 0) return "mute";
-        if (root.mpv.volume <= 50) return "volumeLow";
-        return "audio";
-    }
 
     Rectangle {
         anchors.fill: parent
@@ -68,92 +65,65 @@ Item {
         }
     }
 
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: Theme.spacingLg
-        anchors.rightMargin: Theme.spacingLg
-        spacing: Theme.spacing
+        // Side padding aligns with the top-bar's title indent
+        // (`TopBar` uses `Theme.spacingLg`) and with the volume
+        // cluster's right margin in `PlayerScene` so the chrome's
+        // outer rhythm is uniform on all four edges of the video.
+        anchors.leftMargin:   Theme.spacingLg
+        anchors.rightMargin:  Theme.spacingLg
+        anchors.topMargin:    Theme.spacingSm
+        // Match the side padding so the seek bar has the same
+        // breathing room below it as it does to its left and right.
+        anchors.bottomMargin: Theme.spacingLg
+        spacing: Theme.spacingSm
 
-        IconButton {
-            iconKind: root.mpv && root.mpv.paused ? "play" : "pause"
-            onClicked: if (root.mpv) root.mpv.cyclePause()
+        // ---- Top row: action buttons ------------------------------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+
+            IconButton {
+                iconKind: root.mpv && root.mpv.paused ? "play" : "pause"
+                onClicked: if (root.mpv) root.mpv.cyclePause()
+            }
+            IconButton {
+                iconKind: "captions"
+                visible: playerVm.subtitleTracks.count > 0
+                onClicked: root.subtitlePickerRequested()
+            }
+            IconButton {
+                iconKind: "audioLines"
+                visible: playerVm.audioTracks.count > 0
+                onClicked: root.audioPickerRequested()
+            }
+
+            Item { Layout.fillWidth: true }
+
+            IconButton {
+                iconKind: "gauge"
+                onClicked: root.speedPickerRequested()
+            }
+            IconButton {
+                iconKind: root._isFullscreen ? "minimize" : "maximize"
+                onClicked: root.fullscreenToggled()
+            }
         }
 
-        // Time / total
-        Text {
-            Layout.alignment: Qt.AlignVCenter
-            color: Theme.foreground
-            font: Theme.tabularFont
-            text: {
-                const pos = root.mpv ? Math.max(0, root.mpv.position) : 0;
-                const dur = root.mpv ? Math.max(0, root.mpv.duration) : 0;
-                return _fmt(pos) + " / " + _fmt(dur);
-            }
-            function _fmt(t) {
-                if (!isFinite(t) || t < 0) t = 0;
-                const total = Math.floor(t);
-                const h = Math.floor(total / 3600);
-                const m = Math.floor((total % 3600) / 60);
-                const s = total % 60;
-                const pad = n => (n < 10 ? "0" + n : "" + n);
-                return h > 0
-                    ? h + ":" + pad(m) + ":" + pad(s)
-                    : pad(m) + ":" + pad(s);
-            }
-        }
-
-        // ---- Seek bar (fills the row middle) ------------------------
+        // ---- Bottom row: thick seek bar --------------------------
         SeekBar {
             id: seekBar
             Layout.fillWidth: true
             Layout.preferredHeight:
-                Theme.seekBarHeightHover + Theme.spacingSm
-            Layout.alignment: Qt.AlignVCenter
-            position: root.mpv ? root.mpv.position : 0.0
-            duration: root.mpv ? root.mpv.duration : 0.0
+                Theme.seekBarHeightThick + Theme.spacingSm
+            position:   root.mpv ? root.mpv.position   : 0.0
+            duration:   root.mpv ? root.mpv.duration   : 0.0
             cacheAhead: root.mpv ? root.mpv.cacheAhead : 0.0
-            chapters: playerVm.chapters
+            chapters:   playerVm.chapters
             onSeekRequested: seconds => {
                 if (root.mpv) root.mpv.seekAbsolute(seconds);
             }
-        }
-
-        // ---- Volume cluster ----------------------------------------
-        IconButton {
-            iconKind: root._volumeGlyph()
-            onClicked: {
-                if (root.mpv) root.mpv.setMuted(!root.mpv.muted);
-            }
-        }
-
-        VolumeControl {
-            Layout.preferredWidth: Theme.volumeSliderWidth
-            Layout.preferredHeight: Theme.iconButton
-            volumePercent: root.mpv ? root.mpv.volume : 100
-            muted: root.mpv ? root.mpv.muted : false
-            onVolumeChanged: v => {
-                if (root.mpv) root.mpv.setVolumePercent(v);
-            }
-        }
-
-        // ---- Track / speed / fullscreen pickers --------------------
-        IconButton {
-            iconKind: "audioTracks"
-            visible: playerVm.audioTracks.count > 0
-            onClicked: root.audioPickerRequested()
-        }
-        IconButton {
-            iconKind: "subtitle"
-            visible: playerVm.subtitleTracks.count > 0
-            onClicked: root.subtitlePickerRequested()
-        }
-        IconButton {
-            iconKind: "speed"
-            onClicked: root.speedPickerRequested()
-        }
-        IconButton {
-            iconKind: root._isFullscreen ? "exitFullscreen" : "fullscreen"
-            onClicked: root.fullscreenToggled()
         }
     }
 }

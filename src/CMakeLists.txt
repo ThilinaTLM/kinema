@@ -280,7 +280,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
             ui/player/qml/components/TopBar.qml
             ui/player/qml/components/TransportBar.qml
             ui/player/qml/components/VolumeControl.qml
-            ui/player/qml/components/VolumeHUD.qml
             ui/player/qml/pickers/AudioPicker.qml
             ui/player/qml/pickers/SpeedPicker.qml
             ui/player/qml/pickers/SubtitlePicker.qml

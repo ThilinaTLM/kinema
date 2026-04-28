@@ -36,9 +36,12 @@ QtObject {
     // ---- Palette --------------------------------------------------
     // Slot mapping: Kirigami.Theme.* with the Header colorSet active.
     // Translucent variants (`surface`, `surfaceElev`, `border`,
-    // `hoverFill`, `trackOff`, `trackBuffer`) keep alpha-mixed
-    // versions of the system colours so panels still feel layered
-    // over the video frame.
+    // `hoverFill`) keep alpha-mixed versions of the system colours
+    // so panels still feel layered over the video frame.
+    // Track-specific palette (`trackPlayed`, `trackRest`,
+    // `trackBufferBg`, `trackBufferDot`, plus the matching text
+    // colours) lives further down and is shared between SeekBar
+    // and VolumeControl.
     readonly property color accent:        Kirigami.Theme.highlightColor
     readonly property color accentHover:
         Qt.lighter(Kirigami.Theme.highlightColor, 1.15)
@@ -57,11 +60,25 @@ QtObject {
         theme.withAlpha(Kirigami.Theme.highlightColor, 0.30)
     readonly property color selectedFill:    Kirigami.Theme.highlightColor
     readonly property color highlightedText: Kirigami.Theme.highlightedTextColor
-    readonly property color trackOff:
-        theme.withAlpha(Kirigami.Theme.textColor, 0.18)
-    readonly property color trackBuffer:
-        theme.withAlpha(Kirigami.Theme.textColor, 0.30)
     readonly property color danger:          Kirigami.Theme.negativeTextColor
+
+    // ---- Track palette (SeekBar + VolumeControl) ----------------
+    // Plex/Netflix-ish: solid white played, dim base under tiled
+    // dots for the buffered span, lower-alpha solid grey for the
+    // un-buffered remainder. Fixed white is intentional — keeps the
+    // chrome neutral over arbitrary frames; system accent would
+    // fight bright video. Inside-track text colours are paired so
+    // labels read above either the white played span or the dim
+    // rest via dual-colour clipping in the track components.
+    readonly property color trackPlayed:      "#FFFFFF"
+    readonly property color trackRest:
+        theme.withAlpha(Kirigami.Theme.textColor, 0.10)
+    readonly property color trackBufferBg:
+        theme.withAlpha(Kirigami.Theme.textColor, 0.18)
+    readonly property color trackBufferDot:
+        Qt.rgba(1.0, 1.0, 1.0, 0.55)
+    readonly property color trackTextOnPlayed: Kirigami.Theme.backgroundColor
+    readonly property color trackTextOnRest:   Kirigami.Theme.textColor
 
     // Backdrop dim under modal overlays. Not a theme colour — always
     // pure black at 55 % alpha so it reads against any video frame.
@@ -102,18 +119,21 @@ QtObject {
 
     // Player-specific structural sizes — all expressed in grid units
     // so they scale with the user's font size.
-    readonly property int transportHeight:
-        Kirigami.Units.gridUnit * 3 + Kirigami.Units.largeSpacing
-    readonly property int topBarHeight:    Kirigami.Units.gridUnit * 4
-    readonly property int seekBarHeight:
-        Math.round(Kirigami.Units.smallSpacing * 2.5)
-    readonly property int seekBarHeightHover:
-        Math.round(Kirigami.Units.smallSpacing * 3.5)
-    readonly property int seekHandleSize:  Kirigami.Units.iconSizes.smallMedium
+    readonly property int topBarHeight: Kirigami.Units.gridUnit * 4
+    // Thick seek bar (Plex-style chunky track with internal time
+    // labels). The `TransportBar` host adds its own vertical
+    // padding around this height.
+    readonly property int seekBarHeightThick:
+        Math.round(Kirigami.Units.gridUnit * 2.5)
     readonly property int iconButton:
         Kirigami.Units.gridUnit * 2 + Kirigami.Units.smallSpacing
     readonly property int iconButtonLg:    Kirigami.Units.gridUnit * 3
-    readonly property int volumeSliderWidth: Kirigami.Units.gridUnit * 6
+
+    // Vertical, always-visible volume widget. Width matches the
+    // seek-bar thickness on purpose — the same idiom rotated 90°
+    // (white played fill, dim rest, dotted handle, internal label).
+    readonly property int volumeBarWidth:   seekBarHeightThick
+    readonly property int volumeBarHeight:  Kirigami.Units.gridUnit * 8
 
     // Shared stroke width for PathSvg-based icon glyphs in
     // IconGlyph.qml. Centralised so a future "thicker icons" pass

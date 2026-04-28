@@ -5,17 +5,25 @@ import QtQuick
 import dev.tlmtech.kinema.player
 
 /**
- * Slider-only volume control. Drag or click to set, scroll wheel
- * to nudge by 5 %.
+ * Always-visible vertical volume bar. Same visual idiom as
+ * `SeekBar`, rotated 90°:
  *
- * The mute / volume-state speaker icon used to live inside this
- * component, but it duplicated the audio-track picker speaker that
- * sat right next to it in the transport row. The mute toggle now
- * lives on the transport bar as a standalone `IconButton` whose
- * glyph derives from `volumePercent` + `muted`. This component
- * keeps `muted` as input + the (now unused inside this file)
- * `muteToggled` signal so the parent's wiring stays uniform; the
- * signal is harmless to leave defined.
+ *   ┌───┐
+ *   │░░░│  rest (above the played fill)
+ *   │░░░│
+ *   │┄┄┄│  dotted handle line at the played boundary
+ *   │▓▓▓│  played fill anchored to bottom (solid white)
+ *   │ 75│  centred volume number, dual-colour clipped
+ *   │▓▓▓│
+ *   └───┘
+ *
+ * Drag, click and mouse-wheel scrub the value. Mute is owned by an
+ * external speaker `IconButton` (sits below this widget in the
+ * scene); when `muted` is true the played fill collapses to zero
+ * regardless of `volumePercent` so the visual matches what the
+ * user actually hears.
+ *
+ * Stateless: `volumePercent` + `muted` in, `volumeChanged(v)` out.
  */
 Item {
     id: root
@@ -23,49 +31,111 @@ Item {
     property bool muted: false
 
     signal volumeChanged(double v)
-    signal muteToggled()
 
     readonly property double _ratio:
         muted ? 0 : Math.max(0, Math.min(1, volumePercent / 100))
 
-    implicitWidth: Theme.volumeSliderWidth
-    implicitHeight: Theme.iconButton
+    implicitWidth: Theme.volumeBarWidth
+    implicitHeight: Theme.volumeBarHeight
 
-    // Track
+    readonly property real _radius: Theme.radius
+    readonly property real _playedHeight: height * _ratio
+
+    // ---- Layer 1: rest --------------------------------------------
     Rectangle {
+        anchors.fill: parent
+        radius: root._radius
+        color: Theme.trackRest
+    }
+
+    // ---- Layer 2: played (anchored to bottom) ---------------------
+    Rectangle {
+        id: playedFill
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        height: 4
-        radius: 2
-        color: Theme.trackOff
-    }
-    // Filled progress
-    Rectangle {
-        anchors.left: parent.left
-        anchors.verticalCenter: parent.verticalCenter
-        height: 4
-        radius: 2
-        width: parent.width * root._ratio
-        color: Theme.foreground
-    }
-    // Handle
-    Rectangle {
-        width: 12; height: 12; radius: 6
-        color: Theme.foreground
-        anchors.verticalCenter: parent.verticalCenter
-        x: parent.width * root._ratio - 6
-        visible: sliderArea.containsMouse || sliderArea.pressed
+        anchors.bottom: parent.bottom
+        height: root._playedHeight
+        radius: root._radius
+        color: Theme.trackPlayed
     }
 
+    // ---- Dotted handle line at the played boundary ----------------
+    // Repeater of small white squares stamped horizontally across
+    // the bar at the played/rest border. Hidden when the played
+    // fill is zero (muted or 0%) so we don't sit a stray dashed
+    // line at the bottom of an empty bar.
+    Item {
+        id: handleRow
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: Theme.spacingSm
+        anchors.rightMargin: Theme.spacingSm
+        height: 2
+        y: parent.height - root._playedHeight - height / 2
+        visible: root._playedHeight > 0.5
+
+        Row {
+            anchors.fill: parent
+            spacing: 2
+            Repeater {
+                model: Math.max(1, Math.floor(handleRow.width / 4))
+                delegate: Rectangle {
+                    width: 2
+                    height: 2
+                    color: Theme.trackBufferDot
+                }
+            }
+        }
+    }
+
+    // ---- Internal volume number (dual-colour clipping) ------------
+    // Same trick as SeekBar's time labels: render the same Text
+    // twice, each clipped to one half of the boundary, so the
+    // number reads dark over the white played fill and light over
+    // the dim rest.
+    Item {
+        id: textOnRest
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: parent.height - root._playedHeight
+        clip: true
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            // Anchor to the bar's centre, not this clip Item's, so
+            // the value text stays centred regardless of which
+            // side currently owns more of the bar.
+            y: root.height / 2 - height / 2
+            color: Theme.trackTextOnRest
+            font: Theme.tabularSmallFont
+            text: Math.round(root.volumePercent)
+        }
+    }
+    Item {
+        id: textOnPlayed
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: root._playedHeight
+        clip: true
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: root.height / 2 - height / 2 - (root.height - root._playedHeight)
+            color: Theme.trackTextOnPlayed
+            font: Theme.tabularSmallFont
+            text: Math.round(root.volumePercent)
+        }
+    }
+
+    // ---- Pointer surface ------------------------------------------
     MouseArea {
         id: sliderArea
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        onPressed: mouse => _set(mouse.x)
+        onPressed: mouse => _set(mouse.y)
         onPositionChanged: mouse => {
-            if (pressed) _set(mouse.x);
+            if (pressed) _set(mouse.y);
         }
         onWheel: wheel => {
             const step = wheel.angleDelta.y > 0 ? 5 : -5;
@@ -73,9 +143,10 @@ Item {
                 Math.max(0, Math.min(100, root.volumePercent + step)));
             wheel.accepted = true;
         }
-        function _set(x) {
-            const ratio = Math.max(0,
-                Math.min(1, x / Math.max(1, root.width)));
+        function _set(y) {
+            // Invert: y=0 is top (=100 %), y=height is bottom (=0 %).
+            const ratio = 1 - Math.max(0,
+                Math.min(1, y / Math.max(1, root.height)));
             root.volumeChanged(ratio * 100);
         }
     }

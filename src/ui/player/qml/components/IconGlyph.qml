@@ -13,6 +13,14 @@ import dev.tlmtech.kinema.player
  * uniform `scale:` on a 24 x 24 inner Item — this keeps every
  * glyph's coordinate space identical regardless of host size.
  *
+ * The chrome icons are transcoded directly from the Lucide icon set
+ * (`audio-lines`, `captions`, `gauge`, `maximize`, `minimize`,
+ * `pause`, `play`, `volume`, `volume-1`, `volume-2`, `volume-off`,
+ * `volume-x`). Each Lucide source file is one or more `<path d>`
+ * entries with `stroke="currentColor"`, `stroke-width="2"`, round
+ * caps + joins. We render them with `Theme.iconStroke` and the host
+ * `color` property so the glyph adopts the surrounding theme.
+ *
  * Why PathSvg and not pre-baked SVG / icon fonts:
  *
  *   - No runtime asset dependencies — the player chrome's design
@@ -21,10 +29,12 @@ import dev.tlmtech.kinema.player
  *     `Theme.iconStroke`).
  *   - Perfect HiDPI fidelity at any item size.
  *
- * Stroke language: 1.8 px (`Theme.iconStroke`) at the 24 px viewBox,
- * round caps + round joins, monochrome. Filled silhouettes only
- * for play / pause and for the speaker body. Everything else is
- * outline-stroke for consistent visual weight in a row.
+ * Stroke language: `Theme.iconStroke` at the 24 px viewBox, round
+ * caps + round joins, monochrome outlines. Filled silhouettes only
+ * exist for the `playSolid` / `pauseSolid` kinds, which the
+ * transient `CenterFlash` overlay uses — a thin outline reads weak
+ * as a 96 px pulse, so the flash keeps the bold filled look while
+ * the chrome itself stays in the outline idiom.
  */
 Item {
     id: root
@@ -44,10 +54,48 @@ Item {
         scale: Math.min(root.width, root.height) / 24
         transformOrigin: Item.Center
 
-        // ---- Play: filled rounded triangle ------------------------
+        // ---- Play (Lucide outline triangle) ----------------------
         Shape {
             anchors.fill: parent
             visible: root.kind === "play"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg {
+                    path: "M 5 5 a 2 2 0 0 1 3.008 -1.728 l 11.997 6.998 a 2 2 0 0 1 0.003 3.458 l -12 7 A 2 2 0 0 1 5 19 Z"
+                }
+            }
+        }
+
+        // ---- Pause (Lucide two outline rounded rects) ------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "pause"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                // x=14 y=3 w=5 h=18 rx=1
+                PathSvg {
+                    path: "M 15 3 H 18 A 1 1 0 0 1 19 4 V 20 A 1 1 0 0 1 18 21 H 15 A 1 1 0 0 1 14 20 V 4 A 1 1 0 0 1 15 3 Z"
+                }
+                // x=5 y=3 w=5 h=18 rx=1
+                PathSvg {
+                    path: "M 6 3 H 9 A 1 1 0 0 1 10 4 V 20 A 1 1 0 0 1 9 21 H 6 A 1 1 0 0 1 5 20 V 4 A 1 1 0 0 1 6 3 Z"
+                }
+            }
+        }
+
+        // ---- Play (filled silhouette, used by CenterFlash) -------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "playSolid"
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeWidth: 0
@@ -60,10 +108,10 @@ Item {
             }
         }
 
-        // ---- Pause: two rounded bars ------------------------------
+        // ---- Pause (filled silhouette, used by CenterFlash) ------
         Shape {
             anchors.fill: parent
-            visible: root.kind === "pause"
+            visible: root.kind === "pauseSolid"
             ShapePath {
                 strokeWidth: 0
                 fillColor: root.color
@@ -73,200 +121,189 @@ Item {
             }
         }
 
-        // ---- Audio (high volume): speaker + 2 curved waves --------
+        // ---- Volume (Lucide silent speaker) ----------------------
         Shape {
             anchors.fill: parent
-            visible: root.kind === "audio"
+            visible: root.kind === "volume"
             preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeWidth: 0
-                fillColor: root.color
-                PathSvg {
-                    path: "M 4 9 H 7 L 11 5.5 Q 12 4.7 12 5.8 V 18.2 Q 12 19.3 11 18.5 L 7 15 H 4 Q 3 15 3 14 V 10 Q 3 9 4 9 Z"
-                }
-            }
-            ShapePath {
-                strokeColor: root.color
-                strokeWidth: Theme.iconStroke
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathSvg { path: "M 14.5 9.2 Q 16.2 12 14.5 14.8" }
-            }
-            ShapePath {
-                strokeColor: root.color
-                strokeWidth: Theme.iconStroke
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathSvg { path: "M 17 7 Q 20 12 17 17" }
-            }
-        }
-
-        // ---- Volume low: speaker + single short wave --------------
-        Shape {
-            anchors.fill: parent
-            visible: root.kind === "volumeLow"
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeWidth: 0
-                fillColor: root.color
-                PathSvg {
-                    path: "M 4 9 H 7 L 11 5.5 Q 12 4.7 12 5.8 V 18.2 Q 12 19.3 11 18.5 L 7 15 H 4 Q 3 15 3 14 V 10 Q 3 9 4 9 Z"
-                }
-            }
-            ShapePath {
-                strokeColor: root.color
-                strokeWidth: Theme.iconStroke
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathSvg { path: "M 14.5 9.2 Q 16.2 12 14.5 14.8" }
-            }
-        }
-
-        // ---- Mute: speaker + single diagonal slash ----------------
-        Shape {
-            anchors.fill: parent
-            visible: root.kind === "mute"
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeWidth: 0
-                fillColor: root.color
-                PathSvg {
-                    path: "M 4 9 H 7 L 11 5.5 Q 12 4.7 12 5.8 V 18.2 Q 12 19.3 11 18.5 L 7 15 H 4 Q 3 15 3 14 V 10 Q 3 9 4 9 Z"
-                }
-            }
-            ShapePath {
-                strokeColor: root.color
-                strokeWidth: Theme.iconStroke
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathSvg { path: "M 14 8 L 21 18" }
-            }
-        }
-
-        // ---- Audio tracks: list lines + tiny musical-note mark.
-        //      Distinct from the volume speaker so the two never
-        //      look like duplicate icons in the row. -----------------
-        Shape {
-            anchors.fill: parent
-            visible: root.kind === "audioTracks"
-            ShapePath {
-                strokeColor: root.color
-                strokeWidth: Theme.iconStroke
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathSvg { path: "M 4 7 H 14" }
-                PathSvg { path: "M 4 12 H 11" }
-                PathSvg { path: "M 4 17 H 14" }
-                // Note stem on the right
-                PathSvg { path: "M 18 6 V 14.5" }
-                // Beam from stem-top to a small flag
-                PathSvg { path: "M 18 6 L 21 7.5" }
-            }
-            // Filled note head
-            ShapePath {
-                strokeWidth: 0
-                fillColor: root.color
-                PathSvg {
-                    path: "M 18 14.5 m -1.6 0 a 1.6 1.6 0 1 0 3.2 0 a 1.6 1.6 0 1 0 -3.2 0 Z"
-                }
-            }
-        }
-
-        // ---- Subtitle: rounded rect + two interior caption lines
-        Shape {
-            anchors.fill: parent
-            visible: root.kind === "subtitle"
-            ShapePath {
-                strokeColor: root.color
-                strokeWidth: Theme.iconStroke
-                fillColor: "transparent"
-                joinStyle: ShapePath.RoundJoin
-                capStyle: ShapePath.RoundCap
-                PathSvg {
-                    path: "M 4 6 H 20 Q 21 6 21 7 V 17 Q 21 18 20 18 H 4 Q 3 18 3 17 V 7 Q 3 6 4 6 Z"
-                }
-                PathSvg { path: "M 6 11 H 10" }
-                PathSvg { path: "M 12 11 H 18" }
-                PathSvg { path: "M 6 14.5 H 14" }
-                PathSvg { path: "M 16 14.5 H 18" }
-            }
-        }
-
-        // ---- Speed: half-circle gauge + needle --------------------
-        Shape {
-            anchors.fill: parent
-            visible: root.kind === "speed"
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeColor: root.color
-                strokeWidth: Theme.iconStroke
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathSvg { path: "M 4 16 A 8 8 0 0 1 20 16" }
-                PathSvg { path: "M 6.5 11 L 7.4 11.7" }
-                PathSvg { path: "M 12 8 V 9.2" }
-                PathSvg { path: "M 17.5 11 L 16.6 11.7" }
-                PathSvg { path: "M 12 16 L 16 11.5" }
-            }
-            ShapePath {
-                strokeWidth: 0
-                fillColor: root.color
-                PathSvg {
-                    path: "M 12 16 m -1.4 0 a 1.4 1.4 0 1 0 2.8 0 a 1.4 1.4 0 1 0 -2.8 0 Z"
-                }
-            }
-        }
-
-        // ---- Info: circled lowercase i ----------------------------
-        Shape {
-            anchors.fill: parent
-            visible: root.kind === "info"
-            ShapePath {
-                strokeColor: root.color
-                strokeWidth: Theme.iconStroke
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathSvg { path: "M 12 4 m -8 0 a 8 8 0 1 0 16 0 a 8 8 0 1 0 -16 0 Z" }
-                PathSvg { path: "M 12 11 V 17" }
-            }
-            ShapePath {
-                strokeWidth: 0
-                fillColor: root.color
-                PathSvg { path: "M 12 7.5 m -1 0 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 Z" }
-            }
-        }
-
-        // ---- Fullscreen: four outward corner arrows ---------------
-        Shape {
-            anchors.fill: parent
-            visible: root.kind === "fullscreen"
             ShapePath {
                 strokeColor: root.color
                 strokeWidth: Theme.iconStroke
                 fillColor: "transparent"
                 capStyle: ShapePath.RoundCap
                 joinStyle: ShapePath.RoundJoin
-                PathSvg { path: "M 9 4 H 4 V 9" }
-                PathSvg { path: "M 15 4 H 20 V 9" }
-                PathSvg { path: "M 20 15 V 20 H 15" }
-                PathSvg { path: "M 4 15 V 20 H 9" }
+                PathSvg {
+                    path: "M 11 4.702 a 0.705 0.705 0 0 0 -1.203 -0.498 L 6.413 7.587 A 1.4 1.4 0 0 1 5.416 8 H 3 a 1 1 0 0 0 -1 1 v 6 a 1 1 0 0 0 1 1 h 2.416 a 1.4 1.4 0 0 1 0.997 0.413 l 3.383 3.384 A 0.705 0.705 0 0 0 11 19.298 Z"
+                }
             }
         }
 
-        // ---- Exit fullscreen: four inward corner arrows -----------
+        // ---- Volume-1 (Lucide speaker + 1 short wave) ------------
         Shape {
             anchors.fill: parent
-            visible: root.kind === "exitFullscreen"
+            visible: root.kind === "volume1"
+            preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 strokeColor: root.color
                 strokeWidth: Theme.iconStroke
                 fillColor: "transparent"
                 capStyle: ShapePath.RoundCap
                 joinStyle: ShapePath.RoundJoin
-                PathSvg { path: "M 4 9 H 9 V 4" }
-                PathSvg { path: "M 15 4 V 9 H 20" }
-                PathSvg { path: "M 20 15 H 15 V 20" }
-                PathSvg { path: "M 9 20 V 15 H 4" }
+                PathSvg {
+                    path: "M 11 4.702 a 0.705 0.705 0 0 0 -1.203 -0.498 L 6.413 7.587 A 1.4 1.4 0 0 1 5.416 8 H 3 a 1 1 0 0 0 -1 1 v 6 a 1 1 0 0 0 1 1 h 2.416 a 1.4 1.4 0 0 1 0.997 0.413 l 3.383 3.384 A 0.705 0.705 0 0 0 11 19.298 Z"
+                }
+                PathSvg { path: "M 16 9 a 5 5 0 0 1 0 6" }
+            }
+        }
+
+        // ---- Volume-2 (Lucide speaker + 2 waves) -----------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "volume2"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg {
+                    path: "M 11 4.702 a 0.705 0.705 0 0 0 -1.203 -0.498 L 6.413 7.587 A 1.4 1.4 0 0 1 5.416 8 H 3 a 1 1 0 0 0 -1 1 v 6 a 1 1 0 0 0 1 1 h 2.416 a 1.4 1.4 0 0 1 0.997 0.413 l 3.383 3.384 A 0.705 0.705 0 0 0 11 19.298 Z"
+                }
+                PathSvg { path: "M 16 9 a 5 5 0 0 1 0 6" }
+                PathSvg { path: "M 19.364 18.364 a 9 9 0 0 0 0 -12.728" }
+            }
+        }
+
+        // ---- Volume-off (Lucide slashed speaker, partial waves) --
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "volumeOff"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 16 9 a 5 5 0 0 1 0.95 2.293" }
+                PathSvg { path: "M 19.364 5.636 a 9 9 0 0 1 1.889 9.96" }
+                PathSvg { path: "M 2 2 L 22 22" }
+                PathSvg {
+                    path: "M 7 7 L 6.413 7.587 A 1.4 1.4 0 0 1 5.416 8 H 3 a 1 1 0 0 0 -1 1 v 6 a 1 1 0 0 0 1 1 h 2.416 a 1.4 1.4 0 0 1 0.997 0.413 l 3.383 3.384 A 0.705 0.705 0 0 0 11 19.298 V 11"
+                }
+                PathSvg {
+                    path: "M 9.828 4.172 A 0.686 0.686 0 0 1 11 4.657 V 5.343"
+                }
+            }
+        }
+
+        // ---- Volume-x (Lucide speaker + X) -----------------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "volumeX"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg {
+                    path: "M 11 4.702 a 0.705 0.705 0 0 0 -1.203 -0.498 L 6.413 7.587 A 1.4 1.4 0 0 1 5.416 8 H 3 a 1 1 0 0 0 -1 1 v 6 a 1 1 0 0 0 1 1 h 2.416 a 1.4 1.4 0 0 1 0.997 0.413 l 3.383 3.384 A 0.705 0.705 0 0 0 11 19.298 Z"
+                }
+                PathSvg { path: "M 22 9 L 16 15" }
+                PathSvg { path: "M 16 9 L 22 15" }
+            }
+        }
+
+        // ---- Audio-lines (Lucide six vertical bars) --------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "audioLines"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 2 10 V 13" }
+                PathSvg { path: "M 6 6 V 17" }
+                PathSvg { path: "M 10 3 V 21" }
+                PathSvg { path: "M 14 8 V 15" }
+                PathSvg { path: "M 18 5 V 18" }
+                PathSvg { path: "M 22 10 V 13" }
+            }
+        }
+
+        // ---- Captions (Lucide rounded rect + caption strokes) ----
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "captions"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                // <rect x=3 y=5 w=18 h=14 rx=2 ry=2>
+                PathSvg {
+                    path: "M 5 5 H 19 A 2 2 0 0 1 21 7 V 17 A 2 2 0 0 1 19 19 H 5 A 2 2 0 0 1 3 17 V 7 A 2 2 0 0 1 5 5 Z"
+                }
+                PathSvg { path: "M 7 15 H 11" }
+                PathSvg { path: "M 15 15 H 17" }
+                PathSvg { path: "M 7 11 H 9" }
+                PathSvg { path: "M 13 11 H 17" }
+            }
+        }
+
+        // ---- Gauge (Lucide arc + needle) -------------------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "gauge"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 12 14 L 16 10" }
+                PathSvg { path: "M 3.34 19 a 10 10 0 1 1 17.32 0" }
+            }
+        }
+
+        // ---- Maximize (Lucide four corner arrows) ----------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "maximize"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 8 3 H 5 A 2 2 0 0 0 3 5 V 8" }
+                PathSvg { path: "M 21 8 V 5 A 2 2 0 0 0 19 3 H 16" }
+                PathSvg { path: "M 3 16 V 19 A 2 2 0 0 0 5 21 H 8" }
+                PathSvg { path: "M 16 21 H 19 A 2 2 0 0 0 21 19 V 16" }
+            }
+        }
+
+        // ---- Minimize (Lucide four inward arrows) ----------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "minimize"
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 8 3 V 6 A 2 2 0 0 1 6 8 H 3" }
+                PathSvg { path: "M 21 8 H 18 A 2 2 0 0 1 16 6 V 3" }
+                PathSvg { path: "M 3 16 H 6 A 2 2 0 0 1 8 18 V 21" }
+                PathSvg { path: "M 16 21 V 18 A 2 2 0 0 1 18 16 H 21" }
             }
         }
 

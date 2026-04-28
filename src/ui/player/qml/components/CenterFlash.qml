@@ -47,7 +47,13 @@ Item {
 
         IconGlyph {
             anchors.centerIn: parent
-            kind: root.kind
+            // The chrome's play/pause are outline strokes, which
+            // read weak as a 96 px transient pulse. The flash uses
+            // the bold filled silhouettes (`playSolid`/`pauseSolid`)
+            // dedicated to it.
+            kind: root.kind === "play"
+                ? "playSolid"
+                : root.kind === "pause" ? "pauseSolid" : root.kind
             width: 48
             height: 48
             color: Theme.foreground

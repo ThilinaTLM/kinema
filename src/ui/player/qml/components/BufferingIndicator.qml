@@ -25,7 +25,7 @@ Item {
         radius: width / 2
         color: "transparent"
         border.width: 4
-        border.color: Theme.trackOff
+        border.color: Theme.trackBufferBg
     }
     Rectangle {
         anchors.fill: parent
