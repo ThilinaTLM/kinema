@@ -113,10 +113,8 @@ Kirigami.Page {
         ColumnLayout {
             spacing: Theme.groupSpacing
 
-            Item { Layout.fillHeight: true }
-
             Kirigami.PlaceholderMessage {
-                Layout.alignment: Qt.AlignHCenter
+                Layout.alignment: Qt.AlignCenter
                 Layout.preferredWidth: Math.min(
                     page.width - Theme.pageWideMargin * 2,
                     Theme.placeholderMaxWidth)
@@ -172,8 +170,6 @@ Kirigami.Page {
                     }
                 }
             }
-
-            Item { Layout.fillHeight: true }
         }
 
         // 1 — Loading.

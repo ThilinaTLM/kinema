@@ -296,7 +296,7 @@ private Q_SLOTS:
         BrowseViewModel vm(&tmdb, *m_settings, nullptr);
 
         // Default chips: none. The kind is shown by the segmented
-        // control in the BrowseFilterBar, not as a chip; only
+        // control in the BrowsePage header, not as a chip; only
         // non-default filters surface here.
         const auto baseline = vm.activeChipsList();
         QCOMPARE(baseline.size(), 0);

@@ -185,10 +185,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/DetailOverview.qml
-        ui/qml/components/ActiveFiltersBar.qml
-        ui/qml/components/BrowseFilterBar.qml
         ui/qml/components/EpisodeRow.qml
-        ui/qml/components/GenresMenuButton.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
         ui/qml/components/PosterCard.qml
@@ -198,12 +195,9 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
         ui/qml/components/StreamCard.qml
-        ui/qml/components/StreamFilterBar.qml
         ui/qml/components/StreamRowActions.qml
-        ui/qml/components/StreamSortMenu.qml
         ui/qml/components/StreamsList.qml
         ui/qml/components/UpcomingBadge.qml
-        ui/qml/components/LanguagePicker.qml
         ui/qml/components/SubtitleResultRow.qml
         ui/qml/components/SubtitlesPanel.qml
         ui/qml/pages/BrowsePage.qml

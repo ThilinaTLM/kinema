@@ -6,21 +6,22 @@ import QtQuick.Controls as QQC2
 import QtQuick.Dialogs as QQDialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import org.kde.kirigamiaddons.components as Components
-import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
-// Reusable subtitles search/download surface. Detail pages embed this as an
-// inline tab; SubtitlesPage.qml wraps the same component for player-initiated
-// downloads and other standalone contexts.
+// Body-only subtitles results surface.
+//
+// Filter chrome (release-name SearchField, Languages multi-select menu,
+// HI / FPO sub-menus) lives on the parent `SubtitlesPage` header; this
+// component is responsible only for the status line, the state-switched
+// results region (idle / loading / error / empty / not-configured /
+// ready), and the footer toolbar (Open file… / primary action).
 Item {
     id: panel
 
+    /// Subtitles VM. Defaults to the shell's `subtitlesVm` context
+    /// property; injected explicitly for clarity at call sites.
     property var vm: subtitlesVm
-    property bool showContextTitle: false
-    property bool showCancelButton: false
-    property bool compact: true
 
     QQDialogs.FileDialog {
         id: localFileDialog
@@ -36,145 +37,6 @@ Item {
         anchors.fill: parent
         anchors.margins: Theme.pageMargin
         spacing: Theme.groupSpacing
-
-        Kirigami.Heading {
-            Layout.fillWidth: true
-            visible: panel.showContextTitle
-                && panel.vm
-                && panel.vm.contextTitle.length > 0
-            level: 3
-            text: panel.vm ? panel.vm.contextTitle : ""
-            wrapMode: Text.Wrap
-        }
-
-        QQC2.ScrollView {
-            id: filtersScroll
-            Layout.fillWidth: true
-            Layout.preferredHeight: panel.compact
-                ? Math.min(contentHeight,
-                    Kirigami.Units.gridUnit * 15)
-                : contentHeight
-            Layout.maximumHeight: panel.compact
-                ? Kirigami.Units.gridUnit * 16
-                : Number.POSITIVE_INFINITY
-            clip: true
-            contentWidth: availableWidth
-
-            ColumnLayout {
-                width: filtersScroll.availableWidth
-                spacing: 0
-
-                FormCard.FormHeader {
-                    title: i18nc("@title:group subtitles filter card", "Filters")
-                }
-                FormCard.FormCard {
-                    Layout.fillWidth: true
-
-                    LanguagePicker {
-                        Layout.fillWidth: true
-                        languages: panel.vm ? panel.vm.languages : []
-                        options: panel.vm ? panel.vm.commonLanguages : []
-                        onLanguagesPicked: codes => panel.vm.languages = codes
-                    }
-                    FormCard.FormDelegateSeparator {}
-                    FormCard.AbstractFormDelegate {
-                        background: null
-                        contentItem: RowLayout {
-                            spacing: Theme.inlineSpacing
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                                text: i18nc("@label subtitles filter row",
-                                    "Hearing impaired")
-                            }
-                            Components.RadioSelector {
-                                readonly property var modes: [
-                                    "off", "include", "only"
-                                ]
-                                selectedIndex: Math.max(0,
-                                    modes.indexOf(panel.vm ? panel.vm.hi : "off"))
-                                actions: [
-                                    Kirigami.Action {
-                                        text: i18nc("@option:radio subtitle filter mode", "Off")
-                                        onTriggered: if (panel.vm && panel.vm.hi !== "off") {
-                                            panel.vm.hi = "off";
-                                        }
-                                    },
-                                    Kirigami.Action {
-                                        text: i18nc("@option:radio subtitle filter mode", "Include")
-                                        onTriggered: if (panel.vm && panel.vm.hi !== "include") {
-                                            panel.vm.hi = "include";
-                                        }
-                                    },
-                                    Kirigami.Action {
-                                        text: i18nc("@option:radio subtitle filter mode", "Only")
-                                        onTriggered: if (panel.vm && panel.vm.hi !== "only") {
-                                            panel.vm.hi = "only";
-                                        }
-                                    }
-                                ]
-                            }
-                        }
-                    }
-                    FormCard.AbstractFormDelegate {
-                        background: null
-                        contentItem: RowLayout {
-                            spacing: Theme.inlineSpacing
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                                text: i18nc("@label subtitles filter row",
-                                    "Foreign parts only")
-                            }
-                            Components.RadioSelector {
-                                readonly property var modes: [
-                                    "off", "include", "only"
-                                ]
-                                selectedIndex: Math.max(0,
-                                    modes.indexOf(panel.vm ? panel.vm.fpo : "off"))
-                                actions: [
-                                    Kirigami.Action {
-                                        text: i18nc("@option:radio subtitle filter mode", "Off")
-                                        onTriggered: if (panel.vm && panel.vm.fpo !== "off") {
-                                            panel.vm.fpo = "off";
-                                        }
-                                    },
-                                    Kirigami.Action {
-                                        text: i18nc("@option:radio subtitle filter mode", "Include")
-                                        onTriggered: if (panel.vm && panel.vm.fpo !== "include") {
-                                            panel.vm.fpo = "include";
-                                        }
-                                    },
-                                    Kirigami.Action {
-                                        text: i18nc("@option:radio subtitle filter mode", "Only")
-                                        onTriggered: if (panel.vm && panel.vm.fpo !== "only") {
-                                            panel.vm.fpo = "only";
-                                        }
-                                    }
-                                ]
-                            }
-                        }
-                    }
-                    FormCard.FormDelegateSeparator {}
-                    FormCard.FormTextFieldDelegate {
-                        label: i18nc("@label:textbox subtitles filter row",
-                            "Release name (optional)")
-                        text: panel.vm ? panel.vm.release : ""
-                        placeholderText: i18nc(
-                            "@info:placeholder subtitles release filter",
-                            "e.g. 1080p, BluRay, REMUX")
-                        onTextChanged: if (panel.vm) panel.vm.release = text
-                        onAccepted: if (panel.vm) panel.vm.runSearch()
-                    }
-                    FormCard.FormButtonDelegate {
-                        text: i18nc("@action:button", "Search")
-                        icon.name: "edit-find"
-                        enabled: panel.vm && panel.vm.state !== "notconfigured"
-                        onClicked: panel.vm.runSearch()
-                    }
-                }
-            }
-        }
 
         QQC2.Label {
             Layout.fillWidth: true
@@ -217,11 +79,6 @@ Item {
                     onClicked: localFileDialog.open()
                 }
                 Item { Layout.fillWidth: true }
-                QQC2.Button {
-                    visible: panel.showCancelButton
-                    text: i18nc("@action:button subtitles cancel", "Cancel")
-                    onClicked: panel.vm.closeRequested()
-                }
                 QQC2.Button {
                     text: panel.vm ? panel.vm.primaryActionText : ""
                     icon.name: panel.vm ? panel.vm.primaryActionIcon : ""

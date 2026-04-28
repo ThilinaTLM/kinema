@@ -98,7 +98,8 @@ class MovieDetailViewModel : public QObject
     Q_PROPERTY(bool cachedOnly READ cachedOnly WRITE setCachedOnly NOTIFY cachedOnlyChanged)
     Q_PROPERTY(bool realDebridConfigured READ realDebridConfigured NOTIFY realDebridConfiguredChanged)
     Q_PROPERTY(int rawStreamsCount READ rawStreamsCount NOTIFY rawStreamsCountChanged)
-    // Transient UI-only filter axes consumed by `StreamFilterBar`.
+    // Transient UI-only filter axes consumed by the `StreamsPage`
+    // header `Kirigami.ActionToolBar`.
     // Reset every time `clear()` runs; never persisted.
     Q_PROPERTY(QString uiResolutionFilter READ uiResolutionFilter
         WRITE setUiResolutionFilter NOTIFY uiFiltersChanged)

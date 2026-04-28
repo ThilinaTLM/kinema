@@ -219,7 +219,7 @@ QVariantList BrowseViewModel::activeChipsList() const
         out.append(m);
     };
 
-    // The kind is shown by the segmented control in `BrowseFilterBar`;
+    // The kind is shown by the segmented control in `BrowsePage.qml`;
     // emitting a redundant chip with no remove affordance read as a
     // label rather than a token, so it's intentionally not surfaced
     // here. `removeChip` no longer handles the "kind" kind for the
