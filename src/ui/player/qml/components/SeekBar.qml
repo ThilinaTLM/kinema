@@ -71,28 +71,73 @@ Item {
             color: Theme.trackRest
         }
 
-        // ---- Layer 2: buffered span (flat dim) -------------------
+        // ---- Layer 2: buffered span (rounded-left, square-right) -
         // Slightly less dim than the rest layer so the eye can
-        // tell "loaded ahead" from "not yet loaded" without the
-        // dot texture competing with the rest of the chrome.
-        Rectangle {
+        // tell "loaded ahead" from "not yet loaded". The rounded
+        // LEFT corners line up with the outer rest layer's curve;
+        // the RIGHT edge is a straight vertical line because that
+        // edge is a *progress boundary*, not the visual end of the
+        // bar — a rounded corner there reads as a thumb tapering
+        // off and confuses the eye about where buffered ends.
+        //
+        // Implementation trick (Qt 6.6 has no per-corner radius):
+        // a wider rounded "cap" rectangle whose right half is
+        // overpainted by a square "body" rectangle, leaving only
+        // the rounded LEFT corners visible.
+        Item {
+            id: bufferedFill
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: trackRow.bufferedWidth
-            radius: trackRow.radius
-            color: Theme.trackBufferBg
+            visible: width > 0
+            clip: true
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: trackRow.radius * 2
+                radius: trackRow.radius
+                color: Theme.trackBufferBg
+            }
+            Rectangle {
+                anchors.left: parent.left
+                anchors.leftMargin: trackRow.radius
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                color: Theme.trackBufferBg
+            }
         }
 
-        // ---- Layer 3: played fill --------------------------------
-        Rectangle {
+        // ---- Layer 3: played fill (rounded-left, square-right) --
+        // Same idiom as the buffered layer above.
+        Item {
             id: playedFill
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: trackRow.playedWidth
-            radius: trackRow.radius
-            color: Theme.trackPlayed
+            visible: width > 0
+            clip: true
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: trackRow.radius * 2
+                radius: trackRow.radius
+                color: Theme.trackPlayed
+            }
+            Rectangle {
+                anchors.left: parent.left
+                anchors.leftMargin: trackRow.radius
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                color: Theme.trackPlayed
+            }
         }
 
         // ---- Chapter ticks ---------------------------------------
