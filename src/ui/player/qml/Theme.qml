@@ -133,7 +133,13 @@ QtObject {
     // seek-bar thickness on purpose — the same idiom rotated 90°
     // (white played fill, dim rest, dotted handle, internal label).
     readonly property int volumeBarWidth:   seekBarHeightThick
-    readonly property int volumeBarHeight:  Kirigami.Units.gridUnit * 8
+    readonly property int volumeBarHeight:  Kirigami.Units.gridUnit * 12
+
+    // Volume widget scale. The bar drives mpv's `volume` directly,
+    // and mpv's `volume-max` is set to match in `MpvVideoItem`.
+    // Boost above 100 % is intentional — useful for low-loudness
+    // sources (poorly mastered music, quiet dialogue tracks).
+    readonly property real volumeMaxPercent: 150
 
     // Shared stroke width for PathSvg-based icon glyphs in
     // IconGlyph.qml. Centralised so a future "thicker icons" pass

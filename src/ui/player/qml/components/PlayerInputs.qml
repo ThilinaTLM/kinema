@@ -102,7 +102,7 @@ QtObject {
         case Qt.Key_Equal:    // unshifted '+' on most layouts
             if (root.mpv) {
                 root.mpv.setVolumePercent(
-                    Math.min(100, root.mpv.volume + 5));
+                    Math.min(150, root.mpv.volume + 5));
             }
             event.accepted = true;
             break;
@@ -152,7 +152,7 @@ QtObject {
         if (!root.mpv) return;
         const step = angleDeltaY > 0 ? 5 : -5;
         root.mpv.setVolumePercent(
-            Math.max(0, Math.min(100, root.mpv.volume + step)));
+            Math.max(0, Math.min(150, root.mpv.volume + step)));
         root.activity();
     }
 }

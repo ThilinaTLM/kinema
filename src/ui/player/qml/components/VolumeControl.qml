@@ -13,15 +13,17 @@ import dev.tlmtech.kinema.player
  *   │░░░│
  *   │┄┄┄│  dotted handle line at the played boundary
  *   │▓▓▓│  played fill anchored to bottom (solid white)
- *   │ 75│  centred volume number, dual-colour clipped
  *   │▓▓▓│
+ *   │ 75│  volume number anchored to the inner bottom
  *   └───┘
  *
- * Drag, click and mouse-wheel scrub the value. Mute is owned by an
- * external speaker `IconButton` (sits below this widget in the
- * scene); when `muted` is true the played fill collapses to zero
- * regardless of `volumePercent` so the visual matches what the
- * user actually hears.
+ * Drag, click and mouse-wheel scrub the value over the
+ * `0 — Theme.volumeMaxPercent` range (150 % allows soft boost for
+ * quiet sources; mpv's `volume-max` is raised to match). Mute is
+ * owned by an external speaker `IconButton` (sits below this
+ * widget in the scene); when `muted` is true the played fill
+ * collapses to zero regardless of `volumePercent` so the visual
+ * matches what the user actually hears.
  *
  * Stateless: `volumePercent` + `muted` in, `volumeChanged(v)` out.
  */
@@ -33,7 +35,10 @@ Item {
     signal volumeChanged(double v)
 
     readonly property double _ratio:
-        muted ? 0 : Math.max(0, Math.min(1, volumePercent / 100))
+        muted
+            ? 0
+            : Math.max(0, Math.min(1,
+                volumePercent / Theme.volumeMaxPercent))
 
     implicitWidth: Theme.volumeBarWidth
     implicitHeight: Theme.volumeBarHeight
@@ -89,10 +94,16 @@ Item {
     }
 
     // ---- Internal volume number (dual-colour clipping) ------------
+    // Anchored to the inner bottom of the bar with a small inset.
     // Same trick as SeekBar's time labels: render the same Text
-    // twice, each clipped to one half of the boundary, so the
-    // number reads dark over the white played fill and light over
-    // the dim rest.
+    // twice, each clipped to one side of the played boundary, so
+    // the number reads dark over the white played fill and light
+    // over the dim rest. The on-played copy is what the user sees
+    // virtually all of the time — the on-rest copy only shows up
+    // when the played fill is shorter than the label's bottom
+    // inset (i.e. roughly volume == 0 or muted).
+    readonly property real _labelBottomInset: Theme.spacingSm
+
     Item {
         id: textOnRest
         anchors.left: parent.left
@@ -102,10 +113,10 @@ Item {
         clip: true
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            // Anchor to the bar's centre, not this clip Item's, so
-            // the value text stays centred regardless of which
-            // side currently owns more of the bar.
-            y: root.height / 2 - height / 2
+            // Anchor to the bar's inner bottom, not this clip
+            // Item's, so the value stays put as the played
+            // boundary slides.
+            y: root.height - height - root._labelBottomInset
             color: Theme.trackTextOnRest
             font: Theme.tabularSmallFont
             text: Math.round(root.volumePercent)
@@ -120,7 +131,10 @@ Item {
         clip: true
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            y: root.height / 2 - height / 2 - (root.height - root._playedHeight)
+            // Inverse offset so the rest-side copy and the
+            // played-side copy land at the same screen y.
+            y: (root.height - height - root._labelBottomInset)
+               - (root.height - root._playedHeight)
             color: Theme.trackTextOnPlayed
             font: Theme.tabularSmallFont
             text: Math.round(root.volumePercent)
@@ -140,14 +154,16 @@ Item {
         onWheel: wheel => {
             const step = wheel.angleDelta.y > 0 ? 5 : -5;
             root.volumeChanged(
-                Math.max(0, Math.min(100, root.volumePercent + step)));
+                Math.max(0,
+                    Math.min(Theme.volumeMaxPercent,
+                        root.volumePercent + step)));
             wheel.accepted = true;
         }
         function _set(y) {
-            // Invert: y=0 is top (=100 %), y=height is bottom (=0 %).
+            // Invert: y=0 is top (= max %), y=height is bottom (=0 %).
             const ratio = 1 - Math.max(0,
                 Math.min(1, y / Math.max(1, root.height)));
-            root.volumeChanged(ratio * 100);
+            root.volumeChanged(ratio * Theme.volumeMaxPercent);
         }
     }
 }

@@ -182,6 +182,11 @@ void MpvVideoItem::applySettings(const config::PlayerSettings& settings)
     setProperty(QStringLiteral("ytdl"), false);
     setProperty(QStringLiteral("keep-open"), false);
 
+    // Soft volume boost. mpv's default `volume-max` is 130; raise
+    // it to 150 so the chrome's 0–150 % volume bar can drive the
+    // full range without mpv clamping the value back.
+    setProperty(QStringLiteral("volume-max"), 150.0);
+
     // Load the shipped mpv.conf if present. mpvqt has already done
     // mpv_initialize; we use mpv's `include` option which still
     // accepts a runtime push.
@@ -272,7 +277,9 @@ void MpvVideoItem::seekRelative(double seconds)
 
 void MpvVideoItem::setVolumePercent(double v)
 {
-    v = qBound(0.0, v, 100.0);
+    // Allow soft volume boost up to 150 %. mpv's `volume-max` is
+    // raised to match in `applySettings`.
+    v = qBound(0.0, v, 150.0);
     setProperty(QStringLiteral("volume"), v);
 }
 
