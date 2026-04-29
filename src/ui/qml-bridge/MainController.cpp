@@ -13,6 +13,7 @@
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/PlaybackController.h"
 #endif
+#include "controllers/PlayQueueController.h"
 #include "controllers/SubtitleController.h"
 #include "controllers/TokenController.h"
 #include "controllers/TrayController.h"
@@ -20,6 +21,7 @@
 #include "core/HistoryStore.h"
 #include "core/HttpClient.h"
 #include "core/PlayerLauncher.h"
+#include "core/PlayQueueStore.h"
 #include "core/SubtitleCacheStore.h"
 #include "core/TokenStore.h"
 #include "kinema_debug.h"
@@ -32,6 +34,7 @@
 #include "ui/qml-bridge/EpisodesListModel.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
+#include "ui/qml-bridge/PlayQueueViewModel.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
 #include "ui/qml-bridge/SeriesDetailViewModel.h"
@@ -283,6 +286,8 @@ void MainController::buildCoreServices()
     }
     m_history = std::make_unique<core::HistoryStore>(*m_db, this);
     m_history->runRetentionPass();
+    m_playQueueStore = std::make_unique<core::PlayQueueStore>(
+        *m_db, this);
     m_subtitleCache
         = std::make_unique<core::SubtitleCacheStore>(*m_db, this);
 
@@ -326,6 +331,15 @@ void MainController::buildCoreServices()
     m_streamActions->setHistoryController(m_historyCtrl);
     m_historyCtrl->setStreamActions(m_streamActions);
 
+    // Play queue controller. Built after StreamActions and the
+    // history controller because it composes both: queued items
+    // re-resolve through Torrentio, hand off through StreamActions,
+    // and inherit history's resume-position lookup.
+    m_playQueueCtrl = new controllers::PlayQueueController(
+        *m_playQueueStore, *m_torrentio, *m_streamActions, m_settings,
+        m_tokenCtrl->realDebridToken(), this);
+    m_playQueueVm = new PlayQueueViewModel(m_playQueueCtrl, this);
+
     // Discover / Search / Browse surface VMs. They sit on top of
     // the existing service graph; action signals route back into
     // `MainController` either for direct controller forwarding
@@ -340,9 +354,11 @@ void MainController::buildCoreServices()
     m_movieDetailVm = new MovieDetailViewModel(m_cinemeta,
         m_torrentio, m_tmdb, m_streamActions, m_tokenCtrl,
         m_settings, m_tokenCtrl->realDebridToken(), this);
+    m_movieDetailVm->setPlayQueue(m_playQueueCtrl);
     m_seriesDetailVm = new SeriesDetailViewModel(m_cinemeta,
         m_torrentio, m_tmdb, m_streamActions, m_tokenCtrl,
         m_settings, m_tokenCtrl->realDebridToken(), this);
+    m_seriesDetailVm->setPlayQueue(m_playQueueCtrl);
 
     // TMDB token gain/loss propagates from `TokenController` to
     // both the Discover VM (which already handles it internally)
@@ -547,6 +563,35 @@ void MainController::wireStatusForwarding()
     connect(m_historyCtrl,
         &controllers::HistoryController::statusMessage, this,
         &MainController::passiveMessage);
+    connect(m_playQueueCtrl,
+        &controllers::PlayQueueController::statusMessage, this,
+        &MainController::passiveMessage);
+#ifdef KINEMA_HAVE_LIBMPV
+    // Embedded auto-advance + pause-on-user-close. Wired here
+    // because both signals only exist on the libmpv-built
+    // PlaybackController. The queue controller exposes plain slots
+    // so it itself doesn't depend on libmpv.
+    if (m_playbackCtrl) {
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::endOfFile,
+            m_playQueueCtrl,
+            &controllers::PlayQueueController::onPlayerEndOfFile);
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::userClosedWindow,
+            m_playQueueCtrl,
+            [this](const api::PlaybackContext&) {
+                m_playQueueCtrl->onPlayerUserClosed();
+            });
+    }
+    // When the queue empties, hide the player window.
+    connect(m_playQueueCtrl,
+        &controllers::PlayQueueController::windowCloseRequested,
+        this, [this] {
+            if (m_playerWindow) {
+                m_playerWindow->stopAndHide();
+            }
+        });
+#endif
 #ifdef KINEMA_HAVE_LIBMPV
     connect(m_playbackCtrl,
         &controllers::PlaybackController::statusMessage, this,
@@ -598,42 +643,21 @@ void MainController::wireTray()
 }
 
 #ifdef KINEMA_HAVE_LIBMPV
-void MainController::openEmbeddedPlayer(const QUrl& url,
-    const api::PlaybackContext& ctx)
+ui::player::PlayerWindow* MainController::ensurePlayerWindow()
 {
-    // Each playback gets its own `PlayerWindow` (and therefore its
-    // own libmpv context). Tear down any prior instance first so
-    // there is no carry-over of mpv state, picker selections, or
-    // chrome view-model values between sessions.
     if (m_playerWindow) {
-        // Detach all subscribers from the doomed window. Tray /
-        // history hold raw pointers, so they must be cleared
-        // explicitly; PlaybackController's own destroyed-handler
-        // would clear it eventually, but we drive the cleanup here
-        // synchronously so the new window's wiring lands on a
-        // fully detached graph.
-        if (m_tray) {
-            m_tray->setPlayerWindow(nullptr);
-        }
-        if (m_historyCtrl) {
-            m_historyCtrl->setPlayerWindow(nullptr);
-        }
-        if (m_playbackCtrl) {
-            m_playbackCtrl->setPlayerWindow(nullptr);
-        }
-        auto* doomed = m_playerWindow;
-        m_playerWindow = nullptr;
-        doomed->stopAndHide();
-        doomed->deleteLater();
+        return m_playerWindow;
     }
 
     m_playerWindow = new ui::player::PlayerWindow(
         m_settings.appearance(), m_settings.player(), m_window);
 
-    // The window self-destructs from `closeEvent` so the user X
-    // button drops the libmpv context for real. Clear our caches
-    // when that happens; the next `openEmbeddedPlayer` call will
-    // build a fresh window from scratch.
+    // The window persists across queue items now — closing it via
+    // the X button hides it and clears playback state, but keeps
+    // the libmpv context alive for the next item. We only react
+    // to `destroyed()` for the application-shutdown case (the
+    // window is parented to `m_window`, so it dies when the main
+    // window dies).
     connect(m_playerWindow, &QObject::destroyed, this,
         [this](QObject* obj) {
             if (obj != m_playerWindow) {
@@ -646,8 +670,6 @@ void MainController::openEmbeddedPlayer(const QUrl& url,
             if (m_historyCtrl) {
                 m_historyCtrl->setPlayerWindow(nullptr);
             }
-            // PlaybackController auto-clears via its own destroyed
-            // hook; nothing to do here.
         });
 
     if (m_tray) {
@@ -744,6 +766,13 @@ void MainController::openEmbeddedPlayer(const QUrl& url,
             &ui::player::PlayerViewModel::setSubtitleDownloadEnabled);
     }
 
+    return m_playerWindow;
+}
+
+void MainController::openEmbeddedPlayer(const QUrl& url,
+    const api::PlaybackContext& ctx)
+{
+    ensurePlayerWindow();
     if (m_playbackCtrl) {
         m_playbackCtrl->play(url, ctx);
     }
@@ -799,6 +828,7 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(EpisodesListModel);
     KINEMA_REGISTER_QML_TYPE(SubtitlesViewModel);
     KINEMA_REGISTER_QML_TYPE(SubtitleResultsModel);
+    KINEMA_REGISTER_QML_TYPE(PlayQueueViewModel);
     KINEMA_REGISTER_QML_TYPE(SettingsRootViewModel);
     KINEMA_REGISTER_QML_TYPE(GeneralSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(TmdbSettingsViewModel);
@@ -821,6 +851,7 @@ void MainController::exposeContextProperties(
         { "seriesDetailVm", m_seriesDetailVm },
         { "subtitlesVm", m_subtitlesVm },
         { "settingsVm", m_settingsVm },
+        { "playQueue", m_playQueueVm },
     };
     for (const auto& [name, obj] : contextProps) {
         rootCtx->setContextProperty(QString::fromLatin1(name), obj);

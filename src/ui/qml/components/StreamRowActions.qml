@@ -32,10 +32,22 @@ QQC2.Menu {
     property var vm: movieDetailVm
 
     QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "&Play")
+        text: i18nc("@action:inmenu", "&Play now")
         icon.name: "media-playback-start"
         enabled: menu.hasDirectUrl
-        onTriggered: menu.vm.play(menu.row)
+        onTriggered: menu.vm.playNow(menu.row)
+    }
+    QQC2.MenuItem {
+        text: i18nc("@action:inmenu", "Play &next")
+        icon.name: "media-skip-forward"
+        enabled: menu.hasDirectUrl
+        onTriggered: menu.vm.playNext(menu.row)
+    }
+    QQC2.MenuItem {
+        text: i18nc("@action:inmenu", "Add to &queue")
+        icon.name: "list-add"
+        enabled: menu.hasDirectUrl
+        onTriggered: menu.vm.enqueue(menu.row)
     }
     QQC2.MenuSeparator { }
     QQC2.MenuItem {

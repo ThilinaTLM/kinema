@@ -31,6 +31,7 @@ class Database;
 class HistoryStore;
 class HttpClient;
 class PlayerLauncher;
+class PlayQueueStore;
 class SubtitleCacheStore;
 class TokenStore;
 }
@@ -38,6 +39,7 @@ class TokenStore;
 namespace kinema::controllers {
 class HistoryController;
 class PlaybackController;
+class PlayQueueController;
 class SubtitleController;
 class TokenController;
 class TrayController;
@@ -60,6 +62,7 @@ class BrowseViewModel;
 class ContinueWatchingViewModel;
 class DiscoverViewModel;
 class MovieDetailViewModel;
+class PlayQueueViewModel;
 class SearchViewModel;
 class SeriesDetailViewModel;
 class SubtitlesViewModel;
@@ -224,9 +227,19 @@ private:
     void wireStatusForwarding();
     void wireTray();
 #ifdef KINEMA_HAVE_LIBMPV
-    /// Lazily build the embedded player window and forward the
-    /// play request. Wired to `PlayerLauncher::embeddedRequested`
-    /// the same way `MainWindow::openEmbeddedPlayer` was.
+    /// Lazily build the embedded player window the first time it
+    /// is needed and reuse the same instance for every queue item
+    /// in the session. Wires tray / history / playback / subtitles
+    /// once on creation; subsequent calls are a no-op fast path.
+    /// Returns the live window pointer.
+    ui::player::PlayerWindow* ensurePlayerWindow();
+
+    /// Forward a play request to the embedded window. Used by the
+    /// `PlayerLauncher::embeddedRequested` connection. Routes
+    /// through `PlaybackController::play` like before, but no
+    /// longer tears down the previous window — the queue
+    /// controller drives sequential playback by handing off the
+    /// next URL into the same libmpv context.
     void openEmbeddedPlayer(const QUrl& url,
         const api::PlaybackContext& ctx);
 
@@ -248,6 +261,7 @@ private:
     std::unique_ptr<core::PlayerLauncher> m_player;
     std::unique_ptr<core::Database> m_db;
     std::unique_ptr<core::HistoryStore> m_history;
+    std::unique_ptr<core::PlayQueueStore> m_playQueueStore;
     std::unique_ptr<core::SubtitleCacheStore> m_subtitleCache;
 
     // QObject-parented to this controller.
@@ -260,6 +274,7 @@ private:
     services::StreamActions* m_streamActions {};
     controllers::TokenController* m_tokenCtrl {};
     controllers::HistoryController* m_historyCtrl {};
+    controllers::PlayQueueController* m_playQueueCtrl {};
     controllers::SubtitleController* m_subtitleCtrl {};
     controllers::TrayController* m_tray {};
 
@@ -274,6 +289,7 @@ private:
     SeriesDetailViewModel* m_seriesDetailVm {};
     SubtitlesViewModel* m_subtitlesVm {};
     SettingsRootViewModel* m_settingsVm {};
+    PlayQueueViewModel* m_playQueueVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::PlaybackController* m_playbackCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};

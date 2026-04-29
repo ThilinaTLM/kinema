@@ -181,6 +181,8 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
                 m_window->setSpeed(s);
             }
         });
+    connect(m_window, &ui::player::PlayerWindow::userClosedWindow,
+        this, [this] { Q_EMIT userClosedWindow(m_ctx); });
     connect(m_window, &QObject::destroyed, this, [this](QObject* obj) {
         if (obj == m_window) {
             m_window = nullptr;

@@ -191,7 +191,15 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
                 this, &PlayerWindow::mpvError);
             connect(video, &MpvVideoItem::endOfFile,
                 this, [this](const QString& reason) {
-                    stopAndHide();
+                    // Forward the reason; let the queue controller
+                    // (or whoever is wired in) decide whether to
+                    // load the next file in place or hide the
+                    // window. Fallback for the no-receiver case:
+                    // stopAndHide so the window doesn't sit on a
+                    // black frame indefinitely.
+                    if (receivers(SIGNAL(endOfFile(QString))) <= 0) {
+                        stopAndHide();
+                    }
                     Q_EMIT endOfFile(reason);
                 });
             connect(video, &MpvVideoItem::positionChanged,
@@ -343,13 +351,16 @@ void PlayerWindow::closeEvent(QCloseEvent* e)
 {
     saveGeometryToConfig();
     saveVolumeToConfig();
+    // Notify subscribers BEFORE stopping mpv. The queue controller
+    // listens here to flag the active item as user-paused so the
+    // subsequent `endOfFile("stop")` it receives doesn't trigger
+    // auto-advance.
+    Q_EMIT userClosedWindow();
     stopAndHide();
     e->accept();
-    // The player window is one-shot: each playback gets its own
-    // libmpv context, so we tear ourselves down on close. The host
-    // (MainController) listens for `destroyed()` and will rebuild
-    // a fresh window for the next play request.
-    deleteLater();
+    // Window is no longer one-shot: with the play queue we keep
+    // a persistent libmpv context across queue items. The host
+    // (`MainController`) destroys us only when it destroys itself.
 }
 
 void PlayerWindow::keyPressEvent(QKeyEvent* e)

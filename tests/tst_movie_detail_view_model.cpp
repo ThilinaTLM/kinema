@@ -335,7 +335,7 @@ private Q_SLOTS:
 
         QSignalSpy spy(&f.vm,
             &MovieDetailViewModel::statusMessage);
-        f.vm.play(0);
+        f.vm.playNow(0);
         QCOMPARE(spy.count(), 1);
     }
 

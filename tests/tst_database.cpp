@@ -38,7 +38,7 @@ private Q_SLOTS:
         QVERIFY(db.open());
         QVERIFY(db.isOpen());
         QCOMPARE(db.currentSchemaVersion(), Database::latestSchemaVersion());
-        QCOMPARE(db.currentSchemaVersion(), 3);
+        QCOMPARE(db.currentSchemaVersion(), 4);
 
         // history table must exist and have the key column.
         auto q = db.query();
@@ -87,7 +87,7 @@ private Q_SLOTS:
         {
             Database db(m_path, nullptr);
             QVERIFY(db.open());
-            QCOMPARE(db.currentSchemaVersion(), 3);
+            QCOMPARE(db.currentSchemaVersion(), 4);
         }
     }
 
@@ -109,7 +109,7 @@ private Q_SLOTS:
     {
         Database db(QStringLiteral(":memory:"), nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 3);
+        QCOMPARE(db.currentSchemaVersion(), 4);
     }
 
     // ---- Corrupt file is quarantined and a fresh DB is created ---------
@@ -127,7 +127,7 @@ private Q_SLOTS:
 
         Database db(m_path, nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 3);
+        QCOMPARE(db.currentSchemaVersion(), 4);
 
         // A file named *.corrupt-* should now exist next to the fresh DB.
         const QFileInfo fi(m_path);

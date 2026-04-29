@@ -112,6 +112,13 @@ Q_SIGNALS:
     /// the tray context menu.
     void visibilityChanged(bool visible);
 
+    /// Emitted from `closeEvent` (the user clicking the window's
+    /// close button) before `stopAndHide` runs. Lets the queue
+    /// controller distinguish a user-initiated close from a
+    /// natural end-of-file event so it can pause the queue
+    /// instead of auto-advancing.
+    void userClosedWindow();
+
     // User-action signals re-emitted from PlayerViewModel.
     // PlaybackController consumes these eight to drive the resume,
     // skip-chapter, next-episode, and picker flows.

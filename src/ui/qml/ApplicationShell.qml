@@ -124,6 +124,16 @@ Kirigami.ApplicationWindow {
                 checkable: true
                 checked: root.currentNavKey === "browse"
                 onTriggered: root.showPage("browse")
+            },
+            Kirigami.Action {
+                icon.name: "view-media-playlist"
+                text: playQueue.count > 0
+                    ? i18nc("@action drawer entry, %1 is row count",
+                        "Queue (%1)", playQueue.count)
+                    : i18nc("@action drawer entry", "Queue")
+                checkable: true
+                checked: root.currentNavKey === "queue"
+                onTriggered: root.showPage("queue")
             }
         ]
 
@@ -305,6 +315,9 @@ Kirigami.ApplicationWindow {
         case "browse":
             root.setTopLevelPage(browseComp, {});
             break;
+        case "queue":
+            root.setTopLevelPage(queueComp, {});
+            break;
         }
     }
 
@@ -316,6 +329,7 @@ Kirigami.ApplicationWindow {
     Component { id: discoverComp; DiscoverPage { } }
     Component { id: searchComp;   SearchPage   { } }
     Component { id: browseComp;   BrowsePage   { } }
+    Component { id: queueComp;    QueuePage    { } }
 
     // Detail pages are pushed on top of the current nav page so Esc
     // pops back to it with state preserved (the shell-level Esc

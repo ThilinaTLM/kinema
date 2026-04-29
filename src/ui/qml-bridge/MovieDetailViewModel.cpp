@@ -9,6 +9,7 @@
 #include "config/AppSettings.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
+#include "controllers/PlayQueueController.h"
 #include "controllers/TokenController.h"
 #include "core/DateFormat.h"
 #include "core/HttpError.h"
@@ -542,11 +543,13 @@ void MovieDetailViewModel::requestStreams()
     Q_EMIT streamsRequested();
 }
 
-void MovieDetailViewModel::play(int row)
+void MovieDetailViewModel::setPlayQueue(controllers::PlayQueueController* queue)
 {
-    if (!m_actions) {
-        return;
-    }
+    m_queue = queue;
+}
+
+void MovieDetailViewModel::playNow(int row)
+{
     const auto* s = m_streams->at(row);
     if (!s) {
         return;
@@ -558,7 +561,28 @@ void MovieDetailViewModel::play(int row)
             4000);
         return;
     }
-    m_actions->play(*s, currentContext());
+    if (!m_queue) {
+        return;
+    }
+    m_queue->playNow(*s, currentContext());
+}
+
+void MovieDetailViewModel::playNext(int row)
+{
+    const auto* s = m_streams->at(row);
+    if (!s || s->directUrl.isEmpty() || !m_queue) {
+        return;
+    }
+    m_queue->playNext(*s, currentContext());
+}
+
+void MovieDetailViewModel::enqueue(int row)
+{
+    const auto* s = m_streams->at(row);
+    if (!s || s->directUrl.isEmpty() || !m_queue) {
+        return;
+    }
+    m_queue->enqueue(*s, currentContext());
 }
 
 template <typename Method>

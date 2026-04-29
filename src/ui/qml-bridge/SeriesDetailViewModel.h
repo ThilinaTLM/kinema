@@ -31,6 +31,7 @@ class TorrentioSettings;
 }
 
 namespace kinema::controllers {
+class PlayQueueController;
 class TokenController;
 }
 
@@ -222,8 +223,15 @@ public Q_SLOTS:
     /// selected.
     void requestStreams();
 
+    /// Wire the queue controller. Two-phase init like the movie
+    /// detail VM. Safe to leave unset for tests.
+    void setPlayQueue(controllers::PlayQueueController* queue);
+
     /// Per-row action handlers driven by `StreamCard.qml`'s ⋮ menu.
-    void play(int row);
+    /// Each routes through `controllers::PlayQueueController`.
+    void playNow(int row);
+    void playNext(int row);
+    void enqueue(int row);
     void copyMagnet(int row);
     void openMagnet(int row);
     void copyDirectUrl(int row);
@@ -296,6 +304,7 @@ private:
     api::TorrentioClient* m_torrentio;
     api::TmdbClient* m_tmdb;
     services::StreamActions* m_actions;
+    controllers::PlayQueueController* m_queue {};
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;
     const QString& m_rdToken;

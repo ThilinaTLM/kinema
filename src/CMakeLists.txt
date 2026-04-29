@@ -33,6 +33,7 @@ set(kinema_core_SRCS
     core/MpvTrackList.cpp
     core/Player.cpp
     core/PlayerLauncher.cpp
+    core/PlayQueueStore.cpp
     core/StreamFilter.cpp
     core/StreamTokens.cpp
     core/SubtitleCacheStore.cpp
@@ -58,6 +59,7 @@ set(kinema_core_SRCS
     app/KinemaApplication.cpp
 
     controllers/HistoryController.cpp
+    controllers/PlayQueueController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
@@ -72,6 +74,7 @@ set(kinema_core_SRCS
     ui/qml-bridge/KinemaImageProvider.cpp
     ui/qml-bridge/MainController.cpp
     ui/qml-bridge/MovieDetailViewModel.cpp
+    ui/qml-bridge/PlayQueueViewModel.cpp
     ui/qml-bridge/ResultsListModel.cpp
     ui/qml-bridge/SearchViewModel.cpp
     ui/qml-bridge/SeriesDetailViewModel.cpp
@@ -195,6 +198,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/PosterCard.qml
         ui/qml/components/PosterGrid.qml
         ui/qml/components/ProgressPosterCard.qml
+        ui/qml/components/QueueRow.qml
         ui/qml/components/RatingChip.qml
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
@@ -207,6 +211,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
         ui/qml/pages/MovieDetailPage.qml
+        ui/qml/pages/QueuePage.qml
         ui/qml/pages/SearchPage.qml
         ui/qml/pages/SeriesDetailPage.qml
         ui/qml/pages/StreamsPage.qml

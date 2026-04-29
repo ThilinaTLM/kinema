@@ -73,6 +73,10 @@ Q_SIGNALS:
     void playbackError(const QString& reason, const api::PlaybackContext& ctx);
     void endOfFile(const QString& reason, const api::PlaybackContext& ctx);
     void visibilityChanged(bool visible);
+    /// Re-emitted from `PlayerWindow::userClosedWindow`. Distinguishes
+    /// a user-initiated window close from a natural end-of-file so
+    /// downstream (queue) controllers can pause instead of advance.
+    void userClosedWindow(const api::PlaybackContext& ctx);
 
     /// Best-effort moviehash for the active stream. Empty hex when
     /// the hoster doesn't expose Content-Length or the Range probe

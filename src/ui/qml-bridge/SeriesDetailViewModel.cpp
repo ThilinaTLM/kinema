@@ -15,6 +15,7 @@
 #include "core/HttpErrorPresenter.h"
 #include "core/StreamFilter.h"
 #include "kinema_debug.h"
+#include "controllers/PlayQueueController.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/StreamSorting.h"
@@ -729,11 +730,13 @@ api::PlaybackContext SeriesDetailViewModel::currentContext() const
     return ctx;
 }
 
-void SeriesDetailViewModel::play(int row)
+void SeriesDetailViewModel::setPlayQueue(controllers::PlayQueueController* queue)
 {
-    if (!m_actions) {
-        return;
-    }
+    m_queue = queue;
+}
+
+void SeriesDetailViewModel::playNow(int row)
+{
     const auto* s = m_streams->at(row);
     if (!s) {
         return;
@@ -745,7 +748,28 @@ void SeriesDetailViewModel::play(int row)
             4000);
         return;
     }
-    m_actions->play(*s, currentContext());
+    if (!m_queue) {
+        return;
+    }
+    m_queue->playNow(*s, currentContext());
+}
+
+void SeriesDetailViewModel::playNext(int row)
+{
+    const auto* s = m_streams->at(row);
+    if (!s || s->directUrl.isEmpty() || !m_queue) {
+        return;
+    }
+    m_queue->playNext(*s, currentContext());
+}
+
+void SeriesDetailViewModel::enqueue(int row)
+{
+    const auto* s = m_streams->at(row);
+    if (!s || s->directUrl.isEmpty() || !m_queue) {
+        return;
+    }
+    m_queue->enqueue(*s, currentContext());
 }
 
 template <typename Method>

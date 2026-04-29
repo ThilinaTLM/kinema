@@ -66,7 +66,10 @@ QQC2.ItemDelegate {
 
     function _activatePrimary() {
         if (card.hasDirectUrl) {
-            card.vm.play(card.row);
+            // Primary button = "Play now". The queue controller
+            // displaces any currently-playing item to slot 2 and
+            // starts the new one immediately.
+            card.vm.playNow(card.row);
         } else if (card.hasMagnet) {
             card.vm.openMagnet(card.row);
         }
@@ -234,7 +237,8 @@ QQC2.ItemDelegate {
                     ? "media-playback-start"
                     : "document-open"
                 text: card.hasDirectUrl
-                    ? i18nc("@action:button primary stream action", "Play")
+                    ? i18nc("@action:button primary stream action",
+                        "Play now")
                     : i18nc("@action:button primary stream action",
                         "Open magnet")
                 display: QQC2.AbstractButton.TextBesideIcon
