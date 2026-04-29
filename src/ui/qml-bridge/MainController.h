@@ -38,6 +38,7 @@ class TokenStore;
 
 namespace kinema::controllers {
 class HistoryController;
+class MprisController;
 class PlaybackController;
 class PlayQueueController;
 class SubtitleController;
@@ -291,6 +292,7 @@ private:
     SettingsRootViewModel* m_settingsVm {};
     PlayQueueViewModel* m_playQueueVm {};
 #ifdef KINEMA_HAVE_LIBMPV
+    controllers::MprisController* m_mprisCtrl {};
     controllers::PlaybackController* m_playbackCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};
 #endif

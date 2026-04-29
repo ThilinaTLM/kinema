@@ -211,6 +211,16 @@ ecm_add_test(tst_media_chips.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_mpris_metadata.cpp
+    TEST_NAME tst_mpris_metadata
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::DBus
+)
+
+ecm_add_test(tst_idle_inhibitor.cpp
+    TEST_NAME tst_idle_inhibitor
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::DBus
+)
+
 ecm_add_test(tst_main_controller_close_logic.cpp
     TEST_NAME tst_main_controller_close_logic
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -267,7 +277,8 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_subtitle_cache_store tst_cache_paths tst_language
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
          tst_mpv_config_paths tst_mpv_track_list_parse
-         tst_media_chips tst_main_controller_close_logic
+         tst_media_chips tst_mpris_metadata tst_idle_inhibitor
+         tst_main_controller_close_logic
          tst_discover_view_model tst_continue_watching_view_model
          tst_application_boot)
     target_compile_definitions(${t} PRIVATE ${test_defs})

@@ -24,10 +24,12 @@ set(kinema_core_SRCS
     core/HistoryStore.cpp
     core/HttpClient.cpp
     core/HttpErrorPresenter.cpp
+    core/IdleInhibitor.cpp
     core/Language.cpp
     core/Magnet.cpp
     core/MediaChips.cpp
     core/Moviehash.cpp
+    core/MprisMetadata.cpp
     core/MpvChapterList.cpp
     core/MpvConfigPaths.cpp
     core/MpvTrackList.cpp
@@ -95,6 +97,7 @@ set(kinema_core_SRCS
 # scripts; no IPC bridge.
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
+        controllers/MprisController.cpp
         controllers/PlaybackController.cpp
         ui/player/AudioTracksModel.cpp
         ui/player/ChaptersModel.cpp
@@ -133,6 +136,7 @@ set_target_properties(kinema_core PROPERTIES
 target_link_libraries(kinema_core
     PUBLIC
         Qt6::Core
+        Qt6::DBus
         Qt6::Gui
         Qt6::Widgets
         Qt6::Network

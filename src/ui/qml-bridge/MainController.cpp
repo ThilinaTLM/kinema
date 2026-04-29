@@ -11,6 +11,7 @@
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
+#include "controllers/MprisController.h"
 #include "controllers/PlaybackController.h"
 #endif
 #include "controllers/PlayQueueController.h"
@@ -520,6 +521,24 @@ void MainController::buildCoreServices()
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
         *m_historyCtrl, m_settings, m_http.get(), this);
+    m_mprisCtrl = new controllers::MprisController(
+        *m_playbackCtrl, m_playQueueCtrl, this);
+    connect(m_mprisCtrl, &controllers::MprisController::raiseRequested,
+        this, [this] {
+            if (m_playerWindow && m_playerWindow->hasEverLoaded()) {
+                m_playerWindow->show();
+                m_playerWindow->raise();
+                m_playerWindow->requestActivate();
+                return;
+            }
+            if (m_window) {
+                m_window->setVisible(true);
+                m_window->raise();
+                m_window->requestActivate();
+            }
+        });
+    connect(m_mprisCtrl, &controllers::MprisController::quitRequested,
+        this, &MainController::requestQuit);
     if (m_subtitleCtrl) {
         connect(m_playbackCtrl,
             &controllers::PlaybackController::moviehashComputed,

@@ -22,6 +22,13 @@
 
 namespace kinema::controllers {
 
+bool PlaybackController::isActivelyPlaying() const noexcept
+{
+    return m_hasActiveSession
+        && m_phase == Phase::Playing
+        && !m_paused;
+}
+
 namespace {
 
 QString selectedTrackLang(const core::tracks::TrackList& tracks,
@@ -133,6 +140,11 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
         ++m_streamEpoch;
         Q_EMIT streamCleared();
         m_phase = Phase::Idle;
+        m_hasActiveSession = false;
+        m_paused = false;
+        m_position = 0.0;
+        m_duration = 0.0;
+        Q_EMIT sessionStateChanged();
         return;
     }
 
@@ -146,6 +158,12 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
         this, &PlaybackController::onPositionChanged);
     connect(m_window, &ui::player::PlayerWindow::durationChanged,
         this, &PlaybackController::onDurationChanged);
+    connect(m_window, &ui::player::PlayerWindow::pausedChanged,
+        this, &PlaybackController::onPausedChanged);
+    connect(m_window, &ui::player::PlayerWindow::volumeChanged,
+        this, &PlaybackController::onVolumeChanged);
+    connect(m_window, &ui::player::PlayerWindow::speedChanged,
+        this, &PlaybackController::onSpeedChanged);
     connect(m_window, &ui::player::PlayerWindow::visibilityChanged,
         this, &PlaybackController::visibilityChanged);
     connect(m_window, &ui::player::PlayerWindow::trackListChanged,
@@ -187,6 +205,11 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
         if (obj == m_window) {
             m_window = nullptr;
             m_phase = Phase::Idle;
+            m_hasActiveSession = false;
+            m_paused = false;
+            m_position = 0.0;
+            m_duration = 0.0;
+            Q_EMIT sessionStateChanged();
         }
     });
 }
@@ -196,6 +219,8 @@ void PlaybackController::play(const QUrl& url,
 {
     m_ctx = ctx;
     m_duration = 0.0;
+    m_position = 0.0;
+    m_paused = false;
     m_trackMemoryApplied = false;
     m_pendingResumeSeconds = 0;
     m_skipChapterEnd = -1.0;
@@ -235,10 +260,84 @@ void PlaybackController::play(const QUrl& url,
     }
 
     m_phase = Phase::Loading;
+    m_hasActiveSession = true;
+    Q_EMIT sessionStateChanged();
     Q_EMIT statusMessage(
         i18nc("@info:status", "Loading “%1”…", ctx.title),
         3000);
     m_window->play(url, loadCtx);
+}
+
+void PlaybackController::pause()
+{
+    if (!m_window || !m_hasActiveSession) {
+        return;
+    }
+    m_window->setPaused(true);
+}
+
+void PlaybackController::resume()
+{
+    if (!m_window || !m_hasActiveSession) {
+        return;
+    }
+    m_window->setPaused(false);
+}
+
+void PlaybackController::playPause()
+{
+    if (!m_window || !m_hasActiveSession) {
+        return;
+    }
+    m_window->togglePause();
+}
+
+void PlaybackController::stop()
+{
+    if (!m_window || !m_hasActiveSession) {
+        return;
+    }
+    Q_EMIT userClosedWindow(m_ctx);
+    m_phase = Phase::Idle;
+    m_hasActiveSession = false;
+    m_paused = false;
+    m_position = 0.0;
+    Q_EMIT sessionStateChanged();
+    m_window->stopAndHide();
+}
+
+void PlaybackController::seekRelativeSeconds(double seconds)
+{
+    if (!m_window || !m_hasActiveSession) {
+        return;
+    }
+    m_window->seekRelative(seconds);
+    Q_EMIT seeked(m_position + seconds);
+}
+
+void PlaybackController::seekAbsoluteSeconds(double seconds)
+{
+    if (!m_window || !m_hasActiveSession || seconds < 0.0) {
+        return;
+    }
+    m_window->seekAbsolute(seconds);
+    Q_EMIT seeked(seconds);
+}
+
+void PlaybackController::setVolumePercent(double percent)
+{
+    if (!m_window || !m_hasActiveSession) {
+        return;
+    }
+    m_window->setVolumePercent(percent);
+}
+
+void PlaybackController::setPlaybackRate(double factor)
+{
+    if (!m_window || !m_hasActiveSession) {
+        return;
+    }
+    m_window->setSpeed(factor);
 }
 
 QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
@@ -319,11 +418,14 @@ void PlaybackController::onFileLoaded()
 {
     if (m_pendingResumeSeconds > 0 && m_window) {
         m_phase = Phase::ShowingResumePrompt;
+        m_paused = true;
         m_window->setPaused(true);
         m_window->showResumePrompt(m_pendingResumeSeconds);
     } else {
         m_phase = Phase::Playing;
+        m_paused = false;
     }
+    Q_EMIT sessionStateChanged();
     Q_EMIT fileLoaded(m_ctx);
 }
 
@@ -341,11 +443,16 @@ void PlaybackController::onEndOfFile(const QString& reason)
         m_window->hideResumePrompt();
     }
     m_phase = Phase::Idle;
+    m_hasActiveSession = false;
+    m_paused = false;
+    m_position = 0.0;
+    Q_EMIT sessionStateChanged();
     Q_EMIT endOfFile(reason, m_ctx);
 }
 
 void PlaybackController::onPositionChanged(double seconds)
 {
+    m_position = seconds;
     if (!m_window) {
         return;
     }
@@ -391,6 +498,34 @@ void PlaybackController::onPositionChanged(double seconds)
 void PlaybackController::onDurationChanged(double seconds)
 {
     m_duration = seconds;
+    Q_EMIT sessionStateChanged();
+}
+
+void PlaybackController::onPausedChanged(bool paused)
+{
+    if (m_paused == paused) {
+        return;
+    }
+    m_paused = paused;
+    Q_EMIT sessionStateChanged();
+}
+
+void PlaybackController::onVolumeChanged(double percent)
+{
+    if (qFuzzyCompare(m_volumePercent + 1.0, percent + 1.0)) {
+        return;
+    }
+    m_volumePercent = percent;
+    Q_EMIT sessionStateChanged();
+}
+
+void PlaybackController::onSpeedChanged(double factor)
+{
+    if (qFuzzyCompare(m_playbackRate + 1.0, factor + 1.0)) {
+        return;
+    }
+    m_playbackRate = factor;
+    Q_EMIT sessionStateChanged();
 }
 
 void PlaybackController::onTrackListChanged(
@@ -457,8 +592,11 @@ void PlaybackController::onResumeAccepted()
     }
     m_window->hideResumePrompt();
     m_window->seekAbsolute(static_cast<double>(seconds));
+    Q_EMIT seeked(static_cast<double>(seconds));
     m_window->setPaused(false);
+    m_paused = false;
     m_phase = Phase::Playing;
+    Q_EMIT sessionStateChanged();
 }
 
 void PlaybackController::onResumeDeclined()
@@ -470,8 +608,11 @@ void PlaybackController::onResumeDeclined()
     }
     m_window->hideResumePrompt();
     m_window->seekAbsolute(0.0);
+    Q_EMIT seeked(0.0);
     m_window->setPaused(false);
+    m_paused = false;
     m_phase = Phase::Playing;
+    Q_EMIT sessionStateChanged();
 }
 
 void PlaybackController::onSkipRequested()
@@ -481,6 +622,7 @@ void PlaybackController::onSkipRequested()
     }
     m_window->hideSkipChapter();
     m_window->seekAbsolute(m_skipChapterEnd + 0.25);
+    Q_EMIT seeked(m_skipChapterEnd + 0.25);
 }
 
 } // namespace kinema::controllers

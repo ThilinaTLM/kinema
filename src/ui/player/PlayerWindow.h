@@ -69,7 +69,10 @@ public:
 
     // Imperative control surface (matches the previous public API).
     virtual void setPaused(bool paused);
+    virtual void togglePause();
     virtual void seekAbsolute(double seconds);
+    virtual void seekRelative(double seconds);
+    virtual void setVolumePercent(double percent);
     virtual void setAudioTrack(int id);
     virtual void setSubtitleTrack(int id);
     /// Programmatic playback-speed setter, used by
@@ -85,6 +88,9 @@ public:
     void stopAndHide();
 
     bool hasEverLoaded() const noexcept { return m_hasEverLoaded; }
+    bool paused() const noexcept;
+    double volume() const noexcept;
+    double speed() const noexcept;
 
     /// Access the chrome view-model so wiring in `MainWindow` can
     /// hook subtitle-search signals through it without poking at
@@ -106,6 +112,9 @@ Q_SIGNALS:
     void mpvError(const QString& message);
     void positionChanged(double seconds);
     void durationChanged(double seconds);
+    void pausedChanged(bool paused);
+    void volumeChanged(double percent);
+    void speedChanged(double factor);
     void trackListChanged(const core::tracks::TrackList& tracks);
     void chaptersChanged(const core::chapters::ChapterList& chapters);
     /// Emitted from showEvent / hideEvent so MainWindow can refresh

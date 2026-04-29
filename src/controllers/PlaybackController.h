@@ -51,6 +51,14 @@ public:
     /// chrome view-model.
     ui::player::PlayerWindow* playerWindow() const noexcept { return m_window; }
 
+    double currentPositionSeconds() const noexcept { return m_position; }
+    double durationSeconds() const noexcept { return m_duration; }
+    bool isPaused() const noexcept { return m_paused; }
+    bool isActivelyPlaying() const noexcept;
+    double volumePercent() const noexcept { return m_volumePercent; }
+    double playbackRate() const noexcept { return m_playbackRate; }
+    bool hasActiveSession() const noexcept { return m_hasActiveSession; }
+
     /// The PlaybackKey of the actively loaded media. Falls back to
     /// a default-constructed (invalid) key when nothing is playing.
     const api::PlaybackKey& currentKey() const noexcept { return m_ctx.key; }
@@ -66,6 +74,14 @@ public Q_SLOTS:
     /// active context so later end-of-file / error signals carry media
     /// identity even after the detached window has hidden itself.
     void play(const QUrl& url, const api::PlaybackContext& ctx);
+    void pause();
+    void resume();
+    void playPause();
+    void stop();
+    void seekRelativeSeconds(double seconds);
+    void seekAbsoluteSeconds(double seconds);
+    void setVolumePercent(double percent);
+    void setPlaybackRate(double factor);
 
 Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
@@ -73,6 +89,8 @@ Q_SIGNALS:
     void playbackError(const QString& reason, const api::PlaybackContext& ctx);
     void endOfFile(const QString& reason, const api::PlaybackContext& ctx);
     void visibilityChanged(bool visible);
+    void sessionStateChanged();
+    void seeked(double seconds);
     /// Re-emitted from `PlayerWindow::userClosedWindow`. Distinguishes
     /// a user-initiated window close from a natural end-of-file so
     /// downstream (queue) controllers can pause instead of advance.
@@ -93,6 +111,9 @@ private Q_SLOTS:
     void onEndOfFile(const QString& reason);
     void onPositionChanged(double seconds);
     void onDurationChanged(double seconds);
+    void onPausedChanged(bool paused);
+    void onVolumeChanged(double percent);
+    void onSpeedChanged(double factor);
     void onTrackListChanged(const core::tracks::TrackList& tracks);
     void onChaptersChanged(const core::chapters::ChapterList& chapters);
     void onResumeAccepted();
@@ -121,6 +142,11 @@ private:
     double m_duration = 0.0;
     double m_skipChapterEnd = -1.0;
     bool m_trackMemoryApplied = false;
+    bool m_paused = false;
+    bool m_hasActiveSession = false;
+    double m_position = 0.0;
+    double m_volumePercent = 100.0;
+    double m_playbackRate = 1.0;
     quint64 m_epoch = 0;
     quint64 m_streamEpoch = 0;
 };

@@ -206,6 +206,12 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
                 this, &PlayerWindow::positionChanged);
             connect(video, &MpvVideoItem::durationChanged,
                 this, &PlayerWindow::durationChanged);
+            connect(video, &MpvVideoItem::pausedChanged,
+                this, &PlayerWindow::pausedChanged);
+            connect(video, &MpvVideoItem::volumeChanged,
+                this, &PlayerWindow::volumeChanged);
+            connect(video, &MpvVideoItem::speedChanged,
+                this, &PlayerWindow::speedChanged);
             connect(video, &MpvVideoItem::trackListChanged,
                 this, &PlayerWindow::trackListChanged);
             connect(video, &MpvVideoItem::chaptersChanged,
@@ -238,6 +244,21 @@ const core::tracks::TrackList& PlayerWindow::trackList() const
 QStringList PlayerWindow::recentLogLines() const
 {
     return m_video ? m_video->recentLogLines() : QStringList();
+}
+
+bool PlayerWindow::paused() const noexcept
+{
+    return m_video ? m_video->isPaused() : false;
+}
+
+double PlayerWindow::volume() const noexcept
+{
+    return m_video ? m_video->volume() : -1.0;
+}
+
+double PlayerWindow::speed() const noexcept
+{
+    return m_video ? m_video->speed() : 1.0;
 }
 
 // ---- Imperative control surface ----------------------------------------
@@ -288,9 +309,24 @@ void PlayerWindow::setPaused(bool paused)
     if (m_video) m_video->setPaused(paused);
 }
 
+void PlayerWindow::togglePause()
+{
+    if (m_video) m_video->cyclePause();
+}
+
 void PlayerWindow::seekAbsolute(double seconds)
 {
     if (m_video) m_video->seekAbsolute(seconds);
+}
+
+void PlayerWindow::seekRelative(double seconds)
+{
+    if (m_video) m_video->seekRelative(seconds);
+}
+
+void PlayerWindow::setVolumePercent(double percent)
+{
+    if (m_video) m_video->setVolumePercent(percent);
 }
 
 void PlayerWindow::setAudioTrack(int id)
