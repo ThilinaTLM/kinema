@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
@@ -12,11 +13,11 @@ import dev.tlmtech.kinema.app
 //
 // Chrome:
 //
-//   * `header:` is a `QQC2.ToolBar` (Header colorSet) pairing a
-//     `Kirigami.SearchField` (bound to `subtitlesVm.release` — the
-//     optional "Release name" filter) with a `Kirigami.ActionToolBar`
-//     of filter actions: Languages ▾ (multi-select Menu), HI ▾, FPO ▾
-//     (pick-one sub-menus).
+//   * `header:` is a single merged `PageHeaderBar` inlining the page
+//     title with the basic filters — `Kirigami.SearchField` bound to
+//     `subtitlesVm.release` and a `Languages ▾` multi-select — plus
+//     a `More filters… (N)` button that opens the
+//     `subtitlesAdvancedDialog` carrying HI / Foreign-parts-only.
 //   * Below the header, an inline chip strip lists active filters as
 //     removable `Kirigami.Chip`s with a trailing "Clear all".
 //   * Body is `SubtitlesPanel` (status line + results list + footer
@@ -107,197 +108,107 @@ Kirigami.Page {
         }
     }
 
-    // ---- header: filter toolbar ---------------------------------
-    header: QQC2.ToolBar {
-        id: filterBar
+    // ---- advanced filters dialog --------------------------------
+    Kirigami.Dialog {
+        id: subtitlesAdvancedDialog
+        title: i18nc("@title:dialog subtitles advanced filters",
+            "More filters")
+        standardButtons: Kirigami.Dialog.Close
+        preferredWidth: Kirigami.Units.gridUnit * 26
 
-        Kirigami.Theme.colorSet: Kirigami.Theme.Header
-        Kirigami.Theme.inherit: false
+        readonly property var modes: ["off", "include", "only"]
+        readonly property var modeLabels: [
+            i18nc("@option:radio subtitle filter mode", "Off"),
+            i18nc("@option:radio subtitle filter mode", "Include"),
+            i18nc("@option:radio subtitle filter mode", "Only")
+        ]
 
-        leftPadding: Theme.pageMargin
-        rightPadding: Theme.pageMargin
-        topPadding: Theme.inlineSpacing
-        bottomPadding: Theme.inlineSpacing
-
-        contentItem: RowLayout {
-            spacing: Theme.groupSpacing
-
-            // ---- Release-name filter ------------------------------
-            // Bound to `subtitlesVm.release`. The view-model debounces
-            // edits before re-running the search; Enter (or the Search
-            // page action) bypasses the debounce and runs immediately.
-            Kirigami.SearchField {
-                Layout.fillWidth: true
-                placeholderText: i18nc(
-                    "@info:placeholder subtitles release filter",
-                    "Release name (optional) — e.g. 1080p, BluRay, REMUX")
-                text: subtitlesVm.release
-                autoAccept: false
-                onTextEdited: subtitlesVm.release = text
-                onAccepted: {
-                    if (subtitlesVm.release !== text) {
-                        subtitlesVm.release = text;
+        FormCard.FormCard {
+            FormCard.FormComboBoxDelegate {
+                text: i18nc("@label subtitles filter",
+                    "Hearing impaired")
+                model: subtitlesAdvancedDialog.modeLabels
+                currentIndex: Math.max(0,
+                    subtitlesAdvancedDialog.modes.indexOf(subtitlesVm.hi))
+                onActivated: idx => {
+                    const v = subtitlesAdvancedDialog.modes[idx];
+                    if (subtitlesVm.hi !== v) {
+                        subtitlesVm.hi = v;
                     }
-                    subtitlesVm.runSearch();
                 }
             }
-
-            // ---- Languages / HI / FPO -----------------------------
-            Kirigami.ActionToolBar {
-                id: filterToolBar
-                Layout.alignment: Qt.AlignVCenter
-                alignment: Qt.AlignRight
-                flat: true
-
-                actions: [
-                    // ---- Languages ▾ (multi-select Menu) -----------
-                    Kirigami.Action {
-                        id: languagesAction
-                        text: {
-                            const langs = subtitlesVm.languages || [];
-                            if (langs.length === 0) {
-                                return i18nc("@action:button language picker, no selection",
-                                    "Languages: any");
-                            }
-                            if (langs.length <= 3) {
-                                return i18nc("@action:button language picker, %1 is a comma-joined list of ISO codes",
-                                    "Languages: %1",
-                                    langs.map(c => c.toUpperCase()).join(", "));
-                            }
-                            return i18ncp("@action:button language picker, count summary",
-                                "Languages: %1", "Languages: %1",
-                                langs.length);
-                        }
-                        icon.name: "preferences-desktop-locale"
-
-                        displayComponent: QQC2.ToolButton {
-                            id: langsBtn
-                            // Match Kirigami.ActionToolBar's native button
-                            // styling so this row aligns with the rest of
-                            // the actions (flat, same display mode).
-                            flat: true
-                            display: filterToolBar.display
-                            text: languagesAction.text
-                            // `Kirigami.Action.icon` is a grouped property;
-                            // reading `.name` from outside the action scope
-                            // doesn't propagate reliably to the displayed
-                            // ToolButton, so hard-code it here. The wrapper
-                            // action above keeps `icon.name` set so the
-                            // overflow menu renders the icon too.
-                            icon.name: "preferences-desktop-locale"
-                            checkable: true
-                            checked: langsMenu.opened
-                            onClicked: langsMenu.opened
-                                ? langsMenu.close()
-                                : langsMenu.open()
-
-                            QQC2.Menu {
-                                id: langsMenu
-                                y: langsBtn.height
-                                implicitWidth: Math.max(langsBtn.width,
-                                    Kirigami.Units.gridUnit * 14)
-
-                                QQC2.MenuItem {
-                                    text: i18nc("@action language picker, drop selection",
-                                        "Clear (any language)")
-                                    icon.name: "edit-clear-history"
-                                    enabled: (subtitlesVm.languages || []).length > 0
-                                    onTriggered: subtitlesVm.languages = []
-                                }
-                                QQC2.MenuSeparator { }
-
-                                Repeater {
-                                    model: subtitlesVm.commonLanguages
-                                    delegate: QQC2.MenuItem {
-                                        required property var modelData
-                                        text: `${modelData.display} (${modelData.code.toUpperCase()})`
-                                        checkable: true
-                                        checked: (subtitlesVm.languages || [])
-                                            .indexOf(modelData.code) >= 0
-                                        onTriggered: {
-                                            const code = modelData.code;
-                                            const next = (subtitlesVm.languages || []).slice();
-                                            const at = next.indexOf(code);
-                                            if (at >= 0) {
-                                                next.splice(at, 1);
-                                            } else {
-                                                next.push(code);
-                                            }
-                                            subtitlesVm.languages = next;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-
-                    // ---- HI ▾ (pick-one sub-menu) ------------------
-                    Kirigami.Action {
-                        text: i18nc("@action:button subtitles filter",
-                            "Hearing impaired")
-                        icon.name: "audio-volume-muted"
-                        children: [
-                            Kirigami.Action {
-                                text: i18nc("@option:radio subtitle filter mode", "Off")
-                                checkable: true
-                                checked: subtitlesVm.hi === "off"
-                                onTriggered: if (subtitlesVm.hi !== "off") {
-                                    subtitlesVm.hi = "off";
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@option:radio subtitle filter mode", "Include")
-                                checkable: true
-                                checked: subtitlesVm.hi === "include"
-                                onTriggered: if (subtitlesVm.hi !== "include") {
-                                    subtitlesVm.hi = "include";
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@option:radio subtitle filter mode", "Only")
-                                checkable: true
-                                checked: subtitlesVm.hi === "only"
-                                onTriggered: if (subtitlesVm.hi !== "only") {
-                                    subtitlesVm.hi = "only";
-                                }
-                            }
-                        ]
-                    },
-
-                    // ---- FPO ▾ (pick-one sub-menu) -----------------
-                    Kirigami.Action {
-                        text: i18nc("@action:button subtitles filter",
-                            "Foreign parts only")
-                        icon.name: "format-text-direction-ltr"
-                        children: [
-                            Kirigami.Action {
-                                text: i18nc("@option:radio subtitle filter mode", "Off")
-                                checkable: true
-                                checked: subtitlesVm.fpo === "off"
-                                onTriggered: if (subtitlesVm.fpo !== "off") {
-                                    subtitlesVm.fpo = "off";
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@option:radio subtitle filter mode", "Include")
-                                checkable: true
-                                checked: subtitlesVm.fpo === "include"
-                                onTriggered: if (subtitlesVm.fpo !== "include") {
-                                    subtitlesVm.fpo = "include";
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@option:radio subtitle filter mode", "Only")
-                                checkable: true
-                                checked: subtitlesVm.fpo === "only"
-                                onTriggered: if (subtitlesVm.fpo !== "only") {
-                                    subtitlesVm.fpo = "only";
-                                }
-                            }
-                        ]
+            FormCard.FormComboBoxDelegate {
+                text: i18nc("@label subtitles filter",
+                    "Foreign parts only")
+                model: subtitlesAdvancedDialog.modeLabels
+                currentIndex: Math.max(0,
+                    subtitlesAdvancedDialog.modes.indexOf(subtitlesVm.fpo))
+                onActivated: idx => {
+                    const v = subtitlesAdvancedDialog.modes[idx];
+                    if (subtitlesVm.fpo !== v) {
+                        subtitlesVm.fpo = v;
                     }
-                ]
+                }
             }
+        }
+    }
+
+    // ---- header: merged title + filter bar ----------------------
+    header: PageHeaderBar {
+        id: filterBar
+        title: page.title
+        pageActions: page.actions
+        advancedFiltersDialog: subtitlesAdvancedDialog
+        advancedFilterCount:
+            (subtitlesVm.hi !== "off" ? 1 : 0)
+            + (subtitlesVm.fpo !== "off" ? 1 : 0)
+
+        // ---- Release-name filter ------------------------------
+        // Bound to `subtitlesVm.release`. The view-model debounces
+        // edits before re-running the search; Enter (or the Search
+        // page action) bypasses the debounce and runs immediately.
+        Kirigami.SearchField {
+            Layout.fillWidth: true
+            placeholderText: i18nc(
+                "@info:placeholder subtitles release filter",
+                "Release name (optional) — e.g. 1080p, BluRay, REMUX")
+            text: subtitlesVm.release
+            autoAccept: false
+            onTextEdited: subtitlesVm.release = text
+            onAccepted: {
+                if (subtitlesVm.release !== text) {
+                    subtitlesVm.release = text;
+                }
+                subtitlesVm.runSearch();
+            }
+        }
+
+        // ---- Languages (multi-select) -------------------------
+        FilterMenuButton {
+            Layout.alignment: Qt.AlignVCenter
+            axisLabel: i18nc("@action:button language picker",
+                "Languages")
+            icon.name: "preferences-desktop-locale"
+            multiSelect: true
+            options: {
+                const out = [];
+                const src = subtitlesVm.commonLanguages || [];
+                for (let i = 0; i < src.length; ++i) {
+                    const code = src[i].code !== undefined
+                        ? src[i].code : "";
+                    const display = src[i].display !== undefined
+                        ? src[i].display : code;
+                    out.push({
+                        value: code,
+                        label: i18nc(
+                            "@item language menu, %1 display name, %2 ISO code",
+                            "%1 (%2)", display, code.toUpperCase())
+                    });
+                }
+                return out;
+            }
+            currentValues: subtitlesVm.languages
+            onMultiActivated: list => subtitlesVm.languages = list
         }
     }
 

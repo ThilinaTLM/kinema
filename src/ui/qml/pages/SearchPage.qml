@@ -45,48 +45,52 @@ Kirigami.Page {
 
     Component.onCompleted: focusSearchField()
 
-    header: QQC2.ToolBar {
-        Kirigami.Theme.colorSet: Kirigami.Theme.Header
-        Kirigami.Theme.inherit: false
-        leftPadding: Theme.pageMargin
-        rightPadding: Theme.pageMargin
-        topPadding: Theme.inlineSpacing
-        bottomPadding: Theme.inlineSpacing
+    header: PageHeaderBar {
+        title: page.title
 
-        contentItem: RowLayout {
-            spacing: Theme.groupSpacing
+        MediaKindSelect {
+            Layout.alignment: Qt.AlignVCenter
+            kind: searchVm.kind
+            onActivated: newKind => searchVm.kind = newKind
+        }
 
-            MediaKindSelect {
-                Layout.alignment: Qt.AlignVCenter
-                kind: searchVm.kind
-                onActivated: newKind => searchVm.kind = newKind
+        Kirigami.SearchField {
+            id: searchField
+            Layout.fillWidth: true
+            placeholderText: i18nc("@info:placeholder",
+                "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
+            text: searchVm.query
+            // SearchViewModel owns the network debounce; disable
+            // SearchField's shorter auto-accept timer so it does
+            // not bypass that debounce and submit duplicates.
+            autoAccept: false
+            onTextEdited: searchVm.query = text
+            onAccepted: {
+                if (searchVm.query !== text) {
+                    searchVm.query = text;
+                }
+                searchVm.submit();
             }
+            Keys.onEscapePressed: function (event) {
+                if (text.length > 0) {
+                    searchVm.clear();
+                    event.accepted = true;
+                } else {
+                    event.accepted = false;
+                }
+            }
+        }
 
-            Kirigami.SearchField {
-                id: searchField
-                Layout.fillWidth: true
-                placeholderText: i18nc("@info:placeholder",
-                    "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
-                text: searchVm.query
-                // SearchViewModel owns the network debounce; disable
-                // SearchField's shorter auto-accept timer so it does
-                // not bypass that debounce and submit duplicates.
-                autoAccept: false
-                onTextEdited: searchVm.query = text
-                onAccepted: {
-                    if (searchVm.query !== text) {
-                        searchVm.query = text;
-                    }
-                    searchVm.submit();
+        QQC2.Button {
+            Layout.alignment: Qt.AlignVCenter
+            text: i18nc("@action:button submit search", "Search")
+            icon.name: "edit-find"
+            enabled: searchField.text.length > 0
+            onClicked: {
+                if (searchVm.query !== searchField.text) {
+                    searchVm.query = searchField.text;
                 }
-                Keys.onEscapePressed: function (event) {
-                    if (text.length > 0) {
-                        searchVm.clear();
-                        event.accepted = true;
-                    } else {
-                        event.accepted = false;
-                    }
-                }
+                searchVm.submit();
             }
         }
     }

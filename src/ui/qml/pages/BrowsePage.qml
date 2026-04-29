@@ -5,21 +5,23 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
 // Browse: filter-driven TMDB grid. Chrome:
 //
-//   * `header:` is a `QQC2.ToolBar` (Header colorSet) that pairs the
-//     `MediaKindSelect` (Movies / TV Series) toggle with a
-//     `Kirigami.ActionToolBar` of filter actions: Genres ▾, Released ▾,
-//     ★ Min ▾, Sort ▾, and a Hide-obscure toggle. Every filter is a
-//     `Kirigami.Action`; `ActionToolBar` collapses overflow into its
-//     built-in ▸ menu on narrow widths.
+//   * `header:` is a single merged `PageHeaderBar` that inlines the
+//     page title with the basic filters (`MediaKindSelect`,
+//     `Genres ▾`, `Sort ▾`) and a `More filters… (N)` button. The
+//     advanced dialog (`browseAdvancedDialog`) carries `Released`,
+//     `★ Min`, and the `Hide obscure` toggle — every uncommon filter
+//     lives behind that one button so the inline bar fits at narrow
+//     widths without overflowing.
 //   * Below the header, an inline chip strip paints removable
-//     `Kirigami.Chip`s for every non-default filter, with a trailing
-//     "Clear all" button. Auto-collapses to height 0 when no filter is
-//     active.
+//     `Kirigami.Chip`s for every non-default filter (basic and
+//     advanced), with a trailing "Clear all" button. Auto-collapses
+//     to height 0 when no filter is active.
 //   * Body is the responsive `PosterGrid` over `browseVm.results`,
 //     swapped out via `StackLayout` for the loading / empty / error
 //     placeholders.
@@ -55,298 +57,129 @@ Kirigami.Page {
         }
     ]
 
-    // ---- header: filter toolbar ---------------------------------
-    header: QQC2.ToolBar {
-        id: filterBar
+    // ---- advanced filters dialog --------------------------------
+    // Released window, minimum rating, and the "Hide obscure" toggle
+    // live behind "More filters…" so the inline header stays at
+    // three controls (kind / Genres / Sort) and fits at narrow widths.
+    Kirigami.Dialog {
+        id: browseAdvancedDialog
+        title: i18nc("@title:dialog browse advanced filters",
+            "More filters")
+        standardButtons: Kirigami.Dialog.Close
+        preferredWidth: Kirigami.Units.gridUnit * 26
 
-        Kirigami.Theme.colorSet: Kirigami.Theme.Header
-        Kirigami.Theme.inherit: false
-
-        leftPadding: Theme.pageMargin
-        rightPadding: Theme.pageMargin
-        topPadding: Theme.inlineSpacing
-        bottomPadding: Theme.inlineSpacing
-
-        visible: browseVm.tmdbConfigured && !browseVm.authFailed
-
-        contentItem: RowLayout {
-            spacing: Theme.groupSpacing
-
-            // ---- Movies / TV Series ---------------------------------
-            MediaKindSelect {
-                Layout.alignment: Qt.AlignVCenter
-                kind: browseVm.kind
-                onActivated: newKind => browseVm.kind = newKind
-            }
-
-            // ---- filter actions (with overflow menu on narrow) -----
-            Kirigami.ActionToolBar {
-                id: filterToolBar
-                Layout.fillWidth: true
-                alignment: Qt.AlignLeft
-                flat: true
-
-                actions: [
-                    // ---- Genres ▾ (multi-select Menu) ---------------
-                    Kirigami.Action {
-                        id: genresAction
-                        // Empty parent action; rendered via displayComponent
-                        // because ActionToolBar's children: pattern only
-                        // handles single-select sub-menus, and Genres needs
-                        // multi-select with a "Clear all" affordance.
-                        text: browseVm.genreIds.length > 0
-                            ? i18ncp("@action:button genres button with active count",
-                                "Genres (%1)", "Genres (%1)",
-                                browseVm.genreIds.length)
-                            : i18nc("@action:button", "Genres")
-                        icon.name: "view-categories"
-                        enabled: browseVm.availableGenres.length > 0
-
-                        displayComponent: QQC2.ToolButton {
-                            id: genresBtn
-                            // Match Kirigami.ActionToolBar's native button
-                            // styling so this row aligns with the rest of
-                            // the actions (flat, same display mode).
-                            flat: true
-                            display: filterToolBar.display
-                            text: genresAction.text
-                            // `Kirigami.Action.icon` is a grouped property;
-                            // reading `.name` from outside the action scope
-                            // doesn't propagate reliably to the displayed
-                            // ToolButton, so hard-code it here. The wrapper
-                            // action above keeps `icon.name` set so the
-                            // overflow menu renders the icon too.
-                            icon.name: "view-categories"
-                            enabled: genresAction.enabled
-                            checkable: true
-                            checked: genresMenu.opened
-                            onClicked: genresMenu.opened
-                                ? genresMenu.close()
-                                : genresMenu.open()
-
-                            QQC2.Menu {
-                                id: genresMenu
-                                y: genresBtn.height
-                                implicitWidth: Math.max(genresBtn.width,
-                                    Kirigami.Units.gridUnit * 14)
-
-                                QQC2.MenuItem {
-                                    text: i18nc(
-                                        "@action:inmenu clear all genre selections",
-                                        "Clear all genres")
-                                    icon.name: "edit-clear-history"
-                                    enabled: browseVm.genreIds.length > 0
-                                    onTriggered: browseVm.genreIds = []
-                                }
-                                QQC2.MenuSeparator { }
-
-                                Repeater {
-                                    model: browseVm.availableGenres
-
-                                    delegate: QQC2.MenuItem {
-                                        required property var modelData
-                                        text: modelData.name !== undefined
-                                            ? modelData.name : ""
-                                        checkable: true
-                                        checked: modelData.checked === true
-                                        onTriggered: {
-                                            const id = modelData.id;
-                                            let next = (browseVm.genreIds || []).slice();
-                                            const idx = next.indexOf(id);
-                                            if (checked && idx < 0) {
-                                                next.push(id);
-                                            } else if (!checked && idx >= 0) {
-                                                next.splice(idx, 1);
-                                            } else {
-                                                return;
-                                            }
-                                            browseVm.genreIds = next;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-
-                    // ---- Released ▾ (pick-one sub-menu) -------------
-                    Kirigami.Action {
-                        text: i18nc("@action:button browse filter", "Released")
-                        icon.name: "view-calendar"
-                        children: [
-                            Kirigami.Action {
-                                text: i18nc("@item date window", "Past month")
-                                checkable: true
-                                checked: browseVm.dateWindow === 0
-                                onTriggered: if (browseVm.dateWindow !== 0) {
-                                    browseVm.dateWindow = 0;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item date window", "Past 3 months")
-                                checkable: true
-                                checked: browseVm.dateWindow === 1
-                                onTriggered: if (browseVm.dateWindow !== 1) {
-                                    browseVm.dateWindow = 1;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item date window", "This year")
-                                checkable: true
-                                checked: browseVm.dateWindow === 2
-                                onTriggered: if (browseVm.dateWindow !== 2) {
-                                    browseVm.dateWindow = 2;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item date window", "Past 3 years")
-                                checkable: true
-                                checked: browseVm.dateWindow === 3
-                                onTriggered: if (browseVm.dateWindow !== 3) {
-                                    browseVm.dateWindow = 3;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item date window", "Any time")
-                                checkable: true
-                                checked: browseVm.dateWindow === 4
-                                onTriggered: if (browseVm.dateWindow !== 4) {
-                                    browseVm.dateWindow = 4;
-                                }
-                            }
-                        ]
-                    },
-
-                    // ---- ★ Min ▾ (pick-one sub-menu) ----------------
-                    // Discrete thresholds matching the VM's step-5 ints.
-                    // `minRatingPct` accepts 0..90; we surface the 8
-                    // values users actually care about.
-                    Kirigami.Action {
-                        text: browseVm.minRatingPct <= 0
-                            ? i18nc("@action:button browse rating filter", "★ Any")
-                            : i18nc("@action:button browse rating filter, %1 is a localized one-decimal rating",
-                                "★ %1+",
-                                (browseVm.minRatingPct / 10).toFixed(1))
-                        icon.name: "rating"
-                        children: [
-                            Kirigami.Action {
-                                text: i18nc("@item rating threshold", "Any")
-                                checkable: true
-                                checked: browseVm.minRatingPct === 0
-                                onTriggered: if (browseVm.minRatingPct !== 0) {
-                                    browseVm.minRatingPct = 0;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item rating threshold", "★ 5+")
-                                checkable: true
-                                checked: browseVm.minRatingPct === 50
-                                onTriggered: if (browseVm.minRatingPct !== 50) {
-                                    browseVm.minRatingPct = 50;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item rating threshold", "★ 6+")
-                                checkable: true
-                                checked: browseVm.minRatingPct === 60
-                                onTriggered: if (browseVm.minRatingPct !== 60) {
-                                    browseVm.minRatingPct = 60;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item rating threshold", "★ 7+")
-                                checkable: true
-                                checked: browseVm.minRatingPct === 70
-                                onTriggered: if (browseVm.minRatingPct !== 70) {
-                                    browseVm.minRatingPct = 70;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item rating threshold", "★ 7.5+")
-                                checkable: true
-                                checked: browseVm.minRatingPct === 75
-                                onTriggered: if (browseVm.minRatingPct !== 75) {
-                                    browseVm.minRatingPct = 75;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item rating threshold", "★ 8+")
-                                checkable: true
-                                checked: browseVm.minRatingPct === 80
-                                onTriggered: if (browseVm.minRatingPct !== 80) {
-                                    browseVm.minRatingPct = 80;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item rating threshold", "★ 8.5+")
-                                checkable: true
-                                checked: browseVm.minRatingPct === 85
-                                onTriggered: if (browseVm.minRatingPct !== 85) {
-                                    browseVm.minRatingPct = 85;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item rating threshold", "★ 9+")
-                                checkable: true
-                                checked: browseVm.minRatingPct === 90
-                                onTriggered: if (browseVm.minRatingPct !== 90) {
-                                    browseVm.minRatingPct = 90;
-                                }
-                            }
-                        ]
-                    },
-
-                    // ---- Sort ▾ (pick-one sub-menu) -----------------
-                    Kirigami.Action {
-                        text: i18nc("@action:button browse sort", "Sort")
-                        icon.name: "view-sort"
-                        children: [
-                            Kirigami.Action {
-                                text: i18nc("@item sort", "Most popular")
-                                checkable: true
-                                checked: browseVm.sort === 0
-                                onTriggered: if (browseVm.sort !== 0) {
-                                    browseVm.sort = 0;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item sort", "Newest first")
-                                checkable: true
-                                checked: browseVm.sort === 1
-                                onTriggered: if (browseVm.sort !== 1) {
-                                    browseVm.sort = 1;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item sort", "Highest rated")
-                                checkable: true
-                                checked: browseVm.sort === 2
-                                onTriggered: if (browseVm.sort !== 2) {
-                                    browseVm.sort = 2;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@item sort", "Title (A\u2013Z)")
-                                checkable: true
-                                checked: browseVm.sort === 3
-                                onTriggered: if (browseVm.sort !== 3) {
-                                    browseVm.sort = 3;
-                                }
-                            }
-                        ]
-                    },
-
-                    // ---- Hide obscure (toggle) ----------------------
-                    Kirigami.Action {
-                        text: i18nc("@option:check browse filter", "Hide obscure")
-                        icon.name: "view-filter"
-                        checkable: true
-                        checked: browseVm.hideObscure
-                        tooltip: i18nc("@info:tooltip",
-                            "Skip results with fewer than 200 ratings.")
-                        onTriggered: browseVm.hideObscure = !browseVm.hideObscure
-                    }
+        FormCard.FormCard {
+            FormCard.FormComboBoxDelegate {
+                text: i18nc("@label browse filter", "Released")
+                model: [
+                    i18nc("@item date window", "Past month"),
+                    i18nc("@item date window", "Past 3 months"),
+                    i18nc("@item date window", "This year"),
+                    i18nc("@item date window", "Past 3 years"),
+                    i18nc("@item date window", "Any time")
                 ]
+                currentIndex: browseVm.dateWindow
+                onActivated: idx => browseVm.dateWindow = idx
             }
+            FormCard.FormComboBoxDelegate {
+                text: i18nc("@label browse filter",
+                    "Minimum rating")
+                // Index <-> minRatingPct map. The view-model keeps
+                // discrete step-5 ints; the UI surfaces the eight
+                // values users actually care about.
+                readonly property var pctValues: [0, 50, 60, 70, 75, 80, 85, 90]
+                model: [
+                    i18nc("@item rating threshold", "Any"),
+                    i18nc("@item rating threshold", "★ 5+"),
+                    i18nc("@item rating threshold", "★ 6+"),
+                    i18nc("@item rating threshold", "★ 7+"),
+                    i18nc("@item rating threshold", "★ 7.5+"),
+                    i18nc("@item rating threshold", "★ 8+"),
+                    i18nc("@item rating threshold", "★ 8.5+"),
+                    i18nc("@item rating threshold", "★ 9+")
+                ]
+                currentIndex: Math.max(0,
+                    pctValues.indexOf(browseVm.minRatingPct))
+                onActivated: idx => {
+                    const v = pctValues[idx];
+                    if (browseVm.minRatingPct !== v) {
+                        browseVm.minRatingPct = v;
+                    }
+                }
+            }
+            FormCard.FormSwitchDelegate {
+                text: i18nc("@option:check browse filter",
+                    "Hide obscure")
+                description: i18nc("@info",
+                    "Skip results with fewer than 200 ratings.")
+                checked: browseVm.hideObscure
+                onToggled: browseVm.hideObscure = checked
+            }
+        }
+    }
+
+    // ---- header: merged title + filter bar ----------------------
+    header: PageHeaderBar {
+        id: filterBar
+        title: page.title
+        visible: browseVm.tmdbConfigured && !browseVm.authFailed
+        pageActions: page.actions
+        advancedFiltersDialog: browseAdvancedDialog
+        // Default Released = Past 3 years (index 3); other defaults
+        // are 0/false. Anything else counts as one active advanced
+        // filter.
+        advancedFilterCount:
+            (browseVm.dateWindow !== 3 ? 1 : 0)
+            + (browseVm.minRatingPct > 0 ? 1 : 0)
+            + (browseVm.hideObscure ? 1 : 0)
+
+        // ---- Movies / TV Series ---------------------------------
+        MediaKindSelect {
+            Layout.alignment: Qt.AlignVCenter
+            kind: browseVm.kind
+            onActivated: newKind => browseVm.kind = newKind
+        }
+
+        // ---- Genres (multi-select) ------------------------------
+        FilterMenuButton {
+            Layout.alignment: Qt.AlignVCenter
+            axisLabel: i18nc("@action:button browse filter", "Genres")
+            icon.name: "view-categories"
+            multiSelect: true
+            enabled: browseVm.availableGenres.length > 0
+            options: {
+                const out = [];
+                const src = browseVm.availableGenres || [];
+                for (let i = 0; i < src.length; ++i) {
+                    out.push({
+                        value: src[i].id,
+                        label: src[i].name !== undefined
+                            ? src[i].name : ""
+                    });
+                }
+                return out;
+            }
+            currentValues: browseVm.genreIds
+            onMultiActivated: list => browseVm.genreIds = list
+        }
+
+        // ---- Sort (pick-one) ------------------------------------
+        FilterMenuButton {
+            Layout.alignment: Qt.AlignVCenter
+            axisLabel: i18nc("@action:button browse sort", "Sort")
+            icon.name: "view-sort"
+            options: [
+                { value: 0, label:
+                    i18nc("@item sort", "Most popular") },
+                { value: 1, label:
+                    i18nc("@item sort", "Newest first") },
+                { value: 2, label:
+                    i18nc("@item sort", "Highest rated") },
+                { value: 3, label:
+                    i18nc("@item sort", "Title (A–Z)") }
+            ]
+            currentValue: browseVm.sort
+            onActivated: v => browseVm.sort = v
         }
     }
 

@@ -5,7 +5,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import org.kde.kirigamiaddons.components as Components
+import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
@@ -16,12 +16,14 @@ import dev.tlmtech.kinema.app
 //
 // Chrome:
 //
-//   * `header:` is a `QQC2.ToolBar` (Header colorSet) pairing a
-//     `Components.SegmentedButton` (mutually exclusive resolution choice
-//     — 4K / 1080p / 720p / SD) with a `Kirigami.ActionToolBar` of
-//     toggle filters (Cached only, HDR, Dolby Vision, Multi audio) and
-//     a Sort ▾ parent action whose children carry the 6 sort modes
-//     plus the Descending toggle.
+//   * `header:` is a single merged `PageHeaderBar` inlining the page
+//     title with the basic filters — `Resolution ▾` (Any / 4K /
+//     1080p / 720p / SD), `Cached only`, `Sort ▾` and a `Descending`
+//     icon-toggle — plus a `More filters… (N)` button that opens
+//     the `streamsAdvancedDialog` carrying HDR / Dolby Vision /
+//     Multi-audio toggles. Resolution is a `FilterMenuButton`
+//     (no SegmentedButton) so the bar reads as a single row of
+//     dropdown buttons at every width.
 //   * Below the header, an inline chip strip lists active filters as
 //     removable `Kirigami.Chip`s with a trailing "Clear all".
 //   * The Subtitles… affordance stays as a top-level page action.
@@ -136,223 +138,163 @@ Kirigami.Page {
         }
     ]
 
-    // ---- header: filter toolbar ---------------------------------
-    header: QQC2.ToolBar {
-        id: filterBar
+    // ---- advanced filters dialog --------------------------------
+    // HDR / Dolby Vision / Multi-audio toggles. The codec axis is
+    // niche enough that we keep it behind "More filters…" so the
+    // inline bar stays at four short controls (Resolution / Cached
+    // only / Sort / Descending).
+    Kirigami.Dialog {
+        id: streamsAdvancedDialog
+        title: i18nc("@title:dialog streams advanced filters",
+            "More filters")
+        standardButtons: Kirigami.Dialog.Close
+        preferredWidth: Kirigami.Units.gridUnit * 26
 
-        Kirigami.Theme.colorSet: Kirigami.Theme.Header
-        Kirigami.Theme.inherit: false
-
-        leftPadding: Theme.pageMargin
-        rightPadding: Theme.pageMargin
-        topPadding: Theme.inlineSpacing
-        bottomPadding: Theme.inlineSpacing
-
-        contentItem: RowLayout {
-            spacing: Theme.groupSpacing
-
-            // ---- Resolution (mutually exclusive) ----------------
-            // SegmentedButton communicates "pick one" visually. The
-            // VM exposes a single `uiResolutionFilter` string; clicking
-            // the active chip again clears the axis (sets it to "").
-            Components.SegmentedButton {
-                Layout.alignment: Qt.AlignVCenter
-                actions: [
-                    Kirigami.Action {
-                        text: i18nc("@option:radio stream filter resolution",
-                            "4K")
-                        checkable: true
-                        checked: page.detailVm
-                            && page.detailVm.uiResolutionFilter === "2160p"
-                        onTriggered: if (page.detailVm) {
-                            page.detailVm.uiResolutionFilter =
-                                page.detailVm.uiResolutionFilter === "2160p"
-                                    ? "" : "2160p";
-                        }
-                    },
-                    Kirigami.Action {
-                        text: i18nc("@option:radio stream filter resolution",
-                            "1080p")
-                        checkable: true
-                        checked: page.detailVm
-                            && page.detailVm.uiResolutionFilter === "1080p"
-                        onTriggered: if (page.detailVm) {
-                            page.detailVm.uiResolutionFilter =
-                                page.detailVm.uiResolutionFilter === "1080p"
-                                    ? "" : "1080p";
-                        }
-                    },
-                    Kirigami.Action {
-                        text: i18nc("@option:radio stream filter resolution",
-                            "720p")
-                        checkable: true
-                        checked: page.detailVm
-                            && page.detailVm.uiResolutionFilter === "720p"
-                        onTriggered: if (page.detailVm) {
-                            page.detailVm.uiResolutionFilter =
-                                page.detailVm.uiResolutionFilter === "720p"
-                                    ? "" : "720p";
-                        }
-                    },
-                    Kirigami.Action {
-                        text: i18nc("@option:radio stream filter resolution",
-                            "SD")
-                        checkable: true
-                        checked: page.detailVm
-                            && page.detailVm.uiResolutionFilter === "sd"
-                        onTriggered: if (page.detailVm) {
-                            page.detailVm.uiResolutionFilter =
-                                page.detailVm.uiResolutionFilter === "sd"
-                                    ? "" : "sd";
-                        }
-                    }
-                ]
+        FormCard.FormCard {
+            FormCard.FormSwitchDelegate {
+                text: i18nc("@option:check stream filter", "HDR")
+                description: i18nc("@info:tooltip stream filter",
+                    "Streams with any HDR profile (HDR10, HDR10+, Dolby Vision).")
+                checked: page.detailVm && page.detailVm.uiHdrOnly
+                onToggled: if (page.detailVm) {
+                    page.detailVm.uiHdrOnly = checked;
+                }
             }
+            FormCard.FormSwitchDelegate {
+                text: i18nc("@option:check stream filter",
+                    "Dolby Vision")
+                checked: page.detailVm
+                    && page.detailVm.uiDolbyVisionOnly
+                onToggled: if (page.detailVm) {
+                    page.detailVm.uiDolbyVisionOnly = checked;
+                }
+            }
+            FormCard.FormSwitchDelegate {
+                text: i18nc("@option:check stream filter",
+                    "Dual / Multi audio")
+                checked: page.detailVm
+                    && page.detailVm.uiMultiAudioOnly
+                onToggled: if (page.detailVm) {
+                    page.detailVm.uiMultiAudioOnly = checked;
+                }
+            }
+        }
+    }
 
-            // ---- toggles + Sort -------------------------------------
-            Kirigami.ActionToolBar {
-                Layout.fillWidth: true
-                alignment: Qt.AlignLeft
-                flat: true
+    // ---- header: merged title + filter bar ----------------------
+    header: PageHeaderBar {
+        id: filterBar
+        title: page.title
+        pageActions: page.actions
+        advancedFiltersDialog: streamsAdvancedDialog
+        advancedFilterCount: page.detailVm
+            ? ((page.detailVm.uiHdrOnly ? 1 : 0)
+                + (page.detailVm.uiDolbyVisionOnly ? 1 : 0)
+                + (page.detailVm.uiMultiAudioOnly ? 1 : 0))
+            : 0
 
-                actions: [
-                    Kirigami.Action {
-                        text: i18nc("@option:check stream filter",
-                            "Cached only")
-                        icon.name: "package-installed-outdated"
-                        checkable: true
-                        visible: page.detailVm
-                            && page.detailVm.realDebridConfigured
-                            && page.detailVm.rawStreamsCount > 0
-                        checked: page.detailVm
-                            && page.detailVm.cachedOnly
-                        tooltip: i18nc("@info:tooltip stream filter",
-                            "Show only streams already cached on Real-Debrid \u2014 they play instantly.")
-                        onTriggered: if (page.detailVm) {
-                            page.detailVm.cachedOnly = !page.detailVm.cachedOnly;
-                        }
-                    },
-                    Kirigami.Action {
-                        text: i18nc("@option:check stream filter", "HDR")
-                        checkable: true
-                        checked: page.detailVm && page.detailVm.uiHdrOnly
-                        tooltip: i18nc("@info:tooltip stream filter",
-                            "Streams with any HDR profile (HDR10, HDR10+, Dolby Vision).")
-                        onTriggered: if (page.detailVm) {
-                            page.detailVm.uiHdrOnly = !page.detailVm.uiHdrOnly;
-                        }
-                    },
-                    Kirigami.Action {
-                        text: i18nc("@option:check stream filter", "Dolby Vision")
-                        checkable: true
-                        checked: page.detailVm
-                            && page.detailVm.uiDolbyVisionOnly
-                        onTriggered: if (page.detailVm) {
-                            page.detailVm.uiDolbyVisionOnly =
-                                !page.detailVm.uiDolbyVisionOnly;
-                        }
-                    },
-                    Kirigami.Action {
-                        text: i18nc("@option:check stream filter",
-                            "Dual / Multi audio")
-                        checkable: true
-                        checked: page.detailVm
-                            && page.detailVm.uiMultiAudioOnly
-                        onTriggered: if (page.detailVm) {
-                            page.detailVm.uiMultiAudioOnly =
-                                !page.detailVm.uiMultiAudioOnly;
-                        }
-                    },
+        // ---- Resolution (pick-one dropdown) ---------------------
+        FilterMenuButton {
+            Layout.alignment: Qt.AlignVCenter
+            axisLabel: i18nc("@action:button stream filter",
+                "Resolution")
+            icon.name: "view-fullscreen"
+            options: [
+                { value: "",      label:
+                    i18nc("@item resolution", "Any") },
+                { value: "2160p", label:
+                    i18nc("@item resolution", "4K") },
+                { value: "1080p", label:
+                    i18nc("@item resolution", "1080p") },
+                { value: "720p",  label:
+                    i18nc("@item resolution", "720p") },
+                { value: "sd",    label:
+                    i18nc("@item resolution", "SD") }
+            ]
+            currentValue: page.detailVm
+                ? page.detailVm.uiResolutionFilter : ""
+            onActivated: v => {
+                if (page.detailVm) {
+                    page.detailVm.uiResolutionFilter = v;
+                }
+            }
+        }
 
-                    // ---- Sort ▾ (pick-one + Descending toggle) -------
-                    Kirigami.Action {
-                        text: i18nc("@action:button browse sort", "Sort")
-                        icon.name: "view-sort"
-                        enabled: page.detailVm
-                            && page.detailVm.streams
-                            && page.detailVm.streams.count > 0
-                        children: [
-                            Kirigami.Action {
-                                text: i18nc("@action:inmenu sort streams",
-                                    "Smart (cached, then quality)")
-                                checkable: true
-                                checked: page.detailVm
-                                    && page.detailVm.sortMode === StreamsListModel.Smart
-                                onTriggered: if (page.detailVm) {
-                                    page.detailVm.sortMode = StreamsListModel.Smart;
-                                }
-                            },
-                            Kirigami.Action {
-                                separator: true
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@action:inmenu sort streams", "Seeders")
-                                checkable: true
-                                checked: page.detailVm
-                                    && page.detailVm.sortMode === StreamsListModel.Seeders
-                                onTriggered: if (page.detailVm) {
-                                    page.detailVm.sortMode = StreamsListModel.Seeders;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@action:inmenu sort streams", "Size")
-                                checkable: true
-                                checked: page.detailVm
-                                    && page.detailVm.sortMode === StreamsListModel.Size
-                                onTriggered: if (page.detailVm) {
-                                    page.detailVm.sortMode = StreamsListModel.Size;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@action:inmenu sort streams", "Quality")
-                                checkable: true
-                                checked: page.detailVm
-                                    && page.detailVm.sortMode === StreamsListModel.Quality
-                                onTriggered: if (page.detailVm) {
-                                    page.detailVm.sortMode = StreamsListModel.Quality;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@action:inmenu sort streams", "Provider")
-                                checkable: true
-                                checked: page.detailVm
-                                    && page.detailVm.sortMode === StreamsListModel.Provider
-                                onTriggered: if (page.detailVm) {
-                                    page.detailVm.sortMode = StreamsListModel.Provider;
-                                }
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@action:inmenu sort streams",
-                                    "Release name")
-                                checkable: true
-                                checked: page.detailVm
-                                    && page.detailVm.sortMode === StreamsListModel.ReleaseName
-                                onTriggered: if (page.detailVm) {
-                                    page.detailVm.sortMode = StreamsListModel.ReleaseName;
-                                }
-                            },
-                            Kirigami.Action {
-                                separator: true
-                            },
-                            Kirigami.Action {
-                                text: i18nc("@action:inmenu sort streams",
-                                    "Descending")
-                                checkable: true
-                                checked: page.detailVm
-                                    && page.detailVm.sortDescending
-                                // Smart has a fixed shape — disable the
-                                // toggle so the user doesn't think they're
-                                // affecting anything when they aren't.
-                                enabled: page.detailVm
-                                    && page.detailVm.sortMode !== StreamsListModel.Smart
-                                onTriggered: if (page.detailVm) {
-                                    page.detailVm.sortDescending =
-                                        !page.detailVm.sortDescending;
-                                }
-                            }
-                        ]
-                    }
-                ]
+        // ---- Cached only (toggle) -------------------------------
+        QQC2.ToolButton {
+            Layout.alignment: Qt.AlignVCenter
+            text: i18nc("@option:check stream filter", "Cached only")
+            icon.name: "package-installed-outdated"
+            display: QQC2.AbstractButton.TextBesideIcon
+            flat: true
+            checkable: true
+            visible: page.detailVm
+                && page.detailVm.realDebridConfigured
+                && page.detailVm.rawStreamsCount > 0
+            checked: page.detailVm && page.detailVm.cachedOnly
+            QQC2.ToolTip.text: i18nc("@info:tooltip stream filter",
+                "Show only streams already cached on Real-Debrid — they play instantly.")
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            onClicked: if (page.detailVm) {
+                page.detailVm.cachedOnly = !page.detailVm.cachedOnly;
+            }
+        }
+
+        // ---- Sort (pick-one) ------------------------------------
+        FilterMenuButton {
+            Layout.alignment: Qt.AlignVCenter
+            axisLabel: i18nc("@action:button browse sort", "Sort")
+            icon.name: "view-sort"
+            enabled: page.detailVm
+                && page.detailVm.streams
+                && page.detailVm.streams.count > 0
+            options: [
+                { value: StreamsListModel.Smart, label:
+                    i18nc("@action:inmenu sort streams",
+                        "Smart (cached, then quality)") },
+                { value: StreamsListModel.Seeders, label:
+                    i18nc("@action:inmenu sort streams", "Seeders") },
+                { value: StreamsListModel.Size, label:
+                    i18nc("@action:inmenu sort streams", "Size") },
+                { value: StreamsListModel.Quality, label:
+                    i18nc("@action:inmenu sort streams", "Quality") },
+                { value: StreamsListModel.Provider, label:
+                    i18nc("@action:inmenu sort streams", "Provider") },
+                { value: StreamsListModel.ReleaseName, label:
+                    i18nc("@action:inmenu sort streams",
+                        "Release name") }
+            ]
+            currentValue: page.detailVm
+                ? page.detailVm.sortMode : StreamsListModel.Smart
+            onActivated: v => {
+                if (page.detailVm) {
+                    page.detailVm.sortMode = v;
+                }
+            }
+        }
+
+        // ---- Descending toggle ----------------------------------
+        // Pulled out of the Sort menu so the affordance is visible
+        // at a glance. Disabled when sort mode is Smart, which has
+        // a fixed shape.
+        QQC2.ToolButton {
+            Layout.alignment: Qt.AlignVCenter
+            display: QQC2.AbstractButton.IconOnly
+            icon.name: "view-sort-descending"
+            flat: true
+            checkable: true
+            text: i18nc("@action:button toggle descending sort",
+                "Descending")
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            enabled: page.detailVm
+                && page.detailVm.sortMode !== StreamsListModel.Smart
+            checked: page.detailVm && page.detailVm.sortDescending
+            onClicked: if (page.detailVm) {
+                page.detailVm.sortDescending =
+                    !page.detailVm.sortDescending;
             }
         }
     }
