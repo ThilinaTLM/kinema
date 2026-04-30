@@ -40,6 +40,6 @@ QString dateWindowToString(DateWindow w);
 /// Parse a canonical token; unknown input returns `fallback` (defaults
 /// to `ThisYear`, matching the Browse-page default).
 DateWindow dateWindowFromString(const QString& s,
-    DateWindow fallback = DateWindow::ThisYear);
+    DateWindow fallback = DateWindow::Past3Years);
 
 } // namespace kinema::core

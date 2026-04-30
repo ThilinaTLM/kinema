@@ -65,7 +65,29 @@ Kirigami.Page {
         id: browseAdvancedDialog
         title: i18nc("@title:dialog browse advanced filters",
             "More filters")
-        standardButtons: Kirigami.Dialog.Close
+
+        footer: QQC2.DialogButtonBox {
+            QQC2.Button {
+                text: i18nc("@action:button reset all browse filters",
+                    "Reset all filters")
+                icon.name: "edit-clear-history"
+                visible: browseVm.dateWindow !== 3
+                    || browseVm.minRatingPct > 0
+                    || browseVm.hideObscure
+                    || browseVm.genreIds.length > 0
+                    || browseVm.sort !== 0
+                QQC2.DialogButtonBox.buttonRole: QQC2.DialogButtonBox.ActionRole
+                onClicked: {
+                    browseVm.resetFilters();
+                    browseAdvancedDialog.close();
+                }
+            }
+            QQC2.Button {
+                text: i18nc("@action:button close dialog", "Close")
+                QQC2.DialogButtonBox.buttonRole: QQC2.DialogButtonBox.AcceptRole
+                onClicked: browseAdvancedDialog.close()
+            }
+        }
         preferredWidth: Kirigami.Units.gridUnit * 26
 
         FormCard.FormCard {
@@ -125,13 +147,16 @@ Kirigami.Page {
         visible: browseVm.tmdbConfigured && !browseVm.authFailed
         pageActions: page.actions
         advancedFiltersDialog: browseAdvancedDialog
-        // Default Released = Past 3 years (index 3); other defaults
-        // are 0/false. Anything else counts as one active advanced
-        // filter.
+        // Count advanced filters that deviate from defaults.
+        // dateWindow default = Past 3 years (index 3), minRatingPct
+        // default = 0, hideObscure default = false.
         advancedFilterCount:
             (browseVm.dateWindow !== 3 ? 1 : 0)
             + (browseVm.minRatingPct > 0 ? 1 : 0)
             + (browseVm.hideObscure ? 1 : 0)
+
+        // Right-align filter controls after the title.
+        Item { Layout.fillWidth: true }
 
         // ---- Movies / TV Series ---------------------------------
         MediaKindSelect {
@@ -146,6 +171,7 @@ Kirigami.Page {
             axisLabel: i18nc("@action:button browse filter", "Genres")
             icon.name: "view-categories"
             multiSelect: true
+            active: browseVm.genreIds.length > 0
             enabled: browseVm.availableGenres.length > 0
             options: {
                 const out = [];
@@ -168,6 +194,7 @@ Kirigami.Page {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button browse sort", "Sort")
             icon.name: "view-sort"
+            active: browseVm.sort !== 0
             options: [
                 { value: 0, label:
                     i18nc("@item sort", "Most popular") },
@@ -214,106 +241,29 @@ Kirigami.Page {
         }
     }
 
-    // ---- content column ------------------------------------------
-    ColumnLayout {
+    // ---- content -------------------------------------------------
+    StackLayout {
         anchors.fill: parent
-        spacing: 0
         visible: browseVm.tmdbConfigured && !browseVm.authFailed
 
-        // ---- active-filter chip strip ----------------------------
-        // Collapses to zero height when no filter is active so the
-        // grid takes the full available area in the common case.
-        Item {
-            id: chipStrip
-
-            Layout.fillWidth: true
-            visible: browseVm.activeChips.length > 0
-            implicitHeight: visible
-                ? chipRow.implicitHeight + Theme.inlineSpacing
-                : 0
-
-            Behavior on implicitHeight {
-                NumberAnimation { duration: Kirigami.Units.shortDuration }
-            }
-
-            RowLayout {
-                id: chipRow
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Theme.pageMargin
-                anchors.rightMargin: Theme.pageMargin
-                spacing: Theme.inlineSpacing
-
-                QQC2.Label {
-                    text: i18nc("@label prefix for active filter chip list",
-                        "Filters:")
-                    color: Kirigami.Theme.disabledTextColor
-                }
-
-                QQC2.ScrollView {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: chipFlow.implicitHeight
-                    contentWidth: chipFlow.implicitWidth
-                    contentHeight: chipFlow.implicitHeight
-                    QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AsNeeded
-                    QQC2.ScrollBar.vertical.policy: QQC2.ScrollBar.AlwaysOff
-                    clip: true
-
-                    Row {
-                        id: chipFlow
-                        spacing: Theme.inlineSpacing
-
-                        Repeater {
-                            model: browseVm.activeChips
-
-                            delegate: Kirigami.Chip {
-                                required property int index
-                                required property var modelData
-                                text: modelData.label !== undefined
-                                    ? modelData.label : ""
-                                closable: true
-                                checkable: false
-                                Accessible.name: i18nc("@info:whatsthis",
-                                    "Remove filter %1", text)
-                                onRemoved: browseVm.removeChip(index)
-                            }
-                        }
-                    }
-                }
-
-                QQC2.ToolButton {
-                    text: i18nc("@action:button clear every active filter",
-                        "Clear all")
-                    icon.name: "edit-clear-history"
-                    display: QQC2.AbstractButton.TextBesideIcon
-                    onClicked: browseVm.resetFilters()
-                }
+        // Switch between [content], [loading], [empty], [error]
+        // by inspecting the result model's state. We reuse the
+        // DiscoverSectionModel state enum since BrowseVM's
+        // results list is an instance of it.
+        currentIndex: {
+            if (!browseVm.results) return 0;
+            switch (browseVm.results.state) {
+            case DiscoverSectionModel.Loading:
+                return 1;
+            case DiscoverSectionModel.Empty:
+                return 2;
+            case DiscoverSectionModel.Error:
+                return 3;
+            case DiscoverSectionModel.Ready:
+            default:
+                return 0;
             }
         }
-
-        StackLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-
-            // Switch between [content], [loading], [empty], [error]
-            // by inspecting the result model's state. We reuse the
-            // DiscoverSectionModel state enum since BrowseVM's
-            // results list is an instance of it.
-            currentIndex: {
-                if (!browseVm.results) return 0;
-                switch (browseVm.results.state) {
-                case DiscoverSectionModel.Loading:
-                    return 1;
-                case DiscoverSectionModel.Empty:
-                    return 2;
-                case DiscoverSectionModel.Error:
-                    return 3;
-                case DiscoverSectionModel.Ready:
-                default:
-                    return 0;
-                }
-            }
 
             // 0 — Results grid (+ optional load-more sentinel).
             ColumnLayout {
@@ -394,12 +344,11 @@ Kirigami.Page {
                 text: i18nc("@info placeholder", "Browse failed")
                 explanation: browseVm.results
                     ? browseVm.results.errorMessage : ""
-                helpfulAction: Kirigami.Action {
+            helpfulAction: Kirigami.Action {
                     icon.name: "view-refresh"
                     text: i18nc("@action:button", "Retry")
                     onTriggered: browseVm.refresh()
                 }
             }
-        }
     }
 }

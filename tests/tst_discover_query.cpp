@@ -76,7 +76,7 @@ private Q_SLOTS:
     void dateWindow_unknown_token_falls_back()
     {
         QCOMPARE(dateWindowFromString(QStringLiteral("garbage")),
-            DateWindow::ThisYear);
+            DateWindow::Past3Years);
         QCOMPARE(dateWindowFromString(QStringLiteral("garbage"),
                      DateWindow::Any),
             DateWindow::Any);

@@ -11,10 +11,8 @@ import dev.tlmtech.kinema.app
 // Cinemeta search page. The page header is a `QQC2.ToolBar` with
 // the `MediaKindSelect` (Movies / TV Series) toggle on the left
 // followed by a fill-width `Kirigami.SearchField`. The body renders
-// one of five
-// surfaces (idle / loading / results / empty / error) chosen by
-// `searchVm.results.state`. Idle additionally shows a recent-
-// searches strip from `SearchSettings`.
+// one of five surfaces (idle / loading / results / empty / error)
+// chosen by `searchVm.results.state`.
 //
 // `focusSearchField()` is the hook `ApplicationShell.qml`'s
 // `onFocusSearchRequested` calls; declaring it here means the
@@ -48,6 +46,8 @@ Kirigami.Page {
     header: PageHeaderBar {
         title: page.title
 
+        Item { Layout.fillWidth: true }
+
         MediaKindSelect {
             Layout.alignment: Qt.AlignVCenter
             kind: searchVm.kind
@@ -56,7 +56,11 @@ Kirigami.Page {
 
         Kirigami.SearchField {
             id: searchField
+            Layout.alignment: Qt.AlignVCenter
             Layout.fillWidth: true
+            Layout.minimumWidth: Kirigami.Units.gridUnit * 16
+            Layout.preferredWidth: Theme.wideContentMaxWidth
+            Layout.maximumWidth: Theme.wideContentMaxWidth
             placeholderText: i18nc("@info:placeholder",
                 "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
             text: searchVm.query
@@ -80,19 +84,6 @@ Kirigami.Page {
                 }
             }
         }
-
-        QQC2.Button {
-            Layout.alignment: Qt.AlignVCenter
-            text: i18nc("@action:button submit search", "Search")
-            icon.name: "edit-find"
-            enabled: searchField.text.length > 0
-            onClicked: {
-                if (searchVm.query !== searchField.text) {
-                    searchVm.query = searchField.text;
-                }
-                searchVm.submit();
-            }
-        }
     }
 
     // ---- body: state-switched surface --------------------------
@@ -103,67 +94,17 @@ Kirigami.Page {
             ? searchVm.results.state
             : 0
 
-        // 0 — Idle: no query yet. Centred placeholder + a
-        // recent-searches strip when there is history.
-        ColumnLayout {
-            spacing: Theme.groupSpacing
-
+        // 0 — Idle: no query yet.
+        Item {
             Kirigami.PlaceholderMessage {
-                Layout.alignment: Qt.AlignCenter
-                Layout.preferredWidth: Math.min(
-                    page.width - Theme.pageWideMargin * 2,
+                anchors.centerIn: parent
+                width: Math.min(parent.width - Theme.pageWideMargin * 2,
                     Theme.placeholderMaxWidth)
                 icon.name: "search"
                 text: i18nc("@info placeholder",
                     "Find something to watch")
                 explanation: i18nc("@info placeholder",
                     "Type a title or paste an IMDB id (ttXXXXXXX).")
-            }
-
-            // Recent searches — only shown when history exists.
-            ColumnLayout {
-                visible: searchVm.recentQueries.length > 0
-                Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(
-                    page.width - Theme.pageWideMargin * 2,
-                    Theme.wideContentMaxWidth)
-                spacing: Theme.inlineSpacing
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    QQC2.Label {
-                        Layout.fillWidth: true
-                        text: i18nc("@label", "Recent searches")
-                        font: Kirigami.Theme.smallFont
-                        color: Kirigami.Theme.disabledTextColor
-                    }
-                    QQC2.ToolButton {
-                        text: i18nc("@action:button",
-                            "Clear recent searches")
-                        icon.name: "edit-clear-history"
-                        display: QQC2.AbstractButton.IconOnly
-                        QQC2.ToolTip.text: text
-                        QQC2.ToolTip.visible: hovered
-                        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                        onClicked: searchVm.clearRecent()
-                    }
-                }
-
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Theme.inlineSpacing
-
-                    Repeater {
-                        model: searchVm.recentQueries
-                        delegate: Kirigami.Chip {
-                            required property string modelData
-                            text: modelData
-                            checkable: false
-                            closable: false
-                            onClicked: searchVm.useRecent(modelData)
-                        }
-                    }
-                }
             }
         }
 
@@ -182,43 +123,45 @@ Kirigami.Page {
         }
 
         // 3 — Empty.
-        Kirigami.PlaceholderMessage {
-            Layout.alignment: Qt.AlignCenter
-            Layout.preferredWidth: Math.min(parent.width
-                    - Theme.pageWideMargin * 2,
-                Theme.placeholderMaxWidth)
-            icon.name: "edit-find"
-            text: i18nc("@info placeholder", "No results")
-            explanation: i18nc("@info placeholder",
-                "Cinemeta returned no matches for this query. "
-                + "Try a different spelling, or browse the catalog.")
-            helpfulAction: Kirigami.Action {
-                icon.name: "view-list-details"
-                text: searchVm.kind === 0
-                    ? i18nc("@action:button",
-                        "Browse movies instead")
-                    : i18nc("@action:button",
-                        "Browse TV series instead")
-                onTriggered: mainController.applyBrowsePreset(
-                    searchVm.kind, 0)
+        Item {
+            Kirigami.PlaceholderMessage {
+                anchors.centerIn: parent
+                width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                    Theme.placeholderMaxWidth)
+                icon.name: "edit-find"
+                text: i18nc("@info placeholder", "No results")
+                explanation: i18nc("@info placeholder",
+                    "Cinemeta returned no matches for this query. "
+                    + "Try a different spelling, or browse the catalog.")
+                helpfulAction: Kirigami.Action {
+                    icon.name: "view-list-details"
+                    text: searchVm.kind === 0
+                        ? i18nc("@action:button",
+                            "Browse movies instead")
+                        : i18nc("@action:button",
+                            "Browse TV series instead")
+                    onTriggered: mainController.applyBrowsePreset(
+                        searchVm.kind, 0)
+                }
             }
         }
 
         // 4 — Error.
-        Kirigami.PlaceholderMessage {
-            Layout.alignment: Qt.AlignCenter
-            Layout.preferredWidth: Math.min(parent.width
-                    - Theme.pageWideMargin * 2,
-                Theme.placeholderMaxWidth)
-            icon.name: "dialog-error"
-            text: i18nc("@info placeholder", "Search failed")
-            explanation: searchVm.results
-                ? searchVm.results.errorMessage
-                : ""
-            helpfulAction: Kirigami.Action {
-                icon.name: "view-refresh"
-                text: i18nc("@action:button", "Retry")
-                onTriggered: searchVm.submit()
+        Item {
+            Kirigami.PlaceholderMessage {
+                anchors.centerIn: parent
+                width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                    Theme.placeholderMaxWidth)
+                icon.name: "dialog-error"
+                text: i18nc("@info placeholder", "Search failed")
+                explanation: searchVm.results
+                    ? searchVm.results.errorMessage
+                    : ""
+                helpfulAction: Kirigami.Action {
+                    icon.name: "view-refresh"
+                    text: i18nc("@action:button", "Retry")
+                    onTriggered: searchVm.submit()
+                }
             }
         }
     }

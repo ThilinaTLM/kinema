@@ -7,7 +7,6 @@
 
 #include <QObject>
 #include <QString>
-#include <QStringList>
 #include <QTimer>
 
 #include <QCoro/QCoroTask>
@@ -36,10 +35,8 @@ class ResultsListModel;
  *
  * Live search-as-you-type: `setQuery` debounces submission through
  * `m_debounce` (250 ms, minimum 2 trimmed chars). IMDB ids are
- * detected eagerly and submitted without waiting; `submit()` (Enter
- * or `useRecent`) also bypasses the timer. Successful searches
- * push the query into `SearchSettings::addRecentQuery`, exposed
- * back to QML through `recentQueries`.
+ * detected eagerly and submitted without waiting; `submit()` also
+ * bypasses the timer.
  */
 class SearchViewModel : public QObject
 {
@@ -47,8 +44,6 @@ class SearchViewModel : public QObject
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
     Q_PROPERTY(int kind READ kind WRITE setKind NOTIFY kindChanged)
     Q_PROPERTY(ResultsListModel* results READ results CONSTANT)
-    Q_PROPERTY(QStringList recentQueries READ recentQueries
-        NOTIFY recentQueriesChanged)
 
 public:
     SearchViewModel(api::CinemetaClient* cinemeta,
@@ -64,10 +59,6 @@ public:
     void setKind(int kind);
 
     ResultsListModel* results() const noexcept { return m_results; }
-
-    /// MRU list of recently-submitted queries (newest first).
-    /// Forwards to `SearchSettings::recentQueries()`.
-    QStringList recentQueries() const;
 
 public Q_SLOTS:
     /// Run the current `query` + `kind` against Cinemeta. No-op on
@@ -85,17 +76,9 @@ public Q_SLOTS:
     /// or `openSeriesRequested` based on the row's stored kind.
     void activate(int row);
 
-    /// Re-run a recent search. Sets `query` and submits without
-    /// waiting for the debounce window.
-    Q_INVOKABLE void useRecent(const QString& q);
-
-    /// Wipe the recent-queries list (forwards to settings).
-    Q_INVOKABLE void clearRecent();
-
 Q_SIGNALS:
     void queryChanged();
     void kindChanged();
-    void recentQueriesChanged();
 
     /// Routed by `MainController` to a passive notification (phase
     /// 04) and, in phase 05, to the real detail page push.

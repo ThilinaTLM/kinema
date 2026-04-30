@@ -56,7 +56,7 @@ private Q_SLOTS:
         QCOMPARE(s.browse().minRatingPct(), 0);
         QCOMPARE(static_cast<int>(s.browse().sort()),
             static_cast<int>(api::DiscoverSort::Popularity));
-        QCOMPARE(s.browse().hideObscure(), true);
+        QCOMPARE(s.browse().hideObscure(), false);
 
         // Embedded-player defaults: hardware decoding on, language
         // overrides empty, skip-intro on, volume unset.

@@ -382,6 +382,7 @@ private Q_SLOTS:
         QCOMPARE(vm.results()->state(),
             ResultsListModel::State::Idle);
     }
+
 };
 
 QTEST_MAIN(TstSearchViewModel)

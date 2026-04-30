@@ -34,14 +34,12 @@ SearchViewModel::SearchViewModel(api::CinemetaClient* cinemeta,
     , m_cinemeta(cinemeta)
     , m_settings(&settings)
     , m_results(new ResultsListModel(this))
+    , m_kind(settings.kind())
 {
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(kDebounceMs);
     connect(&m_debounce, &QTimer::timeout, this,
         &SearchViewModel::submit);
-
-    connect(m_settings, &config::SearchSettings::recentQueriesChanged,
-        this, &SearchViewModel::recentQueriesChanged);
 }
 
 void SearchViewModel::setQuery(const QString& q)
@@ -58,7 +56,7 @@ void SearchViewModel::setQuery(const QString& q)
     const auto trimmed = m_query.trimmed();
     if (trimmed.isEmpty()) {
         // Cancel any in-flight result and drop back to Idle so the
-        // recent-searches strip / placeholder show through.
+        // placeholder shows through.
         ++m_epoch;
         m_results->setIdle();
         return;
@@ -89,13 +87,14 @@ void SearchViewModel::setKind(int kind)
         return;
     }
     m_kind = k;
+    m_settings->setKind(k);
     Q_EMIT kindChanged();
 }
 
 void SearchViewModel::submit()
 {
-    // Enter / IMDB-id / useRecent all converge here — cancel any
-    // pending debounce so we don't fire a duplicate request.
+    // Enter / IMDB-id submits converge here — cancel any pending
+    // debounce so we don't fire a duplicate request.
     m_debounce.stop();
 
     const auto trimmed = m_query.trimmed();
@@ -121,25 +120,6 @@ void SearchViewModel::clear()
     // it lands.
     ++m_epoch;
     m_results->setIdle();
-}
-
-QStringList SearchViewModel::recentQueries() const
-{
-    return m_settings->recentQueries();
-}
-
-void SearchViewModel::useRecent(const QString& q)
-{
-    if (m_query != q) {
-        m_query = q;
-        Q_EMIT queryChanged();
-    }
-    submit();
-}
-
-void SearchViewModel::clearRecent()
-{
-    m_settings->clearRecentQueries();
 }
 
 void SearchViewModel::activate(int row)
@@ -188,9 +168,6 @@ QCoro::Task<void> SearchViewModel::runSearchTask(QString text,
         }
 
         m_results->setResults(std::move(results));
-        // Successful result — record the query in MRU history so
-        // the idle state can surface it next time.
-        m_settings->addRecentQuery(text);
         Q_EMIT statusMessage(
             i18ncp("@info:status", "%1 result", "%1 results",
                 m_results->rowCount()),

@@ -247,8 +247,8 @@ private Q_SLOTS:
         vm.setMinRatingPct(70);
         QCOMPARE(m_settings->minRatingPct(), 70);
 
-        vm.setHideObscure(false);
-        QCOMPARE(m_settings->hideObscure(), false);
+        vm.setHideObscure(true);
+        QCOMPARE(m_settings->hideObscure(), true);
 
         vm.setDateWindow(static_cast<int>(DateWindow::Past3Years));
         QCOMPARE(static_cast<int>(m_settings->dateWindow()),
@@ -285,51 +285,8 @@ private Q_SLOTS:
         QCOMPARE(vm.kind(), static_cast<int>(MediaKind::Series));
         QCOMPARE(vm.sort(), static_cast<int>(DiscoverSort::Rating));
         QCOMPARE(vm.minRatingPct(), 0);
-        QCOMPARE(vm.hideObscure(), true);
+        QCOMPARE(vm.hideObscure(), false);
         QVERIFY(filtersSpy.count() >= 1);
-    }
-
-    void testActiveChipsReflectNonDefaultState()
-    {
-        FakeTmdb tmdb;
-        tmdb.setToken(QStringLiteral("token"));
-        BrowseViewModel vm(&tmdb, *m_settings, nullptr);
-
-        // Default chips: none. The kind is shown by the segmented
-        // control in the BrowsePage header, not as a chip; only
-        // non-default filters surface here.
-        const auto baseline = vm.activeChipsList();
-        QCOMPARE(baseline.size(), 0);
-
-        vm.setMinRatingPct(70);
-        vm.setSort(static_cast<int>(DiscoverSort::Rating));
-        const auto chips = vm.activeChipsList();
-        // sort + rating
-        QCOMPARE(chips.size(), 2);
-    }
-
-    void testRemoveChipUndoesFilter()
-    {
-        FakeTmdb tmdb;
-        tmdb.setToken(QStringLiteral("token"));
-        BrowseViewModel vm(&tmdb, *m_settings, nullptr);
-        vm.setMinRatingPct(70);
-        QCOMPARE(vm.activeChipsList().size(), 1);
-
-        // Find the rating chip by `kind == "rating"` and remove it.
-        const auto chips = vm.activeChipsList();
-        int ratingChipIndex = -1;
-        for (int i = 0; i < chips.size(); ++i) {
-            if (chips.at(i).toMap()
-                    .value(QStringLiteral("kind")).toString()
-                == QLatin1String("rating")) {
-                ratingChipIndex = i;
-                break;
-            }
-        }
-        QVERIFY(ratingChipIndex >= 0);
-        vm.removeChip(ratingChipIndex);
-        QCOMPARE(vm.minRatingPct(), 0);
     }
 
     void testStaleResponseDiscarded()

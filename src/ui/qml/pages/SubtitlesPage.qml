@@ -50,71 +50,37 @@ Kirigami.Page {
     ]
 
     // ---- active-filter chips (derived from VM filter properties) -
-    readonly property var subtitlesChips: {
-        const out = [];
-        const langs = subtitlesVm.languages || [];
-        for (let i = 0; i < langs.length; ++i) {
-            const c = langs[i];
-            out.push({
-                kind: "lang",
-                label: c.toUpperCase(),
-                payload: c
-            });
-        }
-        if (subtitlesVm.hi !== "off") {
-            out.push({
-                kind: "hi",
-                label: subtitlesVm.hi === "only"
-                    ? i18nc("@label subtitles chip", "HI only")
-                    : i18nc("@label subtitles chip", "HI included")
-            });
-        }
-        if (subtitlesVm.fpo !== "off") {
-            out.push({
-                kind: "fpo",
-                label: subtitlesVm.fpo === "only"
-                    ? i18nc("@label subtitles chip", "Foreign-only only")
-                    : i18nc("@label subtitles chip", "Foreign-only included")
-            });
-        }
-        if (subtitlesVm.release && subtitlesVm.release.length > 0) {
-            out.push({
-                kind: "release",
-                label: i18nc("@label subtitles chip, %1 is the user-supplied release-name fragment",
-                    "Release: %1", subtitlesVm.release)
-            });
-        }
-        return out;
-    }
-
-    function removeSubtitlesChip(idx) {
-        if (idx < 0 || idx >= page.subtitlesChips.length) {
-            return;
-        }
-        const chip = page.subtitlesChips[idx];
-        switch (chip.kind) {
-        case "lang": {
-            const next = (subtitlesVm.languages || []).slice();
-            const at = next.indexOf(chip.payload);
-            if (at >= 0) {
-                next.splice(at, 1);
-                subtitlesVm.languages = next;
-            }
-            break;
-        }
-        case "hi":      subtitlesVm.hi = "off"; break;
-        case "fpo":     subtitlesVm.fpo = "off"; break;
-        case "release": subtitlesVm.release = ""; break;
-        }
-    }
+    // Removed: active filters are now visible via the FilterMenuButton
+    // labels and the "More filters (N)" count, with a "Reset" action
+    // inside the advanced dialog.
 
     // ---- advanced filters dialog --------------------------------
     Kirigami.Dialog {
         id: subtitlesAdvancedDialog
         title: i18nc("@title:dialog subtitles advanced filters",
             "More filters")
-        standardButtons: Kirigami.Dialog.Close
         preferredWidth: Kirigami.Units.gridUnit * 26
+
+        footer: QQC2.DialogButtonBox {
+            QQC2.Button {
+                text: i18nc("@action:button reset all subtitle filters",
+                    "Reset all filters")
+                icon.name: "edit-clear-history"
+                visible: subtitlesVm.languages.length > 0
+                    || subtitlesVm.hi !== "off"
+                    || subtitlesVm.fpo !== "off"
+                QQC2.DialogButtonBox.buttonRole: QQC2.DialogButtonBox.ActionRole
+                onClicked: {
+                    subtitlesVm.resetFilters();
+                    subtitlesAdvancedDialog.close();
+                }
+            }
+            QQC2.Button {
+                text: i18nc("@action:button close dialog", "Close")
+                QQC2.DialogButtonBox.buttonRole: QQC2.DialogButtonBox.AcceptRole
+                onClicked: subtitlesAdvancedDialog.close()
+            }
+        }
 
         readonly property var modes: ["off", "include", "only"]
         readonly property var modeLabels: [
@@ -138,8 +104,7 @@ Kirigami.Page {
                 }
             }
             FormCard.FormComboBoxDelegate {
-                text: i18nc("@label subtitles filter",
-                    "Foreign parts only")
+                text: i18nc("@label subtitles filter", "Foreign parts only")
                 model: subtitlesAdvancedDialog.modeLabels
                 currentIndex: Math.max(0,
                     subtitlesAdvancedDialog.modes.indexOf(subtitlesVm.fpo))
@@ -190,6 +155,7 @@ Kirigami.Page {
                 "Languages")
             icon.name: "preferences-desktop-locale"
             multiSelect: true
+            active: subtitlesVm.languages.length > 0
             options: {
                 const out = [];
                 const src = subtitlesVm.commonLanguages || [];
@@ -212,85 +178,9 @@ Kirigami.Page {
         }
     }
 
-    // ---- body: chip strip + results panel -----------------------
-    ColumnLayout {
+    // ---- body: results panel -----------------------------------
+    SubtitlesPanel {
         anchors.fill: parent
-        spacing: 0
-
-        // ---- active-filter chip strip ---------------------------
-        Item {
-            id: chipStrip
-
-            Layout.fillWidth: true
-            visible: page.subtitlesChips.length > 0
-            implicitHeight: visible
-                ? chipRow.implicitHeight + Theme.inlineSpacing
-                : 0
-
-            Behavior on implicitHeight {
-                NumberAnimation { duration: Kirigami.Units.shortDuration }
-            }
-
-            RowLayout {
-                id: chipRow
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Theme.pageMargin
-                anchors.rightMargin: Theme.pageMargin
-                spacing: Theme.inlineSpacing
-
-                QQC2.Label {
-                    text: i18nc("@label prefix for active filter chip list",
-                        "Filters:")
-                    color: Kirigami.Theme.disabledTextColor
-                }
-
-                QQC2.ScrollView {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: chipFlow.implicitHeight
-                    contentWidth: chipFlow.implicitWidth
-                    contentHeight: chipFlow.implicitHeight
-                    QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AsNeeded
-                    QQC2.ScrollBar.vertical.policy: QQC2.ScrollBar.AlwaysOff
-                    clip: true
-
-                    Row {
-                        id: chipFlow
-                        spacing: Theme.inlineSpacing
-
-                        Repeater {
-                            model: page.subtitlesChips
-
-                            delegate: Kirigami.Chip {
-                                required property int index
-                                required property var modelData
-                                text: modelData.label !== undefined
-                                    ? modelData.label : ""
-                                closable: true
-                                checkable: false
-                                Accessible.name: i18nc("@info:whatsthis",
-                                    "Remove filter %1", text)
-                                onRemoved: page.removeSubtitlesChip(index)
-                            }
-                        }
-                    }
-                }
-
-                QQC2.ToolButton {
-                    text: i18nc("@action:button clear every active filter",
-                        "Clear all")
-                    icon.name: "edit-clear-history"
-                    display: QQC2.AbstractButton.TextBesideIcon
-                    onClicked: subtitlesVm.resetFilters()
-                }
-            }
-        }
-
-        SubtitlesPanel {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            vm: subtitlesVm
-        }
+        vm: subtitlesVm
     }
 }

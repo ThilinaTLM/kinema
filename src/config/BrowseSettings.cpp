@@ -107,8 +107,8 @@ void BrowseSettings::setGenreIds(QList<int> ids)
 core::DateWindow BrowseSettings::dateWindow() const
 {
     const auto s = detail::read(m_config, kGroup, kKeyDateWindow,
-        QStringLiteral("year"));
-    return core::dateWindowFromString(s, core::DateWindow::ThisYear);
+        QStringLiteral("year3"));
+    return core::dateWindowFromString(s, core::DateWindow::Past3Years);
 }
 
 void BrowseSettings::setDateWindow(core::DateWindow w)
@@ -142,7 +142,7 @@ void BrowseSettings::setSort(api::DiscoverSort s)
 
 bool BrowseSettings::hideObscure() const
 {
-    return detail::read(m_config, kGroup, kKeyHideObscure, true);
+    return detail::read(m_config, kGroup, kKeyHideObscure, false);
 }
 
 void BrowseSettings::setHideObscure(bool on)

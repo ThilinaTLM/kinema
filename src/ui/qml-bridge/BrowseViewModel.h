@@ -61,7 +61,6 @@ class BrowseViewModel : public QObject
     Q_PROPERTY(int sort READ sort WRITE setSort NOTIFY filtersChanged)
     Q_PROPERTY(bool hideObscure READ hideObscure WRITE setHideObscure NOTIFY filtersChanged)
     Q_PROPERTY(QVariantList availableGenres READ availableGenresList NOTIFY availableGenresChanged)
-    Q_PROPERTY(QVariantList activeChips READ activeChipsList NOTIFY filtersChanged)
     Q_PROPERTY(DiscoverSectionModel* results READ results CONSTANT)
     Q_PROPERTY(bool tmdbConfigured READ tmdbConfigured NOTIFY tmdbConfiguredChanged)
     Q_PROPERTY(bool authFailed READ authFailed NOTIFY authFailedChanged)
@@ -93,7 +92,6 @@ public:
     void setHideObscure(bool on);
 
     QVariantList availableGenresList() const;
-    QVariantList activeChipsList() const;
 
     DiscoverSectionModel* results() const noexcept { return m_results; }
     bool tmdbConfigured() const noexcept { return m_tmdbConfigured; }
@@ -111,13 +109,8 @@ public Q_SLOTS:
     /// the last page has been reached.
     void loadMore();
 
-    /// Reset every filter to its widget-era default and refresh.
+    /// Reset every filter to its default and refresh.
     void resetFilters();
-
-    /// Drop a single chip from the `activeChips` list, undoing the
-    /// matching filter (e.g. clearing one genre id, resetting the
-    /// rating slider). Triggers a refresh.
-    void removeChip(int index);
 
     /// QML hook for clicking a poster; routes to
     /// `openMovieRequested` / `openSeriesRequested` based on the
@@ -166,10 +159,10 @@ private:
     // Mirror of BrowseSettings; setters write through to KConfig.
     api::MediaKind m_kind = api::MediaKind::Movie;
     QList<int> m_genreIds;
-    core::DateWindow m_dateWindow = core::DateWindow::ThisYear;
+    core::DateWindow m_dateWindow = core::DateWindow::Past3Years;
     int m_minRatingPct = 0;
     api::DiscoverSort m_sort = api::DiscoverSort::Popularity;
-    bool m_hideObscure = true;
+    bool m_hideObscure = false;
 
     QList<api::TmdbGenre> m_availableGenres;
     bool m_genresLoadedMovie = false;

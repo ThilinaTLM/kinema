@@ -36,46 +36,6 @@ std::optional<Enum> safeEnumCast(int value,
     return std::nullopt;
 }
 
-QString windowLabel(core::DateWindow w)
-{
-    using core::DateWindow;
-    switch (w) {
-    case DateWindow::PastMonth:
-        return i18nc("@label browse window chip", "Past month");
-    case DateWindow::Past3Months:
-        return i18nc("@label browse window chip", "Past 3 months");
-    case DateWindow::ThisYear:
-        return i18nc("@label browse window chip", "This year");
-    case DateWindow::Past3Years:
-        return i18nc("@label browse window chip", "Past 3 years");
-    case DateWindow::Any:
-        return i18nc("@label browse window chip", "Any date");
-    }
-    return {};
-}
-
-QString sortLabel(api::DiscoverSort s)
-{
-    switch (s) {
-    case api::DiscoverSort::Popularity:
-        return i18nc("@label browse sort chip", "Most popular");
-    case api::DiscoverSort::ReleaseDate:
-        return i18nc("@label browse sort chip", "Newest first");
-    case api::DiscoverSort::Rating:
-        return i18nc("@label browse sort chip", "Highest rated");
-    case api::DiscoverSort::TitleAsc:
-        return i18nc("@label browse sort chip", "Title (A–Z)");
-    }
-    return {};
-}
-
-QString ratingLabel(int pct)
-{
-    // pct is 0,60,70,75,80 — same scale BrowseSettings persists.
-    return i18nc("@label browse rating chip",
-        "\u2605 %1+", QString::number(pct / 10.0, 'f', 1));
-}
-
 } // namespace
 
 BrowseViewModel::BrowseViewModel(api::TmdbClient* tmdb,
@@ -194,56 +154,6 @@ QVariantList BrowseViewModel::availableGenresList() const
     return out;
 }
 
-QVariantList BrowseViewModel::activeChipsList() const
-{
-    // "kind" identifies which filter the chip removes when the user
-    // clicks the ×; QML reads it via `model.kind` in the chip row's
-    // delegate. The `payload` carries any per-chip detail the
-    // `removeChip(index)` slot needs to undo the chip — for genre
-    // chips, the genre id; otherwise unset.
-    QVariantList out;
-
-    auto addChip = [&out](const QString& kind, const QString& label,
-                       const QVariant& payload = {}) {
-        QVariantMap m;
-        m.insert(QStringLiteral("kind"), kind);
-        m.insert(QStringLiteral("label"), label);
-        if (payload.isValid()) {
-            m.insert(QStringLiteral("payload"), payload);
-        }
-        out.append(m);
-    };
-
-    // The kind is shown by the segmented control in `BrowsePage.qml`;
-    // emitting a redundant chip with no remove affordance read as a
-    // label rather than a token, so it's intentionally not surfaced
-    // here. `removeChip` no longer handles the "kind" kind for the
-    // same reason.
-    if (m_dateWindow != core::DateWindow::ThisYear) {
-        addChip(QStringLiteral("dateWindow"), windowLabel(m_dateWindow));
-    }
-    if (m_sort != api::DiscoverSort::Popularity) {
-        addChip(QStringLiteral("sort"), sortLabel(m_sort));
-    }
-    if (m_minRatingPct > 0) {
-        addChip(QStringLiteral("rating"), ratingLabel(m_minRatingPct));
-    }
-    if (!m_hideObscure) {
-        addChip(QStringLiteral("hideObscure"),
-            i18nc("@label browse chip", "Include obscure"));
-    }
-    for (int gid : m_genreIds) {
-        const auto it = std::find_if(m_availableGenres.cbegin(),
-            m_availableGenres.cend(),
-            [gid](const api::TmdbGenre& g) { return g.id == gid; });
-        const QString name = (it != m_availableGenres.cend())
-            ? it->name
-            : QString::number(gid);
-        addChip(QStringLiteral("genre"), name, gid);
-    }
-    return out;
-}
-
 bool BrowseViewModel::canLoadMore() const noexcept
 {
     return m_tmdbConfigured && !m_authFailed && m_results->rowCount() > 0
@@ -285,41 +195,15 @@ void BrowseViewModel::resetFilters()
 {
     m_kind = api::MediaKind::Movie;
     m_genreIds.clear();
-    m_dateWindow = core::DateWindow::ThisYear;
+    m_dateWindow = core::DateWindow::Past3Years;
     m_minRatingPct = 0;
     m_sort = api::DiscoverSort::Popularity;
-    m_hideObscure = true;
+    m_hideObscure = false;
     m_availableGenres.clear();
     persistAll();
     Q_EMIT filtersChanged();
     Q_EMIT availableGenresChanged();
     refresh();
-}
-
-void BrowseViewModel::removeChip(int index)
-{
-    const auto chips = activeChipsList();
-    if (index < 0 || index >= chips.size()) {
-        return;
-    }
-    const auto chip = chips.at(index).toMap();
-    const auto kind = chip.value(QStringLiteral("kind")).toString();
-
-    if (kind == QLatin1String("dateWindow")) {
-        setDateWindow(static_cast<int>(core::DateWindow::ThisYear));
-    } else if (kind == QLatin1String("sort")) {
-        setSort(static_cast<int>(api::DiscoverSort::Popularity));
-    } else if (kind == QLatin1String("rating")) {
-        setMinRatingPct(0);
-    } else if (kind == QLatin1String("hideObscure")) {
-        setHideObscure(true);
-    } else if (kind == QLatin1String("genre")) {
-        const int gid
-            = chip.value(QStringLiteral("payload")).toInt();
-        auto next = m_genreIds;
-        next.removeAll(gid);
-        setGenreIds(std::move(next));
-    }
 }
 
 void BrowseViewModel::activate(int row)
@@ -349,13 +233,13 @@ void BrowseViewModel::applyPreset(int kind, int sort)
     m_kind = k;
     m_sort = s;
     // Clear refinements so the preset matches the rail the user
-    // clicked into. `dateWindow` keeps `ThisYear` (matches the
-    // widget defaults); rating drops to "any"; genres clear.
+    // clicked into. DateWindow and obscure use the same defaults
+    // as a fresh browse; rating drops to "any"; genres clear.
     m_genreIds.clear();
     m_availableGenres.clear();
-    m_dateWindow = core::DateWindow::ThisYear;
+    m_dateWindow = core::DateWindow::Past3Years;
     m_minRatingPct = 0;
-    m_hideObscure = true;
+    m_hideObscure = false;
     persistAll();
 
     Q_EMIT filtersChanged();

@@ -10,9 +10,6 @@ namespace kinema::config {
 namespace {
 constexpr auto kGroup = "General";
 constexpr auto kKey = "searchKind";
-constexpr auto kRecentGroup = "Search";
-constexpr auto kRecentKey = "recentQueries";
-constexpr int kRecentCap = 8;
 } // namespace
 
 SearchSettings::SearchSettings(KSharedConfigPtr config, QObject* parent)
@@ -38,33 +35,5 @@ void SearchSettings::setKind(api::MediaKind k)
             : QStringLiteral("Movie"));
 }
 
-QStringList SearchSettings::recentQueries() const
-{
-    return detail::read(m_config, kRecentGroup, kRecentKey, QStringList {});
-}
-
-void SearchSettings::addRecentQuery(const QString& q)
-{
-    const auto trimmed = q.trimmed();
-    if (trimmed.isEmpty()) {
-        return;
-    }
-
-    auto list = recentQueries();
-    list.removeAll(trimmed);
-    list.prepend(trimmed);
-    while (list.size() > kRecentCap) {
-        list.removeLast();
-    }
-
-    detail::write(m_config, kRecentGroup, kRecentKey, list);
-    Q_EMIT recentQueriesChanged();
-}
-
-void SearchSettings::clearRecentQueries()
-{
-    detail::erase(m_config, kRecentGroup, kRecentKey);
-    Q_EMIT recentQueriesChanged();
-}
 
 } // namespace kinema::config

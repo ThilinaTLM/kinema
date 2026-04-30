@@ -34,6 +34,9 @@ QQC2.ToolButton {
     property var options: []           // [{ value, label }]
     property var currentValue           // single-select scalar
     property var currentValues: []      // multi-select list
+    /// When true, highlights the button to indicate an active filter.
+    /// Callers bind this to whether the filter deviates from its default.
+    property bool active: false
 
     signal activated(var value)
     signal multiActivated(var values)
@@ -43,6 +46,12 @@ QQC2.ToolButton {
     display: QQC2.AbstractButton.TextBesideIcon
     checkable: true
     checked: menu.opened
+
+    // Use accent color for the button text when the filter is active
+    // to give an at-a-glance indicator that a non-default value is set.
+    Kirigami.Theme.colorSet: Kirigami.Theme.Header
+    Kirigami.Theme.inherit: false
+    font.bold: root.active
 
     text: {
         if (root.multiSelect) {

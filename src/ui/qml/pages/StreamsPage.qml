@@ -65,69 +65,6 @@ Kirigami.Page {
         return label;
     }
 
-    // ---- active-filter chips (derived from VM ui* properties) ----
-    // Synthesised in QML rather than as a Q_PROPERTY on the detail
-    // VMs; the chip set is short and the labels are inline-i18n'd.
-    readonly property var streamsChips: {
-        if (!page.detailVm) return [];
-        const out = [];
-        if (page.detailVm.cachedOnly) {
-            out.push({
-                kind: "cached",
-                label: i18nc("@label streams chip", "Cached only")
-            });
-        }
-        if (page.detailVm.uiResolutionFilter
-            && page.detailVm.uiResolutionFilter.length > 0) {
-            const r = page.detailVm.uiResolutionFilter;
-            const upper = (r === "sd")
-                ? i18nc("@label streams chip resolution", "SD")
-                : (r === "2160p")
-                    ? i18nc("@label streams chip resolution", "4K")
-                    : r.toUpperCase();
-            out.push({ kind: "res", label: upper });
-        }
-        if (page.detailVm.uiHdrOnly) {
-            out.push({
-                kind: "hdr",
-                label: i18nc("@label streams chip", "HDR")
-            });
-        }
-        if (page.detailVm.uiDolbyVisionOnly) {
-            out.push({
-                kind: "dv",
-                label: i18nc("@label streams chip", "Dolby Vision")
-            });
-        }
-        if (page.detailVm.uiMultiAudioOnly) {
-            out.push({
-                kind: "ma",
-                label: i18nc("@label streams chip", "Multi audio")
-            });
-        }
-        return out;
-    }
-
-    function removeStreamsChip(idx) {
-        if (!page.detailVm || idx < 0 || idx >= page.streamsChips.length) {
-            return;
-        }
-        const chip = page.streamsChips[idx];
-        switch (chip.kind) {
-        case "cached":  page.detailVm.cachedOnly = false; break;
-        case "res":     page.detailVm.uiResolutionFilter = ""; break;
-        case "hdr":     page.detailVm.uiHdrOnly = false; break;
-        case "dv":      page.detailVm.uiDolbyVisionOnly = false; break;
-        case "ma":      page.detailVm.uiMultiAudioOnly = false; break;
-        }
-    }
-
-    function clearAllStreamsFilters() {
-        if (!page.detailVm) return;
-        page.detailVm.cachedOnly = false;
-        page.detailVm.clearUiFilters();
-    }
-
     actions: [
         Kirigami.Action {
             icon.name: "subtitles"
@@ -147,8 +84,34 @@ Kirigami.Page {
         id: streamsAdvancedDialog
         title: i18nc("@title:dialog streams advanced filters",
             "More filters")
-        standardButtons: Kirigami.Dialog.Close
         preferredWidth: Kirigami.Units.gridUnit * 26
+
+        footer: QQC2.DialogButtonBox {
+            QQC2.Button {
+                text: i18nc("@action:button reset all stream filters",
+                    "Reset all filters")
+                icon.name: "edit-clear-history"
+                visible: page.detailVm
+                    && (page.detailVm.cachedOnly
+                        || page.detailVm.uiResolutionFilter.length > 0
+                        || page.detailVm.uiHdrOnly
+                        || page.detailVm.uiDolbyVisionOnly
+                        || page.detailVm.uiMultiAudioOnly)
+                QQC2.DialogButtonBox.buttonRole: QQC2.DialogButtonBox.ActionRole
+                onClicked: {
+                    if (page.detailVm) {
+                        page.detailVm.cachedOnly = false;
+                        page.detailVm.clearUiFilters();
+                    }
+                    streamsAdvancedDialog.close();
+                }
+            }
+            QQC2.Button {
+                text: i18nc("@action:button close dialog", "Close")
+                QQC2.DialogButtonBox.buttonRole: QQC2.DialogButtonBox.AcceptRole
+                onClicked: streamsAdvancedDialog.close()
+            }
+        }
 
         FormCard.FormCard {
             FormCard.FormSwitchDelegate {
@@ -170,8 +133,7 @@ Kirigami.Page {
                 }
             }
             FormCard.FormSwitchDelegate {
-                text: i18nc("@option:check stream filter",
-                    "Dual / Multi audio")
+                text: i18nc("@option:check stream filter", "Dual / Multi audio")
                 checked: page.detailVm
                     && page.detailVm.uiMultiAudioOnly
                 onToggled: if (page.detailVm) {
@@ -194,11 +156,16 @@ Kirigami.Page {
             : 0
 
         // ---- Resolution (pick-one dropdown) ---------------------
+        // Right-align filter controls after the title.
+        Item { Layout.fillWidth: true }
+
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button stream filter",
                 "Resolution")
             icon.name: "view-fullscreen"
+            active: page.detailVm
+                && page.detailVm.uiResolutionFilter.length > 0
             options: [
                 { value: "",      label:
                     i18nc("@item resolution", "Any") },
@@ -246,6 +213,8 @@ Kirigami.Page {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button browse sort", "Sort")
             icon.name: "view-sort"
+            active: page.detailVm
+                && page.detailVm.sortMode !== StreamsListModel.Smart
             enabled: page.detailVm
                 && page.detailVm.streams
                 && page.detailVm.streams.count > 0
@@ -299,85 +268,10 @@ Kirigami.Page {
         }
     }
 
-    // ---- body: chip strip + state-switched streams list ---------
-    ColumnLayout {
+    // ---- body: streams list ------------------------------------
+    StreamsList {
         anchors.fill: parent
-        spacing: 0
-
-        // ---- active-filter chip strip ---------------------------
-        Item {
-            id: chipStrip
-
-            Layout.fillWidth: true
-            visible: page.streamsChips.length > 0
-            implicitHeight: visible
-                ? chipRow.implicitHeight + Theme.inlineSpacing
-                : 0
-
-            Behavior on implicitHeight {
-                NumberAnimation { duration: Kirigami.Units.shortDuration }
-            }
-
-            RowLayout {
-                id: chipRow
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Theme.pageMargin
-                anchors.rightMargin: Theme.pageMargin
-                spacing: Theme.inlineSpacing
-
-                QQC2.Label {
-                    text: i18nc("@label prefix for active filter chip list",
-                        "Filters:")
-                    color: Kirigami.Theme.disabledTextColor
-                }
-
-                QQC2.ScrollView {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: chipFlow.implicitHeight
-                    contentWidth: chipFlow.implicitWidth
-                    contentHeight: chipFlow.implicitHeight
-                    QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AsNeeded
-                    QQC2.ScrollBar.vertical.policy: QQC2.ScrollBar.AlwaysOff
-                    clip: true
-
-                    Row {
-                        id: chipFlow
-                        spacing: Theme.inlineSpacing
-
-                        Repeater {
-                            model: page.streamsChips
-
-                            delegate: Kirigami.Chip {
-                                required property int index
-                                required property var modelData
-                                text: modelData.label !== undefined
-                                    ? modelData.label : ""
-                                closable: true
-                                checkable: false
-                                Accessible.name: i18nc("@info:whatsthis",
-                                    "Remove filter %1", text)
-                                onRemoved: page.removeStreamsChip(index)
-                            }
-                        }
-                    }
-                }
-
-                QQC2.ToolButton {
-                    text: i18nc("@action:button clear every active filter",
-                        "Clear all")
-                    icon.name: "edit-clear-history"
-                    display: QQC2.AbstractButton.TextBesideIcon
-                    onClicked: page.clearAllStreamsFilters()
-                }
-            }
-        }
-
-        StreamsList {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            vm: page.detailVm
-        }
+        visible: true
+        vm: page.detailVm
     }
 }

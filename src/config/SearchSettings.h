@@ -8,20 +8,15 @@
 #include <KSharedConfig>
 
 #include <QObject>
-#include <QStringList>
 
 namespace kinema::config {
 
 /**
- * SearchBar defaults + recent-query history.
+ * SearchBar defaults.
  *
  * KConfig group: [General]
  * Keys:
  *   searchKind        "Movie" | "Series"
- *
- * KConfig group: [Search]
- * Keys:
- *   recentQueries     comma-separated MRU list (cap 8)
  */
 class SearchSettings : public QObject
 {
@@ -31,22 +26,6 @@ public:
 
     api::MediaKind kind() const;
     void setKind(api::MediaKind);
-
-    /// Most-recently-used search queries, newest first. Capped at
-    /// `kRecentCap` entries by `addRecentQuery`. Returns an empty
-    /// list when no history is recorded.
-    QStringList recentQueries() const;
-
-    /// Push `q` (trimmed) to the front of the MRU list, removing
-    /// any earlier occurrence (case-sensitive) and dropping the
-    /// tail beyond the cap. No-op on empty/whitespace input.
-    void addRecentQuery(const QString& q);
-
-    /// Wipe the recent-queries list.
-    void clearRecentQueries();
-
-Q_SIGNALS:
-    void recentQueriesChanged();
 
 private:
     KSharedConfigPtr m_config;
