@@ -17,16 +17,11 @@ import dev.tlmtech.kinema.app
 // Chrome:
 //
 //   * `header:` is a single merged `PageHeaderBar` inlining the page
-//     title with the basic filters — `Resolution ▾` (Any / 4K /
-//     1080p / 720p / SD), `Cached only`, `Sort ▾` and a `Descending`
-//     icon-toggle — plus a `More filters… (N)` button that opens
-//     the `streamsAdvancedDialog` carrying HDR / Dolby Vision /
-//     Multi-audio toggles. Resolution is a `FilterMenuButton`
-//     (no SegmentedButton) so the bar reads as a single row of
-//     dropdown buttons at every width.
-//   * Below the header, an inline chip strip lists active filters as
-//     removable `Kirigami.Chip`s with a trailing "Clear all".
-//   * The Subtitles… affordance stays as a top-level page action.
+//     title with sorting affordances (`Sort ▾` + `Descending`) and a
+//     single `Filters` button.
+//   * The filters dialog owns all stream filters — Resolution,
+//     Cached only, HDR, Dolby Vision, and Dual / Multi audio — so the
+//     header stays compact.
 //
 // Esc pops back to the detail page (handled by the shell-level
 // shortcut in `ApplicationShell.qml`).
@@ -65,26 +60,20 @@ Kirigami.Page {
         return label;
     }
 
-    actions: [
-        Kirigami.Action {
-            icon.name: "subtitles"
-            text: i18nc("@action:button", "Subtitles\u2026")
-            enabled: page.detailVm !== undefined
-                && page.detailVm !== null
-            onTriggered: page.detailVm.requestSubtitles()
-        }
-    ]
-
-    // ---- advanced filters dialog --------------------------------
-    // HDR / Dolby Vision / Multi-audio toggles. The codec axis is
-    // niche enough that we keep it behind "More filters…" so the
-    // inline bar stays at four short controls (Resolution / Cached
-    // only / Sort / Descending).
+    // ---- filters dialog -----------------------------------------
     Kirigami.Dialog {
         id: streamsAdvancedDialog
-        title: i18nc("@title:dialog streams advanced filters",
-            "More filters")
+        title: i18nc("@title:dialog stream filters", "Filters")
         preferredWidth: Kirigami.Units.gridUnit * 26
+
+        readonly property var resolutionValues: ["", "2160p", "1080p", "720p", "sd"]
+        readonly property var resolutionLabels: [
+            i18nc("@item resolution", "Any"),
+            i18nc("@item resolution", "4K"),
+            i18nc("@item resolution", "1080p"),
+            i18nc("@item resolution", "720p"),
+            i18nc("@item resolution", "SD")
+        ]
 
         footer: QQC2.DialogButtonBox {
             QQC2.Button {
@@ -114,6 +103,31 @@ Kirigami.Page {
         }
 
         FormCard.FormCard {
+            FormCard.FormComboBoxDelegate {
+                text: i18nc("@label stream filter", "Resolution")
+                model: streamsAdvancedDialog.resolutionLabels
+                currentIndex: Math.max(0,
+                    streamsAdvancedDialog.resolutionValues.indexOf(
+                        page.detailVm ? page.detailVm.uiResolutionFilter : ""))
+                onActivated: idx => {
+                    if (page.detailVm) {
+                        page.detailVm.uiResolutionFilter =
+                            streamsAdvancedDialog.resolutionValues[idx];
+                    }
+                }
+            }
+            FormCard.FormSwitchDelegate {
+                text: i18nc("@option:check stream filter", "Cached only")
+                description: i18nc("@info:tooltip stream filter",
+                    "Show only streams already cached on Real-Debrid — they play instantly.")
+                visible: page.detailVm
+                    && page.detailVm.realDebridConfigured
+                    && page.detailVm.rawStreamsCount > 0
+                checked: page.detailVm && page.detailVm.cachedOnly
+                onToggled: if (page.detailVm) {
+                    page.detailVm.cachedOnly = checked;
+                }
+            }
             FormCard.FormSwitchDelegate {
                 text: i18nc("@option:check stream filter", "HDR")
                 description: i18nc("@info:tooltip stream filter",
@@ -143,70 +157,23 @@ Kirigami.Page {
         }
     }
 
-    // ---- header: merged title + filter bar ----------------------
+    // ---- header: merged title + sorting + filters ---------------
     header: PageHeaderBar {
         id: filterBar
         title: page.title
-        pageActions: page.actions
         advancedFiltersDialog: streamsAdvancedDialog
+        advancedFiltersButtonText: i18nc(
+            "@action:button open stream filters dialog", "Filters")
         advancedFilterCount: page.detailVm
-            ? ((page.detailVm.uiHdrOnly ? 1 : 0)
+            ? ((page.detailVm.cachedOnly ? 1 : 0)
+                + (page.detailVm.uiResolutionFilter.length > 0 ? 1 : 0)
+                + (page.detailVm.uiHdrOnly ? 1 : 0)
                 + (page.detailVm.uiDolbyVisionOnly ? 1 : 0)
                 + (page.detailVm.uiMultiAudioOnly ? 1 : 0))
             : 0
 
-        // ---- Resolution (pick-one dropdown) ---------------------
-        // Right-align filter controls after the title.
+        // Right-align controls after the title.
         Item { Layout.fillWidth: true }
-
-        FilterMenuButton {
-            Layout.alignment: Qt.AlignVCenter
-            axisLabel: i18nc("@action:button stream filter",
-                "Resolution")
-            icon.name: "view-fullscreen"
-            active: page.detailVm
-                && page.detailVm.uiResolutionFilter.length > 0
-            options: [
-                { value: "",      label:
-                    i18nc("@item resolution", "Any") },
-                { value: "2160p", label:
-                    i18nc("@item resolution", "4K") },
-                { value: "1080p", label:
-                    i18nc("@item resolution", "1080p") },
-                { value: "720p",  label:
-                    i18nc("@item resolution", "720p") },
-                { value: "sd",    label:
-                    i18nc("@item resolution", "SD") }
-            ]
-            currentValue: page.detailVm
-                ? page.detailVm.uiResolutionFilter : ""
-            onActivated: v => {
-                if (page.detailVm) {
-                    page.detailVm.uiResolutionFilter = v;
-                }
-            }
-        }
-
-        // ---- Cached only (toggle) -------------------------------
-        QQC2.ToolButton {
-            Layout.alignment: Qt.AlignVCenter
-            text: i18nc("@option:check stream filter", "Cached only")
-            icon.name: "package-installed-outdated"
-            display: QQC2.AbstractButton.TextBesideIcon
-            flat: true
-            checkable: true
-            visible: page.detailVm
-                && page.detailVm.realDebridConfigured
-                && page.detailVm.rawStreamsCount > 0
-            checked: page.detailVm && page.detailVm.cachedOnly
-            QQC2.ToolTip.text: i18nc("@info:tooltip stream filter",
-                "Show only streams already cached on Real-Debrid — they play instantly.")
-            QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-            onClicked: if (page.detailVm) {
-                page.detailVm.cachedOnly = !page.detailVm.cachedOnly;
-            }
-        }
 
         // ---- Sort (pick-one) ------------------------------------
         FilterMenuButton {

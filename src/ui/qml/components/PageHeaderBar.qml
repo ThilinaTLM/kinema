@@ -49,10 +49,13 @@ QQC2.ToolBar {
     // list<Kirigami.Action> rendered on the right of the bar. Use the
     // page's existing `actions:` declaration to populate.
     property var pageActions: []
-    // Optional. When set, the bar renders a "More filters\u2026 (N)"
-    // ToolButton that calls `open()` on the dialog.
+    // Optional. When set, the bar renders a filters ToolButton that
+    // calls `open()` on the dialog.
     property var advancedFiltersDialog: null
-    // Drives the "(N)" count in the More-filters label.
+    // Optional override for the filters button label. When empty, the
+    // default "More filters…" / "More filters" wording is used.
+    property string advancedFiltersButtonText: ""
+    // Drives the "(N)" count in the filters button label.
     property int advancedFilterCount: 0
 
     // Default property: filter widgets between the title and the
@@ -145,13 +148,21 @@ QQC2.ToolBar {
             flat: true
             display: QQC2.AbstractButton.TextBesideIcon
             icon.name: "view-filter"
-            text: root.advancedFilterCount > 0
-                ? i18ncp(
-                    "@action:button open advanced filters dialog, %1 active count",
-                    "More filters (%1)", "More filters (%1)",
-                    root.advancedFilterCount)
-                : i18nc("@action:button open advanced filters dialog",
-                    "More filters\u2026")
+            text: {
+                if (root.advancedFilterCount > 0) {
+                    const label = root.advancedFiltersButtonText.length > 0
+                        ? root.advancedFiltersButtonText
+                        : i18nc("@action:button open advanced filters dialog",
+                            "More filters");
+                    return i18nc(
+                        "@action:button open filters dialog, %1 label, %2 active count",
+                        "%1 (%2)", label, root.advancedFilterCount);
+                }
+                return root.advancedFiltersButtonText.length > 0
+                    ? root.advancedFiltersButtonText
+                    : i18nc("@action:button open advanced filters dialog",
+                        "More filters\u2026");
+            }
             onClicked: if (root.advancedFiltersDialog) {
                 root.advancedFiltersDialog.open();
             }
