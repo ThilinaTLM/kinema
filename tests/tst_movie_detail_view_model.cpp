@@ -266,7 +266,8 @@ private Q_SLOTS:
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
-        // Default sort: Seeders desc \u2192 Big, Mid, Smol.
+        // Default smart sort keeps 1080p rows ahead of 720p and
+        // orders the 1080p group by seeders: \u2192 Big, Mid, Smol.
         QCOMPARE(f.vm.streams()->rowCount(), 3);
         QCOMPARE(f.vm.streams()->at(0)->releaseName,
             QStringLiteral("Big"));
@@ -438,7 +439,7 @@ private Q_SLOTS:
         QCOMPARE(f.vm.sortDescending(), false);
     }
 
-    void testSmartSortPutsCachedFirstThenResolutionThenSize()
+    void testSmartSortPutsCachedFirstThenResolutionThenSeeders()
     {
         Fixture f;
         f.cinemeta.metaScripts = {
@@ -452,30 +453,30 @@ private Q_SLOTS:
         Stream uncached2160 = makeStream(
             QStringLiteral("Uncached.2160p.huge"),
             QStringLiteral("2160p"), 99, 8'000'000'000);
-        Stream uncached1080big = makeStream(
+        Stream uncached1080lowSeedersBig = makeStream(
             QStringLiteral("Uncached.1080p.big"),
-            QStringLiteral("1080p"), 50, 3'000'000'000);
-        Stream uncached1080small = makeStream(
+            QStringLiteral("1080p"), 10, 3'000'000'000);
+        Stream uncached1080highSeedersSmall = makeStream(
             QStringLiteral("Uncached.1080p.small"),
             QStringLiteral("1080p"), 50, 1'500'000'000);
         f.torrentio.scriptedCalls = {
-            { { uncached2160, uncached1080small, cached1080,
-                  uncached1080big } }
+            { { uncached2160, uncached1080highSeedersSmall, cached1080,
+                  uncached1080lowSeedersBig } }
         };
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
         // Smart: cached row leads, then 2160p, then 1080p ordered
-        // by size desc.
+        // by seeders desc within the quality group.
         QCOMPARE(f.vm.streams()->rowCount(), 4);
         QCOMPARE(f.vm.streams()->at(0)->releaseName,
             QStringLiteral("Cached.1080p.small"));
         QCOMPARE(f.vm.streams()->at(1)->releaseName,
             QStringLiteral("Uncached.2160p.huge"));
         QCOMPARE(f.vm.streams()->at(2)->releaseName,
-            QStringLiteral("Uncached.1080p.big"));
-        QCOMPARE(f.vm.streams()->at(3)->releaseName,
             QStringLiteral("Uncached.1080p.small"));
+        QCOMPARE(f.vm.streams()->at(3)->releaseName,
+            QStringLiteral("Uncached.1080p.big"));
     }
 
     void testSmartSortIgnoresDescendingToggle()

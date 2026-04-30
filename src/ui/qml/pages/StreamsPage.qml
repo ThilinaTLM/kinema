@@ -161,6 +161,7 @@ Kirigami.Page {
     header: PageHeaderBar {
         id: filterBar
         title: page.title
+        titleMaximumWidth: Kirigami.Units.gridUnit * 24
         advancedFiltersDialog: streamsAdvancedDialog
         advancedFiltersButtonText: i18nc(
             "@action:button open stream filters dialog", "Filters")
@@ -188,7 +189,7 @@ Kirigami.Page {
             options: [
                 { value: StreamsListModel.Smart, label:
                     i18nc("@action:inmenu sort streams",
-                        "Smart (cached, then quality)") },
+                        "Smart (cached, quality, seeders)") },
                 { value: StreamsListModel.Seeders, label:
                     i18nc("@action:inmenu sort streams", "Seeders") },
                 { value: StreamsListModel.Size, label:

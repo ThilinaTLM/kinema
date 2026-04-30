@@ -93,7 +93,8 @@ public:
     /// Client-side sort axes. Values carry no semantic meaning; the
     /// view-model maps each to a comparator over `api::Stream`.
     /// `Smart` is the default — cached rows first, then by resolution
-    /// rank, then by size descending. It ignores the descending toggle.
+    /// rank, then by seeders descending within each quality bucket.
+    /// It ignores the descending toggle.
     enum class SortMode {
         Smart = 0,
         Seeders,

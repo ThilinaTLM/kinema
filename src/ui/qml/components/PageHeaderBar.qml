@@ -49,6 +49,10 @@ QQC2.ToolBar {
     // list<Kirigami.Action> rendered on the right of the bar. Use the
     // page's existing `actions:` declaration to populate.
     property var pageActions: []
+    // Cap for the title label's natural width before it starts
+    // eliding, so individual pages can opt into longer titles without
+    // changing the shared default.
+    property int titleMaximumWidth: Kirigami.Units.gridUnit * 14
     // Optional. When set, the bar renders a filters ToolButton that
     // calls `open()` on the dialog.
     property var advancedFiltersDialog: null
@@ -114,7 +118,8 @@ QQC2.ToolBar {
         // Elides at the right; tooltip surfaces the full string when
         // truncated. Cap the natural width so a long pushed-page
         // title (e.g. "Movie X \u00b7 12 streams") cannot push the
-        // filter row off-screen.
+        // filter row off-screen. Pages with naturally longer labels
+        // can raise `titleMaximumWidth`.
         Kirigami.Heading {
             id: titleLabel
             level: 2
@@ -122,7 +127,7 @@ QQC2.ToolBar {
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
             Layout.alignment: Qt.AlignVCenter
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 14
+            Layout.maximumWidth: root.titleMaximumWidth
 
             HoverHandler { id: titleHover }
             QQC2.ToolTip.text: root.title

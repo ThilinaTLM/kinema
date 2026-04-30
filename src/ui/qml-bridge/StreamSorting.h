@@ -34,7 +34,7 @@ QList<api::Stream> applyUiFilters(QList<api::Stream> rows,
     const UiFilters& filters);
 
 /// Sort `rows` in place by `mode`. Stable. `Smart` ignores
-/// `descending` (it has a fixed shape: cached → resolution → size).
+/// `descending` (it has a fixed shape: cached → resolution → seeders).
 void sortInPlace(QList<api::Stream>& rows,
     StreamsListModel::SortMode mode,
     bool descending);
