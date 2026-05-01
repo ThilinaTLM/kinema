@@ -77,7 +77,7 @@ Kirigami.ScrollablePage {
     }
 
     readonly property Kirigami.Action libraryAction: Kirigami.Action {
-        icon.source: AppIcons.url(movieDetailVm.inLibrary ? "trash-2" : "save")
+        icon.source: AppIcons.url(movieDetailVm.inLibrary ? "trash-2" : "library")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: movieDetailVm.libraryActionText
         displayHint: Kirigami.DisplayHint.IconOnly
