@@ -212,6 +212,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/PageHeaderBar.qml
         ui/qml/components/PosterCard.qml
         ui/qml/components/PosterGrid.qml
+        ui/qml/components/EpisodeChip.qml
         ui/qml/components/ProgressPosterCard.qml
         ui/qml/components/QueueRow.qml
         ui/qml/components/RatingChip.qml

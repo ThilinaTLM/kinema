@@ -47,6 +47,7 @@ public:
         ItemRole,         ///< QVariant<api::DiscoverItem> for activation handlers
         ProgressRole,     ///< double in [0,1]; -1 if not applicable
         LastReleaseRole,  ///< pre-formatted Continue-Watching subtitle line
+        EpisodeSubtitleRole, ///< "S01E02" badge for series episodes; empty for movies
     };
     Q_ENUM(Roles)
 
@@ -87,6 +88,7 @@ public:
     /// Continue-Watching overlay data; ignored by other rails.
     void setProgressList(QList<double> progress);
     void setLastReleaseList(QStringList releases);
+    void setEpisodeSubtitleList(QStringList subtitles);
 
     /// Pure accessor for unit tests / hosting view-models.
     const QList<api::DiscoverItem>& items() const noexcept { return m_items; }
@@ -105,6 +107,7 @@ private:
     QList<api::DiscoverItem> m_items;
     QList<double> m_progress;       ///< parallel to m_items; size matches or empty
     QStringList m_lastReleases;     ///< parallel to m_items; size matches or empty
+    QStringList m_episodeSubtitles; ///< parallel to m_items; size matches or empty
     State m_state = State::Idle;
     QString m_errorMessage;
 };

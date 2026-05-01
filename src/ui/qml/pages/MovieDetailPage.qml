@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import QtQuick
-import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
@@ -33,9 +32,16 @@ Kirigami.ScrollablePage {
     // verb without a useful target (no stream picked yet). The label
     // says "Streams" rather than "Play" because the action opens a
     // picker, not the player itself.
-    Kirigami.Dialog {
+    Kirigami.PromptDialog {
         id: removeLibraryDialog
+
         title: i18nc("@title:dialog", "Remove from Library?")
+        subtitle: i18nc("@info",
+            "\u201c%1\u201d will be removed from your Library. "
+            + "Your watched and playback history for this title "
+            + "is preserved.",
+            movieDetailVm.title)
+
         standardButtons: Kirigami.Dialog.NoButton
         customFooterActions: [
             Kirigami.Action {
@@ -54,15 +60,6 @@ Kirigami.ScrollablePage {
                 }
             }
         ]
-
-        QQC2.Label {
-            text: i18nc("@info",
-                "\u201c%1\u201d will be removed from your Library. "
-                + "Your watched and playback history for this title "
-                + "is preserved.",
-                movieDetailVm.title)
-            wrapMode: Text.WordWrap
-        }
     }
 
     readonly property Kirigami.Action streamsAction: Kirigami.Action {

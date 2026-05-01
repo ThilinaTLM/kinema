@@ -14,7 +14,7 @@ import dev.tlmtech.kinema.app
 // adds:
 //
 //   * a thin progress bar overlay along the poster's bottom edge,
-//   * a release-line subtitle ("1080p — Movie.Name.2024"),
+//   * an episode badge chip ("S01E02") on the poster for series,
 //   * a right-click context menu that forwards resume / details /
 //     streams / remove actions to the view-model.
 Item {
@@ -23,7 +23,7 @@ Item {
     // ---- Inputs --------------------------------------------------
     property string posterUrl
     property string title
-    property string lastRelease    // e.g. "1080p — Some.Release.Name"
+    property string episodeSubtitle   // e.g. "S01E02"; empty for movies
     property real progress: 0.0    // [0, 1]; <= 0 hides the bar
 
     signal clicked()
@@ -118,6 +118,18 @@ Item {
                 }
             }
 
+            // Episode badge (top-left). Mirrors RatingChip styling.
+            // Hidden for movies / entries without season+episode.
+            EpisodeChip {
+                episodeSubtitle: card.episodeSubtitle
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    topMargin: Kirigami.Units.smallSpacing
+                    leftMargin: Kirigami.Units.smallSpacing
+                }
+            }
+
             // Progress bar overlay along the poster's bottom edge.
             // Mirrors the original 4px-thick bar; the track sits
             // inside the inset so it doesn't clip the rounded
@@ -152,7 +164,7 @@ Item {
             }
         }
 
-        // ---- Title + release line ----------------------------------
+        // ---- Title ----------------------------------------------
         ColumnLayout {
             id: meta
             spacing: 0
@@ -165,15 +177,6 @@ Item {
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 color: Kirigami.Theme.textColor
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: card.lastRelease.length > 0
-                text: card.lastRelease
-                elide: Text.ElideRight
-                font: Kirigami.Theme.smallFont
-                color: Kirigami.Theme.disabledTextColor
             }
         }
     }

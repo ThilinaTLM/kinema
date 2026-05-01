@@ -58,10 +58,10 @@ ColumnLayout {
         delegate: ProgressPosterCard {
             width: Theme.posterMin
             height: list.height
-            posterUrl:    model.posterUrl
-            title:        model.title
-            lastRelease:  model.lastRelease
-            progress:     model.progress !== undefined ? model.progress : -1
+            posterUrl:       model.posterUrl
+            title:           model.title
+            episodeSubtitle: model.episodeSubtitle
+            progress:        model.progress !== undefined ? model.progress : -1
 
             onClicked: continueWatchingVm.resume(index)
             onDetailsRequested: continueWatchingVm.openDetail(index)

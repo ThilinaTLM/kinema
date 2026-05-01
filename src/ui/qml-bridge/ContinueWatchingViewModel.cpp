@@ -24,6 +24,19 @@ api::DiscoverItem itemFromHistory(const api::HistoryEntry& e)
     return it;
 }
 
+/// Episode badge string for a series entry: "S01E02" (zero-padded).
+/// Returns an empty string for movies or entries without season/episode.
+QString episodeSubtitle(const api::HistoryEntry& e)
+{
+    if (e.key.kind != api::MediaKind::Series
+        || !e.key.season.has_value() || !e.key.episode.has_value()) {
+        return {};
+    }
+    return QStringLiteral("S%1E%2")
+        .arg(*e.key.season, 2, 10, QLatin1Char('0'))
+        .arg(*e.key.episode, 2, 10, QLatin1Char('0'));
+}
+
 /// Continue-Watching subtitle line: "1080p — Release.Name", or the
 /// release name alone, or the bare quality label as a last resort.
 /// Mirrors `ui::ContinueWatchingSection::lastReleaseLine` so visual
@@ -77,17 +90,21 @@ void ContinueWatchingViewModel::rebuildModel()
     QList<api::DiscoverItem> items;
     QList<double> progress;
     QStringList releases;
+    QStringList episodeSubs;
     items.reserve(m_entries.size());
     progress.reserve(m_entries.size());
     releases.reserve(m_entries.size());
+    episodeSubs.reserve(m_entries.size());
     for (const auto& e : m_entries) {
         items.append(itemFromHistory(e));
         progress.append(e.progressFraction());
         releases.append(lastReleaseLine(e.lastStream));
+        episodeSubs.append(episodeSubtitle(e));
     }
     m_model->setItems(std::move(items));
     m_model->setProgressList(std::move(progress));
     m_model->setLastReleaseList(std::move(releases));
+    m_model->setEpisodeSubtitleList(std::move(episodeSubs));
 
     const bool nowEmpty = m_entries.isEmpty();
     if (nowEmpty != m_lastEmpty) {

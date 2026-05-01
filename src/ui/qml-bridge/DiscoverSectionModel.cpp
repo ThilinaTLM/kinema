@@ -79,6 +79,12 @@ QVariant DiscoverSectionModel::data(const QModelIndex& index, int role) const
         }
         return QString();
     }
+    case EpisodeSubtitleRole: {
+        if (index.row() < m_episodeSubtitles.size()) {
+            return m_episodeSubtitles.at(index.row());
+        }
+        return QString();
+    }
     default:
         return {};
     }
@@ -97,6 +103,7 @@ QHash<int, QByteArray> DiscoverSectionModel::roleNames() const
         { ItemRole, "item" },
         { ProgressRole, "progress" },
         { LastReleaseRole, "lastRelease" },
+        { EpisodeSubtitleRole, "episodeSubtitle" },
     };
 }
 
@@ -125,6 +132,7 @@ void DiscoverSectionModel::setItems(QList<api::DiscoverItem> items)
     // Overlay data is meaningful only for the matching item set.
     m_progress.clear();
     m_lastReleases.clear();
+    m_episodeSubtitles.clear();
     endResetModel();
     Q_EMIT countChanged();
 
@@ -178,6 +186,15 @@ void DiscoverSectionModel::setLastReleaseList(QStringList releases)
     if (!m_items.isEmpty()) {
         Q_EMIT dataChanged(index(0), index(rowCount() - 1),
             { LastReleaseRole });
+    }
+}
+
+void DiscoverSectionModel::setEpisodeSubtitleList(QStringList subtitles)
+{
+    m_episodeSubtitles = std::move(subtitles);
+    if (!m_items.isEmpty()) {
+        Q_EMIT dataChanged(index(0), index(rowCount() - 1),
+            { EpisodeSubtitleRole });
     }
 }
 
