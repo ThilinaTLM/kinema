@@ -15,7 +15,7 @@ import dev.tlmtech.kinema.app
 //
 // Activation modes:
 //   - left click → resume          → `continueWatchingVm.resume(row)`
-//   - right click → context menu   → choose another / remove
+//   - right click → context menu   → resume / details / streams / remove
 //
 // The rail self-hides when `continueWatchingVm.empty` is true; the
 // page binds `visible` accordingly.
@@ -64,7 +64,8 @@ ColumnLayout {
             progress:     model.progress !== undefined ? model.progress : -1
 
             onClicked: continueWatchingVm.resume(index)
-            onChooseAnotherRequested: continueWatchingVm.openDetail(index)
+            onDetailsRequested: continueWatchingVm.openDetail(index)
+            onStreamsRequested: continueWatchingVm.openStreams(index)
             onRemoveRequested: removeConfirm.openFor(index)
         }
     }

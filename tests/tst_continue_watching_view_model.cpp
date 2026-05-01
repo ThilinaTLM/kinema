@@ -171,6 +171,26 @@ private Q_SLOTS:
             QStringLiteral("tt5"));
     }
 
+    void openStreamsForwardsEntryAndOutOfRangeIsNoOp()
+    {
+        ContinueWatchingViewModel vm(m_history.get());
+        m_store->record(makeMovieEntry(QStringLiteral("tt6"), 45, 6000));
+        drain();
+
+        QSignalSpy streamsSpy(&vm,
+            &ContinueWatchingViewModel::streamsRequested);
+        vm.openStreams(99);
+        QCOMPARE(streamsSpy.count(), 0);
+        vm.openStreams(-1);
+        QCOMPARE(streamsSpy.count(), 0);
+
+        vm.openStreams(0);
+        QCOMPARE(streamsSpy.count(), 1);
+        QCOMPARE(qvariant_cast<HistoryEntry>(streamsSpy.first().at(0))
+                     .key.imdbId,
+            QStringLiteral("tt6"));
+    }
+
     void removeForwardsAndOutOfRangeIsNoOp()
     {
         ContinueWatchingViewModel vm(m_history.get());

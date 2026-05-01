@@ -9,10 +9,11 @@ import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
-// Pushed-on-top streams surface. Each detail page (movie / series)
-// reaches this page through `MainController::showStreamsRequested(detailVm)`.
-// The page is VM-agnostic — both `MovieDetailViewModel` and
-// `SeriesDetailViewModel` expose the same contract used by `StreamsList`.
+// Pushed-on-top streams surface. `MainController::showStreamsRequested(detailVm)`
+// can reach it either from an active detail page or directly from
+// Continue Watching. The page is VM-agnostic — both
+// `MovieDetailViewModel` and `SeriesDetailViewModel` expose the same
+// contract used by `StreamsList`.
 //
 // Chrome:
 //
@@ -23,7 +24,7 @@ import dev.tlmtech.kinema.app
 //     Cached only, HDR, Dolby Vision, and Dual / Multi audio — so the
 //     header stays compact.
 //
-// Esc pops back to the detail page (handled by the shell-level
+// Esc pops back to the previous page (handled by the shell-level
 // shortcut in `ApplicationShell.qml`).
 Kirigami.Page {
     id: page

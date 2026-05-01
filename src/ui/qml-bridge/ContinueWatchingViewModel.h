@@ -26,9 +26,9 @@ namespace kinema::ui::qml {
  * via the `empty` property.
  *
  * Action signals (`resumeRequested`, `detailRequested`,
- * `removeRequested`) are forwarded to the controller in
+ * `streamsRequested`, `removeRequested`) are forwarded from
  * `MainController::buildCoreServices`. Each delivers the original
- * `api::HistoryEntry` so the controller has the full record (key,
+ * `api::HistoryEntry` so the receiver has the full record (key,
  * stored stream ref, remembered languages) without re-querying the
  * store.
  */
@@ -62,16 +62,19 @@ public Q_SLOTS:
     /// (most recent first), which matches `m_entries`.
     void resume(int row);
     void openDetail(int row);
+    void openStreams(int row);
     void remove(int row);
 
 Q_SIGNALS:
     void emptyChanged();
 
-    /// Forwarded to `MainController` which routes them back into
-    /// `HistoryController::resumeFromHistory` / detail navigation /
+    /// Forwarded to `MainController` which routes them into
+    /// `HistoryController::resumeFromHistory`, detail navigation,
+    /// direct streams-page navigation, or
     /// `HistoryController::removeEntry`.
     void resumeRequested(const api::HistoryEntry& entry);
     void detailRequested(const api::HistoryEntry& entry);
+    void streamsRequested(const api::HistoryEntry& entry);
     void removeRequested(const api::HistoryEntry& entry);
 
 private:

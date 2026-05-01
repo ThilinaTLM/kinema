@@ -397,9 +397,11 @@ void MainController::buildCoreServices()
         });
 
     // Continue Watching action routing. Resume / remove go straight
-    // to the controller; detail / resume-fallback push the matching
-    // detail page. Series entries thread the saved season + episode
-    // through `openSeriesDetailAt` so the page lands pre-selected.
+    // to the history controller; Details pushes the matching detail
+    // page; Streams reuses the detail VMs directly and asks the
+    // shell to push `StreamsPage` without an intermediate detail-page
+    // push. Series entries thread the saved season + episode through
+    // the detail VM so both routes land on the remembered episode.
     connect(m_continueWatchingVm,
         &ContinueWatchingViewModel::resumeRequested, m_historyCtrl,
         &controllers::HistoryController::resumeFromHistory);
@@ -417,9 +419,34 @@ void MainController::buildCoreServices()
             entry.key.season.value_or(-1),
             entry.key.episode.value_or(-1));
     };
+    const auto openHistoryStreams = [this, openHistoryDetail](
+                                        const api::HistoryEntry& entry) {
+        if (entry.key.kind == api::MediaKind::Movie) {
+            if (!m_movieDetailVm || entry.key.imdbId.isEmpty()) {
+                return;
+            }
+            m_movieDetailVm->clear();
+            m_movieDetailVm->load(entry.key.imdbId);
+            Q_EMIT showStreamsRequested(m_movieDetailVm);
+            return;
+        }
+
+        if (!m_seriesDetailVm || entry.key.imdbId.isEmpty()
+            || !entry.key.season || !entry.key.episode) {
+            openHistoryDetail(entry);
+            return;
+        }
+        m_seriesDetailVm->clear();
+        m_seriesDetailVm->loadAt(entry.key.imdbId,
+            *entry.key.season, *entry.key.episode);
+        Q_EMIT showStreamsRequested(m_seriesDetailVm);
+    };
     connect(m_continueWatchingVm,
         &ContinueWatchingViewModel::detailRequested, this,
         openHistoryDetail);
+    connect(m_continueWatchingVm,
+        &ContinueWatchingViewModel::streamsRequested, this,
+        openHistoryStreams);
     // Resume-from-history fallback: the saved release is gone, so
     // open the matching detail page so the user can pick another
     // stream.

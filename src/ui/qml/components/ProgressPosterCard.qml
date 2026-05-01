@@ -15,8 +15,8 @@ import dev.tlmtech.kinema.app
 //
 //   * a thin progress bar overlay along the poster's bottom edge,
 //   * a release-line subtitle ("1080p — Movie.Name.2024"),
-//   * a right-click context menu that forwards remove / pick-another
-//     actions to the view-model.
+//   * a right-click context menu that forwards resume / details /
+//     streams / remove actions to the view-model.
 Item {
     id: card
 
@@ -27,8 +27,9 @@ Item {
     property real progress: 0.0    // [0, 1]; <= 0 hides the bar
 
     signal clicked()
+    signal detailsRequested()
+    signal streamsRequested()
     signal removeRequested()
-    signal chooseAnotherRequested()
 
     // Single source of truth for the hover-elevation state.
     readonly property bool _hovered: hoverArea.containsMouse
@@ -204,14 +205,20 @@ Item {
             onTriggered: card.clicked()
         }
         QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Choose another release…")
+            text: i18nc("@action:inmenu", "Details")
+            icon.source: AppIcons.url("info")
+            icon.color: AppIcons.controlColor(enabled, false)
+            onTriggered: card.detailsRequested()
+        }
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Streams")
             icon.source: AppIcons.url("list-video")
             icon.color: AppIcons.controlColor(enabled, false)
-            onTriggered: card.chooseAnotherRequested()
+            onTriggered: card.streamsRequested()
         }
         QQC2.MenuSeparator {}
         QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Remove from history")
+            text: i18nc("@action:inmenu", "Remove")
             icon.source: AppIcons.url("trash-2")
             icon.color: AppIcons.controlColor(enabled, false)
             onTriggered: card.removeRequested()

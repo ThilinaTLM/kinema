@@ -12,3 +12,5 @@
 - Follow Plasma theming in QML with `Kirigami.Theme` and `Kirigami.Units`; do not add custom palettes or hard-coded colors. Use `/home/tlm/Projects/Kirigami/` as the local Kirigami source reference.
 - Add tests with `ecm_add_test(...)` in `tests/CMakeLists.txt` and add the target to the fixture `foreach` at the bottom.
 - Validate with `cmake --build build -j$(nproc)` and `ctest --test-dir build --output-on-failure`.
+- Downloaded Lucide icons are available in `/home/tlm/Downloads/lucide-icons/icons/`.
+

@@ -112,6 +112,14 @@ void ContinueWatchingViewModel::openDetail(int row)
     Q_EMIT detailRequested(m_entries.at(row));
 }
 
+void ContinueWatchingViewModel::openStreams(int row)
+{
+    if (row < 0 || row >= m_entries.size()) {
+        return;
+    }
+    Q_EMIT streamsRequested(m_entries.at(row));
+}
+
 void ContinueWatchingViewModel::remove(int row)
 {
     if (row < 0 || row >= m_entries.size()) {

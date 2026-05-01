@@ -215,9 +215,10 @@ Q_SIGNALS:
     void showMovieDetailRequested();
     void showSeriesDetailRequested();
     /// Asks `ApplicationShell.qml` to push the Streams page on top
-    /// of the current detail page. `detailVm` is either
-    /// `m_movieDetailVm` or `m_seriesDetailVm`; QML binds the
-    /// pushed page's `detailVm` property to it directly.
+    /// of the current page. `detailVm` is either `m_movieDetailVm`
+    /// or `m_seriesDetailVm`; QML binds the pushed page's
+    /// `detailVm` property to it directly. Emitted both from detail
+    /// pages and from Continue Watching's direct "Streams" action.
     void showStreamsRequested(QObject* detailVm);
 
     /// Fan-in for status messages coming out of `StreamActions`,
