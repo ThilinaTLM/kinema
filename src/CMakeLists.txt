@@ -247,6 +247,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/chevrons-down.svg
         ui/qml/icons/lucide/circle-alert.svg
         ui/qml/icons/lucide/circle-check.svg
+        ui/qml/icons/lucide/circle-dashed.svg
         ui/qml/icons/lucide/clock-arrow-down.svg
         ui/qml/icons/lucide/copy.svg
         ui/qml/icons/lucide/download.svg
@@ -254,8 +255,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/ellipsis.svg
         ui/qml/icons/lucide/eraser.svg
         ui/qml/icons/lucide/external-link.svg
-        ui/qml/icons/lucide/eye-off.svg
-        ui/qml/icons/lucide/eye.svg
         ui/qml/icons/lucide/film.svg
         ui/qml/icons/lucide/flag.svg
         ui/qml/icons/lucide/folder-open.svg

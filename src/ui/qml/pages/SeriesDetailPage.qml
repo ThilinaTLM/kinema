@@ -83,7 +83,7 @@ Kirigami.ScrollablePage {
     }
 
     readonly property Kirigami.Action seriesWatchedAction: Kirigami.Action {
-        icon.source: AppIcons.url(seriesDetailVm.seriesWatched ? "eye-off" : "eye")
+        icon.source: AppIcons.url(seriesDetailVm.seriesWatched ? "circle-dashed" : "circle-check")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: seriesDetailVm.seriesWatched
             ? i18nc("@action:button", "Mark Series Unwatched")

@@ -102,7 +102,7 @@ Kirigami.ScrollablePage {
     }
 
     readonly property Kirigami.Action watchedAction: Kirigami.Action {
-        icon.source: AppIcons.url(movieDetailVm.movieWatched ? "eye-off" : "eye")
+        icon.source: AppIcons.url(movieDetailVm.movieWatched ? "circle-dashed" : "circle-check")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: movieDetailVm.watchedActionText
         enabled: movieDetailVm.metaState === MovieDetailViewModel.Ready

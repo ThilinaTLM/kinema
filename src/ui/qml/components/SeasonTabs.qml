@@ -30,12 +30,12 @@ Item {
         property int targetSeason: -1
         Kirigami.Action {
             text: i18nc("@action:inmenu", "Mark season as watched")
-            icon.source: AppIcons.url("eye")
+            icon.source: AppIcons.url("circle-check")
             onTriggered: tabs.vm.markSeasonWatched(seasonMenu.targetSeason, true)
         }
         Kirigami.Action {
             text: i18nc("@action:inmenu", "Mark season as unwatched")
-            icon.source: AppIcons.url("eye-off")
+            icon.source: AppIcons.url("circle-dashed")
             onTriggered: tabs.vm.markSeasonWatched(seasonMenu.targetSeason, false)
         }
     }
@@ -70,7 +70,7 @@ Item {
                     display: tabs.vm.seasonWatchedList[index] === true
                         ? QQC2.AbstractButton.TextBesideIcon
                         : QQC2.AbstractButton.TextOnly
-                    icon.source: AppIcons.url("eye")
+                    icon.source: AppIcons.url("circle-check")
                     icon.color: Theme.positive
                     onClicked: tabs.vm.currentSeason = index
                     KeyNavigation.left: tabs.vm.currentSeason > 0

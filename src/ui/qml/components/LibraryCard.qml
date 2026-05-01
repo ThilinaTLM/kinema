@@ -140,7 +140,7 @@ QQC2.ItemDelegate {
                         text: card.watched
                             ? i18nc("@action:inmenu", "Mark as Unwatched")
                             : i18nc("@action:inmenu", "Mark as Watched")
-                        icon.source: AppIcons.url(card.watched ? "eye-off" : "eye")
+                        icon.source: AppIcons.url(card.watched ? "circle-dashed" : "circle-check")
                         enabled: !card.upcoming
                         onTriggered: card.toggleWatchedRequested()
                     }
