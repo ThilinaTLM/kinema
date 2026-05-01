@@ -35,6 +35,7 @@ class PlayerLauncher;
 class PlayQueueStore;
 class SubtitleCacheStore;
 class TokenStore;
+class WatchedStore;
 }
 
 namespace kinema::controllers {
@@ -46,6 +47,7 @@ class PlayQueueController;
 class SubtitleController;
 class TokenController;
 class TrayController;
+class WatchedController;
 }
 
 namespace kinema::services {
@@ -267,6 +269,7 @@ private:
     std::unique_ptr<core::Database> m_db;
     std::unique_ptr<core::HistoryStore> m_history;
     std::unique_ptr<core::LibraryStore> m_library;
+    std::unique_ptr<core::WatchedStore> m_watched;
     std::unique_ptr<core::PlayQueueStore> m_playQueueStore;
     std::unique_ptr<core::SubtitleCacheStore> m_subtitleCache;
 
@@ -282,6 +285,7 @@ private:
     controllers::TokenController* m_tokenCtrl {};
     controllers::HistoryController* m_historyCtrl {};
     controllers::LibraryController* m_libraryCtrl {};
+    controllers::WatchedController* m_watchedCtrl {};
     controllers::PlayQueueController* m_playQueueCtrl {};
     controllers::SubtitleController* m_subtitleCtrl {};
     controllers::TrayController* m_tray {};

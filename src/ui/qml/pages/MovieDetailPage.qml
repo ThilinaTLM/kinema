@@ -49,28 +49,19 @@ Kirigami.ScrollablePage {
                 icon.source: AppIcons.url("trash-2")
                 icon.color: AppIcons.negative
                 onTriggered: {
-                    if (deleteTrackingCheck.checked) {
-                        movieDetailVm.hardDeleteFromLibrary();
-                    } else {
-                        movieDetailVm.softRemoveFromLibrary();
-                    }
+                    movieDetailVm.removeFromLibrary();
                     removeLibraryDialog.close();
                 }
             }
         ]
 
-        ColumnLayout {
-            spacing: Kirigami.Units.smallSpacing
-            QQC2.Label {
-                text: i18nc("@info", "\u201c%1\u201d will be removed from your Library.", movieDetailVm.title)
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-            QQC2.CheckBox {
-                id: deleteTrackingCheck
-                text: i18nc("@option:check", "Permanently delete watched state tracking data")
-                checked: false
-            }
+        QQC2.Label {
+            text: i18nc("@info",
+                "\u201c%1\u201d will be removed from your Library. "
+                + "Your watched and playback history for this title "
+                + "is preserved.",
+                movieDetailVm.title)
+            wrapMode: Text.WordWrap
         }
     }
 
@@ -101,12 +92,14 @@ Kirigami.ScrollablePage {
         }
     }
 
+    // Watched-state is independent of Library membership: a user can
+    // mark any movie watched / unwatched without saving it. The action
+    // is enabled the moment the meta has resolved.
     readonly property Kirigami.Action watchedAction: Kirigami.Action {
         icon.source: AppIcons.url(movieDetailVm.movieWatched ? "circle-dashed" : "circle-check")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: movieDetailVm.watchedActionText
         enabled: movieDetailVm.metaState === MovieDetailViewModel.Ready
-            && movieDetailVm.inLibrary
         onTriggered: movieDetailVm.toggleMovieWatched()
     }
 

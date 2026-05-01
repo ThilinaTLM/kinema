@@ -52,26 +52,24 @@ Kirigami.Page {
                 icon.source: AppIcons.url("trash-2")
                 icon.color: AppIcons.negative
                 onTriggered: {
-                    libraryVm.removeFromLibrary(removeDialog.targetRow, deleteTrackingCheck.checked);
+                    libraryVm.removeFromLibrary(removeDialog.targetRow);
                     removeDialog.close();
                 }
             }
         ]
 
-        ColumnLayout {
-            spacing: Kirigami.Units.smallSpacing
-            QQC2.Label {
-                text: removeDialog.targetTitle.length > 0
-                    ? i18nc("@info", "\u201c%1\u201d will be removed from your Library.", removeDialog.targetTitle)
-                    : i18nc("@info", "This title will be removed from your Library.")
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-            QQC2.CheckBox {
-                id: deleteTrackingCheck
-                text: i18nc("@option:check", "Permanently delete watched state tracking data")
-                checked: false
-            }
+        QQC2.Label {
+            text: removeDialog.targetTitle.length > 0
+                ? i18nc("@info",
+                    "\u201c%1\u201d will be removed from your "
+                    + "Library. Your watched and playback history "
+                    + "for it is preserved.",
+                    removeDialog.targetTitle)
+                : i18nc("@info",
+                    "This title will be removed from your Library. "
+                    + "Your watched and playback history for it is "
+                    + "preserved.")
+            wrapMode: Text.WordWrap
         }
     }
 

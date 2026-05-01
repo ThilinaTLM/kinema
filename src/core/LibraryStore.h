@@ -4,9 +4,7 @@
 #pragma once
 
 #include "api/Library.h"
-#include "api/PlaybackContext.h"
 
-#include <QHash>
 #include <QList>
 #include <QObject>
 #include <QString>
@@ -17,6 +15,20 @@ namespace kinema::core {
 
 class Database;
 
+/**
+ * DAO for the user's curated library: `library_titles` (movies and
+ * series the user wants to keep around) and `library_episodes` (the
+ * cached Cinemeta episode list for series in the library, used to
+ * paint Library page rails without a live network call).
+ *
+ * The store does **not** know anything about watched-state or playback
+ * progress. Those concerns live in `core::WatchedStore` /
+ * `controllers::WatchedController` and `core::HistoryStore` /
+ * `controllers::HistoryController`.
+ *
+ * Removal is hard delete only. Pre-1.0 carried a soft-delete (`active`
+ * column) that was removed in migration v6.
+ */
 class LibraryStore : public QObject
 {
     Q_OBJECT
@@ -29,10 +41,10 @@ public:
 
     std::optional<api::LibraryTitle> find(
         api::MediaKind kind, const QString& imdbId) const;
-    bool isActive(api::MediaKind kind, const QString& imdbId) const;
+    bool contains(api::MediaKind kind, const QString& imdbId) const;
 
-    QList<api::LibraryTitle> activeTitles() const;
-    QList<api::LibraryTitle> allTitles(bool includeInactive = false) const;
+    /// All saved titles, most-recently-updated first.
+    QList<api::LibraryTitle> titles() const;
 
     QList<api::LibraryEpisode> episodesForSeries(
         const QString& imdbId) const;
@@ -42,16 +54,10 @@ public:
     void upsertTitle(const api::LibraryTitle& title);
     void upsertEpisodes(const QString& seriesImdbId,
         const QList<api::LibraryEpisode>& episodes);
-    void setActive(api::MediaKind kind, const QString& imdbId, bool active);
-    void hardDelete(api::MediaKind kind, const QString& imdbId);
-
-    api::LibraryWatchOverride watchOverride(
-        const api::PlaybackKey& key) const;
-    QHash<QString, api::LibraryWatchOverride> watchOverridesForImdb(
-        const QString& imdbId) const;
-    void setWatchOverride(const api::PlaybackKey& key,
-        api::LibraryWatchOverride state);
-    void clearWatchOverride(const api::PlaybackKey& key);
+    /// Remove a title from the library. For series this also removes
+    /// every cached episode row. Watched-state and history rows are
+    /// preserved \u2014 they are not library data.
+    void remove(api::MediaKind kind, const QString& imdbId);
 
 Q_SIGNALS:
     void changed();

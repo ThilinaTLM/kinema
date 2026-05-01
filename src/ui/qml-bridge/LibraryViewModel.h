@@ -12,6 +12,7 @@
 
 namespace kinema::controllers {
 class LibraryController;
+class WatchedController;
 }
 
 namespace kinema::ui::qml {
@@ -36,7 +37,8 @@ public:
     };
     Q_ENUM(Section)
 
-    explicit LibraryViewModel(controllers::LibraryController* library,
+    LibraryViewModel(controllers::LibraryController* library,
+        controllers::WatchedController* watched,
         QObject* parent = nullptr);
     ~LibraryViewModel() override;
 
@@ -53,7 +55,7 @@ public Q_SLOTS:
     void activate(int row);
     void resume(int row);
     void setSection(Section section);
-    void removeFromLibrary(int row, bool hardDelete);
+    void removeFromLibrary(int row);
     void toggleWatched(int row);
 
 Q_SIGNALS:
@@ -75,6 +77,7 @@ private:
     const QList<LibraryListRow>& rowsFor(Section section) const;
 
     controllers::LibraryController* m_library {};
+    controllers::WatchedController* m_watched {};
     LibraryListModel* m_model {};
     Section m_section = Section::ToWatch;
     bool m_sectionInitialized = false;

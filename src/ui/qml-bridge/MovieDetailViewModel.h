@@ -34,6 +34,7 @@ namespace kinema::controllers {
 class LibraryController;
 class PlayQueueController;
 class TokenController;
+class WatchedController;
 }
 
 namespace kinema::services {
@@ -115,9 +116,9 @@ class MovieDetailViewModel : public QObject
     Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
 
     Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY libraryStateChanged)
-    Q_PROPERTY(bool movieWatched READ movieWatched NOTIFY libraryStateChanged)
     Q_PROPERTY(QString libraryActionText READ libraryActionText NOTIFY libraryStateChanged)
-    Q_PROPERTY(QString watchedActionText READ watchedActionText NOTIFY libraryStateChanged)
+    Q_PROPERTY(bool movieWatched READ movieWatched NOTIFY watchedStateChanged)
+    Q_PROPERTY(QString watchedActionText READ watchedActionText NOTIFY watchedStateChanged)
 
 public:
     enum class MetaState {
@@ -133,10 +134,13 @@ public:
         api::TmdbClient* tmdb,
         services::StreamActions* actions,
         controllers::LibraryController* library,
+        controllers::WatchedController* watched,
         controllers::TokenController* tokens,
         config::AppSettings& settings,
         const QString& rdTokenRef,
         QObject* parent = nullptr);
+    /// Slim constructor for tests; equivalent to passing
+    /// `library = nullptr, watched = nullptr`.
     MovieDetailViewModel(api::CinemetaClient* cinemeta,
         api::TorrentioClient* torrentio,
         api::TmdbClient* tmdb,
@@ -222,8 +226,7 @@ public Q_SLOTS:
     /// `MainController` forwards as `showStreamsRequested(this)`.
     void requestStreams();
     void addToLibrary();
-    void softRemoveFromLibrary();
-    void hardDeleteFromLibrary();
+    void removeFromLibrary();
     void toggleMovieWatched();
 
     /// Wire the queue controller. Two-phase init: the queue
@@ -269,6 +272,7 @@ Q_SIGNALS:
     void rawStreamsCountChanged();
     void uiFiltersChanged();
     void libraryStateChanged();
+    void watchedStateChanged();
 
     /// Forwarded into `MainController::passiveMessage`.
     void statusMessage(const QString& text, int durationMs);
@@ -302,6 +306,7 @@ private:
     void resetMeta();
     void applyMeta(const api::MetaDetail& detail);
     void refreshLibraryState();
+    void refreshWatchedState();
     void setMetaState(MetaState s, const QString& error = {});
     void setSimilarVisible(bool on);
 
@@ -324,6 +329,7 @@ private:
     api::TmdbClient* m_tmdb;
     services::StreamActions* m_actions;
     controllers::LibraryController* m_library {};
+    controllers::WatchedController* m_watched {};
     controllers::PlayQueueController* m_queue {};
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;

@@ -12,6 +12,7 @@
 #include "controllers/LibraryController.h"
 #include "controllers/PlayQueueController.h"
 #include "controllers/TokenController.h"
+#include "controllers/WatchedController.h"
 #include "core/DateFormat.h"
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
@@ -38,7 +39,8 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     const QString& rdTokenRef,
     QObject* parent)
     : MovieDetailViewModel(cinemeta, torrentio, tmdb, actions,
-          nullptr, tokens, settings, rdTokenRef, parent)
+          /*library=*/nullptr, /*watched=*/nullptr,
+          tokens, settings, rdTokenRef, parent)
 {
 }
 
@@ -47,6 +49,7 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     api::TmdbClient* tmdb,
     services::StreamActions* actions,
     controllers::LibraryController* library,
+    controllers::WatchedController* watched,
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
@@ -57,6 +60,7 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     , m_tmdb(tmdb)
     , m_actions(actions)
     , m_library(library)
+    , m_watched(watched)
     , m_tokens(tokens)
     , m_settings(settings)
     , m_rdToken(rdTokenRef)
@@ -80,6 +84,10 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     if (m_library) {
         connect(m_library, &controllers::LibraryController::changed,
             this, &MovieDetailViewModel::refreshLibraryState);
+    }
+    if (m_watched) {
+        connect(m_watched, &controllers::WatchedController::changed,
+            this, &MovieDetailViewModel::refreshWatchedState);
     }
 
     if (m_tokens) {
@@ -231,6 +239,7 @@ void MovieDetailViewModel::resetMeta()
     m_releaseDateText.clear();
     m_currentMeta = {};
     refreshLibraryState();
+    refreshWatchedState();
     Q_EMIT metaChanged();
 }
 
@@ -279,20 +288,29 @@ void MovieDetailViewModel::applyMeta(const api::MetaDetail& detail)
         : QString();
     Q_EMIT metaChanged();
     refreshLibraryState();
+    refreshWatchedState();
 }
 
 void MovieDetailViewModel::refreshLibraryState()
 {
     const bool inLibrary = m_library && !m_imdbId.isEmpty()
         && m_library->isInLibrary(api::MediaKind::Movie, m_imdbId);
-    const bool watched = m_library && !m_imdbId.isEmpty()
-        && m_library->isMovieWatched(m_imdbId);
-    if (m_inLibrary == inLibrary && m_movieWatched == watched) {
+    if (m_inLibrary == inLibrary) {
         return;
     }
     m_inLibrary = inLibrary;
-    m_movieWatched = watched;
     Q_EMIT libraryStateChanged();
+}
+
+void MovieDetailViewModel::refreshWatchedState()
+{
+    const bool watched = m_watched && !m_imdbId.isEmpty()
+        && m_watched->isMovieWatched(m_imdbId);
+    if (m_movieWatched == watched) {
+        return;
+    }
+    m_movieWatched = watched;
+    Q_EMIT watchedStateChanged();
 }
 
 QString MovieDetailViewModel::libraryActionText() const
@@ -604,24 +622,17 @@ void MovieDetailViewModel::addToLibrary()
     m_library->saveMovie(m_currentMeta);
 }
 
-void MovieDetailViewModel::softRemoveFromLibrary()
+void MovieDetailViewModel::removeFromLibrary()
 {
     if (m_library && !m_imdbId.isEmpty()) {
-        m_library->softRemove(api::MediaKind::Movie, m_imdbId);
-    }
-}
-
-void MovieDetailViewModel::hardDeleteFromLibrary()
-{
-    if (m_library && !m_imdbId.isEmpty()) {
-        m_library->hardDelete(api::MediaKind::Movie, m_imdbId);
+        m_library->removeFromLibrary(api::MediaKind::Movie, m_imdbId);
     }
 }
 
 void MovieDetailViewModel::toggleMovieWatched()
 {
-    if (m_library && !m_imdbId.isEmpty()) {
-        m_library->setMovieWatched(m_imdbId, !m_movieWatched);
+    if (m_watched && !m_imdbId.isEmpty()) {
+        m_watched->setMovieWatched(m_imdbId, !m_movieWatched);
     }
 }
 

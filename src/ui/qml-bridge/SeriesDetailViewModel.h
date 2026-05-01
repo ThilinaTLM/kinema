@@ -34,6 +34,7 @@ namespace kinema::controllers {
 class LibraryController;
 class PlayQueueController;
 class TokenController;
+class WatchedController;
 }
 
 namespace kinema::services {
@@ -126,8 +127,8 @@ class SeriesDetailViewModel : public QObject
     Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
 
     Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY libraryStateChanged)
-    Q_PROPERTY(bool seriesWatched READ seriesWatched NOTIFY libraryStateChanged)
     Q_PROPERTY(QString libraryActionText READ libraryActionText NOTIFY libraryStateChanged)
+    Q_PROPERTY(bool seriesWatched READ seriesWatched NOTIFY watchedStateChanged)
 
 public:
     enum class MetaState {
@@ -143,10 +144,13 @@ public:
         api::TmdbClient* tmdb,
         services::StreamActions* actions,
         controllers::LibraryController* library,
+        controllers::WatchedController* watched,
         controllers::TokenController* tokens,
         config::AppSettings& settings,
         const QString& rdTokenRef,
         QObject* parent = nullptr);
+    /// Slim constructor for tests; equivalent to passing
+    /// `library = nullptr, watched = nullptr`.
     SeriesDetailViewModel(api::CinemetaClient* cinemeta,
         api::TorrentioClient* torrentio,
         api::TmdbClient* tmdb,
@@ -245,8 +249,7 @@ public Q_SLOTS:
     /// selected.
     void requestStreams();
     void addToLibrary();
-    void softRemoveFromLibrary();
-    void hardDeleteFromLibrary();
+    void removeFromLibrary();
     void toggleEpisodeWatched(int row);
     void toggleSeriesWatched();
     void markSeasonWatched(int season, bool watched);
@@ -283,6 +286,7 @@ Q_SIGNALS:
     void rawStreamsCountChanged();
     void uiFiltersChanged();
     void libraryStateChanged();
+    void watchedStateChanged();
 
     void statusMessage(const QString& text, int durationMs);
 
@@ -310,7 +314,7 @@ private:
     void applyMeta(const api::SeriesDetail& sd);
     void resetMeta();
     void refreshLibraryState();
-    void refreshEpisodeLibraryState();
+    void refreshEpisodeWatchedState();
     void setMetaState(MetaState s, const QString& error = {});
     void setSimilarVisible(bool on);
 
@@ -336,6 +340,7 @@ private:
     api::TmdbClient* m_tmdb;
     services::StreamActions* m_actions;
     controllers::LibraryController* m_library {};
+    controllers::WatchedController* m_watched {};
     controllers::PlayQueueController* m_queue {};
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;

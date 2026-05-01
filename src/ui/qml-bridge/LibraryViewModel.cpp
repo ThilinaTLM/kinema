@@ -4,6 +4,7 @@
 #include "ui/qml-bridge/LibraryViewModel.h"
 
 #include "controllers/LibraryController.h"
+#include "controllers/WatchedController.h"
 #include "core/DateFormat.h"
 
 #include <KLocalizedString>
@@ -53,9 +54,12 @@ void sortByTitle(QList<LibraryListRow>& rows)
 } // namespace
 
 LibraryViewModel::LibraryViewModel(
-    controllers::LibraryController* library, QObject* parent)
+    controllers::LibraryController* library,
+    controllers::WatchedController* watched,
+    QObject* parent)
     : QObject(parent)
     , m_library(library)
+    , m_watched(watched)
     , m_model(new LibraryListModel(this))
 {
     if (m_library) {
@@ -63,6 +67,13 @@ LibraryViewModel::LibraryViewModel(
             this, &LibraryViewModel::refresh);
         connect(m_library, &controllers::LibraryController::statusMessage,
             this, &LibraryViewModel::statusMessage);
+    }
+    if (m_watched) {
+        // Watched-state flips happening anywhere in the app (a detail
+        // page mark-watched, a finished playback) need to refresh the
+        // library row badges and section counts.
+        connect(m_watched, &controllers::WatchedController::changed,
+            this, &LibraryViewModel::refresh);
     }
     refresh();
 }
@@ -114,32 +125,41 @@ void LibraryViewModel::resume(int row)
     Q_EMIT resumeRequested(*r->resumeEntry);
 }
 
-void LibraryViewModel::removeFromLibrary(int row, bool hardDelete)
+void LibraryViewModel::removeFromLibrary(int row)
 {
     const auto* r = m_model->at(row);
     if (!r || !m_library) {
         return;
     }
-    if (hardDelete) {
-        m_library->hardDelete(r->kind, r->imdbId);
-    } else {
-        m_library->softRemove(r->kind, r->imdbId);
-    }
+    m_library->removeFromLibrary(r->kind, r->imdbId);
 }
 
 void LibraryViewModel::toggleWatched(int row)
 {
     const auto* r = m_model->at(row);
-    if (!r || !m_library) {
+    if (!r || !m_watched) {
         return;
     }
     if (r->kind == api::MediaKind::Movie) {
-        const bool watched = m_library->isMovieWatched(r->imdbId);
-        m_library->setMovieWatched(r->imdbId, !watched);
-    } else {
-        const bool allWatched = r->watched;
-        m_library->setSeriesWatched(r->imdbId, !allWatched);
+        const bool watched = m_watched->isMovieWatched(r->imdbId);
+        m_watched->setMovieWatched(r->imdbId, !watched);
+        return;
     }
+    // Series: build the (season, episode) pair list from the cached
+    // library_episodes rows; that is the cheapest source for a
+    // library row and is already populated by saveSeries().
+    QList<QPair<int, int>> pairs;
+    if (m_library) {
+        const auto eps = m_library->episodesForSeries(r->imdbId);
+        pairs.reserve(eps.size());
+        for (const auto& ep : eps) {
+            if (ep.season <= 0) {
+                continue;
+            }
+            pairs.append({ ep.season, ep.episode });
+        }
+    }
+    m_watched->setEpisodesWatched(r->imdbId, pairs, !r->watched);
 }
 
 void LibraryViewModel::rebuildRows()
@@ -154,12 +174,16 @@ void LibraryViewModel::rebuildRows()
         return;
     }
 
-    const auto titles = m_library->activeTitles();
+    const auto titles = m_library->titles();
     for (const auto& t : titles) {
         if (t.kind == api::MediaKind::Movie) {
-            const bool watched = m_library->isMovieWatched(t.imdbId);
-            const double progress = m_library->movieProgress(t.imdbId);
-            const auto resume = m_library->resumeEntryForMovie(t.imdbId);
+            const bool watched = m_watched
+                && m_watched->isMovieWatched(t.imdbId);
+            const double progress = m_watched
+                ? m_watched->movieProgress(t.imdbId) : -1.0;
+            const auto resume = m_watched
+                ? m_watched->resumeEntryForMovie(t.imdbId)
+                : std::optional<api::HistoryEntry>{};
             const bool upcoming = isFuture(t.releaseDate);
 
             LibraryListRow row;
@@ -215,15 +239,18 @@ void LibraryViewModel::rebuildRows()
                 continue;
             }
             ++totalAired;
-            const bool epWatched = m_library->isEpisodeWatched(
-                t.imdbId, ep.season, ep.episode);
+            const bool epWatched = m_watched
+                && m_watched->isEpisodeWatched(
+                    t.imdbId, ep.season, ep.episode);
             if (epWatched) {
                 ++watchedCount;
             } else if (!nextToWatch) {
                 nextToWatch = &ep;
             }
-            const auto resume = m_library->resumeEntryForEpisode(
-                t.imdbId, ep.season, ep.episode);
+            const auto resume = m_watched
+                ? m_watched->resumeEntryForEpisode(
+                    t.imdbId, ep.season, ep.episode)
+                : std::optional<api::HistoryEntry>{};
             if (resume && (!latestResume
                     || resume->lastWatchedAt > latestResume->lastWatchedAt)) {
                 latestProgress = resume->progressFraction();

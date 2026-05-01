@@ -82,34 +82,30 @@ private Q_SLOTS:
         const auto got = m_store->find(api::MediaKind::Movie,
             QStringLiteral("tt1000001"));
         QVERIFY(got.has_value());
-        QVERIFY(got->active);
         QCOMPARE(got->title, QStringLiteral("Saved Movie"));
         QCOMPARE(got->year.value_or(0), 2026);
-        QVERIFY(m_store->isActive(api::MediaKind::Movie,
+        QVERIFY(m_store->contains(api::MediaKind::Movie,
             QStringLiteral("tt1000001")));
+
+        const auto all = m_store->titles();
+        QCOMPARE(all.size(), 1);
+        QCOMPARE(all.at(0).imdbId, QStringLiteral("tt1000001"));
     }
 
-    void softRemovePreservesDataAndReaddReactivates()
+    void upsertUpdatesAcrossCalls()
     {
         auto t = movieTitle();
         m_store->upsertTitle(t);
-        m_store->setActive(t.kind, t.imdbId, false);
-
-        auto got = m_store->find(t.kind, t.imdbId);
-        QVERIFY(got.has_value());
-        QVERIFY(!got->active);
-        QVERIFY(!m_store->isActive(t.kind, t.imdbId));
 
         t.title = QStringLiteral("Updated Movie");
-        t.active = true;
         m_store->upsertTitle(t);
-        got = m_store->find(t.kind, t.imdbId);
+
+        const auto got = m_store->find(t.kind, t.imdbId);
         QVERIFY(got.has_value());
-        QVERIFY(got->active);
         QCOMPARE(got->title, QStringLiteral("Updated Movie"));
     }
 
-    void episodesAndOverridesRoundTrip()
+    void episodesRoundTripSorted()
     {
         const auto s = seriesTitle();
         m_store->upsertTitle(s);
@@ -119,37 +115,29 @@ private Q_SLOTS:
         QCOMPARE(eps.size(), 2);
         QCOMPARE(eps.at(0).episode, 1);
         QCOMPARE(eps.at(1).episode, 2);
-
-        api::PlaybackKey key;
-        key.kind = api::MediaKind::Series;
-        key.imdbId = s.imdbId;
-        key.season = 1;
-        key.episode = 2;
-        QCOMPARE(m_store->watchOverride(key), api::LibraryWatchOverride::None);
-        m_store->setWatchOverride(key, api::LibraryWatchOverride::Watched);
-        QCOMPARE(m_store->watchOverride(key), api::LibraryWatchOverride::Watched);
-        m_store->setWatchOverride(key, api::LibraryWatchOverride::Unwatched);
-        QCOMPARE(m_store->watchOverride(key), api::LibraryWatchOverride::Unwatched);
-        m_store->clearWatchOverride(key);
-        QCOMPARE(m_store->watchOverride(key), api::LibraryWatchOverride::None);
     }
 
-    void hardDeleteRemovesLibraryOwnedRows()
+    void removeDeletesTitleAndEpisodes()
     {
         const auto s = seriesTitle();
         m_store->upsertTitle(s);
-        m_store->upsertEpisodes(s.imdbId, { episode(1, 1) });
-        api::PlaybackKey key;
-        key.kind = api::MediaKind::Series;
-        key.imdbId = s.imdbId;
-        key.season = 1;
-        key.episode = 1;
-        m_store->setWatchOverride(key, api::LibraryWatchOverride::Watched);
+        m_store->upsertEpisodes(s.imdbId,
+            { episode(1, 1), episode(1, 2) });
 
-        m_store->hardDelete(api::MediaKind::Series, s.imdbId);
+        m_store->remove(api::MediaKind::Series, s.imdbId);
         QVERIFY(!m_store->find(api::MediaKind::Series, s.imdbId).has_value());
         QVERIFY(m_store->episodesForSeries(s.imdbId).isEmpty());
-        QCOMPARE(m_store->watchOverride(key), api::LibraryWatchOverride::None);
+        QVERIFY(!m_store->contains(api::MediaKind::Series, s.imdbId));
+    }
+
+    void removeIsNoOpForUnknownTitle()
+    {
+        QSignalSpy changed(m_store.get(), &core::LibraryStore::changed);
+        m_store->remove(api::MediaKind::Movie,
+            QStringLiteral("tt9999999"));
+        drain();
+        // Nothing was deleted; no change signal should fire.
+        QCOMPARE(changed.count(), 0);
     }
 
 private:

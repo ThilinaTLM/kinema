@@ -41,28 +41,19 @@ Kirigami.ScrollablePage {
                 icon.source: AppIcons.url("trash-2")
                 icon.color: AppIcons.negative
                 onTriggered: {
-                    if (deleteTrackingCheck.checked) {
-                        seriesDetailVm.hardDeleteFromLibrary();
-                    } else {
-                        seriesDetailVm.softRemoveFromLibrary();
-                    }
+                    seriesDetailVm.removeFromLibrary();
                     removeLibraryDialog.close();
                 }
             }
         ]
 
-        ColumnLayout {
-            spacing: Kirigami.Units.smallSpacing
-            QQC2.Label {
-                text: i18nc("@info", "\u201c%1\u201d will be removed from your Library.", seriesDetailVm.title)
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-            QQC2.CheckBox {
-                id: deleteTrackingCheck
-                text: i18nc("@option:check", "Permanently delete watched state tracking data")
-                checked: false
-            }
+        QQC2.Label {
+            text: i18nc("@info",
+                "\u201c%1\u201d will be removed from your Library. "
+                + "Your watched and playback history for this series "
+                + "is preserved.",
+                seriesDetailVm.title)
+            wrapMode: Text.WordWrap
         }
     }
 
@@ -82,6 +73,9 @@ Kirigami.ScrollablePage {
         }
     }
 
+    // Watched-state is independent of Library membership: a user can
+    // mark a series watched / unwatched without saving it. The action
+    // is enabled the moment the meta has resolved.
     readonly property Kirigami.Action seriesWatchedAction: Kirigami.Action {
         icon.source: AppIcons.url(seriesDetailVm.seriesWatched ? "circle-dashed" : "circle-check")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
@@ -91,7 +85,6 @@ Kirigami.ScrollablePage {
         displayHint: Kirigami.DisplayHint.IconOnly
             | Kirigami.DisplayHint.KeepVisible
         enabled: seriesDetailVm.metaState === SeriesDetailViewModel.Ready
-            && seriesDetailVm.inLibrary
         onTriggered: seriesDetailVm.toggleSeriesWatched()
     }
 

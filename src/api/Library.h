@@ -15,12 +15,6 @@
 
 namespace kinema::api {
 
-enum class LibraryWatchOverride {
-    None = 0,
-    Watched = 1,
-    Unwatched = 2,
-};
-
 struct LibraryTitle {
     MediaKind kind = MediaKind::Movie;
     QString imdbId;
@@ -31,7 +25,6 @@ struct LibraryTitle {
     QUrl backdrop;
     QString overview;
     std::optional<QDate> releaseDate;
-    bool active = true;
     QDateTime addedAt;
     QDateTime updatedAt;
 };
@@ -49,6 +42,5 @@ struct LibraryEpisode {
 
 } // namespace kinema::api
 
-Q_DECLARE_METATYPE(kinema::api::LibraryWatchOverride)
 Q_DECLARE_METATYPE(kinema::api::LibraryTitle)
 Q_DECLARE_METATYPE(kinema::api::LibraryEpisode)

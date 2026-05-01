@@ -24,6 +24,7 @@ set(kinema_core_SRCS
     core/HistoryStore.cpp
     core/HttpClient.cpp
     core/LibraryStore.cpp
+    core/WatchedStore.cpp
     core/HttpErrorPresenter.cpp
     core/IdleInhibitor.cpp
     core/Language.cpp
@@ -67,6 +68,7 @@ set(kinema_core_SRCS
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
+    controllers/WatchedController.cpp
 
     services/StreamActions.cpp
 

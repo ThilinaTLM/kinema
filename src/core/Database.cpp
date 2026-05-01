@@ -407,6 +407,59 @@ bool Database::applyMigration(int toVersion)
                 "CREATE INDEX IF NOT EXISTS library_watch_overrides_by_imdb "
                 "ON library_watch_overrides (imdb_id)"),
         });
+    case 6:
+        // Decouple watched-state tracking from the Library:
+        //   * rename `library_watch_overrides` → `watched_overrides`
+        //     (the table is no longer library-owned data),
+        //   * rebuild `library_titles` without the `active` column
+        //     (soft-removes are gone; remove-from-library is
+        //     unconditional hard delete).
+        return runAll(6, {
+            QStringLiteral(
+                "ALTER TABLE library_watch_overrides "
+                "RENAME TO watched_overrides"),
+            QStringLiteral(
+                "DROP INDEX IF EXISTS library_watch_overrides_by_imdb"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS watched_overrides_by_imdb "
+                "ON watched_overrides (imdb_id)"),
+            QStringLiteral(
+                "DROP INDEX IF EXISTS library_titles_by_active_updated"),
+            QStringLiteral(
+                "DROP INDEX IF EXISTS library_titles_by_release"),
+            QStringLiteral(R"(CREATE TABLE library_titles_new (
+                kind         TEXT NOT NULL,
+                imdb_id      TEXT NOT NULL,
+                tmdb_id      INTEGER NOT NULL DEFAULT 0,
+                title        TEXT NOT NULL,
+                year         INTEGER,
+                poster_url   TEXT NOT NULL DEFAULT '',
+                backdrop_url TEXT NOT NULL DEFAULT '',
+                overview     TEXT NOT NULL DEFAULT '',
+                release_date TEXT NOT NULL DEFAULT '',
+                added_at     TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                PRIMARY KEY (kind, imdb_id)
+            ))"),
+            QStringLiteral(R"(INSERT INTO library_titles_new (
+                    kind, imdb_id, tmdb_id, title, year, poster_url,
+                    backdrop_url, overview, release_date,
+                    added_at, updated_at)
+                SELECT kind, imdb_id, tmdb_id, title, year, poster_url,
+                       backdrop_url, overview, release_date,
+                       added_at, updated_at
+                FROM library_titles
+                WHERE active = 1)"),
+            QStringLiteral("DROP TABLE library_titles"),
+            QStringLiteral(
+                "ALTER TABLE library_titles_new RENAME TO library_titles"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS library_titles_by_updated "
+                "ON library_titles (updated_at DESC)"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS library_titles_by_release "
+                "ON library_titles (release_date)"),
+        });
     default:
         qCWarning(KINEMA)
             << "Database: no migration registered for version"

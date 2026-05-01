@@ -11,6 +11,7 @@
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
 #include "controllers/LibraryController.h"
+#include "controllers/WatchedController.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/MprisController.h"
 #include "controllers/PlaybackController.h"
@@ -23,6 +24,7 @@
 #include "core/HistoryStore.h"
 #include "core/HttpClient.h"
 #include "core/LibraryStore.h"
+#include "core/WatchedStore.h"
 #include "core/PlayerLauncher.h"
 #include "core/PlayQueueStore.h"
 #include "core/SubtitleCacheStore.h"
@@ -293,6 +295,7 @@ void MainController::buildCoreServices()
     m_history = std::make_unique<core::HistoryStore>(*m_db, this);
     m_history->runRetentionPass();
     m_library = std::make_unique<core::LibraryStore>(*m_db, this);
+    m_watched = std::make_unique<core::WatchedStore>(*m_db, this);
     m_playQueueStore = std::make_unique<core::PlayQueueStore>(
         *m_db, this);
     m_subtitleCache
@@ -339,7 +342,9 @@ void MainController::buildCoreServices()
     m_historyCtrl->setStreamActions(m_streamActions);
 
     m_libraryCtrl = new controllers::LibraryController(
-        *m_library, m_historyCtrl, this);
+        *m_library, this);
+    m_watchedCtrl = new controllers::WatchedController(
+        *m_watched, m_historyCtrl, this);
 
     // Play queue controller. Built after StreamActions and the
     // history controller because it composes both: queued items
@@ -358,17 +363,19 @@ void MainController::buildCoreServices()
     m_discoverVm = new DiscoverViewModel(m_tmdb, m_tokenCtrl, this);
     m_continueWatchingVm
         = new ContinueWatchingViewModel(m_historyCtrl, this);
-    m_libraryVm = new LibraryViewModel(m_libraryCtrl, this);
+    m_libraryVm = new LibraryViewModel(m_libraryCtrl, m_watchedCtrl, this);
     m_searchVm = new SearchViewModel(m_cinemeta,
         m_settings.search(), this);
     m_browseVm = new BrowseViewModel(m_tmdb, m_settings.browse(), this);
     m_movieDetailVm = new MovieDetailViewModel(m_cinemeta,
-        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl, m_tokenCtrl,
-        m_settings, m_tokenCtrl->realDebridToken(), this);
+        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
+        m_watchedCtrl, m_tokenCtrl, m_settings,
+        m_tokenCtrl->realDebridToken(), this);
     m_movieDetailVm->setPlayQueue(m_playQueueCtrl);
     m_seriesDetailVm = new SeriesDetailViewModel(m_cinemeta,
-        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl, m_tokenCtrl,
-        m_settings, m_tokenCtrl->realDebridToken(), this);
+        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
+        m_watchedCtrl, m_tokenCtrl, m_settings,
+        m_tokenCtrl->realDebridToken(), this);
     m_seriesDetailVm->setPlayQueue(m_playQueueCtrl);
 
     // TMDB token gain/loss propagates from `TokenController` to
