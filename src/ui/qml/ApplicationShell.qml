@@ -116,6 +116,17 @@ Kirigami.ApplicationWindow {
                 onTriggered: root.showPage("discover")
             },
             Kirigami.Action {
+                icon.source: AppIcons.url("library",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
+                text: i18nc("@action drawer entry", "Library")
+                checkable: true
+                checked: root.currentNavKey === "library"
+                onTriggered: root.showPage("library")
+            },
+            Kirigami.Action {
                 icon.source: AppIcons.url("search",
                     checked ? AppIcons.accentText : AppIcons.foreground)
                 icon.color: enabled
@@ -334,6 +345,9 @@ Kirigami.ApplicationWindow {
         case "discover":
             root.setTopLevelPage(discoverComp, {});
             break;
+        case "library":
+            root.setTopLevelPage(libraryComp, {});
+            break;
         case "search":
             root.setTopLevelPage(searchComp, {});
             break;
@@ -352,6 +366,7 @@ Kirigami.ApplicationWindow {
     // Phase 03 brought up the Discover page; phase 04 brought up
     // Search and Browse. Detail pages remain stubbed until phase 05.
     Component { id: discoverComp; DiscoverPage { } }
+    Component { id: libraryComp;  LibraryPage  { } }
     Component { id: searchComp;   SearchPage   { } }
     Component { id: browseComp;   BrowsePage   { } }
     Component { id: queueComp;    QueuePage    { } }

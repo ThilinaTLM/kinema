@@ -38,7 +38,7 @@ private Q_SLOTS:
         QVERIFY(db.open());
         QVERIFY(db.isOpen());
         QCOMPARE(db.currentSchemaVersion(), Database::latestSchemaVersion());
-        QCOMPARE(db.currentSchemaVersion(), 4);
+        QCOMPARE(db.currentSchemaVersion(), 5);
 
         // history table must exist and have the key column.
         auto q = db.query();
@@ -74,6 +74,20 @@ private Q_SLOTS:
         QVERIFY(subColumns.contains(QStringLiteral("file_name")));
         QVERIFY(subColumns.contains(QStringLiteral("local_path")));
         QVERIFY(subColumns.contains(QStringLiteral("last_used_at")));
+
+        // library tables from v5 migration (moved out of v4).
+        QVERIFY(q.exec(QStringLiteral(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='library_titles'")));
+        QVERIFY(q.next());
+        QVERIFY(q.exec(QStringLiteral(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='library_episodes'")));
+        QVERIFY(q.next());
+        QVERIFY(q.exec(QStringLiteral(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='library_watch_overrides'")));
+        QVERIFY(q.next());
     }
 
     // ---- Reopen is idempotent -------------------------------------------
@@ -87,7 +101,7 @@ private Q_SLOTS:
         {
             Database db(m_path, nullptr);
             QVERIFY(db.open());
-            QCOMPARE(db.currentSchemaVersion(), 4);
+            QCOMPARE(db.currentSchemaVersion(), 5);
         }
     }
 
@@ -109,7 +123,7 @@ private Q_SLOTS:
     {
         Database db(QStringLiteral(":memory:"), nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 4);
+        QCOMPARE(db.currentSchemaVersion(), 5);
     }
 
     // ---- Corrupt file is quarantined and a fresh DB is created ---------
@@ -127,7 +141,7 @@ private Q_SLOTS:
 
         Database db(m_path, nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 4);
+        QCOMPARE(db.currentSchemaVersion(), 5);
 
         // A file named *.corrupt-* should now exist next to the fresh DB.
         const QFileInfo fi(m_path);

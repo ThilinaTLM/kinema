@@ -29,6 +29,7 @@ class AppSettings;
 namespace kinema::core {
 class Database;
 class HistoryStore;
+class LibraryStore;
 class HttpClient;
 class PlayerLauncher;
 class PlayQueueStore;
@@ -38,6 +39,7 @@ class TokenStore;
 
 namespace kinema::controllers {
 class HistoryController;
+class LibraryController;
 class MprisController;
 class PlaybackController;
 class PlayQueueController;
@@ -63,6 +65,7 @@ class AppIconResolver;
 class BrowseViewModel;
 class ContinueWatchingViewModel;
 class DiscoverViewModel;
+class LibraryViewModel;
 class MovieDetailViewModel;
 class PlayQueueViewModel;
 class SearchViewModel;
@@ -263,6 +266,7 @@ private:
     std::unique_ptr<core::PlayerLauncher> m_player;
     std::unique_ptr<core::Database> m_db;
     std::unique_ptr<core::HistoryStore> m_history;
+    std::unique_ptr<core::LibraryStore> m_library;
     std::unique_ptr<core::PlayQueueStore> m_playQueueStore;
     std::unique_ptr<core::SubtitleCacheStore> m_subtitleCache;
 
@@ -277,6 +281,7 @@ private:
     services::StreamActions* m_streamActions {};
     controllers::TokenController* m_tokenCtrl {};
     controllers::HistoryController* m_historyCtrl {};
+    controllers::LibraryController* m_libraryCtrl {};
     controllers::PlayQueueController* m_playQueueCtrl {};
     controllers::SubtitleController* m_subtitleCtrl {};
     controllers::TrayController* m_tray {};
@@ -286,6 +291,7 @@ private:
     // Subtitles / Settings here as their pages land.
     DiscoverViewModel* m_discoverVm {};
     ContinueWatchingViewModel* m_continueWatchingVm {};
+    LibraryViewModel* m_libraryVm {};
     SearchViewModel* m_searchVm {};
     BrowseViewModel* m_browseVm {};
     MovieDetailViewModel* m_movieDetailVm {};

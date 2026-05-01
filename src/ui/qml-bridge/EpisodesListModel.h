@@ -34,6 +34,8 @@ public:
         IsUpcomingRole,
         ThumbnailUrlRole,    ///< QString
         EpisodeRole,         ///< full api::Episode as QVariant
+        WatchedRole,
+        ProgressRole,
     };
     Q_ENUM(Roles)
 
@@ -45,6 +47,7 @@ public:
 
     /// Replace the row list. Pure mutator \u2014 no implicit filtering.
     void setEpisodes(QList<api::Episode> rows);
+    void setLibraryState(QList<bool> watched, QList<double> progress);
     const QList<api::Episode>& episodes() const noexcept { return m_rows; }
     const api::Episode* at(int row) const;
 
@@ -56,6 +59,8 @@ Q_SIGNALS:
 
 private:
     QList<api::Episode> m_rows;
+    QList<bool> m_watched;
+    QList<double> m_progress;
 };
 
 } // namespace kinema::ui::qml

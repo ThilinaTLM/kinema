@@ -25,9 +25,57 @@ Kirigami.ScrollablePage {
     topPadding: 0
     bottomPadding: 0
 
-    // No page-level actions: the episode list IS the play affordance,
-    // and subtitles only have a meaningful context once a stream is
-    // chosen, so it lives on `StreamsPage` instead.
+    Kirigami.PromptDialog {
+        id: removeLibraryDialog
+        title: i18nc("@title:dialog", "Remove from Library?")
+        subtitle: i18nc("@info",
+            "Hide keeps Library watch state for this show. Delete removes only Library data; playback history and resume progress stay intact.")
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18nc("@action:button", "Cancel")
+                icon.source: AppIcons.url("x")
+                icon.color: AppIcons.foreground
+                onTriggered: removeLibraryDialog.close()
+            },
+            Kirigami.Action {
+                text: i18nc("@action:button", "Hide")
+                icon.source: AppIcons.url("eraser")
+                icon.color: AppIcons.foreground
+                onTriggered: {
+                    seriesDetailVm.softRemoveFromLibrary();
+                    removeLibraryDialog.close();
+                }
+            },
+            Kirigami.Action {
+                text: i18nc("@action:button", "Delete Library Data")
+                icon.source: AppIcons.url("trash-2")
+                icon.color: AppIcons.negative
+                onTriggered: {
+                    seriesDetailVm.hardDeleteFromLibrary();
+                    removeLibraryDialog.close();
+                }
+            }
+        ]
+    }
+
+    readonly property Kirigami.Action libraryAction: Kirigami.Action {
+        icon.source: AppIcons.url(seriesDetailVm.inLibrary ? "trash-2" : "save")
+        icon.color: enabled ? AppIcons.foreground : AppIcons.muted
+        text: seriesDetailVm.libraryActionText
+        displayHint: Kirigami.DisplayHint.IconOnly
+            | Kirigami.DisplayHint.KeepVisible
+        enabled: seriesDetailVm.metaState === SeriesDetailViewModel.Ready
+        onTriggered: {
+            if (seriesDetailVm.inLibrary) {
+                removeLibraryDialog.open();
+            } else {
+                seriesDetailVm.addToLibrary();
+            }
+        }
+    }
+
+    actions: [ libraryAction ]
 
     Component.onDestruction: seriesDetailVm.clear()
 
@@ -52,9 +100,7 @@ Kirigami.ScrollablePage {
             isUpcoming: false
             releaseDateText: seriesDetailVm.releaseDateText
 
-            // No primary / secondary action: the episode list below
-            // is the play affordance, and subtitles live on the
-            // `StreamsPage` that an episode tap pushes.
+            primaryAction: page.libraryAction
         }
 
         // The episode list and season tabs already indent their
@@ -97,7 +143,10 @@ Kirigami.ScrollablePage {
                     releasedText: model.releasedText
                     isUpcoming: model.isUpcoming
                     thumbnailUrl: model.thumbnailUrl
+                    watched: model.watched !== undefined ? model.watched : false
+                    progress: model.progress !== undefined ? model.progress : -1
                     selected: index === seriesDetailVm.selectedEpisodeRow
+                    onToggleWatchedRequested: seriesDetailVm.toggleEpisodeWatched(index)
                     onClicked: {
                         // Tap = "show me how to play this one." The VM
                         // selects the episode (kicking off the streams

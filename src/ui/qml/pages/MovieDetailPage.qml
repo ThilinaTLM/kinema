@@ -33,6 +33,40 @@ Kirigami.ScrollablePage {
     // verb without a useful target (no stream picked yet). The label
     // says "Streams" rather than "Play" because the action opens a
     // picker, not the player itself.
+    Kirigami.PromptDialog {
+        id: removeLibraryDialog
+        title: i18nc("@title:dialog", "Remove from Library?")
+        subtitle: i18nc("@info",
+            "Hide keeps Library watch state for this movie. Delete removes only Library data; playback history and resume progress stay intact.")
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18nc("@action:button", "Cancel")
+                icon.source: AppIcons.url("x")
+                icon.color: AppIcons.foreground
+                onTriggered: removeLibraryDialog.close()
+            },
+            Kirigami.Action {
+                text: i18nc("@action:button", "Hide")
+                icon.source: AppIcons.url("eraser")
+                icon.color: AppIcons.foreground
+                onTriggered: {
+                    movieDetailVm.softRemoveFromLibrary();
+                    removeLibraryDialog.close();
+                }
+            },
+            Kirigami.Action {
+                text: i18nc("@action:button", "Delete Library Data")
+                icon.source: AppIcons.url("trash-2")
+                icon.color: AppIcons.negative
+                onTriggered: {
+                    movieDetailVm.hardDeleteFromLibrary();
+                    removeLibraryDialog.close();
+                }
+            }
+        ]
+    }
+
     readonly property Kirigami.Action streamsAction: Kirigami.Action {
         icon.source: AppIcons.url("play")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
@@ -44,7 +78,32 @@ Kirigami.ScrollablePage {
         onTriggered: movieDetailVm.requestStreams()
     }
 
-    actions: [ streamsAction ]
+    readonly property Kirigami.Action libraryAction: Kirigami.Action {
+        icon.source: AppIcons.url(movieDetailVm.inLibrary ? "trash-2" : "save")
+        icon.color: enabled ? AppIcons.foreground : AppIcons.muted
+        text: movieDetailVm.libraryActionText
+        displayHint: Kirigami.DisplayHint.IconOnly
+            | Kirigami.DisplayHint.KeepVisible
+        enabled: movieDetailVm.metaState === MovieDetailViewModel.Ready
+        onTriggered: {
+            if (movieDetailVm.inLibrary) {
+                removeLibraryDialog.open();
+            } else {
+                movieDetailVm.addToLibrary();
+            }
+        }
+    }
+
+    readonly property Kirigami.Action watchedAction: Kirigami.Action {
+        icon.source: AppIcons.url(movieDetailVm.movieWatched ? "circle-check" : "circle-alert")
+        icon.color: enabled ? AppIcons.foreground : AppIcons.muted
+        text: movieDetailVm.watchedActionText
+        enabled: movieDetailVm.metaState === MovieDetailViewModel.Ready
+            && movieDetailVm.inLibrary
+        onTriggered: movieDetailVm.toggleMovieWatched()
+    }
+
+    actions: [ streamsAction, libraryAction, watchedAction ]
 
     Component.onDestruction: movieDetailVm.clear()
 
@@ -70,6 +129,8 @@ Kirigami.ScrollablePage {
             releaseDateText: movieDetailVm.releaseDateText
 
             primaryAction: page.streamsAction
+            secondaryAction: page.libraryAction
+            tertiaryAction: page.watchedAction
         }
 
         SimilarCarousel {

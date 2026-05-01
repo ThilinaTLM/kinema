@@ -9,6 +9,7 @@
 #include "config/AppSettings.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
+#include "controllers/LibraryController.h"
 #include "controllers/PlayQueueController.h"
 #include "controllers/TokenController.h"
 #include "core/DateFormat.h"
@@ -36,11 +37,26 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     config::AppSettings& settings,
     const QString& rdTokenRef,
     QObject* parent)
+    : MovieDetailViewModel(cinemeta, torrentio, tmdb, actions,
+          nullptr, tokens, settings, rdTokenRef, parent)
+{
+}
+
+MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
+    api::TorrentioClient* torrentio,
+    api::TmdbClient* tmdb,
+    services::StreamActions* actions,
+    controllers::LibraryController* library,
+    controllers::TokenController* tokens,
+    config::AppSettings& settings,
+    const QString& rdTokenRef,
+    QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
     , m_torrentio(torrentio)
     , m_tmdb(tmdb)
     , m_actions(actions)
+    , m_library(library)
     , m_tokens(tokens)
     , m_settings(settings)
     , m_rdToken(rdTokenRef)
@@ -60,6 +76,11 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });
+
+    if (m_library) {
+        connect(m_library, &controllers::LibraryController::changed,
+            this, &MovieDetailViewModel::refreshLibraryState);
+    }
 
     if (m_tokens) {
         // RD token presence drives the cachedOnly checkbox visibility
@@ -208,6 +229,8 @@ void MovieDetailViewModel::resetMeta()
     m_rating = -1.0;
     m_isUpcoming = false;
     m_releaseDateText.clear();
+    m_currentMeta = {};
+    refreshLibraryState();
     Q_EMIT metaChanged();
 }
 
@@ -238,6 +261,7 @@ void MovieDetailViewModel::setSimilarVisible(bool on)
 
 void MovieDetailViewModel::applyMeta(const api::MetaDetail& detail)
 {
+    m_currentMeta = detail;
     const auto& s = detail.summary;
     m_imdbId = s.imdbId;
     m_title = s.title;
@@ -254,6 +278,35 @@ void MovieDetailViewModel::applyMeta(const api::MetaDetail& detail)
         ? core::formatReleaseDate(*s.released)
         : QString();
     Q_EMIT metaChanged();
+    refreshLibraryState();
+}
+
+void MovieDetailViewModel::refreshLibraryState()
+{
+    const bool inLibrary = m_library && !m_imdbId.isEmpty()
+        && m_library->isInLibrary(api::MediaKind::Movie, m_imdbId);
+    const bool watched = m_library && !m_imdbId.isEmpty()
+        && m_library->isMovieWatched(m_imdbId);
+    if (m_inLibrary == inLibrary && m_movieWatched == watched) {
+        return;
+    }
+    m_inLibrary = inLibrary;
+    m_movieWatched = watched;
+    Q_EMIT libraryStateChanged();
+}
+
+QString MovieDetailViewModel::libraryActionText() const
+{
+    return m_inLibrary
+        ? i18nc("@action:button", "Remove from Library")
+        : i18nc("@action:button", "Add to Library");
+}
+
+QString MovieDetailViewModel::watchedActionText() const
+{
+    return m_movieWatched
+        ? i18nc("@action:button", "Mark Unwatched")
+        : i18nc("@action:button", "Mark Watched");
 }
 
 void MovieDetailViewModel::load(const QString& imdbId)
@@ -541,6 +594,35 @@ api::PlaybackContext MovieDetailViewModel::currentContext() const
 void MovieDetailViewModel::requestStreams()
 {
     Q_EMIT streamsRequested();
+}
+
+void MovieDetailViewModel::addToLibrary()
+{
+    if (!m_library || m_currentMeta.summary.imdbId.isEmpty()) {
+        return;
+    }
+    m_library->saveMovie(m_currentMeta);
+}
+
+void MovieDetailViewModel::softRemoveFromLibrary()
+{
+    if (m_library && !m_imdbId.isEmpty()) {
+        m_library->softRemove(api::MediaKind::Movie, m_imdbId);
+    }
+}
+
+void MovieDetailViewModel::hardDeleteFromLibrary()
+{
+    if (m_library && !m_imdbId.isEmpty()) {
+        m_library->hardDelete(api::MediaKind::Movie, m_imdbId);
+    }
+}
+
+void MovieDetailViewModel::toggleMovieWatched()
+{
+    if (m_library && !m_imdbId.isEmpty()) {
+        m_library->setMovieWatched(m_imdbId, !m_movieWatched);
+    }
 }
 
 void MovieDetailViewModel::setPlayQueue(controllers::PlayQueueController* queue)

@@ -166,6 +166,11 @@ ecm_add_test(tst_history_store.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
+ecm_add_test(tst_library_store.cpp
+    TEST_NAME tst_library_store
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
 ecm_add_test(tst_play_queue_store.cpp
     TEST_NAME tst_play_queue_store
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
@@ -236,6 +241,11 @@ ecm_add_test(tst_continue_watching_view_model.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
+ecm_add_test(tst_library_view_model.cpp
+    TEST_NAME tst_library_view_model
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
 ecm_add_test(tst_application_boot.cpp
     TEST_NAME tst_application_boot
     LINK_LIBRARIES kinema_core kinema_qml_app Qt6::Test
@@ -272,7 +282,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_stream_actions tst_subtitle_results_model
          tst_token_controller tst_cinemeta_client tst_tmdb_client
          tst_torrentio_client tst_realdebrid_client
-         tst_database tst_history_store tst_play_queue_store
+         tst_database tst_history_store tst_library_store tst_play_queue_store
          tst_play_queue_controller
          tst_subtitle_cache_store tst_cache_paths tst_language
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
@@ -280,7 +290,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_media_chips tst_mpris_metadata tst_idle_inhibitor
          tst_main_controller_close_logic
          tst_discover_view_model tst_continue_watching_view_model
-         tst_application_boot)
+         tst_library_view_model tst_application_boot)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 

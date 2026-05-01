@@ -31,6 +31,7 @@ class TorrentioSettings;
 }
 
 namespace kinema::controllers {
+class LibraryController;
 class PlayQueueController;
 class TokenController;
 }
@@ -122,6 +123,9 @@ class SeriesDetailViewModel : public QObject
         WRITE setUiMultiAudioOnly NOTIFY uiFiltersChanged)
     Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
 
+    Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY libraryStateChanged)
+    Q_PROPERTY(QString libraryActionText READ libraryActionText NOTIFY libraryStateChanged)
+
 public:
     enum class MetaState {
         Idle = 0,
@@ -131,6 +135,15 @@ public:
     };
     Q_ENUM(MetaState)
 
+    SeriesDetailViewModel(api::CinemetaClient* cinemeta,
+        api::TorrentioClient* torrentio,
+        api::TmdbClient* tmdb,
+        services::StreamActions* actions,
+        controllers::LibraryController* library,
+        controllers::TokenController* tokens,
+        config::AppSettings& settings,
+        const QString& rdTokenRef,
+        QObject* parent = nullptr);
     SeriesDetailViewModel(api::CinemetaClient* cinemeta,
         api::TorrentioClient* torrentio,
         api::TmdbClient* tmdb,
@@ -191,6 +204,9 @@ public:
     bool uiAnyFilterActive() const noexcept;
     Q_INVOKABLE void clearUiFilters();
 
+    bool inLibrary() const noexcept { return m_inLibrary; }
+    QString libraryActionText() const;
+
 public Q_SLOTS:
     /// Open the series detail page for `imdbId`. Optional `season` /
     /// `episode` seed (used by Continue Watching) auto-selects the
@@ -222,6 +238,10 @@ public Q_SLOTS:
     /// the currently-selected episode. No-op when no episode is
     /// selected.
     void requestStreams();
+    void addToLibrary();
+    void softRemoveFromLibrary();
+    void hardDeleteFromLibrary();
+    void toggleEpisodeWatched(int row);
 
     /// Wire the queue controller. Two-phase init like the movie
     /// detail VM. Safe to leave unset for tests.
@@ -254,6 +274,7 @@ Q_SIGNALS:
     void realDebridConfiguredChanged();
     void rawStreamsCountChanged();
     void uiFiltersChanged();
+    void libraryStateChanged();
 
     void statusMessage(const QString& text, int durationMs);
 
@@ -280,6 +301,8 @@ private:
 
     void applyMeta(const api::SeriesDetail& sd);
     void resetMeta();
+    void refreshLibraryState();
+    void refreshEpisodeLibraryState();
     void setMetaState(MetaState s, const QString& error = {});
     void setSimilarVisible(bool on);
 
@@ -304,6 +327,7 @@ private:
     api::TorrentioClient* m_torrentio;
     api::TmdbClient* m_tmdb;
     services::StreamActions* m_actions;
+    controllers::LibraryController* m_library {};
     controllers::PlayQueueController* m_queue {};
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;
@@ -319,6 +343,7 @@ private:
     quint64 m_similarEpoch = 0;
 
     // Series meta.
+    api::SeriesDetail m_currentSeries;
     QString m_imdbId;
     QString m_title;
     int m_year = 0;
@@ -357,6 +382,8 @@ private:
     bool m_uiHdrOnly = false;
     bool m_uiDolbyVisionOnly = false;
     bool m_uiMultiAudioOnly = false;
+
+    bool m_inLibrary = false;
 };
 
 } // namespace kinema::ui::qml

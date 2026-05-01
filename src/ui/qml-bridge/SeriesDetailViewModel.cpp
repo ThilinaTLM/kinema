@@ -9,6 +9,7 @@
 #include "config/AppSettings.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
+#include "controllers/LibraryController.h"
 #include "controllers/TokenController.h"
 #include "core/DateFormat.h"
 #include "core/HttpError.h"
@@ -55,11 +56,27 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     config::AppSettings& settings,
     const QString& rdTokenRef,
     QObject* parent)
+    : SeriesDetailViewModel(cinemeta, torrentio, tmdb, actions,
+          nullptr, tokens, settings, rdTokenRef, parent)
+{
+}
+
+SeriesDetailViewModel::SeriesDetailViewModel(
+    api::CinemetaClient* cinemeta,
+    api::TorrentioClient* torrentio,
+    api::TmdbClient* tmdb,
+    services::StreamActions* actions,
+    controllers::LibraryController* library,
+    controllers::TokenController* tokens,
+    config::AppSettings& settings,
+    const QString& rdTokenRef,
+    QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
     , m_torrentio(torrentio)
     , m_tmdb(tmdb)
     , m_actions(actions)
+    , m_library(library)
     , m_tokens(tokens)
     , m_settings(settings)
     , m_rdToken(rdTokenRef)
@@ -77,6 +94,11 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });
+
+    if (m_library) {
+        connect(m_library, &controllers::LibraryController::changed,
+            this, &SeriesDetailViewModel::refreshLibraryState);
+    }
 
     if (m_tokens) {
         connect(m_tokens,
@@ -220,6 +242,8 @@ void SeriesDetailViewModel::resetMeta()
     m_cast.clear();
     m_rating = -1.0;
     m_releaseDateText.clear();
+    m_currentSeries = {};
+    refreshLibraryState();
     Q_EMIT metaChanged();
 
     m_allEpisodes.clear();
@@ -260,6 +284,7 @@ void SeriesDetailViewModel::clear()
 
 void SeriesDetailViewModel::applyMeta(const api::SeriesDetail& sd)
 {
+    m_currentSeries = sd;
     const auto& s = sd.meta.summary;
     m_imdbId = s.imdbId;
     m_title = s.title;
@@ -274,6 +299,7 @@ void SeriesDetailViewModel::applyMeta(const api::SeriesDetail& sd)
         ? core::formatReleaseDate(*s.released)
         : QString();
     Q_EMIT metaChanged();
+    refreshLibraryState();
 
     m_allEpisodes = sd.episodes;
     rebuildSeasons();
@@ -323,6 +349,7 @@ void SeriesDetailViewModel::publishCurrentSeasonEpisodes()
     if (m_currentSeasonIdx < 0
         || m_currentSeasonIdx >= m_seasonNumbers.size()) {
         m_episodes->setEpisodes({});
+        m_episodes->setLibraryState({}, {});
         return;
     }
     const int season = m_seasonNumbers.at(m_currentSeasonIdx);
@@ -334,6 +361,41 @@ void SeriesDetailViewModel::publishCurrentSeasonEpisodes()
         }
     }
     m_episodes->setEpisodes(std::move(rows));
+    refreshEpisodeLibraryState();
+}
+
+void SeriesDetailViewModel::refreshLibraryState()
+{
+    const bool inLibrary = m_library && !m_imdbId.isEmpty()
+        && m_library->isInLibrary(api::MediaKind::Series, m_imdbId);
+    if (m_inLibrary != inLibrary) {
+        m_inLibrary = inLibrary;
+        Q_EMIT libraryStateChanged();
+    }
+    refreshEpisodeLibraryState();
+}
+
+void SeriesDetailViewModel::refreshEpisodeLibraryState()
+{
+    QList<bool> watched;
+    QList<double> progress;
+    watched.reserve(m_episodes->episodes().size());
+    progress.reserve(m_episodes->episodes().size());
+    for (const auto& ep : m_episodes->episodes()) {
+        watched.append(m_library && !m_imdbId.isEmpty()
+            && m_library->isEpisodeWatched(m_imdbId, ep.season, ep.number));
+        progress.append(m_library && !m_imdbId.isEmpty()
+            ? m_library->episodeProgress(m_imdbId, ep.season, ep.number)
+            : -1.0);
+    }
+    m_episodes->setLibraryState(std::move(watched), std::move(progress));
+}
+
+QString SeriesDetailViewModel::libraryActionText() const
+{
+    return m_inLibrary
+        ? i18nc("@action:button", "Remove from Library")
+        : i18nc("@action:button", "Add to Library");
 }
 
 void SeriesDetailViewModel::setCurrentSeason(int idx)
@@ -505,6 +567,40 @@ void SeriesDetailViewModel::requestStreams()
         return;
     }
     Q_EMIT streamsRequested();
+}
+
+void SeriesDetailViewModel::addToLibrary()
+{
+    if (!m_library || m_currentSeries.meta.summary.imdbId.isEmpty()) {
+        return;
+    }
+    m_library->saveSeries(m_currentSeries);
+}
+
+void SeriesDetailViewModel::softRemoveFromLibrary()
+{
+    if (m_library && !m_imdbId.isEmpty()) {
+        m_library->softRemove(api::MediaKind::Series, m_imdbId);
+    }
+}
+
+void SeriesDetailViewModel::hardDeleteFromLibrary()
+{
+    if (m_library && !m_imdbId.isEmpty()) {
+        m_library->hardDelete(api::MediaKind::Series, m_imdbId);
+    }
+}
+
+void SeriesDetailViewModel::toggleEpisodeWatched(int row)
+{
+    const auto* ep = m_episodes->at(row);
+    if (!m_library || !ep || m_imdbId.isEmpty()) {
+        return;
+    }
+    const bool watched = m_library->isEpisodeWatched(
+        m_imdbId, ep->season, ep->number);
+    m_library->setEpisodeWatched(m_imdbId, ep->season, ep->number,
+        !watched);
 }
 
 QCoro::Task<void> SeriesDetailViewModel::loadEpisodeStreamsTask(

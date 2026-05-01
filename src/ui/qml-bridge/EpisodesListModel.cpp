@@ -44,6 +44,10 @@ QVariant EpisodesListModel::data(const QModelIndex& index, int role) const
         return e.thumbnail.toString();
     case EpisodeRole:
         return QVariant::fromValue(e);
+    case WatchedRole:
+        return index.row() < m_watched.size() ? m_watched.at(index.row()) : false;
+    case ProgressRole:
+        return index.row() < m_progress.size() ? m_progress.at(index.row()) : -1.0;
     default:
         return {};
     }
@@ -59,6 +63,8 @@ QHash<int, QByteArray> EpisodesListModel::roleNames() const
         { IsUpcomingRole, "isUpcoming" },
         { ThumbnailUrlRole, "thumbnailUrl" },
         { EpisodeRole, "episode" },
+        { WatchedRole, "watched" },
+        { ProgressRole, "progress" },
     };
 }
 
@@ -66,8 +72,21 @@ void EpisodesListModel::setEpisodes(QList<api::Episode> rows)
 {
     beginResetModel();
     m_rows = std::move(rows);
+    m_watched.clear();
+    m_progress.clear();
     endResetModel();
     Q_EMIT countChanged();
+}
+
+void EpisodesListModel::setLibraryState(QList<bool> watched,
+    QList<double> progress)
+{
+    m_watched = std::move(watched);
+    m_progress = std::move(progress);
+    if (!m_rows.isEmpty()) {
+        Q_EMIT dataChanged(index(0), index(rowCount() - 1),
+            { WatchedRole, ProgressRole });
+    }
 }
 
 const api::Episode* EpisodesListModel::at(int row) const

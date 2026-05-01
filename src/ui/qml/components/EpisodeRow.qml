@@ -22,6 +22,10 @@ QQC2.ItemDelegate {
     property bool isUpcoming: false
     property string thumbnailUrl
     property bool selected: false
+    property bool watched: false
+    property real progress: -1
+
+    signal toggleWatchedRequested()
 
     width: ListView.view ? ListView.view.width : implicitWidth
     padding: Theme.pageMargin
@@ -92,6 +96,13 @@ QQC2.ItemDelegate {
                     font.weight: Font.DemiBold
                     color: Theme.foreground
                 }
+                Kirigami.Icon {
+                    visible: row.watched
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: width
+                    source: AppIcons.url("circle-check")
+                    color: Theme.positive
+                }
                 UpcomingBadge {
                     visible: row.isUpcoming
                     releaseDateText: row.releasedText
@@ -115,6 +126,36 @@ QQC2.ItemDelegate {
                 font.pointSize: Theme.captionFont.pointSize
                 color: Theme.disabled
             }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Kirigami.Units.smallSpacing
+                visible: row.progress > 0 && row.progress < 1 && !row.watched
+                radius: height / 2
+                color: Qt.alpha(Theme.foreground, 0.14)
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: parent.width * Math.max(0, Math.min(1, row.progress))
+                    radius: parent.radius
+                    color: Theme.accent
+                }
+            }
+        }
+
+        QQC2.ToolButton {
+            Layout.alignment: Qt.AlignVCenter
+            icon.source: AppIcons.url(row.watched ? "circle-check" : "circle-alert")
+            icon.color: row.watched ? Theme.positive : Theme.disabled
+            text: row.watched
+                ? i18nc("@action:button", "Mark unwatched")
+                : i18nc("@action:button", "Mark watched")
+            display: QQC2.AbstractButton.IconOnly
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            onClicked: row.toggleWatchedRequested()
         }
 
         // Open-affordance chevron. Tapping a row pushes `StreamsPage`,

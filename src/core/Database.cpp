@@ -357,6 +357,56 @@ bool Database::applyMigration(int toVersion)
                 "CREATE INDEX IF NOT EXISTS play_queue_by_ord "
                 "ON play_queue (ord)"),
         });
+    case 5:
+        return runAll(5, {
+            QStringLiteral(R"(CREATE TABLE IF NOT EXISTS library_titles (
+                kind         TEXT NOT NULL,
+                imdb_id      TEXT NOT NULL,
+                tmdb_id      INTEGER NOT NULL DEFAULT 0,
+                title        TEXT NOT NULL,
+                year         INTEGER,
+                poster_url   TEXT NOT NULL DEFAULT '',
+                backdrop_url TEXT NOT NULL DEFAULT '',
+                overview     TEXT NOT NULL DEFAULT '',
+                release_date TEXT NOT NULL DEFAULT '',
+                active       INTEGER NOT NULL DEFAULT 1,
+                added_at     TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                PRIMARY KEY (kind, imdb_id)
+            ))"),
+            QStringLiteral(R"(CREATE TABLE IF NOT EXISTS library_episodes (
+                series_imdb_id TEXT NOT NULL,
+                season         INTEGER NOT NULL,
+                episode        INTEGER NOT NULL,
+                title          TEXT NOT NULL,
+                overview       TEXT NOT NULL DEFAULT '',
+                thumbnail_url  TEXT NOT NULL DEFAULT '',
+                release_date   TEXT NOT NULL DEFAULT '',
+                updated_at     TEXT NOT NULL,
+                PRIMARY KEY (series_imdb_id, season, episode)
+            ))"),
+            QStringLiteral(R"(CREATE TABLE IF NOT EXISTS library_watch_overrides (
+                key        TEXT PRIMARY KEY,
+                kind       TEXT NOT NULL,
+                imdb_id    TEXT NOT NULL,
+                season     INTEGER,
+                episode    INTEGER,
+                state      INTEGER NOT NULL,
+                changed_at TEXT NOT NULL
+            ))"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS library_titles_by_active_updated "
+                "ON library_titles (active, updated_at DESC)"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS library_titles_by_release "
+                "ON library_titles (active, release_date)"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS library_episodes_by_series_release "
+                "ON library_episodes (series_imdb_id, release_date)"),
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS library_watch_overrides_by_imdb "
+                "ON library_watch_overrides (imdb_id)"),
+        });
     default:
         qCWarning(KINEMA)
             << "Database: no migration registered for version"

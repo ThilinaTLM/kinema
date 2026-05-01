@@ -23,6 +23,7 @@ set(kinema_core_SRCS
     core/DateWindow.cpp
     core/HistoryStore.cpp
     core/HttpClient.cpp
+    core/LibraryStore.cpp
     core/HttpErrorPresenter.cpp
     core/IdleInhibitor.cpp
     core/Language.cpp
@@ -61,6 +62,7 @@ set(kinema_core_SRCS
     app/KinemaApplication.cpp
 
     controllers/HistoryController.cpp
+    controllers/LibraryController.cpp
     controllers/PlayQueueController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
@@ -75,6 +77,8 @@ set(kinema_core_SRCS
     ui/qml-bridge/DiscoverViewModel.cpp
     ui/qml-bridge/EpisodesListModel.cpp
     ui/qml-bridge/KinemaImageProvider.cpp
+    ui/qml-bridge/LibraryListModel.cpp
+    ui/qml-bridge/LibraryViewModel.cpp
     ui/qml-bridge/MainController.cpp
     ui/qml-bridge/MovieDetailViewModel.cpp
     ui/qml-bridge/PlayQueueViewModel.cpp
@@ -199,6 +203,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/DetailOverview.qml
         ui/qml/components/EpisodeRow.qml
         ui/qml/components/FilterMenuButton.qml
+        ui/qml/components/LibraryCard.qml
         ui/qml/components/MediaKindSelect.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
@@ -218,6 +223,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/SubtitlesPanel.qml
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
+        ui/qml/pages/LibraryPage.qml
         ui/qml/pages/MovieDetailPage.qml
         ui/qml/pages/QueuePage.qml
         ui/qml/pages/SearchPage.qml
@@ -256,6 +262,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/house.svg
         ui/qml/icons/lucide/info.svg
         ui/qml/icons/lucide/languages.svg
+        ui/qml/icons/lucide/library.svg
         ui/qml/icons/lucide/list-plus.svg
         ui/qml/icons/lucide/list-video.svg
         ui/qml/icons/lucide/list-x.svg

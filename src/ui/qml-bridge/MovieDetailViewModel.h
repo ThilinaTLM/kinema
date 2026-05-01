@@ -31,6 +31,7 @@ class TorrentioSettings;
 
 
 namespace kinema::controllers {
+class LibraryController;
 class PlayQueueController;
 class TokenController;
 }
@@ -113,6 +114,11 @@ class MovieDetailViewModel : public QObject
         WRITE setUiMultiAudioOnly NOTIFY uiFiltersChanged)
     Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
 
+    Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY libraryStateChanged)
+    Q_PROPERTY(bool movieWatched READ movieWatched NOTIFY libraryStateChanged)
+    Q_PROPERTY(QString libraryActionText READ libraryActionText NOTIFY libraryStateChanged)
+    Q_PROPERTY(QString watchedActionText READ watchedActionText NOTIFY libraryStateChanged)
+
 public:
     enum class MetaState {
         Idle = 0,
@@ -122,6 +128,15 @@ public:
     };
     Q_ENUM(MetaState)
 
+    MovieDetailViewModel(api::CinemetaClient* cinemeta,
+        api::TorrentioClient* torrentio,
+        api::TmdbClient* tmdb,
+        services::StreamActions* actions,
+        controllers::LibraryController* library,
+        controllers::TokenController* tokens,
+        config::AppSettings& settings,
+        const QString& rdTokenRef,
+        QObject* parent = nullptr);
     MovieDetailViewModel(api::CinemetaClient* cinemeta,
         api::TorrentioClient* torrentio,
         api::TmdbClient* tmdb,
@@ -175,6 +190,11 @@ public:
     bool uiAnyFilterActive() const noexcept;
     Q_INVOKABLE void clearUiFilters();
 
+    bool inLibrary() const noexcept { return m_inLibrary; }
+    bool movieWatched() const noexcept { return m_movieWatched; }
+    QString libraryActionText() const;
+    QString watchedActionText() const;
+
 public Q_SLOTS:
     /// Open the detail surface for `imdbId`. Bumps the epoch and
     /// kicks off the meta + streams + similar fetches; previous
@@ -201,6 +221,10 @@ public Q_SLOTS:
     /// top of the current detail page. Emits `streamsRequested()`;
     /// `MainController` forwards as `showStreamsRequested(this)`.
     void requestStreams();
+    void addToLibrary();
+    void softRemoveFromLibrary();
+    void hardDeleteFromLibrary();
+    void toggleMovieWatched();
 
     /// Wire the queue controller. Two-phase init: the queue
     /// controller is built after the detail VMs in MainController
@@ -244,6 +268,7 @@ Q_SIGNALS:
     void realDebridConfiguredChanged();
     void rawStreamsCountChanged();
     void uiFiltersChanged();
+    void libraryStateChanged();
 
     /// Forwarded into `MainController::passiveMessage`.
     void statusMessage(const QString& text, int durationMs);
@@ -276,6 +301,7 @@ private:
 
     void resetMeta();
     void applyMeta(const api::MetaDetail& detail);
+    void refreshLibraryState();
     void setMetaState(MetaState s, const QString& error = {});
     void setSimilarVisible(bool on);
 
@@ -297,6 +323,7 @@ private:
     api::TorrentioClient* m_torrentio;
     api::TmdbClient* m_tmdb;
     services::StreamActions* m_actions;
+    controllers::LibraryController* m_library {};
     controllers::PlayQueueController* m_queue {};
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;
@@ -310,6 +337,7 @@ private:
     quint64 m_similarEpoch = 0;
 
     // Meta fields.
+    api::MetaDetail m_currentMeta;
     QString m_imdbId;
     QString m_title;
     int m_year = 0;
@@ -336,6 +364,9 @@ private:
     bool m_uiHdrOnly = false;
     bool m_uiDolbyVisionOnly = false;
     bool m_uiMultiAudioOnly = false;
+
+    bool m_inLibrary = false;
+    bool m_movieWatched = false;
 };
 
 } // namespace kinema::ui::qml

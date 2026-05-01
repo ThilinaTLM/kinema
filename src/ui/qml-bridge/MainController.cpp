@@ -10,6 +10,7 @@
 #include "api/TorrentioClient.h"
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
+#include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/MprisController.h"
 #include "controllers/PlaybackController.h"
@@ -21,6 +22,7 @@
 #include "core/Database.h"
 #include "core/HistoryStore.h"
 #include "core/HttpClient.h"
+#include "core/LibraryStore.h"
 #include "core/PlayerLauncher.h"
 #include "core/PlayQueueStore.h"
 #include "core/SubtitleCacheStore.h"
@@ -35,6 +37,8 @@
 #include "ui/qml-bridge/EpisodesListModel.h"
 #include "ui/qml-bridge/AppIconResolver.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
+#include "ui/qml-bridge/LibraryListModel.h"
+#include "ui/qml-bridge/LibraryViewModel.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 #include "ui/qml-bridge/PlayQueueViewModel.h"
 #include "ui/qml-bridge/ResultsListModel.h"
@@ -288,6 +292,7 @@ void MainController::buildCoreServices()
     }
     m_history = std::make_unique<core::HistoryStore>(*m_db, this);
     m_history->runRetentionPass();
+    m_library = std::make_unique<core::LibraryStore>(*m_db, this);
     m_playQueueStore = std::make_unique<core::PlayQueueStore>(
         *m_db, this);
     m_subtitleCache
@@ -333,6 +338,9 @@ void MainController::buildCoreServices()
     m_streamActions->setHistoryController(m_historyCtrl);
     m_historyCtrl->setStreamActions(m_streamActions);
 
+    m_libraryCtrl = new controllers::LibraryController(
+        *m_library, m_historyCtrl, this);
+
     // Play queue controller. Built after StreamActions and the
     // history controller because it composes both: queued items
     // re-resolve through Torrentio, hand off through StreamActions,
@@ -350,15 +358,16 @@ void MainController::buildCoreServices()
     m_discoverVm = new DiscoverViewModel(m_tmdb, m_tokenCtrl, this);
     m_continueWatchingVm
         = new ContinueWatchingViewModel(m_historyCtrl, this);
+    m_libraryVm = new LibraryViewModel(m_libraryCtrl, this);
     m_searchVm = new SearchViewModel(m_cinemeta,
         m_settings.search(), this);
     m_browseVm = new BrowseViewModel(m_tmdb, m_settings.browse(), this);
     m_movieDetailVm = new MovieDetailViewModel(m_cinemeta,
-        m_torrentio, m_tmdb, m_streamActions, m_tokenCtrl,
+        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl, m_tokenCtrl,
         m_settings, m_tokenCtrl->realDebridToken(), this);
     m_movieDetailVm->setPlayQueue(m_playQueueCtrl);
     m_seriesDetailVm = new SeriesDetailViewModel(m_cinemeta,
-        m_torrentio, m_tmdb, m_streamActions, m_tokenCtrl,
+        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl, m_tokenCtrl,
         m_settings, m_tokenCtrl->realDebridToken(), this);
     m_seriesDetailVm->setPlayQueue(m_playQueueCtrl);
 
@@ -410,6 +419,15 @@ void MainController::buildCoreServices()
     connect(m_historyCtrl,
         &controllers::HistoryController::resumeFallbackRequested,
         this, openHistoryDetail);
+
+    connect(m_libraryVm, &LibraryViewModel::resumeRequested,
+        m_historyCtrl, &controllers::HistoryController::resumeFromHistory);
+    connect(m_libraryVm, &LibraryViewModel::openMovieRequested,
+        this, &MainController::openMovieDetail);
+    connect(m_libraryVm, &LibraryViewModel::openSeriesRequested,
+        this, &MainController::openSeriesDetail);
+    connect(m_libraryVm, &LibraryViewModel::openSeriesEpisodeRequested,
+        this, &MainController::openSeriesDetailAt);
 
     // Discover navigation routing. "Show all" forwards into the
     // Browse VM via a typed (kind, sort) preset and asks the shell
@@ -582,6 +600,9 @@ void MainController::wireStatusForwarding()
         &MainController::passiveMessage);
     connect(m_historyCtrl,
         &controllers::HistoryController::statusMessage, this,
+        &MainController::passiveMessage);
+    connect(m_libraryCtrl,
+        &controllers::LibraryController::statusMessage, this,
         &MainController::passiveMessage);
     connect(m_playQueueCtrl,
         &controllers::PlayQueueController::statusMessage, this,
@@ -843,6 +864,8 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(DiscoverSectionModel);
     KINEMA_REGISTER_QML_TYPE(ResultsListModel);
     KINEMA_REGISTER_QML_TYPE(StreamsListModel);
+    KINEMA_REGISTER_QML_TYPE(LibraryListModel);
+    KINEMA_REGISTER_QML_TYPE(LibraryViewModel);
     KINEMA_REGISTER_QML_TYPE(MovieDetailViewModel);
     KINEMA_REGISTER_QML_TYPE(SeriesDetailViewModel);
     KINEMA_REGISTER_QML_TYPE(EpisodesListModel);
@@ -871,6 +894,7 @@ void MainController::exposeContextProperties(
         { "mainController", this },
         { "discoverVm", m_discoverVm },
         { "continueWatchingVm", m_continueWatchingVm },
+        { "libraryVm", m_libraryVm },
         { "searchVm", m_searchVm },
         { "browseVm", m_browseVm },
         { "movieDetailVm", m_movieDetailVm },

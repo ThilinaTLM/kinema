@@ -70,7 +70,7 @@ public:
     int currentSchemaVersion() const;
 
     /// Latest schema version this build knows how to produce.
-    static int latestSchemaVersion() noexcept { return 4; }
+    static int latestSchemaVersion() noexcept { return 5; }
 
 private:
     bool configurePragmas();
