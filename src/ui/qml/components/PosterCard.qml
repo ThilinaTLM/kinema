@@ -128,7 +128,7 @@ Item {
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.huge
                 height: width
-                source: "applications-multimedia"
+                source: AppIcons.url("film")
                 color: Kirigami.Theme.disabledTextColor
             }
 

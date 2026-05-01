@@ -123,7 +123,7 @@ Item {
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.huge
                 height: width
-                source: "applications-multimedia"
+                source: AppIcons.url("film")
                 color: Qt.alpha(Theme.foreground, 0.35)
                 visible: posterImage.status !== Image.Ready
             }
@@ -162,6 +162,12 @@ Item {
                         && hero.primaryAction !== undefined
                     icon.name: hero.primaryAction
                         ? hero.primaryAction.icon.name : ""
+                    icon.source: hero.primaryAction
+                        ? hero.primaryAction.icon.source : ""
+                    icon.color: hero.primaryAction
+                        && hero.primaryAction.icon.color
+                        ? hero.primaryAction.icon.color
+                        : AppIcons.controlColor(enabled, highlighted)
                     text: hero.primaryAction
                         ? hero.primaryAction.text : ""
                     enabled: hero.primaryAction
@@ -178,6 +184,12 @@ Item {
                         && hero.secondaryAction !== undefined
                     icon.name: hero.secondaryAction
                         ? hero.secondaryAction.icon.name : ""
+                    icon.source: hero.secondaryAction
+                        ? hero.secondaryAction.icon.source : ""
+                    icon.color: hero.secondaryAction
+                        && hero.secondaryAction.icon.color
+                        ? hero.secondaryAction.icon.color
+                        : AppIcons.controlColor(enabled, highlighted)
                     text: hero.secondaryAction
                         ? hero.secondaryAction.text : ""
                     enabled: hero.secondaryAction
@@ -193,6 +205,12 @@ Item {
                         && hero.tertiaryAction !== undefined
                     icon.name: hero.tertiaryAction
                         ? hero.tertiaryAction.icon.name : ""
+                    icon.source: hero.tertiaryAction
+                        ? hero.tertiaryAction.icon.source : ""
+                    icon.color: hero.tertiaryAction
+                        && hero.tertiaryAction.icon.color
+                        ? hero.tertiaryAction.icon.color
+                        : AppIcons.controlColor(enabled, highlighted)
                     text: hero.tertiaryAction
                         ? hero.tertiaryAction.text : ""
                     enabled: hero.tertiaryAction

@@ -49,7 +49,8 @@ Kirigami.Page {
 
     actions: [
         Kirigami.Action {
-            icon.name: "view-refresh"
+            icon.source: AppIcons.url("refresh-cw")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Refresh")
             displayHint: Kirigami.DisplayHint.IconOnly
             shortcut: StandardKey.Refresh
@@ -70,7 +71,8 @@ Kirigami.Page {
             QQC2.Button {
                 text: i18nc("@action:button reset all browse filters",
                     "Reset all filters")
-                icon.name: "edit-clear-history"
+                icon.source: AppIcons.url("eraser")
+                icon.color: AppIcons.foreground
                 visible: browseVm.dateWindow !== 3
                     || browseVm.minRatingPct > 0
                     || browseVm.hideObscure
@@ -169,7 +171,7 @@ Kirigami.Page {
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button browse filter", "Genres")
-            icon.name: "view-categories"
+            icon.source: AppIcons.url("tags")
             multiSelect: true
             active: browseVm.genreIds.length > 0
             enabled: browseVm.availableGenres.length > 0
@@ -193,7 +195,7 @@ Kirigami.Page {
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button browse sort", "Sort")
-            icon.name: "view-sort"
+            icon.source: AppIcons.url("arrow-up-down")
             active: browseVm.sort !== 0
             options: [
                 { value: 0, label:
@@ -218,8 +220,9 @@ Kirigami.Page {
             Theme.placeholderMaxWidth)
         visible: !browseVm.tmdbConfigured || browseVm.authFailed
 
-        icon.name: browseVm.authFailed
-            ? "dialog-warning" : "configure"
+        icon.source: AppIcons.url(browseVm.authFailed
+            ? "triangle-alert" : "settings")
+        icon.color: browseVm.authFailed ? AppIcons.negative : AppIcons.foreground
         text: browseVm.authFailed
             ? i18nc("@info placeholder",
                 "TMDB rejected the token")
@@ -235,7 +238,8 @@ Kirigami.Page {
                 + "the catalog. Open Settings → TMDB (Discover) "
                 + "and paste a v4 Read Access Token.")
         helpfulAction: Kirigami.Action {
-            icon.name: "settings-configure"
+            icon.source: AppIcons.url("settings")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Open settings…")
             onTriggered: mainController.requestSettings()
         }
@@ -299,7 +303,8 @@ Kirigami.Page {
                     QQC2.Button {
                         text: i18nc("@action:button browse pagination",
                             "Load more")
-                        icon.name: "go-down"
+                        icon.source: AppIcons.url("chevrons-down")
+                        icon.color: AppIcons.controlColor(enabled, false)
                         visible: browseVm.canLoadMore
                             && !browseVm.loading
                         onClicked: browseVm.loadMore()
@@ -322,13 +327,15 @@ Kirigami.Page {
                 Layout.preferredWidth: Math.min(parent.width
                         - Theme.pageWideMargin * 2,
                     Theme.placeholderMaxWidth)
-                icon.name: "edit-find"
+                icon.source: AppIcons.url("search")
+                icon.color: AppIcons.foreground
                 text: i18nc("@info placeholder", "No matches")
                 explanation: i18nc("@info placeholder",
                     "Nothing matches these filters. Try widening "
                     + "the date range or clearing some genres.")
                 helpfulAction: Kirigami.Action {
-                    icon.name: "edit-clear-history"
+                    icon.source: AppIcons.url("eraser")
+                    icon.color: AppIcons.foreground
                     text: i18nc("@action:button", "Reset filters")
                     onTriggered: browseVm.resetFilters()
                 }
@@ -340,12 +347,14 @@ Kirigami.Page {
                 Layout.preferredWidth: Math.min(parent.width
                         - Theme.pageWideMargin * 2,
                     Theme.placeholderMaxWidth)
-                icon.name: "dialog-error"
+                icon.source: AppIcons.url("circle-alert")
+                icon.color: AppIcons.negative
                 text: i18nc("@info placeholder", "Browse failed")
                 explanation: browseVm.results
                     ? browseVm.results.errorMessage : ""
             helpfulAction: Kirigami.Action {
-                    icon.name: "view-refresh"
+                    icon.source: AppIcons.url("refresh-cw")
+                    icon.color: AppIcons.foreground
                     text: i18nc("@action:button", "Retry")
                     onTriggered: browseVm.refresh()
                 }

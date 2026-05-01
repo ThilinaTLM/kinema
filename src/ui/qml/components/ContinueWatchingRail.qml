@@ -86,12 +86,14 @@ ColumnLayout {
         customFooterActions: [
             Kirigami.Action {
                 text: i18nc("@action:button", "Cancel")
-                icon.name: "dialog-cancel"
+                icon.source: AppIcons.url("x")
+                icon.color: AppIcons.foreground
                 onTriggered: removeConfirm.close()
             },
             Kirigami.Action {
                 text: i18nc("@action:button", "Remove")
-                icon.name: "edit-delete"
+                icon.source: AppIcons.url("trash-2")
+                icon.color: AppIcons.negative
                 onTriggered: {
                     if (removeConfirm.targetRow >= 0) {
                         continueWatchingVm.remove(removeConfirm.targetRow);

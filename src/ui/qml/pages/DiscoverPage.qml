@@ -33,7 +33,8 @@ Kirigami.ScrollablePage {
 
     actions: [
         Kirigami.Action {
-            icon.name: "view-refresh"
+            icon.source: AppIcons.url("refresh-cw")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Refresh")
             displayHint: Kirigami.DisplayHint.IconOnly
             shortcut: StandardKey.Refresh
@@ -51,12 +52,14 @@ Kirigami.ScrollablePage {
             Theme.placeholderMaxWidth)
         visible: !discoverVm.tmdbConfigured || discoverVm.authFailed
 
-        icon.name: discoverVm.authFailed ? "dialog-warning" : "configure"
+        icon.source: AppIcons.url(discoverVm.authFailed ? "triangle-alert" : "settings")
+        icon.color: discoverVm.authFailed ? AppIcons.negative : AppIcons.foreground
         text: discoverVm.placeholderTitle
         explanation: discoverVm.placeholderBody
 
         helpfulAction: Kirigami.Action {
-            icon.name: "settings-configure"
+            icon.source: AppIcons.url("settings")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Open settings…")
             onTriggered: mainController.requestSettings()
         }

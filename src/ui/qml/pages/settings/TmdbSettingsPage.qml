@@ -39,7 +39,8 @@ FormCard.FormCardPage {
         }
         FormCard.FormButtonDelegate {
             text: i18nc("@action:button", "Test connection")
-            icon.name: "network-connect"
+            icon.source: AppIcons.url("search-check")
+            icon.color: AppIcons.controlColor(enabled, false)
             enabled: !vm.busy
                 && (tokenField.text.length > 0
                     || vm.userTokenSaved
@@ -48,13 +49,15 @@ FormCard.FormCardPage {
         }
         FormCard.FormButtonDelegate {
             text: i18nc("@action:button", "Save token")
-            icon.name: "document-save"
+            icon.source: AppIcons.url("save")
+            icon.color: AppIcons.controlColor(enabled, false)
             enabled: !vm.busy && tokenField.text.length > 0
             onClicked: vm.save()
         }
         FormCard.FormButtonDelegate {
             text: i18nc("@action:button", "Remove token")
-            icon.name: "edit-delete"
+            icon.source: AppIcons.url("trash-2")
+            icon.color: AppIcons.controlColor(enabled, false)
             enabled: !vm.busy && vm.userTokenSaved
             onClicked: vm.remove()
         }

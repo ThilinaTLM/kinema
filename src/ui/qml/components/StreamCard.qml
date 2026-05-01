@@ -233,9 +233,11 @@ QQC2.ItemDelegate {
                 id: primaryButton
                 visible: card.hasDirectUrl || card.hasMagnet
                 enabled: card.hasDirectUrl || card.hasMagnet
-                icon.name: card.hasDirectUrl
-                    ? "media-playback-start"
-                    : "document-open"
+                icon.source: AppIcons.url(card.hasDirectUrl
+                    ? "play"
+                    : "external-link",
+                    AppIcons.controlColor(enabled, highlighted))
+                icon.color: AppIcons.controlColor(enabled, highlighted)
                 text: card.hasDirectUrl
                     ? i18nc("@action:button primary stream action",
                         "Play now")
@@ -247,7 +249,8 @@ QQC2.ItemDelegate {
             }
 
             QQC2.ToolButton {
-                icon.name: "overflow-menu"
+                icon.source: AppIcons.url("ellipsis")
+                icon.color: AppIcons.controlColor(enabled, false)
                 display: QQC2.AbstractButton.IconOnly
                 text: i18nc("@action:button stream actions", "More actions")
                 onClicked: {

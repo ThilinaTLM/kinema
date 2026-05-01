@@ -74,14 +74,18 @@ Item {
                 QQC2.Button {
                     text: i18nc("@action:button subtitles open local file",
                         "Open file…")
-                    icon.name: "document-open"
+                    icon.source: AppIcons.url("folder-open")
+                    icon.color: AppIcons.controlColor(enabled, false)
                     enabled: !!panel.vm
                     onClicked: localFileDialog.open()
                 }
                 Item { Layout.fillWidth: true }
                 QQC2.Button {
                     text: panel.vm ? panel.vm.primaryActionText : ""
-                    icon.name: panel.vm ? panel.vm.primaryActionIcon : ""
+                    icon.source: AppIcons.url(
+                        panel.vm ? panel.vm.primaryActionIcon : "",
+                        AppIcons.controlColor(enabled, highlighted))
+                    icon.color: AppIcons.controlColor(enabled, highlighted)
                     enabled: panel.vm && panel.vm.primaryActionEnabled
                     highlighted: true
                     onClicked: panel.vm.runPrimaryAction()
@@ -96,7 +100,8 @@ Item {
             anchors.centerIn: parent
             width: Math.min(parent.width - Theme.pageWideMargin * 2,
                 Theme.placeholderMaxWidth)
-            icon.name: "edit-find"
+            icon.source: AppIcons.url("search")
+            icon.color: AppIcons.foreground
             text: i18nc("@info subtitles idle state",
                 "Pick a language and search.")
         }
@@ -114,12 +119,14 @@ Item {
             anchors.centerIn: parent
             width: Math.min(parent.width - Theme.pageWideMargin * 2,
                 Theme.placeholderMaxWidth)
-            icon.name: "dialog-error"
+            icon.source: AppIcons.url("circle-alert")
+            icon.color: AppIcons.negative
             text: i18nc("@info subtitles error state", "Search failed.")
             explanation: panel.vm ? panel.vm.errorText : ""
             helpfulAction: Kirigami.Action {
                 text: i18nc("@action retry subtitles search", "Retry")
-                icon.name: "view-refresh"
+                icon.source: AppIcons.url("refresh-cw")
+                icon.color: AppIcons.foreground
                 onTriggered: panel.vm.runSearch()
             }
         }
@@ -130,7 +137,8 @@ Item {
             anchors.centerIn: parent
             width: Math.min(parent.width - Theme.pageWideMargin * 2,
                 Theme.placeholderMaxWidth)
-            icon.name: "edit-find"
+            icon.source: AppIcons.url("search")
+            icon.color: AppIcons.foreground
             text: i18nc("@info subtitles empty state", "No subtitles found.")
             explanation: i18nc("@info subtitles empty state explanation",
                 "Try widening the languages or removing the release filter.")
@@ -142,7 +150,8 @@ Item {
             anchors.centerIn: parent
             width: Math.min(parent.width - Theme.pageWideMargin * 2,
                 Theme.placeholderMaxWidth)
-            icon.name: "configure"
+            icon.source: AppIcons.url("settings")
+            icon.color: AppIcons.foreground
             text: i18nc("@info subtitles not configured state",
                 "OpenSubtitles isn't configured yet.")
             explanation: i18nc("@info subtitles not configured state explanation",
@@ -150,7 +159,8 @@ Item {
             helpfulAction: Kirigami.Action {
                 text: i18nc("@action open settings from subtitles page",
                     "Open settings…")
-                icon.name: "configure"
+                icon.source: AppIcons.url("settings")
+                icon.color: AppIcons.foreground
                 onTriggered: panel.vm.openSettings()
             }
         }

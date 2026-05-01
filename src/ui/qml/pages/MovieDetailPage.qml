@@ -34,7 +34,8 @@ Kirigami.ScrollablePage {
     // says "Streams" rather than "Play" because the action opens a
     // picker, not the player itself.
     readonly property Kirigami.Action streamsAction: Kirigami.Action {
-        icon.name: "media-playback-start"
+        icon.source: AppIcons.url("play")
+        icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: i18nc("@action:button open the streams page",
             "Streams")
         displayHint: Kirigami.DisplayHint.IconOnly
@@ -93,11 +94,13 @@ Kirigami.ScrollablePage {
         width: Math.min(parent.width - Theme.pageWideMargin * 2,
             Theme.detailPlaceholderMaxWidth)
         visible: movieDetailVm.metaState === MovieDetailViewModel.Error
-        icon.name: "dialog-error"
+        icon.source: AppIcons.url("circle-alert")
+        icon.color: AppIcons.negative
         text: i18nc("@info placeholder", "Couldn't load this title.")
         explanation: movieDetailVm.metaError
         helpfulAction: Kirigami.Action {
-            icon.name: "view-refresh"
+            icon.source: AppIcons.url("refresh-cw")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Retry")
             onTriggered: movieDetailVm.retry()
         }

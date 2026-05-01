@@ -35,14 +35,16 @@ Kirigami.Page {
 
     actions: [
         Kirigami.Action {
-            icon.name: "edit-find"
+            icon.source: AppIcons.url("search")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button subtitles run search", "Search")
             displayHint: Kirigami.DisplayHint.IconOnly
             enabled: subtitlesVm.state !== "notconfigured"
             onTriggered: subtitlesVm.runSearch()
         },
         Kirigami.Action {
-            icon.name: "configure"
+            icon.source: AppIcons.url("settings")
+            icon.color: AppIcons.foreground
             text: i18nc("@action subtitles page header, open settings",
                 "Open settings…")
             onTriggered: subtitlesVm.openSettings()
@@ -65,7 +67,8 @@ Kirigami.Page {
             QQC2.Button {
                 text: i18nc("@action:button reset all subtitle filters",
                     "Reset all filters")
-                icon.name: "edit-clear-history"
+                icon.source: AppIcons.url("eraser")
+                icon.color: AppIcons.foreground
                 visible: subtitlesVm.languages.length > 0
                     || subtitlesVm.hi !== "off"
                     || subtitlesVm.fpo !== "off"
@@ -153,7 +156,7 @@ Kirigami.Page {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button language picker",
                 "Languages")
-            icon.name: "preferences-desktop-locale"
+            icon.source: AppIcons.url("languages")
             multiSelect: true
             active: subtitlesVm.languages.length > 0
             options: {

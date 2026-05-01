@@ -59,6 +59,7 @@ class PlayerWindow;
 
 namespace kinema::ui::qml {
 
+class AppIconResolver;
 class BrowseViewModel;
 class ContinueWatchingViewModel;
 class DiscoverViewModel;
@@ -272,6 +273,7 @@ private:
     api::OpenSubtitlesClient* m_openSubtitles {};
     ui::ImageLoader* m_imageLoader {};
 
+    AppIconResolver* m_appIconResolver {};
     services::StreamActions* m_streamActions {};
     controllers::TokenController* m_tokenCtrl {};
     controllers::HistoryController* m_historyCtrl {};

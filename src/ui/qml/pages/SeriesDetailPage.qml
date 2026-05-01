@@ -132,11 +132,13 @@ Kirigami.ScrollablePage {
         width: Math.min(parent.width - Theme.pageWideMargin * 2,
             Theme.detailPlaceholderMaxWidth)
         visible: seriesDetailVm.metaState === SeriesDetailViewModel.Error
-        icon.name: "dialog-error"
+        icon.source: AppIcons.url("circle-alert")
+        icon.color: AppIcons.negative
         text: i18nc("@info placeholder", "Couldn't load this series.")
         explanation: seriesDetailVm.metaError
         helpfulAction: Kirigami.Action {
-            icon.name: "view-refresh"
+            icon.source: AppIcons.url("refresh-cw")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Retry")
             onTriggered: seriesDetailVm.retry()
         }

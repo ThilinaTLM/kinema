@@ -68,6 +68,7 @@ set(kinema_core_SRCS
 
     services/StreamActions.cpp
 
+    ui/qml-bridge/AppIconResolver.cpp
     ui/qml-bridge/BrowseViewModel.cpp
     ui/qml-bridge/ContinueWatchingViewModel.cpp
     ui/qml-bridge/DiscoverSectionModel.cpp
@@ -180,7 +181,9 @@ set_target_properties(kinema_qml_app PROPERTIES
 # one module URI on purpose; opting NEW makes Qt generate the extra
 # qmldir files automatically.
 qt_policy(SET QTP0004 NEW)
-set_source_files_properties(ui/qml/Theme.qml
+set_source_files_properties(
+    ui/qml/Theme.qml
+    ui/qml/AppIcons.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(kinema_qml_app
@@ -188,6 +191,7 @@ qt_add_qml_module(kinema_qml_app
     VERSION 1.0
     QML_FILES
         ui/qml/ApplicationShell.qml
+        ui/qml/AppIcons.qml
         ui/qml/Theme.qml
         ui/qml/components/BackdropHero.qml
         ui/qml/components/ContentRail.qml
@@ -227,6 +231,52 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/settings/RealDebridSettingsPage.qml
         ui/qml/pages/settings/SubtitlesSettingsPage.qml
         ui/qml/pages/settings/TmdbSettingsPage.qml
+    RESOURCES
+        ui/qml/icons/lucide/arrow-down.svg
+        ui/qml/icons/lucide/arrow-up-down.svg
+        ui/qml/icons/lucide/arrow-up.svg
+        ui/qml/icons/lucide/captions.svg
+        ui/qml/icons/lucide/chevron-left.svg
+        ui/qml/icons/lucide/chevron-right.svg
+        ui/qml/icons/lucide/chevrons-down.svg
+        ui/qml/icons/lucide/circle-alert.svg
+        ui/qml/icons/lucide/circle-check.svg
+        ui/qml/icons/lucide/clock-arrow-down.svg
+        ui/qml/icons/lucide/copy.svg
+        ui/qml/icons/lucide/download.svg
+        ui/qml/icons/lucide/ellipsis.svg
+        ui/qml/icons/lucide/eraser.svg
+        ui/qml/icons/lucide/external-link.svg
+        ui/qml/icons/lucide/film.svg
+        ui/qml/icons/lucide/flag.svg
+        ui/qml/icons/lucide/folder-open.svg
+        ui/qml/icons/lucide/funnel.svg
+        ui/qml/icons/lucide/grid-2x2.svg
+        ui/qml/icons/lucide/headphones.svg
+        ui/qml/icons/lucide/house.svg
+        ui/qml/icons/lucide/info.svg
+        ui/qml/icons/lucide/languages.svg
+        ui/qml/icons/lucide/list-plus.svg
+        ui/qml/icons/lucide/list-video.svg
+        ui/qml/icons/lucide/list-x.svg
+        ui/qml/icons/lucide/minus.svg
+        ui/qml/icons/lucide/palette.svg
+        ui/qml/icons/lucide/play.svg
+        ui/qml/icons/lucide/plus.svg
+        ui/qml/icons/lucide/refresh-cw.svg
+        ui/qml/icons/lucide/save.svg
+        ui/qml/icons/lucide/search-check.svg
+        ui/qml/icons/lucide/search.svg
+        ui/qml/icons/lucide/server.svg
+        ui/qml/icons/lucide/settings-2.svg
+        ui/qml/icons/lucide/settings.svg
+        ui/qml/icons/lucide/skip-forward.svg
+        ui/qml/icons/lucide/star.svg
+        ui/qml/icons/lucide/tags.svg
+        ui/qml/icons/lucide/trash-2.svg
+        ui/qml/icons/lucide/triangle-alert.svg
+        ui/qml/icons/lucide/tv.svg
+        ui/qml/icons/lucide/x.svg
     OUTPUT_DIRECTORY
         "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/app"
     NO_PLUGIN

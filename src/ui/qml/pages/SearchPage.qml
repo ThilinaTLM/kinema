@@ -100,7 +100,8 @@ Kirigami.Page {
                 anchors.centerIn: parent
                 width: Math.min(parent.width - Theme.pageWideMargin * 2,
                     Theme.placeholderMaxWidth)
-                icon.name: "search"
+                icon.source: AppIcons.url("search")
+                icon.color: AppIcons.foreground
                 text: i18nc("@info placeholder",
                     "Find something to watch")
                 explanation: i18nc("@info placeholder",
@@ -128,13 +129,15 @@ Kirigami.Page {
                 anchors.centerIn: parent
                 width: Math.min(parent.width - Theme.pageWideMargin * 2,
                     Theme.placeholderMaxWidth)
-                icon.name: "edit-find"
+                icon.source: AppIcons.url("search")
+                icon.color: AppIcons.foreground
                 text: i18nc("@info placeholder", "No results")
                 explanation: i18nc("@info placeholder",
                     "Cinemeta returned no matches for this query. "
                     + "Try a different spelling, or browse the catalog.")
                 helpfulAction: Kirigami.Action {
-                    icon.name: "view-list-details"
+                    icon.source: AppIcons.url("grid-2x2")
+                    icon.color: AppIcons.foreground
                     text: searchVm.kind === 0
                         ? i18nc("@action:button",
                             "Browse movies instead")
@@ -152,13 +155,15 @@ Kirigami.Page {
                 anchors.centerIn: parent
                 width: Math.min(parent.width - Theme.pageWideMargin * 2,
                     Theme.placeholderMaxWidth)
-                icon.name: "dialog-error"
+                icon.source: AppIcons.url("circle-alert")
+                icon.color: AppIcons.negative
                 text: i18nc("@info placeholder", "Search failed")
                 explanation: searchVm.results
                     ? searchVm.results.errorMessage
                     : ""
                 helpfulAction: Kirigami.Action {
-                    icon.name: "view-refresh"
+                    icon.source: AppIcons.url("refresh-cw")
+                    icon.color: AppIcons.foreground
                     text: i18nc("@action:button", "Retry")
                     onTriggered: searchVm.submit()
                 }

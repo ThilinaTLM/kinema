@@ -174,7 +174,8 @@ QQC2.ItemDelegate {
         // ---- Overflow menu --------------------------------------
         QQC2.ToolButton {
             Layout.alignment: Qt.AlignVCenter
-            icon.name: "overflow-menu"
+            icon.source: AppIcons.url("ellipsis")
+            icon.color: AppIcons.controlColor(enabled, false)
             display: QQC2.AbstractButton.IconOnly
             text: i18nc("@action:button row actions", "More actions")
             onClicked: overflowMenu.popup()
@@ -187,12 +188,14 @@ QQC2.ItemDelegate {
 
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "&Play now")
-            icon.name: "media-playback-start"
+            icon.source: AppIcons.url("play")
+            icon.color: AppIcons.controlColor(enabled, false)
             onTriggered: playQueue.playAt(row.rowIndex)
         }
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "Retry")
-            icon.name: "view-refresh"
+            icon.source: AppIcons.url("refresh-cw")
+            icon.color: AppIcons.controlColor(enabled, false)
             visible: row.status === 2 // Failed
             height: visible ? implicitHeight : 0
             onTriggered: playQueue.retryFailed(row.rowIndex)
@@ -200,14 +203,16 @@ QQC2.ItemDelegate {
         QQC2.MenuSeparator { }
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "Move &up")
-            icon.name: "arrow-up"
+            icon.source: AppIcons.url("arrow-up")
+            icon.color: AppIcons.controlColor(enabled, false)
             enabled: row.rowIndex > 0
             onTriggered: playQueue.moveTo(row.rowIndex,
                 row.rowIndex - 1)
         }
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "Move &down")
-            icon.name: "arrow-down"
+            icon.source: AppIcons.url("arrow-down")
+            icon.color: AppIcons.controlColor(enabled, false)
             enabled: row.rowIndex >= 0
                 && row.rowIndex < (playQueue.count - 1)
             onTriggered: playQueue.moveTo(row.rowIndex,
@@ -216,7 +221,8 @@ QQC2.ItemDelegate {
         QQC2.MenuSeparator { }
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "&Remove")
-            icon.name: "edit-delete"
+            icon.source: AppIcons.url("trash-2")
+            icon.color: AppIcons.controlColor(enabled, false)
             onTriggered: playQueue.removeAt(row.rowIndex)
         }
     }

@@ -96,7 +96,7 @@ ColumnLayout {
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.large
                 height: width
-                source: "applications-multimedia"
+                source: AppIcons.url("film")
                 color: Qt.alpha(Theme.foreground, 0.35)
                 visible: poster.status !== Image.Ready
             }
@@ -131,6 +131,10 @@ ColumnLayout {
                 visible: overview.primaryAction !== null
                     && overview.primaryAction !== undefined
                 icon.name: overview.primaryAction ? overview.primaryAction.icon.name : ""
+                icon.source: overview.primaryAction ? overview.primaryAction.icon.source : ""
+                icon.color: overview.primaryAction && overview.primaryAction.icon.color
+                    ? overview.primaryAction.icon.color
+                    : AppIcons.controlColor(enabled, highlighted)
                 text: overview.primaryAction ? overview.primaryAction.text : ""
                 enabled: overview.primaryAction ? overview.primaryAction.enabled : false
                 highlighted: true
@@ -140,6 +144,10 @@ ColumnLayout {
                 visible: overview.secondaryAction !== null
                     && overview.secondaryAction !== undefined
                 icon.name: overview.secondaryAction ? overview.secondaryAction.icon.name : ""
+                icon.source: overview.secondaryAction ? overview.secondaryAction.icon.source : ""
+                icon.color: overview.secondaryAction && overview.secondaryAction.icon.color
+                    ? overview.secondaryAction.icon.color
+                    : AppIcons.controlColor(enabled, highlighted)
                 text: overview.secondaryAction ? overview.secondaryAction.text : ""
                 enabled: overview.secondaryAction ? overview.secondaryAction.enabled : false
                 onClicked: if (overview.secondaryAction) overview.secondaryAction.trigger()
@@ -148,6 +156,10 @@ ColumnLayout {
                 visible: overview.tertiaryAction !== null
                     && overview.tertiaryAction !== undefined
                 icon.name: overview.tertiaryAction ? overview.tertiaryAction.icon.name : ""
+                icon.source: overview.tertiaryAction ? overview.tertiaryAction.icon.source : ""
+                icon.color: overview.tertiaryAction && overview.tertiaryAction.icon.color
+                    ? overview.tertiaryAction.icon.color
+                    : AppIcons.controlColor(enabled, highlighted)
                 text: overview.tertiaryAction ? overview.tertiaryAction.text : ""
                 enabled: overview.tertiaryAction ? overview.tertiaryAction.enabled : false
                 onClicked: if (overview.tertiaryAction) overview.tertiaryAction.trigger()

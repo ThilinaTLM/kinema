@@ -102,7 +102,7 @@ Item {
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.huge
                 height: width
-                source: "applications-multimedia"
+                source: AppIcons.url("film")
                 color: Kirigami.Theme.disabledTextColor
             }
 
@@ -199,18 +199,21 @@ Item {
         id: contextMenu
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "Resume")
-            icon.name: "media-playback-start"
+            icon.source: AppIcons.url("play")
+            icon.color: AppIcons.controlColor(enabled, false)
             onTriggered: card.clicked()
         }
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "Choose another release…")
-            icon.name: "view-list-details"
+            icon.source: AppIcons.url("list-video")
+            icon.color: AppIcons.controlColor(enabled, false)
             onTriggered: card.chooseAnotherRequested()
         }
         QQC2.MenuSeparator {}
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "Remove from history")
-            icon.name: "edit-delete"
+            icon.source: AppIcons.url("trash-2")
+            icon.color: AppIcons.controlColor(enabled, false)
             onTriggered: card.removeRequested()
         }
     }

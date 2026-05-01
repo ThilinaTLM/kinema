@@ -44,7 +44,8 @@ FormCard.FormCardPage {
         }
         FormCard.FormButtonDelegate {
             text: i18nc("@action:button", "Test connection")
-            icon.name: "network-connect"
+            icon.source: AppIcons.url("search-check")
+            icon.color: AppIcons.controlColor(enabled, false)
             enabled: !vm.busy
                 && apiKeyField.text.length > 0
                 && usernameField.text.length > 0
@@ -53,7 +54,8 @@ FormCard.FormCardPage {
         }
         FormCard.FormButtonDelegate {
             text: i18nc("@action:button", "Save credentials")
-            icon.name: "document-save"
+            icon.source: AppIcons.url("save")
+            icon.color: AppIcons.controlColor(enabled, false)
             enabled: !vm.busy
                 && apiKeyField.text.length > 0
                 && usernameField.text.length > 0
@@ -62,7 +64,8 @@ FormCard.FormCardPage {
         }
         FormCard.FormButtonDelegate {
             text: i18nc("@action:button", "Remove credentials")
-            icon.name: "edit-delete"
+            icon.source: AppIcons.url("trash-2")
+            icon.color: AppIcons.controlColor(enabled, false)
             enabled: !vm.busy && vm.credentialsSaved
             onClicked: vm.removeCredentials()
         }
@@ -88,17 +91,20 @@ FormCard.FormCardPage {
                         elide: Text.ElideRight
                     }
                     QQC2.ToolButton {
-                        icon.name: "go-up"
+                        icon.source: AppIcons.url("arrow-up")
+                        icon.color: AppIcons.controlColor(enabled, false)
                         enabled: index > 0
                         onClicked: vm.moveLanguage(index, index - 1)
                     }
                     QQC2.ToolButton {
-                        icon.name: "go-down"
+                        icon.source: AppIcons.url("arrow-down")
+                        icon.color: AppIcons.controlColor(enabled, false)
                         enabled: index < vm.preferredLanguages.length - 1
                         onClicked: vm.moveLanguage(index, index + 1)
                     }
                     QQC2.ToolButton {
-                        icon.name: "list-remove"
+                        icon.source: AppIcons.url("minus")
+                        icon.color: AppIcons.controlColor(enabled, false)
                         onClicked: vm.removeLanguageAt(index)
                     }
                 }
@@ -120,7 +126,8 @@ FormCard.FormCardPage {
                 }
                 QQC2.Button {
                     text: i18nc("@action:button add a language", "Add")
-                    icon.name: "list-add"
+                    icon.source: AppIcons.url("plus")
+                    icon.color: AppIcons.controlColor(enabled, false)
                     onClicked: {
                         if (addRow.pendingCode.length > 0) {
                             vm.addLanguage(addRow.pendingCode);
@@ -188,7 +195,8 @@ FormCard.FormCardPage {
         }
         FormCard.FormButtonDelegate {
             text: i18nc("@action:button", "Clear subtitle cache")
-            icon.name: "edit-clear"
+            icon.source: AppIcons.url("eraser")
+            icon.color: AppIcons.controlColor(enabled, false)
             onClicked: vm.clearCache()
         }
     }

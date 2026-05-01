@@ -5,6 +5,8 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
+import dev.tlmtech.kinema.app
+
 // Unified popup-style filter button used by `PageHeaderBar` filter rows.
 //
 // One widget for two shapes:
@@ -46,6 +48,7 @@ QQC2.ToolButton {
     display: QQC2.AbstractButton.TextBesideIcon
     checkable: true
     checked: menu.opened
+    icon.color: root.active ? AppIcons.accent : AppIcons.controlColor(enabled, checked)
 
     // Use accent color for the button text when the filter is active
     // to give an at-a-glance indicator that a non-default value is set.
@@ -87,7 +90,8 @@ QQC2.ToolButton {
         QQC2.MenuItem {
             text: i18nc("@action:inmenu clear multi-select selection",
                 "Clear")
-            icon.name: "edit-clear-history"
+            icon.source: AppIcons.url("eraser")
+            icon.color: AppIcons.controlColor(enabled, false)
             visible: root.multiSelect
             height: visible ? implicitHeight : 0
             enabled: root.multiSelect

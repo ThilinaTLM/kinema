@@ -5,6 +5,8 @@ import QtQuick
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
+import dev.tlmtech.kinema.app
+
 // Movies / TV Series toggle, shared by `BrowsePage` and `SearchPage`.
 //
 // Thin wrapper around `Components.SegmentedButton` that bakes in the
@@ -39,7 +41,8 @@ Components.SegmentedButton {
     actions: [
         Kirigami.Action {
             text: i18nc("@option:radio media kind", "Movies")
-            icon.name: "video-x-generic"
+            icon.source: AppIcons.url("film")
+            icon.color: checked ? AppIcons.accent : AppIcons.foreground
             checkable: true
             checked: root.kind === 0
             onTriggered: if (root.kind !== 0) {
@@ -48,7 +51,8 @@ Components.SegmentedButton {
         },
         Kirigami.Action {
             text: i18nc("@option:radio media kind", "TV Series")
-            icon.name: "video-television"
+            icon.source: AppIcons.url("tv")
+            icon.color: checked ? AppIcons.accent : AppIcons.foreground
             checkable: true
             checked: root.kind === 1
             onTriggered: if (root.kind !== 1) {

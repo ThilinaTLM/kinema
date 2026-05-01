@@ -69,7 +69,7 @@ QQC2.ItemDelegate {
                 anchors.centerIn: parent
                 width: Kirigami.Units.iconSizes.medium
                 height: width
-                source: "media-playback-start"
+                source: AppIcons.url("play")
                 color: Qt.alpha(Theme.foreground, 0.35)
                 visible: thumb.status !== Image.Ready
             }
@@ -124,7 +124,7 @@ QQC2.ItemDelegate {
             Layout.alignment: Qt.AlignVCenter
             width: Kirigami.Units.iconSizes.small
             height: width
-            source: "go-next"
+            source: AppIcons.url("chevron-right")
             color: row.selected ? Theme.accent : Theme.disabled
         }
     }

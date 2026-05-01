@@ -416,7 +416,7 @@ void SubtitlesViewModel::updatePrimarySemantics()
         if (isCached) {
             text = i18nc("@action:button subtitle row action for cached entry",
                 "Use");
-            icon = QStringLiteral("dialog-ok-apply");
+            icon = QStringLiteral("circle-check");
         } else {
             text = i18nc("@action:button subtitle row action for fresh download",
                 "Download");

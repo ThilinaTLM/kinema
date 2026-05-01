@@ -33,52 +33,60 @@ QQC2.Menu {
 
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "&Play now")
-        icon.name: "media-playback-start"
+        icon.source: AppIcons.url("play")
+        icon.color: AppIcons.controlColor(enabled, false)
         enabled: menu.hasDirectUrl
         onTriggered: menu.vm.playNow(menu.row)
     }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Play &next")
-        icon.name: "media-skip-forward"
+        icon.source: AppIcons.url("skip-forward")
+        icon.color: AppIcons.controlColor(enabled, false)
         enabled: menu.hasDirectUrl
         onTriggered: menu.vm.playNext(menu.row)
     }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Add to &queue")
-        icon.name: "list-add"
+        icon.source: AppIcons.url("list-plus")
+        icon.color: AppIcons.controlColor(enabled, false)
         enabled: menu.hasDirectUrl
         onTriggered: menu.vm.enqueue(menu.row)
     }
     QQC2.MenuSeparator { }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Copy magnet link")
-        icon.name: "edit-copy"
+        icon.source: AppIcons.url("copy")
+        icon.color: AppIcons.controlColor(enabled, false)
         enabled: menu.hasMagnet
         onTriggered: menu.vm.copyMagnet(menu.row)
     }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Open magnet link")
-        icon.name: "document-open"
+        icon.source: AppIcons.url("external-link")
+        icon.color: AppIcons.controlColor(enabled, false)
         enabled: menu.hasMagnet
         onTriggered: menu.vm.openMagnet(menu.row)
     }
     QQC2.MenuSeparator { }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Copy direct URL")
-        icon.name: "edit-copy"
+        icon.source: AppIcons.url("copy")
+        icon.color: AppIcons.controlColor(enabled, false)
         enabled: menu.hasDirectUrl
         onTriggered: menu.vm.copyDirectUrl(menu.row)
     }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Open direct URL")
-        icon.name: "document-open-remote"
+        icon.source: AppIcons.url("external-link")
+        icon.color: AppIcons.controlColor(enabled, false)
         enabled: menu.hasDirectUrl
         onTriggered: menu.vm.openDirectUrl(menu.row)
     }
     QQC2.MenuSeparator { }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Subtitles\u2026")
-        icon.name: "subtitles"
+        icon.source: AppIcons.url("captions")
+        icon.color: AppIcons.controlColor(enabled, false)
         onTriggered: menu.vm.requestSubtitlesFor(menu.row)
     }
 }

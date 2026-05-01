@@ -46,9 +46,12 @@ QQC2.ItemDelegate {
 
             Kirigami.Icon {
                 visible: row.active || row.cached || row.moviehashMatch
-                source: row.active
-                    ? "emblem-checked"
-                    : (row.cached ? "emblem-downloads" : "starred-symbolic")
+                source: AppIcons.url(row.active
+                    ? "circle-check"
+                    : (row.cached ? "download" : "star"))
+                color: row.active
+                    ? AppIcons.accent
+                    : (row.cached ? AppIcons.foreground : AppIcons.accent)
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
             }
@@ -117,14 +120,16 @@ QQC2.ItemDelegate {
                 visible: row.hearingImpaired
                 checkable: false
                 closable: false
-                icon.name: "audio-headset-symbolic"
+                icon.source: AppIcons.url("headphones")
+                icon.color: AppIcons.foreground
                 text: i18nc("@info subtitles flag", "HI")
             }
             Kirigami.Chip {
                 visible: row.foreignPartsOnly
                 checkable: false
                 closable: false
-                icon.name: "flag-symbolic"
+                icon.source: AppIcons.url("flag")
+                icon.color: AppIcons.foreground
                 text: i18nc("@info subtitles flag", "FPO")
             }
         }

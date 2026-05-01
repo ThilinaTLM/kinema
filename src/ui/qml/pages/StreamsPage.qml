@@ -79,7 +79,8 @@ Kirigami.Page {
             QQC2.Button {
                 text: i18nc("@action:button reset all stream filters",
                     "Reset all filters")
-                icon.name: "edit-clear-history"
+                icon.source: AppIcons.url("eraser")
+                icon.color: AppIcons.foreground
                 visible: page.detailVm
                     && (page.detailVm.cachedOnly
                         || page.detailVm.uiResolutionFilter.length > 0
@@ -180,7 +181,7 @@ Kirigami.Page {
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button browse sort", "Sort")
-            icon.name: "view-sort"
+            icon.source: AppIcons.url("arrow-up-down")
             active: page.detailVm
                 && page.detailVm.sortMode !== StreamsListModel.Smart
             enabled: page.detailVm
@@ -218,7 +219,8 @@ Kirigami.Page {
         QQC2.ToolButton {
             Layout.alignment: Qt.AlignVCenter
             display: QQC2.AbstractButton.IconOnly
-            icon.name: "view-sort-descending"
+            icon.source: AppIcons.url("arrow-down")
+            icon.color: AppIcons.controlColor(enabled, checked)
             flat: true
             checkable: true
             text: i18nc("@action:button toggle descending sort",

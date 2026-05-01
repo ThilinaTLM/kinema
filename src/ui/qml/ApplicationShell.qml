@@ -105,28 +105,44 @@ Kirigami.ApplicationWindow {
 
         actions: [
             Kirigami.Action {
-                icon.name: "go-home"
+                icon.source: AppIcons.url("house",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
                 text: i18nc("@action drawer entry", "Discover")
                 checkable: true
                 checked: root.currentNavKey === "discover"
                 onTriggered: root.showPage("discover")
             },
             Kirigami.Action {
-                icon.name: "search"
+                icon.source: AppIcons.url("search",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
                 text: i18nc("@action drawer entry", "Search")
                 checkable: true
                 checked: root.currentNavKey === "search"
                 onTriggered: root.showPage("search")
             },
             Kirigami.Action {
-                icon.name: "view-list-icons"
+                icon.source: AppIcons.url("grid-2x2",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
                 text: i18nc("@action drawer entry", "Browse")
                 checkable: true
                 checked: root.currentNavKey === "browse"
                 onTriggered: root.showPage("browse")
             },
             Kirigami.Action {
-                icon.name: "view-media-playlist"
+                icon.source: AppIcons.url("list-video",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
                 text: playQueue.count > 0
                     ? i18nc("@action drawer entry, %1 is row count",
                         "Queue (%1)", playQueue.count)
@@ -150,7 +166,8 @@ Kirigami.ApplicationWindow {
 
             Layout.fillWidth: true
 
-            icon.name: "settings-configure"
+            icon.source: AppIcons.url("settings")
+            icon.color: AppIcons.controlColor(enabled, false)
             text: i18nc("@action drawer entry", "Settings")
             display: drawer.collapsed
                 ? QQC2.AbstractButton.IconOnly
@@ -179,49 +196,56 @@ Kirigami.ApplicationWindow {
             KirigamiSettings.ConfigurationModule {
                 moduleId: "general"
                 text: i18nc("@title:tab settings page", "General")
-                icon.name: "preferences-other"
+                icon.source: AppIcons.url("settings-2")
+                icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "GeneralSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "tmdb"
                 text: i18nc("@title:tab settings page", "TMDB (Discover)")
-                icon.name: "applications-multimedia"
+                icon.source: AppIcons.url("film")
+                icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "TmdbSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "realdebrid"
                 text: i18nc("@title:tab settings page", "Real-Debrid")
-                icon.name: "network-server"
+                icon.source: AppIcons.url("server")
+                icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "RealDebridSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "filters"
                 text: i18nc("@title:tab settings page", "Filters")
-                icon.name: "view-filter"
+                icon.source: AppIcons.url("funnel")
+                icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "FiltersSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "player"
                 text: i18nc("@title:tab settings page", "Player")
-                icon.name: "media-playback-start"
+                icon.source: AppIcons.url("play")
+                icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "PlayerSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "subtitles"
                 text: i18nc("@title:tab settings page", "Subtitles")
-                icon.name: "media-view-subtitles-symbolic"
+                icon.source: AppIcons.url("captions")
+                icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "SubtitlesSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "appearance"
                 text: i18nc("@title:tab settings page", "Appearance")
-                icon.name: "preferences-desktop-theme"
+                icon.source: AppIcons.url("palette")
+                icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "AppearanceSettingsPage")
             },
@@ -231,7 +255,8 @@ Kirigami.ApplicationWindow {
             KirigamiSettings.ConfigurationModule {
                 moduleId: "about"
                 text: i18nc("@title:tab settings page", "About Kinema")
-                icon.name: "help-about"
+                icon.source: AppIcons.url("info")
+                icon.color: AppIcons.foreground
                 category: i18nc("@title:group settings categories", "About")
                 page: () => Qt.createComponent(
                     "org.kde.kirigamiaddons.formcard", "AboutPage")

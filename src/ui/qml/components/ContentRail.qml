@@ -41,7 +41,7 @@ ColumnLayout {
 
         QQC2.ToolButton {
             text: i18nc("@action:button", "Show all")
-            icon.name: "go-next"
+            icon.source: AppIcons.url("chevron-right")
             display: QQC2.AbstractButton.TextBesideIcon
             visible: rail.sectionModel
                 && rail.sectionModel.state === DiscoverSectionModel.Ready
@@ -137,7 +137,8 @@ ColumnLayout {
 
             Kirigami.Icon {
                 Layout.alignment: Qt.AlignHCenter
-                source: "dialog-warning"
+                source: AppIcons.url("triangle-alert")
+                color: AppIcons.negative
                 width: Kirigami.Units.iconSizes.medium
                 height: width
             }

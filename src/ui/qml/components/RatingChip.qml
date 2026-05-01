@@ -32,10 +32,7 @@ Rectangle {
         spacing: 2
 
         Kirigami.Icon {
-            // `rating` is a Breeze "favourite" star glyph; it tracks
-            // the current colour scheme so it stays legible on both
-            // light and dark surfaces.
-            source: "rating"
+            source: AppIcons.url("star")
             Layout.preferredWidth: Kirigami.Units.iconSizes.small
             Layout.preferredHeight: Kirigami.Units.iconSizes.small
             color: Theme.accent

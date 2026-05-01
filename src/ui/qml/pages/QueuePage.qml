@@ -28,7 +28,8 @@ Kirigami.ScrollablePage {
     actions: [
         Kirigami.Action {
             id: clearAction
-            icon.name: "edit-clear-history"
+            icon.source: AppIcons.url("list-x")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Clear queue")
             visible: playQueue.count > 0
             onTriggered: clearDialog.open()
@@ -52,7 +53,8 @@ Kirigami.ScrollablePage {
         width: Math.min(parent.width - Kirigami.Units.gridUnit * 4,
             Kirigami.Units.gridUnit * 28)
         visible: playQueue.empty
-        icon.name: "view-media-playlist"
+        icon.source: AppIcons.url("list-video")
+        icon.color: AppIcons.foreground
         text: i18nc("@info placeholder",
             "Your queue is empty")
         explanation: i18nc("@info placeholder",

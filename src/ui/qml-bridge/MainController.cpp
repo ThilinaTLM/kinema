@@ -33,6 +33,7 @@
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
 #include "ui/qml-bridge/EpisodesListModel.h"
+#include "ui/qml-bridge/AppIconResolver.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 #include "ui/qml-bridge/PlayQueueViewModel.h"
@@ -858,6 +859,12 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(AppearanceSettingsViewModel);
 
 #undef KINEMA_REGISTER_QML_TYPE
+
+    if (!m_appIconResolver) {
+        m_appIconResolver = new AppIconResolver(this);
+        qmlRegisterSingletonInstance("dev.tlmtech.kinema.app", 1, 0,
+            "AppIconResolver", m_appIconResolver);
+    }
 
     auto* rootCtx = engine.rootContext();
     const std::pair<const char*, QObject*> contextProps[] = {

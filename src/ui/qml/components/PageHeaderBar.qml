@@ -101,7 +101,8 @@ QQC2.ToolBar {
                 return w && w.pageStack && w.pageStack.depth > 1;
             }
             display: QQC2.AbstractButton.IconOnly
-            icon.name: "go-previous"
+            icon.source: AppIcons.url("chevron-left")
+            icon.color: AppIcons.controlColor(enabled, false)
             text: i18nc("@action:button", "Back")
             QQC2.ToolTip.text: text
             QQC2.ToolTip.visible: hovered
@@ -152,7 +153,8 @@ QQC2.ToolBar {
                 && root.advancedFiltersDialog !== undefined
             flat: true
             display: QQC2.AbstractButton.TextBesideIcon
-            icon.name: "view-filter"
+            icon.source: AppIcons.url("funnel")
+            icon.color: AppIcons.controlColor(enabled, false)
             text: {
                 if (root.advancedFilterCount > 0) {
                     const label = root.advancedFiltersButtonText.length > 0
@@ -179,6 +181,9 @@ QQC2.ToolBar {
             delegate: QQC2.ToolButton {
                 required property var modelData
                 action: modelData
+                icon.color: modelData && modelData.icon && modelData.icon.color
+                    ? modelData.icon.color
+                    : AppIcons.controlColor(enabled, highlighted || checked)
                 display: (modelData && modelData.displayHint
                         === Kirigami.DisplayHint.IconOnly)
                     ? QQC2.AbstractButton.IconOnly

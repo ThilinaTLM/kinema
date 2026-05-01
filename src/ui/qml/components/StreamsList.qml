@@ -97,7 +97,8 @@ StackLayout {
         Layout.preferredWidth: Math.min(parent.width
                 - Theme.pageWideMargin * 2,
             Theme.placeholderMaxWidth)
-        icon.name: "edit-find"
+        icon.source: AppIcons.url("search")
+        icon.color: AppIcons.foreground
         text: i18nc("@info placeholder", "No streams")
         explanation: streams.vm.streams
             ? streams.vm.streams.emptyExplanation : ""
@@ -110,7 +111,8 @@ StackLayout {
             ? clearFiltersAction : null
         Kirigami.Action {
             id: clearFiltersAction
-            icon.name: "edit-clear-all"
+            icon.source: AppIcons.url("eraser")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button reset stream filters",
                 "Reset filters")
             onTriggered: {
@@ -126,12 +128,14 @@ StackLayout {
         Layout.preferredWidth: Math.min(parent.width
                 - Theme.pageWideMargin * 2,
             Theme.placeholderMaxWidth)
-        icon.name: "dialog-error"
+        icon.source: AppIcons.url("circle-alert")
+        icon.color: AppIcons.negative
         text: i18nc("@info placeholder", "Couldn't fetch streams")
         explanation: streams.vm.streams
             ? streams.vm.streams.errorMessage : ""
         helpfulAction: Kirigami.Action {
-            icon.name: "view-refresh"
+            icon.source: AppIcons.url("refresh-cw")
+            icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Retry")
             onTriggered: streams.vm.retry()
         }
@@ -143,7 +147,8 @@ StackLayout {
         Layout.preferredWidth: Math.min(parent.width
                 - Theme.pageWideMargin * 2,
             Theme.placeholderMaxWidth)
-        icon.name: "appointment-soon"
+        icon.source: AppIcons.url("clock-arrow-down")
+        icon.color: AppIcons.foreground
         text: i18nc("@info placeholder",
             "Not released yet")
         explanation: (streams.vm.streams
