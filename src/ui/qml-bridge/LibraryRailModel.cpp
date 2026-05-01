@@ -1,16 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "ui/qml-bridge/LibraryListModel.h"
+#include "ui/qml-bridge/LibraryRailModel.h"
 
 namespace kinema::ui::qml {
 
-LibraryListModel::LibraryListModel(QObject* parent)
+LibraryRailModel::LibraryRailModel(QObject* parent)
     : QAbstractListModel(parent)
 {
 }
 
-int LibraryListModel::rowCount(const QModelIndex& parent) const
+int LibraryRailModel::rowCount(const QModelIndex& parent) const
 {
     if (parent.isValid()) {
         return 0;
@@ -18,9 +18,10 @@ int LibraryListModel::rowCount(const QModelIndex& parent) const
     return static_cast<int>(m_rows.size());
 }
 
-QVariant LibraryListModel::data(const QModelIndex& index, int role) const
+QVariant LibraryRailModel::data(const QModelIndex& index, int role) const
 {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_rows.size()) {
+    if (!index.isValid() || index.row() < 0
+        || index.row() >= m_rows.size()) {
         return {};
     }
     const auto& r = m_rows.at(index.row());
@@ -36,28 +37,22 @@ QVariant LibraryListModel::data(const QModelIndex& index, int role) const
         return r.season ? QVariant(*r.season) : QVariant();
     case EpisodeRole:
         return r.episode ? QVariant(*r.episode) : QVariant();
-    case SubtitleRole:
-        return r.subtitle;
     case PosterUrlRole:
         return r.posterUrl;
+    case ThumbnailUrlRole:
+        return r.thumbnailUrl;
+    case PrimaryLineRole:
+        return r.primaryLine;
+    case SecondaryLineRole:
+        return r.secondaryLine;
     case ProgressRole:
         return r.progress;
-    case WatchedRole:
-        return r.watched;
-    case UpcomingRole:
-        return r.upcoming;
-    case ReleaseDateTextRole:
-        return r.releaseDateText;
-    case RatingRole:
-        return r.rating ? QVariant(*r.rating) : QVariant();
-    case RuntimeMinutesRole:
-        return r.runtimeMinutes ? QVariant(*r.runtimeMinutes) : QVariant();
     default:
         return {};
     }
 }
 
-QHash<int, QByteArray> LibraryListModel::roleNames() const
+QHash<int, QByteArray> LibraryRailModel::roleNames() const
 {
     return {
         { KindRole, "kind" },
@@ -65,18 +60,15 @@ QHash<int, QByteArray> LibraryListModel::roleNames() const
         { SeasonRole, "season" },
         { EpisodeRole, "episode" },
         { TitleRole, "title" },
-        { SubtitleRole, "subtitle" },
         { PosterUrlRole, "posterUrl" },
+        { ThumbnailUrlRole, "thumbnailUrl" },
+        { PrimaryLineRole, "primaryLine" },
+        { SecondaryLineRole, "secondaryLine" },
         { ProgressRole, "progress" },
-        { WatchedRole, "watched" },
-        { UpcomingRole, "upcoming" },
-        { ReleaseDateTextRole, "releaseDateText" },
-        { RatingRole, "rating" },
-        { RuntimeMinutesRole, "runtimeMinutes" },
     };
 }
 
-void LibraryListModel::setRows(QList<LibraryListRow> rows)
+void LibraryRailModel::setRows(QList<LibraryRailRow> rows)
 {
     beginResetModel();
     m_rows = std::move(rows);
@@ -84,7 +76,7 @@ void LibraryListModel::setRows(QList<LibraryListRow> rows)
     Q_EMIT countChanged();
 }
 
-const LibraryListRow* LibraryListModel::at(int row) const
+const LibraryRailRow* LibraryRailModel::at(int row) const
 {
     if (row < 0 || row >= m_rows.size()) {
         return nullptr;

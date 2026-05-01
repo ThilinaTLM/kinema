@@ -58,7 +58,27 @@ std::optional<QDate> dateFromDb(const QString& s)
 
 constexpr const char* kTitleColumns =
     "kind, imdb_id, tmdb_id, title, year, poster_url, backdrop_url, "
-    "overview, release_date, added_at, updated_at";
+    "overview, release_date, added_at, updated_at, "
+    "genres, imdb_rating, runtime_minutes, cast_list";
+
+/// Field separator for list-valued columns (`genres`, `cast_list`).
+/// We use ASCII Unit-Separator (\u001f) so values containing commas
+/// or semicolons (“Actor, Jr.”, “Sci-Fi & Fantasy”) round-trip
+/// without ambiguous splitting.
+constexpr QChar kListSep = QChar(0x001F);
+
+QString joinList(const QStringList& xs)
+{
+    return xs.join(kListSep);
+}
+
+QStringList splitList(const QString& s)
+{
+    if (s.isEmpty()) {
+        return {};
+    }
+    return s.split(kListSep, Qt::SkipEmptyParts);
+}
 
 constexpr const char* kEpisodeColumns =
     "series_imdb_id, season, episode, title, overview, thumbnail_url, "
@@ -86,6 +106,14 @@ api::LibraryTitle hydrateTitle(const QSqlQuery& q)
     t.releaseDate = dateFromDb(q.value(8).toString());
     t.addedAt = parseIsoUtc(q.value(9).toString());
     t.updatedAt = parseIsoUtc(q.value(10).toString());
+    t.genres = splitList(q.value(11).toString());
+    if (!q.value(12).isNull()) {
+        t.imdbRating = q.value(12).toDouble();
+    }
+    if (!q.value(13).isNull()) {
+        t.runtimeMinutes = q.value(13).toInt();
+    }
+    t.cast = splitList(q.value(14).toString());
     return t;
 }
 
@@ -223,8 +251,9 @@ void LibraryStore::upsertTitle(const api::LibraryTitle& title)
     q.prepare(QStringLiteral(R"(
         INSERT INTO library_titles (
             kind, imdb_id, tmdb_id, title, year, poster_url, backdrop_url,
-            overview, release_date, added_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            overview, release_date, added_at, updated_at,
+            genres, imdb_rating, runtime_minutes, cast_list
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(kind, imdb_id) DO UPDATE SET
             tmdb_id = excluded.tmdb_id,
             title = excluded.title,
@@ -233,7 +262,11 @@ void LibraryStore::upsertTitle(const api::LibraryTitle& title)
             backdrop_url = excluded.backdrop_url,
             overview = excluded.overview,
             release_date = excluded.release_date,
-            updated_at = excluded.updated_at
+            updated_at = excluded.updated_at,
+            genres = excluded.genres,
+            imdb_rating = excluded.imdb_rating,
+            runtime_minutes = excluded.runtime_minutes,
+            cast_list = excluded.cast_list
     )"));
     q.addBindValue(mediaKindToDb(t.kind));
     q.addBindValue(t.imdbId);
@@ -246,6 +279,10 @@ void LibraryStore::upsertTitle(const api::LibraryTitle& title)
     q.addBindValue(nullSafe(dateToDb(t.releaseDate)));
     q.addBindValue(isoUtc(t.addedAt));
     q.addBindValue(isoUtc(t.updatedAt));
+    q.addBindValue(nullSafe(joinList(t.genres)));
+    q.addBindValue(t.imdbRating ? QVariant(*t.imdbRating) : QVariant());
+    q.addBindValue(t.runtimeMinutes ? QVariant(*t.runtimeMinutes) : QVariant());
+    q.addBindValue(nullSafe(joinList(t.cast)));
     if (!q.exec()) {
         qCWarning(KINEMA) << "LibraryStore: upsertTitle failed:"
                           << q.lastError().text();

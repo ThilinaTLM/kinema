@@ -19,11 +19,23 @@ import dev.tlmtech.kinema.app
 // Auto-advance is driven entirely by the C++ side
 // (`PlayQueueController` <- `PlaybackController::endOfFile`); this
 // page is just a view + per-row actions.
-Kirigami.ScrollablePage {
+//
+// The body is a `ListView` that handles its own flicking, so the
+// outer page is a plain `Kirigami.Page`. Wrapping a self-flickable
+// view in `Kirigami.ScrollablePage` produces a parent Flickable
+// that intercepts wheel/flick events without ever scrolling, and
+// also flips the page color set to `Theme.View` (near-black under
+// dark Plasma palettes) which doesn't match the rest of the app.
+Kirigami.Page {
     id: page
 
     title: i18nc("@title:window", "Queue")
     objectName: "queue"
+
+    leftPadding: 0
+    rightPadding: 0
+    topPadding: 0
+    bottomPadding: 0
 
     actions: [
         Kirigami.Action {

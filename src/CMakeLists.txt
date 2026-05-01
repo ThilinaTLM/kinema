@@ -80,6 +80,7 @@ set(kinema_core_SRCS
     ui/qml-bridge/EpisodesListModel.cpp
     ui/qml-bridge/KinemaImageProvider.cpp
     ui/qml-bridge/LibraryListModel.cpp
+    ui/qml-bridge/LibraryRailModel.cpp
     ui/qml-bridge/LibraryViewModel.cpp
     ui/qml-bridge/MainController.cpp
     ui/qml-bridge/MovieDetailViewModel.cpp
@@ -203,9 +204,11 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/DetailOverview.qml
+        ui/qml/components/EpisodeRailCard.qml
         ui/qml/components/EpisodeRow.qml
         ui/qml/components/FilterMenuButton.qml
         ui/qml/components/LibraryCard.qml
+        ui/qml/components/LibraryRail.qml
         ui/qml/components/MediaKindSelect.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml

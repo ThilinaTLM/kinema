@@ -38,7 +38,7 @@ private Q_SLOTS:
         QVERIFY(db.open());
         QVERIFY(db.isOpen());
         QCOMPARE(db.currentSchemaVersion(), Database::latestSchemaVersion());
-        QCOMPARE(db.currentSchemaVersion(), 6);
+        QCOMPARE(db.currentSchemaVersion(), 7);
 
         // history table must exist and have the key column.
         auto q = db.query();
@@ -88,6 +88,12 @@ private Q_SLOTS:
         }
         QVERIFY(libColumns.contains(QStringLiteral("imdb_id")));
         QVERIFY(!libColumns.contains(QStringLiteral("active")));
+        // v7 added genres / imdb_rating / runtime_minutes / cast_list
+        // so the Library page can filter offline.
+        QVERIFY(libColumns.contains(QStringLiteral("genres")));
+        QVERIFY(libColumns.contains(QStringLiteral("imdb_rating")));
+        QVERIFY(libColumns.contains(QStringLiteral("runtime_minutes")));
+        QVERIFY(libColumns.contains(QStringLiteral("cast_list")));
 
         QVERIFY(q.exec(QStringLiteral(
             "SELECT name FROM sqlite_master "
@@ -116,7 +122,7 @@ private Q_SLOTS:
         {
             Database db(m_path, nullptr);
             QVERIFY(db.open());
-            QCOMPARE(db.currentSchemaVersion(), 6);
+            QCOMPARE(db.currentSchemaVersion(), 7);
         }
     }
 
@@ -138,7 +144,7 @@ private Q_SLOTS:
     {
         Database db(QStringLiteral(":memory:"), nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 6);
+        QCOMPARE(db.currentSchemaVersion(), 7);
     }
 
     // ---- Corrupt file is quarantined and a fresh DB is created ---------
@@ -156,7 +162,7 @@ private Q_SLOTS:
 
         Database db(m_path, nullptr);
         QVERIFY(db.open());
-        QCOMPARE(db.currentSchemaVersion(), 6);
+        QCOMPARE(db.currentSchemaVersion(), 7);
 
         // A file named *.corrupt-* should now exist next to the fresh DB.
         const QFileInfo fi(m_path);

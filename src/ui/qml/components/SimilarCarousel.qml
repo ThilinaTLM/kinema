@@ -36,18 +36,19 @@ ColumnLayout {
     ListView {
         id: list
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.round(Theme.posterMax * 1.65)
+        Layout.preferredHeight: Math.round(Theme.posterMin * 1.5)
+            + Kirigami.Units.gridUnit * 3
         orientation: ListView.Horizontal
         model: sourceModel
         clip: true
         spacing: Theme.groupSpacing
-        cacheBuffer: Theme.posterMax * 4
+        cacheBuffer: Theme.posterMin * 4
         boundsBehavior: Flickable.StopAtBounds
         leftMargin: Theme.pageMargin
         rightMargin: Theme.pageMargin
 
         delegate: PosterCard {
-            width: Theme.posterMax
+            width: Theme.posterMin
             height: list.height
             posterUrl: model.posterUrl !== undefined ? model.posterUrl : ""
             title:     model.title    !== undefined ? model.title    : ""

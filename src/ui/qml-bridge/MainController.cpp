@@ -40,6 +40,7 @@
 #include "ui/qml-bridge/AppIconResolver.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
 #include "ui/qml-bridge/LibraryListModel.h"
+#include "ui/qml-bridge/LibraryRailModel.h"
 #include "ui/qml-bridge/LibraryViewModel.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 #include "ui/qml-bridge/PlayQueueViewModel.h"
@@ -342,7 +343,14 @@ void MainController::buildCoreServices()
     m_historyCtrl->setStreamActions(m_streamActions);
 
     m_libraryCtrl = new controllers::LibraryController(
-        *m_library, this);
+        *m_library, m_cinemeta, this);
+    // Lazy backfill of v7 schema columns (genres / rating / runtime
+    // / cast) for titles saved before that migration. Queued so the
+    // first event-loop tick boots the UI cleanly; backfill itself is
+    // capped + silent on failure.
+    QMetaObject::invokeMethod(m_libraryCtrl,
+        &controllers::LibraryController::backfillMetadata,
+        Qt::QueuedConnection);
     m_watchedCtrl = new controllers::WatchedController(
         *m_watched, m_historyCtrl, this);
 
@@ -899,6 +907,7 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(ResultsListModel);
     KINEMA_REGISTER_QML_TYPE(StreamsListModel);
     KINEMA_REGISTER_QML_TYPE(LibraryListModel);
+    KINEMA_REGISTER_QML_TYPE(LibraryRailModel);
     KINEMA_REGISTER_QML_TYPE(LibraryViewModel);
     KINEMA_REGISTER_QML_TYPE(MovieDetailViewModel);
     KINEMA_REGISTER_QML_TYPE(SeriesDetailViewModel);

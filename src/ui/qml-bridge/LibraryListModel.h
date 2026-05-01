@@ -28,6 +28,8 @@ struct LibraryListRow {
     bool upcoming = false;
     QString releaseDateText;
     std::optional<api::HistoryEntry> resumeEntry;
+    std::optional<double> rating;
+    std::optional<int> runtimeMinutes;
 };
 
 class LibraryListModel : public QAbstractListModel
@@ -47,6 +49,8 @@ public:
         WatchedRole,
         UpcomingRole,
         ReleaseDateTextRole,
+        RatingRole,
+        RuntimeMinutesRole,
     };
     Q_ENUM(Roles)
 

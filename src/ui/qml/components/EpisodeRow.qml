@@ -32,12 +32,20 @@ QQC2.ItemDelegate {
     implicitHeight: layout.implicitHeight + padding * 2
 
     background: Rectangle {
-        color: row.selected
-            ? Qt.alpha(Theme.accent, 0.18)
-            : (row.hovered
-                ? Kirigami.Theme.alternateBackgroundColor
-                : "transparent")
         radius: Kirigami.Units.cornerRadius
+        color: Kirigami.Theme.alternateBackgroundColor
+        border.color: row.selected
+            ? Qt.alpha(Theme.accent, 0.36)
+            : Qt.alpha(Theme.foreground, row.hovered ? 0.12 : 0.08)
+        border.width: 1
+
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: row.selected
+                ? Qt.alpha(Theme.accent, 0.18)
+                : (row.hovered ? Qt.alpha(Theme.hover, 0.12) : "transparent")
+        }
     }
 
     contentItem: RowLayout {
@@ -144,17 +152,15 @@ QQC2.ItemDelegate {
             }
         }
 
-        QQC2.ToolButton {
+        QQC2.Button {
             Layout.alignment: Qt.AlignVCenter
+            visible: !row.isUpcoming
             icon.source: AppIcons.url(row.watched ? "circle-dashed" : "circle-check")
-            icon.color: row.watched ? Theme.positive : Theme.disabled
+            icon.color: row.watched ? Theme.positive : Theme.foreground
             text: row.watched
-                ? i18nc("@action:button", "Mark unwatched")
-                : i18nc("@action:button", "Mark watched")
-            display: QQC2.AbstractButton.IconOnly
-            QQC2.ToolTip.text: text
-            QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                ? i18nc("@action:button", "Mark Unwatched")
+                : i18nc("@action:button", "Mark Watched")
+            display: QQC2.AbstractButton.TextBesideIcon
             onClicked: row.toggleWatchedRequested()
         }
 

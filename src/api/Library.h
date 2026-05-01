@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QMetaType>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
 #include <optional>
@@ -27,6 +28,15 @@ struct LibraryTitle {
     std::optional<QDate> releaseDate;
     QDateTime addedAt;
     QDateTime updatedAt;
+    /// Cinemeta `genres` array. Empty for rows saved before schema
+    /// v7 until LibraryController's lazy backfill repopulates them.
+    QStringList genres;
+    /// Cinemeta `imdbRating` (0.0..10.0). std::nullopt when unknown.
+    std::optional<double> imdbRating;
+    /// Cinemeta `runtime` minutes. std::nullopt when unknown.
+    std::optional<int> runtimeMinutes;
+    /// Cinemeta `cast` array (top-billed). Empty until backfilled.
+    QStringList cast;
 };
 
 struct LibraryEpisode {

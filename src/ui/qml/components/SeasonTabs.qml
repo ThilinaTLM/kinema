@@ -48,7 +48,7 @@ Item {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.HorizontalFlick
-        implicitHeight: row.implicitHeight + Kirigami.Units.smallSpacing * 2
+        implicitHeight: row.implicitHeight
 
         Row {
             id: row

@@ -44,7 +44,7 @@ Kirigami.ScrollablePage {
             },
             Kirigami.Action {
                 text: i18nc("@action:button", "Remove")
-                icon.source: AppIcons.url("trash-2")
+                icon.source: AppIcons.url("library")
                 icon.color: AppIcons.negative
                 onTriggered: {
                     seriesDetailVm.removeFromLibrary();
@@ -55,7 +55,7 @@ Kirigami.ScrollablePage {
     }
 
     readonly property Kirigami.Action libraryAction: Kirigami.Action {
-        icon.source: AppIcons.url(seriesDetailVm.inLibrary ? "trash-2" : "library")
+        icon.source: AppIcons.url("library")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: seriesDetailVm.libraryActionText
         displayHint: Kirigami.DisplayHint.IconOnly
@@ -77,15 +77,27 @@ Kirigami.ScrollablePage {
         icon.source: AppIcons.url(seriesDetailVm.seriesWatched ? "circle-dashed" : "circle-check")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: seriesDetailVm.seriesWatched
-            ? i18nc("@action:button", "Mark Series Unwatched")
-            : i18nc("@action:button", "Mark Series Watched")
+            ? i18nc("@action:button", "Mark Unwatched")
+            : i18nc("@action:button", "Mark Watched")
         displayHint: Kirigami.DisplayHint.IconOnly
             | Kirigami.DisplayHint.KeepVisible
         enabled: seriesDetailVm.metaState === SeriesDetailViewModel.Ready
         onTriggered: seriesDetailVm.toggleSeriesWatched()
     }
 
-    actions: [ libraryAction, seriesWatchedAction ]
+    readonly property Kirigami.Action refreshAction: Kirigami.Action {
+        icon.source: AppIcons.url("refresh-cw")
+        icon.color: enabled ? AppIcons.foreground : AppIcons.muted
+        text: i18nc("@action:button", "Refresh")
+        displayHint: Kirigami.DisplayHint.IconOnly
+            | Kirigami.DisplayHint.KeepVisible
+        shortcut: StandardKey.Refresh
+        enabled: seriesDetailVm.metaState !== SeriesDetailViewModel.Loading
+            && seriesDetailVm.imdbId.length > 0
+        onTriggered: seriesDetailVm.retry()
+    }
+
+    actions: [ refreshAction ]
 
     Component.onDestruction: seriesDetailVm.clear()
 
@@ -111,6 +123,7 @@ Kirigami.ScrollablePage {
             releaseDateText: seriesDetailVm.releaseDateText
 
             primaryAction: page.libraryAction
+            secondaryAction: page.seriesWatchedAction
         }
 
         // The episode list and season tabs already indent their

@@ -122,6 +122,7 @@ void TestApplicationBoot::loadsApplicationShell()
 
     evaluate(engine, window, QStringLiteral("showPage('search')"));
     evaluate(engine, window, QStringLiteral("showPage('browse')"));
+    evaluate(engine, window, QStringLiteral("showPage('library')"));
     evaluate(engine, window, QStringLiteral("showPage('settings')"));
     evaluate(engine, window, QStringLiteral("showPage('discover')"));
 

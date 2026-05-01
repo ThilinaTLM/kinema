@@ -8,35 +8,45 @@
 #include "core/LibraryStore.h"
 #include "core/WatchedStore.h"
 #include "ui/qml-bridge/LibraryListModel.h"
+#include "ui/qml-bridge/LibraryRailModel.h"
 #include "ui/qml-bridge/LibraryViewModel.h"
 
 #include <QSignalSpy>
 #include <QTest>
 
 using namespace kinema;
+using kinema::ui::qml::LibraryListModel;
+using kinema::ui::qml::LibraryRailModel;
 using kinema::ui::qml::LibraryViewModel;
 
 namespace {
 
 api::LibraryTitle title(api::MediaKind kind, const QString& imdb,
-    const QString& name, std::optional<QDate> released = QDate(2020, 1, 1))
+    const QString& name,
+    std::optional<QDate> released = QDate(2020, 1, 1),
+    QStringList genres = {},
+    std::optional<double> rating = std::nullopt)
 {
     api::LibraryTitle t;
     t.kind = kind;
     t.imdbId = imdb;
     t.title = name;
     t.releaseDate = released;
+    t.addedAt = QDateTime::currentDateTimeUtc();
+    t.genres = std::move(genres);
+    t.imdbRating = rating;
     return t;
 }
 
 api::LibraryEpisode ep(const QString& imdb, int season, int number,
-    std::optional<QDate> released)
+    std::optional<QDate> released, const QString& epTitle = {})
 {
     api::LibraryEpisode e;
     e.seriesImdbId = imdb;
     e.season = season;
     e.episode = number;
-    e.title = QStringLiteral("Episode %1").arg(number);
+    e.title = epTitle.isEmpty()
+        ? QStringLiteral("Episode %1").arg(number) : epTitle;
     e.releaseDate = released;
     return e;
 }
@@ -46,6 +56,20 @@ void drain()
     for (int i = 0; i < 4; ++i) {
         QCoreApplication::processEvents();
     }
+}
+
+QString roleString(const QAbstractItemModel* m, int row, int role)
+{
+    return m->data(m->index(row, 0), role).toString();
+}
+
+QStringList collectTitles(const QAbstractItemModel* m, int role)
+{
+    QStringList out;
+    for (int i = 0; i < m->rowCount(); ++i) {
+        out << roleString(m, i, role);
+    }
+    return out;
 }
 
 } // namespace
@@ -76,82 +100,267 @@ private Q_SLOTS:
         m_db.reset();
     }
 
-    void emptyStartsOnToWatch()
+    // ---- defaults ---------------------------------------------------
+
+    void emptyLibraryReportsEmpty()
     {
         LibraryViewModel vm(m_library.get(), m_watched.get());
-        QCOMPARE(vm.section(), LibraryViewModel::Section::ToWatch);
+        QVERIFY(vm.libraryEmpty());
         QVERIFY(vm.empty());
-        QCOMPARE(vm.model()->rowCount(), 0);
+        QCOMPARE(vm.totalCount(), 0);
+        QCOMPARE(vm.kind(), LibraryViewModel::KindFilter::All);
+        QCOMPARE(vm.status(), LibraryViewModel::StatusFilter::All);
+        QCOMPARE(vm.sort(), LibraryViewModel::SortMode::RecentlyAdded);
+        QVERIFY(!vm.filtersActive());
     }
 
-    void movieSectionsRespectReleaseAndWatchedOverride()
+    void defaultsShowAllEntries()
     {
         m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
-            QStringLiteral("tt1"), QStringLiteral("Ready Movie")));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
-            QStringLiteral("tt2"), QStringLiteral("Future Movie"),
-            QDate::currentDate().addDays(10)));
-        m_watched->setMovieWatched(QStringLiteral("tt1"), true);
+            QStringLiteral("tt1"), QStringLiteral("Movie One")));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+            QStringLiteral("tt2"), QStringLiteral("Series Two")));
         drain();
-
         LibraryViewModel vm(m_library.get(), m_watched.get());
-        QCOMPARE(vm.watchedCount(), 1);
-        QCOMPARE(vm.upcomingCount(), 1);
-
-        vm.setSection(LibraryViewModel::Section::Watched);
-        QCOMPARE(vm.model()->rowCount(), 1);
-        QCOMPARE(vm.model()->data(vm.model()->index(0),
-            ui::qml::LibraryListModel::TitleRole).toString(),
-            QStringLiteral("Ready Movie"));
-
-        vm.setSection(LibraryViewModel::Section::Upcoming);
-        QCOMPARE(vm.model()->rowCount(), 1);
-        QCOMPARE(vm.model()->data(vm.model()->index(0),
-            ui::qml::LibraryListModel::TitleRole).toString(),
-            QStringLiteral("Future Movie"));
+        QCOMPARE(vm.totalCount(), 2);
+        QCOMPARE(vm.model()->rowCount(), 2);
+        QVERIFY(!vm.libraryEmpty());
     }
 
-    void seriesNextEpisodeAndUpcomingRows()
+    // ---- filter axes ------------------------------------------------
+
+    void kindFilterRestrictsToKind()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("Movie One")));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+            QStringLiteral("tt2"), QStringLiteral("Series Two")));
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+
+        vm.setKind(LibraryViewModel::KindFilter::Movies);
+        QCOMPARE(vm.model()->rowCount(), 1);
+        QCOMPARE(roleString(vm.model(), 0, LibraryListModel::TitleRole),
+            QStringLiteral("Movie One"));
+
+        vm.setKind(LibraryViewModel::KindFilter::Series);
+        QCOMPARE(vm.model()->rowCount(), 1);
+        QCOMPARE(roleString(vm.model(), 0, LibraryListModel::TitleRole),
+            QStringLiteral("Series Two"));
+    }
+
+    // Note: the Continue status path requires a HistoryController
+    // to source resume entries. That integration is exercised
+    // end-to-end through the page tests; the VM's filter dispatch
+    // is just a comparison against the resolved status enum.
+
+    void statusFilterUpcomingForMovie()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("Released"),
+            QDate(2020, 1, 1)));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt2"), QStringLiteral("Future"),
+            QDate::currentDate().addDays(20)));
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        vm.setStatus(LibraryViewModel::StatusFilter::Upcoming);
+        QCOMPARE(vm.model()->rowCount(), 1);
+        QCOMPARE(roleString(vm.model(), 0, LibraryListModel::TitleRole),
+            QStringLiteral("Future"));
+    }
+
+    void statusFilterWatchedSeries()
     {
         const QString imdb = QStringLiteral("ttSeries");
+        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+            imdb, QStringLiteral("Done Show")));
+        m_libraryStore->upsertEpisodes(imdb, {
+            ep(imdb, 1, 1, QDate(2020, 1, 1)),
+            ep(imdb, 1, 2, QDate(2020, 1, 8)),
+        });
+        m_watched->setEpisodeWatched(imdb, 1, 1, true);
+        m_watched->setEpisodeWatched(imdb, 1, 2, true);
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        vm.setStatus(LibraryViewModel::StatusFilter::Watched);
+        QCOMPARE(vm.model()->rowCount(), 1);
+    }
+
+    void hideWatchedDropsWatchedEntries()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("Done")));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt2"), QStringLiteral("Pending")));
+        m_watched->setMovieWatched(QStringLiteral("tt1"), true);
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        vm.setHideWatched(true);
+        QCOMPARE(vm.model()->rowCount(), 1);
+        QCOMPARE(roleString(vm.model(), 0, LibraryListModel::TitleRole),
+            QStringLiteral("Pending"));
+    }
+
+    void minRatingExcludesUnratedAndLowRated()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("High"),
+            QDate(2020, 1, 1), {}, 8.5));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt2"), QStringLiteral("Low"),
+            QDate(2020, 1, 1), {}, 5.0));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt3"), QStringLiteral("Unrated"),
+            QDate(2020, 1, 1), {}, std::nullopt));
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        vm.setMinRatingPct(70);
+        QCOMPARE(vm.model()->rowCount(), 1);
+        QCOMPARE(roleString(vm.model(), 0, LibraryListModel::TitleRole),
+            QStringLiteral("High"));
+    }
+
+    void genreFilterMatchesAnyOf()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("SciFi"),
+            QDate(2020, 1, 1),
+            { QStringLiteral("Sci-Fi"), QStringLiteral("Drama") }));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt2"), QStringLiteral("Comedy"),
+            QDate(2020, 1, 1), { QStringLiteral("Comedy") }));
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        QCOMPARE(vm.availableGenres().size(), 3);
+
+        // Resolve the id for "Sci-Fi".
+        int sciFiId = -1;
+        for (const auto& v : vm.availableGenres()) {
+            const auto m = v.toMap();
+            if (m.value(QStringLiteral("name")).toString()
+                == QStringLiteral("Sci-Fi")) {
+                sciFiId = m.value(QStringLiteral("id")).toInt();
+            }
+        }
+        QVERIFY(sciFiId >= 0);
+
+        vm.setGenreIds({ sciFiId });
+        QCOMPARE(vm.model()->rowCount(), 1);
+        QCOMPARE(roleString(vm.model(), 0, LibraryListModel::TitleRole),
+            QStringLiteral("SciFi"));
+    }
+
+    // ---- sort -------------------------------------------------------
+
+    void sortByTitleIsLocaleAware()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt2"), QStringLiteral("Beta")));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("Alpha")));
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        vm.setSort(LibraryViewModel::SortMode::Title);
+        QCOMPARE(collectTitles(vm.model(), LibraryListModel::TitleRole),
+            QStringList({ QStringLiteral("Alpha"),
+                QStringLiteral("Beta") }));
+    }
+
+    void sortByRatingPushesUnratedDown()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("None"),
+            QDate(2020, 1, 1), {}, std::nullopt));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt2"), QStringLiteral("Mid"),
+            QDate(2020, 1, 1), {}, 6.5));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt3"), QStringLiteral("Top"),
+            QDate(2020, 1, 1), {}, 9.0));
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        vm.setSort(LibraryViewModel::SortMode::Rating);
+        QCOMPARE(collectTitles(vm.model(), LibraryListModel::TitleRole),
+            QStringList({ QStringLiteral("Top"),
+                QStringLiteral("Mid"),
+                QStringLiteral("None") }));
+    }
+
+    // ---- smart rails ------------------------------------------------
+
+    void upNextRailIsPerSeriesNextEpisode()
+    {
+        const QString imdb = QStringLiteral("ttUpNext");
         m_libraryStore->upsertTitle(title(api::MediaKind::Series,
             imdb, QStringLiteral("Saved Show")));
         m_libraryStore->upsertEpisodes(imdb, {
             ep(imdb, 1, 1, QDate(2020, 1, 1)),
-            ep(imdb, 1, 2, QDate(2020, 1, 2)),
-            ep(imdb, 2, 1, QDate::currentDate().addDays(3)),
+            ep(imdb, 1, 2, QDate(2020, 1, 8)),
+            ep(imdb, 1, 3, QDate(2020, 1, 15)),
         });
         m_watched->setEpisodeWatched(imdb, 1, 1, true);
         drain();
-
         LibraryViewModel vm(m_library.get(), m_watched.get());
-        QCOMPARE(vm.toWatchCount(), 1);
-        QCOMPARE(vm.upcomingCount(), 1);
-
-        vm.setSection(LibraryViewModel::Section::ToWatch);
-        QCOMPARE(vm.model()->rowCount(), 1);
-        QCOMPARE(vm.model()->data(vm.model()->index(0),
-            ui::qml::LibraryListModel::SeasonRole).toInt(), 1);
-        QCOMPARE(vm.model()->data(vm.model()->index(0),
-            ui::qml::LibraryListModel::EpisodeRole).toInt(), 2);
-
-        vm.setSection(LibraryViewModel::Section::Upcoming);
-        QCOMPARE(vm.model()->rowCount(), 1);
-        QCOMPARE(vm.model()->data(vm.model()->index(0),
-            ui::qml::LibraryListModel::SeasonRole).toInt(), 2);
+        QCOMPARE(vm.upNextModel()->rowCount(), 1);
+        QCOMPARE(vm.upNextModel()->data(
+            vm.upNextModel()->index(0, 0), LibraryRailModel::EpisodeRole)
+                .toInt(), 2);
     }
+
+    void airingSoonRailUsesUpcomingHorizon()
+    {
+        const QString imdb = QStringLiteral("ttAiring");
+        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+            imdb, QStringLiteral("Currently Airing")));
+        m_libraryStore->upsertEpisodes(imdb, {
+            ep(imdb, 1, 1, QDate(2020, 1, 1)),
+            ep(imdb, 1, 2, QDate::currentDate().addDays(5)),
+        });
+        m_watched->setEpisodeWatched(imdb, 1, 1, true);
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        QCOMPARE(vm.airingSoonModel()->rowCount(), 1);
+    }
+
+    void airingSoonRailExcludesFarFutureEpisodes()
+    {
+        const QString imdb = QStringLiteral("ttFar");
+        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+            imdb, QStringLiteral("Far Off")));
+        m_libraryStore->upsertEpisodes(imdb, {
+            ep(imdb, 1, 1, QDate::currentDate().addDays(120)),
+        });
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        QCOMPARE(vm.airingSoonModel()->rowCount(), 0);
+    }
+
+    void comingUpRailHasFutureMovies()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("Released"),
+            QDate(2020, 1, 1)));
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt2"), QStringLiteral("Soon"),
+            QDate::currentDate().addDays(30)));
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        QCOMPARE(vm.comingUpModel()->rowCount(), 1);
+        QCOMPARE(vm.comingUpModel()->data(
+            vm.comingUpModel()->index(0, 0), LibraryRailModel::TitleRole)
+                .toString(), QStringLiteral("Soon"));
+    }
+
+    // ---- behaviours preserved from previous VM ----------------------
 
     void watchedStateOutsideLibraryDoesNotChangeLibraryRows()
     {
-        // No library titles \u2014 marking some other movie watched
-        // through the WatchedController must not surface in the
-        // Library page.
         m_watched->setMovieWatched(QStringLiteral("ttOutside"), true);
         drain();
-
         LibraryViewModel vm(m_library.get(), m_watched.get());
-        QVERIFY(vm.empty());
-        QCOMPARE(vm.watchedCount(), 0);
+        QVERIFY(vm.libraryEmpty());
+        QCOMPARE(vm.totalCount(), 0);
     }
 
     void removeFromLibraryWipesOnlyLibraryRows()
@@ -160,17 +369,34 @@ private Q_SLOTS:
             QStringLiteral("tt1"), QStringLiteral("Movie")));
         m_watched->setMovieWatched(QStringLiteral("tt1"), true);
         drain();
-
         LibraryViewModel vm(m_library.get(), m_watched.get());
-        vm.setSection(LibraryViewModel::Section::Watched);
+        vm.setStatus(LibraryViewModel::StatusFilter::Watched);
         QCOMPARE(vm.model()->rowCount(), 1);
         vm.removeFromLibrary(0);
         drain();
-
-        QVERIFY(vm.empty());
-        // Watched override survives so re-adding the title brings it
-        // back to the Watched section.
+        QVERIFY(vm.libraryEmpty());
         QVERIFY(m_watched->isMovieWatched(QStringLiteral("tt1")));
+    }
+
+    // ---- reset filters ----------------------------------------------
+
+    void resetFiltersClearsEverything()
+    {
+        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+            QStringLiteral("tt1"), QStringLiteral("Anything")));
+        drain();
+        LibraryViewModel vm(m_library.get(), m_watched.get());
+        vm.setKind(LibraryViewModel::KindFilter::Series);
+        vm.setStatus(LibraryViewModel::StatusFilter::Watched);
+        vm.setMinRatingPct(80);
+        vm.setHideWatched(true);
+        QVERIFY(vm.filtersActive());
+        vm.resetFilters();
+        QVERIFY(!vm.filtersActive());
+        QCOMPARE(vm.kind(), LibraryViewModel::KindFilter::All);
+        QCOMPARE(vm.status(), LibraryViewModel::StatusFilter::All);
+        QCOMPARE(vm.minRatingPct(), 0);
+        QVERIFY(!vm.hideWatched());
     }
 
 private:

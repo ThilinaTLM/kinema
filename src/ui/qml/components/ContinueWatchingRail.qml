@@ -43,8 +43,12 @@ ColumnLayout {
     ListView {
         id: list
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.round(Theme.posterMin * 1.5)
-            + Kirigami.Units.gridUnit * 3
+        // Size the rail to the delegate's natural height. Unlike the
+        // generic content rails, Continue Watching cards only show a
+        // single title line, so forcing a taller "poster + meta block"
+        // height leaves an awkward dead band between the artwork and
+        // title.
+        Layout.preferredHeight: cardPrototype.implicitHeight
 
         orientation: ListView.Horizontal
         clip: true
@@ -57,7 +61,6 @@ ColumnLayout {
 
         delegate: ProgressPosterCard {
             width: Theme.posterMin
-            height: list.height
             posterUrl:       model.posterUrl
             title:           model.title
             episodeSubtitle: model.episodeSubtitle
@@ -68,6 +71,12 @@ ColumnLayout {
             onStreamsRequested: continueWatchingVm.openStreams(index)
             onRemoveRequested: removeConfirm.openFor(index)
         }
+    }
+
+    ProgressPosterCard {
+        id: cardPrototype
+        visible: false
+        width: Theme.posterMin
     }
 
     // Confirm dialog for the "Remove from history" context action.

@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "config/AppSettings.h"
+#include "controllers/HistoryController.h"
+#include "controllers/WatchedController.h"
+#include "core/Database.h"
+#include "core/HistoryStore.h"
 #include "core/HttpError.h"
+#include "core/WatchedStore.h"
 #include "services/StreamActions.h"
 #include "TestDoubles.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
@@ -14,6 +19,7 @@
 #include <KSharedConfig>
 
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -100,6 +106,43 @@ struct Fixture {
     }
 };
 
+struct WatchedFixture {
+    QTemporaryDir tmp;
+    kinema::core::Database db;
+    kinema::core::HistoryStore history;
+    kinema::core::WatchedStore watchedStore;
+    KSharedConfigPtr config;
+    AppSettings settings;
+    QString emptyToken;
+    kinema::controllers::HistoryController historyCtrl;
+    kinema::controllers::WatchedController watchedCtrl;
+    FakeCinemetaClient cinemeta;
+    FakeTorrentioClient torrentio;
+    FakeTmdbClient tmdb;
+    StreamActions actions { nullptr };
+    QString rdToken;
+    SeriesDetailViewModel vm;
+
+    WatchedFixture()
+        : db(tmp.filePath(QStringLiteral("kinema.db")), nullptr)
+        , history(db)
+        , watchedStore(db)
+        , config(KSharedConfig::openConfig(
+            tmp.filePath(QStringLiteral("kinemarc")),
+            KConfig::SimpleConfig))
+        , settings(config)
+        , historyCtrl(history, nullptr, settings, emptyToken)
+        , watchedCtrl(watchedStore, &historyCtrl)
+        , vm(&cinemeta, &torrentio, &tmdb, &actions,
+              /*library=*/nullptr, &watchedCtrl,
+              /*tokens=*/nullptr, settings, rdToken, nullptr)
+    {
+        if (!tmp.isValid() || !db.open()) {
+            qFatal("WatchedFixture setup failed");
+        }
+    }
+};
+
 } // namespace
 
 class TstSeriesDetailViewModel : public QObject
@@ -107,6 +150,11 @@ class TstSeriesDetailViewModel : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
+    void initTestCase()
+    {
+        QStandardPaths::setTestModeEnabled(true);
+    }
+
     void testInitialState()
     {
         Fixture f;
@@ -203,6 +251,128 @@ private Q_SLOTS:
         QCOMPARE(f.torrentio.callCount, 0);
         QCOMPARE(f.vm.streams()->state(),
             StreamsListModel::State::Unreleased);
+    }
+
+    void testToggleEpisodeWatchedIgnoresFutureEpisode()
+    {
+        WatchedFixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Future"),
+                  QDate::currentDate().addDays(30)) }) } };
+
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        f.vm.toggleEpisodeWatched(0);
+        drainEvents();
+
+        QVERIFY(!f.watchedCtrl.isEpisodeWatched(
+            QStringLiteral("tt1"), 1, 1));
+    }
+
+    void testToggleSeriesWatchedSkipsFutureEpisodes()
+    {
+        WatchedFixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Aired"),
+                  QDate::currentDate().addDays(-7)),
+              makeEp(1, 2, QStringLiteral("Future"),
+                  QDate::currentDate().addDays(30)) }) } };
+
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        f.vm.toggleSeriesWatched();
+        drainEvents(4);
+
+        QVERIFY(f.watchedCtrl.isEpisodeWatched(
+            QStringLiteral("tt1"), 1, 1));
+        QVERIFY(!f.watchedCtrl.isEpisodeWatched(
+            QStringLiteral("tt1"), 1, 2));
+    }
+
+    void testMarkSeasonWatchedSkipsFutureEpisodes()
+    {
+        WatchedFixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Aired"),
+                  QDate::currentDate().addDays(-7)),
+              makeEp(1, 2, QStringLiteral("Future"),
+                  QDate::currentDate().addDays(30)) }) } };
+
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        f.vm.markSeasonWatched(1, true);
+        drainEvents(4);
+
+        QVERIFY(f.watchedCtrl.isEpisodeWatched(
+            QStringLiteral("tt1"), 1, 1));
+        QVERIFY(!f.watchedCtrl.isEpisodeWatched(
+            QStringLiteral("tt1"), 1, 2));
+    }
+
+    void testSeasonWatchedBadgeStaysFalseWhenUpcomingEpisodesRemain()
+    {
+        WatchedFixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Aired"),
+                  QDate::currentDate().addDays(-7)),
+              makeEp(1, 2, QStringLiteral("Future"),
+                  QDate::currentDate().addDays(30)) }) } };
+
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        f.vm.markSeasonWatched(1, true);
+        drainEvents(4);
+
+        QCOMPARE(f.vm.seasonWatchedList().size(), 1);
+        QVERIFY(!f.vm.seasonWatchedList().at(0).toBool());
+    }
+
+    void testSeasonWatchedBadgeTurnsTrueWhenAllEpisodesAreAiredAndWatched()
+    {
+        WatchedFixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Aired"),
+                  QDate::currentDate().addDays(-7)),
+              makeEp(1, 2, QStringLiteral("Also aired"),
+                  QDate::currentDate().addDays(-1)) }) } };
+
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        f.vm.markSeasonWatched(1, true);
+        drainEvents(4);
+
+        QCOMPARE(f.vm.seasonWatchedList().size(), 1);
+        QVERIFY(f.vm.seasonWatchedList().at(0).toBool());
+    }
+
+    void testSeriesWatchedStaysTrueWhenOnlyUpcomingEpisodesRemain()
+    {
+        WatchedFixture f;
+        f.cinemeta.seriesScripts = { { makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"),
+            { makeEp(1, 1, QStringLiteral("Aired"),
+                  QDate::currentDate().addDays(-7)),
+              makeEp(1, 2, QStringLiteral("Future"),
+                  QDate::currentDate().addDays(30)) }) } };
+
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        f.vm.toggleSeriesWatched();
+        drainEvents(4);
+
+        QVERIFY(f.vm.seriesWatched());
+        QVERIFY(!f.vm.seasonWatchedList().at(0).toBool());
     }
 
     void testEpisodeStreamsErrorShowsError()

@@ -10,6 +10,7 @@
 #include <KLocalizedString>
 
 #include <QDate>
+#include <QVariantMap>
 
 #include <algorithm>
 
@@ -20,6 +21,15 @@ namespace {
 QString posterString(const api::LibraryTitle& t)
 {
     return t.poster.isValid() ? t.poster.toString() : QString();
+}
+
+QString thumbnailString(const api::LibraryEpisode& ep,
+    const api::LibraryTitle& parent)
+{
+    if (ep.thumbnail.isValid()) {
+        return ep.thumbnail.toString();
+    }
+    return posterString(parent);
 }
 
 QString episodeCode(int season, int episode)
@@ -34,22 +44,33 @@ bool isFuture(const std::optional<QDate>& date)
     return core::isFutureRelease(date);
 }
 
-bool isReleased(const std::optional<QDate>& date)
-{
-    return !isFuture(date);
-}
-
 QString releaseText(const std::optional<QDate>& date)
 {
     return date && date->isValid() ? core::formatReleaseDate(*date) : QString();
 }
 
-void sortByTitle(QList<LibraryListRow>& rows)
+/// Resolve the Browse-style date-window index to a lower-bound date.
+/// Returns std::nullopt when the window is "Any time" \u2014 callers
+/// should skip the filter.
+std::optional<QDate> dateWindowFloor(int idx)
 {
-    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
-        return QString::localeAwareCompare(a.title, b.title) < 0;
-    });
+    const auto today = QDate::currentDate();
+    switch (idx) {
+    case LibraryViewModel::DateWindowPastMonth:
+        return today.addMonths(-1);
+    case LibraryViewModel::DateWindowPast3Months:
+        return today.addMonths(-3);
+    case LibraryViewModel::DateWindowThisYear:
+        return QDate(today.year(), 1, 1);
+    case LibraryViewModel::DateWindowPast3Years:
+        return today.addYears(-3);
+    case LibraryViewModel::DateWindowAny:
+    default:
+        return std::nullopt;
+    }
 }
+
+constexpr int kAiringSoonHorizonDays = 30;
 
 } // namespace
 
@@ -61,6 +82,9 @@ LibraryViewModel::LibraryViewModel(
     , m_library(library)
     , m_watched(watched)
     , m_model(new LibraryListModel(this))
+    , m_upNextModel(new LibraryRailModel(this))
+    , m_airingSoonModel(new LibraryRailModel(this))
+    , m_comingUpModel(new LibraryRailModel(this))
 {
     if (m_library) {
         connect(m_library, &controllers::LibraryController::changed,
@@ -69,9 +93,9 @@ LibraryViewModel::LibraryViewModel(
             this, &LibraryViewModel::statusMessage);
     }
     if (m_watched) {
-        // Watched-state flips happening anywhere in the app (a detail
-        // page mark-watched, a finished playback) need to refresh the
-        // library row badges and section counts.
+        // Watched-state flips elsewhere (a detail-page mark, a finished
+        // playback) feed back into the grid badges, the Continue
+        // bucketing for sort, and the Up Next rail.
         connect(m_watched, &controllers::WatchedController::changed,
             this, &LibraryViewModel::refresh);
     }
@@ -80,29 +104,105 @@ LibraryViewModel::LibraryViewModel(
 
 LibraryViewModel::~LibraryViewModel() = default;
 
-void LibraryViewModel::refresh()
+// -- properties --------------------------------------------------------
+
+bool LibraryViewModel::filtersActive() const noexcept
 {
-    rebuildRows();
-    publishSection();
+    return m_kind != KindFilter::All
+        || m_status != StatusFilter::All
+        || !m_genreIds.isEmpty()
+        || m_sort != SortMode::RecentlyAdded
+        || m_dateWindow != DateWindowAny
+        || m_minRatingPct > 0
+        || m_hideWatched;
 }
 
-void LibraryViewModel::setSection(Section section)
+void LibraryViewModel::setKind(KindFilter v)
 {
-    if (m_section == section) {
-        return;
+    if (m_kind == v) return;
+    m_kind = v;
+    Q_EMIT filtersChanged();
+    rebuildGrid();
+}
+
+void LibraryViewModel::setStatus(StatusFilter v)
+{
+    if (m_status == v) return;
+    m_status = v;
+    Q_EMIT filtersChanged();
+    rebuildGrid();
+}
+
+void LibraryViewModel::setGenreIds(const QList<int>& v)
+{
+    if (m_genreIds == v) return;
+    m_genreIds = v;
+    Q_EMIT filtersChanged();
+    rebuildGrid();
+}
+
+void LibraryViewModel::setSort(SortMode v)
+{
+    if (m_sort == v) return;
+    m_sort = v;
+    Q_EMIT filtersChanged();
+    rebuildGrid();
+}
+
+void LibraryViewModel::setDateWindow(int v)
+{
+    if (m_dateWindow == v) return;
+    m_dateWindow = v;
+    Q_EMIT filtersChanged();
+    rebuildGrid();
+}
+
+void LibraryViewModel::setMinRatingPct(int v)
+{
+    if (m_minRatingPct == v) return;
+    m_minRatingPct = v;
+    Q_EMIT filtersChanged();
+    rebuildGrid();
+}
+
+void LibraryViewModel::setHideWatched(bool v)
+{
+    if (m_hideWatched == v) return;
+    m_hideWatched = v;
+    Q_EMIT filtersChanged();
+    rebuildGrid();
+}
+
+// -- public slots ------------------------------------------------------
+
+void LibraryViewModel::refresh()
+{
+    buildEntries();
+    rebuildAvailableGenres();
+    rebuildRails();
+    rebuildGrid();
+}
+
+void LibraryViewModel::resetFilters()
+{
+    bool changed = false;
+    if (m_kind != KindFilter::All) { m_kind = KindFilter::All; changed = true; }
+    if (m_status != StatusFilter::All) { m_status = StatusFilter::All; changed = true; }
+    if (!m_genreIds.isEmpty()) { m_genreIds.clear(); changed = true; }
+    if (m_sort != SortMode::RecentlyAdded) { m_sort = SortMode::RecentlyAdded; changed = true; }
+    if (m_dateWindow != DateWindowAny) { m_dateWindow = DateWindowAny; changed = true; }
+    if (m_minRatingPct != 0) { m_minRatingPct = 0; changed = true; }
+    if (m_hideWatched) { m_hideWatched = false; changed = true; }
+    if (changed) {
+        Q_EMIT filtersChanged();
+        rebuildGrid();
     }
-    m_section = section;
-    m_userSelectedSection = true;
-    Q_EMIT sectionChanged();
-    publishSection();
 }
 
 void LibraryViewModel::activate(int row)
 {
     const auto* r = m_model->at(row);
-    if (!r) {
-        return;
-    }
+    if (!r) return;
     if (r->kind == api::MediaKind::Movie) {
         Q_EMIT openMovieRequested(r->imdbId, r->title);
         return;
@@ -128,255 +228,518 @@ void LibraryViewModel::resume(int row)
 void LibraryViewModel::removeFromLibrary(int row)
 {
     const auto* r = m_model->at(row);
-    if (!r || !m_library) {
-        return;
-    }
+    if (!r || !m_library) return;
     m_library->removeFromLibrary(r->kind, r->imdbId);
 }
 
 void LibraryViewModel::toggleWatched(int row)
 {
     const auto* r = m_model->at(row);
-    if (!r || !m_watched) {
-        return;
-    }
+    if (!r || !m_watched) return;
     if (r->kind == api::MediaKind::Movie) {
         const bool watched = m_watched->isMovieWatched(r->imdbId);
         m_watched->setMovieWatched(r->imdbId, !watched);
         return;
     }
-    // Series: build the (season, episode) pair list from the cached
-    // library_episodes rows; that is the cheapest source for a
-    // library row and is already populated by saveSeries().
     QList<QPair<int, int>> pairs;
     if (m_library) {
         const auto eps = m_library->episodesForSeries(r->imdbId);
         pairs.reserve(eps.size());
         for (const auto& ep : eps) {
-            if (ep.season <= 0) {
-                continue;
-            }
+            if (ep.season <= 0) continue;
             pairs.append({ ep.season, ep.episode });
         }
     }
     m_watched->setEpisodesWatched(r->imdbId, pairs, !r->watched);
 }
 
-void LibraryViewModel::rebuildRows()
+void LibraryViewModel::activateRail(const QString& railId, int row)
 {
-    m_continueRows.clear();
-    m_toWatchRows.clear();
-    m_watchedRows.clear();
-    m_upcomingRows.clear();
+    LibraryRailModel* m = nullptr;
+    if (railId == QLatin1String("upNext")) m = m_upNextModel;
+    else if (railId == QLatin1String("airingSoon")) m = m_airingSoonModel;
+    else if (railId == QLatin1String("comingUp")) m = m_comingUpModel;
+    if (!m) return;
+    const auto* r = m->at(row);
+    if (!r) return;
+    if (r->kind == api::MediaKind::Movie) {
+        Q_EMIT openMovieRequested(r->imdbId, r->title);
+        return;
+    }
+    if (r->season && r->episode && railId == QLatin1String("upNext")) {
+        // Up Next episodes have aired \u2014 jump straight into streams.
+        Q_EMIT openSeriesEpisodeRequested(
+            r->imdbId, r->title, *r->season, *r->episode);
+        return;
+    }
+    // Airing Soon rows reference unaired episodes whose streams will
+    // be empty; route to the series page so the user can browse the
+    // surrounding context (release date, episode list).
+    Q_EMIT openSeriesRequested(r->imdbId, r->title);
+}
 
+// -- entry construction -----------------------------------------------
+
+void LibraryViewModel::buildEntries()
+{
+    m_entries.clear();
     if (!m_library) {
-        Q_EMIT countsChanged();
+        m_totalCount = 0;
+        Q_EMIT libraryEmptyChanged();
         return;
     }
 
     const auto titles = m_library->titles();
+    m_entries.reserve(titles.size());
+
     for (const auto& t : titles) {
+        Entry e;
+        e.title = t;
+
         if (t.kind == api::MediaKind::Movie) {
             const bool watched = m_watched
                 && m_watched->isMovieWatched(t.imdbId);
-            const double progress = m_watched
-                ? m_watched->movieProgress(t.imdbId) : -1.0;
             const auto resume = m_watched
                 ? m_watched->resumeEntryForMovie(t.imdbId)
                 : std::optional<api::HistoryEntry>{};
-            const bool upcoming = isFuture(t.releaseDate);
-
-            LibraryListRow row;
-            row.kind = t.kind;
-            row.imdbId = t.imdbId;
-            row.title = t.title;
-            row.posterUrl = posterString(t);
-            row.progress = progress;
-            row.watched = watched;
-            row.upcoming = upcoming;
-            row.releaseDateText = releaseText(t.releaseDate);
-            row.resumeEntry = resume;
+            const double progress = m_watched
+                ? m_watched->movieProgress(t.imdbId) : -1.0;
+            e.resume = resume;
+            e.resumeProgress = progress;
 
             if (resume) {
-                row.subtitle = i18nc("@info library card subtitle",
-                    "Resume from %1%",
-                    qRound(qBound(0.0, progress, 1.0) * 100.0));
-                m_continueRows.append(row);
-            } else if (upcoming) {
-                row.subtitle = row.releaseDateText.isEmpty()
-                    ? i18nc("@info library card subtitle", "Upcoming")
-                    : i18nc("@info library card subtitle, release date",
-                        "Releases %1", row.releaseDateText);
-                m_upcomingRows.append(row);
+                e.status = ResolvedStatus::Continue;
+            } else if (isFuture(t.releaseDate)) {
+                e.status = ResolvedStatus::Upcoming;
             } else if (watched) {
-                row.subtitle = i18nc("@info library card subtitle", "Watched");
-                m_watchedRows.append(row);
-            } else if (isReleased(t.releaseDate)) {
-                row.subtitle = i18nc("@info library card subtitle", "To watch");
-                m_toWatchRows.append(row);
+                e.status = ResolvedStatus::Watched;
+            } else {
+                e.status = ResolvedStatus::ToWatch;
             }
+            m_entries.append(std::move(e));
             continue;
         }
 
-        const auto episodes = m_library->episodesForSeries(t.imdbId);
-        int watchedCount = 0;
-        int totalAired = 0;
-        int upcomingCount = 0;
-        const api::LibraryEpisode* nextToWatch = nullptr;
-        const api::LibraryEpisode* firstUpcoming = nullptr;
-        std::optional<api::HistoryEntry> latestResume;
-        double latestProgress = -1.0;
-
-        for (const auto& ep : episodes) {
-            const bool future = isFuture(ep.releaseDate);
-            if (future) {
-                ++upcomingCount;
-                if (!firstUpcoming
-                    || (ep.releaseDate && firstUpcoming->releaseDate
-                        && *ep.releaseDate < *firstUpcoming->releaseDate)) {
-                    firstUpcoming = &ep;
+        // Series: scan episode list once to derive every signal.
+        e.episodes = m_library->episodesForSeries(t.imdbId);
+        for (const auto& ep : e.episodes) {
+            if (ep.season <= 0) continue; // skip specials
+            if (isFuture(ep.releaseDate)) {
+                ++e.upcomingCount;
+                if (!e.firstUpcoming
+                    || (ep.releaseDate && e.firstUpcoming->releaseDate
+                        && *ep.releaseDate < *e.firstUpcoming->releaseDate)) {
+                    e.firstUpcoming = &ep;
                 }
                 continue;
             }
-            ++totalAired;
+            ++e.totalAired;
             const bool epWatched = m_watched
                 && m_watched->isEpisodeWatched(
                     t.imdbId, ep.season, ep.episode);
             if (epWatched) {
-                ++watchedCount;
-            } else if (!nextToWatch) {
-                nextToWatch = &ep;
+                ++e.watchedAired;
+            } else if (!e.nextToWatch) {
+                e.nextToWatch = &ep;
             }
             const auto resume = m_watched
                 ? m_watched->resumeEntryForEpisode(
                     t.imdbId, ep.season, ep.episode)
                 : std::optional<api::HistoryEntry>{};
-            if (resume && (!latestResume
-                    || resume->lastWatchedAt > latestResume->lastWatchedAt)) {
-                latestProgress = resume->progressFraction();
-                latestResume = resume;
+            if (resume && (!e.resume
+                    || resume->lastWatchedAt > e.resume->lastWatchedAt)) {
+                e.resume = resume;
+                e.resumeProgress = resume->progressFraction();
             }
         }
 
-        if (latestResume) {
-            LibraryListRow row;
-            row.kind = t.kind;
-            row.imdbId = t.imdbId;
-            row.season = latestResume->key.season;
-            row.episode = latestResume->key.episode;
-            row.title = t.title;
-            row.posterUrl = posterString(t);
-            row.progress = latestProgress;
-            row.resumeEntry = latestResume;
-            if (row.season && row.episode) {
-                row.subtitle = i18nc("@info library card subtitle",
-                    "Resume %1", episodeCode(*row.season, *row.episode));
-            } else {
-                row.subtitle = i18nc("@info library card subtitle", "Resume");
+        // Status precedence: Continue (any active resume) >
+        // Upcoming (zero aired episodes, only future) > Watched (all
+        // aired watched) > ToWatch.
+        if (e.resume) {
+            e.status = ResolvedStatus::Continue;
+        } else if (e.totalAired == 0 && e.upcomingCount > 0) {
+            e.status = ResolvedStatus::Upcoming;
+        } else if (e.totalAired > 0 && e.watchedAired == e.totalAired) {
+            e.status = ResolvedStatus::Watched;
+        } else {
+            e.status = ResolvedStatus::ToWatch;
+        }
+        m_entries.append(std::move(e));
+    }
+
+    const int prev = m_totalCount;
+    m_totalCount = static_cast<int>(m_entries.size());
+    if (prev != m_totalCount) {
+        Q_EMIT libraryEmptyChanged();
+    }
+}
+
+void LibraryViewModel::rebuildAvailableGenres()
+{
+    QHash<QString, int> byName;
+    QStringList ordered;
+    for (const auto& e : m_entries) {
+        for (const auto& g : e.title.genres) {
+            const auto trimmed = g.trimmed();
+            if (trimmed.isEmpty() || byName.contains(trimmed)) continue;
+            byName.insert(trimmed, 0); // placeholder, fixed below
+            ordered.append(trimmed);
+        }
+    }
+    std::sort(ordered.begin(), ordered.end(),
+        [](const QString& a, const QString& b) {
+            return QString::localeAwareCompare(a, b) < 0;
+        });
+
+    QVariantList list;
+    list.reserve(ordered.size());
+    int next = 0;
+    for (const auto& name : ordered) {
+        QVariantMap m;
+        m.insert(QStringLiteral("id"), next);
+        m.insert(QStringLiteral("name"), name);
+        list.append(m);
+        byName.insert(name, next);
+        ++next;
+    }
+
+    // Drop selected genre IDs that no longer correspond to any
+    // surviving genre name; otherwise the chip strip would carry
+    // stale selections.
+    if (!m_genreIds.isEmpty()) {
+        QList<int> kept;
+        kept.reserve(m_genreIds.size());
+        for (const int id : m_genreIds) {
+            if (id >= 0 && id < next) kept.append(id);
+        }
+        if (kept != m_genreIds) {
+            m_genreIds = kept;
+            // No filtersChanged emit here \u2014 the grid is about to
+            // rebuild anyway in refresh().
+        }
+    }
+
+    if (m_availableGenres != list) {
+        m_availableGenres = list;
+        m_genreIdByName = byName;
+        Q_EMIT availableGenresChanged();
+    } else {
+        m_genreIdByName = byName;
+    }
+}
+
+// -- rails ------------------------------------------------------------
+
+void LibraryViewModel::rebuildRails()
+{
+    QList<LibraryRailRow> upNext;
+    QList<LibraryRailRow> airing;
+    QList<LibraryRailRow> coming;
+
+    const auto today = QDate::currentDate();
+    const auto airingHorizon = today.addDays(kAiringSoonHorizonDays);
+
+    for (const auto& e : m_entries) {
+        const auto& t = e.title;
+
+        if (t.kind == api::MediaKind::Movie) {
+            if (t.releaseDate && *t.releaseDate > today) {
+                LibraryRailRow row;
+                row.kind = api::MediaKind::Movie;
+                row.imdbId = t.imdbId;
+                row.title = t.title;
+                row.posterUrl = posterString(t);
+                row.primaryLine = t.title;
+                row.secondaryLine = i18nc(
+                    "@info library coming-up rail, release date",
+                    "Releases %1", releaseText(t.releaseDate));
+                row.releaseDate = t.releaseDate;
+                coming.append(std::move(row));
             }
-            m_continueRows.append(row);
+            continue;
         }
 
-        if (nextToWatch) {
-            LibraryListRow row;
-            row.kind = t.kind;
+        // Series.
+        if (e.nextToWatch) {
+            const auto& ep = *e.nextToWatch;
+            LibraryRailRow row;
+            row.kind = api::MediaKind::Series;
             row.imdbId = t.imdbId;
-            row.season = nextToWatch->season;
-            row.episode = nextToWatch->episode;
             row.title = t.title;
+            row.season = ep.season;
+            row.episode = ep.episode;
             row.posterUrl = posterString(t);
-            row.subtitle = nextToWatch->title.isEmpty()
+            row.thumbnailUrl = thumbnailString(ep, t);
+            const auto code = episodeCode(ep.season, ep.episode);
+            row.primaryLine = ep.title.isEmpty()
+                ? code
+                : i18nc(
+                    "@info library up-next card, episode code and title",
+                    "%1 \u2014 %2", code, ep.title);
+            row.secondaryLine = t.title;
+            // Only carry resume progress when the resume *belongs to*
+            // this same episode; otherwise the bar would lie.
+            if (e.resume && e.resume->key.season == ep.season
+                && e.resume->key.episode == ep.episode) {
+                row.progress = e.resumeProgress;
+            }
+            upNext.append(std::move(row));
+        }
+
+        if (e.firstUpcoming
+            && e.firstUpcoming->releaseDate
+            && *e.firstUpcoming->releaseDate <= airingHorizon) {
+            const auto& ep = *e.firstUpcoming;
+            LibraryRailRow row;
+            row.kind = api::MediaKind::Series;
+            row.imdbId = t.imdbId;
+            row.title = t.title;
+            row.season = ep.season;
+            row.episode = ep.episode;
+            row.posterUrl = posterString(t);
+            row.thumbnailUrl = thumbnailString(ep, t);
+            const auto code = episodeCode(ep.season, ep.episode);
+            row.primaryLine = ep.title.isEmpty()
+                ? i18nc(
+                    "@info library airing-soon, episode code only",
+                    "%1 \u2014 %2", t.title, code)
+                : i18nc(
+                    "@info library airing-soon, title episode code and title",
+                    "%1 \u2014 %2 %3", t.title, code, ep.title);
+            row.secondaryLine = i18nc(
+                "@info library airing-soon, release date",
+                "Airs %1", releaseText(ep.releaseDate));
+            row.releaseDate = ep.releaseDate;
+            airing.append(std::move(row));
+        }
+    }
+
+    // Sort:
+    //   * Up Next       - by series title for predictability
+    //   * Airing Soon   - by ascending release date
+    //   * Coming Up     - by ascending release date
+    std::sort(upNext.begin(), upNext.end(),
+        [](const auto& a, const auto& b) {
+            return QString::localeAwareCompare(a.title, b.title) < 0;
+        });
+    const auto byReleaseAsc = [](const LibraryRailRow& a,
+                                  const LibraryRailRow& b) {
+        if (a.releaseDate && b.releaseDate) {
+            return *a.releaseDate < *b.releaseDate;
+        }
+        return a.releaseDate.has_value() > b.releaseDate.has_value();
+    };
+    std::sort(airing.begin(), airing.end(), byReleaseAsc);
+    std::sort(coming.begin(), coming.end(), byReleaseAsc);
+
+    m_upNextModel->setRows(std::move(upNext));
+    m_airingSoonModel->setRows(std::move(airing));
+    m_comingUpModel->setRows(std::move(coming));
+}
+
+// -- grid -------------------------------------------------------------
+
+bool LibraryViewModel::entryMatchesFilters(const Entry& e) const
+{
+    if (m_kind == KindFilter::Movies && e.title.kind != api::MediaKind::Movie) {
+        return false;
+    }
+    if (m_kind == KindFilter::Series && e.title.kind != api::MediaKind::Series) {
+        return false;
+    }
+
+    if (m_status == StatusFilter::Continue && e.status != ResolvedStatus::Continue) {
+        return false;
+    }
+    if (m_status == StatusFilter::ToWatch && e.status != ResolvedStatus::ToWatch) {
+        return false;
+    }
+    if (m_status == StatusFilter::Watched && e.status != ResolvedStatus::Watched) {
+        return false;
+    }
+    if (m_status == StatusFilter::Upcoming && e.status != ResolvedStatus::Upcoming) {
+        return false;
+    }
+
+    if (m_hideWatched && e.status == ResolvedStatus::Watched) {
+        return false;
+    }
+
+    if (!m_genreIds.isEmpty()) {
+        bool any = false;
+        for (const auto& g : e.title.genres) {
+            const auto it = m_genreIdByName.constFind(g.trimmed());
+            if (it != m_genreIdByName.constEnd()
+                && m_genreIds.contains(it.value())) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) return false;
+    }
+
+    if (m_minRatingPct > 0) {
+        if (!e.title.imdbRating) return false;
+        if (*e.title.imdbRating * 10.0 < m_minRatingPct) return false;
+    }
+
+    if (const auto floor = dateWindowFloor(m_dateWindow)) {
+        if (!e.title.releaseDate) return false;
+        if (*e.title.releaseDate < *floor) return false;
+    }
+
+    return true;
+}
+
+LibraryListRow LibraryViewModel::toGridRow(const Entry& e) const
+{
+    LibraryListRow row;
+    row.kind = e.title.kind;
+    row.imdbId = e.title.imdbId;
+    row.title = e.title.title;
+    row.posterUrl = posterString(e.title);
+    row.releaseDateText = releaseText(e.title.releaseDate);
+    row.rating = e.title.imdbRating;
+    row.runtimeMinutes = e.title.runtimeMinutes;
+
+    switch (e.status) {
+    case ResolvedStatus::Continue: {
+        row.resumeEntry = e.resume;
+        row.progress = e.resumeProgress;
+        if (e.title.kind == api::MediaKind::Movie) {
+            row.subtitle = i18nc("@info library card subtitle",
+                "Resume from %1%",
+                qRound(qBound(0.0, e.resumeProgress, 1.0) * 100.0));
+        } else if (e.resume && e.resume->key.season
+            && e.resume->key.episode) {
+            row.season = e.resume->key.season;
+            row.episode = e.resume->key.episode;
+            row.subtitle = i18nc("@info library card subtitle",
+                "Resume %1",
+                episodeCode(*e.resume->key.season, *e.resume->key.episode));
+        } else {
+            row.subtitle = i18nc("@info library card subtitle", "Resume");
+        }
+        break;
+    }
+    case ResolvedStatus::ToWatch: {
+        if (e.title.kind == api::MediaKind::Movie) {
+            row.subtitle = i18nc("@info library card subtitle", "To watch");
+        } else if (e.nextToWatch) {
+            row.season = e.nextToWatch->season;
+            row.episode = e.nextToWatch->episode;
+            const auto code = episodeCode(
+                e.nextToWatch->season, e.nextToWatch->episode);
+            row.subtitle = e.nextToWatch->title.isEmpty()
                 ? i18nc("@info library card subtitle, episode code",
-                    "Next: %1", episodeCode(nextToWatch->season, nextToWatch->episode))
+                    "Next: %1", code)
                 : i18nc("@info library card subtitle, episode code and title",
-                    "Next: %1 — %2",
-                    episodeCode(nextToWatch->season, nextToWatch->episode),
-                    nextToWatch->title);
-            m_toWatchRows.append(row);
+                    "Next: %1 \u2014 %2", code, e.nextToWatch->title);
+        } else {
+            row.subtitle = i18nc("@info library card subtitle", "To watch");
         }
-
-        if (watchedCount > 0 || (totalAired > 0 && watchedCount == totalAired)) {
-            LibraryListRow row;
-            row.kind = t.kind;
-            row.imdbId = t.imdbId;
-            row.title = t.title;
-            row.posterUrl = posterString(t);
-            row.watched = totalAired > 0 && watchedCount == totalAired;
-            row.progress = totalAired > 0
-                ? static_cast<double>(watchedCount) / totalAired
-                : -1.0;
-            row.subtitle = i18nc("@info library card subtitle, watched count over total episodes",
-                "%1 / %2 episodes watched", watchedCount, totalAired);
-            m_watchedRows.append(row);
+        break;
+    }
+    case ResolvedStatus::Watched: {
+        row.watched = true;
+        if (e.title.kind == api::MediaKind::Movie) {
+            row.subtitle = i18nc("@info library card subtitle", "Watched");
+        } else {
+            row.progress = e.totalAired > 0
+                ? static_cast<double>(e.watchedAired) / e.totalAired
+                : 1.0;
+            row.subtitle = i18nc(
+                "@info library card subtitle, watched count over total episodes",
+                "%1 / %2 episodes watched",
+                e.watchedAired, e.totalAired);
         }
-
-        if (upcomingCount > 0 && firstUpcoming) {
-            LibraryListRow row;
-            row.kind = t.kind;
-            row.imdbId = t.imdbId;
-            row.season = firstUpcoming->season;
-            row.episode = firstUpcoming->episode;
-            row.title = t.title;
-            row.posterUrl = posterString(t);
-            row.upcoming = true;
-            row.releaseDateText = releaseText(firstUpcoming->releaseDate);
-            row.subtitle = upcomingCount == 1
+        break;
+    }
+    case ResolvedStatus::Upcoming: {
+        row.upcoming = true;
+        if (e.title.kind == api::MediaKind::Movie) {
+            row.subtitle = row.releaseDateText.isEmpty()
+                ? i18nc("@info library card subtitle", "Upcoming")
+                : i18nc("@info library card subtitle, release date",
+                    "Releases %1", row.releaseDateText);
+        } else if (e.firstUpcoming) {
+            row.season = e.firstUpcoming->season;
+            row.episode = e.firstUpcoming->episode;
+            const auto epDate = releaseText(e.firstUpcoming->releaseDate);
+            row.subtitle = e.upcomingCount == 1
                 ? i18nc("@info library card subtitle",
                     "%1 airs %2",
-                    episodeCode(firstUpcoming->season, firstUpcoming->episode),
-                    row.releaseDateText)
+                    episodeCode(e.firstUpcoming->season,
+                        e.firstUpcoming->episode),
+                    epDate)
                 : i18ncp("@info library card subtitle",
                     "%1 upcoming episode",
                     "%1 upcoming episodes",
-                    upcomingCount);
-            m_upcomingRows.append(row);
+                    e.upcomingCount);
+        } else {
+            row.subtitle = i18nc("@info library card subtitle", "Upcoming");
         }
+        break;
     }
-
-    sortByTitle(m_toWatchRows);
-    sortByTitle(m_watchedRows);
-    sortByTitle(m_upcomingRows);
-    std::sort(m_continueRows.begin(), m_continueRows.end(), [](const auto& a, const auto& b) {
-        if (a.resumeEntry && b.resumeEntry) {
-            return a.resumeEntry->lastWatchedAt > b.resumeEntry->lastWatchedAt;
-        }
-        return a.resumeEntry.has_value() > b.resumeEntry.has_value();
-    });
-
-    if (!m_userSelectedSection && !m_sectionInitialized) {
-        m_section = m_continueRows.isEmpty() ? Section::ToWatch : Section::Continue;
-        m_sectionInitialized = true;
-        Q_EMIT sectionChanged();
     }
-    Q_EMIT countsChanged();
+    return row;
 }
 
-void LibraryViewModel::publishSection()
+void LibraryViewModel::rebuildGrid()
 {
-    m_model->setRows(rowsFor(m_section));
+    QList<LibraryListRow> rows;
+    rows.reserve(m_entries.size());
+    QList<const Entry*> matched;
+    matched.reserve(m_entries.size());
+    for (const auto& e : m_entries) {
+        if (entryMatchesFilters(e)) {
+            matched.append(&e);
+        }
+    }
+
+    // Sort the matched entries.
+    auto byTitle = [](const Entry* a, const Entry* b) {
+        return QString::localeAwareCompare(a->title.title, b->title.title) < 0;
+    };
+    auto byAddedDesc = [](const Entry* a, const Entry* b) {
+        return a->title.addedAt > b->title.addedAt;
+    };
+    auto byReleaseDesc = [](const Entry* a, const Entry* b) {
+        const bool ah = a->title.releaseDate.has_value();
+        const bool bh = b->title.releaseDate.has_value();
+        if (ah != bh) return ah > bh;
+        if (ah && bh && *a->title.releaseDate != *b->title.releaseDate) {
+            return *a->title.releaseDate > *b->title.releaseDate;
+        }
+        return QString::localeAwareCompare(a->title.title, b->title.title) < 0;
+    };
+    auto byRatingDesc = [](const Entry* a, const Entry* b) {
+        const bool ah = a->title.imdbRating.has_value();
+        const bool bh = b->title.imdbRating.has_value();
+        if (ah != bh) return ah > bh;
+        if (ah && bh && *a->title.imdbRating != *b->title.imdbRating) {
+            return *a->title.imdbRating > *b->title.imdbRating;
+        }
+        return QString::localeAwareCompare(a->title.title, b->title.title) < 0;
+    };
+    switch (m_sort) {
+    case SortMode::Title:
+        std::sort(matched.begin(), matched.end(), byTitle); break;
+    case SortMode::ReleaseDate:
+        std::sort(matched.begin(), matched.end(), byReleaseDesc); break;
+    case SortMode::Rating:
+        std::sort(matched.begin(), matched.end(), byRatingDesc); break;
+    case SortMode::RecentlyAdded:
+    default:
+        std::sort(matched.begin(), matched.end(), byAddedDesc); break;
+    }
+
+    for (const auto* e : matched) {
+        rows.append(toGridRow(*e));
+    }
+    m_model->setRows(std::move(rows));
     Q_EMIT modelChanged();
-}
-
-QList<LibraryListRow>& LibraryViewModel::rowsFor(Section section)
-{
-    switch (section) {
-    case Section::Continue: return m_continueRows;
-    case Section::Watched: return m_watchedRows;
-    case Section::Upcoming: return m_upcomingRows;
-    case Section::ToWatch: break;
-    }
-    return m_toWatchRows;
-}
-
-const QList<LibraryListRow>& LibraryViewModel::rowsFor(Section section) const
-{
-    switch (section) {
-    case Section::Continue: return m_continueRows;
-    case Section::Watched: return m_watchedRows;
-    case Section::Upcoming: return m_upcomingRows;
-    case Section::ToWatch: break;
-    }
-    return m_toWatchRows;
 }
 
 } // namespace kinema::ui::qml

@@ -25,13 +25,10 @@ Kirigami.ScrollablePage {
     topPadding: 0
     bottomPadding: 0
 
-    // Action set is intentionally minimal. `Streams` is the only verb
-    // the detail page exposes — it pushes the streams page, where
-    // subtitles becomes a header action against a chosen stream
-    // context. Surfacing subtitles on the detail page added a second
-    // verb without a useful target (no stream picked yet). The label
-    // says "Streams" rather than "Play" because the action opens a
-    // picker, not the player itself.
+    // Header actions stay intentionally minimal: `Streams` opens the
+    // picker page for the current title and `Refresh` retries the
+    // current load. Library / watched actions live in the body action
+    // row so they do not duplicate the header chrome.
     Kirigami.PromptDialog {
         id: removeLibraryDialog
 
@@ -52,7 +49,7 @@ Kirigami.ScrollablePage {
             },
             Kirigami.Action {
                 text: i18nc("@action:button", "Remove")
-                icon.source: AppIcons.url("trash-2")
+                icon.source: AppIcons.url("library")
                 icon.color: AppIcons.negative
                 onTriggered: {
                     movieDetailVm.removeFromLibrary();
@@ -74,7 +71,7 @@ Kirigami.ScrollablePage {
     }
 
     readonly property Kirigami.Action libraryAction: Kirigami.Action {
-        icon.source: AppIcons.url(movieDetailVm.inLibrary ? "trash-2" : "library")
+        icon.source: AppIcons.url("library")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: movieDetailVm.libraryActionText
         displayHint: Kirigami.DisplayHint.IconOnly
@@ -100,7 +97,19 @@ Kirigami.ScrollablePage {
         onTriggered: movieDetailVm.toggleMovieWatched()
     }
 
-    actions: [ streamsAction, libraryAction, watchedAction ]
+    readonly property Kirigami.Action refreshAction: Kirigami.Action {
+        icon.source: AppIcons.url("refresh-cw")
+        icon.color: enabled ? AppIcons.foreground : AppIcons.muted
+        text: i18nc("@action:button", "Refresh")
+        displayHint: Kirigami.DisplayHint.IconOnly
+            | Kirigami.DisplayHint.KeepVisible
+        shortcut: StandardKey.Refresh
+        enabled: movieDetailVm.metaState !== MovieDetailViewModel.Loading
+            && movieDetailVm.imdbId.length > 0
+        onTriggered: movieDetailVm.retry()
+    }
+
+    actions: [ streamsAction, refreshAction ]
 
     Component.onDestruction: movieDetailVm.clear()
 

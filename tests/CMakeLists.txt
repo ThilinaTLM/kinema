@@ -256,6 +256,11 @@ ecm_add_test(tst_library_view_model.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
+ecm_add_test(tst_library_backfill.cpp
+    TEST_NAME tst_library_backfill
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
 ecm_add_test(tst_application_boot.cpp
     TEST_NAME tst_application_boot
     LINK_LIBRARIES kinema_core kinema_qml_app Qt6::Test
@@ -301,7 +306,8 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_media_chips tst_mpris_metadata tst_idle_inhibitor
          tst_main_controller_close_logic
          tst_discover_view_model tst_continue_watching_view_model
-         tst_library_view_model tst_application_boot)
+         tst_library_view_model tst_library_backfill
+         tst_application_boot)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 

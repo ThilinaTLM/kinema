@@ -6,13 +6,17 @@
 #include "api/Library.h"
 #include "api/Media.h"
 
+#include <QCoro/QCoroTask>
+
 #include <QList>
 #include <QObject>
+#include <QQueue>
 #include <QString>
 
 #include <optional>
 
 namespace kinema::api {
+class CinemetaClient;
 struct MetaDetail;
 struct SeriesDetail;
 }
@@ -28,12 +32,18 @@ namespace kinema::controllers {
  * playback-progress queries live in `controllers::WatchedController`
  * and `controllers::HistoryController` respectively \u2014 this
  * controller is intentionally narrow.
+ *
+ * The optional `CinemetaClient*` powers `backfillMetadata()`, used
+ * to fill in the schema-v7 columns (`genres`, `imdb_rating`,
+ * `runtime_minutes`, `cast_list`) for rows saved before that
+ * migration. Tests that don't need backfill can pass `nullptr`.
  */
 class LibraryController : public QObject
 {
     Q_OBJECT
 public:
     explicit LibraryController(core::LibraryStore& store,
+        api::CinemetaClient* cinemeta = nullptr,
         QObject* parent = nullptr);
     ~LibraryController() override;
 
@@ -51,12 +61,26 @@ public:
     /// preserved.
     void removeFromLibrary(api::MediaKind kind, const QString& imdbId);
 
+public Q_SLOTS:
+    /// Walk the saved titles and ask Cinemeta for any whose v7
+    /// metadata columns are still empty. Idempotent and silent on
+    /// failure; safe to call from a queued connection at startup.
+    /// Capped at a small number of in-flight requests so a large
+    /// library doesn't flood Cinemeta.
+    void backfillMetadata();
+
 Q_SIGNALS:
     void changed();
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
 private:
+    void pumpBackfill();
+    QCoro::Task<void> runBackfillOne(api::LibraryTitle seed);
+
     core::LibraryStore& m_store;
+    api::CinemetaClient* m_cinemeta {};
+    QQueue<api::LibraryTitle> m_backfillQueue;
+    int m_backfillInFlight = 0;
 };
 
 } // namespace kinema::controllers

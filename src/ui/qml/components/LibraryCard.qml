@@ -146,7 +146,7 @@ QQC2.ItemDelegate {
                     }
                     Kirigami.Action {
                         text: i18nc("@action:inmenu", "Remove from Library…")
-                        icon.source: AppIcons.url("trash-2")
+                        icon.source: AppIcons.url("library")
                         icon.color: AppIcons.negative
                         onTriggered: card.removeRequested()
                     }

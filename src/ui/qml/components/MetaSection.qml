@@ -90,7 +90,7 @@ ColumnLayout {
             id: ratingLabel
             text: meta.rating > 0
                 ? i18nc("@info imdb rating",
-                    "\u2605 %1", meta.rating.toFixed(1))
+                    "IMDb \u2605 %1", meta.rating.toFixed(1))
                 : ""
             font.pointSize: Theme.defaultFont.pointSize
             font.weight: Font.DemiBold

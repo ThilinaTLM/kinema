@@ -460,6 +460,29 @@ bool Database::applyMigration(int toVersion)
                 "CREATE INDEX IF NOT EXISTS library_titles_by_release "
                 "ON library_titles (release_date)"),
         });
+    case 7:
+        // Capture extra Cinemeta fields on saved titles so the
+        // Library page can filter offline by genre / rating /
+        // runtime without re-fetching meta. `genres` and
+        // `cast_list` are joined with the ASCII Unit-Separator
+        // (\u001f) so values containing commas / semicolons round
+        // trip safely. Pre-existing rows keep the defaults until a
+        // lazy backfill (LibraryController::backfillMetadata())
+        // refills them on next launch.
+        return runAll(7, {
+            QStringLiteral(
+                "ALTER TABLE library_titles "
+                "ADD COLUMN genres TEXT NOT NULL DEFAULT ''"),
+            QStringLiteral(
+                "ALTER TABLE library_titles "
+                "ADD COLUMN imdb_rating REAL"),
+            QStringLiteral(
+                "ALTER TABLE library_titles "
+                "ADD COLUMN runtime_minutes INTEGER"),
+            QStringLiteral(
+                "ALTER TABLE library_titles "
+                "ADD COLUMN cast_list TEXT NOT NULL DEFAULT ''"),
+        });
     default:
         qCWarning(KINEMA)
             << "Database: no migration registered for version"

@@ -92,6 +92,44 @@ private Q_SLOTS:
         QCOMPARE(all.at(0).imdbId, QStringLiteral("tt1000001"));
     }
 
+    void roundTripsExtendedMetadata()
+    {
+        // v7 columns: genres, imdb_rating, runtime_minutes, cast_list.
+        // Values include comma + semicolon to verify the unit-separator
+        // join is splitter-safe.
+        auto t = movieTitle();
+        t.genres = { QStringLiteral("Sci-Fi & Fantasy"),
+            QStringLiteral("Drama, Crime") };
+        t.imdbRating = 8.4;
+        t.runtimeMinutes = 132;
+        t.cast = { QStringLiteral("Actor, Jr."),
+            QStringLiteral("Other; Person") };
+        m_store->upsertTitle(t);
+
+        const auto got = m_store->find(t.kind, t.imdbId);
+        QVERIFY(got.has_value());
+        QCOMPARE(got->genres, t.genres);
+        QVERIFY(got->imdbRating.has_value());
+        QCOMPARE(*got->imdbRating, 8.4);
+        QCOMPARE(got->runtimeMinutes.value_or(0), 132);
+        QCOMPARE(got->cast, t.cast);
+    }
+
+    void extendedMetadataDefaultsAreEmpty()
+    {
+        // A title saved without genres / rating / runtime / cast
+        // (mimicking the pre-v7 row before backfill) should hydrate
+        // with empty defaults, not garbage.
+        m_store->upsertTitle(movieTitle());
+        const auto got = m_store->find(api::MediaKind::Movie,
+            QStringLiteral("tt1000001"));
+        QVERIFY(got.has_value());
+        QVERIFY(got->genres.isEmpty());
+        QVERIFY(!got->imdbRating.has_value());
+        QVERIFY(!got->runtimeMinutes.has_value());
+        QVERIFY(got->cast.isEmpty());
+    }
+
     void upsertUpdatesAcrossCalls()
     {
         auto t = movieTitle();

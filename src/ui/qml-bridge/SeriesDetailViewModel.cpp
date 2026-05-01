@@ -420,20 +420,24 @@ void SeriesDetailViewModel::refreshEpisodeWatchedState()
     for (int seasonNum : m_seasonNumbers) {
         int seasonAired = 0;
         int seasonWatchedCount = 0;
+        bool hasUpcomingEpisode = false;
         for (const auto& ep : m_allEpisodes) {
             if (ep.season != seasonNum) {
                 continue;
             }
-            if (!core::isFutureRelease(ep.released)) {
-                ++seasonAired;
-                if (m_watched && !m_imdbId.isEmpty()
-                    && m_watched->isEpisodeWatched(m_imdbId, ep.season, ep.number)) {
-                    ++seasonWatchedCount;
-                }
+            if (core::isFutureRelease(ep.released)) {
+                hasUpcomingEpisode = true;
+                continue;
+            }
+            ++seasonAired;
+            if (m_watched && !m_imdbId.isEmpty()
+                && m_watched->isEpisodeWatched(m_imdbId, ep.season, ep.number)) {
+                ++seasonWatchedCount;
             }
         }
-        newSeasonWatched.append(
-            seasonAired > 0 && seasonWatchedCount == seasonAired);
+        newSeasonWatched.append(seasonAired > 0
+            && seasonWatchedCount == seasonAired
+            && !hasUpcomingEpisode);
     }
     if (m_seasonWatchedList != newSeasonWatched) {
         m_seasonWatchedList = std::move(newSeasonWatched);
@@ -647,7 +651,8 @@ void SeriesDetailViewModel::removeFromLibrary()
 void SeriesDetailViewModel::toggleEpisodeWatched(int row)
 {
     const auto* ep = m_episodes->at(row);
-    if (!m_watched || !ep || m_imdbId.isEmpty()) {
+    if (!m_watched || !ep || m_imdbId.isEmpty()
+        || core::isFutureRelease(ep->released)) {
         return;
     }
     const bool watched = m_watched->isEpisodeWatched(
@@ -666,7 +671,7 @@ void SeriesDetailViewModel::toggleSeriesWatched()
     for (const auto& ep : m_allEpisodes) {
         // Skip specials so the action's intent ("finish the series")
         // matches what the season picker actually exposes.
-        if (ep.season <= 0) {
+        if (ep.season <= 0 || core::isFutureRelease(ep.released)) {
             continue;
         }
         pairs.append({ ep.season, ep.number });
@@ -681,7 +686,7 @@ void SeriesDetailViewModel::markSeasonWatched(int season, bool watched)
     }
     QList<QPair<int, int>> pairs;
     for (const auto& ep : m_allEpisodes) {
-        if (ep.season == season) {
+        if (ep.season == season && !core::isFutureRelease(ep.released)) {
             pairs.append({ ep.season, ep.number });
         }
     }
