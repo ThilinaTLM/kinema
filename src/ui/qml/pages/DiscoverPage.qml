@@ -26,9 +26,10 @@ Kirigami.ScrollablePage {
 
     leftPadding: 0
     rightPadding: 0
-    // Page padding gives the first/last rail their breathing room
-    // without spacer Items inside the ColumnLayout.
-    topPadding: Theme.pageTopSpacing
+    // Keep the first rail offset consistent with the spacing
+    // between rails, so Continue Watching doesn't sit tighter to
+    // the page header than the rest of the sections do.
+    topPadding: Theme.sectionSpacing
     bottomPadding: Theme.pageBottomSpacing
 
     actions: [
