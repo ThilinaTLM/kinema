@@ -144,10 +144,11 @@ public:
     /// New row layouts should use `tagsFor` + `summaryLineFor` instead.
     static QStringList chipsFor(const api::Stream& s);
 
-    /// Build the small chip strip shown next to the release name in
-    /// the redesigned `StreamCard`. Carries codec / HDR / language
-    /// codes / multi-audio / release-group — NOT resolution or RD
-    /// (those live in the dedicated leading quality block).
+    /// Build the small chip strip shown on the secondary metadata
+    /// line in the redesigned `StreamCard`. Carries only metadata
+    /// that is *not* already expressed in `summaryLineFor()`:
+    /// language codes / multi-audio / release-group — NOT
+    /// resolution, RD, codec, or HDR.
     static QStringList tagsFor(const api::Stream& s,
         const core::stream_tokens::Tokens& t);
 

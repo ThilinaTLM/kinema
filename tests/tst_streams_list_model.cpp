@@ -200,7 +200,7 @@ private Q_SLOTS:
     {
         StreamsListModel m;
         Stream s = makeStream(
-            QStringLiteral("From.S01.1080p.WEB-DL.x265.10bit.EAC3-QxR"),
+            QStringLiteral("From.S01.1080p.WEB-DL.x265.10bit.DV.HDR10Plus.EAC3-QxR"),
             QStringLiteral("1080p"),
             QStringLiteral("TorrentGalaxy"),
             1'500'000'000, 42, /*rdCached=*/true);
@@ -211,6 +211,8 @@ private Q_SLOTS:
         QVERIFY2(summary.contains(QStringLiteral("WEB-DL")), qPrintable(summary));
         QVERIFY2(summary.contains(QStringLiteral("x265 10-bit")),
             qPrintable(summary));
+        QVERIFY2(summary.contains(QStringLiteral("Dolby Vision")),
+            qPrintable(summary));
         QVERIFY2(summary.contains(QStringLiteral("EAC3")), qPrintable(summary));
 
         const auto tags = m.data(m.index(0),
@@ -219,8 +221,11 @@ private Q_SLOTS:
         // visual treatment in the leading quality block.
         QVERIFY(!tags.contains(QStringLiteral("1080p")));
         QVERIFY(!tags.contains(QStringLiteral("RD+")));
-        // Tags DO include codec, release group.
-        QVERIFY(tags.contains(QStringLiteral("x265 10-bit")));
+        // Tags also avoid duplicating facts already carried by
+        // `summaryLine`.
+        QVERIFY(!tags.contains(QStringLiteral("x265 10-bit")));
+        QVERIFY(!tags.contains(QStringLiteral("Dolby Vision")));
+        // Secondary chip row still carries the release group.
         QVERIFY(tags.contains(QStringLiteral("QxR")));
     }
 

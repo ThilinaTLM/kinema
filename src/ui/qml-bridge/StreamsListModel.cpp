@@ -53,25 +53,15 @@ QStringList StreamsListModel::tagsFor(const api::Stream& s,
 {
     Q_UNUSED(s);
     QStringList tags;
-    // Codec (with 10-bit suffix when applicable).
-    const auto codec = core::stream_tokens::codecLabel(t.codec, t.tenBit);
-    if (!codec.isEmpty()) {
-        tags << codec;
-    }
-    // HDR profile (DV / HDR10+ / HDR10).
-    const auto hdr = core::stream_tokens::hdrLabel(t.hdr);
-    if (!hdr.isEmpty()) {
-        tags << hdr;
-    }
-    // Languages — small uppercased ISO codes ("EN", "FR").
+    // Keep the chip row for secondary metadata only. Codec / HDR /
+    // audio live in `summaryLineFor()` so the row doesn't repeat the
+    // same technical facts twice.
     for (const auto& lang : t.languages) {
         tags << lang.toUpper();
     }
-    // Multi-audio marker (Dual / Multi).
     if (t.multiAudio) {
         tags << i18nc("@label stream chip multi audio", "Multi");
     }
-    // Release group (only when meaningful).
     if (!t.releaseGroup.isEmpty()) {
         tags << t.releaseGroup;
     }

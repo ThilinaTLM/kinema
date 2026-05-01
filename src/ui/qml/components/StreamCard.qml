@@ -8,31 +8,20 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// One stream row, redesigned around the question users actually
-// answer here: "is this cached on Real-Debrid, what quality, what
-// codec/source/audio, and how do I play it?"
+// One stream row, tuned for scanability without making every field
+// fight for top priority.
 //
-// Layout (left to right):
-//   1. Quality block        \u2014 resolution as a bold label, with a
-//                              prominent RD+ / RD badge stacked
-//                              under it.
-//   2. Summary column       \u2014 line 1: pre-joined human summary
-//                              (`source \u00b7 codec \u00b7 hdr \u00b7 audio`).
-//                              line 2: small chips (codec, HDR,
-//                              language, multi-audio, group) inline
-//                              with the provider name as a quiet
-//                              trailing caption.
-//                              The full release name lives in a
-//                              tooltip so it's available on demand
-//                              without eating extra vertical space.
-//   3. Metrics column       \u2014 size (prominent) and seeders
-//                              (`\u21ea N`) stacked, right-aligned.
-//   4. Action column        \u2014 a primary "Play" / "Open magnet"
-//                              button + the existing `\u22ee` overflow
-//                              that opens `StreamRowActions`.
+// Hierarchy:
+//   1. Quality rail     — compact resolution chip + RD status badge.
+//   2. Summary column   — one primary technical line (`source · codec ·
+//                         hdr · audio`) with a quieter secondary chip row.
+//   3. Metrics column   — size + seeders, kept aligned but visually softer.
+//   4. Actions          — primary play/open button + overflow menu.
 //
-// Right-clicking anywhere on the row still opens the overflow menu;
-// double-clicking and Enter/Return play (or open magnet) the row.
+// The row still exposes the same facts as before; the main change is
+// that resolution remains visible without being a second headline, and
+// secondary chips no longer duplicate facts already present in the
+// primary summary line.
 QQC2.ItemDelegate {
     id: card
 
@@ -66,9 +55,6 @@ QQC2.ItemDelegate {
 
     function _activatePrimary() {
         if (card.hasDirectUrl) {
-            // Primary button = "Play now". The queue controller
-            // displaces any currently-playing item to slot 2 and
-            // starts the new one immediately.
             card.vm.playNow(card.row);
         } else if (card.hasMagnet) {
             card.vm.openMagnet(card.row);
@@ -89,28 +75,31 @@ QQC2.ItemDelegate {
         }
     }
 
+    background: Rectangle {
+        radius: Theme.radius
+        color: card.hovered
+            ? Qt.alpha(Theme.foreground, 0.04)
+            : "transparent"
+    }
+
     contentItem: RowLayout {
         id: layout
         spacing: Theme.groupSpacing
 
-        // ---- 1. Quality block ----------------------------------
+        // ---- 1. Quality rail -----------------------------------
         ColumnLayout {
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: Kirigami.Units.gridUnit * 5
             spacing: Math.round(Theme.inlineSpacing / 2)
 
-            QQC2.Label {
+            MetaChip {
                 Layout.alignment: Qt.AlignHCenter
-                text: (!card.resolution || card.resolution === "\u2014")
+                text: (!card.resolution || card.resolution === "—")
                     ? i18nc("@label resolution unknown", "?")
                     : card.resolution.toUpperCase()
-                font.pointSize: Theme.defaultFont.pointSize + 1
-                font.weight: Font.Bold
-                color: Theme.foreground
+                tone: "neutral"
             }
 
-            // RD+ / RD badge \u2014 a filled pill, the *one* loud thing
-            // on the row. Hidden entirely for non-RD rows.
             Rectangle {
                 Layout.alignment: Qt.AlignHCenter
                 visible: card.rdCached || card.rdDownload
@@ -119,7 +108,8 @@ QQC2.ItemDelegate {
                 implicitHeight: rdLabel.implicitHeight
                     + Theme.inlineSpacing
                 implicitWidth: rdLabel.implicitWidth
-                    + Theme.inlineSpacing * 3
+                    + Theme.inlineSpacing * 2
+
                 QQC2.Label {
                     id: rdLabel
                     anchors.centerIn: parent
@@ -128,19 +118,17 @@ QQC2.ItemDelegate {
                         : i18nc("@label stream chip", "RD")
                     color: Theme.background
                     font.pointSize: Theme.captionFont.pointSize
-                    font.weight: Font.Bold
+                    font.weight: Font.DemiBold
                 }
             }
         }
 
-        // ---- 2. Summary + tags + technical subtitle -----------
+        // ---- 2. Primary summary + secondary metadata -----------
         ColumnLayout {
-            id: middleColumn
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
             spacing: Math.round(Theme.inlineSpacing / 2)
 
-            // Tooltip exposes the raw release name on hover or focus.
             HoverHandler {
                 id: hoverHandler
             }
@@ -151,8 +139,6 @@ QQC2.ItemDelegate {
                 text: card.releaseName
             }
 
-            // Line 1: human summary line. Falls back to the release
-            // name when the parser couldn't extract anything useful.
             QQC2.Label {
                 Layout.fillWidth: true
                 text: card.summaryLine.length > 0
@@ -161,33 +147,25 @@ QQC2.ItemDelegate {
                 wrapMode: Text.NoWrap
                 elide: Text.ElideRight
                 font.pointSize: Theme.defaultFont.pointSize
-                font.weight: Font.DemiBold
+                font.weight: Font.Medium
                 color: Theme.foreground
             }
 
-            // Line 2: small chips (codec / HDR / lang / group) plus
-            // the provider name as a trailing caption, all on one
-            // wrapping row. Size and seeders live in the dedicated
-            // metrics column so they line up vertically across rows.
             Flow {
                 Layout.fillWidth: true
                 spacing: Theme.inlineSpacing
                 visible: card.tags.length > 0
                     || (card.provider && card.provider.length > 0)
+
                 Repeater {
                     model: card.tags
                     delegate: MetaChip {
                         required property string modelData
                         text: modelData
-                        // Highlight the HDR / DV chip: that's a hard
-                        // requirement for some users (TV capability).
-                        tone: (modelData === i18nc("@label HDR profile", "Dolby Vision")
-                                || modelData === i18nc("@label HDR profile", "HDR10+"))
-                            ? "accent"
-                            : (modelData === i18nc("@label HDR profile", "HDR10")
-                                ? "accent" : "neutral")
+                        tone: "neutral"
                     }
                 }
+
                 QQC2.Label {
                     visible: card.provider && card.provider.length > 0
                     text: card.provider
@@ -199,7 +177,7 @@ QQC2.ItemDelegate {
             }
         }
 
-        // ---- 3. Metrics column (size / seeders) ---------------
+        // ---- 3. Metrics column ---------------------------------
         ColumnLayout {
             Layout.alignment: Qt.AlignVCenter
             spacing: Math.round(Theme.inlineSpacing / 2)
@@ -209,7 +187,7 @@ QQC2.ItemDelegate {
                 visible: card.sizeText && card.sizeText.length > 0
                 text: card.sizeText
                 font.pointSize: Theme.defaultFont.pointSize
-                font.weight: Font.DemiBold
+                font.weight: Font.Medium
                 color: Theme.foreground
                 horizontalAlignment: Text.AlignRight
             }
@@ -217,20 +195,19 @@ QQC2.ItemDelegate {
             QQC2.Label {
                 Layout.alignment: Qt.AlignRight
                 visible: card.seeders >= 0
-                text: i18nc("@info seeders", "\u21ea %1", card.seeders)
+                text: i18nc("@info seeders", "⇪ %1", card.seeders)
                 font.pointSize: Theme.captionFont.pointSize
                 color: Theme.disabled
                 horizontalAlignment: Text.AlignRight
             }
         }
 
-        // ---- 4. Primary action + overflow ---------------------
+        // ---- 4. Primary action + overflow ----------------------
         RowLayout {
             Layout.alignment: Qt.AlignVCenter
             spacing: Theme.inlineSpacing
 
             QQC2.Button {
-                id: primaryButton
                 visible: card.hasDirectUrl || card.hasMagnet
                 enabled: card.hasDirectUrl || card.hasMagnet
                 icon.source: AppIcons.url(card.hasDirectUrl
