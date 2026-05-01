@@ -92,10 +92,6 @@ void LibraryViewModel::activate(int row)
     if (!r) {
         return;
     }
-    if (m_section == Section::Continue && r->resumeEntry) {
-        Q_EMIT resumeRequested(*r->resumeEntry);
-        return;
-    }
     if (r->kind == api::MediaKind::Movie) {
         Q_EMIT openMovieRequested(r->imdbId, r->title);
         return;
@@ -116,6 +112,34 @@ void LibraryViewModel::resume(int row)
         return;
     }
     Q_EMIT resumeRequested(*r->resumeEntry);
+}
+
+void LibraryViewModel::removeFromLibrary(int row, bool hardDelete)
+{
+    const auto* r = m_model->at(row);
+    if (!r || !m_library) {
+        return;
+    }
+    if (hardDelete) {
+        m_library->hardDelete(r->kind, r->imdbId);
+    } else {
+        m_library->softRemove(r->kind, r->imdbId);
+    }
+}
+
+void LibraryViewModel::toggleWatched(int row)
+{
+    const auto* r = m_model->at(row);
+    if (!r || !m_library) {
+        return;
+    }
+    if (r->kind == api::MediaKind::Movie) {
+        const bool watched = m_library->isMovieWatched(r->imdbId);
+        m_library->setMovieWatched(r->imdbId, !watched);
+    } else {
+        const bool allWatched = r->watched;
+        m_library->setSeriesWatched(r->imdbId, !allWatched);
+    }
 }
 
 void LibraryViewModel::rebuildRows()

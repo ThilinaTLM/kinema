@@ -33,11 +33,9 @@ Kirigami.ScrollablePage {
     // verb without a useful target (no stream picked yet). The label
     // says "Streams" rather than "Play" because the action opens a
     // picker, not the player itself.
-    Kirigami.PromptDialog {
+    Kirigami.Dialog {
         id: removeLibraryDialog
         title: i18nc("@title:dialog", "Remove from Library?")
-        subtitle: i18nc("@info",
-            "Hide keeps Library watch state for this movie. Delete removes only Library data; playback history and resume progress stay intact.")
         standardButtons: Kirigami.Dialog.NoButton
         customFooterActions: [
             Kirigami.Action {
@@ -47,24 +45,33 @@ Kirigami.ScrollablePage {
                 onTriggered: removeLibraryDialog.close()
             },
             Kirigami.Action {
-                text: i18nc("@action:button", "Hide")
-                icon.source: AppIcons.url("eraser")
-                icon.color: AppIcons.foreground
-                onTriggered: {
-                    movieDetailVm.softRemoveFromLibrary();
-                    removeLibraryDialog.close();
-                }
-            },
-            Kirigami.Action {
-                text: i18nc("@action:button", "Delete Library Data")
+                text: i18nc("@action:button", "Remove")
                 icon.source: AppIcons.url("trash-2")
                 icon.color: AppIcons.negative
                 onTriggered: {
-                    movieDetailVm.hardDeleteFromLibrary();
+                    if (deleteTrackingCheck.checked) {
+                        movieDetailVm.hardDeleteFromLibrary();
+                    } else {
+                        movieDetailVm.softRemoveFromLibrary();
+                    }
                     removeLibraryDialog.close();
                 }
             }
         ]
+
+        ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing
+            QQC2.Label {
+                text: i18nc("@info", "\u201c%1\u201d will be removed from your Library.", movieDetailVm.title)
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            QQC2.CheckBox {
+                id: deleteTrackingCheck
+                text: i18nc("@option:check", "Permanently delete watched state tracking data")
+                checked: false
+            }
+        }
     }
 
     readonly property Kirigami.Action streamsAction: Kirigami.Action {
@@ -95,7 +102,7 @@ Kirigami.ScrollablePage {
     }
 
     readonly property Kirigami.Action watchedAction: Kirigami.Action {
-        icon.source: AppIcons.url(movieDetailVm.movieWatched ? "circle-check" : "circle-alert")
+        icon.source: AppIcons.url(movieDetailVm.movieWatched ? "eye-off" : "eye")
         icon.color: enabled ? AppIcons.foreground : AppIcons.muted
         text: movieDetailVm.watchedActionText
         enabled: movieDetailVm.metaState === MovieDetailViewModel.Ready

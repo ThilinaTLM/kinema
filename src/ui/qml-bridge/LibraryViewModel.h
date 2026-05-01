@@ -53,6 +53,8 @@ public Q_SLOTS:
     void activate(int row);
     void resume(int row);
     void setSection(Section section);
+    void removeFromLibrary(int row, bool hardDelete);
+    void toggleWatched(int row);
 
 Q_SIGNALS:
     void sectionChanged();
@@ -63,6 +65,7 @@ Q_SIGNALS:
     void openSeriesEpisodeRequested(const QString& imdbId,
         const QString& title, int season, int episode);
     void resumeRequested(const api::HistoryEntry& entry);
+    void confirmRemoveRequested(int row, const QString& title);
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
 private:

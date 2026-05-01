@@ -25,6 +25,21 @@ Item {
 
     implicitHeight: scroll.implicitHeight
 
+    QQC2.Menu {
+        id: seasonMenu
+        property int targetSeason: -1
+        Kirigami.Action {
+            text: i18nc("@action:inmenu", "Mark season as watched")
+            icon.source: AppIcons.url("eye")
+            onTriggered: tabs.vm.markSeasonWatched(seasonMenu.targetSeason, true)
+        }
+        Kirigami.Action {
+            text: i18nc("@action:inmenu", "Mark season as unwatched")
+            icon.source: AppIcons.url("eye-off")
+            onTriggered: tabs.vm.markSeasonWatched(seasonMenu.targetSeason, false)
+        }
+    }
+
     Flickable {
         id: scroll
         anchors.fill: parent
@@ -52,12 +67,28 @@ Item {
                     checked: tabs.vm.currentSeason === index
                     flat: !checked
                     highlighted: checked
+                    display: tabs.vm.seasonWatchedList[index] === true
+                        ? QQC2.AbstractButton.TextBesideIcon
+                        : QQC2.AbstractButton.TextOnly
+                    icon.source: AppIcons.url("eye")
+                    icon.color: Theme.positive
                     onClicked: tabs.vm.currentSeason = index
                     KeyNavigation.left: tabs.vm.currentSeason > 0
                         ? row.children[index - 1] : null
                     KeyNavigation.right: tabs.vm.currentSeason
                             < tabs.vm.seasonLabels.length - 1
                         ? row.children[index + 1] : null
+
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: {
+                            const seasonNum = tabs.vm.seasonNumbers[index];
+                            if (seasonNum !== undefined) {
+                                seasonMenu.targetSeason = seasonNum;
+                                seasonMenu.popup();
+                            }
+                        }
+                    }
                 }
             }
         }

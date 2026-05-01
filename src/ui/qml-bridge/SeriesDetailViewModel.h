@@ -94,6 +94,8 @@ class SeriesDetailViewModel : public QObject
 
     // ---- season + episode picker ----------------------------------
     Q_PROPERTY(QStringList seasonLabels READ seasonLabels NOTIFY seasonsChanged)
+    Q_PROPERTY(QVariantList seasonNumbers READ seasonNumbers NOTIFY seasonsChanged)
+    Q_PROPERTY(QVariantList seasonWatchedList READ seasonWatchedList NOTIFY seasonsChanged)
     Q_PROPERTY(int currentSeason READ currentSeason WRITE setCurrentSeason NOTIFY currentSeasonChanged)
     Q_PROPERTY(EpisodesListModel* episodes READ episodes CONSTANT)
     Q_PROPERTY(int selectedEpisodeRow READ selectedEpisodeRow NOTIFY selectedEpisodeChanged)
@@ -124,6 +126,7 @@ class SeriesDetailViewModel : public QObject
     Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
 
     Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY libraryStateChanged)
+    Q_PROPERTY(bool seriesWatched READ seriesWatched NOTIFY libraryStateChanged)
     Q_PROPERTY(QString libraryActionText READ libraryActionText NOTIFY libraryStateChanged)
 
 public:
@@ -170,6 +173,8 @@ public:
 
     // ---- season + episode accessors -------------------------------
     QStringList seasonLabels() const { return m_seasonLabels; }
+    QVariantList seasonNumbers() const;
+    QVariantList seasonWatchedList() const { return m_seasonWatchedList; }
     int currentSeason() const noexcept { return m_currentSeasonIdx; }
     void setCurrentSeason(int idx);
     EpisodesListModel* episodes() const noexcept { return m_episodes; }
@@ -205,6 +210,7 @@ public:
     Q_INVOKABLE void clearUiFilters();
 
     bool inLibrary() const noexcept { return m_inLibrary; }
+    bool seriesWatched() const noexcept { return m_seriesWatched; }
     QString libraryActionText() const;
 
 public Q_SLOTS:
@@ -242,6 +248,8 @@ public Q_SLOTS:
     void softRemoveFromLibrary();
     void hardDeleteFromLibrary();
     void toggleEpisodeWatched(int row);
+    void toggleSeriesWatched();
+    void markSeasonWatched(int season, bool watched);
 
     /// Wire the queue controller. Two-phase init like the movie
     /// detail VM. Safe to leave unset for tests.
@@ -364,6 +372,7 @@ private:
     /// `currentSeason` Q_PROPERTY indexes into this list.
     QList<int> m_seasonNumbers;
     QStringList m_seasonLabels;
+    QVariantList m_seasonWatchedList;
     int m_currentSeasonIdx = -1;
 
     // Selected episode (within the current season).
@@ -384,6 +393,7 @@ private:
     bool m_uiMultiAudioOnly = false;
 
     bool m_inLibrary = false;
+    bool m_seriesWatched = false;
 };
 
 } // namespace kinema::ui::qml

@@ -146,7 +146,7 @@ QQC2.ItemDelegate {
 
         QQC2.ToolButton {
             Layout.alignment: Qt.AlignVCenter
-            icon.source: AppIcons.url(row.watched ? "circle-check" : "circle-alert")
+            icon.source: AppIcons.url(row.watched ? "eye-off" : "eye")
             icon.color: row.watched ? Theme.positive : Theme.disabled
             text: row.watched
                 ? i18nc("@action:button", "Mark unwatched")

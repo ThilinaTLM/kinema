@@ -157,6 +157,31 @@ void LibraryController::setEpisodeWatched(const QString& imdbId,
             : api::LibraryWatchOverride::Unwatched);
 }
 
+void LibraryController::setSeriesWatched(const QString& imdbId, bool watched)
+{
+    const auto episodes = m_store.episodesForSeries(imdbId);
+    const auto state = watched
+        ? api::LibraryWatchOverride::Watched
+        : api::LibraryWatchOverride::Unwatched;
+    for (const auto& ep : episodes) {
+        m_store.setWatchOverride(episodeKey(imdbId, ep.season, ep.episode), state);
+    }
+}
+
+void LibraryController::setSeasonWatched(const QString& imdbId,
+    int season, bool watched)
+{
+    const auto episodes = m_store.episodesForSeries(imdbId);
+    const auto state = watched
+        ? api::LibraryWatchOverride::Watched
+        : api::LibraryWatchOverride::Unwatched;
+    for (const auto& ep : episodes) {
+        if (ep.season == season) {
+            m_store.setWatchOverride(episodeKey(imdbId, ep.season, ep.episode), state);
+        }
+    }
+}
+
 void LibraryController::clearWatchOverride(const api::PlaybackKey& key)
 {
     m_store.clearWatchOverride(key);

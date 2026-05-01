@@ -381,14 +381,64 @@ void SeriesDetailViewModel::refreshEpisodeLibraryState()
     QList<double> progress;
     watched.reserve(m_episodes->episodes().size());
     progress.reserve(m_episodes->episodes().size());
+    int airedCount = 0;
+    int watchedCount = 0;
     for (const auto& ep : m_episodes->episodes()) {
-        watched.append(m_library && !m_imdbId.isEmpty()
-            && m_library->isEpisodeWatched(m_imdbId, ep.season, ep.number));
+        const bool isWatched = m_library && !m_imdbId.isEmpty()
+            && m_library->isEpisodeWatched(m_imdbId, ep.season, ep.number);
+        if (!core::isFutureRelease(ep.released)) {
+            ++airedCount;
+            if (isWatched) {
+                ++watchedCount;
+            }
+        }
+        watched.append(isWatched);
         progress.append(m_library && !m_imdbId.isEmpty()
             ? m_library->episodeProgress(m_imdbId, ep.season, ep.number)
             : -1.0);
     }
     m_episodes->setLibraryState(std::move(watched), std::move(progress));
+
+    const bool allWatched = airedCount > 0 && watchedCount == airedCount;
+    if (m_seriesWatched != allWatched) {
+        m_seriesWatched = allWatched;
+        Q_EMIT libraryStateChanged();
+    }
+
+    // Compute per-season watched state for the tab bar badges.
+    QVariantList newSeasonWatched;
+    newSeasonWatched.reserve(m_seasonNumbers.size());
+    for (int seasonNum : m_seasonNumbers) {
+        int seasonAired = 0;
+        int seasonWatched = 0;
+        for (const auto& ep : m_allEpisodes) {
+            if (ep.season != seasonNum) {
+                continue;
+            }
+            if (!core::isFutureRelease(ep.released)) {
+                ++seasonAired;
+                if (m_library && !m_imdbId.isEmpty()
+                    && m_library->isEpisodeWatched(m_imdbId, ep.season, ep.number)) {
+                    ++seasonWatched;
+                }
+            }
+        }
+        newSeasonWatched.append(seasonAired > 0 && seasonWatched == seasonAired);
+    }
+    if (m_seasonWatchedList != newSeasonWatched) {
+        m_seasonWatchedList = std::move(newSeasonWatched);
+        Q_EMIT seasonsChanged();
+    }
+}
+
+QVariantList SeriesDetailViewModel::seasonNumbers() const
+{
+    QVariantList out;
+    out.reserve(m_seasonNumbers.size());
+    for (int n : m_seasonNumbers) {
+        out.append(n);
+    }
+    return out;
 }
 
 QString SeriesDetailViewModel::libraryActionText() const
@@ -601,6 +651,22 @@ void SeriesDetailViewModel::toggleEpisodeWatched(int row)
         m_imdbId, ep->season, ep->number);
     m_library->setEpisodeWatched(m_imdbId, ep->season, ep->number,
         !watched);
+}
+
+void SeriesDetailViewModel::toggleSeriesWatched()
+{
+    if (!m_library || m_imdbId.isEmpty()) {
+        return;
+    }
+    m_library->setSeriesWatched(m_imdbId, !m_seriesWatched);
+}
+
+void SeriesDetailViewModel::markSeasonWatched(int season, bool watched)
+{
+    if (!m_library || m_imdbId.isEmpty()) {
+        return;
+    }
+    m_library->setSeasonWatched(m_imdbId, season, watched);
 }
 
 QCoro::Task<void> SeriesDetailViewModel::loadEpisodeStreamsTask(

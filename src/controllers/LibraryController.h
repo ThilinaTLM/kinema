@@ -50,6 +50,9 @@ public:
     void setMovieWatched(const QString& imdbId, bool watched);
     void setEpisodeWatched(const QString& imdbId,
         int season, int episode, bool watched);
+    void setSeriesWatched(const QString& imdbId, bool watched);
+    void setSeasonWatched(const QString& imdbId,
+        int season, bool watched);
     void clearWatchOverride(const api::PlaybackKey& key);
 
     bool isMovieWatched(const QString& imdbId) const;

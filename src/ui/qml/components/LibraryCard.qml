@@ -20,6 +20,8 @@ QQC2.ItemDelegate {
     property string releaseDateText
 
     signal resumeRequested()
+    signal removeRequested()
+    signal toggleWatchedRequested()
 
     padding: 0
     implicitWidth: Theme.posterMin
@@ -116,6 +118,37 @@ QQC2.ItemDelegate {
                             : i18nc("@label library card badge", "Upcoming")
                         color: AppIcons.accentText
                         font.pointSize: Theme.captionFont.pointSize
+                    }
+                }
+            }
+
+            QQC2.ToolButton {
+                anchors.bottom: parent.bottom
+                anchors.right: parent.right
+                anchors.margins: Kirigami.Units.smallSpacing
+                display: QQC2.AbstractButton.IconOnly
+                flat: true
+                icon.source: AppIcons.url("ellipsis-vertical")
+                icon.color: AppIcons.accentText
+                opacity: card.hovered ? 1.0 : 0.0
+                Behavior on opacity { NumberAnimation { duration: 120 } }
+                onClicked: cardMenu.popup()
+
+                QQC2.Menu {
+                    id: cardMenu
+                    Kirigami.Action {
+                        text: card.watched
+                            ? i18nc("@action:inmenu", "Mark as Unwatched")
+                            : i18nc("@action:inmenu", "Mark as Watched")
+                        icon.source: AppIcons.url(card.watched ? "eye-off" : "eye")
+                        enabled: !card.upcoming
+                        onTriggered: card.toggleWatchedRequested()
+                    }
+                    Kirigami.Action {
+                        text: i18nc("@action:inmenu", "Remove from Library…")
+                        icon.source: AppIcons.url("trash-2")
+                        icon.color: AppIcons.negative
+                        onTriggered: card.removeRequested()
                     }
                 }
             }
