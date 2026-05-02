@@ -106,15 +106,33 @@ public Q_SLOTS:
     void removeAt(int index);
 
     /// Reorder. `from` and `to` are 0-based; `to` is the destination
-    /// index in the post-move list.
+    /// index in the post-move list. While a reorder transaction is
+    /// open (`beginReorder` / `endReorder`), the database write is
+    /// deferred to `endReorder` so a drag-to-reorder gesture does
+    /// not flush the queue table on every pointer crossing.
     void moveTo(int from, int to);
+
+    /// Open a reorder transaction. Subsequent `moveTo` calls update
+    /// the in-memory list and emit granular signals as usual but
+    /// skip the per-call persist; the deferred write fires on
+    /// `endReorder`.
+    void beginReorder();
+
+    /// Close a reorder transaction. Persists once if any `moveTo`
+    /// calls landed while the transaction was open.
+    void endReorder();
 
     /// Drop everything. Stops in-flight resolution.
     void clearAll();
 
     /// Drop every row except the current active one. When no item is
-    /// active, falls back to `clearAll()`.
+    /// active, falls back to `clearAll()`. Played rows are dropped
+    /// alongside pending rows.
     void clearAllExceptActive();
+
+    /// Drop every row whose status is `Played`. No-op when the
+    /// played group is empty.
+    void clearPlayed();
 
     /// Retry an item previously marked `Failed`. Resets it to
     /// `Pending` and \u2014 if it's the active item or there is no
@@ -127,8 +145,10 @@ public Q_SLOTS:
     ///  - if a user-close was just signalled, that takes precedence:
     ///    revert the active row to `Pending` and stop;
     ///  - on a clean end-of-file (`reason` empty or "eof"), the
-    ///    active row was watched to completion - remove it and
-    ///    advance to the new slot 0;
+    ///    active row was watched to completion - mark it `Played`
+    ///    in place and advance to the next non-played, non-failed
+    ///    row. The played group is capped (oldest dropped) so it
+    ///    cannot grow without bound;
     ///  - on `reason == "error"` or anything else, mark the row
     ///    `Failed` and skip-and-advance.
     /// When the queue is empty after this transition, emits
@@ -211,7 +231,20 @@ private:
     /// Returns the (possibly clamped) insert position.
     int insertAt(api::QueueItem item, int atIndex);
 
-    /// Persist via the store. Renumbers `order` to match list order.
+    /// Index of the first row whose status is not `Played`. Used as
+    /// the natural "head of pending" anchor when no row is active.
+    /// Returns `m_items.size()` when every row is played.
+    int firstPendingIndex() const;
+
+    /// Drop the oldest `Played` rows until at most `kPlayedCap`
+    /// remain. Emits granular `itemAboutToBeRemoved` / `itemRemoved`
+    /// pairs and shifts `m_activeIndex` to track the deletes.
+    void enforcePlayedCap();
+
+    /// Persist via the store. Played rows are filtered out so they
+    /// do not resurrect across restarts (matching the design that
+    /// `Played` is a session-only status, like `Active` / `Failed`).
+    /// Renumbers `order` to match the persisted list position.
     void persist();
 
     /// Update `m_activeIndex` and emit `activeIndexChanged` if
@@ -234,6 +267,11 @@ private:
     /// Bumped on every dispatch / clear so a late co-await result
     /// from a stale resolve task is discarded.
     quint64 m_resolveEpoch = 0;
+
+    /// True between matching `beginReorder` / `endReorder` calls.
+    /// While true, `moveTo` defers `persist()` to `endReorder`.
+    bool m_reordering = false;
+    bool m_reorderDirty = false;
 
     /// Set true on `userClosedWindow`, cleared on the next
     /// `endOfFile`. Lets us treat the inevitable

@@ -37,6 +37,10 @@ class PlayQueueViewModel : public QAbstractListModel
     Q_PROPERTY(bool hasActiveItem READ hasActiveItem NOTIFY queueStateChanged)
     Q_PROPERTY(bool canClearExceptActive READ canClearExceptActive NOTIFY queueStateChanged)
     Q_PROPERTY(int failedCount READ failedCount NOTIFY queueStateChanged)
+    Q_PROPERTY(int playedCount READ playedCount NOTIFY queueStateChanged)
+    Q_PROPERTY(int pendingCount READ pendingCount NOTIFY queueStateChanged)
+    Q_PROPERTY(bool canClearPlayed READ canClearPlayed NOTIFY queueStateChanged)
+    Q_PROPERTY(int leadIndex READ leadIndex NOTIFY queueStateChanged)
     Q_PROPERTY(int remainingCount READ remainingCount NOTIFY queueStateChanged)
     Q_PROPERTY(bool embeddedPlaybackActive READ embeddedPlaybackActive NOTIFY playbackStateChanged)
     Q_PROPERTY(bool playbackPaused READ playbackPaused NOTIFY playbackStateChanged)
@@ -69,6 +73,14 @@ public:
     bool hasActiveItem() const noexcept;
     bool canClearExceptActive() const noexcept;
     int failedCount() const noexcept;
+    int playedCount() const noexcept;
+    int pendingCount() const noexcept;
+    bool canClearPlayed() const noexcept { return playedCount() > 0; }
+    /// Index of the row that should receive the lead-row treatment
+    /// in the queue page: the active item when something is
+    /// playing, otherwise the first non-played row, or `-1` when
+    /// the queue is empty / fully played.
+    int leadIndex() const noexcept;
     int remainingCount() const noexcept;
     bool embeddedPlaybackActive() const noexcept;
     bool playbackPaused() const noexcept;
@@ -81,8 +93,14 @@ public Q_SLOTS:
     void playAt(int index);
     void removeAt(int index);
     void moveTo(int from, int to);
+    /// Open a reorder transaction so a drag-to-reorder gesture
+    /// does not flush the database on every pointer crossing.
+    /// Pair with `endReorder()`.
+    void beginReorder();
+    void endReorder();
     void clearAll();
     void clearAllExceptActive();
+    void clearPlayed();
     void retryFailed(int index);
     void togglePause();
     void stopPlayback();

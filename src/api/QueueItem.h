@@ -46,6 +46,9 @@ struct QueueItem {
         Pending,    ///< Sitting in the queue, ready to be played.
         Active,     ///< Currently the focus of the player.
         Failed,     ///< Last resolve attempt could not produce a URL.
+        Played,     ///< Watched to completion in this session. Session-only;
+                    ///< not persisted, capped, and rendered above the
+                    ///< active row so `Previous` can replay it.
     };
 
     qint64 id = 0;          ///< DB primary key. 0 = not yet persisted.

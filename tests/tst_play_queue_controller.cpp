@@ -760,7 +760,7 @@ private Q_SLOTS:
     //  Step 4: end-of-file auto-advance
     // -----------------------------------------------------------
 
-    void cleanEndOfFileRemovesAndAdvances()
+    void cleanEndOfFileMarksPlayedAndAdvances()
     {
         m_ctrl->playNow(makeStream(QStringLiteral("A"),
                             QStringLiteral("https://rd.example/A")),
@@ -775,14 +775,20 @@ private Q_SLOTS:
         m_ctrl->onPlayerEndOfFile(QStringLiteral("eof"),
             api::PlaybackContext {});
 
-        QCOMPARE(m_ctrl->items().size(), 1);
+        // A is kept in place as `Played` so the user can replay it
+        // via Previous; B becomes the new active row at slot 1.
+        QCOMPARE(m_ctrl->items().size(), 2);
         QCOMPARE(m_ctrl->items()[0].key.imdbId,
+            QStringLiteral("ttA"));
+        QCOMPARE(m_ctrl->items()[0].status,
+            api::QueueItem::Status::Played);
+        QCOMPARE(m_ctrl->items()[1].key.imdbId,
             QStringLiteral("ttB"));
-        QCOMPARE(m_ctrl->activeIndex(), 0);
+        QCOMPARE(m_ctrl->activeIndex(), 1);
         QCOMPARE(m_actions->calls.size(), 2);
     }
 
-    void cleanEndOfFileOnLastItemEmptiesQueueAndCloses()
+    void cleanEndOfFileOnLastItemMarksPlayedAndCloses()
     {
         m_ctrl->playNow(makeStream(QStringLiteral("A"),
                             QStringLiteral("https://rd.example/A")),
@@ -794,7 +800,12 @@ private Q_SLOTS:
         m_ctrl->onPlayerEndOfFile(QStringLiteral("eof"),
             api::PlaybackContext {});
 
-        QVERIFY(m_ctrl->isEmpty());
+        // The played row stays so it remains discoverable on the
+        // queue page; activeIndex drops to -1 and the player is
+        // asked to close.
+        QCOMPARE(m_ctrl->items().size(), 1);
+        QCOMPARE(m_ctrl->items()[0].status,
+            api::QueueItem::Status::Played);
         QCOMPARE(m_ctrl->activeIndex(), -1);
         QCOMPARE(closeSpy.count(), 1);
     }
@@ -902,9 +913,13 @@ private Q_SLOTS:
         m_ctrl->onPlayerEndOfFile(QStringLiteral("eof"),
             api::PlaybackContext {});
 
-        QCOMPARE(m_ctrl->items().size(), 1);
-        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttB"));
-        QCOMPARE(m_ctrl->activeIndex(), 0);
+        // The clean EOF marks A as Played in place and advances to B.
+        QCOMPARE(m_ctrl->items().size(), 2);
+        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttA"));
+        QCOMPARE(m_ctrl->items()[0].status,
+            api::QueueItem::Status::Played);
+        QCOMPARE(m_ctrl->items()[1].key.imdbId, QStringLiteral("ttB"));
+        QCOMPARE(m_ctrl->activeIndex(), 1);
         QCOMPARE(m_actions->calls.size(), 3);
     }
 
@@ -974,6 +989,88 @@ private Q_SLOTS:
         QCOMPARE(m_ctrl->activeIndex(), -1);
         // Persisted clear.
         QVERIFY(m_store->loadAll().isEmpty());
+    }
+
+    // -----------------------------------------------------------
+    //  Played-status: clearPlayed + persistence + cap
+    // -----------------------------------------------------------
+
+    void clearPlayedDropsPlayedRowsOnly()
+    {
+        // Build [A(active), B, C] then EOF A so it becomes Played
+        // and B becomes active. State: [A(played), B(active), C].
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B"),
+                            QStringLiteral("https://rd.example/B")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("C"),
+                            QStringLiteral("https://rd.example/C")),
+            makeMovieCtx(QStringLiteral("ttC"), QStringLiteral("C")));
+        m_ctrl->onPlayerEndOfFile(QStringLiteral("eof"),
+            api::PlaybackContext {});
+        QCOMPARE(m_ctrl->items().size(), 3);
+        QCOMPARE(m_ctrl->items()[0].status,
+            api::QueueItem::Status::Played);
+        QCOMPARE(m_ctrl->activeIndex(), 1);
+
+        m_ctrl->clearPlayed();
+
+        QCOMPARE(m_ctrl->items().size(), 2);
+        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttB"));
+        QCOMPARE(m_ctrl->items()[1].key.imdbId, QStringLiteral("ttC"));
+        QCOMPARE(m_ctrl->activeIndex(), 0);
+    }
+
+    void playedRowsAreNotPersistedAcrossLoad()
+    {
+        // [A(active), B] → EOF A → [A(played), B(active)].
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B"),
+                            QStringLiteral("https://rd.example/B")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+        m_ctrl->onPlayerEndOfFile(QStringLiteral("eof"),
+            api::PlaybackContext {});
+
+        // The store snapshot must contain only the non-played row.
+        const auto persisted = m_store->loadAll();
+        QCOMPARE(persisted.size(), 1);
+        QCOMPARE(persisted[0].key.imdbId, QStringLiteral("ttB"));
+    }
+
+    void playNowInsertsAtActiveSlotAboveDemotedActive()
+    {
+        // Start with [A(played), B(active)] by playing A and EOFing
+        // it after enqueueing B.
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B"),
+                            QStringLiteral("https://rd.example/B")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+        m_ctrl->onPlayerEndOfFile(QStringLiteral("eof"),
+            api::PlaybackContext {});
+        QCOMPARE(m_ctrl->activeIndex(), 1);
+
+        // playNow on a brand-new release C should insert at the
+        // current active slot (1), demoting B to slot 2 as Pending,
+        // and leave A's `Played` status above untouched.
+        m_ctrl->playNow(makeStream(QStringLiteral("C"),
+                            QStringLiteral("https://rd.example/C")),
+            makeMovieCtx(QStringLiteral("ttC"), QStringLiteral("C")));
+
+        QCOMPARE(m_ctrl->items().size(), 3);
+        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttA"));
+        QCOMPARE(m_ctrl->items()[0].status,
+            api::QueueItem::Status::Played);
+        QCOMPARE(m_ctrl->items()[1].key.imdbId, QStringLiteral("ttC"));
+        QCOMPARE(m_ctrl->items()[2].key.imdbId, QStringLiteral("ttB"));
+        QCOMPARE(m_ctrl->items()[2].status,
+            api::QueueItem::Status::Pending);
+        QCOMPARE(m_ctrl->activeIndex(), 1);
     }
 
 private:

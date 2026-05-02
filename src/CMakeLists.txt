@@ -226,6 +226,9 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/PosterGrid.qml
         ui/qml/components/EpisodeChip.qml
         ui/qml/components/ProgressPosterCard.qml
+        ui/qml/components/QueueCompactRow.qml
+        ui/qml/components/QueueLeadRow.qml
+        ui/qml/components/QueuePlayedRow.qml
         ui/qml/components/QueueRow.qml
         ui/qml/components/RatingChip.qml
         ui/qml/components/SeasonTabs.qml
@@ -265,6 +268,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/circle-alert.svg
         ui/qml/icons/lucide/circle-check.svg
         ui/qml/icons/lucide/circle-dashed.svg
+        ui/qml/icons/lucide/circle-play.svg
         ui/qml/icons/lucide/clapperboard.svg
         ui/qml/icons/lucide/clock-arrow-down.svg
         ui/qml/icons/lucide/copy.svg
@@ -278,7 +282,9 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/folder-open.svg
         ui/qml/icons/lucide/funnel.svg
         ui/qml/icons/lucide/grid-2x2.svg
+        ui/qml/icons/lucide/grip-vertical.svg
         ui/qml/icons/lucide/headphones.svg
+        ui/qml/icons/lucide/history.svg
         ui/qml/icons/lucide/house.svg
         ui/qml/icons/lucide/info.svg
         ui/qml/icons/lucide/languages.svg
@@ -289,6 +295,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/list-x.svg
         ui/qml/icons/lucide/minus.svg
         ui/qml/icons/lucide/palette.svg
+        ui/qml/icons/lucide/pause.svg
         ui/qml/icons/lucide/play.svg
         ui/qml/icons/lucide/plus.svg
         ui/qml/icons/lucide/refresh-cw.svg

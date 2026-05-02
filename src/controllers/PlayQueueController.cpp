@@ -58,11 +58,11 @@ void PlayQueueController::playNow(const api::Stream& s,
 
     const int existing = indexOfKey(ctx.key);
     if (existing == m_activeIndex && existing >= 0) {
+        // Already the active row — just refresh the streamRef and
+        // re-dispatch. We do not move it: with the played group
+        // above the active row, "position 0" is no longer the
+        // natural home of the active item.
         replaceRowFromStream(existing, s, ctx);
-        if (existing != 0) {
-            moveTo(existing, 0);
-        }
-        setActiveIndex(0);
         dispatchActiveItem();
         return;
     }
@@ -77,9 +77,18 @@ void PlayQueueController::playNow(const api::Stream& s,
         Q_EMIT itemChanged(m_activeIndex);
     }
 
+    // Insert at the active slot when something is active so the new
+    // item slots in immediately above the previously-active row, or
+    // at the head of the pending range when idle. This keeps the
+    // played group above the active row instead of being shoved
+    // beneath a freshly-inserted row.
+    const int insertIdx = (m_activeIndex >= 0)
+        ? m_activeIndex
+        : firstPendingIndex();
+
     auto item = buildItem(s, ctx);
-    insertAt(std::move(item), 0);
-    setActiveIndex(0);
+    const int actual = insertAt(std::move(item), insertIdx);
+    setActiveIndex(actual);
     dispatchActiveItem();
 }
 
@@ -226,7 +235,26 @@ void PlayQueueController::moveTo(int from, int to)
 
     Q_EMIT itemMoved(from, to);
     setActiveIndex(newActive);
-    persist();
+    if (m_reordering) {
+        m_reorderDirty = true;
+    } else {
+        persist();
+    }
+}
+
+void PlayQueueController::beginReorder()
+{
+    m_reordering = true;
+    m_reorderDirty = false;
+}
+
+void PlayQueueController::endReorder()
+{
+    m_reordering = false;
+    if (m_reorderDirty) {
+        m_reorderDirty = false;
+        persist();
+    }
 }
 
 void PlayQueueController::clearAll()
@@ -269,6 +297,34 @@ void PlayQueueController::clearAllExceptActive()
         3000);
 }
 
+void PlayQueueController::clearPlayed()
+{
+    if (m_items.isEmpty()) {
+        return;
+    }
+    bool changed = false;
+    // Walk from the end so indices remain stable for the rows we
+    // haven't visited yet.
+    for (int i = m_items.size() - 1; i >= 0; --i) {
+        if (m_items[i].status != api::QueueItem::Status::Played) {
+            continue;
+        }
+        Q_EMIT itemAboutToBeRemoved(i);
+        m_items.removeAt(i);
+        Q_EMIT itemRemoved(i);
+        if (m_activeIndex > i) {
+            setActiveIndex(m_activeIndex - 1);
+        }
+        changed = true;
+    }
+    if (changed) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status", "Cleared played items."),
+            3000);
+        persist();
+    }
+}
+
 void PlayQueueController::onPlayerEndOfFile(const QString& reason,
     const api::PlaybackContext& ctx)
 {
@@ -302,11 +358,16 @@ void PlayQueueController::onPlayerEndOfFile(const QString& reason,
                 m_items[m_activeIndex].title),
             5000);
 
-        // Find the next non-Failed row after this one and dispatch.
+        // Find the next playable row after this one and dispatch.
+        // Skip over both `Failed` (already known-broken) and
+        // `Played` (already finished; the user has to click them
+        // explicitly to replay).
         const int from = m_activeIndex;
         int next = -1;
         for (int i = from + 1; i < m_items.size(); ++i) {
-            if (m_items[i].status != api::QueueItem::Status::Failed) {
+            const auto st = m_items[i].status;
+            if (st != api::QueueItem::Status::Failed
+                && st != api::QueueItem::Status::Played) {
                 next = i;
                 break;
             }
@@ -322,19 +383,38 @@ void PlayQueueController::onPlayerEndOfFile(const QString& reason,
     }
 
     // Clean end-of-file (eof / empty reason / stop without user-close):
-    // active item was watched to completion. Remove it and advance.
+    // active item was watched to completion. Mark it `Played` in
+    // place — the played group sits above the active row so the
+    // user can replay it from the queue page or via `Previous`.
     const int oldIdx = m_activeIndex;
-    Q_EMIT itemAboutToBeRemoved(oldIdx);
-    m_items.removeAt(oldIdx);
-    Q_EMIT itemRemoved(oldIdx);
+    m_items[oldIdx].status = api::QueueItem::Status::Played;
+    Q_EMIT itemChanged(oldIdx);
     ++m_resolveEpoch;
     m_userClosePending = false;
 
-    if (oldIdx < m_items.size()) {
-        setActiveIndex(oldIdx);
-        dispatchActiveItem();
+    // Find the next playable row.
+    int next = -1;
+    for (int i = oldIdx + 1; i < m_items.size(); ++i) {
+        const auto st = m_items[i].status;
+        if (st != api::QueueItem::Status::Played
+            && st != api::QueueItem::Status::Failed) {
+            next = i;
+            break;
+        }
+    }
+
+    if (next >= 0) {
+        setActiveIndex(next);
     } else {
         setActiveIndex(-1);
+    }
+
+    // Trim the played group (oldest rows first); may shift indices.
+    enforcePlayedCap();
+
+    if (m_activeIndex >= 0) {
+        dispatchActiveItem();
+    } else {
         Q_EMIT statusMessage(
             i18nc("@info:status", "Queue finished."), 4000);
         Q_EMIT windowCloseRequested();
@@ -612,23 +692,79 @@ int PlayQueueController::insertAt(api::QueueItem item, int atIndex)
     return atIndex;
 }
 
+int PlayQueueController::firstPendingIndex() const
+{
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].status != api::QueueItem::Status::Played) {
+            return i;
+        }
+    }
+    return m_items.size();
+}
+
+void PlayQueueController::enforcePlayedCap()
+{
+    constexpr int kPlayedCap = 20;
+
+    int played = 0;
+    for (const auto& it : m_items) {
+        if (it.status == api::QueueItem::Status::Played) {
+            ++played;
+        }
+    }
+    while (played > kPlayedCap) {
+        // Drop the oldest played row (lowest index, since natural
+        // EOF appends played status at the formerly-active slot,
+        // which is always lower than the new active slot).
+        for (int i = 0; i < m_items.size(); ++i) {
+            if (m_items[i].status
+                != api::QueueItem::Status::Played) {
+                continue;
+            }
+            Q_EMIT itemAboutToBeRemoved(i);
+            m_items.removeAt(i);
+            Q_EMIT itemRemoved(i);
+            if (m_activeIndex > i) {
+                setActiveIndex(m_activeIndex - 1);
+            }
+            --played;
+            break;
+        }
+    }
+}
+
 void PlayQueueController::persist()
 {
-    // Renumber and write back. The store's replaceAll backfills ids
-    // for any 0-id rows; copy them back so the in-memory list stays
-    // canonical.
-    const auto written = m_store.replaceAll(m_items);
-    if (written.size() != m_items.size()) {
+    // Filter out `Played` rows so they do not resurrect across
+    // restarts (matching the design that `Played` is session-only).
+    // Keep an index map from the persisted snapshot back to
+    // `m_items` so we can copy assigned ids onto the right rows
+    // without disturbing played entries.
+    QList<api::QueueItem> toPersist;
+    QList<int> indexMap;
+    toPersist.reserve(m_items.size());
+    indexMap.reserve(m_items.size());
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].status == api::QueueItem::Status::Played) {
+            continue;
+        }
+        toPersist.append(m_items[i]);
+        indexMap.append(i);
+    }
+
+    const auto written = m_store.replaceAll(toPersist);
+    if (written.size() != toPersist.size()) {
         qCWarning(KINEMA)
             << "PlayQueueController: persist replaceAll size mismatch ("
-            << written.size() << "vs" << m_items.size() << ")";
+            << written.size() << "vs" << toPersist.size() << ")";
         return;
     }
-    for (int i = 0; i < written.size(); ++i) {
-        m_items[i].id = written[i].id;
-        m_items[i].order = written[i].order;
+    for (int j = 0; j < written.size(); ++j) {
+        const int i = indexMap[j];
+        m_items[i].id = written[j].id;
+        m_items[i].order = written[j].order;
         if (!m_items[i].addedAt.isValid()) {
-            m_items[i].addedAt = written[i].addedAt;
+            m_items[i].addedAt = written[j].addedAt;
         }
     }
 }

@@ -133,6 +133,54 @@ int PlayQueueViewModel::failedCount() const noexcept
     return count;
 }
 
+int PlayQueueViewModel::playedCount() const noexcept
+{
+    if (!m_ctrl) {
+        return 0;
+    }
+    int count = 0;
+    for (const auto& item : m_ctrl->items()) {
+        if (item.status == api::QueueItem::Status::Played) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int PlayQueueViewModel::pendingCount() const noexcept
+{
+    if (!m_ctrl) {
+        return 0;
+    }
+    int count = 0;
+    for (const auto& item : m_ctrl->items()) {
+        const auto st = item.status;
+        if (st == api::QueueItem::Status::Pending
+            || st == api::QueueItem::Status::Failed) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int PlayQueueViewModel::leadIndex() const noexcept
+{
+    if (!m_ctrl) {
+        return -1;
+    }
+    const int active = m_ctrl->activeIndex();
+    if (active >= 0) {
+        return active;
+    }
+    const auto& items = m_ctrl->items();
+    for (int i = 0; i < items.size(); ++i) {
+        if (items[i].status != api::QueueItem::Status::Played) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 int PlayQueueViewModel::remainingCount() const noexcept
 {
     if (!hasActiveItem()) {
@@ -238,6 +286,20 @@ void PlayQueueViewModel::moveTo(int from, int to)
     }
 }
 
+void PlayQueueViewModel::beginReorder()
+{
+    if (m_ctrl) {
+        m_ctrl->beginReorder();
+    }
+}
+
+void PlayQueueViewModel::endReorder()
+{
+    if (m_ctrl) {
+        m_ctrl->endReorder();
+    }
+}
+
 void PlayQueueViewModel::clearAll()
 {
     if (m_ctrl) {
@@ -249,6 +311,13 @@ void PlayQueueViewModel::clearAllExceptActive()
 {
     if (m_ctrl) {
         m_ctrl->clearAllExceptActive();
+    }
+}
+
+void PlayQueueViewModel::clearPlayed()
+{
+    if (m_ctrl) {
+        m_ctrl->clearPlayed();
     }
 }
 
