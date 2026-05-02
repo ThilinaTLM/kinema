@@ -112,6 +112,10 @@ public Q_SLOTS:
     /// Drop everything. Stops in-flight resolution.
     void clearAll();
 
+    /// Drop every row except the current active one. When no item is
+    /// active, falls back to `clearAll()`.
+    void clearAllExceptActive();
+
     /// Retry an item previously marked `Failed`. Resets it to
     /// `Pending` and \u2014 if it's the active item or there is no
     /// active item \u2014 dispatches it.

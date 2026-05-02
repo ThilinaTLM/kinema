@@ -909,8 +909,54 @@ private Q_SLOTS:
     }
 
     // -----------------------------------------------------------
-    //  clearAll
+    //  clearAll / clearAllExceptActive
     // -----------------------------------------------------------
+
+    void clearAllExceptActiveKeepsOnlyCurrentItem()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B"),
+                            QStringLiteral("https://rd.example/B")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("C"),
+                            QStringLiteral("https://rd.example/C")),
+            makeMovieCtx(QStringLiteral("ttC"), QStringLiteral("C")));
+
+        QSignalSpy resetSpy(m_ctrl.get(),
+            &controllers::PlayQueueController::itemsReset);
+
+        m_ctrl->clearAllExceptActive();
+
+        QCOMPARE(resetSpy.count(), 1);
+        QCOMPARE(m_ctrl->items().size(), 1);
+        QCOMPARE(m_ctrl->activeIndex(), 0);
+        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttA"));
+
+        const auto persisted = m_store->loadAll();
+        QCOMPARE(persisted.size(), 1);
+        QCOMPARE(persisted[0].key.imdbId, QStringLiteral("ttA"));
+        QCOMPARE(persisted[0].order, 0);
+    }
+
+    void clearAllExceptActiveWithoutActiveFallsBackToClearAll()
+    {
+        m_ctrl->enqueue(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"),
+                QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B"),
+                            QStringLiteral("https://rd.example/B")),
+            makeMovieCtx(QStringLiteral("ttB"),
+                QStringLiteral("B")));
+        QCOMPARE(m_ctrl->activeIndex(), -1);
+
+        m_ctrl->clearAllExceptActive();
+        QVERIFY(m_ctrl->isEmpty());
+        QCOMPARE(m_ctrl->activeIndex(), -1);
+        QVERIFY(m_store->loadAll().isEmpty());
+    }
 
     void clearAllEmptiesQueueAndPersists()
     {

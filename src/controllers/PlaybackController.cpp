@@ -125,6 +125,8 @@ PlaybackController::PlaybackController(HistoryController& history,
     , m_settings(settings)
     , m_http(http)
 {
+    connect(&m_loadWatchdog, &PlaybackLoadWatchdog::timedOut,
+        this, &PlaybackController::onLoadWatchdogTimedOut);
 }
 
 void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
@@ -137,6 +139,7 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
     }
     m_window = window;
     if (!m_window) {
+        m_loadWatchdog.stop();
         ++m_streamEpoch;
         Q_EMIT streamCleared();
         m_phase = Phase::Idle;
@@ -262,10 +265,18 @@ void PlaybackController::play(const QUrl& url,
 
     m_phase = Phase::Loading;
     m_hasActiveSession = true;
+    Q_EMIT activeSessionChanged(m_hasActiveSession);
+    Q_EMIT positionChanged(m_position);
+    Q_EMIT durationChanged(m_duration);
+    Q_EMIT pausedChanged(m_paused);
     Q_EMIT sessionStateChanged();
     Q_EMIT statusMessage(
         i18nc("@info:status", "Loading “%1”…", ctx.title),
         3000);
+    // Arm the load watchdog before we hand off to mpv. Disarmed in
+    // `onFileLoaded()` / `onEndOfFile()` / `stop()`; on timeout we
+    // synthesise an error end-of-file so the queue auto-advances.
+    m_loadWatchdog.start();
     m_window->play(url, loadCtx);
 }
 
@@ -298,6 +309,7 @@ void PlaybackController::stop()
     if (!m_window || !m_hasActiveSession) {
         return;
     }
+    m_loadWatchdog.stop();
     Q_EMIT userClosedWindow(m_ctx);
     m_phase = Phase::Idle;
     m_hasActiveSession = false;
@@ -305,6 +317,10 @@ void PlaybackController::stop()
     m_position = 0.0;
     m_duration = 0.0;
     m_window->setLoadingVisible(false);
+    Q_EMIT activeSessionChanged(m_hasActiveSession);
+    Q_EMIT pausedChanged(m_paused);
+    Q_EMIT positionChanged(m_position);
+    Q_EMIT durationChanged(m_duration);
     Q_EMIT sessionStateChanged();
     m_window->stopAndHide();
 }
@@ -419,6 +435,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
 
 void PlaybackController::onFileLoaded()
 {
+    m_loadWatchdog.stop();
     if (m_window) {
         m_window->setLoadingVisible(false);
     }
@@ -431,20 +448,41 @@ void PlaybackController::onFileLoaded()
         m_phase = Phase::Playing;
         m_paused = false;
     }
+    Q_EMIT pausedChanged(m_paused);
     Q_EMIT sessionStateChanged();
     Q_EMIT fileLoaded(m_ctx);
 }
 
 void PlaybackController::onPlaybackError(const QString& reason)
 {
+    m_loadWatchdog.stop();
     if (m_window) {
         m_window->setLoadingVisible(false);
     }
     Q_EMIT playbackError(reason, m_ctx);
 }
 
+void PlaybackController::onLoadWatchdogTimedOut()
+{
+    if (m_phase != Phase::Loading) {
+        return;
+    }
+    qCWarning(KINEMA)
+        << "PlaybackController: load watchdog tripped for"
+        << m_ctx.title
+        << "after" << m_loadWatchdog.timeout().count() << "ms;"
+        << "treating as a playback error so the queue can advance.";
+    Q_EMIT statusMessage(
+        i18nc("@info:status",
+            "Could not start “%1” — the source did not respond.",
+            m_ctx.title),
+        6000);
+    onEndOfFile(QStringLiteral("error"));
+}
+
 void PlaybackController::onEndOfFile(const QString& reason)
 {
+    m_loadWatchdog.stop();
     ++m_epoch;
     m_pendingResumeSeconds = 0;
     if (m_window) {
@@ -457,6 +495,10 @@ void PlaybackController::onEndOfFile(const QString& reason)
     m_paused = false;
     m_position = 0.0;
     m_duration = 0.0;
+    Q_EMIT activeSessionChanged(m_hasActiveSession);
+    Q_EMIT pausedChanged(m_paused);
+    Q_EMIT positionChanged(m_position);
+    Q_EMIT durationChanged(m_duration);
     Q_EMIT sessionStateChanged();
     Q_EMIT endOfFile(reason, m_ctx);
 }
@@ -464,6 +506,7 @@ void PlaybackController::onEndOfFile(const QString& reason)
 void PlaybackController::onPositionChanged(double seconds)
 {
     m_position = seconds;
+    Q_EMIT positionChanged(m_position);
     if (!m_window) {
         return;
     }
@@ -509,6 +552,7 @@ void PlaybackController::onPositionChanged(double seconds)
 void PlaybackController::onDurationChanged(double seconds)
 {
     m_duration = seconds;
+    Q_EMIT durationChanged(m_duration);
     Q_EMIT sessionStateChanged();
 }
 
@@ -518,6 +562,7 @@ void PlaybackController::onPausedChanged(bool paused)
         return;
     }
     m_paused = paused;
+    Q_EMIT pausedChanged(m_paused);
     Q_EMIT sessionStateChanged();
 }
 

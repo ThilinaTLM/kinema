@@ -243,6 +243,32 @@ void PlayQueueController::clearAll()
     m_store.clear();
 }
 
+void PlayQueueController::clearAllExceptActive()
+{
+    if (m_items.isEmpty()) {
+        return;
+    }
+    if (m_activeIndex < 0 || m_activeIndex >= m_items.size()) {
+        clearAll();
+        return;
+    }
+
+    const auto active = m_items.at(m_activeIndex);
+
+    Q_EMIT itemsAboutToReset();
+    m_items = { active };
+    m_items[0].order = 0;
+    setActiveIndex(0);
+    m_userClosePending = false;
+    Q_EMIT itemsReset();
+    persist();
+
+    Q_EMIT statusMessage(
+        i18nc("@info:status",
+            "Cleared the queue and kept only the current item."),
+        3000);
+}
+
 void PlayQueueController::onPlayerEndOfFile(const QString& reason,
     const api::PlaybackContext& ctx)
 {

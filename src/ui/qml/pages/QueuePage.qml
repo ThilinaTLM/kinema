@@ -8,24 +8,6 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Top-level Play Queue page reachable from the global drawer.
-//
-//   * Header carries a single "Clear queue" action when the queue
-//     has rows.
-//   * Body is a `ListView` of `QueueRow`s bound to the `playQueue`
-//     context property exposed by `MainController`.
-//   * Empty state explains how to populate the queue.
-//
-// Auto-advance is driven entirely by the C++ side
-// (`PlayQueueController` <- `PlaybackController::endOfFile`); this
-// page is just a view + per-row actions.
-//
-// The body is a `ListView` that handles its own flicking, so the
-// outer page is a plain `Kirigami.Page`. Wrapping a self-flickable
-// view in `Kirigami.ScrollablePage` produces a parent Flickable
-// that intercepts wheel/flick events without ever scrolling, and
-// also flips the page color set to `Theme.View` (near-black under
-// dark Plasma palettes) which doesn't match the rest of the app.
 Kirigami.Page {
     id: page
 
@@ -37,42 +19,90 @@ Kirigami.Page {
     topPadding: 0
     bottomPadding: 0
 
-    actions: [
-        Kirigami.Action {
-            id: clearAction
-            icon.source: AppIcons.url("list-x")
-            icon.color: AppIcons.foreground
-            text: i18nc("@action:button", "Clear queue")
+    header: PageHeaderBar {
+        title: page.title
+
+        Item { Layout.fillWidth: true }
+
+        MetaChip {
             visible: playQueue.count > 0
+            text: i18nc("@info queue summary", "%1 total", playQueue.count)
+            tone: "neutral"
+        }
+        MetaChip {
+            visible: playQueue.count > 0
+            text: playQueue.hasActiveItem
+                ? i18nc("@info queue summary", "%1 next", playQueue.remainingCount)
+                : i18nc("@info queue summary", "%1 queued", playQueue.remainingCount)
+            tone: playQueue.hasActiveItem ? "accent" : "neutral"
+        }
+        MetaChip {
+            visible: playQueue.failedCount > 0
+            text: i18nc("@info queue summary", "%1 unavailable", playQueue.failedCount)
+            tone: "negative"
+        }
+
+        QQC2.ToolButton {
+            visible: playQueue.count > 0
+            icon.source: AppIcons.url("ellipsis")
+            icon.color: AppIcons.controlColor(enabled, false)
+            text: i18nc("@action:button", "Queue actions")
+            display: QQC2.AbstractButton.IconOnly
+            onClicked: queueActionsMenu.popup()
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+        }
+    }
+
+    QQC2.Menu {
+        id: queueActionsMenu
+
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Clear all")
+            icon.source: AppIcons.url("list-x")
+            icon.color: AppIcons.controlColor(enabled, false)
             onTriggered: clearDialog.open()
         }
-    ]
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Clear all except current")
+            icon.source: AppIcons.url("minus")
+            icon.color: AppIcons.controlColor(enabled, false)
+            enabled: playQueue.canClearExceptActive
+            onTriggered: clearOthersDialog.open()
+        }
+    }
 
     Kirigami.PromptDialog {
         id: clearDialog
         title: i18nc("@title:window confirm", "Clear queue?")
         subtitle: i18nc("@info:tooltip",
-            "This removes every item, including any that's "
-            + "currently playing. The active stream is stopped.")
+            "This removes every item, including the current one. The active stream is stopped.")
         standardButtons: Kirigami.PromptDialog.Cancel
             | Kirigami.PromptDialog.Ok
         onAccepted: playQueue.clearAll()
     }
 
-    // Empty state.
+    Kirigami.PromptDialog {
+        id: clearOthersDialog
+        title: i18nc("@title:window confirm", "Clear everything else?")
+        subtitle: i18nc("@info:tooltip",
+            "This keeps the current item in place and removes the rest of the queue.")
+        standardButtons: Kirigami.PromptDialog.Cancel
+            | Kirigami.PromptDialog.Ok
+        onAccepted: playQueue.clearAllExceptActive()
+    }
+
     Kirigami.PlaceholderMessage {
         anchors.centerIn: parent
-        width: Math.min(parent.width - Kirigami.Units.gridUnit * 4,
-            Kirigami.Units.gridUnit * 28)
+        width: Math.min(parent.width - Theme.pageWideMargin * 2,
+            Theme.placeholderMaxWidth)
         visible: playQueue.empty
         icon.source: AppIcons.url("list-video")
         icon.color: AppIcons.foreground
-        text: i18nc("@info placeholder",
-            "Your queue is empty")
+        text: i18nc("@info placeholder", "Your queue is empty")
         explanation: i18nc("@info placeholder",
-            "Pick a release from any movie or episode and tap "
-            + "\u201cPlay now\u201d, \u201cPlay next\u201d, or "
-            + "\u201cAdd to queue\u201d.")
+            "Pick a release from any movie or episode and tap “Play now”, “Play next”, or “Add to queue”.")
     }
 
     ListView {
@@ -80,10 +110,13 @@ Kirigami.Page {
         anchors.fill: parent
         visible: !playQueue.empty
         clip: true
-        spacing: 0
+        spacing: Theme.inlineSpacing
+        leftMargin: Theme.pageMargin
+        rightMargin: Theme.pageMargin
+        topMargin: Theme.pageTopSpacing
+        bottomMargin: Theme.pageBottomSpacing
         model: playQueue
 
-        // Smooth move animation when the queue is reordered.
         moveDisplaced: Transition {
             NumberAnimation {
                 properties: "y"
@@ -103,6 +136,24 @@ Kirigami.Page {
             sizeBytes: model.sizeBytes
             status: model.status
             isActive: model.isActive
+        }
+
+        QQC2.ScrollBar.vertical: QQC2.ScrollBar { }
+
+        Component.onCompleted: {
+            if (playQueue.activeIndex >= 0) {
+                positionViewAtIndex(playQueue.activeIndex, ListView.Contain);
+            }
+        }
+    }
+
+    Connections {
+        target: playQueue
+        function onActiveIndexChanged() {
+            if (playQueue.activeIndex >= 0 && list.visible) {
+                list.positionViewAtIndex(playQueue.activeIndex,
+                    ListView.Contain);
+            }
         }
     }
 }

@@ -11,6 +11,7 @@
 
 namespace kinema::controllers {
 class PlayQueueController;
+class PlaybackController;
 }
 
 namespace kinema::ui::qml {
@@ -33,6 +34,14 @@ class PlayQueueViewModel : public QAbstractListModel
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
     Q_PROPERTY(int activeIndex READ activeIndex NOTIFY activeIndexChanged)
     Q_PROPERTY(bool empty READ empty NOTIFY countChanged)
+    Q_PROPERTY(bool hasActiveItem READ hasActiveItem NOTIFY queueStateChanged)
+    Q_PROPERTY(bool canClearExceptActive READ canClearExceptActive NOTIFY queueStateChanged)
+    Q_PROPERTY(int failedCount READ failedCount NOTIFY queueStateChanged)
+    Q_PROPERTY(int remainingCount READ remainingCount NOTIFY queueStateChanged)
+    Q_PROPERTY(bool embeddedPlaybackActive READ embeddedPlaybackActive NOTIFY playbackStateChanged)
+    Q_PROPERTY(bool playbackPaused READ playbackPaused NOTIFY playbackStateChanged)
+    Q_PROPERTY(double playbackPositionSeconds READ playbackPositionSeconds NOTIFY playbackStateChanged)
+    Q_PROPERTY(double playbackDurationSeconds READ playbackDurationSeconds NOTIFY playbackStateChanged)
 public:
     enum Roles {
         TitleRole = Qt::UserRole + 1,
@@ -57,17 +66,34 @@ public:
 
     int activeIndex() const noexcept;
     bool empty() const noexcept { return rowCount() == 0; }
+    bool hasActiveItem() const noexcept;
+    bool canClearExceptActive() const noexcept;
+    int failedCount() const noexcept;
+    int remainingCount() const noexcept;
+    bool embeddedPlaybackActive() const noexcept;
+    bool playbackPaused() const noexcept;
+    double playbackPositionSeconds() const noexcept;
+    double playbackDurationSeconds() const noexcept;
+
+    void setPlaybackController(controllers::PlaybackController* ctrl);
 
 public Q_SLOTS:
     void playAt(int index);
     void removeAt(int index);
     void moveTo(int from, int to);
     void clearAll();
+    void clearAllExceptActive();
     void retryFailed(int index);
+    void togglePause();
+    void stopPlayback();
+    void playPreviousItem();
+    void playNextItem();
 
 Q_SIGNALS:
     void countChanged();
     void activeIndexChanged();
+    void queueStateChanged();
+    void playbackStateChanged();
 
 private Q_SLOTS:
     void onItemsAboutToReset();
@@ -80,10 +106,22 @@ private Q_SLOTS:
     void onItemMoved(int from, int to);
     void onItemChanged(int index);
     void onActiveIndexChanged(int index);
+    void onPlaybackSessionChanged();
+    void onPlaybackPositionChanged(double seconds);
+    void onPlaybackDurationChanged(double seconds);
+    void onPlaybackPausedChanged(bool paused);
 
 private:
+    void emitQueueStateChanged();
+    void emitPlaybackStateChanged();
+
     controllers::PlayQueueController* m_ctrl;
+    controllers::PlaybackController* m_playbackCtrl = nullptr;
     bool m_moveInProgress = false;
+    double m_playbackPositionSeconds = 0.0;
+    double m_playbackDurationSeconds = 0.0;
+    bool m_playbackPaused = false;
+    bool m_hasEmbeddedPlaybackSession = false;
 };
 
 } // namespace kinema::ui::qml

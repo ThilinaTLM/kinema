@@ -10,6 +10,7 @@
 #include "core/MediaChips.h"
 #include "ui/player/MpvVideoItem.h"
 #include "ui/player/PlayerViewModel.h"
+#include "ui/player/PlayerWindowPresentation.h"
 
 #include <KLocalizedString>
 
@@ -300,9 +301,17 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
         m_video->loadFile(url, startSec);
     }
 
-    show();
-    raise();
-    requestActivate();
+    const auto presentation =
+        window_presentation::forPlayback(isVisible());
+    if (presentation.showWindow) {
+        show();
+    }
+    if (presentation.raiseWindow) {
+        raise();
+    }
+    if (presentation.requestActivation) {
+        requestActivate();
+    }
     if (auto* root = rootObject()) {
         root->forceActiveFocus();
     }

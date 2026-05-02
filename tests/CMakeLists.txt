@@ -6,9 +6,11 @@ include(ECMAddTests)
 # pass the absolute path via a target-level definition so the tests don't
 # depend on CWD.
 set(KINEMA_TEST_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+set(KINEMA_TEST_PROJECT_ROOT "${CMAKE_SOURCE_DIR}")
 
 set(test_defs
     KINEMA_TEST_FIXTURES_DIR="${KINEMA_TEST_FIXTURES_DIR}"
+    KINEMA_TEST_PROJECT_ROOT="${KINEMA_TEST_PROJECT_ROOT}"
 )
 
 ecm_add_test(tst_magnet.cpp
@@ -294,6 +296,22 @@ if(KINEMA_ENABLE_MPV_EMBED)
         TEST_NAME tst_player_chapters_model
         LINK_LIBRARIES kinema_core Qt6::Test
     )
+    ecm_add_test(tst_mpv_load_command.cpp
+        TEST_NAME tst_mpv_load_command
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
+    ecm_add_test(tst_player_window_presentation.cpp
+        TEST_NAME tst_player_window_presentation
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
+    ecm_add_test(tst_playback_load_watchdog.cpp
+        TEST_NAME tst_playback_load_watchdog
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
+    ecm_add_test(tst_shipped_mpv_conf.cpp
+        TEST_NAME tst_shipped_mpv_conf
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
 endif()
 
 foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
@@ -322,7 +340,9 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
 endforeach()
 
 foreach(t tst_player_view_model tst_player_audio_tracks_model
-         tst_player_subtitle_tracks_model tst_player_chapters_model)
+         tst_player_subtitle_tracks_model tst_player_chapters_model
+         tst_mpv_load_command tst_player_window_presentation
+         tst_playback_load_watchdog tst_shipped_mpv_conf)
     if(TARGET ${t})
         target_compile_definitions(${t} PRIVATE ${test_defs})
     endif()

@@ -585,6 +585,9 @@ void MainController::buildCoreServices()
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
         *m_historyCtrl, m_settings, m_http.get(), this);
+    if (m_playQueueVm) {
+        m_playQueueVm->setPlaybackController(m_playbackCtrl);
+    }
     m_mprisCtrl = new controllers::MprisController(
         *m_playbackCtrl, m_playQueueCtrl, this);
     connect(m_mprisCtrl, &controllers::MprisController::raiseRequested,

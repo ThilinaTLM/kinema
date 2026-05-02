@@ -3,6 +3,9 @@
 
 #include "ui/qml-bridge/PlayQueueViewModel.h"
 
+#ifdef KINEMA_HAVE_LIBMPV
+#include "controllers/PlaybackController.h"
+#endif
 #include "controllers/PlayQueueController.h"
 #include "ui/qml-bridge/QueueDisplay.h"
 
@@ -105,6 +108,115 @@ int PlayQueueViewModel::activeIndex() const noexcept
     return m_ctrl ? m_ctrl->activeIndex() : -1;
 }
 
+bool PlayQueueViewModel::hasActiveItem() const noexcept
+{
+    return activeIndex() >= 0 && activeIndex() < rowCount();
+}
+
+bool PlayQueueViewModel::canClearExceptActive() const noexcept
+{
+    return hasActiveItem() && rowCount() > 1;
+}
+
+int PlayQueueViewModel::failedCount() const noexcept
+{
+    if (!m_ctrl) {
+        return 0;
+    }
+
+    int count = 0;
+    for (const auto& item : m_ctrl->items()) {
+        if (item.status == api::QueueItem::Status::Failed) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int PlayQueueViewModel::remainingCount() const noexcept
+{
+    if (!hasActiveItem()) {
+        return rowCount();
+    }
+    const int remaining = rowCount() - activeIndex() - 1;
+    return remaining > 0 ? remaining : 0;
+}
+
+bool PlayQueueViewModel::embeddedPlaybackActive() const noexcept
+{
+#ifdef KINEMA_HAVE_LIBMPV
+    if (!m_playbackCtrl || !m_hasEmbeddedPlaybackSession || !hasActiveItem()) {
+        return false;
+    }
+
+    const int idx = activeIndex();
+    const auto& items = m_ctrl->items();
+    return idx >= 0 && idx < items.size()
+        && m_playbackCtrl->currentKey() == items.at(idx).key;
+#else
+    return false;
+#endif
+}
+
+bool PlayQueueViewModel::playbackPaused() const noexcept
+{
+    return m_playbackPaused;
+}
+
+double PlayQueueViewModel::playbackPositionSeconds() const noexcept
+{
+    return m_playbackPositionSeconds;
+}
+
+double PlayQueueViewModel::playbackDurationSeconds() const noexcept
+{
+    return m_playbackDurationSeconds;
+}
+
+void PlayQueueViewModel::setPlaybackController(
+    controllers::PlaybackController* ctrl)
+{
+    if (m_playbackCtrl == ctrl) {
+        return;
+    }
+
+    m_playbackCtrl = ctrl;
+#ifdef KINEMA_HAVE_LIBMPV
+    if (m_playbackCtrl) {
+        m_hasEmbeddedPlaybackSession = m_playbackCtrl->hasActiveSession();
+        m_playbackPaused = m_playbackCtrl->isPaused();
+        m_playbackPositionSeconds = m_playbackCtrl->currentPositionSeconds();
+        m_playbackDurationSeconds = m_playbackCtrl->durationSeconds();
+
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::activeSessionChanged,
+            this, [this](bool) { onPlaybackSessionChanged(); });
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::positionChanged,
+            this, &PlayQueueViewModel::onPlaybackPositionChanged);
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::durationChanged,
+            this, &PlayQueueViewModel::onPlaybackDurationChanged);
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::pausedChanged,
+            this, &PlayQueueViewModel::onPlaybackPausedChanged);
+    } else {
+        m_hasEmbeddedPlaybackSession = false;
+        m_playbackPaused = false;
+        m_playbackPositionSeconds = 0.0;
+        m_playbackDurationSeconds = 0.0;
+    }
+#else
+    Q_UNUSED(ctrl);
+    m_hasEmbeddedPlaybackSession = false;
+    m_playbackPaused = false;
+    m_playbackPositionSeconds = 0.0;
+    m_playbackDurationSeconds = 0.0;
+#endif
+
+    emitPlaybackStateChanged();
+}
+
 void PlayQueueViewModel::playAt(int index)
 {
     if (m_ctrl) {
@@ -133,10 +245,49 @@ void PlayQueueViewModel::clearAll()
     }
 }
 
+void PlayQueueViewModel::clearAllExceptActive()
+{
+    if (m_ctrl) {
+        m_ctrl->clearAllExceptActive();
+    }
+}
+
 void PlayQueueViewModel::retryFailed(int index)
 {
     if (m_ctrl) {
         m_ctrl->retryFailed(index);
+    }
+}
+
+void PlayQueueViewModel::togglePause()
+{
+#ifdef KINEMA_HAVE_LIBMPV
+    if (m_playbackCtrl && embeddedPlaybackActive()) {
+        m_playbackCtrl->playPause();
+    }
+#endif
+}
+
+void PlayQueueViewModel::stopPlayback()
+{
+#ifdef KINEMA_HAVE_LIBMPV
+    if (m_playbackCtrl && embeddedPlaybackActive()) {
+        m_playbackCtrl->stop();
+    }
+#endif
+}
+
+void PlayQueueViewModel::playPreviousItem()
+{
+    if (m_ctrl) {
+        m_ctrl->playPreviousItem();
+    }
+}
+
+void PlayQueueViewModel::playNextItem()
+{
+    if (m_ctrl) {
+        m_ctrl->playNextItem();
     }
 }
 
@@ -150,6 +301,8 @@ void PlayQueueViewModel::onItemsReset()
     endResetModel();
     Q_EMIT countChanged();
     Q_EMIT activeIndexChanged();
+    emitQueueStateChanged();
+    emitPlaybackStateChanged();
 }
 
 void PlayQueueViewModel::onItemAboutToBeInserted(int index)
@@ -161,6 +314,8 @@ void PlayQueueViewModel::onItemInserted(int /*index*/)
 {
     endInsertRows();
     Q_EMIT countChanged();
+    emitQueueStateChanged();
+    emitPlaybackStateChanged();
 }
 
 void PlayQueueViewModel::onItemAboutToBeRemoved(int index)
@@ -172,6 +327,8 @@ void PlayQueueViewModel::onItemRemoved(int /*index*/)
 {
     endRemoveRows();
     Q_EMIT countChanged();
+    emitQueueStateChanged();
+    emitPlaybackStateChanged();
 }
 
 void PlayQueueViewModel::onItemAboutToBeMoved(int from, int to)
@@ -197,12 +354,16 @@ void PlayQueueViewModel::onItemMoved(int /*from*/, int /*to*/)
     }
     // The active row may have shifted as a side effect of the move.
     Q_EMIT activeIndexChanged();
+    emitQueueStateChanged();
+    emitPlaybackStateChanged();
 }
 
 void PlayQueueViewModel::onItemChanged(int index)
 {
     const auto modelIdx = this->index(index);
     Q_EMIT dataChanged(modelIdx, modelIdx);
+    emitQueueStateChanged();
+    emitPlaybackStateChanged();
 }
 
 void PlayQueueViewModel::onActiveIndexChanged(int /*index*/)
@@ -216,6 +377,47 @@ void PlayQueueViewModel::onActiveIndexChanged(int /*index*/)
             { IsActiveRole });
     }
     Q_EMIT activeIndexChanged();
+    emitQueueStateChanged();
+    emitPlaybackStateChanged();
+}
+
+void PlayQueueViewModel::onPlaybackSessionChanged()
+{
+#ifdef KINEMA_HAVE_LIBMPV
+    if (!m_playbackCtrl) {
+        return;
+    }
+    m_hasEmbeddedPlaybackSession = m_playbackCtrl->hasActiveSession();
+    emitPlaybackStateChanged();
+#endif
+}
+
+void PlayQueueViewModel::onPlaybackPositionChanged(double seconds)
+{
+    m_playbackPositionSeconds = seconds;
+    emitPlaybackStateChanged();
+}
+
+void PlayQueueViewModel::onPlaybackDurationChanged(double seconds)
+{
+    m_playbackDurationSeconds = seconds;
+    emitPlaybackStateChanged();
+}
+
+void PlayQueueViewModel::onPlaybackPausedChanged(bool paused)
+{
+    m_playbackPaused = paused;
+    emitPlaybackStateChanged();
+}
+
+void PlayQueueViewModel::emitQueueStateChanged()
+{
+    Q_EMIT queueStateChanged();
+}
+
+void PlayQueueViewModel::emitPlaybackStateChanged()
+{
+    Q_EMIT playbackStateChanged();
 }
 
 } // namespace kinema::ui::qml

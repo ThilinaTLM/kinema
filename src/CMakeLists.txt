@@ -109,11 +109,14 @@ if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
         controllers/MprisController.cpp
         controllers/PlaybackController.cpp
+        controllers/PlaybackLoadWatchdog.cpp
         ui/player/AudioTracksModel.cpp
         ui/player/ChaptersModel.cpp
+        ui/player/MpvLoadCommand.cpp
         ui/player/MpvVideoItem.cpp
         ui/player/PlayerViewModel.cpp
         ui/player/PlayerWindow.cpp
+        ui/player/PlayerWindowPresentation.cpp
         ui/player/QueueNavPreview.cpp
         ui/player/SubtitleTracksModel.cpp
     )

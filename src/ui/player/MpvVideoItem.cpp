@@ -8,6 +8,7 @@
 #include "config/PlayerSettings.h"
 #include "core/MpvConfigPaths.h"
 #include "kinema_debug.h"
+#include "ui/player/MpvLoadCommand.h"
 
 #include <MpvController>
 
@@ -275,16 +276,7 @@ void MpvVideoItem::loadFile(const QUrl& url,
         m_pendingVolume.reset();
     }
 
-    const QString urlStr = QString::fromUtf8(url.toEncoded());
-    QStringList args;
-    args << QStringLiteral("loadfile") << urlStr;
-    if (startSeconds && *startSeconds > 0.0) {
-        // loadfile <url> <flags> <index> <options>
-        args << QStringLiteral("replace")
-             << QStringLiteral("-1")
-             << QStringLiteral("start=%1").arg(*startSeconds, 0, 'f', 3);
-    }
-    command(args);
+    command(mpv_command::buildLoadFileCommand(url, startSeconds));
 }
 
 void MpvVideoItem::stop()

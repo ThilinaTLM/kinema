@@ -12,6 +12,7 @@
 
 #include <QCoro/QCoroTask>
 
+#include "controllers/PlaybackLoadWatchdog.h"
 #include "core/MpvChapterList.h"
 #include "core/MpvTrackList.h"
 
@@ -90,6 +91,10 @@ Q_SIGNALS:
     void endOfFile(const QString& reason, const api::PlaybackContext& ctx);
     void visibilityChanged(bool visible);
     void sessionStateChanged();
+    void activeSessionChanged(bool active);
+    void positionChanged(double seconds);
+    void durationChanged(double seconds);
+    void pausedChanged(bool paused);
     void seeked(double seconds);
     /// Re-emitted from `PlayerWindow::userClosedWindow`. Distinguishes
     /// a user-initiated window close from a natural end-of-file so
@@ -109,6 +114,11 @@ private Q_SLOTS:
     void onFileLoaded();
     void onPlaybackError(const QString& reason);
     void onEndOfFile(const QString& reason);
+    /// Fired by `m_loadWatchdog` when mpv has not produced either a
+    /// `fileLoaded` or an `endOfFile` within the configured deadline.
+    /// Synthesises an `endOfFile("error", …)` so the queue's
+    /// existing skip-and-advance path takes over.
+    void onLoadWatchdogTimedOut();
     void onPositionChanged(double seconds);
     void onDurationChanged(double seconds);
     void onPausedChanged(bool paused);
@@ -132,6 +142,7 @@ private:
     const config::AppSettings& m_settings;
     core::HttpClient* m_http = nullptr;
     ui::player::PlayerWindow* m_window = nullptr;
+    PlaybackLoadWatchdog m_loadWatchdog { this };
 
     QCoro::Task<void> kickoffMoviehashCompute(QUrl url, quint64 epoch);
 
