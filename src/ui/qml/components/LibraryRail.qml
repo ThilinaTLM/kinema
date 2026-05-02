@@ -87,6 +87,8 @@ ColumnLayout {
             artworkAspect: rail.artworkAspect
             fallbackIcon: rail.fallbackIcon
             posterUrl: model.posterUrl !== undefined ? model.posterUrl : ""
+            backdropUrl: model.backdropUrl !== undefined
+                ? model.backdropUrl : ""
             thumbnailUrl: model.thumbnailUrl !== undefined
                 ? model.thumbnailUrl : ""
             primaryLine: model.primaryLine !== undefined

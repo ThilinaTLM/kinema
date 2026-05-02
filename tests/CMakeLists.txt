@@ -267,6 +267,11 @@ ecm_add_test(tst_application_boot.cpp
 )
 qt_import_qml_plugins(tst_application_boot)
 
+ecm_add_test(tst_kinema_image_provider.cpp
+    TEST_NAME tst_kinema_image_provider
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Quick
+)
+
 if(KINEMA_ENABLE_MPV_EMBED)
     ecm_add_test(tst_player_view_model.cpp
         TEST_NAME tst_player_view_model
@@ -307,7 +312,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_main_controller_close_logic
          tst_discover_view_model tst_continue_watching_view_model
          tst_library_view_model tst_library_backfill
-         tst_application_boot)
+         tst_application_boot tst_kinema_image_provider)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 

@@ -30,6 +30,7 @@ public:
         , m_url(url)
     {
         if (!loader || !url.isValid()) {
+            m_failed = true;
             QMetaObject::invokeMethod(this, [this] { resolve({}); },
                 Qt::QueuedConnection);
             return;
@@ -64,6 +65,22 @@ public:
         return QQuickTextureFactory::textureFactoryForImage(m_image);
     }
 
+    // QQuick's pixmap reader decides Image.status purely from
+    // errorString() emptiness: an empty string → Ready (even when
+    // textureFactory() returns nullptr), non-empty → Error. Without
+    // this override a failed fetch would resolve with a null QImage
+    // and silently land on Ready with no texture, so consumers that
+    // walk a fallback chain via Image.onStatusChanged (notably the
+    // Library smart rails' EpisodeRailCard) would never advance.
+    QString errorString() const override
+    {
+        if (!m_failed) {
+            return {};
+        }
+        return QStringLiteral("kinema image load failed: %1")
+            .arg(m_url.toString(QUrl::RemovePassword));
+    }
+
     void cancel() override
     {
         if (m_conn) {
@@ -72,7 +89,10 @@ public:
         }
         // ImageLoader has no per-request cancel API — the in-flight
         // download will complete and seed the cache for whoever
-        // requests the URL next. Cheap.
+        // requests the URL next. Cheap. Cancellation counts as
+        // failure so QML treats the response as Image.Error rather
+        // than a successful empty load.
+        m_failed = true;
         resolve({});
     }
 
@@ -142,6 +162,12 @@ private:
         }
         m_resolved = true;
         m_image = image;
+        // A null QImage is the universal failure signal from
+        // ImageLoader (HTTP error, decode failure, missing cache).
+        // Promote it to Image.Error via errorString().
+        if (image.isNull()) {
+            m_failed = true;
+        }
         if (m_conn) {
             QObject::disconnect(m_conn);
             m_conn = {};
@@ -154,6 +180,7 @@ private:
     QImage m_image;
     QMetaObject::Connection m_conn;
     bool m_resolved {false};
+    bool m_failed {false};
 };
 
 } // namespace

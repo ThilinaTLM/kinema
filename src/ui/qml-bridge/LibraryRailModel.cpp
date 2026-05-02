@@ -39,6 +39,8 @@ QVariant LibraryRailModel::data(const QModelIndex& index, int role) const
         return r.episode ? QVariant(*r.episode) : QVariant();
     case PosterUrlRole:
         return r.posterUrl;
+    case BackdropUrlRole:
+        return r.backdropUrl;
     case ThumbnailUrlRole:
         return r.thumbnailUrl;
     case PrimaryLineRole:
@@ -63,6 +65,7 @@ QHash<int, QByteArray> LibraryRailModel::roleNames() const
         { EpisodeRole, "episode" },
         { TitleRole, "title" },
         { PosterUrlRole, "posterUrl" },
+        { BackdropUrlRole, "backdropUrl" },
         { ThumbnailUrlRole, "thumbnailUrl" },
         { PrimaryLineRole, "primaryLine" },
         { SecondaryLineRole, "secondaryLine" },

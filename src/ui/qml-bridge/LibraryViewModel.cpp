@@ -24,10 +24,20 @@ QString posterString(const api::LibraryTitle& t)
     return t.poster.isValid() ? t.poster.toString() : QString();
 }
 
+/// 16:9 hero artwork URL of the parent title — same image used
+/// behind the detail-page header. Used by the smart rails as the
+/// preferred fallback for episode cards whose own thumbnail is
+/// missing (typical for unaired Airing Soon entries) so the card
+/// stays at frame aspect instead of letterboxing a 2:3 poster.
+QString backdropString(const api::LibraryTitle& t)
+{
+    return t.backdrop.isValid() ? t.backdrop.toString() : QString();
+}
+
 /// Returns the episode's own thumbnail URL, or an empty string
-/// when the source didn't carry one. The QML side falls back to
-/// the parent poster (rendered letterboxed inside the rail's 16:9
-/// frame) so card heights stay uniform.
+/// when the source didn't carry one. The QML side then walks
+/// `backdropUrl → posterUrl → fallback icon` so card heights
+/// stay uniform across the rail.
 QString thumbnailString(const api::LibraryEpisode& ep)
 {
     return ep.thumbnail.isValid() ? ep.thumbnail.toString() : QString();
@@ -470,6 +480,7 @@ void LibraryViewModel::rebuildRails()
                 row.imdbId = t.imdbId;
                 row.title = t.title;
                 row.posterUrl = posterString(t);
+                row.backdropUrl = backdropString(t);
                 row.primaryLine = t.title;
                 row.tertiaryLine = i18nc(
                     "@info library airing-soon rail, movie release date",
@@ -488,6 +499,7 @@ void LibraryViewModel::rebuildRails()
             row.season = ep.season;
             row.episode = ep.episode;
             row.posterUrl = posterString(t);
+            row.backdropUrl = backdropString(t);
             row.thumbnailUrl = thumbnailString(ep);
             const auto code = episodeCode(ep.season, ep.episode);
             row.primaryLine = t.title;
@@ -514,6 +526,7 @@ void LibraryViewModel::rebuildRails()
             row.season = ep.season;
             row.episode = ep.episode;
             row.posterUrl = posterString(t);
+            row.backdropUrl = backdropString(t);
             row.thumbnailUrl = thumbnailString(ep);
             const auto code = episodeCode(ep.season, ep.episode);
             row.primaryLine = t.title;
@@ -558,8 +571,12 @@ void LibraryViewModel::rebuildRails()
         row.imdbId = t.imdbId;
         row.title = t.title;
         row.posterUrl = posterString(t);
-        // Recently added uses poster artwork: leave thumbnailUrl
-        // empty so the QML renders the poster directly.
+        // Recently added intentionally uses poster artwork only:
+        // both `thumbnailUrl` and `backdropUrl` stay empty so the
+        // card's fallback chain skips straight to the 2:3 poster.
+        // (Up Next and Airing Soon use 16:9 frames and want the
+        // show backdrop as their thumbnail fallback; Recently
+        // Added is a 2:3 poster strip and must keep that look.)
         row.primaryLine = t.title;
         if (t.year) {
             row.secondaryLine = QString::number(*t.year);

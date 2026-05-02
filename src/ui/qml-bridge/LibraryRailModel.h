@@ -36,13 +36,20 @@ struct LibraryRailRow {
     /// Series or movie title (the parent saved-library row).
     QString title;
     /// 2:3 poster URL of the parent title. Always set when known;
-    /// the QML uses it as a letterboxed fallback inside the rail's
-    /// configured artwork frame when `thumbnailUrl` is empty.
+    /// the QML uses it as a last-resort letterboxed fallback inside
+    /// the rail's configured artwork frame when both `thumbnailUrl`
+    /// and `backdropUrl` are unavailable.
     QString posterUrl;
+    /// 16:9 backdrop URL of the parent title. Used as the preferred
+    /// fallback for episode rails when an episode has no thumbnail
+    /// (e.g. unaired Airing Soon entries) so the card renders the
+    /// show's hero artwork at the same aspect as the frame instead
+    /// of a letterboxed poster.
+    QString backdropUrl;
     /// 16:9 episode still URL when the source actually had one.
     /// Empty for movies and for series rows whose Cinemeta payload
-    /// didn't include a thumbnail — the card then renders
-    /// `posterUrl` with `PreserveAspectFit` instead of crop.
+    /// didn't include a thumbnail — the card then walks
+    /// `backdropUrl` → `posterUrl` → fallback icon.
     QString thumbnailUrl;
     QString primaryLine;
     QString secondaryLine;
@@ -66,6 +73,7 @@ public:
         EpisodeRole,
         TitleRole,
         PosterUrlRole,
+        BackdropUrlRole,
         ThumbnailUrlRole,
         PrimaryLineRole,
         SecondaryLineRole,

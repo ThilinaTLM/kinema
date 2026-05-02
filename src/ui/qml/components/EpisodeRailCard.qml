@@ -26,19 +26,21 @@ import dev.tlmtech.kinema.app
 // Empty lines are hidden so a movie row (two lines) and an episode
 // row (three lines) coexist without forcing extra whitespace.
 //
-// Artwork resolves through a `thumbnail \u2192 poster \u2192
-// fallback icon` chain. The card starts on whichever URL is
-// supplied and advances on `KinemaArtworkFrame.imageError()`, so
-// an unaired episode whose Cinemeta thumbnail 404s still ends up
-// showing the parent series poster instead of an empty frame.
-// When the card is configured with a 16:9 frame but resolves to a
-// 2:3 poster, the frame switches to letterbox mode so the poster
-// sits letterboxed instead of being crop-distorted.
+// Artwork resolves through a `thumbnail \u2192 backdrop \u2192
+// poster \u2192 fallback icon` chain. The card starts on whichever
+// URL is supplied and advances on
+// `KinemaArtworkFrame.imageError()`, so an unaired episode whose
+// Cinemeta thumbnail 404s falls back to the parent show's hero
+// backdrop (same image used on the detail page) instead of an
+// empty frame. The 2:3 poster is the last-resort artwork for the
+// rare case where TMDB lacks a backdrop; in a 16:9 frame it's
+// rendered letterboxed instead of being crop-distorted.
 Item {
     id: card
 
     // ---- Inputs --------------------------------------------------
     property string posterUrl: ""
+    property string backdropUrl: ""
     property string thumbnailUrl: ""
     property string primaryLine: ""
     property string secondaryLine: ""
@@ -54,37 +56,38 @@ Item {
 
     /// Artwork resolution step:
     ///   0 — try `thumbnailUrl` (cropped 16:9 episode still)
-    ///   1 — try `posterUrl`    (letterboxed 2:3 poster fallback)
-    ///   2 — give up, render the fallback icon over the alt-bg
+    ///   1 — try `backdropUrl`  (cropped 16:9 show backdrop)
+    ///   2 — try `posterUrl`    (letterboxed 2:3 show poster)
+    ///   3 — give up, render the fallback icon over the alt-bg
     ///
-    /// Initial step is computed from which URL is non-empty; the
-    /// frame's `imageError` signal advances on load errors, and
-    /// the `on*UrlChanged` handlers reset the step when the
-    /// delegate is recycled to a different model row.
-    property int _artStep: thumbnailUrl.length > 0
-        ? 0 : (posterUrl.length > 0 ? 1 : 2)
+    /// Initial step skips past empty URLs; the frame's `imageError`
+    /// signal advances on load errors, and the `on*UrlChanged`
+    /// handlers reset the step when the delegate is recycled.
+    function _initialStep() {
+        if (thumbnailUrl.length > 0) return 0;
+        if (backdropUrl.length > 0) return 1;
+        if (posterUrl.length > 0) return 2;
+        return 3;
+    }
+
+    property int _artStep: _initialStep()
 
     readonly property string _artUrl:
         _artStep === 0 ? thumbnailUrl
-        : _artStep === 1 ? posterUrl
+        : _artStep === 1 ? backdropUrl
+        : _artStep === 2 ? posterUrl
         : ""
 
-    /// Step 0 = real episode still → crop into the rail's frame.
-    /// Steps 1/2 = poster fallback → letterbox so 2:3 art doesn't
-    /// stretch inside a 16:9 frame.
-    readonly property bool _artIsThumbnail: _artStep === 0
+    /// Steps 0/1 are 16:9 artwork (episode still / show backdrop)
+    /// — crop into the rail's frame. Step 2 is the 2:3 poster
+    /// fallback — letterbox inside a 16:9 frame so the art isn't
+    /// crop-distorted.
+    readonly property bool _artIsLetterbox:
+        _artStep === 2 && card.artworkAspect < 1
 
-    onThumbnailUrlChanged: _artStep =
-        thumbnailUrl.length > 0
-            ? 0 : (posterUrl.length > 0 ? 1 : 2)
-    onPosterUrlChanged: {
-        if (_artStep === 1 && posterUrl.length === 0) {
-            _artStep = 2;
-        } else if (_artStep === 2 && posterUrl.length > 0
-            && thumbnailUrl.length === 0) {
-            _artStep = 1;
-        }
-    }
+    onThumbnailUrlChanged: _artStep = _initialStep()
+    onBackdropUrlChanged: _artStep = _initialStep()
+    onPosterUrlChanged: _artStep = _initialStep()
 
     readonly property bool _hovered: hoverHandler.hovered
 
@@ -130,31 +133,35 @@ Item {
 
             url: card._artUrl
             aspect: card.artworkAspect
-            // Real episode still → crop. Poster fallback in a 16:9
-            // frame → letterbox so the 2:3 art isn't stretched.
-            // Posters in their native aspect (1.5) crop neutrally,
-            // so the flag only matters for the thumbnail-fallback
-            // case.
-            letterbox: !card._artIsThumbnail
-                && card.artworkAspect < 1
+            // 16:9 artwork (steps 0/1) crops into the frame. 2:3
+            // poster (step 2) inside a 16:9 frame letterboxes so
+            // the art isn't crop-distorted. Native-aspect posters
+            // in poster-aspect frames (Recently Added) crop
+            // neutrally and never reach the letterbox path.
+            letterbox: card._artIsLetterbox
             fallbackIcon: card.fallbackIcon
             hovered: card._hovered
             focusRing: card._hovered || card.activeFocus
             progress: card.progress
 
-            // Walk the fallback chain on load failure: thumbnail →
-            // poster → give up. Cinemeta sometimes returns a
-            // thumbnail URL for unaired episodes whose still
-            // doesn't actually exist on the CDN yet, and without
-            // this hop the frame would just stay empty.
+            // Walk the fallback chain on load failure:
+            //   thumbnail → backdrop → poster → give up.
+            // Skip steps whose URL is empty (or duplicates an
+            // already-failed URL) so we don't bounce between
+            // identical sources.
             onImageError: {
-                if (card._artStep === 0
-                    && card.posterUrl.length > 0
-                    && card.posterUrl !== card.thumbnailUrl) {
-                    card._artStep = 1;
-                } else if (card._artStep < 2) {
-                    card._artStep = 2;
+                let next = card._artStep + 1;
+                while (next <= 2) {
+                    const url = next === 1
+                        ? card.backdropUrl
+                        : card.posterUrl;
+                    if (url.length > 0
+                        && url !== card._artUrl) {
+                        break;
+                    }
+                    next += 1;
                 }
+                card._artStep = next;
             }
         }
 
