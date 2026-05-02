@@ -389,7 +389,7 @@ private:
     QList<api::Stream> m_rawStreams;
     StreamsListModel::SortMode m_sortMode
         = StreamsListModel::SortMode::Smart;
-    bool m_sortDescending = false;
+    bool m_sortDescending = true;
 
     // Transient UI filter state — not persisted.
     QString m_uiResolutionFilter;

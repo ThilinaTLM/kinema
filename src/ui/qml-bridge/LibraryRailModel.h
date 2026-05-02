@@ -15,13 +15,19 @@
 
 namespace kinema::ui::qml {
 
-/// One card in a Library page rail. Same shape for all three rails
-/// (Up Next, Airing Soon, Coming Up); the populating view-model
-/// fills `primaryLine` / `secondaryLine` per rail semantics:
+/// One card in a Library page rail. Same shape across rails;
+/// callers (the view-model) populate the three text lines and the
+/// artwork URLs per their own semantics:
 ///
-///   * Up Next       \u2014 next unwatched aired episode of a saved series
-///   * Airing Soon   \u2014 next upcoming episode airing within ~30 days
-///   * Coming Up     \u2014 saved movie with a future release date
+///   * Up Next        — next unwatched aired episode per saved series
+///   * Airing Soon    — next upcoming item (episode or movie) by date
+///   * Recently Added — most-recently-saved titles
+///
+/// Three text lines give the card room for show title + episode
+/// designator + meta ("Airs Fri, Apr 26", resume %, "Added 2 days
+/// ago"). Empty lines are hidden by the QML, so cards with two-
+/// line content (movies) and three-line content (episodes) coexist
+/// without forcing uniform whitespace.
 struct LibraryRailRow {
     api::MediaKind kind = api::MediaKind::Movie;
     QString imdbId;
@@ -29,16 +35,18 @@ struct LibraryRailRow {
     std::optional<int> episode;
     /// Series or movie title (the parent saved-library row).
     QString title;
-    /// 2:3 poster URL of the parent title (used as fallback when
-    /// `thumbnailUrl` is empty).
+    /// 2:3 poster URL of the parent title. Always set when known;
+    /// the QML uses it as a letterboxed fallback inside the rail's
+    /// configured artwork frame when `thumbnailUrl` is empty.
     QString posterUrl;
-    /// 16:9 episode still URL when `kind == Series` and the rail is
-    /// Up Next / Airing Soon. Empty for movies and as a fallback.
+    /// 16:9 episode still URL when the source actually had one.
+    /// Empty for movies and for series rows whose Cinemeta payload
+    /// didn't include a thumbnail — the card then renders
+    /// `posterUrl` with `PreserveAspectFit` instead of crop.
     QString thumbnailUrl;
-    /// Bold first line on the card (e.g. "S02E08 \u2014 The Bell" or movie title).
     QString primaryLine;
-    /// Caption second line on the card (e.g. "Airs Fri, Apr 26").
     QString secondaryLine;
+    QString tertiaryLine;
     std::optional<QDate> releaseDate;
     /// Resume position fraction (0.0..1.0) when this row has playback
     /// progress, otherwise -1. Currently only Up Next surfaces this.
@@ -61,6 +69,7 @@ public:
         ThumbnailUrlRole,
         PrimaryLineRole,
         SecondaryLineRole,
+        TertiaryLineRole,
         ProgressRole,
     };
     Q_ENUM(Roles)

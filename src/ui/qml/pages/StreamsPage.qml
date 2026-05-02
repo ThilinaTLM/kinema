@@ -18,11 +18,14 @@ import dev.tlmtech.kinema.app
 // Chrome:
 //
 //   * `header:` is a single merged `PageHeaderBar` inlining the page
-//     title with sorting affordances (`Sort ▾` + `Descending`) and a
-//     single `Filters` button.
+//     title with a single `Sort` trigger button (opens
+//     `StreamSortDialog`) and a single `Filters` button.
 //   * The filters dialog owns all stream filters — Resolution,
-//     Cached only, HDR, Dolby Vision, and Dual / Multi audio — so the
-//     header stays compact.
+//     Cached only, HDR, Dolby Vision, and Dual / Multi audio.
+//   * The sort dialog owns the sort mode and ascending / descending
+//     direction in one place, so the header trigger can stay short
+//     even for `Smart` (which would otherwise spell out its three-key
+//     shape inline).
 //
 // Esc pops back to the previous page (handled by the shell-level
 // shortcut in `ApplicationShell.qml`).
@@ -159,11 +162,16 @@ Kirigami.Page {
         }
     }
 
+    // ---- sort dialog -------------------------------------------
+    StreamSortDialog {
+        id: streamSortDialog
+        vm: page.detailVm
+    }
+
     // ---- header: merged title + sorting + filters ---------------
     header: PageHeaderBar {
         id: filterBar
         title: page.title
-        titleMaximumWidth: Kirigami.Units.gridUnit * 24
         advancedFiltersDialog: streamsAdvancedDialog
         advancedFiltersButtonText: i18nc(
             "@action:button open stream filters dialog", "Filters")
@@ -178,64 +186,69 @@ Kirigami.Page {
         // Right-align controls after the title.
         Item { Layout.fillWidth: true }
 
-        // ---- Sort (pick-one) ------------------------------------
-        FilterMenuButton {
+        // ---- Sort trigger ---------------------------------------
+        // Single button — opens StreamSortDialog. Label intentionally
+        // omits Smart's parenthetical shape ("cached, quality,
+        // seeders") because the dialog body explains it; the bar has
+        // to fit. For non-Smart modes the trailing arrow signals the
+        // active direction so the user does not have to open the
+        // dialog to read it.
+        QQC2.ToolButton {
             Layout.alignment: Qt.AlignVCenter
-            axisLabel: i18nc("@action:button browse sort", "Sort")
+            flat: true
+            display: QQC2.AbstractButton.TextBesideIcon
             icon.source: AppIcons.url("arrow-up-down")
-            active: page.detailVm
-                && page.detailVm.sortMode !== StreamsListModel.Smart
+            readonly property int mode: page.detailVm
+                ? page.detailVm.sortMode : StreamsListModel.Smart
+            readonly property bool isSmart:
+                mode === StreamsListModel.Smart
+            readonly property bool active: !isSmart
+            icon.color: active
+                ? AppIcons.accent
+                : AppIcons.controlColor(enabled, false)
+            font.bold: active
             enabled: page.detailVm
                 && page.detailVm.streams
                 && page.detailVm.streams.count > 0
-            options: [
-                { value: StreamsListModel.Smart, label:
-                    i18nc("@action:inmenu sort streams",
-                        "Smart (cached, quality, seeders)") },
-                { value: StreamsListModel.Seeders, label:
-                    i18nc("@action:inmenu sort streams", "Seeders") },
-                { value: StreamsListModel.Size, label:
-                    i18nc("@action:inmenu sort streams", "Size") },
-                { value: StreamsListModel.Quality, label:
-                    i18nc("@action:inmenu sort streams", "Quality") },
-                { value: StreamsListModel.Provider, label:
-                    i18nc("@action:inmenu sort streams", "Provider") },
-                { value: StreamsListModel.ReleaseName, label:
-                    i18nc("@action:inmenu sort streams",
-                        "Release name") }
-            ]
-            currentValue: page.detailVm
-                ? page.detailVm.sortMode : StreamsListModel.Smart
-            onActivated: v => {
-                if (page.detailVm) {
-                    page.detailVm.sortMode = v;
+            text: {
+                const m = mode;
+                const arrow = isSmart
+                    ? ""
+                    : (page.detailVm && page.detailVm.sortDescending
+                        ? " \u2193" : " \u2191");
+                switch (m) {
+                case StreamsListModel.Smart:
+                    return i18nc("@action:button sort trigger label",
+                        "Sort: Smart");
+                case StreamsListModel.Seeders:
+                    return i18nc(
+                        "@action:button sort trigger, %1 direction arrow",
+                        "Sort: Seeders%1", arrow);
+                case StreamsListModel.Size:
+                    return i18nc(
+                        "@action:button sort trigger, %1 direction arrow",
+                        "Sort: Size%1", arrow);
+                case StreamsListModel.Quality:
+                    return i18nc(
+                        "@action:button sort trigger, %1 direction arrow",
+                        "Sort: Quality%1", arrow);
+                case StreamsListModel.Provider:
+                    return i18nc(
+                        "@action:button sort trigger, %1 direction arrow",
+                        "Sort: Provider%1", arrow);
+                case StreamsListModel.ReleaseName:
+                    return i18nc(
+                        "@action:button sort trigger, %1 direction arrow",
+                        "Sort: Release name%1", arrow);
                 }
+                return i18nc("@action:button sort trigger fallback",
+                    "Sort");
             }
-        }
-
-        // ---- Descending toggle ----------------------------------
-        // Pulled out of the Sort menu so the affordance is visible
-        // at a glance. Disabled when sort mode is Smart, which has
-        // a fixed shape.
-        QQC2.ToolButton {
-            Layout.alignment: Qt.AlignVCenter
-            display: QQC2.AbstractButton.IconOnly
-            icon.source: AppIcons.url("arrow-down")
-            icon.color: AppIcons.controlColor(enabled, checked)
-            flat: true
-            checkable: true
-            text: i18nc("@action:button toggle descending sort",
-                "Descending")
-            QQC2.ToolTip.text: text
+            QQC2.ToolTip.text: i18nc("@info:tooltip sort trigger",
+                "Choose how streams are ordered")
             QQC2.ToolTip.visible: hovered
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-            enabled: page.detailVm
-                && page.detailVm.sortMode !== StreamsListModel.Smart
-            checked: page.detailVm && page.detailVm.sortDescending
-            onClicked: if (page.detailVm) {
-                page.detailVm.sortDescending =
-                    !page.detailVm.sortDescending;
-            }
+            onClicked: streamSortDialog.open()
         }
     }
 

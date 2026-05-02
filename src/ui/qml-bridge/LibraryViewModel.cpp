@@ -3,6 +3,7 @@
 
 #include "ui/qml-bridge/LibraryViewModel.h"
 
+#include "config/LibrarySettings.h"
 #include "controllers/LibraryController.h"
 #include "controllers/WatchedController.h"
 #include "core/DateFormat.h"
@@ -23,13 +24,13 @@ QString posterString(const api::LibraryTitle& t)
     return t.poster.isValid() ? t.poster.toString() : QString();
 }
 
-QString thumbnailString(const api::LibraryEpisode& ep,
-    const api::LibraryTitle& parent)
+/// Returns the episode's own thumbnail URL, or an empty string
+/// when the source didn't carry one. The QML side falls back to
+/// the parent poster (rendered letterboxed inside the rail's 16:9
+/// frame) so card heights stay uniform.
+QString thumbnailString(const api::LibraryEpisode& ep)
 {
-    if (ep.thumbnail.isValid()) {
-        return ep.thumbnail.toString();
-    }
-    return posterString(parent);
+    return ep.thumbnail.isValid() ? ep.thumbnail.toString() : QString();
 }
 
 QString episodeCode(int season, int episode)
@@ -70,21 +71,25 @@ std::optional<QDate> dateWindowFloor(int idx)
     }
 }
 
-constexpr int kAiringSoonHorizonDays = 30;
+constexpr int kAiringSoonEpisodeHorizonDays = 30;
+constexpr int kRecentlyAddedLimit = 20;
 
 } // namespace
 
 LibraryViewModel::LibraryViewModel(
     controllers::LibraryController* library,
     controllers::WatchedController* watched,
+    config::LibrarySettings& settings,
     QObject* parent)
     : QObject(parent)
     , m_library(library)
     , m_watched(watched)
+    , m_librarySettings(&settings)
     , m_model(new LibraryListModel(this))
     , m_upNextModel(new LibraryRailModel(this))
     , m_airingSoonModel(new LibraryRailModel(this))
-    , m_comingUpModel(new LibraryRailModel(this))
+    , m_recentlyAddedModel(new LibraryRailModel(this))
+    , m_smartMode(settings.smartMode())
 {
     if (m_library) {
         connect(m_library, &controllers::LibraryController::changed,
@@ -115,6 +120,16 @@ bool LibraryViewModel::filtersActive() const noexcept
         || m_dateWindow != DateWindowAny
         || m_minRatingPct > 0
         || m_hideWatched;
+}
+
+void LibraryViewModel::setSmartMode(bool v)
+{
+    if (m_smartMode == v) return;
+    m_smartMode = v;
+    if (m_librarySettings) {
+        m_librarySettings->setSmartMode(v);
+    }
+    Q_EMIT smartModeChanged();
 }
 
 void LibraryViewModel::setKind(KindFilter v)
@@ -258,7 +273,7 @@ void LibraryViewModel::activateRail(const QString& railId, int row)
     LibraryRailModel* m = nullptr;
     if (railId == QLatin1String("upNext")) m = m_upNextModel;
     else if (railId == QLatin1String("airingSoon")) m = m_airingSoonModel;
-    else if (railId == QLatin1String("comingUp")) m = m_comingUpModel;
+    else if (railId == QLatin1String("recentlyAdded")) m = m_recentlyAddedModel;
     if (!m) return;
     const auto* r = m->at(row);
     if (!r) return;
@@ -267,14 +282,14 @@ void LibraryViewModel::activateRail(const QString& railId, int row)
         return;
     }
     if (r->season && r->episode && railId == QLatin1String("upNext")) {
-        // Up Next episodes have aired \u2014 jump straight into streams.
+        // Up Next episodes have aired -- jump straight into streams.
         Q_EMIT openSeriesEpisodeRequested(
             r->imdbId, r->title, *r->season, *r->episode);
         return;
     }
     // Airing Soon rows reference unaired episodes whose streams will
-    // be empty; route to the series page so the user can browse the
-    // surrounding context (release date, episode list).
+    // be empty; recentlyAdded is just "open the title". In both
+    // cases the safe action is to open the series page.
     Q_EMIT openSeriesRequested(r->imdbId, r->title);
 }
 
@@ -434,15 +449,20 @@ void LibraryViewModel::rebuildAvailableGenres()
 void LibraryViewModel::rebuildRails()
 {
     QList<LibraryRailRow> upNext;
-    QList<LibraryRailRow> airing;
-    QList<LibraryRailRow> coming;
+    QList<LibraryRailRow> airingOrComing;
+    QList<LibraryRailRow> recentlyAdded;
 
     const auto today = QDate::currentDate();
-    const auto airingHorizon = today.addDays(kAiringSoonHorizonDays);
+    const auto episodeHorizon
+        = today.addDays(kAiringSoonEpisodeHorizonDays);
 
     for (const auto& e : m_entries) {
         const auto& t = e.title;
 
+        // "Airing soon" merges upcoming episodes (within the
+        // ~30-day horizon) and saved movies with any future
+        // release date. Sort is ascending by release date so a
+        // single chronological strip surfaces what's next.
         if (t.kind == api::MediaKind::Movie) {
             if (t.releaseDate && *t.releaseDate > today) {
                 LibraryRailRow row;
@@ -451,45 +471,15 @@ void LibraryViewModel::rebuildRails()
                 row.title = t.title;
                 row.posterUrl = posterString(t);
                 row.primaryLine = t.title;
-                row.secondaryLine = i18nc(
-                    "@info library coming-up rail, release date",
+                row.tertiaryLine = i18nc(
+                    "@info library airing-soon rail, movie release date",
                     "Releases %1", releaseText(t.releaseDate));
                 row.releaseDate = t.releaseDate;
-                coming.append(std::move(row));
+                airingOrComing.append(std::move(row));
             }
-            continue;
-        }
-
-        // Series.
-        if (e.nextToWatch) {
-            const auto& ep = *e.nextToWatch;
-            LibraryRailRow row;
-            row.kind = api::MediaKind::Series;
-            row.imdbId = t.imdbId;
-            row.title = t.title;
-            row.season = ep.season;
-            row.episode = ep.episode;
-            row.posterUrl = posterString(t);
-            row.thumbnailUrl = thumbnailString(ep, t);
-            const auto code = episodeCode(ep.season, ep.episode);
-            row.primaryLine = ep.title.isEmpty()
-                ? code
-                : i18nc(
-                    "@info library up-next card, episode code and title",
-                    "%1 \u2014 %2", code, ep.title);
-            row.secondaryLine = t.title;
-            // Only carry resume progress when the resume *belongs to*
-            // this same episode; otherwise the bar would lie.
-            if (e.resume && e.resume->key.season == ep.season
-                && e.resume->key.episode == ep.episode) {
-                row.progress = e.resumeProgress;
-            }
-            upNext.append(std::move(row));
-        }
-
-        if (e.firstUpcoming
+        } else if (e.firstUpcoming
             && e.firstUpcoming->releaseDate
-            && *e.firstUpcoming->releaseDate <= airingHorizon) {
+            && *e.firstUpcoming->releaseDate <= episodeHorizon) {
             const auto& ep = *e.firstUpcoming;
             LibraryRailRow row;
             row.kind = api::MediaKind::Series;
@@ -498,27 +488,86 @@ void LibraryViewModel::rebuildRails()
             row.season = ep.season;
             row.episode = ep.episode;
             row.posterUrl = posterString(t);
-            row.thumbnailUrl = thumbnailString(ep, t);
+            row.thumbnailUrl = thumbnailString(ep);
             const auto code = episodeCode(ep.season, ep.episode);
-            row.primaryLine = ep.title.isEmpty()
-                ? i18nc(
-                    "@info library airing-soon, episode code only",
-                    "%1 \u2014 %2", t.title, code)
+            row.primaryLine = t.title;
+            row.secondaryLine = ep.title.isEmpty()
+                ? code
                 : i18nc(
-                    "@info library airing-soon, title episode code and title",
-                    "%1 \u2014 %2 %3", t.title, code, ep.title);
-            row.secondaryLine = i18nc(
-                "@info library airing-soon, release date",
+                    "@info library rail, episode code dot title",
+                    "%1 \u00b7 %2", code, ep.title);
+            row.tertiaryLine = i18nc(
+                "@info library airing-soon rail, episode air date",
                 "Airs %1", releaseText(ep.releaseDate));
             row.releaseDate = ep.releaseDate;
-            airing.append(std::move(row));
+            airingOrComing.append(std::move(row));
+        }
+
+        // "Up Next" surfaces the next unwatched aired episode per
+        // series only; movies don't have a meaningful "next".
+        if (t.kind == api::MediaKind::Series && e.nextToWatch) {
+            const auto& ep = *e.nextToWatch;
+            LibraryRailRow row;
+            row.kind = api::MediaKind::Series;
+            row.imdbId = t.imdbId;
+            row.title = t.title;
+            row.season = ep.season;
+            row.episode = ep.episode;
+            row.posterUrl = posterString(t);
+            row.thumbnailUrl = thumbnailString(ep);
+            const auto code = episodeCode(ep.season, ep.episode);
+            row.primaryLine = t.title;
+            row.secondaryLine = ep.title.isEmpty()
+                ? code
+                : i18nc(
+                    "@info library rail, episode code dot title",
+                    "%1 \u00b7 %2", code, ep.title);
+            // Only carry resume progress when the resume *belongs to*
+            // this same episode; otherwise the bar would lie.
+            if (e.resume && e.resume->key.season == ep.season
+                && e.resume->key.episode == ep.episode) {
+                row.progress = e.resumeProgress;
+                row.tertiaryLine = i18nc(
+                    "@info library up-next, resume percent",
+                    "Resume from %1%",
+                    qRound(qBound(0.0, e.resumeProgress, 1.0)
+                        * 100.0));
+            }
+            upNext.append(std::move(row));
         }
     }
 
-    // Sort:
-    //   * Up Next       - by series title for predictability
-    //   * Airing Soon   - by ascending release date
-    //   * Coming Up     - by ascending release date
+    // Recently added: every saved title, sorted by addedAt desc
+    // and capped so the rail stays visually sane on large libraries.
+    QList<const Entry*> byAdded;
+    byAdded.reserve(m_entries.size());
+    for (const auto& e : m_entries) {
+        byAdded.append(&e);
+    }
+    std::sort(byAdded.begin(), byAdded.end(),
+        [](const Entry* a, const Entry* b) {
+            return a->title.addedAt > b->title.addedAt;
+        });
+    if (byAdded.size() > kRecentlyAddedLimit) {
+        byAdded.resize(kRecentlyAddedLimit);
+    }
+    for (const auto* e : byAdded) {
+        const auto& t = e->title;
+        LibraryRailRow row;
+        row.kind = t.kind;
+        row.imdbId = t.imdbId;
+        row.title = t.title;
+        row.posterUrl = posterString(t);
+        // Recently added uses poster artwork: leave thumbnailUrl
+        // empty so the QML renders the poster directly.
+        row.primaryLine = t.title;
+        if (t.year) {
+            row.secondaryLine = QString::number(*t.year);
+        }
+        row.releaseDate = t.releaseDate;
+        recentlyAdded.append(std::move(row));
+    }
+
     std::sort(upNext.begin(), upNext.end(),
         [](const auto& a, const auto& b) {
             return QString::localeAwareCompare(a.title, b.title) < 0;
@@ -530,12 +579,12 @@ void LibraryViewModel::rebuildRails()
         }
         return a.releaseDate.has_value() > b.releaseDate.has_value();
     };
-    std::sort(airing.begin(), airing.end(), byReleaseAsc);
-    std::sort(coming.begin(), coming.end(), byReleaseAsc);
+    std::sort(airingOrComing.begin(), airingOrComing.end(),
+        byReleaseAsc);
 
     m_upNextModel->setRows(std::move(upNext));
-    m_airingSoonModel->setRows(std::move(airing));
-    m_comingUpModel->setRows(std::move(coming));
+    m_airingSoonModel->setRows(std::move(airingOrComing));
+    m_recentlyAddedModel->setRows(std::move(recentlyAdded));
 }
 
 // -- grid -------------------------------------------------------------

@@ -436,7 +436,7 @@ private Q_SLOTS:
         Fixture f;
         QCOMPARE(f.vm.sortMode(),
             static_cast<int>(StreamsListModel::SortMode::Smart));
-        QCOMPARE(f.vm.sortDescending(), false);
+        QCOMPARE(f.vm.sortDescending(), true);
     }
 
     void testSmartSortPutsCachedFirstThenResolutionThenSeeders()

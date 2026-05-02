@@ -9,19 +9,23 @@ import org.kde.kirigami as Kirigami
 import dev.tlmtech.kinema.app
 
 // One stream row, tuned for scanability without making every field
-// fight for top priority.
+// fight for top priority. Visually shaped to match `EpisodeRow` —
+// alternate background colour, soft border, hover overlay — so the
+// streams list reads as a stack of distinct cards rather than a
+// flat block.
 //
-// Hierarchy:
-//   1. Quality rail     — compact resolution chip + RD status badge.
-//   2. Summary column   — one primary technical line (`source · codec ·
-//                         hdr · audio`) with a quieter secondary chip row.
-//   3. Metrics column   — size + seeders, kept aligned but visually softer.
+// Information hierarchy, primary to secondary:
+//
+//   1. Quality rail     — resolution chip + RD status badge. Top-tier
+//                         signal: this is the first thing a user reads.
+//   2. Metrics column   — seeders + size, right-aligned and bold.
+//                         Top-tier signal: drives the play/skip choice.
+//   3. Summary column   — `source · codec · hdr · audio`, plus chips
+//                         for languages / multi / release group /
+//                         provider. Demoted to caption weight because
+//                         the technical chrome is supporting context,
+//                         not the row's title.
 //   4. Actions          — primary play/open button + overflow menu.
-//
-// The row still exposes the same facts as before; the main change is
-// that resolution remains visible without being a second headline, and
-// secondary chips no longer duplicate facts already present in the
-// primary summary line.
 QQC2.ItemDelegate {
     id: card
 
@@ -46,7 +50,7 @@ QQC2.ItemDelegate {
     width: ListView.view
         ? ListView.view.width - ListView.view.leftMargin - ListView.view.rightMargin
         : implicitWidth
-    padding: Theme.groupSpacing
+    padding: Theme.pageMargin
     implicitHeight: layout.implicitHeight + padding * 2
 
     onDoubleClicked: card._activatePrimary()
@@ -76,10 +80,19 @@ QQC2.ItemDelegate {
     }
 
     background: Rectangle {
-        radius: Theme.radius
-        color: card.hovered
-            ? Qt.alpha(Theme.foreground, 0.04)
-            : "transparent"
+        radius: Kirigami.Units.cornerRadius
+        color: Kirigami.Theme.alternateBackgroundColor
+        border.color: Qt.alpha(Theme.foreground,
+            card.hovered ? 0.12 : 0.08)
+        border.width: 1
+
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: card.hovered
+                ? Qt.alpha(Theme.hover, 0.12)
+                : "transparent"
+        }
     }
 
     contentItem: RowLayout {
@@ -89,7 +102,8 @@ QQC2.ItemDelegate {
         // ---- 1. Quality rail -----------------------------------
         ColumnLayout {
             Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 5
+            Layout.preferredWidth: Math.round(
+                Kirigami.Units.gridUnit * 5.5)
             spacing: Math.round(Theme.inlineSpacing / 2)
 
             MetaChip {
@@ -123,7 +137,10 @@ QQC2.ItemDelegate {
             }
         }
 
-        // ---- 2. Primary summary + secondary metadata -----------
+        // ---- 2. Summary column (secondary) ---------------------
+        // Holds the technical line + chips. Demoted to caption /
+        // disabled colour so resolution + seeders / size carry the
+        // visual weight.
         ColumnLayout {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
@@ -146,9 +163,9 @@ QQC2.ItemDelegate {
                     : card.releaseName
                 wrapMode: Text.NoWrap
                 elide: Text.ElideRight
-                font.pointSize: Theme.defaultFont.pointSize
+                font.pointSize: Theme.captionFont.pointSize
                 font.weight: Font.Medium
-                color: Theme.foreground
+                color: Theme.disabled
             }
 
             Flow {
@@ -177,10 +194,34 @@ QQC2.ItemDelegate {
             }
         }
 
-        // ---- 3. Metrics column ---------------------------------
+        // ---- 3. Metrics column (primary) -----------------------
+        // Seeders carry top weight — a healthy swarm is the single
+        // strongest signal a stream will play. Size sits beneath at
+        // medium weight.
         ColumnLayout {
             Layout.alignment: Qt.AlignVCenter
-            spacing: Math.round(Theme.inlineSpacing / 2)
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 6
+            spacing: Kirigami.Units.smallSpacing
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                visible: card.seeders >= 0
+                spacing: Math.round(Theme.inlineSpacing / 2)
+
+                Kirigami.Icon {
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: width
+                    source: AppIcons.url("users")
+                    color: Theme.foreground
+                }
+                QQC2.Label {
+                    text: card.seeders
+                    font.pointSize: Theme.defaultFont.pointSize
+                    font.weight: Font.DemiBold
+                    color: Theme.foreground
+                    horizontalAlignment: Text.AlignRight
+                }
+            }
 
             QQC2.Label {
                 Layout.alignment: Qt.AlignRight
@@ -189,15 +230,6 @@ QQC2.ItemDelegate {
                 font.pointSize: Theme.defaultFont.pointSize
                 font.weight: Font.Medium
                 color: Theme.foreground
-                horizontalAlignment: Text.AlignRight
-            }
-
-            QQC2.Label {
-                Layout.alignment: Qt.AlignRight
-                visible: card.seeders >= 0
-                text: i18nc("@info seeders", "⇪ %1", card.seeders)
-                font.pointSize: Theme.captionFont.pointSize
-                color: Theme.disabled
                 horizontalAlignment: Text.AlignRight
             }
         }

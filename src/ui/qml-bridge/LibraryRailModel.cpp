@@ -45,6 +45,8 @@ QVariant LibraryRailModel::data(const QModelIndex& index, int role) const
         return r.primaryLine;
     case SecondaryLineRole:
         return r.secondaryLine;
+    case TertiaryLineRole:
+        return r.tertiaryLine;
     case ProgressRole:
         return r.progress;
     default:
@@ -64,6 +66,7 @@ QHash<int, QByteArray> LibraryRailModel::roleNames() const
         { ThumbnailUrlRole, "thumbnailUrl" },
         { PrimaryLineRole, "primaryLine" },
         { SecondaryLineRole, "secondaryLine" },
+        { TertiaryLineRole, "tertiaryLine" },
         { ProgressRole, "progress" },
     };
 }

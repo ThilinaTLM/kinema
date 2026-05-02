@@ -11,6 +11,7 @@ set(kinema_core_SRCS
     config/BrowseSettings.cpp
     config/CacheSettings.cpp
     config/FilterSettings.cpp
+    config/LibrarySettings.cpp
     config/PlayerSettings.cpp
     config/RealDebridSettings.cpp
     config/SearchSettings.cpp
@@ -208,7 +209,9 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/EpisodeRow.qml
         ui/qml/components/FilterMenuButton.qml
         ui/qml/components/LibraryCard.qml
+        ui/qml/components/LibraryListView.qml
         ui/qml/components/LibraryRail.qml
+        ui/qml/components/LibrarySmartView.qml
         ui/qml/components/MediaKindSelect.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
@@ -223,6 +226,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/SimilarCarousel.qml
         ui/qml/components/StreamCard.qml
         ui/qml/components/StreamRowActions.qml
+        ui/qml/components/StreamSortDialog.qml
         ui/qml/components/StreamsList.qml
         ui/qml/components/UpcomingBadge.qml
         ui/qml/components/SubtitleResultRow.qml
@@ -254,6 +258,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/circle-alert.svg
         ui/qml/icons/lucide/circle-check.svg
         ui/qml/icons/lucide/circle-dashed.svg
+        ui/qml/icons/lucide/clapperboard.svg
         ui/qml/icons/lucide/clock-arrow-down.svg
         ui/qml/icons/lucide/copy.svg
         ui/qml/icons/lucide/download.svg
@@ -271,6 +276,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/info.svg
         ui/qml/icons/lucide/languages.svg
         ui/qml/icons/lucide/library.svg
+        ui/qml/icons/lucide/list.svg
         ui/qml/icons/lucide/list-plus.svg
         ui/qml/icons/lucide/list-video.svg
         ui/qml/icons/lucide/list-x.svg
@@ -286,11 +292,13 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/settings-2.svg
         ui/qml/icons/lucide/settings.svg
         ui/qml/icons/lucide/skip-forward.svg
+        ui/qml/icons/lucide/sparkles.svg
         ui/qml/icons/lucide/star.svg
         ui/qml/icons/lucide/tags.svg
         ui/qml/icons/lucide/trash-2.svg
         ui/qml/icons/lucide/triangle-alert.svg
         ui/qml/icons/lucide/tv.svg
+        ui/qml/icons/lucide/users.svg
         ui/qml/icons/lucide/x.svg
     OUTPUT_DIRECTORY
         "${CMAKE_BINARY_DIR}/qml/dev/tlmtech/kinema/app"

@@ -73,11 +73,10 @@ Item {
                     icon.source: AppIcons.url("circle-check")
                     icon.color: Theme.positive
                     onClicked: tabs.vm.currentSeason = index
-                    KeyNavigation.left: tabs.vm.currentSeason > 0
-                        ? row.children[index - 1] : null
-                    KeyNavigation.right: tabs.vm.currentSeason
-                            < tabs.vm.seasonLabels.length - 1
-                        ? row.children[index + 1] : null
+                    KeyNavigation.left: index > 0
+                        ? (row.children[index - 1] ?? null) : null
+                    KeyNavigation.right: index < tabs.vm.seasonLabels.length - 1
+                        ? (row.children[index + 1] ?? null) : null
 
                     TapHandler {
                         acceptedButtons: Qt.RightButton

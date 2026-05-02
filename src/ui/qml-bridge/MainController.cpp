@@ -371,7 +371,8 @@ void MainController::buildCoreServices()
     m_discoverVm = new DiscoverViewModel(m_tmdb, m_tokenCtrl, this);
     m_continueWatchingVm
         = new ContinueWatchingViewModel(m_historyCtrl, this);
-    m_libraryVm = new LibraryViewModel(m_libraryCtrl, m_watchedCtrl, this);
+    m_libraryVm = new LibraryViewModel(m_libraryCtrl, m_watchedCtrl,
+        m_settings.library(), this);
     m_searchVm = new SearchViewModel(m_cinemeta,
         m_settings.search(), this);
     m_browseVm = new BrowseViewModel(m_tmdb, m_settings.browse(), this);

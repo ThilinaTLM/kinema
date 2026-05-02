@@ -7,6 +7,7 @@
 #include "config/BrowseSettings.h"
 #include "config/CacheSettings.h"
 #include "config/FilterSettings.h"
+#include "config/LibrarySettings.h"
 #include "config/PlayerSettings.h"
 #include "config/RealDebridSettings.h"
 #include "config/SearchSettings.h"
@@ -51,6 +52,9 @@ public:
     BrowseSettings& browse() noexcept { return m_browse; }
     const BrowseSettings& browse() const noexcept { return m_browse; }
 
+    LibrarySettings& library() noexcept { return m_library; }
+    const LibrarySettings& library() const noexcept { return m_library; }
+
     TorrentioSettings& torrentio() noexcept { return m_torrentio; }
     const TorrentioSettings& torrentio() const noexcept { return m_torrentio; }
 
@@ -84,6 +88,7 @@ private:
     PlayerSettings m_player;
     FilterSettings m_filter;
     BrowseSettings m_browse;
+    LibrarySettings m_library;
     TorrentioSettings m_torrentio;
     AppearanceSettings m_appearance;
     RealDebridSettings m_realDebrid;

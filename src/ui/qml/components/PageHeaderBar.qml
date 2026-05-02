@@ -49,10 +49,12 @@ QQC2.ToolBar {
     // list<Kirigami.Action> rendered on the right of the bar. Use the
     // page's existing `actions:` declaration to populate.
     property var pageActions: []
-    // Cap for the title label's natural width before it starts
-    // eliding, so individual pages can opt into longer titles without
-    // changing the shared default.
-    property int titleMaximumWidth: Kirigami.Units.gridUnit * 14
+    // Optional hard cap for the title's natural width. When unset (-1)
+    // the title is responsive: it grows up to its implicit width and
+    // elides only when the bar is too narrow to fit it alongside the
+    // filter slot and right-side controls. Set a positive value to
+    // force-elide a long title on wide windows (rarely needed now).
+    property int titleMaximumWidth: -1
     // Optional. When set, the bar renders a filters ToolButton that
     // calls `open()` on the dialog.
     property var advancedFiltersDialog: null
@@ -116,11 +118,15 @@ QQC2.ToolBar {
         }
 
         // ---- Title ----------------------------------------------
-        // Elides at the right; tooltip surfaces the full string when
-        // truncated. Cap the natural width so a long pushed-page
-        // title (e.g. "Movie X \u00b7 12 streams") cannot push the
-        // filter row off-screen. Pages with naturally longer labels
-        // can raise `titleMaximumWidth`.
+        // Sits at its implicit width when there's room; elides via
+        // `ElideRight` when the bar is constrained. The hover tooltip
+        // surfaces the full string only when the heading is actually
+        // truncated, so wide windows show the full title without a
+        // hint. `titleMaximumWidth > 0` is honoured as a hard cap;
+        // otherwise the title is fully responsive. `minimumWidth: 0`
+        // lets the heading shrink below its implicit width before the
+        // right-side controls get pushed off-screen on very narrow
+        // windows.
         Kirigami.Heading {
             id: titleLabel
             level: 2
@@ -128,7 +134,10 @@ QQC2.ToolBar {
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
             Layout.alignment: Qt.AlignVCenter
-            Layout.maximumWidth: root.titleMaximumWidth
+            Layout.minimumWidth: 0
+            Layout.maximumWidth: root.titleMaximumWidth > 0
+                ? root.titleMaximumWidth
+                : Number.POSITIVE_INFINITY
 
             HoverHandler { id: titleHover }
             QQC2.ToolTip.text: root.title
@@ -138,8 +147,10 @@ QQC2.ToolBar {
 
         // ---- Filters slot ---------------------------------------
         // Caller children land here (default property forwards to
-        // `data`). Layout.fillWidth claims the gap between the
-        // title and the right-side actions.
+        // `data`). `Layout.fillWidth: true` claims the gap between
+        // the title and the right-side actions, and is what lets
+        // caller-injected `SearchField`s grow to a useful width on
+        // wide windows.
         RowLayout {
             id: filtersRow
             Layout.fillWidth: true
@@ -181,6 +192,12 @@ QQC2.ToolBar {
             delegate: QQC2.ToolButton {
                 required property var modelData
                 action: modelData
+                // Honor `Action.visible: false` so pages can hide a
+                // page action by binding its visibility (e.g.
+                // "Clear filters" only when filters are active).
+                visible: !modelData
+                    || modelData.visible === undefined
+                    || modelData.visible
                 icon.color: modelData && modelData.icon && modelData.icon.color
                     ? modelData.icon.color
                     : AppIcons.controlColor(enabled, highlighted || checked)

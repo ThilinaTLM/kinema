@@ -16,6 +16,10 @@
 
 #include <optional>
 
+namespace kinema::config {
+class LibrarySettings;
+}
+
 namespace kinema::controllers {
 class LibraryController;
 class WatchedController;
@@ -48,7 +52,7 @@ class LibraryViewModel : public QObject
     Q_PROPERTY(LibraryListModel* model READ model CONSTANT)
     Q_PROPERTY(LibraryRailModel* upNextModel READ upNextModel CONSTANT)
     Q_PROPERTY(LibraryRailModel* airingSoonModel READ airingSoonModel CONSTANT)
-    Q_PROPERTY(LibraryRailModel* comingUpModel READ comingUpModel CONSTANT)
+    Q_PROPERTY(LibraryRailModel* recentlyAddedModel READ recentlyAddedModel CONSTANT)
 
     Q_PROPERTY(KindFilter kind READ kind WRITE setKind NOTIFY filtersChanged)
     Q_PROPERTY(StatusFilter status READ status WRITE setStatus NOTIFY filtersChanged)
@@ -57,6 +61,8 @@ class LibraryViewModel : public QObject
     Q_PROPERTY(int dateWindow READ dateWindow WRITE setDateWindow NOTIFY filtersChanged)
     Q_PROPERTY(int minRatingPct READ minRatingPct WRITE setMinRatingPct NOTIFY filtersChanged)
     Q_PROPERTY(bool hideWatched READ hideWatched WRITE setHideWatched NOTIFY filtersChanged)
+
+    Q_PROPERTY(bool smartMode READ smartMode WRITE setSmartMode NOTIFY smartModeChanged)
 
     Q_PROPERTY(QVariantList availableGenres READ availableGenres NOTIFY availableGenresChanged)
     Q_PROPERTY(bool filtersActive READ filtersActive NOTIFY filtersChanged)
@@ -99,13 +105,14 @@ public:
 
     LibraryViewModel(controllers::LibraryController* library,
         controllers::WatchedController* watched,
+        config::LibrarySettings& settings,
         QObject* parent = nullptr);
     ~LibraryViewModel() override;
 
     LibraryListModel* model() const noexcept { return m_model; }
     LibraryRailModel* upNextModel() const noexcept { return m_upNextModel; }
     LibraryRailModel* airingSoonModel() const noexcept { return m_airingSoonModel; }
-    LibraryRailModel* comingUpModel() const noexcept { return m_comingUpModel; }
+    LibraryRailModel* recentlyAddedModel() const noexcept { return m_recentlyAddedModel; }
 
     KindFilter kind() const noexcept { return m_kind; }
     void setKind(KindFilter v);
@@ -128,6 +135,12 @@ public:
     bool hideWatched() const noexcept { return m_hideWatched; }
     void setHideWatched(bool v);
 
+    /// Persisted Library page mode. `true` shows the Smart rails view
+    /// (Up Next / Airing Soon / Recently Added); `false` shows the
+    /// filterable List grid. Backed by `config::LibrarySettings`.
+    bool smartMode() const noexcept { return m_smartMode; }
+    void setSmartMode(bool v);
+
     QVariantList availableGenres() const noexcept { return m_availableGenres; }
     bool filtersActive() const noexcept;
     bool empty() const noexcept { return m_model->rowCount() == 0; }
@@ -142,8 +155,8 @@ public Q_SLOTS:
     void removeFromLibrary(int row);
     void toggleWatched(int row);
     /// Activate a smart-rail card. `railId` is one of `"upNext"`,
-    /// `"airingSoon"`, `"comingUp"`; `row` is the index into that
-    /// rail's model.
+    /// `"airingSoon"`, `"recentlyAdded"`; `row` is the index into
+    /// that rail's model.
     void activateRail(const QString& railId, int row);
 
 Q_SIGNALS:
@@ -151,6 +164,7 @@ Q_SIGNALS:
     void availableGenresChanged();
     void modelChanged();
     void libraryEmptyChanged();
+    void smartModeChanged();
     void openMovieRequested(const QString& imdbId, const QString& title);
     void openSeriesRequested(const QString& imdbId, const QString& title);
     void openSeriesEpisodeRequested(const QString& imdbId,
@@ -189,11 +203,12 @@ private:
 
     controllers::LibraryController* m_library {};
     controllers::WatchedController* m_watched {};
+    config::LibrarySettings* m_librarySettings {};
 
     LibraryListModel* m_model {};
     LibraryRailModel* m_upNextModel {};
     LibraryRailModel* m_airingSoonModel {};
-    LibraryRailModel* m_comingUpModel {};
+    LibraryRailModel* m_recentlyAddedModel {};
 
     QList<Entry> m_entries;
     int m_totalCount = 0;
@@ -206,6 +221,9 @@ private:
     int m_dateWindow = DateWindowAny;
     int m_minRatingPct = 0;
     bool m_hideWatched = false;
+
+    // Persisted view mode (mirror of LibrarySettings::smartMode).
+    bool m_smartMode = true;
 
     // Genre catalog: list of { id: int, name: QString } maps; the
     // QML reads this through the `availableGenres` property. The

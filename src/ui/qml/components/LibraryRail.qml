@@ -8,21 +8,23 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Smart rail used at the top of the Library page (Up Next /
-// Airing Soon / Coming Up). Header on top, horizontal episode-card
-// list below.
+// Smart rail used on the Library page's Smart view (Up Next /
+// Airing Soon / Recently Added). Header on top, horizontal
+// `EpisodeRailCard` row below.
 //
 // Public surface:
-//   * `model`         \u2014 a `LibraryRailModel*` from the C++ side.
-//   * `title`         \u2014 i18n'd rail heading.
-//   * `artworkShape`  \u2014 "thumbnail" (16:9 episode still) or
-//                       "poster" (2:3 movie poster). Up Next /
-//                       Airing Soon use the former; Coming Up
-//                       uses the latter.
+//   * `model`         — a `LibraryRailModel*` from the C++ side.
+//   * `title`         — i18n'd rail heading.
+//   * `artworkShape`  — "thumbnail" (16:9 episode still) or
+//                       "poster" (2:3 poster). Up Next + Airing
+//                       Soon use thumbnails; Recently Added uses
+//                       posters.
 //   * `signal itemActivated(int row)`
 //
-// Self-hides via `visible: !rail.model || rail.model.empty` on
-// the caller side; the page binds it directly.
+// Self-hides via `visible: !rail.model || rail.model.empty` on the
+// caller side. All Library rails share the same outer left/right
+// margin (`Theme.pageMargin`) so headers and card strips line up
+// vertically across rails.
 ColumnLayout {
     id: rail
 
@@ -32,6 +34,9 @@ ColumnLayout {
 
     signal itemActivated(int row)
 
+    // Per-rail vertical structure. Header to ListView spacing is
+    // `inlineSpacing`; outer rail-to-rail spacing is owned by the
+    // parent ColumnLayout (Theme.sectionSpacing).
     spacing: Theme.inlineSpacing
 
     readonly property real artworkAspect:
@@ -48,6 +53,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.leftMargin: Theme.pageMargin
         Layout.rightMargin: Theme.pageMargin
+        spacing: Theme.inlineSpacing
 
         Kirigami.Heading {
             level: 3
@@ -89,6 +95,8 @@ ColumnLayout {
                 ? model.primaryLine : ""
             secondaryLine: model.secondaryLine !== undefined
                 ? model.secondaryLine : ""
+            tertiaryLine: model.tertiaryLine !== undefined
+                ? model.tertiaryLine : ""
             progress: model.progress !== undefined ? model.progress : -1
 
             onClicked: rail.itemActivated(index)
@@ -97,12 +105,26 @@ ColumnLayout {
 
     // Sized prototype used to anchor the ListView's preferred height
     // to the card's natural height, mirroring `ContinueWatchingRail`.
-    // `Layout.preferredWidth` (not `width`) so the QtQuick.Layouts
-    // attached property treats the card as a managed sibling.
+    //
+    // Must use plain `width` rather than `Layout.preferredWidth`:
+    // `visible: false` excludes the prototype from the parent
+    // ColumnLayout, so attached `Layout.*` properties never get
+    // applied. Without an explicit width the prototype falls back to
+    // its own implicitWidth (gridUnit*16), and the rail row reserves
+    // far more vertical space than the real 128 px-wide poster
+    // delegates need.
     EpisodeRailCard {
         id: cardPrototype
         visible: false
-        Layout.preferredWidth: rail.cardWidth
+        width: rail.cardWidth
         artworkAspect: rail.artworkAspect
+        fallbackIcon: rail.fallbackIcon
+        // Fill all three lines so the prototype reports the maximum
+        // possible card height (movies with two lines coexist with
+        // episodes with three lines in the same row, and the row
+        // height needs to fit the tallest card).
+        primaryLine: "\u00a0"
+        secondaryLine: "\u00a0"
+        tertiaryLine: "\u00a0"
     }
 }
