@@ -4,37 +4,9 @@
 #include "ui/qml-bridge/PlayQueueViewModel.h"
 
 #include "controllers/PlayQueueController.h"
-
-#include <KLocalizedString>
+#include "ui/qml-bridge/QueueDisplay.h"
 
 namespace kinema::ui::qml {
-
-namespace {
-
-QString subtitleFor(const api::QueueItem& it)
-{
-    if (it.key.kind != api::MediaKind::Series) {
-        return {};
-    }
-    if (it.key.season && it.key.episode) {
-        const auto sxe = QStringLiteral("S%1E%2")
-                             .arg(*it.key.season,
-                                 /*fieldWidth=*/2, /*base=*/10,
-                                 QLatin1Char('0'))
-                             .arg(*it.key.episode,
-                                 /*fieldWidth=*/2, /*base=*/10,
-                                 QLatin1Char('0'));
-        if (!it.episodeTitle.isEmpty()) {
-            return i18nc("@label queue row episode subtitle, "
-                         "%1 SxE, %2 episode title",
-                "%1 - %2", sxe, it.episodeTitle);
-        }
-        return sxe;
-    }
-    return it.episodeTitle;
-}
-
-} // namespace
 
 PlayQueueViewModel::PlayQueueViewModel(
     controllers::PlayQueueController* ctrl, QObject* parent)
@@ -88,7 +60,7 @@ QVariant PlayQueueViewModel::data(const QModelIndex& index, int role) const
     case TitleRole:
         return it.title;
     case SubtitleRole:
-        return subtitleFor(it);
+        return queue_display::subtitle(it);
     case PosterUrlRole:
         return it.poster.isValid() ? it.poster.toString() : QString {};
     case ReleaseNameRole:

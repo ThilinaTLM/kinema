@@ -86,6 +86,7 @@ set(kinema_core_SRCS
     ui/qml-bridge/MainController.cpp
     ui/qml-bridge/MovieDetailViewModel.cpp
     ui/qml-bridge/PlayQueueViewModel.cpp
+    ui/qml-bridge/QueueDisplay.cpp
     ui/qml-bridge/ResultsListModel.cpp
     ui/qml-bridge/SearchViewModel.cpp
     ui/qml-bridge/SeriesDetailViewModel.cpp
@@ -113,6 +114,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
         ui/player/MpvVideoItem.cpp
         ui/player/PlayerViewModel.cpp
         ui/player/PlayerWindow.cpp
+        ui/player/QueueNavPreview.cpp
         ui/player/SubtitleTracksModel.cpp
     )
 endif()
@@ -349,6 +351,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
             ui/player/qml/components/PickerItem.qml
             ui/player/qml/components/PlayerInputs.qml
             ui/player/qml/components/PopupPanel.qml
+            ui/player/qml/components/QueueNavTooltip.qml
             ui/player/qml/components/SectionHeader.qml
             ui/player/qml/components/SeekBar.qml
             ui/player/qml/components/TopBar.qml

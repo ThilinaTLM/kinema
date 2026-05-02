@@ -44,6 +44,7 @@
 #include "ui/qml-bridge/LibraryViewModel.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 #include "ui/qml-bridge/PlayQueueViewModel.h"
+#include "ui/qml-bridge/QueueDisplay.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
 #include "ui/qml-bridge/SeriesDetailViewModel.h"
@@ -787,6 +788,33 @@ ui::player::PlayerWindow* MainController::ensurePlayerWindow()
                 ? m_playQueueCtrl->items().size()
                 : 0;
             playerVm->setQueueNavigationState(active, count);
+
+            if (!m_playQueueCtrl || active < 0 || active >= count) {
+                playerVm->clearPreviousPreview();
+                playerVm->clearNextPreview();
+                return;
+            }
+
+            const auto& items = m_playQueueCtrl->items();
+            if (active > 0) {
+                const auto& prev = items.at(active - 1);
+                playerVm->setPreviousPreview(
+                    queue_display::previewTitle(prev),
+                    queue_display::subtitle(prev),
+                    queue_display::previewChips(prev));
+            } else {
+                playerVm->clearPreviousPreview();
+            }
+
+            if ((active + 1) < count) {
+                const auto& next = items.at(active + 1);
+                playerVm->setNextPreview(
+                    queue_display::previewTitle(next),
+                    queue_display::subtitle(next),
+                    queue_display::previewChips(next));
+            } else {
+                playerVm->clearNextPreview();
+            }
         };
 
         refreshQueueNavigation();

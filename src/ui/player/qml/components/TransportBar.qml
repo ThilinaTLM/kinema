@@ -10,7 +10,8 @@ import dev.tlmtech.kinema.player
 /**
  * Two-row playback chrome:
  *
- *   [play] [captions] [audio-lines]              [gauge] [maximize]
+ *   [play] [skip-back] [skip-forward] [captions] [audio-lines]
+ *                                      [gauge] [maximize]
  *   [12:03 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -42:29]
  *
  * Top row hosts the action buttons (left cluster + spacer + right
@@ -81,36 +82,53 @@ Item {
 
         // ---- Top row: action buttons ------------------------------
         RowLayout {
+            id: actionsRow
             Layout.fillWidth: true
             spacing: Theme.spacing
 
+            IconButton {
+                iconKind: root.mpv && root.mpv.paused ? "play" : "pause"
+                onClicked: if (root.mpv) root.mpv.cyclePause()
+            }
+
             Item {
+                id: navButtonsWrap
                 visible: playerVm.queueNavigationVisible
                 implicitWidth: visible ? prevBtn.implicitWidth + nextBtn.implicitWidth + Theme.spacingSm : 0
                 implicitHeight: visible ? Math.max(prevBtn.implicitHeight, nextBtn.implicitHeight) : 0
 
                 Row {
+                    id: navButtons
                     anchors.fill: parent
                     spacing: Theme.spacingSm
 
-                    IconButton {
-                        id: prevBtn
-                        iconKind: "skipBack"
-                        enabled: playerVm.canGoPrevious
-                        onClicked: playerVm.requestPrevious()
+                    Item {
+                        id: prevSlot
+                        implicitWidth: prevBtn.implicitWidth
+                        implicitHeight: prevBtn.implicitHeight
+
+                        IconButton {
+                            id: prevBtn
+                            anchors.fill: parent
+                            iconKind: "skipBack"
+                            enabled: playerVm.canGoPrevious
+                            onClicked: playerVm.requestPrevious()
+                        }
                     }
-                    IconButton {
-                        id: nextBtn
-                        iconKind: "skipForward"
-                        enabled: playerVm.canGoNext
-                        onClicked: playerVm.requestNext()
+                    Item {
+                        id: nextSlot
+                        implicitWidth: nextBtn.implicitWidth
+                        implicitHeight: nextBtn.implicitHeight
+
+                        IconButton {
+                            id: nextBtn
+                            anchors.fill: parent
+                            iconKind: "skipForward"
+                            enabled: playerVm.canGoNext
+                            onClicked: playerVm.requestNext()
+                        }
                     }
                 }
-            }
-
-            IconButton {
-                iconKind: root.mpv && root.mpv.paused ? "play" : "pause"
-                onClicked: if (root.mpv) root.mpv.cyclePause()
             }
             IconButton {
                 iconKind: "captions"
@@ -149,5 +167,49 @@ Item {
                 if (root.mpv) root.mpv.seekAbsolute(seconds);
             }
         }
+    }
+
+    QueueNavTooltip {
+        id: prevTooltip
+        shown: prevBtn.hovered
+            && playerVm.previousPreview
+            && playerVm.previousPreview.available
+        title: playerVm.previousPreview
+            ? playerVm.previousPreview.title : ""
+        subtitle: playerVm.previousPreview
+            ? playerVm.previousPreview.subtitle : ""
+        chips: playerVm.previousPreview
+            ? playerVm.previousPreview.chips : []
+        x: {
+            const centered = actionsRow.x + navButtonsWrap.x + navButtons.x
+                + prevSlot.x + prevBtn.width / 2 - width / 2;
+            const minX = Theme.spacingLg;
+            const maxX = root.width - Theme.spacingLg - width;
+            return Math.max(minX, Math.min(maxX, centered));
+        }
+        y: actionsRow.y + navButtonsWrap.y + navButtons.y + prevSlot.y
+            - height - Theme.spacingSm
+    }
+
+    QueueNavTooltip {
+        id: nextTooltip
+        shown: nextBtn.hovered
+            && playerVm.nextPreview
+            && playerVm.nextPreview.available
+        title: playerVm.nextPreview
+            ? playerVm.nextPreview.title : ""
+        subtitle: playerVm.nextPreview
+            ? playerVm.nextPreview.subtitle : ""
+        chips: playerVm.nextPreview
+            ? playerVm.nextPreview.chips : []
+        x: {
+            const centered = actionsRow.x + navButtonsWrap.x + navButtons.x
+                + nextSlot.x + nextBtn.width / 2 - width / 2;
+            const minX = Theme.spacingLg;
+            const maxX = root.width - Theme.spacingLg - width;
+            return Math.max(minX, Math.min(maxX, centered));
+        }
+        y: actionsRow.y + navButtonsWrap.y + navButtons.y + nextSlot.y
+            - height - Theme.spacingSm
     }
 }

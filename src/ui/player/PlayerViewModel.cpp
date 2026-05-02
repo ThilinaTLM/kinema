@@ -8,6 +8,7 @@
 #include "ui/player/AudioTracksModel.h"
 #include "ui/player/ChaptersModel.h"
 #include "ui/player/MpvVideoItem.h"
+#include "ui/player/QueueNavPreview.h"
 #include "ui/player/SubtitleTracksModel.h"
 
 namespace kinema::ui::player {
@@ -17,6 +18,8 @@ PlayerViewModel::PlayerViewModel(QObject* parent)
     , m_audioModel(new AudioTracksModel(this))
     , m_subtitleModel(new SubtitleTracksModel(this))
     , m_chaptersModel(new ChaptersModel(this))
+    , m_previousPreview(new QueueNavPreview(this))
+    , m_nextPreview(new QueueNavPreview(this))
 {
 }
 
@@ -114,6 +117,36 @@ void PlayerViewModel::setQueueNavigationState(int activeIndex, int count)
     if (m_canGoNext != canGoNext) {
         m_canGoNext = canGoNext;
         Q_EMIT canGoNextChanged();
+    }
+}
+
+void PlayerViewModel::setPreviousPreview(const QString& title,
+    const QString& subtitle, const QStringList& chips)
+{
+    if (m_previousPreview) {
+        m_previousPreview->setPreview(title, subtitle, chips);
+    }
+}
+
+void PlayerViewModel::clearPreviousPreview()
+{
+    if (m_previousPreview) {
+        m_previousPreview->clear();
+    }
+}
+
+void PlayerViewModel::setNextPreview(const QString& title,
+    const QString& subtitle, const QStringList& chips)
+{
+    if (m_nextPreview) {
+        m_nextPreview->setPreview(title, subtitle, chips);
+    }
+}
+
+void PlayerViewModel::clearNextPreview()
+{
+    if (m_nextPreview) {
+        m_nextPreview->clear();
     }
 }
 

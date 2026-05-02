@@ -13,9 +13,11 @@ import dev.tlmtech.kinema.player
 Item {
     id: root
     property var chips: []
-    implicitHeight: 22
+    implicitWidth: chipRow.implicitWidth
+    implicitHeight: chipRow.implicitHeight
 
     Row {
+        id: chipRow
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
         spacing: Theme.unit

@@ -29,6 +29,7 @@ Item {
     id: root
     property string iconKind: ""
     property bool checked: false
+    readonly property bool hovered: hover.hovered
     signal clicked()
 
     implicitWidth: Theme.iconButton
