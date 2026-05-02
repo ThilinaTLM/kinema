@@ -92,16 +92,15 @@ Item {
     Kirigami.Theme.inherit: false
 
     implicitWidth: Kirigami.Units.gridUnit * 16
-    // Compute implicit height from the *actual* width when one has
-    // been assigned (delegates and the LibraryRail prototype both
-    // set `width: rail.cardWidth`). Falling back to `implicitWidth`
-    // would over-report height for poster rails (cardWidth 8gu <
-    // implicitWidth 16gu) and reserve a phantom band of empty
-    // space below the artwork — visible as the large gap between
-    // the rail header and the poster row in Library Smart.
-    readonly property int _layoutWidth:
-        width > 0 ? width : implicitWidth
-    implicitHeight: Math.round(_layoutWidth * artworkAspect)
+    // Compute implicit height from the *actual* width. Both call
+    // sites (LibraryRail delegate + visible:false prototype) set
+    // `width: rail.cardWidth` explicitly, and `Item.width` already
+    // defaults to `implicitWidth` when no binding is assigned, so
+    // the previous `width > 0 ? width : implicitWidth` fallback was
+    // dead code that introduced an extra dependency on
+    // `implicitWidth` and triggered a binding-loop warning during
+    // initial sizing.
+    implicitHeight: Math.round(width * artworkAspect)
         + meta.implicitHeight
         + Kirigami.Units.smallSpacing * 2
 
@@ -123,11 +122,10 @@ Item {
             id: art
             Layout.fillWidth: true
             Layout.preferredHeight: Math.round(width * card.artworkAspect)
-            // Mirror the card's resolved width so the prototype
-            // (which lives outside any layout that would set
-            // `width` on `art`) reports a height that matches the
-            // real laid-out frame.
-            implicitHeight: Math.round(card._layoutWidth
+            // Mirror the card's resolved width so the implicit
+            // height of the frame matches the laid-out frame even
+            // before `Layout.preferredHeight` settles.
+            implicitHeight: Math.round(card.width
                 * card.artworkAspect)
 
             url: card._artUrl
