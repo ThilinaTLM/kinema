@@ -4,6 +4,7 @@
 #include "controllers/HistoryController.h"
 
 #include "api/TorrentioClient.h"
+#include "controllers/PlayQueueController.h"
 #include "config/AppSettings.h"
 #include "core/HistoryStore.h"
 #include "core/HttpError.h"
@@ -110,6 +111,11 @@ void HistoryController::setPlayerWindow(ui::player::PlayerWindow* window)
 void HistoryController::setStreamActions(services::StreamActions* actions)
 {
     m_actions = actions;
+}
+
+void HistoryController::setPlayQueue(PlayQueueController* queue)
+{
+    m_queue = queue;
 }
 
 void HistoryController::onPlayStarting(const api::PlaybackContext& ctx)
@@ -313,9 +319,9 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
         co_return;
     }
 
-    if (!m_actions) {
+    if (!m_queue) {
         qCWarning(KINEMA)
-            << "HistoryController: no StreamActions wired; "
+            << "HistoryController: no PlayQueueController wired; "
                "cannot dispatch resume";
         Q_EMIT resumeFallbackRequested(entry);
         co_return;
@@ -332,7 +338,7 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
     ctx.poster = entry.poster;
     // streamRef and resumeSeconds are filled by StreamActions::play.
 
-    m_actions->play(*hit, ctx);
+    m_queue->playNow(*hit, ctx);
 }
 
 void HistoryController::onFileLoaded()

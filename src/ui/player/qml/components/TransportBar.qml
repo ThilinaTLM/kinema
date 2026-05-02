@@ -84,6 +84,30 @@ Item {
             Layout.fillWidth: true
             spacing: Theme.spacing
 
+            Item {
+                visible: playerVm.queueNavigationVisible
+                implicitWidth: visible ? prevBtn.implicitWidth + nextBtn.implicitWidth + Theme.spacingSm : 0
+                implicitHeight: visible ? Math.max(prevBtn.implicitHeight, nextBtn.implicitHeight) : 0
+
+                Row {
+                    anchors.fill: parent
+                    spacing: Theme.spacingSm
+
+                    IconButton {
+                        id: prevBtn
+                        iconKind: "skipBack"
+                        enabled: playerVm.canGoPrevious
+                        onClicked: playerVm.requestPrevious()
+                    }
+                    IconButton {
+                        id: nextBtn
+                        iconKind: "skipForward"
+                        enabled: playerVm.canGoNext
+                        onClicked: playerVm.requestNext()
+                    }
+                }
+            }
+
             IconButton {
                 iconKind: root.mpv && root.mpv.paused ? "play" : "pause"
                 onClicked: if (root.mpv) root.mpv.cyclePause()

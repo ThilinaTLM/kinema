@@ -15,8 +15,9 @@ import dev.tlmtech.kinema.player
  *
  * The chrome icons are transcoded directly from the Lucide icon set
  * (`audio-lines`, `captions`, `gauge`, `maximize`, `minimize`,
- * `pause`, `play`, `volume`, `volume-1`, `volume-2`, `volume-off`,
- * `volume-x`). Each Lucide source file is one or more `<path d>`
+ * `pause`, `play`, `skip-back`, `skip-forward`, `volume`,
+ * `volume-1`, `volume-2`, `volume-off`, `volume-x`). Each Lucide
+ * source file is one or more `<path d>`
  * entries with `stroke="currentColor"`, `stroke-width="2"`, round
  * caps + joins. We render them with `Theme.iconStroke` and the host
  * `color` property so the glyph adopts the surrounding theme.
@@ -278,6 +279,38 @@ Item {
                 joinStyle: ShapePath.RoundJoin
                 PathSvg { path: "M 12 14 L 16 10" }
                 PathSvg { path: "M 3.34 19 a 10 10 0 1 1 17.32 0" }
+            }
+        }
+
+        // ---- Skip-back (Lucide previous track) -------------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "skipBack"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 6 5 V 19" }
+                PathSvg { path: "M 18 6 L 10 12 L 18 18 Z" }
+            }
+        }
+
+        // ---- Skip-forward (Lucide next track) --------------------
+        Shape {
+            anchors.fill: parent
+            visible: root.kind === "skipForward"
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: root.color
+                strokeWidth: Theme.iconStroke
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 18 5 V 19" }
+                PathSvg { path: "M 6 6 L 14 12 L 6 18 Z" }
             }
         }
 

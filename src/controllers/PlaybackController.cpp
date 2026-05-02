@@ -237,6 +237,7 @@ void PlaybackController::play(const QUrl& url,
     }
 
     if (m_window) {
+        m_window->setLoadingVisible(true);
         m_window->hideSkipChapter();
         m_window->hideResumePrompt();
     }
@@ -302,6 +303,8 @@ void PlaybackController::stop()
     m_hasActiveSession = false;
     m_paused = false;
     m_position = 0.0;
+    m_duration = 0.0;
+    m_window->setLoadingVisible(false);
     Q_EMIT sessionStateChanged();
     m_window->stopAndHide();
 }
@@ -416,6 +419,9 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
 
 void PlaybackController::onFileLoaded()
 {
+    if (m_window) {
+        m_window->setLoadingVisible(false);
+    }
     if (m_pendingResumeSeconds > 0 && m_window) {
         m_phase = Phase::ShowingResumePrompt;
         m_paused = true;
@@ -431,6 +437,9 @@ void PlaybackController::onFileLoaded()
 
 void PlaybackController::onPlaybackError(const QString& reason)
 {
+    if (m_window) {
+        m_window->setLoadingVisible(false);
+    }
     Q_EMIT playbackError(reason, m_ctx);
 }
 
@@ -439,6 +448,7 @@ void PlaybackController::onEndOfFile(const QString& reason)
     ++m_epoch;
     m_pendingResumeSeconds = 0;
     if (m_window) {
+        m_window->setLoadingVisible(false);
         m_window->hideSkipChapter();
         m_window->hideResumePrompt();
     }
@@ -446,6 +456,7 @@ void PlaybackController::onEndOfFile(const QString& reason)
     m_hasActiveSession = false;
     m_paused = false;
     m_position = 0.0;
+    m_duration = 0.0;
     Q_EMIT sessionStateChanged();
     Q_EMIT endOfFile(reason, m_ctx);
 }

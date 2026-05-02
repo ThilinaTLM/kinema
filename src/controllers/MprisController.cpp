@@ -294,7 +294,7 @@ void MprisController::next()
     if (!m_queue || !canGoNext()) {
         return;
     }
-    m_queue->playAt(m_queue->activeIndex() + 1);
+    m_queue->playNextItem();
 }
 
 void MprisController::previous()
@@ -302,7 +302,7 @@ void MprisController::previous()
     if (!m_queue || !canGoPrevious()) {
         return;
     }
-    m_queue->playAt(m_queue->activeIndex() - 1);
+    m_queue->playPreviousItem();
 }
 
 void MprisController::pause()

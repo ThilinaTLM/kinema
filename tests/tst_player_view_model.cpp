@@ -17,6 +17,9 @@ private Q_SLOTS:
     void skipPillLifecycle();
     void mediaContextEmitsOnce();
     void chipsListChange();
+    void loadingState();
+    void queueNavigationState();
+    void previousNextSignals();
     void noActionWhenAlreadyVisible();
 };
 
@@ -106,6 +109,69 @@ void TestPlayerViewModel::chipsListChange()
     vm.setMediaChips({ QStringLiteral("4K"),
         QStringLiteral("HDR10") });
     QCOMPARE(spy.count(), 1);
+}
+
+void TestPlayerViewModel::loadingState()
+{
+    PlayerViewModel vm;
+    QSignalSpy spy(&vm, &PlayerViewModel::loadingVisibleChanged);
+
+    QVERIFY(!vm.loadingVisible());
+    vm.setLoadingVisible(true);
+    QVERIFY(vm.loadingVisible());
+    QCOMPARE(spy.count(), 1);
+
+    vm.setLoadingVisible(true);
+    QCOMPARE(spy.count(), 1);
+
+    vm.setLoadingVisible(false);
+    QVERIFY(!vm.loadingVisible());
+    QCOMPARE(spy.count(), 2);
+}
+
+void TestPlayerViewModel::queueNavigationState()
+{
+    PlayerViewModel vm;
+    QSignalSpy visSpy(&vm, &PlayerViewModel::queueNavigationVisibleChanged);
+    QSignalSpy prevSpy(&vm, &PlayerViewModel::canGoPreviousChanged);
+    QSignalSpy nextSpy(&vm, &PlayerViewModel::canGoNextChanged);
+
+    vm.setQueueNavigationState(0, 3);
+    QVERIFY(vm.queueNavigationVisible());
+    QVERIFY(!vm.canGoPrevious());
+    QVERIFY(vm.canGoNext());
+    QCOMPARE(visSpy.count(), 1);
+    QCOMPARE(prevSpy.count(), 0);
+    QCOMPARE(nextSpy.count(), 1);
+
+    vm.setQueueNavigationState(1, 3);
+    QVERIFY(vm.canGoPrevious());
+    QVERIFY(vm.canGoNext());
+    QCOMPARE(prevSpy.count(), 1);
+
+    vm.setQueueNavigationState(2, 3);
+    QVERIFY(vm.canGoPrevious());
+    QVERIFY(!vm.canGoNext());
+    QCOMPARE(nextSpy.count(), 2);
+
+    vm.setQueueNavigationState(-1, 0);
+    QVERIFY(!vm.queueNavigationVisible());
+    QVERIFY(!vm.canGoPrevious());
+    QVERIFY(!vm.canGoNext());
+    QCOMPARE(visSpy.count(), 2);
+}
+
+void TestPlayerViewModel::previousNextSignals()
+{
+    PlayerViewModel vm;
+    QSignalSpy prevSpy(&vm, &PlayerViewModel::previousRequested);
+    QSignalSpy nextSpy(&vm, &PlayerViewModel::nextRequested);
+
+    vm.requestPrevious();
+    vm.requestNext();
+
+    QCOMPARE(prevSpy.count(), 1);
+    QCOMPARE(nextSpy.count(), 1);
 }
 
 void TestPlayerViewModel::noActionWhenAlreadyVisible()

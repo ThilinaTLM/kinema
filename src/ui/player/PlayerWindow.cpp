@@ -133,6 +133,10 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
         this, [this] { close(); });
     connect(m_viewModel, &PlayerViewModel::fullscreenToggleRequested,
         this, &PlayerWindow::toggleFullscreen);
+    connect(m_viewModel, &PlayerViewModel::previousRequested,
+        this, &PlayerWindow::previousRequested);
+    connect(m_viewModel, &PlayerViewModel::nextRequested,
+        this, &PlayerWindow::nextRequested);
 
     // Load the QML scene. The MpvVideoItem inside it will be the
     // first MpvVideoItem child of the root; we look it up after
@@ -288,7 +292,7 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
             ctx.key.kind == api::MediaKind::Series
                 ? QStringLiteral("series")
                 : QStringLiteral("movie"));
-        pushMediaChips();
+        m_viewModel->setMediaChips({});
     }
 
     if (m_video) {
@@ -365,6 +369,13 @@ void PlayerWindow::showSkipChapter(const QString& kind,
 void PlayerWindow::hideSkipChapter()
 {
     if (m_viewModel) m_viewModel->hideSkip();
+}
+
+void PlayerWindow::setLoadingVisible(bool on)
+{
+    if (m_viewModel) {
+        m_viewModel->setLoadingVisible(on);
+    }
 }
 
 void PlayerWindow::stopAndHide()

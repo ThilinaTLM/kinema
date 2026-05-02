@@ -39,10 +39,9 @@ class PlayerViewModel;
  * (chrome state) and `MpvVideoItem` (transport).
  *
  * Geometry persistence and remembered-volume behaviour: applied on
- * first show, saved on every hide. Each playback gets a fresh
- * window (and therefore a fresh libmpv context); on close the
- * window calls `deleteLater()` on itself so the host can rebuild
- * cleanly for the next stream.
+ * first show, saved on every hide. The window and libmpv instance
+ * are reused across sequential queue items; closing the window just
+ * hides it and stops playback.
  */
 class PlayerWindow : public QQuickView
 {
@@ -83,6 +82,7 @@ public:
     virtual void showSkipChapter(const QString& kind,
         const QString& label, qint64 startSec, qint64 endSec);
     virtual void hideSkipChapter();
+    virtual void setLoadingVisible(bool on);
 
     /// Stop playback, leave fullscreen if needed, hide the window.
     void stopAndHide();
@@ -137,6 +137,8 @@ Q_SIGNALS:
     void audioPicked(int trackId);
     void subtitlePicked(int trackId);
     void speedPicked(double factor);
+    void previousRequested();
+    void nextRequested();
 
 private Q_SLOTS:
     /// Mirror QML's `chromeVisible` to the QQuickWindow cursor:

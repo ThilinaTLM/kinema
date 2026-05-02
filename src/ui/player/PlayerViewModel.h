@@ -67,6 +67,16 @@ class PlayerViewModel : public QObject
     Q_PROPERTY(QStringList mediaChips READ mediaChips
         NOTIFY mediaChipsChanged)
 
+    // ---- Transport / queue state -------------------------------------
+    Q_PROPERTY(bool loadingVisible READ loadingVisible
+        NOTIFY loadingVisibleChanged)
+    Q_PROPERTY(bool queueNavigationVisible READ queueNavigationVisible
+        NOTIFY queueNavigationVisibleChanged)
+    Q_PROPERTY(bool canGoPrevious READ canGoPrevious
+        NOTIFY canGoPreviousChanged)
+    Q_PROPERTY(bool canGoNext READ canGoNext
+        NOTIFY canGoNextChanged)
+
     // ---- Prompts ------------------------------------------------------
     Q_PROPERTY(bool resumeVisible READ resumeVisible
         NOTIFY resumeVisibleChanged)
@@ -113,6 +123,14 @@ public:
     QString mediaKind() const { return m_mediaKind; }
     QStringList mediaChips() const { return m_mediaChips; }
 
+    bool loadingVisible() const noexcept { return m_loadingVisible; }
+    bool queueNavigationVisible() const noexcept
+    {
+        return m_queueNavigationVisible;
+    }
+    bool canGoPrevious() const noexcept { return m_canGoPrevious; }
+    bool canGoNext() const noexcept { return m_canGoNext; }
+
     bool resumeVisible() const noexcept { return m_resumeVisible; }
     qint64 resumeSeconds() const noexcept { return m_resumeSeconds; }
 
@@ -132,6 +150,8 @@ public Q_SLOTS:
     void setMediaContext(const QString& title,
         const QString& subtitle, const QString& kind);
     void setMediaChips(const QStringList& chips);
+    void setLoadingVisible(bool on);
+    void setQueueNavigationState(int activeIndex, int count);
 
     void showResume(qint64 seconds);
     void hideResume();
@@ -168,6 +188,8 @@ public Q_SLOTS:
     void pickSpeed(double factor);
     void requestClose();
     void requestToggleFullscreen();
+    void requestPrevious();
+    void requestNext();
 
 Q_SIGNALS:
     // Property notifications.
@@ -175,6 +197,10 @@ Q_SIGNALS:
     void mediaSubtitleChanged();
     void mediaKindChanged();
     void mediaChipsChanged();
+    void loadingVisibleChanged();
+    void queueNavigationVisibleChanged();
+    void canGoPreviousChanged();
+    void canGoNextChanged();
     void currentAudioIdChanged();
     void currentSubtitleIdChanged();
     void resumeVisibleChanged();
@@ -196,6 +222,8 @@ Q_SIGNALS:
     void speedPicked(double factor);
     void closeRequested();
     void fullscreenToggleRequested();
+    void previousRequested();
+    void nextRequested();
 
     /// Emitted from the QML "Download subtitle…" picker entry.
     /// MainWindow opens the Qt Widgets `SubtitlesDialog` in
@@ -228,6 +256,11 @@ private:
     QString m_mediaSubtitle;
     QString m_mediaKind;
     QStringList m_mediaChips;
+
+    bool m_loadingVisible = false;
+    bool m_queueNavigationVisible = false;
+    bool m_canGoPrevious = false;
+    bool m_canGoNext = false;
 
     bool m_resumeVisible = false;
     qint64 m_resumeSeconds = 0;

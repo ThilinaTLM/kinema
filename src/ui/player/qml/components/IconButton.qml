@@ -36,10 +36,12 @@ Item {
 
     HoverHandler {
         id: hover
-        cursorShape: Qt.PointingHandCursor
+        enabled: root.enabled
+        cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
     TapHandler {
         id: tap
+        enabled: root.enabled
         gesturePolicy: TapHandler.ReleaseWithinBounds
         onTapped: {
             root.clicked();
@@ -54,6 +56,7 @@ Item {
         anchors.fill: parent
         radius: width / 2
         color: {
+            if (!root.enabled)  return "transparent";
             if (root.checked)   return Theme.hoverFill;
             if (tap.pressed)    return Theme.hoverFill;
             if (hover.hovered)  return Qt.rgba(1, 1, 1, 0.08);
@@ -80,5 +83,6 @@ Item {
         anchors.centerIn: parent
         kind: root.iconKind
         color: root.checked ? Theme.highlightedText : Theme.foreground
+        opacity: root.enabled ? 1.0 : 0.35
     }
 }

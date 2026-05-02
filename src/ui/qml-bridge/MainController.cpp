@@ -361,6 +361,7 @@ void MainController::buildCoreServices()
     m_playQueueCtrl = new controllers::PlayQueueController(
         *m_playQueueStore, *m_torrentio, *m_streamActions, m_settings,
         m_tokenCtrl->realDebridToken(), this);
+    m_historyCtrl->setPlayQueue(m_playQueueCtrl);
     m_playQueueVm = new PlayQueueViewModel(m_playQueueCtrl, this);
 
     // Discover / Search / Browse surface VMs. They sit on top of
@@ -776,13 +777,57 @@ ui::player::PlayerWindow* MainController::ensurePlayerWindow()
             Qt::UniqueConnection);
     }
 
+    auto* playerVm = m_playerWindow->viewModel();
+    if (playerVm && m_playQueueCtrl) {
+        const auto refreshQueueNavigation = [this, playerVm] {
+            const int active = m_playQueueCtrl
+                ? m_playQueueCtrl->activeIndex()
+                : -1;
+            const int count = m_playQueueCtrl
+                ? m_playQueueCtrl->items().size()
+                : 0;
+            playerVm->setQueueNavigationState(active, count);
+        };
+
+        refreshQueueNavigation();
+        connect(m_playQueueCtrl,
+            &controllers::PlayQueueController::activeIndexChanged,
+            playerVm, [refreshQueueNavigation](int) {
+                refreshQueueNavigation();
+            });
+        connect(m_playQueueCtrl,
+            &controllers::PlayQueueController::itemsReset,
+            playerVm, refreshQueueNavigation);
+        connect(m_playQueueCtrl,
+            &controllers::PlayQueueController::itemInserted,
+            playerVm, [refreshQueueNavigation](int) {
+                refreshQueueNavigation();
+            });
+        connect(m_playQueueCtrl,
+            &controllers::PlayQueueController::itemRemoved,
+            playerVm, [refreshQueueNavigation](int) {
+                refreshQueueNavigation();
+            });
+        connect(m_playQueueCtrl,
+            &controllers::PlayQueueController::itemMoved,
+            playerVm, [refreshQueueNavigation](int, int) {
+                refreshQueueNavigation();
+            });
+        connect(m_playerWindow, &ui::player::PlayerWindow::previousRequested,
+            m_playQueueCtrl,
+            &controllers::PlayQueueController::playPreviousItem);
+        connect(m_playerWindow, &ui::player::PlayerWindow::nextRequested,
+            m_playQueueCtrl,
+            &controllers::PlayQueueController::playNextItem);
+    }
+
     // Player chrome's `SubtitlePicker → Download…` lands on the
     // main window. We restore + raise the main window first so the
     // user can see the pushed page; the player keeps its separate
     // window visible behind it. The pushed Subtitles page tracks
     // the live `PlaybackController` context so its header reflects
     // whatever is currently playing.
-    connect(m_playerWindow->viewModel(),
+    connect(playerVm,
         &ui::player::PlayerViewModel::subtitlesDialogRequested,
         this, [this] {
             if (m_window) {
@@ -804,7 +849,6 @@ ui::player::PlayerWindow* MainController::ensurePlayerWindow()
     // sender is `m_subtitlesVm`, but the receiver context object is
     // the player VM, so Qt drops the slot when that VM dies).
     if (m_subtitlesVm) {
-        auto* playerVm = m_playerWindow->viewModel();
         connect(m_subtitlesVm,
             &SubtitlesViewModel::downloadCompleted, playerVm,
             [this, playerVm](api::PlaybackKey key, const QString& fileId,
@@ -841,7 +885,6 @@ ui::player::PlayerWindow* MainController::ensurePlayerWindow()
     // `Download…` picker entry can disable itself when
     // OpenSubtitles isn't configured.
     if (m_subtitleCtrl) {
-        auto* playerVm = m_playerWindow->viewModel();
         playerVm->setSubtitleDownloadEnabled(
             m_subtitleCtrl->downloadEnabled());
         connect(m_subtitleCtrl,

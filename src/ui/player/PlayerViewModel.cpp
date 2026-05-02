@@ -88,6 +88,35 @@ void PlayerViewModel::setMediaChips(const QStringList& chips)
     Q_EMIT mediaChipsChanged();
 }
 
+void PlayerViewModel::setLoadingVisible(bool on)
+{
+    if (m_loadingVisible == on) {
+        return;
+    }
+    m_loadingVisible = on;
+    Q_EMIT loadingVisibleChanged();
+}
+
+void PlayerViewModel::setQueueNavigationState(int activeIndex, int count)
+{
+    const bool visible = activeIndex >= 0 && count > 0;
+    const bool canGoPrevious = activeIndex > 0;
+    const bool canGoNext = activeIndex >= 0 && (activeIndex + 1) < count;
+
+    if (m_queueNavigationVisible != visible) {
+        m_queueNavigationVisible = visible;
+        Q_EMIT queueNavigationVisibleChanged();
+    }
+    if (m_canGoPrevious != canGoPrevious) {
+        m_canGoPrevious = canGoPrevious;
+        Q_EMIT canGoPreviousChanged();
+    }
+    if (m_canGoNext != canGoNext) {
+        m_canGoNext = canGoNext;
+        Q_EMIT canGoNextChanged();
+    }
+}
+
 void PlayerViewModel::showResume(qint64 seconds)
 {
     if (m_resumeSeconds != seconds) {
@@ -213,6 +242,16 @@ void PlayerViewModel::requestClose()
 void PlayerViewModel::requestToggleFullscreen()
 {
     Q_EMIT fullscreenToggleRequested();
+}
+
+void PlayerViewModel::requestPrevious()
+{
+    Q_EMIT previousRequested();
+}
+
+void PlayerViewModel::requestNext()
+{
+    Q_EMIT nextRequested();
 }
 
 // ---- Mirror MpvVideoItem signals ---------------------------------------

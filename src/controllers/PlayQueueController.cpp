@@ -56,6 +56,21 @@ void PlayQueueController::playNow(const api::Stream& s,
         return;
     }
 
+    const int existing = indexOfKey(ctx.key);
+    if (existing == m_activeIndex && existing >= 0) {
+        replaceRowFromStream(existing, s, ctx);
+        if (existing != 0) {
+            moveTo(existing, 0);
+        }
+        setActiveIndex(0);
+        dispatchActiveItem();
+        return;
+    }
+
+    if (existing >= 0) {
+        removeRowForReinsert(existing);
+    }
+
     // Demote any previously-active row.
     if (m_activeIndex >= 0 && m_activeIndex < m_items.size()) {
         m_items[m_activeIndex].status = api::QueueItem::Status::Pending;
@@ -65,11 +80,7 @@ void PlayQueueController::playNow(const api::Stream& s,
     auto item = buildItem(s, ctx);
     insertAt(std::move(item), 0);
     setActiveIndex(0);
-
-    // Bump epoch + kick off resolution.
-    ++m_resolveEpoch;
-    auto task = startActiveItem();
-    Q_UNUSED(task);
+    dispatchActiveItem();
 }
 
 void PlayQueueController::playNext(const api::Stream& s,
@@ -83,20 +94,24 @@ void PlayQueueController::playNext(const api::Stream& s,
         return;
     }
 
-    auto item = buildItem(s, ctx);
-    const int insertIdx = (m_activeIndex >= 0)
-        ? m_activeIndex + 1
-        : 0;
-    const int placed = insertAt(std::move(item), insertIdx);
+    const int existing = indexOfKey(ctx.key);
+    const QString title = ctx.title.isEmpty() ? s.releaseName : ctx.title;
+    if (existing == m_activeIndex && existing >= 0) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status", "Already playing: \u201c%1\u201d", title),
+            2500);
+        return;
+    }
+    if (existing >= 0) {
+        removeRowForReinsert(existing);
+    }
 
-    // Inserting at or before the active index would shift it; this
-    // path always inserts strictly after the active row, so the
-    // active index is unaffected.
-    Q_UNUSED(placed);
+    auto item = buildItem(s, ctx);
+    const int insertIdx = (m_activeIndex >= 0) ? m_activeIndex + 1 : 0;
+    insertAt(std::move(item), insertIdx);
 
     Q_EMIT statusMessage(
-        i18nc("@info:status", "Will play next: \u201c%1\u201d",
-            ctx.title.isEmpty() ? s.releaseName : ctx.title),
+        i18nc("@info:status", "Will play next: \u201c%1\u201d", title),
         2500);
 }
 
@@ -111,12 +126,23 @@ void PlayQueueController::enqueue(const api::Stream& s,
         return;
     }
 
+    const int existing = indexOfKey(ctx.key);
+    const QString title = ctx.title.isEmpty() ? s.releaseName : ctx.title;
+    if (existing == m_activeIndex && existing >= 0) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status", "Already playing: \u201c%1\u201d", title),
+            2500);
+        return;
+    }
+    if (existing >= 0) {
+        removeRowForReinsert(existing);
+    }
+
     auto item = buildItem(s, ctx);
     insertAt(std::move(item), m_items.size());
 
     Q_EMIT statusMessage(
-        i18nc("@info:status", "Added to queue: \u201c%1\u201d",
-            ctx.title.isEmpty() ? s.releaseName : ctx.title),
+        i18nc("@info:status", "Added to queue: \u201c%1\u201d", title),
         2500);
 }
 
@@ -125,23 +151,14 @@ void PlayQueueController::playAt(int index)
     if (index < 0 || index >= m_items.size()) {
         return;
     }
-    if (index == m_activeIndex) {
-        // Re-dispatch the same row \u2014 user clicked the active row.
-        ++m_resolveEpoch;
-        auto task = startActiveItem();
-        Q_UNUSED(task);
-        return;
-    }
-
-    if (m_activeIndex >= 0 && m_activeIndex < m_items.size()) {
+    if (index != m_activeIndex
+        && m_activeIndex >= 0 && m_activeIndex < m_items.size()) {
         m_items[m_activeIndex].status = api::QueueItem::Status::Pending;
         Q_EMIT itemChanged(m_activeIndex);
     }
 
     setActiveIndex(index);
-    ++m_resolveEpoch;
-    auto task = startActiveItem();
-    Q_UNUSED(task);
+    dispatchActiveItem();
 }
 
 void PlayQueueController::removeAt(int index)
@@ -160,10 +177,10 @@ void PlayQueueController::removeAt(int index)
         // remove list so the next pending row takes its place;
         // dispatch playback for it.
         ++m_resolveEpoch; // discard any in-flight resolve
+        m_userClosePending = false;
         if (index < m_items.size()) {
             setActiveIndex(index);
-            auto task = startActiveItem();
-            Q_UNUSED(task);
+            dispatchActiveItem();
         } else {
             setActiveIndex(-1);
             // No more items - tell the host to hide the player.
@@ -221,6 +238,7 @@ void PlayQueueController::clearAll()
     m_items.clear();
     setActiveIndex(-1);
     ++m_resolveEpoch;
+    m_userClosePending = false;
     Q_EMIT itemsReset();
     m_store.clear();
 }
@@ -269,9 +287,7 @@ void PlayQueueController::onPlayerEndOfFile(const QString& reason,
         }
         if (next >= 0) {
             setActiveIndex(next);
-            ++m_resolveEpoch;
-            auto task = startActiveItem();
-            Q_UNUSED(task);
+            dispatchActiveItem();
         } else {
             setActiveIndex(-1);
             Q_EMIT windowCloseRequested();
@@ -286,11 +302,11 @@ void PlayQueueController::onPlayerEndOfFile(const QString& reason,
     m_items.removeAt(oldIdx);
     Q_EMIT itemRemoved(oldIdx);
     ++m_resolveEpoch;
+    m_userClosePending = false;
 
     if (oldIdx < m_items.size()) {
         setActiveIndex(oldIdx);
-        auto task = startActiveItem();
-        Q_UNUSED(task);
+        dispatchActiveItem();
     } else {
         setActiveIndex(-1);
         Q_EMIT statusMessage(
@@ -310,6 +326,20 @@ void PlayQueueController::onPlayerUserClosed()
     }
 }
 
+void PlayQueueController::playPreviousItem()
+{
+    if (m_activeIndex > 0) {
+        playAt(m_activeIndex - 1);
+    }
+}
+
+void PlayQueueController::playNextItem()
+{
+    if (m_activeIndex >= 0 && (m_activeIndex + 1) < m_items.size()) {
+        playAt(m_activeIndex + 1);
+    }
+}
+
 void PlayQueueController::retryFailed(int index)
 {
     if (index < 0 || index >= m_items.size()) {
@@ -326,9 +356,7 @@ void PlayQueueController::retryFailed(int index)
         if (m_activeIndex != index) {
             setActiveIndex(index);
         }
-        ++m_resolveEpoch;
-        auto task = startActiveItem();
-        Q_UNUSED(task);
+        dispatchActiveItem();
     }
 }
 
@@ -441,6 +469,55 @@ QCoro::Task<void> PlayQueueController::startActiveItem()
 //  Helpers
 // ------------------------------------------------------------------
 
+int PlayQueueController::indexOfKey(const api::PlaybackKey& key) const
+{
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].key == key) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void PlayQueueController::replaceRowFromStream(int index,
+    const api::Stream& s, const api::PlaybackContext& ctx)
+{
+    if (index < 0 || index >= m_items.size()) {
+        return;
+    }
+
+    auto& item = m_items[index];
+    item.key = ctx.key;
+    item.title = ctx.title.isEmpty()
+        ? (s.releaseName.isEmpty() ? s.qualityLabel : s.releaseName)
+        : ctx.title;
+    item.seriesTitle = ctx.seriesTitle;
+    item.episodeTitle = ctx.episodeTitle;
+    item.poster = ctx.poster;
+    item.streamRef = api::HistoryStreamRef::fromStream(s);
+    item.cachedDirectUrl = s.directUrl;
+    item.addedAt = QDateTime::currentDateTimeUtc();
+    item.status = api::QueueItem::Status::Pending;
+    Q_EMIT itemChanged(index);
+    persist();
+}
+
+void PlayQueueController::removeRowForReinsert(int index)
+{
+    if (index < 0 || index >= m_items.size()) {
+        return;
+    }
+
+    Q_EMIT itemAboutToBeRemoved(index);
+    m_items.removeAt(index);
+    Q_EMIT itemRemoved(index);
+
+    if (m_activeIndex > index) {
+        setActiveIndex(m_activeIndex - 1);
+    }
+    persist();
+}
+
 api::QueueItem PlayQueueController::buildItem(const api::Stream& s,
     const api::PlaybackContext& ctx)
 {
@@ -537,6 +614,14 @@ void PlayQueueController::setActiveIndex(int index)
     }
     m_activeIndex = index;
     Q_EMIT activeIndexChanged(index);
+}
+
+void PlayQueueController::dispatchActiveItem()
+{
+    ++m_resolveEpoch;
+    m_userClosePending = false;
+    auto task = startActiveItem();
+    Q_UNUSED(task);
 }
 
 } // namespace kinema::controllers

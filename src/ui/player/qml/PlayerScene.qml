@@ -217,8 +217,8 @@ Item {
     // ---- Layer 5: HUDs ------------------------------------------------
     BufferingIndicator {
         anchors.centerIn: parent
-        active: mpv.buffering
-        percent: mpv.bufferingPercent
+        active: playerVm.loadingVisible || mpv.buffering
+        percent: mpv.buffering ? mpv.bufferingPercent : 0
     }
 
     // Always-visible vertical volume cluster on the right edge,

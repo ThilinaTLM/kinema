@@ -96,6 +96,11 @@ public Q_SLOTS:
     /// resolves a fresh URL.
     void playAt(int index);
 
+    /// Queue-aware transport navigation shared by the player chrome
+    /// and MPRIS.
+    void playPreviousItem();
+    void playNextItem();
+
     /// Drop the row at `index`. If it's the active row, in step 2
     /// we just clear `activeIndex`; auto-advance lands in step 4.
     void removeAt(int index);
@@ -186,6 +191,18 @@ private:
     /// `StreamActions::play`).
     static api::PlaybackContext toContext(const api::QueueItem& item);
 
+    /// Resolve the index of the existing row for `key`, or -1.
+    int indexOfKey(const api::PlaybackKey& key) const;
+
+    /// Overwrite the row at `index` with fresh stream/context data
+    /// for the same media key.
+    void replaceRowFromStream(int index, const api::Stream& s,
+        const api::PlaybackContext& ctx);
+
+    /// Remove a row so the caller can reinsert it elsewhere without
+    /// triggering active-playback side effects.
+    void removeRowForReinsert(int index);
+
     /// Insert `item` at `atIndex`, persist, and emit itemInserted.
     /// Returns the (possibly clamped) insert position.
     int insertAt(api::QueueItem item, int atIndex);
@@ -196,6 +213,10 @@ private:
     /// Update `m_activeIndex` and emit `activeIndexChanged` if
     /// changed. No-op when value is identical.
     void setActiveIndex(int index);
+
+    /// Bump the resolve epoch, clear stale user-close state, and
+    /// dispatch the current active row.
+    void dispatchActiveItem();
 
     core::PlayQueueStore& m_store;
     api::TorrentioClient& m_torrentio;

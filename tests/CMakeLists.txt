@@ -166,6 +166,11 @@ ecm_add_test(tst_history_store.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
+ecm_add_test(tst_history_controller.cpp
+    TEST_NAME tst_history_controller
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
 ecm_add_test(tst_library_store.cpp
     TEST_NAME tst_library_store
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
@@ -302,8 +307,8 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
          tst_stream_actions tst_subtitle_results_model
          tst_token_controller tst_cinemeta_client tst_tmdb_client
          tst_torrentio_client tst_realdebrid_client
-         tst_database tst_history_store tst_library_store
-         tst_watched_store tst_watched_controller tst_play_queue_store
+         tst_database tst_history_store tst_history_controller
+         tst_library_store tst_watched_store tst_watched_controller tst_play_queue_store
          tst_play_queue_controller
          tst_subtitle_cache_store tst_cache_paths tst_language
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller

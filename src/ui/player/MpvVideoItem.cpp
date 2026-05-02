@@ -210,11 +210,31 @@ void MpvVideoItem::applySettings(const config::PlayerSettings& settings)
 void MpvVideoItem::loadFile(const QUrl& url,
     std::optional<double> startSeconds)
 {
-    // Invalidate cached state so the first new sample is always
-    // forwarded.
-    m_position = -1.0;
-    m_duration = -1.0;
-    m_cacheAhead = -1.0;
+    m_logTail.clear();
+
+    const bool pausedChangedNow = m_paused;
+    const bool bufferingChangedNow = m_bufferingWaiting
+        || m_bufferingPercent != 0;
+    const bool positionChangedNow = m_position != 0.0;
+    const bool durationChangedNow = m_duration != 0.0;
+    const bool cacheAheadChangedNow = m_cacheAhead != 0.0;
+    const bool audioTrackChangedNow = m_audioTrackId != -1;
+    const bool subtitleTrackChangedNow = m_subtitleTrackId != -1;
+    const bool statsChangedNow = m_stats.width != 0 || m_stats.height != 0
+        || !m_stats.videoCodec.isEmpty() || !m_stats.audioCodec.isEmpty()
+        || m_stats.fps != 0.0 || m_stats.videoBitrate != 0.0
+        || m_stats.audioBitrate != 0.0 || m_stats.cacheSeconds != 0.0
+        || m_stats.audioChannels != 0
+        || !m_stats.hdrPrimaries.isEmpty()
+        || !m_stats.hdrGamma.isEmpty();
+
+    // Reset load-scoped state immediately so the reused player
+    // never shows stale transport / track / chip state while the
+    // next file is still loading.
+    m_paused = false;
+    m_position = 0.0;
+    m_duration = 0.0;
+    m_cacheAhead = 0.0;
     m_bufferingWaiting = false;
     m_bufferingPercent = 0;
     m_tracks.clear();
@@ -223,8 +243,32 @@ void MpvVideoItem::loadFile(const QUrl& url,
     m_subtitleTrackId = -1;
     m_stats = VideoStats {};
 
+    if (pausedChangedNow) {
+        Q_EMIT pausedChanged(false);
+    }
+    if (positionChangedNow) {
+        Q_EMIT positionChanged(0.0);
+    }
+    if (durationChangedNow) {
+        Q_EMIT durationChanged(0.0);
+    }
+    if (bufferingChangedNow) {
+        Q_EMIT bufferingChanged(false, 0);
+    }
+    if (cacheAheadChangedNow) {
+        Q_EMIT cacheAheadChanged(0.0);
+    }
     Q_EMIT trackListChanged(m_tracks);
     Q_EMIT chaptersChanged(m_chapters);
+    if (audioTrackChangedNow) {
+        Q_EMIT audioTrackChanged(-1);
+    }
+    if (subtitleTrackChangedNow) {
+        Q_EMIT subtitleTrackChanged(-1);
+    }
+    if (statsChangedNow) {
+        Q_EMIT videoStatsChanged(m_stats);
+    }
 
     if (m_pendingVolume) {
         setProperty(QStringLiteral("volume"), *m_pendingVolume);
@@ -383,7 +427,8 @@ void MpvVideoItem::onMpvPropertyChanged(const QString& name,
     } else if (name == QLatin1String(kTimePos)) {
         const double v = asDouble();
         if (m_position < 0.0
-            || qAbs(v - m_position) >= kPositionEpsilonSec) {
+            || qAbs(v - m_position) >= kPositionEpsilonSec
+            || (m_position == 0.0 && v > 0.0)) {
             m_position = v;
             Q_EMIT positionChanged(v);
         }

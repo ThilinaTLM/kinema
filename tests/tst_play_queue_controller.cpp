@@ -256,6 +256,51 @@ private Q_SLOTS:
         QCOMPARE(statusSpy.count(), 1);
     }
 
+    void playNowDuplicateNonActiveMovesToFrontOnce()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B1"),
+                            QStringLiteral("https://rd.example/B1")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("C"),
+                            QStringLiteral("https://rd.example/C")),
+            makeMovieCtx(QStringLiteral("ttC"), QStringLiteral("C")));
+
+        m_ctrl->playNow(makeStream(QStringLiteral("B2"),
+                            QStringLiteral("https://rd.example/B2")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+
+        QCOMPARE(m_ctrl->items().size(), 3);
+        QCOMPARE(m_ctrl->activeIndex(), 0);
+        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttB"));
+        QCOMPARE(m_ctrl->items()[0].streamRef.releaseName,
+            QStringLiteral("Release.B2"));
+        QCOMPARE(m_ctrl->items()[1].key.imdbId, QStringLiteral("ttA"));
+        QCOMPARE(m_ctrl->items()[2].key.imdbId, QStringLiteral("ttC"));
+        QCOMPARE(m_actions->calls.size(), 2);
+    }
+
+    void playNowDuplicateActiveRestartsWithoutInserting()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A1"),
+                            QStringLiteral("https://rd.example/A1")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+
+        m_ctrl->playNow(makeStream(QStringLiteral("A2"),
+                            QStringLiteral("https://rd.example/A2")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+
+        QCOMPARE(m_ctrl->items().size(), 1);
+        QCOMPARE(m_ctrl->activeIndex(), 0);
+        QCOMPARE(m_ctrl->items()[0].streamRef.releaseName,
+            QStringLiteral("Release.A2"));
+        QCOMPARE(m_actions->calls.size(), 2);
+        QCOMPARE(m_actions->calls[1].stream.directUrl,
+            QUrl(QStringLiteral("https://rd.example/A2")));
+    }
+
     // -----------------------------------------------------------
     //  Play Next
     // -----------------------------------------------------------
@@ -300,6 +345,48 @@ private Q_SLOTS:
         QVERIFY(m_actions->calls.isEmpty());
     }
 
+    void playNextDuplicateMovesBehindActiveOnce()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B1"),
+                            QStringLiteral("https://rd.example/B1")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("C"),
+                            QStringLiteral("https://rd.example/C")),
+            makeMovieCtx(QStringLiteral("ttC"), QStringLiteral("C")));
+
+        m_ctrl->playNext(makeStream(QStringLiteral("C2"),
+                             QStringLiteral("https://rd.example/C2")),
+            makeMovieCtx(QStringLiteral("ttC"), QStringLiteral("C")));
+
+        QCOMPARE(m_ctrl->items().size(), 3);
+        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttA"));
+        QCOMPARE(m_ctrl->items()[1].key.imdbId, QStringLiteral("ttC"));
+        QCOMPARE(m_ctrl->items()[1].streamRef.releaseName,
+            QStringLiteral("Release.C2"));
+        QCOMPARE(m_ctrl->items()[2].key.imdbId, QStringLiteral("ttB"));
+        QCOMPARE(m_actions->calls.size(), 1);
+    }
+
+    void playNextDuplicateActiveNoOpsWithStatus()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+
+        QSignalSpy statusSpy(m_ctrl.get(),
+            &controllers::PlayQueueController::statusMessage);
+        m_ctrl->playNext(makeStream(QStringLiteral("A2"),
+                             QStringLiteral("https://rd.example/A2")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+
+        QCOMPARE(m_ctrl->items().size(), 1);
+        QCOMPARE(m_actions->calls.size(), 1);
+        QCOMPARE(statusSpy.count(), 1);
+    }
+
     // -----------------------------------------------------------
     //  Add to queue
     // -----------------------------------------------------------
@@ -325,6 +412,48 @@ private Q_SLOTS:
             QStringLiteral("ttC"));
         QCOMPARE(m_ctrl->activeIndex(), 0);
         QCOMPARE(m_actions->calls.size(), 1);
+    }
+
+    void enqueueDuplicateAppendsOnce()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B1"),
+                            QStringLiteral("https://rd.example/B1")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("C"),
+                            QStringLiteral("https://rd.example/C")),
+            makeMovieCtx(QStringLiteral("ttC"), QStringLiteral("C")));
+
+        m_ctrl->enqueue(makeStream(QStringLiteral("B2"),
+                            QStringLiteral("https://rd.example/B2")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+
+        QCOMPARE(m_ctrl->items().size(), 3);
+        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttA"));
+        QCOMPARE(m_ctrl->items()[1].key.imdbId, QStringLiteral("ttC"));
+        QCOMPARE(m_ctrl->items()[2].key.imdbId, QStringLiteral("ttB"));
+        QCOMPARE(m_ctrl->items()[2].streamRef.releaseName,
+            QStringLiteral("Release.B2"));
+        QCOMPARE(m_actions->calls.size(), 1);
+    }
+
+    void enqueueDuplicateActiveNoOpsWithStatus()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+
+        QSignalSpy statusSpy(m_ctrl.get(),
+            &controllers::PlayQueueController::statusMessage);
+        m_ctrl->enqueue(makeStream(QStringLiteral("A2"),
+                            QStringLiteral("https://rd.example/A2")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+
+        QCOMPARE(m_ctrl->items().size(), 1);
+        QCOMPARE(m_actions->calls.size(), 1);
+        QCOMPARE(statusSpy.count(), 1);
     }
 
     // -----------------------------------------------------------
@@ -718,6 +847,65 @@ private Q_SLOTS:
             api::QueueItem::Status::Pending);
         // No new dispatch.
         QCOMPARE(m_actions->calls.size(), 1);
+    }
+
+    void previousAndNextItemNavigateWithinBounds()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B"),
+                            QStringLiteral("https://rd.example/B")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("C"),
+                            QStringLiteral("https://rd.example/C")),
+            makeMovieCtx(QStringLiteral("ttC"), QStringLiteral("C")));
+
+        FakeTorrentioClient::ScriptedCall sc;
+        sc.suspend = true;
+        sc.streams.append(makeStream(QStringLiteral("A"),
+            QStringLiteral("https://rd.example/A-fresh")));
+        m_torrentio->scriptedCalls.append(sc);
+
+        m_ctrl->playNextItem();
+        QCOMPARE(m_ctrl->activeIndex(), 1);
+        QCOMPARE(m_actions->calls.size(), 2);
+
+        m_ctrl->playPreviousItem();
+        drainEvents(4);
+        QCOMPARE(m_ctrl->activeIndex(), 0);
+        QCOMPARE(m_actions->calls.size(), 3);
+
+        m_ctrl->playPreviousItem();
+        QCOMPARE(m_ctrl->activeIndex(), 0);
+        QCOMPARE(m_actions->calls.size(), 3);
+    }
+
+    void freshDispatchClearsPendingUserClose()
+    {
+        m_ctrl->playNow(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"), QStringLiteral("A")));
+        m_ctrl->enqueue(makeStream(QStringLiteral("B"),
+                            QStringLiteral("https://rd.example/B")),
+            makeMovieCtx(QStringLiteral("ttB"), QStringLiteral("B")));
+
+        FakeTorrentioClient::ScriptedCall sc;
+        sc.suspend = true;
+        sc.streams.append(makeStream(QStringLiteral("A"),
+            QStringLiteral("https://rd.example/A-fresh")));
+        m_torrentio->scriptedCalls.append(sc);
+
+        m_ctrl->onPlayerUserClosed();
+        m_ctrl->playAt(0);
+        drainEvents(4);
+        m_ctrl->onPlayerEndOfFile(QStringLiteral("eof"),
+            api::PlaybackContext {});
+
+        QCOMPARE(m_ctrl->items().size(), 1);
+        QCOMPARE(m_ctrl->items()[0].key.imdbId, QStringLiteral("ttB"));
+        QCOMPARE(m_ctrl->activeIndex(), 0);
+        QCOMPARE(m_actions->calls.size(), 3);
     }
 
     // -----------------------------------------------------------
