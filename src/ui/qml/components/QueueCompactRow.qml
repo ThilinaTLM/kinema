@@ -60,12 +60,9 @@ QQC2.ItemDelegate {
     // Poster height drives the row height; everything aligns to it.
     readonly property real posterHeight:
         Math.round(Kirigami.Units.gridUnit * 5)
-    readonly property real posterWidth:
-        Math.round(posterHeight / 1.5)
 
-    padding: Theme.inlineSpacing * 2
-    implicitHeight: Math.max(posterHeight, layout.implicitHeight)
-        + padding * 2
+    padding: 0
+    implicitHeight: layout.implicitHeight
 
     onClicked: if (!row.dragLifted) {
         row.playRequested();
@@ -127,12 +124,113 @@ QQC2.ItemDelegate {
         id: layout
         spacing: Theme.groupSpacing
 
-        // ---- Drag handle ----------------------------------------
+        // ---- Poster ---------------------------------------------
+        Item {
+            Layout.fillHeight: true
+            Layout.minimumHeight: row.posterHeight
+            Layout.preferredWidth: Math.round(height / 1.5)
+
+            Rectangle {
+                anchors.fill: parent
+                radius: Kirigami.Units.cornerRadius
+                color: Qt.alpha(Theme.foreground, 0.08)
+                border.color: Qt.alpha(Theme.foreground, 0.10)
+                border.width: 1
+            }
+
+            Image {
+                anchors.fill: parent
+                anchors.margins: 1
+                source: row.posterUrl.length > 0
+                    ? "image://kinema/queue?u=" + row.posterUrl
+                    : ""
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                cache: true
+                visible: status === Image.Ready
+            }
+        }
+
+        // ---- Meta column ----------------------------------------
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignVCenter
+            Layout.topMargin: Theme.inlineSpacing * 2
+            Layout.bottomMargin: Theme.inlineSpacing * 2
+            spacing: Math.round(Theme.inlineSpacing / 2)
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.inlineSpacing
+
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    text: row.title
+                    font.weight: Font.DemiBold
+                    color: Theme.foreground
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    wrapMode: Text.NoWrap
+                }
+
+                MetaChip {
+                    visible: row.isFailed
+                    text: i18nc("@info queue badge", "Unavailable")
+                    tone: "negative"
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Theme.inlineSpacing
+                visible: row.resolution.length > 0
+                    || row.qualityLabel.length > 0
+                    || row._sizeText(row.sizeBytes).length > 0
+
+                MetaChip {
+                    visible: row.resolution.length > 0
+                    text: row.resolution.toUpperCase()
+                    tone: "neutral"
+                }
+                MetaChip {
+                    visible: row.qualityLabel.length > 0
+                        && row.qualityLabel !== row.resolution
+                    text: row.qualityLabel
+                    tone: "neutral"
+                }
+                MetaChip {
+                    visible: row._sizeText(row.sizeBytes).length > 0
+                    text: row._sizeText(row.sizeBytes)
+                    tone: "neutral"
+                }
+            }
+        }
+
+        // ---- Trailing actions -----------------------------------
+        RowLayout {
+            Layout.alignment: Qt.AlignVCenter
+            Layout.rightMargin: Theme.inlineSpacing * 2
+            spacing: Theme.inlineSpacing
+
+            QQC2.ToolButton {
+                visible: row.isFailed
+                icon.source: AppIcons.url("refresh-cw")
+                icon.color: AppIcons.controlColor(enabled, false)
+                text: i18nc("@action:button", "Retry")
+                display: QQC2.AbstractButton.IconOnly
+                onClicked: row.retryRequested()
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.visible: hovered
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            }
+        }
+
+        // ---- Drag handle (right edge) ---------------------------
         Item {
             id: dragHandle
-            Layout.alignment: Qt.AlignVCenter
+            Layout.fillHeight: true
             Layout.preferredWidth: Kirigami.Units.iconSizes.medium
-            Layout.preferredHeight: row.posterHeight
+                + Theme.inlineSpacing * 2
             visible: row.dragEnabled
 
             Kirigami.Icon {
@@ -182,168 +280,6 @@ QQC2.ItemDelegate {
                         0, centroid.position.y);
                     row.dragHandleMoved(p.y);
                 }
-            }
-        }
-
-        // ---- Poster ---------------------------------------------
-        Item {
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: row.posterWidth
-            Layout.preferredHeight: row.posterHeight
-
-            Rectangle {
-                anchors.fill: parent
-                radius: Kirigami.Units.cornerRadius
-                color: Qt.alpha(Theme.foreground, 0.08)
-                border.color: Qt.alpha(Theme.foreground, 0.10)
-                border.width: 1
-            }
-
-            Image {
-                anchors.fill: parent
-                anchors.margins: 1
-                source: row.posterUrl.length > 0
-                    ? "image://kinema/queue?u=" + row.posterUrl
-                    : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                visible: status === Image.Ready
-            }
-
-            Kirigami.Icon {
-                anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.medium
-                height: width
-                source: AppIcons.url("film")
-                color: Qt.alpha(Theme.foreground, 0.35)
-            }
-        }
-
-        // ---- Meta column ----------------------------------------
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.alignment: Qt.AlignVCenter
-            spacing: Math.round(Theme.inlineSpacing / 2)
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Theme.inlineSpacing
-
-                QQC2.Label {
-                    Layout.fillWidth: true
-                    text: row.title
-                    font.weight: Font.DemiBold
-                    color: Theme.foreground
-                    elide: Text.ElideRight
-                    maximumLineCount: 1
-                    wrapMode: Text.NoWrap
-                }
-
-                MetaChip {
-                    visible: row.isFailed
-                    text: i18nc("@info queue badge", "Unavailable")
-                    tone: "negative"
-                }
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: row.subtitle.length > 0
-                text: row.subtitle
-                color: Theme.disabled
-                font.pointSize: Theme.captionFont.pointSize
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                wrapMode: Text.NoWrap
-            }
-
-            Flow {
-                Layout.fillWidth: true
-                spacing: Theme.inlineSpacing
-                visible: row.resolution.length > 0
-                    || row.qualityLabel.length > 0
-                    || row.provider.length > 0
-                    || row._sizeText(row.sizeBytes).length > 0
-
-                MetaChip {
-                    visible: row.resolution.length > 0
-                    text: row.resolution.toUpperCase()
-                    tone: "neutral"
-                }
-                MetaChip {
-                    visible: row.qualityLabel.length > 0
-                        && row.qualityLabel !== row.resolution
-                    text: row.qualityLabel
-                    tone: "neutral"
-                }
-                MetaChip {
-                    visible: row._sizeText(row.sizeBytes).length > 0
-                    text: row._sizeText(row.sizeBytes)
-                    tone: "neutral"
-                }
-                QQC2.Label {
-                    visible: row.provider.length > 0
-                    text: row.provider
-                    font.pointSize: Theme.captionFont.pointSize
-                    color: Theme.disabled
-                    height: Theme.defaultFont.pixelSize
-                        + Theme.inlineSpacing
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: row.releaseName.length > 0
-                text: row.releaseName
-                color: Theme.disabled
-                font.pointSize: Theme.captionFont.pointSize
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                wrapMode: Text.NoWrap
-
-                HoverHandler { id: releaseHover }
-                QQC2.ToolTip.text: row.releaseName
-                QQC2.ToolTip.visible: releaseHover.hovered
-                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-            }
-        }
-
-        // ---- Trailing actions -----------------------------------
-        RowLayout {
-            Layout.alignment: Qt.AlignVCenter
-            spacing: Theme.inlineSpacing
-
-            QQC2.ToolButton {
-                visible: row.isFailed
-                icon.source: AppIcons.url("refresh-cw")
-                icon.color: AppIcons.controlColor(enabled, false)
-                text: i18nc("@action:button", "Retry")
-                display: QQC2.AbstractButton.IconOnly
-                onClicked: row.retryRequested()
-                QQC2.ToolTip.text: text
-                QQC2.ToolTip.visible: hovered
-                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-            }
-
-            QQC2.ToolButton {
-                icon.source: AppIcons.url("trash-2")
-                icon.color: AppIcons.controlColor(enabled, false)
-                text: i18nc("@action:button", "Remove")
-                display: QQC2.AbstractButton.IconOnly
-                onClicked: row.removeRequested()
-                QQC2.ToolTip.text: text
-                QQC2.ToolTip.visible: hovered
-                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-            }
-
-            QQC2.ToolButton {
-                icon.source: AppIcons.url("ellipsis")
-                icon.color: AppIcons.controlColor(enabled, false)
-                display: QQC2.AbstractButton.IconOnly
-                text: i18nc("@action:button row actions", "More actions")
-                onClicked: row.overflowRequested()
             }
         }
     }

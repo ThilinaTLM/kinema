@@ -37,10 +37,10 @@ void TestMpvLoadCommand::buildWithResume()
         QStringLiteral("loadfile"),
         QStringLiteral("https://example.com/video.mkv"),
         QStringLiteral("replace"),
+        QStringLiteral("-1"),
         QStringLiteral("start=123.456"),
     };
     QCOMPARE(args, expected);
-    QVERIFY(!args.contains(QStringLiteral("-1")));
 }
 
 QTEST_GUILESS_MAIN(TestMpvLoadCommand)

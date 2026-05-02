@@ -59,9 +59,8 @@ QQC2.ItemDelegate {
     readonly property real posterWidth:
         Math.round(posterHeight / 1.5)
 
-    padding: Theme.groupSpacing
-    implicitHeight: Math.max(posterHeight, layout.implicitHeight)
-        + padding * 2
+    padding: 0
+    implicitHeight: layout.implicitHeight
 
     onClicked: if (!row.isActive) {
         row.playRequested();
@@ -128,17 +127,14 @@ QQC2.ItemDelegate {
         // ---- Poster ---------------------------------------------
         Item {
             id: posterFrame
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: row.posterWidth
-            Layout.preferredHeight: row.posterHeight
+            Layout.fillHeight: true
+            Layout.minimumHeight: row.posterHeight
+            Layout.preferredWidth: Math.round(height / 1.5)
 
-            Kirigami.ShadowedRectangle {
+            Rectangle {
                 anchors.fill: parent
                 radius: Kirigami.Units.cornerRadius
                 color: Qt.alpha(Theme.foreground, 0.06)
-                shadow.size: Kirigami.Units.largeSpacing
-                shadow.yOffset: Kirigami.Units.smallSpacing
-                shadow.color: Qt.alpha(Theme.foreground, 0.30)
                 border.color: Qt.alpha(Theme.foreground, 0.10)
                 border.width: 1
             }
@@ -154,60 +150,37 @@ QQC2.ItemDelegate {
                 cache: true
                 visible: status === Image.Ready
             }
-
-            Kirigami.Icon {
-                anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.large
-                height: width
-                source: AppIcons.url("film")
-                color: Qt.alpha(Theme.foreground, 0.35)
-            }
         }
 
         // ---- Meta column ----------------------------------------
         ColumnLayout {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
+            Layout.topMargin: Theme.groupSpacing
+            Layout.bottomMargin: Theme.groupSpacing
+            Layout.rightMargin: Theme.groupSpacing
             spacing: Theme.inlineSpacing
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.inlineSpacing
 
-                MetaChip {
-                    text: row.isActive
-                        ? i18nc("@info queue badge", "Now playing")
-                        : i18nc("@info queue badge", "Up next")
-                    tone: "accent"
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    text: row.title
+                    font.pointSize: Theme.sectionFont.pointSize
+                    font.weight: Font.DemiBold
+                    color: Theme.foreground
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    wrapMode: Text.NoWrap
                 }
+
                 MetaChip {
                     visible: row.isFailed && !row.isActive
                     text: i18nc("@info queue badge", "Unavailable")
                     tone: "negative"
                 }
-                Item { Layout.fillWidth: true }
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                text: row.title
-                font.pointSize: Theme.sectionFont.pointSize
-                font.weight: Font.DemiBold
-                color: Theme.foreground
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                wrapMode: Text.NoWrap
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: row.subtitle.length > 0
-                text: row.subtitle
-                font.pointSize: Theme.defaultFont.pointSize
-                color: Theme.foreground
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                wrapMode: Text.NoWrap
             }
 
             Flow {
@@ -215,7 +188,6 @@ QQC2.ItemDelegate {
                 spacing: Theme.inlineSpacing
                 visible: row.resolution.length > 0
                     || row.qualityLabel.length > 0
-                    || row.provider.length > 0
                     || row._sizeText(row.sizeBytes).length > 0
 
                 MetaChip {
@@ -234,31 +206,6 @@ QQC2.ItemDelegate {
                     text: row._sizeText(row.sizeBytes)
                     tone: "neutral"
                 }
-                QQC2.Label {
-                    visible: row.provider.length > 0
-                    text: row.provider
-                    font.pointSize: Theme.captionFont.pointSize
-                    color: Theme.disabled
-                    height: Theme.defaultFont.pixelSize
-                        + Theme.inlineSpacing
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: row.releaseName.length > 0
-                text: row.releaseName
-                color: Theme.disabled
-                font.pointSize: Theme.captionFont.pointSize
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                wrapMode: Text.NoWrap
-
-                HoverHandler { id: releaseHover }
-                QQC2.ToolTip.text: row.releaseName
-                QQC2.ToolTip.visible: releaseHover.hovered
-                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             }
 
             // ---- Playback rail (active only) -------------------
@@ -388,27 +335,6 @@ QQC2.ItemDelegate {
                 }
 
                 Item { Layout.fillWidth: true }
-
-                QQC2.ToolButton {
-                    visible: !row.isActive
-                    icon.source: AppIcons.url("trash-2")
-                    icon.color: AppIcons.controlColor(enabled, false)
-                    text: i18nc("@action:button", "Remove")
-                    display: QQC2.AbstractButton.IconOnly
-                    onClicked: row.removeRequested()
-                    QQC2.ToolTip.text: text
-                    QQC2.ToolTip.visible: hovered
-                    QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                }
-
-                QQC2.ToolButton {
-                    icon.source: AppIcons.url("ellipsis")
-                    icon.color: AppIcons.controlColor(enabled, false)
-                    display: QQC2.AbstractButton.IconOnly
-                    text: i18nc("@action:button row actions",
-                        "More actions")
-                    onClicked: row.overflowRequested()
-                }
             }
         }
     }

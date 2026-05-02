@@ -14,7 +14,11 @@ QStringList buildLoadFileCommand(const QUrl& url,
     args << QStringLiteral("loadfile")
          << QString::fromUtf8(url.toEncoded());
     if (startSeconds && *startSeconds > 0.0) {
+        // loadfile <url> [<flags> [<index> [<options>]]]; index must be an
+        // integer (-1 = unused for non-insert flags), options is a
+        // comma-separated key=value list applied to the loaded file.
         args << QStringLiteral("replace")
+             << QStringLiteral("-1")
              << QStringLiteral("start=%1").arg(*startSeconds, 0, 'f', 3);
     }
     return args;

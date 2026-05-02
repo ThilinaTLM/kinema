@@ -106,24 +106,10 @@ Kirigami.Page {
         Item { Layout.fillWidth: true }
 
         MetaChip {
-            visible: playQueue.count > 0
-            text: i18nc("@info queue summary", "%1 total", playQueue.count)
-            tone: "neutral"
-        }
-        MetaChip {
             visible: playQueue.playedCount > 0
             text: i18nc("@info queue summary", "%1 played",
                 playQueue.playedCount)
             tone: "neutral"
-        }
-        MetaChip {
-            visible: playQueue.count > 0
-            text: playQueue.hasActiveItem
-                ? i18nc("@info queue summary", "%1 next",
-                    playQueue.remainingCount)
-                : i18nc("@info queue summary", "%1 queued",
-                    playQueue.pendingCount)
-            tone: playQueue.hasActiveItem ? "accent" : "neutral"
         }
         MetaChip {
             visible: playQueue.failedCount > 0
@@ -257,7 +243,7 @@ Kirigami.Page {
         spacing: Theme.inlineSpacing
         leftMargin: Theme.pageMargin
         rightMargin: Theme.pageMargin
-        topMargin: Theme.pageTopSpacing
+        topMargin: Theme.sectionSpacing
         bottomMargin: Theme.pageBottomSpacing
         model: playQueue
         cacheBuffer: Kirigami.Units.gridUnit * 12
