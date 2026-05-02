@@ -64,11 +64,22 @@ QImage ImageLoader::cached(const QUrl& url) const
 void ImageLoader::clearMemoryCache()
 {
     m_memCache.clear();
+    m_failedUrls.clear();
 }
 
 QCoro::Task<QImage> ImageLoader::requestPoster(QUrl url)
 {
     if (!url.isValid() || url.isEmpty()) {
+        co_return QImage();
+    }
+
+    // 0. Negative cache. A URL that already failed once in this session
+    // (typically a remote 404) is not worth retrying — every failed
+    // request is a network round trip plus a noisy log line, and the
+    // image-provider response would just resolve to a null QImage
+    // anyway. clearMemoryCache() resets this if the user genuinely
+    // wants a refetch.
+    if (m_failedUrls.contains(url)) {
         co_return QImage();
     }
 
@@ -120,13 +131,17 @@ QCoro::Task<QImage> ImageLoader::requestPoster(QUrl url)
                     f.write(bytes);
                     f.close();
                 }
+            } else {
+                m_failedUrls.insert(url);
             }
         } else {
             qCDebug(KINEMA) << "poster decode failed for"
                             << core::redactUrlForLog(url);
+            m_failedUrls.insert(url);
         }
     } catch (const std::exception& e) {
         qCDebug(KINEMA) << "poster fetch failed:" << e.what();
+        m_failedUrls.insert(url);
     }
 
     promise->addResult(result);

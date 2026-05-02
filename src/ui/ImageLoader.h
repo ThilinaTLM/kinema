@@ -9,6 +9,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QPromise>
+#include <QSet>
 #include <QSharedPointer>
 #include <QString>
 #include <QUrl>
@@ -62,7 +63,8 @@ public:
     /// absent from the in-memory cache.
     QImage cached(const QUrl& url) const;
 
-    /// Clear the memory cache (not the disk cache).
+    /// Clear the memory cache (not the disk cache). Also clears the
+    /// in-process negative cache so previously-failed URLs are retried.
     void clearMemoryCache();
 
 Q_SIGNALS:
@@ -95,6 +97,13 @@ private:
         QSharedPointer<QPromise<QImage>> promise;
     };
     QHash<QUrl, InFlight> m_inFlight;
+
+    // Negative cache: URLs whose fetch failed in this session. Avoids
+    // re-hammering remote 404s every time a card scrolls back into view
+    // (each KinemaImageResponse is short-lived and would otherwise issue
+    // a fresh HTTP request on every miss). Lifetime = process; cleared
+    // by clearMemoryCache().
+    QSet<QUrl> m_failedUrls;
 };
 
 } // namespace kinema::ui
