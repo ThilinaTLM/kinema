@@ -49,6 +49,10 @@ ColumnLayout {
             : Kirigami.Units.gridUnit * 18
 
     // ---- Header ---------------------------------------------------
+    // Mirrors `ContentRail`'s header on Discover: heading only, no
+    // trailing count. The smart rails are capped at small sizes by
+    // the view-model, so a count in the right gutter would just
+    // duplicate visible state and break alignment with Discover.
     RowLayout {
         Layout.fillWidth: true
         Layout.leftMargin: Theme.pageMargin
@@ -60,12 +64,6 @@ ColumnLayout {
             text: rail.title
             Layout.fillWidth: true
             elide: Text.ElideRight
-        }
-        QQC2.Label {
-            visible: rail.model && rail.model.count > 0
-            text: rail.model ? String(rail.model.count) : ""
-            color: Theme.disabled
-            font.pointSize: Theme.captionFont.pointSize
         }
     }
 

@@ -8,29 +8,36 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Card for the Library page's smart rails.
+// Card for the Library page's smart rails. Sibling of `PosterCard`
+// and `LibraryCard` — `KinemaArtworkFrame` owns the shadow lift,
+// focus ring, hover tint, and rounded-corner clipping.
 //
-// Renders artwork (16:9 episode still or 2:3 movie poster, picked
-// by `artworkAspect`) plus up to three text lines:
+// Two artwork modes, picked by `artworkAspect`:
+//
+//   * 9 / 16  — wide episode still cropped into the frame,
+//   * 1.5     — 2:3 movie poster, fills the frame.
+//
+// And up to three meta lines:
 //
 //   primaryLine    — show or movie title
-//   secondaryLine  — episode designator ("S02E08 · The Bell")
+//   secondaryLine  — episode designator ("S02E08 \u00b7 The Bell")
 //   tertiaryLine   — meta line ("Airs Fri, Apr 26", "Resume from 42%")
 //
 // Empty lines are hidden so a movie row (two lines) and an episode
 // row (three lines) coexist without forcing extra whitespace.
 //
-// Artwork resolves through a `thumbnail → poster → fallback icon`
-// chain. The card starts on whichever URL is supplied and advances
-// on `Image.Error`, so an unaired episode whose Cinemeta thumbnail
-// 404s still ends up showing the parent series poster instead of
-// an empty frame. When the card is configured with a 16:9 frame but
-// resolves to a 2:3 poster (either as the initial source or after
-// an error retry), `fillMode` switches to `PreserveAspectFit` so
-// the poster sits letterboxed instead of being crop-distorted.
-QQC2.ItemDelegate {
+// Artwork resolves through a `thumbnail \u2192 poster \u2192
+// fallback icon` chain. The card starts on whichever URL is
+// supplied and advances on `KinemaArtworkFrame.imageError()`, so
+// an unaired episode whose Cinemeta thumbnail 404s still ends up
+// showing the parent series poster instead of an empty frame.
+// When the card is configured with a 16:9 frame but resolves to a
+// 2:3 poster, the frame switches to letterbox mode so the poster
+// sits letterboxed instead of being crop-distorted.
+Item {
     id: card
 
+    // ---- Inputs --------------------------------------------------
     property string posterUrl: ""
     property string thumbnailUrl: ""
     property string primaryLine: ""
@@ -43,15 +50,17 @@ QQC2.ItemDelegate {
     /// Fallback icon when no artwork is available at all.
     property string fallbackIcon: "tv"
 
+    signal clicked()
+
     /// Artwork resolution step:
     ///   0 — try `thumbnailUrl` (cropped 16:9 episode still)
     ///   1 — try `posterUrl`    (letterboxed 2:3 poster fallback)
     ///   2 — give up, render the fallback icon over the alt-bg
     ///
     /// Initial step is computed from which URL is non-empty; the
-    /// `Image.onStatusChanged` handler advances on load errors. The
-    /// `on*UrlChanged` handlers reset the step when the delegate is
-    /// recycled to a different model row.
+    /// frame's `imageError` signal advances on load errors, and
+    /// the `on*UrlChanged` handlers reset the step when the
+    /// delegate is recycled to a different model row.
     property int _artStep: thumbnailUrl.length > 0
         ? 0 : (posterUrl.length > 0 ? 1 : 2)
 
@@ -77,98 +86,76 @@ QQC2.ItemDelegate {
         }
     }
 
-    padding: 0
+    readonly property bool _hovered: hoverHandler.hovered
+
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     implicitWidth: Kirigami.Units.gridUnit * 16
-    implicitHeight: art.implicitHeight + meta.implicitHeight
+    // Compute implicit height from the *actual* width when one has
+    // been assigned (delegates and the LibraryRail prototype both
+    // set `width: rail.cardWidth`). Falling back to `implicitWidth`
+    // would over-report height for poster rails (cardWidth 8gu <
+    // implicitWidth 16gu) and reserve a phantom band of empty
+    // space below the artwork — visible as the large gap between
+    // the rail header and the poster row in Library Smart.
+    readonly property int _layoutWidth:
+        width > 0 ? width : implicitWidth
+    implicitHeight: Math.round(_layoutWidth * artworkAspect)
+        + meta.implicitHeight
         + Kirigami.Units.smallSpacing * 2
 
-    background: Rectangle {
-        radius: Kirigami.Units.cornerRadius
-        color: card.hovered
-            ? Kirigami.Theme.alternateBackgroundColor
-            : "transparent"
+    activeFocusOnTab: true
+    Keys.onPressed: function (event) {
+        if (event.key === Qt.Key_Return
+            || event.key === Qt.Key_Enter
+            || event.key === Qt.Key_Space) {
+            card.clicked();
+            event.accepted = true;
+        }
     }
 
-    contentItem: ColumnLayout {
+    ColumnLayout {
+        anchors.fill: parent
         spacing: Kirigami.Units.smallSpacing
 
-        Item {
+        KinemaArtworkFrame {
             id: art
             Layout.fillWidth: true
             Layout.preferredHeight: Math.round(width * card.artworkAspect)
-            implicitHeight: Math.round(card.implicitWidth
+            // Mirror the card's resolved width so the prototype
+            // (which lives outside any layout that would set
+            // `width` on `art`) reports a height that matches the
+            // real laid-out frame.
+            implicitHeight: Math.round(card._layoutWidth
                 * card.artworkAspect)
 
-            Rectangle {
-                anchors.fill: parent
-                radius: Kirigami.Units.cornerRadius
-                color: Kirigami.Theme.alternateBackgroundColor
-                border.color: Qt.alpha(Theme.foreground, 0.12)
-                border.width: 1
-            }
-            Image {
-                id: artImage
-                anchors.fill: parent
-                anchors.margins: 1
-                source: card._artUrl.length > 0
-                    ? "image://kinema/poster?u="
-                        + encodeURIComponent(card._artUrl)
-                    : ""
-                // Crop episode thumbnails into the 16:9 frame for
-                // visual density; letterbox poster fallbacks so a
-                // 2:3 source isn't stretched ugly.
-                fillMode: card._artIsThumbnail
-                    ? Image.PreserveAspectCrop
-                    : Image.PreserveAspectFit
-                asynchronous: true
-                cache: true
-                visible: status === Image.Ready
+            url: card._artUrl
+            aspect: card.artworkAspect
+            // Real episode still → crop. Poster fallback in a 16:9
+            // frame → letterbox so the 2:3 art isn't stretched.
+            // Posters in their native aspect (1.5) crop neutrally,
+            // so the flag only matters for the thumbnail-fallback
+            // case.
+            letterbox: !card._artIsThumbnail
+                && card.artworkAspect < 1
+            fallbackIcon: card.fallbackIcon
+            hovered: card._hovered
+            focusRing: card._hovered || card.activeFocus
+            progress: card.progress
 
-                // Walk the fallback chain on load failure: thumbnail
-                // → poster → give up. Cinemeta sometimes returns a
-                // thumbnail URL for unaired episodes whose still
-                // doesn't actually exist on the CDN yet, and without
-                // this hop the frame would just stay empty.
-                onStatusChanged: {
-                    if (status !== Image.Error) {
-                        return;
-                    }
-                    if (card._artStep === 0
-                        && card.posterUrl.length > 0
-                        && card.posterUrl !== card.thumbnailUrl) {
-                        card._artStep = 1;
-                    } else {
-                        card._artStep = 2;
-                    }
-                }
-            }
-            Kirigami.Icon {
-                anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.large
-                height: width
-                source: AppIcons.url(card.fallbackIcon)
-                color: Qt.alpha(Theme.foreground, 0.35)
-                visible: artImage.status !== Image.Ready
-            }
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.margins: 1
-                height: Kirigami.Units.smallSpacing
-                radius: height / 2
-                color: Qt.alpha(Theme.foreground, 0.18)
-                visible: card.progress > 0 && card.progress < 1
-
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: parent.width
-                        * Math.max(0, Math.min(1, card.progress))
-                    radius: parent.radius
-                    color: Theme.accent
+            // Walk the fallback chain on load failure: thumbnail →
+            // poster → give up. Cinemeta sometimes returns a
+            // thumbnail URL for unaired episodes whose still
+            // doesn't actually exist on the CDN yet, and without
+            // this hop the frame would just stay empty.
+            onImageError: {
+                if (card._artStep === 0
+                    && card.posterUrl.length > 0
+                    && card.posterUrl !== card.thumbnailUrl) {
+                    card._artStep = 1;
+                } else if (card._artStep < 2) {
+                    card._artStep = 2;
                 }
             }
         }
@@ -205,5 +192,14 @@ QQC2.ItemDelegate {
                 font.pointSize: Theme.captionFont.pointSize
             }
         }
+    }
+
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onTapped: card.clicked()
+    }
+    HoverHandler {
+        id: hoverHandler
+        cursorShape: Qt.PointingHandCursor
     }
 }

@@ -87,11 +87,11 @@ Item {
                     ? model.posterUrl : ""
                 title: model.title !== undefined ? model.title : ""
                 subtitle: model.subtitle !== undefined ? model.subtitle : ""
+                rating: (model.rating !== undefined && model.rating !== null)
+                    ? model.rating : -1
                 progress: model.progress !== undefined ? model.progress : -1
                 watched: model.watched !== undefined ? model.watched : false
                 upcoming: model.upcoming !== undefined ? model.upcoming : false
-                releaseDateText: model.releaseDateText !== undefined
-                    ? model.releaseDateText : ""
                 onClicked: view.vm && view.vm.activate(index)
                 onRemoveRequested: view.removeRequested(index,
                     model.title !== undefined ? model.title : "")

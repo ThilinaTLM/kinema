@@ -8,176 +8,164 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-QQC2.ItemDelegate {
+// Library list-view tile. Sibling of `PosterCard` —
+// `KinemaArtworkFrame` provides the same shadow lift, focus ring,
+// hover tint, and rounded-corner clipping; the card adds:
+//
+//   * a `RatingChip` overlay (top-right) when the entry has an
+//     IMDb rating,
+//   * a `StatusChip` overlay (top-left) for Watched / Upcoming
+//     entries,
+//   * a thin progress bar along the poster's bottom edge for
+//     in-progress titles (driven by the frame's built-in overlay),
+//   * a right-click context menu for Open / toggle Watched / Remove
+//     from Library, mirroring `ProgressPosterCard`.
+//
+// No more hover-revealed kebab button — the menu is accessible via
+// right-click everywhere card-style UIs in the app use it.
+Item {
     id: card
 
+    // ---- Inputs --------------------------------------------------
     property string posterUrl
     property string title
     property string subtitle
+    property real rating: -1
     property real progress: -1
     property bool watched: false
     property bool upcoming: false
-    property string releaseDateText
 
-    signal resumeRequested()
+    signal clicked()
     signal removeRequested()
     signal toggleWatchedRequested()
 
-    padding: 0
-    implicitWidth: Theme.posterMin
-    implicitHeight: posterBox.implicitHeight + meta.implicitHeight
-        + Kirigami.Units.smallSpacing
+    readonly property bool _hovered: hoverArea.containsMouse
 
-    background: Rectangle {
-        radius: Kirigami.Units.cornerRadius
-        color: card.hovered ? Kirigami.Theme.alternateBackgroundColor : "transparent"
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
+    implicitWidth: Theme.posterMin
+    implicitHeight: poster.height + meta.implicitHeight
+        + Kirigami.Units.smallSpacing * 2
+
+    activeFocusOnTab: true
+    Keys.onPressed: function (event) {
+        if (event.key === Qt.Key_Return
+            || event.key === Qt.Key_Enter
+            || event.key === Qt.Key_Space) {
+            card.clicked();
+            event.accepted = true;
+        }
     }
 
-    contentItem: ColumnLayout {
+    ColumnLayout {
+        anchors.fill: parent
         spacing: Kirigami.Units.smallSpacing
 
-        Item {
-            id: posterBox
+        KinemaArtworkFrame {
+            id: poster
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.round(width * 1.5)
-            implicitHeight: Math.round(card.implicitWidth * 1.5)
+            Layout.preferredHeight: Math.round(width * aspect)
 
-            Rectangle {
-                anchors.fill: parent
-                radius: Kirigami.Units.cornerRadius
-                color: Kirigami.Theme.alternateBackgroundColor
-                border.color: Qt.alpha(Theme.foreground, 0.12)
-                border.width: 1
-            }
-            Image {
-                id: poster
-                anchors.fill: parent
-                anchors.margins: 1
-                source: card.posterUrl
-                    ? "image://kinema/poster?u=" + encodeURIComponent(card.posterUrl)
-                    : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                visible: status === Image.Ready
-            }
-            Kirigami.Icon {
-                anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.large
-                height: width
-                source: AppIcons.url("film")
-                color: Qt.alpha(Theme.foreground, 0.35)
-                visible: poster.status !== Image.Ready
-            }
+            url: card.posterUrl
+            aspect: 1.5
+            fallbackIcon: "film"
+            hovered: card._hovered
+            focusRing: card._hovered || card.activeFocus
+            progress: card.progress
 
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.margins: 1
-                height: Kirigami.Units.smallSpacing
-                radius: height / 2
-                color: Qt.alpha(Theme.foreground, 0.18)
-                visible: card.progress > 0 && card.progress < 1
-
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: parent.width * Math.max(0, Math.min(1, card.progress))
-                    radius: parent.radius
-                    color: Theme.accent
+            // Watched / Upcoming badge (top-left). Self-hides when
+            // both flags are false.
+            StatusChip {
+                watched: card.watched
+                upcoming: card.upcoming
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    topMargin: Kirigami.Units.smallSpacing
+                    leftMargin: Kirigami.Units.smallSpacing
                 }
             }
 
-            Rectangle {
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: Kirigami.Units.smallSpacing
-                visible: card.watched || card.upcoming
-                radius: height / 2
-                color: card.watched
-                    ? Qt.alpha(Theme.positive, 0.90)
-                    : Qt.alpha(Theme.accent, 0.90)
-                implicitWidth: badgeRow.implicitWidth + Kirigami.Units.smallSpacing * 2
-                implicitHeight: badgeRow.implicitHeight + Kirigami.Units.smallSpacing
-
-                RowLayout {
-                    id: badgeRow
-                    anchors.centerIn: parent
-                    spacing: Kirigami.Units.smallSpacing
-                    Kirigami.Icon {
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                        Layout.preferredHeight: width
-                        source: AppIcons.url(card.watched ? "circle-check" : "clock-arrow-down")
-                        color: AppIcons.accentText
-                    }
-                    QQC2.Label {
-                        text: card.watched
-                            ? i18nc("@label library card badge", "Watched")
-                            : i18nc("@label library card badge", "Upcoming")
-                        color: AppIcons.accentText
-                        font.pointSize: Theme.captionFont.pointSize
-                    }
-                }
-            }
-
-            QQC2.ToolButton {
-                anchors.bottom: parent.bottom
-                anchors.right: parent.right
-                anchors.margins: Kirigami.Units.smallSpacing
-                display: QQC2.AbstractButton.IconOnly
-                flat: true
-                icon.source: AppIcons.url("ellipsis-vertical")
-                icon.color: AppIcons.accentText
-                opacity: card.hovered ? 1.0 : 0.0
-                Behavior on opacity { NumberAnimation { duration: 120 } }
-                onClicked: cardMenu.popup()
-
-                QQC2.Menu {
-                    id: cardMenu
-                    Kirigami.Action {
-                        text: card.watched
-                            ? i18nc("@action:inmenu", "Mark as Unwatched")
-                            : i18nc("@action:inmenu", "Mark as Watched")
-                        icon.source: AppIcons.url(card.watched ? "circle-dashed" : "circle-check")
-                        enabled: !card.upcoming
-                        onTriggered: card.toggleWatchedRequested()
-                    }
-                    Kirigami.Action {
-                        text: i18nc("@action:inmenu", "Remove from Library…")
-                        icon.source: AppIcons.url("library")
-                        icon.color: AppIcons.negative
-                        onTriggered: card.removeRequested()
-                    }
+            // IMDb rating chip (top-right). Self-hides when
+            // `rating <= 0`.
+            RatingChip {
+                rating: card.rating
+                anchors {
+                    top: parent.top
+                    right: parent.right
+                    topMargin: Kirigami.Units.smallSpacing
+                    rightMargin: Kirigami.Units.smallSpacing
                 }
             }
         }
 
         ColumnLayout {
             id: meta
-            Layout.fillWidth: true
             spacing: 0
+            Layout.fillWidth: true
+
+            Kirigami.Heading {
+                Layout.fillWidth: true
+                level: 5
+                text: card.title
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                color: Kirigami.Theme.textColor
+            }
 
             QQC2.Label {
                 Layout.fillWidth: true
-                text: card.title
-                maximumLineCount: 2
-                wrapMode: Text.WordWrap
-                elide: Text.ElideRight
-                color: Theme.foreground
-                font.weight: Font.DemiBold
-            }
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: text.length > 0
+                visible: card.subtitle.length > 0
                 text: card.subtitle
-                maximumLineCount: 2
-                wrapMode: Text.WordWrap
                 elide: Text.ElideRight
-                color: Theme.disabled
-                font.pointSize: Theme.captionFont.pointSize
+                font: Kirigami.Theme.smallFont
+                color: Kirigami.Theme.disabledTextColor
             }
+        }
+    }
+
+    // Click + hover + right-click handling, mirroring the pattern
+    // used by `ProgressPosterCard`.
+    MouseArea {
+        id: hoverArea
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        cursorShape: Qt.PointingHandCursor
+        onClicked: function (mouse) {
+            if (mouse.button === Qt.LeftButton) {
+                card.clicked();
+            } else if (mouse.button === Qt.RightButton) {
+                contextMenu.popup();
+            }
+        }
+    }
+
+    QQC2.Menu {
+        id: contextMenu
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Open")
+            icon.source: AppIcons.url("play")
+            icon.color: AppIcons.controlColor(enabled, false)
+            onTriggered: card.clicked()
+        }
+        QQC2.MenuItem {
+            text: card.watched
+                ? i18nc("@action:inmenu", "Mark as Unwatched")
+                : i18nc("@action:inmenu", "Mark as Watched")
+            icon.source: AppIcons.url(card.watched
+                ? "circle-dashed" : "circle-check")
+            icon.color: AppIcons.controlColor(enabled, false)
+            enabled: !card.upcoming
+            onTriggered: card.toggleWatchedRequested()
+        }
+        QQC2.MenuSeparator {}
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Remove from Library\u2026")
+            icon.source: AppIcons.url("library")
+            icon.color: AppIcons.negative
+            onTriggered: card.removeRequested()
         }
     }
 }

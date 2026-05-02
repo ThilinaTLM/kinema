@@ -8,26 +8,16 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// One TMDB / Cinemeta tile: 2:3 poster image, two-line title, a
-// caption subtitle and a corner rating chip. Visual chrome leans
-// on Kirigami theme tokens so it tracks the user's Plasma colour
-// scheme without any hand-rolled palette:
+// One TMDB / Cinemeta tile: 2:3 poster, single-line title, caption
+// subtitle, corner rating chip. Shares chrome with every other
+// poster/thumbnail card in the app via `KinemaArtworkFrame` —
+// hover lift, animated focus ring, hover tint, and fallback icon
+// all live there. This card just composes the frame with the
+// rating chip overlay and the meta block, and wires activation.
 //
-//   * `Kirigami.ShadowedImage` renders the artwork through a
-//     distance-field shader so the pixels are clipped to the
-//     rounded corners (a plain `Image` inside a `ShadowedRectangle`
-//     leaks square corners on top of the rounded frame).
-//   * The shadow lifts on hover instead of a scale transform —
-//     scale would bleed into adjacent grid cells.
-//   * `Kirigami.Theme.colorSet: View` so the surface inherits the
-//     content area's background, not the page header's.
-//   * `hoverColor` / `focusColor` for hover + keyboard focus.
-//
-// Public surface is intentionally identical to the previous version
-// so `PosterGrid`, `ContentRail`, and `SimilarCarousel` can keep
-// using the delegate without changes. `ProgressPosterCard` reuses
-// the same hover/elevation pattern so the two card variants feel
-// like siblings.
+// Public surface is intentionally identical to the previous
+// version so `PosterGrid`, `ContentRail`, and `SimilarCarousel`
+// can keep using the delegate without changes.
 Item {
     id: card
 
@@ -39,15 +29,14 @@ Item {
 
     signal clicked()
 
-    // Single source of truth for the hover-elevation state so the
-    // shadow, border, and tint can all flip together.
+    // Single source of truth for hover state so the frame's
+    // hover/focus inputs and any future overlay tweaks stay in
+    // sync.
     readonly property bool _hovered: hoverHandler.hovered
 
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.inherit: false
 
-    // Geometry. The grid / rail sets `width`/`height` directly; this
-    // keeps a sensible default for ad-hoc consumers.
     implicitWidth: Theme.posterMin
     implicitHeight: poster.height + meta.implicitHeight
         + Kirigami.Units.smallSpacing * 2
@@ -64,88 +53,23 @@ Item {
         }
     }
 
-    // ---- Visual chrome ------------------------------------------
     ColumnLayout {
         anchors.fill: parent
         spacing: Kirigami.Units.smallSpacing
 
-        // Poster frame. `ShadowedImage` renders the artwork through
-        // a distance-field shader, so pixels are clipped to the
-        // rounded corners — no square overhang at the corners.
-        Kirigami.ShadowedImage {
+        KinemaArtworkFrame {
             id: poster
             Layout.fillWidth: true
-            // 2:3 portrait aspect, computed from current width so
-            // the card stays crisp at every grid density.
-            Layout.preferredHeight: Math.round(width * 1.5)
+            Layout.preferredHeight: Math.round(width * aspect)
 
-            radius: Kirigami.Units.cornerRadius
-            color: Kirigami.Theme.alternateBackgroundColor
-
-            source: card.posterUrl
-                ? "image://kinema/poster?u=" + encodeURIComponent(card.posterUrl)
-                : ""
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            // Source size derives from the actual width so wide
-            // grids don't pull blurry thumbnails. Capped at the
-            // theme's `posterMax` to avoid pulling needlessly large
-            // TMDB renditions on dense displays. Both dimensions
-            // derive from `_srcW` rather than from each other so
-            // QQuickImage doesn't see a sourceSize.height ←
-            // sourceSize.width binding loop.
-            readonly property int _srcW: Math.min(
-                card.width * 2, Theme.posterMax * 2)
-            sourceSize.width: _srcW
-            sourceSize.height: Math.round(_srcW * 1.5)
-
-            border.color: card._hovered || card.activeFocus
-                ? Kirigami.Theme.focusColor
-                : Qt.alpha(Kirigami.Theme.textColor, 0.12)
-            border.width: card.activeFocus ? 2 : 1
-
-            shadow.size: card._hovered
-                ? Kirigami.Units.gridUnit
-                : Kirigami.Units.smallSpacing
-            shadow.yOffset: card._hovered
-                ? Kirigami.Units.smallSpacing
-                : 1
-            shadow.color: Qt.alpha(Kirigami.Theme.textColor,
-                card._hovered ? 0.40 : 0.18)
-
-            Behavior on shadow.size {
-                NumberAnimation { duration: Kirigami.Units.shortDuration }
-            }
-            Behavior on shadow.yOffset {
-                NumberAnimation { duration: Kirigami.Units.shortDuration }
-            }
-
-            // Skeleton + missing-poster fallback. A neutral icon
-            // sits in the same slot as the image so cards without
-            // a TMDB poster don't render an empty rectangle.
-            Kirigami.Icon {
-                visible: poster.status !== Image.Ready
-                anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.huge
-                height: width
-                source: AppIcons.url("film")
-                color: Kirigami.Theme.disabledTextColor
-            }
-
-            // Hover tint, also rounded-corner-clipped via the same
-            // distance-field shader so it never escapes the frame.
-            Kirigami.ShadowedRectangle {
-                anchors.fill: parent
-                radius: poster.radius
-                color: Kirigami.Theme.hoverColor
-                opacity: card._hovered ? 0.18 : 0
-                Behavior on opacity {
-                    NumberAnimation { duration: Kirigami.Units.shortDuration }
-                }
-            }
+            url: card.posterUrl
+            aspect: 1.5
+            fallbackIcon: "film"
+            hovered: card._hovered
+            focusRing: card._hovered || card.activeFocus
 
             // Rating overlay (top-right). Sits inside the inset so
-            // it does not clip the rounded corner.
+            // it never clips the rounded corner.
             RatingChip {
                 rating: card.rating
                 anchors {
@@ -157,7 +81,6 @@ Item {
             }
         }
 
-        // ---- Title + secondary line --------------------------------
         ColumnLayout {
             id: meta
             spacing: 0

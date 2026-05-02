@@ -8,10 +8,8 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// PosterCard variant for the Continue Watching rail. Shares the
-// same `Kirigami.ShadowedImage` chrome and hover-elevation pattern
-// as `PosterCard` so the two card variants feel like siblings, and
-// adds:
+// PosterCard variant for the Continue Watching rail. Same chrome
+// as `PosterCard` (via `KinemaArtworkFrame`) plus:
 //
 //   * a thin progress bar overlay along the poster's bottom edge,
 //   * an episode badge chip ("S01E02") on the poster for series,
@@ -31,7 +29,6 @@ Item {
     signal streamsRequested()
     signal removeRequested()
 
-    // Single source of truth for the hover-elevation state.
     readonly property bool _hovered: hoverArea.containsMouse
 
     Kirigami.Theme.colorSet: Kirigami.Theme.View
@@ -51,72 +48,21 @@ Item {
         }
     }
 
-    // ---- Visual chrome ------------------------------------------
     ColumnLayout {
         anchors.fill: parent
         spacing: Kirigami.Units.smallSpacing
 
-        // Same poster frame as `PosterCard`: distance-field shader
-        // means the artwork is clipped to the rounded corners and
-        // the shadow lifts cleanly on hover.
-        Kirigami.ShadowedImage {
+        KinemaArtworkFrame {
             id: poster
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.round(width * 1.5)
+            Layout.preferredHeight: Math.round(width * aspect)
 
-            radius: Kirigami.Units.cornerRadius
-            color: Kirigami.Theme.alternateBackgroundColor
-
-            source: card.posterUrl
-                ? "image://kinema/poster?u=" + encodeURIComponent(card.posterUrl)
-                : ""
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            readonly property int _srcW: Math.min(
-                card.width * 2, Theme.posterMax * 2)
-            sourceSize.width: _srcW
-            sourceSize.height: Math.round(_srcW * 1.5)
-
-            border.color: card._hovered || card.activeFocus
-                ? Kirigami.Theme.focusColor
-                : Qt.alpha(Kirigami.Theme.textColor, 0.12)
-            border.width: card.activeFocus ? 2 : 1
-
-            shadow.size: card._hovered
-                ? Kirigami.Units.gridUnit
-                : Kirigami.Units.smallSpacing
-            shadow.yOffset: card._hovered
-                ? Kirigami.Units.smallSpacing
-                : 1
-            shadow.color: Qt.alpha(Kirigami.Theme.textColor,
-                card._hovered ? 0.40 : 0.18)
-
-            Behavior on shadow.size {
-                NumberAnimation { duration: Kirigami.Units.shortDuration }
-            }
-            Behavior on shadow.yOffset {
-                NumberAnimation { duration: Kirigami.Units.shortDuration }
-            }
-
-            Kirigami.Icon {
-                visible: poster.status !== Image.Ready
-                anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.huge
-                height: width
-                source: AppIcons.url("film")
-                color: Kirigami.Theme.disabledTextColor
-            }
-
-            // Hover tint, rounded-corner-clipped via the same shader.
-            Kirigami.ShadowedRectangle {
-                anchors.fill: parent
-                radius: poster.radius
-                color: Kirigami.Theme.hoverColor
-                opacity: card._hovered ? 0.18 : 0
-                Behavior on opacity {
-                    NumberAnimation { duration: Kirigami.Units.shortDuration }
-                }
-            }
+            url: card.posterUrl
+            aspect: 1.5
+            fallbackIcon: "film"
+            hovered: card._hovered
+            focusRing: card._hovered || card.activeFocus
+            progress: card.progress
 
             // Episode badge (top-left). Mirrors RatingChip styling.
             // Hidden for movies / entries without season+episode.
@@ -129,42 +75,8 @@ Item {
                     leftMargin: Kirigami.Units.smallSpacing
                 }
             }
-
-            // Progress bar overlay along the poster's bottom edge.
-            // Mirrors the original 4px-thick bar; the track sits
-            // inside the inset so it doesn't clip the rounded
-            // corners.
-            Item {
-                visible: card.progress > 0
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    bottom: parent.bottom
-                    leftMargin: Kirigami.Units.smallSpacing
-                    rightMargin: Kirigami.Units.smallSpacing
-                    bottomMargin: Kirigami.Units.smallSpacing
-                }
-                height: 4
-
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 2
-                    color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.62)
-                }
-
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: parent.width
-                        * Math.max(0, Math.min(1, card.progress))
-                    radius: 2
-                    color: Kirigami.Theme.highlightColor
-                }
-            }
         }
 
-        // ---- Title ----------------------------------------------
         ColumnLayout {
             id: meta
             spacing: 0

@@ -208,6 +208,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/EpisodeRailCard.qml
         ui/qml/components/EpisodeRow.qml
         ui/qml/components/FilterMenuButton.qml
+        ui/qml/components/KinemaArtworkFrame.qml
         ui/qml/components/LibraryCard.qml
         ui/qml/components/LibraryListView.qml
         ui/qml/components/LibraryRail.qml
@@ -224,6 +225,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/RatingChip.qml
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
+        ui/qml/components/StatusChip.qml
         ui/qml/components/StreamCard.qml
         ui/qml/components/StreamRowActions.qml
         ui/qml/components/StreamSortDialog.qml
