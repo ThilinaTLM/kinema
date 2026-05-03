@@ -67,6 +67,48 @@ private Q_SLOTS:
     {
         QVERIFY(!isFutureRelease(std::optional<QDate> { QDate() }));
     }
+
+    // -- isReleaseTooEarlyForStreams --------------------------------
+    // Mirrors isFutureRelease's contract for the unknown/past/today
+    // cases, but extends the "allow fetch" window by
+    // kStreamLookaheadDays so tomorrow's releases attempt streams.
+
+    void isReleaseTooEarlyForStreams_nulloptIsFalse()
+    {
+        QVERIFY(!isReleaseTooEarlyForStreams(std::nullopt));
+    }
+
+    void isReleaseTooEarlyForStreams_invalidDateIsFalse()
+    {
+        QVERIFY(!isReleaseTooEarlyForStreams(
+            std::optional<QDate> { QDate() }));
+    }
+
+    void isReleaseTooEarlyForStreams_pastIsFalse()
+    {
+        QVERIFY(!isReleaseTooEarlyForStreams(std::optional<QDate> {
+            QDate::currentDate().addDays(-1) }));
+    }
+
+    void isReleaseTooEarlyForStreams_todayIsFalse()
+    {
+        QVERIFY(!isReleaseTooEarlyForStreams(
+            std::optional<QDate> { QDate::currentDate() }));
+    }
+
+    void isReleaseTooEarlyForStreams_tomorrowIsFalse()
+    {
+        // Boundary: the lookahead window includes tomorrow.
+        QVERIFY(!isReleaseTooEarlyForStreams(std::optional<QDate> {
+            QDate::currentDate().addDays(kStreamLookaheadDays) }));
+    }
+
+    void isReleaseTooEarlyForStreams_dayAfterTomorrowIsTrue()
+    {
+        QVERIFY(isReleaseTooEarlyForStreams(std::optional<QDate> {
+            QDate::currentDate().addDays(
+                kStreamLookaheadDays + 1) }));
+    }
 };
 
 QTEST_APPLESS_MAIN(DateFormatTest)

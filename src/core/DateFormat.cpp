@@ -30,4 +30,10 @@ bool isFutureRelease(const std::optional<QDate>& d)
     return d.has_value() && d->isValid() && *d > QDate::currentDate();
 }
 
+bool isReleaseTooEarlyForStreams(const std::optional<QDate>& d)
+{
+    return d.has_value() && d->isValid()
+        && *d > QDate::currentDate().addDays(kStreamLookaheadDays);
+}
+
 } // namespace kinema::core

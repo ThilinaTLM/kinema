@@ -702,8 +702,12 @@ QCoro::Task<void> SeriesDetailViewModel::loadEpisodeStreamsTask(
     m_rawStreams.clear();
     Q_EMIT rawStreamsCountChanged();
 
-    // Unaired episodes \u2014 skip the network call.
-    if (core::isFutureRelease(ep.released) && ep.released) {
+    // Skip the network call only for episodes still more than a day
+    // out \u2014 torrents commonly seed ~1 day before the official air
+    // date. Strict "upcoming" semantics still drive episode-row badges
+    // and watched aggregation via `core::isFutureRelease`.
+    if (ep.released
+        && core::isReleaseTooEarlyForStreams(ep.released)) {
         m_streams->setUnreleased(*ep.released);
         co_return;
     }

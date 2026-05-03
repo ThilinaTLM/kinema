@@ -92,72 +92,75 @@ StackLayout {
     }
 
     // 3 — Empty (no rows after filters / upstream returned 0).
-    Kirigami.PlaceholderMessage {
-        Layout.alignment: Qt.AlignCenter
-        Layout.preferredWidth: Math.min(parent.width
-                - Theme.pageWideMargin * 2,
-            Theme.placeholderMaxWidth)
-        icon.source: AppIcons.url("search")
-        icon.color: AppIcons.foreground
-        text: i18nc("@info placeholder", "No streams")
-        explanation: streams.vm.streams
-            ? streams.vm.streams.emptyExplanation : ""
-        // When the user has narrowed via the filter chips, give
-        // them a one-click out instead of forcing a manual untoggle
-        // of each chip. `cachedOnly` is independent of the `ui*`
-        // axes, so we surface the action whenever either is set.
-        helpfulAction: (streams.vm.uiAnyFilterActive
-                || streams.vm.cachedOnly)
-            ? clearFiltersAction : null
-        Kirigami.Action {
-            id: clearFiltersAction
-            icon.source: AppIcons.url("eraser")
+    Item {
+        Kirigami.PlaceholderMessage {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
+            icon.source: AppIcons.url("search")
             icon.color: AppIcons.foreground
-            text: i18nc("@action:button reset stream filters",
-                "Reset filters")
-            onTriggered: {
-                streams.vm.cachedOnly = false;
-                streams.vm.clearUiFilters();
+            text: i18nc("@info placeholder", "No streams")
+            explanation: streams.vm.streams
+                ? streams.vm.streams.emptyExplanation : ""
+            // When the user has narrowed via the filter chips, give
+            // them a one-click out instead of forcing a manual untoggle
+            // of each chip. `cachedOnly` is independent of the `ui*`
+            // axes, so we surface the action whenever either is set.
+            helpfulAction: (streams.vm.uiAnyFilterActive
+                    || streams.vm.cachedOnly)
+                ? clearFiltersAction : null
+            Kirigami.Action {
+                id: clearFiltersAction
+                icon.source: AppIcons.url("eraser")
+                icon.color: AppIcons.foreground
+                text: i18nc("@action:button reset stream filters",
+                    "Reset filters")
+                onTriggered: {
+                    streams.vm.cachedOnly = false;
+                    streams.vm.clearUiFilters();
+                }
             }
         }
     }
 
     // 4 — Error.
-    Kirigami.PlaceholderMessage {
-        Layout.alignment: Qt.AlignCenter
-        Layout.preferredWidth: Math.min(parent.width
-                - Theme.pageWideMargin * 2,
-            Theme.placeholderMaxWidth)
-        icon.source: AppIcons.url("circle-alert")
-        icon.color: AppIcons.negative
-        text: i18nc("@info placeholder", "Couldn't fetch streams")
-        explanation: streams.vm.streams
-            ? streams.vm.streams.errorMessage : ""
-        helpfulAction: Kirigami.Action {
-            icon.source: AppIcons.url("refresh-cw")
-            icon.color: AppIcons.foreground
-            text: i18nc("@action:button", "Retry")
-            onTriggered: streams.vm.retry()
+    Item {
+        Kirigami.PlaceholderMessage {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
+            icon.source: AppIcons.url("circle-alert")
+            icon.color: AppIcons.negative
+            text: i18nc("@info placeholder", "Couldn't fetch streams")
+            explanation: streams.vm.streams
+                ? streams.vm.streams.errorMessage : ""
+            helpfulAction: Kirigami.Action {
+                icon.source: AppIcons.url("refresh-cw")
+                icon.color: AppIcons.foreground
+                text: i18nc("@action:button", "Retry")
+                onTriggered: streams.vm.retry()
+            }
         }
     }
 
     // 5 — Unreleased.
-    Kirigami.PlaceholderMessage {
-        Layout.alignment: Qt.AlignCenter
-        Layout.preferredWidth: Math.min(parent.width
-                - Theme.pageWideMargin * 2,
-            Theme.placeholderMaxWidth)
-        icon.source: AppIcons.url("clock-arrow-down")
-        icon.color: AppIcons.foreground
-        text: i18nc("@info placeholder",
-            "Not released yet")
-        explanation: (streams.vm.streams
-            && streams.vm.streams.releaseDate
-            && streams.vm.streams.releaseDate.toString().length > 0)
-            ? i18nc("@info placeholder body. %1 is a localized date",
-                "Streams will be available from %1.",
-                Qt.formatDate(
-                    streams.vm.streams.releaseDate, Qt.DefaultLocaleLongDate))
-            : ""
+    Item {
+        Kirigami.PlaceholderMessage {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - Theme.pageWideMargin * 2,
+                Theme.placeholderMaxWidth)
+            icon.source: AppIcons.url("clock-arrow-down")
+            icon.color: AppIcons.foreground
+            text: i18nc("@info placeholder",
+                "Not released yet")
+            explanation: (streams.vm.streams
+                && streams.vm.streams.releaseDate
+                && streams.vm.streams.releaseDate.toString().length > 0)
+                ? i18nc("@info placeholder body. %1 is a localized date",
+                    "Streams will be available from %1.",
+                    Qt.formatDate(
+                        streams.vm.streams.releaseDate, Qt.DefaultLocaleLongDate))
+                : ""
+        }
     }
 }

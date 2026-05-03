@@ -34,4 +34,20 @@ QString formatReleaseDate(const QDateTime& dt);
  */
 bool isFutureRelease(const std::optional<QDate>& d);
 
+/// Number of days before the official release date at which we begin
+/// attempting to fetch streams. Torrents commonly appear roughly a
+/// day before the official date, so a 1-day grace window catches them
+/// without flooding providers with pointless lookups.
+inline constexpr int kStreamLookaheadDays = 1;
+
+/**
+ * True iff `d` is far enough in the future that stream providers
+ * almost certainly have nothing yet — i.e. strictly more than
+ * `kStreamLookaheadDays` after today. Used only to gate Torrentio
+ * requests; UI badging continues to use `isFutureRelease()` so an
+ * item stays visually "Upcoming" until its actual release date. A
+ * missing or invalid date returns false (allow the fetch).
+ */
+bool isReleaseTooEarlyForStreams(const std::optional<QDate>& d);
+
 } // namespace kinema::core

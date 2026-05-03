@@ -390,9 +390,13 @@ QCoro::Task<void> MovieDetailViewModel::loadMetaAndStreams(QString imdbId)
     auto similarTask = loadSimilarFor(imdbId, api::MediaKind::Movie);
     Q_UNUSED(similarTask);
 
-    // Future releases produce no useful Torrentio result; surface the
-    // release date and stop.
-    if (m_isUpcoming && detail.summary.released) {
+    // Releases more than a day out produce no useful Torrentio result;
+    // surface the release date and stop. Titles within the lookahead
+    // window (today / tomorrow) still attempt a fetch — torrents often
+    // seed a day early. The header `isUpcoming` badge stays bound to
+    // the strict `isFutureRelease` semantics.
+    if (detail.summary.released
+        && core::isReleaseTooEarlyForStreams(detail.summary.released)) {
         m_streams->setUnreleased(*detail.summary.released);
         co_return;
     }
