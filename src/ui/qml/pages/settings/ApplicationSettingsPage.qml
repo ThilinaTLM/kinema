@@ -2,15 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import QtQuick
-import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
 FormCard.FormCardPage {
-    title: i18nc("@title:tab settings page", "Appearance")
+    title: i18nc("@title:tab settings page", "Application")
 
-    readonly property var vm: settingsVm.appearance
+    readonly property var vm: settingsVm.general
+
+    FormCard.FormHeader {
+        title: i18nc("@title:group", "Search defaults")
+    }
+    FormCard.FormCard {
+        FormCard.FormComboBoxDelegate {
+            text: i18nc("@label:listbox", "Default search kind")
+            model: [
+                i18nc("@item:inlistbox", "Movie"),
+                i18nc("@item:inlistbox", "Series")
+            ]
+            currentIndex: vm.defaultSearchKind
+            onActivated: vm.defaultSearchKind = currentIndex
+        }
+    }
 
     FormCard.FormHeader {
         title: i18nc("@title:group window behaviour", "Window")
@@ -21,26 +35,14 @@ FormCard.FormCardPage {
             description: vm.trayAvailable
                 ? i18nc("@info form delegate hint",
                     "Closing the main window hides Kinema to the tray "
-                    + "instead of quitting.")
+                    + "instead of quitting. Use the tray icon or Ctrl+Q "
+                    + "to quit.")
                 : i18nc("@info form delegate hint, no tray",
-                    "Your desktop does not expose a system tray.")
+                    "Your desktop does not expose a system tray, so "
+                    + "close-to-tray is unavailable.")
             checked: vm.closeToTray
             enabled: vm.trayAvailable
             onToggled: vm.closeToTray = checked
-        }
-    }
-
-    FormCard.FormHeader {
-        title: i18nc("@title:group appearance theme", "Theme")
-    }
-    FormCard.FormCard {
-        FormCard.FormTextDelegate {
-            text: i18nc("@info appearance follows plasma",
-                "Kinema follows your Plasma colour scheme, font, and "
-                + "icon theme.")
-            description: i18nc("@info appearance follows plasma",
-                "Change them from System Settings → Appearance to "
-                + "see the effect across the app.")
         }
     }
 }

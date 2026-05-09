@@ -1018,11 +1018,10 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(GeneralSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(TmdbSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(RealDebridSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(FiltersSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(StreamsSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(PlayerSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(SubtitlesSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(TorrentStreamingSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(AppearanceSettingsViewModel);
 
 #undef KINEMA_REGISTER_QML_TYPE
 

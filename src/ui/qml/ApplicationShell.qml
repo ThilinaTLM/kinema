@@ -205,16 +205,16 @@ Kirigami.ApplicationWindow {
         window: root
         modules: [
             KirigamiSettings.ConfigurationModule {
-                moduleId: "general"
-                text: i18nc("@title:tab settings page", "General")
+                moduleId: "application"
+                text: i18nc("@title:tab settings page", "Application")
                 icon.source: AppIcons.url("settings-2")
                 icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
-                    "dev.tlmtech.kinema.app", "GeneralSettingsPage")
+                    "dev.tlmtech.kinema.app", "ApplicationSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "tmdb"
-                text: i18nc("@title:tab settings page", "TMDB (Discover)")
+                text: i18nc("@title:tab settings page", "TMDB")
                 icon.source: AppIcons.url("film")
                 icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
@@ -229,12 +229,12 @@ Kirigami.ApplicationWindow {
                     "dev.tlmtech.kinema.app", "RealDebridSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
-                moduleId: "filters"
-                text: i18nc("@title:tab settings page", "Filters")
+                moduleId: "streams"
+                text: i18nc("@title:tab settings page", "Streams")
                 icon.source: AppIcons.url("funnel")
                 icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
-                    "dev.tlmtech.kinema.app", "FiltersSettingsPage")
+                    "dev.tlmtech.kinema.app", "StreamsSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "player"
@@ -260,14 +260,6 @@ Kirigami.ApplicationWindow {
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "TorrentStreamingSettingsPage")
             },
-            KirigamiSettings.ConfigurationModule {
-                moduleId: "appearance"
-                text: i18nc("@title:tab settings page", "Appearance")
-                icon.source: AppIcons.url("palette")
-                icon.color: AppIcons.foreground
-                page: () => Qt.createComponent(
-                    "dev.tlmtech.kinema.app", "AppearanceSettingsPage")
-            },
             // The About page lives inside the settings dialog — the modern
             // KDE6 convention. F1 still opens it via
             // `mainController.requestAbout()` which routes here.
@@ -278,7 +270,7 @@ Kirigami.ApplicationWindow {
                 icon.color: AppIcons.foreground
                 category: i18nc("@title:group settings categories", "About")
                 page: () => Qt.createComponent(
-                    "org.kde.kirigamiaddons.formcard", "AboutPage")
+                    "dev.tlmtech.kinema.app", "AboutSettingsPage")
                 initialProperties: () => ({
                     aboutData: mainController.aboutData
                 })

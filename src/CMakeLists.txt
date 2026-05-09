@@ -259,11 +259,11 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/SeriesDetailPage.qml
         ui/qml/pages/StreamsPage.qml
         ui/qml/pages/SubtitlesPage.qml
-        ui/qml/pages/settings/AppearanceSettingsPage.qml
-        ui/qml/pages/settings/FiltersSettingsPage.qml
-        ui/qml/pages/settings/GeneralSettingsPage.qml
+        ui/qml/pages/settings/AboutSettingsPage.qml
+        ui/qml/pages/settings/ApplicationSettingsPage.qml
         ui/qml/pages/settings/PlayerSettingsPage.qml
         ui/qml/pages/settings/RealDebridSettingsPage.qml
+        ui/qml/pages/settings/StreamsSettingsPage.qml
         ui/qml/pages/settings/SubtitlesSettingsPage.qml
         ui/qml/pages/settings/TmdbSettingsPage.qml
         ui/qml/pages/settings/TorrentStreamingSettingsPage.qml

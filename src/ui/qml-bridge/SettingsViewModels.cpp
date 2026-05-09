@@ -89,15 +89,13 @@ core::player::Kind indexToPlayerKind(int idx)
 
 } // namespace
 
-// ============================== General ===================================
+// ============================== Application ===============================
 
 GeneralSettingsViewModel::GeneralSettingsViewModel(
     config::SearchSettings& search,
-    config::TorrentioSettings& torrentio,
     config::AppearanceSettings& appearance, QObject* parent)
     : QObject(parent)
     , m_search(search)
-    , m_torrentio(torrentio)
     , m_appearance(appearance)
 {
 }
@@ -105,11 +103,6 @@ GeneralSettingsViewModel::GeneralSettingsViewModel(
 int GeneralSettingsViewModel::defaultSearchKind() const
 {
     return m_search.kind() == api::MediaKind::Series ? 1 : 0;
-}
-
-int GeneralSettingsViewModel::defaultTorrentioSort() const
-{
-    return sortModeToIndex(m_torrentio.defaultSort());
 }
 
 bool GeneralSettingsViewModel::closeToTray() const
@@ -130,16 +123,6 @@ void GeneralSettingsViewModel::setDefaultSearchKind(int kind)
     }
     m_search.setKind(next);
     Q_EMIT defaultSearchKindChanged();
-}
-
-void GeneralSettingsViewModel::setDefaultTorrentioSort(int sort)
-{
-    const auto next = indexToSortMode(sort);
-    if (m_torrentio.defaultSort() == next) {
-        return;
-    }
-    m_torrentio.setDefaultSort(next);
-    Q_EMIT defaultTorrentioSortChanged();
 }
 
 void GeneralSettingsViewModel::setCloseToTray(bool on)
@@ -533,29 +516,36 @@ QCoro::Task<void> RealDebridSettingsViewModel::removeTask()
     setBusy(false);
 }
 
-// ============================== Filters ===================================
+// ============================== Streams ===================================
 
-FiltersSettingsViewModel::FiltersSettingsViewModel(
+StreamsSettingsViewModel::StreamsSettingsViewModel(
+    config::TorrentioSettings& torrentio,
     config::FilterSettings& settings, QObject* parent)
     : QObject(parent)
+    , m_torrentio(torrentio)
     , m_settings(settings)
 {
 }
 
-QStringList FiltersSettingsViewModel::excludedResolutions() const
+int StreamsSettingsViewModel::defaultTorrentioSort() const
+{
+    return sortModeToIndex(m_torrentio.defaultSort());
+}
+
+QStringList StreamsSettingsViewModel::excludedResolutions() const
 {
     return m_settings.excludedResolutions();
 }
-QStringList FiltersSettingsViewModel::excludedCategories() const
+QStringList StreamsSettingsViewModel::excludedCategories() const
 {
     return m_settings.excludedCategories();
 }
-QString FiltersSettingsViewModel::blocklistText() const
+QString StreamsSettingsViewModel::blocklistText() const
 {
     return m_settings.keywordBlocklist().join(QLatin1Char('\n'));
 }
 
-QVariantList FiltersSettingsViewModel::resolutionOptions() const
+QVariantList StreamsSettingsViewModel::resolutionOptions() const
 {
     QVariantList out;
     const QList<std::pair<QString, QString>> opts {
@@ -576,7 +566,7 @@ QVariantList FiltersSettingsViewModel::resolutionOptions() const
     return out;
 }
 
-QVariantList FiltersSettingsViewModel::categoryOptions() const
+QVariantList StreamsSettingsViewModel::categoryOptions() const
 {
     QVariantList out;
     const QList<std::pair<QString, QString>> opts {
@@ -603,7 +593,17 @@ QVariantList FiltersSettingsViewModel::categoryOptions() const
     return out;
 }
 
-void FiltersSettingsViewModel::setExcludedResolutions(
+void StreamsSettingsViewModel::setDefaultTorrentioSort(int sort)
+{
+    const auto next = indexToSortMode(sort);
+    if (m_torrentio.defaultSort() == next) {
+        return;
+    }
+    m_torrentio.setDefaultSort(next);
+    Q_EMIT defaultTorrentioSortChanged();
+}
+
+void StreamsSettingsViewModel::setExcludedResolutions(
     const QStringList& tokens)
 {
     if (m_settings.excludedResolutions() == tokens) {
@@ -613,7 +613,7 @@ void FiltersSettingsViewModel::setExcludedResolutions(
     Q_EMIT excludedResolutionsChanged();
 }
 
-void FiltersSettingsViewModel::setExcludedCategories(
+void StreamsSettingsViewModel::setExcludedCategories(
     const QStringList& tokens)
 {
     if (m_settings.excludedCategories() == tokens) {
@@ -623,7 +623,7 @@ void FiltersSettingsViewModel::setExcludedCategories(
     Q_EMIT excludedCategoriesChanged();
 }
 
-void FiltersSettingsViewModel::setBlocklistText(const QString& text)
+void StreamsSettingsViewModel::setBlocklistText(const QString& text)
 {
     QStringList keywords
         = text.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -637,7 +637,7 @@ void FiltersSettingsViewModel::setBlocklistText(const QString& text)
     Q_EMIT blocklistChanged();
 }
 
-void FiltersSettingsViewModel::toggleResolution(const QString& token,
+void StreamsSettingsViewModel::toggleResolution(const QString& token,
     bool on)
 {
     auto next = excludedResolutions();
@@ -652,7 +652,7 @@ void FiltersSettingsViewModel::toggleResolution(const QString& token,
     setExcludedResolutions(next);
 }
 
-void FiltersSettingsViewModel::toggleCategory(const QString& token,
+void StreamsSettingsViewModel::toggleCategory(const QString& token,
     bool on)
 {
     auto next = excludedCategories();
@@ -667,13 +667,13 @@ void FiltersSettingsViewModel::toggleCategory(const QString& token,
     setExcludedCategories(next);
 }
 
-bool FiltersSettingsViewModel::resolutionExcluded(
+bool StreamsSettingsViewModel::resolutionExcluded(
     const QString& token) const
 {
     return excludedResolutions().contains(token);
 }
 
-bool FiltersSettingsViewModel::categoryExcluded(
+bool StreamsSettingsViewModel::categoryExcluded(
     const QString& token) const
 {
     return excludedCategories().contains(token);
@@ -1186,34 +1186,6 @@ void TorrentStreamingSettingsViewModel::setIdleStopMinutes(int v)
     Q_EMIT idleStopMinutesChanged();
 }
 
-// ============================== Appearance ================================
-
-AppearanceSettingsViewModel::AppearanceSettingsViewModel(
-    config::AppearanceSettings& appearance, QObject* parent)
-    : QObject(parent)
-    , m_appearance(appearance)
-{
-}
-
-bool AppearanceSettingsViewModel::closeToTray() const
-{
-    return m_appearance.closeToTray();
-}
-
-bool AppearanceSettingsViewModel::trayAvailable() const
-{
-    return QSystemTrayIcon::isSystemTrayAvailable();
-}
-
-void AppearanceSettingsViewModel::setCloseToTray(bool on)
-{
-    if (m_appearance.closeToTray() == on) {
-        return;
-    }
-    m_appearance.setCloseToTray(on);
-    Q_EMIT closeToTrayChanged();
-}
-
 // ============================== Root ======================================
 
 SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
@@ -1222,19 +1194,17 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     : QObject(parent)
 {
     m_general = new GeneralSettingsViewModel(settings.search(),
-        settings.torrentio(), settings.appearance(), this);
+        settings.appearance(), this);
     m_tmdb = new TmdbSettingsViewModel(http, tokens, this);
     m_rd = new RealDebridSettingsViewModel(http, tokens,
         settings.realDebrid(), this);
-    m_filters = new FiltersSettingsViewModel(settings.filter(),
-        this);
+    m_streams = new StreamsSettingsViewModel(settings.torrentio(),
+        settings.filter(), this);
     m_player = new PlayerSettingsViewModel(settings.player(), this);
     m_subs = new SubtitlesSettingsViewModel(http, tokens,
         settings.subtitle(), settings.cache(), subtitleCache, this);
     m_torrentStreaming = new TorrentStreamingSettingsViewModel(
         settings.torrentStreaming(), this);
-    m_appear
-        = new AppearanceSettingsViewModel(settings.appearance(), this);
 
     // Forward token / credential changes through the root so
     // `MainController` can route them to `TokenController`.

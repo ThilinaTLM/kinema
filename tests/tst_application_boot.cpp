@@ -29,7 +29,13 @@ bool isTargetWarning(const QString& message)
                 "Unable to assign [undefined] to bool")))
         || (message.contains(QStringLiteral("PageRow.qml"))
             && message.contains(QStringLiteral(
-                "Value is null and could not be converted to an object")));
+                "Value is null and could not be converted to an object")))
+        || message.contains(QStringLiteral(
+            "Cannot read property 'Success' of undefined"))
+        || message.contains(QStringLiteral(
+            "Cannot read property 'flickable' of null"))
+        || message.contains(QStringLiteral(
+            "items in the process of being created at engine destruction"));
 }
 
 QStringList& capturedWarnings()
@@ -124,6 +130,7 @@ void TestApplicationBoot::loadsApplicationShell()
     evaluate(engine, window, QStringLiteral("showPage('browse')"));
     evaluate(engine, window, QStringLiteral("showPage('library')"));
     evaluate(engine, window, QStringLiteral("showPage('settings')"));
+    evaluate(engine, window, QStringLiteral("mainController.requestAbout()"));
     evaluate(engine, window, QStringLiteral("showPage('discover')"));
 
     const auto warnings = warningCollector.messages();

@@ -76,15 +76,14 @@ QString DiscoverViewModel::placeholderBody() const
     if (m_authFailed) {
         return i18nc("@info discover placeholder",
             "The bundled TMDB token may have been revoked, or your "
-            "override is invalid. Open Settings → TMDB (Discover) to "
-            "paste a working token.");
+            "override is invalid. Open Settings → TMDB to paste a "
+            "working token.");
     }
     if (!m_tmdbConfigured) {
         return i18nc("@info discover placeholder",
             "Discover uses The Movie Database to surface trending, "
             "popular, and top-rated content. Open Settings → TMDB "
-            "(Discover) and paste a v4 Read Access Token to get "
-            "started.");
+            "and paste a v4 Read Access Token to get started.");
     }
     return {};
 }

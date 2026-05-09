@@ -49,41 +49,34 @@ namespace kinema::ui::qml {
  * exposes to QML as the `settingsVm` context property.
  */
 
-// ---- General ----------------------------------------------------------
+// ---- Application ------------------------------------------------------
 class GeneralSettingsViewModel : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(int defaultSearchKind READ defaultSearchKind
         WRITE setDefaultSearchKind NOTIFY defaultSearchKindChanged)
-    Q_PROPERTY(int defaultTorrentioSort READ defaultTorrentioSort
-        WRITE setDefaultTorrentioSort NOTIFY defaultTorrentioSortChanged)
     Q_PROPERTY(bool closeToTray READ closeToTray
         WRITE setCloseToTray NOTIFY closeToTrayChanged)
     Q_PROPERTY(bool trayAvailable READ trayAvailable CONSTANT)
 
 public:
     GeneralSettingsViewModel(config::SearchSettings& search,
-        config::TorrentioSettings& torrentio,
         config::AppearanceSettings& appearance,
         QObject* parent = nullptr);
 
     int defaultSearchKind() const;
-    int defaultTorrentioSort() const;
     bool closeToTray() const;
     bool trayAvailable() const;
 
     void setDefaultSearchKind(int kind);
-    void setDefaultTorrentioSort(int sort);
     void setCloseToTray(bool on);
 
 Q_SIGNALS:
     void defaultSearchKindChanged();
-    void defaultTorrentioSortChanged();
     void closeToTrayChanged();
 
 private:
     config::SearchSettings& m_search;
-    config::TorrentioSettings& m_torrentio;
     config::AppearanceSettings& m_appearance;
 };
 
@@ -197,10 +190,12 @@ private:
     bool m_busy = false;
 };
 
-// ---- Filters ----------------------------------------------------------
-class FiltersSettingsViewModel : public QObject
+// ---- Streams ----------------------------------------------------------
+class StreamsSettingsViewModel : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(int defaultTorrentioSort READ defaultTorrentioSort
+        WRITE setDefaultTorrentioSort NOTIFY defaultTorrentioSortChanged)
     Q_PROPERTY(QStringList excludedResolutions READ excludedResolutions
         WRITE setExcludedResolutions NOTIFY excludedResolutionsChanged)
     Q_PROPERTY(QStringList excludedCategories READ excludedCategories
@@ -211,15 +206,17 @@ class FiltersSettingsViewModel : public QObject
     Q_PROPERTY(QVariantList categoryOptions READ categoryOptions CONSTANT)
 
 public:
-    FiltersSettingsViewModel(config::FilterSettings& settings,
-        QObject* parent = nullptr);
+    StreamsSettingsViewModel(config::TorrentioSettings& torrentio,
+        config::FilterSettings& settings, QObject* parent = nullptr);
 
+    int defaultTorrentioSort() const;
     QStringList excludedResolutions() const;
     QStringList excludedCategories() const;
     QString blocklistText() const;
     QVariantList resolutionOptions() const;
     QVariantList categoryOptions() const;
 
+    void setDefaultTorrentioSort(int sort);
     void setExcludedResolutions(const QStringList& tokens);
     void setExcludedCategories(const QStringList& tokens);
     void setBlocklistText(const QString& text);
@@ -231,11 +228,13 @@ public:
     Q_INVOKABLE bool categoryExcluded(const QString& token) const;
 
 Q_SIGNALS:
+    void defaultTorrentioSortChanged();
     void excludedResolutionsChanged();
     void excludedCategoriesChanged();
     void blocklistChanged();
 
 private:
+    config::TorrentioSettings& m_torrentio;
     config::FilterSettings& m_settings;
 };
 
@@ -444,32 +443,6 @@ private:
     config::TorrentStreamingSettings& m_settings;
 };
 
-// ---- Appearance -------------------------------------------------------
-// Survives as a sub-page even though only `closeToTray` and (until
-// phase 02) `showMenuBar` were ever surfaced. The remaining splitter
-// state keys are storage-only — they don't appear in the UI.
-class AppearanceSettingsViewModel : public QObject
-{
-    Q_OBJECT
-    Q_PROPERTY(bool closeToTray READ closeToTray WRITE setCloseToTray NOTIFY closeToTrayChanged)
-    Q_PROPERTY(bool trayAvailable READ trayAvailable CONSTANT)
-
-public:
-    AppearanceSettingsViewModel(
-        config::AppearanceSettings& appearance,
-        QObject* parent = nullptr);
-
-    bool closeToTray() const;
-    bool trayAvailable() const;
-    void setCloseToTray(bool on);
-
-Q_SIGNALS:
-    void closeToTrayChanged();
-
-private:
-    config::AppearanceSettings& m_appearance;
-};
-
 // ---- Root -------------------------------------------------------------
 class SettingsRootViewModel : public QObject
 {
@@ -477,11 +450,10 @@ class SettingsRootViewModel : public QObject
     Q_PROPERTY(GeneralSettingsViewModel* general READ general CONSTANT)
     Q_PROPERTY(TmdbSettingsViewModel* tmdb READ tmdb CONSTANT)
     Q_PROPERTY(RealDebridSettingsViewModel* realDebrid READ realDebrid CONSTANT)
-    Q_PROPERTY(FiltersSettingsViewModel* filters READ filters CONSTANT)
+    Q_PROPERTY(StreamsSettingsViewModel* streams READ streams CONSTANT)
     Q_PROPERTY(PlayerSettingsViewModel* player READ player CONSTANT)
     Q_PROPERTY(SubtitlesSettingsViewModel* subtitles READ subtitles CONSTANT)
     Q_PROPERTY(TorrentStreamingSettingsViewModel* torrentStreaming READ torrentStreaming CONSTANT)
-    Q_PROPERTY(AppearanceSettingsViewModel* appearance READ appearance CONSTANT)
 
 public:
     SettingsRootViewModel(core::HttpClient* http,
@@ -493,11 +465,10 @@ public:
     GeneralSettingsViewModel* general() const { return m_general; }
     TmdbSettingsViewModel* tmdb() const { return m_tmdb; }
     RealDebridSettingsViewModel* realDebrid() const { return m_rd; }
-    FiltersSettingsViewModel* filters() const { return m_filters; }
+    StreamsSettingsViewModel* streams() const { return m_streams; }
     PlayerSettingsViewModel* player() const { return m_player; }
     SubtitlesSettingsViewModel* subtitles() const { return m_subs; }
     TorrentStreamingSettingsViewModel* torrentStreaming() const { return m_torrentStreaming; }
-    AppearanceSettingsViewModel* appearance() const { return m_appear; }
 
 Q_SIGNALS:
     /// Forwarded from `TmdbSettingsViewModel::tokenChanged`.
@@ -511,11 +482,10 @@ private:
     GeneralSettingsViewModel* m_general {};
     TmdbSettingsViewModel* m_tmdb {};
     RealDebridSettingsViewModel* m_rd {};
-    FiltersSettingsViewModel* m_filters {};
+    StreamsSettingsViewModel* m_streams {};
     PlayerSettingsViewModel* m_player {};
     SubtitlesSettingsViewModel* m_subs {};
     TorrentStreamingSettingsViewModel* m_torrentStreaming {};
-    AppearanceSettingsViewModel* m_appear {};
 };
 
 } // namespace kinema::ui::qml

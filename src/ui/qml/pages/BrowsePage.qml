@@ -232,11 +232,11 @@ Kirigami.Page {
             ? i18nc("@info placeholder",
                 "The bundled TMDB token may have been revoked, or "
                 + "your override is invalid. Open Settings → TMDB "
-                + "(Discover) to paste a working token.")
+                + "to paste a working token.")
             : i18nc("@info placeholder",
                 "Browse uses TMDB's /discover endpoint to filter "
-                + "the catalog. Open Settings → TMDB (Discover) "
-                + "and paste a v4 Read Access Token.")
+                + "the catalog. Open Settings → TMDB and paste a "
+                + "v4 Read Access Token.")
         helpfulAction: Kirigami.Action {
             icon.source: AppIcons.url("settings")
             icon.color: AppIcons.foreground

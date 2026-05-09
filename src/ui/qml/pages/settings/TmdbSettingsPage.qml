@@ -10,7 +10,7 @@ import org.kde.kirigamiaddons.formcard as FormCard
 import dev.tlmtech.kinema.app
 
 FormCard.FormCardPage {
-    title: i18nc("@title:tab settings page", "TMDB (Discover)")
+    title: i18nc("@title:tab settings page", "TMDB")
 
     readonly property var vm: settingsVm.tmdb
 
@@ -22,10 +22,12 @@ FormCard.FormCardPage {
             text: i18nc("@info tmdb settings intro",
                 "TMDB read-access token")
             description: i18nc("@info tmdb settings intro",
-                "Discover uses a shared token that ships with Kinema. "
-                + "Paste your own v4 read-access token to use your "
-                + "account instead. The token is stored in your system "
-                + "keyring — never on disk in plaintext.")
+                "Kinema uses TMDB for Discover, Browse, and metadata "
+                + "lookups across detail pages and recommendations. "
+                + "A shared token ships with Kinema; paste your own v4 "
+                + "read-access token to use your account instead. The "
+                + "token is stored in your system keyring — never on "
+                + "disk in plaintext.")
         }
         FormCard.FormPasswordFieldDelegate {
             id: tokenField

@@ -2,20 +2,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import QtQuick
-import QtQuick.Controls as QQC2
-import QtQuick.Layouts
-import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
 FormCard.FormCardPage {
-    title: i18nc("@title:tab settings page", "Filters")
+    title: i18nc("@title:tab settings page", "Streams")
 
-    readonly property var vm: settingsVm.filters
+    readonly property var vm: settingsVm.streams
 
     FormCard.FormHeader {
-        title: i18nc("@title:group", "Exclude resolutions")
+        title: i18nc("@title:group", "Defaults")
+    }
+    FormCard.FormCard {
+        FormCard.FormComboBoxDelegate {
+            text: i18nc("@label:listbox", "Default torrent sort")
+            model: [
+                i18nc("@item:inlistbox sort mode", "Seeders"),
+                i18nc("@item:inlistbox sort mode", "Size"),
+                i18nc("@item:inlistbox sort mode", "Quality & Size")
+            ]
+            currentIndex: vm.defaultTorrentioSort
+            onActivated: vm.defaultTorrentioSort = currentIndex
+            description: i18nc("@info form delegate hint",
+                "Applied to every Torrentio query. You can still re-sort "
+                + "any column from the streams list header.")
+        }
+    }
+
+    FormCard.FormHeader {
+        title: i18nc("@title:group", "Hide resolutions")
     }
     FormCard.FormCard {
         Repeater {
@@ -31,7 +47,7 @@ FormCard.FormCardPage {
     }
 
     FormCard.FormHeader {
-        title: i18nc("@title:group", "Exclude variants")
+        title: i18nc("@title:group", "Hide variants")
     }
     FormCard.FormCard {
         Repeater {
@@ -47,7 +63,7 @@ FormCard.FormCardPage {
     }
 
     FormCard.FormHeader {
-        title: i18nc("@title:group filters keyword blocklist",
+        title: i18nc("@title:group streams keyword blocklist",
             "Keyword blocklist")
     }
     FormCard.FormCard {
@@ -61,7 +77,7 @@ FormCard.FormCardPage {
         }
         FormCard.FormTextDelegate {
             description: i18nc("@info form delegate hint",
-                "Case-insensitive substring match against the release "
+                "Case-insensitive substring match against the stream "
                 + "name and description line.")
         }
     }
