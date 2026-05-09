@@ -1,0 +1,9 @@
+{
+  "id": "UNR123",
+  "filename": "Sample.Movie.2023.1080p.mkv",
+  "filesize": 2147483648,
+  "download": "https://hoster.example.com/d/UNR123/Sample.Movie.2023.1080p.mkv",
+  "mimeType": "video/x-matroska",
+  "host": "hoster.example.com",
+  "streamable": 1
+}

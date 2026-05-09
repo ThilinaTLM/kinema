@@ -5,6 +5,7 @@
 
 #include "api/RealDebrid.h"
 
+#include <QList>
 #include <QObject>
 #include <QString>
 #include <QUrl>
@@ -18,13 +19,26 @@ class HttpClient;
 namespace kinema::api {
 
 /**
- * Client for the Real-Debrid REST v1 API. Kinema only ever calls the
- * /user endpoint — it's used to validate the token the user pastes into
- * the Real-Debrid dialog. Actual torrent resolution still goes through
- * Torrentio (which includes the token in its per-stream config).
+ * Client for the Real-Debrid REST v1 API.
  *
- * Endpoint:
- *   GET /rest/1.0/user   with  Authorization: Bearer <token>
+ * Kinema uses RD for two things now:
+ *
+ * 1. Validating the user-supplied token (`/user`).
+ * 2. Decoupled, on-demand torrent resolution for the unified downloader:
+ *    `instantAvailability` → `addMagnet` → `torrentInfo` →
+ *    `selectFiles` → `torrentInfo` → `unrestrictLink`. The download
+ *    subsystem orchestrates that workflow inside `RealDebridResolver`.
+ *
+ * Endpoints used:
+ *   GET  /rest/1.0/user
+ *   GET  /rest/1.0/torrents/instantAvailability/{hash}
+ *   POST /rest/1.0/torrents/addMagnet      (form-encoded)
+ *   GET  /rest/1.0/torrents/info/{id}
+ *   POST /rest/1.0/torrents/selectFiles/{id} (form-encoded)
+ *   POST /rest/1.0/unrestrict/link         (form-encoded)
+ *   DELETE /rest/1.0/torrents/delete/{id}
+ *
+ * Every request carries `Authorization: Bearer <token>`.
  */
 class RealDebridClient : public QObject
 {
@@ -41,7 +55,34 @@ public:
     const QString& token() const noexcept { return m_token; }
 
     /// Throws HttpError. Auth failures surface as HttpStatus 401.
-    QCoro::Task<RealDebridUser> user();
+    virtual QCoro::Task<RealDebridUser> user();
+
+    /// Returns an empty `RdInstantAvailability` (cached() == false) when
+    /// RD does not have the torrent. `infoHash` is normalized to lower
+    /// case before the request is issued.
+    virtual QCoro::Task<RdInstantAvailability> instantAvailability(
+        QString infoHash);
+
+    /// Adds a magnet to the user's RD torrents. The returned id is used
+    /// for the rest of the resolution workflow.
+    virtual QCoro::Task<RdAddMagnetResult> addMagnet(QString magnet);
+
+    /// Returns the current state of an RD torrent, including its file
+    /// list and the per-file hoster links (when available).
+    virtual QCoro::Task<RdTorrentInfo> torrentInfo(QString rdTorrentId);
+
+    /// Tells RD which files inside a torrent the user wants. Pass
+    /// 1-indexed file ids — the same scheme RD's `instantAvailability`
+    /// and `torrentInfo` use. Pass an empty list to select all files.
+    virtual QCoro::Task<void> selectFiles(QString rdTorrentId,
+        QList<int> fileIds);
+
+    /// Resolves a hoster link returned by RD into a streamable URL.
+    virtual QCoro::Task<RdUnrestrictedLink> unrestrictLink(QUrl link);
+
+    /// Removes the torrent from the user's RD account. Best-effort:
+    /// callers typically swallow errors on cleanup.
+    virtual QCoro::Task<void> deleteTorrent(QString rdTorrentId);
 
 private:
     core::HttpClient* m_http;

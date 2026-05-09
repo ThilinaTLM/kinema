@@ -4,7 +4,14 @@
       "name": "Torrentio\n1080p",
       "title": "The.Matrix.1999.1080p.BluRay.x264-NOGRP\n👤 1500 💾 2.1 GB ⚙️ ThePirateBay",
       "infoHash": "aabb1122ccdd3344eeff5566778899aabbccddee",
-      "fileIdx": 0
+      "fileIdx": 0,
+      "behaviorHints": {
+        "filename": "The.Matrix.1999.1080p.BluRay.x264-NOGRP.mkv"
+      },
+      "sources": [
+        "tracker:udp://tracker.example.com:80",
+        "dht:aabb1122"
+      ]
     },
     {
       "name": "Torrentio\n2160p [RD+]",

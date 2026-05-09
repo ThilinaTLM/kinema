@@ -6,9 +6,12 @@
 #include "api/CinemetaClient.h"
 #include "api/OpenSubtitlesClient.h"
 #include "api/PlaybackContext.h"
+#include "api/RealDebridClient.h"
 #include "api/TmdbClient.h"
 #include "api/TorrentioClient.h"
 #include "config/AppSettings.h"
+#include "config/DownloadSettings.h"
+#include "controllers/DownloadController.h"
 #include "controllers/HistoryController.h"
 #include "controllers/LibraryController.h"
 #include "controllers/WatchedController.h"
@@ -21,23 +24,29 @@
 #include "controllers/TokenController.h"
 #include "controllers/TrayController.h"
 #include "core/Database.h"
+#include "core/DownloadStore.h"
 #include "core/HistoryStore.h"
 #include "core/HttpClient.h"
 #include "core/LibraryStore.h"
+#include "core/MediaCache.h"
 #include "core/WatchedStore.h"
 #include "core/PlayerLauncher.h"
 #include "core/PlayQueueStore.h"
 #include "core/SubtitleCacheStore.h"
 #include "core/TokenStore.h"
 #include "core/TorrentCache.h"
+#include "download/DownloadManager.h"
 #include "kinema_debug.h"
 #include "services/StreamActions.h"
+#include "services/StreamAvailabilityService.h"
 #include "torrent/TorrentStreamingService.h"
 #include "ui/ImageLoader.h"
 #include "ui/qml-bridge/BrowseViewModel.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
+#include "ui/qml-bridge/DownloadsListModel.h"
+#include "ui/qml-bridge/DownloadsViewModel.h"
 #include "ui/qml-bridge/EpisodesListModel.h"
 #include "ui/qml-bridge/AppIconResolver.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
@@ -294,6 +303,20 @@ void MainController::buildCoreServices()
         *m_torrentCache, m_settings.torrentStreaming(), this);
     m_streamActions = new services::StreamActions(
         m_player.get(), m_torrentStreaming, this);
+    // RD-aware availability annotator. Used by the detail VMs to
+    // mark streams `rdCached` after Torrentio's discovery results
+    // come back — RD is no longer encoded into the Torrentio URL
+    // so we have to ask RD itself which hashes are instantly
+    // available.
+
+    // Real-Debrid client + unified downloader settings/cache. The
+    // RD client picks up its token from the keyring once the
+    // TokenController has fired its initial reads.
+    m_rd = std::make_unique<api::RealDebridClient>(m_http.get(), this);
+    m_streamAvailability = new services::StreamAvailabilityService(
+        *m_rd, this);
+    m_mediaCache = std::make_unique<core::MediaCache>(
+        m_settings.download(), this);
 
     // History DB. Open is best-effort: a broken DB means history
     // is disabled for this session, not that the app refuses to
@@ -312,12 +335,33 @@ void MainController::buildCoreServices()
         *m_db, this);
     m_subtitleCache
         = std::make_unique<core::SubtitleCacheStore>(*m_db, this);
+    m_downloadStore = std::make_unique<core::DownloadStore>(*m_db, this);
+
+    // The unified downloader. Wires the localhost media server,
+    // RD-resolution pipeline, torrent engine, and persistent store.
+    m_downloadManager = new download::DownloadManager(*m_http, *m_rd,
+        *m_torrentStreaming, *m_downloadStore, *m_mediaCache,
+        m_settings.download(), this);
+    m_streamActions->setDownloadManager(m_downloadManager);
+    m_downloadCtrl = new controllers::DownloadController(
+        *m_downloadManager, *m_downloadStore, this);
 
     // Tokens — built before the OpenSubtitles client + history
     // controller because both reference its live `const QString&`
     // aliases.
     m_tokenCtrl = new controllers::TokenController(
         m_tokens.get(), m_tmdb, m_settings.realDebrid(), this);
+
+    // Keep the RD client's in-memory token in sync with whatever
+    // the keyring-backed `TokenController` resolves. The download
+    // manager's RD-availability + resolution paths read the live
+    // token from `m_rd` on every call.
+    m_rd->setToken(m_tokenCtrl->realDebridToken());
+    connect(m_tokenCtrl,
+        &controllers::TokenController::realDebridTokenChanged,
+        m_rd.get(), [this](const QString& tok) {
+            m_rd->setToken(tok);
+        });
 
     // OpenSubtitles + subtitle controller.
     m_openSubtitles = new api::OpenSubtitlesClient(m_http.get(),
@@ -374,6 +418,12 @@ void MainController::buildCoreServices()
         m_tokenCtrl->realDebridToken(), this);
     m_historyCtrl->setPlayQueue(m_playQueueCtrl);
     m_playQueueVm = new PlayQueueViewModel(m_playQueueCtrl, this);
+
+    // Downloads page VM. Lives over the entire app lifetime so the
+    // drawer's downloads entry can show counts even before the
+    // first navigation to the page.
+    m_downloadsVm = new DownloadsViewModel(*m_downloadCtrl,
+        *m_mediaCache, this);
 
     // Discover / Search / Browse surface VMs. They sit on top of
     // the existing service graph; action signals route back into
@@ -1018,6 +1068,8 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(SubtitlesViewModel);
     KINEMA_REGISTER_QML_TYPE(SubtitleResultsModel);
     KINEMA_REGISTER_QML_TYPE(PlayQueueViewModel);
+    KINEMA_REGISTER_QML_TYPE(DownloadsViewModel);
+    KINEMA_REGISTER_QML_TYPE(DownloadsListModel);
     KINEMA_REGISTER_QML_TYPE(SettingsRootViewModel);
     KINEMA_REGISTER_QML_TYPE(GeneralSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(TmdbSettingsViewModel);
@@ -1048,6 +1100,7 @@ void MainController::exposeContextProperties(
         { "subtitlesVm", m_subtitlesVm },
         { "settingsVm", m_settingsVm },
         { "playQueue", m_playQueueVm },
+        { "downloadsVm", m_downloadsVm },
     };
     for (const auto& [name, obj] : contextProps) {
         rootCtx->setContextProperty(QString::fromLatin1(name), obj);

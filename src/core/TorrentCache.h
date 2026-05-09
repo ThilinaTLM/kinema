@@ -16,9 +16,14 @@ class TorrentStreamingSettings;
 namespace kinema::core {
 
 /**
- * Filesystem-backed cache for built-in torrent streaming. The cache
- * keeps one directory per info hash under `cache::torrentsDir()` and
- * prunes inactive directories least-recently-used by marker mtime.
+ * Filesystem-backed cache for the libtorrent backend (now wrapped by
+ * `download::TorrentAssetSession`). One directory per info hash
+ * under `cache::torrentsDir()`. Pruned LRU by marker mtime.
+ *
+ * The unified downloader's per-asset bookkeeping lives in
+ * `core::MediaCache`; this cache is internal to the torrent engine
+ * and exists because libtorrent needs a stable on-disk save path
+ * keyed by info hash.
  */
 class TorrentCache : public QObject
 {

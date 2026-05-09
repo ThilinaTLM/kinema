@@ -64,6 +64,77 @@ private Q_SLOTS:
         QVERIFY(u.type.isEmpty());
         QVERIFY(!u.premiumUntil.has_value());
     }
+
+    void instantAvailability_cached_listsVariants()
+    {
+        const auto doc = loadFixture("rd_instant_availability_cached.json");
+        const auto av = realdebrid::parseInstantAvailability(doc,
+            QStringLiteral("AABB1122CCDD3344EEFF5566778899AABBCCDDEE"));
+
+        QVERIFY(av.cached());
+        QCOMPARE(av.variants.size(), 2);
+        QCOMPARE(av.variants.at(0).files.size(), 2);
+        const auto& f0 = av.variants.at(0).files.at(0);
+        QCOMPARE(f0.fileId, 1);
+        QCOMPARE(f0.filename, QStringLiteral("Sample.Movie.2023.1080p.mkv"));
+        QCOMPARE(f0.sizeBytes, qint64(2147483648));
+    }
+
+    void instantAvailability_uncached_returnsEmpty()
+    {
+        const auto doc = loadFixture("rd_instant_availability_uncached.json");
+        const auto av = realdebrid::parseInstantAvailability(doc,
+            QStringLiteral("ff00112233445566778899aabbccddeeff001122"));
+        QVERIFY(!av.cached());
+        QVERIFY(av.variants.isEmpty());
+    }
+
+    void addMagnet_extractsId()
+    {
+        const auto doc = loadFixture("rd_add_magnet.json");
+        const auto r = realdebrid::parseAddMagnet(doc);
+        QCOMPARE(r.id, QStringLiteral("ABC123ID"));
+        QVERIFY(!r.uri.isEmpty());
+    }
+
+    void addMagnet_throwsOnMissingId()
+    {
+        const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
+        QVERIFY_EXCEPTION_THROWN(
+            realdebrid::parseAddMagnet(doc),
+            kinema::core::HttpError);
+    }
+
+    void torrentInfo_listsFilesAndLinks()
+    {
+        const auto doc = loadFixture("rd_torrent_info_downloaded.json");
+        const auto t = realdebrid::parseTorrentInfo(doc);
+        QCOMPARE(t.id, QStringLiteral("ABC123ID"));
+        QCOMPARE(t.status, QStringLiteral("downloaded"));
+        QCOMPARE(t.progress, 100);
+        QCOMPARE(t.files.size(), 2);
+        QVERIFY(t.files.at(0).selected);
+        QVERIFY(!t.files.at(1).selected);
+        QCOMPARE(t.links.size(), 1);
+    }
+
+    void unrestrictLink_extractsDownload()
+    {
+        const auto doc = loadFixture("rd_unrestrict_link.json");
+        const auto u = realdebrid::parseUnrestrictedLink(doc);
+        QCOMPARE(u.filename, QStringLiteral("Sample.Movie.2023.1080p.mkv"));
+        QCOMPARE(u.fileSize, qint64(2147483648));
+        QVERIFY(u.streamable);
+        QVERIFY(!u.download.isEmpty());
+    }
+
+    void unrestrictLink_throwsOnMissingDownload()
+    {
+        const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
+        QVERIFY_EXCEPTION_THROWN(
+            realdebrid::parseUnrestrictedLink(doc),
+            kinema::core::HttpError);
+    }
 };
 
 QTEST_APPLESS_MAIN(TstRealDebridParse)

@@ -57,6 +57,13 @@ struct HistoryStreamRef {
     QString qualityLabel;
     std::optional<qint64> sizeBytes;
     QString provider;
+    /// Pinned file index inside the torrent (-1 = unknown). Carried
+    /// alongside the info hash so queue/history replay can pick the
+    /// same file even when a torrent has multiple video tracks.
+    int fileIndex = -1;
+    /// Filename hint Torrentio reported — used by the RD resolver to
+    /// pick the same file variant on subsequent visits.
+    QString fileNameHint;
 
     /// Build a history reference from a live Torrentio stream.
     static HistoryStreamRef fromStream(const Stream& s);

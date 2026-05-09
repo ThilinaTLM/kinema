@@ -505,9 +505,9 @@ QCoro::Task<void> PlayQueueController::startActiveItem()
             m_items[m_activeIndex].cachedDirectUrl.clear();
         }
         // Re-resolve via Torrentio + match-by-infoHash, mirroring the
-        // pattern HistoryController::resumeFromHistory uses.
+        // pattern HistoryController::resumeFromHistory uses. Torrentio
+        // is now discovery-only — RD lives in the unified downloader.
         auto opts = m_settings.torrentioOptions();
-        opts.realDebridToken = m_rdToken;
 
         QList<api::Stream> streams;
         try {

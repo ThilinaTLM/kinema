@@ -77,6 +77,11 @@ private:
     bool runMigrations();
     bool applyMigration(int toVersion);
     bool setSchemaVersion(int version);
+    /// Idempotent CREATE TABLE/INDEX IF NOT EXISTS statements for
+    /// downloader-related tables. Runs after `runMigrations()` so the
+    /// numbered migration chain stays untouched (per AGENTS.md: no
+    /// migrations for `kinema.db`).
+    bool ensureSupplementalTables();
     void quarantineCorruptFile();
 
     QString m_path;

@@ -23,6 +23,10 @@ namespace kinema::torrent {
 class TorrentStreamingService;
 }
 
+namespace kinema::download {
+class DownloadManager;
+}
+
 namespace kinema::services {
 
 /**
@@ -44,6 +48,11 @@ public:
     StreamActions(core::PlayerLauncher* launcher,
         torrent::TorrentStreamingService* torrentStreaming,
         QObject* parent = nullptr);
+
+    /// Wire the unified downloader. When set, `play()` always asks
+    /// the manager for a localhost URL; the legacy direct/torrent
+    /// branch is bypassed.
+    void setDownloadManager(download::DownloadManager* manager);
 
     /// Wire the history controller used to seed resume-from and
     /// record play-start entries. Two-phase init because the
@@ -76,9 +85,12 @@ private:
 
     QCoro::Task<void> playTorrentTask(api::Stream stream,
         api::PlaybackContext ctx, quint64 epoch);
+    QCoro::Task<void> playLocalTask(api::Stream stream,
+        api::PlaybackContext ctx, quint64 epoch);
 
     core::PlayerLauncher* m_launcher;
     torrent::TorrentStreamingService* m_torrentStreaming;
+    download::DownloadManager* m_downloadManager {};
     controllers::HistoryController* m_history {};
     quint64 m_playEpoch = 0;
 };

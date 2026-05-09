@@ -26,6 +26,30 @@ namespace kinema::torrent {
 
 class LocalStreamServer;
 
+/// Per-asset metadata returned by `prepareSession()`. Used by the
+/// unified-downloader's `TorrentAssetSession` to wire the asset into
+/// `download::LocalMediaServer` without going through TSS's own
+/// localhost server.
+struct PreparedSession {
+    QString token;
+    QString fileName;
+    qint64 fileSize = 0;
+    QString infoHash;
+};
+
+/**
+ * Libtorrent-backed engine. After the unified-downloader refactor
+ * this class is the torrent **backend implementation**: it owns the
+ * libtorrent session, picks the right file inside multi-file
+ * torrents, and exposes per-asset byte-range fetches through
+ * `prepareSession()` / `ensureRange()` / `readRange()`. Production
+ * playback always reaches it through
+ * `download::TorrentAssetSession` + `download::LocalMediaServer`.
+ *
+ * The legacy `prepare()` method (and its private `LocalStreamServer`)
+ * are retained only for tests that haven't been ported to the
+ * unified downloader. New code must use `prepareSession()`.
+ */
 class TorrentStreamingService : public QObject
 {
     Q_OBJECT
@@ -35,8 +59,18 @@ public:
         QObject* parent = nullptr);
     ~TorrentStreamingService() override;
 
+    /// LEGACY: returns a URL served by the engine's own private
+    /// `LocalStreamServer`. New code must call `prepareSession()`
+    /// and register the asset with `download::LocalMediaServer`.
     virtual QCoro::Task<QUrl> prepare(const api::Stream& stream,
         const api::PlaybackContext& ctx);
+
+    /// Same per-asset preparation as `prepare()` (metadata fetch,
+    /// file selection, startup buffering, piece prioritisation), but
+    /// does not touch the legacy `LocalStreamServer`. Used by the
+    /// new unified downloader pipeline.
+    virtual QCoro::Task<PreparedSession> prepareSession(
+        const api::Stream& stream, const api::PlaybackContext& ctx);
 
     QCoro::Task<bool> ensureRange(const QString& token, ByteRange range);
     QByteArray readRange(const QString& token, ByteRange range) const;

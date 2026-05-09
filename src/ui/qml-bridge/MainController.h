@@ -28,9 +28,11 @@ class AppSettings;
 
 namespace kinema::core {
 class Database;
+class DownloadStore;
 class HistoryStore;
 class LibraryStore;
 class HttpClient;
+class MediaCache;
 class PlayerLauncher;
 class PlayQueueStore;
 class SubtitleCacheStore;
@@ -39,11 +41,24 @@ class TorrentCache;
 class WatchedStore;
 }
 
+namespace kinema::api {
+class RealDebridClient;
+}
+
+namespace kinema::config {
+class DownloadSettings;
+}
+
+namespace kinema::download {
+class DownloadManager;
+}
+
 namespace kinema::torrent {
 class TorrentStreamingService;
 }
 
 namespace kinema::controllers {
+class DownloadController;
 class HistoryController;
 class LibraryController;
 class MprisController;
@@ -57,6 +72,7 @@ class WatchedController;
 
 namespace kinema::services {
 class StreamActions;
+class StreamAvailabilityService;
 }
 
 namespace kinema::ui {
@@ -72,6 +88,7 @@ class AppIconResolver;
 class BrowseViewModel;
 class ContinueWatchingViewModel;
 class DiscoverViewModel;
+class DownloadsViewModel;
 class LibraryViewModel;
 class MovieDetailViewModel;
 class PlayQueueViewModel;
@@ -279,6 +296,9 @@ private:
     std::unique_ptr<core::PlayQueueStore> m_playQueueStore;
     std::unique_ptr<core::SubtitleCacheStore> m_subtitleCache;
     std::unique_ptr<core::TorrentCache> m_torrentCache;
+    std::unique_ptr<core::DownloadStore> m_downloadStore;
+    std::unique_ptr<core::MediaCache> m_mediaCache;
+    std::unique_ptr<api::RealDebridClient> m_rd;
 
     // QObject-parented to this controller.
     api::CinemetaClient* m_cinemeta {};
@@ -289,7 +309,10 @@ private:
 
     AppIconResolver* m_appIconResolver {};
     services::StreamActions* m_streamActions {};
+    services::StreamAvailabilityService* m_streamAvailability {};
     torrent::TorrentStreamingService* m_torrentStreaming {};
+    download::DownloadManager* m_downloadManager {};
+    controllers::DownloadController* m_downloadCtrl {};
     controllers::TokenController* m_tokenCtrl {};
     controllers::HistoryController* m_historyCtrl {};
     controllers::LibraryController* m_libraryCtrl {};
@@ -311,6 +334,7 @@ private:
     SubtitlesViewModel* m_subtitlesVm {};
     SettingsRootViewModel* m_settingsVm {};
     PlayQueueViewModel* m_playQueueVm {};
+    DownloadsViewModel* m_downloadsVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::MprisController* m_mprisCtrl {};
     controllers::PlaybackController* m_playbackCtrl {};

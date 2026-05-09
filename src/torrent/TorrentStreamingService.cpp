@@ -186,16 +186,12 @@ TorrentStreamingService::~TorrentStreamingService()
     stopAll();
 }
 
-QCoro::Task<QUrl> TorrentStreamingService::prepare(const api::Stream& stream,
-    const api::PlaybackContext& ctx)
+QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
+    const api::Stream& stream, const api::PlaybackContext& ctx)
 {
     if (stream.infoHash.isEmpty()) {
         throw runtimeError(i18nc("@info:status",
             "This stream has no magnet info hash."));
-    }
-    if (!d->server.listen()) {
-        throw runtimeError(i18nc("@info:status",
-            "Could not start the local torrent streaming server."));
     }
 
     const QString hash = normalizedHash(stream.infoHash);
@@ -314,8 +310,24 @@ QCoro::Task<QUrl> TorrentStreamingService::prepare(const api::Stream& stream,
 
     d->cache.touch(hash);
     d->cache.enforceBudget();
-    co_return d->server.urlForToken(state.token,
-        fileNameForUrl(state.selected.path));
+
+    PreparedSession ps;
+    ps.token = state.token;
+    ps.fileName = fileNameForUrl(state.selected.path);
+    ps.fileSize = state.layout.fileSize;
+    ps.infoHash = state.infoHash;
+    co_return ps;
+}
+
+QCoro::Task<QUrl> TorrentStreamingService::prepare(const api::Stream& stream,
+    const api::PlaybackContext& ctx)
+{
+    if (!d->server.listen()) {
+        throw runtimeError(i18nc("@info:status",
+            "Could not start the local torrent streaming server."));
+    }
+    const auto ps = co_await prepareSession(stream, ctx);
+    co_return d->server.urlForToken(ps.token, ps.fileName);
 }
 
 QCoro::Task<bool> TorrentStreamingService::ensureRange(const QString& token,

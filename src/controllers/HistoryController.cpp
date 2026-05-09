@@ -265,7 +265,6 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
     }
 
     auto opts = m_settings.torrentioOptions();
-    opts.realDebridToken = m_rdToken;
 
     QList<api::Stream> streams;
     try {

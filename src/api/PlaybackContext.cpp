@@ -28,6 +28,8 @@ HistoryStreamRef HistoryStreamRef::fromStream(const Stream& s)
     ref.qualityLabel = s.qualityLabel;
     ref.sizeBytes = s.sizeBytes;
     ref.provider = s.provider;
+    ref.fileIndex = s.fileIndex;
+    ref.fileNameHint = s.fileNameHint;
     return ref;
 }
 

@@ -173,6 +173,21 @@ ecm_add_test(tst_database.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
+ecm_add_test(tst_download_store.cpp
+    TEST_NAME tst_download_store
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
+ecm_add_test(tst_media_cache.cpp
+    TEST_NAME tst_media_cache
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_local_media_server.cpp
+    TEST_NAME tst_local_media_server
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Network
+)
+
 ecm_add_test(tst_history_store.cpp
     TEST_NAME tst_history_store
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
@@ -345,7 +360,8 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_main_controller_close_logic
          tst_discover_view_model tst_continue_watching_view_model
          tst_library_view_model tst_library_backfill
-         tst_application_boot tst_kinema_image_provider)
+         tst_application_boot tst_kinema_image_provider
+         tst_download_store tst_media_cache tst_local_media_server)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 

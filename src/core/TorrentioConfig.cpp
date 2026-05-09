@@ -36,10 +36,6 @@ QString toPathSegment(const ConfigOptions& opts)
     if (!opts.providers.isEmpty()) {
         parts.append(QStringLiteral("providers=") + opts.providers.join(QLatin1Char(',')));
     }
-    // MUST be last (Torrentio RD addon requirement).
-    if (!opts.realDebridToken.isEmpty()) {
-        parts.append(QStringLiteral("realdebrid=") + opts.realDebridToken);
-    }
 
     return parts.join(QLatin1Char('|'));
 }

@@ -7,6 +7,7 @@
 #include "core/Magnet.h"
 #include "core/PlayerLauncher.h"
 #include "core/HttpErrorPresenter.h"
+#include "download/DownloadManager.h"
 #include "kinema_debug.h"
 #include "torrent/TorrentStreamingService.h"
 
@@ -64,6 +65,11 @@ void StreamActions::setHistoryController(
     controllers::HistoryController* history)
 {
     m_history = history;
+}
+
+void StreamActions::setDownloadManager(download::DownloadManager* manager)
+{
+    m_downloadManager = manager;
 }
 
 void StreamActions::copyMagnet(const api::Stream& stream)
@@ -139,12 +145,26 @@ void StreamActions::play(const api::Stream& stream,
         m_history->onPlayStarting(ctx);
     }
 
+    // Preferred path: every backend serves through the unified
+    // downloader so the player only ever sees localhost URLs.
+    if (m_downloadManager && !stream.infoHash.isEmpty()) {
+        const auto epoch = ++m_playEpoch;
+        auto task = playLocalTask(stream, ctx, epoch);
+        Q_UNUSED(task);
+        return;
+    }
+
+    // Direct-URL-only candidate (no info hash) — fall back to the
+    // remote URL until discovery learns to recover an info hash.
     if (!stream.directUrl.isEmpty()) {
         ++m_playEpoch;
         m_launcher->play(stream.directUrl, ctx);
         return;
     }
 
+    // Legacy fallback. Only reached when the unified downloader is
+    // not wired (some unit-test setups). Production always takes the
+    // `m_downloadManager` branch above.
     if (!m_torrentStreaming) {
         Q_EMIT statusMessage(
             i18nc("@info:status",
@@ -156,6 +176,25 @@ void StreamActions::play(const api::Stream& stream,
     const auto epoch = ++m_playEpoch;
     auto task = playTorrentTask(stream, ctx, epoch);
     Q_UNUSED(task);
+}
+
+QCoro::Task<void> StreamActions::playLocalTask(api::Stream stream,
+    api::PlaybackContext ctx, quint64 epoch)
+{
+    try {
+        const QUrl url = co_await m_downloadManager->prepareForPlayback(
+            stream, ctx);
+        if (epoch != m_playEpoch) {
+            co_return;
+        }
+        m_launcher->play(url, ctx);
+    } catch (const std::exception& e) {
+        if (epoch != m_playEpoch) {
+            co_return;
+        }
+        Q_EMIT statusMessage(core::describeError(e, "local playback"),
+            6000);
+    }
 }
 
 QCoro::Task<void> StreamActions::playTorrentTask(api::Stream stream,

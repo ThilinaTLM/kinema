@@ -114,14 +114,37 @@ Stream parseOne(const QJsonObject& obj)
     s.provider = parseProvider(titleRaw);
 
     s.infoHash = obj.value(QStringLiteral("infoHash")).toString();
+    const auto bh = obj.value(QStringLiteral("behaviorHints")).toObject();
     // Some Torrentio responses tuck infoHash inside behaviorHints
     // (notably certain RD/AD-resolved entries). Fall back to that
     // nested location when the top-level field is absent so the
     // history layer can still key resume on a stable identifier.
     if (s.infoHash.isEmpty()) {
-        const auto bh = obj.value(QStringLiteral("behaviorHints")).toObject();
         s.infoHash = bh.value(QStringLiteral("infoHash")).toString();
     }
+
+    // `fileIdx` may live at the top level or under behaviorHints.
+    // Default to -1 when absent so the backend can choose its own
+    // file from the torrent contents.
+    {
+        const auto top = obj.value(QStringLiteral("fileIdx"));
+        const auto nested = bh.value(QStringLiteral("fileIdx"));
+        const QJsonValue chosen = top.isUndefined() ? nested : top;
+        if (chosen.isDouble()) {
+            s.fileIndex = chosen.toInt(-1);
+        }
+    }
+    s.fileNameHint = bh.value(QStringLiteral("filename")).toString();
+
+    // `sources` is an optional list of tracker URIs / DHT hints.
+    const auto srcs = obj.value(QStringLiteral("sources")).toArray();
+    s.sources.reserve(srcs.size());
+    for (const auto& v : srcs) {
+        if (v.isString()) {
+            s.sources.append(v.toString());
+        }
+    }
+
     const auto urlStr = obj.value(QStringLiteral("url")).toString();
     if (!urlStr.isEmpty()) {
         s.directUrl = QUrl(urlStr);

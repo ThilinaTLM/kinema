@@ -719,7 +719,6 @@ QCoro::Task<void> SeriesDetailViewModel::loadEpisodeStreamsTask(
 
     try {
         auto opts = m_settings.torrentioOptions();
-        opts.realDebridToken = m_rdToken;
         auto streams = co_await m_torrentio->streams(
             api::MediaKind::Series, ep.streamId(m_imdbId), opts);
         if (myEpoch != m_episodeEpoch) {

@@ -10,12 +10,11 @@
 namespace kinema::config {
 
 /**
- * User-tunable behavior for built-in BitTorrent streaming.
- *
- * The torrent engine is always built; these settings only tune cache
- * and transfer behavior. Values are intentionally conservative so a
- * media stream can start without filling the disk or seeding in the
- * background after playback stops.
+ * Torrent-backend tuning. Kept around because the libtorrent engine
+ * still consumes it directly; new code should reach for
+ * `config::DownloadSettings`, which spans both the torrent and RD
+ * backends. Both classes share the same `[TorrentStreaming]` KConfig
+ * group so on-disk values are identical.
  */
 class TorrentStreamingSettings : public QObject
 {

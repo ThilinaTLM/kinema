@@ -6,6 +6,7 @@
 #include "config/AppearanceSettings.h"
 #include "config/BrowseSettings.h"
 #include "config/CacheSettings.h"
+#include "config/DownloadSettings.h"
 #include "config/FilterSettings.h"
 #include "config/LibrarySettings.h"
 #include "config/PlayerSettings.h"
@@ -74,6 +75,9 @@ public:
     TorrentStreamingSettings& torrentStreaming() noexcept { return m_torrentStreaming; }
     const TorrentStreamingSettings& torrentStreaming() const noexcept { return m_torrentStreaming; }
 
+    DownloadSettings& download() noexcept { return m_download; }
+    const DownloadSettings& download() const noexcept { return m_download; }
+
     /// Build the Torrentio options from the current Torrentio + Filter
     /// state. The RD token is NOT filled — callers merge it in from
     /// TokenController.
@@ -99,6 +103,7 @@ private:
     SubtitleSettings m_subtitle;
     CacheSettings m_cache;
     TorrentStreamingSettings m_torrentStreaming;
+    DownloadSettings m_download;
 };
 
 } // namespace kinema::config

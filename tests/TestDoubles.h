@@ -55,11 +55,15 @@ inline QJsonDocument loadJsonFixture(const char* name)
 class FakeHttpClient : public core::HttpClient
 {
 public:
+    enum class Method { Get, Post, Delete, Head };
+
     struct Call {
         bool json = false;
         bool usedRequest = false;
         QUrl url;
         QNetworkRequest request;
+        Method method = Method::Get;
+        QByteArray body;
     };
 
     explicit FakeHttpClient(QObject* parent = nullptr)
@@ -70,11 +74,12 @@ public:
     QList<Call> calls;
     QList<QJsonDocument> jsonReplies;
     QList<QByteArray> byteReplies;
+    QList<QList<QPair<QByteArray, QByteArray>>> headerReplies;
     std::optional<core::HttpError> nextError;
 
     QCoro::Task<QByteArray> get(QUrl url) override
     {
-        calls.append({ false, false, url, {} });
+        calls.append({ false, false, url, {}, Method::Get, {} });
         if (nextError) {
             throw *nextError;
         }
@@ -83,7 +88,7 @@ public:
 
     QCoro::Task<QJsonDocument> getJson(QUrl url) override
     {
-        calls.append({ true, false, url, {} });
+        calls.append({ true, false, url, {}, Method::Get, {} });
         if (nextError) {
             throw *nextError;
         }
@@ -92,7 +97,7 @@ public:
 
     QCoro::Task<QByteArray> get(QNetworkRequest request) override
     {
-        calls.append({ false, true, {}, request });
+        calls.append({ false, true, {}, request, Method::Get, {} });
         if (nextError) {
             throw *nextError;
         }
@@ -101,11 +106,52 @@ public:
 
     QCoro::Task<QJsonDocument> getJson(QNetworkRequest request) override
     {
-        calls.append({ true, true, {}, request });
+        calls.append({ true, true, {}, request, Method::Get, {} });
         if (nextError) {
             throw *nextError;
         }
         co_return jsonReplies.isEmpty() ? QJsonDocument {} : jsonReplies.takeFirst();
+    }
+
+    QCoro::Task<QByteArray> postJson(QNetworkRequest request,
+        const QByteArray& body) override
+    {
+        calls.append({ false, true, {}, request, Method::Post, body });
+        if (nextError) {
+            throw *nextError;
+        }
+        co_return byteReplies.isEmpty() ? QByteArray {} : byteReplies.takeFirst();
+    }
+
+    QCoro::Task<QJsonDocument> postJsonForJson(QNetworkRequest request,
+        const QByteArray& body) override
+    {
+        calls.append({ true, true, {}, request, Method::Post, body });
+        if (nextError) {
+            throw *nextError;
+        }
+        co_return jsonReplies.isEmpty() ? QJsonDocument {} : jsonReplies.takeFirst();
+    }
+
+    QCoro::Task<QByteArray> del(QNetworkRequest request) override
+    {
+        calls.append({ false, true, {}, request, Method::Delete, {} });
+        if (nextError) {
+            throw *nextError;
+        }
+        co_return byteReplies.isEmpty() ? QByteArray {} : byteReplies.takeFirst();
+    }
+
+    QCoro::Task<QList<QPair<QByteArray, QByteArray>>> head(
+        QNetworkRequest request) override
+    {
+        calls.append({ false, true, {}, request, Method::Head, {} });
+        if (nextError) {
+            throw *nextError;
+        }
+        co_return headerReplies.isEmpty()
+            ? QList<QPair<QByteArray, QByteArray>> {}
+            : headerReplies.takeFirst();
     }
 };
 

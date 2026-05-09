@@ -260,7 +260,7 @@ private Q_SLOTS:
             (QStringList { QStringLiteral("4k") }));
         QCOMPARE(opts.excludedCategories,
             (QStringList { QStringLiteral("cam") }));
-        QVERIFY(opts.realDebridToken.isEmpty());
+        // Torrentio is discovery-only — RD never appears in the URL.
     }
 
 private:

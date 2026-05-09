@@ -161,6 +161,20 @@ Kirigami.ApplicationWindow {
                 checkable: true
                 checked: root.currentNavKey === "queue"
                 onTriggered: root.showPage("queue")
+            },
+            Kirigami.Action {
+                icon.source: AppIcons.url("download",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
+                text: downloadsVm.activeCount > 0
+                    ? i18nc("@action drawer entry, %1 is active count",
+                        "Downloads (%1)", downloadsVm.activeCount)
+                    : i18nc("@action drawer entry", "Downloads")
+                checkable: true
+                checked: root.currentNavKey === "downloads"
+                onTriggered: root.showPage("downloads")
             }
         ]
 
@@ -352,6 +366,9 @@ Kirigami.ApplicationWindow {
         case "queue":
             root.setTopLevelPage(queueComp, {});
             break;
+        case "downloads":
+            root.setTopLevelPage(downloadsComp, {});
+            break;
         }
     }
 
@@ -365,6 +382,7 @@ Kirigami.ApplicationWindow {
     Component { id: searchComp;   SearchPage   { } }
     Component { id: browseComp;   BrowsePage   { } }
     Component { id: queueComp;    QueuePage    { } }
+    Component { id: downloadsComp; DownloadsPage { } }
 
     // Detail pages are pushed on top of the current nav page so Esc
     // pops back to it with state preserved (the shell-level Esc

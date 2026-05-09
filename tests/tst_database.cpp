@@ -109,6 +109,28 @@ private Q_SLOTS:
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name='library_watch_overrides'")));
         QVERIFY(!q.next());
+
+        // download_items is bootstrapped by ensureSupplementalTables()
+        // — idempotent CREATE TABLE IF NOT EXISTS, no schema_meta bump.
+        QVERIFY(q.exec(QStringLiteral(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='download_items'")));
+        QVERIFY(q.next());
+        QVERIFY(q.exec(QStringLiteral("PRAGMA table_info(download_items)")));
+        QStringList dlColumns;
+        while (q.next()) {
+            dlColumns << q.value(1).toString();
+        }
+        QVERIFY(dlColumns.contains(QStringLiteral("asset_id")));
+        QVERIFY(dlColumns.contains(QStringLiteral("backend_kind")));
+        QVERIFY(dlColumns.contains(QStringLiteral("state")));
+        QVERIFY(dlColumns.contains(QStringLiteral("cache_disposition")));
+        QVERIFY(dlColumns.contains(QStringLiteral("playback_key")));
+        QVERIFY(dlColumns.contains(QStringLiteral("info_hash")));
+        QVERIFY(dlColumns.contains(QStringLiteral("file_index")));
+        QVERIFY(dlColumns.contains(QStringLiteral("cached_size_bytes")));
+        QVERIFY(dlColumns.contains(QStringLiteral("local_dir")));
+        QVERIFY(dlColumns.contains(QStringLiteral("last_used_at")));
     }
 
     // ---- Reopen is idempotent -------------------------------------------

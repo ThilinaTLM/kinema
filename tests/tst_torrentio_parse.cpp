@@ -56,6 +56,27 @@ private Q_SLOTS:
         QVERIFY(first.directUrl.isEmpty());
     }
 
+    void extractsFileIndexFilenameAndSources()
+    {
+        const auto doc = loadFixture("torrentio_stream_tt0133093.json");
+        const auto streams = torrentio::parseStreams(doc);
+
+        const auto& first = streams.at(0);
+        QCOMPARE(first.fileIndex, 0);
+        QCOMPARE(first.fileNameHint,
+            QStringLiteral("The.Matrix.1999.1080p.BluRay.x264-NOGRP.mkv"));
+        QCOMPARE(first.sources.size(), 2);
+        QCOMPARE(first.sources.at(0),
+            QStringLiteral("tracker:udp://tracker.example.com:80"));
+
+        // Rows that don't carry fileIdx default to -1 and an empty
+        // filename / sources list.
+        const auto& noMeta = streams.at(3);
+        QCOMPARE(noMeta.fileIndex, -1);
+        QVERIFY(noMeta.fileNameHint.isEmpty());
+        QVERIFY(noMeta.sources.isEmpty());
+    }
+
     void detectsRdCachedFlag_andDirectUrl()
     {
         const auto doc = loadFixture("torrentio_stream_tt0133093.json");

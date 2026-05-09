@@ -10,6 +10,7 @@ set(kinema_core_SRCS
     config/AppSettings.cpp
     config/BrowseSettings.cpp
     config/CacheSettings.cpp
+    config/DownloadSettings.cpp
     config/FilterSettings.cpp
     config/LibrarySettings.cpp
     config/PlayerSettings.cpp
@@ -22,6 +23,8 @@ set(kinema_core_SRCS
     core/CachePaths.cpp
     core/Database.cpp
     core/DateFormat.cpp
+    core/DownloadStore.cpp
+    core/MediaCache.cpp
     core/DateWindow.cpp
     core/HistoryStore.cpp
     core/HttpClient.cpp
@@ -53,8 +56,16 @@ set(kinema_core_SRCS
     torrent/PiecePlanner.cpp
     torrent/TorrentStreamingService.cpp
 
+    download/AssetSession.cpp
+    download/DownloadManager.cpp
+    download/HttpAssetSession.cpp
+    download/LocalMediaServer.cpp
+    download/RealDebridResolver.cpp
+    download/TorrentAssetSession.cpp
+
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp
+    api/Download.cpp
     api/OpenSubtitlesClient.cpp
     api/OpenSubtitlesParse.cpp
     api/PlaybackContext.cpp
@@ -70,6 +81,7 @@ set(kinema_core_SRCS
 
     app/KinemaApplication.cpp
 
+    controllers/DownloadController.cpp
     controllers/HistoryController.cpp
     controllers/LibraryController.cpp
     controllers/PlayQueueController.cpp
@@ -79,12 +91,15 @@ set(kinema_core_SRCS
     controllers/WatchedController.cpp
 
     services/StreamActions.cpp
+    services/StreamAvailabilityService.cpp
 
     ui/qml-bridge/AppIconResolver.cpp
     ui/qml-bridge/BrowseViewModel.cpp
     ui/qml-bridge/ContinueWatchingViewModel.cpp
     ui/qml-bridge/DiscoverSectionModel.cpp
     ui/qml-bridge/DiscoverViewModel.cpp
+    ui/qml-bridge/DownloadsListModel.cpp
+    ui/qml-bridge/DownloadsViewModel.cpp
     ui/qml-bridge/EpisodesListModel.cpp
     ui/qml-bridge/KinemaImageProvider.cpp
     ui/qml-bridge/LibraryListModel.cpp
@@ -247,11 +262,13 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/StreamRowActions.qml
         ui/qml/components/StreamSortDialog.qml
         ui/qml/components/StreamsList.qml
+        ui/qml/components/DownloadRow.qml
         ui/qml/components/UpcomingBadge.qml
         ui/qml/components/SubtitleResultRow.qml
         ui/qml/components/SubtitlesPanel.qml
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
+        ui/qml/pages/DownloadsPage.qml
         ui/qml/pages/LibraryPage.qml
         ui/qml/pages/MovieDetailPage.qml
         ui/qml/pages/QueuePage.qml

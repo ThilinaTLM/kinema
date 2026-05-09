@@ -44,7 +44,6 @@ private Q_SLOTS:
         opts.excludedResolutions = { QStringLiteral("4k") };
         opts.excludedCategories = { QStringLiteral("cam") };
         opts.providers = { QStringLiteral("yts") };
-        opts.realDebridToken = QStringLiteral("RDTOKEN");
 
         const auto streams = QCoro::waitFor(client.streams(
             MediaKind::Series, QStringLiteral("tt0903747:1:1"), opts));
@@ -52,7 +51,7 @@ private Q_SLOTS:
         QVERIFY(!streams.isEmpty());
         QCOMPARE(http.calls.size(), 1);
         QCOMPARE(http.calls.first().url.path(),
-            QStringLiteral("/sort=seeders|qualityfilter=4k,cam|providers=yts|realdebrid=RDTOKEN/stream/series/tt0903747:1:1.json"));
+            QStringLiteral("/sort=seeders|qualityfilter=4k,cam|providers=yts/stream/series/tt0903747:1:1.json"));
     }
 };
 

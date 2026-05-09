@@ -163,6 +163,34 @@ QCoro::Task<QJsonDocument> HttpClient::postJsonForJson(
     co_return parseJsonOrThrow(respBody);
 }
 
+QCoro::Task<QByteArray> HttpClient::del(QNetworkRequest request)
+{
+    requireHttps(request.url());
+    if (!request.hasRawHeader("User-Agent")) {
+        request.setHeader(QNetworkRequest::UserAgentHeader, m_userAgent);
+    }
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+        QNetworkRequest::NoLessSafeRedirectPolicy);
+
+    const QString logUrl = redactUrlForLog(request.url());
+    qCDebug(KINEMA) << "HTTP DELETE" << logUrl;
+
+    QNetworkReply* reply = m_nam.deleteResource(request);
+    co_await qCoro(reply).waitForFinished();
+    const std::unique_ptr<QNetworkReply> replyGuard { reply };
+    const auto status = reply->attribute(
+        QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+    if (reply->error() != QNetworkReply::NoError) {
+        throw HttpError(kindFromReply(reply), status, reply->errorString());
+    }
+    if (status < 200 || status >= 300) {
+        throw HttpError(HttpError::Kind::HttpStatus, status,
+            i18n("Server returned HTTP %1 for %2", status, logUrl));
+    }
+    co_return reply->readAll();
+}
+
 QCoro::Task<QList<QPair<QByteArray, QByteArray>>> HttpClient::head(
     QNetworkRequest request)
 {

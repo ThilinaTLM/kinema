@@ -405,8 +405,8 @@ QCoro::Task<void> MovieDetailViewModel::loadStreamsTask(
     }
 
     try {
+        // Torrentio is discovery-only — RD is no longer in the URL.
         auto opts = m_settings.torrentioOptions();
-        opts.realDebridToken = m_rdToken;
         auto streams = co_await m_torrentio->streams(
             api::MediaKind::Movie, imdbId, opts);
         if (expectedEpoch != m_epoch) {
