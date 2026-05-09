@@ -490,6 +490,31 @@ private Q_SLOTS:
         QVERIFY(m_ctrl->items()[0].cachedDirectUrl.isEmpty());
     }
 
+    void cachedDirectUrlIgnoredWhenRealDebridDisabled()
+    {
+        m_ctrl->enqueue(makeStream(QStringLiteral("A"),
+                            QStringLiteral("https://rd.example/A")),
+            makeMovieCtx(QStringLiteral("ttA"),
+                QStringLiteral("A")));
+        QVERIFY(!m_ctrl->items()[0].cachedDirectUrl.isEmpty());
+
+        m_rdToken.clear();
+        FakeTorrentioClient::ScriptedCall sc;
+        sc.suspend = true;
+        sc.streams.append(makeStream(QStringLiteral("A"), QString {}));
+        m_torrentio->scriptedCalls.append(sc);
+
+        m_ctrl->playAt(0);
+        drainEvents(4);
+
+        QCOMPARE(m_torrentio->callCount, 1);
+        QCOMPARE(m_actions->calls.size(), 1);
+        QVERIFY(m_actions->calls[0].stream.directUrl.isEmpty());
+        QCOMPARE(m_actions->calls[0].stream.infoHash,
+            QStringLiteral("hash-A"));
+        QVERIFY(m_ctrl->items()[0].cachedDirectUrl.isEmpty());
+    }
+
     // -----------------------------------------------------------
     //  removeAt
     // -----------------------------------------------------------

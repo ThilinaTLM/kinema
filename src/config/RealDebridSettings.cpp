@@ -9,7 +9,8 @@ namespace kinema::config {
 
 namespace {
 constexpr auto kGroup = "RealDebrid";
-constexpr auto kKey = "configured";
+constexpr auto kKeyConfigured = "configured";
+constexpr auto kKeyEnabled = "enabled";
 } // namespace
 
 RealDebridSettings::RealDebridSettings(KSharedConfigPtr config, QObject* parent)
@@ -20,7 +21,7 @@ RealDebridSettings::RealDebridSettings(KSharedConfigPtr config, QObject* parent)
 
 bool RealDebridSettings::configured() const
 {
-    return detail::read(m_config, kGroup, kKey, false);
+    return detail::read(m_config, kGroup, kKeyConfigured, false);
 }
 
 void RealDebridSettings::setConfigured(bool on)
@@ -28,8 +29,22 @@ void RealDebridSettings::setConfigured(bool on)
     if (configured() == on) {
         return;
     }
-    detail::write(m_config, kGroup, kKey, on);
+    detail::write(m_config, kGroup, kKeyConfigured, on);
     Q_EMIT configuredChanged(on);
+}
+
+bool RealDebridSettings::enabled() const
+{
+    return detail::read(m_config, kGroup, kKeyEnabled, true);
+}
+
+void RealDebridSettings::setEnabled(bool on)
+{
+    if (enabled() == on) {
+        return;
+    }
+    detail::write(m_config, kGroup, kKeyEnabled, on);
+    Q_EMIT enabledChanged(on);
 }
 
 } // namespace kinema::config

@@ -17,6 +17,7 @@ namespace kinema::config {
  * KConfig group: [RealDebrid]
  * Keys:
  *   configured   bool
+ *   enabled      bool
  */
 class RealDebridSettings : public QObject
 {
@@ -28,8 +29,12 @@ public:
     bool configured() const;
     void setConfigured(bool);
 
+    bool enabled() const;
+    void setEnabled(bool);
+
 Q_SIGNALS:
     void configuredChanged(bool);
+    void enabledChanged(bool);
 
 private:
     KSharedConfigPtr m_config;

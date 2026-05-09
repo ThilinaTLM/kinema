@@ -3,6 +3,7 @@
 
 #include "config/AppSettings.h"
 #include "config/TorrentioSettings.h"
+#include "controllers/TokenController.h"
 #include "core/HttpError.h"
 #include "services/StreamActions.h"
 #include "TestDoubles.h"
@@ -23,10 +24,12 @@ using kinema::api::MetaDetail;
 using kinema::api::MetaSummary;
 using kinema::api::Stream;
 using kinema::config::AppSettings;
+using kinema::controllers::TokenController;
 using kinema::core::HttpError;
 using kinema::services::StreamActions;
 using kinema::tests::FakeCinemetaClient;
 using kinema::tests::FakeTmdbClient;
+using kinema::tests::FakeTokenStore;
 using kinema::tests::FakeTorrentioClient;
 using kinema::tests::drainEvents;
 using kinema::ui::qml::MovieDetailViewModel;
@@ -99,6 +102,25 @@ struct Fixture {
               /*tokens=*/nullptr, settings, rdToken, nullptr)
     {
     }
+};
+
+class StubTokenController : public TokenController
+{
+public:
+    explicit StubTokenController(kinema::config::RealDebridSettings& rdSettings,
+        QObject* parent = nullptr)
+        : TokenController(&m_tokens, /*tmdb=*/nullptr,
+              rdSettings, parent, QStringLiteral(""))
+    {
+    }
+
+    void publishRealDebridToken(const QString& token)
+    {
+        Q_EMIT realDebridTokenChanged(token);
+    }
+
+private:
+    FakeTokenStore m_tokens;
 };
 
 } // namespace
@@ -246,6 +268,51 @@ private Q_SLOTS:
         f.vm.retry();
         drainEvents();
         QCOMPARE(f.cinemeta.metaCalls, 2);
+    }
+
+    void testRealDebridTokenChangeRefetchesStreams()
+    {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        auto config = KSharedConfig::openConfig(
+            tmp.filePath(QStringLiteral("kinemarc")),
+            KConfig::SimpleConfig);
+        AppSettings settings(config);
+        FakeCinemetaClient cinemeta;
+        FakeTorrentioClient torrentio;
+        FakeTmdbClient tmdb;
+        StreamActions actions { nullptr, nullptr };
+        StubTokenController tokens(settings.realDebrid());
+        QString rdToken = QStringLiteral("rd-token");
+        MovieDetailViewModel vm(&cinemeta, &torrentio, &tmdb,
+            &actions, &tokens, settings, rdToken, nullptr);
+
+        cinemeta.metaScripts = {
+            { makeDetail(QStringLiteral("tt1"),
+                QStringLiteral("Movie")) }
+        };
+        torrentio.scriptedCalls = {
+            { { makeStream(QStringLiteral("Cached"),
+                  QStringLiteral("1080p"), 5, 1,
+                  QStringLiteral("p"), true) } },
+            { { makeStream(QStringLiteral("MagnetOnly"),
+                  QStringLiteral("1080p"), 5, 1) } }
+        };
+
+        vm.load(QStringLiteral("tt1"));
+        drainEvents();
+        QCOMPARE(torrentio.callCount, 1);
+        QVERIFY(!vm.streams()->at(0)->directUrl.isEmpty());
+
+        rdToken.clear();
+        tokens.publishRealDebridToken(QString {});
+        drainEvents(4);
+
+        QCOMPARE(torrentio.callCount, 2);
+        QCOMPARE(vm.streams()->rowCount(), 1);
+        QCOMPARE(vm.streams()->at(0)->releaseName,
+            QStringLiteral("MagnetOnly"));
+        QVERIFY(vm.streams()->at(0)->directUrl.isEmpty());
     }
 
     void testSortOrdersStreams()

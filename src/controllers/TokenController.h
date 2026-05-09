@@ -33,8 +33,8 @@ namespace kinema::controllers {
  *   2. Compile-time default (from core/TmdbConfig.h).
  *   3. Empty \u2014 Discover shows a \"not configured\" state.
  *
- * RD: presence of a keyring entry + the `configured` flag in
- * RealDebridSettings.
+ * RD: effective token is exposed only when RealDebridSettings says
+ * a keyring token is configured *and* RD usage is enabled.
  */
 class TokenController : public QObject
 {
@@ -57,8 +57,9 @@ public Q_SLOTS:
     /// Kick off both keyring reads. Fire-and-forget.
     void loadAll();
 
-    /// Re-read RD from the keyring (called after Save / Remove from
-    /// the Real-Debrid settings page).
+    /// Re-resolve the effective RD token. When RD is disabled this
+    /// publishes an empty token without touching the keyring; when
+    /// enabled it re-reads the saved token.
     void refreshRealDebrid();
 
     /// Re-resolve the TMDB token chain (user keyring \u2192 compile-time

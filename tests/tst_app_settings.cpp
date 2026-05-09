@@ -48,6 +48,7 @@ private Q_SLOTS:
         QCOMPARE(s.appearance().showMenuBar(), false);
         QVERIFY(s.appearance().playerWindowGeometry().isEmpty());
         QCOMPARE(s.realDebrid().configured(), false);
+        QCOMPARE(s.realDebrid().enabled(), true);
         QVERIFY(s.filter().excludedResolutions().isEmpty());
         QVERIFY(s.filter().excludedCategories().isEmpty());
         QVERIFY(s.filter().keywordBlocklist().isEmpty());
@@ -219,6 +220,18 @@ private Q_SLOTS:
         // Idempotent set — no extra emission.
         s.realDebrid().setConfigured(true);
         QCOMPARE(spy.count(), 1);
+    }
+
+    void testRealDebridEnabledSignal()
+    {
+        config::AppSettings s(m_config);
+        QSignalSpy spy(&s.realDebrid(),
+            &config::RealDebridSettings::enabledChanged);
+        s.realDebrid().setEnabled(false);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.takeFirst().at(0).toBool(), false);
+        s.realDebrid().setEnabled(false);
+        QCOMPARE(spy.count(), 0);
     }
 
     void testKeywordBlocklistChangedSignal()

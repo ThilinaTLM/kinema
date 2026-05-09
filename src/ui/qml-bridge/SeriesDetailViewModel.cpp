@@ -113,6 +113,11 @@ SeriesDetailViewModel::SeriesDetailViewModel(
             &controllers::TokenController::realDebridTokenChanged,
             this, [this](const QString&) {
                 Q_EMIT realDebridConfiguredChanged();
+                if (m_selectedEpisodeRow >= 0 && !m_imdbId.isEmpty()) {
+                    auto t = loadEpisodeStreamsTask(m_selectedEpisode);
+                    Q_UNUSED(t);
+                    return;
+                }
                 rebuildVisibleStreams();
             });
     }

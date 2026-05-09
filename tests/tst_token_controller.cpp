@@ -71,7 +71,7 @@ private Q_SLOTS:
         QCOMPARE(controller.tmdbToken(), QStringLiteral("tmdb-user"));
     }
 
-    void testLoadAllReadsRealDebridWhenConfigured()
+    void testLoadAllReadsRealDebridWhenConfiguredAndEnabled()
     {
         Fixture f;
         f.settings.realDebrid().setConfigured(true);
@@ -91,6 +91,25 @@ private Q_SLOTS:
         QVERIFY(f.tokens.readKeys.contains(
             QString::fromLatin1(TokenStore::kTmdbKey)));
         QCOMPARE(controller.realDebridToken(), QStringLiteral("rd-token"));
+    }
+
+    void testLoadAllSkipsRealDebridReadWhenDisabled()
+    {
+        Fixture f;
+        f.settings.realDebrid().setConfigured(true);
+        f.settings.realDebrid().setEnabled(false);
+        f.tokens.values.insert(QString::fromLatin1(TokenStore::kRealDebridKey),
+            QStringLiteral("rd-token"));
+
+        TokenController controller(
+            &f.tokens, &f.tmdb, f.settings.realDebrid(), nullptr,
+            QStringLiteral("compiled-default"));
+        controller.loadAll();
+        drainEvents();
+
+        QVERIFY(!f.tokens.readKeys.contains(
+            QString::fromLatin1(TokenStore::kRealDebridKey)));
+        QVERIFY(controller.realDebridToken().isEmpty());
     }
 
     void testTmdbTokenPrecedenceAndClientState()
@@ -157,6 +176,32 @@ private Q_SLOTS:
         drainEvents();
         QCOMPARE(tmdbSpy.count(), 2);
         QCOMPARE(rdSpy.count(), 1);
+    }
+
+    void testDisableClearsEffectiveRealDebridToken()
+    {
+        Fixture f;
+        f.settings.realDebrid().setConfigured(true);
+        f.tokens.values.insert(QString::fromLatin1(TokenStore::kRealDebridKey),
+            QStringLiteral("rd-a"));
+
+        TokenController controller(
+            &f.tokens, &f.tmdb, f.settings.realDebrid(), nullptr,
+            QStringLiteral("compiled-default"));
+        QSignalSpy rdSpy(&controller, &TokenController::realDebridTokenChanged);
+
+        controller.loadAll();
+        drainEvents();
+        QCOMPARE(controller.realDebridToken(), QStringLiteral("rd-a"));
+        QCOMPARE(rdSpy.count(), 1);
+
+        f.settings.realDebrid().setEnabled(false);
+        controller.refreshRealDebrid();
+        drainEvents();
+
+        QCOMPARE(controller.realDebridToken(), QString {});
+        QCOMPARE(rdSpy.count(), 2);
+        QCOMPARE(rdSpy.last().at(0).toString(), QString {});
     }
 
     void testReadFailureLeavesSafeState()

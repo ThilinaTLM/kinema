@@ -299,10 +299,13 @@ Q_SIGNALS:
 
 private:
     QCoro::Task<void> loadMetaAndStreams(QString imdbId);
+    QCoro::Task<void> loadStreamsTask(QString imdbId,
+        std::optional<QDate> released, quint64 expectedEpoch);
     QCoro::Task<void> resolveByTmdbAndLoad(int tmdbId, QString title);
     QCoro::Task<void> loadSimilarFor(QString imdbId,
         api::MediaKind kind);
 
+    void refreshStreamsForCurrentTitle();
     void resetMeta();
     void applyMeta(const api::MetaDetail& detail);
     void refreshLibraryState();

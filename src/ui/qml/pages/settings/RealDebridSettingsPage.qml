@@ -17,6 +17,16 @@ FormCard.FormCardPage {
         title: i18nc("@title:group real-debrid token settings", "API token")
     }
     FormCard.FormCard {
+        FormCard.FormSwitchDelegate {
+            text: i18nc("@option:check real-debrid settings",
+                "Use Real-Debrid for stream resolution")
+            description: i18nc("@info rd settings toggle",
+                "Turning this off keeps your token in the system keyring, "
+                + "but Kinema stops requesting Real-Debrid direct URLs so "
+                + "you can test built-in torrent streaming.")
+            checked: vm.enabled
+            onToggled: vm.enabled = checked
+        }
         FormCard.FormTextDelegate {
             text: i18nc("@info rd settings intro",
                 "Real-Debrid API token")

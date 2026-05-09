@@ -44,9 +44,7 @@ TokenController::TokenController(
 
 void TokenController::loadAll()
 {
-    if (m_rdSettings.configured()) {
-        [[maybe_unused]] auto rd = loadRdTask();
-    }
+    [[maybe_unused]] auto rd = loadRdTask();
     [[maybe_unused]] auto tmdb = loadTmdbTask();
     [[maybe_unused]] auto os = loadOpenSubtitlesTask();
 }
@@ -68,8 +66,11 @@ void TokenController::refreshOpenSubtitlesCredentials()
 
 QCoro::Task<void> TokenController::loadRdTask()
 {
-    auto next = co_await safeRead(*m_tokens,
-        core::TokenStore::kRealDebridKey, "RD token");
+    QString next;
+    if (m_rdSettings.configured() && m_rdSettings.enabled()) {
+        next = co_await safeRead(*m_tokens,
+            core::TokenStore::kRealDebridKey, "RD token");
+    }
     if (next != m_rdToken) {
         m_rdToken = std::move(next);
         Q_EMIT realDebridTokenChanged(m_rdToken);

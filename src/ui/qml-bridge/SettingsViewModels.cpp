@@ -361,6 +361,11 @@ bool RealDebridSettingsViewModel::tokenSaved() const
     return m_rdSettings.configured();
 }
 
+bool RealDebridSettingsViewModel::enabled() const
+{
+    return m_rdSettings.enabled();
+}
+
 void RealDebridSettingsViewModel::setToken(const QString& token)
 {
     if (m_token == token) {
@@ -368,6 +373,16 @@ void RealDebridSettingsViewModel::setToken(const QString& token)
     }
     m_token = token;
     Q_EMIT tokenInputChanged();
+}
+
+void RealDebridSettingsViewModel::setEnabled(bool on)
+{
+    if (m_rdSettings.enabled() == on) {
+        return;
+    }
+    m_rdSettings.setEnabled(on);
+    Q_EMIT enabledChanged();
+    Q_EMIT usageChanged();
 }
 
 void RealDebridSettingsViewModel::load()
@@ -1212,6 +1227,8 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
         &SettingsRootViewModel::tmdbTokenChanged);
     connect(m_rd, &RealDebridSettingsViewModel::tokenChanged, this,
         &SettingsRootViewModel::realDebridTokenChanged);
+    connect(m_rd, &RealDebridSettingsViewModel::usageChanged, this,
+        &SettingsRootViewModel::realDebridUsageChanged);
     connect(m_subs,
         &SubtitlesSettingsViewModel::credentialsChanged, this,
         &SettingsRootViewModel::subtitleCredentialsChanged);

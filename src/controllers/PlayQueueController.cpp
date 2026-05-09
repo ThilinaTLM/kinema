@@ -496,11 +496,14 @@ QCoro::Task<void> PlayQueueController::startActiveItem()
     m_items[m_activeIndex].status = api::QueueItem::Status::Active;
     Q_EMIT itemChanged(m_activeIndex);
 
-    QUrl url = item.cachedDirectUrl;
+    QUrl url = m_rdToken.isEmpty() ? QUrl {} : item.cachedDirectUrl;
     if (!url.isEmpty()) {
         // Consume the cached URL so a later pass re-resolves cleanly.
         m_items[m_activeIndex].cachedDirectUrl.clear();
     } else {
+        if (m_rdToken.isEmpty() && !m_items[m_activeIndex].cachedDirectUrl.isEmpty()) {
+            m_items[m_activeIndex].cachedDirectUrl.clear();
+        }
         // Re-resolve via Torrentio + match-by-infoHash, mirroring the
         // pattern HistoryController::resumeFromHistory uses.
         auto opts = m_settings.torrentioOptions();

@@ -97,9 +97,7 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
             &controllers::TokenController::realDebridTokenChanged,
             this, [this](const QString&) {
                 Q_EMIT realDebridConfiguredChanged();
-                // The cached-only filter is meaningless without RD,
-                // so re-render so it goes back to "everything".
-                rebuildVisibleStreams();
+                refreshStreamsForCurrentTitle();
             });
     }
 }
@@ -390,14 +388,19 @@ QCoro::Task<void> MovieDetailViewModel::loadMetaAndStreams(QString imdbId)
     auto similarTask = loadSimilarFor(imdbId, api::MediaKind::Movie);
     Q_UNUSED(similarTask);
 
+    co_await loadStreamsTask(imdbId, detail.summary.released, myEpoch);
+}
+
+QCoro::Task<void> MovieDetailViewModel::loadStreamsTask(
+    QString imdbId, std::optional<QDate> released, quint64 expectedEpoch)
+{
     // Releases more than a day out produce no useful Torrentio result;
     // surface the release date and stop. Titles within the lookahead
     // window (today / tomorrow) still attempt a fetch — torrents often
     // seed a day early. The header `isUpcoming` badge stays bound to
     // the strict `isFutureRelease` semantics.
-    if (detail.summary.released
-        && core::isReleaseTooEarlyForStreams(detail.summary.released)) {
-        m_streams->setUnreleased(*detail.summary.released);
+    if (released && core::isReleaseTooEarlyForStreams(*released)) {
+        m_streams->setUnreleased(*released);
         co_return;
     }
 
@@ -406,19 +409,35 @@ QCoro::Task<void> MovieDetailViewModel::loadMetaAndStreams(QString imdbId)
         opts.realDebridToken = m_rdToken;
         auto streams = co_await m_torrentio->streams(
             api::MediaKind::Movie, imdbId, opts);
-        if (myEpoch != m_epoch) {
+        if (expectedEpoch != m_epoch) {
             co_return;
         }
         m_rawStreams = std::move(streams);
         Q_EMIT rawStreamsCountChanged();
         rebuildVisibleStreams();
     } catch (const std::exception& e) {
-        if (myEpoch != m_epoch) {
+        if (expectedEpoch != m_epoch) {
             co_return;
         }
         m_streams->setError(
             core::describeError(e, "movie detail/streams"));
     }
+}
+
+void MovieDetailViewModel::refreshStreamsForCurrentTitle()
+{
+    if (m_metaState != MetaState::Ready || m_imdbId.isEmpty()) {
+        rebuildVisibleStreams();
+        return;
+    }
+
+    const auto myEpoch = ++m_epoch;
+    m_streams->setLoading();
+    m_rawStreams.clear();
+    Q_EMIT rawStreamsCountChanged();
+    auto t = loadStreamsTask(m_imdbId, m_currentMeta.summary.released,
+        myEpoch);
+    Q_UNUSED(t);
 }
 
 QCoro::Task<void> MovieDetailViewModel::resolveByTmdbAndLoad(

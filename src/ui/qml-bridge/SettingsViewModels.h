@@ -142,6 +142,7 @@ class RealDebridSettingsViewModel : public QObject
     Q_OBJECT
     Q_PROPERTY(QString token READ token WRITE setToken NOTIFY tokenInputChanged)
     Q_PROPERTY(bool tokenSaved READ tokenSaved NOTIFY tokenSavedChanged)
+    Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
     Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
@@ -154,11 +155,13 @@ public:
 
     QString token() const { return m_token; }
     bool tokenSaved() const;
+    bool enabled() const;
     QString statusMessage() const { return m_statusMessage; }
     int statusKind() const { return m_statusKind; }
     bool busy() const { return m_busy; }
 
     void setToken(const QString& token);
+    void setEnabled(bool on);
 
 public Q_SLOTS:
     void load();
@@ -169,9 +172,11 @@ public Q_SLOTS:
 Q_SIGNALS:
     void tokenInputChanged();
     void tokenSavedChanged();
+    void enabledChanged();
     void statusChanged();
     void busyChanged();
     void tokenChanged(const QString& token);
+    void usageChanged();
 
 private:
     void setStatus(const QString& message, int kind);
@@ -475,6 +480,8 @@ Q_SIGNALS:
     void tmdbTokenChanged(const QString& token);
     /// Forwarded from `RealDebridSettingsViewModel::tokenChanged`.
     void realDebridTokenChanged(const QString& token);
+    /// Forwarded from `RealDebridSettingsViewModel::usageChanged`.
+    void realDebridUsageChanged();
     /// Forwarded from `SubtitlesSettingsViewModel::credentialsChanged`.
     void subtitleCredentialsChanged();
 

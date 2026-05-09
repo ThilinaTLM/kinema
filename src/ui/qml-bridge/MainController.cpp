@@ -587,6 +587,10 @@ void MainController::buildCoreServices()
         m_tokenCtrl,
         [this](const QString&) { m_tokenCtrl->refreshRealDebrid(); });
     connect(m_settingsVm,
+        &SettingsRootViewModel::realDebridUsageChanged,
+        m_tokenCtrl,
+        [this] { m_tokenCtrl->refreshRealDebrid(); });
+    connect(m_settingsVm,
         &SettingsRootViewModel::subtitleCredentialsChanged,
         m_tokenCtrl, [this] {
             m_tokenCtrl->refreshOpenSubtitlesCredentials();
