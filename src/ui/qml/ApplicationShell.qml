@@ -292,18 +292,13 @@ Kirigami.ApplicationWindow {
     Component.onCompleted: root.setTopLevelPage(discoverComp, {})
 
     function createPage(component, properties) {
-        // Kirigami.PageRow accepts Component objects, but on the current
-        // Qt/Kirigami stack it creates them with a non-visual helper
-        // parent first, which produces noisy "not placed in scene"
-        // warnings. Create with a temporary visual parent so the page is
-        // in-scene at birth, then detach before handing it to PageRow so it
-        // can own insertion without thinking the page is already present.
-        const page = component.createObject(root.contentItem,
-            properties || {});
-        if (page) {
-            page.parent = null;
-        }
-        return page;
+        // Instantiate pages unattached and hand the finished item to
+        // PageRow. The previous create-then-detach flow fixed PageRow's
+        // helper-parent warnings, but it also left Kirigami/FormCard
+        // internals briefly observing a null parent during startup,
+        // producing noisy `ScrollablePage.flickable` /
+        // `FormDelegateBackground.visibleChildren` errors.
+        return component.createObject(null, properties || {});
     }
 
     function setTopLevelPage(component, properties) {

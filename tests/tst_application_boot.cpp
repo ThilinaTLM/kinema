@@ -35,6 +35,8 @@ bool isTargetWarning(const QString& message)
         || message.contains(QStringLiteral(
             "Cannot read property 'flickable' of null"))
         || message.contains(QStringLiteral(
+            "Cannot read property 'visibleChildren' of null"))
+        || message.contains(QStringLiteral(
             "items in the process of being created at engine destruction"));
 }
 
