@@ -253,6 +253,14 @@ Kirigami.ApplicationWindow {
                     "dev.tlmtech.kinema.app", "SubtitlesSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
+                moduleId: "torrentstreaming"
+                text: i18nc("@title:tab settings page", "Torrent streaming")
+                icon.source: AppIcons.url("download")
+                icon.color: AppIcons.foreground
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "TorrentStreamingSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
                 moduleId: "appearance"
                 text: i18nc("@title:tab settings page", "Appearance")
                 icon.source: AppIcons.url("palette")

@@ -651,10 +651,10 @@ void MovieDetailViewModel::playNow(int row)
     if (!s) {
         return;
     }
-    if (s->directUrl.isEmpty()) {
+    if (s->directUrl.isEmpty() && s->infoHash.isEmpty()) {
         Q_EMIT statusMessage(
             i18nc("@info:status",
-                "Direct playback needs a Real-Debrid cached stream."),
+                "This stream has no playable URL or magnet."),
             4000);
         return;
     }
@@ -667,7 +667,7 @@ void MovieDetailViewModel::playNow(int row)
 void MovieDetailViewModel::playNext(int row)
 {
     const auto* s = m_streams->at(row);
-    if (!s || s->directUrl.isEmpty() || !m_queue) {
+    if (!s || (s->directUrl.isEmpty() && s->infoHash.isEmpty()) || !m_queue) {
         return;
     }
     m_queue->playNext(*s, currentContext());
@@ -676,7 +676,7 @@ void MovieDetailViewModel::playNext(int row)
 void MovieDetailViewModel::enqueue(int row)
 {
     const auto* s = m_streams->at(row);
-    if (!s || s->directUrl.isEmpty() || !m_queue) {
+    if (!s || (s->directUrl.isEmpty() && s->infoHash.isEmpty()) || !m_queue) {
         return;
     }
     m_queue->enqueue(*s, currentContext());

@@ -86,7 +86,7 @@ struct Fixture {
     FakeCinemetaClient cinemeta;
     FakeTorrentioClient torrentio;
     FakeTmdbClient tmdb;
-    StreamActions actions { nullptr };
+    StreamActions actions { nullptr, nullptr };
     QString rdToken;
     MovieDetailViewModel vm;
 
@@ -318,7 +318,7 @@ private Q_SLOTS:
         QCOMPARE(spy.count(), 1);
     }
 
-    void testPlayWithoutDirectUrlEmitsStatus()
+    void testPlayWithoutDirectUrlUsesMagnetFallback()
     {
         Fixture f;
         f.cinemeta.metaScripts = {
@@ -337,7 +337,7 @@ private Q_SLOTS:
         QSignalSpy spy(&f.vm,
             &MovieDetailViewModel::statusMessage);
         f.vm.playNow(0);
-        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.count(), 0);
     }
 
     void testActivateSimilarRoutesByKind()

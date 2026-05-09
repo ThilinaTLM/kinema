@@ -91,7 +91,7 @@ struct Fixture {
     FakeCinemetaClient cinemeta;
     FakeTorrentioClient torrentio;
     FakeTmdbClient tmdb;
-    StreamActions actions { nullptr };
+    StreamActions actions { nullptr, nullptr };
     QString rdToken;
     SeriesDetailViewModel vm;
 
@@ -119,7 +119,7 @@ struct WatchedFixture {
     FakeCinemetaClient cinemeta;
     FakeTorrentioClient torrentio;
     FakeTmdbClient tmdb;
-    StreamActions actions { nullptr };
+    StreamActions actions { nullptr, nullptr };
     QString rdToken;
     SeriesDetailViewModel vm;
 

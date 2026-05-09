@@ -58,10 +58,8 @@ QQC2.ItemDelegate {
     Keys.onEnterPressed: card._activatePrimary()
 
     function _activatePrimary() {
-        if (card.hasDirectUrl) {
+        if (card.hasDirectUrl || card.hasMagnet) {
             card.vm.playNow(card.row);
-        } else if (card.hasMagnet) {
-            card.vm.openMagnet(card.row);
         }
     }
 
@@ -251,7 +249,7 @@ QQC2.ItemDelegate {
                     ? i18nc("@action:button primary stream action",
                         "Play now")
                     : i18nc("@action:button primary stream action",
-                        "Open magnet")
+                        "Stream")
                 display: QQC2.AbstractButton.TextBesideIcon
                 highlighted: card.hasDirectUrl
                 onClicked: card._activatePrimary()

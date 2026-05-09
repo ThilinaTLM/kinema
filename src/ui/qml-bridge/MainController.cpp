@@ -29,8 +29,10 @@
 #include "core/PlayQueueStore.h"
 #include "core/SubtitleCacheStore.h"
 #include "core/TokenStore.h"
+#include "core/TorrentCache.h"
 #include "kinema_debug.h"
 #include "services/StreamActions.h"
+#include "torrent/TorrentStreamingService.h"
 #include "ui/ImageLoader.h"
 #include "ui/qml-bridge/BrowseViewModel.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
@@ -164,6 +166,9 @@ bool MainController::handleWindowCloseRequested()
 void MainController::requestQuit()
 {
     m_reallyQuit = true;
+    if (m_torrentStreaming) {
+        m_torrentStreaming->stopAll();
+    }
 #ifdef KINEMA_HAVE_LIBMPV
     // Take the player down explicitly so its closeEvent persists
     // geometry / volume and stops playback before exit.
@@ -283,7 +288,12 @@ void MainController::buildCoreServices()
     m_torrentio = new api::TorrentioClient(m_http.get(), this);
     m_tmdb = new api::TmdbClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
-    m_streamActions = new services::StreamActions(m_player.get(), this);
+    m_torrentCache = std::make_unique<core::TorrentCache>(
+        m_settings.torrentStreaming(), this);
+    m_torrentStreaming = new torrent::TorrentStreamingService(
+        *m_torrentCache, m_settings.torrentStreaming(), this);
+    m_streamActions = new services::StreamActions(
+        m_player.get(), m_torrentStreaming, this);
 
     // History DB. Open is best-effort: a broken DB means history
     // is disabled for this session, not that the app refuses to
@@ -643,6 +653,8 @@ void MainController::wireStatusForwarding()
         });
     connect(m_streamActions, &services::StreamActions::statusMessage,
         this, &MainController::passiveMessage);
+    connect(m_torrentStreaming, &torrent::TorrentStreamingService::statusMessage,
+        this, &MainController::passiveMessage);
     connect(m_subtitleCtrl,
         &controllers::SubtitleController::statusMessage, this,
         &MainController::passiveMessage);
@@ -666,9 +678,21 @@ void MainController::wireStatusForwarding()
             m_playQueueCtrl,
             &controllers::PlayQueueController::onPlayerEndOfFile);
         connect(m_playbackCtrl,
+            &controllers::PlaybackController::endOfFile,
+            this,
+            [this](const QString&) {
+                if (m_torrentStreaming && m_playbackCtrl) {
+                    m_torrentStreaming->stopForContext(
+                        m_playbackCtrl->currentContext());
+                }
+            });
+        connect(m_playbackCtrl,
             &controllers::PlaybackController::userClosedWindow,
             m_playQueueCtrl,
-            [this](const api::PlaybackContext&) {
+            [this](const api::PlaybackContext& ctx) {
+                if (m_torrentStreaming) {
+                    m_torrentStreaming->stopForContext(ctx);
+                }
                 m_playQueueCtrl->onPlayerUserClosed();
             });
     }
@@ -997,6 +1021,7 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(FiltersSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(PlayerSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(SubtitlesSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(TorrentStreamingSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(AppearanceSettingsViewModel);
 
 #undef KINEMA_REGISTER_QML_TYPE

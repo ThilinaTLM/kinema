@@ -17,6 +17,7 @@ set(kinema_core_SRCS
     config/SearchSettings.cpp
     config/SubtitleSettings.cpp
     config/TorrentioSettings.cpp
+    config/TorrentStreamingSettings.cpp
 
     core/CachePaths.cpp
     core/Database.cpp
@@ -43,8 +44,14 @@ set(kinema_core_SRCS
     core/StreamTokens.cpp
     core/SubtitleCacheStore.cpp
     core/TokenStore.cpp
+    core/TorrentCache.cpp
     core/TorrentioConfig.cpp
     core/UrlRedactor.cpp
+
+    torrent/LocalStreamServer.cpp
+    torrent/MediaFileSelector.cpp
+    torrent/PiecePlanner.cpp
+    torrent/TorrentStreamingService.cpp
 
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp
@@ -170,6 +177,8 @@ target_link_libraries(kinema_core
         QCoro6::Core
         QCoro6::Network
         Qt6Keychain::Qt6Keychain
+        Boost::headers
+        PkgConfig::LIBTORRENT
 )
 
 # ---- App-side QML module (always built) ----------------------------------
@@ -257,6 +266,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/settings/RealDebridSettingsPage.qml
         ui/qml/pages/settings/SubtitlesSettingsPage.qml
         ui/qml/pages/settings/TmdbSettingsPage.qml
+        ui/qml/pages/settings/TorrentStreamingSettingsPage.qml
     RESOURCES
         ui/qml/icons/lucide/arrow-down.svg
         ui/qml/icons/lucide/arrow-up-down.svg
@@ -415,14 +425,12 @@ set_target_properties(kinema PROPERTIES
 
 target_link_libraries(kinema PRIVATE kinema_core kinema_qml_app)
 
-# kinema_core is a STATIC library; the linker discards the QML
-# module's registration object (`QQmlModuleRegistration`) by default
-# because no symbol references it. `qt_import_qml_plugins` emits the
-# right link directives to force-link every QML module the static
-# library carries — both the always-built `dev.tlmtech.kinema.app`
-# shell module and (when libmpv is enabled) the player chrome.
-# Without it the engine reports `<C++ type> is not a type` for
-# everything declared with `QML_ELEMENT`.
-qt_import_qml_plugins(kinema)
+# kinema_core / kinema_qml_app are static libraries, so their QML
+# module registration objects would normally be dead-stripped. The
+# executable keeps them alive explicitly via the generated
+# `qml_register_types_dev_tlmtech_kinema_app()` and
+# `qml_register_types_dev_tlmtech_kinema_player()` calls in main.cpp,
+# which avoids `qt_import_qml_plugins()` and its noisy import scan over
+# shared system QML modules.
 
 install(TARGETS kinema ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})

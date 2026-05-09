@@ -81,10 +81,13 @@ find_package(Qt6Keychain REQUIRED)
 # manages the offscreen FBO + worker thread. Rolling our own mpv
 # integration is rejected; see plans/qml-player-chrome-migration.md.
 # ---------------------------------------------------------------------------
-find_package(PkgConfig)
-if(PkgConfig_FOUND)
-    pkg_check_modules(MPV IMPORTED_TARGET mpv>=0.36)
+find_package(PkgConfig REQUIRED)
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
 endif()
+find_package(Boost CONFIG REQUIRED COMPONENTS headers)
+pkg_check_modules(LIBTORRENT REQUIRED IMPORTED_TARGET libtorrent-rasterbar)
+pkg_check_modules(MPV IMPORTED_TARGET mpv>=0.36)
 find_package(MpvQt QUIET)
 set(_kinema_have_mpvqt ${MpvQt_FOUND})
 if(MPV_FOUND AND _kinema_have_mpvqt)
@@ -112,6 +115,8 @@ if(KINEMA_ENABLE_MPV_EMBED AND NOT _kinema_have_mpvqt)
 endif()
 add_feature_info("Embedded mpv player" KINEMA_ENABLE_MPV_EMBED
     "in-app playback using libmpv via QtQuick + mpvqt")
+add_feature_info("Built-in torrent streaming" TRUE
+    "magnet playback using libtorrent-rasterbar and a localhost range server")
 
 qcoro_enable_coroutines()
 

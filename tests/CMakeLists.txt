@@ -28,6 +28,16 @@ ecm_add_test(tst_torrentio_config.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_media_file_selector.cpp
+    TEST_NAME tst_media_file_selector
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_piece_planner.cpp
+    TEST_NAME tst_piece_planner
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_cinemeta_parse.cpp
     TEST_NAME tst_cinemeta_parse
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -272,7 +282,6 @@ ecm_add_test(tst_application_boot.cpp
     TEST_NAME tst_application_boot
     LINK_LIBRARIES kinema_core kinema_qml_app Qt6::Test
 )
-qt_import_qml_plugins(tst_application_boot)
 
 ecm_add_test(tst_kinema_image_provider.cpp
     TEST_NAME tst_kinema_image_provider
@@ -314,7 +323,8 @@ if(KINEMA_ENABLE_MPV_EMBED)
     )
 endif()
 
-foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_cinemeta_parse
+foreach(t tst_magnet tst_url_redactor tst_torrentio_config
+         tst_media_file_selector tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
          tst_stream_tokens

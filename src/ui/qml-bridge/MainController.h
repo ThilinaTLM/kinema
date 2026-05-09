@@ -35,7 +35,12 @@ class PlayerLauncher;
 class PlayQueueStore;
 class SubtitleCacheStore;
 class TokenStore;
+class TorrentCache;
 class WatchedStore;
+}
+
+namespace kinema::torrent {
+class TorrentStreamingService;
 }
 
 namespace kinema::controllers {
@@ -273,6 +278,7 @@ private:
     std::unique_ptr<core::WatchedStore> m_watched;
     std::unique_ptr<core::PlayQueueStore> m_playQueueStore;
     std::unique_ptr<core::SubtitleCacheStore> m_subtitleCache;
+    std::unique_ptr<core::TorrentCache> m_torrentCache;
 
     // QObject-parented to this controller.
     api::CinemetaClient* m_cinemeta {};
@@ -283,6 +289,7 @@ private:
 
     AppIconResolver* m_appIconResolver {};
     services::StreamActions* m_streamActions {};
+    torrent::TorrentStreamingService* m_torrentStreaming {};
     controllers::TokenController* m_tokenCtrl {};
     controllers::HistoryController* m_historyCtrl {};
     controllers::LibraryController* m_libraryCtrl {};

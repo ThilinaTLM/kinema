@@ -23,6 +23,7 @@
 
 #include <optional>
 #include <stdexcept>
+#include <utility>
 
 namespace kinema::tests {
 
@@ -149,6 +150,16 @@ public:
         QList<api::Stream> streams;
         std::optional<core::HttpError> error;
         bool suspend = false;
+
+        ScriptedCall() = default;
+        ScriptedCall(QList<api::Stream> streams,
+            std::optional<core::HttpError> error = std::nullopt,
+            bool suspend = false)
+            : streams(std::move(streams))
+            , error(std::move(error))
+            , suspend(suspend)
+        {
+        }
     };
 
     explicit FakeTorrentioClient(QObject* parent = nullptr)
@@ -192,12 +203,32 @@ public:
         api::MetaDetail detail;
         std::optional<core::HttpError> error;
         bool suspend = false;
+
+        MetaScript() = default;
+        MetaScript(api::MetaDetail detail,
+            std::optional<core::HttpError> error = std::nullopt,
+            bool suspend = false)
+            : detail(std::move(detail))
+            , error(std::move(error))
+            , suspend(suspend)
+        {
+        }
     };
 
     struct SeriesScript {
         api::SeriesDetail detail;
         std::optional<core::HttpError> error;
         bool suspend = false;
+
+        SeriesScript() = default;
+        SeriesScript(api::SeriesDetail detail,
+            std::optional<core::HttpError> error = std::nullopt,
+            bool suspend = false)
+            : detail(std::move(detail))
+            , error(std::move(error))
+            , suspend(suspend)
+        {
+        }
     };
 
     explicit FakeCinemetaClient(QObject* parent = nullptr)

@@ -292,13 +292,17 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
         co_return;
     }
 
-    // Match by infoHash. Require a playable direct URL; without one
-    // we can't hand off to the player anyway.
+    // Match by infoHash/release. Prefer Real-Debrid direct URLs when
+    // available, otherwise let StreamActions use built-in torrent
+    // streaming for magnet-only rows.
     const api::Stream* hit = nullptr;
     for (const auto& s : streams) {
-        if (entry.lastStream.matches(s) && !s.directUrl.isEmpty()) {
+        if (entry.lastStream.matches(s)
+            && (!s.directUrl.isEmpty() || !s.infoHash.isEmpty())) {
             hit = &s;
-            break;
+            if (!s.directUrl.isEmpty()) {
+                break;
+            }
         }
     }
 

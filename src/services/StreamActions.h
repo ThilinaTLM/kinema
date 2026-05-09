@@ -6,6 +6,8 @@
 #include "api/Media.h"
 #include "api/PlaybackContext.h"
 
+#include <QCoro/QCoroTask>
+
 #include <QObject>
 #include <QUrl>
 
@@ -15,6 +17,10 @@ class HistoryController;
 
 namespace kinema::core {
 class PlayerLauncher;
+}
+
+namespace kinema::torrent {
+class TorrentStreamingService;
 }
 
 namespace kinema::services {
@@ -36,6 +42,7 @@ class StreamActions : public QObject
     Q_OBJECT
 public:
     StreamActions(core::PlayerLauncher* launcher,
+        torrent::TorrentStreamingService* torrentStreaming,
         QObject* parent = nullptr);
 
     /// Wire the history controller used to seed resume-from and
@@ -67,8 +74,13 @@ private:
         const QString& failurePrefix,
         const char* failureLogTag);
 
+    QCoro::Task<void> playTorrentTask(api::Stream stream,
+        api::PlaybackContext ctx, quint64 epoch);
+
     core::PlayerLauncher* m_launcher;
+    torrent::TorrentStreamingService* m_torrentStreaming;
     controllers::HistoryController* m_history {};
+    quint64 m_playEpoch = 0;
 };
 
 } // namespace kinema::services

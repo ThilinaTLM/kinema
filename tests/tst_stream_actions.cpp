@@ -39,7 +39,7 @@ private Q_SLOTS:
             KConfig::SimpleConfig);
         m_settings = std::make_unique<kinema::config::AppSettings>(m_config);
         m_launcher = std::make_unique<PlayerLauncher>(m_settings->player());
-        m_actions = std::make_unique<StreamActions>(m_launcher.get());
+        m_actions = std::make_unique<StreamActions>(m_launcher.get(), nullptr);
     }
 
     void cleanup()
@@ -122,7 +122,7 @@ private Q_SLOTS:
         // launcher call attempted.
         QCOMPARE(spy.count(), 1);
         const auto msg = spy.first().at(0).toString();
-        QVERIFY(msg.contains(QStringLiteral("Real-Debrid")));
+        QVERIFY(msg.contains(QStringLiteral("playable URL")));
     }
 
 private:

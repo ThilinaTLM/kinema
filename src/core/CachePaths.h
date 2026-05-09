@@ -21,6 +21,11 @@ QDir root();
 /// individual file path build time (see SubtitleCacheStore).
 QDir subtitlesDir();
 
+/// `<root>/torrents`. Each torrent gets a child directory keyed by
+/// its info hash. Used by the built-in streaming engine for media
+/// payload and libtorrent resume data.
+QDir torrentsDir();
+
 /// Recursive byte size of `dir` (files only). Returns 0 when the
 /// directory does not exist.
 qint64 dirSizeBytes(const QDir& dir);

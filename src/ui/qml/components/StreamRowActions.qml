@@ -9,7 +9,8 @@ import dev.tlmtech.kinema.app
 
 // Per-row action menu installed on each `StreamCard`'s "\u22ee" button.
 // Items are enabled based on what the row carries:
-//   - Play / Copy direct URL / Open direct URL  : require directUrl
+//   - Play / Play next / Queue                  : require directUrl or infoHash
+//   - Copy direct URL / Open direct URL          : require directUrl
 //   - Copy magnet / Open magnet                  : require infoHash
 //   - Subtitles\u2026                                  : always (stub)
 //
@@ -35,21 +36,21 @@ QQC2.Menu {
         text: i18nc("@action:inmenu", "&Play now")
         icon.source: AppIcons.url("play")
         icon.color: AppIcons.controlColor(enabled, false)
-        enabled: menu.hasDirectUrl
+        enabled: menu.hasDirectUrl || menu.hasMagnet
         onTriggered: menu.vm.playNow(menu.row)
     }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Play &next")
         icon.source: AppIcons.url("skip-forward")
         icon.color: AppIcons.controlColor(enabled, false)
-        enabled: menu.hasDirectUrl
+        enabled: menu.hasDirectUrl || menu.hasMagnet
         onTriggered: menu.vm.playNext(menu.row)
     }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Add to &queue")
         icon.source: AppIcons.url("list-plus")
         icon.color: AppIcons.controlColor(enabled, false)
-        enabled: menu.hasDirectUrl
+        enabled: menu.hasDirectUrl || menu.hasMagnet
         onTriggered: menu.vm.enqueue(menu.row)
     }
     QQC2.MenuSeparator { }

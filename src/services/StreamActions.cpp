@@ -6,7 +6,9 @@
 #include "controllers/HistoryController.h"
 #include "core/Magnet.h"
 #include "core/PlayerLauncher.h"
+#include "core/HttpErrorPresenter.h"
 #include "kinema_debug.h"
+#include "torrent/TorrentStreamingService.h"
 
 #include <KIO/OpenUrlJob>
 #include <KLocalizedString>
@@ -28,9 +30,11 @@ QString clipboardCopyMessage(bool isMagnet)
 
 } // namespace
 
-StreamActions::StreamActions(core::PlayerLauncher* launcher, QObject* parent)
+StreamActions::StreamActions(core::PlayerLauncher* launcher,
+    torrent::TorrentStreamingService* torrentStreaming, QObject* parent)
     : QObject(parent)
     , m_launcher(launcher)
+    , m_torrentStreaming(torrentStreaming)
 {
 }
 
@@ -108,11 +112,10 @@ void StreamActions::openDirectUrl(const api::Stream& stream)
 void StreamActions::play(const api::Stream& stream,
     const api::PlaybackContext& ctxIn)
 {
-    if (stream.directUrl.isEmpty()) {
+    if (stream.directUrl.isEmpty() && stream.infoHash.isEmpty()) {
         Q_EMIT statusMessage(
             i18nc("@info:status",
-                "This release has no direct URL \u2014 "
-                "use Real-Debrid for one-click play."),
+                "This release has no playable URL or magnet."),
             5000);
         return;
     }
@@ -136,7 +139,41 @@ void StreamActions::play(const api::Stream& stream,
         m_history->onPlayStarting(ctx);
     }
 
-    m_launcher->play(stream.directUrl, ctx);
+    if (!stream.directUrl.isEmpty()) {
+        ++m_playEpoch;
+        m_launcher->play(stream.directUrl, ctx);
+        return;
+    }
+
+    if (!m_torrentStreaming) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "Torrent streaming is not available in this build."),
+            5000);
+        return;
+    }
+
+    const auto epoch = ++m_playEpoch;
+    auto task = playTorrentTask(stream, ctx, epoch);
+    Q_UNUSED(task);
+}
+
+QCoro::Task<void> StreamActions::playTorrentTask(api::Stream stream,
+    api::PlaybackContext ctx, quint64 epoch)
+{
+    try {
+        const QUrl url = co_await m_torrentStreaming->prepare(stream, ctx);
+        if (epoch != m_playEpoch) {
+            co_return;
+        }
+        m_launcher->play(url, ctx);
+    } catch (const std::exception& e) {
+        if (epoch != m_playEpoch) {
+            co_return;
+        }
+        Q_EMIT statusMessage(core::describeError(e, "torrent playback"),
+            6000);
+    }
 }
 
 } // namespace kinema::services

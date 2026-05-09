@@ -17,6 +17,7 @@
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
 #include "config/TorrentioSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "core/DateFormat.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
@@ -1125,6 +1126,66 @@ QCoro::Task<void> SubtitlesSettingsViewModel::removeTask()
     setBusy(false);
 }
 
+// ========================== Torrent streaming =============================
+
+TorrentStreamingSettingsViewModel::TorrentStreamingSettingsViewModel(
+    config::TorrentStreamingSettings& settings, QObject* parent)
+    : QObject(parent)
+    , m_settings(settings)
+{
+}
+
+int TorrentStreamingSettingsViewModel::cacheBudgetGb() const { return m_settings.cacheBudgetGb(); }
+int TorrentStreamingSettingsViewModel::startupBufferMiB() const { return m_settings.startupBufferMiB(); }
+int TorrentStreamingSettingsViewModel::readaheadMiB() const { return m_settings.readaheadMiB(); }
+int TorrentStreamingSettingsViewModel::tailBufferMiB() const { return m_settings.tailBufferMiB(); }
+int TorrentStreamingSettingsViewModel::maxDownloadRateKiB() const { return m_settings.maxDownloadRateKiB(); }
+int TorrentStreamingSettingsViewModel::maxUploadRateKiB() const { return m_settings.maxUploadRateKiB(); }
+int TorrentStreamingSettingsViewModel::idleStopMinutes() const { return m_settings.idleStopMinutes(); }
+
+void TorrentStreamingSettingsViewModel::setCacheBudgetGb(int v)
+{
+    if (cacheBudgetGb() == v) return;
+    m_settings.setCacheBudgetGb(v);
+    Q_EMIT cacheBudgetGbChanged();
+}
+void TorrentStreamingSettingsViewModel::setStartupBufferMiB(int v)
+{
+    if (startupBufferMiB() == v) return;
+    m_settings.setStartupBufferMiB(v);
+    Q_EMIT startupBufferMiBChanged();
+}
+void TorrentStreamingSettingsViewModel::setReadaheadMiB(int v)
+{
+    if (readaheadMiB() == v) return;
+    m_settings.setReadaheadMiB(v);
+    Q_EMIT readaheadMiBChanged();
+}
+void TorrentStreamingSettingsViewModel::setTailBufferMiB(int v)
+{
+    if (tailBufferMiB() == v) return;
+    m_settings.setTailBufferMiB(v);
+    Q_EMIT tailBufferMiBChanged();
+}
+void TorrentStreamingSettingsViewModel::setMaxDownloadRateKiB(int v)
+{
+    if (maxDownloadRateKiB() == v) return;
+    m_settings.setMaxDownloadRateKiB(v);
+    Q_EMIT maxDownloadRateKiBChanged();
+}
+void TorrentStreamingSettingsViewModel::setMaxUploadRateKiB(int v)
+{
+    if (maxUploadRateKiB() == v) return;
+    m_settings.setMaxUploadRateKiB(v);
+    Q_EMIT maxUploadRateKiBChanged();
+}
+void TorrentStreamingSettingsViewModel::setIdleStopMinutes(int v)
+{
+    if (idleStopMinutes() == v) return;
+    m_settings.setIdleStopMinutes(v);
+    Q_EMIT idleStopMinutesChanged();
+}
+
 // ============================== Appearance ================================
 
 AppearanceSettingsViewModel::AppearanceSettingsViewModel(
@@ -1170,6 +1231,8 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     m_player = new PlayerSettingsViewModel(settings.player(), this);
     m_subs = new SubtitlesSettingsViewModel(http, tokens,
         settings.subtitle(), settings.cache(), subtitleCache, this);
+    m_torrentStreaming = new TorrentStreamingSettingsViewModel(
+        settings.torrentStreaming(), this);
     m_appear
         = new AppearanceSettingsViewModel(settings.appearance(), this);
 

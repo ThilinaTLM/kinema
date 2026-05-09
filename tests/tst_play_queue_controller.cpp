@@ -34,7 +34,7 @@ class RecordingStreamActions : public services::StreamActions
 {
 public:
     explicit RecordingStreamActions(QObject* parent = nullptr)
-        : services::StreamActions(/*launcher=*/nullptr, parent)
+        : services::StreamActions(/*launcher=*/nullptr, /*torrentStreaming=*/nullptr, parent)
     {
     }
 
@@ -239,7 +239,7 @@ private Q_SLOTS:
         QCOMPARE(m_actions->calls.size(), 2);
     }
 
-    void playNowRejectsStreamWithoutDirectUrl()
+    void playNowAcceptsMagnetOnlyStream()
     {
         api::Stream s;
         s.infoHash = QStringLiteral("hash-x");
@@ -251,7 +251,10 @@ private Q_SLOTS:
             &controllers::PlayQueueController::statusMessage);
         m_ctrl->playNow(s, ctx);
 
-        QVERIFY(m_ctrl->isEmpty());
+        QVERIFY(!m_ctrl->isEmpty());
+        QCOMPARE(m_ctrl->items().size(), 1);
+        QCOMPARE(m_ctrl->items().first().status,
+            api::QueueItem::Status::Failed);
         QVERIFY(m_actions->calls.isEmpty());
         QCOMPARE(statusSpy.count(), 1);
     }

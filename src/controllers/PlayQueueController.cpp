@@ -16,6 +16,15 @@
 
 namespace kinema::controllers {
 
+namespace {
+
+bool isPlayable(const api::Stream& s)
+{
+    return !s.directUrl.isEmpty() || !s.infoHash.isEmpty();
+}
+
+} // namespace
+
 PlayQueueController::PlayQueueController(core::PlayQueueStore& store,
     api::TorrentioClient& torrentio,
     services::StreamActions& actions,
@@ -48,10 +57,10 @@ PlayQueueController::~PlayQueueController() = default;
 void PlayQueueController::playNow(const api::Stream& s,
     const api::PlaybackContext& ctx)
 {
-    if (s.directUrl.isEmpty()) {
+    if (!isPlayable(s)) {
         Q_EMIT statusMessage(
             i18nc("@info:status",
-                "This release has no direct URL \u2014 use Real-Debrid for one-click play."),
+                "This release has no playable URL or magnet."),
             5000);
         return;
     }
@@ -95,10 +104,10 @@ void PlayQueueController::playNow(const api::Stream& s,
 void PlayQueueController::playNext(const api::Stream& s,
     const api::PlaybackContext& ctx)
 {
-    if (s.directUrl.isEmpty()) {
+    if (!isPlayable(s)) {
         Q_EMIT statusMessage(
             i18nc("@info:status",
-                "This release has no direct URL \u2014 use Real-Debrid for one-click play."),
+                "This release has no playable URL or magnet."),
             5000);
         return;
     }
@@ -127,10 +136,10 @@ void PlayQueueController::playNext(const api::Stream& s,
 void PlayQueueController::enqueue(const api::Stream& s,
     const api::PlaybackContext& ctx)
 {
-    if (s.directUrl.isEmpty()) {
+    if (!isPlayable(s)) {
         Q_EMIT statusMessage(
             i18nc("@info:status",
-                "This release has no direct URL \u2014 use Real-Debrid for one-click play."),
+                "This release has no playable URL or magnet."),
             5000);
         return;
     }
@@ -530,9 +539,11 @@ QCoro::Task<void> PlayQueueController::startActiveItem()
 
         const api::Stream* hit = nullptr;
         for (const auto& s : streams) {
-            if (item.streamRef.matches(s) && !s.directUrl.isEmpty()) {
+            if (item.streamRef.matches(s) && isPlayable(s)) {
                 hit = &s;
-                break;
+                if (!s.directUrl.isEmpty()) {
+                    break;
+                }
             }
         }
 
@@ -556,6 +567,12 @@ QCoro::Task<void> PlayQueueController::startActiveItem()
             co_return;
         }
         url = hit->directUrl;
+        if (url.isEmpty()) {
+            const auto stream = *hit;
+            auto ctx = toContext(item);
+            m_actions.play(stream, ctx);
+            co_return;
+        }
     }
 
     if (myEpoch != m_resolveEpoch) {

@@ -124,7 +124,7 @@ Kirigami.Page {
             FormCard.FormSwitchDelegate {
                 text: i18nc("@option:check stream filter", "Cached only")
                 description: i18nc("@info:tooltip stream filter",
-                    "Show only streams already cached on Real-Debrid — they play instantly.")
+                    "Show only streams with Real-Debrid direct URLs — they play instantly.")
                 visible: page.detailVm
                     && page.detailVm.realDebridConfigured
                     && page.detailVm.rawStreamsCount > 0

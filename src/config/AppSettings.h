@@ -13,6 +13,7 @@
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
 #include "config/TorrentioSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "core/TorrentioConfig.h"
 
 #include <KSharedConfig>
@@ -70,6 +71,9 @@ public:
     CacheSettings& cache() noexcept { return m_cache; }
     const CacheSettings& cache() const noexcept { return m_cache; }
 
+    TorrentStreamingSettings& torrentStreaming() noexcept { return m_torrentStreaming; }
+    const TorrentStreamingSettings& torrentStreaming() const noexcept { return m_torrentStreaming; }
+
     /// Build the Torrentio options from the current Torrentio + Filter
     /// state. The RD token is NOT filled — callers merge it in from
     /// TokenController.
@@ -94,6 +98,7 @@ private:
     RealDebridSettings m_realDebrid;
     SubtitleSettings m_subtitle;
     CacheSettings m_cache;
+    TorrentStreamingSettings m_torrentStreaming;
 };
 
 } // namespace kinema::config

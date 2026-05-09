@@ -31,6 +31,17 @@ QDir subtitlesDir()
     return s;
 }
 
+QDir torrentsDir()
+{
+    QDir d = root();
+    const auto subPath = d.absoluteFilePath(QStringLiteral("torrents"));
+    QDir s(subPath);
+    if (!s.exists()) {
+        s.mkpath(QStringLiteral("."));
+    }
+    return s;
+}
+
 qint64 dirSizeBytes(const QDir& dir)
 {
     if (!dir.exists()) {

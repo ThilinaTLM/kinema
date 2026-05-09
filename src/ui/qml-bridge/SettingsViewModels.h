@@ -28,6 +28,7 @@ class RealDebridSettings;
 class SearchSettings;
 class SubtitleSettings;
 class TorrentioSettings;
+class TorrentStreamingSettings;
 }
 
 namespace kinema::ui::qml {
@@ -398,6 +399,51 @@ private:
     bool m_busy = false;
 };
 
+// ---- Torrent streaming -----------------------------------------------
+class TorrentStreamingSettingsViewModel : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int cacheBudgetGb READ cacheBudgetGb WRITE setCacheBudgetGb NOTIFY cacheBudgetGbChanged)
+    Q_PROPERTY(int startupBufferMiB READ startupBufferMiB WRITE setStartupBufferMiB NOTIFY startupBufferMiBChanged)
+    Q_PROPERTY(int readaheadMiB READ readaheadMiB WRITE setReadaheadMiB NOTIFY readaheadMiBChanged)
+    Q_PROPERTY(int tailBufferMiB READ tailBufferMiB WRITE setTailBufferMiB NOTIFY tailBufferMiBChanged)
+    Q_PROPERTY(int maxDownloadRateKiB READ maxDownloadRateKiB WRITE setMaxDownloadRateKiB NOTIFY maxDownloadRateKiBChanged)
+    Q_PROPERTY(int maxUploadRateKiB READ maxUploadRateKiB WRITE setMaxUploadRateKiB NOTIFY maxUploadRateKiBChanged)
+    Q_PROPERTY(int idleStopMinutes READ idleStopMinutes WRITE setIdleStopMinutes NOTIFY idleStopMinutesChanged)
+
+public:
+    TorrentStreamingSettingsViewModel(config::TorrentStreamingSettings& settings,
+        QObject* parent = nullptr);
+
+    int cacheBudgetGb() const;
+    int startupBufferMiB() const;
+    int readaheadMiB() const;
+    int tailBufferMiB() const;
+    int maxDownloadRateKiB() const;
+    int maxUploadRateKiB() const;
+    int idleStopMinutes() const;
+
+    void setCacheBudgetGb(int v);
+    void setStartupBufferMiB(int v);
+    void setReadaheadMiB(int v);
+    void setTailBufferMiB(int v);
+    void setMaxDownloadRateKiB(int v);
+    void setMaxUploadRateKiB(int v);
+    void setIdleStopMinutes(int v);
+
+Q_SIGNALS:
+    void cacheBudgetGbChanged();
+    void startupBufferMiBChanged();
+    void readaheadMiBChanged();
+    void tailBufferMiBChanged();
+    void maxDownloadRateKiBChanged();
+    void maxUploadRateKiBChanged();
+    void idleStopMinutesChanged();
+
+private:
+    config::TorrentStreamingSettings& m_settings;
+};
+
 // ---- Appearance -------------------------------------------------------
 // Survives as a sub-page even though only `closeToTray` and (until
 // phase 02) `showMenuBar` were ever surfaced. The remaining splitter
@@ -434,6 +480,7 @@ class SettingsRootViewModel : public QObject
     Q_PROPERTY(FiltersSettingsViewModel* filters READ filters CONSTANT)
     Q_PROPERTY(PlayerSettingsViewModel* player READ player CONSTANT)
     Q_PROPERTY(SubtitlesSettingsViewModel* subtitles READ subtitles CONSTANT)
+    Q_PROPERTY(TorrentStreamingSettingsViewModel* torrentStreaming READ torrentStreaming CONSTANT)
     Q_PROPERTY(AppearanceSettingsViewModel* appearance READ appearance CONSTANT)
 
 public:
@@ -449,6 +496,7 @@ public:
     FiltersSettingsViewModel* filters() const { return m_filters; }
     PlayerSettingsViewModel* player() const { return m_player; }
     SubtitlesSettingsViewModel* subtitles() const { return m_subs; }
+    TorrentStreamingSettingsViewModel* torrentStreaming() const { return m_torrentStreaming; }
     AppearanceSettingsViewModel* appearance() const { return m_appear; }
 
 Q_SIGNALS:
@@ -466,6 +514,7 @@ private:
     FiltersSettingsViewModel* m_filters {};
     PlayerSettingsViewModel* m_player {};
     SubtitlesSettingsViewModel* m_subs {};
+    TorrentStreamingSettingsViewModel* m_torrentStreaming {};
     AppearanceSettingsViewModel* m_appear {};
 };
 

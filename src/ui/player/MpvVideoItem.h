@@ -25,6 +25,14 @@ class PlayerSettings;
 
 namespace kinema::ui::player {
 
+struct MpvAbstractItemForeign
+{
+    Q_GADGET
+    QML_FOREIGN(MpvAbstractItem)
+    QML_NAMED_ELEMENT(MpvAbstractItem)
+    QML_UNCREATABLE("MpvAbstractItem is an internal mpvqt base class")
+};
+
 /**
  * QtQuick item that renders an in-process libmpv instance. Subclasses
  * `MpvAbstractItem` from the KDE-maintained `mpvqt` library, which
