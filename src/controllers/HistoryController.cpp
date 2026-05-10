@@ -9,7 +9,7 @@
 #include "core/HistoryStore.h"
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 #include "services/StreamActions.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
@@ -238,7 +238,7 @@ void HistoryController::resumeFromHistory(const api::HistoryEntry& entry)
     // without a chosen release — no way to find it again.
     if (entry.lastStream.infoHash.isEmpty()
         && entry.lastStream.releaseName.isEmpty()) {
-        qCInfo(KINEMA)
+        qCInfo(KINEMA_APP)
             << "HistoryController: cannot resume" << entry.key.storageKey()
             << "— no saved release reference (delete + replay to recover)";
         Q_EMIT resumeFallbackRequested(entry);
@@ -275,7 +275,7 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
         if (myEpoch != m_resumeEpoch) {
             co_return;
         }
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "HistoryController: torrentio fetch failed for resume:"
             << core::describeError(e, "resume/torrentio");
         Q_EMIT statusMessage(
@@ -306,7 +306,7 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
     }
 
     if (!hit) {
-        qCInfo(KINEMA).nospace()
+        qCInfo(KINEMA_APP).nospace()
             << "HistoryController: saved release not in current "
                "Torrentio response for " << entry.key.storageKey()
             << " (hash=\"" << entry.lastStream.infoHash
@@ -323,7 +323,7 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
     }
 
     if (!m_queue) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "HistoryController: no PlayQueueController wired; "
                "cannot dispatch resume";
         Q_EMIT resumeFallbackRequested(entry);

@@ -5,7 +5,7 @@
 
 #include "core/HttpError.h"
 #include "core/UrlRedactor.h"
-#include "kinema_debug.h"
+#include "kinema_log_http.h"
 #include "kinema_version.h"
 
 #include <QCoro/QCoroNetworkReply>
@@ -88,7 +88,7 @@ QCoro::Task<QByteArray> HttpClient::get(QNetworkRequest request)
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
     const QString logUrl = redactUrlForLog(request.url());
-    qCDebug(KINEMA) << "HTTP GET" << logUrl;
+    qCDebug(KINEMA_HTTP) << "HTTP GET" << logUrl;
 
     QNetworkReply* reply = m_nam.get(request);
     co_await qCoro(reply).waitForFinished();
@@ -97,7 +97,7 @@ QCoro::Task<QByteArray> HttpClient::get(QNetworkRequest request)
     const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
     if (reply->error() != QNetworkReply::NoError) {
-        qCWarning(KINEMA) << "HTTP failed" << logUrl
+        qCWarning(KINEMA_HTTP) << "HTTP failed" << logUrl
                           << reply->error() << reply->errorString();
         throw HttpError(kindFromReply(reply), status, reply->errorString());
     }
@@ -131,7 +131,7 @@ QCoro::Task<QByteArray> HttpClient::postJson(QNetworkRequest request,
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
     const QString logUrl = redactUrlForLog(request.url());
-    qCDebug(KINEMA) << "HTTP POST" << logUrl;
+    qCDebug(KINEMA_HTTP) << "HTTP POST" << logUrl;
 
     QNetworkReply* reply = m_nam.post(request, body);
     co_await qCoro(reply).waitForFinished();
@@ -142,7 +142,7 @@ QCoro::Task<QByteArray> HttpClient::postJson(QNetworkRequest request,
     if (reply->error() != QNetworkReply::NoError) {
         const auto respBody = QString::fromUtf8(reply->readAll());
         const auto msg = respBody.isEmpty() ? reply->errorString() : respBody;
-        qCWarning(KINEMA) << "HTTP POST failed" << logUrl
+        qCWarning(KINEMA_HTTP) << "HTTP POST failed" << logUrl
                           << reply->error() << msg;
         throw HttpError(kindFromReply(reply), status, msg);
     }
@@ -173,7 +173,7 @@ QCoro::Task<QByteArray> HttpClient::del(QNetworkRequest request)
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
     const QString logUrl = redactUrlForLog(request.url());
-    qCDebug(KINEMA) << "HTTP DELETE" << logUrl;
+    qCDebug(KINEMA_HTTP) << "HTTP DELETE" << logUrl;
 
     QNetworkReply* reply = m_nam.deleteResource(request);
     co_await qCoro(reply).waitForFinished();
@@ -207,7 +207,7 @@ QCoro::Task<QList<QPair<QByteArray, QByteArray>>> HttpClient::head(
         QNetworkRequest::NoLessSafeRedirectPolicy);
 
     const QString logUrl = redactUrlForLog(url);
-    qCDebug(KINEMA) << "HTTP HEAD" << logUrl;
+    qCDebug(KINEMA_HTTP) << "HTTP HEAD" << logUrl;
 
     QNetworkReply* reply = m_nam.head(request);
     co_await qCoro(reply).waitForFinished();

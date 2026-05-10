@@ -4,7 +4,7 @@
 #include "core/HttpErrorPresenter.h"
 
 #include "core/HttpError.h"
-#include "kinema_debug.h"
+#include "kinema_log_http.h"
 
 namespace kinema::core {
 
@@ -25,13 +25,13 @@ bool isHttpStatus(const std::exception& e, int status)
 QString describeError(const std::exception& e, const char* context)
 {
     if (const auto* he = asHttpError(e)) {
-        qCWarning(KINEMA).nospace()
+        qCWarning(KINEMA_HTTP).nospace()
             << context << ": " << he->message()
             << " (status=" << he->httpStatus() << ")";
         return he->message();
     }
     const auto msg = QString::fromUtf8(e.what());
-    qCWarning(KINEMA).nospace() << context << " (unknown): " << msg;
+    qCWarning(KINEMA_HTTP).nospace() << context << " (unknown): " << msg;
     return msg;
 }
 

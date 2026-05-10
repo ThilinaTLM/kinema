@@ -28,7 +28,6 @@
 #include "core/TmdbConfig.h"
 #include "core/TokenStore.h"
 #include "core/TorrentioConfig.h"
-#include "kinema_debug.h"
 
 #include <KLocalizedString>
 

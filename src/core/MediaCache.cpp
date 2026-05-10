@@ -5,7 +5,7 @@
 
 #include "config/DownloadSettings.h"
 #include "core/CachePaths.h"
-#include "kinema_debug.h"
+#include "kinema_log_download.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -104,7 +104,7 @@ void MediaCache::setPinned(const QString& assetId, bool on)
     if (on) {
         QFile f(path);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            qCWarning(KINEMA) << "MediaCache: could not pin" << path;
+            qCWarning(KINEMA_DOWNLOAD) << "MediaCache: could not pin" << path;
             return;
         }
         f.write(QDateTime::currentDateTimeUtc()
@@ -224,11 +224,11 @@ void MediaCache::enforceBudget()
             break;
         }
         if (!removeRecursively(c.path)) {
-            qCWarning(KINEMA) << "MediaCache: failed to prune" << c.path;
+            qCWarning(KINEMA_DOWNLOAD) << "MediaCache: failed to prune" << c.path;
             continue;
         }
         ephemeralTotal -= c.size;
-        qCInfo(KINEMA) << "MediaCache: pruned" << c.assetId;
+        qCInfo(KINEMA_DOWNLOAD) << "MediaCache: pruned" << c.assetId;
     }
 }
 

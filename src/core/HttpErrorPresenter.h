@@ -21,10 +21,10 @@ class HttpError;
  *
  * ```
  * try { ... } catch (const core::HttpError& e) {
- *     qCWarning(KINEMA) << "ctx:" << e.message();
+ *     qCWarning(KINEMA_HTTP) << "ctx:" << e.message();
  *     pane->showError(e.message());
  * } catch (const std::exception& e) {
- *     qCWarning(KINEMA) << "ctx (unknown):" << e.what();
+ *     qCWarning(KINEMA_HTTP) << "ctx (unknown):" << e.what();
  *     pane->showError(QString::fromUtf8(e.what()));
  * }
  * ```

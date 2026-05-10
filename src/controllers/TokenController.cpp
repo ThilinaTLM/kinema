@@ -7,7 +7,7 @@
 #include "config/RealDebridSettings.h"
 #include "core/TmdbConfig.h"
 #include "core/TokenStore.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 namespace kinema::controllers {
 
@@ -19,7 +19,7 @@ QCoro::Task<QString> safeRead(core::TokenStore& store, const char* key,
     try {
         co_return co_await store.read(QString::fromLatin1(key));
     } catch (const std::exception& e) {
-        qCWarning(KINEMA) << label << "read failed:" << e.what();
+        qCWarning(KINEMA_APP) << label << "read failed:" << e.what();
     }
     co_return QString {};
 }

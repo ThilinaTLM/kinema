@@ -7,7 +7,7 @@
 #include "config/AppSettings.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/PlayQueueStore.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 #include "services/StreamActions.h"
 
 #include <KLocalizedString>
@@ -518,7 +518,7 @@ QCoro::Task<void> PlayQueueController::startActiveItem()
             if (myEpoch != m_resolveEpoch) {
                 co_return;
             }
-            qCWarning(KINEMA)
+            qCWarning(KINEMA_APP)
                 << "PlayQueueController: torrentio fetch failed:"
                 << core::describeError(e, "queue/torrentio");
             // Mark Failed; step 4 will replace this with skip-and-advance.
@@ -551,7 +551,7 @@ QCoro::Task<void> PlayQueueController::startActiveItem()
         }
 
         if (!hit) {
-            qCInfo(KINEMA).nospace()
+            qCInfo(KINEMA_APP).nospace()
                 << "PlayQueueController: queued release not in current "
                    "Torrentio response for " << item.key.storageKey()
                 << " (hash=\"" << item.streamRef.infoHash << "\")";
@@ -774,7 +774,7 @@ void PlayQueueController::persist()
 
     const auto written = m_store.replaceAll(toPersist);
     if (written.size() != toPersist.size()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "PlayQueueController: persist replaceAll size mismatch ("
             << written.size() << "vs" << toPersist.size() << ")";
         return;

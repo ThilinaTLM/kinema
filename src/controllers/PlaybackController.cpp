@@ -12,7 +12,7 @@
 #include "core/Moviehash.h"
 #include "core/UrlRedactor.h"
 #include "ui/player/PlayerWindow.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 #include <KLocalizedString>
 
@@ -392,14 +392,14 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
             }
         }
     } catch (const std::exception& e) {
-        qCDebug(KINEMA) << "moviehash: HEAD failed:" << e.what();
+        qCDebug(KINEMA_APP) << "moviehash: HEAD failed:" << e.what();
         co_return;
     }
     if (epoch != m_streamEpoch) {
         co_return;
     }
     if (size <= 2 * kBlock) {
-        qCDebug(KINEMA) << "moviehash: Content-Length too small or absent";
+        qCDebug(KINEMA_APP) << "moviehash: Content-Length too small or absent";
         co_return;
     }
 
@@ -408,7 +408,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     try {
         head = co_await rangeGet(0, kBlock - 1);
     } catch (const std::exception& e) {
-        qCDebug(KINEMA) << "moviehash: head Range GET failed:" << e.what();
+        qCDebug(KINEMA_APP) << "moviehash: head Range GET failed:" << e.what();
         co_return;
     }
     if (epoch != m_streamEpoch || head.size() != kBlock) {
@@ -417,7 +417,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     try {
         tail = co_await rangeGet(size - kBlock, size - 1);
     } catch (const std::exception& e) {
-        qCDebug(KINEMA) << "moviehash: tail Range GET failed:" << e.what();
+        qCDebug(KINEMA_APP) << "moviehash: tail Range GET failed:" << e.what();
         co_return;
     }
     if (epoch != m_streamEpoch || tail.size() != kBlock) {
@@ -428,7 +428,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     if (hex.isEmpty() || epoch != m_streamEpoch) {
         co_return;
     }
-    qCDebug(KINEMA) << "moviehash: computed" << hex << "for"
+    qCDebug(KINEMA_APP) << "moviehash: computed" << hex << "for"
                     << core::redactUrlForLog(url);
     Q_EMIT moviehashComputed(hex);
 }
@@ -467,7 +467,7 @@ void PlaybackController::onLoadWatchdogTimedOut()
     if (m_phase != Phase::Loading) {
         return;
     }
-    qCWarning(KINEMA)
+    qCWarning(KINEMA_APP)
         << "PlaybackController: load watchdog tripped for"
         << m_ctx.title
         << "after" << m_loadWatchdog.timeout().count() << "ms;"

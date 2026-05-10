@@ -4,7 +4,7 @@
 #include "core/PlayerLauncher.h"
 
 #include "config/PlayerSettings.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 #include <KLocalizedString>
 #include <KNotification>
@@ -62,7 +62,7 @@ std::optional<player::Kind> PlayerLauncher::resolvePlayer() const
             continue;
         }
         if (player::isAvailable(k)) {
-            qCInfo(KINEMA) << "preferred player"
+            qCInfo(KINEMA_APP) << "preferred player"
                            << player::toString(preferred)
                            << "is unavailable; falling back to"
                            << player::toString(k);
@@ -96,7 +96,7 @@ void PlayerLauncher::play(const QUrl& url, const api::PlaybackContext& ctx)
     };
 
     if (!url.isValid() || url.isEmpty()) {
-        qCWarning(KINEMA) << "PlayerLauncher::play called with empty URL";
+        qCWarning(KINEMA_APP) << "PlayerLauncher::play called with empty URL";
         fail(player::Kind::Mpv, i18nc("@info:status",
             "No playable URL available for this item."));
         return;
@@ -120,7 +120,7 @@ void PlayerLauncher::play(const QUrl& url, const api::PlaybackContext& ctx)
     const auto kind = *picked;
 
     if (kind == player::Kind::Embedded) {
-        qCInfo(KINEMA) << "handing off to embedded player for"
+        qCInfo(KINEMA_APP) << "handing off to embedded player for"
                        << (title.isEmpty() ? url.toString() : title);
         Q_EMIT embeddedRequested(url, ctx);
         return;
@@ -137,21 +137,21 @@ void PlayerLauncher::play(const QUrl& url, const api::PlaybackContext& ctx)
         return;
     }
 
-    qCInfo(KINEMA).noquote() << "launching" << inv.program
+    qCInfo(KINEMA_APP).noquote() << "launching" << inv.program
                              << inv.args.join(QLatin1Char(' '));
 
     qint64 pid = 0;
     const bool ok = QProcess::startDetached(inv.program, inv.args,
         QString {}, &pid);
     if (!ok) {
-        qCWarning(KINEMA) << "startDetached failed for" << inv.program;
+        qCWarning(KINEMA_APP) << "startDetached failed for" << inv.program;
         fail(kind, i18nc("@info:status",
             "Failed to launch %1 — is it installed and on $PATH?",
             player::displayName(kind)));
         return;
     }
 
-    qCDebug(KINEMA) << "player spawned, pid =" << pid;
+    qCDebug(KINEMA_APP) << "player spawned, pid =" << pid;
     const auto display = title.isEmpty() ? url.toString() : title;
     Q_EMIT launched(kind, display);
     notifyLaunched(kind, display);

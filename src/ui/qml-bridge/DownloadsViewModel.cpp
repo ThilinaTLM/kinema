@@ -5,17 +5,42 @@
 
 #include "controllers/DownloadController.h"
 #include "core/MediaCache.h"
+#include "download/DownloadManager.h"
+#include "kinema_log_app.h"
 
 #include <KFormat>
+#include <KIO/OpenUrlJob>
+#include <KLocalizedString>
+
+#include <QUrl>
 
 namespace kinema::ui::qml {
 
+namespace {
+
+bool isActiveState(api::DownloadState s)
+{
+    switch (s) {
+    case api::DownloadState::Queued:
+    case api::DownloadState::Preparing:
+    case api::DownloadState::Downloading:
+    case api::DownloadState::Streaming:
+        return true;
+    default:
+        return false;
+    }
+}
+
+} // namespace
+
 DownloadsViewModel::DownloadsViewModel(
     controllers::DownloadController& controller,
+    download::DownloadManager& manager,
     core::MediaCache& cache,
     QObject* parent)
     : QObject(parent)
     , m_controller(controller)
+    , m_manager(manager)
     , m_cache(cache)
     , m_items(new DownloadsListModel(this))
 {
@@ -27,17 +52,71 @@ DownloadsViewModel::DownloadsViewModel(
 void DownloadsViewModel::refresh()
 {
     auto rows = m_controller.items();
-    m_items->setItems(rows);
-    rebuildCounts();
+
+    // Pull live stats once per refresh and join them into the
+    // model's transient map. This keeps DownloadsListModel free of
+    // any DownloadManager dependency while still letting QML bind
+    // to per-row rate / peers / ETA roles.
+    QHash<QString, DownloadsListModel::LiveRow> live;
+    for (const auto& it : rows) {
+        if (auto stats = m_manager.liveStatsFor(it.assetId)) {
+            DownloadsListModel::LiveRow lr;
+            lr.ratePayloadBps = stats->ratePayloadBps;
+            lr.peers = stats->peers;
+            lr.seeds = stats->seeds;
+            lr.etaSeconds = stats->etaSeconds;
+            live.insert(it.assetId, lr);
+        }
+    }
+
+    rebuildCountsFrom(rows, live);
+
+    QList<api::DownloadItem> visible;
+    if (m_filter == FilterAll) {
+        visible = rows;
+    } else {
+        for (auto& it : rows) {
+            if (rowMatchesFilter(it)) {
+                visible.append(it);
+            }
+        }
+    }
+    m_items->setItems(visible, std::move(live));
+
+    Q_EMIT countsChanged();
     Q_EMIT cacheChanged();
 }
 
-void DownloadsViewModel::rebuildCounts()
+bool DownloadsViewModel::rowMatchesFilter(const api::DownloadItem& it) const
+{
+    switch (m_filter) {
+    case FilterActive:
+        return isActiveState(it.state);
+    case FilterCompleted:
+        return it.state == api::DownloadState::Completed;
+    case FilterFailed:
+        return it.state == api::DownloadState::Failed;
+    case FilterPinned:
+        return it.isPinned();
+    default:
+        return true;
+    }
+}
+
+void DownloadsViewModel::rebuildCountsFrom(
+    const QList<api::DownloadItem>& rows,
+    const QHash<QString, DownloadsListModel::LiveRow>& live)
 {
     m_activeCount = 0;
     m_completedCount = 0;
     m_failedCount = 0;
-    for (const auto& it : m_items->items()) {
+    m_pinnedCount = 0;
+    m_totalCount = rows.size();
+    m_totalRateBps = 0;
+    for (const auto& it : rows) {
+        if (it.isPinned()) {
+            ++m_pinnedCount;
+        }
         switch (it.state) {
         case api::DownloadState::Queued:
         case api::DownloadState::Preparing:
@@ -55,8 +134,24 @@ void DownloadsViewModel::rebuildCounts()
         case api::DownloadState::Cancelled:
             break;
         }
+        if (const auto liveIt = live.constFind(it.assetId);
+            liveIt != live.constEnd() && isActiveState(it.state)) {
+            m_totalRateBps += liveIt->ratePayloadBps;
+        }
     }
-    Q_EMIT countsChanged();
+}
+
+void DownloadsViewModel::setFilter(int f)
+{
+    if (f < FilterAll || f > FilterPinned) {
+        f = FilterAll;
+    }
+    if (m_filter == f) {
+        return;
+    }
+    m_filter = f;
+    Q_EMIT filterChanged();
+    refresh();
 }
 
 qint64 DownloadsViewModel::cacheSizeBytes() const
@@ -69,14 +164,45 @@ qint64 DownloadsViewModel::ephemeralSizeBytes() const
     return m_cache.ephemeralSizeBytes();
 }
 
+qint64 DownloadsViewModel::cacheBudgetBytes() const
+{
+    return m_cache.budgetBytes();
+}
+
+double DownloadsViewModel::cacheUsageFraction() const
+{
+    const qint64 budget = cacheBudgetBytes();
+    if (budget <= 0) {
+        return 0.0;
+    }
+    return qBound(0.0,
+        static_cast<double>(cacheSizeBytes())
+            / static_cast<double>(budget),
+        1.0);
+}
+
 QString DownloadsViewModel::cacheSizeText() const
 {
     return KFormat().formatByteSize(cacheSizeBytes());
 }
 
+QString DownloadsViewModel::cacheBudgetText() const
+{
+    return KFormat().formatByteSize(cacheBudgetBytes());
+}
+
 QString DownloadsViewModel::ephemeralSizeText() const
 {
     return KFormat().formatByteSize(ephemeralSizeBytes());
+}
+
+QString DownloadsViewModel::totalDownloadRateText() const
+{
+    if (m_totalRateBps <= 0) {
+        return QString();
+    }
+    return i18nc("@label aggregate download rate per second",
+        "%1/s", KFormat().formatByteSize(m_totalRateBps));
 }
 
 void DownloadsViewModel::retry(const QString& assetId)
@@ -97,6 +223,59 @@ void DownloadsViewModel::remove(const QString& assetId, bool deleteFiles)
 void DownloadsViewModel::pin(const QString& assetId, bool on)
 {
     m_controller.pin(assetId, on);
+}
+
+void DownloadsViewModel::runEvictionNow()
+{
+    qCInfo(KINEMA_APP) << "DownloadsViewModel: manual eviction triggered";
+    // The controller doesn't expose runEviction; we tunnel through
+    // the manager directly because it's only the cache pass.
+    m_cache.enforceBudget();
+    refresh();
+}
+
+void DownloadsViewModel::openLocalDir(const QString& assetId)
+{
+    const auto rows = m_controller.items();
+    QString dir;
+    for (const auto& it : rows) {
+        if (it.assetId == assetId) {
+            dir = it.localDir;
+            break;
+        }
+    }
+    if (dir.isEmpty()) {
+        return;
+    }
+    auto* job = new KIO::OpenUrlJob(QUrl::fromLocalFile(dir), this);
+    job->setRunExecutables(false);
+    job->start();
+}
+
+void DownloadsViewModel::clearFinished()
+{
+    const auto rows = m_controller.items();
+    int removed = 0;
+    for (const auto& it : rows) {
+        if (it.state == api::DownloadState::Completed && !it.isPinned()) {
+            m_controller.remove(it.assetId, /*deleteFiles=*/false);
+            ++removed;
+        }
+    }
+    qCInfo(KINEMA_APP) << "clearFinished removed" << removed << "rows";
+}
+
+void DownloadsViewModel::clearFailed()
+{
+    const auto rows = m_controller.items();
+    int removed = 0;
+    for (const auto& it : rows) {
+        if (it.state == api::DownloadState::Failed) {
+            m_controller.remove(it.assetId, /*deleteFiles=*/false);
+            ++removed;
+        }
+    }
+    qCInfo(KINEMA_APP) << "clearFailed removed" << removed << "rows";
 }
 
 } // namespace kinema::ui::qml

@@ -23,6 +23,29 @@ TorrentAssetSession::TorrentAssetSession(
     , m_fileSize(fileSize)
     , m_infoHash(std::move(infoHash))
 {
+    // Filter the engine's per-hash signals down to *our* hash.
+    connect(&m_engine, &torrent::TorrentStreamingService::torrentStatsChanged,
+        this, [this](const QString& hash, qint64 doneBytes,
+                   qint64 ratePayloadBps, int peers, int seeds,
+                   int etaSeconds) {
+            if (hash != m_infoHash) {
+                return;
+            }
+            Q_EMIT cachedBytesChanged(doneBytes);
+            Q_EMIT liveStatsChanged(ratePayloadBps, peers, seeds, etaSeconds);
+        });
+    connect(&m_engine, &torrent::TorrentStreamingService::torrentFinished,
+        this, [this](const QString& hash) {
+            if (hash == m_infoHash) {
+                Q_EMIT completed();
+            }
+        });
+    connect(&m_engine, &torrent::TorrentStreamingService::torrentFailed,
+        this, [this](const QString& hash, const QString& reason) {
+            if (hash == m_infoHash) {
+                Q_EMIT failed(reason);
+            }
+        });
 }
 
 TorrentAssetSession::~TorrentAssetSession() = default;

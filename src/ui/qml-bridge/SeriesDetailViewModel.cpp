@@ -9,6 +9,7 @@
 #include "config/AppSettings.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
+#include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
@@ -16,7 +17,7 @@
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/StreamFilter.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 #include "controllers/PlayQueueController.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
@@ -752,7 +753,7 @@ QCoro::Task<void> SeriesDetailViewModel::resolveByTmdbAndLoad(
             const bool notFound
                 = he->kind() == core::HttpError::Kind::HttpStatus
                 && he->httpStatus() == 404;
-            qCWarning(KINEMA).nospace()
+            qCWarning(KINEMA_APP).nospace()
                 << "TMDB external_ids lookup failed: tv/"
                 << tmdbId << " (\"" << title << "\") \u2014 "
                 << he->httpStatus() << " " << he->message();
@@ -777,7 +778,7 @@ QCoro::Task<void> SeriesDetailViewModel::resolveByTmdbAndLoad(
     }
 
     if (imdbId.isEmpty()) {
-        qCWarning(KINEMA).nospace()
+        qCWarning(KINEMA_APP).nospace()
             << "TMDB has no IMDB id for tv/" << tmdbId
             << " (\"" << title << "\")";
         Q_EMIT statusMessage(
@@ -929,6 +930,12 @@ void SeriesDetailViewModel::setPlayQueue(controllers::PlayQueueController* queue
     m_queue = queue;
 }
 
+void SeriesDetailViewModel::setDownloadController(
+    controllers::DownloadController* dl)
+{
+    m_downloads = dl;
+}
+
 void SeriesDetailViewModel::playNow(int row)
 {
     const auto* s = m_streams->at(row);
@@ -964,6 +971,29 @@ void SeriesDetailViewModel::enqueue(int row)
         return;
     }
     m_queue->enqueue(*s, currentContext());
+}
+
+void SeriesDetailViewModel::saveOffline(int row, bool pinned)
+{
+    const auto* s = m_streams->at(row);
+    if (!s) {
+        return;
+    }
+    if (s->infoHash.isEmpty() && s->directUrl.isEmpty()) {
+        Q_EMIT statusMessage(i18nc("@info:status",
+            "This stream has no playable URL or magnet."), 4000);
+        return;
+    }
+    if (!m_downloads) {
+        return;
+    }
+    m_downloads->enqueue(*s, currentContext(), pinned);
+    Q_EMIT statusMessage(pinned
+            ? i18nc("@info:status saving an episode for offline playback",
+                  "Saving \u201c%1\u201d offline\u2026", currentContext().title)
+            : i18nc("@info:status caching an episode",
+                  "Caching \u201c%1\u201d\u2026", currentContext().title),
+        3500);
 }
 
 template <typename Method>

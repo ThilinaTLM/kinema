@@ -9,6 +9,7 @@
 #include "config/AppSettings.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
+#include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
 #include "controllers/PlayQueueController.h"
 #include "controllers/TokenController.h"
@@ -17,7 +18,7 @@
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/StreamFilter.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/StreamSorting.h"
@@ -456,7 +457,7 @@ QCoro::Task<void> MovieDetailViewModel::resolveByTmdbAndLoad(
             const bool notFound
                 = he->kind() == core::HttpError::Kind::HttpStatus
                 && he->httpStatus() == 404;
-            qCWarning(KINEMA).nospace()
+            qCWarning(KINEMA_APP).nospace()
                 << "TMDB external_ids lookup failed: movie/"
                 << tmdbId << " (\"" << title << "\") \u2014 "
                 << he->httpStatus() << " " << he->message();
@@ -481,7 +482,7 @@ QCoro::Task<void> MovieDetailViewModel::resolveByTmdbAndLoad(
     }
 
     if (imdbId.isEmpty()) {
-        qCWarning(KINEMA).nospace()
+        qCWarning(KINEMA_APP).nospace()
             << "TMDB has no IMDB id for movie/" << tmdbId
             << " (\"" << title << "\")";
         Q_EMIT statusMessage(
@@ -699,6 +700,35 @@ void MovieDetailViewModel::enqueue(int row)
         return;
     }
     m_queue->enqueue(*s, currentContext());
+}
+
+void MovieDetailViewModel::saveOffline(int row, bool pinned)
+{
+    const auto* s = m_streams->at(row);
+    if (!s) {
+        return;
+    }
+    if (s->infoHash.isEmpty() && s->directUrl.isEmpty()) {
+        Q_EMIT statusMessage(i18nc("@info:status",
+            "This stream has no playable URL or magnet."), 4000);
+        return;
+    }
+    if (!m_downloads) {
+        return;
+    }
+    m_downloads->enqueue(*s, currentContext(), pinned);
+    Q_EMIT statusMessage(pinned
+            ? i18nc("@info:status saving a stream for offline playback",
+                  "Saving \u201c%1\u201d offline\u2026", m_title)
+            : i18nc("@info:status caching a stream into the local cache",
+                  "Caching \u201c%1\u201d\u2026", m_title),
+        3500);
+}
+
+void MovieDetailViewModel::setDownloadController(
+    controllers::DownloadController* dl)
+{
+    m_downloads = dl;
 }
 
 template <typename Method>

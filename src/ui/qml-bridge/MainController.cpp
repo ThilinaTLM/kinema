@@ -36,7 +36,7 @@
 #include "core/TokenStore.h"
 #include "core/TorrentCache.h"
 #include "download/DownloadManager.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 #include "services/StreamActions.h"
 #include "services/StreamAvailabilityService.h"
 #include "torrent/TorrentStreamingService.h"
@@ -323,7 +323,7 @@ void MainController::buildCoreServices()
     // start. HistoryStore handles `!isOpen()` gracefully.
     m_db = std::make_unique<core::Database>(this);
     if (!m_db->open()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "MainController: history database unavailable; "
                "history / resume features are disabled this session";
     }
@@ -423,7 +423,7 @@ void MainController::buildCoreServices()
     // drawer's downloads entry can show counts even before the
     // first navigation to the page.
     m_downloadsVm = new DownloadsViewModel(*m_downloadCtrl,
-        *m_mediaCache, this);
+        *m_downloadManager, *m_mediaCache, this);
 
     // Discover / Search / Browse surface VMs. They sit on top of
     // the existing service graph; action signals route back into
@@ -443,11 +443,13 @@ void MainController::buildCoreServices()
         m_watchedCtrl, m_tokenCtrl, m_settings,
         m_tokenCtrl->realDebridToken(), this);
     m_movieDetailVm->setPlayQueue(m_playQueueCtrl);
+    m_movieDetailVm->setDownloadController(m_downloadCtrl);
     m_seriesDetailVm = new SeriesDetailViewModel(m_cinemeta,
         m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
         m_tokenCtrl->realDebridToken(), this);
     m_seriesDetailVm->setPlayQueue(m_playQueueCtrl);
+    m_seriesDetailVm->setDownloadController(m_downloadCtrl);
 
     // TMDB token gain/loss propagates from `TokenController` to
     // both the Discover VM (which already handles it internally)
@@ -687,7 +689,7 @@ void MainController::buildCoreServices()
 #endif
 
     if (!m_player->preferredPlayerAvailable()) {
-        qCInfo(KINEMA) << "preferred media player not found on $PATH";
+        qCInfo(KINEMA_APP) << "preferred media player not found on $PATH";
     }
 }
 

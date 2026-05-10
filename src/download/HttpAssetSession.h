@@ -112,6 +112,13 @@ private:
     /// `m_chunkAvailable[i] == true` means chunk i is fully on disk.
     std::vector<bool> m_chunkAvailable;
     int m_totalChunks = 0;
+
+    /// EWMA bookkeeping for the synthesised download rate. Updated
+    /// every time a chunk lands so the UI sees a live MiB/s figure
+    /// for HTTP-backed assets too.
+    qint64 m_emaRateBps = 0;
+    qint64 m_lastSampleBytes = 0;
+    qint64 m_lastSampleAtMsec = 0;
 };
 
 } // namespace kinema::download

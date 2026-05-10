@@ -85,6 +85,23 @@ QQC2.Menu {
     }
     QQC2.MenuSeparator { }
     QQC2.MenuItem {
+        text: i18nc("@action:inmenu save a release for offline playback",
+            "Save offline")
+        icon.source: AppIcons.url("download")
+        icon.color: AppIcons.controlColor(enabled, false)
+        enabled: menu.hasMagnet || menu.hasDirectUrl
+        onTriggered: menu.vm.saveOffline(menu.row, /*pinned=*/true)
+    }
+    QQC2.MenuItem {
+        text: i18nc("@action:inmenu prefetch a release into the local cache",
+            "Cache for streaming")
+        icon.source: AppIcons.url("hard-drive")
+        icon.color: AppIcons.controlColor(enabled, false)
+        enabled: menu.hasMagnet || menu.hasDirectUrl
+        onTriggered: menu.vm.saveOffline(menu.row, /*pinned=*/false)
+    }
+    QQC2.MenuSeparator { }
+    QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Subtitles\u2026")
         icon.source: AppIcons.url("captions")
         icon.color: AppIcons.controlColor(enabled, false)

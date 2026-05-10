@@ -6,7 +6,7 @@
 #include "api/RealDebridClient.h"
 #include "core/HttpError.h"
 #include "core/Magnet.h"
-#include "kinema_debug.h"
+#include "kinema_log_rd.h"
 
 #include <KLocalizedString>
 

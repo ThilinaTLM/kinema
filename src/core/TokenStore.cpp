@@ -3,7 +3,7 @@
 
 #include "core/TokenStore.h"
 
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 #include <KLocalizedString>
 
@@ -79,7 +79,7 @@ QCoro::Task<QString> TokenStore::read(QString key)
     if (err == QKeychain::NoBackendAvailable) {
         m_available = false;
     }
-    qCWarning(KINEMA) << "keyring read failed:" << err << job->errorString();
+    qCWarning(KINEMA_APP) << "keyring read failed:" << err << job->errorString();
     throw TokenStoreError(describeError(job));
 }
 
@@ -101,7 +101,7 @@ QCoro::Task<void> TokenStore::write(QString key, QString value)
     if (err == QKeychain::NoBackendAvailable) {
         m_available = false;
     }
-    qCWarning(KINEMA) << "keyring write failed:" << err << job->errorString();
+    qCWarning(KINEMA_APP) << "keyring write failed:" << err << job->errorString();
     throw TokenStoreError(describeError(job));
 }
 
@@ -122,7 +122,7 @@ QCoro::Task<void> TokenStore::remove(QString key)
     if (err == QKeychain::NoBackendAvailable) {
         m_available = false;
     }
-    qCWarning(KINEMA) << "keyring remove failed:" << err << job->errorString();
+    qCWarning(KINEMA_APP) << "keyring remove failed:" << err << job->errorString();
     throw TokenStoreError(describeError(job));
 }
 

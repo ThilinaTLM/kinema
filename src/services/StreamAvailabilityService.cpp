@@ -4,7 +4,7 @@
 #include "services/StreamAvailabilityService.h"
 
 #include "api/RealDebridClient.h"
-#include "kinema_debug.h"
+#include "kinema_log_rd.h"
 
 namespace kinema::services {
 
@@ -40,7 +40,7 @@ QCoro::Task<QList<api::Stream>> StreamAvailabilityService::enrich(
                 cached.insert(h);
             }
         } catch (const std::exception& e) {
-            qCInfo(KINEMA) << "RD availability check failed for" << h
+            qCInfo(KINEMA_RD) << "RD availability check failed for" << h
                            << ":" << e.what();
             // Swallow: enrichment is best-effort. The user still
             // sees Torrentio's [RD+] tag from the discovery row.

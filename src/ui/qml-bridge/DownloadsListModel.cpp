@@ -33,6 +33,68 @@ QString stateText(api::DownloadState s)
     return QString();
 }
 
+/// One of {"positive","neutral","warn","negative"}. Used by QML to
+/// pick a chip background colour without leaking enum values out.
+QString stateTone(api::DownloadState s)
+{
+    switch (s) {
+    case api::DownloadState::Completed:
+        return QStringLiteral("positive");
+    case api::DownloadState::Downloading:
+    case api::DownloadState::Streaming:
+    case api::DownloadState::Preparing:
+        return QStringLiteral("neutral");
+    case api::DownloadState::Queued:
+    case api::DownloadState::Paused:
+    case api::DownloadState::Cancelled:
+        return QStringLiteral("warn");
+    case api::DownloadState::Failed:
+        return QStringLiteral("negative");
+    }
+    return QStringLiteral("neutral");
+}
+
+QString backendIcon(api::DownloadBackendKind k)
+{
+    switch (k) {
+    case api::DownloadBackendKind::Torrent:
+        return QStringLiteral("network-server-database");
+    case api::DownloadBackendKind::RealDebridHttp:
+        return QStringLiteral("folder-cloud");
+    }
+    return QStringLiteral("download");
+}
+
+QString backendLabel(api::DownloadBackendKind k)
+{
+    switch (k) {
+    case api::DownloadBackendKind::Torrent:
+        return i18nc("@label download backend", "Torrent");
+    case api::DownloadBackendKind::RealDebridHttp:
+        return i18nc("@label download backend", "Real-Debrid");
+    }
+    return QString();
+}
+
+QString rateText(qint64 bps)
+{
+    if (bps <= 0) {
+        return QString();
+    }
+    return i18nc("@label download rate per second",
+        "%1/s", KFormat().formatByteSize(bps));
+}
+
+QString etaText(int seconds)
+{
+    if (seconds <= 0) {
+        return QString();
+    }
+    return KFormat().formatDuration(
+        static_cast<quint64>(seconds) * 1000ULL,
+        KFormat::AbbreviatedDuration);
+}
+
 QString sizeText(const api::DownloadItem& it)
 {
     KFormat fmt;
@@ -71,6 +133,9 @@ QString subtitleText(const api::DownloadItem& it)
     if (!it.releaseName.isEmpty()) {
         parts.append(it.releaseName);
     }
+    if (!it.provider.isEmpty()) {
+        parts.append(it.provider);
+    }
     return parts.join(QStringLiteral(" \u00b7 "));
 }
 
@@ -95,6 +160,8 @@ QVariant DownloadsListModel::data(const QModelIndex& index, int role) const
         return {};
     }
     const auto& it = m_items.at(index.row());
+    const auto liveIt = m_liveStats.constFind(it.assetId);
+    const LiveRow live = liveIt == m_liveStats.constEnd() ? LiveRow {} : *liveIt;
     switch (role) {
     case AssetIdRole:
         return it.assetId;
@@ -106,10 +173,16 @@ QVariant DownloadsListModel::data(const QModelIndex& index, int role) const
         return it.poster.toString();
     case BackendKindRole:
         return static_cast<int>(it.backendKind);
+    case BackendIconRole:
+        return backendIcon(it.backendKind);
+    case BackendLabelRole:
+        return backendLabel(it.backendKind);
     case StateRole:
         return static_cast<int>(it.state);
     case StateTextRole:
         return stateText(it.state);
+    case StateToneRole:
+        return stateTone(it.state);
     case DispositionRole:
         return static_cast<int>(it.disposition);
     case IsPinnedRole:
@@ -142,6 +215,18 @@ QVariant DownloadsListModel::data(const QModelIndex& index, int role) const
         return it.lastError;
     case LocalDirRole:
         return it.localDir;
+    case DownloadRateBpsRole:
+        return live.ratePayloadBps;
+    case DownloadRateTextRole:
+        return rateText(live.ratePayloadBps);
+    case PeersRole:
+        return live.peers;
+    case SeedsRole:
+        return live.seeds;
+    case EtaSecondsRole:
+        return live.etaSeconds;
+    case EtaTextRole:
+        return etaText(live.etaSeconds);
     }
     return {};
 }
@@ -154,8 +239,11 @@ QHash<int, QByteArray> DownloadsListModel::roleNames() const
         { SubtitleRole, "subtitle" },
         { PosterUrlRole, "posterUrl" },
         { BackendKindRole, "backendKind" },
+        { BackendIconRole, "backendIcon" },
+        { BackendLabelRole, "backendLabel" },
         { StateRole, "state" },
         { StateTextRole, "stateText" },
+        { StateToneRole, "stateTone" },
         { DispositionRole, "disposition" },
         { IsPinnedRole, "pinned" },
         { IsCompleteRole, "complete" },
@@ -170,13 +258,21 @@ QHash<int, QByteArray> DownloadsListModel::roleNames() const
         { ReleaseNameRole, "releaseName" },
         { ErrorTextRole, "errorText" },
         { LocalDirRole, "localDir" },
+        { DownloadRateBpsRole, "downloadRateBps" },
+        { DownloadRateTextRole, "downloadRateText" },
+        { PeersRole, "peers" },
+        { SeedsRole, "seeds" },
+        { EtaSecondsRole, "etaSeconds" },
+        { EtaTextRole, "etaText" },
     };
 }
 
-void DownloadsListModel::setItems(QList<api::DownloadItem> items)
+void DownloadsListModel::setItems(QList<api::DownloadItem> items,
+    QHash<QString, LiveRow> liveStats)
 {
     beginResetModel();
     m_items = std::move(items);
+    m_liveStats = std::move(liveStats);
     endResetModel();
     Q_EMIT countChanged();
 }

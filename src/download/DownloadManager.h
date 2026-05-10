@@ -44,6 +44,16 @@ class LocalMediaServer;
 class RealDebridResolver;
 class TorrentAssetSession;
 
+/// Transient per-asset telemetry merged into download rows. The
+/// `DownloadManager` keeps the live values in memory only; only the
+/// persisted (cachedBytes / state) fields make it to the store.
+struct LiveAssetStats {
+    qint64 ratePayloadBps = 0;
+    int    peers = 0;
+    int    seeds = 0;
+    int    etaSeconds = -1;
+};
+
 /**
  * Long-lived orchestrator for the unified downloader.
  *
@@ -90,6 +100,10 @@ public:
     /// store row. No-op when no row exists yet.
     void pin(const QString& assetId, bool on);
 
+    /// Look up live transient stats (rate / peers / ETA) for an
+    /// asset. Returns nullopt when the asset has no active session.
+    std::optional<LiveAssetStats> liveStatsFor(const QString& assetId) const;
+
     /// Delete the persisted row plus any cached files. Stops the
     /// session if active.
     void remove(const QString& assetId, bool deleteFiles = true);
@@ -111,11 +125,25 @@ private:
     QCoro::Task<QUrl> prepareHttp(api::AssetRef ref,
         api::Stream stream, api::PlaybackContext ctx);
 
+    /// Background-start a torrent session for an enqueued asset.
+    /// Used by `enqueueDownload` and `retry`. Best-effort: a failure
+    /// here marks the row as Failed but does not propagate.
+    QCoro::Task<void> startTorrentBackground(api::AssetRef ref,
+        api::Stream stream, api::PlaybackContext ctx);
+
     api::DownloadBackendKind chooseBackend(const api::Stream& s) const;
     api::DownloadItem buildItem(const api::AssetRef& ref,
         const api::Stream& s, const api::PlaybackContext& ctx,
         api::DownloadBackendKind backend,
         api::CacheDisposition disposition) const;
+
+    /// Wire an HTTP session's progress signals to the store +
+    /// itemChanged broadcast. Idempotent at the call-site level.
+    void installHttpProgressBindings(HttpAssetSession* raw,
+        const QString& assetId);
+    /// Wire a torrent session's progress signals to the store.
+    void installTorrentProgressBindings(TorrentAssetSession* raw,
+        const QString& assetId);
 
     core::HttpClient& m_http;
     api::RealDebridClient& m_rd;
@@ -129,6 +157,10 @@ private:
 
     /// Active sessions keyed by `assetId`. Owned via std::unique_ptr.
     std::map<QString, std::unique_ptr<AssetSession>> m_sessions;
+
+    /// Transient telemetry, populated by session signal handlers.
+    /// Cleared when a session is destroyed.
+    std::map<QString, LiveAssetStats> m_liveStats;
 };
 
 } // namespace kinema::download

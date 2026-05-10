@@ -5,7 +5,7 @@
 
 #include "core/Database.h"
 #include "core/SqlUtil.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 #include <QDate>
 #include <QDateTime>
@@ -176,7 +176,7 @@ QList<api::LibraryTitle> LibraryStore::titles() const
     auto q = m_db.query();
     if (!q.exec(QStringLiteral("SELECT ") + QString::fromLatin1(kTitleColumns)
             + QStringLiteral(" FROM library_titles ORDER BY updated_at DESC"))) {
-        qCWarning(KINEMA) << "LibraryStore: titles failed:"
+        qCWarning(KINEMA_APP) << "LibraryStore: titles failed:"
                           << q.lastError().text();
         return out;
     }
@@ -199,7 +199,7 @@ QList<api::LibraryEpisode> LibraryStore::episodesForSeries(
                          "ORDER BY season ASC, episode ASC"));
     q.addBindValue(imdbId);
     if (!q.exec()) {
-        qCWarning(KINEMA) << "LibraryStore: episodesForSeries failed:"
+        qCWarning(KINEMA_APP) << "LibraryStore: episodesForSeries failed:"
                           << q.lastError().text();
         return out;
     }
@@ -284,7 +284,7 @@ void LibraryStore::upsertTitle(const api::LibraryTitle& title)
     q.addBindValue(t.runtimeMinutes ? QVariant(*t.runtimeMinutes) : QVariant());
     q.addBindValue(nullSafe(joinList(t.cast)));
     if (!q.exec()) {
-        qCWarning(KINEMA) << "LibraryStore: upsertTitle failed:"
+        qCWarning(KINEMA_APP) << "LibraryStore: upsertTitle failed:"
                           << q.lastError().text();
         return;
     }
@@ -299,7 +299,7 @@ void LibraryStore::upsertEpisodes(const QString& seriesImdbId,
     }
     auto db = QSqlDatabase::database(m_db.connectionName());
     if (!db.transaction()) {
-        qCWarning(KINEMA) << "LibraryStore: episode transaction failed:"
+        qCWarning(KINEMA_APP) << "LibraryStore: episode transaction failed:"
                           << db.lastError().text();
         return;
     }
@@ -333,7 +333,7 @@ void LibraryStore::upsertEpisodes(const QString& seriesImdbId,
         q.addBindValue(nullSafe(dateToDb(in.releaseDate)));
         q.addBindValue(isoUtc(updated));
         if (!q.exec()) {
-            qCWarning(KINEMA) << "LibraryStore: upsertEpisodes failed:"
+            qCWarning(KINEMA_APP) << "LibraryStore: upsertEpisodes failed:"
                               << q.lastError().text();
             db.rollback();
             return;
@@ -341,7 +341,7 @@ void LibraryStore::upsertEpisodes(const QString& seriesImdbId,
     }
 
     if (!db.commit()) {
-        qCWarning(KINEMA) << "LibraryStore: episode commit failed:"
+        qCWarning(KINEMA_APP) << "LibraryStore: episode commit failed:"
                           << db.lastError().text();
         db.rollback();
         return;
@@ -356,7 +356,7 @@ void LibraryStore::remove(api::MediaKind kind, const QString& imdbId)
     }
     auto db = QSqlDatabase::database(m_db.connectionName());
     if (!db.transaction()) {
-        qCWarning(KINEMA) << "LibraryStore: remove transaction failed:"
+        qCWarning(KINEMA_APP) << "LibraryStore: remove transaction failed:"
                           << db.lastError().text();
         return;
     }
@@ -367,7 +367,7 @@ void LibraryStore::remove(api::MediaKind kind, const QString& imdbId)
     q.addBindValue(mediaKindToDb(kind));
     q.addBindValue(imdbId);
     if (!q.exec()) {
-        qCWarning(KINEMA) << "LibraryStore: remove title failed:"
+        qCWarning(KINEMA_APP) << "LibraryStore: remove title failed:"
                           << q.lastError().text();
         db.rollback();
         return;
@@ -379,7 +379,7 @@ void LibraryStore::remove(api::MediaKind kind, const QString& imdbId)
             "DELETE FROM library_episodes WHERE series_imdb_id = ?"));
         q.addBindValue(imdbId);
         if (!q.exec()) {
-            qCWarning(KINEMA) << "LibraryStore: remove episodes failed:"
+            qCWarning(KINEMA_APP) << "LibraryStore: remove episodes failed:"
                               << q.lastError().text();
             db.rollback();
             return;
@@ -387,7 +387,7 @@ void LibraryStore::remove(api::MediaKind kind, const QString& imdbId)
     }
 
     if (!db.commit()) {
-        qCWarning(KINEMA) << "LibraryStore: remove commit failed:"
+        qCWarning(KINEMA_APP) << "LibraryStore: remove commit failed:"
                           << db.lastError().text();
         db.rollback();
         return;

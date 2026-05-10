@@ -31,6 +31,7 @@ class TorrentioSettings;
 }
 
 namespace kinema::controllers {
+class DownloadController;
 class LibraryController;
 class PlayQueueController;
 class TokenController;
@@ -258,11 +259,16 @@ public Q_SLOTS:
     /// detail VM. Safe to leave unset for tests.
     void setPlayQueue(controllers::PlayQueueController* queue);
 
+    /// Wire the download controller. Same two-phase pattern.
+    void setDownloadController(controllers::DownloadController* dl);
+
     /// Per-row action handlers driven by `StreamCard.qml`'s ⋮ menu.
     /// Each routes through `controllers::PlayQueueController`.
     void playNow(int row);
     void playNext(int row);
     void enqueue(int row);
+    /// Hand the row's stream to `controllers::DownloadController::enqueue`.
+    void saveOffline(int row, bool pinned);
     void copyMagnet(int row);
     void openMagnet(int row);
     void copyDirectUrl(int row);
@@ -342,6 +348,7 @@ private:
     controllers::LibraryController* m_library {};
     controllers::WatchedController* m_watched {};
     controllers::PlayQueueController* m_queue {};
+    controllers::DownloadController* m_downloads {};
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;
     const QString& m_rdToken;

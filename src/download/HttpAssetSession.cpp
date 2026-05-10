@@ -6,10 +6,11 @@
 #include "config/DownloadSettings.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
-#include "kinema_debug.h"
+#include "kinema_log_download.h"
 
 #include <KLocalizedString>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -264,7 +265,7 @@ QCoro::Task<bool> HttpAssetSession::fetchChunk(int chunkIndex)
     } catch (const core::HttpError& e) {
         const int s = e.httpStatus();
         if (s == 401 || s == 403 || s == 410) {
-            qCInfo(KINEMA) << "HttpAssetSession: upstream expired ("
+            qCInfo(KINEMA_DOWNLOAD) << "HttpAssetSession: upstream expired ("
                            << s << "), re-resolving";
             needRetry = true;
         } else {
@@ -303,7 +304,31 @@ QCoro::Task<bool> HttpAssetSession::fetchChunk(int chunkIndex)
 
     markChunkAvailable(chunkIndex);
     saveChunkMap();
-    Q_EMIT cachedBytesChanged(cachedBytes());
+    const qint64 cached = cachedBytes();
+    Q_EMIT cachedBytesChanged(cached);
+
+    // Synthesise a download rate as an EWMA over byte deltas. The
+    // first sample seeds the baseline; later samples blend the new
+    // instantaneous bytes-per-second at α = 0.4.
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastSampleAtMsec > 0) {
+        const qint64 dtMs = nowMs - m_lastSampleAtMsec;
+        const qint64 dBytes = cached - m_lastSampleBytes;
+        if (dtMs > 50 && dBytes >= 0) {
+            const qint64 instBps = (dBytes * 1000) / dtMs;
+            m_emaRateBps = (m_emaRateBps == 0)
+                ? instBps
+                : (instBps * 4 + m_emaRateBps * 6) / 10;
+        }
+    }
+    m_lastSampleAtMsec = nowMs;
+    m_lastSampleBytes = cached;
+
+    int eta = -1;
+    if (m_emaRateBps > 0 && m_fileSize > cached) {
+        eta = static_cast<int>((m_fileSize - cached) / m_emaRateBps);
+    }
+    Q_EMIT liveStatsChanged(m_emaRateBps, /*peers=*/0, /*seeds=*/0, eta);
 
     if (chunkIndex == m_totalChunks - 1
         && std::all_of(m_chunkAvailable.begin(),

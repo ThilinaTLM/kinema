@@ -9,7 +9,7 @@
 #include "controllers/PlaybackController.h"
 #include "core/IdleInhibitor.h"
 #include "core/MprisMetadata.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
@@ -382,7 +382,7 @@ void MprisController::ensureRegistration()
     m_objectRegistered = QDBusConnection::sessionBus().registerObject(
         QString::fromLatin1(kPath), this, QDBusConnection::ExportAdaptors);
     if (!m_objectRegistered) {
-        qCWarning(KINEMA) << "failed to register MPRIS object";
+        qCWarning(KINEMA_APP) << "failed to register MPRIS object";
     }
 }
 
@@ -395,7 +395,7 @@ void MprisController::setRegistered(bool on)
         m_serviceRegistered = QDBusConnection::sessionBus().registerService(
             QString::fromLatin1(kService));
         if (!m_serviceRegistered) {
-            qCWarning(KINEMA) << "failed to acquire MPRIS service name"
+            qCWarning(KINEMA_APP) << "failed to acquire MPRIS service name"
                               << kService;
         }
         return;

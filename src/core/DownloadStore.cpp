@@ -5,7 +5,7 @@
 
 #include "core/Database.h"
 #include "core/SqlUtil.h"
-#include "kinema_debug.h"
+#include "kinema_log_download.h"
 
 #include <QDateTime>
 #include <QSqlError>
@@ -108,7 +108,7 @@ QList<api::DownloadItem> DownloadStore::loadAll() const
             "SELECT %1 FROM download_items "
             "ORDER BY updated_at DESC")
                     .arg(QString::fromLatin1(kSelectColumns)))) {
-        qCWarning(KINEMA) << "DownloadStore::loadAll failed:"
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::loadAll failed:"
                           << q.lastError().text();
         return out;
     }
@@ -225,7 +225,12 @@ void DownloadStore::upsert(const api::DownloadItem& item)
     q.addBindValue(nullSafe(item.title));
     q.addBindValue(nullSafe(item.seriesTitle));
     q.addBindValue(nullSafe(item.episodeTitle));
-    q.addBindValue(item.poster.isEmpty() ? QString() : item.poster.toString());
+    // The schema is `poster_url TEXT NOT NULL DEFAULT ''`, so we
+    // must send an actual empty string rather than a default-
+    // constructed (null) QString — the latter binds as SQL NULL.
+    q.addBindValue(item.poster.isEmpty()
+            ? QStringLiteral("")
+            : item.poster.toString());
 
     q.addBindValue(nullSafe(item.infoHash));
     q.addBindValue(nullSafe(item.releaseName));
@@ -251,7 +256,7 @@ void DownloadStore::upsert(const api::DownloadItem& item)
     q.addBindValue(used);
 
     if (!q.exec()) {
-        qCWarning(KINEMA) << "DownloadStore::upsert failed:"
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::upsert failed:"
                           << q.lastError().text();
         return;
     }
@@ -277,7 +282,7 @@ void DownloadStore::updateProgress(const QString& assetId,
     q.addBindValue(now);
     q.addBindValue(assetId);
     if (!q.exec()) {
-        qCWarning(KINEMA) << "DownloadStore::updateProgress failed:"
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::updateProgress failed:"
                           << q.lastError().text();
         return;
     }
@@ -301,7 +306,7 @@ void DownloadStore::updateState(const QString& assetId,
     q.addBindValue(now);
     q.addBindValue(assetId);
     if (!q.exec()) {
-        qCWarning(KINEMA) << "DownloadStore::updateState failed:"
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::updateState failed:"
                           << q.lastError().text();
         return;
     }
@@ -324,7 +329,7 @@ void DownloadStore::setDisposition(const QString& assetId,
     q.addBindValue(now);
     q.addBindValue(assetId);
     if (!q.exec()) {
-        qCWarning(KINEMA) << "DownloadStore::setDisposition failed:"
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::setDisposition failed:"
                           << q.lastError().text();
         return;
     }
@@ -343,7 +348,7 @@ void DownloadStore::touch(const QString& assetId)
     q.addBindValue(now);
     q.addBindValue(assetId);
     if (!q.exec()) {
-        qCWarning(KINEMA) << "DownloadStore::touch failed:"
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::touch failed:"
                           << q.lastError().text();
     }
 }
@@ -357,7 +362,7 @@ void DownloadStore::remove(const QString& assetId)
     q.prepare(QStringLiteral("DELETE FROM download_items WHERE asset_id = ?"));
     q.addBindValue(assetId);
     if (!q.exec()) {
-        qCWarning(KINEMA) << "DownloadStore::remove failed:"
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::remove failed:"
                           << q.lastError().text();
         return;
     }
@@ -371,7 +376,7 @@ void DownloadStore::clear()
     }
     auto q = m_db.query();
     if (!q.exec(QStringLiteral("DELETE FROM download_items"))) {
-        qCWarning(KINEMA) << "DownloadStore::clear failed:"
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::clear failed:"
                           << q.lastError().text();
         return;
     }

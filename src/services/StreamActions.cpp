@@ -8,7 +8,7 @@
 #include "core/PlayerLauncher.h"
 #include "core/HttpErrorPresenter.h"
 #include "download/DownloadManager.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 #include "torrent/TorrentStreamingService.h"
 
 #include <KIO/OpenUrlJob>
@@ -52,7 +52,7 @@ void StreamActions::launchOpenUrlJob(const QUrl& url,
                 i18nc("@info:status", "%1: %2",
                     failurePrefix, job->errorString()),
                 6000);
-            qCWarning(KINEMA) << failureLogTag << "failed:"
+            qCWarning(KINEMA_APP) << failureLogTag << "failed:"
                               << job->errorString();
             return;
         }

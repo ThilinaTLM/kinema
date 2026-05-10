@@ -5,7 +5,7 @@
 
 #include "core/Database.h"
 #include "core/SqlUtil.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 #include <QDateTime>
 #include <QSqlDatabase>
@@ -126,7 +126,7 @@ QList<api::QueueItem> PlayQueueStore::loadAll() const
     if (!q.exec(QStringLiteral("SELECT ")
             + QString::fromLatin1(kSelectColumns)
             + QStringLiteral(" FROM play_queue ORDER BY ord ASC"))) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "PlayQueueStore: loadAll failed:" << q.lastError().text();
         return out;
     }
@@ -145,7 +145,7 @@ qint64 PlayQueueStore::insert(const api::QueueItem& item)
     q.prepare(QString::fromLatin1(kInsertSql));
     bindInsertValues(q, item);
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "PlayQueueStore: insert failed:" << q.lastError().text();
         return 0;
     }
@@ -161,7 +161,7 @@ void PlayQueueStore::remove(qint64 id)
     q.prepare(QStringLiteral("DELETE FROM play_queue WHERE id = ?"));
     q.addBindValue(id);
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "PlayQueueStore: remove failed:" << q.lastError().text();
     }
 }
@@ -173,7 +173,7 @@ void PlayQueueStore::clear()
     }
     auto q = m_db.query();
     if (!q.exec(QStringLiteral("DELETE FROM play_queue"))) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "PlayQueueStore: clear failed:" << q.lastError().text();
     }
 }
@@ -187,7 +187,7 @@ QList<api::QueueItem> PlayQueueStore::replaceAll(
 
     auto db = QSqlDatabase::database(m_db.connectionName());
     if (!db.transaction()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "PlayQueueStore: transaction() failed:"
             << db.lastError().text();
         return {};
@@ -195,7 +195,7 @@ QList<api::QueueItem> PlayQueueStore::replaceAll(
 
     QSqlQuery clearQ(db);
     if (!clearQ.exec(QStringLiteral("DELETE FROM play_queue"))) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "PlayQueueStore: replaceAll DELETE failed:"
             << clearQ.lastError().text();
         db.rollback();
@@ -234,7 +234,7 @@ QList<api::QueueItem> PlayQueueStore::replaceAll(
             : QDateTime::currentDateTimeUtc();
         ins.bindValue(15, isoUtc(added));
         if (!ins.exec()) {
-            qCWarning(KINEMA)
+            qCWarning(KINEMA_APP)
                 << "PlayQueueStore: replaceAll INSERT failed:"
                 << ins.lastError().text();
             db.rollback();
@@ -247,7 +247,7 @@ QList<api::QueueItem> PlayQueueStore::replaceAll(
     }
 
     if (!db.commit()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "PlayQueueStore: replaceAll commit failed:"
             << db.lastError().text();
         db.rollback();

@@ -77,6 +77,15 @@ Q_SIGNALS:
     void completed();
     void statusMessage(const QString& text, int timeoutMs);
     void failed(const QString& reason);
+
+    /// Periodic transient telemetry (rate / peers / ETA). The
+    /// torrent backend forwards engine-side stats, the HTTP backend
+    /// computes a rate from byte deltas and reports `peers=0`.
+    /// Subscribers must not assume a fixed cadence.
+    void liveStatsChanged(qint64 ratePayloadBps,
+        int peers,
+        int seeds,
+        int etaSeconds);
 };
 
 } // namespace kinema::download

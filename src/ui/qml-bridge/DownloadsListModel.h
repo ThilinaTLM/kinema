@@ -23,8 +23,11 @@ public:
         SubtitleRole,
         PosterUrlRole,
         BackendKindRole,
+        BackendIconRole,
+        BackendLabelRole,
         StateRole,
         StateTextRole,
+        StateToneRole,
         DispositionRole,
         IsPinnedRole,
         IsCompleteRole,
@@ -39,6 +42,21 @@ public:
         ReleaseNameRole,
         ErrorTextRole,
         LocalDirRole,
+        DownloadRateBpsRole,
+        DownloadRateTextRole,
+        PeersRole,
+        SeedsRole,
+        EtaSecondsRole,
+        EtaTextRole,
+    };
+
+    /// Transient telemetry sourced from `DownloadManager::liveStatsFor`.
+    /// The view-model populates this map before `setItems` runs.
+    struct LiveRow {
+        qint64 ratePayloadBps = 0;
+        int    peers = 0;
+        int    seeds = 0;
+        int    etaSeconds = -1;
     };
 
     explicit DownloadsListModel(QObject* parent = nullptr);
@@ -47,7 +65,8 @@ public:
     QVariant data(const QModelIndex& index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    void setItems(QList<api::DownloadItem> items);
+    void setItems(QList<api::DownloadItem> items,
+        QHash<QString, LiveRow> liveStats = {});
     const QList<api::DownloadItem>& items() const noexcept { return m_items; }
 
 Q_SIGNALS:
@@ -55,6 +74,7 @@ Q_SIGNALS:
 
 private:
     QList<api::DownloadItem> m_items;
+    QHash<QString, LiveRow> m_liveStats;
 };
 
 } // namespace kinema::ui::qml

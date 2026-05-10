@@ -6,7 +6,6 @@
 #include "api/TmdbClient.h"
 #include "controllers/TokenController.h"
 #include "core/HttpErrorPresenter.h"
-#include "kinema_debug.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 
 #include <KLocalizedString>

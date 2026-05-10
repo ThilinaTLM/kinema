@@ -5,7 +5,7 @@
 
 #include "core/HttpClient.h"
 #include "core/UrlRedactor.h"
-#include "kinema_debug.h"
+#include "kinema_log_http.h"
 
 #include <QCoro/QCoroFuture>
 
@@ -135,12 +135,12 @@ QCoro::Task<QImage> ImageLoader::requestPoster(QUrl url)
                 m_failedUrls.insert(url);
             }
         } else {
-            qCDebug(KINEMA) << "poster decode failed for"
+            qCDebug(KINEMA_HTTP) << "poster decode failed for"
                             << core::redactUrlForLog(url);
             m_failedUrls.insert(url);
         }
     } catch (const std::exception& e) {
-        qCDebug(KINEMA) << "poster fetch failed:" << e.what();
+        qCDebug(KINEMA_HTTP) << "poster fetch failed:" << e.what();
         m_failedUrls.insert(url);
     }
 

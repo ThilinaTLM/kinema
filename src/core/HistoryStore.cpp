@@ -5,7 +5,7 @@
 
 #include "core/Database.h"
 #include "core/SqlUtil.h"
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 #include <QDateTime>
 #include <QSqlError>
@@ -115,13 +115,13 @@ void HistoryStore::runRetentionPass()
         "WHERE finished = 1 AND last_watched_at < ?"));
     q.addBindValue(isoUtc(cutoff));
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "HistoryStore: retention pass failed:"
             << q.lastError().text();
         return;
     }
     if (q.numRowsAffected() > 0) {
-        qCInfo(KINEMA) << "HistoryStore: retention removed"
+        qCInfo(KINEMA_APP) << "HistoryStore: retention removed"
                        << q.numRowsAffected() << "finished rows";
         scheduleChanged();
     }
@@ -186,7 +186,7 @@ QList<api::HistoryEntry> HistoryStore::continueWatching(int limit) const
             LIMIT ?)"));
     q.addBindValue(limit);
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "HistoryStore: continueWatching failed:"
             << q.lastError().text();
         return out;
@@ -313,7 +313,7 @@ void HistoryStore::record(const api::HistoryEntry& entry)
     q.addBindValue(nullSafe(e.rememberedSubtitleLang));
 
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "HistoryStore: upsert failed for" << keyStr
             << "\u2014" << q.lastError().text();
         return;
@@ -330,7 +330,7 @@ void HistoryStore::remove(const api::PlaybackKey& key)
     q.prepare(QStringLiteral("DELETE FROM history WHERE key = ?"));
     q.addBindValue(key.storageKey());
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "HistoryStore: remove failed:" << q.lastError().text();
         return;
     }
@@ -351,7 +351,7 @@ void HistoryStore::setRememberedSubtitleLang(const api::PlaybackKey& key,
     q.addBindValue(nullSafe(lang));
     q.addBindValue(key.storageKey());
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "HistoryStore: setRememberedSubtitleLang failed:"
             << q.lastError().text();
         return;
@@ -368,7 +368,7 @@ void HistoryStore::clear()
     }
     auto q = m_db.query();
     if (!q.exec(QStringLiteral("DELETE FROM history"))) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "HistoryStore: clear failed:" << q.lastError().text();
         return;
     }

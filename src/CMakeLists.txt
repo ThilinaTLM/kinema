@@ -144,12 +144,50 @@ if(KINEMA_ENABLE_MPV_EMBED)
     )
 endif()
 
+# Per-subsystem logging categories. Each block emits a generated
+# header (kinema_log_<name>.h) under ${CMAKE_CURRENT_BINARY_DIR}.
+# Files include only the headers they need and call qC*() with the
+# matching identifier so users can tune verbosity per subsystem with
+# QT_LOGGING_RULES, e.g.
+#   QT_LOGGING_RULES='kinema.torrent.debug=true'
 ecm_qt_declare_logging_category(kinema_core_SRCS
-    HEADER kinema_debug.h
-    IDENTIFIER KINEMA
-    CATEGORY_NAME dev.tlmtech.kinema
+    HEADER kinema_log_app.h
+    IDENTIFIER KINEMA_APP
+    CATEGORY_NAME kinema.app
     DEFAULT_SEVERITY Info
-    DESCRIPTION "Kinema"
+    DESCRIPTION "Kinema (app shell, controllers, view-models)"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_torrent.h
+    IDENTIFIER KINEMA_TORRENT
+    CATEGORY_NAME kinema.torrent
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema torrent engine"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_download.h
+    IDENTIFIER KINEMA_DOWNLOAD
+    CATEGORY_NAME kinema.download
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema unified download manager"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_rd.h
+    IDENTIFIER KINEMA_RD
+    CATEGORY_NAME kinema.rd
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema Real-Debrid integration"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_http.h
+    IDENTIFIER KINEMA_HTTP
+    CATEGORY_NAME kinema.http
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema HTTP client + image fetches"
     EXPORT KINEMA
 )
 
