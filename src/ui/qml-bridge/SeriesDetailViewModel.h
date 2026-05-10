@@ -111,7 +111,6 @@ class SeriesDetailViewModel : public QObject
     // ---- streams configuration ------------------------------------
     Q_PROPERTY(int sortMode READ sortMode WRITE setSortMode NOTIFY sortChanged)
     Q_PROPERTY(bool sortDescending READ sortDescending WRITE setSortDescending NOTIFY sortChanged)
-    Q_PROPERTY(bool cachedOnly READ cachedOnly WRITE setCachedOnly NOTIFY cachedOnlyChanged)
     Q_PROPERTY(bool realDebridConfigured READ realDebridConfigured NOTIFY realDebridConfiguredChanged)
     Q_PROPERTY(int rawStreamsCount READ rawStreamsCount NOTIFY rawStreamsCountChanged)
     // Transient UI-only filter axes consumed by the `StreamsPage`
@@ -195,8 +194,6 @@ public:
     void setSortMode(int mode);
     bool sortDescending() const noexcept { return m_sortDescending; }
     void setSortDescending(bool desc);
-    bool cachedOnly() const;
-    void setCachedOnly(bool on);
     bool realDebridConfigured() const noexcept { return !m_rdToken.isEmpty(); }
     int rawStreamsCount() const noexcept
     {
@@ -294,7 +291,6 @@ Q_SIGNALS:
     void selectedEpisodeChanged();
     void similarChanged();
     void sortChanged();
-    void cachedOnlyChanged();
     void realDebridConfiguredChanged();
     void rawStreamsCountChanged();
     void uiFiltersChanged();

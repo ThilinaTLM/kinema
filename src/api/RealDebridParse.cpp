@@ -51,55 +51,6 @@ RealDebridUser parseUser(const QJsonDocument& doc)
     return u;
 }
 
-RdInstantAvailability parseInstantAvailability(const QJsonDocument& doc,
-    const QString& infoHash)
-{
-    if (!doc.isObject()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("Real-Debrid instant-availability response was not a JSON object."));
-    }
-    RdInstantAvailability out;
-    out.infoHash = infoHash.toLower();
-
-    const auto root = doc.object();
-    // RD keys responses by the info-hash lowercased. Try direct match
-    // first, then fall back to a case-insensitive lookup.
-    QJsonValue entry = root.value(out.infoHash);
-    if (entry.isUndefined()) {
-        for (auto it = root.begin(); it != root.end(); ++it) {
-            if (it.key().compare(out.infoHash, Qt::CaseInsensitive) == 0) {
-                entry = it.value();
-                break;
-            }
-        }
-    }
-    if (!entry.isObject()) {
-        return out; // not cached / unknown shape
-    }
-    const auto rdArr = entry.toObject().value(QStringLiteral("rd")).toArray();
-    out.variants.reserve(rdArr.size());
-    for (const auto& vRaw : rdArr) {
-        if (!vRaw.isObject()) {
-            continue;
-        }
-        const auto variantObj = vRaw.toObject();
-        RdInstantVariant variant;
-        variant.files.reserve(variantObj.size());
-        for (auto it = variantObj.begin(); it != variantObj.end(); ++it) {
-            RdInstantVariantFile f;
-            f.fileId = it.key().toInt();
-            const auto fObj = it.value().toObject();
-            f.filename = fObj.value(QStringLiteral("filename")).toString();
-            f.sizeBytes = readInt64(fObj.value(QStringLiteral("filesize")));
-            variant.files.append(f);
-        }
-        if (!variant.files.isEmpty()) {
-            out.variants.append(std::move(variant));
-        }
-    }
-    return out;
-}
-
 RdAddMagnetResult parseAddMagnet(const QJsonDocument& doc)
 {
     if (!doc.isObject()) {

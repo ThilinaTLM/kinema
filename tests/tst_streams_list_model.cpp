@@ -15,8 +15,7 @@ Stream makeStream(const QString& releaseName,
     const QString& resolution,
     const QString& provider,
     qint64 size,
-    int seeders,
-    bool rdCached = false)
+    int seeders)
 {
     Stream s;
     s.releaseName = releaseName;
@@ -24,7 +23,6 @@ Stream makeStream(const QString& releaseName,
     s.provider = provider;
     s.sizeBytes = size;
     s.seeders = seeders;
-    s.rdCached = rdCached;
     s.infoHash = QStringLiteral("0123456789abcdef");
     return s;
 }
@@ -141,7 +139,6 @@ private Q_SLOTS:
                                  QByteArrayLiteral("provider"),
                                  QByteArrayLiteral("hasMagnet"),
                                  QByteArrayLiteral("hasDirectUrl"),
-                                 QByteArrayLiteral("rdCached"),
                                  QByteArrayLiteral("chips"),
                                  QByteArrayLiteral("source"),
                                  QByteArrayLiteral("codec"),
@@ -163,15 +160,10 @@ private Q_SLOTS:
             QStringLiteral("1080p"),
             QStringLiteral("rargb"), 1, 5);
         const auto chips = StreamsListModel::chipsFor(raw);
-        // Expected: resolution + provider, no RD chip when not flagged.
+        // Expected: resolution + provider.
         QVERIFY(chips.contains(QStringLiteral("1080p")));
         QVERIFY(chips.contains(QStringLiteral("rargb")));
         QCOMPARE(chips.size(), 2);
-
-        auto rd = raw;
-        rd.rdCached = true;
-        const auto rdChips = StreamsListModel::chipsFor(rd);
-        QVERIFY(rdChips.contains(QStringLiteral("RD+")));
     }
 
     void testFormatSize()
@@ -183,17 +175,15 @@ private Q_SLOTS:
         QVERIFY(!StreamsListModel::formatSize(1'500'000'000).isEmpty());
     }
 
-    void testQualityLabelRoleAddsRdSuffix()
+    void testQualityLabelRoleIsResolution()
     {
         StreamsListModel m;
-        auto rd = makeStream(QStringLiteral("X"),
+        m.setItems({ makeStream(QStringLiteral("X"),
             QStringLiteral("1080p"),
-            QStringLiteral("p"), 1, 1, /*rdCached=*/true);
-        m.setItems({ rd });
+            QStringLiteral("p"), 1, 1) });
         const auto label = m.data(m.index(0),
             StreamsListModel::QualityLabelRole).toString();
-        QVERIFY2(label.contains(QStringLiteral("[RD+]")),
-            qPrintable(label));
+        QCOMPARE(label, QStringLiteral("1080p"));
     }
 
     void testSummaryLineAndTagsRoles()
@@ -203,7 +193,7 @@ private Q_SLOTS:
             QStringLiteral("From.S01.1080p.WEB-DL.x265.10bit.DV.HDR10Plus.EAC3-QxR"),
             QStringLiteral("1080p"),
             QStringLiteral("TorrentGalaxy"),
-            1'500'000'000, 42, /*rdCached=*/true);
+            1'500'000'000, 42);
         m.setItems({ s });
 
         const auto summary = m.data(m.index(0),
@@ -217,10 +207,9 @@ private Q_SLOTS:
 
         const auto tags = m.data(m.index(0),
             StreamsListModel::TagsRole).toStringList();
-        // Tags do NOT include resolution or RD — those have dedicated
-        // visual treatment in the leading quality block.
+        // Tags do NOT include resolution — it has dedicated visual
+        // treatment in the leading quality block.
         QVERIFY(!tags.contains(QStringLiteral("1080p")));
-        QVERIFY(!tags.contains(QStringLiteral("RD+")));
         // Tags also avoid duplicating facts already carried by
         // `summaryLine`.
         QVERIFY(!tags.contains(QStringLiteral("x265 10-bit")));

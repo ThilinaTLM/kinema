@@ -84,27 +84,18 @@ QQC2.Menu {
         onTriggered: menu.vm.openDirectUrl(menu.row)
     }
     QQC2.MenuSeparator { }
-    // Backend override sub-menu. The default `\u2b07 Download`
-    // button uses `BackendSelector`'s priority (Real-Debrid first
-    // when configured); these items force a specific transport.
-    QQC2.Menu {
-        title: i18nc("@action:inmenu submenu", "Force backend")
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Real-Debrid")
-            icon.source: AppIcons.url("folder-cloud")
-            icon.color: AppIcons.controlColor(enabled, false)
-            enabled: menu.hasMagnet || menu.hasDirectUrl
-            // 1 == api::DownloadBackendKind::RealDebridHttp
-            onTriggered: menu.vm.downloadWithBackend(menu.row, 1)
-        }
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Torrent")
-            icon.source: AppIcons.url("network-server-database")
-            icon.color: AppIcons.controlColor(enabled, false)
-            enabled: menu.hasMagnet
-            // 0 == api::DownloadBackendKind::Torrent
-            onTriggered: menu.vm.downloadWithBackend(menu.row, 0)
-        }
+    // Backend escape hatch. The default `\u2b07 Download` button
+    // routes through Real-Debrid when configured; this leaf forces
+    // libtorrent for users who want to bypass RD on a specific
+    // release (e.g. RD is having a slow day).
+    QQC2.MenuItem {
+        text: i18nc("@action:inmenu force libtorrent backend",
+            "Use torrent for this download")
+        icon.source: AppIcons.url("network-server-database")
+        icon.color: AppIcons.controlColor(enabled, false)
+        enabled: menu.hasMagnet
+        // 0 == api::DownloadBackendKind::Torrent
+        onTriggered: menu.vm.downloadWithBackend(menu.row, 0)
     }
     QQC2.MenuSeparator { }
     QQC2.MenuItem {

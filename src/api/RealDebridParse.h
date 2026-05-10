@@ -20,25 +20,6 @@ namespace kinema::api::realdebrid {
 RealDebridUser parseUser(const QJsonDocument& doc);
 
 /**
- * Parse `GET /torrents/instantAvailability/{hash}` response.
- *
- * Real-Debrid replies with a per-host map keyed by lowercase info-hash:
- *   {
- *     "<hash>": {
- *       "rd": [
- *         { "<fileId>": { "filename": "...", "filesize": 12345 }, ... },
- *         { "<fileId>": ... }
- *       ]
- *     }
- *   }
- *
- * An empty object (or a hash whose `rd` array is empty/missing) means
- * "not cached". Non-rd hosts are ignored — Kinema only consumes RD.
- */
-RdInstantAvailability parseInstantAvailability(const QJsonDocument& doc,
-    const QString& infoHash);
-
-/**
  * Parse `POST /torrents/addMagnet` response: { id, uri }.
  */
 RdAddMagnetResult parseAddMagnet(const QJsonDocument& doc);

@@ -69,15 +69,6 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     , m_similar(new DiscoverSectionModel(
           i18nc("@label movie detail rail", "More like this"), this))
 {
-    // Persisted filter inputs feed the same rebuild path the user-
-    // facing "Cached on RD only" toggle does, so a settings change
-    // during another phase reflows the visible list immediately.
-    connect(&m_settings.torrentio(),
-        &config::TorrentioSettings::cachedOnlyChanged, this,
-        [this](bool) {
-            Q_EMIT cachedOnlyChanged();
-            rebuildVisibleStreams();
-        });
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });
@@ -92,8 +83,9 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     }
 
     if (m_tokens) {
-        // RD token presence drives the cachedOnly checkbox visibility
-        // (`realDebridConfigured`) and gates RD direct-URL columns.
+        // RD token presence drives the `realDebridConfigured` chip
+        // visibility on the streams page and routing inside the
+        // download manager (RD-first when configured).
         connect(m_tokens,
             &controllers::TokenController::realDebridTokenChanged,
             this, [this](const QString&) {
@@ -104,21 +96,6 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
 }
 
 MovieDetailViewModel::~MovieDetailViewModel() = default;
-
-bool MovieDetailViewModel::cachedOnly() const
-{
-    return m_settings.torrentio().cachedOnly();
-}
-
-void MovieDetailViewModel::setCachedOnly(bool on)
-{
-    if (m_settings.torrentio().cachedOnly() == on) {
-        return;
-    }
-    m_settings.torrentio().setCachedOnly(on);
-    // The KConfig setter fires `cachedOnlyChanged`, which re-renders
-    // through the connection above. We don't manually emit here.
-}
 
 void MovieDetailViewModel::setSortMode(int mode)
 {
@@ -586,15 +563,9 @@ void MovieDetailViewModel::rebuildVisibleStreams()
 
     QString emptyExplanation;
     if (visible.isEmpty() && !m_rawStreams.isEmpty()) {
-        const bool cachedFiltered
-            = realDebridConfigured() && cachedOnly();
-        emptyExplanation = cachedFiltered
-            ? i18nc("@info streams empty",
-                "Uncheck \u201cCached on Real-Debrid only\u201d or "
-                "widen your filters in Settings.")
-            : i18nc("@info streams empty",
-                "Loosen the exclusions or keyword blocklist in "
-                "Settings.");
+        emptyExplanation = i18nc("@info streams empty",
+            "Loosen the exclusions or keyword blocklist in "
+            "Settings.");
     } else if (visible.isEmpty()) {
         emptyExplanation = i18nc("@info streams empty",
             "Try a different release or widen your filters.");
@@ -609,7 +580,6 @@ QList<api::Stream> MovieDetailViewModel::applyFilters() const
         return {};
     }
     core::stream_filter::ClientFilters f;
-    f.cachedOnly = realDebridConfigured() && cachedOnly();
     f.keywordBlocklist = m_settings.filter().keywordBlocklist();
     auto rows = core::stream_filter::apply(m_rawStreams, f);
 

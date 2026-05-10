@@ -18,11 +18,6 @@ namespace kinema::core::stream_filter {
  * these are the knobs we can't push upstream.
  */
 struct ClientFilters {
-    /// When true, only rows with `Stream::rdCached == true` survive.
-    /// Callers are expected to only set this when Real-Debrid is
-    /// actually configured.
-    bool cachedOnly = false;
-
     /// Case-insensitive substring blocklist applied to `releaseName`
     /// and `detailsText`. Empty strings are ignored.
     QStringList keywordBlocklist;

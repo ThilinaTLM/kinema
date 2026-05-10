@@ -95,8 +95,6 @@ Stream parseOne(const QJsonObject& obj)
     const auto nameRaw = obj.value(QStringLiteral("name")).toString();
     // `name` is sometimes multi-line; first line is the quality label.
     s.qualityLabel = nameRaw.section(QLatin1Char('\n'), 0, 0).trimmed();
-    s.rdCached = nameRaw.contains(QLatin1String("[RD+]"));
-    s.rdDownload = nameRaw.contains(QLatin1String("[RD download]"));
 
     const auto titleRaw = obj.value(QStringLiteral("title")).toString();
     if (!titleRaw.isEmpty()) {

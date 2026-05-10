@@ -65,30 +65,6 @@ private Q_SLOTS:
         QVERIFY(!u.premiumUntil.has_value());
     }
 
-    void instantAvailability_cached_listsVariants()
-    {
-        const auto doc = loadFixture("rd_instant_availability_cached.json");
-        const auto av = realdebrid::parseInstantAvailability(doc,
-            QStringLiteral("AABB1122CCDD3344EEFF5566778899AABBCCDDEE"));
-
-        QVERIFY(av.cached());
-        QCOMPARE(av.variants.size(), 2);
-        QCOMPARE(av.variants.at(0).files.size(), 2);
-        const auto& f0 = av.variants.at(0).files.at(0);
-        QCOMPARE(f0.fileId, 1);
-        QCOMPARE(f0.filename, QStringLiteral("Sample.Movie.2023.1080p.mkv"));
-        QCOMPARE(f0.sizeBytes, qint64(2147483648));
-    }
-
-    void instantAvailability_uncached_returnsEmpty()
-    {
-        const auto doc = loadFixture("rd_instant_availability_uncached.json");
-        const auto av = realdebrid::parseInstantAvailability(doc,
-            QStringLiteral("ff00112233445566778899aabbccddeeff001122"));
-        QVERIFY(!av.cached());
-        QVERIFY(av.variants.isEmpty());
-    }
-
     void addMagnet_extractsId()
     {
         const auto doc = loadFixture("rd_add_magnet.json");

@@ -38,7 +38,6 @@
 #include "download/DownloadManager.h"
 #include "kinema_log_app.h"
 #include "services/StreamActions.h"
-#include "services/StreamAvailabilityService.h"
 #include "torrent/TorrentStreamingService.h"
 #include "ui/ImageLoader.h"
 #include "ui/qml-bridge/BrowseViewModel.h"
@@ -303,18 +302,15 @@ void MainController::buildCoreServices()
         *m_torrentCache, m_settings.torrentStreaming(), this);
     m_streamActions = new services::StreamActions(
         m_player.get(), m_torrentStreaming, this);
-    // RD-aware availability annotator. Used by the detail VMs to
-    // mark streams `rdCached` after Torrentio's discovery results
-    // come back — RD is no longer encoded into the Torrentio URL
-    // so we have to ask RD itself which hashes are instantly
-    // available.
 
     // Real-Debrid client + unified downloader settings/cache. The
     // RD client picks up its token from the keyring once the
-    // TokenController has fired its initial reads.
+    // TokenController has fired its initial reads. Routing between
+    // RD and the libtorrent backend is decided inside
+    // `download::BackendSelector` at enqueue time — if RD is
+    // configured every stream goes through it; otherwise libtorrent
+    // takes over.
     m_rd = std::make_unique<api::RealDebridClient>(m_http.get(), this);
-    m_streamAvailability = new services::StreamAvailabilityService(
-        *m_rd, this);
     m_mediaCache = std::make_unique<core::MediaCache>(
         m_settings.download(), this);
 

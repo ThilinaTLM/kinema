@@ -126,16 +126,18 @@ QCoro::Task<ResolvedRdLink> RealDebridResolver::resolve(api::AssetRef ref)
             i18n("Real-Debrid resolution requires an info hash."));
     }
 
-    // Step 1: instant availability \u2014 informs whether the user is
-    // about to wait minutes for RD to download or seconds.
-    const auto avail = co_await m_rd.instantAvailability(ref.infoHash);
-    Q_UNUSED(avail);
+    // RD deprecated the `/torrents/instantAvailability/` endpoint
+    // (it returns 403 / empty objects in practice), so we no longer
+    // probe cache state up front \u2014 the result was unused anyway.
+    // We go straight to addMagnet; if RD has the bytes already the
+    // status flips to `downloaded` near-instantly and the loops
+    // below return in one tick.
 
-    // Step 2: Add the magnet to the user's torrents.
+    // Step 1: Add the magnet to the user's torrents.
     const auto magnet = core::magnet::build(ref.infoHash, ref.releaseName);
     const auto added = co_await m_rd.addMagnet(magnet);
 
-    // Step 3: Wait until RD has populated the file list.
+    // Step 2: Wait until RD has populated the file list.
     api::RdTorrentInfo info;
     int waitedMs = 0;
     while (true) {
@@ -151,7 +153,7 @@ QCoro::Task<ResolvedRdLink> RealDebridResolver::resolve(api::AssetRef ref)
         waitedMs += kPollIntervalMs;
     }
 
-    // Step 4: choose file id (uses our scoring) and ask RD to select it.
+    // Step 3: choose file id (uses our scoring) and ask RD to select it.
     int chosenId = -1;
     if (ref.fileIndex >= 0) {
         // Torrentio reports `fileIdx` as a 0-based index; RD ids are
@@ -176,7 +178,7 @@ QCoro::Task<ResolvedRdLink> RealDebridResolver::resolve(api::AssetRef ref)
 
     co_await m_rd.selectFiles(added.id, QList<int> { chosenId });
 
-    // Step 5: Wait until RD has produced a link for the selected file.
+    // Step 4: Wait until RD has produced a link for the selected file.
     waitedMs = 0;
     while (true) {
         info = co_await m_rd.torrentInfo(added.id);
@@ -195,7 +197,7 @@ QCoro::Task<ResolvedRdLink> RealDebridResolver::resolve(api::AssetRef ref)
         waitedMs += kPollIntervalMs;
     }
 
-    // Step 6: unrestrict the (first) hoster link.
+    // Step 5: unrestrict the (first) hoster link.
     const QUrl link = info.links.first();
     const auto unrestricted = co_await m_rd.unrestrictLink(link);
 

@@ -5,6 +5,10 @@
 
 #include "download/DownloadBackend.h"
 
+#include <KLocalizedString>
+
+#include <stdexcept>
+
 namespace kinema::download {
 
 BackendSelector::BackendSelector() = default;
@@ -22,12 +26,18 @@ DownloadBackend* BackendSelector::select(const api::Stream& s,
     std::optional<api::DownloadBackendKind> override) const
 {
     if (override.has_value()) {
-        if (auto* b = find(*override); b && b->canHandle(s)) {
+        auto* b = find(*override);
+        if (b && b->canHandle(s)) {
             return b;
         }
-        // Override requested but the backend can't serve this
-        // stream; fall through to the priority list rather than
-        // refusing outright.
+        // The user explicitly picked a backend; refuse loudly
+        // instead of silently falling back to a different one. The
+        // caller wraps this into a `Failed` row with a useful
+        // message, which is much easier to debug than "why did this
+        // download go to torrent when I asked for RD?".
+        throw std::runtime_error(i18nc("@info:status",
+            "The selected download backend cannot serve this stream.")
+                                     .toStdString());
     }
     for (const auto& b : m_backends) {
         if (b->canHandle(s)) {

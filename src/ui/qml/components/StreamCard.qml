@@ -37,8 +37,6 @@ QQC2.ItemDelegate {
     property string sizeText
     property int seeders: -1
     property string provider
-    property bool rdCached: false
-    property bool rdDownload: false
     property bool hasMagnet: false
     property bool hasDirectUrl: false
     property string resolution
@@ -112,27 +110,6 @@ QQC2.ItemDelegate {
                 tone: "neutral"
             }
 
-            Rectangle {
-                Layout.alignment: Qt.AlignHCenter
-                visible: card.rdCached || card.rdDownload
-                radius: height / 2
-                color: card.rdCached ? Theme.positive : Theme.accent
-                implicitHeight: rdLabel.implicitHeight
-                    + Theme.inlineSpacing
-                implicitWidth: rdLabel.implicitWidth
-                    + Theme.inlineSpacing * 2
-
-                QQC2.Label {
-                    id: rdLabel
-                    anchors.centerIn: parent
-                    text: card.rdCached
-                        ? i18nc("@label stream chip", "RD+")
-                        : i18nc("@label stream chip", "RD")
-                    color: Theme.background
-                    font.pointSize: Theme.captionFont.pointSize
-                    font.weight: Font.DemiBold
-                }
-            }
         }
 
         // ---- 2. Summary column (secondary) ---------------------

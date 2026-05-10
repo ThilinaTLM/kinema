@@ -22,9 +22,9 @@ StackLayout {
     id: streams
 
     /// View-model exposing `streams` (StreamsListModel*),
-    /// `cachedOnly`, `realDebridConfigured`, `rawStreamsCount`,
-    /// `sortMode`, and the `uiResolutionFilter` / `uiHdrOnly` /
-    /// `uiDolbyVisionOnly` / `uiMultiAudioOnly` transient filters.
+    /// `realDebridConfigured`, `rawStreamsCount`, `sortMode`, and
+    /// the `uiResolutionFilter` / `uiHdrOnly` / `uiDolbyVisionOnly`
+    /// / `uiMultiAudioOnly` transient filters.
     /// Defaults to `movieDetailVm`.
     property var vm: movieDetailVm
 
@@ -82,8 +82,6 @@ StackLayout {
             sizeText: model.sizeText
             seeders: model.seeders
             provider: model.provider
-            rdCached: model.rdCached
-            rdDownload: model.rdDownload
             hasMagnet: model.hasMagnet
             hasDirectUrl: model.hasDirectUrl
             resolution: model.resolution
@@ -104,10 +102,8 @@ StackLayout {
                 ? streams.vm.streams.emptyExplanation : ""
             // When the user has narrowed via the filter chips, give
             // them a one-click out instead of forcing a manual untoggle
-            // of each chip. `cachedOnly` is independent of the `ui*`
-            // axes, so we surface the action whenever either is set.
-            helpfulAction: (streams.vm.uiAnyFilterActive
-                    || streams.vm.cachedOnly)
+            // of each chip.
+            helpfulAction: streams.vm.uiAnyFilterActive
                 ? clearFiltersAction : null
             Kirigami.Action {
                 id: clearFiltersAction
@@ -115,10 +111,7 @@ StackLayout {
                 icon.color: AppIcons.foreground
                 text: i18nc("@action:button reset stream filters",
                     "Reset filters")
-                onTriggered: {
-                    streams.vm.cachedOnly = false;
-                    streams.vm.clearUiFilters();
-                }
+                onTriggered: streams.vm.clearUiFilters()
             }
         }
     }

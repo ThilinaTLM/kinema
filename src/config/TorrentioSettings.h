@@ -12,12 +12,12 @@
 namespace kinema::config {
 
 /**
- * Torrentio query defaults (sort mode + RD cached-only toggle).
+ * Torrentio query defaults (currently just the wire-format sort
+ * mode that becomes the `sort=` URL parameter).
  *
  * KConfig group: [General]
  * Keys:
  *   defaultSort   "seeders" | "size" | "qualitysize"
- *   cachedOnly    bool (RD cached-only filter)
  */
 class TorrentioSettings : public QObject
 {
@@ -29,12 +29,8 @@ public:
     core::torrentio::SortMode defaultSort() const;
     void setDefaultSort(core::torrentio::SortMode);
 
-    bool cachedOnly() const;
-    void setCachedOnly(bool);
-
 Q_SIGNALS:
     void defaultSortChanged(core::torrentio::SortMode);
-    void cachedOnlyChanged(bool);
 
 private:
     KSharedConfigPtr m_config;

@@ -86,15 +86,13 @@ Kirigami.Page {
                 icon.source: AppIcons.url("eraser")
                 icon.color: AppIcons.foreground
                 visible: page.detailVm
-                    && (page.detailVm.cachedOnly
-                        || page.detailVm.uiResolutionFilter.length > 0
+                    && (page.detailVm.uiResolutionFilter.length > 0
                         || page.detailVm.uiHdrOnly
                         || page.detailVm.uiDolbyVisionOnly
                         || page.detailVm.uiMultiAudioOnly)
                 QQC2.DialogButtonBox.buttonRole: QQC2.DialogButtonBox.ActionRole
                 onClicked: {
                     if (page.detailVm) {
-                        page.detailVm.cachedOnly = false;
                         page.detailVm.clearUiFilters();
                     }
                     streamsAdvancedDialog.close();
@@ -119,18 +117,6 @@ Kirigami.Page {
                         page.detailVm.uiResolutionFilter =
                             streamsAdvancedDialog.resolutionValues[idx];
                     }
-                }
-            }
-            FormCard.FormSwitchDelegate {
-                text: i18nc("@option:check stream filter", "Cached only")
-                description: i18nc("@info:tooltip stream filter",
-                    "Show only streams with Real-Debrid direct URLs — they play instantly.")
-                visible: page.detailVm
-                    && page.detailVm.realDebridConfigured
-                    && page.detailVm.rawStreamsCount > 0
-                checked: page.detailVm && page.detailVm.cachedOnly
-                onToggled: if (page.detailVm) {
-                    page.detailVm.cachedOnly = checked;
                 }
             }
             FormCard.FormSwitchDelegate {
@@ -176,8 +162,7 @@ Kirigami.Page {
         advancedFiltersButtonText: i18nc(
             "@action:button open stream filters dialog", "Filters")
         advancedFilterCount: page.detailVm
-            ? ((page.detailVm.cachedOnly ? 1 : 0)
-                + (page.detailVm.uiResolutionFilter.length > 0 ? 1 : 0)
+            ? ((page.detailVm.uiResolutionFilter.length > 0 ? 1 : 0)
                 + (page.detailVm.uiHdrOnly ? 1 : 0)
                 + (page.detailVm.uiDolbyVisionOnly ? 1 : 0)
                 + (page.detailVm.uiMultiAudioOnly ? 1 : 0))

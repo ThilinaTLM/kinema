@@ -72,7 +72,6 @@ class WatchedController;
 
 namespace kinema::services {
 class StreamActions;
-class StreamAvailabilityService;
 }
 
 namespace kinema::ui {
@@ -309,7 +308,6 @@ private:
 
     AppIconResolver* m_appIconResolver {};
     services::StreamActions* m_streamActions {};
-    services::StreamAvailabilityService* m_streamAvailability {};
     torrent::TorrentStreamingService* m_torrentStreaming {};
     download::DownloadManager* m_downloadManager {};
     controllers::DownloadController* m_downloadCtrl {};

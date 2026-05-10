@@ -37,11 +37,6 @@ QStringList StreamsListModel::chipsFor(const api::Stream& s)
     if (!s.resolution.isEmpty() && s.resolution != QLatin1String("\u2014")) {
         chips.append(s.resolution);
     }
-    if (s.rdCached) {
-        chips.append(i18nc("@label stream chip", "RD+"));
-    } else if (s.rdDownload) {
-        chips.append(i18nc("@label stream chip", "RD"));
-    }
     if (!s.provider.isEmpty()) {
         chips.append(s.provider);
     }
@@ -115,15 +110,8 @@ QVariant StreamsListModel::data(const QModelIndex& index, int role) const
         return s.detailsText;
     case ResolutionRole:
         return s.resolution;
-    case QualityLabelRole: {
-        QString label = s.resolution;
-        if (s.rdCached) {
-            label += QStringLiteral(" \u00b7 [RD+]");
-        } else if (s.rdDownload) {
-            label += QStringLiteral(" \u00b7 [RD]");
-        }
-        return label;
-    }
+    case QualityLabelRole:
+        return s.resolution;
     case SizeBytesRole:
         return s.sizeBytes ? QVariant::fromValue(*s.sizeBytes)
                            : QVariant::fromValue<qint64>(-1);
@@ -137,10 +125,6 @@ QVariant StreamsListModel::data(const QModelIndex& index, int role) const
         return s.infoHash;
     case DirectUrlRole:
         return s.directUrl.toString();
-    case RdCachedRole:
-        return s.rdCached;
-    case RdDownloadRole:
-        return s.rdDownload;
     case HasMagnetRole:
         return !s.infoHash.isEmpty();
     case HasDirectUrlRole:
@@ -188,8 +172,6 @@ QHash<int, QByteArray> StreamsListModel::roleNames() const
         { ProviderRole, "provider" },
         { InfoHashRole, "infoHash" },
         { DirectUrlRole, "directUrl" },
-        { RdCachedRole, "rdCached" },
-        { RdDownloadRole, "rdDownload" },
         { HasMagnetRole, "hasMagnet" },
         { HasDirectUrlRole, "hasDirectUrl" },
         { ChipsRole, "chips" },

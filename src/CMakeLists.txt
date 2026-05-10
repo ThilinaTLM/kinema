@@ -94,7 +94,6 @@ set(kinema_core_SRCS
     controllers/WatchedController.cpp
 
     services/StreamActions.cpp
-    services/StreamAvailabilityService.cpp
 
     ui/qml-bridge/AppIconResolver.cpp
     ui/qml-bridge/BrowseViewModel.cpp

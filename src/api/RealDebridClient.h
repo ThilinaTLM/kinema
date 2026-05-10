@@ -25,13 +25,15 @@ namespace kinema::api {
  *
  * 1. Validating the user-supplied token (`/user`).
  * 2. Decoupled, on-demand torrent resolution for the unified downloader:
- *    `instantAvailability` → `addMagnet` → `torrentInfo` →
- *    `selectFiles` → `torrentInfo` → `unrestrictLink`. The download
- *    subsystem orchestrates that workflow inside `RealDebridResolver`.
+ *    `addMagnet` → `torrentInfo` → `selectFiles` → `torrentInfo`
+ *    → `unrestrictLink`. The download subsystem orchestrates that
+ *    workflow inside `RealDebridResolver`. RD's old
+ *    `/torrents/instantAvailability/{hash}` probe was deprecated
+ *    upstream (returns 403 / empty objects in practice) and is no
+ *    longer part of our flow.
  *
  * Endpoints used:
  *   GET  /rest/1.0/user
- *   GET  /rest/1.0/torrents/instantAvailability/{hash}
  *   POST /rest/1.0/torrents/addMagnet      (form-encoded)
  *   GET  /rest/1.0/torrents/info/{id}
  *   POST /rest/1.0/torrents/selectFiles/{id} (form-encoded)
@@ -57,12 +59,6 @@ public:
     /// Throws HttpError. Auth failures surface as HttpStatus 401.
     virtual QCoro::Task<RealDebridUser> user();
 
-    /// Returns an empty `RdInstantAvailability` (cached() == false) when
-    /// RD does not have the torrent. `infoHash` is normalized to lower
-    /// case before the request is issued.
-    virtual QCoro::Task<RdInstantAvailability> instantAvailability(
-        QString infoHash);
-
     /// Adds a magnet to the user's RD torrents. The returned id is used
     /// for the rest of the resolution workflow.
     virtual QCoro::Task<RdAddMagnetResult> addMagnet(QString magnet);
@@ -72,8 +68,8 @@ public:
     virtual QCoro::Task<RdTorrentInfo> torrentInfo(QString rdTorrentId);
 
     /// Tells RD which files inside a torrent the user wants. Pass
-    /// 1-indexed file ids — the same scheme RD's `instantAvailability`
-    /// and `torrentInfo` use. Pass an empty list to select all files.
+    /// 1-indexed file ids — the same scheme RD's `torrentInfo` uses.
+    /// Pass an empty list to select all files.
     virtual QCoro::Task<void> selectFiles(QString rdTorrentId,
         QList<int> fileIds);
 

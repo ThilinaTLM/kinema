@@ -34,19 +34,20 @@ struct ResolvedRdLink {
 };
 
 /**
- * Encapsulates the seven-step RD workflow needed to obtain a fresh
- * hoster URL for a given asset:
+ * Encapsulates the RD workflow needed to obtain a fresh hoster URL
+ * for a given asset:
  *
- *   1. instantAvailability(infoHash)
- *   2. choose the best matching variant by `fileIndex` / `fileNameHint`
- *   3. addMagnet(magnet)
- *   4. torrentInfo(rdTorrentId)
- *   5. selectFiles(rdTorrentId, chosenIds)
- *   6. torrentInfo(rdTorrentId) again to retrieve produced links
- *   7. unrestrictLink(link)
+ *   1. addMagnet(magnet)
+ *   2. torrentInfo(rdTorrentId) until the file list is populated
+ *   3. choose the best file by `fileIndex` / `fileNameHint`
+ *   4. selectFiles(rdTorrentId, chosenIds)
+ *   5. torrentInfo(rdTorrentId) again to retrieve produced links
+ *   6. unrestrictLink(link)
  *
- * Steps 1+3 are unconditional; the resolver short-circuits when RD
- * already has a fully cached variant.
+ * RD's `/torrents/instantAvailability/` cache probe was deprecated
+ * upstream (returns 403 / empty objects in practice), so it's no
+ * longer part of the flow. When RD already has the bytes the
+ * `addMagnet` -> `torrentInfo` cycle resolves in one tick anyway.
  */
 class RealDebridResolver : public QObject
 {

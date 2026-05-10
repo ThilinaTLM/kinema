@@ -10,7 +10,6 @@ namespace kinema::config {
 namespace {
 constexpr auto kGroup = "General";
 constexpr auto kKeyDefaultSort = "defaultSort";
-constexpr auto kKeyCachedOnly = "cachedOnly";
 } // namespace
 
 TorrentioSettings::TorrentioSettings(KSharedConfigPtr config, QObject* parent)
@@ -40,20 +39,6 @@ void TorrentioSettings::setDefaultSort(core::torrentio::SortMode m)
     detail::write(m_config, kGroup, kKeyDefaultSort,
         core::torrentio::toString(m));
     Q_EMIT defaultSortChanged(m);
-}
-
-bool TorrentioSettings::cachedOnly() const
-{
-    return detail::read(m_config, kGroup, kKeyCachedOnly, false);
-}
-
-void TorrentioSettings::setCachedOnly(bool on)
-{
-    if (cachedOnly() == on) {
-        return;
-    }
-    detail::write(m_config, kGroup, kKeyCachedOnly, on);
-    Q_EMIT cachedOnlyChanged(on);
 }
 
 } // namespace kinema::config

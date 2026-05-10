@@ -24,9 +24,6 @@ QList<api::Stream> apply(const QList<api::Stream>& in, const ClientFilters& filt
     QList<api::Stream> out;
     out.reserve(in.size());
     for (const auto& s : in) {
-        if (filters.cachedOnly && !s.rdCached) {
-            continue;
-        }
         if (!filters.keywordBlocklist.isEmpty()
             && matchesBlocklist(s, filters.keywordBlocklist)) {
             continue;

@@ -31,10 +31,13 @@ bool RealDebridBackend::canHandle(const api::Stream& s) const
     if (m_rd.token().isEmpty()) {
         return false;
     }
-    // RD can serve us when (a) Torrentio already flagged the
-    // release as cached, or (b) the row carries a direct hoster
-    // URL we can unrestrict.
-    return s.rdCached || !s.directUrl.isEmpty();
+    // When RD is configured, route every stream with an actionable
+    // identifier through it. RealDebridResolver works for any
+    // infohash via addMagnet -> selectFiles -> unrestrictLink, and a
+    // pre-resolved direct URL is unrestricted directly. RD's
+    // instantAvailability endpoint is no longer reliable, so we no
+    // longer probe "is this cached?" before routing.
+    return !s.infoHash.isEmpty() || !s.directUrl.isEmpty();
 }
 
 QCoro::Task<std::unique_ptr<AssetSession>> RealDebridBackend::open(

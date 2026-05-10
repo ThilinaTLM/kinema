@@ -90,12 +90,6 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     , m_similar(new DiscoverSectionModel(
           i18nc("@label series detail rail", "More like this"), this))
 {
-    connect(&m_settings.torrentio(),
-        &config::TorrentioSettings::cachedOnlyChanged, this,
-        [this](bool) {
-            Q_EMIT cachedOnlyChanged();
-            rebuildVisibleStreams();
-        });
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });
@@ -125,19 +119,6 @@ SeriesDetailViewModel::SeriesDetailViewModel(
 }
 
 SeriesDetailViewModel::~SeriesDetailViewModel() = default;
-
-bool SeriesDetailViewModel::cachedOnly() const
-{
-    return m_settings.torrentio().cachedOnly();
-}
-
-void SeriesDetailViewModel::setCachedOnly(bool on)
-{
-    if (m_settings.torrentio().cachedOnly() == on) {
-        return;
-    }
-    m_settings.torrentio().setCachedOnly(on);
-}
 
 void SeriesDetailViewModel::setSortMode(int mode)
 {
@@ -874,15 +855,9 @@ void SeriesDetailViewModel::rebuildVisibleStreams()
 
     QString emptyExplanation;
     if (visible.isEmpty()) {
-        const bool cachedFiltered
-            = realDebridConfigured() && cachedOnly();
-        emptyExplanation = cachedFiltered
-            ? i18nc("@info streams empty",
-                "Uncheck \u201cCached on Real-Debrid only\u201d or "
-                "widen your filters in Settings.")
-            : i18nc("@info streams empty",
-                "Loosen the exclusions or keyword blocklist in "
-                "Settings.");
+        emptyExplanation = i18nc("@info streams empty",
+            "Loosen the exclusions or keyword blocklist in "
+            "Settings.");
     }
     m_streams->setItems(std::move(visible), emptyExplanation);
 }
@@ -893,7 +868,6 @@ QList<api::Stream> SeriesDetailViewModel::applyFilters() const
         return {};
     }
     core::stream_filter::ClientFilters f;
-    f.cachedOnly = realDebridConfigured() && cachedOnly();
     f.keywordBlocklist = m_settings.filter().keywordBlocklist();
     auto rows = core::stream_filter::apply(m_rawStreams, f);
 

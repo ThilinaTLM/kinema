@@ -39,10 +39,12 @@ public:
     void registerBackend(std::unique_ptr<DownloadBackend> backend);
 
     /// Find a backend for the given stream. When `override` is
-    /// provided and the matching backend reports `canHandle`,
-    /// return it; otherwise iterate by priority.
+    /// provided the matching backend must report `canHandle`;
+    /// otherwise the call throws so the caller surfaces the failure
+    /// rather than silently routing through a different backend.
+    /// When no override is given, iterate by priority.
     /// Returns `nullptr` when no registered backend can serve the
-    /// stream.
+    /// stream (no override given, no backend `canHandle` it).
     DownloadBackend* select(const api::Stream& s,
         std::optional<api::DownloadBackendKind> override = std::nullopt) const;
 

@@ -68,9 +68,6 @@ struct Stream {
     /// Real-Debrid direct URL, empty unless RD is configured and produced it.
     QUrl directUrl;
 
-    bool rdCached = false; ///< `name` contains "[RD+]"
-    bool rdDownload = false; ///< `name` contains "[RD download]"
-
     /// Index of the chosen file inside the torrent (`fileIdx` from
     /// Torrentio's `behaviorHints`). `-1` when Torrentio does not
     /// pin a file (single-file torrent or when the response leaves

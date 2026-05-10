@@ -347,31 +347,6 @@ private Q_SLOTS:
             QStringLiteral("Smol"));
     }
 
-    void testCachedOnlyFiltersWhenRdConfigured()
-    {
-        Fixture f;
-        f.rdToken = QStringLiteral("rd"); // pretend RD is on
-        f.settings.torrentio().setCachedOnly(true);
-
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
-        Stream cached = makeStream(QStringLiteral("Cached.1080p"),
-            QStringLiteral("1080p"), 5, 1);
-        cached.rdCached = true;
-        const Stream uncached = makeStream(QStringLiteral("Uncached"),
-            QStringLiteral("1080p"), 5, 1);
-        f.torrentio.scriptedCalls = { { { uncached, cached } } };
-
-        f.vm.load(QStringLiteral("tt1"));
-        drainEvents();
-
-        QCOMPARE(f.vm.streams()->rowCount(), 1);
-        QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("Cached.1080p"));
-    }
-
     void testRequestStreamsEmitsSignal()
     {
         // `requestStreams()` is the QML "Play" handler on the
@@ -506,44 +481,37 @@ private Q_SLOTS:
         QCOMPARE(f.vm.sortDescending(), true);
     }
 
-    void testSmartSortPutsCachedFirstThenResolutionThenSeeders()
+    void testSmartSortByResolutionThenSeeders()
     {
         Fixture f;
         f.cinemeta.metaScripts = {
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("X")) }
         };
-        Stream cached1080 = makeStream(
-            QStringLiteral("Cached.1080p.small"),
-            QStringLiteral("1080p"), 5, 1'000'000'000);
-        cached1080.rdCached = true;
-        Stream uncached2160 = makeStream(
-            QStringLiteral("Uncached.2160p.huge"),
-            QStringLiteral("2160p"), 99, 8'000'000'000);
-        Stream uncached1080lowSeedersBig = makeStream(
-            QStringLiteral("Uncached.1080p.big"),
-            QStringLiteral("1080p"), 10, 3'000'000'000);
-        Stream uncached1080highSeedersSmall = makeStream(
-            QStringLiteral("Uncached.1080p.small"),
-            QStringLiteral("1080p"), 50, 1'500'000'000);
+        const Stream low2160 = makeStream(
+            QStringLiteral("R.2160p"),
+            QStringLiteral("2160p"), 5, 8'000'000'000);
+        const Stream high1080 = makeStream(
+            QStringLiteral("R.1080p.popular"),
+            QStringLiteral("1080p"), 99, 1'500'000'000);
+        const Stream low1080 = makeStream(
+            QStringLiteral("R.1080p.unloved"),
+            QStringLiteral("1080p"), 1, 3'000'000'000);
         f.torrentio.scriptedCalls = {
-            { { uncached2160, uncached1080highSeedersSmall, cached1080,
-                  uncached1080lowSeedersBig } }
+            { { high1080, low1080, low2160 } }
         };
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
-        // Smart: cached row leads, then 2160p, then 1080p ordered
+        // Smart: 2160p first (resolution rank), then 1080p ordered
         // by seeders desc within the quality group.
-        QCOMPARE(f.vm.streams()->rowCount(), 4);
+        QCOMPARE(f.vm.streams()->rowCount(), 3);
         QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("Cached.1080p.small"));
+            QStringLiteral("R.2160p"));
         QCOMPARE(f.vm.streams()->at(1)->releaseName,
-            QStringLiteral("Uncached.2160p.huge"));
+            QStringLiteral("R.1080p.popular"));
         QCOMPARE(f.vm.streams()->at(2)->releaseName,
-            QStringLiteral("Uncached.1080p.small"));
-        QCOMPARE(f.vm.streams()->at(3)->releaseName,
-            QStringLiteral("Uncached.1080p.big"));
+            QStringLiteral("R.1080p.unloved"));
     }
 
     void testSmartSortIgnoresDescendingToggle()
@@ -553,21 +521,21 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("X")) }
         };
-        Stream cached = makeStream(QStringLiteral("Cached"),
+        const Stream popular = makeStream(QStringLiteral("Popular"),
+            QStringLiteral("1080p"), 99, 1);
+        const Stream unloved = makeStream(QStringLiteral("Unloved"),
             QStringLiteral("1080p"), 1, 1);
-        cached.rdCached = true;
-        Stream uncached = makeStream(QStringLiteral("Uncached"),
-            QStringLiteral("1080p"), 1, 1);
-        f.torrentio.scriptedCalls = { { { uncached, cached } } };
+        f.torrentio.scriptedCalls = { { { unloved, popular } } };
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
         QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("Cached"));
+            QStringLiteral("Popular"));
         f.vm.setSortDescending(true);
-        // Smart still ignores it: cached must remain first.
+        // Smart still ignores the toggle: higher-seeder row stays
+        // first regardless of `sortDescending`.
         QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("Cached"));
+            QStringLiteral("Popular"));
     }
 
     void testUiResolutionFilterNarrowsList()

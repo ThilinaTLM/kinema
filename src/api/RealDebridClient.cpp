@@ -45,11 +45,6 @@ void requireToken(const QString& token)
     }
 }
 
-QString sanitizeHash(QString h)
-{
-    return h.trimmed().toLower();
-}
-
 } // namespace
 
 RealDebridClient::RealDebridClient(core::HttpClient* http, QObject* parent)
@@ -78,24 +73,6 @@ QCoro::Task<RealDebridUser> RealDebridClient::user()
 
     const auto doc = co_await m_http->getJson(std::move(req));
     co_return realdebrid::parseUser(doc);
-}
-
-QCoro::Task<RdInstantAvailability> RealDebridClient::instantAvailability(
-    QString infoHash)
-{
-    requireToken(m_token);
-    const auto hash = sanitizeHash(infoHash);
-    if (hash.isEmpty()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("Real-Debrid instantAvailability: empty info hash."));
-    }
-
-    QNetworkRequest req(appendPath(m_baseUrl,
-        QStringLiteral("/torrents/instantAvailability/") + hash));
-    req.setRawHeader("Authorization", bearer(m_token));
-
-    const auto doc = co_await m_http->getJson(std::move(req));
-    co_return realdebrid::parseInstantAvailability(doc, hash);
 }
 
 QCoro::Task<RdAddMagnetResult> RealDebridClient::addMagnet(QString magnet)

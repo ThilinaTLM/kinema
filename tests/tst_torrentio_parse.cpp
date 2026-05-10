@@ -51,8 +51,6 @@ private Q_SLOTS:
         const qint64 expected = static_cast<qint64>(2.1 * 1024.0 * 1024.0 * 1024.0);
         QVERIFY(std::llabs(*first.sizeBytes - expected) < 1024);
         QCOMPARE(first.provider, QStringLiteral("ThePirateBay"));
-        QVERIFY(!first.rdCached);
-        QVERIFY(!first.rdDownload);
         QVERIFY(first.directUrl.isEmpty());
     }
 
@@ -77,31 +75,28 @@ private Q_SLOTS:
         QVERIFY(noMeta.sources.isEmpty());
     }
 
-    void detectsRdCachedFlag_andDirectUrl()
+    void exposesDirectUrlWhenPresent()
     {
         const auto doc = loadFixture("torrentio_stream_tt0133093.json");
         const auto streams = torrentio::parseStreams(doc);
 
-        const auto& rdRow = streams.at(1);
-        QCOMPARE(rdRow.resolution, QStringLiteral("2160p"));
-        QVERIFY(rdRow.rdCached);
-        QVERIFY(!rdRow.rdDownload);
-        QCOMPARE(rdRow.directUrl,
+        // Row 1 in the fixture carries an `url` field, simulating an
+        // RD-resolved direct hoster link the parser passes through
+        // verbatim. Routing decisions live in the download manager;
+        // the parser just surfaces what Torrentio returned.
+        const auto& urlRow = streams.at(1);
+        QCOMPARE(urlRow.resolution, QStringLiteral("2160p"));
+        QCOMPARE(urlRow.directUrl,
             QUrl(QStringLiteral("https://real-debrid.com/d/ABCDEF/matrix.mkv")));
         // No 👤 tag in fixture → seeders is unset.
-        QVERIFY(!rdRow.seeders.has_value());
-    }
+        QVERIFY(!urlRow.seeders.has_value());
 
-    void detectsRdDownloadFlag()
-    {
-        const auto doc = loadFixture("torrentio_stream_tt0133093.json");
-        const auto streams = torrentio::parseStreams(doc);
-
-        const auto& rdDownloadRow = streams.at(2);
-        QVERIFY(!rdDownloadRow.rdCached);
-        QVERIFY(rdDownloadRow.rdDownload);
-        QVERIFY(rdDownloadRow.seeders.has_value());
-        QCOMPARE(*rdDownloadRow.seeders, 62);
+        // Row 2 has no `url` field; directUrl stays empty regardless
+        // of any "[RD download]"-style tagging in the name.
+        const auto& noUrlRow = streams.at(2);
+        QVERIFY(noUrlRow.directUrl.isEmpty());
+        QVERIFY(noUrlRow.seeders.has_value());
+        QCOMPARE(*noUrlRow.seeders, 62);
     }
 
     void handlesMissingMetadataGracefully()

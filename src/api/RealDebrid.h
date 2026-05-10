@@ -23,29 +23,6 @@ struct RealDebridUser {
     std::optional<QDateTime> premiumUntil;
 };
 
-/// One file variant inside an instant-availability response. RD groups
-/// cached files into "variants" — alternative file selections the
-/// service has cached together.
-struct RdInstantVariantFile {
-    int fileId = 0; ///< 1-indexed file id used by RD's selectFiles API
-    QString filename;
-    qint64 sizeBytes = 0;
-};
-
-struct RdInstantVariant {
-    /// Files in this variant. RD will only serve the variant if every
-    /// listed file is requested via selectFiles(...).
-    QList<RdInstantVariantFile> files;
-};
-
-/// Top-level instant-availability shape: a list of variants per host
-/// ("rd"). Empty list means "not cached".
-struct RdInstantAvailability {
-    QString infoHash;
-    QList<RdInstantVariant> variants;
-    bool cached() const noexcept { return !variants.isEmpty(); }
-};
-
 /// Result of POST /torrents/addMagnet.
 struct RdAddMagnetResult {
     QString id; ///< RD torrent id
@@ -89,7 +66,6 @@ struct RdUnrestrictedLink {
 } // namespace kinema::api
 
 Q_DECLARE_METATYPE(kinema::api::RealDebridUser)
-Q_DECLARE_METATYPE(kinema::api::RdInstantAvailability)
 Q_DECLARE_METATYPE(kinema::api::RdAddMagnetResult)
 Q_DECLARE_METATYPE(kinema::api::RdTorrentInfo)
 Q_DECLARE_METATYPE(kinema::api::RdUnrestrictedLink)

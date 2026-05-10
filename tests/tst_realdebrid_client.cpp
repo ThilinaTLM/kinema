@@ -51,26 +51,6 @@ private Q_SLOTS:
         }
     }
 
-    void instantAvailability_buildsHashScopedUrl()
-    {
-        FakeHttpClient http;
-        http.jsonReplies = { loadJsonFixture("rd_instant_availability_cached.json") };
-
-        RealDebridClient client(&http);
-        client.setToken(QStringLiteral("rd-token"));
-
-        const auto av = QCoro::waitFor(client.instantAvailability(
-            QStringLiteral("AABB1122CCDD3344EEFF5566778899AABBCCDDEE")));
-
-        QVERIFY(av.cached());
-        QCOMPARE(http.calls.size(), 1);
-        QCOMPARE(http.calls.first().request.url().path(),
-            QStringLiteral("/rest/1.0/torrents/instantAvailability/"
-                           "aabb1122ccdd3344eeff5566778899aabbccddee"));
-        QCOMPARE(http.calls.first().request.rawHeader("Authorization"),
-            QByteArrayLiteral("Bearer rd-token"));
-    }
-
     void addMagnet_postsFormEncodedMagnet()
     {
         FakeHttpClient http;

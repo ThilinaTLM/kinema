@@ -43,7 +43,6 @@ private Q_SLOTS:
             static_cast<int>(api::MediaKind::Movie));
         QCOMPARE(static_cast<int>(s.torrentio().defaultSort()),
             static_cast<int>(core::torrentio::SortMode::Seeders));
-        QCOMPARE(s.torrentio().cachedOnly(), false);
         QCOMPARE(s.appearance().closeToTray(), true);
         QCOMPARE(s.appearance().showMenuBar(), false);
         QVERIFY(s.appearance().playerWindowGeometry().isEmpty());
@@ -198,16 +197,6 @@ private Q_SLOTS:
         QCOMPARE(spy.count(), 1);
         s.filter().setExcludedCategories({ QStringLiteral("cam") });
         QCOMPARE(spy.count(), 2);
-    }
-
-    void testCachedOnlyChangedEmitted()
-    {
-        config::AppSettings s(m_config);
-        QSignalSpy spy(&s.torrentio(),
-            &config::TorrentioSettings::cachedOnlyChanged);
-        s.torrentio().setCachedOnly(true);
-        QCOMPARE(spy.count(), 1);
-        QCOMPARE(spy.takeFirst().at(0).toBool(), true);
     }
 
     void testRealDebridConfiguredSignal()
