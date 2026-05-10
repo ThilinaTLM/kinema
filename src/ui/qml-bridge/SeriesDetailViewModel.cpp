@@ -923,6 +923,26 @@ void SeriesDetailViewModel::playNow(int row)
     m_actions->play(*s, currentContext());
 }
 
+void SeriesDetailViewModel::playWithBackend(int row, int backendKind)
+{
+    const auto* s = m_streams->at(row);
+    if (!s) {
+        return;
+    }
+    if (s->directUrl.isEmpty() && s->infoHash.isEmpty()) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "This stream has no playable URL or magnet."),
+            4000);
+        return;
+    }
+    if (!m_actions) {
+        return;
+    }
+    m_actions->playWithBackend(*s, currentContext(),
+        static_cast<api::DownloadBackendKind>(backendKind));
+}
+
 void SeriesDetailViewModel::download(int row)
 {
     const auto* s = m_streams->at(row);

@@ -210,13 +210,17 @@ QQC2.ItemDelegate {
         }
 
         // ---- 4. Primary actions + overflow ---------------------
-        // Two side-by-side affordances per the downloads model:
+        // Three side-by-side affordances per the downloads model:
         //   \u25b6 Play    \u2192 OnDemand session, only fetches what the
         //                  player needs; quiesces when not playing.
+        //                  Single label regardless of backend; the
+        //                  `highlighted` accent stays on cached /
+        //                  direct-URL rows so users still see at a
+        //                  glance which releases will start instantly.
         //   \u2b07 Download \u2192 Full + Pinned background download; runs
         //                  to completion regardless of playback.
-        // The third button is the row's overflow menu, which holds
-        // copy/open magnet/url, backend overrides, subtitles, etc.
+        //   \u22ee More    \u2192 overflow menu: copy/open magnet/url,
+        //                  per-row backend overrides, subtitles.
         RowLayout {
             Layout.alignment: Qt.AlignVCenter
             spacing: Theme.inlineSpacing
@@ -224,16 +228,11 @@ QQC2.ItemDelegate {
             QQC2.Button {
                 visible: card.hasDirectUrl || card.hasMagnet
                 enabled: card.hasDirectUrl || card.hasMagnet
-                icon.source: AppIcons.url(card.hasDirectUrl
-                    ? "play"
-                    : "external-link",
+                icon.source: AppIcons.url("play",
                     AppIcons.controlColor(enabled, highlighted))
                 icon.color: AppIcons.controlColor(enabled, highlighted)
-                text: card.hasDirectUrl
-                    ? i18nc("@action:button primary stream action",
-                        "Play now")
-                    : i18nc("@action:button primary stream action",
-                        "Stream")
+                text: i18nc("@action:button primary stream action",
+                    "Play")
                 display: QQC2.AbstractButton.TextBesideIcon
                 highlighted: card.hasDirectUrl
                 onClicked: card._activatePrimary()

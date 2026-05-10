@@ -257,6 +257,9 @@ public Q_SLOTS:
     /// Per-row action handlers driven by `StreamCard.qml`'s ⋮ menu.
     /// `playNow` routes straight through `services::StreamActions`.
     void playNow(int row);
+    /// As `playNow` but forces a specific backend (Torrent /
+    /// RealDebridHttp). Used by the per-stream override menu.
+    void playWithBackend(int row, int backendKind);
     /// Hand the row's stream to `controllers::DownloadController::enqueue`.
     /// Background full-file episode download, mirroring the
     /// explicit `\u2b07 Download` button on the stream row. Always
