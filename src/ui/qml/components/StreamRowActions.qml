@@ -84,21 +84,27 @@ QQC2.Menu {
         onTriggered: menu.vm.openDirectUrl(menu.row)
     }
     QQC2.MenuSeparator { }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu save a release for offline playback",
-            "Save offline")
-        icon.source: AppIcons.url("download")
-        icon.color: AppIcons.controlColor(enabled, false)
-        enabled: menu.hasMagnet || menu.hasDirectUrl
-        onTriggered: menu.vm.saveOffline(menu.row, /*pinned=*/true)
-    }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu prefetch a release into the local cache",
-            "Cache for streaming")
-        icon.source: AppIcons.url("hard-drive")
-        icon.color: AppIcons.controlColor(enabled, false)
-        enabled: menu.hasMagnet || menu.hasDirectUrl
-        onTriggered: menu.vm.saveOffline(menu.row, /*pinned=*/false)
+    // Backend override sub-menu. The default `\u2b07 Download`
+    // button uses `BackendSelector`'s priority (Real-Debrid first
+    // when configured); these items force a specific transport.
+    QQC2.Menu {
+        title: i18nc("@action:inmenu submenu", "Force backend")
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Real-Debrid")
+            icon.source: AppIcons.url("folder-cloud")
+            icon.color: AppIcons.controlColor(enabled, false)
+            enabled: menu.hasMagnet || menu.hasDirectUrl
+            // 1 == api::DownloadBackendKind::RealDebridHttp
+            onTriggered: menu.vm.downloadWithBackend(menu.row, 1)
+        }
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Torrent")
+            icon.source: AppIcons.url("network-server-database")
+            icon.color: AppIcons.controlColor(enabled, false)
+            enabled: menu.hasMagnet
+            // 0 == api::DownloadBackendKind::Torrent
+            onTriggered: menu.vm.downloadWithBackend(menu.row, 0)
+        }
     }
     QQC2.MenuSeparator { }
     QQC2.MenuItem {

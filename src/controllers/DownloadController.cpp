@@ -18,6 +18,8 @@ DownloadController::DownloadController(download::DownloadManager& manager,
         this, &DownloadController::changed);
     connect(&m_manager, &download::DownloadManager::statusMessage,
         this, &DownloadController::statusMessage);
+    connect(&m_manager, &download::DownloadManager::itemChanged,
+        this, &DownloadController::changed);
 }
 
 QList<api::DownloadItem> DownloadController::items() const
@@ -31,12 +33,47 @@ std::optional<api::DownloadItem> DownloadController::findForKey(
     return m_store.findForKey(key);
 }
 
-void DownloadController::enqueue(const api::Stream& stream,
-    const api::PlaybackContext& ctx, bool pinned)
+QSet<QString> DownloadController::attachedPlayerAssetIds() const
 {
-    m_manager.enqueueDownload(stream, ctx,
-        pinned ? api::CacheDisposition::Pinned
-               : api::CacheDisposition::Ephemeral);
+    return m_manager.attachedPlayerAssetIds();
+}
+
+void DownloadController::download(const api::Stream& stream,
+    const api::PlaybackContext& ctx)
+{
+    m_manager.enqueueDownload(stream, ctx);
+}
+
+void DownloadController::downloadWithBackend(const api::Stream& stream,
+    const api::PlaybackContext& ctx,
+    api::DownloadBackendKind backend)
+{
+    m_manager.enqueueDownload(stream, ctx, backend);
+}
+
+void DownloadController::upgradeToFull(const QString& assetId)
+{
+    m_manager.upgradeToFull(assetId);
+}
+
+void DownloadController::pause(const QString& assetId)
+{
+    m_manager.pause(assetId);
+}
+
+void DownloadController::resume(const QString& assetId)
+{
+    m_manager.resume(assetId);
+}
+
+void DownloadController::attachPlayer(const QString& assetId)
+{
+    m_manager.attachPlayer(assetId);
+}
+
+void DownloadController::detachPlayer(const QString& assetId)
+{
+    m_manager.detachPlayer(assetId);
 }
 
 void DownloadController::retry(const QString& assetId)

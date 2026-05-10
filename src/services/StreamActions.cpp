@@ -118,6 +118,20 @@ void StreamActions::openDirectUrl(const api::Stream& stream)
 void StreamActions::play(const api::Stream& stream,
     const api::PlaybackContext& ctxIn)
 {
+    playInternal(stream, ctxIn, std::nullopt);
+}
+
+void StreamActions::playWithBackend(const api::Stream& stream,
+    const api::PlaybackContext& ctxIn,
+    api::DownloadBackendKind backend)
+{
+    playInternal(stream, ctxIn, backend);
+}
+
+void StreamActions::playInternal(const api::Stream& stream,
+    const api::PlaybackContext& ctxIn,
+    std::optional<api::DownloadBackendKind> backendOverride)
+{
     if (stream.directUrl.isEmpty() && stream.infoHash.isEmpty()) {
         Q_EMIT statusMessage(
             i18nc("@info:status",
@@ -149,7 +163,7 @@ void StreamActions::play(const api::Stream& stream,
     // downloader so the player only ever sees localhost URLs.
     if (m_downloadManager && !stream.infoHash.isEmpty()) {
         const auto epoch = ++m_playEpoch;
-        auto task = playLocalTask(stream, ctx, epoch);
+        auto task = playLocalTask(stream, ctx, epoch, backendOverride);
         Q_UNUSED(task);
         return;
     }
@@ -178,15 +192,61 @@ void StreamActions::play(const api::Stream& stream,
     Q_UNUSED(task);
 }
 
+void StreamActions::download(const api::Stream& stream,
+    const api::PlaybackContext& ctxIn)
+{
+    if (!m_downloadManager) {
+        Q_EMIT statusMessage(i18nc("@info:status",
+            "Downloads are not available in this build."), 5000);
+        return;
+    }
+    api::PlaybackContext ctx = ctxIn;
+    ctx.streamRef = api::HistoryStreamRef::fromStream(stream);
+    if (ctx.title.isEmpty()) {
+        ctx.title = stream.releaseName.isEmpty()
+            ? stream.qualityLabel
+            : stream.releaseName;
+    }
+    m_downloadManager->enqueueDownload(stream, ctx);
+}
+
+void StreamActions::downloadWithBackend(const api::Stream& stream,
+    const api::PlaybackContext& ctxIn,
+    api::DownloadBackendKind backend)
+{
+    if (!m_downloadManager) {
+        Q_EMIT statusMessage(i18nc("@info:status",
+            "Downloads are not available in this build."), 5000);
+        return;
+    }
+    api::PlaybackContext ctx = ctxIn;
+    ctx.streamRef = api::HistoryStreamRef::fromStream(stream);
+    if (ctx.title.isEmpty()) {
+        ctx.title = stream.releaseName.isEmpty()
+            ? stream.qualityLabel
+            : stream.releaseName;
+    }
+    m_downloadManager->enqueueDownload(stream, ctx, backend);
+}
+
 QCoro::Task<void> StreamActions::playLocalTask(api::Stream stream,
-    api::PlaybackContext ctx, quint64 epoch)
+    api::PlaybackContext ctx, quint64 epoch,
+    std::optional<api::DownloadBackendKind> backendOverride)
 {
     try {
         const QUrl url = co_await m_downloadManager->prepareForPlayback(
-            stream, ctx);
+            stream, ctx, backendOverride);
         if (epoch != m_playEpoch) {
             co_return;
         }
+        // attachPlayer was already called by `prepareForPlayback`
+        // so the Downloads view sees a `Streaming`/`Downloading +
+        // Playing` chip immediately. detachPlayer is currently a
+        // gap: external player processes are launched detached and
+        // we don't watch their lifetime, so OnDemand sessions
+        // remain `Active` until the engine's idle-stop timer
+        // expires (TorrentStreamingSettings::idleStopMinutes).
+        // Embedded player attach/detach can be wired here later.
         m_launcher->play(url, ctx);
     } catch (const std::exception& e) {
         if (epoch != m_playEpoch) {

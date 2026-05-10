@@ -208,6 +208,32 @@ void HttpAssetSession::touch()
     // server activity through `LocalMediaServer`.
 }
 
+void HttpAssetSession::pause()
+{
+    if (m_paused) {
+        return;
+    }
+    m_paused = true;
+    qCInfo(KINEMA_DOWNLOAD).nospace()
+        << "HttpAssetSession[" << m_assetId << "]: paused";
+}
+
+void HttpAssetSession::resume()
+{
+    if (!m_paused) {
+        return;
+    }
+    m_paused = false;
+    qCInfo(KINEMA_DOWNLOAD).nospace()
+        << "HttpAssetSession[" << m_assetId << "]: resumed";
+    // For Full mode, kick the prefetch loop again. OnDemand stays
+    // consumer-driven; the next ensureRange() naturally runs.
+    if (m_mode == api::DownloadMode::Full) {
+        auto task = prefetchAll();
+        Q_UNUSED(task);
+    }
+}
+
 QCoro::Task<void> HttpAssetSession::ensureResolved()
 {
     if (m_resolveInFlight || !m_upstream.isEmpty()) {
@@ -393,6 +419,12 @@ QCoro::Task<void> HttpAssetSession::prefetchAll()
 {
     co_await ensureResolved();
     for (int i = 0; i < m_totalChunks; ++i) {
+        // Honour user pause + Full→OnDemand demotion at chunk
+        // boundaries. Player-driven `ensureRange` calls remain
+        // unaffected because they don't go through this loop.
+        if (m_paused || m_mode != api::DownloadMode::Full) {
+            co_return;
+        }
         if (isChunkAvailable(i)) {
             continue;
         }

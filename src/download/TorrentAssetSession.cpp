@@ -65,4 +65,14 @@ void TorrentAssetSession::touch()
     m_engine.touchToken(m_token);
 }
 
+void TorrentAssetSession::pause()
+{
+    m_engine.pauseInfoHash(m_infoHash);
+}
+
+void TorrentAssetSession::resume()
+{
+    m_engine.resumeInfoHash(m_infoHash);
+}
+
 } // namespace kinema::download

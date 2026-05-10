@@ -63,6 +63,13 @@ public:
     QByteArray readRange(ByteRange range) const override;
     void touch() override;
 
+    api::DownloadMode mode() const override { return m_mode; }
+    void setMode(api::DownloadMode m) override { m_mode = m; }
+
+    void pause() override;
+    void resume() override;
+    bool isPaused() const noexcept { return m_paused; }
+
     /// Resolve the upstream hoster URL (idempotent). Throws on failure.
     QCoro::Task<void> ensureResolved();
 
@@ -108,6 +115,15 @@ private:
     QUrl m_upstream;
     QString m_rdTorrentId;
     bool m_resolveInFlight = false;
+
+    /// User-visible mode. Defaults to OnDemand; promoted to Full
+    /// when the manager triggers `prefetchAll()` via `changeMode`.
+    api::DownloadMode m_mode = api::DownloadMode::OnDemand;
+
+    /// User-paused flag honoured by `prefetchAll()` between chunk
+    /// boundaries. Range fetches driven by the player ignore it so
+    /// playback of already-cached bytes keeps working.
+    bool m_paused = false;
 
     /// `m_chunkAvailable[i] == true` means chunk i is fully on disk.
     std::vector<bool> m_chunkAvailable;

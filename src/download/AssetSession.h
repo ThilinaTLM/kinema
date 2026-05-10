@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "api/Download.h"
 #include "torrent/PiecePlanner.h"
 
 #include <QByteArray>
@@ -71,6 +72,23 @@ public:
 
     /// Bytes currently available on disk. Used for progress UI.
     virtual qint64 cachedBytes() const { return -1; }
+
+    /// Current download mode. Concrete sessions persist this so a
+    /// `BackendSelector::changeMode` can no-op when nothing changes.
+    virtual api::DownloadMode mode() const = 0;
+
+    /// Update the in-memory mode flag. Backends call this from
+    /// `DownloadBackend::changeMode` after applying the policy
+    /// change to their own state (libtorrent priorities, prefetch
+    /// loop, etc).
+    virtual void setMode(api::DownloadMode m) = 0;
+
+    /// User-initiated pause. Default is a no-op so backends that
+    /// don't yet honour pause keep working.
+    virtual void pause() {}
+
+    /// User-initiated resume; mirror of `pause()`.
+    virtual void resume() {}
 
 Q_SIGNALS:
     void cachedBytesChanged(qint64 bytes);

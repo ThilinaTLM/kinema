@@ -232,7 +232,14 @@ QQC2.ItemDelegate {
             }
         }
 
-        // ---- 4. Primary action + overflow ----------------------
+        // ---- 4. Primary actions + overflow ---------------------
+        // Two side-by-side affordances per the downloads model:
+        //   \u25b6 Play    \u2192 OnDemand session, only fetches what the
+        //                  player needs; quiesces when not playing.
+        //   \u2b07 Download \u2192 Full + Pinned background download; runs
+        //                  to completion regardless of playback.
+        // The third button is the row's overflow menu, which holds
+        // copy/open magnet/url, backend overrides, subtitles, etc.
         RowLayout {
             Layout.alignment: Qt.AlignVCenter
             spacing: Theme.inlineSpacing
@@ -253,6 +260,22 @@ QQC2.ItemDelegate {
                 display: QQC2.AbstractButton.TextBesideIcon
                 highlighted: card.hasDirectUrl
                 onClicked: card._activatePrimary()
+            }
+
+            QQC2.ToolButton {
+                visible: card.hasDirectUrl || card.hasMagnet
+                enabled: card.hasDirectUrl || card.hasMagnet
+                icon.source: AppIcons.url("download",
+                    AppIcons.controlColor(enabled, false))
+                icon.color: AppIcons.controlColor(enabled, false)
+                display: QQC2.AbstractButton.IconOnly
+                text: i18nc("@action:button background full download",
+                    "Download")
+                QQC2.ToolTip.text: i18nc("@info:tooltip background download",
+                    "Download the whole file in the background. "
+                    + "Continues even if you stop watching.")
+                QQC2.ToolTip.visible: hovered
+                onClicked: card.vm.download(card.row)
             }
 
             QQC2.ToolButton {

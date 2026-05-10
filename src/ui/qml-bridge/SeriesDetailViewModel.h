@@ -268,7 +268,14 @@ public Q_SLOTS:
     void playNext(int row);
     void enqueue(int row);
     /// Hand the row's stream to `controllers::DownloadController::enqueue`.
-    void saveOffline(int row, bool pinned);
+    /// Background full-file episode download, mirroring the
+    /// explicit `\u2b07 Download` button on the stream row. Always
+    /// Full + Pinned; mode upgrade for already-streaming sessions
+    /// is handled by `DownloadManager::enqueueDownload`.
+    void download(int row);
+    /// As above but forces a specific backend (Torrent /
+    /// RealDebridHttp).
+    void downloadWithBackend(int row, int backendKind);
     void copyMagnet(int row);
     void openMagnet(int row);
     void copyDirectUrl(int row);

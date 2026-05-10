@@ -10,24 +10,36 @@ namespace kinema::ui::qml {
 
 namespace {
 
-QString stateText(api::DownloadState s)
+QString stateText(api::DownloadState s, api::DownloadMode mode,
+    bool hasPlayer, bool complete)
 {
+    using S = api::DownloadState;
+    using M = api::DownloadMode;
     switch (s) {
-    case api::DownloadState::Queued:
+    case S::Queued:
         return i18nc("@label download state", "Queued");
-    case api::DownloadState::Preparing:
+    case S::Resolving:
         return i18nc("@label download state", "Preparing\u2026");
-    case api::DownloadState::Downloading:
-        return i18nc("@label download state", "Downloading");
-    case api::DownloadState::Streaming:
-        return i18nc("@label download state", "Streaming");
-    case api::DownloadState::Completed:
+    case S::Active:
+        if (mode == M::OnDemand) {
+            return hasPlayer
+                ? i18nc("@label download state", "Streaming")
+                : i18nc("@label download state", "Caching");
+        }
+        return hasPlayer
+            ? i18nc("@label download state",
+                  "Downloading + Playing")
+            : i18nc("@label download state", "Downloading");
+    case S::Idle:
+        return i18nc("@label download state", "Idle");
+    case S::Completed:
+        Q_UNUSED(complete);
         return i18nc("@label download state", "Completed");
-    case api::DownloadState::Paused:
+    case S::Paused:
         return i18nc("@label download state", "Paused");
-    case api::DownloadState::Cancelled:
+    case S::Cancelled:
         return i18nc("@label download state", "Cancelled");
-    case api::DownloadState::Failed:
+    case S::Failed:
         return i18nc("@label download state", "Failed");
     }
     return QString();
@@ -40,11 +52,11 @@ QString stateTone(api::DownloadState s)
     switch (s) {
     case api::DownloadState::Completed:
         return QStringLiteral("positive");
-    case api::DownloadState::Downloading:
-    case api::DownloadState::Streaming:
-    case api::DownloadState::Preparing:
+    case api::DownloadState::Active:
+    case api::DownloadState::Resolving:
         return QStringLiteral("neutral");
     case api::DownloadState::Queued:
+    case api::DownloadState::Idle:
     case api::DownloadState::Paused:
     case api::DownloadState::Cancelled:
         return QStringLiteral("warn");
@@ -52,6 +64,17 @@ QString stateTone(api::DownloadState s)
         return QStringLiteral("negative");
     }
     return QStringLiteral("neutral");
+}
+
+QString modeLabel(api::DownloadMode m)
+{
+    switch (m) {
+    case api::DownloadMode::OnDemand:
+        return i18nc("@label download mode", "Stream");
+    case api::DownloadMode::Full:
+        return i18nc("@label download mode", "Full");
+    }
+    return QString();
 }
 
 QString backendIcon(api::DownloadBackendKind k)
@@ -179,10 +202,29 @@ QVariant DownloadsListModel::data(const QModelIndex& index, int role) const
         return backendLabel(it.backendKind);
     case StateRole:
         return static_cast<int>(it.state);
-    case StateTextRole:
-        return stateText(it.state);
+    case StateTextRole: {
+        const bool hasPlayer = m_attachedPlayers.contains(it.assetId);
+        return stateText(it.state, it.mode, hasPlayer, it.complete);
+    }
     case StateToneRole:
         return stateTone(it.state);
+    case ModeRole:
+        return static_cast<int>(it.mode);
+    case ModeLabelRole:
+        return modeLabel(it.mode);
+    case CanUpgradeRole:
+        return it.mode == api::DownloadMode::OnDemand
+            && it.state != api::DownloadState::Completed
+            && it.state != api::DownloadState::Failed
+            && it.state != api::DownloadState::Cancelled;
+    case CanPauseRole:
+        return it.state == api::DownloadState::Active
+            || it.state == api::DownloadState::Resolving
+            || it.state == api::DownloadState::Idle;
+    case CanResumeRole:
+        return it.state == api::DownloadState::Paused;
+    case HasPlayerAttachedRole:
+        return m_attachedPlayers.contains(it.assetId);
     case DispositionRole:
         return static_cast<int>(it.disposition);
     case IsPinnedRole:
@@ -244,6 +286,12 @@ QHash<int, QByteArray> DownloadsListModel::roleNames() const
         { StateRole, "state" },
         { StateTextRole, "stateText" },
         { StateToneRole, "stateTone" },
+        { ModeRole, "mode" },
+        { ModeLabelRole, "modeLabel" },
+        { CanUpgradeRole, "canUpgrade" },
+        { CanPauseRole, "canPause" },
+        { CanResumeRole, "canResume" },
+        { HasPlayerAttachedRole, "hasPlayerAttached" },
         { DispositionRole, "disposition" },
         { IsPinnedRole, "pinned" },
         { IsCompleteRole, "complete" },
@@ -268,10 +316,12 @@ QHash<int, QByteArray> DownloadsListModel::roleNames() const
 }
 
 void DownloadsListModel::setItems(QList<api::DownloadItem> items,
-    QHash<QString, LiveRow> liveStats)
+    QHash<QString, LiveRow> liveStats,
+    QSet<QString> attachedPlayers)
 {
     beginResetModel();
     m_items = std::move(items);
+    m_attachedPlayers = std::move(attachedPlayers);
     m_liveStats = std::move(liveStats);
     endResetModel();
     Q_EMIT countChanged();

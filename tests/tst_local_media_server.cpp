@@ -15,6 +15,7 @@
 #include <QTest>
 
 using namespace kinema::download;
+namespace api = kinema::api;
 using kinema::torrent::ByteRange;
 
 namespace {
@@ -51,12 +52,16 @@ public:
     }
     void touch() override { ++touchCount; }
 
+    api::DownloadMode mode() const override { return m_mode; }
+    void setMode(api::DownloadMode m) override { m_mode = m; }
+
     int ensureCount = 0;
     int touchCount = 0;
 
 private:
     QByteArray m_content;
     QString m_fileName;
+    api::DownloadMode m_mode = api::DownloadMode::OnDemand;
 };
 
 QByteArray fetchPath(const QUrl& url, const QByteArray& rangeHeader = {})

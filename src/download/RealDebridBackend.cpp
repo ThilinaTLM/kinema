@@ -1,0 +1,103 @@
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+#include "download/RealDebridBackend.h"
+
+#include "api/RealDebridClient.h"
+#include "core/MediaCache.h"
+#include "download/HttpAssetSession.h"
+#include "download/RealDebridResolver.h"
+#include "kinema_log_download.h"
+
+namespace kinema::download {
+
+RealDebridBackend::RealDebridBackend(core::HttpClient& http,
+    api::RealDebridClient& rd,
+    RealDebridResolver& resolver,
+    core::MediaCache& cache,
+    const config::DownloadSettings& settings)
+    : m_http(http)
+    , m_rd(rd)
+    , m_resolver(resolver)
+    , m_cache(cache)
+    , m_settings(settings)
+{
+}
+
+RealDebridBackend::~RealDebridBackend() = default;
+
+bool RealDebridBackend::canHandle(const api::Stream& s) const
+{
+    if (m_rd.token().isEmpty()) {
+        return false;
+    }
+    // RD can serve us when (a) Torrentio already flagged the
+    // release as cached, or (b) the row carries a direct hoster
+    // URL we can unrestrict.
+    return s.rdCached || !s.directUrl.isEmpty();
+}
+
+QCoro::Task<std::unique_ptr<AssetSession>> RealDebridBackend::open(
+    const api::AssetRef& ref,
+    const api::Stream& s,
+    const api::PlaybackContext& ctx,
+    api::DownloadMode mode)
+{
+    Q_UNUSED(s);
+    Q_UNUSED(ctx);
+    const auto assetId = api::assetIdFor(ref);
+    m_cache.markActive(assetId);
+
+    auto session = std::make_unique<HttpAssetSession>(m_http, m_resolver,
+        m_settings, ref, assetId,
+        m_cache.assetDir(assetId).absolutePath());
+    session->setMode(mode);
+    auto* raw = session.get();
+
+    // Resolve once up front so the caller surfaces RD failures
+    // synchronously (i.e. a `Failed` row instead of silent stalls).
+    co_await raw->ensureResolved();
+
+    if (mode == api::DownloadMode::Full) {
+        // Fire and forget; the prefetch loop honours `m_paused`
+        // and `m_mode` so future demotion/pause is observed at the
+        // next chunk boundary. Errors propagate via the session's
+        // `failed` signal which the manager has already wired.
+        auto task = raw->prefetchAll();
+        Q_UNUSED(task);
+    }
+
+    qCInfo(KINEMA_DOWNLOAD).nospace()
+        << "RealDebridBackend::open assetId=\"" << assetId
+        << "\" mode=" << static_cast<int>(mode)
+        << " fileSize=" << raw->fileSize();
+
+    co_return session;
+}
+
+void RealDebridBackend::changeMode(AssetSession& session,
+    api::DownloadMode newMode)
+{
+    if (session.mode() == newMode) {
+        return;
+    }
+    auto* http = qobject_cast<HttpAssetSession*>(&session);
+    if (!http) {
+        qCWarning(KINEMA_DOWNLOAD)
+            << "RealDebridBackend::changeMode called on non-HTTP session";
+        return;
+    }
+    http->setMode(newMode);
+    if (newMode == api::DownloadMode::Full) {
+        // Wake the prefetch loop. If a previous prefetchAll() is
+        // still in flight (e.g. paused mid-loop) it'll resume on
+        // its next iteration; if not, this kicks a fresh one.
+        auto task = http->prefetchAll();
+        Q_UNUSED(task);
+    }
+    qCInfo(KINEMA_DOWNLOAD).nospace()
+        << "RealDebridBackend::changeMode assetId=\"" << session.assetId()
+        << "\" -> mode=" << static_cast<int>(newMode);
+}
+
+} // namespace kinema::download

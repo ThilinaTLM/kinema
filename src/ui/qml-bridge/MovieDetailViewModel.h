@@ -252,7 +252,14 @@ public Q_SLOTS:
     /// Hand the row's stream to `controllers::DownloadController::enqueue`.
     /// `pinned=true` -> Save offline (runs to completion, never
     /// auto-evicted); `pinned=false` -> ephemeral cache prefetch.
-    void saveOffline(int row, bool pinned);
+    /// Background full-file download, mirroring the explicit
+    /// `\u2b07 Download` button on the stream row. Always Full +
+    /// Pinned; mode upgrade for already-streaming sessions is
+    /// handled by `DownloadManager::enqueueDownload`.
+    void download(int row);
+    /// As above but forces a specific backend (Torrent /
+    /// RealDebridHttp). Used by the per-stream override menu.
+    void downloadWithBackend(int row, int backendKind);
     void copyMagnet(int row);
     void openMagnet(int row);
     void copyDirectUrl(int row);

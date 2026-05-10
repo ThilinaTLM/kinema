@@ -484,6 +484,28 @@ bool Database::applyMigration(int toVersion)
                 "ALTER TABLE library_titles "
                 "ADD COLUMN cast_list TEXT NOT NULL DEFAULT ''"),
         });
+    case 8:
+        // Downloads re-architecture: the `download_items` table
+        // gains an explicit `mode` column (OnDemand vs Full) and
+        // the `state` enum is pruned (Preparing→Resolving,
+        // Downloading+Streaming→Active, +Idle). Per AGENTS.md we
+        // do not migrate persisted rows; drop the table here and
+        // let `ensureSupplementalTables()` recreate it with the
+        // new schema on the next call.
+        return runAll(8, {
+            QStringLiteral(
+                "DROP INDEX IF EXISTS download_items_by_state"),
+            QStringLiteral(
+                "DROP INDEX IF EXISTS "
+                "download_items_by_disposition"),
+            QStringLiteral(
+                "DROP INDEX IF EXISTS "
+                "download_items_by_playback_key"),
+            QStringLiteral(
+                "DROP INDEX IF EXISTS download_items_by_hash"),
+            QStringLiteral(
+                "DROP TABLE IF EXISTS download_items"),
+        });
     default:
         qCWarning(KINEMA_APP)
             << "Database: no migration registered for version"
@@ -502,6 +524,7 @@ bool Database::ensureSupplementalTables()
             asset_id            TEXT PRIMARY KEY,
             backend_kind        INTEGER NOT NULL,
             state               INTEGER NOT NULL,
+            mode                INTEGER NOT NULL DEFAULT 0,
             cache_disposition   INTEGER NOT NULL,
             playback_key        TEXT NOT NULL,
             media_kind          INTEGER NOT NULL,
@@ -531,6 +554,10 @@ bool Database::ensureSupplementalTables()
         QStringLiteral(
             "CREATE INDEX IF NOT EXISTS download_items_by_state "
             "ON download_items (state, updated_at DESC)"),
+        QStringLiteral(
+            "CREATE INDEX IF NOT EXISTS "
+            "download_items_by_mode_state "
+            "ON download_items (mode, state, updated_at DESC)"),
         QStringLiteral(
             "CREATE INDEX IF NOT EXISTS download_items_by_disposition "
             "ON download_items (cache_disposition, last_used_at)"),

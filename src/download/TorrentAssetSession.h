@@ -44,6 +44,12 @@ public:
     QByteArray readRange(ByteRange range) const override;
     void touch() override;
 
+    api::DownloadMode mode() const override { return m_mode; }
+    void setMode(api::DownloadMode m) override { m_mode = m; }
+
+    void pause() override;
+    void resume() override;
+
     /// Info hash this session was registered against. Used by the
     /// manager when stopping by hash.
     const QString& infoHash() const noexcept { return m_infoHash; }
@@ -55,6 +61,7 @@ private:
     QString m_fileName;
     qint64 m_fileSize;
     QString m_infoHash;
+    api::DownloadMode m_mode = api::DownloadMode::OnDemand;
 };
 
 } // namespace kinema::download

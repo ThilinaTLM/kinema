@@ -22,9 +22,9 @@ bool isActiveState(api::DownloadState s)
 {
     switch (s) {
     case api::DownloadState::Queued:
-    case api::DownloadState::Preparing:
-    case api::DownloadState::Downloading:
-    case api::DownloadState::Streaming:
+    case api::DownloadState::Resolving:
+    case api::DownloadState::Active:
+    case api::DownloadState::Idle:
         return true;
     default:
         return false;
@@ -81,7 +81,8 @@ void DownloadsViewModel::refresh()
             }
         }
     }
-    m_items->setItems(visible, std::move(live));
+    auto attached = m_controller.attachedPlayerAssetIds();
+    m_items->setItems(visible, std::move(live), std::move(attached));
 
     Q_EMIT countsChanged();
     Q_EMIT cacheChanged();
@@ -119,9 +120,9 @@ void DownloadsViewModel::rebuildCountsFrom(
         }
         switch (it.state) {
         case api::DownloadState::Queued:
-        case api::DownloadState::Preparing:
-        case api::DownloadState::Downloading:
-        case api::DownloadState::Streaming:
+        case api::DownloadState::Resolving:
+        case api::DownloadState::Active:
+        case api::DownloadState::Idle:
             ++m_activeCount;
             break;
         case api::DownloadState::Completed:
@@ -223,6 +224,21 @@ void DownloadsViewModel::remove(const QString& assetId, bool deleteFiles)
 void DownloadsViewModel::pin(const QString& assetId, bool on)
 {
     m_controller.pin(assetId, on);
+}
+
+void DownloadsViewModel::upgradeToFull(const QString& assetId)
+{
+    m_controller.upgradeToFull(assetId);
+}
+
+void DownloadsViewModel::pauseDownload(const QString& assetId)
+{
+    m_controller.pause(assetId);
+}
+
+void DownloadsViewModel::resumeDownload(const QString& assetId)
+{
+    m_controller.resume(assetId);
 }
 
 void DownloadsViewModel::runEvictionNow()

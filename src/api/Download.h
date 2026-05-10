@@ -21,16 +21,30 @@ enum class DownloadBackendKind {
     RealDebridHttp, ///< RD hoster URL fetched in chunks into a sparse file.
 };
 
-/// Lifecycle state for a `DownloadItem`.
+/// User-visible lifecycle policy for a download. Independent of
+/// backend and disposition; selected by the user via Play (OnDemand)
+/// or Download (Full) and upgradable in place via
+/// `DownloadManager::upgradeToFull`.
+enum class DownloadMode {
+    OnDemand, ///< only fetch what the player asks for; idle-stop
+              ///< when no consumer is attached.
+    Full,     ///< eagerly fetch the whole file; never idle-stop
+              ///< until Completed/Cancelled/Failed. Player can
+              ///< attach concurrently for play-while-downloading.
+};
+
+/// Lifecycle state for a `DownloadItem`. The chip text shown in
+/// the UI is derived from `(state, mode, hasPlayerAttached)` rather
+/// than persisted, so this enum stays orthogonal to mode.
 enum class DownloadState {
-    Queued,      ///< persisted but no work has started yet
-    Preparing,   ///< resolving (e.g. RD addMagnet/instantAvailability)
-    Downloading, ///< bytes are flowing
-    Streaming,   ///< serving the asset to the player while still incomplete
-    Completed,   ///< all bytes available locally
-    Failed,      ///< terminal error; `lastError` populated
-    Paused,      ///< user-initiated pause
-    Cancelled,   ///< user-initiated cancellation; files may still exist
+    Queued,    ///< persisted, no work started
+    Resolving, ///< RD addMagnet / torrent metadata fetch in flight
+    Active,    ///< bytes flowing (or eligible to flow on demand)
+    Idle,      ///< OnDemand only: alive but no consumer attached
+    Paused,    ///< user-initiated pause
+    Completed, ///< all bytes available locally
+    Failed,    ///< terminal error; `lastError` populated
+    Cancelled, ///< user-initiated cancellation; files may still exist
 };
 
 /// Eviction policy for an asset.
@@ -76,6 +90,7 @@ struct DownloadItem {
     QString assetId;
     DownloadBackendKind backendKind = DownloadBackendKind::Torrent;
     DownloadState state = DownloadState::Queued;
+    DownloadMode mode = DownloadMode::OnDemand;
     CacheDisposition disposition = CacheDisposition::Ephemeral;
 
     PlaybackKey key;
@@ -135,4 +150,5 @@ Q_DECLARE_METATYPE(kinema::api::AssetRef)
 Q_DECLARE_METATYPE(kinema::api::DownloadItem)
 Q_DECLARE_METATYPE(kinema::api::DownloadBackendKind)
 Q_DECLARE_METATYPE(kinema::api::DownloadState)
+Q_DECLARE_METATYPE(kinema::api::DownloadMode)
 Q_DECLARE_METATYPE(kinema::api::CacheDisposition)

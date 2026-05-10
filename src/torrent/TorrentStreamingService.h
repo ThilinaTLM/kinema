@@ -109,6 +109,21 @@ public:
     /// after the user stops watching.
     virtual void setKeepAlive(const QString& infoHash, bool on);
 
+    /// Pause / resume the libtorrent handle behind a session.
+    /// User-initiated; bypasses idle-stop bookkeeping. Pausing
+    /// keeps the session in `m_sessions` so it can resume without
+    /// re-fetching metadata.
+    virtual void pauseInfoHash(const QString& infoHash);
+    virtual void resumeInfoHash(const QString& infoHash);
+
+    /// Promote a streaming session to a full background download:
+    /// drops every `set_piece_deadline()` entry so libtorrent picks
+    /// pieces in normal order, sets the selected file to top
+    /// priority, and exempts the session from idle-stop.
+    /// Idempotent. Used by `DownloadManager::upgradeToFull` and by
+    /// `TorrentBackend::changeMode(OnDemand\u2192Full)`.
+    virtual void promoteToFull(const QString& infoHash);
+
 public Q_SLOTS:
     void stopInfoHash(const QString& infoHash);
     void stopForContext(const api::PlaybackContext& ctx);

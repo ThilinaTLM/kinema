@@ -601,6 +601,76 @@ void TorrentStreamingService::setKeepAlive(const QString& infoHash, bool on)
         << "[hash=" << shortHash(h) << "] keepAlive=" << on;
 }
 
+void TorrentStreamingService::pauseInfoHash(const QString& infoHash)
+{
+    if (!d) {
+        return;
+    }
+    const QString h = normalizedHash(infoHash);
+    auto it = d->sessions.find(h);
+    if (it == d->sessions.end() || !it->handle.is_valid()) {
+        return;
+    }
+    it->handle.pause();
+    qCInfo(KINEMA_TORRENT).nospace()
+        << "[hash=" << shortHash(h) << "] pause (user)";
+}
+
+void TorrentStreamingService::resumeInfoHash(const QString& infoHash)
+{
+    if (!d) {
+        return;
+    }
+    const QString h = normalizedHash(infoHash);
+    auto it = d->sessions.find(h);
+    if (it == d->sessions.end() || !it->handle.is_valid()) {
+        return;
+    }
+    it->handle.resume();
+    it->lastActivity = QDateTime::currentDateTimeUtc();
+    qCInfo(KINEMA_TORRENT).nospace()
+        << "[hash=" << shortHash(h) << "] resume (user)";
+}
+
+void TorrentStreamingService::promoteToFull(const QString& infoHash)
+{
+    if (!d) {
+        return;
+    }
+    const QString h = normalizedHash(infoHash);
+    auto it = d->sessions.find(h);
+    if (it == d->sessions.end() || !it->handle.is_valid()) {
+        return;
+    }
+    auto& state = it.value();
+    // Clear every per-piece deadline. Passing 0 deadline + an
+    // unrecognised flag clears the entry; libtorrent's documented
+    // way is `clear_piece_deadlines()` (since 1.2).
+    state.handle.clear_piece_deadlines();
+    // Re-assert top priority on the selected file in case the
+    // session was created by a path that left other priorities in
+    // place.
+    if (state.layout.pieceCount > 0) {
+        const auto ti = state.handle.torrent_file();
+        if (ti) {
+            const auto& fs = ti->files();
+            std::vector<lt::download_priority_t> priorities(
+                fs.num_files(), lt::dont_download);
+            if (state.selected.index >= 0
+                && state.selected.index
+                    < static_cast<int>(priorities.size())) {
+                priorities[state.selected.index] = lt::top_priority;
+            }
+            state.handle.prioritize_files(priorities);
+        }
+    }
+    state.keepAlive = true;
+    state.lastActivity = QDateTime::currentDateTimeUtc();
+    qCInfo(KINEMA_TORRENT).nospace()
+        << "[hash=" << shortHash(h)
+        << "] promoteToFull: deadlines cleared, keepAlive=on";
+}
+
 void TorrentStreamingService::postTorrentUpdates()
 {
     if (!d || d->sessions.isEmpty()) {

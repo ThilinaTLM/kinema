@@ -346,6 +346,12 @@ void MainController::buildCoreServices()
     m_downloadCtrl = new controllers::DownloadController(
         *m_downloadManager, *m_downloadStore, this);
 
+    // Re-attach Full background downloads from the previous run.
+    // OnDemand sessions are intentionally skipped: by definition
+    // they only do work while a player is consuming them, and
+    // there is no consumer at startup.
+    m_downloadManager->resumePersisted();
+
     // Tokens — built before the OpenSubtitles client + history
     // controller because both reference its live `const QString&`
     // aliases.

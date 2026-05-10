@@ -15,12 +15,14 @@ namespace {
 
 api::DownloadItem sample(const QString& assetId,
     api::CacheDisposition d = api::CacheDisposition::Ephemeral,
-    api::DownloadState s = api::DownloadState::Queued)
+    api::DownloadState s = api::DownloadState::Queued,
+    api::DownloadMode m = api::DownloadMode::OnDemand)
 {
     api::DownloadItem it;
     it.assetId = assetId;
     it.backendKind = api::DownloadBackendKind::Torrent;
     it.state = s;
+    it.mode = m;
     it.disposition = d;
     it.key.kind = api::MediaKind::Movie;
     it.key.imdbId = QStringLiteral("tt1234567");
@@ -76,7 +78,53 @@ private Q_SLOTS:
         QCOMPARE(found->expectedSizeBytes.value_or(-1), 2147483648LL);
         QCOMPARE(found->cachedSizeBytes, qint64(0));
         QCOMPARE(found->state, api::DownloadState::Queued);
+        QCOMPARE(found->mode, api::DownloadMode::OnDemand);
         QCOMPARE(found->disposition, api::CacheDisposition::Ephemeral);
+    }
+
+    void modeRoundTripsAndIsMutable()
+    {
+        auto a = sample(QStringLiteral("asset-a"),
+            api::CacheDisposition::Pinned,
+            api::DownloadState::Active,
+            api::DownloadMode::Full);
+        m_store->upsert(a);
+
+        const auto found = m_store->find(QStringLiteral("asset-a"));
+        QVERIFY(found.has_value());
+        QCOMPARE(found->mode, api::DownloadMode::Full);
+        QCOMPARE(found->state, api::DownloadState::Active);
+
+        m_store->updateMode(QStringLiteral("asset-a"),
+            api::DownloadMode::OnDemand);
+        const auto after = m_store->find(QStringLiteral("asset-a"));
+        QVERIFY(after.has_value());
+        QCOMPARE(after->mode, api::DownloadMode::OnDemand);
+    }
+
+    void synthesiseStartArgsRoundTripsCoreFields()
+    {
+        auto row = sample(QStringLiteral("asset-a"),
+            api::CacheDisposition::Pinned,
+            api::DownloadState::Active,
+            api::DownloadMode::Full);
+        const auto args = core::DownloadStore::synthesiseStartArgs(row);
+
+        QCOMPARE(args.ref.infoHash, row.infoHash);
+        QCOMPARE(args.ref.releaseName, row.releaseName);
+        QCOMPARE(args.ref.fileIndex, row.fileIndex);
+        QCOMPARE(args.ref.fileNameHint, row.fileNameHint);
+        QCOMPARE(args.ref.qualityLabel, row.qualityLabel);
+        QCOMPARE(args.ref.resolution, row.resolution);
+        QCOMPARE(args.ref.provider, row.provider);
+        QVERIFY(args.ref.isValid());
+
+        QCOMPARE(args.stream.infoHash, row.infoHash);
+        QCOMPARE(args.stream.releaseName, row.releaseName);
+
+        QCOMPARE(args.ctx.key.imdbId, row.key.imdbId);
+        QCOMPARE(args.ctx.title, row.title);
+        QCOMPARE(args.ctx.poster, row.poster);
     }
 
     void updateProgressTouchesFields()

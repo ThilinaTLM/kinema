@@ -57,11 +57,14 @@ set(kinema_core_SRCS
     torrent/TorrentStreamingService.cpp
 
     download/AssetSession.cpp
+    download/BackendSelector.cpp
     download/DownloadManager.cpp
     download/HttpAssetSession.cpp
     download/LocalMediaServer.cpp
+    download/RealDebridBackend.cpp
     download/RealDebridResolver.cpp
     download/TorrentAssetSession.cpp
+    download/TorrentBackend.cpp
 
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp

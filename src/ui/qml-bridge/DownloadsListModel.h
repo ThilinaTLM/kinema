@@ -8,6 +8,7 @@
 #include <QAbstractListModel>
 #include <QHash>
 #include <QList>
+#include <QSet>
 
 namespace kinema::ui::qml {
 
@@ -28,6 +29,12 @@ public:
         StateRole,
         StateTextRole,
         StateToneRole,
+        ModeRole,
+        ModeLabelRole,
+        CanUpgradeRole,
+        CanPauseRole,
+        CanResumeRole,
+        HasPlayerAttachedRole,
         DispositionRole,
         IsPinnedRole,
         IsCompleteRole,
@@ -66,7 +73,8 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     void setItems(QList<api::DownloadItem> items,
-        QHash<QString, LiveRow> liveStats = {});
+        QHash<QString, LiveRow> liveStats = {},
+        QSet<QString> attachedPlayers = {});
     const QList<api::DownloadItem>& items() const noexcept { return m_items; }
 
 Q_SIGNALS:
@@ -75,6 +83,7 @@ Q_SIGNALS:
 private:
     QList<api::DownloadItem> m_items;
     QHash<QString, LiveRow> m_liveStats;
+    QSet<QString> m_attachedPlayers;
 };
 
 } // namespace kinema::ui::qml

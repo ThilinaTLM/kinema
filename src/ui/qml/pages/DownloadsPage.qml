@@ -200,10 +200,12 @@ Kirigami.Page {
             }
             explanation: downloadsVm.filter === 0
                 ? i18nc("@info:placeholder explanation",
-                    "Pick \"Save offline\" on a stream from a movie or "
-                    + "series detail page. Pinned items run to "
-                    + "completion in the background; ephemeral ones "
-                    + "are cached opportunistically while you stream.")
+                    "Click the \u2b07 Download button on a stream to start "
+                    + "a full background download (it keeps going whether "
+                    + "you watch or not). Click \u25b6 Play to stream on "
+                    + "demand \u2014 only the bytes the player needs are "
+                    + "fetched, and the session quiesces when you stop "
+                    + "watching.")
                 : ""
 
             QQC2.Button {

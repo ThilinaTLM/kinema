@@ -95,6 +95,14 @@ public Q_SLOTS:
     void remove(const QString& assetId, bool deleteFiles);
     void pin(const QString& assetId, bool on);
 
+    /// Promote an OnDemand session to Full + Pinned in place. Bound
+    /// to the row's `Keep file` action.
+    void upgradeToFull(const QString& assetId);
+
+    /// User-initiated pause / resume.
+    void pauseDownload(const QString& assetId);
+    void resumeDownload(const QString& assetId);
+
     /// Run the cache eviction pass now (instead of waiting for the
     /// periodic timer). Bound to a header button.
     void runEvictionNow();

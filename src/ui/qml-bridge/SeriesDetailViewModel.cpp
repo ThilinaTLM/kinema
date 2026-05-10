@@ -973,7 +973,7 @@ void SeriesDetailViewModel::enqueue(int row)
     m_queue->enqueue(*s, currentContext());
 }
 
-void SeriesDetailViewModel::saveOffline(int row, bool pinned)
+void SeriesDetailViewModel::download(int row)
 {
     const auto* s = m_streams->at(row);
     if (!s) {
@@ -987,13 +987,21 @@ void SeriesDetailViewModel::saveOffline(int row, bool pinned)
     if (!m_downloads) {
         return;
     }
-    m_downloads->enqueue(*s, currentContext(), pinned);
-    Q_EMIT statusMessage(pinned
-            ? i18nc("@info:status saving an episode for offline playback",
-                  "Saving \u201c%1\u201d offline\u2026", currentContext().title)
-            : i18nc("@info:status caching an episode",
-                  "Caching \u201c%1\u201d\u2026", currentContext().title),
+    m_downloads->download(*s, currentContext());
+    Q_EMIT statusMessage(
+        i18nc("@info:status starting a background episode download",
+            "Downloading \u201c%1\u201d\u2026", currentContext().title),
         3500);
+}
+
+void SeriesDetailViewModel::downloadWithBackend(int row, int backendKind)
+{
+    const auto* s = m_streams->at(row);
+    if (!s || !m_downloads) {
+        return;
+    }
+    m_downloads->downloadWithBackend(*s, currentContext(),
+        static_cast<api::DownloadBackendKind>(backendKind));
 }
 
 template <typename Method>

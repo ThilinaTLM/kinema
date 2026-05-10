@@ -22,7 +22,7 @@ using sql::nullSafe;
 using sql::parseIsoUtc;
 
 constexpr const char* kSelectColumns =
-    "asset_id, backend_kind, state, cache_disposition, "
+    "asset_id, backend_kind, state, mode, cache_disposition, "
     "playback_key, media_kind, imdb_id, season, episode, "
     "title, series_title, episode_title, poster_url, "
     "info_hash, release_name, file_index, file_name_hint, "
@@ -36,42 +36,43 @@ api::DownloadItem hydrate(const QSqlQuery& q)
     it.assetId = q.value(0).toString();
     it.backendKind = static_cast<api::DownloadBackendKind>(q.value(1).toInt());
     it.state = static_cast<api::DownloadState>(q.value(2).toInt());
-    it.disposition = static_cast<api::CacheDisposition>(q.value(3).toInt());
+    it.mode = static_cast<api::DownloadMode>(q.value(3).toInt());
+    it.disposition = static_cast<api::CacheDisposition>(q.value(4).toInt());
 
-    // playback_key column at index 4 is denormalized for indexing;
+    // playback_key column at index 5 is denormalized for indexing;
     // the structured key is rebuilt from kind/imdb/season/episode.
-    it.key.kind = static_cast<api::MediaKind>(q.value(5).toInt());
-    it.key.imdbId = q.value(6).toString();
-    if (!q.value(7).isNull()) {
-        it.key.season = q.value(7).toInt();
-    }
+    it.key.kind = static_cast<api::MediaKind>(q.value(6).toInt());
+    it.key.imdbId = q.value(7).toString();
     if (!q.value(8).isNull()) {
-        it.key.episode = q.value(8).toInt();
+        it.key.season = q.value(8).toInt();
     }
-    it.title = q.value(9).toString();
-    it.seriesTitle = q.value(10).toString();
-    it.episodeTitle = q.value(11).toString();
-    const auto poster = q.value(12).toString();
+    if (!q.value(9).isNull()) {
+        it.key.episode = q.value(9).toInt();
+    }
+    it.title = q.value(10).toString();
+    it.seriesTitle = q.value(11).toString();
+    it.episodeTitle = q.value(12).toString();
+    const auto poster = q.value(13).toString();
     if (!poster.isEmpty()) {
         it.poster = QUrl(poster);
     }
-    it.infoHash = q.value(13).toString();
-    it.releaseName = q.value(14).toString();
-    it.fileIndex = q.value(15).toInt();
-    it.fileNameHint = q.value(16).toString();
-    it.qualityLabel = q.value(17).toString();
-    it.resolution = q.value(18).toString();
-    it.provider = q.value(19).toString();
-    if (!q.value(20).isNull()) {
-        it.expectedSizeBytes = q.value(20).toLongLong();
+    it.infoHash = q.value(14).toString();
+    it.releaseName = q.value(15).toString();
+    it.fileIndex = q.value(16).toInt();
+    it.fileNameHint = q.value(17).toString();
+    it.qualityLabel = q.value(18).toString();
+    it.resolution = q.value(19).toString();
+    it.provider = q.value(20).toString();
+    if (!q.value(21).isNull()) {
+        it.expectedSizeBytes = q.value(21).toLongLong();
     }
-    it.cachedSizeBytes = q.value(21).toLongLong();
-    it.lastError = q.value(22).toString();
-    it.complete = q.value(23).toInt() != 0;
-    it.localDir = q.value(24).toString();
-    it.addedAt = parseIsoUtc(q.value(25).toString());
-    it.updatedAt = parseIsoUtc(q.value(26).toString());
-    it.lastUsedAt = parseIsoUtc(q.value(27).toString());
+    it.cachedSizeBytes = q.value(22).toLongLong();
+    it.lastError = q.value(23).toString();
+    it.complete = q.value(24).toInt() != 0;
+    it.localDir = q.value(25).toString();
+    it.addedAt = parseIsoUtc(q.value(26).toString());
+    it.updatedAt = parseIsoUtc(q.value(27).toString());
+    it.lastUsedAt = parseIsoUtc(q.value(28).toString());
     return it;
 }
 
@@ -162,7 +163,7 @@ void DownloadStore::upsert(const api::DownloadItem& item)
     auto q = m_db.query();
     q.prepare(QStringLiteral(R"(
         INSERT INTO download_items (
-            asset_id, backend_kind, state, cache_disposition,
+            asset_id, backend_kind, state, mode, cache_disposition,
             playback_key, media_kind, imdb_id, season, episode,
             title, series_title, episode_title, poster_url,
             info_hash, release_name, file_index, file_name_hint,
@@ -170,7 +171,7 @@ void DownloadStore::upsert(const api::DownloadItem& item)
             expected_size_bytes, cached_size_bytes, last_error, complete,
             local_dir, added_at, updated_at, last_used_at
         ) VALUES (
-            ?, ?, ?, ?,
+            ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
@@ -181,6 +182,7 @@ void DownloadStore::upsert(const api::DownloadItem& item)
         ON CONFLICT(asset_id) DO UPDATE SET
             backend_kind        = excluded.backend_kind,
             state               = excluded.state,
+            mode                = excluded.mode,
             cache_disposition   = excluded.cache_disposition,
             playback_key        = excluded.playback_key,
             media_kind          = excluded.media_kind,
@@ -210,6 +212,7 @@ void DownloadStore::upsert(const api::DownloadItem& item)
     q.addBindValue(item.assetId);
     q.addBindValue(static_cast<int>(item.backendKind));
     q.addBindValue(static_cast<int>(item.state));
+    q.addBindValue(static_cast<int>(item.mode));
     q.addBindValue(static_cast<int>(item.disposition));
 
     q.addBindValue(item.key.storageKey());
@@ -311,6 +314,62 @@ void DownloadStore::updateState(const QString& assetId,
         return;
     }
     scheduleChanged();
+}
+
+void DownloadStore::updateMode(const QString& assetId,
+    api::DownloadMode mode)
+{
+    if (!m_db.isOpen() || assetId.isEmpty()) {
+        return;
+    }
+    const auto now = isoUtc(QDateTime::currentDateTimeUtc());
+    auto q = m_db.query();
+    q.prepare(QStringLiteral(
+        "UPDATE download_items SET "
+        "mode = ?, updated_at = ? "
+        "WHERE asset_id = ?"));
+    q.addBindValue(static_cast<int>(mode));
+    q.addBindValue(now);
+    q.addBindValue(assetId);
+    if (!q.exec()) {
+        qCWarning(KINEMA_DOWNLOAD) << "DownloadStore::updateMode failed:"
+                          << q.lastError().text();
+        return;
+    }
+    scheduleChanged();
+}
+
+DownloadStore::StartArgs DownloadStore::synthesiseStartArgs(
+    const api::DownloadItem& row)
+{
+    StartArgs out;
+
+    out.ref.key = row.key;
+    out.ref.infoHash = row.infoHash;
+    out.ref.releaseName = row.releaseName;
+    out.ref.fileIndex = row.fileIndex;
+    out.ref.fileNameHint = row.fileNameHint;
+    out.ref.qualityLabel = row.qualityLabel;
+    out.ref.resolution = row.resolution;
+    out.ref.provider = row.provider;
+    out.ref.sizeBytes = row.expectedSizeBytes;
+
+    out.stream.infoHash = row.infoHash;
+    out.stream.releaseName = row.releaseName;
+    out.stream.qualityLabel = row.qualityLabel;
+    out.stream.resolution = row.resolution;
+    out.stream.provider = row.provider;
+    if (row.expectedSizeBytes) {
+        out.stream.sizeBytes = *row.expectedSizeBytes;
+    }
+
+    out.ctx.key = row.key;
+    out.ctx.title = row.title;
+    out.ctx.seriesTitle = row.seriesTitle;
+    out.ctx.episodeTitle = row.episodeTitle;
+    out.ctx.poster = row.poster;
+
+    return out;
 }
 
 void DownloadStore::setDisposition(const QString& assetId,

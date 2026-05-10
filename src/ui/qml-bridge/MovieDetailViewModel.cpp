@@ -702,7 +702,7 @@ void MovieDetailViewModel::enqueue(int row)
     m_queue->enqueue(*s, currentContext());
 }
 
-void MovieDetailViewModel::saveOffline(int row, bool pinned)
+void MovieDetailViewModel::download(int row)
 {
     const auto* s = m_streams->at(row);
     if (!s) {
@@ -716,13 +716,21 @@ void MovieDetailViewModel::saveOffline(int row, bool pinned)
     if (!m_downloads) {
         return;
     }
-    m_downloads->enqueue(*s, currentContext(), pinned);
-    Q_EMIT statusMessage(pinned
-            ? i18nc("@info:status saving a stream for offline playback",
-                  "Saving \u201c%1\u201d offline\u2026", m_title)
-            : i18nc("@info:status caching a stream into the local cache",
-                  "Caching \u201c%1\u201d\u2026", m_title),
+    m_downloads->download(*s, currentContext());
+    Q_EMIT statusMessage(
+        i18nc("@info:status starting a background download",
+            "Downloading \u201c%1\u201d\u2026", m_title),
         3500);
+}
+
+void MovieDetailViewModel::downloadWithBackend(int row, int backendKind)
+{
+    const auto* s = m_streams->at(row);
+    if (!s || !m_downloads) {
+        return;
+    }
+    m_downloads->downloadWithBackend(*s, currentContext(),
+        static_cast<api::DownloadBackendKind>(backendKind));
 }
 
 void MovieDetailViewModel::setDownloadController(
