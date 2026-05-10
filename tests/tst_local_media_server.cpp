@@ -14,6 +14,8 @@
 #include <QSignalSpy>
 #include <QTest>
 
+#include <vector>
+
 using namespace kinema::download;
 namespace api = kinema::api;
 using kinema::torrent::ByteRange;
@@ -39,8 +41,8 @@ public:
 
     QCoro::Task<bool> ensureRange(ByteRange r) override
     {
-        Q_UNUSED(r);
         ++ensureCount;
+        ensureRanges.push_back(r);
         co_return true;
     }
     QByteArray readRange(ByteRange r) const override
@@ -59,6 +61,7 @@ public:
 
     int ensureCount = 0;
     int touchCount = 0;
+    std::vector<ByteRange> ensureRanges;
 
 private:
     QByteArray m_content;
@@ -102,6 +105,28 @@ private Q_SLOTS:
         QCOMPARE(body, content);
         QVERIFY(session.ensureCount > 0);
         QVERIFY(session.touchCount > 0);
+    }
+
+    void urlForDoesNotDoublePercentEncode()
+    {
+        LocalMediaServer server;
+        QVERIFY(server.listen());
+
+        FakeAssetSession session(QByteArray("x"),
+            QStringLiteral("The Show (1080p) [foo].mkv"),
+            QStringLiteral("asset-1"));
+        server.registerSession(&session);
+
+        const QUrl url = server.urlFor(&session);
+        // QUrl stores the path decoded; reserved characters are
+        // percent-encoded exactly once when serialised.
+        QCOMPARE(url.path(),
+            QStringLiteral("/stream/asset-1/The Show (1080p) [foo].mkv"));
+        const QByteArray encoded = url.toEncoded();
+        QVERIFY2(!encoded.contains("%2520"),
+            qPrintable(QStringLiteral("double-encoded path: ")
+                + QString::fromUtf8(encoded)));
+        QVERIFY(encoded.contains("%20"));
     }
 
     void respectsRangeRequests()
@@ -151,6 +176,43 @@ private Q_SLOTS:
         const auto body = fetchPath(url);
         QCOMPARE(body, content);
         QVERIFY(session.ensureCount > 0);
+    }
+
+    void nonRangeGetServesEntireBodyViaChunkedReads()
+    {
+        LocalMediaServer server;
+        QVERIFY(server.listen());
+
+        // 6 MiB content — large enough to span multiple
+        // 1 MiB streaming chunks inside serveSocket.
+        const int kSize = 6 * 1024 * 1024;
+        QByteArray content;
+        content.resize(kSize);
+        for (int i = 0; i < kSize; ++i) {
+            content[i] = static_cast<char>((i * 31) & 0xff);
+        }
+        FakeAssetSession session(content,
+            QStringLiteral("big.mkv"),
+            QStringLiteral("asset-big"));
+        server.registerSession(&session);
+
+        const auto body = fetchPath(server.urlFor(&session));
+        QCOMPARE(body.size(), content.size());
+        QCOMPARE(body, content);
+
+        // The streaming loop must call ensureRange more than once
+        // for a 6 MiB body and no single call may cover the whole
+        // file.
+        QVERIFY2(session.ensureRanges.size() >= 2,
+            qPrintable(QStringLiteral("ensureRanges.size()=%1")
+                .arg(session.ensureRanges.size())));
+        for (const auto& r : session.ensureRanges) {
+            const qint64 len = r.endInclusive - r.start + 1;
+            QVERIFY2(len < kSize,
+                qPrintable(QStringLiteral("single ensureRange covered "
+                    "whole file: start=%1 end=%2")
+                    .arg(r.start).arg(r.endInclusive)));
+        }
     }
 
     void unknownAssetReturns404()

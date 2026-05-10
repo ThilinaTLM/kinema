@@ -220,6 +220,12 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
 void PlaybackController::play(const QUrl& url,
     const api::PlaybackContext& ctx)
 {
+    qCInfo(KINEMA_CONTROLLER).nospace()
+        << "PlaybackController::play url="
+        << core::redactUrlForLog(url)
+        << " title=\"" << ctx.title << "\""
+        << " resumeSec="
+        << (ctx.resumeSeconds ? *ctx.resumeSeconds : 0);
     m_ctx = ctx;
     m_duration = 0.0;
     m_position = 0.0;
@@ -365,6 +371,19 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     if (!m_http) {
         co_return;
     }
+    if (url.scheme() != QLatin1String("https")) {
+        // Local streams (http://127.0.0.1/...) are served by
+        // LocalMediaServer; we deliberately route OpenSubtitles
+        // moviehash through the upstream HTTPS URL only. A future
+        // change can compute the hash directly from the cached
+        // payload via AssetSession::readRange, but for now just
+        // skip the futile HEAD/GET pair (core::HttpClient enforces
+        // HTTPS and would throw on every probe).
+        qCDebug(KINEMA_CONTROLLER)
+            << "moviehash: skipping non-HTTPS URL"
+            << core::redactUrlForLog(url);
+        co_return;
+    }
     constexpr qint64 kBlock = 65536;
 
     const auto rangeGet = [this, &url](qint64 start, qint64 end)
@@ -435,6 +454,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
 
 void PlaybackController::onFileLoaded()
 {
+    qCInfo(KINEMA_CONTROLLER) << "PlaybackController: file-loaded";
     m_loadWatchdog.stop();
     if (m_window) {
         m_window->setLoadingVisible(false);
@@ -455,6 +475,8 @@ void PlaybackController::onFileLoaded()
 
 void PlaybackController::onPlaybackError(const QString& reason)
 {
+    qCWarning(KINEMA_CONTROLLER).nospace()
+        << "PlaybackController: playback error \"" << reason << "\"";
     m_loadWatchdog.stop();
     if (m_window) {
         m_window->setLoadingVisible(false);

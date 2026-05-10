@@ -470,6 +470,23 @@ QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
         item.expectedSizeBytes = raw->fileSize() > 0
             ? std::optional<qint64>(raw->fileSize())
             : item.expectedSizeBytes;
+
+        // Seed the persisted progress from whatever the session
+        // discovered on disk (HttpAssetSession::loadChunkMap, or a
+        // torrent resume populated by the engine). Without this,
+        // re-opening a session over an already-cached payload
+        // leaves cached_size_bytes at 0 forever — fetchChunk only
+        // emits cachedBytesChanged on chunks it actually downloads,
+        // so a fully-cached play stays at 0% on the Downloads row.
+        const qint64 initialCached = raw->cachedBytes();
+        if (initialCached >= 0) {
+            item.cachedSizeBytes = initialCached;
+            const qint64 expected = raw->fileSize();
+            if (expected > 0 && initialCached >= expected) {
+                item.complete = true;
+                item.state = api::DownloadState::Completed;
+            }
+        }
         m_store.upsert(item);
         Q_EMIT itemChanged(assetId);
 
