@@ -22,7 +22,7 @@ StackLayout {
     id: streams
 
     /// View-model exposing `streams` (StreamsListModel*),
-    /// `realDebridConfigured`, `rawStreamsCount`, `sortMode`, and
+    /// `debridConfigured`, `rawStreamsCount`, `sortMode`, and
     /// the `uiResolutionFilter` / `uiHdrOnly` / `uiDolbyVisionOnly`
     /// / `uiMultiAudioOnly` transient filters.
     /// Defaults to `movieDetailVm`.

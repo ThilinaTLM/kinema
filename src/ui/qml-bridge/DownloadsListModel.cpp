@@ -83,6 +83,7 @@ QString backendIcon(api::DownloadBackendKind k)
     case api::DownloadBackendKind::Torrent:
         return QStringLiteral("network-server-database");
     case api::DownloadBackendKind::RealDebridHttp:
+    case api::DownloadBackendKind::AllDebridHttp:
         return QStringLiteral("folder-cloud");
     }
     return QStringLiteral("download");
@@ -95,6 +96,8 @@ QString backendLabel(api::DownloadBackendKind k)
         return i18nc("@label download backend", "Torrent");
     case api::DownloadBackendKind::RealDebridHttp:
         return i18nc("@label download backend", "Real-Debrid");
+    case api::DownloadBackendKind::AllDebridHttp:
+        return i18nc("@label download backend", "AllDebrid");
     }
     return QString();
 }

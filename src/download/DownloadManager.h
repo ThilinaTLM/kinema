@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "api/Debrid.h"
 #include "api/Download.h"
 #include "api/Media.h"
 #include "api/PlaybackContext.h"
@@ -21,6 +22,7 @@
 #include <optional>
 
 namespace kinema::api {
+class AllDebridClient;
 class RealDebridClient;
 }
 
@@ -40,8 +42,10 @@ class TorrentStreamingService;
 
 namespace kinema::download {
 
+class AllDebridResolver;
 class AssetSession;
 class BackendSelector;
+class DebridResolver;
 class DownloadBackend;
 class HttpAssetSession;
 class LocalMediaServer;
@@ -84,11 +88,17 @@ class DownloadManager : public QObject
 public:
     DownloadManager(core::HttpClient& http,
         api::RealDebridClient& rd,
+        api::AllDebridClient& ad,
         torrent::TorrentStreamingService& torrentEngine,
         core::DownloadStore& store,
         core::MediaCache& cache,
         const config::DownloadSettings& settings,
         QObject* parent = nullptr);
+
+    /// Forward the user's active-debrid-provider choice to the
+    /// internal `BackendSelector`. Called by `MainController` on
+    /// `DebridSettings::activeProviderChanged`.
+    void setActiveDebridProvider(api::DebridProvider p);
     ~DownloadManager() override;
 
     /// Realise or reuse a session for the asset and return a
@@ -194,12 +204,14 @@ private:
 
     core::HttpClient& m_http;
     api::RealDebridClient& m_rd;
+    api::AllDebridClient& m_ad;
     torrent::TorrentStreamingService& m_torrentEngine;
     core::DownloadStore& m_store;
     core::MediaCache& m_cache;
     const config::DownloadSettings& m_settings;
 
-    std::unique_ptr<RealDebridResolver> m_resolver;
+    std::unique_ptr<RealDebridResolver> m_rdResolver;
+    std::unique_ptr<AllDebridResolver> m_adResolver;
     std::unique_ptr<LocalMediaServer> m_server;
     std::unique_ptr<BackendSelector> m_selector;
 

@@ -17,24 +17,29 @@ class TokenStore;
 }
 
 namespace kinema::config {
-class RealDebridSettings;
+class DebridSettings;
 }
 
 namespace kinema::controllers {
 
 /**
- * Owns the in-memory copies of the Real-Debrid and TMDB tokens. One
- * TokenController per app; controllers that need the tokens receive
- * them as `const QString&` aliases and get live updates without any
- * keyring round-trip.
+ * Owns the in-memory copies of the Real-Debrid, AllDebrid, TMDB and
+ * OpenSubtitles credentials. One TokenController per app;
+ * controllers that need the tokens receive them as `const QString&`
+ * aliases and get live updates without any keyring round-trip.
  *
  * TMDB resolution order:
  *   1. User-override token in the keyring (if any).
  *   2. Compile-time default (from core/TmdbConfig.h).
  *   3. Empty \u2014 Discover shows a \"not configured\" state.
  *
- * RD: effective token is exposed only when RealDebridSettings says
- * a keyring token is configured *and* RD usage is enabled.
+ * Debrid: both the RD token and the AllDebrid apikey are published
+ * raw whenever the keyring has them. `download::BackendSelector`
+ * (configured by `MainController` from
+ * `config::DebridSettings::activeProvider()`) is what actually
+ * decides which provider serves new sessions; the per-client tokens
+ * still need to be set so explicit override paths (resume, per-row
+ * override) keep working.
  */
 class TokenController : public QObject
 {
@@ -43,11 +48,12 @@ public:
     TokenController(
         core::TokenStore* tokens,
         api::TmdbClient* tmdb,
-        const config::RealDebridSettings& rdSettings,
+        const config::DebridSettings& debridSettings,
         QObject* parent = nullptr,
         QString tmdbCompiledDefaultToken = QString());
 
     const QString& realDebridToken() const noexcept { return m_rdToken; }
+    const QString& allDebridApiKey() const noexcept { return m_adApiKey; }
     const QString& tmdbToken() const noexcept { return m_tmdbToken; }
     const QString& openSubtitlesApiKey() const noexcept { return m_osApiKey; }
     const QString& openSubtitlesUsername() const noexcept { return m_osUsername; }
@@ -57,10 +63,14 @@ public Q_SLOTS:
     /// Kick off both keyring reads. Fire-and-forget.
     void loadAll();
 
-    /// Re-resolve the effective RD token. When RD is disabled this
-    /// publishes an empty token without touching the keyring; when
-    /// enabled it re-reads the saved token.
+    /// Re-read the RD token from the keyring. The selector decides
+    /// whether RD is the active provider; this slot just keeps the
+    /// in-memory token in sync after Save / Remove on the settings
+    /// page.
     void refreshRealDebrid();
+
+    /// Re-read the AllDebrid apikey from the keyring.
+    void refreshAllDebrid();
 
     /// Re-resolve the TMDB token chain (user keyring \u2192 compile-time
     /// default). Called after Save / Remove from the TMDB settings page.
@@ -75,6 +85,9 @@ Q_SIGNALS:
     /// token removed or never set.
     void realDebridTokenChanged(const QString&);
 
+    /// Fires whenever the AllDebrid apikey changes.
+    void allDebridApiKeyChanged(const QString&);
+
     /// Fires whenever the effective TMDB token changes. Empty string
     /// = no user override and no compile-time default.
     void tmdbTokenChanged(const QString&);
@@ -85,14 +98,16 @@ Q_SIGNALS:
 
 private:
     QCoro::Task<void> loadRdTask();
+    QCoro::Task<void> loadAdTask();
     QCoro::Task<void> loadTmdbTask();
     QCoro::Task<void> loadOpenSubtitlesTask();
 
     core::TokenStore* m_tokens;
     api::TmdbClient* m_tmdb;
-    const config::RealDebridSettings& m_rdSettings;
+    const config::DebridSettings& m_debridSettings;
 
     QString m_rdToken;
+    QString m_adApiKey;
     QString m_tmdbToken;
     QString m_tmdbCompiledDefaultToken;
     QString m_osApiKey;

@@ -1,0 +1,18 @@
+{
+  "status": "success",
+  "data": {
+    "user": {
+      "username": "bob",
+      "email": "bob@example.com",
+      "isPremium": false,
+      "isSubscribed": false,
+      "isTrial": false,
+      "premiumUntil": 0,
+      "lang": "en",
+      "preferedDomain": "fr",
+      "fidelityPoints": 0,
+      "limitedHostersQuotas": {},
+      "notifications": []
+    }
+  }
+}

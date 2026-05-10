@@ -3,6 +3,7 @@
 
 #include "ui/qml-bridge/SettingsViewModels.h"
 
+#include "api/AllDebridClient.h"
 #include "api/Media.h"
 #include "api/OpenSubtitlesClient.h"
 #include "api/RealDebridClient.h"
@@ -11,9 +12,9 @@
 #include "config/AppSettings.h"
 #include "config/AppearanceSettings.h"
 #include "config/CacheSettings.h"
+#include "config/DebridSettings.h"
 #include "config/FilterSettings.h"
 #include "config/PlayerSettings.h"
-#include "config/RealDebridSettings.h"
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
 #include "config/TorrentioSettings.h"
@@ -348,29 +349,24 @@ QCoro::Task<void> TmdbSettingsViewModel::removeTask()
     setBusy(false);
 }
 
-// ============================== Real-Debrid ===============================
+// ============================== Debrid: Real-Debrid section ==============
 
-RealDebridSettingsViewModel::RealDebridSettingsViewModel(
+RealDebridSectionViewModel::RealDebridSectionViewModel(
     core::HttpClient* http, core::TokenStore* tokens,
-    config::RealDebridSettings& settings, QObject* parent)
+    config::DebridSettings& settings, QObject* parent)
     : QObject(parent)
     , m_http(http)
     , m_tokens(tokens)
-    , m_rdSettings(settings)
+    , m_settings(settings)
 {
 }
 
-bool RealDebridSettingsViewModel::tokenSaved() const
+bool RealDebridSectionViewModel::tokenSaved() const
 {
-    return m_rdSettings.configured();
+    return m_settings.realDebridConfigured();
 }
 
-bool RealDebridSettingsViewModel::enabled() const
-{
-    return m_rdSettings.enabled();
-}
-
-void RealDebridSettingsViewModel::setToken(const QString& token)
+void RealDebridSectionViewModel::setToken(const QString& token)
 {
     if (m_token == token) {
         return;
@@ -379,38 +375,28 @@ void RealDebridSettingsViewModel::setToken(const QString& token)
     Q_EMIT tokenInputChanged();
 }
 
-void RealDebridSettingsViewModel::setEnabled(bool on)
-{
-    if (m_rdSettings.enabled() == on) {
-        return;
-    }
-    m_rdSettings.setEnabled(on);
-    Q_EMIT enabledChanged();
-    Q_EMIT usageChanged();
-}
-
-void RealDebridSettingsViewModel::load()
+void RealDebridSectionViewModel::load()
 {
     auto t = loadTask();
     Q_UNUSED(t);
 }
-void RealDebridSettingsViewModel::testConnection()
+void RealDebridSectionViewModel::testConnection()
 {
     auto t = testTask();
     Q_UNUSED(t);
 }
-void RealDebridSettingsViewModel::save()
+void RealDebridSectionViewModel::save()
 {
     auto t = saveTask();
     Q_UNUSED(t);
 }
-void RealDebridSettingsViewModel::remove()
+void RealDebridSectionViewModel::remove()
 {
     auto t = removeTask();
     Q_UNUSED(t);
 }
 
-void RealDebridSettingsViewModel::setStatus(const QString& message, int kind)
+void RealDebridSectionViewModel::setStatus(const QString& message, int kind)
 {
     if (m_statusMessage == message && m_statusKind == kind) {
         return;
@@ -420,7 +406,7 @@ void RealDebridSettingsViewModel::setStatus(const QString& message, int kind)
     Q_EMIT statusChanged();
 }
 
-void RealDebridSettingsViewModel::setBusy(bool on)
+void RealDebridSectionViewModel::setBusy(bool on)
 {
     if (m_busy == on) {
         return;
@@ -429,7 +415,7 @@ void RealDebridSettingsViewModel::setBusy(bool on)
     Q_EMIT busyChanged();
 }
 
-QCoro::Task<void> RealDebridSettingsViewModel::loadTask()
+QCoro::Task<void> RealDebridSectionViewModel::loadTask()
 {
     setBusy(true);
     try {
@@ -447,7 +433,7 @@ QCoro::Task<void> RealDebridSettingsViewModel::loadTask()
     setBusy(false);
 }
 
-QCoro::Task<void> RealDebridSettingsViewModel::testTask()
+QCoro::Task<void> RealDebridSectionViewModel::testTask()
 {
     const auto token = m_token.trimmed();
     if (token.isEmpty()) {
@@ -488,7 +474,7 @@ QCoro::Task<void> RealDebridSettingsViewModel::testTask()
     setBusy(false);
 }
 
-QCoro::Task<void> RealDebridSettingsViewModel::saveTask()
+QCoro::Task<void> RealDebridSectionViewModel::saveTask()
 {
     const auto token = m_token.trimmed();
     if (token.isEmpty()) {
@@ -499,7 +485,7 @@ QCoro::Task<void> RealDebridSettingsViewModel::saveTask()
         co_await m_tokens->write(
             QString::fromLatin1(core::TokenStore::kRealDebridKey),
             token);
-        m_rdSettings.setConfigured(true);
+        m_settings.setRealDebridConfigured(true);
         Q_EMIT tokenSavedChanged();
         Q_EMIT tokenChanged(token);
         setStatus(i18nc("@info rd settings status",
@@ -513,13 +499,13 @@ QCoro::Task<void> RealDebridSettingsViewModel::saveTask()
     setBusy(false);
 }
 
-QCoro::Task<void> RealDebridSettingsViewModel::removeTask()
+QCoro::Task<void> RealDebridSectionViewModel::removeTask()
 {
     setBusy(true);
     try {
         co_await m_tokens->remove(
             QString::fromLatin1(core::TokenStore::kRealDebridKey));
-        m_rdSettings.setConfigured(false);
+        m_settings.setRealDebridConfigured(false);
         m_token.clear();
         Q_EMIT tokenInputChanged();
         Q_EMIT tokenSavedChanged();
@@ -533,6 +519,220 @@ QCoro::Task<void> RealDebridSettingsViewModel::removeTask()
             kStatusError);
     }
     setBusy(false);
+}
+
+// ============================== Debrid: AllDebrid section ===============
+
+AllDebridSectionViewModel::AllDebridSectionViewModel(
+    core::HttpClient* http, core::TokenStore* tokens,
+    config::DebridSettings& settings, QObject* parent)
+    : QObject(parent)
+    , m_http(http)
+    , m_tokens(tokens)
+    , m_settings(settings)
+{
+}
+
+bool AllDebridSectionViewModel::apiKeySaved() const
+{
+    return m_settings.allDebridConfigured();
+}
+
+void AllDebridSectionViewModel::setApiKey(const QString& apiKey)
+{
+    if (m_apiKey == apiKey) {
+        return;
+    }
+    m_apiKey = apiKey;
+    Q_EMIT apiKeyInputChanged();
+}
+
+void AllDebridSectionViewModel::load()
+{
+    auto t = loadTask();
+    Q_UNUSED(t);
+}
+void AllDebridSectionViewModel::testConnection()
+{
+    auto t = testTask();
+    Q_UNUSED(t);
+}
+void AllDebridSectionViewModel::save()
+{
+    auto t = saveTask();
+    Q_UNUSED(t);
+}
+void AllDebridSectionViewModel::remove()
+{
+    auto t = removeTask();
+    Q_UNUSED(t);
+}
+
+void AllDebridSectionViewModel::setStatus(const QString& message, int kind)
+{
+    if (m_statusMessage == message && m_statusKind == kind) {
+        return;
+    }
+    m_statusMessage = message;
+    m_statusKind = kind;
+    Q_EMIT statusChanged();
+}
+
+void AllDebridSectionViewModel::setBusy(bool on)
+{
+    if (m_busy == on) {
+        return;
+    }
+    m_busy = on;
+    Q_EMIT busyChanged();
+}
+
+QCoro::Task<void> AllDebridSectionViewModel::loadTask()
+{
+    setBusy(true);
+    try {
+        const auto existing = co_await m_tokens->read(
+            QString::fromLatin1(core::TokenStore::kAllDebridKey));
+        if (!existing.isEmpty()) {
+            setApiKey(existing);
+        }
+    } catch (const core::TokenStoreError& e) {
+        setStatus(e.message(), kStatusError);
+    } catch (const std::exception& e) {
+        setStatus(core::describeError(e, "ad settings/load"),
+            kStatusError);
+    }
+    setBusy(false);
+}
+
+QCoro::Task<void> AllDebridSectionViewModel::testTask()
+{
+    const auto apiKey = m_apiKey.trimmed();
+    if (apiKey.isEmpty()) {
+        co_return;
+    }
+    setBusy(true);
+    setStatus(i18nc("@info ad settings status, in progress",
+        "Testing AllDebrid API key…"), kStatusInfo);
+    api::AllDebridClient client(m_http);
+    client.setApiKey(apiKey);
+    try {
+        const auto user = co_await client.user();
+        const auto plan = user.isPremium
+            ? (user.isTrial
+                ? i18nc("@info ad plan label", "trial")
+                : i18nc("@info ad plan label", "premium"))
+            : i18nc("@info ad plan label", "free");
+        QString msg = i18nc("@info ad settings status",
+            "Signed in as %1 (%2)",
+            user.username.isEmpty() ? QStringLiteral("—")
+                                    : user.username,
+            plan);
+        if (user.premiumUntil) {
+            msg += QLatin1Char('\n')
+                + i18nc("@info ad settings status premium expiry",
+                    "Premium until: %1",
+                    core::formatReleaseDate(*user.premiumUntil));
+        }
+        setStatus(msg, kStatusPositive);
+    } catch (const std::exception& e) {
+        if (const auto* he = core::asHttpError(e);
+            he
+            && (he->httpStatus() == 401 || he->httpStatus() == 403)) {
+            setStatus(i18nc("@info ad settings status",
+                "AllDebrid rejected the API key (HTTP %1).",
+                he->httpStatus()),
+                kStatusError);
+        } else {
+            setStatus(core::describeError(e, "ad settings/test"),
+                kStatusError);
+        }
+    }
+    setBusy(false);
+}
+
+QCoro::Task<void> AllDebridSectionViewModel::saveTask()
+{
+    const auto apiKey = m_apiKey.trimmed();
+    if (apiKey.isEmpty()) {
+        co_return;
+    }
+    setBusy(true);
+    try {
+        co_await m_tokens->write(
+            QString::fromLatin1(core::TokenStore::kAllDebridKey),
+            apiKey);
+        m_settings.setAllDebridConfigured(true);
+        Q_EMIT apiKeySavedChanged();
+        Q_EMIT apiKeyChanged(apiKey);
+        setStatus(i18nc("@info ad settings status",
+            "API key saved to keyring."), kStatusPositive);
+    } catch (const core::TokenStoreError& e) {
+        setStatus(e.message(), kStatusError);
+    } catch (const std::exception& e) {
+        setStatus(core::describeError(e, "ad settings/save"),
+            kStatusError);
+    }
+    setBusy(false);
+}
+
+QCoro::Task<void> AllDebridSectionViewModel::removeTask()
+{
+    setBusy(true);
+    try {
+        co_await m_tokens->remove(
+            QString::fromLatin1(core::TokenStore::kAllDebridKey));
+        m_settings.setAllDebridConfigured(false);
+        m_apiKey.clear();
+        Q_EMIT apiKeyInputChanged();
+        Q_EMIT apiKeySavedChanged();
+        Q_EMIT apiKeyChanged(QString {});
+        setStatus(i18nc("@info ad settings status",
+            "API key removed from keyring."), kStatusInfo);
+    } catch (const core::TokenStoreError& e) {
+        setStatus(e.message(), kStatusError);
+    } catch (const std::exception& e) {
+        setStatus(core::describeError(e, "ad settings/remove"),
+            kStatusError);
+    }
+    setBusy(false);
+}
+
+// ============================== Debrid parent VM =========================
+
+DebridSettingsViewModel::DebridSettingsViewModel(
+    core::HttpClient* http, core::TokenStore* tokens,
+    config::DebridSettings& settings, QObject* parent)
+    : QObject(parent)
+    , m_settings(settings)
+    , m_rd(new RealDebridSectionViewModel(http, tokens, settings, this))
+    , m_ad(new AllDebridSectionViewModel(http, tokens, settings, this))
+{
+    connect(&m_settings, &config::DebridSettings::activeProviderChanged,
+        this, [this](api::DebridProvider) {
+            Q_EMIT activeProviderChanged();
+        });
+}
+
+int DebridSettingsViewModel::activeProvider() const
+{
+    return static_cast<int>(m_settings.activeProvider());
+}
+
+void DebridSettingsViewModel::setActiveProvider(int provider)
+{
+    auto value = api::DebridProvider::None;
+    switch (provider) {
+    case static_cast<int>(api::DebridProvider::RealDebrid):
+        value = api::DebridProvider::RealDebrid;
+        break;
+    case static_cast<int>(api::DebridProvider::AllDebrid):
+        value = api::DebridProvider::AllDebrid;
+        break;
+    default:
+        break;
+    }
+    m_settings.setActiveProvider(value);
 }
 
 // ============================== Streams ===================================
@@ -1280,8 +1480,8 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     m_general = new GeneralSettingsViewModel(settings.search(),
         settings.appearance(), this);
     m_tmdb = new TmdbSettingsViewModel(http, tokens, this);
-    m_rd = new RealDebridSettingsViewModel(http, tokens,
-        settings.realDebrid(), this);
+    m_debrid = new DebridSettingsViewModel(http, tokens,
+        settings.debrid(), this);
     m_streams = new StreamsSettingsViewModel(settings.torrentio(),
         settings.filter(), this);
     m_player = new PlayerSettingsViewModel(settings.player(), this);
@@ -1294,10 +1494,15 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     // `MainController` can route them to `TokenController`.
     connect(m_tmdb, &TmdbSettingsViewModel::tokenChanged, this,
         &SettingsRootViewModel::tmdbTokenChanged);
-    connect(m_rd, &RealDebridSettingsViewModel::tokenChanged, this,
+    connect(m_debrid->realDebrid(),
+        &RealDebridSectionViewModel::tokenChanged, this,
         &SettingsRootViewModel::realDebridTokenChanged);
-    connect(m_rd, &RealDebridSettingsViewModel::usageChanged, this,
-        &SettingsRootViewModel::realDebridUsageChanged);
+    connect(m_debrid->allDebrid(),
+        &AllDebridSectionViewModel::apiKeyChanged, this,
+        &SettingsRootViewModel::allDebridApiKeyChanged);
+    connect(m_debrid,
+        &DebridSettingsViewModel::activeProviderChanged, this,
+        &SettingsRootViewModel::activeDebridProviderChanged);
     connect(m_subs,
         &SubtitlesSettingsViewModel::credentialsChanged, this,
         &SettingsRootViewModel::subtitleCredentialsChanged);
@@ -1305,7 +1510,8 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     // Initial async loads. Each VM's loadTask is independent and
     // safe to run concurrently — they hit different keyring keys.
     m_tmdb->load();
-    m_rd->load();
+    m_debrid->realDebrid()->load();
+    m_debrid->allDebrid()->load();
     m_subs->load();
 }
 

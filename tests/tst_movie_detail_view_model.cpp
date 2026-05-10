@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "config/AppSettings.h"
+#include "config/DebridSettings.h"
 #include "config/TorrentioSettings.h"
 #include "controllers/TokenController.h"
 #include "core/HttpError.h"
@@ -91,6 +92,7 @@ struct Fixture {
     FakeTmdbClient tmdb;
     StreamActions actions { nullptr, nullptr };
     QString rdToken;
+    QString adApiKey;
     MovieDetailViewModel vm;
 
     Fixture()
@@ -99,7 +101,8 @@ struct Fixture {
             KConfig::SimpleConfig))
         , settings(config)
         , vm(&cinemeta, &torrentio, &tmdb, &actions,
-              /*tokens=*/nullptr, settings, rdToken, nullptr)
+              /*tokens=*/nullptr, settings, rdToken, adApiKey,
+              nullptr)
     {
     }
 };
@@ -107,10 +110,10 @@ struct Fixture {
 class StubTokenController : public TokenController
 {
 public:
-    explicit StubTokenController(kinema::config::RealDebridSettings& rdSettings,
+    explicit StubTokenController(kinema::config::DebridSettings& debridSettings,
         QObject* parent = nullptr)
         : TokenController(&m_tokens, /*tmdb=*/nullptr,
-              rdSettings, parent, QStringLiteral(""))
+              debridSettings, parent, QStringLiteral(""))
     {
     }
 
@@ -139,6 +142,49 @@ private Q_SLOTS:
             StreamsListModel::State::Idle);
         QVERIFY(f.vm.similar() != nullptr);
         QVERIFY(!f.vm.similarVisible());
+        // No debrid credentials ⇒ chip hidden.
+        QVERIFY(!f.vm.debridConfigured());
+    }
+
+    void testDebridConfiguredReflectsAllDebridApiKey()
+    {
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(
+            tmp.filePath(QStringLiteral("kinemarc")),
+            KConfig::SimpleConfig);
+        AppSettings settings(config);
+        FakeCinemetaClient cinemeta;
+        FakeTorrentioClient torrentio;
+        FakeTmdbClient tmdb;
+        StreamActions actions { nullptr, nullptr };
+        StubTokenController tokens(settings.debrid());
+        QString rdToken;
+        QString adApiKey = QStringLiteral("ad-key");
+        MovieDetailViewModel vm(&cinemeta, &torrentio, &tmdb,
+            &actions, &tokens, settings, rdToken, adApiKey,
+            nullptr);
+        // AllDebrid alone is enough to flip the chip on.
+        QVERIFY(vm.debridConfigured());
+    }
+
+    void testDebridConfiguredFalseWithoutAnyCredential()
+    {
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(
+            tmp.filePath(QStringLiteral("kinemarc")),
+            KConfig::SimpleConfig);
+        AppSettings settings(config);
+        FakeCinemetaClient cinemeta;
+        FakeTorrentioClient torrentio;
+        FakeTmdbClient tmdb;
+        StreamActions actions { nullptr, nullptr };
+        StubTokenController tokens(settings.debrid());
+        QString rdToken;
+        QString adApiKey;
+        MovieDetailViewModel vm(&cinemeta, &torrentio, &tmdb,
+            &actions, &tokens, settings, rdToken, adApiKey,
+            nullptr);
+        QVERIFY(!vm.debridConfigured());
     }
 
     void testLoadFetchesMetaThenStreams()
@@ -282,10 +328,12 @@ private Q_SLOTS:
         FakeTorrentioClient torrentio;
         FakeTmdbClient tmdb;
         StreamActions actions { nullptr, nullptr };
-        StubTokenController tokens(settings.realDebrid());
+        StubTokenController tokens(settings.debrid());
         QString rdToken = QStringLiteral("rd-token");
+        QString adApiKey;
         MovieDetailViewModel vm(&cinemeta, &torrentio, &tmdb,
-            &actions, &tokens, settings, rdToken, nullptr);
+            &actions, &tokens, settings, rdToken, adApiKey,
+            nullptr);
 
         cinemeta.metaScripts = {
             { makeDetail(QStringLiteral("tt1"),

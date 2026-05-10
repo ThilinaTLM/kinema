@@ -221,12 +221,12 @@ Kirigami.ApplicationWindow {
                     "dev.tlmtech.kinema.app", "TmdbSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
-                moduleId: "realdebrid"
-                text: i18nc("@title:tab settings page", "Real-Debrid")
+                moduleId: "debrid"
+                text: i18nc("@title:tab settings page", "Debrid")
                 icon.source: AppIcons.url("server")
                 icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
-                    "dev.tlmtech.kinema.app", "RealDebridSettingsPage")
+                    "dev.tlmtech.kinema.app", "DebridSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "streams"

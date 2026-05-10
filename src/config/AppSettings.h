@@ -6,11 +6,11 @@
 #include "config/AppearanceSettings.h"
 #include "config/BrowseSettings.h"
 #include "config/CacheSettings.h"
+#include "config/DebridSettings.h"
 #include "config/DownloadSettings.h"
 #include "config/FilterSettings.h"
 #include "config/LibrarySettings.h"
 #include "config/PlayerSettings.h"
-#include "config/RealDebridSettings.h"
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
 #include "config/TorrentioSettings.h"
@@ -63,8 +63,8 @@ public:
     AppearanceSettings& appearance() noexcept { return m_appearance; }
     const AppearanceSettings& appearance() const noexcept { return m_appearance; }
 
-    RealDebridSettings& realDebrid() noexcept { return m_realDebrid; }
-    const RealDebridSettings& realDebrid() const noexcept { return m_realDebrid; }
+    DebridSettings& debrid() noexcept { return m_debrid; }
+    const DebridSettings& debrid() const noexcept { return m_debrid; }
 
     SubtitleSettings& subtitle() noexcept { return m_subtitle; }
     const SubtitleSettings& subtitle() const noexcept { return m_subtitle; }
@@ -99,7 +99,7 @@ private:
     LibrarySettings m_library;
     TorrentioSettings m_torrentio;
     AppearanceSettings m_appearance;
-    RealDebridSettings m_realDebrid;
+    DebridSettings m_debrid;
     SubtitleSettings m_subtitle;
     CacheSettings m_cache;
     TorrentStreamingSettings m_torrentStreaming;

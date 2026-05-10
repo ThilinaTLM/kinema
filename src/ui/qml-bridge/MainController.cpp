@@ -6,10 +6,12 @@
 #include "api/CinemetaClient.h"
 #include "api/OpenSubtitlesClient.h"
 #include "api/PlaybackContext.h"
+#include "api/AllDebridClient.h"
 #include "api/RealDebridClient.h"
 #include "api/TmdbClient.h"
 #include "api/TorrentioClient.h"
 #include "config/AppSettings.h"
+#include "config/DebridSettings.h"
 #include "config/DownloadSettings.h"
 #include "controllers/DownloadController.h"
 #include "controllers/HistoryController.h"
@@ -308,6 +310,7 @@ void MainController::buildCoreServices()
     // configured every stream goes through it; otherwise libtorrent
     // takes over.
     m_rd = std::make_unique<api::RealDebridClient>(m_http.get(), this);
+    m_ad = std::make_unique<api::AllDebridClient>(m_http.get(), this);
     m_mediaCache = std::make_unique<core::MediaCache>(
         m_settings.download(), this);
 
@@ -331,7 +334,7 @@ void MainController::buildCoreServices()
     // The unified downloader. Wires the localhost media server,
     // RD-resolution pipeline, torrent engine, and persistent store.
     m_downloadManager = new download::DownloadManager(*m_http, *m_rd,
-        *m_torrentStreaming, *m_downloadStore, *m_mediaCache,
+        *m_ad, *m_torrentStreaming, *m_downloadStore, *m_mediaCache,
         m_settings.download(), this);
     m_streamActions->setDownloadManager(m_downloadManager);
     m_downloadCtrl = new controllers::DownloadController(
@@ -347,17 +350,35 @@ void MainController::buildCoreServices()
     // controller because both reference its live `const QString&`
     // aliases.
     m_tokenCtrl = new controllers::TokenController(
-        m_tokens.get(), m_tmdb, m_settings.realDebrid(), this);
+        m_tokens.get(), m_tmdb, m_settings.debrid(), this);
 
-    // Keep the RD client's in-memory token in sync with whatever
-    // the keyring-backed `TokenController` resolves. The download
-    // manager's RD-availability + resolution paths read the live
-    // token from `m_rd` on every call.
+    // Keep the RD / AD clients' in-memory tokens in sync with the
+    // keyring-backed `TokenController`. Both backends check
+    // `client.token()` / `client.apiKey()` for `canHandle`; the
+    // active-provider gate lives in `BackendSelector`.
     m_rd->setToken(m_tokenCtrl->realDebridToken());
+    m_ad->setApiKey(m_tokenCtrl->allDebridApiKey());
     connect(m_tokenCtrl,
         &controllers::TokenController::realDebridTokenChanged,
         m_rd.get(), [this](const QString& tok) {
             m_rd->setToken(tok);
+        });
+    connect(m_tokenCtrl,
+        &controllers::TokenController::allDebridApiKeyChanged,
+        m_ad.get(), [this](const QString& key) {
+            m_ad->setApiKey(key);
+        });
+
+    // Forward the active-debrid-provider radio to the download
+    // manager's selector. Initial value + future changes both go
+    // through the same path.
+    m_downloadManager->setActiveDebridProvider(
+        m_settings.debrid().activeProvider());
+    connect(&m_settings.debrid(),
+        &config::DebridSettings::activeProviderChanged,
+        m_downloadManager,
+        [this](api::DebridProvider p) {
+            m_downloadManager->setActiveDebridProvider(p);
         });
 
     // OpenSubtitles + subtitle controller.
@@ -428,12 +449,14 @@ void MainController::buildCoreServices()
     m_movieDetailVm = new MovieDetailViewModel(m_cinemeta,
         m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
-        m_tokenCtrl->realDebridToken(), this);
+        m_tokenCtrl->realDebridToken(),
+        m_tokenCtrl->allDebridApiKey(), this);
     m_movieDetailVm->setDownloadController(m_downloadCtrl);
     m_seriesDetailVm = new SeriesDetailViewModel(m_cinemeta,
         m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
-        m_tokenCtrl->realDebridToken(), this);
+        m_tokenCtrl->realDebridToken(),
+        m_tokenCtrl->allDebridApiKey(), this);
     m_seriesDetailVm->setDownloadController(m_downloadCtrl);
 
     // TMDB token gain/loss propagates from `TokenController` to
@@ -625,9 +648,18 @@ void MainController::buildCoreServices()
         m_tokenCtrl,
         [this](const QString&) { m_tokenCtrl->refreshRealDebrid(); });
     connect(m_settingsVm,
-        &SettingsRootViewModel::realDebridUsageChanged,
+        &SettingsRootViewModel::allDebridApiKeyChanged,
         m_tokenCtrl,
-        [this] { m_tokenCtrl->refreshRealDebrid(); });
+        [this](const QString&) { m_tokenCtrl->refreshAllDebrid(); });
+    connect(m_settingsVm,
+        &SettingsRootViewModel::activeDebridProviderChanged,
+        m_tokenCtrl, [this] {
+            // Pure UX: refresh both tokens so the in-memory copies
+            // re-read the keyring (cheap; tokens didn't change but
+            // it keeps the contract symmetric with the radio).
+            m_tokenCtrl->refreshRealDebrid();
+            m_tokenCtrl->refreshAllDebrid();
+        });
     connect(m_settingsVm,
         &SettingsRootViewModel::subtitleCredentialsChanged,
         m_tokenCtrl, [this] {
@@ -1008,7 +1040,9 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(SettingsRootViewModel);
     KINEMA_REGISTER_QML_TYPE(GeneralSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(TmdbSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(RealDebridSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(RealDebridSectionViewModel);
+    KINEMA_REGISTER_QML_TYPE(AllDebridSectionViewModel);
+    KINEMA_REGISTER_QML_TYPE(DebridSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(StreamsSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(PlayerSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(SubtitlesSettingsViewModel);

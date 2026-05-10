@@ -23,9 +23,9 @@ namespace kinema::config {
 class AppearanceSettings;
 class AppSettings;
 class CacheSettings;
+class DebridSettings;
 class FilterSettings;
 class PlayerSettings;
-class RealDebridSettings;
 class SearchSettings;
 class SubtitleSettings;
 class TorrentioSettings;
@@ -137,32 +137,29 @@ private:
     bool m_busy = false;
 };
 
-// ---- Real-Debrid ------------------------------------------------------
-class RealDebridSettingsViewModel : public QObject
+// ---- Debrid: Real-Debrid section --------------------------------------
+class RealDebridSectionViewModel : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString token READ token WRITE setToken NOTIFY tokenInputChanged)
     Q_PROPERTY(bool tokenSaved READ tokenSaved NOTIFY tokenSavedChanged)
-    Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
     Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
 
 public:
-    RealDebridSettingsViewModel(core::HttpClient* http,
+    RealDebridSectionViewModel(core::HttpClient* http,
         core::TokenStore* tokens,
-        config::RealDebridSettings& settings,
+        config::DebridSettings& settings,
         QObject* parent = nullptr);
 
     QString token() const { return m_token; }
     bool tokenSaved() const;
-    bool enabled() const;
     QString statusMessage() const { return m_statusMessage; }
     int statusKind() const { return m_statusKind; }
     bool busy() const { return m_busy; }
 
     void setToken(const QString& token);
-    void setEnabled(bool on);
 
 public Q_SLOTS:
     void load();
@@ -173,11 +170,9 @@ public Q_SLOTS:
 Q_SIGNALS:
     void tokenInputChanged();
     void tokenSavedChanged();
-    void enabledChanged();
     void statusChanged();
     void busyChanged();
     void tokenChanged(const QString& token);
-    void usageChanged();
 
 private:
     void setStatus(const QString& message, int kind);
@@ -189,11 +184,99 @@ private:
 
     core::HttpClient* m_http;
     core::TokenStore* m_tokens;
-    config::RealDebridSettings& m_rdSettings;
+    config::DebridSettings& m_settings;
     QString m_token;
     QString m_statusMessage;
     int m_statusKind = 0;
     bool m_busy = false;
+};
+
+// ---- Debrid: AllDebrid section ---------------------------------------
+class AllDebridSectionViewModel : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QString apiKey READ apiKey WRITE setApiKey NOTIFY apiKeyInputChanged)
+    Q_PROPERTY(bool apiKeySaved READ apiKeySaved NOTIFY apiKeySavedChanged)
+    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
+    Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
+    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+
+public:
+    AllDebridSectionViewModel(core::HttpClient* http,
+        core::TokenStore* tokens,
+        config::DebridSettings& settings,
+        QObject* parent = nullptr);
+
+    QString apiKey() const { return m_apiKey; }
+    bool apiKeySaved() const;
+    QString statusMessage() const { return m_statusMessage; }
+    int statusKind() const { return m_statusKind; }
+    bool busy() const { return m_busy; }
+
+    void setApiKey(const QString& apiKey);
+
+public Q_SLOTS:
+    void load();
+    void testConnection();
+    void save();
+    void remove();
+
+Q_SIGNALS:
+    void apiKeyInputChanged();
+    void apiKeySavedChanged();
+    void statusChanged();
+    void busyChanged();
+    void apiKeyChanged(const QString& apiKey);
+
+private:
+    void setStatus(const QString& message, int kind);
+    void setBusy(bool on);
+    QCoro::Task<void> loadTask();
+    QCoro::Task<void> testTask();
+    QCoro::Task<void> saveTask();
+    QCoro::Task<void> removeTask();
+
+    core::HttpClient* m_http;
+    core::TokenStore* m_tokens;
+    config::DebridSettings& m_settings;
+    QString m_apiKey;
+    QString m_statusMessage;
+    int m_statusKind = 0;
+    bool m_busy = false;
+};
+
+// ---- Debrid: parent VM ------------------------------------------------
+class DebridSettingsViewModel : public QObject
+{
+    Q_OBJECT
+    /// 0 = None, 1 = Real-Debrid, 2 = AllDebrid. Maps to
+    /// `api::DebridProvider`.
+    Q_PROPERTY(int activeProvider READ activeProvider
+        WRITE setActiveProvider NOTIFY activeProviderChanged)
+    Q_PROPERTY(RealDebridSectionViewModel* realDebrid
+        READ realDebrid CONSTANT)
+    Q_PROPERTY(AllDebridSectionViewModel* allDebrid
+        READ allDebrid CONSTANT)
+
+public:
+    DebridSettingsViewModel(core::HttpClient* http,
+        core::TokenStore* tokens,
+        config::DebridSettings& settings,
+        QObject* parent = nullptr);
+
+    int activeProvider() const;
+    void setActiveProvider(int provider);
+
+    RealDebridSectionViewModel* realDebrid() const { return m_rd; }
+    AllDebridSectionViewModel* allDebrid() const { return m_ad; }
+
+Q_SIGNALS:
+    void activeProviderChanged();
+
+private:
+    config::DebridSettings& m_settings;
+    RealDebridSectionViewModel* m_rd {};
+    AllDebridSectionViewModel* m_ad {};
 };
 
 // ---- Streams ----------------------------------------------------------
@@ -489,7 +572,7 @@ class SettingsRootViewModel : public QObject
     Q_OBJECT
     Q_PROPERTY(GeneralSettingsViewModel* general READ general CONSTANT)
     Q_PROPERTY(TmdbSettingsViewModel* tmdb READ tmdb CONSTANT)
-    Q_PROPERTY(RealDebridSettingsViewModel* realDebrid READ realDebrid CONSTANT)
+    Q_PROPERTY(DebridSettingsViewModel* debrid READ debrid CONSTANT)
     Q_PROPERTY(StreamsSettingsViewModel* streams READ streams CONSTANT)
     Q_PROPERTY(PlayerSettingsViewModel* player READ player CONSTANT)
     Q_PROPERTY(SubtitlesSettingsViewModel* subtitles READ subtitles CONSTANT)
@@ -505,7 +588,7 @@ public:
 
     GeneralSettingsViewModel* general() const { return m_general; }
     TmdbSettingsViewModel* tmdb() const { return m_tmdb; }
-    RealDebridSettingsViewModel* realDebrid() const { return m_rd; }
+    DebridSettingsViewModel* debrid() const { return m_debrid; }
     StreamsSettingsViewModel* streams() const { return m_streams; }
     PlayerSettingsViewModel* player() const { return m_player; }
     SubtitlesSettingsViewModel* subtitles() const { return m_subs; }
@@ -514,17 +597,19 @@ public:
 Q_SIGNALS:
     /// Forwarded from `TmdbSettingsViewModel::tokenChanged`.
     void tmdbTokenChanged(const QString& token);
-    /// Forwarded from `RealDebridSettingsViewModel::tokenChanged`.
+    /// Forwarded from `RealDebridSectionViewModel::tokenChanged`.
     void realDebridTokenChanged(const QString& token);
-    /// Forwarded from `RealDebridSettingsViewModel::usageChanged`.
-    void realDebridUsageChanged();
+    /// Forwarded from `AllDebridSectionViewModel::apiKeyChanged`.
+    void allDebridApiKeyChanged(const QString& apiKey);
+    /// Forwarded from `DebridSettingsViewModel::activeProviderChanged`.
+    void activeDebridProviderChanged();
     /// Forwarded from `SubtitlesSettingsViewModel::credentialsChanged`.
     void subtitleCredentialsChanged();
 
 private:
     GeneralSettingsViewModel* m_general {};
     TmdbSettingsViewModel* m_tmdb {};
-    RealDebridSettingsViewModel* m_rd {};
+    DebridSettingsViewModel* m_debrid {};
     StreamsSettingsViewModel* m_streams {};
     PlayerSettingsViewModel* m_player {};
     SubtitlesSettingsViewModel* m_subs {};

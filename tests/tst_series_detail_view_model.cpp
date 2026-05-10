@@ -93,6 +93,7 @@ struct Fixture {
     FakeTmdbClient tmdb;
     StreamActions actions { nullptr, nullptr };
     QString rdToken;
+    QString adApiKey;
     SeriesDetailViewModel vm;
 
     Fixture()
@@ -101,7 +102,8 @@ struct Fixture {
             KConfig::SimpleConfig))
         , settings(config)
         , vm(&cinemeta, &torrentio, &tmdb, &actions,
-              /*tokens=*/nullptr, settings, rdToken, nullptr)
+              /*tokens=*/nullptr, settings, rdToken, adApiKey,
+              nullptr)
     {
     }
 };
@@ -121,6 +123,7 @@ struct WatchedFixture {
     FakeTmdbClient tmdb;
     StreamActions actions { nullptr, nullptr };
     QString rdToken;
+    QString adApiKey;
     SeriesDetailViewModel vm;
 
     WatchedFixture()
@@ -135,7 +138,8 @@ struct WatchedFixture {
         , watchedCtrl(watchedStore, &historyCtrl)
         , vm(&cinemeta, &torrentio, &tmdb, &actions,
               /*library=*/nullptr, &watchedCtrl,
-              /*tokens=*/nullptr, settings, rdToken, nullptr)
+              /*tokens=*/nullptr, settings, rdToken, adApiKey,
+              nullptr)
     {
         if (!tmp.isValid() || !db.open()) {
             qFatal("WatchedFixture setup failed");

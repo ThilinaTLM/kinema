@@ -15,8 +15,8 @@ import dev.tlmtech.kinema.app
 //   - Play via torrent / Use torrent for this
 //     download                                  : require infoHash, and
 //                                                 only meaningful when
-//                                                 Real-Debrid is
-//                                                 configured (otherwise
+//                                                 a debrid provider is
+//                                                 active (otherwise
 //                                                 torrent is already the
 //                                                 default backend) \u2014 hidden
 //                                                 in that case.
@@ -71,17 +71,18 @@ QQC2.Menu {
     }
     QQC2.MenuSeparator { }
     // Backend escape hatches. The default Play / Download buttons
-    // route through Real-Debrid when configured; these leaves force
-    // libtorrent for users who want to bypass RD on a specific
-    // release (e.g. RD is having a slow day). Hidden when RD is not
-    // configured \u2014 in that state torrent is already the default and
-    // the override would be a no-op.
+    // route through the active debrid provider when configured;
+    // these leaves force libtorrent for users who want to bypass
+    // the debrid provider on a specific release (e.g. it's having a
+    // slow day). Hidden when no debrid provider is active \u2014 in that
+    // state torrent is already the default and the override would
+    // be a no-op.
     QQC2.MenuItem {
         text: i18nc("@action:inmenu force libtorrent backend for play",
             "Play via torrent")
         icon.source: AppIcons.url("play")
         icon.color: AppIcons.controlColor(enabled, false)
-        visible: menu.vm && menu.vm.realDebridConfigured
+        visible: menu.vm && menu.vm.debridConfigured
         enabled: menu.hasMagnet
         // 0 == api::DownloadBackendKind::Torrent
         onTriggered: menu.vm.playWithBackend(menu.row, 0)
@@ -91,7 +92,7 @@ QQC2.Menu {
             "Use torrent for this download")
         icon.source: AppIcons.url("network-server-database")
         icon.color: AppIcons.controlColor(enabled, false)
-        visible: menu.vm && menu.vm.realDebridConfigured
+        visible: menu.vm && menu.vm.debridConfigured
         enabled: menu.hasMagnet
         // 0 == api::DownloadBackendKind::Torrent
         onTriggered: menu.vm.downloadWithBackend(menu.row, 0)

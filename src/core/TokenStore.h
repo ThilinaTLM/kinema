@@ -50,6 +50,7 @@ class TokenStore : public QObject
 public:
     static constexpr auto kServiceName = "dev.tlmtech.kinema";
     static constexpr auto kRealDebridKey = "realdebrid-token";
+    static constexpr auto kAllDebridKey = "alldebrid-apikey";
     static constexpr auto kTmdbKey = "tmdb-token";
     static constexpr auto kOpenSubtitlesApiKey = "opensubtitles-api-key";
     static constexpr auto kOpenSubtitlesUsername = "opensubtitles-username";

@@ -37,10 +37,11 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
+    const QString& adApiKeyRef,
     QObject* parent)
     : MovieDetailViewModel(cinemeta, torrentio, tmdb, actions,
           /*library=*/nullptr, /*watched=*/nullptr,
-          tokens, settings, rdTokenRef, parent)
+          tokens, settings, rdTokenRef, adApiKeyRef, parent)
 {
 }
 
@@ -53,6 +54,7 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
+    const QString& adApiKeyRef,
     QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
@@ -64,6 +66,7 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     , m_tokens(tokens)
     , m_settings(settings)
     , m_rdToken(rdTokenRef)
+    , m_adApiKey(adApiKeyRef)
     , m_streams(new StreamsListModel(this))
     , m_similar(new DiscoverSectionModel(
           i18nc("@label movie detail rail", "More like this"), this))
@@ -82,15 +85,20 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     }
 
     if (m_tokens) {
-        // RD token presence drives the `realDebridConfigured` chip
-        // visibility on the streams page and routing inside the
-        // download manager (RD-first when configured).
+        // Either debrid credential's presence drives the
+        // `debridConfigured` chip visibility on the streams page
+        // and the per-row override menu (Play via torrent /
+        // Use torrent for this download).
+        const auto onDebridChanged = [this](const QString&) {
+            Q_EMIT debridConfiguredChanged();
+            refreshStreamsForCurrentTitle();
+        };
         connect(m_tokens,
             &controllers::TokenController::realDebridTokenChanged,
-            this, [this](const QString&) {
-                Q_EMIT realDebridConfiguredChanged();
-                refreshStreamsForCurrentTitle();
-            });
+            this, onDebridChanged);
+        connect(m_tokens,
+            &controllers::TokenController::allDebridApiKeyChanged,
+            this, onDebridChanged);
     }
 }
 

@@ -17,8 +17,9 @@ namespace kinema::api {
 
 /// Which downloader backend a given asset is served from.
 enum class DownloadBackendKind {
-    Torrent, ///< libtorrent-backed local progressive download.
-    RealDebridHttp, ///< RD hoster URL fetched in chunks into a sparse file.
+    Torrent = 0, ///< libtorrent-backed local progressive download.
+    RealDebridHttp = 1, ///< RD hoster URL fetched in chunks into a sparse file.
+    AllDebridHttp = 2, ///< AllDebrid hoster URL fetched in chunks into a sparse file.
 };
 
 /// User-visible lifecycle policy for a download. Independent of

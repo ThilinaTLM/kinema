@@ -28,7 +28,7 @@ constexpr qint64 kDefaultChunk = 4LL * 1024LL * 1024LL;
 } // namespace
 
 HttpAssetSession::HttpAssetSession(core::HttpClient& http,
-    RealDebridResolver& resolver,
+    DebridResolver& resolver,
     const config::DownloadSettings& settings,
     api::AssetRef ref,
     QString assetId,
@@ -243,7 +243,7 @@ QCoro::Task<void> HttpAssetSession::ensureResolved()
     try {
         const auto resolved = co_await m_resolver.resolve(m_ref);
         m_upstream = resolved.downloadUrl;
-        m_rdTorrentId = resolved.rdTorrentId;
+        m_providerTorrentId = resolved.providerTorrentId;
         if (resolved.fileSize > 0
             && (m_fileSize <= 0 || resolved.fileSize != m_fileSize)) {
             m_fileSize = resolved.fileSize;

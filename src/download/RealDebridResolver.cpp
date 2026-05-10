@@ -6,11 +6,11 @@
 #include "api/RealDebridClient.h"
 #include "core/HttpError.h"
 #include "core/Magnet.h"
+#include "download/DebridFilePicker.h"
 
 #include <KLocalizedString>
 
 #include <QCoro/QCoroSignal>
-#include <QFileInfo>
 #include <QTimer>
 
 #include <chrono>
@@ -32,93 +32,41 @@ QCoro::Task<void> sleepMs(int ms)
     co_await qCoro(&t, &QTimer::timeout);
 }
 
-/// Score how well an RD file matches the asset hint. Higher is better.
-int score(const QString& path,
-    qint64 sizeBytes,
-    const api::AssetRef& ref)
-{
-    int s = 0;
-
-    if (sizeBytes >= 50LL * 1024LL * 1024LL) {
-        s += 2;
-    }
-
-    const auto suffix = QFileInfo(path).suffix().toLower();
-    static const QStringList kVideo {
-        QStringLiteral("mkv"), QStringLiteral("mp4"),
-        QStringLiteral("m4v"), QStringLiteral("avi"),
-        QStringLiteral("mov"), QStringLiteral("ts"),
-    };
-    if (kVideo.contains(suffix)) {
-        s += 4;
-    }
-
-    if (!ref.fileNameHint.isEmpty()) {
-        const auto base = QFileInfo(path).fileName();
-        if (base.compare(ref.fileNameHint, Qt::CaseInsensitive) == 0) {
-            s += 16;
-        } else if (base.contains(ref.fileNameHint, Qt::CaseInsensitive)) {
-            s += 8;
-        }
-    }
-
-    if (ref.key.season.has_value() && ref.key.episode.has_value()) {
-        const auto s2 = QStringLiteral("S%1").arg(*ref.key.season,
-            2, 10, QLatin1Char('0'));
-        const auto s2u = QStringLiteral("%1x").arg(*ref.key.season,
-            2, 10, QLatin1Char('0'));
-        const auto e2 = QStringLiteral("E%1").arg(*ref.key.episode,
-            2, 10, QLatin1Char('0'));
-        if (path.contains(s2 + e2, Qt::CaseInsensitive)) {
-            s += 8;
-        } else if (path.contains(s2u, Qt::CaseInsensitive)
-            && path.contains(QString::number(*ref.key.episode))) {
-            s += 4;
-        }
-    }
-    return s;
-}
-
-/// Pick the best file id from a torrent-info response.
+/// Pick the best file id from an RD torrent-info response. Uses the
+/// shared scoring helper but maps back through RD's 1-based file ids.
 int chooseFileId(const QList<api::RdTorrentFile>& files,
     const api::AssetRef& ref)
 {
-    int bestScore = -1;
-    int bestId = -1;
-    qint64 bestSize = -1;
-
+    QList<picker::Candidate> candidates;
+    candidates.reserve(files.size());
     for (const auto& f : files) {
-        const int sc = score(f.path, f.bytes, ref);
-        if (sc > bestScore || (sc == bestScore && f.bytes > bestSize)) {
-            bestScore = sc;
-            bestSize = f.bytes;
-            bestId = f.id;
-        }
+        candidates.append({ f.path, f.bytes });
     }
-    return bestId;
+    const int idx = picker::chooseIndex(candidates, ref);
+    return idx < 0 ? -1 : files[idx].id;
 }
 
 } // namespace
 
 RealDebridResolver::RealDebridResolver(api::RealDebridClient& rd, QObject* parent)
-    : QObject(parent)
+    : DebridResolver(parent)
     , m_rd(rd)
 {
 }
 
-QCoro::Task<void> RealDebridResolver::cleanup(QString rdTorrentId)
+QCoro::Task<void> RealDebridResolver::cleanup(QString providerTorrentId)
 {
-    if (rdTorrentId.isEmpty()) {
+    if (providerTorrentId.isEmpty()) {
         co_return;
     }
     try {
-        co_await m_rd.deleteTorrent(rdTorrentId);
+        co_await m_rd.deleteTorrent(providerTorrentId);
     } catch (...) {
         // best-effort
     }
 }
 
-QCoro::Task<ResolvedRdLink> RealDebridResolver::resolve(api::AssetRef ref)
+QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(api::AssetRef ref)
 {
     if (ref.infoHash.isEmpty()) {
         throw core::HttpError(core::HttpError::Kind::Json, 0,
@@ -200,13 +148,13 @@ QCoro::Task<ResolvedRdLink> RealDebridResolver::resolve(api::AssetRef ref)
     const QUrl link = info.links.first();
     const auto unrestricted = co_await m_rd.unrestrictLink(link);
 
-    ResolvedRdLink out;
+    ResolvedDebridLink out;
     out.downloadUrl = unrestricted.download;
     out.fileSize = unrestricted.fileSize;
     out.fileName = unrestricted.filename.isEmpty()
         ? ref.fileNameHint
         : unrestricted.filename;
-    out.rdTorrentId = added.id;
+    out.providerTorrentId = added.id;
     co_return out;
 }
 

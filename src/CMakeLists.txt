@@ -14,7 +14,8 @@ set(kinema_core_SRCS
     config/FilterSettings.cpp
     config/LibrarySettings.cpp
     config/PlayerSettings.cpp
-    config/RealDebridSettings.cpp
+    api/Debrid.cpp
+    config/DebridSettings.cpp
     config/SearchSettings.cpp
     config/SubtitleSettings.cpp
     config/TorrentioSettings.cpp
@@ -56,8 +57,11 @@ set(kinema_core_SRCS
     torrent/PiecePlanner.cpp
     torrent/TorrentStreamingService.cpp
 
+    download/AllDebridBackend.cpp
+    download/AllDebridResolver.cpp
     download/AssetSession.cpp
     download/BackendSelector.cpp
+    download/DebridFilePicker.cpp
     download/DownloadManager.cpp
     download/HttpAssetSession.cpp
     download/LocalMediaServer.cpp
@@ -66,6 +70,8 @@ set(kinema_core_SRCS
     download/TorrentAssetSession.cpp
     download/TorrentBackend.cpp
 
+    api/AllDebridClient.cpp
+    api/AllDebridParse.cpp
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp
     api/Download.cpp
@@ -342,8 +348,8 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/SubtitlesPage.qml
         ui/qml/pages/settings/AboutSettingsPage.qml
         ui/qml/pages/settings/ApplicationSettingsPage.qml
+        ui/qml/pages/settings/DebridSettingsPage.qml
         ui/qml/pages/settings/PlayerSettingsPage.qml
-        ui/qml/pages/settings/RealDebridSettingsPage.qml
         ui/qml/pages/settings/StreamsSettingsPage.qml
         ui/qml/pages/settings/SubtitlesSettingsPage.qml
         ui/qml/pages/settings/TmdbSettingsPage.qml

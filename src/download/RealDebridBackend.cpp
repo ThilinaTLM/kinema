@@ -5,15 +5,15 @@
 
 #include "api/RealDebridClient.h"
 #include "core/MediaCache.h"
+#include "download/DebridResolver.h"
 #include "download/HttpAssetSession.h"
-#include "download/RealDebridResolver.h"
 #include "kinema_log_download.h"
 
 namespace kinema::download {
 
 RealDebridBackend::RealDebridBackend(core::HttpClient& http,
     api::RealDebridClient& rd,
-    RealDebridResolver& resolver,
+    DebridResolver& resolver,
     core::MediaCache& cache,
     const config::DownloadSettings& settings)
     : m_http(http)

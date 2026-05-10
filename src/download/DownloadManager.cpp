@@ -3,6 +3,7 @@
 
 #include "download/DownloadManager.h"
 
+#include "api/AllDebridClient.h"
 #include "api/RealDebridClient.h"
 #include "config/DownloadSettings.h"
 #include "core/DownloadStore.h"
@@ -13,6 +14,8 @@
 #include "download/DownloadBackend.h"
 #include "download/HttpAssetSession.h"
 #include "download/LocalMediaServer.h"
+#include "download/AllDebridBackend.h"
+#include "download/AllDebridResolver.h"
 #include "download/RealDebridBackend.h"
 #include "download/RealDebridResolver.h"
 #include "download/TorrentAssetSession.h"
@@ -43,9 +46,15 @@ const char* dispositionName(api::CacheDisposition d)
 
 const char* backendName(api::DownloadBackendKind k)
 {
-    return k == api::DownloadBackendKind::RealDebridHttp
-        ? "RealDebridHttp"
-        : "Torrent";
+    switch (k) {
+    case api::DownloadBackendKind::RealDebridHttp:
+        return "RealDebridHttp";
+    case api::DownloadBackendKind::AllDebridHttp:
+        return "AllDebridHttp";
+    case api::DownloadBackendKind::Torrent:
+        break;
+    }
+    return "Torrent";
 }
 
 QCoro::Task<void> sleepMs(int ms)
@@ -61,6 +70,7 @@ QCoro::Task<void> sleepMs(int ms)
 
 DownloadManager::DownloadManager(core::HttpClient& http,
     api::RealDebridClient& rd,
+    api::AllDebridClient& ad,
     torrent::TorrentStreamingService& torrentEngine,
     core::DownloadStore& store,
     core::MediaCache& cache,
@@ -69,11 +79,13 @@ DownloadManager::DownloadManager(core::HttpClient& http,
     : QObject(parent)
     , m_http(http)
     , m_rd(rd)
+    , m_ad(ad)
     , m_torrentEngine(torrentEngine)
     , m_store(store)
     , m_cache(cache)
     , m_settings(settings)
-    , m_resolver(std::make_unique<RealDebridResolver>(rd, this))
+    , m_rdResolver(std::make_unique<RealDebridResolver>(rd, this))
+    , m_adResolver(std::make_unique<AllDebridResolver>(ad, this))
     , m_server(std::make_unique<LocalMediaServer>(this))
     , m_selector(std::make_unique<BackendSelector>())
 {
@@ -90,15 +102,26 @@ DownloadManager::DownloadManager(core::HttpClient& http,
         });
 
     // Order matters: the selector tries backends in priority order
-    // when no override is given. Real-Debrid first since it's the
-    // faster transport when available.
+    // when no override is given. Both debrid backends are
+    // registered up front; the selector itself gates which one is
+    // "active" via `setActiveDebridProvider` so swapping providers
+    // is a single setter call rather than re-registration.
     m_selector->registerBackend(std::make_unique<RealDebridBackend>(
-        m_http, m_rd, *m_resolver, m_cache, m_settings));
+        m_http, m_rd, *m_rdResolver, m_cache, m_settings));
+    m_selector->registerBackend(std::make_unique<AllDebridBackend>(
+        m_http, m_ad, *m_adResolver, m_cache, m_settings));
     m_selector->registerBackend(std::make_unique<TorrentBackend>(
         m_torrentEngine, m_cache));
 }
 
 DownloadManager::~DownloadManager() = default;
+
+void DownloadManager::setActiveDebridProvider(api::DebridProvider p)
+{
+    if (m_selector) {
+        m_selector->setActiveDebridProvider(p);
+    }
+}
 
 api::DownloadItem DownloadManager::buildItem(const api::AssetRef& ref,
     const api::Stream& s, const api::PlaybackContext& ctx,

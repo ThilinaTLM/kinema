@@ -5,7 +5,7 @@
 
 #include "api/Download.h"
 #include "download/AssetSession.h"
-#include "download/RealDebridResolver.h"
+#include "download/DebridResolver.h"
 
 #include <QFile>
 #include <QHash>
@@ -28,24 +28,24 @@ class DownloadSettings;
 namespace kinema::download {
 
 /**
- * RD-backed `AssetSession` that streams an upstream hoster URL into a
- * local sparse file in fixed-size chunks. Each chunk is a chunk of
+ * Debrid-backed `AssetSession` that streams an upstream hoster URL
+ * into a local sparse file in fixed-size chunks. Each chunk is
  * 4 MiB by default; availability is tracked in a side-car bitmap so
  * the local cache survives restarts.
  *
  * Foreground `ensureRange()` requests preempt background prefetch
  * jobs by jumping to the head of the work queue.
  *
- * On 401/403 from the upstream URL the session re-runs the RD
- * resolution pipeline once and retries the request. URLs are not
- * persisted across sessions because RD URLs expire.
+ * On 401/403 from the upstream URL the session re-runs the debrid
+ * provider's resolution pipeline once and retries the request. URLs
+ * are not persisted across sessions because hoster URLs expire.
  */
 class HttpAssetSession : public AssetSession
 {
     Q_OBJECT
 public:
     HttpAssetSession(core::HttpClient& http,
-        RealDebridResolver& resolver,
+        DebridResolver& resolver,
         const config::DownloadSettings& settings,
         api::AssetRef ref,
         QString assetId,
@@ -101,7 +101,7 @@ private:
     void ensureFileSizedToTotal();
 
     core::HttpClient& m_http;
-    RealDebridResolver& m_resolver;
+    DebridResolver& m_resolver;
     const config::DownloadSettings& m_settings;
 
     api::AssetRef m_ref;
@@ -113,7 +113,7 @@ private:
     qint64 m_chunkSize = 4LL * 1024LL * 1024LL;
 
     QUrl m_upstream;
-    QString m_rdTorrentId;
+    QString m_providerTorrentId;
     bool m_resolveInFlight = false;
 
     /// User-visible mode. Defaults to OnDemand; promoted to Full

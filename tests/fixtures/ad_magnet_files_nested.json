@@ -1,0 +1,42 @@
+{
+  "status": "success",
+  "data": {
+    "magnets": [
+      {
+        "id": "789012",
+        "files": [
+          {
+            "n": "Show.S01.1080p",
+            "e": [
+              {
+                "n": "Show.S01E01.1080p.mkv",
+                "s": 1500000000,
+                "l": "https://alldebrid.com/f/ep01"
+              },
+              {
+                "n": "Show.S01E02.1080p.mkv",
+                "s": 1450000000,
+                "l": "https://alldebrid.com/f/ep02"
+              },
+              {
+                "n": "Subs",
+                "e": [
+                  {
+                    "n": "Show.S01E01.en.srt",
+                    "s": 12345,
+                    "l": "https://alldebrid.com/f/srt01"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "n": "readme.txt",
+            "s": 4096,
+            "l": "https://alldebrid.com/f/readme"
+          }
+        ]
+      }
+    ]
+  }
+}

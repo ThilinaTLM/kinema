@@ -56,10 +56,11 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
+    const QString& adApiKeyRef,
     QObject* parent)
     : SeriesDetailViewModel(cinemeta, torrentio, tmdb, actions,
           /*library=*/nullptr, /*watched=*/nullptr,
-          tokens, settings, rdTokenRef, parent)
+          tokens, settings, rdTokenRef, adApiKeyRef, parent)
 {
 }
 
@@ -73,6 +74,7 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
+    const QString& adApiKeyRef,
     QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
@@ -84,6 +86,7 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     , m_tokens(tokens)
     , m_settings(settings)
     , m_rdToken(rdTokenRef)
+    , m_adApiKey(adApiKeyRef)
     , m_streams(new StreamsListModel(this))
     , m_episodes(new EpisodesListModel(this))
     , m_similar(new DiscoverSectionModel(
@@ -103,17 +106,21 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     }
 
     if (m_tokens) {
+        const auto onDebridChanged = [this](const QString&) {
+            Q_EMIT debridConfiguredChanged();
+            if (m_selectedEpisodeRow >= 0 && !m_imdbId.isEmpty()) {
+                auto t = loadEpisodeStreamsTask(m_selectedEpisode);
+                Q_UNUSED(t);
+                return;
+            }
+            rebuildVisibleStreams();
+        };
         connect(m_tokens,
             &controllers::TokenController::realDebridTokenChanged,
-            this, [this](const QString&) {
-                Q_EMIT realDebridConfiguredChanged();
-                if (m_selectedEpisodeRow >= 0 && !m_imdbId.isEmpty()) {
-                    auto t = loadEpisodeStreamsTask(m_selectedEpisode);
-                    Q_UNUSED(t);
-                    return;
-                }
-                rebuildVisibleStreams();
-            });
+            this, onDebridChanged);
+        connect(m_tokens,
+            &controllers::TokenController::allDebridApiKeyChanged,
+            this, onDebridChanged);
     }
 }
 

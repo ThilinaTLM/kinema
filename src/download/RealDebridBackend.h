@@ -20,7 +20,7 @@ class DownloadSettings;
 
 namespace kinema::download {
 
-class RealDebridResolver;
+class DebridResolver;
 
 /**
  * `DownloadBackend` adapter over `RealDebridResolver` +
@@ -42,7 +42,7 @@ class RealDebridBackend final : public DownloadBackend
 public:
     RealDebridBackend(core::HttpClient& http,
         api::RealDebridClient& rd,
-        RealDebridResolver& resolver,
+        DebridResolver& resolver,
         core::MediaCache& cache,
         const config::DownloadSettings& settings);
     ~RealDebridBackend() override;
@@ -66,7 +66,7 @@ public:
 private:
     core::HttpClient& m_http;
     api::RealDebridClient& m_rd;
-    RealDebridResolver& m_resolver;
+    DebridResolver& m_resolver;
     core::MediaCache& m_cache;
     const config::DownloadSettings& m_settings;
 };

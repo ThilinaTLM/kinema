@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "data": {
+    "link": "https://p1cjev.alldeb.ovh/dl/abcdef/ubuntu-18.04.2-live-server-amd64.iso",
+    "host": "alldebrid",
+    "filename": "ubuntu-18.04.2-live-server-amd64.iso",
+    "paws": false,
+    "filesize": 875773970,
+    "id": "abcdef",
+    "hostDomain": "alldebrid.com"
+  }
+}

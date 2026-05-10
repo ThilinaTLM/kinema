@@ -41,6 +41,7 @@ class WatchedStore;
 }
 
 namespace kinema::api {
+class AllDebridClient;
 class RealDebridClient;
 }
 
@@ -294,6 +295,7 @@ private:
     std::unique_ptr<core::DownloadStore> m_downloadStore;
     std::unique_ptr<core::MediaCache> m_mediaCache;
     std::unique_ptr<api::RealDebridClient> m_rd;
+    std::unique_ptr<api::AllDebridClient> m_ad;
 
     // QObject-parented to this controller.
     api::CinemetaClient* m_cinemeta {};

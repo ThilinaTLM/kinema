@@ -3,6 +3,8 @@
 
 #include "config/AppSettings.h"
 
+#include "api/Debrid.h"
+
 #include <KConfig>
 #include <KSharedConfig>
 
@@ -46,8 +48,10 @@ private Q_SLOTS:
         QCOMPARE(s.appearance().closeToTray(), true);
         QCOMPARE(s.appearance().showMenuBar(), false);
         QVERIFY(s.appearance().playerWindowGeometry().isEmpty());
-        QCOMPARE(s.realDebrid().configured(), false);
-        QCOMPARE(s.realDebrid().enabled(), true);
+        QCOMPARE(s.debrid().realDebridConfigured(), false);
+        QCOMPARE(s.debrid().allDebridConfigured(), false);
+        QCOMPARE(s.debrid().activeProvider(),
+            api::DebridProvider::None);
         QVERIFY(s.filter().excludedResolutions().isEmpty());
         QVERIFY(s.filter().excludedCategories().isEmpty());
         QVERIFY(s.filter().keywordBlocklist().isEmpty());
@@ -199,28 +203,45 @@ private Q_SLOTS:
         QCOMPARE(spy.count(), 2);
     }
 
-    void testRealDebridConfiguredSignal()
+    void testDebridRealDebridConfiguredSignal()
     {
         config::AppSettings s(m_config);
-        QSignalSpy spy(&s.realDebrid(),
-            &config::RealDebridSettings::configuredChanged);
-        s.realDebrid().setConfigured(true);
+        QSignalSpy spy(&s.debrid(),
+            &config::DebridSettings::realDebridConfiguredChanged);
+        s.debrid().setRealDebridConfigured(true);
         QCOMPARE(spy.count(), 1);
         // Idempotent set — no extra emission.
-        s.realDebrid().setConfigured(true);
+        s.debrid().setRealDebridConfigured(true);
         QCOMPARE(spy.count(), 1);
     }
 
-    void testRealDebridEnabledSignal()
+    void testDebridAllDebridConfiguredSignal()
     {
         config::AppSettings s(m_config);
-        QSignalSpy spy(&s.realDebrid(),
-            &config::RealDebridSettings::enabledChanged);
-        s.realDebrid().setEnabled(false);
+        QSignalSpy spy(&s.debrid(),
+            &config::DebridSettings::allDebridConfiguredChanged);
+        s.debrid().setAllDebridConfigured(true);
         QCOMPARE(spy.count(), 1);
-        QCOMPARE(spy.takeFirst().at(0).toBool(), false);
-        s.realDebrid().setEnabled(false);
+        QCOMPARE(spy.takeFirst().at(0).toBool(), true);
+        s.debrid().setAllDebridConfigured(true);
         QCOMPARE(spy.count(), 0);
+    }
+
+    void testDebridActiveProviderSignal()
+    {
+        config::AppSettings s(m_config);
+        QSignalSpy spy(&s.debrid(),
+            &config::DebridSettings::activeProviderChanged);
+        QCOMPARE(s.debrid().activeProvider(),
+            api::DebridProvider::None);
+        s.debrid().setActiveProvider(api::DebridProvider::AllDebrid);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(s.debrid().activeProvider(),
+            api::DebridProvider::AllDebrid);
+        // Persists round-trip through the KConfig backend.
+        config::AppSettings s2(m_config);
+        QCOMPARE(s2.debrid().activeProvider(),
+            api::DebridProvider::AllDebrid);
     }
 
     void testKeywordBlocklistChangedSignal()

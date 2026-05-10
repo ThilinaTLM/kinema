@@ -11,6 +11,30 @@
 
 namespace kinema::download {
 
+namespace {
+
+bool isDebridKind(api::DownloadBackendKind k) noexcept
+{
+    return k == api::DownloadBackendKind::RealDebridHttp
+        || k == api::DownloadBackendKind::AllDebridHttp;
+}
+
+bool matchesActiveDebrid(api::DownloadBackendKind k,
+    api::DebridProvider p) noexcept
+{
+    switch (p) {
+    case api::DebridProvider::RealDebrid:
+        return k == api::DownloadBackendKind::RealDebridHttp;
+    case api::DebridProvider::AllDebrid:
+        return k == api::DownloadBackendKind::AllDebridHttp;
+    case api::DebridProvider::None:
+        break;
+    }
+    return false;
+}
+
+} // namespace
+
 BackendSelector::BackendSelector() = default;
 BackendSelector::~BackendSelector() = default;
 
@@ -40,6 +64,14 @@ DownloadBackend* BackendSelector::select(const api::Stream& s,
                                      .toStdString());
     }
     for (const auto& b : m_backends) {
+        if (isDebridKind(b->kind())
+            && !matchesActiveDebrid(b->kind(), m_activeDebrid)) {
+            // Skip non-active debrid backends during default
+            // routing; they remain reachable through the explicit
+            // `override` path (per-row override menus, resume of
+            // rows persisted against the other provider).
+            continue;
+        }
         if (b->canHandle(s)) {
             return b.get();
         }

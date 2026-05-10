@@ -98,7 +98,7 @@ class MovieDetailViewModel : public QObject
     // ---- streams configuration -------------------------------------
     Q_PROPERTY(int sortMode READ sortMode WRITE setSortMode NOTIFY sortChanged)
     Q_PROPERTY(bool sortDescending READ sortDescending WRITE setSortDescending NOTIFY sortChanged)
-    Q_PROPERTY(bool realDebridConfigured READ realDebridConfigured NOTIFY realDebridConfiguredChanged)
+    Q_PROPERTY(bool debridConfigured READ debridConfigured NOTIFY debridConfiguredChanged)
     Q_PROPERTY(int rawStreamsCount READ rawStreamsCount NOTIFY rawStreamsCountChanged)
     // Transient UI-only filter axes consumed by the `StreamsPage`
     // header `Kirigami.ActionToolBar`.
@@ -135,6 +135,7 @@ public:
         controllers::TokenController* tokens,
         config::AppSettings& settings,
         const QString& rdTokenRef,
+        const QString& adApiKeyRef,
         QObject* parent = nullptr);
     /// Slim constructor for tests; equivalent to passing
     /// `library = nullptr, watched = nullptr`.
@@ -145,6 +146,7 @@ public:
         controllers::TokenController* tokens,
         config::AppSettings& settings,
         const QString& rdTokenRef,
+        const QString& adApiKeyRef,
         QObject* parent = nullptr);
     ~MovieDetailViewModel() override;
 
@@ -172,7 +174,10 @@ public:
     void setSortMode(int mode);
     bool sortDescending() const noexcept { return m_sortDescending; }
     void setSortDescending(bool desc);
-    bool realDebridConfigured() const noexcept { return !m_rdToken.isEmpty(); }
+    bool debridConfigured() const noexcept
+    {
+        return !m_rdToken.isEmpty() || !m_adApiKey.isEmpty();
+    }
     int rawStreamsCount() const noexcept
     {
         return static_cast<int>(m_rawStreams.size());
@@ -271,7 +276,7 @@ Q_SIGNALS:
     void metaStateChanged();
     void similarChanged();
     void sortChanged();
-    void realDebridConfiguredChanged();
+    void debridConfiguredChanged();
     void rawStreamsCountChanged();
     void uiFiltersChanged();
     void libraryStateChanged();
@@ -340,6 +345,7 @@ private:
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;
     const QString& m_rdToken;
+    const QString& m_adApiKey;
 
     StreamsListModel* m_streams;
     DiscoverSectionModel* m_similar;

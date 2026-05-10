@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "data": {
+    "magnets": [
+      {
+        "id": 123456,
+        "filename": "ubuntu-18.04.2-live-server-amd64.iso",
+        "size": 875773970,
+        "status": "Ready",
+        "statusCode": 4,
+        "downloaded": 875773970,
+        "uploaded": 0,
+        "seeders": 0,
+        "downloadSpeed": 0,
+        "uploadSpeed": 0,
+        "uploadDate": 1657133868,
+        "completionDate": 1657133968
+      }
+    ]
+  }
+}

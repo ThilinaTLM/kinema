@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "api/Debrid.h"
 #include "api/Download.h"
 #include "api/Media.h"
 
@@ -34,9 +35,23 @@ public:
     BackendSelector& operator=(const BackendSelector&) = delete;
 
     /// Add a backend to the selection list. Insertion order is
-    /// the priority order; register Real-Debrid first if you want
-    /// it preferred over plain torrent.
+    /// the priority order; debrid backends should be registered
+    /// before the torrent backend. The selector still gates debrid
+    /// backends on `setActiveDebridProvider`.
     void registerBackend(std::unique_ptr<DownloadBackend> backend);
+
+    /// Track which debrid provider the user chose as active. The
+    /// non-active debrid backend is skipped during default routing
+    /// (override paths still work). `DebridProvider::None` skips
+    /// every debrid backend, leaving only the torrent backend.
+    void setActiveDebridProvider(api::DebridProvider p) noexcept
+    {
+        m_activeDebrid = p;
+    }
+    api::DebridProvider activeDebridProvider() const noexcept
+    {
+        return m_activeDebrid;
+    }
 
     /// Find a backend for the given stream. When `override` is
     /// provided the matching backend must report `canHandle`;
@@ -55,6 +70,7 @@ public:
 
 private:
     std::vector<std::unique_ptr<DownloadBackend>> m_backends;
+    api::DebridProvider m_activeDebrid = api::DebridProvider::None;
 };
 
 } // namespace kinema::download

@@ -4,6 +4,7 @@
 #include "api/Download.h"
 #include "api/Media.h"
 #include "api/PlaybackContext.h"
+#include "api/AllDebridClient.h"
 #include "api/RealDebridClient.h"
 #include "config/DownloadSettings.h"
 #include "config/TorrentStreamingSettings.h"
@@ -154,9 +155,11 @@ private Q_SLOTS:
         // Empty token ⇒ chooseBackend always picks Torrent for our
         // synthetic streams, which is what we want to exercise.
         m_rd->setToken(QString());
+        m_ad = std::make_unique<api::AllDebridClient>(m_http.get());
+        m_ad->setApiKey(QString());
         m_engine = std::make_unique<StubTorrentEngine>();
         m_manager = std::make_unique<download::DownloadManager>(
-            *m_http, *m_rd, *m_engine, *m_store, *m_cache,
+            *m_http, *m_rd, *m_ad, *m_engine, *m_store, *m_cache,
             *m_dlSettings);
     }
 
@@ -165,6 +168,7 @@ private Q_SLOTS:
         m_manager.reset();
         m_engine.reset();
         m_rd.reset();
+        m_ad.reset();
         m_http.reset();
         m_cache.reset();
         m_store.reset();
@@ -441,7 +445,7 @@ private Q_SLOTS:
         m_manager.reset();
         m_engine = std::make_unique<StubTorrentEngine>();
         m_manager = std::make_unique<download::DownloadManager>(
-            *m_http, *m_rd, *m_engine, *m_store, *m_cache,
+            *m_http, *m_rd, *m_ad, *m_engine, *m_store, *m_cache,
             *m_dlSettings);
 
         const QUrl second = QCoro::waitFor(
@@ -487,6 +491,7 @@ private:
     std::unique_ptr<core::MediaCache> m_cache;
     std::unique_ptr<core::HttpClient> m_http;
     std::unique_ptr<api::RealDebridClient> m_rd;
+    std::unique_ptr<api::AllDebridClient> m_ad;
     std::unique_ptr<StubTorrentEngine> m_engine;
     std::unique_ptr<download::DownloadManager> m_manager;
 };

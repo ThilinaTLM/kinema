@@ -1,0 +1,17 @@
+{
+  "status": "success",
+  "data": {
+    "magnets": [
+      {
+        "id": "123456",
+        "files": [
+          {
+            "n": "ubuntu-18.04.2-live-server-amd64.iso",
+            "s": 875773970,
+            "l": "https://alldebrid.com/f/abcdefg"
+          }
+        ]
+      }
+    ]
+  }
+}

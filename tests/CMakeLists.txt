@@ -63,6 +63,11 @@ ecm_add_test(tst_realdebrid_parse.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_alldebrid_parse.cpp
+    TEST_NAME tst_alldebrid_parse
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_opensubtitles_parse.cpp
     TEST_NAME tst_opensubtitles_parse
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -165,6 +170,21 @@ ecm_add_test(tst_torrentio_client.cpp
 
 ecm_add_test(tst_realdebrid_client.cpp
     TEST_NAME tst_realdebrid_client
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_alldebrid_client.cpp
+    TEST_NAME tst_alldebrid_client
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_alldebrid_resolver.cpp
+    TEST_NAME tst_alldebrid_resolver
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_backend_selector.cpp
+    TEST_NAME tst_backend_selector
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -336,7 +356,8 @@ endif()
 foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_media_file_selector tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
-         tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
+         tst_torrentio_parse tst_realdebrid_parse tst_alldebrid_parse
+         tst_player tst_stream_filter
          tst_stream_tokens
          tst_date_format tst_app_settings
          tst_search_view_model tst_browse_view_model tst_results_list_model
@@ -344,7 +365,8 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_movie_detail_view_model tst_series_detail_view_model
          tst_stream_actions tst_subtitle_results_model
          tst_token_controller tst_cinemeta_client tst_tmdb_client
-         tst_torrentio_client tst_realdebrid_client
+         tst_torrentio_client tst_realdebrid_client tst_alldebrid_client
+         tst_alldebrid_resolver tst_backend_selector
          tst_database tst_history_store tst_history_controller
          tst_library_store tst_watched_store tst_watched_controller
          tst_subtitle_cache_store tst_cache_paths tst_language
