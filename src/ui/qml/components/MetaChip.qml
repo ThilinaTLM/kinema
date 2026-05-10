@@ -3,6 +3,7 @@
 
 import QtQuick
 import QtQuick.Controls as QQC2
+import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
@@ -20,6 +21,14 @@ QQC2.Control {
 
     property string text
     property string tone: "neutral"
+    // Optional leading icon. Empty by default — call sites that
+    // want a plain text pill ignore it. When set, the chip renders
+    // icon + label inside the same border so multiple icon-bearing
+    // chips line up with text-only chips on the same rail.
+    // `var` so this accepts both `url` (image://, file:// from
+    // AppIcons.url) and bare XDG icon names (e.g. "folder-cloud").
+    property var iconSource
+    property color iconColor: chip.labelColor
 
     leftPadding: Kirigami.Units.smallSpacing * 2
     rightPadding: Kirigami.Units.smallSpacing * 2
@@ -49,13 +58,27 @@ QQC2.Control {
         border.width: 1
     }
 
-    contentItem: QQC2.Label {
-        text: chip.text
-        color: chip.labelColor
-        font.pointSize: Theme.captionFont.pointSize
-        font.weight: Font.Medium
-        elide: Text.ElideRight
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
+    contentItem: RowLayout {
+        spacing: Kirigami.Units.smallSpacing
+
+        Kirigami.Icon {
+            visible: chip.iconSource !== undefined
+                && ("" + chip.iconSource).length > 0
+            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+            Layout.preferredHeight: width
+            source: chip.iconSource
+            color: chip.iconColor
+        }
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            text: chip.text
+            color: chip.labelColor
+            font.pointSize: Theme.captionFont.pointSize
+            font.weight: Font.Medium
+            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
     }
 }

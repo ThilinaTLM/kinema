@@ -14,6 +14,7 @@
 
 namespace kinema::core {
 class HttpClient;
+class MediaCache;
 class SubtitleCacheStore;
 class TokenStore;
 }
@@ -404,6 +405,13 @@ private:
 };
 
 // ---- Torrent streaming -----------------------------------------------
+//
+// Despite the historical class name, this VM now also owns the
+// downloader's filesystem cache read-outs (`MediaCache::sizeBytes`
+// etc.) and the manual eviction trigger. The settings tab is
+// surfaced to the user as "Downloads" — the on-disk class /
+// KConfig group names are kept stable to avoid a migration on a
+// pre-1.0 codebase.
 class TorrentStreamingSettingsViewModel : public QObject
 {
     Q_OBJECT
@@ -415,8 +423,20 @@ class TorrentStreamingSettingsViewModel : public QObject
     Q_PROPERTY(int maxUploadRateKiB READ maxUploadRateKiB WRITE setMaxUploadRateKiB NOTIFY maxUploadRateKiBChanged)
     Q_PROPERTY(int idleStopMinutes READ idleStopMinutes WRITE setIdleStopMinutes NOTIFY idleStopMinutesChanged)
 
+    // Live cache state, refreshed by an internal poll timer. Pinned
+    // bytes are excluded from the budget; `ephemeralSizeBytes` is
+    // what eviction is allowed to drop.
+    Q_PROPERTY(qint64 cacheSizeBytes READ cacheSizeBytes NOTIFY cacheChanged)
+    Q_PROPERTY(qint64 cacheBudgetBytes READ cacheBudgetBytes NOTIFY cacheChanged)
+    Q_PROPERTY(qint64 ephemeralSizeBytes READ ephemeralSizeBytes NOTIFY cacheChanged)
+    Q_PROPERTY(double cacheUsageFraction READ cacheUsageFraction NOTIFY cacheChanged)
+    Q_PROPERTY(QString cacheSizeText READ cacheSizeText NOTIFY cacheChanged)
+    Q_PROPERTY(QString cacheBudgetText READ cacheBudgetText NOTIFY cacheChanged)
+    Q_PROPERTY(QString ephemeralSizeText READ ephemeralSizeText NOTIFY cacheChanged)
+
 public:
     TorrentStreamingSettingsViewModel(config::TorrentStreamingSettings& settings,
+        core::MediaCache& cache,
         QObject* parent = nullptr);
 
     int cacheBudgetGb() const;
@@ -435,6 +455,19 @@ public:
     void setMaxUploadRateKiB(int v);
     void setIdleStopMinutes(int v);
 
+    qint64 cacheSizeBytes() const;
+    qint64 cacheBudgetBytes() const;
+    qint64 ephemeralSizeBytes() const;
+    double cacheUsageFraction() const;
+    QString cacheSizeText() const;
+    QString cacheBudgetText() const;
+    QString ephemeralSizeText() const;
+
+public Q_SLOTS:
+    /// Drop ephemeral cache entries until the budget is satisfied,
+    /// then refresh the cached counters.
+    void runEvictionNow();
+
 Q_SIGNALS:
     void cacheBudgetGbChanged();
     void startupBufferMiBChanged();
@@ -443,9 +476,11 @@ Q_SIGNALS:
     void maxDownloadRateKiBChanged();
     void maxUploadRateKiBChanged();
     void idleStopMinutesChanged();
+    void cacheChanged();
 
 private:
     config::TorrentStreamingSettings& m_settings;
+    core::MediaCache& m_cache;
 };
 
 // ---- Root -------------------------------------------------------------
@@ -465,6 +500,7 @@ public:
         core::TokenStore* tokens,
         config::AppSettings& settings,
         core::SubtitleCacheStore* subtitleCache,
+        core::MediaCache* mediaCache,
         QObject* parent = nullptr);
 
     GeneralSettingsViewModel* general() const { return m_general; }

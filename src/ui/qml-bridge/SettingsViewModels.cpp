@@ -23,8 +23,12 @@
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/Language.h"
+#include "core/MediaCache.h"
 #include "core/Player.h"
 #include "core/SubtitleCacheStore.h"
+#include "kinema_log_ui.h"
+
+#include <KFormat>
 #include "core/TmdbConfig.h"
 #include "core/TokenStore.h"
 #include "core/TorrentioConfig.h"
@@ -33,6 +37,7 @@
 
 #include <QFile>
 #include <QSystemTrayIcon>
+#include <QTimer>
 
 namespace kinema::ui::qml {
 
@@ -1143,10 +1148,21 @@ QCoro::Task<void> SubtitlesSettingsViewModel::removeTask()
 // ========================== Torrent streaming =============================
 
 TorrentStreamingSettingsViewModel::TorrentStreamingSettingsViewModel(
-    config::TorrentStreamingSettings& settings, QObject* parent)
+    config::TorrentStreamingSettings& settings,
+    core::MediaCache& cache, QObject* parent)
     : QObject(parent)
     , m_settings(settings)
+    , m_cache(cache)
 {
+    // Cache stats are read on demand from `MediaCache` (which walks
+    // the asset dirs). A 5 s poll keeps the settings page's usage
+    // bar live without making per-property reads expensive.
+    auto* poll = new QTimer(this);
+    poll->setInterval(5000);
+    poll->setTimerType(Qt::CoarseTimer);
+    connect(poll, &QTimer::timeout, this,
+        [this] { Q_EMIT cacheChanged(); });
+    poll->start();
 }
 
 int TorrentStreamingSettingsViewModel::cacheBudgetGb() const { return m_settings.cacheBudgetGb(); }
@@ -1162,6 +1178,8 @@ void TorrentStreamingSettingsViewModel::setCacheBudgetGb(int v)
     if (cacheBudgetGb() == v) return;
     m_settings.setCacheBudgetGb(v);
     Q_EMIT cacheBudgetGbChanged();
+    // Budget changed → the usage bar's denominator changed too.
+    Q_EMIT cacheChanged();
 }
 void TorrentStreamingSettingsViewModel::setStartupBufferMiB(int v)
 {
@@ -1200,13 +1218,65 @@ void TorrentStreamingSettingsViewModel::setIdleStopMinutes(int v)
     Q_EMIT idleStopMinutesChanged();
 }
 
+qint64 TorrentStreamingSettingsViewModel::cacheSizeBytes() const
+{
+    return m_cache.sizeBytes();
+}
+
+qint64 TorrentStreamingSettingsViewModel::cacheBudgetBytes() const
+{
+    return m_cache.budgetBytes();
+}
+
+qint64 TorrentStreamingSettingsViewModel::ephemeralSizeBytes() const
+{
+    return m_cache.ephemeralSizeBytes();
+}
+
+double TorrentStreamingSettingsViewModel::cacheUsageFraction() const
+{
+    const qint64 budget = cacheBudgetBytes();
+    if (budget <= 0) {
+        return 0.0;
+    }
+    return qBound(0.0,
+        static_cast<double>(cacheSizeBytes())
+            / static_cast<double>(budget),
+        1.0);
+}
+
+QString TorrentStreamingSettingsViewModel::cacheSizeText() const
+{
+    return KFormat().formatByteSize(cacheSizeBytes());
+}
+
+QString TorrentStreamingSettingsViewModel::cacheBudgetText() const
+{
+    return KFormat().formatByteSize(cacheBudgetBytes());
+}
+
+QString TorrentStreamingSettingsViewModel::ephemeralSizeText() const
+{
+    return KFormat().formatByteSize(ephemeralSizeBytes());
+}
+
+void TorrentStreamingSettingsViewModel::runEvictionNow()
+{
+    qCInfo(KINEMA_UI)
+        << "Downloads settings: manual cache eviction triggered";
+    m_cache.enforceBudget();
+    Q_EMIT cacheChanged();
+}
+
 // ============================== Root ======================================
 
 SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     core::TokenStore* tokens, config::AppSettings& settings,
-    core::SubtitleCacheStore* subtitleCache, QObject* parent)
+    core::SubtitleCacheStore* subtitleCache,
+    core::MediaCache* mediaCache, QObject* parent)
     : QObject(parent)
 {
+    Q_ASSERT(mediaCache);
     m_general = new GeneralSettingsViewModel(settings.search(),
         settings.appearance(), this);
     m_tmdb = new TmdbSettingsViewModel(http, tokens, this);
@@ -1218,7 +1288,7 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     m_subs = new SubtitlesSettingsViewModel(http, tokens,
         settings.subtitle(), settings.cache(), subtitleCache, this);
     m_torrentStreaming = new TorrentStreamingSettingsViewModel(
-        settings.torrentStreaming(), this);
+        settings.torrentStreaming(), *mediaCache, this);
 
     // Forward token / credential changes through the root so
     // `MainController` can route them to `TokenController`.

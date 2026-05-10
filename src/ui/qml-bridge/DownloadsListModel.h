@@ -47,6 +47,8 @@ public:
         ResolutionRole,
         ProviderRole,
         ReleaseNameRole,
+        SeriesTitleRole,
+        EpisodeTitleRole,
         ErrorTextRole,
         LocalDirRole,
         DownloadRateBpsRole,
@@ -55,6 +57,13 @@ public:
         SeedsRole,
         EtaSecondsRole,
         EtaTextRole,
+        // Source-title identity, sourced from `DownloadItem::key`
+        // (`PlaybackKey`). Used by QML to navigate from a download
+        // row to the originating Movie / Series detail page.
+        ImdbIdRole,
+        KindRole,    ///< 0 = movie, 1 = series
+        SeasonRole,  ///< -1 if not a series episode
+        EpisodeRole, ///< -1 if not a series episode
     };
 
     /// Transient telemetry sourced from `DownloadManager::liveStatsFor`.

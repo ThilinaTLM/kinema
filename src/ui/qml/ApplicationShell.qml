@@ -253,8 +253,14 @@ Kirigami.ApplicationWindow {
                     "dev.tlmtech.kinema.app", "SubtitlesSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
+                // moduleId stays "torrentstreaming" so any persisted
+                // "last opened settings page" state and deep-link
+                // strings (`MainController::requestSettings(category)`)
+                // keep working without a migration. The user-facing
+                // tab label is now "Downloads" because the page covers
+                // both backends and the unified MediaCache.
                 moduleId: "torrentstreaming"
-                text: i18nc("@title:tab settings page", "Torrent streaming")
+                text: i18nc("@title:tab settings page", "Downloads")
                 icon.source: AppIcons.url("download")
                 icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(

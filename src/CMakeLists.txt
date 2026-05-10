@@ -387,6 +387,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/minus.svg
         ui/qml/icons/lucide/palette.svg
         ui/qml/icons/lucide/pause.svg
+        ui/qml/icons/lucide/pin.svg
         ui/qml/icons/lucide/play.svg
         ui/qml/icons/lucide/plus.svg
         ui/qml/icons/lucide/refresh-cw.svg

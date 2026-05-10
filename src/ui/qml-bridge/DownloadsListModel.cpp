@@ -253,6 +253,10 @@ QVariant DownloadsListModel::data(const QModelIndex& index, int role) const
         return it.provider;
     case ReleaseNameRole:
         return it.releaseName;
+    case SeriesTitleRole:
+        return it.seriesTitle;
+    case EpisodeTitleRole:
+        return it.episodeTitle;
     case ErrorTextRole:
         return it.lastError;
     case LocalDirRole:
@@ -269,6 +273,14 @@ QVariant DownloadsListModel::data(const QModelIndex& index, int role) const
         return live.etaSeconds;
     case EtaTextRole:
         return etaText(live.etaSeconds);
+    case ImdbIdRole:
+        return it.key.imdbId;
+    case KindRole:
+        return static_cast<int>(it.key.kind);
+    case SeasonRole:
+        return it.key.season ? *it.key.season : -1;
+    case EpisodeRole:
+        return it.key.episode ? *it.key.episode : -1;
     }
     return {};
 }
@@ -304,6 +316,8 @@ QHash<int, QByteArray> DownloadsListModel::roleNames() const
         { ResolutionRole, "resolution" },
         { ProviderRole, "provider" },
         { ReleaseNameRole, "releaseName" },
+        { SeriesTitleRole, "seriesTitle" },
+        { EpisodeTitleRole, "episodeTitle" },
         { ErrorTextRole, "errorText" },
         { LocalDirRole, "localDir" },
         { DownloadRateBpsRole, "downloadRateBps" },
@@ -312,6 +326,10 @@ QHash<int, QByteArray> DownloadsListModel::roleNames() const
         { SeedsRole, "seeds" },
         { EtaSecondsRole, "etaSeconds" },
         { EtaTextRole, "etaText" },
+        { ImdbIdRole, "imdbId" },
+        { KindRole, "kind" },
+        { SeasonRole, "season" },
+        { EpisodeRole, "episode" },
     };
 }
 

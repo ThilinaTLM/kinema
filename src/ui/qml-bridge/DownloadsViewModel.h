@@ -12,12 +12,12 @@ namespace kinema::controllers {
 class DownloadController;
 }
 
-namespace kinema::core {
-class MediaCache;
-}
-
 namespace kinema::download {
 class DownloadManager;
+}
+
+namespace kinema::services {
+class StreamActions;
 }
 
 namespace kinema::ui::qml {
@@ -26,27 +26,24 @@ namespace kinema::ui::qml {
  * Per-page view-model for `DownloadsPage.qml`. Owns a
  * `DownloadsListModel` and forwards row-level actions to the
  * `DownloadController`.
+ *
+ * Cache budget / usage / eviction live on
+ * `TorrentStreamingSettingsViewModel` (settings tab "Downloads"); this
+ * VM is purely the runtime ops console.
  */
 class DownloadsViewModel : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(DownloadsListModel* items READ items CONSTANT)
     Q_PROPERTY(int activeCount READ activeCount NOTIFY countsChanged)
+    Q_PROPERTY(int pausedCount READ pausedCount NOTIFY countsChanged)
     Q_PROPERTY(int completedCount READ completedCount NOTIFY countsChanged)
     Q_PROPERTY(int failedCount READ failedCount NOTIFY countsChanged)
-    Q_PROPERTY(int pinnedCount READ pinnedCount NOTIFY countsChanged)
     Q_PROPERTY(int totalCount READ totalCount NOTIFY countsChanged)
     Q_PROPERTY(qint64 totalDownloadRateBps READ totalDownloadRateBps
         NOTIFY countsChanged)
     Q_PROPERTY(QString totalDownloadRateText READ totalDownloadRateText
         NOTIFY countsChanged)
-    Q_PROPERTY(qint64 cacheSizeBytes READ cacheSizeBytes NOTIFY cacheChanged)
-    Q_PROPERTY(qint64 cacheBudgetBytes READ cacheBudgetBytes NOTIFY cacheChanged)
-    Q_PROPERTY(double cacheUsageFraction READ cacheUsageFraction NOTIFY cacheChanged)
-    Q_PROPERTY(QString cacheSizeText READ cacheSizeText NOTIFY cacheChanged)
-    Q_PROPERTY(QString cacheBudgetText READ cacheBudgetText NOTIFY cacheChanged)
-    Q_PROPERTY(qint64 ephemeralSizeBytes READ ephemeralSizeBytes NOTIFY cacheChanged)
-    Q_PROPERTY(QString ephemeralSizeText READ ephemeralSizeText NOTIFY cacheChanged)
     Q_PROPERTY(int filter READ filter WRITE setFilter NOTIFY filterChanged)
 
 public:
@@ -57,32 +54,23 @@ public:
         FilterActive = 1,
         FilterCompleted = 2,
         FilterFailed = 3,
-        FilterPinned = 4,
     };
     Q_ENUM(Filter)
 
     DownloadsViewModel(controllers::DownloadController& controller,
         download::DownloadManager& manager,
-        core::MediaCache& cache,
+        services::StreamActions* streamActions,
         QObject* parent = nullptr);
 
     DownloadsListModel* items() const { return m_items; }
 
     int activeCount() const noexcept { return m_activeCount; }
+    int pausedCount() const noexcept { return m_pausedCount; }
     int completedCount() const noexcept { return m_completedCount; }
     int failedCount() const noexcept { return m_failedCount; }
-    int pinnedCount() const noexcept { return m_pinnedCount; }
     int totalCount() const noexcept { return m_totalCount; }
     qint64 totalDownloadRateBps() const noexcept { return m_totalRateBps; }
     QString totalDownloadRateText() const;
-
-    qint64 cacheSizeBytes() const;
-    qint64 ephemeralSizeBytes() const;
-    qint64 cacheBudgetBytes() const;
-    double cacheUsageFraction() const;
-    QString cacheSizeText() const;
-    QString cacheBudgetText() const;
-    QString ephemeralSizeText() const;
 
     int filter() const noexcept { return m_filter; }
     void setFilter(int f);
@@ -103,23 +91,26 @@ public Q_SLOTS:
     void pauseDownload(const QString& assetId);
     void resumeDownload(const QString& assetId);
 
-    /// Run the cache eviction pass now (instead of waiting for the
-    /// periodic timer). Bound to a header button.
-    void runEvictionNow();
+    /// Play the cached asset directly. Synthesises an `api::Stream` +
+    /// `PlaybackContext` from the persisted `DownloadItem` and hands
+    /// off to `services::StreamActions::play`. The download manager's
+    /// `prepareForPlayback` short-circuits to the local cache file
+    /// when the asset is already complete, so this is a no-network
+    /// path for finished downloads.
+    void playDownload(const QString& assetId);
+
+    /// Bulk equivalents bound to the page-level `Pause all` /
+    /// `Resume all` toolbar actions. Iterate the in-memory rows
+    /// snapshot and forward per-asset to the controller; redundant
+    /// pause/resume calls are tolerated by the manager.
+    void pauseAll();
+    void resumeAll();
 
     /// Reveal the asset's local cache directory in the file manager.
     void openLocalDir(const QString& assetId);
 
-    /// Drop persisted rows for completed (and not pinned) downloads.
-    /// Files are kept on disk; eviction handles them later.
-    void clearFinished();
-
-    /// Drop persisted rows for failed downloads. Files are kept.
-    void clearFailed();
-
 Q_SIGNALS:
     void countsChanged();
-    void cacheChanged();
     void filterChanged();
 
 private:
@@ -129,12 +120,12 @@ private:
 
     controllers::DownloadController& m_controller;
     download::DownloadManager& m_manager;
-    core::MediaCache& m_cache;
+    services::StreamActions* m_streamActions {};
     DownloadsListModel* m_items {};
     int m_activeCount = 0;
+    int m_pausedCount = 0;
     int m_completedCount = 0;
     int m_failedCount = 0;
-    int m_pinnedCount = 0;
     int m_totalCount = 0;
     qint64 m_totalRateBps = 0;
     int m_filter = FilterAll;

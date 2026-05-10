@@ -410,7 +410,7 @@ void MainController::buildCoreServices()
     // drawer's downloads entry can show counts even before the
     // first navigation to the page.
     m_downloadsVm = new DownloadsViewModel(*m_downloadCtrl,
-        *m_downloadManager, *m_mediaCache, this);
+        *m_downloadManager, m_streamActions, this);
 
     // Discover / Search / Browse surface VMs. They sit on top of
     // the existing service graph; action signals route back into
@@ -615,7 +615,8 @@ void MainController::buildCoreServices()
     // round-trip, matching the legacy SettingsDialog -> MainWindow
     // wiring.
     m_settingsVm = new SettingsRootViewModel(m_http.get(),
-        m_tokens.get(), m_settings, m_subtitleCache.get(), this);
+        m_tokens.get(), m_settings, m_subtitleCache.get(),
+        m_mediaCache.get(), this);
     connect(m_settingsVm,
         &SettingsRootViewModel::tmdbTokenChanged, m_tokenCtrl,
         [this](const QString&) { m_tokenCtrl->refreshTmdb(); });
