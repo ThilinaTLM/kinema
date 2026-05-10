@@ -3,7 +3,7 @@
 
 #include "core/Database.h"
 
-#include "kinema_log_app.h"
+#include "kinema_log_db.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -81,7 +81,7 @@ bool Database::open()
         const QFileInfo fi(m_path);
         const QDir parent = fi.absoluteDir();
         if (!parent.exists() && !parent.mkpath(QStringLiteral("."))) {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_DB)
                 << "Database: could not create directory"
                 << parent.absolutePath();
             return false;
@@ -93,7 +93,7 @@ bool Database::open()
             QStringLiteral("QSQLITE"), m_connectionName);
         db.setDatabaseName(m_path);
         if (!db.open()) {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_DB)
                 << "Database: open failed at" << m_path << "\u2014"
                 << db.lastError().text();
             return false;
@@ -112,7 +112,7 @@ bool Database::open()
 
     if (tryOpen()) {
         m_opened = true;
-        qCInfo(KINEMA_APP) << "Database: opened" << m_path
+        qCInfo(KINEMA_DB) << "Database: opened" << m_path
                        << "schema v" << currentSchemaVersion();
         return true;
     }
@@ -128,19 +128,19 @@ bool Database::open()
         return false;
     }
 
-    qCWarning(KINEMA_APP)
+    qCWarning(KINEMA_DB)
         << "Database: initial open failed; quarantining" << m_path;
     quarantineCorruptFile();
 
     if (tryOpen()) {
         m_opened = true;
-        qCInfo(KINEMA_APP) << "Database: opened" << m_path
+        qCInfo(KINEMA_DB) << "Database: opened" << m_path
                        << "schema v" << currentSchemaVersion()
                        << "(after quarantine)";
         return true;
     }
 
-    qCWarning(KINEMA_APP)
+    qCWarning(KINEMA_DB)
         << "Database: reopen after quarantine failed";
     if (QSqlDatabase::contains(m_connectionName)) {
         QSqlDatabase::removeDatabase(m_connectionName);
@@ -165,7 +165,7 @@ bool Database::configurePragmas()
     };
     for (const auto& p : pragmas) {
         if (!q.exec(p)) {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_DB)
                 << "Database: PRAGMA failed:" << p
                 << "\u2014" << q.lastError().text();
             return false;
@@ -209,7 +209,7 @@ bool Database::setSchemaVersion(int version)
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value"));
     q.addBindValue(QString::number(version));
     if (!q.exec()) {
-        qCWarning(KINEMA_APP)
+        qCWarning(KINEMA_DB)
             << "Database: setSchemaVersion failed:"
             << q.lastError().text();
         return false;
@@ -227,7 +227,7 @@ bool Database::runMigrations()
     while (current < target) {
         const int next = current + 1;
         if (!db.transaction()) {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_DB)
                 << "Database: transaction() failed:"
                 << db.lastError().text();
             return false;
@@ -237,7 +237,7 @@ bool Database::runMigrations()
             return false;
         }
         if (!db.commit()) {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_DB)
                 << "Database: commit failed:" << db.lastError().text();
             db.rollback();
             return false;
@@ -255,7 +255,7 @@ bool Database::applyMigration(int toVersion)
     const auto runAll = [&](int version, const QStringList& stmts) {
         for (const auto& s : stmts) {
             if (!q.exec(s)) {
-                qCWarning(KINEMA_APP)
+                qCWarning(KINEMA_DB)
                     << "Database: migration v" << version
                     << "failed on" << s
                     << "\u2014" << q.lastError().text();
@@ -487,7 +487,7 @@ bool Database::applyMigration(int toVersion)
                 "DROP TABLE IF EXISTS download_items"),
         });
     default:
-        qCWarning(KINEMA_APP)
+        qCWarning(KINEMA_DB)
             << "Database: no migration registered for version"
             << toVersion;
         return false;
@@ -551,7 +551,7 @@ bool Database::ensureSupplementalTables()
 
     for (const auto& s : stmts) {
         if (!q.exec(s)) {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_DB)
                 << "Database: ensureSupplementalTables failed on" << s
                 << "\u2014" << q.lastError().text();
             return false;
@@ -570,10 +570,10 @@ void Database::quarantineCorruptFile()
     const auto quarantined = m_path + QStringLiteral(".corrupt-") + ts;
     if (QFile::exists(m_path)) {
         if (QFile::rename(m_path, quarantined)) {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_DB)
                 << "Database: quarantined corrupt file to" << quarantined;
         } else {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_DB)
                 << "Database: could not rename" << m_path
                 << "to" << quarantined << "\u2014 removing instead";
             QFile::remove(m_path);

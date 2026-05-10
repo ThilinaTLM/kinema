@@ -33,7 +33,7 @@
 #include <QWidget>
 #include <QWindow>
 
-#include "kinema_log_app.h"
+#include "kinema_log_player.h"
 
 namespace kinema::ui::player {
 
@@ -153,7 +153,7 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     if (status() == QQuickView::Error) {
         const auto errors = QQuickView::errors();
         for (const auto& e : errors) {
-            qCWarning(KINEMA_APP) << "PlayerScene.qml load error:"
+            qCWarning(KINEMA_PLAYER) << "PlayerScene.qml load error:"
                               << e.toString();
         }
     }
@@ -230,7 +230,7 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
                     pushMediaChips();
                 });
         } else {
-            qCWarning(KINEMA_APP)
+            qCWarning(KINEMA_PLAYER)
                 << "PlayerWindow: kinemaMpvVideoItem not found in QML";
         }
     }

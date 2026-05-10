@@ -11,7 +11,7 @@
 #include "core/HttpErrorPresenter.h"
 #include "core/Language.h"
 #include "core/SubtitleCacheStore.h"
-#include "kinema_log_app.h"
+#include "kinema_log_controller.h"
 
 #include <KLocalizedString>
 
@@ -105,7 +105,7 @@ void SubtitleController::setMoviehash(QString hex)
         return;
     }
     m_moviehash = std::move(hex);
-    qCDebug(KINEMA_APP) << "SubtitleController: moviehash ="
+    qCDebug(KINEMA_CONTROLLER) << "SubtitleController: moviehash ="
                     << (m_moviehash.isEmpty() ? "<unset>" : qPrintable(m_moviehash));
     Q_EMIT moviehashChanged(m_moviehash);
 }
@@ -222,7 +222,7 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
         if (auto cached = m_cache->findByFileId(fileId);
             cached.has_value()
             && QFile::exists(cached->localPath)) {
-            qCDebug(KINEMA_APP)
+            qCDebug(KINEMA_CONTROLLER)
                 << "SubtitleController: cache hit for" << fileId;
             m_cache->touch(fileId);
             Q_EMIT downloadFinished(fileId, cached->localPath,
@@ -233,7 +233,7 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
         }
     }
 
-    qCDebug(KINEMA_APP) << "SubtitleController: cache miss for" << fileId
+    qCDebug(KINEMA_CONTROLLER) << "SubtitleController: cache miss for" << fileId
                     << "— fetching from OpenSubtitles";
 
     // Find the matching hit so we can fill display metadata.
@@ -258,7 +258,7 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
         }
         if (ticket.link.isEmpty() || !ticket.link.isValid()) {
             // Quota-exhausted path.
-            qCDebug(KINEMA_APP)
+            qCDebug(KINEMA_CONTROLLER)
                 << "SubtitleController: quota exhausted, reset at"
                 << ticket.resetAt.toString(Qt::ISODate);
             QString msg;
@@ -326,7 +326,7 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
     entry.lastUsedAt = entry.addedAt;
 
     if (m_cache && !m_cache->insert(entry)) {
-        qCWarning(KINEMA_APP)
+        qCWarning(KINEMA_CONTROLLER)
             << "SubtitleController: cache row insert failed for" << fileId;
         // The file is on disk but unreferenced; remove it so the
         // reconcile pass doesn't have to clean up later.
@@ -369,7 +369,7 @@ void SubtitleController::evictIfOverBudget()
         m_cache->remove(v.fileId);
     }
     if (!victims.isEmpty()) {
-        qCDebug(KINEMA_APP)
+        qCDebug(KINEMA_CONTROLLER)
             << "SubtitleController: evicted" << victims.size()
             << "subtitles to fit budget";
         Q_EMIT cacheChanged();
@@ -422,7 +422,7 @@ void SubtitleController::reconcileCacheOnStartup()
         }
     }
 
-    qCDebug(KINEMA_APP)
+    qCDebug(KINEMA_CONTROLLER)
         << "SubtitleController: reconcile dropped" << orphanRows
         << "orphan rows and" << orphanFiles << "orphan files";
 

@@ -33,6 +33,7 @@ set(kinema_core_SRCS
     core/HttpErrorPresenter.cpp
     core/IdleInhibitor.cpp
     core/Language.cpp
+    core/Logging.cpp
     core/Magnet.cpp
     core/MediaChips.cpp
     core/Moviehash.cpp
@@ -153,7 +154,47 @@ ecm_qt_declare_logging_category(kinema_core_SRCS
     IDENTIFIER KINEMA_APP
     CATEGORY_NAME kinema.app
     DEFAULT_SEVERITY Info
-    DESCRIPTION "Kinema (app shell, controllers, view-models)"
+    DESCRIPTION "Kinema (app shell, MainController, KinemaApplication)"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_db.h
+    IDENTIFIER KINEMA_DB
+    CATEGORY_NAME kinema.db
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema database and per-table stores"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_controller.h
+    IDENTIFIER KINEMA_CONTROLLER
+    CATEGORY_NAME kinema.controller
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema controllers (history, subtitles, library, …)"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_ui.h
+    IDENTIFIER KINEMA_UI
+    CATEGORY_NAME kinema.ui
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema view-models, image loading, QML bridge"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_player.h
+    IDENTIFIER KINEMA_PLAYER
+    CATEGORY_NAME kinema.player
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema embedded mpv player"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_api.h
+    IDENTIFIER KINEMA_API
+    CATEGORY_NAME kinema.api
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema upstream API clients (TMDB, OpenSubtitles, …)"
     EXPORT KINEMA
 )
 ecm_qt_declare_logging_category(kinema_core_SRCS
@@ -170,14 +211,6 @@ ecm_qt_declare_logging_category(kinema_core_SRCS
     CATEGORY_NAME kinema.download
     DEFAULT_SEVERITY Info
     DESCRIPTION "Kinema unified download manager"
-    EXPORT KINEMA
-)
-ecm_qt_declare_logging_category(kinema_core_SRCS
-    HEADER kinema_log_rd.h
-    IDENTIFIER KINEMA_RD
-    CATEGORY_NAME kinema.rd
-    DEFAULT_SEVERITY Info
-    DESCRIPTION "Kinema Real-Debrid integration"
     EXPORT KINEMA
 )
 ecm_qt_declare_logging_category(kinema_core_SRCS

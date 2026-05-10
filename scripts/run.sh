@@ -20,6 +20,7 @@ RUN_TESTS=0
 CLEAN=0
 NO_RUN=0
 RECONFIGURE=0
+QUIET=0
 APP_ARGS=()
 
 usage() {
@@ -33,11 +34,19 @@ Options:
   -n, --no-run         Build only; don't launch kinema
   -d, --debug          Use CMAKE_BUILD_TYPE=Debug
       --release        Use CMAKE_BUILD_TYPE=Release
+  -q, --quiet          Don't auto-enable kinema.*.debug logging rules
   -B, --build-dir DIR  Build directory (default: build)
   -j, --jobs N         Parallel build jobs (default: $(nproc))
   -h, --help           Show this help
 
-Environment overrides: BUILD_DIR, BUILD_TYPE, JOBS
+Environment overrides: BUILD_DIR, BUILD_TYPE, JOBS, QT_LOGGING_RULES
+
+Unless -q/--quiet is given (or QT_LOGGING_RULES is already set in the
+environment), the runner exports
+  QT_LOGGING_RULES='kinema.*.debug=true;kinema.http.debug=false'
+so every Kinema subsystem logs at debug. HTTP debug logs every URL and
+is intentionally off by default — flip it back on with
+  QT_LOGGING_RULES='kinema.*.debug=true' ./scripts/run.sh
 
 Anything after '--' is forwarded as arguments to the kinema binary.
 EOF
@@ -51,6 +60,7 @@ while [[ $# -gt 0 ]]; do
         -n|--no-run)      NO_RUN=1 ;;
         -d|--debug)       BUILD_TYPE="Debug" ;;
         --release)        BUILD_TYPE="Release" ;;
+        -q|--quiet)       QUIET=1 ;;
         -B|--build-dir)   BUILD_DIR="$2"; shift ;;
         -j|--jobs)        JOBS="$2"; shift ;;
         -h|--help)        usage; exit 0 ;;
@@ -89,6 +99,13 @@ BIN="${BUILD_DIR}/bin/kinema"
 if [[ ! -x "${BIN}" ]]; then
     echo "error: ${BIN} not found or not executable" >&2
     exit 1
+fi
+
+if [[ "${QUIET}" -eq 0 && -z "${QT_LOGGING_RULES:-}" ]]; then
+    export QT_LOGGING_RULES='kinema.*.debug=true;kinema.http.debug=false'
+    log "QT_LOGGING_RULES=${QT_LOGGING_RULES}"
+elif [[ -n "${QT_LOGGING_RULES:-}" ]]; then
+    log "QT_LOGGING_RULES=${QT_LOGGING_RULES} (from environment)"
 fi
 
 log "Launching ${BIN} ${APP_ARGS[*]:-}"

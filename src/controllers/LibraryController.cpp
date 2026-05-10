@@ -6,7 +6,7 @@
 #include "api/CinemetaClient.h"
 #include "api/Media.h"
 #include "core/LibraryStore.h"
-#include "kinema_log_app.h"
+#include "kinema_log_controller.h"
 
 #include <KLocalizedString>
 
@@ -226,7 +226,7 @@ QCoro::Task<void> LibraryController::runBackfillOne(
             m_store.upsertTitle(refreshed);
         }
     } catch (const std::exception& e) {
-        qCDebug(KINEMA_APP)
+        qCDebug(KINEMA_CONTROLLER)
             << "LibraryController: backfill failed for"
             << seed.imdbId << "—" << e.what();
     }

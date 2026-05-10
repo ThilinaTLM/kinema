@@ -17,7 +17,7 @@
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/StreamFilter.h"
-#include "kinema_log_app.h"
+#include "kinema_log_ui.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/StreamSorting.h"
@@ -433,7 +433,7 @@ QCoro::Task<void> MovieDetailViewModel::resolveByTmdbAndLoad(
             const bool notFound
                 = he->kind() == core::HttpError::Kind::HttpStatus
                 && he->httpStatus() == 404;
-            qCWarning(KINEMA_APP).nospace()
+            qCWarning(KINEMA_UI).nospace()
                 << "TMDB external_ids lookup failed: movie/"
                 << tmdbId << " (\"" << title << "\") \u2014 "
                 << he->httpStatus() << " " << he->message();
@@ -458,7 +458,7 @@ QCoro::Task<void> MovieDetailViewModel::resolveByTmdbAndLoad(
     }
 
     if (imdbId.isEmpty()) {
-        qCWarning(KINEMA_APP).nospace()
+        qCWarning(KINEMA_UI).nospace()
             << "TMDB has no IMDB id for movie/" << tmdbId
             << " (\"" << title << "\")";
         Q_EMIT statusMessage(

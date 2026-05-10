@@ -6,7 +6,7 @@
 #include "controllers/DownloadController.h"
 #include "core/MediaCache.h"
 #include "download/DownloadManager.h"
-#include "kinema_log_app.h"
+#include "kinema_log_ui.h"
 
 #include <KFormat>
 #include <KIO/OpenUrlJob>
@@ -243,7 +243,7 @@ void DownloadsViewModel::resumeDownload(const QString& assetId)
 
 void DownloadsViewModel::runEvictionNow()
 {
-    qCInfo(KINEMA_APP) << "DownloadsViewModel: manual eviction triggered";
+    qCInfo(KINEMA_UI) << "DownloadsViewModel: manual eviction triggered";
     // The controller doesn't expose runEviction; we tunnel through
     // the manager directly because it's only the cache pass.
     m_cache.enforceBudget();
@@ -278,7 +278,7 @@ void DownloadsViewModel::clearFinished()
             ++removed;
         }
     }
-    qCInfo(KINEMA_APP) << "clearFinished removed" << removed << "rows";
+    qCInfo(KINEMA_UI) << "clearFinished removed" << removed << "rows";
 }
 
 void DownloadsViewModel::clearFailed()
@@ -291,7 +291,7 @@ void DownloadsViewModel::clearFailed()
             ++removed;
         }
     }
-    qCInfo(KINEMA_APP) << "clearFailed removed" << removed << "rows";
+    qCInfo(KINEMA_UI) << "clearFailed removed" << removed << "rows";
 }
 
 } // namespace kinema::ui::qml

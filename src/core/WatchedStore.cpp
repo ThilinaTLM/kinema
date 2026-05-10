@@ -5,7 +5,7 @@
 
 #include "core/Database.h"
 #include "core/SqlUtil.h"
-#include "kinema_log_app.h"
+#include "kinema_log_db.h"
 
 #include <QDateTime>
 #include <QSqlDatabase>
@@ -80,7 +80,7 @@ WatchedStore::overridesForImdb(const QString& imdbId) const
         "SELECT key, state FROM watched_overrides WHERE imdb_id = ?"));
     q.addBindValue(imdbId);
     if (!q.exec()) {
-        qCWarning(KINEMA_APP) << "WatchedStore: overridesForImdb failed:"
+        qCWarning(KINEMA_DB) << "WatchedStore: overridesForImdb failed:"
                           << q.lastError().text();
         return out;
     }
@@ -120,7 +120,7 @@ void WatchedStore::setOverride(const api::PlaybackKey& key, Override state)
     q.addBindValue(static_cast<int>(state));
     q.addBindValue(isoUtc(QDateTime::currentDateTimeUtc()));
     if (!q.exec()) {
-        qCWarning(KINEMA_APP) << "WatchedStore: setOverride failed:"
+        qCWarning(KINEMA_DB) << "WatchedStore: setOverride failed:"
                           << q.lastError().text();
         return;
     }
@@ -137,7 +137,7 @@ void WatchedStore::clearOverride(const api::PlaybackKey& key)
         "DELETE FROM watched_overrides WHERE key = ?"));
     q.addBindValue(key.storageKey());
     if (!q.exec()) {
-        qCWarning(KINEMA_APP) << "WatchedStore: clearOverride failed:"
+        qCWarning(KINEMA_DB) << "WatchedStore: clearOverride failed:"
                           << q.lastError().text();
         return;
     }
@@ -156,7 +156,7 @@ void WatchedStore::clearAllForImdb(const QString& imdbId)
         "DELETE FROM watched_overrides WHERE imdb_id = ?"));
     q.addBindValue(imdbId);
     if (!q.exec()) {
-        qCWarning(KINEMA_APP) << "WatchedStore: clearAllForImdb failed:"
+        qCWarning(KINEMA_DB) << "WatchedStore: clearAllForImdb failed:"
                           << q.lastError().text();
         return;
     }

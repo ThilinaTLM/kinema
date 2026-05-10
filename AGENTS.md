@@ -13,4 +13,5 @@
 - Add tests with `ecm_add_test(...)` in `tests/CMakeLists.txt` and add the target to the fixture `foreach` at the bottom.
 - Validate with `cmake --build build -j$(nproc)` and `ctest --test-dir build --output-on-failure`.
 - Downloaded Lucide icons are available in `/home/tlm/Downloads/lucide-icons/icons/`.
+- Logging is set up by `core::installLogging()` (called from `KinemaApplication::configure()`): rich pattern with ISO-8601 ms timestamp / severity / category / `file:line in fn` (warn+) and a rotating file at `~/.local/share/kinema/logs/kinema.log` (5 MB × 5, rotated on startup; suppressed under `QStandardPaths::isTestModeEnabled()`). Use the per-subsystem categories declared in `src/CMakeLists.txt`: `KINEMA_APP` (shell/lifecycle), `KINEMA_DB` (Database + `*Store`), `KINEMA_CONTROLLER` (`controllers/*`), `KINEMA_UI` (view-models, image loader, `services/StreamActions`), `KINEMA_PLAYER` (embedded mpv), `KINEMA_API` (`api/*Client`), `KINEMA_HTTP`, `KINEMA_TORRENT`, `KINEMA_DOWNLOAD`. Tune verbosity via `kdebugsettings` or `QT_LOGGING_RULES` (e.g., `kinema.db.debug=true`); `./scripts/run.sh` exports a sensible default unless `-q`/`--quiet` is passed.
 

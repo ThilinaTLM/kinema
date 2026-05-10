@@ -7,7 +7,7 @@
 
 #include "config/PlayerSettings.h"
 #include "core/MpvConfigPaths.h"
-#include "kinema_log_app.h"
+#include "kinema_log_player.h"
 #include "ui/player/MpvLoadCommand.h"
 
 #include <MpvController>
@@ -193,10 +193,10 @@ void MpvVideoItem::applySettings(const config::PlayerSettings& settings)
     // accepts a runtime push.
     const auto mpvConf = core::mpv_config::mpvConfPath();
     if (!mpvConf.isEmpty()) {
-        qCInfo(KINEMA_APP) << "loading shipped mpv config from" << mpvConf;
+        qCInfo(KINEMA_PLAYER) << "loading shipped mpv config from" << mpvConf;
         setProperty(QStringLiteral("include"), mpvConf);
     } else {
-        qCWarning(KINEMA_APP)
+        qCWarning(KINEMA_PLAYER)
             << "Kinema mpv.conf not found \u2014 using built-in defaults";
     }
 
