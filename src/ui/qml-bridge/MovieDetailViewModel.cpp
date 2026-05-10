@@ -11,7 +11,6 @@
 #include "config/TorrentioSettings.h"
 #include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
-#include "controllers/PlayQueueController.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
 #include "core/DateFormat.h"
@@ -630,11 +629,6 @@ void MovieDetailViewModel::toggleMovieWatched()
     }
 }
 
-void MovieDetailViewModel::setPlayQueue(controllers::PlayQueueController* queue)
-{
-    m_queue = queue;
-}
-
 void MovieDetailViewModel::playNow(int row)
 {
     const auto* s = m_streams->at(row);
@@ -648,28 +642,10 @@ void MovieDetailViewModel::playNow(int row)
             4000);
         return;
     }
-    if (!m_queue) {
+    if (!m_actions) {
         return;
     }
-    m_queue->playNow(*s, currentContext());
-}
-
-void MovieDetailViewModel::playNext(int row)
-{
-    const auto* s = m_streams->at(row);
-    if (!s || (s->directUrl.isEmpty() && s->infoHash.isEmpty()) || !m_queue) {
-        return;
-    }
-    m_queue->playNext(*s, currentContext());
-}
-
-void MovieDetailViewModel::enqueue(int row)
-{
-    const auto* s = m_streams->at(row);
-    if (!s || (s->directUrl.isEmpty() && s->infoHash.isEmpty()) || !m_queue) {
-        return;
-    }
-    m_queue->enqueue(*s, currentContext());
+    m_actions->play(*s, currentContext());
 }
 
 void MovieDetailViewModel::download(int row)

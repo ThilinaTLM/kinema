@@ -34,7 +34,6 @@ class LibraryStore;
 class HttpClient;
 class MediaCache;
 class PlayerLauncher;
-class PlayQueueStore;
 class SubtitleCacheStore;
 class TokenStore;
 class TorrentCache;
@@ -63,7 +62,7 @@ class HistoryController;
 class LibraryController;
 class MprisController;
 class PlaybackController;
-class PlayQueueController;
+class SeriesPlaybackSessionController;
 class SubtitleController;
 class TokenController;
 class TrayController;
@@ -90,7 +89,6 @@ class DiscoverViewModel;
 class DownloadsViewModel;
 class LibraryViewModel;
 class MovieDetailViewModel;
-class PlayQueueViewModel;
 class SearchViewModel;
 class SeriesDetailViewModel;
 class SubtitlesViewModel;
@@ -257,18 +255,17 @@ private:
     void wireTray();
 #ifdef KINEMA_HAVE_LIBMPV
     /// Lazily build the embedded player window the first time it
-    /// is needed and reuse the same instance for every queue item
-    /// in the session. Wires tray / history / playback / subtitles
-    /// once on creation; subsequent calls are a no-op fast path.
-    /// Returns the live window pointer.
+    /// is needed and reuse the same instance for subsequent plays.
+    /// Wires tray / history / playback / subtitles once on
+    /// creation; subsequent calls are a no-op fast path. Returns
+    /// the live window pointer.
     ui::player::PlayerWindow* ensurePlayerWindow();
 
     /// Forward a play request to the embedded window. Used by the
     /// `PlayerLauncher::embeddedRequested` connection. Routes
-    /// through `PlaybackController::play` like before, but no
-    /// longer tears down the previous window — the queue
-    /// controller drives sequential playback by handing off the
-    /// next URL into the same libmpv context.
+    /// through `PlaybackController::play` like before, but keeps
+    /// the same detached window + libmpv context alive across
+    /// successive plays.
     void openEmbeddedPlayer(const QUrl& url,
         const api::PlaybackContext& ctx);
 
@@ -292,7 +289,6 @@ private:
     std::unique_ptr<core::HistoryStore> m_history;
     std::unique_ptr<core::LibraryStore> m_library;
     std::unique_ptr<core::WatchedStore> m_watched;
-    std::unique_ptr<core::PlayQueueStore> m_playQueueStore;
     std::unique_ptr<core::SubtitleCacheStore> m_subtitleCache;
     std::unique_ptr<core::TorrentCache> m_torrentCache;
     std::unique_ptr<core::DownloadStore> m_downloadStore;
@@ -315,7 +311,6 @@ private:
     controllers::HistoryController* m_historyCtrl {};
     controllers::LibraryController* m_libraryCtrl {};
     controllers::WatchedController* m_watchedCtrl {};
-    controllers::PlayQueueController* m_playQueueCtrl {};
     controllers::SubtitleController* m_subtitleCtrl {};
     controllers::TrayController* m_tray {};
 
@@ -331,11 +326,11 @@ private:
     SeriesDetailViewModel* m_seriesDetailVm {};
     SubtitlesViewModel* m_subtitlesVm {};
     SettingsRootViewModel* m_settingsVm {};
-    PlayQueueViewModel* m_playQueueVm {};
     DownloadsViewModel* m_downloadsVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::MprisController* m_mprisCtrl {};
     controllers::PlaybackController* m_playbackCtrl {};
+    controllers::SeriesPlaybackSessionController* m_seriesSessionCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};
 #endif
 

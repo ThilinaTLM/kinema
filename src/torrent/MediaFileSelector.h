@@ -31,9 +31,31 @@ struct MediaFileSelection {
     bool ok() const noexcept { return file.has_value(); }
 };
 
+struct EpisodeFileTarget {
+    int season = 0;
+    int episode = 0;
+    SelectedMediaFile file;
+};
+
+struct EpisodePackNavigation {
+    std::optional<EpisodeFileTarget> previous;
+    std::optional<EpisodeFileTarget> current;
+    std::optional<EpisodeFileTarget> next;
+
+    bool navigationAvailable() const noexcept
+    {
+        return current.has_value()
+            && (previous.has_value() || next.has_value());
+    }
+};
+
 bool isVideoFilePath(const QString& path);
 bool isLikelySampleOrExtra(const QString& path, qint64 sizeBytes);
 MediaFileSelection selectMediaFile(const QVector<TorrentFileEntry>& files,
     const api::PlaybackContext& ctx);
+std::optional<EpisodePackNavigation> adjacentEpisodeFiles(
+    const QVector<TorrentFileEntry>& files,
+    int season,
+    int episode);
 
 } // namespace kinema::torrent

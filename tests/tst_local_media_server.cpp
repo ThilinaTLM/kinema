@@ -24,14 +24,16 @@ class FakeAssetSession : public AssetSession
 {
 public:
     explicit FakeAssetSession(QByteArray content,
-        QString fileName = QStringLiteral("test.mkv"))
+        QString fileName = QStringLiteral("test.mkv"),
+        QString assetId = QStringLiteral("asset-1"))
         : m_content(std::move(content))
         , m_fileName(std::move(fileName))
+        , m_assetId(std::move(assetId))
     {
     }
 
     QString token() const override { return QStringLiteral("tok-1"); }
-    QString assetId() const override { return QStringLiteral("asset-1"); }
+    QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_content.size(); }
 
@@ -61,6 +63,7 @@ public:
 private:
     QByteArray m_content;
     QString m_fileName;
+    QString m_assetId;
     api::DownloadMode m_mode = api::DownloadMode::OnDemand;
 };
 
@@ -114,12 +117,43 @@ private Q_SLOTS:
         server.registerSession(&session);
 
         const QUrl url = server.urlFor(&session);
+        QCOMPARE(url.path(), QStringLiteral("/stream/asset-1/test.mkv"));
         const auto body = fetchPath(url, "bytes=100-199");
         QCOMPARE(body.size(), 100);
         QCOMPARE(body, content.mid(100, 100));
     }
 
-    void unknownTokenReturns404()
+    void resolvesMissingLiveSessionThroughCallback()
+    {
+        LocalMediaServer server;
+        QVERIFY(server.listen());
+
+        const QByteArray content("Recovered payload");
+        FakeAssetSession session(content,
+            QStringLiteral("episode.mkv"),
+            QStringLiteral("asset-recovered"));
+        server.setSessionResolver(
+            [&server, &session](const QString& assetId)
+                -> QCoro::Task<AssetSession*> {
+                if (assetId == session.assetId()) {
+                    server.registerSession(&session);
+                    co_return &session;
+                }
+                co_return nullptr;
+            });
+
+        QUrl url;
+        url.setScheme(QStringLiteral("http"));
+        url.setHost(QStringLiteral("127.0.0.1"));
+        url.setPort(server.urlFor(&session).port());
+        url.setPath(QStringLiteral("/stream/asset-recovered/episode.mkv"));
+
+        const auto body = fetchPath(url);
+        QCOMPARE(body, content);
+        QVERIFY(session.ensureCount > 0);
+    }
+
+    void unknownAssetReturns404()
     {
         LocalMediaServer server;
         QVERIFY(server.listen());
@@ -135,7 +169,7 @@ private Q_SLOTS:
         url.setScheme(QStringLiteral("http"));
         url.setHost(QStringLiteral("127.0.0.1"));
         url.setPort(liveUrl.port());
-        url.setPath(QStringLiteral("/stream/missing-token/file.mkv"));
+        url.setPath(QStringLiteral("/stream/missing-asset/file.mkv"));
         // The response body is whatever (likely empty); we just need
         // the request to complete without hanging.
         QNetworkAccessManager nam;

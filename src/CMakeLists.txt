@@ -42,7 +42,6 @@ set(kinema_core_SRCS
     core/MpvTrackList.cpp
     core/Player.cpp
     core/PlayerLauncher.cpp
-    core/PlayQueueStore.cpp
     core/StreamFilter.cpp
     core/StreamTokens.cpp
     core/SubtitleCacheStore.cpp
@@ -87,7 +86,6 @@ set(kinema_core_SRCS
     controllers/DownloadController.cpp
     controllers/HistoryController.cpp
     controllers/LibraryController.cpp
-    controllers/PlayQueueController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
@@ -109,8 +107,6 @@ set(kinema_core_SRCS
     ui/qml-bridge/LibraryViewModel.cpp
     ui/qml-bridge/MainController.cpp
     ui/qml-bridge/MovieDetailViewModel.cpp
-    ui/qml-bridge/PlayQueueViewModel.cpp
-    ui/qml-bridge/QueueDisplay.cpp
     ui/qml-bridge/ResultsListModel.cpp
     ui/qml-bridge/SearchViewModel.cpp
     ui/qml-bridge/SeriesDetailViewModel.cpp
@@ -134,6 +130,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
         controllers/MprisController.cpp
         controllers/PlaybackController.cpp
         controllers/PlaybackLoadWatchdog.cpp
+        controllers/SeriesPlaybackSessionController.cpp
         ui/player/AudioTracksModel.cpp
         ui/player/ChaptersModel.cpp
         ui/player/MpvLoadCommand.cpp
@@ -141,7 +138,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
         ui/player/PlayerViewModel.cpp
         ui/player/PlayerWindow.cpp
         ui/player/PlayerWindowPresentation.cpp
-        ui/player/QueueNavPreview.cpp
         ui/player/SubtitleTracksModel.cpp
     )
 endif()
@@ -290,10 +286,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/PosterGrid.qml
         ui/qml/components/EpisodeChip.qml
         ui/qml/components/ProgressPosterCard.qml
-        ui/qml/components/QueueCompactRow.qml
-        ui/qml/components/QueueLeadRow.qml
-        ui/qml/components/QueuePlayedRow.qml
-        ui/qml/components/QueueRow.qml
         ui/qml/components/RatingChip.qml
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
@@ -311,7 +303,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/DownloadsPage.qml
         ui/qml/pages/LibraryPage.qml
         ui/qml/pages/MovieDetailPage.qml
-        ui/qml/pages/QueuePage.qml
         ui/qml/pages/SearchPage.qml
         ui/qml/pages/SeriesDetailPage.qml
         ui/qml/pages/StreamsPage.qml
@@ -428,7 +419,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
             ui/player/qml/components/PickerItem.qml
             ui/player/qml/components/PlayerInputs.qml
             ui/player/qml/components/PopupPanel.qml
-            ui/player/qml/components/QueueNavTooltip.qml
             ui/player/qml/components/SectionHeader.qml
             ui/player/qml/components/SeekBar.qml
             ui/player/qml/components/TopBar.qml

@@ -425,6 +425,60 @@ private Q_SLOTS:
         QCOMPARE(m_engine->keepAliveCalls.last().second, false);
     }
 
+    void prepareForPlaybackReturnsDeterministicAssetUrl()
+    {
+        auto stream = makeStream();
+        stream.fileIndex = 3;
+        stream.fileNameHint = QStringLiteral("Episode.S01E01.mkv");
+        const auto ctx = makeContext();
+        const auto assetId = api::assetIdFor(api::assetRefFor(stream, ctx));
+
+        const QUrl first = QCoro::waitFor(
+            m_manager->prepareForPlayback(stream, ctx));
+        QCOMPARE(first.path(),
+            QStringLiteral("/stream/%1/file.mkv").arg(assetId));
+
+        m_manager.reset();
+        m_engine = std::make_unique<StubTorrentEngine>();
+        m_manager = std::make_unique<download::DownloadManager>(
+            *m_http, *m_rd, *m_engine, *m_store, *m_cache,
+            *m_dlSettings);
+
+        const QUrl second = QCoro::waitFor(
+            m_manager->prepareForPlayback(stream, ctx));
+        QCOMPARE(second.path(), first.path());
+        QCOMPARE(second.host(), first.host());
+        QVERIFY(second.port() > 0);
+    }
+
+    void synthesiseStartArgsPreservesFileSelectionHints()
+    {
+        auto row = api::DownloadItem {};
+        row.assetId = QStringLiteral("asset-x");
+        row.key.kind = api::MediaKind::Series;
+        row.key.imdbId = QStringLiteral("tt7654321");
+        row.key.season = 1;
+        row.key.episode = 2;
+        row.infoHash = QStringLiteral(
+            "11223344556677889900aabbccddeeff00112233");
+        row.releaseName = QStringLiteral("Show.S01E02.1080p");
+        row.fileIndex = 7;
+        row.fileNameHint = QStringLiteral("Show.S01E02.mkv");
+        row.qualityLabel = QStringLiteral("Torrentio 1080p");
+        row.resolution = QStringLiteral("1080p");
+        row.provider = QStringLiteral("Torrentio");
+        row.expectedSizeBytes = 123456789LL;
+        row.title = QStringLiteral("Episode 2");
+        row.seriesTitle = QStringLiteral("Show");
+        row.episodeTitle = QStringLiteral("Episode 2");
+
+        const auto args = core::DownloadStore::synthesiseStartArgs(row);
+        QCOMPARE(args.stream.fileIndex, row.fileIndex);
+        QCOMPARE(args.stream.fileNameHint, row.fileNameHint);
+        QCOMPARE(args.ref.fileIndex, row.fileIndex);
+        QCOMPARE(args.ref.fileNameHint, row.fileNameHint);
+    }
+
 private:
     KSharedConfigPtr m_config;
     std::unique_ptr<config::DownloadSettings> m_dlSettings;

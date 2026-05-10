@@ -334,30 +334,10 @@ bool Database::applyMigration(int toVersion)
                 "ON subtitle_cache (last_used_at)"),
         });
     case 4:
-        return runAll(4, {
-            QStringLiteral(R"(CREATE TABLE IF NOT EXISTS play_queue (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                ord           INTEGER NOT NULL,
-                imdb_id       TEXT NOT NULL,
-                media_kind    INTEGER NOT NULL,
-                season        INTEGER,
-                episode       INTEGER,
-                title         TEXT NOT NULL,
-                series_title  TEXT NOT NULL DEFAULT '',
-                episode_title TEXT NOT NULL DEFAULT '',
-                poster        TEXT NOT NULL DEFAULT '',
-                info_hash     TEXT NOT NULL,
-                release_name  TEXT NOT NULL DEFAULT '',
-                resolution    TEXT NOT NULL DEFAULT '',
-                quality_label TEXT NOT NULL DEFAULT '',
-                size_bytes    INTEGER,
-                provider      TEXT NOT NULL DEFAULT '',
-                added_at      TEXT NOT NULL
-            ))"),
-            QStringLiteral(
-                "CREATE INDEX IF NOT EXISTS play_queue_by_ord "
-                "ON play_queue (ord)"),
-        });
+        // Historical queue schema removed. Keep the version number so
+        // older databases still advance through the same migration
+        // ladder, but new databases no longer create the table.
+        return true;
     case 5:
         return runAll(5, {
             QStringLiteral(R"(CREATE TABLE IF NOT EXISTS library_titles (

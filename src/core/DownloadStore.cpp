@@ -359,6 +359,8 @@ DownloadStore::StartArgs DownloadStore::synthesiseStartArgs(
     out.stream.qualityLabel = row.qualityLabel;
     out.stream.resolution = row.resolution;
     out.stream.provider = row.provider;
+    out.stream.fileIndex = row.fileIndex;
+    out.stream.fileNameHint = row.fileNameHint;
     if (row.expectedSizeBytes) {
         out.stream.sizeBytes = *row.expectedSizeBytes;
     }

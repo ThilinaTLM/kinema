@@ -22,6 +22,9 @@
 
 #include <KLocalizedString>
 
+#include <QCoro/QCoroSignal>
+#include <QTimer>
+
 #include <stdexcept>
 
 namespace kinema::download {
@@ -43,6 +46,15 @@ const char* backendName(api::DownloadBackendKind k)
     return k == api::DownloadBackendKind::RealDebridHttp
         ? "RealDebridHttp"
         : "Torrent";
+}
+
+QCoro::Task<void> sleepMs(int ms)
+{
+    QTimer timer;
+    timer.setSingleShot(true);
+    timer.start(ms);
+    co_await qCoro(&timer, &QTimer::timeout);
+    co_return;
 }
 
 } // namespace
@@ -72,6 +84,10 @@ DownloadManager::DownloadManager(core::HttpClient& http,
         qCInfo(KINEMA_DOWNLOAD)
             << "DownloadManager ready; localhost server listening";
     }
+    m_server->setSessionResolver(
+        [this](const QString& assetId) -> QCoro::Task<AssetSession*> {
+            co_return co_await ensureSessionForAssetId(assetId);
+        });
 
     // Order matters: the selector tries backends in priority order
     // when no override is given. Real-Debrid first since it's the
@@ -324,6 +340,37 @@ void DownloadManager::resumePersisted()
         << "resumePersisted: kicked" << resumed << "Full sessions";
 }
 
+QCoro::Task<AssetSession*> DownloadManager::ensureSessionForAssetId(
+    const QString& assetId)
+{
+    if (assetId.isEmpty()) {
+        co_return nullptr;
+    }
+    if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
+        it->second->touch();
+        co_return it->second.get();
+    }
+
+    const auto row = m_store.find(assetId);
+    if (!row) {
+        co_return nullptr;
+    }
+
+    auto args = core::DownloadStore::synthesiseStartArgs(*row);
+    try {
+        co_await openSession(args.ref, args.stream, args.ctx,
+            row->mode, row->disposition, row->backendKind);
+    } catch (const std::exception& e) {
+        qCWarning(KINEMA_DOWNLOAD).nospace()
+            << "ensureSessionForAssetId failed assetId=" << assetId
+            << " reason=\"" << QString::fromUtf8(e.what()) << "\"";
+        co_return nullptr;
+    }
+
+    auto it = m_sessions.find(assetId);
+    co_return it == m_sessions.end() ? nullptr : it->second.get();
+}
+
 QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
     api::Stream stream, api::PlaybackContext ctx,
     api::DownloadMode mode, api::CacheDisposition disposition,
@@ -331,48 +378,108 @@ QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
 {
     const auto assetId = api::assetIdFor(ref);
 
-    // Reuse an active session if one exists for this asset.
+    // Reuse an active session if one exists for this exact asset.
     if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
         auto* existing = it->second.get();
         existing->touch();
         co_return m_server->urlFor(existing);
     }
 
-    auto* backend = m_selector->select(stream, backendOverride);
-    if (!backend) {
-        throw std::runtime_error(i18nc("@info:status",
-            "No download backend can serve this stream.")
-                                     .toStdString());
+    // Series-pack episode navigation can request a different file
+    // inside the same info hash. The torrent backend only serves
+    // one selected file per live hash session, so supersede any
+    // older same-hash asset sessions before opening the new one.
+    if (!ref.infoHash.isEmpty()) {
+        QStringList superseded;
+        for (const auto& [otherAssetId, session] : m_sessions) {
+            if (otherAssetId == assetId) {
+                continue;
+            }
+            auto* torrentSession
+                = qobject_cast<TorrentAssetSession*>(session.get());
+            if (!torrentSession
+                || torrentSession->infoHash() != ref.infoHash) {
+                continue;
+            }
+            superseded.append(otherAssetId);
+        }
+        for (const auto& otherAssetId : superseded) {
+            if (auto it = m_sessions.find(otherAssetId);
+                it != m_sessions.end()) {
+                m_server->unregisterSession(it->second.get());
+                m_sessions.erase(it);
+            }
+            m_liveStats.erase(otherAssetId);
+            m_attachedPlayers.remove(otherAssetId);
+            if (const auto row = m_store.find(otherAssetId);
+                row && row->mode == api::DownloadMode::OnDemand
+                && row->state == api::DownloadState::Active) {
+                m_store.updateState(otherAssetId,
+                    api::DownloadState::Idle);
+                Q_EMIT itemChanged(otherAssetId);
+            }
+            m_cache.markInactive(otherAssetId);
+        }
     }
 
-    // Persist the row immediately so the UI shows a Resolving entry
-    // while the backend opens its session.
-    auto item = buildItem(ref, stream, ctx, backend->kind(), mode,
-        disposition);
-    m_store.upsert(item);
-    if (disposition == api::CacheDisposition::Pinned) {
-        m_cache.setPinned(assetId, true);
+    while (m_openingAssetIds.contains(assetId)) {
+        if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
+            auto* existing = it->second.get();
+            existing->touch();
+            co_return m_server->urlFor(existing);
+        }
+        co_await sleepMs(25);
+    }
+    if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
+        auto* existing = it->second.get();
+        existing->touch();
+        co_return m_server->urlFor(existing);
     }
 
-    Q_EMIT statusMessage(mode == api::DownloadMode::Full
-            ? i18nc("@info:status", "Starting download\u2026")
-            : i18nc("@info:status", "Buffering stream\u2026"),
-        0);
+    m_openingAssetIds.insert(assetId);
 
-    auto session = co_await backend->open(ref, stream, ctx, mode);
-    auto* raw = session.get();
-    installProgressBindings(raw, assetId);
-    m_server->registerSession(raw);
-    m_sessions.emplace(assetId, std::move(session));
+    try {
+        auto* backend = m_selector->select(stream, backendOverride);
+        if (!backend) {
+            throw std::runtime_error(i18nc("@info:status",
+                "No download backend can serve this stream.")
+                                         .toStdString());
+        }
 
-    item.state = api::DownloadState::Active;
-    item.expectedSizeBytes = raw->fileSize() > 0
-        ? std::optional<qint64>(raw->fileSize())
-        : item.expectedSizeBytes;
-    m_store.upsert(item);
-    Q_EMIT itemChanged(assetId);
+        // Persist the row immediately so the UI shows a Resolving entry
+        // while the backend opens its session.
+        auto item = buildItem(ref, stream, ctx, backend->kind(), mode,
+            disposition);
+        m_store.upsert(item);
+        if (disposition == api::CacheDisposition::Pinned) {
+            m_cache.setPinned(assetId, true);
+        }
 
-    co_return m_server->urlFor(raw);
+        Q_EMIT statusMessage(mode == api::DownloadMode::Full
+                ? i18nc("@info:status", "Starting download\u2026")
+                : i18nc("@info:status", "Buffering stream\u2026"),
+            0);
+
+        auto session = co_await backend->open(ref, stream, ctx, mode);
+        auto* raw = session.get();
+        installProgressBindings(raw, assetId);
+        m_server->registerSession(raw);
+        m_sessions.emplace(assetId, std::move(session));
+
+        item.state = api::DownloadState::Active;
+        item.expectedSizeBytes = raw->fileSize() > 0
+            ? std::optional<qint64>(raw->fileSize())
+            : item.expectedSizeBytes;
+        m_store.upsert(item);
+        Q_EMIT itemChanged(assetId);
+
+        const QUrl url = m_server->urlFor(raw);
+        m_openingAssetIds.remove(assetId);
+        co_return url;
+    } catch (...) {
+        m_openingAssetIds.remove(assetId);
+        throw;
+    }
 }
 
 QCoro::Task<void> DownloadManager::startBackground(api::AssetRef ref,

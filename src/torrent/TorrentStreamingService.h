@@ -5,6 +5,7 @@
 
 #include "api/Media.h"
 #include "api/PlaybackContext.h"
+#include "torrent/MediaFileSelector.h"
 #include "torrent/PiecePlanner.h"
 
 #include <QCoro/QCoroTask>
@@ -102,6 +103,7 @@ public:
     qint64 fileSizeForToken(const QString& token) const;
     QString fileNameForToken(const QString& token) const;
     void touchToken(const QString& token);
+    QVector<TorrentFileEntry> filesForInfoHash(const QString& infoHash) const;
 
     /// Mark the session for `infoHash` as exempt from idle-stop.
     /// The unified downloader calls this when the asset is pinned

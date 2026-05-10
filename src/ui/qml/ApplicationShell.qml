@@ -149,20 +149,6 @@ Kirigami.ApplicationWindow {
                 onTriggered: root.showPage("browse")
             },
             Kirigami.Action {
-                icon.source: AppIcons.url("list-video",
-                    checked ? AppIcons.accentText : AppIcons.foreground)
-                icon.color: enabled
-                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
-                    : AppIcons.muted
-                text: playQueue.count > 0
-                    ? i18nc("@action drawer entry, %1 is row count",
-                        "Queue (%1)", playQueue.count)
-                    : i18nc("@action drawer entry", "Queue")
-                checkable: true
-                checked: root.currentNavKey === "queue"
-                onTriggered: root.showPage("queue")
-            },
-            Kirigami.Action {
                 icon.source: AppIcons.url("download",
                     checked ? AppIcons.accentText : AppIcons.foreground)
                 icon.color: enabled
@@ -363,9 +349,6 @@ Kirigami.ApplicationWindow {
         case "browse":
             root.setTopLevelPage(browseComp, {});
             break;
-        case "queue":
-            root.setTopLevelPage(queueComp, {});
-            break;
         case "downloads":
             root.setTopLevelPage(downloadsComp, {});
             break;
@@ -381,7 +364,6 @@ Kirigami.ApplicationWindow {
     Component { id: libraryComp;  LibraryPage  { } }
     Component { id: searchComp;   SearchPage   { } }
     Component { id: browseComp;   BrowsePage   { } }
-    Component { id: queueComp;    QueuePage    { } }
     Component { id: downloadsComp; DownloadsPage { } }
 
     // Detail pages are pushed on top of the current nav page so Esc

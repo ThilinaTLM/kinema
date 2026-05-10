@@ -8,7 +8,6 @@
 #include "ui/player/AudioTracksModel.h"
 #include "ui/player/ChaptersModel.h"
 #include "ui/player/MpvVideoItem.h"
-#include "ui/player/QueueNavPreview.h"
 #include "ui/player/SubtitleTracksModel.h"
 
 namespace kinema::ui::player {
@@ -18,8 +17,6 @@ PlayerViewModel::PlayerViewModel(QObject* parent)
     , m_audioModel(new AudioTracksModel(this))
     , m_subtitleModel(new SubtitleTracksModel(this))
     , m_chaptersModel(new ChaptersModel(this))
-    , m_previousPreview(new QueueNavPreview(this))
-    , m_nextPreview(new QueueNavPreview(this))
 {
 }
 
@@ -100,15 +97,12 @@ void PlayerViewModel::setLoadingVisible(bool on)
     Q_EMIT loadingVisibleChanged();
 }
 
-void PlayerViewModel::setQueueNavigationState(int activeIndex, int count)
+void PlayerViewModel::setEpisodeNavigationState(bool visible,
+    bool canGoPrevious, bool canGoNext)
 {
-    const bool visible = activeIndex >= 0 && count > 0;
-    const bool canGoPrevious = activeIndex > 0;
-    const bool canGoNext = activeIndex >= 0 && (activeIndex + 1) < count;
-
-    if (m_queueNavigationVisible != visible) {
-        m_queueNavigationVisible = visible;
-        Q_EMIT queueNavigationVisibleChanged();
+    if (m_episodeNavigationVisible != visible) {
+        m_episodeNavigationVisible = visible;
+        Q_EMIT episodeNavigationVisibleChanged();
     }
     if (m_canGoPrevious != canGoPrevious) {
         m_canGoPrevious = canGoPrevious;
@@ -117,36 +111,6 @@ void PlayerViewModel::setQueueNavigationState(int activeIndex, int count)
     if (m_canGoNext != canGoNext) {
         m_canGoNext = canGoNext;
         Q_EMIT canGoNextChanged();
-    }
-}
-
-void PlayerViewModel::setPreviousPreview(const QString& title,
-    const QString& subtitle, const QStringList& chips)
-{
-    if (m_previousPreview) {
-        m_previousPreview->setPreview(title, subtitle, chips);
-    }
-}
-
-void PlayerViewModel::clearPreviousPreview()
-{
-    if (m_previousPreview) {
-        m_previousPreview->clear();
-    }
-}
-
-void PlayerViewModel::setNextPreview(const QString& title,
-    const QString& subtitle, const QStringList& chips)
-{
-    if (m_nextPreview) {
-        m_nextPreview->setPreview(title, subtitle, chips);
-    }
-}
-
-void PlayerViewModel::clearNextPreview()
-{
-    if (m_nextPreview) {
-        m_nextPreview->clear();
     }
 }
 

@@ -162,6 +162,11 @@ Q_SIGNALS:
     void itemChanged(const QString& assetId);
 
 private:
+    /// Ensure a live session exists for `assetId`, recovering it from
+    /// the persisted store when needed. Returns nullptr when recovery
+    /// is impossible or backend startup fails.
+    QCoro::Task<AssetSession*> ensureSessionForAssetId(const QString& assetId);
+
     /// Realise a session (creating or reusing) and persist the row.
     /// Returns the localhost URL on success; throws on backend failure.
     QCoro::Task<QUrl> openSession(api::AssetRef ref,
@@ -200,6 +205,10 @@ private:
 
     /// Active sessions keyed by `assetId`. Owned via std::unique_ptr.
     std::map<QString, std::unique_ptr<AssetSession>> m_sessions;
+
+    /// Asset ids currently being opened. Prevents duplicate session
+    /// creation when multiple localhost requests race a cold recovery.
+    QSet<QString> m_openingAssetIds;
 
     /// Transient telemetry, populated by session signal handlers.
     /// Cleared when a session is destroyed.

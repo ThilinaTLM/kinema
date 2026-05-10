@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ui/player/PlayerViewModel.h"
-#include "ui/player/QueueNavPreview.h"
 
 #include <QSignalSpy>
 #include <QTest>
 
 using kinema::ui::player::PlayerViewModel;
-using kinema::ui::player::QueueNavPreview;
 
 class TestPlayerViewModel : public QObject
 {
@@ -20,8 +18,7 @@ private Q_SLOTS:
     void mediaContextEmitsOnce();
     void chipsListChange();
     void loadingState();
-    void queueNavigationState();
-    void queueNavPreviews();
+    void episodeNavigationState();
     void previousNextSignals();
     void noActionWhenAlreadyVisible();
 };
@@ -132,87 +129,36 @@ void TestPlayerViewModel::loadingState()
     QCOMPARE(spy.count(), 2);
 }
 
-void TestPlayerViewModel::queueNavigationState()
+void TestPlayerViewModel::episodeNavigationState()
 {
     PlayerViewModel vm;
-    QSignalSpy visSpy(&vm, &PlayerViewModel::queueNavigationVisibleChanged);
+    QSignalSpy visSpy(&vm, &PlayerViewModel::episodeNavigationVisibleChanged);
     QSignalSpy prevSpy(&vm, &PlayerViewModel::canGoPreviousChanged);
     QSignalSpy nextSpy(&vm, &PlayerViewModel::canGoNextChanged);
 
-    vm.setQueueNavigationState(0, 3);
-    QVERIFY(vm.queueNavigationVisible());
+    vm.setEpisodeNavigationState(true, false, true);
+    QVERIFY(vm.episodeNavigationVisible());
     QVERIFY(!vm.canGoPrevious());
     QVERIFY(vm.canGoNext());
     QCOMPARE(visSpy.count(), 1);
     QCOMPARE(prevSpy.count(), 0);
     QCOMPARE(nextSpy.count(), 1);
 
-    vm.setQueueNavigationState(1, 3);
+    vm.setEpisodeNavigationState(true, true, true);
     QVERIFY(vm.canGoPrevious());
     QVERIFY(vm.canGoNext());
     QCOMPARE(prevSpy.count(), 1);
 
-    vm.setQueueNavigationState(2, 3);
+    vm.setEpisodeNavigationState(true, true, false);
     QVERIFY(vm.canGoPrevious());
     QVERIFY(!vm.canGoNext());
     QCOMPARE(nextSpy.count(), 2);
 
-    vm.setQueueNavigationState(-1, 0);
-    QVERIFY(!vm.queueNavigationVisible());
+    vm.setEpisodeNavigationState(false, false, false);
+    QVERIFY(!vm.episodeNavigationVisible());
     QVERIFY(!vm.canGoPrevious());
     QVERIFY(!vm.canGoNext());
     QCOMPARE(visSpy.count(), 2);
-}
-
-void TestPlayerViewModel::queueNavPreviews()
-{
-    PlayerViewModel vm;
-    auto* prev = qobject_cast<QueueNavPreview*>(vm.previousPreview());
-    auto* next = qobject_cast<QueueNavPreview*>(vm.nextPreview());
-    QVERIFY(prev);
-    QVERIFY(next);
-
-    QSignalSpy prevAvailSpy(prev, &QueueNavPreview::availableChanged);
-    QSignalSpy prevTitleSpy(prev, &QueueNavPreview::titleChanged);
-    QSignalSpy nextAvailSpy(next, &QueueNavPreview::availableChanged);
-    QSignalSpy nextChipsSpy(next, &QueueNavPreview::chipsChanged);
-
-    vm.setPreviousPreview(QStringLiteral("Severance"),
-        QStringLiteral("S02E04 - Woe's Hollow"),
-        { QStringLiteral("1080P"), QStringLiteral("WEB-DL") });
-    QVERIFY(prev->available());
-    QCOMPARE(prev->title(), QStringLiteral("Severance"));
-    QCOMPARE(prev->subtitle(), QStringLiteral("S02E04 - Woe's Hollow"));
-    QCOMPARE(prev->chips().size(), 2);
-    QCOMPARE(prevAvailSpy.count(), 1);
-    QCOMPARE(prevTitleSpy.count(), 1);
-
-    vm.setPreviousPreview(QStringLiteral("Severance"),
-        QStringLiteral("S02E04 - Woe's Hollow"),
-        { QStringLiteral("1080P"), QStringLiteral("WEB-DL") });
-    QCOMPARE(prevAvailSpy.count(), 1);
-    QCOMPARE(prevTitleSpy.count(), 1);
-
-    vm.setNextPreview(QStringLiteral("Sinners"), QString(),
-        { QStringLiteral("4K") });
-    QVERIFY(next->available());
-    QCOMPARE(next->title(), QStringLiteral("Sinners"));
-    QCOMPARE(next->chips(), QStringList { QStringLiteral("4K") });
-    QCOMPARE(nextAvailSpy.count(), 1);
-    QCOMPARE(nextChipsSpy.count(), 1);
-
-    vm.clearPreviousPreview();
-    QVERIFY(!prev->available());
-    QVERIFY(prev->title().isEmpty());
-    QVERIFY(prev->subtitle().isEmpty());
-    QVERIFY(prev->chips().isEmpty());
-    QCOMPARE(prevAvailSpy.count(), 2);
-
-    vm.clearNextPreview();
-    QVERIFY(!next->available());
-    QVERIFY(next->title().isEmpty());
-    QVERIFY(next->chips().isEmpty());
-    QCOMPARE(nextAvailSpy.count(), 2);
 }
 
 void TestPlayerViewModel::previousNextSignals()

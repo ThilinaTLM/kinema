@@ -11,6 +11,8 @@
 #include <QTcpServer>
 #include <QUrl>
 
+#include <functional>
+
 class QTcpSocket;
 
 namespace kinema::download {
@@ -20,11 +22,12 @@ class AssetSession;
 /**
  * Generic localhost HTTP server that fronts every download backend.
  *
- * - Sessions register a `(token, AssetSession*)` mapping. The token
- *   is stable for the lifetime of the session.
- * - For each incoming request the server resolves the token, asks
- *   the session to `ensureRange(...)`, then reads bytes via
+ * - Sessions register an `(assetId, AssetSession*)` mapping.
+ * - For each incoming request the server resolves the `assetId`,
+ *   asks the session to `ensureRange(...)`, then reads bytes via
  *   `readRange(...)`.
+ * - When no live session exists, the server may ask an injected
+ *   resolver callback to re-realise one from persisted state.
  * - One server instance per process; the `DownloadManager` owns it.
  * - Replaces the torrent-only `torrent::LocalStreamServer`.
  */
@@ -41,14 +44,17 @@ public:
     /// True once `listen()` has succeeded.
     bool isListening() const noexcept { return m_server.isListening(); }
 
-    /// Map a token to a session. Caller retains ownership of the
+    /// Map an asset id to a session. Caller retains ownership of the
     /// session and is responsible for calling `unregisterSession()`
     /// before destroying it.
     void registerSession(AssetSession* session);
     void unregisterSession(AssetSession* session);
-    void unregisterToken(const QString& token);
+    void unregisterAssetId(const QString& assetId);
 
-    /// `http://127.0.0.1:<port>/stream/<token>/<percent-encoded-name>`.
+    using SessionResolver = std::function<QCoro::Task<AssetSession*>(const QString& assetId)>;
+    void setSessionResolver(SessionResolver resolver);
+
+    /// `http://127.0.0.1:<port>/stream/<assetId>/<percent-encoded-name>`.
     QUrl urlFor(AssetSession* session) const;
 
 private Q_SLOTS:
@@ -56,10 +62,12 @@ private Q_SLOTS:
 
 private:
     QCoro::Task<void> serveSocket(QTcpSocket* socket);
-    AssetSession* sessionForToken(const QString& token) const;
+    QCoro::Task<AssetSession*> ensureSessionForAssetId(const QString& assetId);
+    AssetSession* sessionForAssetId(const QString& assetId) const;
 
     QTcpServer m_server;
     QHash<QString, QPointer<AssetSession>> m_sessions;
+    SessionResolver m_resolver;
 };
 
 } // namespace kinema::download

@@ -34,10 +34,6 @@ class PlayerWindow;
 }
 
 namespace kinema::controllers {
-class PlayQueueController;
-}
-
-namespace kinema::controllers {
 
 /**
  * Mediator between the embedded player, the persistent
@@ -54,8 +50,8 @@ namespace kinema::controllers {
  *     `onPlayStarting(ctx)`, capturing the `HistoryStreamRef` so a
  *     later "Continue Watching" click can replay the same release.
  *   - Orchestrate one-click resume: fetch Torrentio, match by
- *     infoHash, and hand off to the play queue. On a miss, signal
- *     the caller to fall back to the detail pane.
+ *     infoHash, and hand off directly to `StreamActions::play`.
+ *     On a miss, signal the caller to fall back to the detail pane.
  *
  * Two-phase init: `PlayerWindow` and `StreamActions` are wired in
  * after construction because they form a small cycle with this
@@ -82,9 +78,6 @@ public:
     /// set before Continue-Watching cards can resume.
     void setStreamActions(services::StreamActions* actions);
 
-    /// Queue-first embedded playback hand-off for history resume.
-    void setPlayQueue(PlayQueueController* queue);
-
     /// Called by StreamActions::play just before the launcher fires.
     /// Pins the context so later position updates can be attributed
     /// to it and persists the "last-played" row so external plays
@@ -105,7 +98,7 @@ public:
 public Q_SLOTS:
     /// One-click resume. Re-fetches Torrentio for the entry's key,
     /// matches by `lastStream.infoHash`, and on a hit routes the
-    /// fresh stream through the play queue. On a miss emits
+    /// fresh stream through `StreamActions::play`. On a miss emits
     /// `resumeFallbackRequested()` so MainWindow can open the detail
     /// pane instead.
     void resumeFromHistory(const api::HistoryEntry& entry);
@@ -147,7 +140,6 @@ private:
     const QString& m_rdToken;
     ui::player::PlayerWindow* m_player {};
     services::StreamActions* m_actions {};
-    PlayQueueController* m_queue {};
 
     /// Set by onPlayStarting, promoted to m_active on fileLoaded.
     std::optional<api::PlaybackContext> m_pending;

@@ -33,7 +33,6 @@ class TorrentioSettings;
 namespace kinema::controllers {
 class DownloadController;
 class LibraryController;
-class PlayQueueController;
 class TokenController;
 class WatchedController;
 }
@@ -252,18 +251,12 @@ public Q_SLOTS:
     void toggleSeriesWatched();
     void markSeasonWatched(int season, bool watched);
 
-    /// Wire the queue controller. Two-phase init like the movie
-    /// detail VM. Safe to leave unset for tests.
-    void setPlayQueue(controllers::PlayQueueController* queue);
-
     /// Wire the download controller. Same two-phase pattern.
     void setDownloadController(controllers::DownloadController* dl);
 
     /// Per-row action handlers driven by `StreamCard.qml`'s ⋮ menu.
-    /// Each routes through `controllers::PlayQueueController`.
+    /// `playNow` routes straight through `services::StreamActions`.
     void playNow(int row);
-    void playNext(int row);
-    void enqueue(int row);
     /// Hand the row's stream to `controllers::DownloadController::enqueue`.
     /// Background full-file episode download, mirroring the
     /// explicit `\u2b07 Download` button on the stream row. Always
@@ -350,7 +343,6 @@ private:
     services::StreamActions* m_actions;
     controllers::LibraryController* m_library {};
     controllers::WatchedController* m_watched {};
-    controllers::PlayQueueController* m_queue {};
     controllers::DownloadController* m_downloads {};
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;

@@ -17,15 +17,15 @@ class IdleInhibitor;
 
 namespace kinema::controllers {
 
-class PlayQueueController;
 class PlaybackController;
+class SeriesPlaybackSessionController;
 
 class MprisController : public QObject
 {
     Q_OBJECT
 public:
     MprisController(PlaybackController& playback,
-        PlayQueueController* queue,
+        SeriesPlaybackSessionController* seriesSession,
         QObject* parent = nullptr);
     ~MprisController() override;
 
@@ -76,7 +76,7 @@ private:
     void emitRootPropertiesChanged();
 
     PlaybackController& m_playback;
-    PlayQueueController* m_queue = nullptr;
+    SeriesPlaybackSessionController* m_seriesSession = nullptr;
     std::unique_ptr<core::IdleInhibitor> m_inhibitor;
     bool m_objectRegistered = false;
     bool m_serviceRegistered = false;

@@ -83,7 +83,7 @@ void writeHeaders(QTcpSocket* socket, int status, qint64 contentLength,
     socket->write(h);
 }
 
-QString tokenFromPath(const QString& path)
+QString assetIdFromPath(const QString& path)
 {
     const QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
     if (parts.size() < 2 || parts.at(0) != QLatin1String("stream")) {
@@ -163,7 +163,7 @@ void LocalMediaServer::registerSession(AssetSession* session)
     if (!session) {
         return;
     }
-    m_sessions.insert(session->token(), QPointer<AssetSession>(session));
+    m_sessions.insert(session->assetId(), QPointer<AssetSession>(session));
 }
 
 void LocalMediaServer::unregisterSession(AssetSession* session)
@@ -171,21 +171,38 @@ void LocalMediaServer::unregisterSession(AssetSession* session)
     if (!session) {
         return;
     }
-    m_sessions.remove(session->token());
+    m_sessions.remove(session->assetId());
 }
 
-void LocalMediaServer::unregisterToken(const QString& token)
+void LocalMediaServer::unregisterAssetId(const QString& assetId)
 {
-    m_sessions.remove(token);
+    m_sessions.remove(assetId);
 }
 
-AssetSession* LocalMediaServer::sessionForToken(const QString& token) const
+void LocalMediaServer::setSessionResolver(SessionResolver resolver)
 {
-    const auto it = m_sessions.constFind(token);
+    m_resolver = std::move(resolver);
+}
+
+AssetSession* LocalMediaServer::sessionForAssetId(const QString& assetId) const
+{
+    const auto it = m_sessions.constFind(assetId);
     if (it == m_sessions.constEnd()) {
         return nullptr;
     }
     return it.value().data();
+}
+
+QCoro::Task<AssetSession*> LocalMediaServer::ensureSessionForAssetId(
+    const QString& assetId)
+{
+    if (auto* session = sessionForAssetId(assetId)) {
+        co_return session;
+    }
+    if (!m_resolver || assetId.isEmpty()) {
+        co_return nullptr;
+    }
+    co_return co_await m_resolver(assetId);
 }
 
 QUrl LocalMediaServer::urlFor(AssetSession* session) const
@@ -198,7 +215,7 @@ QUrl LocalMediaServer::urlFor(AssetSession* session) const
     url.setHost(QStringLiteral("127.0.0.1"));
     url.setPort(m_server.serverPort());
     url.setPath(QStringLiteral("/stream/%1/%2").arg(
-        session->token(),
+        session->assetId(),
         QString::fromUtf8(QUrl::toPercentEncoding(
             QFileInfo(session->fileName()).fileName()))));
     return url;
@@ -242,9 +259,9 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
         co_return;
     }
 
-    const QString token = tokenFromPath(req->path);
-    auto* session = sessionForToken(token);
-    if (token.isEmpty() || !session) {
+    const QString assetId = assetIdFromPath(req->path);
+    auto* session = co_await ensureSessionForAssetId(assetId);
+    if (assetId.isEmpty() || !session) {
         writeHeaders(guard, 404, 0, {});
         guard->disconnectFromHost();
         co_return;

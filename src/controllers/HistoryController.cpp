@@ -4,7 +4,6 @@
 #include "controllers/HistoryController.h"
 
 #include "api/TorrentioClient.h"
-#include "controllers/PlayQueueController.h"
 #include "config/AppSettings.h"
 #include "core/HistoryStore.h"
 #include "core/HttpError.h"
@@ -111,11 +110,6 @@ void HistoryController::setPlayerWindow(ui::player::PlayerWindow* window)
 void HistoryController::setStreamActions(services::StreamActions* actions)
 {
     m_actions = actions;
-}
-
-void HistoryController::setPlayQueue(PlayQueueController* queue)
-{
-    m_queue = queue;
 }
 
 void HistoryController::onPlayStarting(const api::PlaybackContext& ctx)
@@ -322,14 +316,6 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
         co_return;
     }
 
-    if (!m_queue) {
-        qCWarning(KINEMA_APP)
-            << "HistoryController: no PlayQueueController wired; "
-               "cannot dispatch resume";
-        Q_EMIT resumeFallbackRequested(entry);
-        co_return;
-    }
-
     // Build the PlaybackContext from the history row (not the fresh
     // stream) so fields like `title` and `poster` retain what the
     // user originally saw.
@@ -341,7 +327,15 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
     ctx.poster = entry.poster;
     // streamRef and resumeSeconds are filled by StreamActions::play.
 
-    m_queue->playNow(*hit, ctx);
+    if (!m_actions) {
+        qCWarning(KINEMA_APP)
+            << "HistoryController: no StreamActions wired; "
+               "cannot dispatch resume";
+        Q_EMIT resumeFallbackRequested(entry);
+        co_return;
+    }
+
+    m_actions->play(*hit, ctx);
 }
 
 void HistoryController::onFileLoaded()

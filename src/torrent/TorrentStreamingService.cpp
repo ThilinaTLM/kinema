@@ -94,6 +94,54 @@ QString hashFromAlert(const lt::torrent_alert* a)
 {
     return a ? hashFromHandle(a->handle) : QString();
 }
+
+QVector<TorrentFileEntry> torrentFileEntries(
+    const std::shared_ptr<const lt::torrent_info>& ti)
+{
+    QVector<TorrentFileEntry> files;
+    if (!ti) {
+        return files;
+    }
+
+    const auto& fs = ti->files();
+    files.reserve(fs.num_files());
+    for (int i = 0; i < fs.num_files(); ++i) {
+        const lt::file_index_t idx(i);
+        files.append({ i,
+            QString::fromStdString(fs.file_path(idx)),
+            fs.file_size(idx) });
+    }
+    return files;
+}
+
+std::optional<SelectedMediaFile> requestedFileSelection(
+    const QVector<TorrentFileEntry>& files,
+    const api::Stream& stream,
+    const api::PlaybackContext& ctx,
+    QString* error)
+{
+    if (stream.fileIndex >= 0) {
+        for (const auto& f : files) {
+            if (f.index == stream.fileIndex) {
+                return SelectedMediaFile { f.index, f.path, f.size };
+            }
+        }
+        if (error) {
+            *error = i18nc("@info:status",
+                "The selected episode file is no longer present in this torrent.");
+        }
+        return std::nullopt;
+    }
+
+    const auto sel = selectMediaFile(files, ctx);
+    if (!sel.ok()) {
+        if (error) {
+            *error = sel.error;
+        }
+        return std::nullopt;
+    }
+    return sel.file;
+}
 }
 
 struct TorrentStreamingService::Private {
@@ -357,29 +405,29 @@ QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
         Q_EMIT statusMessage(i18nc("@info:status",
             "Fetching torrent metadata for “%1”…",
             ctx.title.isEmpty() ? stream.releaseName : ctx.title), 0);
+    }
 
-        const auto start = QDateTime::currentMSecsSinceEpoch();
-        while (true) {
-            if (!state.handle.is_valid()) {
-                throw runtimeError(i18nc("@info:status",
-                    "Torrent session ended before metadata was available."));
+    const auto start = QDateTime::currentMSecsSinceEpoch();
+    while (true) {
+        if (!state.handle.is_valid()) {
+            throw runtimeError(i18nc("@info:status",
+                "Torrent session ended before metadata was available."));
+        }
+        const auto ti = state.handle.torrent_file();
+        if (ti) {
+            const auto files = torrentFileEntries(ti);
+            QString selectionError;
+            const auto requested = requestedFileSelection(files,
+                stream, ctx, &selectionError);
+            if (!requested) {
+                throw runtimeError(selectionError);
             }
-            const auto ti = state.handle.torrent_file();
-            if (ti) {
+
+            const bool changedFile = state.selected.index >= 0
+                && state.selected.index != requested->index;
+            if (state.selected.index < 0 || changedFile) {
                 const auto& fs = ti->files();
-                QVector<TorrentFileEntry> files;
-                files.reserve(fs.num_files());
-                for (int i = 0; i < fs.num_files(); ++i) {
-                    const lt::file_index_t idx(i);
-                    files.append({ i,
-                        QString::fromStdString(fs.file_path(idx)),
-                        fs.file_size(idx) });
-                }
-                auto sel = selectMediaFile(files, ctx);
-                if (!sel.ok()) {
-                    throw runtimeError(sel.error);
-                }
-                state.selected = *sel.file;
+                state.selected = *requested;
                 const lt::file_index_t fidx(state.selected.index);
                 state.layout.fileOffset = fs.file_offset(fidx);
                 state.layout.fileSize = fs.file_size(fidx);
@@ -387,11 +435,20 @@ QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
                 state.layout.pieceCount = ti->num_pieces();
                 state.filePath = d->cache.torrentDir(hash)
                     .absoluteFilePath(state.selected.path);
+                state.handle.clear_piece_deadlines();
 
                 std::vector<lt::download_priority_t> priorities(
                     fs.num_files(), lt::dont_download);
                 priorities[state.selected.index] = lt::top_priority;
                 state.handle.prioritize_files(priorities);
+
+                if (changedFile) {
+                    d->tokenToHash.remove(state.token);
+                    state.token = QUuid::createUuid().toString(
+                        QUuid::WithoutBraces);
+                    d->tokenToHash.insert(state.token, hash);
+                }
+
                 qCInfo(KINEMA_TORRENT).nospace()
                     << "[hash=" << shortHash(hash)
                     << "] metadata ready; " << fs.num_files()
@@ -400,14 +457,14 @@ QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
                     << state.selected.path << "\" size="
                     << state.layout.fileSize << " pieceSize="
                     << state.layout.pieceSize;
-                break;
             }
-            if (QDateTime::currentMSecsSinceEpoch() - start > kMetadataTimeoutMs) {
-                throw runtimeError(i18nc("@info:status",
-                    "Timed out while fetching torrent metadata."));
-            }
-            co_await sleepMs(250);
+            break;
         }
+        if (QDateTime::currentMSecsSinceEpoch() - start > kMetadataTimeoutMs) {
+            throw runtimeError(i18nc("@info:status",
+                "Timed out while fetching torrent metadata."));
+        }
+        co_await sleepMs(250);
     }
 
     // Streaming mode pre-warms the head/tail piece windows so the
@@ -555,6 +612,20 @@ void TorrentStreamingService::touchToken(const QString& token)
     }
     state->lastActivity = QDateTime::currentDateTimeUtc();
     d->cache.touch(state->infoHash);
+}
+
+QVector<TorrentFileEntry> TorrentStreamingService::filesForInfoHash(
+    const QString& infoHash) const
+{
+    if (!d) {
+        return {};
+    }
+    const QString h = normalizedHash(infoHash);
+    const auto it = d->sessions.constFind(h);
+    if (it == d->sessions.constEnd() || !it->handle.is_valid()) {
+        return {};
+    }
+    return torrentFileEntries(it->handle.torrent_file());
 }
 
 void TorrentStreamingService::stopInfoHash(const QString& infoHash)

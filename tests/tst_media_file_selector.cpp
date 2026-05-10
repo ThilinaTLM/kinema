@@ -41,6 +41,36 @@ private Q_SLOTS:
         QVERIFY(picked.ok());
         QCOMPARE(picked.file->index, 1);
     }
+
+    void adjacentEpisodesFoundForSeasonPack()
+    {
+        QVector<torrent::TorrentFileEntry> files {
+            {0, QStringLiteral("Show/Show.S01E01.mkv"), 800LL * 1024 * 1024},
+            {1, QStringLiteral("Show/Show.S01E02.mkv"), 810LL * 1024 * 1024},
+            {2, QStringLiteral("Show/Show.S01E03.mkv"), 820LL * 1024 * 1024},
+        };
+
+        const auto nav = torrent::adjacentEpisodeFiles(files, 1, 2);
+        QVERIFY(nav.has_value());
+        QVERIFY(nav->current.has_value());
+        QVERIFY(nav->previous.has_value());
+        QVERIFY(nav->next.has_value());
+        QCOMPARE(nav->previous->file.index, 0);
+        QCOMPARE(nav->current->file.index, 1);
+        QCOMPARE(nav->next->file.index, 2);
+    }
+
+    void ambiguousCurrentEpisodeDisablesNavigation()
+    {
+        QVector<torrent::TorrentFileEntry> files {
+            {0, QStringLiteral("Show/Show.S01E02.1080p.mkv"), 800LL * 1024 * 1024},
+            {1, QStringLiteral("Show/Show.S01E02.720p.mkv"), 600LL * 1024 * 1024},
+            {2, QStringLiteral("Show/Show.S01E03.mkv"), 820LL * 1024 * 1024},
+        };
+
+        const auto nav = torrent::adjacentEpisodeFiles(files, 1, 2);
+        QVERIFY(!nav.has_value());
+    }
 };
 
 QTEST_MAIN(TstMediaFileSelector)
