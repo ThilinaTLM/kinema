@@ -62,7 +62,7 @@ Kirigami.ScrollablePage {
             icon.source: AppIcons.url("settings")
             icon.color: AppIcons.foreground
             text: i18nc("@action:button", "Open settings…")
-            onTriggered: mainController.requestSettings()
+            onTriggered: shell.requestSettings()
         }
     }
 

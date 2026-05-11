@@ -5,7 +5,7 @@
 
 #include "api/CinemetaClient.h"
 #include "config/SearchSettings.h"
-#include "core/HttpErrorPresenter.h"
+#include "core/io/HttpErrorPresenter.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 
 #include <KLocalizedString>
@@ -80,9 +80,9 @@ void SearchViewModel::setQuery(const QString& q)
 
 void SearchViewModel::setKind(int kind)
 {
-    const auto k = (kind == static_cast<int>(api::MediaKind::Series))
-        ? api::MediaKind::Series
-        : api::MediaKind::Movie;
+    const auto k = (kind == static_cast<int>(domain::MediaKind::Series))
+        ? domain::MediaKind::Series
+        : domain::MediaKind::Movie;
     if (m_kind == k) {
         return;
     }
@@ -128,7 +128,7 @@ void SearchViewModel::activate(int row)
     if (!item) {
         return;
     }
-    if (item->kind == api::MediaKind::Series) {
+    if (item->kind == domain::MediaKind::Series) {
         Q_EMIT openSeriesRequested(item->imdbId, item->title);
     } else {
         Q_EMIT openMovieRequested(item->imdbId, item->title);
@@ -136,7 +136,7 @@ void SearchViewModel::activate(int row)
 }
 
 QCoro::Task<void> SearchViewModel::runSearchTask(QString text,
-    api::MediaKind kind)
+    domain::MediaKind kind)
 {
     const auto myEpoch = ++m_epoch;
     m_results->setLoading();
@@ -146,7 +146,7 @@ QCoro::Task<void> SearchViewModel::runSearchTask(QString text,
         0);
 
     try {
-        QList<api::MetaSummary> results;
+        QList<domain::MetaSummary> results;
         if (looksLikeImdbId(text)) {
             auto detail = co_await m_cinemeta->meta(kind, text);
             if (myEpoch != m_epoch) {

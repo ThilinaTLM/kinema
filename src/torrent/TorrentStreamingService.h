@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 #include "torrent/MediaFileSelector.h"
 #include "torrent/PiecePlanner.h"
 
@@ -87,15 +87,15 @@ public:
     /// LEGACY: returns a URL served by the engine's own private
     /// `LocalStreamServer`. New code must call `prepareSession()`
     /// and register the asset with `download::LocalMediaServer`.
-    virtual QCoro::Task<QUrl> prepare(const api::Stream& stream,
-        const api::PlaybackContext& ctx);
+    virtual QCoro::Task<QUrl> prepare(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx);
 
     /// Same per-asset preparation as `prepare()` (metadata fetch,
     /// file selection, startup buffering, piece prioritisation), but
     /// does not touch the legacy `LocalStreamServer`. Used by the
     /// new unified downloader pipeline.
     virtual QCoro::Task<PreparedSession> prepareSession(
-        const api::Stream& stream, const api::PlaybackContext& ctx,
+        const domain::Stream& stream, const domain::PlaybackContext& ctx,
         PrepareMode mode = PrepareMode::Streaming);
 
     QCoro::Task<bool> ensureRange(const QString& token, ByteRange range);
@@ -128,7 +128,7 @@ public:
 
 public Q_SLOTS:
     void stopInfoHash(const QString& infoHash);
-    void stopForContext(const api::PlaybackContext& ctx);
+    void stopForContext(const domain::PlaybackContext& ctx);
     void stopAll();
 
 Q_SIGNALS:

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Indexer.h"
+#include "domain/Indexer.h"
 
 #include <KSharedConfig>
 
@@ -31,11 +31,11 @@ public:
     explicit IndexerSettings(KSharedConfigPtr config,
         QObject* parent = nullptr);
 
-    api::IndexerKind activeIndexer() const;
-    void setActiveIndexer(api::IndexerKind k);
+    domain::IndexerKind activeIndexer() const;
+    void setActiveIndexer(domain::IndexerKind k);
 
 Q_SIGNALS:
-    void activeIndexerChanged(api::IndexerKind);
+    void activeIndexerChanged(domain::IndexerKind);
 
 private:
     KSharedConfigPtr m_config;

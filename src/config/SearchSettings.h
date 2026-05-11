@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 
 #include <KSharedConfig>
 
@@ -24,8 +24,8 @@ class SearchSettings : public QObject
 public:
     explicit SearchSettings(KSharedConfigPtr config, QObject* parent = nullptr);
 
-    api::MediaKind kind() const;
-    void setKind(api::MediaKind);
+    domain::MediaKind kind() const;
+    void setKind(domain::MediaKind);
 
 private:
     KSharedConfigPtr m_config;

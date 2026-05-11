@@ -20,20 +20,20 @@ DebridSettings::DebridSettings(KSharedConfigPtr config, QObject* parent)
 {
 }
 
-api::DebridProvider DebridSettings::activeProvider() const
+domain::DebridProvider DebridSettings::activeProvider() const
 {
     const auto raw = detail::read(m_config, kGroup, kKeyProvider,
         QString { QStringLiteral("none") });
-    return api::providerFromString(raw);
+    return domain::providerFromString(raw);
 }
 
-void DebridSettings::setActiveProvider(api::DebridProvider p)
+void DebridSettings::setActiveProvider(domain::DebridProvider p)
 {
     if (activeProvider() == p) {
         return;
     }
     detail::write(m_config, kGroup, kKeyProvider,
-        api::providerToString(p));
+        domain::providerToString(p));
     Q_EMIT activeProviderChanged(p);
 }
 

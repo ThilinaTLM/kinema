@@ -3,11 +3,11 @@
 
 #include "controllers/HistoryController.h"
 
-#include "api/Indexer.h"
+#include "domain/Indexer.h"
 #include "api/IndexerSelector.h"
-#include "core/HistoryStore.h"
-#include "core/HttpError.h"
-#include "core/HttpErrorPresenter.h"
+#include "core/persistence/HistoryStore.h"
+#include "core/io/HttpError.h"
+#include "core/io/HttpErrorPresenter.h"
 #include "kinema_log_controller.h"
 #include "services/StreamActions.h"
 
@@ -110,7 +110,7 @@ void HistoryController::setStreamActions(services::StreamActions* actions)
     m_actions = actions;
 }
 
-void HistoryController::onPlayStarting(const api::PlaybackContext& ctx)
+void HistoryController::onPlayStarting(const domain::PlaybackContext& ctx)
 {
     if (!ctx.key.isValid()) {
         return;
@@ -133,7 +133,7 @@ void HistoryController::onPlayStarting(const api::PlaybackContext& ctx)
     //     the launcher is fired.
     //   - The stored stream reference is up-to-date even before the
     //     first position tick arrives.
-    api::HistoryEntry e;
+    domain::HistoryEntry e;
     e.key = ctx.key;
     e.title = ctx.title;
     e.seriesTitle = ctx.seriesTitle;
@@ -158,7 +158,7 @@ void HistoryController::onPlayStarting(const api::PlaybackContext& ctx)
 }
 
 std::optional<qint64> HistoryController::resumeSecondsFor(
-    const api::PlaybackKey& key) const
+    const domain::PlaybackKey& key) const
 {
     if (!key.isValid()) {
         return std::nullopt;
@@ -193,25 +193,25 @@ std::optional<qint64> HistoryController::resumeSecondsFor(
     return static_cast<qint64>(qMax(0.0, resume));
 }
 
-std::optional<api::HistoryEntry> HistoryController::find(
-    const api::PlaybackKey& key) const
+std::optional<domain::HistoryEntry> HistoryController::find(
+    const domain::PlaybackKey& key) const
 {
     return m_store.find(key);
 }
 
-std::optional<api::HistoryEntry> HistoryController::findLatestForMedia(
-    api::MediaKind kind, const QString& imdbId) const
+std::optional<domain::HistoryEntry> HistoryController::findLatestForMedia(
+    domain::MediaKind kind, const QString& imdbId) const
 {
     return m_store.findLatestForMedia(kind, imdbId);
 }
 
-QList<api::HistoryEntry> HistoryController::continueWatching(
+QList<domain::HistoryEntry> HistoryController::continueWatching(
     int maxItems) const
 {
     return m_store.continueWatching(maxItems);
 }
 
-void HistoryController::removeEntry(const api::HistoryEntry& entry)
+void HistoryController::removeEntry(const domain::HistoryEntry& entry)
 {
     if (!entry.key.isValid()) {
         return;
@@ -219,7 +219,7 @@ void HistoryController::removeEntry(const api::HistoryEntry& entry)
     m_store.remove(entry.key);
 }
 
-void HistoryController::resumeFromHistory(const api::HistoryEntry& entry)
+void HistoryController::resumeFromHistory(const domain::HistoryEntry& entry)
 {
     if (!entry.key.isValid()) {
         return;
@@ -240,7 +240,7 @@ void HistoryController::resumeFromHistory(const api::HistoryEntry& entry)
     Q_UNUSED(task);
 }
 
-QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
+QCoro::Task<void> HistoryController::resumeTask(domain::HistoryEntry entry)
 {
     const auto myEpoch = ++m_resumeEpoch;
 
@@ -257,7 +257,7 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
         co_return;
     }
 
-    QList<api::Stream> streams;
+    QList<domain::Stream> streams;
     try {
         const auto streamId = entry.key.storageKey();
         streams = co_await indexer->streams(entry.key.kind, streamId);
@@ -284,7 +284,7 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
     // Match by infoHash/release. Prefer Real-Debrid direct URLs when
     // available, otherwise let StreamActions use built-in torrent
     // streaming for magnet-only rows.
-    const api::Stream* hit = nullptr;
+    const domain::Stream* hit = nullptr;
     for (const auto& s : streams) {
         if (entry.lastStream.matches(s)
             && (!s.directUrl.isEmpty() || !s.infoHash.isEmpty())) {
@@ -315,7 +315,7 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
     // Build the PlaybackContext from the history row (not the fresh
     // stream) so fields like `title` and `poster` retain what the
     // user originally saw.
-    api::PlaybackContext ctx;
+    domain::PlaybackContext ctx;
     ctx.key = entry.key;
     ctx.title = entry.title;
     ctx.seriesTitle = entry.seriesTitle;
@@ -399,7 +399,7 @@ void HistoryController::persistActive(bool force)
         return;
     }
 
-    api::HistoryEntry e;
+    domain::HistoryEntry e;
     e.key = m_active->key;
     e.title = m_active->title;
     e.seriesTitle = m_active->seriesTitle;

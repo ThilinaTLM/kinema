@@ -3,7 +3,7 @@
 
 #include "api/TmdbParse.h"
 
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 
 #include <KLocalizedString>
 
@@ -14,6 +14,7 @@
 #include <QLatin1StringView>
 
 namespace kinema::api::tmdb {
+using namespace kinema::domain;
 
 namespace {
 

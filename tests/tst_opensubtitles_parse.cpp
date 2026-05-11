@@ -13,6 +13,7 @@
 #endif
 
 using namespace kinema::api;
+using namespace kinema::domain;
 
 namespace {
 

@@ -3,7 +3,7 @@
 
 #include "ui/qml-bridge/StreamSorting.h"
 
-#include "core/StreamTokens.h"
+#include "core/util/StreamTokens.h"
 
 #include <algorithm>
 
@@ -26,14 +26,14 @@ bool UiFilters::any() const noexcept
         || hdrOnly || dolbyVisionOnly || multiAudioOnly;
 }
 
-QList<api::Stream> applyUiFilters(QList<api::Stream> rows,
+QList<domain::Stream> applyUiFilters(QList<domain::Stream> rows,
     const UiFilters& filters)
 {
     if (!filters.any()) {
         return rows;
     }
 
-    QList<api::Stream> out;
+    QList<domain::Stream> out;
     out.reserve(rows.size());
     for (auto& s : rows) {
         if (!filters.resolution.isEmpty()) {
@@ -67,7 +67,7 @@ QList<api::Stream> applyUiFilters(QList<api::Stream> rows,
     return out;
 }
 
-void sortInPlace(QList<api::Stream>& rows,
+void sortInPlace(QList<domain::Stream>& rows,
     StreamsListModel::SortMode mode, bool descending)
 {
     using SortMode = StreamsListModel::SortMode;
@@ -77,7 +77,7 @@ void sortInPlace(QList<api::Stream>& rows,
         // within each quality group. "Smart" has a fixed shape; the
         // descending toggle is ignored.
         std::stable_sort(rows.begin(), rows.end(),
-            [](const api::Stream& a, const api::Stream& b) {
+            [](const domain::Stream& a, const domain::Stream& b) {
                 const int aRes = resolutionRank(a.resolution);
                 const int bRes = resolutionRank(b.resolution);
                 if (aRes != bRes) return aRes > bRes;
@@ -90,7 +90,7 @@ void sortInPlace(QList<api::Stream>& rows,
         return;
     }
 
-    auto cmp = [mode](const api::Stream& a, const api::Stream& b) {
+    auto cmp = [mode](const domain::Stream& a, const domain::Stream& b) {
         switch (mode) {
         case SortMode::Smart:
             return false; // unreachable
@@ -110,7 +110,7 @@ void sortInPlace(QList<api::Stream>& rows,
     };
     if (descending) {
         std::stable_sort(rows.begin(), rows.end(),
-            [cmp](const api::Stream& a, const api::Stream& b) {
+            [cmp](const domain::Stream& a, const domain::Stream& b) {
                 return cmp(b, a);
             });
     } else {

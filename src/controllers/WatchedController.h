@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 
 #include <QList>
 #include <QObject>
@@ -46,25 +46,25 @@ public:
     ~WatchedController() override;
 
     // ---- queries --------------------------------------------------
-    bool isWatched(const api::PlaybackKey& key) const;
+    bool isWatched(const domain::PlaybackKey& key) const;
     bool isMovieWatched(const QString& imdbId) const;
     bool isEpisodeWatched(const QString& imdbId,
         int season, int episode) const;
 
     /// Progress fraction in [0, 1] for an in-progress play, or `-1.0`
     /// when no progress is recorded (or the entry is finished).
-    double progressFor(const api::PlaybackKey& key) const;
+    double progressFor(const domain::PlaybackKey& key) const;
     double movieProgress(const QString& imdbId) const;
     double episodeProgress(const QString& imdbId,
         int season, int episode) const;
 
     /// Resume entry: in-progress history row for the given key, or
     /// `std::nullopt` when nothing is to resume.
-    std::optional<api::HistoryEntry> resumeEntryFor(
-        const api::PlaybackKey& key) const;
-    std::optional<api::HistoryEntry> resumeEntryForMovie(
+    std::optional<domain::HistoryEntry> resumeEntryFor(
+        const domain::PlaybackKey& key) const;
+    std::optional<domain::HistoryEntry> resumeEntryForMovie(
         const QString& imdbId) const;
-    std::optional<api::HistoryEntry> resumeEntryForEpisode(
+    std::optional<domain::HistoryEntry> resumeEntryForEpisode(
         const QString& imdbId, int season, int episode) const;
 
     // ---- mutations ------------------------------------------------
@@ -77,7 +77,7 @@ public:
     /// tick downstream of `WatchedStore`.
     void setEpisodesWatched(const QString& imdbId,
         const QList<QPair<int, int>>& seasonEpisode, bool watched);
-    void clearOverride(const api::PlaybackKey& key);
+    void clearOverride(const domain::PlaybackKey& key);
 
 Q_SIGNALS:
     /// Fan-in of the underlying store and history controller signals.
@@ -86,8 +86,8 @@ Q_SIGNALS:
     void changed();
 
 private:
-    api::PlaybackKey movieKey(const QString& imdbId) const;
-    api::PlaybackKey episodeKey(const QString& imdbId,
+    domain::PlaybackKey movieKey(const QString& imdbId) const;
+    domain::PlaybackKey episodeKey(const QString& imdbId,
         int season, int episode) const;
 
     core::WatchedStore& m_store;

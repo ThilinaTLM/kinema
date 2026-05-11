@@ -3,7 +3,7 @@
 
 #include "controllers/DownloadController.h"
 
-#include "core/DownloadStore.h"
+#include "core/persistence/DownloadStore.h"
 #include "download/DownloadManager.h"
 
 namespace kinema::controllers {
@@ -22,13 +22,13 @@ DownloadController::DownloadController(download::DownloadManager& manager,
         this, &DownloadController::changed);
 }
 
-QList<api::DownloadItem> DownloadController::items() const
+QList<domain::DownloadItem> DownloadController::items() const
 {
     return m_store.loadAll();
 }
 
-std::optional<api::DownloadItem> DownloadController::findForKey(
-    const api::PlaybackKey& key) const
+std::optional<domain::DownloadItem> DownloadController::findForKey(
+    const domain::PlaybackKey& key) const
 {
     return m_store.findForKey(key);
 }
@@ -38,15 +38,15 @@ QSet<QString> DownloadController::attachedPlayerAssetIds() const
     return m_manager.attachedPlayerAssetIds();
 }
 
-void DownloadController::download(const api::Stream& stream,
-    const api::PlaybackContext& ctx)
+void DownloadController::download(const domain::Stream& stream,
+    const domain::PlaybackContext& ctx)
 {
     m_manager.enqueueDownload(stream, ctx);
 }
 
-void DownloadController::downloadWithBackend(const api::Stream& stream,
-    const api::PlaybackContext& ctx,
-    api::DownloadBackendKind backend)
+void DownloadController::downloadWithBackend(const domain::Stream& stream,
+    const domain::PlaybackContext& ctx,
+    domain::DownloadBackendKind backend)
 {
     m_manager.enqueueDownload(stream, ctx, backend);
 }

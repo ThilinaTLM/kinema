@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Subtitle.h"
+#include "domain/Subtitle.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -68,17 +68,17 @@ public:
     int count() const noexcept { return static_cast<int>(m_rows.size()); }
 
     /// Replace the row set. Resets the model.
-    void setHits(const QList<api::SubtitleHit>& hits);
+    void setHits(const QList<domain::SubtitleHit>& hits);
 
     /// Update the cached / active flags. Cheap; emits dataChanged
     /// across all rows for the affected role.
     void setCachedFileIds(const QSet<QString>& ids);
     void setActiveFileIds(const QSet<QString>& ids);
 
-    const api::SubtitleHit& hitAt(int row) const { return m_rows.at(row); }
+    const domain::SubtitleHit& hitAt(int row) const { return m_rows.at(row); }
 
 private:
-    QList<api::SubtitleHit> m_rows;
+    QList<domain::SubtitleHit> m_rows;
     QSet<QString> m_cached;
     QSet<QString> m_active;
 };

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "core/StreamFilter.h"
+#include "core/util/StreamFilter.h"
 
 #include <QTest>
 
@@ -10,10 +10,10 @@ using namespace kinema::core::stream_filter;
 
 namespace {
 
-api::Stream makeStream(const QString& releaseName,
+domain::Stream makeStream(const QString& releaseName,
     const QString& detailsText = {})
 {
-    api::Stream s;
+    domain::Stream s;
     s.releaseName = releaseName;
     s.detailsText = detailsText;
     return s;
@@ -27,7 +27,7 @@ class TstStreamFilter : public QObject
 private Q_SLOTS:
     void emptyFilters_passThrough()
     {
-        const QList<api::Stream> in { makeStream(QStringLiteral("A")),
+        const QList<domain::Stream> in { makeStream(QStringLiteral("A")),
             makeStream(QStringLiteral("B")) };
         const auto out = apply(in, {});
         QCOMPARE(out.size(), 2);
@@ -37,7 +37,7 @@ private Q_SLOTS:
 
     void blocklist_matchesReleaseNameCaseInsensitively()
     {
-        const QList<api::Stream> in {
+        const QList<domain::Stream> in {
             makeStream(QStringLiteral("The.Matrix.1999.CAM.x264")),
             makeStream(QStringLiteral("The.Matrix.1999.1080p.BluRay")),
             makeStream(QStringLiteral("The.Matrix.1999.720p.HDCam")),
@@ -51,7 +51,7 @@ private Q_SLOTS:
 
     void blocklist_matchesDetailsText()
     {
-        const QList<api::Stream> in {
+        const QList<domain::Stream> in {
             makeStream(QStringLiteral("Some.Release.1080p"),
                 QStringLiteral("Hindi dub · 1.2 GB")),
             makeStream(QStringLiteral("Other.Release.1080p"),
@@ -66,7 +66,7 @@ private Q_SLOTS:
 
     void blocklist_emptyKeywordsSkipped()
     {
-        const QList<api::Stream> in { makeStream(QStringLiteral("hello")) };
+        const QList<domain::Stream> in { makeStream(QStringLiteral("hello")) };
         ClientFilters f;
         f.keywordBlocklist = { QString {}, QStringLiteral("  ") };
         // Note: whitespace-only keywords are NOT special-cased — they
@@ -81,7 +81,7 @@ private Q_SLOTS:
 
     void blocklist_emptyMeansPassThrough()
     {
-        const QList<api::Stream> in {
+        const QList<domain::Stream> in {
             makeStream(QStringLiteral("anything")),
             makeStream(QStringLiteral("else")),
         };
@@ -102,13 +102,13 @@ private Q_SLOTS:
 
     void excludedCategoriesNonen_dropsRowsWithNonEnglishLanguage()
     {
-        api::Stream en;
+        domain::Stream en;
         en.releaseName = QStringLiteral("en.row");
         en.language = QStringLiteral("en");
-        api::Stream es;
+        domain::Stream es;
         es.releaseName = QStringLiteral("es.row");
         es.language = QStringLiteral("es");
-        api::Stream unknown;
+        domain::Stream unknown;
         unknown.releaseName = QStringLiteral("unknown.row");
         // empty language — pass through (Torrentio rows)
 
@@ -122,10 +122,10 @@ private Q_SLOTS:
 
     void excludedCategoriesNonen_languageCompareIsCaseInsensitive()
     {
-        api::Stream upper;
+        domain::Stream upper;
         upper.releaseName = QStringLiteral("upper.en");
         upper.language = QStringLiteral("EN");
-        api::Stream mixed;
+        domain::Stream mixed;
         mixed.releaseName = QStringLiteral("mixed.es");
         mixed.language = QStringLiteral("ES");
 
@@ -138,7 +138,7 @@ private Q_SLOTS:
 
     void orderIsPreserved()
     {
-        const QList<api::Stream> in {
+        const QList<domain::Stream> in {
             makeStream(QStringLiteral("aaa")),
             makeStream(QStringLiteral("bbb.cam")),
             makeStream(QStringLiteral("ccc")),

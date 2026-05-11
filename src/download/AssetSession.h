@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Download.h"
+#include "domain/Download.h"
 #include "torrent/PiecePlanner.h"
 
 #include <QByteArray>
@@ -75,13 +75,13 @@ public:
 
     /// Current download mode. Concrete sessions persist this so a
     /// `BackendSelector::changeMode` can no-op when nothing changes.
-    virtual api::DownloadMode mode() const = 0;
+    virtual domain::DownloadMode mode() const = 0;
 
     /// Update the in-memory mode flag. Backends call this from
     /// `DownloadBackend::changeMode` after applying the policy
     /// change to their own state (libtorrent priorities, prefetch
     /// loop, etc).
-    virtual void setMode(api::DownloadMode m) = 0;
+    virtual void setMode(domain::DownloadMode m) = 0;
 
     /// User-initiated pause. Default is a no-op so backends that
     /// don't yet honour pause keep working.

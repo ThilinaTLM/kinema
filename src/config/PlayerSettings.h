@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/Player.h"
+#include "core/mpv/Player.h"
 
 #include <KSharedConfig>
 

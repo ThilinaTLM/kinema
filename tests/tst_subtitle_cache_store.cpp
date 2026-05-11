@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "core/Database.h"
-#include "core/SubtitleCacheStore.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/SubtitleCacheStore.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -37,18 +37,18 @@ core::SubtitleCacheStore::Entry makeEntry(const QString& fileId,
     return e;
 }
 
-api::PlaybackKey movieKey(const QString& imdb)
+domain::PlaybackKey movieKey(const QString& imdb)
 {
-    api::PlaybackKey k;
-    k.kind = api::MediaKind::Movie;
+    domain::PlaybackKey k;
+    k.kind = domain::MediaKind::Movie;
     k.imdbId = imdb;
     return k;
 }
 
-api::PlaybackKey episodeKey(const QString& imdb, int s, int e)
+domain::PlaybackKey episodeKey(const QString& imdb, int s, int e)
 {
-    api::PlaybackKey k;
-    k.kind = api::MediaKind::Series;
+    domain::PlaybackKey k;
+    k.kind = domain::MediaKind::Series;
     k.imdbId = imdb;
     k.season = s;
     k.episode = e;

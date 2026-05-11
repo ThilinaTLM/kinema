@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Debrid.h"
-#include "api/Download.h"
-#include "api/Media.h"
+#include "domain/Debrid.h"
+#include "domain/Download.h"
+#include "domain/Media.h"
 #include "download/AssetSession.h"
 #include "download/BackendSelector.h"
 #include "download/DownloadBackend.h"
@@ -21,44 +21,44 @@ namespace {
 class StubBackend final : public download::DownloadBackend
 {
 public:
-    StubBackend(api::DownloadBackendKind kind, bool willHandle)
+    StubBackend(domain::DownloadBackendKind kind, bool willHandle)
         : m_kind(kind)
         , m_willHandle(willHandle)
     {
     }
 
-    api::DownloadBackendKind kind() const noexcept override
+    domain::DownloadBackendKind kind() const noexcept override
     {
         return m_kind;
     }
 
-    bool canHandle(const api::Stream&) const override
+    bool canHandle(const domain::Stream&) const override
     {
         ++canHandleCalls;
         return m_willHandle;
     }
 
     QCoro::Task<std::unique_ptr<download::AssetSession>> open(
-        const api::AssetRef&, const api::Stream&,
-        const api::PlaybackContext&, api::DownloadMode) override
+        const domain::AssetRef&, const domain::Stream&,
+        const domain::PlaybackContext&, domain::DownloadMode) override
     {
         co_return nullptr;
     }
 
-    void changeMode(download::AssetSession&, api::DownloadMode) override
+    void changeMode(download::AssetSession&, domain::DownloadMode) override
     {
     }
 
     mutable int canHandleCalls = 0;
 
 private:
-    api::DownloadBackendKind m_kind;
+    domain::DownloadBackendKind m_kind;
     bool m_willHandle;
 };
 
-api::Stream makeStream()
+domain::Stream makeStream()
 {
-    api::Stream s;
+    domain::Stream s;
     s.infoHash = QStringLiteral(
         "aabbccddeeff00112233445566778899aabbccdd");
     return s;
@@ -75,19 +75,19 @@ private Q_SLOTS:
     {
         download::BackendSelector sel;
         auto* rd = new StubBackend(
-            api::DownloadBackendKind::RealDebridHttp, true);
+            domain::DownloadBackendKind::RealDebridHttp, true);
         auto* ad = new StubBackend(
-            api::DownloadBackendKind::AllDebridHttp, true);
+            domain::DownloadBackendKind::AllDebridHttp, true);
         auto* tor = new StubBackend(
-            api::DownloadBackendKind::Torrent, true);
+            domain::DownloadBackendKind::Torrent, true);
         sel.registerBackend(std::unique_ptr<StubBackend>(rd));
         sel.registerBackend(std::unique_ptr<StubBackend>(ad));
         sel.registerBackend(std::unique_ptr<StubBackend>(tor));
-        sel.setActiveDebridProvider(api::DebridProvider::RealDebrid);
+        sel.setActiveDebridProvider(domain::DebridProvider::RealDebrid);
 
         auto* picked = sel.select(makeStream());
         QVERIFY(picked != nullptr);
-        QCOMPARE(picked->kind(), api::DownloadBackendKind::RealDebridHttp);
+        QCOMPARE(picked->kind(), domain::DownloadBackendKind::RealDebridHttp);
         // AD must NOT have been consulted.
         QCOMPARE(ad->canHandleCalls, 0);
     }
@@ -96,19 +96,19 @@ private Q_SLOTS:
     {
         download::BackendSelector sel;
         auto* rd = new StubBackend(
-            api::DownloadBackendKind::RealDebridHttp, true);
+            domain::DownloadBackendKind::RealDebridHttp, true);
         auto* ad = new StubBackend(
-            api::DownloadBackendKind::AllDebridHttp, true);
+            domain::DownloadBackendKind::AllDebridHttp, true);
         auto* tor = new StubBackend(
-            api::DownloadBackendKind::Torrent, true);
+            domain::DownloadBackendKind::Torrent, true);
         sel.registerBackend(std::unique_ptr<StubBackend>(rd));
         sel.registerBackend(std::unique_ptr<StubBackend>(ad));
         sel.registerBackend(std::unique_ptr<StubBackend>(tor));
-        sel.setActiveDebridProvider(api::DebridProvider::AllDebrid);
+        sel.setActiveDebridProvider(domain::DebridProvider::AllDebrid);
 
         auto* picked = sel.select(makeStream());
         QVERIFY(picked != nullptr);
-        QCOMPARE(picked->kind(), api::DownloadBackendKind::AllDebridHttp);
+        QCOMPARE(picked->kind(), domain::DownloadBackendKind::AllDebridHttp);
         QCOMPARE(rd->canHandleCalls, 0);
     }
 
@@ -116,19 +116,19 @@ private Q_SLOTS:
     {
         download::BackendSelector sel;
         auto* rd = new StubBackend(
-            api::DownloadBackendKind::RealDebridHttp, true);
+            domain::DownloadBackendKind::RealDebridHttp, true);
         auto* ad = new StubBackend(
-            api::DownloadBackendKind::AllDebridHttp, true);
+            domain::DownloadBackendKind::AllDebridHttp, true);
         auto* tor = new StubBackend(
-            api::DownloadBackendKind::Torrent, true);
+            domain::DownloadBackendKind::Torrent, true);
         sel.registerBackend(std::unique_ptr<StubBackend>(rd));
         sel.registerBackend(std::unique_ptr<StubBackend>(ad));
         sel.registerBackend(std::unique_ptr<StubBackend>(tor));
-        sel.setActiveDebridProvider(api::DebridProvider::None);
+        sel.setActiveDebridProvider(domain::DebridProvider::None);
 
         auto* picked = sel.select(makeStream());
         QVERIFY(picked != nullptr);
-        QCOMPARE(picked->kind(), api::DownloadBackendKind::Torrent);
+        QCOMPARE(picked->kind(), domain::DownloadBackendKind::Torrent);
         QCOMPARE(rd->canHandleCalls, 0);
         QCOMPARE(ad->canHandleCalls, 0);
     }
@@ -137,38 +137,38 @@ private Q_SLOTS:
     {
         download::BackendSelector sel;
         auto* rd = new StubBackend(
-            api::DownloadBackendKind::RealDebridHttp, false);
+            domain::DownloadBackendKind::RealDebridHttp, false);
         auto* tor = new StubBackend(
-            api::DownloadBackendKind::Torrent, true);
+            domain::DownloadBackendKind::Torrent, true);
         sel.registerBackend(std::unique_ptr<StubBackend>(rd));
         sel.registerBackend(std::unique_ptr<StubBackend>(tor));
-        sel.setActiveDebridProvider(api::DebridProvider::RealDebrid);
+        sel.setActiveDebridProvider(domain::DebridProvider::RealDebrid);
 
         auto* picked = sel.select(makeStream());
         QVERIFY(picked != nullptr);
-        QCOMPARE(picked->kind(), api::DownloadBackendKind::Torrent);
+        QCOMPARE(picked->kind(), domain::DownloadBackendKind::Torrent);
     }
 
     void override_reachesNonActiveDebridBackend()
     {
         download::BackendSelector sel;
         auto* rd = new StubBackend(
-            api::DownloadBackendKind::RealDebridHttp, true);
+            domain::DownloadBackendKind::RealDebridHttp, true);
         auto* ad = new StubBackend(
-            api::DownloadBackendKind::AllDebridHttp, true);
+            domain::DownloadBackendKind::AllDebridHttp, true);
         auto* tor = new StubBackend(
-            api::DownloadBackendKind::Torrent, true);
+            domain::DownloadBackendKind::Torrent, true);
         sel.registerBackend(std::unique_ptr<StubBackend>(rd));
         sel.registerBackend(std::unique_ptr<StubBackend>(ad));
         sel.registerBackend(std::unique_ptr<StubBackend>(tor));
-        sel.setActiveDebridProvider(api::DebridProvider::AllDebrid);
+        sel.setActiveDebridProvider(domain::DebridProvider::AllDebrid);
 
         // Even though AD is active, an explicit RD override must
         // still resolve so resume of an RD-persisted row works.
         auto* picked = sel.select(makeStream(),
-            api::DownloadBackendKind::RealDebridHttp);
+            domain::DownloadBackendKind::RealDebridHttp);
         QVERIFY(picked != nullptr);
-        QCOMPARE(picked->kind(), api::DownloadBackendKind::RealDebridHttp);
+        QCOMPARE(picked->kind(), domain::DownloadBackendKind::RealDebridHttp);
     }
 };
 

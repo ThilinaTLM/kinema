@@ -4,7 +4,7 @@
 #pragma once
 
 #include "api/CinemetaClient.h"
-#include "api/Indexer.h"
+#include "domain/Indexer.h"
 #include "api/IndexerSelector.h"
 #include "api/TmdbClient.h"
 #include "api/TorrentioIndexer.h"
@@ -12,9 +12,9 @@
 
 #include <KConfig>
 #include <KSharedConfig>
-#include "core/HttpClient.h"
-#include "core/HttpError.h"
-#include "core/TokenStore.h"
+#include "core/io/HttpClient.h"
+#include "core/io/HttpError.h"
+#include "core/persistence/TokenStore.h"
 
 #include <QCoro/QCoroSignal>
 #include <QCoro/QCoroTask>
@@ -196,7 +196,7 @@ public:
 };
 
 /**
- * Scripted `api::Indexer` for view-model / controller tests.
+ * Scripted `domain::Indexer` for view-model / controller tests.
  *
  * Tests typically wrap one of these in an `api::IndexerSelector`
  * (registered with `IndexerKind::Torrentio` by default) and inject
@@ -204,16 +204,16 @@ public:
  * fake records what was asked for (`lastKind`, `lastStreamId`) and
  * replays a scripted sequence of `streams` or errors.
  */
-class FakeIndexer : public api::Indexer
+class FakeIndexer : public domain::Indexer
 {
 public:
     struct ScriptedCall {
-        QList<api::Stream> streams;
+        QList<domain::Stream> streams;
         std::optional<core::HttpError> error;
         bool suspend = false;
 
         ScriptedCall() = default;
-        ScriptedCall(QList<api::Stream> streams,
+        ScriptedCall(QList<domain::Stream> streams,
             std::optional<core::HttpError> error = std::nullopt,
             bool suspend = false)
             : streams(std::move(streams))
@@ -224,7 +224,7 @@ public:
     };
 
     explicit FakeIndexer(
-        api::IndexerKind kind = api::IndexerKind::Torrentio,
+        domain::IndexerKind kind = domain::IndexerKind::Torrentio,
         QObject* parent = nullptr)
         : Indexer(parent)
         , m_kind(kind)
@@ -233,17 +233,17 @@ public:
 
     QList<ScriptedCall> scriptedCalls;
     int callCount = 0;
-    api::MediaKind lastKind = api::MediaKind::Movie;
+    domain::MediaKind lastKind = domain::MediaKind::Movie;
     QString lastStreamId;
 
-    api::IndexerKind kind() const noexcept override { return m_kind; }
+    domain::IndexerKind kind() const noexcept override { return m_kind; }
     QString displayName() const override
     {
         return QStringLiteral("FakeIndexer(%1)")
-            .arg(api::indexerKindToString(m_kind));
+            .arg(domain::indexerKindToString(m_kind));
     }
 
-    QCoro::Task<QList<api::Stream>> streams(api::MediaKind kind,
+    QCoro::Task<QList<domain::Stream>> streams(domain::MediaKind kind,
         QString streamId) override
     {
         ++callCount;
@@ -264,7 +264,7 @@ public:
     }
 
 private:
-    api::IndexerKind m_kind;
+    domain::IndexerKind m_kind;
 };
 
 /**
@@ -279,7 +279,7 @@ class IndexerHarness
 {
 public:
     explicit IndexerHarness(
-        api::IndexerKind kind = api::IndexerKind::Torrentio)
+        domain::IndexerKind kind = domain::IndexerKind::Torrentio)
         : m_settings(makeScratchConfig())
         , m_selector(m_settings)
     {
@@ -314,12 +314,12 @@ class FakeCinemetaClient : public api::CinemetaClient
 {
 public:
     struct MetaScript {
-        api::MetaDetail detail;
+        domain::MetaDetail detail;
         std::optional<core::HttpError> error;
         bool suspend = false;
 
         MetaScript() = default;
-        MetaScript(api::MetaDetail detail,
+        MetaScript(domain::MetaDetail detail,
             std::optional<core::HttpError> error = std::nullopt,
             bool suspend = false)
             : detail(std::move(detail))
@@ -330,12 +330,12 @@ public:
     };
 
     struct SeriesScript {
-        api::SeriesDetail detail;
+        domain::SeriesDetail detail;
         std::optional<core::HttpError> error;
         bool suspend = false;
 
         SeriesScript() = default;
-        SeriesScript(api::SeriesDetail detail,
+        SeriesScript(domain::SeriesDetail detail,
             std::optional<core::HttpError> error = std::nullopt,
             bool suspend = false)
             : detail(std::move(detail))
@@ -354,11 +354,11 @@ public:
     QList<SeriesScript> seriesScripts;
     int metaCalls = 0;
     int seriesCalls = 0;
-    api::MediaKind lastMetaKind = api::MediaKind::Movie;
+    domain::MediaKind lastMetaKind = domain::MediaKind::Movie;
     QString lastMetaImdbId;
     QString lastSeriesImdbId;
 
-    QCoro::Task<api::MetaDetail> meta(api::MediaKind kind, QString imdbId) override
+    QCoro::Task<domain::MetaDetail> meta(domain::MediaKind kind, QString imdbId) override
     {
         ++metaCalls;
         lastMetaKind = kind;
@@ -377,7 +377,7 @@ public:
         co_return scripted.detail;
     }
 
-    QCoro::Task<api::SeriesDetail> seriesMeta(QString imdbId) override
+    QCoro::Task<domain::SeriesDetail> seriesMeta(QString imdbId) override
     {
         ++seriesCalls;
         lastSeriesImdbId = imdbId;

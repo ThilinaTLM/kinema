@@ -143,7 +143,7 @@ Kirigami.Page {
                             "Browse movies instead")
                         : i18nc("@action:button",
                             "Browse TV series instead")
-                    onTriggered: mainController.applyBrowsePreset(
+                    onTriggered: shell.applyBrowsePreset(
                         searchVm.kind, 0)
                 }
             }

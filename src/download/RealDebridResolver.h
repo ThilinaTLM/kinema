@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Download.h"
-#include "api/RealDebrid.h"
+#include "domain/Download.h"
+#include "domain/RealDebrid.h"
 #include "download/DebridResolver.h"
 
 #include <QString>
@@ -40,7 +40,7 @@ class RealDebridResolver : public DebridResolver
 public:
     RealDebridResolver(api::RealDebridClient& rd, QObject* parent = nullptr);
 
-    QCoro::Task<ResolvedDebridLink> resolve(api::AssetRef ref) override;
+    QCoro::Task<ResolvedDebridLink> resolve(domain::AssetRef ref) override;
     QCoro::Task<void> cleanup(QString providerTorrentId) override;
 
 private:

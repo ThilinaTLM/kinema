@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Download.h"
+#include "domain/Download.h"
 #include "download/AssetSession.h"
 #include "download/DebridResolver.h"
 
@@ -47,7 +47,7 @@ public:
     HttpAssetSession(core::HttpClient& http,
         DebridResolver& resolver,
         const config::DownloadSettings& settings,
-        api::AssetRef ref,
+        domain::AssetRef ref,
         QString assetId,
         QString localDir,
         QObject* parent = nullptr);
@@ -63,8 +63,8 @@ public:
     QByteArray readRange(ByteRange range) const override;
     void touch() override;
 
-    api::DownloadMode mode() const override { return m_mode; }
-    void setMode(api::DownloadMode m) override { m_mode = m; }
+    domain::DownloadMode mode() const override { return m_mode; }
+    void setMode(domain::DownloadMode m) override { m_mode = m; }
 
     void pause() override;
     void resume() override;
@@ -78,7 +78,7 @@ public:
     /// to the head of the queue. Safe to call multiple times.
     QCoro::Task<void> prefetchAll();
 
-    const api::AssetRef& ref() const noexcept { return m_ref; }
+    const domain::AssetRef& ref() const noexcept { return m_ref; }
     const QString& localDir() const noexcept { return m_localDir; }
 
     /// Chunk size in bytes. Test hook \u2014 prefer the constructor for
@@ -104,7 +104,7 @@ private:
     DebridResolver& m_resolver;
     const config::DownloadSettings& m_settings;
 
-    api::AssetRef m_ref;
+    domain::AssetRef m_ref;
     QString m_assetId;
     QString m_token;
     QString m_localDir;
@@ -118,7 +118,7 @@ private:
 
     /// User-visible mode. Defaults to OnDemand; promoted to Full
     /// when the manager triggers `prefetchAll()` via `changeMode`.
-    api::DownloadMode m_mode = api::DownloadMode::OnDemand;
+    domain::DownloadMode m_mode = domain::DownloadMode::OnDemand;
 
     /// User-paused flag honoured by `prefetchAll()` between chunk
     /// boundaries. Range fetches driven by the player ignore it so

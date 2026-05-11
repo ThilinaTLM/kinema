@@ -102,7 +102,7 @@ void ResultsListModel::setLoading()
     resetState(State::Loading);
 }
 
-void ResultsListModel::setResults(QList<api::MetaSummary> rows)
+void ResultsListModel::setResults(QList<domain::MetaSummary> rows)
 {
     beginResetModel();
     m_rows = std::move(rows);
@@ -131,7 +131,7 @@ void ResultsListModel::setError(const QString& message)
     resetState(State::Error);
 }
 
-const api::MetaSummary* ResultsListModel::at(int row) const
+const domain::MetaSummary* ResultsListModel::at(int row) const
 {
     if (row < 0 || row >= m_rows.size()) {
         return nullptr;

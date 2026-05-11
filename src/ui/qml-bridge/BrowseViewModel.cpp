@@ -5,7 +5,7 @@
 
 #include "api/TmdbClient.h"
 #include "config/BrowseSettings.h"
-#include "core/HttpErrorPresenter.h"
+#include "core/io/HttpErrorPresenter.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 
 #include <KLocalizedString>
@@ -53,9 +53,9 @@ BrowseViewModel::BrowseViewModel(api::TmdbClient* tmdb,
 
 void BrowseViewModel::setKind(int kind)
 {
-    const auto k = (kind == static_cast<int>(api::MediaKind::Series))
-        ? api::MediaKind::Series
-        : api::MediaKind::Movie;
+    const auto k = (kind == static_cast<int>(domain::MediaKind::Series))
+        ? domain::MediaKind::Series
+        : domain::MediaKind::Movie;
     if (m_kind == k) {
         return;
     }
@@ -113,7 +113,7 @@ void BrowseViewModel::setMinRatingPct(int pct)
 
 void BrowseViewModel::setSort(int sort)
 {
-    using api::DiscoverSort;
+    using domain::DiscoverSort;
     const auto s = safeEnumCast<DiscoverSort>(sort, {
         DiscoverSort::Popularity, DiscoverSort::ReleaseDate,
         DiscoverSort::Rating, DiscoverSort::TitleAsc });
@@ -192,11 +192,11 @@ void BrowseViewModel::loadMore()
 
 void BrowseViewModel::resetFilters()
 {
-    m_kind = api::MediaKind::Movie;
+    m_kind = domain::MediaKind::Movie;
     m_genreIds.clear();
     m_dateWindow = core::DateWindow::Past3Years;
     m_minRatingPct = 0;
-    m_sort = api::DiscoverSort::Popularity;
+    m_sort = domain::DiscoverSort::Popularity;
     m_hideObscure = false;
     m_availableGenres.clear();
     persistAll();
@@ -211,7 +211,7 @@ void BrowseViewModel::activate(int row)
     if (!item) {
         return;
     }
-    if (item->kind == api::MediaKind::Series) {
+    if (item->kind == domain::MediaKind::Series) {
         Q_EMIT openSeriesRequested(item->tmdbId, item->title);
     } else {
         Q_EMIT openMovieRequested(item->tmdbId, item->title);
@@ -220,10 +220,10 @@ void BrowseViewModel::activate(int row)
 
 void BrowseViewModel::applyPreset(int kind, int sort)
 {
-    using api::DiscoverSort;
-    const auto k = (kind == static_cast<int>(api::MediaKind::Series))
-        ? api::MediaKind::Series
-        : api::MediaKind::Movie;
+    using domain::DiscoverSort;
+    const auto k = (kind == static_cast<int>(domain::MediaKind::Series))
+        ? domain::MediaKind::Series
+        : domain::MediaKind::Movie;
     const auto s = safeEnumCast<DiscoverSort>(sort, {
         DiscoverSort::Popularity, DiscoverSort::ReleaseDate,
         DiscoverSort::Rating, DiscoverSort::TitleAsc })
@@ -268,9 +268,9 @@ void BrowseViewModel::persistAll()
     m_settings.setHideObscure(m_hideObscure);
 }
 
-api::DiscoverQuery BrowseViewModel::buildQuery(int page) const
+domain::DiscoverQuery BrowseViewModel::buildQuery(int page) const
 {
-    api::DiscoverQuery q;
+    domain::DiscoverQuery q;
     q.kind = m_kind;
     q.withGenreIds = m_genreIds;
     const auto r = core::dateRangeFor(m_dateWindow);
@@ -375,12 +375,12 @@ QCoro::Task<void> BrowseViewModel::loadPage(int page, bool append)
     }
 }
 
-QCoro::Task<void> BrowseViewModel::ensureGenresFor(api::MediaKind kind)
+QCoro::Task<void> BrowseViewModel::ensureGenresFor(domain::MediaKind kind)
 {
-    bool& loaded = kind == api::MediaKind::Movie
+    bool& loaded = kind == domain::MediaKind::Movie
         ? m_genresLoadedMovie
         : m_genresLoadedSeries;
-    bool& loading = kind == api::MediaKind::Movie
+    bool& loading = kind == domain::MediaKind::Movie
         ? m_genresLoadingMovie
         : m_genresLoadingSeries;
     if (loading) {
@@ -411,7 +411,7 @@ QCoro::Task<void> BrowseViewModel::ensureGenresFor(api::MediaKind kind)
                 const bool stillThere = std::any_of(
                     m_availableGenres.cbegin(),
                     m_availableGenres.cend(),
-                    [id](const api::TmdbGenre& g) {
+                    [id](const domain::TmdbGenre& g) {
                         return g.id == id;
                     });
                 if (stillThere) {

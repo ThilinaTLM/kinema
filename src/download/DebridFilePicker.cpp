@@ -10,7 +10,7 @@ namespace kinema::download::picker {
 
 int score(const QString& path,
     qint64 sizeBytes,
-    const api::AssetRef& ref)
+    const domain::AssetRef& ref)
 {
     int s = 0;
 
@@ -55,7 +55,7 @@ int score(const QString& path,
 }
 
 int chooseIndex(const QList<Candidate>& candidates,
-    const api::AssetRef& ref)
+    const domain::AssetRef& ref)
 {
     int bestScore = -1;
     int bestIdx = -1;

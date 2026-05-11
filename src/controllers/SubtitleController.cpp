@@ -6,11 +6,11 @@
 #include "api/OpenSubtitlesClient.h"
 #include "config/CacheSettings.h"
 #include "config/SubtitleSettings.h"
-#include "core/CachePaths.h"
-#include "core/HttpError.h"
-#include "core/HttpErrorPresenter.h"
-#include "core/Language.h"
-#include "core/SubtitleCacheStore.h"
+#include "core/io/CachePaths.h"
+#include "core/io/HttpError.h"
+#include "core/io/HttpErrorPresenter.h"
+#include "core/util/Language.h"
+#include "core/persistence/SubtitleCacheStore.h"
 #include "kinema_log_controller.h"
 
 #include <KLocalizedString>
@@ -27,7 +27,7 @@ namespace kinema::controllers {
 
 namespace {
 
-bool matchesReleaseFilter(const api::SubtitleHit& hit, const QString& filter)
+bool matchesReleaseFilter(const domain::SubtitleHit& hit, const QString& filter)
 {
     if (filter.isEmpty()) {
         return true;
@@ -130,7 +130,7 @@ void SubtitleController::setActiveSubtitlePaths(const QStringList& paths)
     Q_EMIT activeSubtitleChanged();
 }
 
-void SubtitleController::runQuery(api::PlaybackKey key,
+void SubtitleController::runQuery(domain::PlaybackKey key,
     QStringList languages,
     QString hearingImpaired,
     QString foreignPartsOnly,
@@ -141,7 +141,7 @@ void SubtitleController::runQuery(api::PlaybackKey key,
         return;
     }
     m_currentKey = key;
-    api::SubtitleSearchQuery q;
+    domain::SubtitleSearchQuery q;
     q.key = std::move(key);
     q.languages = std::move(languages);
     q.hearingImpaired = std::move(hearingImpaired);
@@ -153,7 +153,7 @@ void SubtitleController::runQuery(api::PlaybackKey key,
     Q_UNUSED(t);
 }
 
-QCoro::Task<void> SubtitleController::runSearchTask(api::SubtitleSearchQuery q)
+QCoro::Task<void> SubtitleController::runSearchTask(domain::SubtitleSearchQuery q)
 {
     const auto myEpoch = ++m_epoch;
     setError({});
@@ -169,7 +169,7 @@ QCoro::Task<void> SubtitleController::runSearchTask(api::SubtitleSearchQuery q)
         if (!q.releaseFilter.trimmed().isEmpty()) {
             const auto needle = q.releaseFilter.trimmed();
             hits.erase(std::remove_if(hits.begin(), hits.end(),
-                           [&needle](const api::SubtitleHit& h) {
+                           [&needle](const domain::SubtitleHit& h) {
                                return !matchesReleaseFilter(h, needle);
                            }),
                 hits.end());
@@ -177,7 +177,7 @@ QCoro::Task<void> SubtitleController::runSearchTask(api::SubtitleSearchQuery q)
 
         // moviehash_match first; ties broken by download_count desc.
         std::stable_sort(hits.begin(), hits.end(),
-            [](const api::SubtitleHit& a, const api::SubtitleHit& b) {
+            [](const domain::SubtitleHit& a, const domain::SubtitleHit& b) {
                 if (a.moviehashMatch != b.moviehashMatch) {
                     return a.moviehashMatch && !b.moviehashMatch;
                 }
@@ -204,14 +204,14 @@ QCoro::Task<void> SubtitleController::runSearchTask(api::SubtitleSearchQuery q)
     setSearching(false);
 }
 
-void SubtitleController::download(QString fileId, api::PlaybackKey key)
+void SubtitleController::download(QString fileId, domain::PlaybackKey key)
 {
     auto t = downloadTask(std::move(fileId), std::move(key));
     Q_UNUSED(t);
 }
 
 QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
-    api::PlaybackKey key)
+    domain::PlaybackKey key)
 {
     if (fileId.isEmpty()) {
         co_return;
@@ -237,7 +237,7 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
                     << "— fetching from OpenSubtitles";
 
     // Find the matching hit so we can fill display metadata.
-    const api::SubtitleHit* hit = nullptr;
+    const domain::SubtitleHit* hit = nullptr;
     for (const auto& h : m_hits) {
         if (h.fileId == fileId) {
             hit = &h;
@@ -245,7 +245,7 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
         }
     }
 
-    api::SubtitleDownloadTicket ticket;
+    domain::SubtitleDownloadTicket ticket;
     QByteArray bytes;
     try {
         ticket = co_await m_client->requestDownload(fileId);
@@ -376,7 +376,7 @@ void SubtitleController::evictIfOverBudget()
     }
 }
 
-void SubtitleController::rebuildCachedFileIds(const api::PlaybackKey& key)
+void SubtitleController::rebuildCachedFileIds(const domain::PlaybackKey& key)
 {
     if (!m_cache || !key.isValid()) {
         m_cachedFileIds.clear();

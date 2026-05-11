@@ -4,8 +4,8 @@
 #include "download/AllDebridResolver.h"
 
 #include "api/AllDebridClient.h"
-#include "core/HttpError.h"
-#include "core/Magnet.h"
+#include "core/io/HttpError.h"
+#include "core/util/Magnet.h"
 #include "download/DebridFilePicker.h"
 
 #include <KLocalizedString>
@@ -67,7 +67,7 @@ QCoro::Task<void> AllDebridResolver::cleanup(QString providerTorrentId)
     }
 }
 
-QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(api::AssetRef ref)
+QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
 {
     if (ref.infoHash.isEmpty()) {
         throw core::HttpError(core::HttpError::Kind::Json, 0,
@@ -79,7 +79,7 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(api::AssetRef ref)
     const auto added = co_await m_ad.uploadMagnet(magnet);
 
     // Step 2: poll until Ready or terminal error or timeout.
-    api::AdMagnetStatus status;
+    domain::AdMagnetStatus status;
     int waitedMs = 0;
     while (true) {
         status = co_await m_ad.magnetStatus(added.id);

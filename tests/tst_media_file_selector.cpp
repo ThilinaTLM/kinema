@@ -18,8 +18,8 @@ private Q_SLOTS:
             {1, QStringLiteral("Movie/Movie.1080p.mkv"), 2LL * 1024 * 1024 * 1024},
             {2, QStringLiteral("Movie/Movie.720p.mp4"), 1LL * 1024 * 1024 * 1024},
         };
-        api::PlaybackContext ctx;
-        ctx.key.kind = api::MediaKind::Movie;
+        domain::PlaybackContext ctx;
+        ctx.key.kind = domain::MediaKind::Movie;
 
         const auto picked = torrent::selectMediaFile(files, ctx);
         QVERIFY(picked.ok());
@@ -32,8 +32,8 @@ private Q_SLOTS:
             {0, QStringLiteral("Show/Show.S01E01.mkv"), 800LL * 1024 * 1024},
             {1, QStringLiteral("Show/Show.S01E02.mkv"), 700LL * 1024 * 1024},
         };
-        api::PlaybackContext ctx;
-        ctx.key.kind = api::MediaKind::Series;
+        domain::PlaybackContext ctx;
+        ctx.key.kind = domain::MediaKind::Series;
         ctx.key.season = 1;
         ctx.key.episode = 2;
 

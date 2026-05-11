@@ -17,7 +17,7 @@
 #include <vector>
 
 using namespace kinema::download;
-namespace api = kinema::api;
+namespace domain = kinema::domain;
 using kinema::torrent::ByteRange;
 
 namespace {
@@ -56,8 +56,8 @@ public:
     }
     void touch() override { ++touchCount; }
 
-    api::DownloadMode mode() const override { return m_mode; }
-    void setMode(api::DownloadMode m) override { m_mode = m; }
+    domain::DownloadMode mode() const override { return m_mode; }
+    void setMode(domain::DownloadMode m) override { m_mode = m; }
 
     int ensureCount = 0;
     int touchCount = 0;
@@ -67,7 +67,7 @@ private:
     QByteArray m_content;
     QString m_fileName;
     QString m_assetId;
-    api::DownloadMode m_mode = api::DownloadMode::OnDemand;
+    domain::DownloadMode m_mode = domain::DownloadMode::OnDemand;
 };
 
 QByteArray fetchPath(const QUrl& url, const QByteArray& rangeHeader = {})

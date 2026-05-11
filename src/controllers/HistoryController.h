@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 
 #include <QList>
 #include <QObject>
@@ -77,18 +77,18 @@ public:
     /// Pins the context so later position updates can be attributed
     /// to it and persists the "last-played" row so external plays
     /// show up in Continue Watching too.
-    void onPlayStarting(const api::PlaybackContext& ctx);
+    void onPlayStarting(const domain::PlaybackContext& ctx);
 
     /// Resume-time lookup. Returns the live in-memory position when
     /// the active session matches `key` (mid-session stream swap);
     /// otherwise the stored position.
-    std::optional<qint64> resumeSecondsFor(const api::PlaybackKey& key) const;
+    std::optional<qint64> resumeSecondsFor(const domain::PlaybackKey& key) const;
 
-    std::optional<api::HistoryEntry> find(const api::PlaybackKey& key) const;
-    std::optional<api::HistoryEntry> findLatestForMedia(
-        api::MediaKind kind, const QString& imdbId) const;
+    std::optional<domain::HistoryEntry> find(const domain::PlaybackKey& key) const;
+    std::optional<domain::HistoryEntry> findLatestForMedia(
+        domain::MediaKind kind, const QString& imdbId) const;
 
-    QList<api::HistoryEntry> continueWatching(int maxItems = 30) const;
+    QList<domain::HistoryEntry> continueWatching(int maxItems = 30) const;
 
 public Q_SLOTS:
     /// One-click resume. Re-fetches Torrentio for the entry's key,
@@ -96,13 +96,13 @@ public Q_SLOTS:
     /// fresh stream through `StreamActions::play`. On a miss emits
     /// `resumeFallbackRequested()` so MainWindow can open the detail
     /// pane instead.
-    void resumeFromHistory(const api::HistoryEntry& entry);
+    void resumeFromHistory(const domain::HistoryEntry& entry);
 
     /// Forget a Continue-Watching entry. Thin wrapper over
     /// `HistoryStore::remove`; the store fires `changed()` which
     /// drives the rail to re-pull. Exposed as a slot so QML view-
     /// models can invoke it without holding a `HistoryStore&`.
-    void removeEntry(const api::HistoryEntry& entry);
+    void removeEntry(const domain::HistoryEntry& entry);
 
 Q_SIGNALS:
     /// Forwarded from HistoryStore::changed. Drives UI refreshes.
@@ -116,7 +116,7 @@ Q_SIGNALS:
     /// response (or RD could not give us a direct URL). MainWindow
     /// opens the detail pane via the existing openFromHistory path
     /// so the user can pick another release.
-    void resumeFallbackRequested(const api::HistoryEntry& entry);
+    void resumeFallbackRequested(const domain::HistoryEntry& entry);
 
 private Q_SLOTS:
     void onFileLoaded();
@@ -126,7 +126,7 @@ private Q_SLOTS:
     void onPersistTick();
 
 private:
-    QCoro::Task<void> resumeTask(api::HistoryEntry entry);
+    QCoro::Task<void> resumeTask(domain::HistoryEntry entry);
     void persistActive(bool force);
 
     core::HistoryStore& m_store;
@@ -136,9 +136,9 @@ private:
     services::StreamActions* m_actions {};
 
     /// Set by onPlayStarting, promoted to m_active on fileLoaded.
-    std::optional<api::PlaybackContext> m_pending;
+    std::optional<domain::PlaybackContext> m_pending;
     /// Current embedded-player session, if any.
-    std::optional<api::PlaybackContext> m_active;
+    std::optional<domain::PlaybackContext> m_active;
     double m_lastPosition = 0.0;
     double m_duration = 0.0;
     double m_lastPersistedPosition = 0.0;

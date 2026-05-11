@@ -94,7 +94,7 @@ QQC2.ItemDelegate {
     required property int season
     required property int episode
 
-    // Mirror api::DownloadState integer values so the binding code
+    // Mirror domain::DownloadState integer values so the binding code
     // doesn't carry magic numbers.
     readonly property int stateQueued: 0
     readonly property int stateResolving: 1
@@ -105,7 +105,7 @@ QQC2.ItemDelegate {
     readonly property int stateFailed: 6
     readonly property int stateCancelled: 7
 
-    // api::MediaKind: 0 = movie, 1 = series.
+    // domain::MediaKind: 0 = movie, 1 = series.
     readonly property int kindMovie: 0
     readonly property int kindSeries: 1
 
@@ -173,7 +173,7 @@ QQC2.ItemDelegate {
         return n < 10 ? "0" + n : "" + n;
     }
 
-    // Map api::DownloadItem stateTone to MetaChip tones. MetaChip
+    // Map domain::DownloadItem stateTone to MetaChip tones. MetaChip
     // lacks a dedicated "warn" tone today, so warn falls through to
     // "accent" — visually close to Plasma's neutralTextColor tint.
     function _chipTone(tone) {
@@ -207,13 +207,13 @@ QQC2.ItemDelegate {
         }
         if (row.kind === row.kindSeries) {
             if (row.season >= 0 && row.episode >= 0) {
-                mainController.openSeriesDetailAt(row.imdbId,
+                shell.openSeriesDetailAt(row.imdbId,
                     row.title, row.season, row.episode);
             } else {
-                mainController.openSeriesDetail(row.imdbId, row.title);
+                shell.openSeriesDetail(row.imdbId, row.title);
             }
         } else {
-            mainController.openMovieDetail(row.imdbId, row.title);
+            shell.openMovieDetail(row.imdbId, row.title);
         }
     }
 

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Discover.h"
+#include "domain/Discover.h"
 
 #include <QJsonDocument>
 #include <QString>
@@ -12,6 +12,7 @@
 #include <utility>
 
 namespace kinema::api::tmdb {
+using namespace kinema::domain;
 
 /// Poster size segment used when composing image URLs. TMDB's image CDN
 /// expects `https://image.tmdb.org/t/p/{size}/{path}`. We hardcode a

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 
 #include <QString>
 #include <QVector>
@@ -52,7 +52,7 @@ struct EpisodePackNavigation {
 bool isVideoFilePath(const QString& path);
 bool isLikelySampleOrExtra(const QString& path, qint64 sizeBytes);
 MediaFileSelection selectMediaFile(const QVector<TorrentFileEntry>& files,
-    const api::PlaybackContext& ctx);
+    const domain::PlaybackContext& ctx);
 std::optional<EpisodePackNavigation> adjacentEpisodeFiles(
     const QVector<TorrentFileEntry>& files,
     int season,

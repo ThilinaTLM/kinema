@@ -5,7 +5,7 @@
 #include "config/DebridSettings.h"
 #include "config/TorrentioSettings.h"
 #include "controllers/TokenController.h"
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 #include "services/StreamActions.h"
 #include "TestDoubles.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
@@ -19,11 +19,11 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using kinema::api::DiscoverItem;
-using kinema::api::MediaKind;
-using kinema::api::MetaDetail;
-using kinema::api::MetaSummary;
-using kinema::api::Stream;
+using kinema::domain::DiscoverItem;
+using kinema::domain::MediaKind;
+using kinema::domain::MetaDetail;
+using kinema::domain::MetaSummary;
+using kinema::domain::Stream;
 using kinema::config::AppSettings;
 using kinema::controllers::TokenController;
 using kinema::core::HttpError;

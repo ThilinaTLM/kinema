@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Indexer.h"
+#include "domain/Indexer.h"
 #include "api/IndexerSelector.h"
 #include "config/IndexerSettings.h"
 
@@ -20,29 +20,29 @@ using namespace kinema;
 
 namespace {
 
-class StubIndexer : public api::Indexer
+class StubIndexer : public domain::Indexer
 {
 public:
-    explicit StubIndexer(api::IndexerKind k, QObject* parent = nullptr)
+    explicit StubIndexer(domain::IndexerKind k, QObject* parent = nullptr)
         : Indexer(parent)
         , m_kind(k)
     {
     }
 
-    api::IndexerKind kind() const noexcept override { return m_kind; }
+    domain::IndexerKind kind() const noexcept override { return m_kind; }
     QString displayName() const override
     {
-        return QStringLiteral("Stub(%1)").arg(api::indexerKindToString(m_kind));
+        return QStringLiteral("Stub(%1)").arg(domain::indexerKindToString(m_kind));
     }
 
-    QCoro::Task<QList<api::Stream>> streams(api::MediaKind,
+    QCoro::Task<QList<domain::Stream>> streams(domain::MediaKind,
         QString) override
     {
-        co_return QList<api::Stream> {};
+        co_return QList<domain::Stream> {};
     }
 
 private:
-    api::IndexerKind m_kind;
+    domain::IndexerKind m_kind;
 };
 
 } // namespace
@@ -72,19 +72,19 @@ private Q_SLOTS:
         config::IndexerSettings settings(m_config);
         api::IndexerSelector selector(settings);
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Torrentio));
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Peerflix));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Peerflix));
 
         // Default: Torrentio
         auto* a = selector.active();
         QVERIFY(a);
-        QCOMPARE(a->kind(), api::IndexerKind::Torrentio);
+        QCOMPARE(a->kind(), domain::IndexerKind::Torrentio);
 
-        settings.setActiveIndexer(api::IndexerKind::Peerflix);
+        settings.setActiveIndexer(domain::IndexerKind::Peerflix);
         a = selector.active();
         QVERIFY(a);
-        QCOMPARE(a->kind(), api::IndexerKind::Peerflix);
+        QCOMPARE(a->kind(), domain::IndexerKind::Peerflix);
     }
 
     void find_returnsIndexerRegardlessOfActive()
@@ -92,24 +92,24 @@ private Q_SLOTS:
         config::IndexerSettings settings(m_config);
         api::IndexerSelector selector(settings);
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Torrentio));
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Peerflix));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Peerflix));
 
         // Active is Torrentio but find() should still surface Peerflix.
-        auto* mf = selector.find(api::IndexerKind::Peerflix);
+        auto* mf = selector.find(domain::IndexerKind::Peerflix);
         QVERIFY(mf);
-        QCOMPARE(mf->kind(), api::IndexerKind::Peerflix);
+        QCOMPARE(mf->kind(), domain::IndexerKind::Peerflix);
     }
 
     void active_returnsNullWhenNoIndexerRegisteredForKind()
     {
         config::IndexerSettings settings(m_config);
-        settings.setActiveIndexer(api::IndexerKind::Peerflix);
+        settings.setActiveIndexer(domain::IndexerKind::Peerflix);
 
         api::IndexerSelector selector(settings);
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Torrentio));
 
         // Peerflix not registered → null.
         QVERIFY(!selector.active());
@@ -120,15 +120,15 @@ private Q_SLOTS:
         config::IndexerSettings settings(m_config);
         api::IndexerSelector selector(settings);
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Torrentio));
 
-        auto* first = selector.find(api::IndexerKind::Torrentio);
+        auto* first = selector.find(domain::IndexerKind::Torrentio);
         QVERIFY(first);
 
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Torrentio));
 
-        auto* second = selector.find(api::IndexerKind::Torrentio);
+        auto* second = selector.find(domain::IndexerKind::Torrentio);
         QVERIFY(second);
         QVERIFY(second != first);
         QCOMPARE(selector.all().size(), 1);
@@ -139,16 +139,16 @@ private Q_SLOTS:
         config::IndexerSettings settings(m_config);
         api::IndexerSelector selector(settings);
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Torrentio));
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Peerflix));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Peerflix));
 
         QSignalSpy spy(&selector,
             &api::IndexerSelector::activeIndexerChanged);
-        settings.setActiveIndexer(api::IndexerKind::Peerflix);
+        settings.setActiveIndexer(domain::IndexerKind::Peerflix);
         QCOMPARE(spy.count(), 1);
-        QCOMPARE(spy.at(0).at(0).value<api::IndexerKind>(),
-            api::IndexerKind::Peerflix);
+        QCOMPARE(spy.at(0).at(0).value<domain::IndexerKind>(),
+            domain::IndexerKind::Peerflix);
     }
 
     void all_returnsRegistrationOrder()
@@ -156,14 +156,14 @@ private Q_SLOTS:
         config::IndexerSettings settings(m_config);
         api::IndexerSelector selector(settings);
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Peerflix));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Peerflix));
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
+            std::make_unique<StubIndexer>(domain::IndexerKind::Torrentio));
 
         const auto all = selector.all();
         QCOMPARE(all.size(), 2);
-        QCOMPARE(all.at(0)->kind(), api::IndexerKind::Peerflix);
-        QCOMPARE(all.at(1)->kind(), api::IndexerKind::Torrentio);
+        QCOMPARE(all.at(0)->kind(), domain::IndexerKind::Peerflix);
+        QCOMPARE(all.at(1)->kind(), domain::IndexerKind::Torrentio);
     }
 
 private:

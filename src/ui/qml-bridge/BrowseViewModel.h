@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "api/Discover.h"
-#include "api/Media.h"
-#include "core/DateWindow.h"
+#include "domain/Discover.h"
+#include "domain/Media.h"
+#include "core/util/DateWindow.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 
 #include <QList>
@@ -143,10 +143,10 @@ Q_SIGNALS:
 private:
     void restoreFromSettings();
     void persistAll();
-    api::DiscoverQuery buildQuery(int page) const;
+    domain::DiscoverQuery buildQuery(int page) const;
 
     QCoro::Task<void> loadPage(int page, bool append);
-    QCoro::Task<void> ensureGenresFor(api::MediaKind kind);
+    QCoro::Task<void> ensureGenresFor(domain::MediaKind kind);
 
     void setLoading(bool on);
     void setTmdbConfigured(bool on);
@@ -157,14 +157,14 @@ private:
     DiscoverSectionModel* m_results;
 
     // Mirror of BrowseSettings; setters write through to KConfig.
-    api::MediaKind m_kind = api::MediaKind::Movie;
+    domain::MediaKind m_kind = domain::MediaKind::Movie;
     QList<int> m_genreIds;
     core::DateWindow m_dateWindow = core::DateWindow::Past3Years;
     int m_minRatingPct = 0;
-    api::DiscoverSort m_sort = api::DiscoverSort::Popularity;
+    domain::DiscoverSort m_sort = domain::DiscoverSort::Popularity;
     bool m_hideObscure = false;
 
-    QList<api::TmdbGenre> m_availableGenres;
+    QList<domain::TmdbGenre> m_availableGenres;
     bool m_genresLoadedMovie = false;
     bool m_genresLoadedSeries = false;
     bool m_genresLoadingMovie = false;

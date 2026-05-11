@@ -4,7 +4,7 @@
 #include "download/RealDebridBackend.h"
 
 #include "api/RealDebridClient.h"
-#include "core/MediaCache.h"
+#include "core/persistence/MediaCache.h"
 #include "download/DebridResolver.h"
 #include "download/HttpAssetSession.h"
 #include "kinema_log_download.h"
@@ -26,7 +26,7 @@ RealDebridBackend::RealDebridBackend(core::HttpClient& http,
 
 RealDebridBackend::~RealDebridBackend() = default;
 
-bool RealDebridBackend::canHandle(const api::Stream& s) const
+bool RealDebridBackend::canHandle(const domain::Stream& s) const
 {
     if (m_rd.token().isEmpty()) {
         return false;
@@ -41,14 +41,14 @@ bool RealDebridBackend::canHandle(const api::Stream& s) const
 }
 
 QCoro::Task<std::unique_ptr<AssetSession>> RealDebridBackend::open(
-    const api::AssetRef& ref,
-    const api::Stream& s,
-    const api::PlaybackContext& ctx,
-    api::DownloadMode mode)
+    const domain::AssetRef& ref,
+    const domain::Stream& s,
+    const domain::PlaybackContext& ctx,
+    domain::DownloadMode mode)
 {
     Q_UNUSED(s);
     Q_UNUSED(ctx);
-    const auto assetId = api::assetIdFor(ref);
+    const auto assetId = domain::assetIdFor(ref);
     m_cache.markActive(assetId);
 
     auto session = std::make_unique<HttpAssetSession>(m_http, m_resolver,
@@ -61,7 +61,7 @@ QCoro::Task<std::unique_ptr<AssetSession>> RealDebridBackend::open(
     // synchronously (i.e. a `Failed` row instead of silent stalls).
     co_await raw->ensureResolved();
 
-    if (mode == api::DownloadMode::Full) {
+    if (mode == domain::DownloadMode::Full) {
         // Fire and forget; the prefetch loop honours `m_paused`
         // and `m_mode` so future demotion/pause is observed at the
         // next chunk boundary. Errors propagate via the session's
@@ -79,7 +79,7 @@ QCoro::Task<std::unique_ptr<AssetSession>> RealDebridBackend::open(
 }
 
 void RealDebridBackend::changeMode(AssetSession& session,
-    api::DownloadMode newMode)
+    domain::DownloadMode newMode)
 {
     if (session.mode() == newMode) {
         return;
@@ -91,7 +91,7 @@ void RealDebridBackend::changeMode(AssetSession& session,
         return;
     }
     http->setMode(newMode);
-    if (newMode == api::DownloadMode::Full) {
+    if (newMode == domain::DownloadMode::Full) {
         // Wake the prefetch loop. If a previous prefetchAll() is
         // still in flight (e.g. paused mid-loop) it'll resume on
         // its next iteration; if not, this kicks a fresh one.

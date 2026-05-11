@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 #include "ui/qml-bridge/EpisodesListModel.h"
 #include "ui/qml-bridge/StreamsListModel.h"
 
@@ -67,7 +67,7 @@ class DiscoverSectionModel;
  *
  * Episode picker semantics: `selectedEpisodeRow` is the row inside
  * the current season's episode list (\u2212 1 = collapsed). Selecting
- * a row builds an `api::PlaybackContext` and kicks the per-episode
+ * a row builds an `domain::PlaybackContext` and kicks the per-episode
  * stream fetch; clearing collapses the streams region.
  *
  * Streams config (sort + cached-only) and per-row action delegation
@@ -309,7 +309,7 @@ Q_SIGNALS:
     void openMovieByTmdbRequested(int tmdbId, const QString& title);
     void openSeriesByTmdbRequested(int tmdbId, const QString& title);
 
-    void subtitlesRequested(const api::PlaybackContext& ctx);
+    void subtitlesRequested(const domain::PlaybackContext& ctx);
 
     /// Emitted from `requestStreams()` /
     /// `selectEpisodeAndOpenStreams()`. `MainController` connects
@@ -323,11 +323,11 @@ private:
     QCoro::Task<void> loadSeriesMetaTask(QString imdbId,
         std::optional<int> pendingSeason,
         std::optional<int> pendingEpisode);
-    QCoro::Task<void> loadEpisodeStreamsTask(api::Episode ep);
+    QCoro::Task<void> loadEpisodeStreamsTask(domain::Episode ep);
     QCoro::Task<void> resolveByTmdbAndLoad(int tmdbId, QString title);
     QCoro::Task<void> loadSimilarFor(QString imdbId);
 
-    void applyMeta(const api::SeriesDetail& sd);
+    void applyMeta(const domain::SeriesDetail& sd);
     void resetMeta();
     void refreshLibraryState();
     void refreshEpisodeWatchedState();
@@ -342,9 +342,9 @@ private:
     void publishCurrentSeasonEpisodes();
 
     void rebuildVisibleStreams();
-    QList<api::Stream> applyFilters() const;
-    void sortInPlace(QList<api::Stream>& rows) const;
-    api::PlaybackContext currentContext() const;
+    QList<domain::Stream> applyFilters() const;
+    void sortInPlace(QList<domain::Stream>& rows) const;
+    domain::PlaybackContext currentContext() const;
 
     /// Forwards a row's stream to a `services::StreamActions`
     /// pointer-to-member.
@@ -373,7 +373,7 @@ private:
     quint64 m_similarEpoch = 0;
 
     // Series meta.
-    api::SeriesDetail m_currentSeries;
+    domain::SeriesDetail m_currentSeries;
     QString m_imdbId;
     QString m_title;
     int m_year = 0;
@@ -389,7 +389,7 @@ private:
 
     // All episodes (across all seasons, sorted by (season, number) by
     // the parser). Specials (season 0) included; the picker filters.
-    QList<api::Episode> m_allEpisodes;
+    QList<domain::Episode> m_allEpisodes;
     /// Season numbers excluding specials, in ascending order. The
     /// `currentSeason` Q_PROPERTY indexes into this list.
     QList<int> m_seasonNumbers;
@@ -399,11 +399,11 @@ private:
 
     // Selected episode (within the current season).
     int m_selectedEpisodeRow = -1;
-    api::Episode m_selectedEpisode;
+    domain::Episode m_selectedEpisode;
     QString m_selectedEpisodeLabel;
 
     // Streams config.
-    QList<api::Stream> m_rawStreams;
+    QList<domain::Stream> m_rawStreams;
     StreamsListModel::SortMode m_sortMode
         = StreamsListModel::SortMode::Smart;
     bool m_sortDescending = true;

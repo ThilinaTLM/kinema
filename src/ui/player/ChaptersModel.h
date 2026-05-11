@@ -5,7 +5,7 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
-#include "core/MpvChapterList.h"
+#include "core/mpv/MpvChapterList.h"
 
 #include <QAbstractListModel>
 #include <QHash>

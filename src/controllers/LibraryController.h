@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Library.h"
-#include "api/Media.h"
+#include "domain/Library.h"
+#include "domain/Media.h"
 
 #include <QCoro/QCoroTask>
 
@@ -17,6 +17,9 @@
 
 namespace kinema::api {
 class CinemetaClient;
+}
+
+namespace kinema::domain {
 struct MetaDetail;
 struct SeriesDetail;
 }
@@ -47,19 +50,19 @@ public:
         QObject* parent = nullptr);
     ~LibraryController() override;
 
-    bool isInLibrary(api::MediaKind kind, const QString& imdbId) const;
-    std::optional<api::LibraryTitle> title(api::MediaKind kind,
+    bool isInLibrary(domain::MediaKind kind, const QString& imdbId) const;
+    std::optional<domain::LibraryTitle> title(domain::MediaKind kind,
         const QString& imdbId) const;
-    QList<api::LibraryTitle> titles() const;
-    QList<api::LibraryEpisode> episodesForSeries(
+    QList<domain::LibraryTitle> titles() const;
+    QList<domain::LibraryEpisode> episodesForSeries(
         const QString& imdbId) const;
 
-    void saveMovie(const api::MetaDetail& meta);
-    void saveSeries(const api::SeriesDetail& detail);
+    void saveMovie(const domain::MetaDetail& meta);
+    void saveSeries(const domain::SeriesDetail& detail);
     /// Remove the title (and, for series, its cached episode rows)
     /// from the library. Watched-state and history rows are
     /// preserved.
-    void removeFromLibrary(api::MediaKind kind, const QString& imdbId);
+    void removeFromLibrary(domain::MediaKind kind, const QString& imdbId);
 
 public Q_SLOTS:
     /// Walk the saved titles and ask Cinemeta for any whose v7
@@ -75,11 +78,11 @@ Q_SIGNALS:
 
 private:
     void pumpBackfill();
-    QCoro::Task<void> runBackfillOne(api::LibraryTitle seed);
+    QCoro::Task<void> runBackfillOne(domain::LibraryTitle seed);
 
     core::LibraryStore& m_store;
     api::CinemetaClient* m_cinemeta {};
-    QQueue<api::LibraryTitle> m_backfillQueue;
+    QQueue<domain::LibraryTitle> m_backfillQueue;
     int m_backfillInFlight = 0;
 };
 

@@ -4,7 +4,7 @@
 #include "download/AllDebridBackend.h"
 
 #include "api/AllDebridClient.h"
-#include "core/MediaCache.h"
+#include "core/persistence/MediaCache.h"
 #include "download/DebridResolver.h"
 #include "download/HttpAssetSession.h"
 #include "kinema_log_download.h"
@@ -26,7 +26,7 @@ AllDebridBackend::AllDebridBackend(core::HttpClient& http,
 
 AllDebridBackend::~AllDebridBackend() = default;
 
-bool AllDebridBackend::canHandle(const api::Stream& s) const
+bool AllDebridBackend::canHandle(const domain::Stream& s) const
 {
     if (m_ad.apiKey().isEmpty()) {
         return false;
@@ -38,14 +38,14 @@ bool AllDebridBackend::canHandle(const api::Stream& s) const
 }
 
 QCoro::Task<std::unique_ptr<AssetSession>> AllDebridBackend::open(
-    const api::AssetRef& ref,
-    const api::Stream& s,
-    const api::PlaybackContext& ctx,
-    api::DownloadMode mode)
+    const domain::AssetRef& ref,
+    const domain::Stream& s,
+    const domain::PlaybackContext& ctx,
+    domain::DownloadMode mode)
 {
     Q_UNUSED(s);
     Q_UNUSED(ctx);
-    const auto assetId = api::assetIdFor(ref);
+    const auto assetId = domain::assetIdFor(ref);
     m_cache.markActive(assetId);
 
     auto session = std::make_unique<HttpAssetSession>(m_http, m_resolver,
@@ -56,7 +56,7 @@ QCoro::Task<std::unique_ptr<AssetSession>> AllDebridBackend::open(
 
     co_await raw->ensureResolved();
 
-    if (mode == api::DownloadMode::Full) {
+    if (mode == domain::DownloadMode::Full) {
         auto task = raw->prefetchAll();
         Q_UNUSED(task);
     }
@@ -70,7 +70,7 @@ QCoro::Task<std::unique_ptr<AssetSession>> AllDebridBackend::open(
 }
 
 void AllDebridBackend::changeMode(AssetSession& session,
-    api::DownloadMode newMode)
+    domain::DownloadMode newMode)
 {
     if (session.mode() == newMode) {
         return;
@@ -82,7 +82,7 @@ void AllDebridBackend::changeMode(AssetSession& session,
         return;
     }
     http->setMode(newMode);
-    if (newMode == api::DownloadMode::Full) {
+    if (newMode == domain::DownloadMode::Full) {
         auto task = http->prefetchAll();
         Q_UNUSED(task);
     }

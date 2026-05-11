@@ -3,7 +3,7 @@
 
 #include "api/CinemetaParse.h"
 
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 
 #include <KLocalizedString>
 
@@ -13,6 +13,7 @@
 #include <QRegularExpression>
 
 namespace kinema::api::cinemeta {
+using namespace kinema::domain;
 
 namespace {
 

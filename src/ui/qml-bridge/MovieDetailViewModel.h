@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 #include "ui/qml-bridge/StreamsListModel.h"
 
 #include <QList>
@@ -301,7 +301,7 @@ Q_SIGNALS:
     /// Phase 06 hook: pushes the Subtitles page with the carried
     /// playback context. Phase 05 stubs the connection in
     /// `MainController` with a passive notification.
-    void subtitlesRequested(const api::PlaybackContext& ctx);
+    void subtitlesRequested(const domain::PlaybackContext& ctx);
 
     /// Emitted from `requestStreams()`. `MainController` connects
     /// to a lambda that forwards as
@@ -316,11 +316,11 @@ private:
         std::optional<QDate> released, quint64 expectedEpoch);
     QCoro::Task<void> resolveByTmdbAndLoad(int tmdbId, QString title);
     QCoro::Task<void> loadSimilarFor(QString imdbId,
-        api::MediaKind kind);
+        domain::MediaKind kind);
 
     void refreshStreamsForCurrentTitle();
     void resetMeta();
-    void applyMeta(const api::MetaDetail& detail);
+    void applyMeta(const domain::MetaDetail& detail);
     void refreshLibraryState();
     void refreshWatchedState();
     void setMetaState(MetaState s, const QString& error = {});
@@ -330,9 +330,9 @@ private:
     /// cached-only + blocklist + sort. Called when any of those
     /// inputs change.
     void rebuildVisibleStreams();
-    QList<api::Stream> applyFilters() const;
-    void sortInPlace(QList<api::Stream>& rows) const;
-    api::PlaybackContext currentContext() const;
+    QList<domain::Stream> applyFilters() const;
+    void sortInPlace(QList<domain::Stream>& rows) const;
+    domain::PlaybackContext currentContext() const;
 
     /// Forwards a row's stream to a `services::StreamActions`
     /// pointer-to-member. Lets the per-row trampolines stay
@@ -360,7 +360,7 @@ private:
     quint64 m_similarEpoch = 0;
 
     // Meta fields.
-    api::MetaDetail m_currentMeta;
+    domain::MetaDetail m_currentMeta;
     QString m_imdbId;
     QString m_title;
     int m_year = 0;
@@ -377,7 +377,7 @@ private:
     QString m_metaError;
 
     // Streams config.
-    QList<api::Stream> m_rawStreams;
+    QList<domain::Stream> m_rawStreams;
     StreamsListModel::SortMode m_sortMode
         = StreamsListModel::SortMode::Smart;
     bool m_sortDescending = true;

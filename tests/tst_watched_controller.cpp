@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
 #include "controllers/WatchedController.h"
-#include "core/Database.h"
-#include "core/HistoryStore.h"
-#include "core/WatchedStore.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/HistoryStore.h"
+#include "core/persistence/WatchedStore.h"
 
 #include <KSharedConfig>
 
@@ -21,10 +21,10 @@ using namespace kinema;
 
 namespace {
 
-api::HistoryEntry makeFinishedMovieEntry(const QString& imdb)
+domain::HistoryEntry makeFinishedMovieEntry(const QString& imdb)
 {
-    api::HistoryEntry e;
-    e.key.kind = api::MediaKind::Movie;
+    domain::HistoryEntry e;
+    e.key.kind = domain::MediaKind::Movie;
     e.key.imdbId = imdb;
     e.title = QStringLiteral("Movie ") + imdb;
     e.positionSec = 6000;
@@ -34,11 +34,11 @@ api::HistoryEntry makeFinishedMovieEntry(const QString& imdb)
     return e;
 }
 
-api::HistoryEntry makeInProgressEpisodeEntry(const QString& imdb,
+domain::HistoryEntry makeInProgressEpisodeEntry(const QString& imdb,
     int season, int episode, double pos, double dur)
 {
-    api::HistoryEntry e;
-    e.key.kind = api::MediaKind::Series;
+    domain::HistoryEntry e;
+    e.key.kind = domain::MediaKind::Series;
     e.key.imdbId = imdb;
     e.key.season = season;
     e.key.episode = episode;
@@ -167,8 +167,8 @@ private Q_SLOTS:
         m_watchedCtrl->setMovieWatched(imdb, false);
         QVERIFY(!m_watchedCtrl->isMovieWatched(imdb));
 
-        api::PlaybackKey key;
-        key.kind = api::MediaKind::Movie;
+        domain::PlaybackKey key;
+        key.kind = domain::MediaKind::Movie;
         key.imdbId = imdb;
         m_watchedCtrl->clearOverride(key);
         QVERIFY(m_watchedCtrl->isMovieWatched(imdb));

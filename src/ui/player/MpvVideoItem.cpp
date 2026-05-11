@@ -6,7 +6,7 @@
 #include "ui/player/MpvVideoItem.h"
 
 #include "config/PlayerSettings.h"
-#include "core/MpvConfigPaths.h"
+#include "core/mpv/MpvConfigPaths.h"
 #include "kinema_log_player.h"
 #include "ui/player/MpvLoadCommand.h"
 

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -33,7 +33,7 @@ public:
         ReleasedTextRole,    ///< pre-formatted release date string
         IsUpcomingRole,
         ThumbnailUrlRole,    ///< QString
-        EpisodeRole,         ///< full api::Episode as QVariant
+        EpisodeRole,         ///< full domain::Episode as QVariant
         WatchedRole,
         ProgressRole,
     };
@@ -46,10 +46,10 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     /// Replace the row list. Pure mutator \u2014 no implicit filtering.
-    void setEpisodes(QList<api::Episode> rows);
+    void setEpisodes(QList<domain::Episode> rows);
     void setLibraryState(QList<bool> watched, QList<double> progress);
-    const QList<api::Episode>& episodes() const noexcept { return m_rows; }
-    const api::Episode* at(int row) const;
+    const QList<domain::Episode>& episodes() const noexcept { return m_rows; }
+    const domain::Episode* at(int row) const;
 
     /// Find the row index for the given (season, number) pair, or -1.
     int rowFor(int season, int episodeNumber) const;
@@ -58,7 +58,7 @@ Q_SIGNALS:
     void countChanged();
 
 private:
-    QList<api::Episode> m_rows;
+    QList<domain::Episode> m_rows;
     QList<bool> m_watched;
     QList<double> m_progress;
 };

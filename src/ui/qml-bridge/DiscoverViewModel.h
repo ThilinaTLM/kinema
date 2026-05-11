@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Discover.h"
-#include "api/Media.h"
+#include "domain/Discover.h"
+#include "domain/Media.h"
 
 #include <QList>
 #include <QObject>
@@ -64,7 +64,7 @@ public:
 
     /// Used by tests / `MainController` to feed the section list at
     /// construction without spinning a real TMDB client.
-    using Fetcher = std::function<QCoro::Task<QList<api::DiscoverItem>>()>;
+    using Fetcher = std::function<QCoro::Task<QList<domain::DiscoverItem>>()>;
     /// Each Discover rail carries a preset that maps it to a Browse
     /// query when the user clicks `Show all →`. The trending /
     /// popular / now-playing / on-the-air / top-rated endpoints
@@ -73,8 +73,8 @@ public:
     struct SectionSpec {
         QString title;
         Fetcher fetch;
-        api::MediaKind browseKind = api::MediaKind::Movie;
-        api::DiscoverSort browseSort = api::DiscoverSort::Popularity;
+        domain::MediaKind browseKind = domain::MediaKind::Movie;
+        domain::DiscoverSort browseSort = domain::DiscoverSort::Popularity;
     };
 
 public Q_SLOTS:
@@ -122,8 +122,8 @@ private:
 
     QList<DiscoverSectionModel*> m_sections;
     QList<Fetcher> m_fetchers;
-    QList<api::MediaKind> m_browseKinds;
-    QList<api::DiscoverSort> m_browseSorts;
+    QList<domain::MediaKind> m_browseKinds;
+    QList<domain::DiscoverSort> m_browseSorts;
     QList<quint64> m_epochs;
 
     bool m_tmdbConfigured = false;

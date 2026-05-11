@@ -44,8 +44,8 @@ public:
     QByteArray readRange(ByteRange range) const override;
     void touch() override;
 
-    api::DownloadMode mode() const override { return m_mode; }
-    void setMode(api::DownloadMode m) override { m_mode = m; }
+    domain::DownloadMode mode() const override { return m_mode; }
+    void setMode(domain::DownloadMode m) override { m_mode = m; }
 
     void pause() override;
     void resume() override;
@@ -61,7 +61,7 @@ private:
     QString m_fileName;
     qint64 m_fileSize;
     QString m_infoHash;
-    api::DownloadMode m_mode = api::DownloadMode::OnDemand;
+    domain::DownloadMode m_mode = domain::DownloadMode::OnDemand;
 };
 
 } // namespace kinema::download

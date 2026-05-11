@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "core/MpvChapterList.h"
-#include "core/MpvTrackList.h"
+#include "core/mpv/MpvChapterList.h"
+#include "core/mpv/MpvTrackList.h"
 
 #include <QByteArray>
 #include <QFile>

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 
 #include <QObject>
 #include <QString>
@@ -16,6 +16,7 @@ class HttpClient;
 }
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 /**
  * Client for Cinemeta — the metadata source used by Stremio and mirrored

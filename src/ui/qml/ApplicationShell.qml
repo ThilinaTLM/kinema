@@ -16,7 +16,7 @@ import dev.tlmtech.kinema.app
 //  * icon-only primary navigation with a bottom Settings action
 //  * application-wide keyboard shortcuts (Quit, Preferences,
 //    Find, Help, Esc-pop)
-//  * close-to-tray decision routed through `mainController`
+//  * close-to-tray decision routed through `shell`
 //  * passive notifications surfaced from the C++ side
 //
 // Real per-page content (Discover hero / sections, Search field,
@@ -50,35 +50,35 @@ Kirigami.ApplicationWindow {
     // We flip `close.accepted` to false when the controller has
     // taken responsibility for hiding the window itself.
     onClosing: function (close) {
-        if (!mainController.handleWindowCloseRequested()) {
+        if (!shell.handleWindowCloseRequested()) {
             close.accepted = false;
         }
     }
 
     // ---- application-level shortcuts -----------------------------------
     // Replaces the KStandardAction wiring in MainWindow. Each
-    // shortcut routes through `mainController` so the C++ side
+    // shortcut routes through `shell` so the C++ side
     // decides what "Settings" or "About" actually means at the
     // current phase (placeholder push now, real page in phase 06).
     Shortcut {
         sequences: [ StandardKey.Quit ]
         context: Qt.ApplicationShortcut
-        onActivated: mainController.requestQuit()
+        onActivated: shell.requestQuit()
     }
     Shortcut {
         sequences: [ StandardKey.Preferences ]
         context: Qt.ApplicationShortcut
-        onActivated: mainController.requestSettings()
+        onActivated: shell.requestSettings()
     }
     Shortcut {
         sequences: [ StandardKey.Find ]
         context: Qt.ApplicationShortcut
-        onActivated: mainController.requestFocusSearch()
+        onActivated: shell.requestFocusSearch()
     }
     Shortcut {
         sequence: "F1"
         context: Qt.ApplicationShortcut
-        onActivated: mainController.requestAbout()
+        onActivated: shell.requestAbout()
     }
     Shortcut {
         sequence: "Esc"
@@ -183,7 +183,7 @@ Kirigami.ApplicationWindow {
             display: drawer.collapsed
                 ? QQC2.AbstractButton.IconOnly
                 : QQC2.AbstractButton.TextBesideIcon
-            onClicked: mainController.requestSettings()
+            onClicked: shell.requestSettings()
 
             QQC2.ToolTip.text: text
             QQC2.ToolTip.visible: drawer.collapsed && hovered
@@ -276,7 +276,7 @@ Kirigami.ApplicationWindow {
             },
             // The About page lives inside the settings dialog — the modern
             // KDE6 convention. F1 still opens it via
-            // `mainController.requestAbout()` which routes here.
+            // `shell.requestAbout()` which routes here.
             KirigamiSettings.ConfigurationModule {
                 moduleId: "about"
                 text: i18nc("@title:tab settings page", "About Kinema")
@@ -286,7 +286,7 @@ Kirigami.ApplicationWindow {
                 page: () => Qt.createComponent(
                     "dev.tlmtech.kinema.app", "AboutSettingsPage")
                 initialProperties: () => ({
-                    aboutData: mainController.aboutData
+                    aboutData: shell.aboutData
                 })
             }
         ]
@@ -399,7 +399,7 @@ Kirigami.ApplicationWindow {
 
     // ---- C++-driven flows ----------------------------------------------
     Connections {
-        target: mainController
+        target: shell
 
         function onShowSettingsRequested(category) {
             // Open the addons ConfigurationView. Empty category lands on

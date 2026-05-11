@@ -6,9 +6,9 @@
 #include "api/AllDebridClient.h"
 #include "api/RealDebridClient.h"
 #include "config/DownloadSettings.h"
-#include "core/DownloadStore.h"
-#include "core/HttpClient.h"
-#include "core/MediaCache.h"
+#include "core/persistence/DownloadStore.h"
+#include "core/io/HttpClient.h"
+#include "core/persistence/MediaCache.h"
 #include "download/AssetSession.h"
 #include "download/BackendSelector.h"
 #include "download/DownloadBackend.h"
@@ -34,24 +34,24 @@ namespace kinema::download {
 
 namespace {
 
-const char* modeName(api::DownloadMode m)
+const char* modeName(domain::DownloadMode m)
 {
-    return m == api::DownloadMode::Full ? "Full" : "OnDemand";
+    return m == domain::DownloadMode::Full ? "Full" : "OnDemand";
 }
 
-const char* dispositionName(api::CacheDisposition d)
+const char* dispositionName(domain::CacheDisposition d)
 {
-    return d == api::CacheDisposition::Pinned ? "Pinned" : "Ephemeral";
+    return d == domain::CacheDisposition::Pinned ? "Pinned" : "Ephemeral";
 }
 
-const char* backendName(api::DownloadBackendKind k)
+const char* backendName(domain::DownloadBackendKind k)
 {
     switch (k) {
-    case api::DownloadBackendKind::RealDebridHttp:
+    case domain::DownloadBackendKind::RealDebridHttp:
         return "RealDebridHttp";
-    case api::DownloadBackendKind::AllDebridHttp:
+    case domain::DownloadBackendKind::AllDebridHttp:
         return "AllDebridHttp";
-    case api::DownloadBackendKind::Torrent:
+    case domain::DownloadBackendKind::Torrent:
         break;
     }
     return "Torrent";
@@ -116,23 +116,23 @@ DownloadManager::DownloadManager(core::HttpClient& http,
 
 DownloadManager::~DownloadManager() = default;
 
-void DownloadManager::setActiveDebridProvider(api::DebridProvider p)
+void DownloadManager::setActiveDebridProvider(domain::DebridProvider p)
 {
     if (m_selector) {
         m_selector->setActiveDebridProvider(p);
     }
 }
 
-api::DownloadItem DownloadManager::buildItem(const api::AssetRef& ref,
-    const api::Stream& s, const api::PlaybackContext& ctx,
-    api::DownloadBackendKind backend,
-    api::DownloadMode mode,
-    api::CacheDisposition disposition) const
+domain::DownloadItem DownloadManager::buildItem(const domain::AssetRef& ref,
+    const domain::Stream& s, const domain::PlaybackContext& ctx,
+    domain::DownloadBackendKind backend,
+    domain::DownloadMode mode,
+    domain::CacheDisposition disposition) const
 {
-    api::DownloadItem it;
-    it.assetId = api::assetIdFor(ref);
+    domain::DownloadItem it;
+    it.assetId = domain::assetIdFor(ref);
     it.backendKind = backend;
-    it.state = api::DownloadState::Resolving;
+    it.state = domain::DownloadState::Resolving;
     it.mode = mode;
     it.disposition = disposition;
     it.key = ctx.key;
@@ -152,17 +152,17 @@ api::DownloadItem DownloadManager::buildItem(const api::AssetRef& ref,
     return it;
 }
 
-std::optional<api::DownloadItem> DownloadManager::findForKey(
-    const api::PlaybackKey& key) const
+std::optional<domain::DownloadItem> DownloadManager::findForKey(
+    const domain::PlaybackKey& key) const
 {
     return m_store.findForKey(key);
 }
 
-QCoro::Task<QUrl> DownloadManager::prepareForPlayback(api::Stream stream,
-    api::PlaybackContext ctx,
-    std::optional<api::DownloadBackendKind> backendOverride)
+QCoro::Task<QUrl> DownloadManager::prepareForPlayback(domain::Stream stream,
+    domain::PlaybackContext ctx,
+    std::optional<domain::DownloadBackendKind> backendOverride)
 {
-    const auto ref = api::assetRefFor(stream, ctx);
+    const auto ref = domain::assetRefFor(stream, ctx);
     if (!ref.isValid()) {
         // Direct-URL-only candidate without an info hash. We still
         // play it via the player (no localhost server for it) so we
@@ -171,7 +171,7 @@ QCoro::Task<QUrl> DownloadManager::prepareForPlayback(api::Stream stream,
         throw std::runtime_error(i18nc("@info:status",
             "This stream has no playable info hash.").toStdString());
     }
-    const auto assetId = api::assetIdFor(ref);
+    const auto assetId = domain::assetIdFor(ref);
 
     // Preserve a previously persisted row's mode + disposition.
     // A second click on Play does not downgrade an existing Full
@@ -179,10 +179,10 @@ QCoro::Task<QUrl> DownloadManager::prepareForPlayback(api::Stream stream,
     const auto existing = m_store.find(assetId);
     const auto mode = existing
         ? existing->mode
-        : api::DownloadMode::OnDemand;
+        : domain::DownloadMode::OnDemand;
     const auto disposition = existing
         ? existing->disposition
-        : api::CacheDisposition::Ephemeral;
+        : domain::CacheDisposition::Ephemeral;
 
     qCInfo(KINEMA_DOWNLOAD).nospace()
         << "prepareForPlayback assetId=" << assetId
@@ -195,11 +195,11 @@ QCoro::Task<QUrl> DownloadManager::prepareForPlayback(api::Stream stream,
     co_return url;
 }
 
-void DownloadManager::enqueueDownload(api::Stream stream,
-    api::PlaybackContext ctx,
-    std::optional<api::DownloadBackendKind> backendOverride)
+void DownloadManager::enqueueDownload(domain::Stream stream,
+    domain::PlaybackContext ctx,
+    std::optional<domain::DownloadBackendKind> backendOverride)
 {
-    const auto ref = api::assetRefFor(stream, ctx);
+    const auto ref = domain::assetRefFor(stream, ctx);
     if (!ref.isValid()) {
         Q_EMIT statusMessage(i18nc("@info:status",
             "Cannot download: stream has no playable info hash."), 5000);
@@ -207,7 +207,7 @@ void DownloadManager::enqueueDownload(api::Stream stream,
             << "enqueueDownload rejected: invalid AssetRef (no info hash)";
         return;
     }
-    const auto assetId = api::assetIdFor(ref);
+    const auto assetId = domain::assetIdFor(ref);
 
     // Already-active session: upgrade in place rather than spawning
     // a duplicate.
@@ -221,7 +221,7 @@ void DownloadManager::enqueueDownload(api::Stream stream,
         << " mode=Full disposition=Pinned";
 
     auto task = startBackground(ref, std::move(stream), std::move(ctx),
-        api::DownloadMode::Full, api::CacheDisposition::Pinned,
+        domain::DownloadMode::Full, domain::CacheDisposition::Pinned,
         backendOverride);
     Q_UNUSED(task);
 }
@@ -235,28 +235,28 @@ void DownloadManager::upgradeToFull(const QString& assetId)
         return;
     }
     auto& session = *sit->second;
-    if (session.mode() == api::DownloadMode::Full) {
+    if (session.mode() == domain::DownloadMode::Full) {
         // Still ensure pin marker is set in case the user pinned
         // by hand earlier and we lost track.
         m_cache.setPinned(assetId, true);
-        m_store.setDisposition(assetId, api::CacheDisposition::Pinned);
+        m_store.setDisposition(assetId, domain::CacheDisposition::Pinned);
         return;
     }
 
     auto* backend = m_selector->find(
         m_store.find(assetId)
             ? m_store.find(assetId)->backendKind
-            : api::DownloadBackendKind::Torrent);
+            : domain::DownloadBackendKind::Torrent);
     if (!backend) {
         qCWarning(KINEMA_DOWNLOAD)
             << "upgradeToFull: no backend registered for" << assetId;
         return;
     }
-    backend->changeMode(session, api::DownloadMode::Full);
+    backend->changeMode(session, domain::DownloadMode::Full);
 
-    m_store.updateMode(assetId, api::DownloadMode::Full);
+    m_store.updateMode(assetId, domain::DownloadMode::Full);
     m_cache.setPinned(assetId, true);
-    m_store.setDisposition(assetId, api::CacheDisposition::Pinned);
+    m_store.setDisposition(assetId, domain::CacheDisposition::Pinned);
     Q_EMIT itemChanged(assetId);
 
     qCInfo(KINEMA_DOWNLOAD).nospace()
@@ -277,8 +277,8 @@ void DownloadManager::attachPlayer(const QString& assetId)
     // a consumer reattaches. Full rows ignore the flag because they
     // never sit at Idle.
     if (auto row = m_store.find(assetId);
-        row && row->state == api::DownloadState::Idle) {
-        m_store.updateState(assetId, api::DownloadState::Active);
+        row && row->state == domain::DownloadState::Idle) {
+        m_store.updateState(assetId, domain::DownloadState::Active);
     }
     Q_EMIT itemChanged(assetId);
 }
@@ -292,14 +292,14 @@ void DownloadManager::detachPlayer(const QString& assetId)
         return;
     }
     if (auto row = m_store.find(assetId)) {
-        if (row->mode == api::DownloadMode::OnDemand
-            && row->state == api::DownloadState::Active) {
+        if (row->mode == domain::DownloadMode::OnDemand
+            && row->state == domain::DownloadState::Active) {
             // Park at Idle so the UI can show that we're alive but
             // not currently fetching for a consumer. The torrent
             // engine's own idle-stop timer will eventually quiesce
             // the libtorrent handle (governed by
             // TorrentStreamingSettings::idleStopMinutes).
-            m_store.updateState(assetId, api::DownloadState::Idle);
+            m_store.updateState(assetId, domain::DownloadState::Idle);
         }
     }
     Q_EMIT itemChanged(assetId);
@@ -311,7 +311,7 @@ void DownloadManager::pause(const QString& assetId)
     if (sit != m_sessions.end()) {
         sit->second->pause();
     }
-    m_store.updateState(assetId, api::DownloadState::Paused);
+    m_store.updateState(assetId, domain::DownloadState::Paused);
     Q_EMIT itemChanged(assetId);
     qCInfo(KINEMA_DOWNLOAD) << "pause assetId=" << assetId;
 }
@@ -321,7 +321,7 @@ void DownloadManager::resume(const QString& assetId)
     auto sit = m_sessions.find(assetId);
     if (sit != m_sessions.end()) {
         sit->second->resume();
-        m_store.updateState(assetId, api::DownloadState::Active);
+        m_store.updateState(assetId, domain::DownloadState::Active);
     } else {
         // No live session — kick a retry.
         retry(assetId);
@@ -333,8 +333,8 @@ void DownloadManager::resume(const QString& assetId)
 
 void DownloadManager::resumePersisted()
 {
-    using S = api::DownloadState;
-    using M = api::DownloadMode;
+    using S = domain::DownloadState;
+    using M = domain::DownloadMode;
 
     int resumed = 0;
     for (const auto& row : m_store.loadAll()) {
@@ -394,12 +394,12 @@ QCoro::Task<AssetSession*> DownloadManager::ensureSessionForAssetId(
     co_return it == m_sessions.end() ? nullptr : it->second.get();
 }
 
-QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
-    api::Stream stream, api::PlaybackContext ctx,
-    api::DownloadMode mode, api::CacheDisposition disposition,
-    std::optional<api::DownloadBackendKind> backendOverride)
+QCoro::Task<QUrl> DownloadManager::openSession(domain::AssetRef ref,
+    domain::Stream stream, domain::PlaybackContext ctx,
+    domain::DownloadMode mode, domain::CacheDisposition disposition,
+    std::optional<domain::DownloadBackendKind> backendOverride)
 {
-    const auto assetId = api::assetIdFor(ref);
+    const auto assetId = domain::assetIdFor(ref);
 
     // Reuse an active session if one exists for this exact asset.
     if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
@@ -435,10 +435,10 @@ QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
             m_liveStats.erase(otherAssetId);
             m_attachedPlayers.remove(otherAssetId);
             if (const auto row = m_store.find(otherAssetId);
-                row && row->mode == api::DownloadMode::OnDemand
-                && row->state == api::DownloadState::Active) {
+                row && row->mode == domain::DownloadMode::OnDemand
+                && row->state == domain::DownloadState::Active) {
                 m_store.updateState(otherAssetId,
-                    api::DownloadState::Idle);
+                    domain::DownloadState::Idle);
                 Q_EMIT itemChanged(otherAssetId);
             }
             m_cache.markInactive(otherAssetId);
@@ -474,11 +474,11 @@ QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
         auto item = buildItem(ref, stream, ctx, backend->kind(), mode,
             disposition);
         m_store.upsert(item);
-        if (disposition == api::CacheDisposition::Pinned) {
+        if (disposition == domain::CacheDisposition::Pinned) {
             m_cache.setPinned(assetId, true);
         }
 
-        Q_EMIT statusMessage(mode == api::DownloadMode::Full
+        Q_EMIT statusMessage(mode == domain::DownloadMode::Full
                 ? i18nc("@info:status", "Starting download\u2026")
                 : i18nc("@info:status", "Buffering stream\u2026"),
             0);
@@ -489,7 +489,7 @@ QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
         m_server->registerSession(raw);
         m_sessions.emplace(assetId, std::move(session));
 
-        item.state = api::DownloadState::Active;
+        item.state = domain::DownloadState::Active;
         item.expectedSizeBytes = raw->fileSize() > 0
             ? std::optional<qint64>(raw->fileSize())
             : item.expectedSizeBytes;
@@ -507,7 +507,7 @@ QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
             const qint64 expected = raw->fileSize();
             if (expected > 0 && initialCached >= expected) {
                 item.complete = true;
-                item.state = api::DownloadState::Completed;
+                item.state = domain::DownloadState::Completed;
             }
         }
         m_store.upsert(item);
@@ -522,18 +522,18 @@ QCoro::Task<QUrl> DownloadManager::openSession(api::AssetRef ref,
     }
 }
 
-QCoro::Task<void> DownloadManager::startBackground(api::AssetRef ref,
-    api::Stream stream, api::PlaybackContext ctx,
-    api::DownloadMode mode, api::CacheDisposition disposition,
-    std::optional<api::DownloadBackendKind> backendOverride)
+QCoro::Task<void> DownloadManager::startBackground(domain::AssetRef ref,
+    domain::Stream stream, domain::PlaybackContext ctx,
+    domain::DownloadMode mode, domain::CacheDisposition disposition,
+    std::optional<domain::DownloadBackendKind> backendOverride)
 {
-    const auto assetId = api::assetIdFor(ref);
+    const auto assetId = domain::assetIdFor(ref);
     try {
         co_await openSession(std::move(ref), std::move(stream),
             std::move(ctx), mode, disposition, backendOverride);
     } catch (const std::exception& e) {
         const auto reason = QString::fromUtf8(e.what());
-        m_store.updateState(assetId, api::DownloadState::Failed, reason);
+        m_store.updateState(assetId, domain::DownloadState::Failed, reason);
         Q_EMIT itemChanged(assetId);
         qCWarning(KINEMA_DOWNLOAD).nospace()
             << "startBackground failed assetId=" << assetId
@@ -550,13 +550,13 @@ void DownloadManager::installProgressBindings(AssetSession* raw,
             // we see real bytes flowing.
             const auto found = m_store.find(assetId);
             const bool wasIdle = found
-                && (found->state == api::DownloadState::Queued
-                    || found->state == api::DownloadState::Resolving
-                    || found->state == api::DownloadState::Idle);
+                && (found->state == domain::DownloadState::Queued
+                    || found->state == domain::DownloadState::Resolving
+                    || found->state == domain::DownloadState::Idle);
             m_store.updateProgress(assetId, bytes, false);
             if (wasIdle) {
                 m_store.updateState(assetId,
-                    api::DownloadState::Active);
+                    domain::DownloadState::Active);
             }
             Q_EMIT itemChanged(assetId);
         });
@@ -564,7 +564,7 @@ void DownloadManager::installProgressBindings(AssetSession* raw,
         const auto found = m_store.find(assetId);
         m_store.updateProgress(assetId,
             found ? found->expectedSizeBytes.value_or(0) : 0, true);
-        m_store.updateState(assetId, api::DownloadState::Completed);
+        m_store.updateState(assetId, domain::DownloadState::Completed);
         m_liveStats.erase(assetId);
         Q_EMIT itemChanged(assetId);
         qCInfo(KINEMA_DOWNLOAD).nospace()
@@ -572,7 +572,7 @@ void DownloadManager::installProgressBindings(AssetSession* raw,
     });
     connect(raw, &AssetSession::failed, this,
         [this, assetId](const QString& reason) {
-            m_store.updateState(assetId, api::DownloadState::Failed,
+            m_store.updateState(assetId, domain::DownloadState::Failed,
                 reason);
             m_liveStats.erase(assetId);
             Q_EMIT itemChanged(assetId);
@@ -605,8 +605,8 @@ void DownloadManager::pin(const QString& assetId, bool on)
 {
     m_cache.setPinned(assetId, on);
     m_store.setDisposition(assetId,
-        on ? api::CacheDisposition::Pinned
-           : api::CacheDisposition::Ephemeral);
+        on ? domain::CacheDisposition::Pinned
+           : domain::CacheDisposition::Ephemeral);
     // Mirror the pin onto the live torrent session so the engine's
     // idle-stop respects "Save offline" intent. Other backends are
     // no-ops here.
@@ -633,7 +633,7 @@ void DownloadManager::cancel(const QString& assetId)
     m_liveStats.erase(assetId);
     m_attachedPlayers.remove(assetId);
     m_cache.markInactive(assetId);
-    m_store.updateState(assetId, api::DownloadState::Cancelled);
+    m_store.updateState(assetId, domain::DownloadState::Cancelled);
     Q_EMIT itemChanged(assetId);
 }
 
@@ -672,7 +672,7 @@ void DownloadManager::retry(const QString& assetId)
         << " backend=" << backendName(found->backendKind)
         << " mode=" << modeName(found->mode);
 
-    m_store.updateState(assetId, api::DownloadState::Queued);
+    m_store.updateState(assetId, domain::DownloadState::Queued);
     Q_EMIT itemChanged(assetId);
 
     // Drop any half-broken session before restarting.

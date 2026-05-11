@@ -31,7 +31,7 @@ QString StreamsListModel::formatSize(std::optional<qint64> bytes)
         *bytes, 2, QLocale::DataSizeIecFormat);
 }
 
-QStringList StreamsListModel::chipsFor(const api::Stream& s)
+QStringList StreamsListModel::chipsFor(const domain::Stream& s)
 {
     QStringList chips;
     if (!s.resolution.isEmpty() && s.resolution != QLatin1String("\u2014")) {
@@ -43,7 +43,7 @@ QStringList StreamsListModel::chipsFor(const api::Stream& s)
     return chips;
 }
 
-QStringList StreamsListModel::tagsFor(const api::Stream& s,
+QStringList StreamsListModel::tagsFor(const domain::Stream& s,
     const core::stream_tokens::Tokens& t)
 {
     Q_UNUSED(s);
@@ -63,7 +63,7 @@ QStringList StreamsListModel::tagsFor(const api::Stream& s,
     return tags;
 }
 
-QString StreamsListModel::summaryLineFor(const api::Stream& s,
+QString StreamsListModel::summaryLineFor(const domain::Stream& s,
     const core::stream_tokens::Tokens& t)
 {
     Q_UNUSED(s);
@@ -252,7 +252,7 @@ void StreamsListModel::setLoading()
     resetState(State::Loading);
 }
 
-void StreamsListModel::setItems(QList<api::Stream> visible,
+void StreamsListModel::setItems(QList<domain::Stream> visible,
     const QString& emptyExplanation)
 {
     beginResetModel();
@@ -294,7 +294,7 @@ void StreamsListModel::setUnreleased(const QDate& date)
     resetState(State::Unreleased);
 }
 
-const api::Stream* StreamsListModel::at(int row) const
+const domain::Stream* StreamsListModel::at(int row) const
 {
     if (row < 0 || row >= m_items.size()) {
         return nullptr;

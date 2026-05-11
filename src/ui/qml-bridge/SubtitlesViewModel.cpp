@@ -5,7 +5,7 @@
 
 #include "config/SubtitleSettings.h"
 #include "controllers/SubtitleController.h"
-#include "core/Language.h"
+#include "core/util/Language.h"
 #include "ui/qml-bridge/SubtitleResultsModel.h"
 
 #include <KLocalizedString>
@@ -106,7 +106,7 @@ QString SubtitlesViewModel::errorText() const
     return m_controller ? m_controller->lastError() : QString {};
 }
 
-void SubtitlesViewModel::setMedia(const api::PlaybackContext& ctx)
+void SubtitlesViewModel::setMedia(const domain::PlaybackContext& ctx)
 {
     m_context = ctx;
     m_contextTitle = formatContextTitle(ctx);
@@ -449,13 +449,13 @@ void SubtitlesViewModel::refreshModelFlags()
 }
 
 QString SubtitlesViewModel::formatContextTitle(
-    const api::PlaybackContext& ctx) const
+    const domain::PlaybackContext& ctx) const
 {
     QString base = ctx.title.isEmpty()
         ? i18nc("@title placeholder when media has no display title",
               "Selected media")
         : ctx.title;
-    if (ctx.key.kind == api::MediaKind::Series
+    if (ctx.key.kind == domain::MediaKind::Series
         && ctx.key.season.has_value()
         && ctx.key.episode.has_value()) {
         const QString tag = QStringLiteral("S%1E%2")

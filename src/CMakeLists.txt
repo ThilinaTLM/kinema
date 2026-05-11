@@ -14,8 +14,6 @@ set(kinema_core_SRCS
     config/FilterSettings.cpp
     config/LibrarySettings.cpp
     config/PlayerSettings.cpp
-    api/Debrid.cpp
-    api/Indexer.cpp
     api/IndexerSelector.cpp
     config/DebridSettings.cpp
     config/IndexerSettings.cpp
@@ -25,36 +23,39 @@ set(kinema_core_SRCS
     config/TorrentioSettings.cpp
     config/TorrentStreamingSettings.cpp
 
-    core/CachePaths.cpp
-    core/Database.cpp
-    core/DateFormat.cpp
-    core/DownloadStore.cpp
-    core/MediaCache.cpp
-    core/DateWindow.cpp
-    core/HistoryStore.cpp
-    core/HttpClient.cpp
-    core/LibraryStore.cpp
-    core/WatchedStore.cpp
-    core/HttpErrorPresenter.cpp
-    core/IdleInhibitor.cpp
-    core/Language.cpp
-    core/Logging.cpp
-    core/Magnet.cpp
-    core/MediaChips.cpp
-    core/Moviehash.cpp
-    core/MprisMetadata.cpp
-    core/MpvChapterList.cpp
-    core/MpvConfigPaths.cpp
-    core/MpvTrackList.cpp
-    core/Player.cpp
-    core/PlayerLauncher.cpp
-    core/StreamFilter.cpp
-    core/StreamTokens.cpp
-    core/SubtitleCacheStore.cpp
-    core/TokenStore.cpp
-    core/TorrentCache.cpp
-    core/TorrentioConfig.cpp
-    core/UrlRedactor.cpp
+    core/persistence/Database.cpp
+    core/persistence/DownloadStore.cpp
+    core/persistence/HistoryStore.cpp
+    core/persistence/LibraryStore.cpp
+    core/persistence/MediaCache.cpp
+    core/persistence/SubtitleCacheStore.cpp
+    core/persistence/TokenStore.cpp
+    core/persistence/TorrentCache.cpp
+    core/persistence/WatchedStore.cpp
+
+    core/mpv/MprisMetadata.cpp
+    core/mpv/MpvChapterList.cpp
+    core/mpv/MpvConfigPaths.cpp
+    core/mpv/MpvTrackList.cpp
+    core/mpv/Player.cpp
+    core/mpv/PlayerLauncher.cpp
+
+    core/io/CachePaths.cpp
+    core/io/HttpClient.cpp
+    core/io/HttpErrorPresenter.cpp
+    core/io/IdleInhibitor.cpp
+    core/io/Logging.cpp
+    core/io/UrlRedactor.cpp
+
+    core/util/DateFormat.cpp
+    core/util/DateWindow.cpp
+    core/util/Language.cpp
+    core/util/Magnet.cpp
+    core/util/MediaChips.cpp
+    core/util/Moviehash.cpp
+    core/util/StreamFilter.cpp
+    core/util/StreamTokens.cpp
+    core/util/TorrentioConfig.cpp
 
     torrent/LocalStreamServer.cpp
     torrent/MediaFileSelector.cpp
@@ -78,10 +79,8 @@ set(kinema_core_SRCS
     api/AllDebridParse.cpp
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp
-    api/Download.cpp
     api/OpenSubtitlesClient.cpp
     api/OpenSubtitlesParse.cpp
-    api/PlaybackContext.cpp
     api/RealDebridClient.cpp
     api/RealDebridParse.cpp
     api/PeerflixIndexer.cpp
@@ -91,9 +90,15 @@ set(kinema_core_SRCS
     api/TmdbParse.cpp
     api/TorrentioIndexer.cpp
 
+    domain/Debrid.cpp
+    domain/Download.cpp
+    domain/Indexer.cpp
+    domain/PlaybackContext.cpp
+
     ui/ImageLoader.cpp
 
     app/KinemaApplication.cpp
+    app/ServiceContainer.cpp
 
     controllers/DownloadController.cpp
     controllers/HistoryController.cpp
@@ -117,12 +122,25 @@ set(kinema_core_SRCS
     ui/qml-bridge/LibraryListModel.cpp
     ui/qml-bridge/LibraryRailModel.cpp
     ui/qml-bridge/LibraryViewModel.cpp
-    ui/qml-bridge/MainController.cpp
     ui/qml-bridge/MovieDetailViewModel.cpp
+    ui/qml-bridge/QmlContext.cpp
+    ui/qml-bridge/ShellViewModel.cpp
     ui/qml-bridge/ResultsListModel.cpp
     ui/qml-bridge/SearchViewModel.cpp
     ui/qml-bridge/SeriesDetailViewModel.cpp
-    ui/qml-bridge/SettingsViewModels.cpp
+    ui/qml-bridge/settings/AllDebridSectionViewModel.cpp
+    ui/qml-bridge/settings/DebridSettingsViewModel.cpp
+    ui/qml-bridge/settings/GeneralSettingsViewModel.cpp
+    ui/qml-bridge/settings/IndexerSettingsViewModel.cpp
+    ui/qml-bridge/settings/PeerflixSectionViewModel.cpp
+    ui/qml-bridge/settings/PlayerSettingsViewModel.cpp
+    ui/qml-bridge/settings/RealDebridSectionViewModel.cpp
+    ui/qml-bridge/settings/SettingsRootViewModel.cpp
+    ui/qml-bridge/settings/StreamsSettingsViewModel.cpp
+    ui/qml-bridge/settings/SubtitlesSettingsViewModel.cpp
+    ui/qml-bridge/settings/TmdbSettingsViewModel.cpp
+    ui/qml-bridge/settings/TorrentStreamingSettingsViewModel.cpp
+    ui/qml-bridge/settings/TorrentioSectionViewModel.cpp
     ui/qml-bridge/StreamSorting.cpp
     ui/qml-bridge/StreamsListModel.cpp
     ui/qml-bridge/SubtitleResultsModel.cpp
@@ -165,7 +183,7 @@ ecm_qt_declare_logging_category(kinema_core_SRCS
     IDENTIFIER KINEMA_APP
     CATEGORY_NAME kinema.app
     DEFAULT_SEVERITY Info
-    DESCRIPTION "Kinema (app shell, MainController, KinemaApplication)"
+    DESCRIPTION "Kinema (app shell, ShellViewModel, KinemaApplication)"
     EXPORT KINEMA
 )
 ecm_qt_declare_logging_category(kinema_core_SRCS
@@ -281,9 +299,10 @@ target_link_libraries(kinema_core
 # player module on `kinema_core`: `qt_add_qml_module` permits only
 # one module per target. C++ types this module needs (the engine-
 # side `KinemaImageProvider` and the `mainController` context-
-# property `MainController`) live in `kinema_core` and are exposed
-# via context properties — so this module is QML-only and depends
-# on `kinema_core` for the engine-side wiring done from `main.cpp`.
+# property `shell` of type `ShellViewModel`) live in `kinema_core`
+# and are exposed via context properties — so this module is QML-
+# only and depends on `kinema_core` for the engine-side wiring done
+# from `main.cpp` via `installQmlContext()`.
 #
 # `Theme.qml` is a QML singleton — the property must be set on the
 # source before `qt_add_qml_module()` so the generated qmldir picks

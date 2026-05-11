@@ -6,7 +6,7 @@
 #include "TestDoubles.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
-#include "core/TorrentioConfig.h"
+#include "core/util/TorrentioConfig.h"
 
 #include <KConfig>
 #include <KConfigGroup>
@@ -50,7 +50,7 @@ private Q_SLOTS:
 
         api::TorrentioIndexer indexer(&http, settings, filter);
 
-        (void)QCoro::waitFor(indexer.streams(api::MediaKind::Movie,
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
             QStringLiteral("tt0133093")));
 
         QCOMPARE(http.calls.size(), 1);
@@ -75,7 +75,7 @@ private Q_SLOTS:
 
         api::TorrentioIndexer indexer(&http, settings, filter);
 
-        (void)QCoro::waitFor(indexer.streams(api::MediaKind::Series,
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Series,
             QStringLiteral("tt0903747:1:1")));
 
         QCOMPARE(http.calls.size(), 1);
@@ -96,7 +96,7 @@ private Q_SLOTS:
 
         api::TorrentioIndexer indexer(&http, settings, filter);
 
-        (void)QCoro::waitFor(indexer.streams(api::MediaKind::Movie,
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
             QStringLiteral("tt0133093")));
 
         QCOMPARE(http.calls.first().url.host(),
@@ -109,7 +109,7 @@ private Q_SLOTS:
         config::FilterSettings filter(m_config);
         tests::FakeHttpClient http;
         api::TorrentioIndexer indexer(&http, settings, filter);
-        QCOMPARE(indexer.kind(), api::IndexerKind::Torrentio);
+        QCOMPARE(indexer.kind(), domain::IndexerKind::Torrentio);
         QCOMPARE(indexer.displayName(), QStringLiteral("Torrentio"));
     }
 };

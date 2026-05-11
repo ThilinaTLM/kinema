@@ -4,9 +4,10 @@
 #include "api/CinemetaClient.h"
 
 #include "api/CinemetaParse.h"
-#include "core/HttpClient.h"
+#include "core/io/HttpClient.h"
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 CinemetaClient::CinemetaClient(core::HttpClient* http, QObject* parent)
     : QObject(parent)

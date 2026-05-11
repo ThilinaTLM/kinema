@@ -3,13 +3,13 @@
 
 #include "ui/qml-bridge/SubtitleResultsModel.h"
 
-#include "api/Subtitle.h"
+#include "domain/Subtitle.h"
 
 #include <QSet>
 #include <QSignalSpy>
 #include <QtTest>
 
-using kinema::api::SubtitleHit;
+using kinema::domain::SubtitleHit;
 using kinema::ui::qml::SubtitleResultsModel;
 
 namespace {

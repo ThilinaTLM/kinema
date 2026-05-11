@@ -47,21 +47,21 @@ public:
         const config::DownloadSettings& settings);
     ~RealDebridBackend() override;
 
-    api::DownloadBackendKind kind() const noexcept override
+    domain::DownloadBackendKind kind() const noexcept override
     {
-        return api::DownloadBackendKind::RealDebridHttp;
+        return domain::DownloadBackendKind::RealDebridHttp;
     }
 
-    bool canHandle(const api::Stream& s) const override;
+    bool canHandle(const domain::Stream& s) const override;
 
     QCoro::Task<std::unique_ptr<AssetSession>> open(
-        const api::AssetRef& ref,
-        const api::Stream& s,
-        const api::PlaybackContext& ctx,
-        api::DownloadMode mode) override;
+        const domain::AssetRef& ref,
+        const domain::Stream& s,
+        const domain::PlaybackContext& ctx,
+        domain::DownloadMode mode) override;
 
     void changeMode(AssetSession& session,
-        api::DownloadMode newMode) override;
+        domain::DownloadMode newMode) override;
 
 private:
     core::HttpClient& m_http;

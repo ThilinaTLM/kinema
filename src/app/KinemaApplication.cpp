@@ -4,7 +4,7 @@
 #include "app/KinemaApplication.h"
 
 #include "config/AppSettings.h"
-#include "core/Logging.h"
+#include "core/io/Logging.h"
 
 #include <KAboutData>
 #include <KLocalizedString>

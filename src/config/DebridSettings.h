@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Debrid.h"
+#include "domain/Debrid.h"
 
 #include <KSharedConfig>
 
@@ -36,8 +36,8 @@ public:
     explicit DebridSettings(KSharedConfigPtr config,
         QObject* parent = nullptr);
 
-    api::DebridProvider activeProvider() const;
-    void setActiveProvider(api::DebridProvider p);
+    domain::DebridProvider activeProvider() const;
+    void setActiveProvider(domain::DebridProvider p);
 
     bool realDebridConfigured() const;
     void setRealDebridConfigured(bool);
@@ -46,7 +46,7 @@ public:
     void setAllDebridConfigured(bool);
 
 Q_SIGNALS:
-    void activeProviderChanged(api::DebridProvider);
+    void activeProviderChanged(domain::DebridProvider);
     void realDebridConfiguredChanged(bool);
     void allDebridConfiguredChanged(bool);
 

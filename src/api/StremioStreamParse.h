@@ -3,11 +3,12 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 
 #include <QJsonDocument>
 
 namespace kinema::api::stremio {
+using namespace kinema::domain;
 
 /**
  * Parse a Stremio addon `/stream/{kind}/{id}.json` response body.

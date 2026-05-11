@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Download.h"
+#include "domain/Download.h"
 
 #include <QMetaType>
 #include <QObject>
@@ -64,7 +64,7 @@ public:
     ~DebridResolver() override = default;
 
     /// Run the full pipeline. Throws on failure.
-    virtual QCoro::Task<ResolvedDebridLink> resolve(api::AssetRef ref) = 0;
+    virtual QCoro::Task<ResolvedDebridLink> resolve(domain::AssetRef ref) = 0;
 
     /// Best-effort cleanup of the provider-side torrent/magnet entry.
     /// Implementations swallow errors.

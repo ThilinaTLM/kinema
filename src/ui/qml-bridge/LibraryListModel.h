@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -16,7 +16,7 @@
 namespace kinema::ui::qml {
 
 struct LibraryListRow {
-    api::MediaKind kind = api::MediaKind::Movie;
+    domain::MediaKind kind = domain::MediaKind::Movie;
     QString imdbId;
     std::optional<int> season;
     std::optional<int> episode;
@@ -27,7 +27,7 @@ struct LibraryListRow {
     bool watched = false;
     bool upcoming = false;
     QString releaseDateText;
-    std::optional<api::HistoryEntry> resumeEntry;
+    std::optional<domain::HistoryEntry> resumeEntry;
     std::optional<double> rating;
     std::optional<int> runtimeMinutes;
 };

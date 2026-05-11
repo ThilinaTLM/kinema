@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "app/KinemaApplication.h"
-#include "ui/qml-bridge/MainController.h"
+#include "app/ServiceContainer.h"
+#include "ui/qml-bridge/QmlContext.h"
+#include "ui/qml-bridge/ShellViewModel.h"
 
 #include <KAboutData>
 
@@ -78,14 +80,20 @@ int main(int argc, char* argv[])
     // TypeErrors at shutdown (notably from the Downloads page).
     auto engine = std::make_unique<QQmlApplicationEngine>();
 
-    // Owns every long-lived service the app needs (HTTP, DB,
-    // tokens, history, subtitles, tray, embedded playback) and
-    // registers the `image://kinema/...` provider plus the
-    // `mainController` context property on the engine. Phase 02
-    // takes over composition entirely from the deleted
-    // `MainWindow`; phases 03+ add per-page view-models alongside.
-    kinema::ui::qml::MainController controller(
-        app.settings(), *engine, &app);
+    // Composition root: owns every long-lived service the app
+    // needs (HTTP, DB, tokens, history, subtitles, embedded
+    // playback). Constructed first so the shell can be built
+    // against it.
+    kinema::app::ServiceContainer services(app.settings());
+
+    // QML-facing shell view-model. Routes view-model signals to
+    // navigation/status, owns the tray controller, and (under
+    // `KINEMA_HAVE_LIBMPV`) the embedded player window. Exposed
+    // to QML as the `shell` context property by
+    // `installQmlContext()`.
+    kinema::ui::qml::ShellViewModel shell(services, &app);
+
+    kinema::ui::qml::installQmlContext(*engine, services, shell);
 
     engine->loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
         QStringLiteral("ApplicationShell"));
@@ -96,16 +104,16 @@ int main(int argc, char* argv[])
     auto* window
         = qobject_cast<QQuickWindow*>(engine->rootObjects().first());
     Q_ASSERT(window);
-    // Hand the live window over so the controller can wire the
-    // tray, embedded-player transient parenting, and the close
-    // handler against it.
-    controller.attachWindow(window);
+    // Hand the live window over so the shell can wire the tray,
+    // embedded-player transient parenting, and the close handler
+    // against it.
+    shell.attachWindow(window);
 
     const int rc = app.exec();
 
     // Drop the QML engine (and the window / page bindings it owns)
-    // before `controller`'s view models go out of scope at stack
-    // unwind. Avoids null-deref TypeErrors fired from bindings that
+    // before the shell + services go out of scope at stack unwind.
+    // Avoids null-deref TypeErrors fired from bindings that
     // re-evaluate during teardown.
     engine.reset();
     return rc;

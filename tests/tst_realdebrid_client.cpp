@@ -3,7 +3,7 @@
 
 #include "api/RealDebridClient.h"
 
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 #include "TestDoubles.h"
 
 #include <QTest>

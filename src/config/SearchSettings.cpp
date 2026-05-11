@@ -18,19 +18,19 @@ SearchSettings::SearchSettings(KSharedConfigPtr config, QObject* parent)
 {
 }
 
-api::MediaKind SearchSettings::kind() const
+domain::MediaKind SearchSettings::kind() const
 {
     const auto s = detail::read(m_config, kGroup, kKey,
         QStringLiteral("Movie"));
     return s == QLatin1String("Series")
-        ? api::MediaKind::Series
-        : api::MediaKind::Movie;
+        ? domain::MediaKind::Series
+        : domain::MediaKind::Movie;
 }
 
-void SearchSettings::setKind(api::MediaKind k)
+void SearchSettings::setKind(domain::MediaKind k)
 {
     detail::write(m_config, kGroup, kKey,
-        k == api::MediaKind::Series
+        k == domain::MediaKind::Series
             ? QStringLiteral("Series")
             : QStringLiteral("Movie"));
 }

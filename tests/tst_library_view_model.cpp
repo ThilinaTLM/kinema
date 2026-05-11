@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Library.h"
+#include "domain/Library.h"
 #include "config/AppSettings.h"
 #include "config/LibrarySettings.h"
 #include "controllers/LibraryController.h"
 #include "controllers/WatchedController.h"
-#include "core/Database.h"
-#include "core/LibraryStore.h"
-#include "core/WatchedStore.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/LibraryStore.h"
+#include "core/persistence/WatchedStore.h"
 #include "ui/qml-bridge/LibraryListModel.h"
 #include "ui/qml-bridge/LibraryRailModel.h"
 #include "ui/qml-bridge/LibraryViewModel.h"
@@ -27,13 +27,13 @@ using kinema::ui::qml::LibraryViewModel;
 
 namespace {
 
-api::LibraryTitle title(api::MediaKind kind, const QString& imdb,
+domain::LibraryTitle title(domain::MediaKind kind, const QString& imdb,
     const QString& name,
     std::optional<QDate> released = QDate(2020, 1, 1),
     QStringList genres = {},
     std::optional<double> rating = std::nullopt)
 {
-    api::LibraryTitle t;
+    domain::LibraryTitle t;
     t.kind = kind;
     t.imdbId = imdb;
     t.title = name;
@@ -44,10 +44,10 @@ api::LibraryTitle title(api::MediaKind kind, const QString& imdb,
     return t;
 }
 
-api::LibraryEpisode ep(const QString& imdb, int season, int number,
+domain::LibraryEpisode ep(const QString& imdb, int season, int number,
     std::optional<QDate> released, const QString& epTitle = {})
 {
-    api::LibraryEpisode e;
+    domain::LibraryEpisode e;
     e.seriesImdbId = imdb;
     e.season = season;
     e.episode = number;
@@ -133,9 +133,9 @@ private Q_SLOTS:
 
     void defaultsShowAllEntries()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("Movie One")));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Series,
             QStringLiteral("tt2"), QStringLiteral("Series Two")));
         drain();
         LibraryViewModel vm(m_library.get(), m_watched.get(), m_appSettings->library());
@@ -148,9 +148,9 @@ private Q_SLOTS:
 
     void kindFilterRestrictsToKind()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("Movie One")));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Series,
             QStringLiteral("tt2"), QStringLiteral("Series Two")));
         drain();
         LibraryViewModel vm(m_library.get(), m_watched.get(), m_appSettings->library());
@@ -173,10 +173,10 @@ private Q_SLOTS:
 
     void statusFilterUpcomingForMovie()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("Released"),
             QDate(2020, 1, 1)));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt2"), QStringLiteral("Future"),
             QDate::currentDate().addDays(20)));
         drain();
@@ -190,7 +190,7 @@ private Q_SLOTS:
     void statusFilterWatchedSeries()
     {
         const QString imdb = QStringLiteral("ttSeries");
-        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Series,
             imdb, QStringLiteral("Done Show")));
         m_libraryStore->upsertEpisodes(imdb, {
             ep(imdb, 1, 1, QDate(2020, 1, 1)),
@@ -206,9 +206,9 @@ private Q_SLOTS:
 
     void hideWatchedDropsWatchedEntries()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("Done")));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt2"), QStringLiteral("Pending")));
         m_watched->setMovieWatched(QStringLiteral("tt1"), true);
         drain();
@@ -221,13 +221,13 @@ private Q_SLOTS:
 
     void minRatingExcludesUnratedAndLowRated()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("High"),
             QDate(2020, 1, 1), {}, 8.5));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt2"), QStringLiteral("Low"),
             QDate(2020, 1, 1), {}, 5.0));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt3"), QStringLiteral("Unrated"),
             QDate(2020, 1, 1), {}, std::nullopt));
         drain();
@@ -240,11 +240,11 @@ private Q_SLOTS:
 
     void genreFilterMatchesAnyOf()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("SciFi"),
             QDate(2020, 1, 1),
             { QStringLiteral("Sci-Fi"), QStringLiteral("Drama") }));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt2"), QStringLiteral("Comedy"),
             QDate(2020, 1, 1), { QStringLiteral("Comedy") }));
         drain();
@@ -272,9 +272,9 @@ private Q_SLOTS:
 
     void sortByTitleIsLocaleAware()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt2"), QStringLiteral("Beta")));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("Alpha")));
         drain();
         LibraryViewModel vm(m_library.get(), m_watched.get(), m_appSettings->library());
@@ -286,13 +286,13 @@ private Q_SLOTS:
 
     void sortByRatingPushesUnratedDown()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("None"),
             QDate(2020, 1, 1), {}, std::nullopt));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt2"), QStringLiteral("Mid"),
             QDate(2020, 1, 1), {}, 6.5));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt3"), QStringLiteral("Top"),
             QDate(2020, 1, 1), {}, 9.0));
         drain();
@@ -309,7 +309,7 @@ private Q_SLOTS:
     void upNextRailIsPerSeriesNextEpisode()
     {
         const QString imdb = QStringLiteral("ttUpNext");
-        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Series,
             imdb, QStringLiteral("Saved Show")));
         m_libraryStore->upsertEpisodes(imdb, {
             ep(imdb, 1, 1, QDate(2020, 1, 1)),
@@ -328,7 +328,7 @@ private Q_SLOTS:
     void airingSoonRailUsesUpcomingHorizon()
     {
         const QString imdb = QStringLiteral("ttAiring");
-        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Series,
             imdb, QStringLiteral("Currently Airing")));
         m_libraryStore->upsertEpisodes(imdb, {
             ep(imdb, 1, 1, QDate(2020, 1, 1)),
@@ -343,7 +343,7 @@ private Q_SLOTS:
     void airingSoonRailExcludesFarFutureEpisodes()
     {
         const QString imdb = QStringLiteral("ttFar");
-        m_libraryStore->upsertTitle(title(api::MediaKind::Series,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Series,
             imdb, QStringLiteral("Far Off")));
         m_libraryStore->upsertEpisodes(imdb, {
             ep(imdb, 1, 1, QDate::currentDate().addDays(120)),
@@ -357,10 +357,10 @@ private Q_SLOTS:
     {
         // "Airing Soon" merges upcoming episodes (within ~30d)
         // and saved movies with a future release date.
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("Released"),
             QDate(2020, 1, 1)));
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt2"), QStringLiteral("Soon"),
             QDate::currentDate().addDays(30)));
         drain();
@@ -378,7 +378,7 @@ private Q_SLOTS:
         // test isn't sensitive to wall-clock granularity.
         const auto base = QDateTime::currentDateTimeUtc().addDays(-5);
         for (int i = 0; i < 25; ++i) {
-            api::LibraryTitle t = title(api::MediaKind::Movie,
+            domain::LibraryTitle t = title(domain::MediaKind::Movie,
                 QStringLiteral("tt%1").arg(i),
                 QStringLiteral("Title %1").arg(i, 2, 10,
                     QLatin1Char('0')));
@@ -409,7 +409,7 @@ private Q_SLOTS:
 
     void removeFromLibraryWipesOnlyLibraryRows()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("Movie")));
         m_watched->setMovieWatched(QStringLiteral("tt1"), true);
         drain();
@@ -426,7 +426,7 @@ private Q_SLOTS:
 
     void resetFiltersClearsEverything()
     {
-        m_libraryStore->upsertTitle(title(api::MediaKind::Movie,
+        m_libraryStore->upsertTitle(title(domain::MediaKind::Movie,
             QStringLiteral("tt1"), QStringLiteral("Anything")));
         drain();
         LibraryViewModel vm(m_library.get(), m_watched.get(), m_appSettings->library());

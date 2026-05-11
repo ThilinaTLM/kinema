@@ -13,21 +13,21 @@ namespace kinema::download {
 
 namespace {
 
-bool isDebridKind(api::DownloadBackendKind k) noexcept
+bool isDebridKind(domain::DownloadBackendKind k) noexcept
 {
-    return k == api::DownloadBackendKind::RealDebridHttp
-        || k == api::DownloadBackendKind::AllDebridHttp;
+    return k == domain::DownloadBackendKind::RealDebridHttp
+        || k == domain::DownloadBackendKind::AllDebridHttp;
 }
 
-bool matchesActiveDebrid(api::DownloadBackendKind k,
-    api::DebridProvider p) noexcept
+bool matchesActiveDebrid(domain::DownloadBackendKind k,
+    domain::DebridProvider p) noexcept
 {
     switch (p) {
-    case api::DebridProvider::RealDebrid:
-        return k == api::DownloadBackendKind::RealDebridHttp;
-    case api::DebridProvider::AllDebrid:
-        return k == api::DownloadBackendKind::AllDebridHttp;
-    case api::DebridProvider::None:
+    case domain::DebridProvider::RealDebrid:
+        return k == domain::DownloadBackendKind::RealDebridHttp;
+    case domain::DebridProvider::AllDebrid:
+        return k == domain::DownloadBackendKind::AllDebridHttp;
+    case domain::DebridProvider::None:
         break;
     }
     return false;
@@ -46,8 +46,8 @@ void BackendSelector::registerBackend(
     }
 }
 
-DownloadBackend* BackendSelector::select(const api::Stream& s,
-    std::optional<api::DownloadBackendKind> override) const
+DownloadBackend* BackendSelector::select(const domain::Stream& s,
+    std::optional<domain::DownloadBackendKind> override) const
 {
     if (override.has_value()) {
         auto* b = find(*override);
@@ -79,7 +79,7 @@ DownloadBackend* BackendSelector::select(const api::Stream& s,
     return nullptr;
 }
 
-DownloadBackend* BackendSelector::find(api::DownloadBackendKind kind) const
+DownloadBackend* BackendSelector::find(domain::DownloadBackendKind kind) const
 {
     for (const auto& b : m_backends) {
         if (b->kind() == kind) {

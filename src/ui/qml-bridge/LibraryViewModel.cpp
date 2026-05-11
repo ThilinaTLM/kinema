@@ -6,7 +6,7 @@
 #include "config/LibrarySettings.h"
 #include "controllers/LibraryController.h"
 #include "controllers/WatchedController.h"
-#include "core/DateFormat.h"
+#include "core/util/DateFormat.h"
 
 #include <KLocalizedString>
 
@@ -19,7 +19,7 @@ namespace kinema::ui::qml {
 
 namespace {
 
-QString posterString(const api::LibraryTitle& t)
+QString posterString(const domain::LibraryTitle& t)
 {
     return t.poster.isValid() ? t.poster.toString() : QString();
 }
@@ -29,7 +29,7 @@ QString posterString(const api::LibraryTitle& t)
 /// preferred fallback for episode cards whose own thumbnail is
 /// missing (typical for unaired Airing Soon entries) so the card
 /// stays at frame aspect instead of letterboxing a 2:3 poster.
-QString backdropString(const api::LibraryTitle& t)
+QString backdropString(const domain::LibraryTitle& t)
 {
     return t.backdrop.isValid() ? t.backdrop.toString() : QString();
 }
@@ -38,7 +38,7 @@ QString backdropString(const api::LibraryTitle& t)
 /// when the source didn't carry one. The QML side then walks
 /// `backdropUrl → posterUrl → fallback icon` so card heights
 /// stay uniform across the rail.
-QString thumbnailString(const api::LibraryEpisode& ep)
+QString thumbnailString(const domain::LibraryEpisode& ep)
 {
     return ep.thumbnail.isValid() ? ep.thumbnail.toString() : QString();
 }
@@ -228,7 +228,7 @@ void LibraryViewModel::activate(int row)
 {
     const auto* r = m_model->at(row);
     if (!r) return;
-    if (r->kind == api::MediaKind::Movie) {
+    if (r->kind == domain::MediaKind::Movie) {
         Q_EMIT openMovieRequested(r->imdbId, r->title);
         return;
     }
@@ -261,7 +261,7 @@ void LibraryViewModel::toggleWatched(int row)
 {
     const auto* r = m_model->at(row);
     if (!r || !m_watched) return;
-    if (r->kind == api::MediaKind::Movie) {
+    if (r->kind == domain::MediaKind::Movie) {
         const bool watched = m_watched->isMovieWatched(r->imdbId);
         m_watched->setMovieWatched(r->imdbId, !watched);
         return;
@@ -287,7 +287,7 @@ void LibraryViewModel::activateRail(const QString& railId, int row)
     if (!m) return;
     const auto* r = m->at(row);
     if (!r) return;
-    if (r->kind == api::MediaKind::Movie) {
+    if (r->kind == domain::MediaKind::Movie) {
         Q_EMIT openMovieRequested(r->imdbId, r->title);
         return;
     }
@@ -321,12 +321,12 @@ void LibraryViewModel::buildEntries()
         Entry e;
         e.title = t;
 
-        if (t.kind == api::MediaKind::Movie) {
+        if (t.kind == domain::MediaKind::Movie) {
             const bool watched = m_watched
                 && m_watched->isMovieWatched(t.imdbId);
             const auto resume = m_watched
                 ? m_watched->resumeEntryForMovie(t.imdbId)
-                : std::optional<api::HistoryEntry>{};
+                : std::optional<domain::HistoryEntry>{};
             const double progress = m_watched
                 ? m_watched->movieProgress(t.imdbId) : -1.0;
             e.resume = resume;
@@ -370,7 +370,7 @@ void LibraryViewModel::buildEntries()
             const auto resume = m_watched
                 ? m_watched->resumeEntryForEpisode(
                     t.imdbId, ep.season, ep.episode)
-                : std::optional<api::HistoryEntry>{};
+                : std::optional<domain::HistoryEntry>{};
             if (resume && (!e.resume
                     || resume->lastWatchedAt > e.resume->lastWatchedAt)) {
                 e.resume = resume;
@@ -473,10 +473,10 @@ void LibraryViewModel::rebuildRails()
         // ~30-day horizon) and saved movies with any future
         // release date. Sort is ascending by release date so a
         // single chronological strip surfaces what's next.
-        if (t.kind == api::MediaKind::Movie) {
+        if (t.kind == domain::MediaKind::Movie) {
             if (t.releaseDate && *t.releaseDate > today) {
                 LibraryRailRow row;
-                row.kind = api::MediaKind::Movie;
+                row.kind = domain::MediaKind::Movie;
                 row.imdbId = t.imdbId;
                 row.title = t.title;
                 row.posterUrl = posterString(t);
@@ -493,7 +493,7 @@ void LibraryViewModel::rebuildRails()
             && *e.firstUpcoming->releaseDate <= episodeHorizon) {
             const auto& ep = *e.firstUpcoming;
             LibraryRailRow row;
-            row.kind = api::MediaKind::Series;
+            row.kind = domain::MediaKind::Series;
             row.imdbId = t.imdbId;
             row.title = t.title;
             row.season = ep.season;
@@ -517,10 +517,10 @@ void LibraryViewModel::rebuildRails()
 
         // "Up Next" surfaces the next unwatched aired episode per
         // series only; movies don't have a meaningful "next".
-        if (t.kind == api::MediaKind::Series && e.nextToWatch) {
+        if (t.kind == domain::MediaKind::Series && e.nextToWatch) {
             const auto& ep = *e.nextToWatch;
             LibraryRailRow row;
-            row.kind = api::MediaKind::Series;
+            row.kind = domain::MediaKind::Series;
             row.imdbId = t.imdbId;
             row.title = t.title;
             row.season = ep.season;
@@ -608,10 +608,10 @@ void LibraryViewModel::rebuildRails()
 
 bool LibraryViewModel::entryMatchesFilters(const Entry& e) const
 {
-    if (m_kind == KindFilter::Movies && e.title.kind != api::MediaKind::Movie) {
+    if (m_kind == KindFilter::Movies && e.title.kind != domain::MediaKind::Movie) {
         return false;
     }
-    if (m_kind == KindFilter::Series && e.title.kind != api::MediaKind::Series) {
+    if (m_kind == KindFilter::Series && e.title.kind != domain::MediaKind::Series) {
         return false;
     }
 
@@ -673,7 +673,7 @@ LibraryListRow LibraryViewModel::toGridRow(const Entry& e) const
     case ResolvedStatus::Continue: {
         row.resumeEntry = e.resume;
         row.progress = e.resumeProgress;
-        if (e.title.kind == api::MediaKind::Movie) {
+        if (e.title.kind == domain::MediaKind::Movie) {
             row.subtitle = i18nc("@info library card subtitle",
                 "Resume from %1%",
                 qRound(qBound(0.0, e.resumeProgress, 1.0) * 100.0));
@@ -690,7 +690,7 @@ LibraryListRow LibraryViewModel::toGridRow(const Entry& e) const
         break;
     }
     case ResolvedStatus::ToWatch: {
-        if (e.title.kind == api::MediaKind::Movie) {
+        if (e.title.kind == domain::MediaKind::Movie) {
             row.subtitle = i18nc("@info library card subtitle", "To watch");
         } else if (e.nextToWatch) {
             row.season = e.nextToWatch->season;
@@ -709,7 +709,7 @@ LibraryListRow LibraryViewModel::toGridRow(const Entry& e) const
     }
     case ResolvedStatus::Watched: {
         row.watched = true;
-        if (e.title.kind == api::MediaKind::Movie) {
+        if (e.title.kind == domain::MediaKind::Movie) {
             row.subtitle = i18nc("@info library card subtitle", "Watched");
         } else {
             row.progress = e.totalAired > 0
@@ -724,7 +724,7 @@ LibraryListRow LibraryViewModel::toGridRow(const Entry& e) const
     }
     case ResolvedStatus::Upcoming: {
         row.upcoming = true;
-        if (e.title.kind == api::MediaKind::Movie) {
+        if (e.title.kind == domain::MediaKind::Movie) {
             row.subtitle = row.releaseDateText.isEmpty()
                 ? i18nc("@info library card subtitle", "Upcoming")
                 : i18nc("@info library card subtitle, release date",

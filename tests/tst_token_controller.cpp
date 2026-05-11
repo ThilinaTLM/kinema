@@ -6,7 +6,7 @@
 #include "api/TmdbClient.h"
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
-#include "core/TokenStore.h"
+#include "core/persistence/TokenStore.h"
 #include "TestDoubles.h"
 
 #include <KConfig>

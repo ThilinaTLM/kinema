@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
-#include "core/Database.h"
-#include "core/HistoryStore.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/HistoryStore.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 
@@ -17,10 +17,10 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using kinema::api::HistoryEntry;
-using kinema::api::HistoryStreamRef;
-using kinema::api::MediaKind;
-using kinema::api::PlaybackKey;
+using kinema::domain::HistoryEntry;
+using kinema::domain::HistoryStreamRef;
+using kinema::domain::MediaKind;
+using kinema::domain::PlaybackKey;
 using kinema::config::AppSettings;
 using kinema::controllers::HistoryController;
 using kinema::core::Database;

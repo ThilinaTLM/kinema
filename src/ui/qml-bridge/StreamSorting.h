@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 #include "ui/qml-bridge/StreamsListModel.h"
 
 #include <QList>
@@ -30,12 +30,12 @@ struct UiFilters {
 
 /// Drop rows that fail the transient UI filters. `rows` is consumed
 /// by move when none of the filters are active.
-QList<api::Stream> applyUiFilters(QList<api::Stream> rows,
+QList<domain::Stream> applyUiFilters(QList<domain::Stream> rows,
     const UiFilters& filters);
 
 /// Sort `rows` in place by `mode`. Stable. `Smart` ignores
 /// `descending` (it has a fixed shape: cached → resolution → seeders).
-void sortInPlace(QList<api::Stream>& rows,
+void sortInPlace(QList<domain::Stream>& rows,
     StreamsListModel::SortMode mode,
     bool descending);
 

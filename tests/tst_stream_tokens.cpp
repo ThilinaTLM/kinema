@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "core/StreamTokens.h"
+#include "core/util/StreamTokens.h"
 
 #include <QTest>
 
@@ -10,11 +10,11 @@ using namespace kinema::core::stream_tokens;
 
 namespace {
 
-api::Stream makeStream(const QString& releaseName,
+domain::Stream makeStream(const QString& releaseName,
     const QString& detailsText = {},
     const QString& qualityLabel = {})
 {
-    api::Stream s;
+    domain::Stream s;
     s.qualityLabel = qualityLabel;
     s.releaseName = releaseName;
     s.detailsText = detailsText;

@@ -6,7 +6,7 @@
 #include <QSignalSpy>
 #include <QTest>
 
-using kinema::api::Stream;
+using kinema::domain::Stream;
 using kinema::ui::qml::StreamsListModel;
 
 namespace {

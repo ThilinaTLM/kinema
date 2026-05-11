@@ -4,8 +4,8 @@
 #include "torrent/TorrentStreamingService.h"
 
 #include "config/TorrentStreamingSettings.h"
-#include "core/Magnet.h"
-#include "core/TorrentCache.h"
+#include "core/util/Magnet.h"
+#include "core/persistence/TorrentCache.h"
 #include "kinema_log_torrent.h"
 #include "torrent/LocalStreamServer.h"
 #include "torrent/MediaFileSelector.h"
@@ -116,8 +116,8 @@ QVector<TorrentFileEntry> torrentFileEntries(
 
 std::optional<SelectedMediaFile> requestedFileSelection(
     const QVector<TorrentFileEntry>& files,
-    const api::Stream& stream,
-    const api::PlaybackContext& ctx,
+    const domain::Stream& stream,
+    const domain::PlaybackContext& ctx,
     QString* error)
 {
     if (stream.fileIndex >= 0) {
@@ -211,7 +211,7 @@ struct TorrentStreamingService::Private {
         FilePieceLayout layout;
         QString filePath;
         QDateTime lastActivity = QDateTime::currentDateTimeUtc();
-        api::PlaybackKey key;
+        domain::PlaybackKey key;
         LiveStats lastStats;
         bool keepAlive = false;
     };
@@ -335,7 +335,7 @@ TorrentStreamingService::~TorrentStreamingService()
 }
 
 QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
-    const api::Stream& stream, const api::PlaybackContext& ctx,
+    const domain::Stream& stream, const domain::PlaybackContext& ctx,
     PrepareMode mode)
 {
     if (stream.infoHash.isEmpty()) {
@@ -509,8 +509,8 @@ QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
     co_return ps;
 }
 
-QCoro::Task<QUrl> TorrentStreamingService::prepare(const api::Stream& stream,
-    const api::PlaybackContext& ctx)
+QCoro::Task<QUrl> TorrentStreamingService::prepare(const domain::Stream& stream,
+    const domain::PlaybackContext& ctx)
 {
     if (!d->server.listen()) {
         throw runtimeError(i18nc("@info:status",
@@ -636,7 +636,7 @@ void TorrentStreamingService::stopInfoHash(const QString& infoHash)
     d->stopHash(infoHash, "explicit");
 }
 
-void TorrentStreamingService::stopForContext(const api::PlaybackContext& ctx)
+void TorrentStreamingService::stopForContext(const domain::PlaybackContext& ctx)
 {
     if (!ctx.streamRef.infoHash.isEmpty()) {
         stopInfoHash(ctx.streamRef.infoHash);

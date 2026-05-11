@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/TmdbDiscoverUrl.h"
-#include "api/Discover.h"
-#include "core/DateWindow.h"
+#include "domain/Discover.h"
+#include "core/util/DateWindow.h"
 
 #include <QDate>
 #include <QTest>
 #include <QUrlQuery>
 
 using namespace kinema::api;
+using namespace kinema::domain;
 using kinema::core::DateRange;
 using kinema::core::DateWindow;
 using kinema::core::dateRangeFor;

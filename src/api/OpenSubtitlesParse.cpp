@@ -3,7 +3,7 @@
 
 #include "api/OpenSubtitlesParse.h"
 
-#include "core/Language.h"
+#include "core/util/Language.h"
 
 #include <QFileInfo>
 #include <QJsonArray>
@@ -14,6 +14,7 @@
 #include <stdexcept>
 
 namespace kinema::api::opensubtitles {
+using namespace kinema::domain;
 
 namespace {
 

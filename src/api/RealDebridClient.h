@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/RealDebrid.h"
+#include "domain/RealDebrid.h"
 
 #include <QList>
 #include <QObject>
@@ -17,6 +17,7 @@ class HttpClient;
 }
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 /**
  * Client for the Real-Debrid REST v1 API.

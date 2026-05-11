@@ -4,10 +4,10 @@
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
 #include "controllers/WatchedController.h"
-#include "core/Database.h"
-#include "core/HistoryStore.h"
-#include "core/HttpError.h"
-#include "core/WatchedStore.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/HistoryStore.h"
+#include "core/io/HttpError.h"
+#include "core/persistence/WatchedStore.h"
 #include "services/StreamActions.h"
 #include "TestDoubles.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
@@ -23,11 +23,11 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using kinema::api::Episode;
-using kinema::api::MediaKind;
-using kinema::api::MetaDetail;
-using kinema::api::SeriesDetail;
-using kinema::api::Stream;
+using kinema::domain::Episode;
+using kinema::domain::MediaKind;
+using kinema::domain::MetaDetail;
+using kinema::domain::SeriesDetail;
+using kinema::domain::Stream;
 using kinema::config::AppSettings;
 using kinema::core::HttpError;
 using kinema::services::StreamActions;
@@ -558,11 +558,11 @@ private Q_SLOTS:
     void testActivateSimilarRoutesByKind()
     {
         Fixture f;
-        kinema::api::DiscoverItem movie;
+        kinema::domain::DiscoverItem movie;
         movie.tmdbId = 100;
         movie.kind = MediaKind::Movie;
         movie.title = QStringLiteral("M");
-        kinema::api::DiscoverItem series;
+        kinema::domain::DiscoverItem series;
         series.tmdbId = 200;
         series.kind = MediaKind::Series;
         series.title = QStringLiteral("S");

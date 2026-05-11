@@ -138,7 +138,7 @@ bool isLikelySampleOrExtra(const QString& path, qint64 sizeBytes)
 }
 
 MediaFileSelection selectMediaFile(const QVector<TorrentFileEntry>& files,
-    const api::PlaybackContext& ctx)
+    const domain::PlaybackContext& ctx)
 {
     QVector<TorrentFileEntry> candidates = playableCandidates(files);
 
@@ -150,7 +150,7 @@ MediaFileSelection selectMediaFile(const QVector<TorrentFileEntry>& files,
     std::sort(candidates.begin(), candidates.end(),
         [](const auto& a, const auto& b) { return a.size > b.size; });
 
-    if (ctx.key.kind == api::MediaKind::Series
+    if (ctx.key.kind == domain::MediaKind::Series
         && ctx.key.season && ctx.key.episode) {
         QVector<TorrentFileEntry> episodeMatches;
         for (const auto& f : candidates) {

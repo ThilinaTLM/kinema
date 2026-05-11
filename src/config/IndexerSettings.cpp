@@ -18,20 +18,20 @@ IndexerSettings::IndexerSettings(KSharedConfigPtr config, QObject* parent)
 {
 }
 
-api::IndexerKind IndexerSettings::activeIndexer() const
+domain::IndexerKind IndexerSettings::activeIndexer() const
 {
     const auto raw = detail::read(m_config, kGroup, kKeyActive,
         QString { QStringLiteral("torrentio") });
-    return api::indexerKindFromString(raw);
+    return domain::indexerKindFromString(raw);
 }
 
-void IndexerSettings::setActiveIndexer(api::IndexerKind k)
+void IndexerSettings::setActiveIndexer(domain::IndexerKind k)
 {
     if (activeIndexer() == k) {
         return;
     }
     detail::write(m_config, kGroup, kKeyActive,
-        api::indexerKindToString(k));
+        domain::indexerKindToString(k));
     Q_EMIT activeIndexerChanged(k);
 }
 

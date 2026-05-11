@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "core/MediaChips.h"
+#include "core/util/MediaChips.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>

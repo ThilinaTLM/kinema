@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "api/Download.h"
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Download.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 
 #include <QCoro/QCoroTask>
 
@@ -34,7 +34,7 @@ namespace kinema::services {
 
 /**
  * Single entry point for every user-initiated action on an
- * api::Stream: copy/open magnet, copy/open direct URL, play.
+ * domain::Stream: copy/open magnet, copy/open direct URL, play.
  *
  * UI widgets (StreamsPanel, context menus) call these slots directly.
  * The service centralises clipboard + KIO + launcher wiring so each
@@ -63,34 +63,34 @@ public:
     void setHistoryController(controllers::HistoryController* history);
 
 public Q_SLOTS:
-    void copyMagnet(const api::Stream& stream);
-    void openMagnet(const api::Stream& stream);
-    void copyDirectUrl(const api::Stream& stream);
-    void openDirectUrl(const api::Stream& stream);
+    void copyMagnet(const domain::Stream& stream);
+    void openMagnet(const domain::Stream& stream);
+    void copyDirectUrl(const domain::Stream& stream);
+    void openDirectUrl(const domain::Stream& stream);
 
     /// Play `stream` with the identity/title information in `ctx`.
     /// Fills `ctx.streamRef` from the stream and asks the history
     /// controller (if wired) for a resume position before handing
     /// off to PlayerLauncher. Virtual so controller tests can record
     /// auto-next dispatches without spinning up a real launcher.
-    virtual void play(const api::Stream& stream,
-        const api::PlaybackContext& ctx);
+    virtual void play(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx);
 
     /// Same as `play()` but forces a specific download backend.
     /// Used by the per-stream override menu.
-    void playWithBackend(const api::Stream& stream,
-        const api::PlaybackContext& ctx,
-        api::DownloadBackendKind backend);
+    void playWithBackend(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx,
+        domain::DownloadBackendKind backend);
 
     /// Background full-file download. Maps onto
     /// `DownloadManager::enqueueDownload` and never launches the
     /// player. Mode upgrade for already-streaming sessions is
     /// handled by the manager.
-    void download(const api::Stream& stream,
-        const api::PlaybackContext& ctx);
-    void downloadWithBackend(const api::Stream& stream,
-        const api::PlaybackContext& ctx,
-        api::DownloadBackendKind backend);
+    void download(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx);
+    void downloadWithBackend(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx,
+        domain::DownloadBackendKind backend);
 
 Q_SIGNALS:
     /// Status-bar message. MainWindow connects this once.
@@ -102,15 +102,15 @@ private:
         const QString& failurePrefix,
         const char* failureLogTag);
 
-    QCoro::Task<void> playTorrentTask(api::Stream stream,
-        api::PlaybackContext ctx, quint64 epoch);
-    QCoro::Task<void> playLocalTask(api::Stream stream,
-        api::PlaybackContext ctx, quint64 epoch,
-        std::optional<api::DownloadBackendKind> backendOverride);
+    QCoro::Task<void> playTorrentTask(domain::Stream stream,
+        domain::PlaybackContext ctx, quint64 epoch);
+    QCoro::Task<void> playLocalTask(domain::Stream stream,
+        domain::PlaybackContext ctx, quint64 epoch,
+        std::optional<domain::DownloadBackendKind> backendOverride);
 
-    void playInternal(const api::Stream& stream,
-        const api::PlaybackContext& ctxIn,
-        std::optional<api::DownloadBackendKind> backendOverride);
+    void playInternal(const domain::Stream& stream,
+        const domain::PlaybackContext& ctxIn,
+        std::optional<domain::DownloadBackendKind> backendOverride);
 
     core::PlayerLauncher* m_launcher;
     torrent::TorrentStreamingService* m_torrentStreaming;

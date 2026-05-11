@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Discover.h"
-#include "api/Media.h"
+#include "domain/Discover.h"
+#include "domain/Media.h"
 #include "api/TmdbClient.h"
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
 #include "controllers/TokenController.h"
-#include "core/HttpError.h"
-#include "core/TokenStore.h"
+#include "core/io/HttpError.h"
+#include "core/persistence/TokenStore.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
 
@@ -17,12 +17,12 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using kinema::api::DiscoverItem;
-using kinema::api::DiscoverPageResult;
-using kinema::api::DiscoverQuery;
-using kinema::api::MediaKind;
+using kinema::domain::DiscoverItem;
+using kinema::domain::DiscoverPageResult;
+using kinema::domain::DiscoverQuery;
+using kinema::domain::MediaKind;
 using kinema::api::TmdbClient;
-using kinema::api::TmdbGenre;
+using kinema::domain::TmdbGenre;
 using kinema::core::HttpError;
 using kinema::ui::qml::DiscoverSectionModel;
 using kinema::ui::qml::DiscoverViewModel;

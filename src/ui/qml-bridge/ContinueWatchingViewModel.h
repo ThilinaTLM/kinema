@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 
 #include <QList>
@@ -28,7 +28,7 @@ namespace kinema::ui::qml {
  * Action signals (`resumeRequested`, `detailRequested`,
  * `streamsRequested`, `removeRequested`) are forwarded from
  * `MainController::buildCoreServices`. Each delivers the original
- * `api::HistoryEntry` so the receiver has the full record (key,
+ * `domain::HistoryEntry` so the receiver has the full record (key,
  * stored stream ref, remembered languages) without re-querying the
  * store.
  */
@@ -48,7 +48,7 @@ public:
 
     /// Test/inspector accessor — phase 03 uses this only in the unit
     /// test fixture.
-    const QList<api::HistoryEntry>& entries() const noexcept
+    const QList<domain::HistoryEntry>& entries() const noexcept
     {
         return m_entries;
     }
@@ -72,17 +72,17 @@ Q_SIGNALS:
     /// `HistoryController::resumeFromHistory`, detail navigation,
     /// direct streams-page navigation, or
     /// `HistoryController::removeEntry`.
-    void resumeRequested(const api::HistoryEntry& entry);
-    void detailRequested(const api::HistoryEntry& entry);
-    void streamsRequested(const api::HistoryEntry& entry);
-    void removeRequested(const api::HistoryEntry& entry);
+    void resumeRequested(const domain::HistoryEntry& entry);
+    void detailRequested(const domain::HistoryEntry& entry);
+    void streamsRequested(const domain::HistoryEntry& entry);
+    void removeRequested(const domain::HistoryEntry& entry);
 
 private:
     void rebuildModel();
 
     controllers::HistoryController* m_history;
     DiscoverSectionModel* m_model;
-    QList<api::HistoryEntry> m_entries;
+    QList<domain::HistoryEntry> m_entries;
     bool m_lastEmpty = true;
 };
 

@@ -3,13 +3,14 @@
 
 #pragma once
 
-#include "api/Subtitle.h"
+#include "domain/Subtitle.h"
 
 #include <QJsonDocument>
 #include <QList>
 #include <QString>
 
 namespace kinema::api::opensubtitles {
+using namespace kinema::domain;
 
 /**
  * Parse a `GET /subtitles` response body into a list of

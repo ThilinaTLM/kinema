@@ -3,7 +3,7 @@
 
 #include "api/RealDebridParse.h"
 
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 
 #include <KLocalizedString>
 
@@ -12,6 +12,7 @@
 #include <QJsonValue>
 
 namespace kinema::api::realdebrid {
+using namespace kinema::domain;
 
 namespace {
 

@@ -7,7 +7,7 @@
 
 #include "config/AppearanceSettings.h"
 #include "config/PlayerSettings.h"
-#include "core/MediaChips.h"
+#include "core/util/MediaChips.h"
 #include "ui/player/MpvVideoItem.h"
 #include "ui/player/PlayerViewModel.h"
 #include "ui/player/PlayerWindowPresentation.h"
@@ -43,9 +43,9 @@ namespace {
 /// primary title. Movies have no subtitle; series get
 /// `"S01E03 \u2014 Episode title"` when both are known, falling
 /// back to the numeric part alone otherwise.
-QString buildSubtitleLabel(const api::PlaybackContext& ctx)
+QString buildSubtitleLabel(const domain::PlaybackContext& ctx)
 {
-    if (ctx.key.kind != api::MediaKind::Series) {
+    if (ctx.key.kind != domain::MediaKind::Series) {
         return {};
     }
     if (!ctx.key.season.has_value() || !ctx.key.episode.has_value()) {
@@ -268,7 +268,7 @@ double PlayerWindow::speed() const noexcept
 
 // ---- Imperative control surface ----------------------------------------
 
-void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
+void PlayerWindow::play(const QUrl& url, const domain::PlaybackContext& ctx)
 {
     m_hasEverLoaded = true;
 
@@ -290,7 +290,7 @@ void PlayerWindow::play(const QUrl& url, const api::PlaybackContext& ctx)
     if (m_viewModel) {
         m_viewModel->setMediaContext(ctx.title,
             buildSubtitleLabel(ctx),
-            ctx.key.kind == api::MediaKind::Series
+            ctx.key.kind == domain::MediaKind::Series
                 ? QStringLiteral("series")
                 : QStringLiteral("movie"));
         m_viewModel->setMediaChips({});

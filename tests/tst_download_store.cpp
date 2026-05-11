@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Download.h"
-#include "core/Database.h"
-#include "core/DownloadStore.h"
+#include "domain/Download.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/DownloadStore.h"
 
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -13,18 +13,18 @@ using namespace kinema;
 
 namespace {
 
-api::DownloadItem sample(const QString& assetId,
-    api::CacheDisposition d = api::CacheDisposition::Ephemeral,
-    api::DownloadState s = api::DownloadState::Queued,
-    api::DownloadMode m = api::DownloadMode::OnDemand)
+domain::DownloadItem sample(const QString& assetId,
+    domain::CacheDisposition d = domain::CacheDisposition::Ephemeral,
+    domain::DownloadState s = domain::DownloadState::Queued,
+    domain::DownloadMode m = domain::DownloadMode::OnDemand)
 {
-    api::DownloadItem it;
+    domain::DownloadItem it;
     it.assetId = assetId;
-    it.backendKind = api::DownloadBackendKind::Torrent;
+    it.backendKind = domain::DownloadBackendKind::Torrent;
     it.state = s;
     it.mode = m;
     it.disposition = d;
-    it.key.kind = api::MediaKind::Movie;
+    it.key.kind = domain::MediaKind::Movie;
     it.key.imdbId = QStringLiteral("tt1234567");
     it.title = QStringLiteral("Sample Movie");
     it.poster = QUrl(QStringLiteral("https://example.com/p.jpg"));
@@ -77,37 +77,37 @@ private Q_SLOTS:
             QStringLiteral("aabb1122ccdd3344eeff5566778899aabbccddee"));
         QCOMPARE(found->expectedSizeBytes.value_or(-1), 2147483648LL);
         QCOMPARE(found->cachedSizeBytes, qint64(0));
-        QCOMPARE(found->state, api::DownloadState::Queued);
-        QCOMPARE(found->mode, api::DownloadMode::OnDemand);
-        QCOMPARE(found->disposition, api::CacheDisposition::Ephemeral);
+        QCOMPARE(found->state, domain::DownloadState::Queued);
+        QCOMPARE(found->mode, domain::DownloadMode::OnDemand);
+        QCOMPARE(found->disposition, domain::CacheDisposition::Ephemeral);
     }
 
     void modeRoundTripsAndIsMutable()
     {
         auto a = sample(QStringLiteral("asset-a"),
-            api::CacheDisposition::Pinned,
-            api::DownloadState::Active,
-            api::DownloadMode::Full);
+            domain::CacheDisposition::Pinned,
+            domain::DownloadState::Active,
+            domain::DownloadMode::Full);
         m_store->upsert(a);
 
         const auto found = m_store->find(QStringLiteral("asset-a"));
         QVERIFY(found.has_value());
-        QCOMPARE(found->mode, api::DownloadMode::Full);
-        QCOMPARE(found->state, api::DownloadState::Active);
+        QCOMPARE(found->mode, domain::DownloadMode::Full);
+        QCOMPARE(found->state, domain::DownloadState::Active);
 
         m_store->updateMode(QStringLiteral("asset-a"),
-            api::DownloadMode::OnDemand);
+            domain::DownloadMode::OnDemand);
         const auto after = m_store->find(QStringLiteral("asset-a"));
         QVERIFY(after.has_value());
-        QCOMPARE(after->mode, api::DownloadMode::OnDemand);
+        QCOMPARE(after->mode, domain::DownloadMode::OnDemand);
     }
 
     void synthesiseStartArgsRoundTripsCoreFields()
     {
         auto row = sample(QStringLiteral("asset-a"),
-            api::CacheDisposition::Pinned,
-            api::DownloadState::Active,
-            api::DownloadMode::Full);
+            domain::CacheDisposition::Pinned,
+            domain::DownloadState::Active,
+            domain::DownloadMode::Full);
         const auto args = core::DownloadStore::synthesiseStartArgs(row);
 
         QCOMPARE(args.ref.infoHash, row.infoHash);
@@ -147,28 +147,28 @@ private Q_SLOTS:
     {
         m_store->upsert(sample(QStringLiteral("asset-a")));
         m_store->updateState(QStringLiteral("asset-a"),
-            api::DownloadState::Failed, QStringLiteral("network down"));
+            domain::DownloadState::Failed, QStringLiteral("network down"));
         m_store->setDisposition(QStringLiteral("asset-a"),
-            api::CacheDisposition::Pinned);
+            domain::CacheDisposition::Pinned);
 
         const auto found = m_store->find(QStringLiteral("asset-a"));
         QVERIFY(found.has_value());
-        QCOMPARE(found->state, api::DownloadState::Failed);
+        QCOMPARE(found->state, domain::DownloadState::Failed);
         QCOMPARE(found->lastError, QStringLiteral("network down"));
-        QCOMPARE(found->disposition, api::CacheDisposition::Pinned);
+        QCOMPARE(found->disposition, domain::CacheDisposition::Pinned);
     }
 
     void findForKeyReturnsLatest()
     {
         m_store->upsert(sample(QStringLiteral("asset-a")));
-        api::DownloadItem b = sample(QStringLiteral("asset-b"));
+        domain::DownloadItem b = sample(QStringLiteral("asset-b"));
         b.title = QStringLiteral("Sample Movie B");
         m_store->upsert(b);
         // Bump asset-b's updated_at by re-upserting.
         m_store->upsert(b);
 
-        api::PlaybackKey key;
-        key.kind = api::MediaKind::Movie;
+        domain::PlaybackKey key;
+        key.kind = domain::MediaKind::Movie;
         key.imdbId = QStringLiteral("tt1234567");
 
         const auto found = m_store->findForKey(key);

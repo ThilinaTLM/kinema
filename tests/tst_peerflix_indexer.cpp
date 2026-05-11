@@ -41,7 +41,7 @@ private Q_SLOTS:
         config::PeerflixSettings settings(m_config);
         tests::FakeHttpClient http;
         api::PeerflixIndexer indexer(&http, settings);
-        QCOMPARE(indexer.kind(), api::IndexerKind::Peerflix);
+        QCOMPARE(indexer.kind(), domain::IndexerKind::Peerflix);
         QCOMPARE(indexer.displayName(), QStringLiteral("Peerflix"));
     }
 
@@ -53,7 +53,7 @@ private Q_SLOTS:
             tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings);
-        (void)QCoro::waitFor(indexer.streams(api::MediaKind::Movie,
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
             QStringLiteral("tt0133093")));
 
         QCOMPARE(http.calls.size(), 1);
@@ -73,7 +73,7 @@ private Q_SLOTS:
             tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings);
-        (void)QCoro::waitFor(indexer.streams(api::MediaKind::Movie,
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
             QStringLiteral("tt0133093")));
 
         QCOMPARE(http.calls.first().url.host(),
@@ -90,7 +90,7 @@ private Q_SLOTS:
             tests::loadJsonFixture("peerflix_stream_tt0903747_1_1.json"));
 
         api::PeerflixIndexer indexer(&http, settings);
-        (void)QCoro::waitFor(indexer.streams(api::MediaKind::Series,
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Series,
             QStringLiteral("tt0903747:1:1")));
 
         QCOMPARE(http.calls.size(), 1);
@@ -107,7 +107,7 @@ private Q_SLOTS:
 
         api::PeerflixIndexer indexer(&http, settings);
         const auto streams = QCoro::waitFor(indexer.streams(
-            api::MediaKind::Movie, QStringLiteral("tt0133093")));
+            domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
         QCOMPARE(streams.size(), 3);
 

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Subtitle.h"
+#include "domain/Subtitle.h"
 
 #include <QNetworkRequest>
 #include <QObject>
@@ -17,6 +17,7 @@ class HttpClient;
 }
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 /**
  * Client for the OpenSubtitles.com REST v1 API.

@@ -5,9 +5,9 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
-#include "api/PlaybackContext.h"
-#include "core/MpvChapterList.h"
-#include "core/MpvTrackList.h"
+#include "domain/PlaybackContext.h"
+#include "core/mpv/MpvChapterList.h"
+#include "core/mpv/MpvTrackList.h"
 
 #include <QPointer>
 #include <QString>
@@ -64,7 +64,7 @@ public:
 
     /// Load `url` into mpv and show the window.
     virtual void play(const QUrl& url,
-        const kinema::api::PlaybackContext& ctx);
+        const kinema::domain::PlaybackContext& ctx);
 
     // Imperative control surface (matches the previous public API).
     virtual void setPaused(bool paused);
