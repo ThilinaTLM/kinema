@@ -250,6 +250,12 @@ public Q_SLOTS:
     /// the currently-selected episode. No-op when no episode is
     /// selected.
     void requestStreams();
+
+    /// Re-run only the streams fetch for the currently-selected
+    /// episode. Used by the Streams page "Refresh" header action;
+    /// cheaper than `retry()` which also re-fetches the series meta.
+    /// No-op when no episode is selected.
+    void refreshStreams();
     void addToLibrary();
     void removeFromLibrary();
     void toggleEpisodeWatched(int row);

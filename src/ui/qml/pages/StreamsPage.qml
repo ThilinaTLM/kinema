@@ -43,6 +43,25 @@ Kirigami.Page {
     // interchangeably.
     property var detailVm
 
+    // Right-most header action. Re-runs only the streams fetch (cheaper
+    // than `retry()`, which also re-fetches the meta). Rendered via
+    // `PageHeaderBar.pageActions` so it lands after the "Filters"
+    // button, matching Browse / Library / Discover. Disabled while a
+    // fetch is in flight so users can't double-tap during a refresh.
+    actions: [
+        Kirigami.Action {
+            icon.source: AppIcons.url("refresh-cw")
+            icon.color: AppIcons.foreground
+            text: i18nc("@action:button refresh streams", "Refresh")
+            displayHint: Kirigami.DisplayHint.IconOnly
+            shortcut: StandardKey.Refresh
+            enabled: page.detailVm
+                && page.detailVm.streams
+                && page.detailVm.streams.state !== StreamsListModel.Loading
+            onTriggered: if (page.detailVm) page.detailVm.refreshStreams()
+        }
+    ]
+
     // Title carries the title / episode label, with the visible-row
     // count appended after a separator when there are streams.
     title: {
@@ -154,10 +173,11 @@ Kirigami.Page {
         vm: page.detailVm
     }
 
-    // ---- header: merged title + sorting + filters ---------------
+    // ---- header: merged title + sorting + filters + refresh -----
     header: PageHeaderBar {
         id: filterBar
         title: page.title
+        pageActions: page.actions
         advancedFiltersDialog: streamsAdvancedDialog
         advancedFiltersButtonText: i18nc(
             "@action:button open stream filters dialog", "Filters")

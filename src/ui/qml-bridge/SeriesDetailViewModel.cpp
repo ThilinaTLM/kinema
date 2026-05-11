@@ -630,6 +630,15 @@ void SeriesDetailViewModel::requestStreams()
     Q_EMIT streamsRequested();
 }
 
+void SeriesDetailViewModel::refreshStreams()
+{
+    if (m_selectedEpisodeRow < 0 || m_imdbId.isEmpty()) {
+        return;
+    }
+    auto t = loadEpisodeStreamsTask(m_selectedEpisode);
+    Q_UNUSED(t);
+}
+
 void SeriesDetailViewModel::addToLibrary()
 {
     if (!m_library || m_currentSeries.meta.summary.imdbId.isEmpty()) {

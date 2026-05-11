@@ -628,6 +628,11 @@ void MovieDetailViewModel::requestStreams()
     Q_EMIT streamsRequested();
 }
 
+void MovieDetailViewModel::refreshStreams()
+{
+    refreshStreamsForCurrentTitle();
+}
+
 void MovieDetailViewModel::addToLibrary()
 {
     if (!m_library || m_currentMeta.summary.imdbId.isEmpty()) {

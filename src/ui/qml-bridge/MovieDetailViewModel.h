@@ -225,6 +225,11 @@ public Q_SLOTS:
     /// top of the current detail page. Emits `streamsRequested()`;
     /// `MainController` forwards as `showStreamsRequested(this)`.
     void requestStreams();
+
+    /// Re-run only the streams fetch for the current title. Used by
+    /// the Streams page "Refresh" header action; cheaper than
+    /// `retry()` which also re-fetches the meta.
+    void refreshStreams();
     void addToLibrary();
     void removeFromLibrary();
     void toggleMovieWatched();
