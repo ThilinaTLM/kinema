@@ -23,15 +23,15 @@ QString toString(SortMode);
  * Options that shape a Torrentio stream query. Rendered into a pipe-separated
  * URL path segment like:
  *
- *   sort=seeders|qualityfilter=4k,cam,threed|providers=yts,eztv|realdebrid=XYZ
+ *   sort=seeders|qualityfilter=4k,cam,threed|providers=yts,eztv
  *
  * Torrentio's `qualityfilter` URL param is an **exclusion** list that mixes
  * resolution and variant tags. We keep the two concepts separate in code for
  * clarity and merge them into a single comma-separated value at render time
  * (resolutions first, then categories, preserving input order within each).
  *
- * `realDebridToken`, when non-empty, is always emitted last — Torrentio
- * requires this for the RD addon to pick it up.
+ * Real-Debrid is now driven by Kinema directly through the unified
+ * downloader — it is no longer encoded into the Torrentio URL.
  */
 struct ConfigOptions {
     SortMode sort = SortMode::Seeders;
@@ -43,7 +43,6 @@ struct ConfigOptions {
     /// `nonen`, `unknown`, `brremux`.
     QStringList excludedCategories;
     QStringList providers; ///< e.g. {"yts","eztv"}
-    QString realDebridToken; ///< empty = no RD
 };
 
 /**

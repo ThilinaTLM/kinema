@@ -4,6 +4,7 @@
 #include "app/KinemaApplication.h"
 
 #include "config/AppSettings.h"
+#include "core/Logging.h"
 
 #include <KAboutData>
 #include <KLocalizedString>
@@ -36,6 +37,11 @@ void KinemaApplication::configure()
     QCoreApplication::setOrganizationName(QStringLiteral("TLMTech"));
     QCoreApplication::setApplicationName(QStringLiteral("Kinema"));
     QCoreApplication::setApplicationVersion(QStringLiteral(KINEMA_VERSION_STRING));
+
+    // Install rich logging *after* org/app names are set so that
+    // QStandardPaths::AppDataLocation resolves under "kinema/" — the
+    // file log goes to <AppDataLocation>/logs/kinema.log.
+    core::installLogging();
 
     QGuiApplication::setDesktopFileName(QStringLiteral("dev.tlmtech.kinema"));
     QGuiApplication::setApplicationDisplayName(QStringLiteral("Kinema"));

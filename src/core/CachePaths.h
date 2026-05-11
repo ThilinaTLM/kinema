@@ -26,6 +26,12 @@ QDir subtitlesDir();
 /// payload and libtorrent resume data.
 QDir torrentsDir();
 
+/// `<root>/media`. Each downloaded asset (torrent-backed or HTTP-
+/// backed) gets a child directory keyed by the asset id produced by
+/// the unified downloader. Replaces the torrent-only layout used by
+/// `torrentsDir()` once the legacy streaming service is retired.
+QDir mediaDir();
+
 /// Recursive byte size of `dir` (files only). Returns 0 when the
 /// directory does not exist.
 qint64 dirSizeBytes(const QDir& dir);

@@ -70,13 +70,18 @@ public:
     int currentSchemaVersion() const;
 
     /// Latest schema version this build knows how to produce.
-    static int latestSchemaVersion() noexcept { return 7; }
+    static int latestSchemaVersion() noexcept { return 8; }
 
 private:
     bool configurePragmas();
     bool runMigrations();
     bool applyMigration(int toVersion);
     bool setSchemaVersion(int version);
+    /// Idempotent CREATE TABLE/INDEX IF NOT EXISTS statements for
+    /// downloader-related tables. Runs after `runMigrations()` so the
+    /// numbered migration chain stays untouched (per AGENTS.md: no
+    /// migrations for `kinema.db`).
+    bool ensureSupplementalTables();
     void quarantineCorruptFile();
 
     QString m_path;

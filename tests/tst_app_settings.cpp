@@ -3,6 +3,9 @@
 
 #include "config/AppSettings.h"
 
+#include "api/Debrid.h"
+#include "api/Indexer.h"
+
 #include <KConfig>
 #include <KSharedConfig>
 
@@ -43,12 +46,13 @@ private Q_SLOTS:
             static_cast<int>(api::MediaKind::Movie));
         QCOMPARE(static_cast<int>(s.torrentio().defaultSort()),
             static_cast<int>(core::torrentio::SortMode::Seeders));
-        QCOMPARE(s.torrentio().cachedOnly(), false);
         QCOMPARE(s.appearance().closeToTray(), true);
         QCOMPARE(s.appearance().showMenuBar(), false);
         QVERIFY(s.appearance().playerWindowGeometry().isEmpty());
-        QCOMPARE(s.realDebrid().configured(), false);
-        QCOMPARE(s.realDebrid().enabled(), true);
+        QCOMPARE(s.debrid().realDebridConfigured(), false);
+        QCOMPARE(s.debrid().allDebridConfigured(), false);
+        QCOMPARE(s.debrid().activeProvider(),
+            api::DebridProvider::None);
         QVERIFY(s.filter().excludedResolutions().isEmpty());
         QVERIFY(s.filter().excludedCategories().isEmpty());
         QVERIFY(s.filter().keywordBlocklist().isEmpty());
@@ -182,56 +186,45 @@ private Q_SLOTS:
 
     // ---- Signals ---------------------------------------------------------
 
-    void testTorrentioOptionsChangedEmittedOnSortChange()
+    void testDebridRealDebridConfiguredSignal()
     {
         config::AppSettings s(m_config);
-        QSignalSpy spy(&s, &config::AppSettings::torrentioOptionsChanged);
-        s.torrentio().setDefaultSort(core::torrentio::SortMode::Size);
-        QCOMPARE(spy.count(), 1);
-    }
-
-    void testTorrentioOptionsChangedEmittedOnExclusionsChange()
-    {
-        config::AppSettings s(m_config);
-        QSignalSpy spy(&s, &config::AppSettings::torrentioOptionsChanged);
-        s.filter().setExcludedResolutions({ QStringLiteral("4k") });
-        QCOMPARE(spy.count(), 1);
-        s.filter().setExcludedCategories({ QStringLiteral("cam") });
-        QCOMPARE(spy.count(), 2);
-    }
-
-    void testCachedOnlyChangedEmitted()
-    {
-        config::AppSettings s(m_config);
-        QSignalSpy spy(&s.torrentio(),
-            &config::TorrentioSettings::cachedOnlyChanged);
-        s.torrentio().setCachedOnly(true);
-        QCOMPARE(spy.count(), 1);
-        QCOMPARE(spy.takeFirst().at(0).toBool(), true);
-    }
-
-    void testRealDebridConfiguredSignal()
-    {
-        config::AppSettings s(m_config);
-        QSignalSpy spy(&s.realDebrid(),
-            &config::RealDebridSettings::configuredChanged);
-        s.realDebrid().setConfigured(true);
+        QSignalSpy spy(&s.debrid(),
+            &config::DebridSettings::realDebridConfiguredChanged);
+        s.debrid().setRealDebridConfigured(true);
         QCOMPARE(spy.count(), 1);
         // Idempotent set — no extra emission.
-        s.realDebrid().setConfigured(true);
+        s.debrid().setRealDebridConfigured(true);
         QCOMPARE(spy.count(), 1);
     }
 
-    void testRealDebridEnabledSignal()
+    void testDebridAllDebridConfiguredSignal()
     {
         config::AppSettings s(m_config);
-        QSignalSpy spy(&s.realDebrid(),
-            &config::RealDebridSettings::enabledChanged);
-        s.realDebrid().setEnabled(false);
+        QSignalSpy spy(&s.debrid(),
+            &config::DebridSettings::allDebridConfiguredChanged);
+        s.debrid().setAllDebridConfigured(true);
         QCOMPARE(spy.count(), 1);
-        QCOMPARE(spy.takeFirst().at(0).toBool(), false);
-        s.realDebrid().setEnabled(false);
+        QCOMPARE(spy.takeFirst().at(0).toBool(), true);
+        s.debrid().setAllDebridConfigured(true);
         QCOMPARE(spy.count(), 0);
+    }
+
+    void testDebridActiveProviderSignal()
+    {
+        config::AppSettings s(m_config);
+        QSignalSpy spy(&s.debrid(),
+            &config::DebridSettings::activeProviderChanged);
+        QCOMPARE(s.debrid().activeProvider(),
+            api::DebridProvider::None);
+        s.debrid().setActiveProvider(api::DebridProvider::AllDebrid);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(s.debrid().activeProvider(),
+            api::DebridProvider::AllDebrid);
+        // Persists round-trip through the KConfig backend.
+        config::AppSettings s2(m_config);
+        QCOMPARE(s2.debrid().activeProvider(),
+            api::DebridProvider::AllDebrid);
     }
 
     void testKeywordBlocklistChangedSignal()
@@ -243,24 +236,13 @@ private Q_SLOTS:
         QCOMPARE(spy.count(), 1);
     }
 
-    // ---- Aggregated torrentioOptions() ----------------------------------
+    // ---- Indexer settings (active radio + per-indexer configured flags) -
 
-    void testTorrentioOptionsAggregates()
+    void testIndexerDefaultsAreTorrentioActive()
     {
         config::AppSettings s(m_config);
-        s.torrentio().setDefaultSort(
-            core::torrentio::SortMode::QualitySize);
-        s.filter().setExcludedResolutions({ QStringLiteral("4k") });
-        s.filter().setExcludedCategories({ QStringLiteral("cam") });
-
-        const auto opts = s.torrentioOptions();
-        QCOMPARE(static_cast<int>(opts.sort),
-            static_cast<int>(core::torrentio::SortMode::QualitySize));
-        QCOMPARE(opts.excludedResolutions,
-            (QStringList { QStringLiteral("4k") }));
-        QCOMPARE(opts.excludedCategories,
-            (QStringList { QStringLiteral("cam") }));
-        QVERIFY(opts.realDebridToken.isEmpty());
+        QCOMPARE(s.indexers().activeIndexer(),
+            api::IndexerKind::Torrentio);
     }
 
 private:

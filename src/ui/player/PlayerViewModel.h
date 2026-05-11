@@ -7,7 +7,6 @@
 
 #include "core/MpvChapterList.h"
 #include "core/MpvTrackList.h"
-#include "ui/player/QueueNavPreview.h"
 
 #include <QAbstractListModel>
 #include <QObject>
@@ -68,17 +67,15 @@ class PlayerViewModel : public QObject
     Q_PROPERTY(QStringList mediaChips READ mediaChips
         NOTIFY mediaChipsChanged)
 
-    // ---- Transport / queue state -------------------------------------
+    // ---- Transport / series-episode state ----------------------------
     Q_PROPERTY(bool loadingVisible READ loadingVisible
         NOTIFY loadingVisibleChanged)
-    Q_PROPERTY(bool queueNavigationVisible READ queueNavigationVisible
-        NOTIFY queueNavigationVisibleChanged)
+    Q_PROPERTY(bool episodeNavigationVisible READ episodeNavigationVisible
+        NOTIFY episodeNavigationVisibleChanged)
     Q_PROPERTY(bool canGoPrevious READ canGoPrevious
         NOTIFY canGoPreviousChanged)
     Q_PROPERTY(bool canGoNext READ canGoNext
         NOTIFY canGoNextChanged)
-    Q_PROPERTY(QObject* previousPreview READ previousPreview CONSTANT)
-    Q_PROPERTY(QObject* nextPreview READ nextPreview CONSTANT)
 
     // ---- Prompts ------------------------------------------------------
     Q_PROPERTY(bool resumeVisible READ resumeVisible
@@ -127,14 +124,12 @@ public:
     QStringList mediaChips() const { return m_mediaChips; }
 
     bool loadingVisible() const noexcept { return m_loadingVisible; }
-    bool queueNavigationVisible() const noexcept
+    bool episodeNavigationVisible() const noexcept
     {
-        return m_queueNavigationVisible;
+        return m_episodeNavigationVisible;
     }
     bool canGoPrevious() const noexcept { return m_canGoPrevious; }
     bool canGoNext() const noexcept { return m_canGoNext; }
-    QObject* previousPreview() const noexcept { return m_previousPreview; }
-    QObject* nextPreview() const noexcept { return m_nextPreview; }
 
     bool resumeVisible() const noexcept { return m_resumeVisible; }
     qint64 resumeSeconds() const noexcept { return m_resumeSeconds; }
@@ -156,13 +151,8 @@ public Q_SLOTS:
         const QString& subtitle, const QString& kind);
     void setMediaChips(const QStringList& chips);
     void setLoadingVisible(bool on);
-    void setQueueNavigationState(int activeIndex, int count);
-    void setPreviousPreview(const QString& title,
-        const QString& subtitle, const QStringList& chips);
-    void clearPreviousPreview();
-    void setNextPreview(const QString& title,
-        const QString& subtitle, const QStringList& chips);
-    void clearNextPreview();
+    void setEpisodeNavigationState(bool visible,
+        bool canGoPrevious, bool canGoNext);
 
     void showResume(qint64 seconds);
     void hideResume();
@@ -209,7 +199,7 @@ Q_SIGNALS:
     void mediaKindChanged();
     void mediaChipsChanged();
     void loadingVisibleChanged();
-    void queueNavigationVisibleChanged();
+    void episodeNavigationVisibleChanged();
     void canGoPreviousChanged();
     void canGoNextChanged();
     void currentAudioIdChanged();
@@ -259,8 +249,6 @@ private:
     AudioTracksModel* m_audioModel = nullptr;
     SubtitleTracksModel* m_subtitleModel = nullptr;
     ChaptersModel* m_chaptersModel = nullptr;
-    QueueNavPreview* m_previousPreview = nullptr;
-    QueueNavPreview* m_nextPreview = nullptr;
 
     int m_currentAudioId = -1;
     int m_currentSubtitleId = -1;
@@ -271,7 +259,7 @@ private:
     QStringList m_mediaChips;
 
     bool m_loadingVisible = false;
-    bool m_queueNavigationVisible = false;
+    bool m_episodeNavigationVisible = false;
     bool m_canGoPrevious = false;
     bool m_canGoNext = false;
 

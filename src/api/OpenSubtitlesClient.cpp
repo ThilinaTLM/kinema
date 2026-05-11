@@ -6,7 +6,7 @@
 #include "api/OpenSubtitlesParse.h"
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
-#include "kinema_debug.h"
+#include "kinema_log_api.h"
 
 #include <KLocalizedString>
 
@@ -150,7 +150,7 @@ QCoro::Task<void> OpenSubtitlesClient::ensureLoggedIn()
         /*authed=*/false);
     const auto doc = co_await m_http->postJsonForJson(std::move(req), bytes);
     m_jwt = opensubtitles::parseLogin(doc);
-    qCDebug(KINEMA) << "OpenSubtitles login OK";
+    qCDebug(KINEMA_API) << "OpenSubtitles login OK";
 }
 
 QCoro::Task<SubtitleDownloadTicket> OpenSubtitlesClient::requestDownload(
@@ -186,7 +186,7 @@ QCoro::Task<SubtitleDownloadTicket> OpenSubtitlesClient::requestDownload(
     }
 
     // JWT expired or revoked — clear and try once more.
-    qCDebug(KINEMA) << "OpenSubtitles 401 on /download \u2014 refreshing JWT";
+    qCDebug(KINEMA_API) << "OpenSubtitles 401 on /download \u2014 refreshing JWT";
     m_jwt.clear();
     co_await ensureLoggedIn();
     co_return opensubtitles::parseDownload(co_await post());

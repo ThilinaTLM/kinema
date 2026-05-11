@@ -12,8 +12,13 @@
 
 #include <QCoro/QCoroTask>
 
+namespace kinema::api {
+class IndexerSelector;
+}
+
 namespace kinema::core {
 class HttpClient;
+class MediaCache;
 class SubtitleCacheStore;
 class TokenStore;
 }
@@ -22,10 +27,12 @@ namespace kinema::config {
 class AppearanceSettings;
 class AppSettings;
 class CacheSettings;
+class DebridSettings;
 class FilterSettings;
 class PlayerSettings;
-class RealDebridSettings;
 class SearchSettings;
+class IndexerSettings;
+class PeerflixSettings;
 class SubtitleSettings;
 class TorrentioSettings;
 class TorrentStreamingSettings;
@@ -136,32 +143,29 @@ private:
     bool m_busy = false;
 };
 
-// ---- Real-Debrid ------------------------------------------------------
-class RealDebridSettingsViewModel : public QObject
+// ---- Debrid: Real-Debrid section --------------------------------------
+class RealDebridSectionViewModel : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString token READ token WRITE setToken NOTIFY tokenInputChanged)
     Q_PROPERTY(bool tokenSaved READ tokenSaved NOTIFY tokenSavedChanged)
-    Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
     Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
 
 public:
-    RealDebridSettingsViewModel(core::HttpClient* http,
+    RealDebridSectionViewModel(core::HttpClient* http,
         core::TokenStore* tokens,
-        config::RealDebridSettings& settings,
+        config::DebridSettings& settings,
         QObject* parent = nullptr);
 
     QString token() const { return m_token; }
     bool tokenSaved() const;
-    bool enabled() const;
     QString statusMessage() const { return m_statusMessage; }
     int statusKind() const { return m_statusKind; }
     bool busy() const { return m_busy; }
 
     void setToken(const QString& token);
-    void setEnabled(bool on);
 
 public Q_SLOTS:
     void load();
@@ -172,11 +176,9 @@ public Q_SLOTS:
 Q_SIGNALS:
     void tokenInputChanged();
     void tokenSavedChanged();
-    void enabledChanged();
     void statusChanged();
     void busyChanged();
     void tokenChanged(const QString& token);
-    void usageChanged();
 
 private:
     void setStatus(const QString& message, int kind);
@@ -188,19 +190,235 @@ private:
 
     core::HttpClient* m_http;
     core::TokenStore* m_tokens;
-    config::RealDebridSettings& m_rdSettings;
+    config::DebridSettings& m_settings;
     QString m_token;
     QString m_statusMessage;
     int m_statusKind = 0;
     bool m_busy = false;
 };
 
-// ---- Streams ----------------------------------------------------------
+// ---- Debrid: AllDebrid section ---------------------------------------
+class AllDebridSectionViewModel : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QString apiKey READ apiKey WRITE setApiKey NOTIFY apiKeyInputChanged)
+    Q_PROPERTY(bool apiKeySaved READ apiKeySaved NOTIFY apiKeySavedChanged)
+    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
+    Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
+    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+
+public:
+    AllDebridSectionViewModel(core::HttpClient* http,
+        core::TokenStore* tokens,
+        config::DebridSettings& settings,
+        QObject* parent = nullptr);
+
+    QString apiKey() const { return m_apiKey; }
+    bool apiKeySaved() const;
+    QString statusMessage() const { return m_statusMessage; }
+    int statusKind() const { return m_statusKind; }
+    bool busy() const { return m_busy; }
+
+    void setApiKey(const QString& apiKey);
+
+public Q_SLOTS:
+    void load();
+    void testConnection();
+    void save();
+    void remove();
+
+Q_SIGNALS:
+    void apiKeyInputChanged();
+    void apiKeySavedChanged();
+    void statusChanged();
+    void busyChanged();
+    void apiKeyChanged(const QString& apiKey);
+
+private:
+    void setStatus(const QString& message, int kind);
+    void setBusy(bool on);
+    QCoro::Task<void> loadTask();
+    QCoro::Task<void> testTask();
+    QCoro::Task<void> saveTask();
+    QCoro::Task<void> removeTask();
+
+    core::HttpClient* m_http;
+    core::TokenStore* m_tokens;
+    config::DebridSettings& m_settings;
+    QString m_apiKey;
+    QString m_statusMessage;
+    int m_statusKind = 0;
+    bool m_busy = false;
+};
+
+// ---- Debrid: parent VM ------------------------------------------------
+class DebridSettingsViewModel : public QObject
+{
+    Q_OBJECT
+    /// 0 = None, 1 = Real-Debrid, 2 = AllDebrid. Maps to
+    /// `api::DebridProvider`.
+    Q_PROPERTY(int activeProvider READ activeProvider
+        WRITE setActiveProvider NOTIFY activeProviderChanged)
+    Q_PROPERTY(RealDebridSectionViewModel* realDebrid
+        READ realDebrid CONSTANT)
+    Q_PROPERTY(AllDebridSectionViewModel* allDebrid
+        READ allDebrid CONSTANT)
+
+public:
+    DebridSettingsViewModel(core::HttpClient* http,
+        core::TokenStore* tokens,
+        config::DebridSettings& settings,
+        QObject* parent = nullptr);
+
+    int activeProvider() const;
+    void setActiveProvider(int provider);
+
+    RealDebridSectionViewModel* realDebrid() const { return m_rd; }
+    AllDebridSectionViewModel* allDebrid() const { return m_ad; }
+
+Q_SIGNALS:
+    void activeProviderChanged();
+
+private:
+    config::DebridSettings& m_settings;
+    RealDebridSectionViewModel* m_rd {};
+    AllDebridSectionViewModel* m_ad {};
+};
+
+// ---- Indexers: Torrentio section --------------------------------------
+class TorrentioSectionViewModel : public QObject
+{
+    Q_OBJECT
+    /// 0 = Seeders, 1 = Size, 2 = Quality & Size.
+    Q_PROPERTY(int defaultSort READ defaultSort
+        WRITE setDefaultSort NOTIFY defaultSortChanged)
+    Q_PROPERTY(QString baseUrl READ baseUrl
+        WRITE setBaseUrl NOTIFY baseUrlChanged)
+    Q_PROPERTY(QString defaultBaseUrl READ defaultBaseUrlString CONSTANT)
+    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
+    Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
+    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+
+public:
+    TorrentioSectionViewModel(api::IndexerSelector* indexers,
+        config::TorrentioSettings& settings,
+        QObject* parent = nullptr);
+
+    int defaultSort() const;
+    QString baseUrl() const;
+    QString defaultBaseUrlString() const;
+    QString statusMessage() const { return m_statusMessage; }
+    int statusKind() const { return m_statusKind; }
+    bool busy() const { return m_busy; }
+
+    void setDefaultSort(int sort);
+    void setBaseUrl(const QString& url);
+
+public Q_SLOTS:
+    void testConnection();
+    void resetBaseUrl();
+
+Q_SIGNALS:
+    void defaultSortChanged();
+    void baseUrlChanged();
+    void statusChanged();
+    void busyChanged();
+
+private:
+    void setStatus(const QString& message, int kind);
+    void setBusy(bool on);
+    QCoro::Task<void> testTask();
+
+    api::IndexerSelector* m_indexers;
+    config::TorrentioSettings& m_settings;
+    QString m_statusMessage;
+    int m_statusKind = 0;
+    bool m_busy = false;
+};
+
+// ---- Indexers: Peerflix section ---------------------------------------
+class PeerflixSectionViewModel : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QString baseUrl READ baseUrl
+        WRITE setBaseUrl NOTIFY baseUrlChanged)
+    Q_PROPERTY(QString defaultBaseUrl READ defaultBaseUrlString CONSTANT)
+    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
+    Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
+    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+
+public:
+    PeerflixSectionViewModel(api::IndexerSelector* indexers,
+        config::PeerflixSettings& settings,
+        QObject* parent = nullptr);
+
+    QString baseUrl() const;
+    QString defaultBaseUrlString() const;
+    QString statusMessage() const { return m_statusMessage; }
+    int statusKind() const { return m_statusKind; }
+    bool busy() const { return m_busy; }
+
+    void setBaseUrl(const QString& url);
+
+public Q_SLOTS:
+    void testConnection();
+    void resetBaseUrl();
+
+Q_SIGNALS:
+    void baseUrlChanged();
+    void statusChanged();
+    void busyChanged();
+
+private:
+    void setStatus(const QString& message, int kind);
+    void setBusy(bool on);
+    QCoro::Task<void> testTask();
+
+    api::IndexerSelector* m_indexers;
+    config::PeerflixSettings& m_settings;
+    QString m_statusMessage;
+    int m_statusKind = 0;
+    bool m_busy = false;
+};
+
+// ---- Indexers: parent VM ----------------------------------------------
+class IndexerSettingsViewModel : public QObject
+{
+    Q_OBJECT
+    /// 1 = Torrentio, 2 = Peerflix. Maps to `api::IndexerKind`.
+    Q_PROPERTY(int activeIndexer READ activeIndexer
+        WRITE setActiveIndexer NOTIFY activeIndexerChanged)
+    Q_PROPERTY(TorrentioSectionViewModel* torrentio
+        READ torrentio CONSTANT)
+    Q_PROPERTY(PeerflixSectionViewModel* peerflix
+        READ peerflix CONSTANT)
+
+public:
+    IndexerSettingsViewModel(api::IndexerSelector* indexers,
+        config::IndexerSettings& indexerSettings,
+        config::TorrentioSettings& torrentioSettings,
+        config::PeerflixSettings& peerflixSettings,
+        QObject* parent = nullptr);
+
+    int activeIndexer() const;
+    void setActiveIndexer(int kind);
+
+    TorrentioSectionViewModel* torrentio() const { return m_torrentio; }
+    PeerflixSectionViewModel* peerflix() const { return m_peerflix; }
+
+Q_SIGNALS:
+    void activeIndexerChanged();
+
+private:
+    config::IndexerSettings& m_settings;
+    TorrentioSectionViewModel* m_torrentio {};
+    PeerflixSectionViewModel* m_peerflix {};
+};
+
+// ---- Streams (indexer-agnostic filters) -------------------------------
 class StreamsSettingsViewModel : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(int defaultTorrentioSort READ defaultTorrentioSort
-        WRITE setDefaultTorrentioSort NOTIFY defaultTorrentioSortChanged)
     Q_PROPERTY(QStringList excludedResolutions READ excludedResolutions
         WRITE setExcludedResolutions NOTIFY excludedResolutionsChanged)
     Q_PROPERTY(QStringList excludedCategories READ excludedCategories
@@ -211,17 +429,15 @@ class StreamsSettingsViewModel : public QObject
     Q_PROPERTY(QVariantList categoryOptions READ categoryOptions CONSTANT)
 
 public:
-    StreamsSettingsViewModel(config::TorrentioSettings& torrentio,
-        config::FilterSettings& settings, QObject* parent = nullptr);
+    StreamsSettingsViewModel(config::FilterSettings& settings,
+        QObject* parent = nullptr);
 
-    int defaultTorrentioSort() const;
     QStringList excludedResolutions() const;
     QStringList excludedCategories() const;
     QString blocklistText() const;
     QVariantList resolutionOptions() const;
     QVariantList categoryOptions() const;
 
-    void setDefaultTorrentioSort(int sort);
     void setExcludedResolutions(const QStringList& tokens);
     void setExcludedCategories(const QStringList& tokens);
     void setBlocklistText(const QString& text);
@@ -233,13 +449,11 @@ public:
     Q_INVOKABLE bool categoryExcluded(const QString& token) const;
 
 Q_SIGNALS:
-    void defaultTorrentioSortChanged();
     void excludedResolutionsChanged();
     void excludedCategoriesChanged();
     void blocklistChanged();
 
 private:
-    config::TorrentioSettings& m_torrentio;
     config::FilterSettings& m_settings;
 };
 
@@ -404,6 +618,13 @@ private:
 };
 
 // ---- Torrent streaming -----------------------------------------------
+//
+// Despite the historical class name, this VM now also owns the
+// downloader's filesystem cache read-outs (`MediaCache::sizeBytes`
+// etc.) and the manual eviction trigger. The settings tab is
+// surfaced to the user as "Downloads" — the on-disk class /
+// KConfig group names are kept stable to avoid a migration on a
+// pre-1.0 codebase.
 class TorrentStreamingSettingsViewModel : public QObject
 {
     Q_OBJECT
@@ -415,8 +636,20 @@ class TorrentStreamingSettingsViewModel : public QObject
     Q_PROPERTY(int maxUploadRateKiB READ maxUploadRateKiB WRITE setMaxUploadRateKiB NOTIFY maxUploadRateKiBChanged)
     Q_PROPERTY(int idleStopMinutes READ idleStopMinutes WRITE setIdleStopMinutes NOTIFY idleStopMinutesChanged)
 
+    // Live cache state, refreshed by an internal poll timer. Pinned
+    // bytes are excluded from the budget; `ephemeralSizeBytes` is
+    // what eviction is allowed to drop.
+    Q_PROPERTY(qint64 cacheSizeBytes READ cacheSizeBytes NOTIFY cacheChanged)
+    Q_PROPERTY(qint64 cacheBudgetBytes READ cacheBudgetBytes NOTIFY cacheChanged)
+    Q_PROPERTY(qint64 ephemeralSizeBytes READ ephemeralSizeBytes NOTIFY cacheChanged)
+    Q_PROPERTY(double cacheUsageFraction READ cacheUsageFraction NOTIFY cacheChanged)
+    Q_PROPERTY(QString cacheSizeText READ cacheSizeText NOTIFY cacheChanged)
+    Q_PROPERTY(QString cacheBudgetText READ cacheBudgetText NOTIFY cacheChanged)
+    Q_PROPERTY(QString ephemeralSizeText READ ephemeralSizeText NOTIFY cacheChanged)
+
 public:
     TorrentStreamingSettingsViewModel(config::TorrentStreamingSettings& settings,
+        core::MediaCache& cache,
         QObject* parent = nullptr);
 
     int cacheBudgetGb() const;
@@ -435,6 +668,19 @@ public:
     void setMaxUploadRateKiB(int v);
     void setIdleStopMinutes(int v);
 
+    qint64 cacheSizeBytes() const;
+    qint64 cacheBudgetBytes() const;
+    qint64 ephemeralSizeBytes() const;
+    double cacheUsageFraction() const;
+    QString cacheSizeText() const;
+    QString cacheBudgetText() const;
+    QString ephemeralSizeText() const;
+
+public Q_SLOTS:
+    /// Drop ephemeral cache entries until the budget is satisfied,
+    /// then refresh the cached counters.
+    void runEvictionNow();
+
 Q_SIGNALS:
     void cacheBudgetGbChanged();
     void startupBufferMiBChanged();
@@ -443,9 +689,11 @@ Q_SIGNALS:
     void maxDownloadRateKiBChanged();
     void maxUploadRateKiBChanged();
     void idleStopMinutesChanged();
+    void cacheChanged();
 
 private:
     config::TorrentStreamingSettings& m_settings;
+    core::MediaCache& m_cache;
 };
 
 // ---- Root -------------------------------------------------------------
@@ -454,7 +702,8 @@ class SettingsRootViewModel : public QObject
     Q_OBJECT
     Q_PROPERTY(GeneralSettingsViewModel* general READ general CONSTANT)
     Q_PROPERTY(TmdbSettingsViewModel* tmdb READ tmdb CONSTANT)
-    Q_PROPERTY(RealDebridSettingsViewModel* realDebrid READ realDebrid CONSTANT)
+    Q_PROPERTY(DebridSettingsViewModel* debrid READ debrid CONSTANT)
+    Q_PROPERTY(IndexerSettingsViewModel* indexers READ indexers CONSTANT)
     Q_PROPERTY(StreamsSettingsViewModel* streams READ streams CONSTANT)
     Q_PROPERTY(PlayerSettingsViewModel* player READ player CONSTANT)
     Q_PROPERTY(SubtitlesSettingsViewModel* subtitles READ subtitles CONSTANT)
@@ -463,13 +712,16 @@ class SettingsRootViewModel : public QObject
 public:
     SettingsRootViewModel(core::HttpClient* http,
         core::TokenStore* tokens,
+        api::IndexerSelector* indexers,
         config::AppSettings& settings,
         core::SubtitleCacheStore* subtitleCache,
+        core::MediaCache* mediaCache,
         QObject* parent = nullptr);
 
     GeneralSettingsViewModel* general() const { return m_general; }
     TmdbSettingsViewModel* tmdb() const { return m_tmdb; }
-    RealDebridSettingsViewModel* realDebrid() const { return m_rd; }
+    DebridSettingsViewModel* debrid() const { return m_debrid; }
+    IndexerSettingsViewModel* indexers() const { return m_indexers; }
     StreamsSettingsViewModel* streams() const { return m_streams; }
     PlayerSettingsViewModel* player() const { return m_player; }
     SubtitlesSettingsViewModel* subtitles() const { return m_subs; }
@@ -478,17 +730,20 @@ public:
 Q_SIGNALS:
     /// Forwarded from `TmdbSettingsViewModel::tokenChanged`.
     void tmdbTokenChanged(const QString& token);
-    /// Forwarded from `RealDebridSettingsViewModel::tokenChanged`.
+    /// Forwarded from `RealDebridSectionViewModel::tokenChanged`.
     void realDebridTokenChanged(const QString& token);
-    /// Forwarded from `RealDebridSettingsViewModel::usageChanged`.
-    void realDebridUsageChanged();
+    /// Forwarded from `AllDebridSectionViewModel::apiKeyChanged`.
+    void allDebridApiKeyChanged(const QString& apiKey);
+    /// Forwarded from `DebridSettingsViewModel::activeProviderChanged`.
+    void activeDebridProviderChanged();
     /// Forwarded from `SubtitlesSettingsViewModel::credentialsChanged`.
     void subtitleCredentialsChanged();
 
 private:
     GeneralSettingsViewModel* m_general {};
     TmdbSettingsViewModel* m_tmdb {};
-    RealDebridSettingsViewModel* m_rd {};
+    DebridSettingsViewModel* m_debrid {};
+    IndexerSettingsViewModel* m_indexers {};
     StreamsSettingsViewModel* m_streams {};
     PlayerSettingsViewModel* m_player {};
     SubtitlesSettingsViewModel* m_subs {};

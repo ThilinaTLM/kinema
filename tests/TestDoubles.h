@@ -4,8 +4,14 @@
 #pragma once
 
 #include "api/CinemetaClient.h"
+#include "api/Indexer.h"
+#include "api/IndexerSelector.h"
 #include "api/TmdbClient.h"
-#include "api/TorrentioClient.h"
+#include "api/TorrentioIndexer.h"
+#include "config/IndexerSettings.h"
+
+#include <KConfig>
+#include <KSharedConfig>
 #include "core/HttpClient.h"
 #include "core/HttpError.h"
 #include "core/TokenStore.h"
@@ -55,11 +61,15 @@ inline QJsonDocument loadJsonFixture(const char* name)
 class FakeHttpClient : public core::HttpClient
 {
 public:
+    enum class Method { Get, Post, Delete, Head };
+
     struct Call {
         bool json = false;
         bool usedRequest = false;
         QUrl url;
         QNetworkRequest request;
+        Method method = Method::Get;
+        QByteArray body;
     };
 
     explicit FakeHttpClient(QObject* parent = nullptr)
@@ -70,11 +80,12 @@ public:
     QList<Call> calls;
     QList<QJsonDocument> jsonReplies;
     QList<QByteArray> byteReplies;
+    QList<QList<QPair<QByteArray, QByteArray>>> headerReplies;
     std::optional<core::HttpError> nextError;
 
     QCoro::Task<QByteArray> get(QUrl url) override
     {
-        calls.append({ false, false, url, {} });
+        calls.append({ false, false, url, {}, Method::Get, {} });
         if (nextError) {
             throw *nextError;
         }
@@ -83,7 +94,7 @@ public:
 
     QCoro::Task<QJsonDocument> getJson(QUrl url) override
     {
-        calls.append({ true, false, url, {} });
+        calls.append({ true, false, url, {}, Method::Get, {} });
         if (nextError) {
             throw *nextError;
         }
@@ -92,7 +103,7 @@ public:
 
     QCoro::Task<QByteArray> get(QNetworkRequest request) override
     {
-        calls.append({ false, true, {}, request });
+        calls.append({ false, true, {}, request, Method::Get, {} });
         if (nextError) {
             throw *nextError;
         }
@@ -101,11 +112,52 @@ public:
 
     QCoro::Task<QJsonDocument> getJson(QNetworkRequest request) override
     {
-        calls.append({ true, true, {}, request });
+        calls.append({ true, true, {}, request, Method::Get, {} });
         if (nextError) {
             throw *nextError;
         }
         co_return jsonReplies.isEmpty() ? QJsonDocument {} : jsonReplies.takeFirst();
+    }
+
+    QCoro::Task<QByteArray> postJson(QNetworkRequest request,
+        const QByteArray& body) override
+    {
+        calls.append({ false, true, {}, request, Method::Post, body });
+        if (nextError) {
+            throw *nextError;
+        }
+        co_return byteReplies.isEmpty() ? QByteArray {} : byteReplies.takeFirst();
+    }
+
+    QCoro::Task<QJsonDocument> postJsonForJson(QNetworkRequest request,
+        const QByteArray& body) override
+    {
+        calls.append({ true, true, {}, request, Method::Post, body });
+        if (nextError) {
+            throw *nextError;
+        }
+        co_return jsonReplies.isEmpty() ? QJsonDocument {} : jsonReplies.takeFirst();
+    }
+
+    QCoro::Task<QByteArray> del(QNetworkRequest request) override
+    {
+        calls.append({ false, true, {}, request, Method::Delete, {} });
+        if (nextError) {
+            throw *nextError;
+        }
+        co_return byteReplies.isEmpty() ? QByteArray {} : byteReplies.takeFirst();
+    }
+
+    QCoro::Task<QList<QPair<QByteArray, QByteArray>>> head(
+        QNetworkRequest request) override
+    {
+        calls.append({ false, true, {}, request, Method::Head, {} });
+        if (nextError) {
+            throw *nextError;
+        }
+        co_return headerReplies.isEmpty()
+            ? QList<QPair<QByteArray, QByteArray>> {}
+            : headerReplies.takeFirst();
     }
 };
 
@@ -143,7 +195,16 @@ public:
     }
 };
 
-class FakeTorrentioClient : public api::TorrentioClient
+/**
+ * Scripted `api::Indexer` for view-model / controller tests.
+ *
+ * Tests typically wrap one of these in an `api::IndexerSelector`
+ * (registered with `IndexerKind::Torrentio` by default) and inject
+ * the selector into the production view-model / controller. The
+ * fake records what was asked for (`lastKind`, `lastStreamId`) and
+ * replays a scripted sequence of `streams` or errors.
+ */
+class FakeIndexer : public api::Indexer
 {
 public:
     struct ScriptedCall {
@@ -162,8 +223,11 @@ public:
         }
     };
 
-    explicit FakeTorrentioClient(QObject* parent = nullptr)
-        : TorrentioClient(nullptr, parent)
+    explicit FakeIndexer(
+        api::IndexerKind kind = api::IndexerKind::Torrentio,
+        QObject* parent = nullptr)
+        : Indexer(parent)
+        , m_kind(kind)
     {
     }
 
@@ -171,16 +235,20 @@ public:
     int callCount = 0;
     api::MediaKind lastKind = api::MediaKind::Movie;
     QString lastStreamId;
-    core::torrentio::ConfigOptions lastOptions;
+
+    api::IndexerKind kind() const noexcept override { return m_kind; }
+    QString displayName() const override
+    {
+        return QStringLiteral("FakeIndexer(%1)")
+            .arg(api::indexerKindToString(m_kind));
+    }
 
     QCoro::Task<QList<api::Stream>> streams(api::MediaKind kind,
-        QString streamId,
-        core::torrentio::ConfigOptions opts = {}) override
+        QString streamId) override
     {
         ++callCount;
         lastKind = kind;
         lastStreamId = streamId;
-        lastOptions = std::move(opts);
 
         ScriptedCall scripted;
         if (!scriptedCalls.isEmpty()) {
@@ -194,6 +262,52 @@ public:
         }
         co_return scripted.streams;
     }
+
+private:
+    api::IndexerKind m_kind;
+};
+
+/**
+ * Convenience harness that bundles a scratch in-memory
+ * `IndexerSettings` + `IndexerSelector` with a single `FakeIndexer`
+ * registered as the active indexer.
+ *
+ * View-model / controller tests pass `harness.selector()` into
+ * production code and script via `harness.fake().scriptedCalls`.
+ */
+class IndexerHarness
+{
+public:
+    explicit IndexerHarness(
+        api::IndexerKind kind = api::IndexerKind::Torrentio)
+        : m_settings(makeScratchConfig())
+        , m_selector(m_settings)
+    {
+        m_settings.setActiveIndexer(kind);
+        auto owned = std::make_unique<FakeIndexer>(kind);
+        m_fake = owned.get();
+        m_selector.registerIndexer(std::move(owned));
+    }
+
+    FakeIndexer& fake() noexcept { return *m_fake; }
+    api::IndexerSelector* selector() noexcept { return &m_selector; }
+
+private:
+    static KSharedConfigPtr makeScratchConfig()
+    {
+        // Tests usually run with QStandardPaths test mode set, so
+        // this opens an isolated in-process config. We don't need
+        // disk persistence — the harness lives for the test only.
+        return KSharedConfig::openConfig(
+            QStringLiteral("kinema-test-indexer-harness"),
+            KConfig::SimpleConfig,
+            QStandardPaths::TempLocation);
+    }
+
+    KSharedConfigPtr m_config;
+    config::IndexerSettings m_settings;
+    api::IndexerSelector m_selector;
+    FakeIndexer* m_fake { nullptr };
 };
 
 class FakeCinemetaClient : public api::CinemetaClient

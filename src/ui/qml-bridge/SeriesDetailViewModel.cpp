@@ -4,11 +4,13 @@
 #include "ui/qml-bridge/SeriesDetailViewModel.h"
 
 #include "api/CinemetaClient.h"
+#include "api/Indexer.h"
+#include "api/IndexerSelector.h"
 #include "api/TmdbClient.h"
-#include "api/TorrentioClient.h"
 #include "config/AppSettings.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
+#include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
@@ -16,8 +18,7 @@
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/StreamFilter.h"
-#include "kinema_debug.h"
-#include "controllers/PlayQueueController.h"
+#include "kinema_log_ui.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/StreamSorting.h"
@@ -50,22 +51,23 @@ QString episodeDisplayLabel(const QString& seriesTitle,
 
 SeriesDetailViewModel::SeriesDetailViewModel(
     api::CinemetaClient* cinemeta,
-    api::TorrentioClient* torrentio,
+    api::IndexerSelector* indexers,
     api::TmdbClient* tmdb,
     services::StreamActions* actions,
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
+    const QString& adApiKeyRef,
     QObject* parent)
-    : SeriesDetailViewModel(cinemeta, torrentio, tmdb, actions,
+    : SeriesDetailViewModel(cinemeta, indexers, tmdb, actions,
           /*library=*/nullptr, /*watched=*/nullptr,
-          tokens, settings, rdTokenRef, parent)
+          tokens, settings, rdTokenRef, adApiKeyRef, parent)
 {
 }
 
 SeriesDetailViewModel::SeriesDetailViewModel(
     api::CinemetaClient* cinemeta,
-    api::TorrentioClient* torrentio,
+    api::IndexerSelector* indexers,
     api::TmdbClient* tmdb,
     services::StreamActions* actions,
     controllers::LibraryController* library,
@@ -73,10 +75,11 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
+    const QString& adApiKeyRef,
     QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
-    , m_torrentio(torrentio)
+    , m_indexers(indexers)
     , m_tmdb(tmdb)
     , m_actions(actions)
     , m_library(library)
@@ -84,20 +87,18 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     , m_tokens(tokens)
     , m_settings(settings)
     , m_rdToken(rdTokenRef)
+    , m_adApiKey(adApiKeyRef)
     , m_streams(new StreamsListModel(this))
     , m_episodes(new EpisodesListModel(this))
     , m_similar(new DiscoverSectionModel(
           i18nc("@label series detail rail", "More like this"), this))
 {
-    connect(&m_settings.torrentio(),
-        &config::TorrentioSettings::cachedOnlyChanged, this,
-        [this](bool) {
-            Q_EMIT cachedOnlyChanged();
-            rebuildVisibleStreams();
-        });
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });
+    connect(&m_settings.filter(),
+        &config::FilterSettings::exclusionsChanged, this,
+        [this]() { rebuildVisibleStreams(); });
 
     if (m_library) {
         connect(m_library, &controllers::LibraryController::changed,
@@ -109,34 +110,25 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     }
 
     if (m_tokens) {
+        const auto onDebridChanged = [this](const QString&) {
+            Q_EMIT debridConfiguredChanged();
+            if (m_selectedEpisodeRow >= 0 && !m_imdbId.isEmpty()) {
+                auto t = loadEpisodeStreamsTask(m_selectedEpisode);
+                Q_UNUSED(t);
+                return;
+            }
+            rebuildVisibleStreams();
+        };
         connect(m_tokens,
             &controllers::TokenController::realDebridTokenChanged,
-            this, [this](const QString&) {
-                Q_EMIT realDebridConfiguredChanged();
-                if (m_selectedEpisodeRow >= 0 && !m_imdbId.isEmpty()) {
-                    auto t = loadEpisodeStreamsTask(m_selectedEpisode);
-                    Q_UNUSED(t);
-                    return;
-                }
-                rebuildVisibleStreams();
-            });
+            this, onDebridChanged);
+        connect(m_tokens,
+            &controllers::TokenController::allDebridApiKeyChanged,
+            this, onDebridChanged);
     }
 }
 
 SeriesDetailViewModel::~SeriesDetailViewModel() = default;
-
-bool SeriesDetailViewModel::cachedOnly() const
-{
-    return m_settings.torrentio().cachedOnly();
-}
-
-void SeriesDetailViewModel::setCachedOnly(bool on)
-{
-    if (m_settings.torrentio().cachedOnly() == on) {
-        return;
-    }
-    m_settings.torrentio().setCachedOnly(on);
-}
 
 void SeriesDetailViewModel::setSortMode(int mode)
 {
@@ -638,6 +630,15 @@ void SeriesDetailViewModel::requestStreams()
     Q_EMIT streamsRequested();
 }
 
+void SeriesDetailViewModel::refreshStreams()
+{
+    if (m_selectedEpisodeRow < 0 || m_imdbId.isEmpty()) {
+        return;
+    }
+    auto t = loadEpisodeStreamsTask(m_selectedEpisode);
+    Q_UNUSED(t);
+}
+
 void SeriesDetailViewModel::addToLibrary()
 {
     if (!m_library || m_currentSeries.meta.summary.imdbId.isEmpty()) {
@@ -718,10 +719,14 @@ QCoro::Task<void> SeriesDetailViewModel::loadEpisodeStreamsTask(
     }
 
     try {
-        auto opts = m_settings.torrentioOptions();
-        opts.realDebridToken = m_rdToken;
-        auto streams = co_await m_torrentio->streams(
-            api::MediaKind::Series, ep.streamId(m_imdbId), opts);
+        auto* indexer = m_indexers ? m_indexers->active() : nullptr;
+        if (!indexer) {
+            m_streams->setError(i18nc("@info streams empty",
+                "No stream indexer is configured."));
+            co_return;
+        }
+        auto streams = co_await indexer->streams(
+            api::MediaKind::Series, ep.streamId(m_imdbId));
         if (myEpoch != m_episodeEpoch) {
             co_return;
         }
@@ -753,7 +758,7 @@ QCoro::Task<void> SeriesDetailViewModel::resolveByTmdbAndLoad(
             const bool notFound
                 = he->kind() == core::HttpError::Kind::HttpStatus
                 && he->httpStatus() == 404;
-            qCWarning(KINEMA).nospace()
+            qCWarning(KINEMA_UI).nospace()
                 << "TMDB external_ids lookup failed: tv/"
                 << tmdbId << " (\"" << title << "\") \u2014 "
                 << he->httpStatus() << " " << he->message();
@@ -778,7 +783,7 @@ QCoro::Task<void> SeriesDetailViewModel::resolveByTmdbAndLoad(
     }
 
     if (imdbId.isEmpty()) {
-        qCWarning(KINEMA).nospace()
+        qCWarning(KINEMA_UI).nospace()
             << "TMDB has no IMDB id for tv/" << tmdbId
             << " (\"" << title << "\")";
         Q_EMIT statusMessage(
@@ -874,15 +879,9 @@ void SeriesDetailViewModel::rebuildVisibleStreams()
 
     QString emptyExplanation;
     if (visible.isEmpty()) {
-        const bool cachedFiltered
-            = realDebridConfigured() && cachedOnly();
-        emptyExplanation = cachedFiltered
-            ? i18nc("@info streams empty",
-                "Uncheck \u201cCached on Real-Debrid only\u201d or "
-                "widen your filters in Settings.")
-            : i18nc("@info streams empty",
-                "Loosen the exclusions or keyword blocklist in "
-                "Settings.");
+        emptyExplanation = i18nc("@info streams empty",
+            "Loosen the exclusions or keyword blocklist in "
+            "Settings.");
     }
     m_streams->setItems(std::move(visible), emptyExplanation);
 }
@@ -893,8 +892,9 @@ QList<api::Stream> SeriesDetailViewModel::applyFilters() const
         return {};
     }
     core::stream_filter::ClientFilters f;
-    f.cachedOnly = realDebridConfigured() && cachedOnly();
     f.keywordBlocklist = m_settings.filter().keywordBlocklist();
+    f.excludedResolutions = m_settings.filter().excludedResolutions();
+    f.excludedCategories = m_settings.filter().excludedCategories();
     auto rows = core::stream_filter::apply(m_rawStreams, f);
 
     return stream_sorting::applyUiFilters(std::move(rows),
@@ -925,9 +925,10 @@ api::PlaybackContext SeriesDetailViewModel::currentContext() const
     return ctx;
 }
 
-void SeriesDetailViewModel::setPlayQueue(controllers::PlayQueueController* queue)
+void SeriesDetailViewModel::setDownloadController(
+    controllers::DownloadController* dl)
 {
-    m_queue = queue;
+    m_downloads = dl;
 }
 
 void SeriesDetailViewModel::playNow(int row)
@@ -943,28 +944,61 @@ void SeriesDetailViewModel::playNow(int row)
             4000);
         return;
     }
-    if (!m_queue) {
+    if (!m_actions) {
         return;
     }
-    m_queue->playNow(*s, currentContext());
+    m_actions->play(*s, currentContext());
 }
 
-void SeriesDetailViewModel::playNext(int row)
+void SeriesDetailViewModel::playWithBackend(int row, int backendKind)
 {
     const auto* s = m_streams->at(row);
-    if (!s || (s->directUrl.isEmpty() && s->infoHash.isEmpty()) || !m_queue) {
+    if (!s) {
         return;
     }
-    m_queue->playNext(*s, currentContext());
+    if (s->directUrl.isEmpty() && s->infoHash.isEmpty()) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "This stream has no playable URL or magnet."),
+            4000);
+        return;
+    }
+    if (!m_actions) {
+        return;
+    }
+    m_actions->playWithBackend(*s, currentContext(),
+        static_cast<api::DownloadBackendKind>(backendKind));
 }
 
-void SeriesDetailViewModel::enqueue(int row)
+void SeriesDetailViewModel::download(int row)
 {
     const auto* s = m_streams->at(row);
-    if (!s || (s->directUrl.isEmpty() && s->infoHash.isEmpty()) || !m_queue) {
+    if (!s) {
         return;
     }
-    m_queue->enqueue(*s, currentContext());
+    if (s->infoHash.isEmpty() && s->directUrl.isEmpty()) {
+        Q_EMIT statusMessage(i18nc("@info:status",
+            "This stream has no playable URL or magnet."), 4000);
+        return;
+    }
+    if (!m_downloads) {
+        return;
+    }
+    m_downloads->download(*s, currentContext());
+    Q_EMIT statusMessage(
+        i18nc("@info:status starting a background episode download",
+            "Downloading \u201c%1\u201d\u2026", currentContext().title),
+        3500);
+}
+
+void SeriesDetailViewModel::downloadWithBackend(int row, int backendKind)
+{
+    const auto* s = m_streams->at(row);
+    if (!s || !m_downloads) {
+        return;
+    }
+    m_downloads->downloadWithBackend(*s, currentContext(),
+        static_cast<api::DownloadBackendKind>(backendKind));
 }
 
 template <typename Method>

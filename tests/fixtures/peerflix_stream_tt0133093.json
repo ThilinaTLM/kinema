@@ -1,0 +1,42 @@
+{
+  "streams": [
+    {
+      "name": "Peerflix\n4K",
+      "description": "The.Matrix.1999.4K.UHD.BluRay.HDR-NOGRP\nThe.Matrix.4K.mkv\n  👤 14 💾 56.19 GB 🌐 Peerflix",
+      "infoHash": "4927c5658396e63e40bc9061bd805a7bb1e06966",
+      "fileIdx": 0,
+      "sources": [
+        "tracker:udp://tracker.opentrackr.org:1337/announce",
+        "dht:4927c5658396e63e40bc9061bd805a7bb1e06966"
+      ],
+      "behaviorHints": {
+        "filename": "The.Matrix.4K.mkv"
+      },
+      "language": "es",
+      "quality": "4K",
+      "seed": 14,
+      "sizebytes": 60333553090
+    },
+    {
+      "name": "Peerflix\n1080p",
+      "description": "The.Matrix.1999.1080p.BluRay.x264-RARBG\nThe.Matrix.1999.1080p.BluRay.x264-RARBG.mkv",
+      "infoHash": "aabb1122ccdd3344eeff5566778899aabbccddee",
+      "sources": [
+        "tracker:udp://tracker.opentrackr.org:1337/announce"
+      ],
+      "language": "en",
+      "quality": "1080p",
+      "seed": 612,
+      "sizebytes": 2254857830
+    },
+    {
+      "name": "Peerflix\n720p",
+      "description": "The.Matrix.1999.720p.BluRay.x264-SPANISH\nThe.Matrix.720p.es.mkv",
+      "infoHash": "bbccddeeff0011223344556677889900aabbccdd",
+      "language": "es",
+      "quality": "720p",
+      "seed": 0,
+      "sizebytes": 687897313
+    }
+  ]
+}

@@ -149,18 +149,18 @@ Kirigami.ApplicationWindow {
                 onTriggered: root.showPage("browse")
             },
             Kirigami.Action {
-                icon.source: AppIcons.url("list-video",
+                icon.source: AppIcons.url("download",
                     checked ? AppIcons.accentText : AppIcons.foreground)
                 icon.color: enabled
                     ? (checked ? AppIcons.accentText : AppIcons.foreground)
                     : AppIcons.muted
-                text: playQueue.count > 0
-                    ? i18nc("@action drawer entry, %1 is row count",
-                        "Queue (%1)", playQueue.count)
-                    : i18nc("@action drawer entry", "Queue")
+                text: downloadsVm.activeCount > 0
+                    ? i18nc("@action drawer entry, %1 is active count",
+                        "Downloads (%1)", downloadsVm.activeCount)
+                    : i18nc("@action drawer entry", "Downloads")
                 checkable: true
-                checked: root.currentNavKey === "queue"
-                onTriggered: root.showPage("queue")
+                checked: root.currentNavKey === "downloads"
+                onTriggered: root.showPage("downloads")
             }
         ]
 
@@ -221,12 +221,20 @@ Kirigami.ApplicationWindow {
                     "dev.tlmtech.kinema.app", "TmdbSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
-                moduleId: "realdebrid"
-                text: i18nc("@title:tab settings page", "Real-Debrid")
+                moduleId: "debrid"
+                text: i18nc("@title:tab settings page", "Debrid")
                 icon.source: AppIcons.url("server")
                 icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
-                    "dev.tlmtech.kinema.app", "RealDebridSettingsPage")
+                    "dev.tlmtech.kinema.app", "DebridSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
+                moduleId: "indexers"
+                text: i18nc("@title:tab settings page", "Indexers")
+                icon.source: AppIcons.url("list-video")
+                icon.color: AppIcons.foreground
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "IndexersSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
                 moduleId: "streams"
@@ -253,8 +261,14 @@ Kirigami.ApplicationWindow {
                     "dev.tlmtech.kinema.app", "SubtitlesSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
+                // moduleId stays "torrentstreaming" so any persisted
+                // "last opened settings page" state and deep-link
+                // strings (`MainController::requestSettings(category)`)
+                // keep working without a migration. The user-facing
+                // tab label is now "Downloads" because the page covers
+                // both backends and the unified MediaCache.
                 moduleId: "torrentstreaming"
-                text: i18nc("@title:tab settings page", "Torrent streaming")
+                text: i18nc("@title:tab settings page", "Downloads")
                 icon.source: AppIcons.url("download")
                 icon.color: AppIcons.foreground
                 page: () => Qt.createComponent(
@@ -292,18 +306,13 @@ Kirigami.ApplicationWindow {
     Component.onCompleted: root.setTopLevelPage(discoverComp, {})
 
     function createPage(component, properties) {
-        // Kirigami.PageRow accepts Component objects, but on the current
-        // Qt/Kirigami stack it creates them with a non-visual helper
-        // parent first, which produces noisy "not placed in scene"
-        // warnings. Create with a temporary visual parent so the page is
-        // in-scene at birth, then detach before handing it to PageRow so it
-        // can own insertion without thinking the page is already present.
-        const page = component.createObject(root.contentItem,
-            properties || {});
-        if (page) {
-            page.parent = null;
-        }
-        return page;
+        // Instantiate pages unattached and hand the finished item to
+        // PageRow. The previous create-then-detach flow fixed PageRow's
+        // helper-parent warnings, but it also left Kirigami/FormCard
+        // internals briefly observing a null parent during startup,
+        // producing noisy `ScrollablePage.flickable` /
+        // `FormDelegateBackground.visibleChildren` errors.
+        return component.createObject(null, properties || {});
     }
 
     function setTopLevelPage(component, properties) {
@@ -354,8 +363,8 @@ Kirigami.ApplicationWindow {
         case "browse":
             root.setTopLevelPage(browseComp, {});
             break;
-        case "queue":
-            root.setTopLevelPage(queueComp, {});
+        case "downloads":
+            root.setTopLevelPage(downloadsComp, {});
             break;
         }
     }
@@ -369,7 +378,7 @@ Kirigami.ApplicationWindow {
     Component { id: libraryComp;  LibraryPage  { } }
     Component { id: searchComp;   SearchPage   { } }
     Component { id: browseComp;   BrowsePage   { } }
-    Component { id: queueComp;    QueuePage    { } }
+    Component { id: downloadsComp; DownloadsPage { } }
 
     // Detail pages are pushed on top of the current nav page so Esc
     // pops back to it with state preserved (the shell-level Esc

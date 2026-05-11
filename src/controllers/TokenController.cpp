@@ -4,10 +4,10 @@
 #include "controllers/TokenController.h"
 
 #include "api/TmdbClient.h"
-#include "config/RealDebridSettings.h"
+#include "config/DebridSettings.h"
 #include "core/TmdbConfig.h"
 #include "core/TokenStore.h"
-#include "kinema_debug.h"
+#include "kinema_log_controller.h"
 
 namespace kinema::controllers {
 
@@ -19,7 +19,7 @@ QCoro::Task<QString> safeRead(core::TokenStore& store, const char* key,
     try {
         co_return co_await store.read(QString::fromLatin1(key));
     } catch (const std::exception& e) {
-        qCWarning(KINEMA) << label << "read failed:" << e.what();
+        qCWarning(KINEMA_CONTROLLER) << label << "read failed:" << e.what();
     }
     co_return QString {};
 }
@@ -29,13 +29,13 @@ QCoro::Task<QString> safeRead(core::TokenStore& store, const char* key,
 TokenController::TokenController(
     core::TokenStore* tokens,
     api::TmdbClient* tmdb,
-    const config::RealDebridSettings& rdSettings,
+    const config::DebridSettings& debridSettings,
     QObject* parent,
     QString tmdbCompiledDefaultToken)
     : QObject(parent)
     , m_tokens(tokens)
     , m_tmdb(tmdb)
-    , m_rdSettings(rdSettings)
+    , m_debridSettings(debridSettings)
     , m_tmdbCompiledDefaultToken(tmdbCompiledDefaultToken.isNull()
             ? QString::fromLatin1(core::kTmdbCompiledDefaultToken)
             : std::move(tmdbCompiledDefaultToken))
@@ -45,6 +45,7 @@ TokenController::TokenController(
 void TokenController::loadAll()
 {
     [[maybe_unused]] auto rd = loadRdTask();
+    [[maybe_unused]] auto ad = loadAdTask();
     [[maybe_unused]] auto tmdb = loadTmdbTask();
     [[maybe_unused]] auto os = loadOpenSubtitlesTask();
 }
@@ -52,6 +53,11 @@ void TokenController::loadAll()
 void TokenController::refreshRealDebrid()
 {
     [[maybe_unused]] auto t = loadRdTask();
+}
+
+void TokenController::refreshAllDebrid()
+{
+    [[maybe_unused]] auto t = loadAdTask();
 }
 
 void TokenController::refreshTmdb()
@@ -66,14 +72,32 @@ void TokenController::refreshOpenSubtitlesCredentials()
 
 QCoro::Task<void> TokenController::loadRdTask()
 {
+    // We always publish the raw keyring value when one exists.
+    // The active-provider gate lives in `download::BackendSelector`,
+    // not here, so the RD client still has a valid token if a row
+    // persisted against RD needs to resume after the user switches
+    // the active provider to AllDebrid.
     QString next;
-    if (m_rdSettings.configured() && m_rdSettings.enabled()) {
+    if (m_debridSettings.realDebridConfigured()) {
         next = co_await safeRead(*m_tokens,
             core::TokenStore::kRealDebridKey, "RD token");
     }
     if (next != m_rdToken) {
         m_rdToken = std::move(next);
         Q_EMIT realDebridTokenChanged(m_rdToken);
+    }
+}
+
+QCoro::Task<void> TokenController::loadAdTask()
+{
+    QString next;
+    if (m_debridSettings.allDebridConfigured()) {
+        next = co_await safeRead(*m_tokens,
+            core::TokenStore::kAllDebridKey, "AllDebrid apikey");
+    }
+    if (next != m_adApiKey) {
+        m_adApiKey = std::move(next);
+        Q_EMIT allDebridApiKeyChanged(m_adApiKey);
     }
 }
 

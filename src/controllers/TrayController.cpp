@@ -3,7 +3,7 @@
 
 #include "controllers/TrayController.h"
 
-#include "kinema_debug.h"
+#include "kinema_log_controller.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
 #include "ui/player/PlayerWindow.h"
@@ -45,7 +45,7 @@ TrayController::TrayController(QWindow* mainWindow, QObject* parent)
     // covers the genuinely-absent case.
     m_available = QSystemTrayIcon::isSystemTrayAvailable();
     if (!m_available) {
-        qCInfo(KINEMA) << "no system tray host available;"
+        qCInfo(KINEMA_CONTROLLER) << "no system tray host available;"
                        << "close-to-tray will be inert";
         return;
     }
@@ -146,7 +146,7 @@ QIcon TrayController::renderSymbolicIcon() const
 {
     QFile f(QStringLiteral(":/kinema/tray-icon.svg"));
     if (!f.open(QIODevice::ReadOnly)) {
-        qCWarning(KINEMA) << "tray: symbolic SVG resource missing;"
+        qCWarning(KINEMA_CONTROLLER) << "tray: symbolic SVG resource missing;"
                           << "falling back to themed icon";
         return QIcon::fromTheme(
             QStringLiteral("dev.tlmtech.kinema-symbolic"),
@@ -166,7 +166,7 @@ QIcon TrayController::renderSymbolicIcon() const
 
     QSvgRenderer renderer(svg);
     if (!renderer.isValid()) {
-        qCWarning(KINEMA) << "tray: symbolic SVG failed to parse";
+        qCWarning(KINEMA_CONTROLLER) << "tray: symbolic SVG failed to parse";
         return QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema"));
     }
 

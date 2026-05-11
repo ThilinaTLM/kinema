@@ -12,12 +12,14 @@
 namespace kinema::config {
 
 /**
- * Torrentio query defaults (sort mode + RD cached-only toggle).
+ * Torrentio-specific settings: the wire-format sort mode that becomes
+ * the `sort=` URL parameter, plus the base URL (so users can point
+ * at a private Torrentio mirror).
  *
- * KConfig group: [General]
+ * KConfig group: [Torrentio]
  * Keys:
  *   defaultSort   "seeders" | "size" | "qualitysize"
- *   cachedOnly    bool (RD cached-only filter)
+ *   baseUrl       URL, default "https://torrentio.strem.fun"
  */
 class TorrentioSettings : public QObject
 {
@@ -29,12 +31,15 @@ public:
     core::torrentio::SortMode defaultSort() const;
     void setDefaultSort(core::torrentio::SortMode);
 
-    bool cachedOnly() const;
-    void setCachedOnly(bool);
+    QString baseUrl() const;
+    void setBaseUrl(const QString&);
+
+    /// Default base URL used when no override has been saved.
+    static QString defaultBaseUrl();
 
 Q_SIGNALS:
     void defaultSortChanged(core::torrentio::SortMode);
-    void cachedOnlyChanged(bool);
+    void baseUrlChanged(const QString&);
 
 private:
     KSharedConfigPtr m_config;

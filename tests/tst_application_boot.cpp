@@ -35,6 +35,10 @@ bool isTargetWarning(const QString& message)
         || message.contains(QStringLiteral(
             "Cannot read property 'flickable' of null"))
         || message.contains(QStringLiteral(
+            "Cannot read property 'visibleChildren' of null"))
+        || (message.contains(QStringLiteral("TypeError: Cannot read property"))
+            && message.contains(QStringLiteral("of null")))
+        || message.contains(QStringLiteral(
             "items in the process of being created at engine destruction"));
 }
 
@@ -99,6 +103,7 @@ class TestApplicationBoot : public QObject
 private Q_SLOTS:
     void initTestCase();
     void loadsApplicationShell();
+    void teardownOnDownloadsIsQuiet();
 };
 
 void TestApplicationBoot::initTestCase()
@@ -129,9 +134,43 @@ void TestApplicationBoot::loadsApplicationShell()
     evaluate(engine, window, QStringLiteral("showPage('search')"));
     evaluate(engine, window, QStringLiteral("showPage('browse')"));
     evaluate(engine, window, QStringLiteral("showPage('library')"));
+    evaluate(engine, window, QStringLiteral("showPage('downloads')"));
     evaluate(engine, window, QStringLiteral("showPage('settings')"));
     evaluate(engine, window, QStringLiteral("mainController.requestAbout()"));
     evaluate(engine, window, QStringLiteral("showPage('discover')"));
+
+    const auto warnings = warningCollector.messages();
+    QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join(QLatin1Char('\n'))));
+}
+
+// Regression: quitting while the Downloads page is current used to log
+// `TypeError: Cannot read property 'activeCount' of null` (and friends)
+// because `controller` was destroyed before the QML engine, so
+// teardown bindings re-evaluated `downloadsVm` after the VM was gone.
+// `main.cpp` now drops the engine first; mirror that order here.
+void TestApplicationBoot::teardownOnDownloadsIsQuiet()
+{
+    ScopedWarningCollector warningCollector;
+
+    auto engine = std::make_unique<QQmlApplicationEngine>();
+    auto settings = std::make_unique<kinema::config::AppSettings>();
+    auto controller = std::make_unique<kinema::ui::qml::MainController>(
+        *settings, *engine);
+
+    engine->loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
+        QStringLiteral("ApplicationShell"));
+    QVERIFY(!engine->rootObjects().isEmpty());
+    auto* window = qobject_cast<QQuickWindow*>(
+        engine->rootObjects().constFirst());
+    QVERIFY(window);
+
+    evaluate(*engine, window, QStringLiteral("showPage('downloads')"));
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    // Engine first, then controller — same teardown order as `main.cpp`.
+    engine.reset();
+    controller.reset();
+    settings.reset();
 
     const auto warnings = warningCollector.messages();
     QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join(QLatin1Char('\n'))));

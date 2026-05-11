@@ -6,7 +6,7 @@
 #include "core/CachePaths.h"
 #include "core/Database.h"
 #include "core/SqlUtil.h"
-#include "kinema_debug.h"
+#include "kinema_log_db.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -179,7 +179,7 @@ QList<SubtitleCacheStore::Entry> SubtitleCacheStore::findFor(
         q.addBindValue(l);
     }
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_DB)
             << "SubtitleCacheStore: findFor failed:"
             << q.lastError().text();
         return out;
@@ -281,7 +281,7 @@ bool SubtitleCacheStore::insert(const Entry& e)
             : QDateTime::currentDateTimeUtc()));
 
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_DB)
             << "SubtitleCacheStore: insert failed for" << e.fileId
             << "\u2014" << q.lastError().text();
         return false;
@@ -301,7 +301,7 @@ void SubtitleCacheStore::touch(const QString& fileId)
     q.addBindValue(isoUtc(QDateTime::currentDateTimeUtc()));
     q.addBindValue(fileId);
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_DB)
             << "SubtitleCacheStore: touch failed:"
             << q.lastError().text();
         return;
@@ -321,7 +321,7 @@ void SubtitleCacheStore::remove(const QString& fileId)
         "DELETE FROM subtitle_cache WHERE file_id = ?"));
     q.addBindValue(fileId);
     if (!q.exec()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_DB)
             << "SubtitleCacheStore: remove failed:"
             << q.lastError().text();
         return;
@@ -380,7 +380,7 @@ void SubtitleCacheStore::clearAll()
     }
     auto q = m_db.query();
     if (!q.exec(QStringLiteral("DELETE FROM subtitle_cache"))) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_DB)
             << "SubtitleCacheStore: clearAll failed:"
             << q.lastError().text();
         return;

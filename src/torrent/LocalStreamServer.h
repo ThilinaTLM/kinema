@@ -15,6 +15,11 @@ namespace kinema::torrent {
 
 class TorrentStreamingService;
 
+/**
+ * LEGACY localhost server kept private to `TorrentStreamingService`
+ * for the deprecated `prepare()` entry point. Production playback
+ * goes through `download::LocalMediaServer`.
+ */
 class LocalStreamServer : public QObject
 {
     Q_OBJECT

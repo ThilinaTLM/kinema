@@ -8,10 +8,15 @@
 namespace kinema::config {
 
 namespace {
-constexpr auto kGroup = "General";
+constexpr auto kGroup = "Torrentio";
 constexpr auto kKeyDefaultSort = "defaultSort";
-constexpr auto kKeyCachedOnly = "cachedOnly";
+constexpr auto kKeyBaseUrl = "baseUrl";
 } // namespace
+
+QString TorrentioSettings::defaultBaseUrl()
+{
+    return QStringLiteral("https://torrentio.strem.fun");
+}
 
 TorrentioSettings::TorrentioSettings(KSharedConfigPtr config, QObject* parent)
     : QObject(parent)
@@ -42,18 +47,22 @@ void TorrentioSettings::setDefaultSort(core::torrentio::SortMode m)
     Q_EMIT defaultSortChanged(m);
 }
 
-bool TorrentioSettings::cachedOnly() const
+QString TorrentioSettings::baseUrl() const
 {
-    return detail::read(m_config, kGroup, kKeyCachedOnly, false);
+    const auto raw = detail::read(m_config, kGroup, kKeyBaseUrl,
+        defaultBaseUrl());
+    return raw.isEmpty() ? defaultBaseUrl() : raw;
 }
 
-void TorrentioSettings::setCachedOnly(bool on)
+void TorrentioSettings::setBaseUrl(const QString& url)
 {
-    if (cachedOnly() == on) {
+    const auto trimmed = url.trimmed();
+    const auto effective = trimmed.isEmpty() ? defaultBaseUrl() : trimmed;
+    if (baseUrl() == effective) {
         return;
     }
-    detail::write(m_config, kGroup, kKeyCachedOnly, on);
-    Q_EMIT cachedOnlyChanged(on);
+    detail::write(m_config, kGroup, kKeyBaseUrl, effective);
+    Q_EMIT baseUrlChanged(effective);
 }
 
 } // namespace kinema::config

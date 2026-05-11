@@ -6,15 +6,17 @@
 #include "config/AppearanceSettings.h"
 #include "config/BrowseSettings.h"
 #include "config/CacheSettings.h"
+#include "config/DebridSettings.h"
+#include "config/DownloadSettings.h"
 #include "config/FilterSettings.h"
+#include "config/IndexerSettings.h"
 #include "config/LibrarySettings.h"
+#include "config/PeerflixSettings.h"
 #include "config/PlayerSettings.h"
-#include "config/RealDebridSettings.h"
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
 #include "config/TorrentioSettings.h"
 #include "config/TorrentStreamingSettings.h"
-#include "core/TorrentioConfig.h"
 
 #include <KSharedConfig>
 
@@ -62,8 +64,8 @@ public:
     AppearanceSettings& appearance() noexcept { return m_appearance; }
     const AppearanceSettings& appearance() const noexcept { return m_appearance; }
 
-    RealDebridSettings& realDebrid() noexcept { return m_realDebrid; }
-    const RealDebridSettings& realDebrid() const noexcept { return m_realDebrid; }
+    DebridSettings& debrid() noexcept { return m_debrid; }
+    const DebridSettings& debrid() const noexcept { return m_debrid; }
 
     SubtitleSettings& subtitle() noexcept { return m_subtitle; }
     const SubtitleSettings& subtitle() const noexcept { return m_subtitle; }
@@ -74,20 +76,16 @@ public:
     TorrentStreamingSettings& torrentStreaming() noexcept { return m_torrentStreaming; }
     const TorrentStreamingSettings& torrentStreaming() const noexcept { return m_torrentStreaming; }
 
-    /// Build the Torrentio options from the current Torrentio + Filter
-    /// state. The RD token is NOT filled — callers merge it in from
-    /// TokenController.
-    core::torrentio::ConfigOptions torrentioOptions() const;
+    DownloadSettings& download() noexcept { return m_download; }
+    const DownloadSettings& download() const noexcept { return m_download; }
 
-Q_SIGNALS:
-    /// Fired whenever any input to torrentioOptions() changes
-    /// (default sort or filter exclusions). MainWindow/controllers
-    /// debounce and refetch the visible torrent list.
-    void torrentioOptionsChanged();
+    IndexerSettings& indexers() noexcept { return m_indexers; }
+    const IndexerSettings& indexers() const noexcept { return m_indexers; }
+
+    PeerflixSettings& peerflix() noexcept { return m_peerflix; }
+    const PeerflixSettings& peerflix() const noexcept { return m_peerflix; }
 
 private:
-    void connectAggregateSignals();
-
     SearchSettings m_search;
     PlayerSettings m_player;
     FilterSettings m_filter;
@@ -95,10 +93,13 @@ private:
     LibrarySettings m_library;
     TorrentioSettings m_torrentio;
     AppearanceSettings m_appearance;
-    RealDebridSettings m_realDebrid;
+    DebridSettings m_debrid;
     SubtitleSettings m_subtitle;
     CacheSettings m_cache;
     TorrentStreamingSettings m_torrentStreaming;
+    DownloadSettings m_download;
+    IndexerSettings m_indexers;
+    PeerflixSettings m_peerflix;
 };
 
 } // namespace kinema::config

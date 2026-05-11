@@ -5,7 +5,7 @@
 
 #include "config/TorrentStreamingSettings.h"
 #include "core/CachePaths.h"
-#include "kinema_debug.h"
+#include "kinema_log_torrent.h"
 
 #include <QDateTime>
 #include <QDirIterator>
@@ -101,7 +101,7 @@ void TorrentCache::touch(const QString& infoHash) const
     const auto marker = accessMarkerPath(infoHash);
     QFile f(marker);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qCWarning(KINEMA) << "TorrentCache: could not touch" << marker;
+        qCWarning(KINEMA_TORRENT) << "TorrentCache: could not touch" << marker;
         return;
     }
     f.write(QDateTime::currentDateTimeUtc()
@@ -167,11 +167,11 @@ void TorrentCache::enforceBudget()
             break;
         }
         if (!removeRecursively(c.path)) {
-            qCWarning(KINEMA) << "TorrentCache: failed to prune" << c.path;
+            qCWarning(KINEMA_TORRENT) << "TorrentCache: failed to prune" << c.path;
             continue;
         }
         total -= c.size;
-        qCInfo(KINEMA) << "TorrentCache: pruned" << c.hash;
+        qCInfo(KINEMA_TORRENT) << "TorrentCache: pruned" << c.hash;
     }
 }
 

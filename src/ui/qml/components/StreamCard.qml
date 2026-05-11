@@ -37,8 +37,6 @@ QQC2.ItemDelegate {
     property string sizeText
     property int seeders: -1
     property string provider
-    property bool rdCached: false
-    property bool rdDownload: false
     property bool hasMagnet: false
     property bool hasDirectUrl: false
     property string resolution
@@ -112,27 +110,6 @@ QQC2.ItemDelegate {
                 tone: "neutral"
             }
 
-            Rectangle {
-                Layout.alignment: Qt.AlignHCenter
-                visible: card.rdCached || card.rdDownload
-                radius: height / 2
-                color: card.rdCached ? Theme.positive : Theme.accent
-                implicitHeight: rdLabel.implicitHeight
-                    + Theme.inlineSpacing
-                implicitWidth: rdLabel.implicitWidth
-                    + Theme.inlineSpacing * 2
-
-                QQC2.Label {
-                    id: rdLabel
-                    anchors.centerIn: parent
-                    text: card.rdCached
-                        ? i18nc("@label stream chip", "RD+")
-                        : i18nc("@label stream chip", "RD")
-                    color: Theme.background
-                    font.pointSize: Theme.captionFont.pointSize
-                    font.weight: Font.DemiBold
-                }
-            }
         }
 
         // ---- 2. Summary column (secondary) ---------------------
@@ -232,7 +209,18 @@ QQC2.ItemDelegate {
             }
         }
 
-        // ---- 4. Primary action + overflow ----------------------
+        // ---- 4. Primary actions + overflow ---------------------
+        // Three side-by-side affordances per the downloads model:
+        //   \u25b6 Play    \u2192 OnDemand session, only fetches what the
+        //                  player needs; quiesces when not playing.
+        //                  Single label regardless of backend; the
+        //                  `highlighted` accent stays on cached /
+        //                  direct-URL rows so users still see at a
+        //                  glance which releases will start instantly.
+        //   \u2b07 Download \u2192 Full + Pinned background download; runs
+        //                  to completion regardless of playback.
+        //   \u22ee More    \u2192 overflow menu: copy/open magnet/url,
+        //                  per-row backend overrides, subtitles.
         RowLayout {
             Layout.alignment: Qt.AlignVCenter
             spacing: Theme.inlineSpacing
@@ -240,19 +228,30 @@ QQC2.ItemDelegate {
             QQC2.Button {
                 visible: card.hasDirectUrl || card.hasMagnet
                 enabled: card.hasDirectUrl || card.hasMagnet
-                icon.source: AppIcons.url(card.hasDirectUrl
-                    ? "play"
-                    : "external-link",
+                icon.source: AppIcons.url("play",
                     AppIcons.controlColor(enabled, highlighted))
                 icon.color: AppIcons.controlColor(enabled, highlighted)
-                text: card.hasDirectUrl
-                    ? i18nc("@action:button primary stream action",
-                        "Play now")
-                    : i18nc("@action:button primary stream action",
-                        "Stream")
+                text: i18nc("@action:button primary stream action",
+                    "Play")
                 display: QQC2.AbstractButton.TextBesideIcon
                 highlighted: card.hasDirectUrl
                 onClicked: card._activatePrimary()
+            }
+
+            QQC2.ToolButton {
+                visible: card.hasDirectUrl || card.hasMagnet
+                enabled: card.hasDirectUrl || card.hasMagnet
+                icon.source: AppIcons.url("download",
+                    AppIcons.controlColor(enabled, false))
+                icon.color: AppIcons.controlColor(enabled, false)
+                display: QQC2.AbstractButton.IconOnly
+                text: i18nc("@action:button background full download",
+                    "Download")
+                QQC2.ToolTip.text: i18nc("@info:tooltip background download",
+                    "Download the whole file in the background. "
+                    + "Continues even if you stop watching.")
+                QQC2.ToolTip.visible: hovered
+                onClicked: card.vm.download(card.row)
             }
 
             QQC2.ToolButton {

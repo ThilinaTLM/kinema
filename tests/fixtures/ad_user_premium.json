@@ -1,0 +1,18 @@
+{
+  "status": "success",
+  "data": {
+    "user": {
+      "username": "alice",
+      "email": "alice@example.com",
+      "isPremium": true,
+      "isSubscribed": true,
+      "isTrial": false,
+      "premiumUntil": 1893456000,
+      "lang": "en",
+      "preferedDomain": "fr",
+      "fidelityPoints": 200,
+      "limitedHostersQuotas": {},
+      "notifications": []
+    }
+  }
+}

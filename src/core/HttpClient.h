@@ -62,6 +62,10 @@ public:
     virtual QCoro::Task<QList<QPair<QByteArray, QByteArray>>> head(
         QNetworkRequest request);
 
+    /// DELETE on the given request. Returns the response body on
+    /// success (often empty). Throws HttpError on non-2xx.
+    virtual QCoro::Task<QByteArray> del(QNetworkRequest request);
+
     void setTimeout(std::chrono::milliseconds timeout);
     std::chrono::milliseconds timeout() const noexcept { return m_timeout; }
 

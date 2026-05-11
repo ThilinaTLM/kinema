@@ -11,13 +11,11 @@ using namespace kinema::core::stream_filter;
 namespace {
 
 api::Stream makeStream(const QString& releaseName,
-    bool rdCached = false,
     const QString& detailsText = {})
 {
     api::Stream s;
     s.releaseName = releaseName;
     s.detailsText = detailsText;
-    s.rdCached = rdCached;
     return s;
 }
 
@@ -35,34 +33,6 @@ private Q_SLOTS:
         QCOMPARE(out.size(), 2);
         QCOMPARE(out[0].releaseName, QStringLiteral("A"));
         QCOMPARE(out[1].releaseName, QStringLiteral("B"));
-    }
-
-    void cachedOnly_keepsOnlyRDCached()
-    {
-        const QList<api::Stream> in {
-            makeStream(QStringLiteral("one"), /*rdCached=*/false),
-            makeStream(QStringLiteral("two"), /*rdCached=*/true),
-            makeStream(QStringLiteral("three"), /*rdCached=*/false),
-            makeStream(QStringLiteral("four"), /*rdCached=*/true),
-        };
-        ClientFilters f;
-        f.cachedOnly = true;
-        const auto out = apply(in, f);
-        QCOMPARE(out.size(), 2);
-        QCOMPARE(out[0].releaseName, QStringLiteral("two"));
-        QCOMPARE(out[1].releaseName, QStringLiteral("four"));
-    }
-
-    void cachedOnly_off_keepsAll()
-    {
-        const QList<api::Stream> in {
-            makeStream(QStringLiteral("a"), /*rdCached=*/false),
-            makeStream(QStringLiteral("b"), /*rdCached=*/true),
-        };
-        ClientFilters f;
-        f.cachedOnly = false;
-        const auto out = apply(in, f);
-        QCOMPARE(out.size(), 2);
     }
 
     void blocklist_matchesReleaseNameCaseInsensitively()
@@ -83,9 +53,9 @@ private Q_SLOTS:
     {
         const QList<api::Stream> in {
             makeStream(QStringLiteral("Some.Release.1080p"),
-                false, QStringLiteral("Hindi dub · 1.2 GB")),
+                QStringLiteral("Hindi dub · 1.2 GB")),
             makeStream(QStringLiteral("Other.Release.1080p"),
-                false, QStringLiteral("English · 1.3 GB")),
+                QStringLiteral("English · 1.3 GB")),
         };
         ClientFilters f;
         f.keywordBlocklist = { QStringLiteral("Hindi") };
@@ -103,7 +73,9 @@ private Q_SLOTS:
         // match anything that contains whitespace. The caller is
         // expected to have trimmed input. We do verify empty QStrings
         // are ignored (they'd otherwise match every stream).
-        const auto outEmpty = apply(in, { false, { QString {} } });
+        ClientFilters fEmpty;
+        fEmpty.keywordBlocklist = { QString {} };
+        const auto outEmpty = apply(in, fEmpty);
         QCOMPARE(outEmpty.size(), 1);
     }
 
@@ -119,21 +91,6 @@ private Q_SLOTS:
         QCOMPARE(out.size(), 2);
     }
 
-    void combined_cachedAndBlocklist()
-    {
-        const QList<api::Stream> in {
-            makeStream(QStringLiteral("Foo.CAM"), /*rdCached=*/true),
-            makeStream(QStringLiteral("Foo.1080p"), /*rdCached=*/true),
-            makeStream(QStringLiteral("Foo.1080p.uncached"), /*rdCached=*/false),
-        };
-        ClientFilters f;
-        f.cachedOnly = true;
-        f.keywordBlocklist = { QStringLiteral("cam") };
-        const auto out = apply(in, f);
-        QCOMPARE(out.size(), 1);
-        QCOMPARE(out[0].releaseName, QStringLiteral("Foo.1080p"));
-    }
-
     void matchesBlocklist_helper()
     {
         const auto s = makeStream(QStringLiteral("Release.HDR10.2160p"));
@@ -143,16 +100,52 @@ private Q_SLOTS:
         QVERIFY(!matchesBlocklist(s, {}));
     }
 
+    void excludedCategoriesNonen_dropsRowsWithNonEnglishLanguage()
+    {
+        api::Stream en;
+        en.releaseName = QStringLiteral("en.row");
+        en.language = QStringLiteral("en");
+        api::Stream es;
+        es.releaseName = QStringLiteral("es.row");
+        es.language = QStringLiteral("es");
+        api::Stream unknown;
+        unknown.releaseName = QStringLiteral("unknown.row");
+        // empty language — pass through (Torrentio rows)
+
+        ClientFilters f;
+        f.excludedCategories = { QStringLiteral("nonen") };
+        const auto out = apply({ en, es, unknown }, f);
+        QCOMPARE(out.size(), 2);
+        QCOMPARE(out[0].releaseName, QStringLiteral("en.row"));
+        QCOMPARE(out[1].releaseName, QStringLiteral("unknown.row"));
+    }
+
+    void excludedCategoriesNonen_languageCompareIsCaseInsensitive()
+    {
+        api::Stream upper;
+        upper.releaseName = QStringLiteral("upper.en");
+        upper.language = QStringLiteral("EN");
+        api::Stream mixed;
+        mixed.releaseName = QStringLiteral("mixed.es");
+        mixed.language = QStringLiteral("ES");
+
+        ClientFilters f;
+        f.excludedCategories = { QStringLiteral("nonen") };
+        const auto out = apply({ upper, mixed }, f);
+        QCOMPARE(out.size(), 1);
+        QCOMPARE(out[0].releaseName, QStringLiteral("upper.en"));
+    }
+
     void orderIsPreserved()
     {
         const QList<api::Stream> in {
-            makeStream(QStringLiteral("aaa"), true),
-            makeStream(QStringLiteral("bbb"), false),
-            makeStream(QStringLiteral("ccc"), true),
-            makeStream(QStringLiteral("ddd"), true),
+            makeStream(QStringLiteral("aaa")),
+            makeStream(QStringLiteral("bbb.cam")),
+            makeStream(QStringLiteral("ccc")),
+            makeStream(QStringLiteral("ddd")),
         };
         ClientFilters f;
-        f.cachedOnly = true;
+        f.keywordBlocklist = { QStringLiteral("cam") };
         const auto out = apply(in, f);
         QCOMPARE(out.size(), 3);
         QCOMPARE(out[0].releaseName, QStringLiteral("aaa"));

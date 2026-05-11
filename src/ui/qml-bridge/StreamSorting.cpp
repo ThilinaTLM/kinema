@@ -73,12 +73,11 @@ void sortInPlace(QList<api::Stream>& rows,
     using SortMode = StreamsListModel::SortMode;
 
     if (mode == SortMode::Smart) {
-        // Cached first, then grouped by resolution descending, then
-        // seeders descending within each quality group. "Smart" has
-        // a fixed shape; the descending toggle is ignored.
+        // Grouped by resolution descending, then seeders descending
+        // within each quality group. "Smart" has a fixed shape; the
+        // descending toggle is ignored.
         std::stable_sort(rows.begin(), rows.end(),
             [](const api::Stream& a, const api::Stream& b) {
-                if (a.rdCached != b.rdCached) return a.rdCached;
                 const int aRes = resolutionRank(a.resolution);
                 const int bRes = resolutionRank(b.resolution);
                 if (aRes != bRes) return aRes > bRes;

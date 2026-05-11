@@ -68,8 +68,26 @@ struct Stream {
     /// Real-Debrid direct URL, empty unless RD is configured and produced it.
     QUrl directUrl;
 
-    bool rdCached = false; ///< `name` contains "[RD+]"
-    bool rdDownload = false; ///< `name` contains "[RD download]"
+    /// Index of the chosen file inside the torrent (`fileIdx` from
+    /// Torrentio's `behaviorHints`). `-1` when Torrentio does not
+    /// pin a file (single-file torrent or when the response leaves
+    /// it to the client to decide).
+    int fileIndex = -1;
+    /// Hint at the chosen file name (`behaviorHints.filename`).
+    /// Empty when Torrentio does not provide one.
+    QString fileNameHint;
+    /// Optional extra source trackers that Torrentio attached. Useful
+    /// when re-adding the magnet against libtorrent so peer discovery
+    /// is not gated on the stripped-down default tracker list.
+    QStringList sources;
+
+    /// Lower-cased ISO-ish language code as advertised by the indexer
+    /// (e.g. `"en"`, `"es"`). Empty when the indexer doesn't surface
+    /// a language field — Torrentio rows currently leave this blank;
+    /// Peerflix populates it for every row. Consumed by
+    /// `core::stream_filter::ClientFilters` to honour the
+    /// "Non-English" hide-variant toggle.
+    QString language;
 };
 
 /// One episode row from Cinemeta's series meta.videos[].

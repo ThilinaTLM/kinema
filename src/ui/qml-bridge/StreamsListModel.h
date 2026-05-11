@@ -26,10 +26,10 @@ namespace kinema::ui::qml {
  * so the page can switch placeholders on `model.state` directly,
  * matching the `DiscoverSectionModel` / `ResultsListModel` shape.
  *
- * Sort order and cached-only / blocklist filtering live on the
- * owning view-model: it keeps the unfiltered raw list, applies
- * filters + sort, and calls `setItems(visible)` with the rendered
- * result. The model itself is intentionally dumb — it just holds
+ * Sort order and blocklist filtering live on the owning view-model:
+ * it keeps the unfiltered raw list, applies filters + sort, and
+ * calls `setItems(visible)` with the rendered result. The model
+ * itself is intentionally dumb — it just holds
  * what's currently visible plus the state/error/release-date side
  * channels the page needs to render placeholders.
  *
@@ -53,15 +53,13 @@ public:
         ReleaseNameRole,
         DetailsTextRole,
         ResolutionRole,
-        QualityLabelRole, ///< resolution + " · [RD+]" / " · [RD]"
+        QualityLabelRole, ///< resolution string
         SizeBytesRole,    ///< qint64; -1 if unknown
         SizeTextRole,     ///< localized "1.2 GB" / "—"
         SeedersRole,      ///< int; -1 if unknown
         ProviderRole,
         InfoHashRole,
         DirectUrlRole,    ///< QString (empty if RD didn't resolve one)
-        RdCachedRole,
-        RdDownloadRole,
         HasMagnetRole,
         HasDirectUrlRole,
         ChipsRole,        ///< QStringList of small label pills (legacy)
@@ -92,9 +90,9 @@ public:
 
     /// Client-side sort axes. Values carry no semantic meaning; the
     /// view-model maps each to a comparator over `api::Stream`.
-    /// `Smart` is the default — cached rows first, then by resolution
-    /// rank, then by seeders descending within each quality bucket.
-    /// It ignores the descending toggle.
+    /// `Smart` is the default — by resolution rank, then by seeders
+    /// descending within each quality bucket. It ignores the
+    /// descending toggle.
     enum class SortMode {
         Smart = 0,
         Seeders,

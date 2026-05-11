@@ -64,6 +64,53 @@ private Q_SLOTS:
         QVERIFY(u.type.isEmpty());
         QVERIFY(!u.premiumUntil.has_value());
     }
+
+    void addMagnet_extractsId()
+    {
+        const auto doc = loadFixture("rd_add_magnet.json");
+        const auto r = realdebrid::parseAddMagnet(doc);
+        QCOMPARE(r.id, QStringLiteral("ABC123ID"));
+        QVERIFY(!r.uri.isEmpty());
+    }
+
+    void addMagnet_throwsOnMissingId()
+    {
+        const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
+        QVERIFY_EXCEPTION_THROWN(
+            realdebrid::parseAddMagnet(doc),
+            kinema::core::HttpError);
+    }
+
+    void torrentInfo_listsFilesAndLinks()
+    {
+        const auto doc = loadFixture("rd_torrent_info_downloaded.json");
+        const auto t = realdebrid::parseTorrentInfo(doc);
+        QCOMPARE(t.id, QStringLiteral("ABC123ID"));
+        QCOMPARE(t.status, QStringLiteral("downloaded"));
+        QCOMPARE(t.progress, 100);
+        QCOMPARE(t.files.size(), 2);
+        QVERIFY(t.files.at(0).selected);
+        QVERIFY(!t.files.at(1).selected);
+        QCOMPARE(t.links.size(), 1);
+    }
+
+    void unrestrictLink_extractsDownload()
+    {
+        const auto doc = loadFixture("rd_unrestrict_link.json");
+        const auto u = realdebrid::parseUnrestrictedLink(doc);
+        QCOMPARE(u.filename, QStringLiteral("Sample.Movie.2023.1080p.mkv"));
+        QCOMPARE(u.fileSize, qint64(2147483648));
+        QVERIFY(u.streamable);
+        QVERIFY(!u.download.isEmpty());
+    }
+
+    void unrestrictLink_throwsOnMissingDownload()
+    {
+        const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
+        QVERIFY_EXCEPTION_THROWN(
+            realdebrid::parseUnrestrictedLink(doc),
+            kinema::core::HttpError);
+    }
 };
 
 QTEST_APPLESS_MAIN(TstRealDebridParse)

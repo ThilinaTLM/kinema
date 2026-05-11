@@ -53,13 +53,38 @@ ecm_add_test(tst_discover_query.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_torrentio_parse.cpp
-    TEST_NAME tst_torrentio_parse
+ecm_add_test(tst_stremio_stream_parse.cpp
+    TEST_NAME tst_stremio_stream_parse
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_indexer_settings.cpp
+    TEST_NAME tst_indexer_settings
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_indexer_selector.cpp
+    TEST_NAME tst_indexer_selector
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_peerflix_settings.cpp
+    TEST_NAME tst_peerflix_settings
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_peerflix_indexer.cpp
+    TEST_NAME tst_peerflix_indexer
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
 ecm_add_test(tst_realdebrid_parse.cpp
     TEST_NAME tst_realdebrid_parse
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_alldebrid_parse.cpp
+    TEST_NAME tst_alldebrid_parse
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -158,8 +183,8 @@ ecm_add_test(tst_tmdb_client.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_torrentio_client.cpp
-    TEST_NAME tst_torrentio_client
+ecm_add_test(tst_torrentio_indexer.cpp
+    TEST_NAME tst_torrentio_indexer
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -168,9 +193,44 @@ ecm_add_test(tst_realdebrid_client.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_alldebrid_client.cpp
+    TEST_NAME tst_alldebrid_client
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_alldebrid_resolver.cpp
+    TEST_NAME tst_alldebrid_resolver
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_backend_selector.cpp
+    TEST_NAME tst_backend_selector
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_database.cpp
     TEST_NAME tst_database
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
+ecm_add_test(tst_download_store.cpp
+    TEST_NAME tst_download_store
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
+ecm_add_test(tst_download_manager.cpp
+    TEST_NAME tst_download_manager
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql Qt6::Network
+)
+
+ecm_add_test(tst_media_cache.cpp
+    TEST_NAME tst_media_cache
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_local_media_server.cpp
+    TEST_NAME tst_local_media_server
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Network
 )
 
 ecm_add_test(tst_history_store.cpp
@@ -195,16 +255,6 @@ ecm_add_test(tst_watched_store.cpp
 
 ecm_add_test(tst_watched_controller.cpp
     TEST_NAME tst_watched_controller
-    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
-)
-
-ecm_add_test(tst_play_queue_store.cpp
-    TEST_NAME tst_play_queue_store
-    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
-)
-
-ecm_add_test(tst_play_queue_controller.cpp
-    TEST_NAME tst_play_queue_controller
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
 )
 
@@ -326,7 +376,10 @@ endif()
 foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_media_file_selector tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
-         tst_torrentio_parse tst_realdebrid_parse tst_player tst_stream_filter
+         tst_stremio_stream_parse tst_indexer_settings tst_indexer_selector
+         tst_peerflix_settings tst_peerflix_indexer
+         tst_realdebrid_parse tst_alldebrid_parse
+         tst_player tst_stream_filter
          tst_stream_tokens
          tst_date_format tst_app_settings
          tst_search_view_model tst_browse_view_model tst_results_list_model
@@ -334,10 +387,10 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_movie_detail_view_model tst_series_detail_view_model
          tst_stream_actions tst_subtitle_results_model
          tst_token_controller tst_cinemeta_client tst_tmdb_client
-         tst_torrentio_client tst_realdebrid_client
+         tst_torrentio_indexer tst_realdebrid_client tst_alldebrid_client
+         tst_alldebrid_resolver tst_backend_selector
          tst_database tst_history_store tst_history_controller
-         tst_library_store tst_watched_store tst_watched_controller tst_play_queue_store
-         tst_play_queue_controller
+         tst_library_store tst_watched_store tst_watched_controller
          tst_subtitle_cache_store tst_cache_paths tst_language
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
          tst_mpv_config_paths tst_mpv_track_list_parse
@@ -345,7 +398,9 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_main_controller_close_logic
          tst_discover_view_model tst_continue_watching_view_model
          tst_library_view_model tst_library_backfill
-         tst_application_boot tst_kinema_image_provider)
+         tst_application_boot tst_kinema_image_provider
+         tst_download_store tst_download_manager
+         tst_media_cache tst_local_media_server)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 

@@ -14,11 +14,7 @@
 #include <optional>
 
 namespace kinema::api {
-class TorrentioClient;
-}
-
-namespace kinema::config {
-class AppSettings;
+class IndexerSelector;
 }
 
 namespace kinema::core {
@@ -31,10 +27,6 @@ class StreamActions;
 
 namespace kinema::ui::player {
 class PlayerWindow;
-}
-
-namespace kinema::controllers {
-class PlayQueueController;
 }
 
 namespace kinema::controllers {
@@ -54,8 +46,8 @@ namespace kinema::controllers {
  *     `onPlayStarting(ctx)`, capturing the `HistoryStreamRef` so a
  *     later "Continue Watching" click can replay the same release.
  *   - Orchestrate one-click resume: fetch Torrentio, match by
- *     infoHash, and hand off to the play queue. On a miss, signal
- *     the caller to fall back to the detail pane.
+ *     infoHash, and hand off directly to `StreamActions::play`.
+ *     On a miss, signal the caller to fall back to the detail pane.
  *
  * Two-phase init: `PlayerWindow` and `StreamActions` are wired in
  * after construction because they form a small cycle with this
@@ -67,8 +59,7 @@ class HistoryController : public QObject
     Q_OBJECT
 public:
     HistoryController(core::HistoryStore& store,
-        api::TorrentioClient* torrentio,
-        const config::AppSettings& settings,
+        api::IndexerSelector* indexers,
         const QString& rdTokenRef,
         QObject* parent = nullptr);
 
@@ -81,9 +72,6 @@ public:
     /// Provide the StreamActions used by `resumeFromHistory`. Must be
     /// set before Continue-Watching cards can resume.
     void setStreamActions(services::StreamActions* actions);
-
-    /// Queue-first embedded playback hand-off for history resume.
-    void setPlayQueue(PlayQueueController* queue);
 
     /// Called by StreamActions::play just before the launcher fires.
     /// Pins the context so later position updates can be attributed
@@ -105,7 +93,7 @@ public:
 public Q_SLOTS:
     /// One-click resume. Re-fetches Torrentio for the entry's key,
     /// matches by `lastStream.infoHash`, and on a hit routes the
-    /// fresh stream through the play queue. On a miss emits
+    /// fresh stream through `StreamActions::play`. On a miss emits
     /// `resumeFallbackRequested()` so MainWindow can open the detail
     /// pane instead.
     void resumeFromHistory(const api::HistoryEntry& entry);
@@ -142,12 +130,10 @@ private:
     void persistActive(bool force);
 
     core::HistoryStore& m_store;
-    api::TorrentioClient* m_torrentio;
-    const config::AppSettings& m_settings;
+    api::IndexerSelector* m_indexers;
     const QString& m_rdToken;
     ui::player::PlayerWindow* m_player {};
     services::StreamActions* m_actions {};
-    PlayQueueController* m_queue {};
 
     /// Set by onPlayStarting, promoted to m_active on fileLoaded.
     std::optional<api::PlaybackContext> m_pending;

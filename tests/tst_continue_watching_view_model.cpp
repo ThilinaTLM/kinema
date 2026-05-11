@@ -79,7 +79,7 @@ private Q_SLOTS:
             m_tmp->filePath(QStringLiteral("kinemarc")));
         m_settings = std::make_unique<AppSettings>(m_config, nullptr);
         m_history = std::make_unique<HistoryController>(*m_store,
-            /*torrentio=*/nullptr, *m_settings, m_emptyToken);
+            /*indexers=*/nullptr, m_emptyToken);
     }
 
     void cleanup()

@@ -1,43 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+//
+// This header has been replaced by `config/DebridSettings.h`. It
+// remains as a deprecated shim only for in-tree compilation units
+// that haven't been updated yet; new code should include
+// `config/DebridSettings.h` directly.
+//
+// Once all callsites are migrated this file will be removed
+// outright (pre-1.0; no migrations are added for the [RealDebrid]
+// KConfig group).
 
 #pragma once
-
-#include <KSharedConfig>
-
-#include <QObject>
-
-namespace kinema::config {
-
-/**
- * Real-Debrid "is a token stored in the keyring" bit. The actual token
- * material lives in the system keyring via core::TokenStore; this
- * class only tracks the persistent flag used to light up RD UI.
- *
- * KConfig group: [RealDebrid]
- * Keys:
- *   configured   bool
- *   enabled      bool
- */
-class RealDebridSettings : public QObject
-{
-    Q_OBJECT
-public:
-    explicit RealDebridSettings(KSharedConfigPtr config,
-        QObject* parent = nullptr);
-
-    bool configured() const;
-    void setConfigured(bool);
-
-    bool enabled() const;
-    void setEnabled(bool);
-
-Q_SIGNALS:
-    void configuredChanged(bool);
-    void enabledChanged(bool);
-
-private:
-    KSharedConfigPtr m_config;
-};
-
-} // namespace kinema::config

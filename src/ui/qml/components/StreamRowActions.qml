@@ -8,10 +8,18 @@ import org.kde.kirigami as Kirigami
 import dev.tlmtech.kinema.app
 
 // Per-row action menu installed on each `StreamCard`'s "\u22ee" button.
-// Items are enabled based on what the row carries:
-//   - Play / Play next / Queue                  : require directUrl or infoHash
-//   - Copy direct URL / Open direct URL          : require directUrl
-//   - Copy magnet / Open magnet                  : require infoHash
+// Play is covered by the row's primary button (and Enter / double-click /
+// right-click), so the menu only carries the secondary affordances:
+//   - Copy magnet / Open magnet                 : require infoHash
+//   - Copy direct URL / Open direct URL         : require directUrl
+//   - Play via torrent / Use torrent for this
+//     download                                  : require infoHash, and
+//                                                 only meaningful when
+//                                                 a debrid provider is
+//                                                 active (otherwise
+//                                                 torrent is already the
+//                                                 default backend) \u2014 hidden
+//                                                 in that case.
 //   - Subtitles\u2026                                  : always (stub)
 //
 // All actions route through the owning view-model's slots so the
@@ -32,28 +40,6 @@ QQC2.Menu {
     /// SeriesDetailPage will pass `seriesDetailVm` instead.
     property var vm: movieDetailVm
 
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "&Play now")
-        icon.source: AppIcons.url("play")
-        icon.color: AppIcons.controlColor(enabled, false)
-        enabled: menu.hasDirectUrl || menu.hasMagnet
-        onTriggered: menu.vm.playNow(menu.row)
-    }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "Play &next")
-        icon.source: AppIcons.url("skip-forward")
-        icon.color: AppIcons.controlColor(enabled, false)
-        enabled: menu.hasDirectUrl || menu.hasMagnet
-        onTriggered: menu.vm.playNext(menu.row)
-    }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "Add to &queue")
-        icon.source: AppIcons.url("list-plus")
-        icon.color: AppIcons.controlColor(enabled, false)
-        enabled: menu.hasDirectUrl || menu.hasMagnet
-        onTriggered: menu.vm.enqueue(menu.row)
-    }
-    QQC2.MenuSeparator { }
     QQC2.MenuItem {
         text: i18nc("@action:inmenu", "Copy magnet link")
         icon.source: AppIcons.url("copy")
@@ -82,6 +68,34 @@ QQC2.Menu {
         icon.color: AppIcons.controlColor(enabled, false)
         enabled: menu.hasDirectUrl
         onTriggered: menu.vm.openDirectUrl(menu.row)
+    }
+    QQC2.MenuSeparator { }
+    // Backend escape hatches. The default Play / Download buttons
+    // route through the active debrid provider when configured;
+    // these leaves force libtorrent for users who want to bypass
+    // the debrid provider on a specific release (e.g. it's having a
+    // slow day). Hidden when no debrid provider is active \u2014 in that
+    // state torrent is already the default and the override would
+    // be a no-op.
+    QQC2.MenuItem {
+        text: i18nc("@action:inmenu force libtorrent backend for play",
+            "Play via torrent")
+        icon.source: AppIcons.url("play")
+        icon.color: AppIcons.controlColor(enabled, false)
+        visible: menu.vm && menu.vm.debridConfigured
+        enabled: menu.hasMagnet
+        // 0 == api::DownloadBackendKind::Torrent
+        onTriggered: menu.vm.playWithBackend(menu.row, 0)
+    }
+    QQC2.MenuItem {
+        text: i18nc("@action:inmenu force libtorrent backend",
+            "Use torrent for this download")
+        icon.source: AppIcons.url("network-server-database")
+        icon.color: AppIcons.controlColor(enabled, false)
+        visible: menu.vm && menu.vm.debridConfigured
+        enabled: menu.hasMagnet
+        // 0 == api::DownloadBackendKind::Torrent
+        onTriggered: menu.vm.downloadWithBackend(menu.row, 0)
     }
     QQC2.MenuSeparator { }
     QQC2.MenuItem {

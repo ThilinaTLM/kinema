@@ -69,27 +69,14 @@ private Q_SLOTS:
             QStringLiteral("sort=seeders|qualityfilter=480p"));
     }
 
-    void realDebrid_isAlwaysLast()
+    void doesNotEmbedRealDebridToken()
     {
+        // Torrentio is discovery-only: RD never appears in the URL.
         ConfigOptions o;
         o.excludedResolutions = { QStringLiteral("4k") };
-        o.excludedCategories = { QStringLiteral("cam") };
         o.providers = { QStringLiteral("yts") };
-        o.realDebridToken = QStringLiteral("SECRETTOKEN");
         const auto s = toPathSegment(o);
-
-        QVERIFY(s.endsWith(QStringLiteral("|realdebrid=SECRETTOKEN")));
-        QVERIFY(s.indexOf(QStringLiteral("qualityfilter"))
-            < s.indexOf(QStringLiteral("realdebrid")));
-        QVERIFY(s.indexOf(QStringLiteral("providers"))
-            < s.indexOf(QStringLiteral("realdebrid")));
-    }
-
-    void realDebrid_onlyOption_stillLast()
-    {
-        ConfigOptions o;
-        o.realDebridToken = QStringLiteral("T");
-        QCOMPARE(toPathSegment(o), QStringLiteral("sort=seeders|realdebrid=T"));
+        QVERIFY(!s.contains(QStringLiteral("realdebrid")));
     }
 };
 

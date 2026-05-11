@@ -11,6 +11,8 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 
+#include <memory>
+
 #ifdef KINEMA_HAVE_LIBMPV
 #include <QSGRendererInterface>
 #include <clocale>
@@ -68,7 +70,13 @@ int main(int argc, char* argv[])
     std::setlocale(LC_NUMERIC, "C");
 #endif
 
-    QQmlApplicationEngine engine;
+    // Heap-allocate so we can tear the engine down explicitly before
+    // `controller` dies. With both on the stack, `controller` (declared
+    // after `engine`) destructs first; the QML engine then deletes the
+    // window and its bindings re-evaluate against already-freed view
+    // models, logging spurious `Cannot read property 'X' of null`
+    // TypeErrors at shutdown (notably from the Downloads page).
+    auto engine = std::make_unique<QQmlApplicationEngine>();
 
     // Owns every long-lived service the app needs (HTTP, DB,
     // tokens, history, subtitles, tray, embedded playback) and
@@ -77,21 +85,28 @@ int main(int argc, char* argv[])
     // takes over composition entirely from the deleted
     // `MainWindow`; phases 03+ add per-page view-models alongside.
     kinema::ui::qml::MainController controller(
-        app.settings(), engine, &app);
+        app.settings(), *engine, &app);
 
-    engine.loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
+    engine->loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
         QStringLiteral("ApplicationShell"));
-    if (engine.rootObjects().isEmpty()) {
+    if (engine->rootObjects().isEmpty()) {
         return 1;
     }
 
     auto* window
-        = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+        = qobject_cast<QQuickWindow*>(engine->rootObjects().first());
     Q_ASSERT(window);
     // Hand the live window over so the controller can wire the
     // tray, embedded-player transient parenting, and the close
     // handler against it.
     controller.attachWindow(window);
 
-    return app.exec();
+    const int rc = app.exec();
+
+    // Drop the QML engine (and the window / page bindings it owns)
+    // before `controller`'s view models go out of scope at stack
+    // unwind. Avoids null-deref TypeErrors fired from bindings that
+    // re-evaluate during teardown.
+    engine.reset();
+    return rc;
 }

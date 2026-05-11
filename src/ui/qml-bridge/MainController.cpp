@@ -6,31 +6,40 @@
 #include "api/CinemetaClient.h"
 #include "api/OpenSubtitlesClient.h"
 #include "api/PlaybackContext.h"
+#include "api/AllDebridClient.h"
+#include "api/RealDebridClient.h"
 #include "api/TmdbClient.h"
-#include "api/TorrentioClient.h"
+#include "api/IndexerSelector.h"
+#include "api/PeerflixIndexer.h"
+#include "api/TorrentioIndexer.h"
 #include "config/AppSettings.h"
+#include "config/DebridSettings.h"
+#include "config/DownloadSettings.h"
+#include "controllers/DownloadController.h"
 #include "controllers/HistoryController.h"
 #include "controllers/LibraryController.h"
 #include "controllers/WatchedController.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/MprisController.h"
 #include "controllers/PlaybackController.h"
+#include "controllers/SeriesPlaybackSessionController.h"
 #endif
-#include "controllers/PlayQueueController.h"
 #include "controllers/SubtitleController.h"
 #include "controllers/TokenController.h"
 #include "controllers/TrayController.h"
 #include "core/Database.h"
+#include "core/DownloadStore.h"
 #include "core/HistoryStore.h"
 #include "core/HttpClient.h"
 #include "core/LibraryStore.h"
+#include "core/MediaCache.h"
 #include "core/WatchedStore.h"
 #include "core/PlayerLauncher.h"
-#include "core/PlayQueueStore.h"
 #include "core/SubtitleCacheStore.h"
 #include "core/TokenStore.h"
 #include "core/TorrentCache.h"
-#include "kinema_debug.h"
+#include "download/DownloadManager.h"
+#include "kinema_log_app.h"
 #include "services/StreamActions.h"
 #include "torrent/TorrentStreamingService.h"
 #include "ui/ImageLoader.h"
@@ -38,6 +47,8 @@
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
+#include "ui/qml-bridge/DownloadsListModel.h"
+#include "ui/qml-bridge/DownloadsViewModel.h"
 #include "ui/qml-bridge/EpisodesListModel.h"
 #include "ui/qml-bridge/AppIconResolver.h"
 #include "ui/qml-bridge/KinemaImageProvider.h"
@@ -45,8 +56,6 @@
 #include "ui/qml-bridge/LibraryRailModel.h"
 #include "ui/qml-bridge/LibraryViewModel.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
-#include "ui/qml-bridge/PlayQueueViewModel.h"
-#include "ui/qml-bridge/QueueDisplay.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
 #include "ui/qml-bridge/SeriesDetailViewModel.h"
@@ -285,7 +294,15 @@ void MainController::buildCoreServices()
     m_player = std::make_unique<core::PlayerLauncher>(
         m_settings.player(), this);
     m_cinemeta = new api::CinemetaClient(m_http.get(), this);
-    m_torrentio = new api::TorrentioClient(m_http.get(), this);
+    // Indexer abstraction: a selector owns one or more concrete
+    // indexers (Torrentio + Peerflix today) and view-models call
+    // `selector->active()->streams()`. The active indexer tracks
+    // `IndexerSettings`.
+    m_indexers = new api::IndexerSelector(m_settings.indexers(), this);
+    m_indexers->registerIndexer(std::make_unique<api::TorrentioIndexer>(
+        m_http.get(), m_settings.torrentio(), m_settings.filter()));
+    m_indexers->registerIndexer(std::make_unique<api::PeerflixIndexer>(
+        m_http.get(), m_settings.peerflix()));
     m_tmdb = new api::TmdbClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
     m_torrentCache = std::make_unique<core::TorrentCache>(
@@ -295,12 +312,24 @@ void MainController::buildCoreServices()
     m_streamActions = new services::StreamActions(
         m_player.get(), m_torrentStreaming, this);
 
+    // Real-Debrid client + unified downloader settings/cache. The
+    // RD client picks up its token from the keyring once the
+    // TokenController has fired its initial reads. Routing between
+    // RD and the libtorrent backend is decided inside
+    // `download::BackendSelector` at enqueue time — if RD is
+    // configured every stream goes through it; otherwise libtorrent
+    // takes over.
+    m_rd = std::make_unique<api::RealDebridClient>(m_http.get(), this);
+    m_ad = std::make_unique<api::AllDebridClient>(m_http.get(), this);
+    m_mediaCache = std::make_unique<core::MediaCache>(
+        m_settings.download(), this);
+
     // History DB. Open is best-effort: a broken DB means history
     // is disabled for this session, not that the app refuses to
     // start. HistoryStore handles `!isOpen()` gracefully.
     m_db = std::make_unique<core::Database>(this);
     if (!m_db->open()) {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_APP)
             << "MainController: history database unavailable; "
                "history / resume features are disabled this session";
     }
@@ -308,16 +337,59 @@ void MainController::buildCoreServices()
     m_history->runRetentionPass();
     m_library = std::make_unique<core::LibraryStore>(*m_db, this);
     m_watched = std::make_unique<core::WatchedStore>(*m_db, this);
-    m_playQueueStore = std::make_unique<core::PlayQueueStore>(
-        *m_db, this);
     m_subtitleCache
         = std::make_unique<core::SubtitleCacheStore>(*m_db, this);
+    m_downloadStore = std::make_unique<core::DownloadStore>(*m_db, this);
+
+    // The unified downloader. Wires the localhost media server,
+    // RD-resolution pipeline, torrent engine, and persistent store.
+    m_downloadManager = new download::DownloadManager(*m_http, *m_rd,
+        *m_ad, *m_torrentStreaming, *m_downloadStore, *m_mediaCache,
+        m_settings.download(), this);
+    m_streamActions->setDownloadManager(m_downloadManager);
+    m_downloadCtrl = new controllers::DownloadController(
+        *m_downloadManager, *m_downloadStore, this);
+
+    // Re-attach Full background downloads from the previous run.
+    // OnDemand sessions are intentionally skipped: by definition
+    // they only do work while a player is consuming them, and
+    // there is no consumer at startup.
+    m_downloadManager->resumePersisted();
 
     // Tokens — built before the OpenSubtitles client + history
     // controller because both reference its live `const QString&`
     // aliases.
     m_tokenCtrl = new controllers::TokenController(
-        m_tokens.get(), m_tmdb, m_settings.realDebrid(), this);
+        m_tokens.get(), m_tmdb, m_settings.debrid(), this);
+
+    // Keep the RD / AD clients' in-memory tokens in sync with the
+    // keyring-backed `TokenController`. Both backends check
+    // `client.token()` / `client.apiKey()` for `canHandle`; the
+    // active-provider gate lives in `BackendSelector`.
+    m_rd->setToken(m_tokenCtrl->realDebridToken());
+    m_ad->setApiKey(m_tokenCtrl->allDebridApiKey());
+    connect(m_tokenCtrl,
+        &controllers::TokenController::realDebridTokenChanged,
+        m_rd.get(), [this](const QString& tok) {
+            m_rd->setToken(tok);
+        });
+    connect(m_tokenCtrl,
+        &controllers::TokenController::allDebridApiKeyChanged,
+        m_ad.get(), [this](const QString& key) {
+            m_ad->setApiKey(key);
+        });
+
+    // Forward the active-debrid-provider radio to the download
+    // manager's selector. Initial value + future changes both go
+    // through the same path.
+    m_downloadManager->setActiveDebridProvider(
+        m_settings.debrid().activeProvider());
+    connect(&m_settings.debrid(),
+        &config::DebridSettings::activeProviderChanged,
+        m_downloadManager,
+        [this](api::DebridProvider p) {
+            m_downloadManager->setActiveDebridProvider(p);
+        });
 
     // OpenSubtitles + subtitle controller.
     m_openSubtitles = new api::OpenSubtitlesClient(m_http.get(),
@@ -348,8 +420,7 @@ void MainController::buildCoreServices()
     // History controller. Two-phase: StreamActions is wired now;
     // `setPlayerWindow` lands in `openEmbeddedPlayer`.
     m_historyCtrl = new controllers::HistoryController(*m_history,
-        m_torrentio, m_settings, m_tokenCtrl->realDebridToken(),
-        this);
+        m_indexers, m_tokenCtrl->realDebridToken(), this);
     m_streamActions->setHistoryController(m_historyCtrl);
     m_historyCtrl->setStreamActions(m_streamActions);
 
@@ -365,15 +436,11 @@ void MainController::buildCoreServices()
     m_watchedCtrl = new controllers::WatchedController(
         *m_watched, m_historyCtrl, this);
 
-    // Play queue controller. Built after StreamActions and the
-    // history controller because it composes both: queued items
-    // re-resolve through Torrentio, hand off through StreamActions,
-    // and inherit history's resume-position lookup.
-    m_playQueueCtrl = new controllers::PlayQueueController(
-        *m_playQueueStore, *m_torrentio, *m_streamActions, m_settings,
-        m_tokenCtrl->realDebridToken(), this);
-    m_historyCtrl->setPlayQueue(m_playQueueCtrl);
-    m_playQueueVm = new PlayQueueViewModel(m_playQueueCtrl, this);
+    // Downloads page VM. Lives over the entire app lifetime so the
+    // drawer's downloads entry can show counts even before the
+    // first navigation to the page.
+    m_downloadsVm = new DownloadsViewModel(*m_downloadCtrl,
+        *m_downloadManager, m_streamActions, this);
 
     // Discover / Search / Browse surface VMs. They sit on top of
     // the existing service graph; action signals route back into
@@ -389,15 +456,17 @@ void MainController::buildCoreServices()
         m_settings.search(), this);
     m_browseVm = new BrowseViewModel(m_tmdb, m_settings.browse(), this);
     m_movieDetailVm = new MovieDetailViewModel(m_cinemeta,
-        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
+        m_indexers, m_tmdb, m_streamActions, m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
-        m_tokenCtrl->realDebridToken(), this);
-    m_movieDetailVm->setPlayQueue(m_playQueueCtrl);
+        m_tokenCtrl->realDebridToken(),
+        m_tokenCtrl->allDebridApiKey(), this);
+    m_movieDetailVm->setDownloadController(m_downloadCtrl);
     m_seriesDetailVm = new SeriesDetailViewModel(m_cinemeta,
-        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
+        m_indexers, m_tmdb, m_streamActions, m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
-        m_tokenCtrl->realDebridToken(), this);
-    m_seriesDetailVm->setPlayQueue(m_playQueueCtrl);
+        m_tokenCtrl->realDebridToken(),
+        m_tokenCtrl->allDebridApiKey(), this);
+    m_seriesDetailVm->setDownloadController(m_downloadCtrl);
 
     // TMDB token gain/loss propagates from `TokenController` to
     // both the Discover VM (which already handles it internally)
@@ -578,7 +647,8 @@ void MainController::buildCoreServices()
     // round-trip, matching the legacy SettingsDialog -> MainWindow
     // wiring.
     m_settingsVm = new SettingsRootViewModel(m_http.get(),
-        m_tokens.get(), m_settings, m_subtitleCache.get(), this);
+        m_tokens.get(), m_indexers, m_settings, m_subtitleCache.get(),
+        m_mediaCache.get(), this);
     connect(m_settingsVm,
         &SettingsRootViewModel::tmdbTokenChanged, m_tokenCtrl,
         [this](const QString&) { m_tokenCtrl->refreshTmdb(); });
@@ -587,9 +657,18 @@ void MainController::buildCoreServices()
         m_tokenCtrl,
         [this](const QString&) { m_tokenCtrl->refreshRealDebrid(); });
     connect(m_settingsVm,
-        &SettingsRootViewModel::realDebridUsageChanged,
+        &SettingsRootViewModel::allDebridApiKeyChanged,
         m_tokenCtrl,
-        [this] { m_tokenCtrl->refreshRealDebrid(); });
+        [this](const QString&) { m_tokenCtrl->refreshAllDebrid(); });
+    connect(m_settingsVm,
+        &SettingsRootViewModel::activeDebridProviderChanged,
+        m_tokenCtrl, [this] {
+            // Pure UX: refresh both tokens so the in-memory copies
+            // re-read the keyring (cheap; tokens didn't change but
+            // it keeps the contract symmetric with the radio).
+            m_tokenCtrl->refreshRealDebrid();
+            m_tokenCtrl->refreshAllDebrid();
+        });
     connect(m_settingsVm,
         &SettingsRootViewModel::subtitleCredentialsChanged,
         m_tokenCtrl, [this] {
@@ -599,11 +678,10 @@ void MainController::buildCoreServices()
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
         *m_historyCtrl, m_settings, m_http.get(), this);
-    if (m_playQueueVm) {
-        m_playQueueVm->setPlaybackController(m_playbackCtrl);
-    }
+    m_seriesSessionCtrl = new controllers::SeriesPlaybackSessionController(
+        *m_playbackCtrl, *m_torrentStreaming, *m_streamActions, this);
     m_mprisCtrl = new controllers::MprisController(
-        *m_playbackCtrl, m_playQueueCtrl, this);
+        *m_playbackCtrl, m_seriesSessionCtrl, this);
     connect(m_mprisCtrl, &controllers::MprisController::raiseRequested,
         this, [this] {
             if (m_playerWindow && m_playerWindow->hasEverLoaded()) {
@@ -637,7 +715,7 @@ void MainController::buildCoreServices()
 #endif
 
     if (!m_player->preferredPlayerAvailable()) {
-        qCInfo(KINEMA) << "preferred media player not found on $PATH";
+        qCInfo(KINEMA_APP) << "preferred media player not found on $PATH";
     }
 }
 
@@ -668,19 +746,19 @@ void MainController::wireStatusForwarding()
     connect(m_libraryCtrl,
         &controllers::LibraryController::statusMessage, this,
         &MainController::passiveMessage);
-    connect(m_playQueueCtrl,
-        &controllers::PlayQueueController::statusMessage, this,
-        &MainController::passiveMessage);
 #ifdef KINEMA_HAVE_LIBMPV
-    // Embedded auto-advance + pause-on-user-close. Wired here
-    // because both signals only exist on the libmpv-built
-    // PlaybackController. The queue controller exposes plain slots
-    // so it itself doesn't depend on libmpv.
-    if (m_playbackCtrl) {
+    // Embedded series-pack navigation + auto-next. The controller
+    // derives prev/next strictly from the active torrent's file list
+    // and requests window close when playback reaches a terminal EOF.
+    if (m_playbackCtrl && m_seriesSessionCtrl) {
+        connect(m_playbackCtrl,
+            &controllers::PlaybackController::activeSessionChanged,
+            m_seriesSessionCtrl,
+            &controllers::SeriesPlaybackSessionController::refreshFromPlayback);
         connect(m_playbackCtrl,
             &controllers::PlaybackController::endOfFile,
-            m_playQueueCtrl,
-            &controllers::PlayQueueController::onPlayerEndOfFile);
+            m_seriesSessionCtrl,
+            &controllers::SeriesPlaybackSessionController::onPlayerEndOfFile);
         connect(m_playbackCtrl,
             &controllers::PlaybackController::endOfFile,
             this,
@@ -692,22 +770,21 @@ void MainController::wireStatusForwarding()
             });
         connect(m_playbackCtrl,
             &controllers::PlaybackController::userClosedWindow,
-            m_playQueueCtrl,
+            m_seriesSessionCtrl,
             [this](const api::PlaybackContext& ctx) {
                 if (m_torrentStreaming) {
                     m_torrentStreaming->stopForContext(ctx);
                 }
-                m_playQueueCtrl->onPlayerUserClosed();
+                m_seriesSessionCtrl->onPlayerUserClosed(ctx);
+            });
+        connect(m_seriesSessionCtrl,
+            &controllers::SeriesPlaybackSessionController::windowCloseRequested,
+            this, [this] {
+                if (m_playerWindow) {
+                    m_playerWindow->stopAndHide();
+                }
             });
     }
-    // When the queue empties, hide the player window.
-    connect(m_playQueueCtrl,
-        &controllers::PlayQueueController::windowCloseRequested,
-        this, [this] {
-            if (m_playerWindow) {
-                m_playerWindow->stopAndHide();
-            }
-        });
 #endif
 #ifdef KINEMA_HAVE_LIBMPV
     connect(m_playbackCtrl,
@@ -769,9 +846,9 @@ ui::player::PlayerWindow* MainController::ensurePlayerWindow()
     m_playerWindow = new ui::player::PlayerWindow(
         m_settings.appearance(), m_settings.player(), m_window);
 
-    // The window persists across queue items now — closing it via
-    // the X button hides it and clears playback state, but keeps
-    // the libmpv context alive for the next item. We only react
+    // The window persists across successive plays now — closing it
+    // via the X button hides it and clears playback state, but
+    // keeps the libmpv context alive for the next launch. We only react
     // to `destroyed()` for the application-shutdown case (the
     // window is parented to `m_window`, so it dies when the main
     // window dies).
@@ -810,74 +887,24 @@ ui::player::PlayerWindow* MainController::ensurePlayerWindow()
     }
 
     auto* playerVm = m_playerWindow->viewModel();
-    if (playerVm && m_playQueueCtrl) {
-        const auto refreshQueueNavigation = [this, playerVm] {
-            const int active = m_playQueueCtrl
-                ? m_playQueueCtrl->activeIndex()
-                : -1;
-            const int count = m_playQueueCtrl
-                ? m_playQueueCtrl->items().size()
-                : 0;
-            playerVm->setQueueNavigationState(active, count);
-
-            if (!m_playQueueCtrl || active < 0 || active >= count) {
-                playerVm->clearPreviousPreview();
-                playerVm->clearNextPreview();
-                return;
-            }
-
-            const auto& items = m_playQueueCtrl->items();
-            if (active > 0) {
-                const auto& prev = items.at(active - 1);
-                playerVm->setPreviousPreview(
-                    queue_display::previewTitle(prev),
-                    queue_display::subtitle(prev),
-                    queue_display::previewChips(prev));
-            } else {
-                playerVm->clearPreviousPreview();
-            }
-
-            if ((active + 1) < count) {
-                const auto& next = items.at(active + 1);
-                playerVm->setNextPreview(
-                    queue_display::previewTitle(next),
-                    queue_display::subtitle(next),
-                    queue_display::previewChips(next));
-            } else {
-                playerVm->clearNextPreview();
-            }
+    if (playerVm && m_seriesSessionCtrl) {
+        const auto refreshEpisodeNavigation = [this, playerVm] {
+            playerVm->setEpisodeNavigationState(
+                m_seriesSessionCtrl->navigationVisible(),
+                m_seriesSessionCtrl->canGoPrevious(),
+                m_seriesSessionCtrl->canGoNext());
         };
 
-        refreshQueueNavigation();
-        connect(m_playQueueCtrl,
-            &controllers::PlayQueueController::activeIndexChanged,
-            playerVm, [refreshQueueNavigation](int) {
-                refreshQueueNavigation();
-            });
-        connect(m_playQueueCtrl,
-            &controllers::PlayQueueController::itemsReset,
-            playerVm, refreshQueueNavigation);
-        connect(m_playQueueCtrl,
-            &controllers::PlayQueueController::itemInserted,
-            playerVm, [refreshQueueNavigation](int) {
-                refreshQueueNavigation();
-            });
-        connect(m_playQueueCtrl,
-            &controllers::PlayQueueController::itemRemoved,
-            playerVm, [refreshQueueNavigation](int) {
-                refreshQueueNavigation();
-            });
-        connect(m_playQueueCtrl,
-            &controllers::PlayQueueController::itemMoved,
-            playerVm, [refreshQueueNavigation](int, int) {
-                refreshQueueNavigation();
-            });
+        refreshEpisodeNavigation();
+        connect(m_seriesSessionCtrl,
+            &controllers::SeriesPlaybackSessionController::navigationChanged,
+            playerVm, refreshEpisodeNavigation);
         connect(m_playerWindow, &ui::player::PlayerWindow::previousRequested,
-            m_playQueueCtrl,
-            &controllers::PlayQueueController::playPreviousItem);
+            m_seriesSessionCtrl,
+            &controllers::SeriesPlaybackSessionController::playPreviousEpisode);
         connect(m_playerWindow, &ui::player::PlayerWindow::nextRequested,
-            m_playQueueCtrl,
-            &controllers::PlayQueueController::playNextItem);
+            m_seriesSessionCtrl,
+            &controllers::SeriesPlaybackSessionController::playNextEpisode);
     }
 
     // Player chrome's `SubtitlePicker → Download…` lands on the
@@ -1017,11 +1044,14 @@ void MainController::exposeContextProperties(
     KINEMA_REGISTER_QML_TYPE(EpisodesListModel);
     KINEMA_REGISTER_QML_TYPE(SubtitlesViewModel);
     KINEMA_REGISTER_QML_TYPE(SubtitleResultsModel);
-    KINEMA_REGISTER_QML_TYPE(PlayQueueViewModel);
+    KINEMA_REGISTER_QML_TYPE(DownloadsViewModel);
+    KINEMA_REGISTER_QML_TYPE(DownloadsListModel);
     KINEMA_REGISTER_QML_TYPE(SettingsRootViewModel);
     KINEMA_REGISTER_QML_TYPE(GeneralSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(TmdbSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(RealDebridSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE(RealDebridSectionViewModel);
+    KINEMA_REGISTER_QML_TYPE(AllDebridSectionViewModel);
+    KINEMA_REGISTER_QML_TYPE(DebridSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(StreamsSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(PlayerSettingsViewModel);
     KINEMA_REGISTER_QML_TYPE(SubtitlesSettingsViewModel);
@@ -1047,7 +1077,7 @@ void MainController::exposeContextProperties(
         { "seriesDetailVm", m_seriesDetailVm },
         { "subtitlesVm", m_subtitlesVm },
         { "settingsVm", m_settingsVm },
-        { "playQueue", m_playQueueVm },
+        { "downloadsVm", m_downloadsVm },
     };
     for (const auto& [name, obj] : contextProps) {
         rootCtx->setContextProperty(QString::fromLatin1(name), obj);

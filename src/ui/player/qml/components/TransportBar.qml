@@ -93,7 +93,7 @@ Item {
 
             Item {
                 id: navButtonsWrap
-                visible: playerVm.queueNavigationVisible
+                visible: playerVm.episodeNavigationVisible
                 implicitWidth: visible ? prevBtn.implicitWidth + nextBtn.implicitWidth + Theme.spacingSm : 0
                 implicitHeight: visible ? Math.max(prevBtn.implicitHeight, nextBtn.implicitHeight) : 0
 
@@ -169,47 +169,4 @@ Item {
         }
     }
 
-    QueueNavTooltip {
-        id: prevTooltip
-        shown: prevBtn.hovered
-            && playerVm.previousPreview
-            && playerVm.previousPreview.available
-        title: playerVm.previousPreview
-            ? playerVm.previousPreview.title : ""
-        subtitle: playerVm.previousPreview
-            ? playerVm.previousPreview.subtitle : ""
-        chips: playerVm.previousPreview
-            ? playerVm.previousPreview.chips : []
-        x: {
-            const centered = actionsRow.x + navButtonsWrap.x + navButtons.x
-                + prevSlot.x + prevBtn.width / 2 - width / 2;
-            const minX = Theme.spacingLg;
-            const maxX = root.width - Theme.spacingLg - width;
-            return Math.max(minX, Math.min(maxX, centered));
-        }
-        y: actionsRow.y + navButtonsWrap.y + navButtons.y + prevSlot.y
-            - height - Theme.spacingSm
-    }
-
-    QueueNavTooltip {
-        id: nextTooltip
-        shown: nextBtn.hovered
-            && playerVm.nextPreview
-            && playerVm.nextPreview.available
-        title: playerVm.nextPreview
-            ? playerVm.nextPreview.title : ""
-        subtitle: playerVm.nextPreview
-            ? playerVm.nextPreview.subtitle : ""
-        chips: playerVm.nextPreview
-            ? playerVm.nextPreview.chips : []
-        x: {
-            const centered = actionsRow.x + navButtonsWrap.x + navButtons.x
-                + nextSlot.x + nextBtn.width / 2 - width / 2;
-            const minX = Theme.spacingLg;
-            const maxX = root.width - Theme.spacingLg - width;
-            return Math.max(minX, Math.min(maxX, centered));
-        }
-        y: actionsRow.y + navButtonsWrap.y + navButtons.y + nextSlot.y
-            - height - Theme.spacingSm
-    }
 }

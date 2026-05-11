@@ -16,9 +16,9 @@ class QUrl;
 
 namespace kinema::api {
 class CinemetaClient;
+class IndexerSelector;
 class OpenSubtitlesClient;
 class TmdbClient;
-class TorrentioClient;
 class PlaybackContext;
 }
 
@@ -28,15 +28,29 @@ class AppSettings;
 
 namespace kinema::core {
 class Database;
+class DownloadStore;
 class HistoryStore;
 class LibraryStore;
 class HttpClient;
+class MediaCache;
 class PlayerLauncher;
-class PlayQueueStore;
 class SubtitleCacheStore;
 class TokenStore;
 class TorrentCache;
 class WatchedStore;
+}
+
+namespace kinema::api {
+class AllDebridClient;
+class RealDebridClient;
+}
+
+namespace kinema::config {
+class DownloadSettings;
+}
+
+namespace kinema::download {
+class DownloadManager;
 }
 
 namespace kinema::torrent {
@@ -44,11 +58,12 @@ class TorrentStreamingService;
 }
 
 namespace kinema::controllers {
+class DownloadController;
 class HistoryController;
 class LibraryController;
 class MprisController;
 class PlaybackController;
-class PlayQueueController;
+class SeriesPlaybackSessionController;
 class SubtitleController;
 class TokenController;
 class TrayController;
@@ -72,9 +87,9 @@ class AppIconResolver;
 class BrowseViewModel;
 class ContinueWatchingViewModel;
 class DiscoverViewModel;
+class DownloadsViewModel;
 class LibraryViewModel;
 class MovieDetailViewModel;
-class PlayQueueViewModel;
 class SearchViewModel;
 class SeriesDetailViewModel;
 class SubtitlesViewModel;
@@ -241,18 +256,17 @@ private:
     void wireTray();
 #ifdef KINEMA_HAVE_LIBMPV
     /// Lazily build the embedded player window the first time it
-    /// is needed and reuse the same instance for every queue item
-    /// in the session. Wires tray / history / playback / subtitles
-    /// once on creation; subsequent calls are a no-op fast path.
-    /// Returns the live window pointer.
+    /// is needed and reuse the same instance for subsequent plays.
+    /// Wires tray / history / playback / subtitles once on
+    /// creation; subsequent calls are a no-op fast path. Returns
+    /// the live window pointer.
     ui::player::PlayerWindow* ensurePlayerWindow();
 
     /// Forward a play request to the embedded window. Used by the
     /// `PlayerLauncher::embeddedRequested` connection. Routes
-    /// through `PlaybackController::play` like before, but no
-    /// longer tears down the previous window — the queue
-    /// controller drives sequential playback by handing off the
-    /// next URL into the same libmpv context.
+    /// through `PlaybackController::play` like before, but keeps
+    /// the same detached window + libmpv context alive across
+    /// successive plays.
     void openEmbeddedPlayer(const QUrl& url,
         const api::PlaybackContext& ctx);
 
@@ -276,13 +290,16 @@ private:
     std::unique_ptr<core::HistoryStore> m_history;
     std::unique_ptr<core::LibraryStore> m_library;
     std::unique_ptr<core::WatchedStore> m_watched;
-    std::unique_ptr<core::PlayQueueStore> m_playQueueStore;
     std::unique_ptr<core::SubtitleCacheStore> m_subtitleCache;
     std::unique_ptr<core::TorrentCache> m_torrentCache;
+    std::unique_ptr<core::DownloadStore> m_downloadStore;
+    std::unique_ptr<core::MediaCache> m_mediaCache;
+    std::unique_ptr<api::RealDebridClient> m_rd;
+    std::unique_ptr<api::AllDebridClient> m_ad;
 
     // QObject-parented to this controller.
     api::CinemetaClient* m_cinemeta {};
-    api::TorrentioClient* m_torrentio {};
+    api::IndexerSelector* m_indexers {};
     api::TmdbClient* m_tmdb {};
     api::OpenSubtitlesClient* m_openSubtitles {};
     ui::ImageLoader* m_imageLoader {};
@@ -290,11 +307,12 @@ private:
     AppIconResolver* m_appIconResolver {};
     services::StreamActions* m_streamActions {};
     torrent::TorrentStreamingService* m_torrentStreaming {};
+    download::DownloadManager* m_downloadManager {};
+    controllers::DownloadController* m_downloadCtrl {};
     controllers::TokenController* m_tokenCtrl {};
     controllers::HistoryController* m_historyCtrl {};
     controllers::LibraryController* m_libraryCtrl {};
     controllers::WatchedController* m_watchedCtrl {};
-    controllers::PlayQueueController* m_playQueueCtrl {};
     controllers::SubtitleController* m_subtitleCtrl {};
     controllers::TrayController* m_tray {};
 
@@ -310,10 +328,11 @@ private:
     SeriesDetailViewModel* m_seriesDetailVm {};
     SubtitlesViewModel* m_subtitlesVm {};
     SettingsRootViewModel* m_settingsVm {};
-    PlayQueueViewModel* m_playQueueVm {};
+    DownloadsViewModel* m_downloadsVm {};
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::MprisController* m_mprisCtrl {};
     controllers::PlaybackController* m_playbackCtrl {};
+    controllers::SeriesPlaybackSessionController* m_seriesSessionCtrl {};
     ui::player::PlayerWindow* m_playerWindow {};
 #endif
 

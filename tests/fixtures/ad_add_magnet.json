@@ -1,0 +1,15 @@
+{
+  "status": "success",
+  "data": {
+    "magnets": [
+      {
+        "magnet": "magnet:?xt=urn:btih:842783e3005495d5d1637f5364b59343c7844707&dn=ubuntu",
+        "hash": "842783e3005495d5d1637f5364b59343c7844707",
+        "name": "ubuntu-18.04.2-live-server-amd64.iso",
+        "size": 875773970,
+        "ready": true,
+        "id": 123456
+      }
+    ]
+  }
+}

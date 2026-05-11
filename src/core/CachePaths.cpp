@@ -42,6 +42,17 @@ QDir torrentsDir()
     return s;
 }
 
+QDir mediaDir()
+{
+    QDir d = root();
+    const auto subPath = d.absoluteFilePath(QStringLiteral("media"));
+    QDir s(subPath);
+    if (!s.exists()) {
+        s.mkpath(QStringLiteral("."));
+    }
+    return s;
+}
+
 qint64 dirSizeBytes(const QDir& dir)
 {
     if (!dir.exists()) {

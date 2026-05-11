@@ -20,8 +20,8 @@
 
 namespace kinema::api {
 class CinemetaClient;
+class IndexerSelector;
 class TmdbClient;
-class TorrentioClient;
 }
 
 namespace kinema::config {
@@ -31,8 +31,8 @@ class TorrentioSettings;
 }
 
 namespace kinema::controllers {
+class DownloadController;
 class LibraryController;
-class PlayQueueController;
 class TokenController;
 class WatchedController;
 }
@@ -110,8 +110,7 @@ class SeriesDetailViewModel : public QObject
     // ---- streams configuration ------------------------------------
     Q_PROPERTY(int sortMode READ sortMode WRITE setSortMode NOTIFY sortChanged)
     Q_PROPERTY(bool sortDescending READ sortDescending WRITE setSortDescending NOTIFY sortChanged)
-    Q_PROPERTY(bool cachedOnly READ cachedOnly WRITE setCachedOnly NOTIFY cachedOnlyChanged)
-    Q_PROPERTY(bool realDebridConfigured READ realDebridConfigured NOTIFY realDebridConfiguredChanged)
+    Q_PROPERTY(bool debridConfigured READ debridConfigured NOTIFY debridConfiguredChanged)
     Q_PROPERTY(int rawStreamsCount READ rawStreamsCount NOTIFY rawStreamsCountChanged)
     // Transient UI-only filter axes consumed by the `StreamsPage`
     // header `Kirigami.ActionToolBar`.
@@ -140,7 +139,7 @@ public:
     Q_ENUM(MetaState)
 
     SeriesDetailViewModel(api::CinemetaClient* cinemeta,
-        api::TorrentioClient* torrentio,
+        api::IndexerSelector* indexers,
         api::TmdbClient* tmdb,
         services::StreamActions* actions,
         controllers::LibraryController* library,
@@ -148,16 +147,18 @@ public:
         controllers::TokenController* tokens,
         config::AppSettings& settings,
         const QString& rdTokenRef,
+        const QString& adApiKeyRef,
         QObject* parent = nullptr);
     /// Slim constructor for tests; equivalent to passing
     /// `library = nullptr, watched = nullptr`.
     SeriesDetailViewModel(api::CinemetaClient* cinemeta,
-        api::TorrentioClient* torrentio,
+        api::IndexerSelector* indexers,
         api::TmdbClient* tmdb,
         services::StreamActions* actions,
         controllers::TokenController* tokens,
         config::AppSettings& settings,
         const QString& rdTokenRef,
+        const QString& adApiKeyRef,
         QObject* parent = nullptr);
     ~SeriesDetailViewModel() override;
 
@@ -194,9 +195,10 @@ public:
     void setSortMode(int mode);
     bool sortDescending() const noexcept { return m_sortDescending; }
     void setSortDescending(bool desc);
-    bool cachedOnly() const;
-    void setCachedOnly(bool on);
-    bool realDebridConfigured() const noexcept { return !m_rdToken.isEmpty(); }
+    bool debridConfigured() const noexcept
+    {
+        return !m_rdToken.isEmpty() || !m_adApiKey.isEmpty();
+    }
     int rawStreamsCount() const noexcept
     {
         return static_cast<int>(m_rawStreams.size());
@@ -248,21 +250,36 @@ public Q_SLOTS:
     /// the currently-selected episode. No-op when no episode is
     /// selected.
     void requestStreams();
+
+    /// Re-run only the streams fetch for the currently-selected
+    /// episode. Used by the Streams page "Refresh" header action;
+    /// cheaper than `retry()` which also re-fetches the series meta.
+    /// No-op when no episode is selected.
+    void refreshStreams();
     void addToLibrary();
     void removeFromLibrary();
     void toggleEpisodeWatched(int row);
     void toggleSeriesWatched();
     void markSeasonWatched(int season, bool watched);
 
-    /// Wire the queue controller. Two-phase init like the movie
-    /// detail VM. Safe to leave unset for tests.
-    void setPlayQueue(controllers::PlayQueueController* queue);
+    /// Wire the download controller. Same two-phase pattern.
+    void setDownloadController(controllers::DownloadController* dl);
 
     /// Per-row action handlers driven by `StreamCard.qml`'s ⋮ menu.
-    /// Each routes through `controllers::PlayQueueController`.
+    /// `playNow` routes straight through `services::StreamActions`.
     void playNow(int row);
-    void playNext(int row);
-    void enqueue(int row);
+    /// As `playNow` but forces a specific backend (Torrent /
+    /// RealDebridHttp). Used by the per-stream override menu.
+    void playWithBackend(int row, int backendKind);
+    /// Hand the row's stream to `controllers::DownloadController::enqueue`.
+    /// Background full-file episode download, mirroring the
+    /// explicit `\u2b07 Download` button on the stream row. Always
+    /// Full + Pinned; mode upgrade for already-streaming sessions
+    /// is handled by `DownloadManager::enqueueDownload`.
+    void download(int row);
+    /// As above but forces a specific backend (Torrent /
+    /// RealDebridHttp).
+    void downloadWithBackend(int row, int backendKind);
     void copyMagnet(int row);
     void openMagnet(int row);
     void copyDirectUrl(int row);
@@ -281,8 +298,7 @@ Q_SIGNALS:
     void selectedEpisodeChanged();
     void similarChanged();
     void sortChanged();
-    void cachedOnlyChanged();
-    void realDebridConfiguredChanged();
+    void debridConfiguredChanged();
     void rawStreamsCountChanged();
     void uiFiltersChanged();
     void libraryStateChanged();
@@ -336,15 +352,16 @@ private:
     void dispatchStreamAction(int row, Method method);
 
     api::CinemetaClient* m_cinemeta;
-    api::TorrentioClient* m_torrentio;
+    api::IndexerSelector* m_indexers;
     api::TmdbClient* m_tmdb;
     services::StreamActions* m_actions;
     controllers::LibraryController* m_library {};
     controllers::WatchedController* m_watched {};
-    controllers::PlayQueueController* m_queue {};
+    controllers::DownloadController* m_downloads {};
     controllers::TokenController* m_tokens;
     config::AppSettings& m_settings;
     const QString& m_rdToken;
+    const QString& m_adApiKey;
 
     StreamsListModel* m_streams;
     EpisodesListModel* m_episodes;

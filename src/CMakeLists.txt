@@ -10,10 +10,16 @@ set(kinema_core_SRCS
     config/AppSettings.cpp
     config/BrowseSettings.cpp
     config/CacheSettings.cpp
+    config/DownloadSettings.cpp
     config/FilterSettings.cpp
     config/LibrarySettings.cpp
     config/PlayerSettings.cpp
-    config/RealDebridSettings.cpp
+    api/Debrid.cpp
+    api/Indexer.cpp
+    api/IndexerSelector.cpp
+    config/DebridSettings.cpp
+    config/IndexerSettings.cpp
+    config/PeerflixSettings.cpp
     config/SearchSettings.cpp
     config/SubtitleSettings.cpp
     config/TorrentioSettings.cpp
@@ -22,6 +28,8 @@ set(kinema_core_SRCS
     core/CachePaths.cpp
     core/Database.cpp
     core/DateFormat.cpp
+    core/DownloadStore.cpp
+    core/MediaCache.cpp
     core/DateWindow.cpp
     core/HistoryStore.cpp
     core/HttpClient.cpp
@@ -30,6 +38,7 @@ set(kinema_core_SRCS
     core/HttpErrorPresenter.cpp
     core/IdleInhibitor.cpp
     core/Language.cpp
+    core/Logging.cpp
     core/Magnet.cpp
     core/MediaChips.cpp
     core/Moviehash.cpp
@@ -39,7 +48,6 @@ set(kinema_core_SRCS
     core/MpvTrackList.cpp
     core/Player.cpp
     core/PlayerLauncher.cpp
-    core/PlayQueueStore.cpp
     core/StreamFilter.cpp
     core/StreamTokens.cpp
     core/SubtitleCacheStore.cpp
@@ -53,26 +61,43 @@ set(kinema_core_SRCS
     torrent/PiecePlanner.cpp
     torrent/TorrentStreamingService.cpp
 
+    download/AllDebridBackend.cpp
+    download/AllDebridResolver.cpp
+    download/AssetSession.cpp
+    download/BackendSelector.cpp
+    download/DebridFilePicker.cpp
+    download/DownloadManager.cpp
+    download/HttpAssetSession.cpp
+    download/LocalMediaServer.cpp
+    download/RealDebridBackend.cpp
+    download/RealDebridResolver.cpp
+    download/TorrentAssetSession.cpp
+    download/TorrentBackend.cpp
+
+    api/AllDebridClient.cpp
+    api/AllDebridParse.cpp
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp
+    api/Download.cpp
     api/OpenSubtitlesClient.cpp
     api/OpenSubtitlesParse.cpp
     api/PlaybackContext.cpp
     api/RealDebridClient.cpp
     api/RealDebridParse.cpp
+    api/PeerflixIndexer.cpp
+    api/StremioStreamParse.cpp
     api/TmdbClient.cpp
     api/TmdbDiscoverUrl.cpp
     api/TmdbParse.cpp
-    api/TorrentioClient.cpp
-    api/TorrentioParse.cpp
+    api/TorrentioIndexer.cpp
 
     ui/ImageLoader.cpp
 
     app/KinemaApplication.cpp
 
+    controllers/DownloadController.cpp
     controllers/HistoryController.cpp
     controllers/LibraryController.cpp
-    controllers/PlayQueueController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
@@ -85,6 +110,8 @@ set(kinema_core_SRCS
     ui/qml-bridge/ContinueWatchingViewModel.cpp
     ui/qml-bridge/DiscoverSectionModel.cpp
     ui/qml-bridge/DiscoverViewModel.cpp
+    ui/qml-bridge/DownloadsListModel.cpp
+    ui/qml-bridge/DownloadsViewModel.cpp
     ui/qml-bridge/EpisodesListModel.cpp
     ui/qml-bridge/KinemaImageProvider.cpp
     ui/qml-bridge/LibraryListModel.cpp
@@ -92,8 +119,6 @@ set(kinema_core_SRCS
     ui/qml-bridge/LibraryViewModel.cpp
     ui/qml-bridge/MainController.cpp
     ui/qml-bridge/MovieDetailViewModel.cpp
-    ui/qml-bridge/PlayQueueViewModel.cpp
-    ui/qml-bridge/QueueDisplay.cpp
     ui/qml-bridge/ResultsListModel.cpp
     ui/qml-bridge/SearchViewModel.cpp
     ui/qml-bridge/SeriesDetailViewModel.cpp
@@ -117,6 +142,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
         controllers/MprisController.cpp
         controllers/PlaybackController.cpp
         controllers/PlaybackLoadWatchdog.cpp
+        controllers/SeriesPlaybackSessionController.cpp
         ui/player/AudioTracksModel.cpp
         ui/player/ChaptersModel.cpp
         ui/player/MpvLoadCommand.cpp
@@ -124,17 +150,86 @@ if(KINEMA_ENABLE_MPV_EMBED)
         ui/player/PlayerViewModel.cpp
         ui/player/PlayerWindow.cpp
         ui/player/PlayerWindowPresentation.cpp
-        ui/player/QueueNavPreview.cpp
         ui/player/SubtitleTracksModel.cpp
     )
 endif()
 
+# Per-subsystem logging categories. Each block emits a generated
+# header (kinema_log_<name>.h) under ${CMAKE_CURRENT_BINARY_DIR}.
+# Files include only the headers they need and call qC*() with the
+# matching identifier so users can tune verbosity per subsystem with
+# QT_LOGGING_RULES, e.g.
+#   QT_LOGGING_RULES='kinema.torrent.debug=true'
 ecm_qt_declare_logging_category(kinema_core_SRCS
-    HEADER kinema_debug.h
-    IDENTIFIER KINEMA
-    CATEGORY_NAME dev.tlmtech.kinema
+    HEADER kinema_log_app.h
+    IDENTIFIER KINEMA_APP
+    CATEGORY_NAME kinema.app
     DEFAULT_SEVERITY Info
-    DESCRIPTION "Kinema"
+    DESCRIPTION "Kinema (app shell, MainController, KinemaApplication)"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_db.h
+    IDENTIFIER KINEMA_DB
+    CATEGORY_NAME kinema.db
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema database and per-table stores"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_controller.h
+    IDENTIFIER KINEMA_CONTROLLER
+    CATEGORY_NAME kinema.controller
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema controllers (history, subtitles, library, …)"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_ui.h
+    IDENTIFIER KINEMA_UI
+    CATEGORY_NAME kinema.ui
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema view-models, image loading, QML bridge"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_player.h
+    IDENTIFIER KINEMA_PLAYER
+    CATEGORY_NAME kinema.player
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema embedded mpv player"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_api.h
+    IDENTIFIER KINEMA_API
+    CATEGORY_NAME kinema.api
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema upstream API clients (TMDB, OpenSubtitles, …)"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_torrent.h
+    IDENTIFIER KINEMA_TORRENT
+    CATEGORY_NAME kinema.torrent
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema torrent engine"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_download.h
+    IDENTIFIER KINEMA_DOWNLOAD
+    CATEGORY_NAME kinema.download
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema unified download manager"
+    EXPORT KINEMA
+)
+ecm_qt_declare_logging_category(kinema_core_SRCS
+    HEADER kinema_log_http.h
+    IDENTIFIER KINEMA_HTTP
+    CATEGORY_NAME kinema.http
+    DEFAULT_SEVERITY Info
+    DESCRIPTION "Kinema HTTP client + image fetches"
     EXPORT KINEMA
 )
 
@@ -235,10 +330,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/PosterGrid.qml
         ui/qml/components/EpisodeChip.qml
         ui/qml/components/ProgressPosterCard.qml
-        ui/qml/components/QueueCompactRow.qml
-        ui/qml/components/QueueLeadRow.qml
-        ui/qml/components/QueuePlayedRow.qml
-        ui/qml/components/QueueRow.qml
         ui/qml/components/RatingChip.qml
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
@@ -247,22 +338,24 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/StreamRowActions.qml
         ui/qml/components/StreamSortDialog.qml
         ui/qml/components/StreamsList.qml
+        ui/qml/components/DownloadRow.qml
         ui/qml/components/UpcomingBadge.qml
         ui/qml/components/SubtitleResultRow.qml
         ui/qml/components/SubtitlesPanel.qml
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
+        ui/qml/pages/DownloadsPage.qml
         ui/qml/pages/LibraryPage.qml
         ui/qml/pages/MovieDetailPage.qml
-        ui/qml/pages/QueuePage.qml
         ui/qml/pages/SearchPage.qml
         ui/qml/pages/SeriesDetailPage.qml
         ui/qml/pages/StreamsPage.qml
         ui/qml/pages/SubtitlesPage.qml
         ui/qml/pages/settings/AboutSettingsPage.qml
         ui/qml/pages/settings/ApplicationSettingsPage.qml
+        ui/qml/pages/settings/DebridSettingsPage.qml
+        ui/qml/pages/settings/IndexersSettingsPage.qml
         ui/qml/pages/settings/PlayerSettingsPage.qml
-        ui/qml/pages/settings/RealDebridSettingsPage.qml
         ui/qml/pages/settings/StreamsSettingsPage.qml
         ui/qml/pages/settings/SubtitlesSettingsPage.qml
         ui/qml/pages/settings/TmdbSettingsPage.qml
@@ -306,6 +399,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/minus.svg
         ui/qml/icons/lucide/palette.svg
         ui/qml/icons/lucide/pause.svg
+        ui/qml/icons/lucide/pin.svg
         ui/qml/icons/lucide/play.svg
         ui/qml/icons/lucide/plus.svg
         ui/qml/icons/lucide/refresh-cw.svg
@@ -371,7 +465,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
             ui/player/qml/components/PickerItem.qml
             ui/player/qml/components/PlayerInputs.qml
             ui/player/qml/components/PopupPanel.qml
-            ui/player/qml/components/QueueNavTooltip.qml
             ui/player/qml/components/SectionHeader.qml
             ui/player/qml/components/SeekBar.qml
             ui/player/qml/components/TopBar.qml

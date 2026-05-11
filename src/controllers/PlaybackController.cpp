@@ -12,7 +12,7 @@
 #include "core/Moviehash.h"
 #include "core/UrlRedactor.h"
 #include "ui/player/PlayerWindow.h"
-#include "kinema_debug.h"
+#include "kinema_log_controller.h"
 
 #include <KLocalizedString>
 
@@ -220,6 +220,12 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
 void PlaybackController::play(const QUrl& url,
     const api::PlaybackContext& ctx)
 {
+    qCInfo(KINEMA_CONTROLLER).nospace()
+        << "PlaybackController::play url="
+        << core::redactUrlForLog(url)
+        << " title=\"" << ctx.title << "\""
+        << " resumeSec="
+        << (ctx.resumeSeconds ? *ctx.resumeSeconds : 0);
     m_ctx = ctx;
     m_duration = 0.0;
     m_position = 0.0;
@@ -365,6 +371,19 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     if (!m_http) {
         co_return;
     }
+    if (url.scheme() != QLatin1String("https")) {
+        // Local streams (http://127.0.0.1/...) are served by
+        // LocalMediaServer; we deliberately route OpenSubtitles
+        // moviehash through the upstream HTTPS URL only. A future
+        // change can compute the hash directly from the cached
+        // payload via AssetSession::readRange, but for now just
+        // skip the futile HEAD/GET pair (core::HttpClient enforces
+        // HTTPS and would throw on every probe).
+        qCDebug(KINEMA_CONTROLLER)
+            << "moviehash: skipping non-HTTPS URL"
+            << core::redactUrlForLog(url);
+        co_return;
+    }
     constexpr qint64 kBlock = 65536;
 
     const auto rangeGet = [this, &url](qint64 start, qint64 end)
@@ -392,14 +411,14 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
             }
         }
     } catch (const std::exception& e) {
-        qCDebug(KINEMA) << "moviehash: HEAD failed:" << e.what();
+        qCDebug(KINEMA_CONTROLLER) << "moviehash: HEAD failed:" << e.what();
         co_return;
     }
     if (epoch != m_streamEpoch) {
         co_return;
     }
     if (size <= 2 * kBlock) {
-        qCDebug(KINEMA) << "moviehash: Content-Length too small or absent";
+        qCDebug(KINEMA_CONTROLLER) << "moviehash: Content-Length too small or absent";
         co_return;
     }
 
@@ -408,7 +427,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     try {
         head = co_await rangeGet(0, kBlock - 1);
     } catch (const std::exception& e) {
-        qCDebug(KINEMA) << "moviehash: head Range GET failed:" << e.what();
+        qCDebug(KINEMA_CONTROLLER) << "moviehash: head Range GET failed:" << e.what();
         co_return;
     }
     if (epoch != m_streamEpoch || head.size() != kBlock) {
@@ -417,7 +436,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     try {
         tail = co_await rangeGet(size - kBlock, size - 1);
     } catch (const std::exception& e) {
-        qCDebug(KINEMA) << "moviehash: tail Range GET failed:" << e.what();
+        qCDebug(KINEMA_CONTROLLER) << "moviehash: tail Range GET failed:" << e.what();
         co_return;
     }
     if (epoch != m_streamEpoch || tail.size() != kBlock) {
@@ -428,13 +447,14 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
     if (hex.isEmpty() || epoch != m_streamEpoch) {
         co_return;
     }
-    qCDebug(KINEMA) << "moviehash: computed" << hex << "for"
+    qCDebug(KINEMA_CONTROLLER) << "moviehash: computed" << hex << "for"
                     << core::redactUrlForLog(url);
     Q_EMIT moviehashComputed(hex);
 }
 
 void PlaybackController::onFileLoaded()
 {
+    qCInfo(KINEMA_CONTROLLER) << "PlaybackController: file-loaded";
     m_loadWatchdog.stop();
     if (m_window) {
         m_window->setLoadingVisible(false);
@@ -455,6 +475,8 @@ void PlaybackController::onFileLoaded()
 
 void PlaybackController::onPlaybackError(const QString& reason)
 {
+    qCWarning(KINEMA_CONTROLLER).nospace()
+        << "PlaybackController: playback error \"" << reason << "\"";
     m_loadWatchdog.stop();
     if (m_window) {
         m_window->setLoadingVisible(false);
@@ -467,7 +489,7 @@ void PlaybackController::onLoadWatchdogTimedOut()
     if (m_phase != Phase::Loading) {
         return;
     }
-    qCWarning(KINEMA)
+    qCWarning(KINEMA_CONTROLLER)
         << "PlaybackController: load watchdog tripped for"
         << m_ctx.title
         << "after" << m_loadWatchdog.timeout().count() << "ms;"

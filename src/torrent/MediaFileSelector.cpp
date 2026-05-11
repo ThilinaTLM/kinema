@@ -6,6 +6,7 @@
 #include <KLocalizedString>
 
 #include <QFileInfo>
+#include <QHash>
 #include <QRegularExpression>
 #include <QSet>
 #include <QStringList>
@@ -60,6 +61,49 @@ SelectedMediaFile toSelected(const TorrentFileEntry& f)
 {
     return { f.index, f.path, f.size };
 }
+
+struct EpisodeIdentity {
+    int season = 0;
+    int episode = 0;
+};
+
+std::optional<EpisodeIdentity> parseEpisodeIdentity(const QString& path)
+{
+    QString compact = normalized(path);
+    compact.remove(QLatin1Char(' '));
+
+    static const QRegularExpression kSxe(
+        QStringLiteral("s(\\d{1,2})e(\\d{1,2})"));
+    auto m = kSxe.match(compact);
+    if (m.hasMatch()) {
+        return EpisodeIdentity { m.captured(1).toInt(),
+            m.captured(2).toInt() };
+    }
+
+    static const QRegularExpression kXToken(
+        QStringLiteral("(\\d{1,2})x(\\d{1,2})"));
+    m = kXToken.match(compact);
+    if (m.hasMatch()) {
+        return EpisodeIdentity { m.captured(1).toInt(),
+            m.captured(2).toInt() };
+    }
+
+    return std::nullopt;
+}
+
+QVector<TorrentFileEntry> playableCandidates(
+    const QVector<TorrentFileEntry>& files)
+{
+    QVector<TorrentFileEntry> candidates;
+    for (const auto& f : files) {
+        if (f.index < 0 || f.size <= 0 || !isVideoFilePath(f.path)
+            || isLikelySampleOrExtra(f.path, f.size)) {
+            continue;
+        }
+        candidates.append(f);
+    }
+    return candidates;
+}
 }
 
 bool isVideoFilePath(const QString& path)
@@ -96,14 +140,7 @@ bool isLikelySampleOrExtra(const QString& path, qint64 sizeBytes)
 MediaFileSelection selectMediaFile(const QVector<TorrentFileEntry>& files,
     const api::PlaybackContext& ctx)
 {
-    QVector<TorrentFileEntry> candidates;
-    for (const auto& f : files) {
-        if (f.index < 0 || f.size <= 0 || !isVideoFilePath(f.path)
-            || isLikelySampleOrExtra(f.path, f.size)) {
-            continue;
-        }
-        candidates.append(f);
-    }
+    QVector<TorrentFileEntry> candidates = playableCandidates(files);
 
     if (candidates.isEmpty()) {
         return { std::nullopt,
@@ -140,6 +177,56 @@ MediaFileSelection selectMediaFile(const QVector<TorrentFileEntry>& files,
     }
 
     return { toSelected(candidates.first()), {} };
+}
+
+std::optional<EpisodePackNavigation> adjacentEpisodeFiles(
+    const QVector<TorrentFileEntry>& files,
+    int season,
+    int episode)
+{
+    if (season <= 0 || episode <= 0) {
+        return std::nullopt;
+    }
+
+    QHash<int, EpisodeFileTarget> uniqueByEpisode;
+    QSet<int> ambiguousEpisodes;
+
+    const auto candidates = playableCandidates(files);
+    for (const auto& f : candidates) {
+        const auto id = parseEpisodeIdentity(f.path);
+        if (!id || id->season != season || id->episode <= 0) {
+            continue;
+        }
+
+        if (ambiguousEpisodes.contains(id->episode)) {
+            continue;
+        }
+        if (uniqueByEpisode.contains(id->episode)) {
+            uniqueByEpisode.remove(id->episode);
+            ambiguousEpisodes.insert(id->episode);
+            continue;
+        }
+
+        uniqueByEpisode.insert(id->episode,
+            EpisodeFileTarget { id->season, id->episode, toSelected(f) });
+    }
+
+    if (ambiguousEpisodes.contains(episode)
+        || !uniqueByEpisode.contains(episode)) {
+        return std::nullopt;
+    }
+
+    EpisodePackNavigation nav;
+    nav.current = uniqueByEpisode.value(episode);
+    if (!ambiguousEpisodes.contains(episode - 1)
+        && uniqueByEpisode.contains(episode - 1)) {
+        nav.previous = uniqueByEpisode.value(episode - 1);
+    }
+    if (!ambiguousEpisodes.contains(episode + 1)
+        && uniqueByEpisode.contains(episode + 1)) {
+        nav.next = uniqueByEpisode.value(episode + 1);
+    }
+    return nav;
 }
 
 } // namespace kinema::torrent

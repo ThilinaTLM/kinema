@@ -33,7 +33,7 @@ using kinema::core::HttpError;
 using kinema::services::StreamActions;
 using kinema::tests::FakeCinemetaClient;
 using kinema::tests::FakeTmdbClient;
-using kinema::tests::FakeTorrentioClient;
+using kinema::tests::IndexerHarness;
 using kinema::tests::drainEvents;
 using kinema::ui::qml::SeriesDetailViewModel;
 using kinema::ui::qml::StreamsListModel;
@@ -89,10 +89,11 @@ struct Fixture {
     KSharedConfigPtr config;
     AppSettings settings;
     FakeCinemetaClient cinemeta;
-    FakeTorrentioClient torrentio;
+    IndexerHarness indexers;
     FakeTmdbClient tmdb;
     StreamActions actions { nullptr, nullptr };
     QString rdToken;
+    QString adApiKey;
     SeriesDetailViewModel vm;
 
     Fixture()
@@ -100,10 +101,13 @@ struct Fixture {
             tmp.filePath(QStringLiteral("kinemarc")),
             KConfig::SimpleConfig))
         , settings(config)
-        , vm(&cinemeta, &torrentio, &tmdb, &actions,
-              /*tokens=*/nullptr, settings, rdToken, nullptr)
+        , vm(&cinemeta, indexers.selector(), &tmdb, &actions,
+              /*tokens=*/nullptr, settings, rdToken, adApiKey,
+              nullptr)
     {
     }
+
+    auto& torrentio() noexcept { return indexers.fake(); }
 };
 
 struct WatchedFixture {
@@ -117,10 +121,11 @@ struct WatchedFixture {
     kinema::controllers::HistoryController historyCtrl;
     kinema::controllers::WatchedController watchedCtrl;
     FakeCinemetaClient cinemeta;
-    FakeTorrentioClient torrentio;
+    IndexerHarness indexers;
     FakeTmdbClient tmdb;
     StreamActions actions { nullptr, nullptr };
     QString rdToken;
+    QString adApiKey;
     SeriesDetailViewModel vm;
 
     WatchedFixture()
@@ -131,16 +136,19 @@ struct WatchedFixture {
             tmp.filePath(QStringLiteral("kinemarc")),
             KConfig::SimpleConfig))
         , settings(config)
-        , historyCtrl(history, nullptr, settings, emptyToken)
+        , historyCtrl(history, indexers.selector(), emptyToken)
         , watchedCtrl(watchedStore, &historyCtrl)
-        , vm(&cinemeta, &torrentio, &tmdb, &actions,
+        , vm(&cinemeta, indexers.selector(), &tmdb, &actions,
               /*library=*/nullptr, &watchedCtrl,
-              /*tokens=*/nullptr, settings, rdToken, nullptr)
+              /*tokens=*/nullptr, settings, rdToken, adApiKey,
+              nullptr)
     {
         if (!tmp.isValid() || !db.open()) {
             qFatal("WatchedFixture setup failed");
         }
     }
+
+    auto& torrentio() noexcept { return indexers.fake(); }
 };
 
 } // namespace
@@ -215,7 +223,7 @@ private Q_SLOTS:
         f.cinemeta.seriesScripts = { { makeSeries(
             QStringLiteral("tt1"), QStringLiteral("X"),
             { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("Pilot.1080p"),
                   10, 1'000'000'000) } }
         };
@@ -230,7 +238,7 @@ private Q_SLOTS:
         QCOMPARE(f.vm.streams()->state(),
             StreamsListModel::State::Ready);
         QCOMPARE(f.vm.streams()->rowCount(), 1);
-        QCOMPARE(f.torrentio.lastStreamId,
+        QCOMPARE(f.torrentio().lastStreamId,
             QStringLiteral("tt1:1:1"));
     }
 
@@ -248,7 +256,7 @@ private Q_SLOTS:
         f.vm.selectEpisode(0);
         drainEvents();
 
-        QCOMPARE(f.torrentio.callCount, 0);
+        QCOMPARE(f.torrentio().callCount, 0);
         QCOMPARE(f.vm.streams()->state(),
             StreamsListModel::State::Unreleased);
     }
@@ -381,7 +389,7 @@ private Q_SLOTS:
         f.cinemeta.seriesScripts = { { makeSeries(
             QStringLiteral("tt1"), QStringLiteral("X"),
             { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { {}, HttpError(HttpError::Kind::Network, 0,
                   QStringLiteral("down")) }
         };
@@ -400,7 +408,7 @@ private Q_SLOTS:
         f.cinemeta.seriesScripts = { { makeSeries(
             QStringLiteral("tt1"), QStringLiteral("X"),
             { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("R"), 1, 1) } }
         };
         f.vm.load(QStringLiteral("tt1"));
@@ -422,7 +430,7 @@ private Q_SLOTS:
         f.cinemeta.seriesScripts = { { makeSeries(
             QStringLiteral("tt1"), QStringLiteral("X"),
             { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("R"), 1, 1) } }
         };
         f.vm.load(QStringLiteral("tt1"));
@@ -457,7 +465,7 @@ private Q_SLOTS:
         f.cinemeta.seriesScripts = { { makeSeries(
             QStringLiteral("tt1"), QStringLiteral("X"),
             { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("R"), 1, 1) } }
         };
         f.vm.load(QStringLiteral("tt1"));
@@ -482,7 +490,7 @@ private Q_SLOTS:
             { makeEp(1, 1, QStringLiteral("S1E1")),
               makeEp(2, 1, QStringLiteral("S2E1")),
               makeEp(2, 2, QStringLiteral("S2E2")) }) } };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("S2E2"), 1, 1) } }
         };
 
@@ -491,7 +499,7 @@ private Q_SLOTS:
 
         QCOMPARE(f.vm.currentSeason(), 1); // index of season 2
         QCOMPARE(f.vm.selectedEpisodeRow(), 1);
-        QCOMPARE(f.torrentio.lastStreamId,
+        QCOMPARE(f.torrentio().lastStreamId,
             QStringLiteral("tt1:2:2"));
     }
 
@@ -580,7 +588,7 @@ private Q_SLOTS:
         f.cinemeta.seriesScripts = { { makeSeries(
             QStringLiteral("tt1"), QStringLiteral("X"),
             { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("R"), 1, 1) } }
         };
         f.vm.load(QStringLiteral("tt1"));

@@ -1,0 +1,14 @@
+{
+  "status": "success",
+  "data": {
+    "magnets": [
+      {
+        "magnet": "not-a-valid-magnet",
+        "error": {
+          "code": "MAGNET_INVALID_URI",
+          "message": "Magnet is not valid"
+        }
+      }
+    ]
+  }
+}

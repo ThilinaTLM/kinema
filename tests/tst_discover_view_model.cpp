@@ -5,7 +5,7 @@
 #include "api/Media.h"
 #include "api/TmdbClient.h"
 #include "config/AppSettings.h"
-#include "config/RealDebridSettings.h"
+#include "config/DebridSettings.h"
 #include "controllers/TokenController.h"
 #include "core/HttpError.h"
 #include "core/TokenStore.h"

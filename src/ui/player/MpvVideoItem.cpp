@@ -7,7 +7,7 @@
 
 #include "config/PlayerSettings.h"
 #include "core/MpvConfigPaths.h"
-#include "kinema_debug.h"
+#include "kinema_log_player.h"
 #include "ui/player/MpvLoadCommand.h"
 
 #include <MpvController>
@@ -193,10 +193,10 @@ void MpvVideoItem::applySettings(const config::PlayerSettings& settings)
     // accepts a runtime push.
     const auto mpvConf = core::mpv_config::mpvConfPath();
     if (!mpvConf.isEmpty()) {
-        qCInfo(KINEMA) << "loading shipped mpv config from" << mpvConf;
+        qCInfo(KINEMA_PLAYER) << "loading shipped mpv config from" << mpvConf;
         setProperty(QStringLiteral("include"), mpvConf);
     } else {
-        qCWarning(KINEMA)
+        qCWarning(KINEMA_PLAYER)
             << "Kinema mpv.conf not found \u2014 using built-in defaults";
     }
 
@@ -211,6 +211,11 @@ void MpvVideoItem::applySettings(const config::PlayerSettings& settings)
 void MpvVideoItem::loadFile(const QUrl& url,
     std::optional<double> startSeconds)
 {
+    qCInfo(KINEMA_PLAYER).nospace()
+        << "MpvVideoItem::loadFile url="
+        << url.toString(QUrl::RemovePassword)
+        << " startSeconds="
+        << (startSeconds ? *startSeconds : 0.0);
     m_logTail.clear();
 
     const bool pausedChangedNow = m_paused;
@@ -389,11 +394,14 @@ void MpvVideoItem::appendLogLine(const QString& line)
 
 void MpvVideoItem::onMpvFileLoaded()
 {
+    qCInfo(KINEMA_PLAYER) << "MpvVideoItem: file-loaded";
     Q_EMIT fileLoaded();
 }
 
 void MpvVideoItem::onMpvEndFile(const QString& reason)
 {
+    qCInfo(KINEMA_PLAYER).nospace()
+        << "MpvVideoItem: end-file reason=\"" << reason << "\"";
     Q_EMIT endOfFile(reason);
 }
 
@@ -450,12 +458,20 @@ void MpvVideoItem::onMpvPropertyChanged(const QString& name,
         }
     } else if (name == QLatin1String(kPausedForCache)) {
         const bool v = asBool();
-        m_bufferingWaiting = v;
-        Q_EMIT bufferingChanged(m_bufferingWaiting, m_bufferingPercent);
+        if (v != m_bufferingWaiting) {
+            qCInfo(KINEMA_PLAYER).nospace()
+                << "MpvVideoItem: paused-for-cache "
+                << (v ? "ON" : "OFF")
+                << " (cache-buffer-state=" << m_bufferingPercent << "%)";
+            m_bufferingWaiting = v;
+            Q_EMIT bufferingChanged(m_bufferingWaiting, m_bufferingPercent);
+        }
     } else if (name == QLatin1String(kCacheBufferState)) {
         const int v = asInt();
-        m_bufferingPercent = v;
-        Q_EMIT bufferingChanged(m_bufferingWaiting, m_bufferingPercent);
+        if (v != m_bufferingPercent) {
+            m_bufferingPercent = v;
+            Q_EMIT bufferingChanged(m_bufferingWaiting, m_bufferingPercent);
+        }
     } else if (name == QLatin1String(kDemuxerCacheTime)) {
         const double v = asDouble();
         if (m_cacheAhead < 0.0 || qAbs(v - m_cacheAhead) > 0.25) {

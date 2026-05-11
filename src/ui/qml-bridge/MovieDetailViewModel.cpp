@@ -4,20 +4,21 @@
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 
 #include "api/CinemetaClient.h"
+#include "api/Indexer.h"
+#include "api/IndexerSelector.h"
 #include "api/TmdbClient.h"
-#include "api/TorrentioClient.h"
 #include "config/AppSettings.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
+#include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
-#include "controllers/PlayQueueController.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
 #include "core/DateFormat.h"
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
 #include "core/StreamFilter.h"
-#include "kinema_debug.h"
+#include "kinema_log_ui.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/StreamSorting.h"
@@ -31,21 +32,22 @@ using SortMode = StreamsListModel::SortMode;
 } // namespace
 
 MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
-    api::TorrentioClient* torrentio,
+    api::IndexerSelector* indexers,
     api::TmdbClient* tmdb,
     services::StreamActions* actions,
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
+    const QString& adApiKeyRef,
     QObject* parent)
-    : MovieDetailViewModel(cinemeta, torrentio, tmdb, actions,
+    : MovieDetailViewModel(cinemeta, indexers, tmdb, actions,
           /*library=*/nullptr, /*watched=*/nullptr,
-          tokens, settings, rdTokenRef, parent)
+          tokens, settings, rdTokenRef, adApiKeyRef, parent)
 {
 }
 
 MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
-    api::TorrentioClient* torrentio,
+    api::IndexerSelector* indexers,
     api::TmdbClient* tmdb,
     services::StreamActions* actions,
     controllers::LibraryController* library,
@@ -53,10 +55,11 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
+    const QString& adApiKeyRef,
     QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
-    , m_torrentio(torrentio)
+    , m_indexers(indexers)
     , m_tmdb(tmdb)
     , m_actions(actions)
     , m_library(library)
@@ -64,22 +67,17 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     , m_tokens(tokens)
     , m_settings(settings)
     , m_rdToken(rdTokenRef)
+    , m_adApiKey(adApiKeyRef)
     , m_streams(new StreamsListModel(this))
     , m_similar(new DiscoverSectionModel(
           i18nc("@label movie detail rail", "More like this"), this))
 {
-    // Persisted filter inputs feed the same rebuild path the user-
-    // facing "Cached on RD only" toggle does, so a settings change
-    // during another phase reflows the visible list immediately.
-    connect(&m_settings.torrentio(),
-        &config::TorrentioSettings::cachedOnlyChanged, this,
-        [this](bool) {
-            Q_EMIT cachedOnlyChanged();
-            rebuildVisibleStreams();
-        });
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });
+    connect(&m_settings.filter(),
+        &config::FilterSettings::exclusionsChanged, this,
+        [this]() { rebuildVisibleStreams(); });
 
     if (m_library) {
         connect(m_library, &controllers::LibraryController::changed,
@@ -91,33 +89,24 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     }
 
     if (m_tokens) {
-        // RD token presence drives the cachedOnly checkbox visibility
-        // (`realDebridConfigured`) and gates RD direct-URL columns.
+        // Either debrid credential's presence drives the
+        // `debridConfigured` chip visibility on the streams page
+        // and the per-row override menu (Play via torrent /
+        // Use torrent for this download).
+        const auto onDebridChanged = [this](const QString&) {
+            Q_EMIT debridConfiguredChanged();
+            refreshStreamsForCurrentTitle();
+        };
         connect(m_tokens,
             &controllers::TokenController::realDebridTokenChanged,
-            this, [this](const QString&) {
-                Q_EMIT realDebridConfiguredChanged();
-                refreshStreamsForCurrentTitle();
-            });
+            this, onDebridChanged);
+        connect(m_tokens,
+            &controllers::TokenController::allDebridApiKeyChanged,
+            this, onDebridChanged);
     }
 }
 
 MovieDetailViewModel::~MovieDetailViewModel() = default;
-
-bool MovieDetailViewModel::cachedOnly() const
-{
-    return m_settings.torrentio().cachedOnly();
-}
-
-void MovieDetailViewModel::setCachedOnly(bool on)
-{
-    if (m_settings.torrentio().cachedOnly() == on) {
-        return;
-    }
-    m_settings.torrentio().setCachedOnly(on);
-    // The KConfig setter fires `cachedOnlyChanged`, which re-renders
-    // through the connection above. We don't manually emit here.
-}
 
 void MovieDetailViewModel::setSortMode(int mode)
 {
@@ -405,10 +394,17 @@ QCoro::Task<void> MovieDetailViewModel::loadStreamsTask(
     }
 
     try {
-        auto opts = m_settings.torrentioOptions();
-        opts.realDebridToken = m_rdToken;
-        auto streams = co_await m_torrentio->streams(
-            api::MediaKind::Movie, imdbId, opts);
+        // The indexer is discovery-only — RD is no longer in the URL.
+        // Per-indexer config (sort, filters) lives inside each
+        // concrete Indexer; the view-model just asks for streams.
+        auto* indexer = m_indexers ? m_indexers->active() : nullptr;
+        if (!indexer) {
+            m_streams->setError(i18nc("@info streams empty",
+                "No stream indexer is configured."));
+            co_return;
+        }
+        auto streams = co_await indexer->streams(
+            api::MediaKind::Movie, imdbId);
         if (expectedEpoch != m_epoch) {
             co_return;
         }
@@ -456,7 +452,7 @@ QCoro::Task<void> MovieDetailViewModel::resolveByTmdbAndLoad(
             const bool notFound
                 = he->kind() == core::HttpError::Kind::HttpStatus
                 && he->httpStatus() == 404;
-            qCWarning(KINEMA).nospace()
+            qCWarning(KINEMA_UI).nospace()
                 << "TMDB external_ids lookup failed: movie/"
                 << tmdbId << " (\"" << title << "\") \u2014 "
                 << he->httpStatus() << " " << he->message();
@@ -481,7 +477,7 @@ QCoro::Task<void> MovieDetailViewModel::resolveByTmdbAndLoad(
     }
 
     if (imdbId.isEmpty()) {
-        qCWarning(KINEMA).nospace()
+        qCWarning(KINEMA_UI).nospace()
             << "TMDB has no IMDB id for movie/" << tmdbId
             << " (\"" << title << "\")";
         Q_EMIT statusMessage(
@@ -585,15 +581,9 @@ void MovieDetailViewModel::rebuildVisibleStreams()
 
     QString emptyExplanation;
     if (visible.isEmpty() && !m_rawStreams.isEmpty()) {
-        const bool cachedFiltered
-            = realDebridConfigured() && cachedOnly();
-        emptyExplanation = cachedFiltered
-            ? i18nc("@info streams empty",
-                "Uncheck \u201cCached on Real-Debrid only\u201d or "
-                "widen your filters in Settings.")
-            : i18nc("@info streams empty",
-                "Loosen the exclusions or keyword blocklist in "
-                "Settings.");
+        emptyExplanation = i18nc("@info streams empty",
+            "Loosen the exclusions or keyword blocklist in "
+            "Settings.");
     } else if (visible.isEmpty()) {
         emptyExplanation = i18nc("@info streams empty",
             "Try a different release or widen your filters.");
@@ -608,8 +598,9 @@ QList<api::Stream> MovieDetailViewModel::applyFilters() const
         return {};
     }
     core::stream_filter::ClientFilters f;
-    f.cachedOnly = realDebridConfigured() && cachedOnly();
     f.keywordBlocklist = m_settings.filter().keywordBlocklist();
+    f.excludedResolutions = m_settings.filter().excludedResolutions();
+    f.excludedCategories = m_settings.filter().excludedCategories();
     auto rows = core::stream_filter::apply(m_rawStreams, f);
 
     return stream_sorting::applyUiFilters(std::move(rows),
@@ -637,6 +628,11 @@ void MovieDetailViewModel::requestStreams()
     Q_EMIT streamsRequested();
 }
 
+void MovieDetailViewModel::refreshStreams()
+{
+    refreshStreamsForCurrentTitle();
+}
+
 void MovieDetailViewModel::addToLibrary()
 {
     if (!m_library || m_currentMeta.summary.imdbId.isEmpty()) {
@@ -659,11 +655,6 @@ void MovieDetailViewModel::toggleMovieWatched()
     }
 }
 
-void MovieDetailViewModel::setPlayQueue(controllers::PlayQueueController* queue)
-{
-    m_queue = queue;
-}
-
 void MovieDetailViewModel::playNow(int row)
 {
     const auto* s = m_streams->at(row);
@@ -677,28 +668,67 @@ void MovieDetailViewModel::playNow(int row)
             4000);
         return;
     }
-    if (!m_queue) {
+    if (!m_actions) {
         return;
     }
-    m_queue->playNow(*s, currentContext());
+    m_actions->play(*s, currentContext());
 }
 
-void MovieDetailViewModel::playNext(int row)
+void MovieDetailViewModel::playWithBackend(int row, int backendKind)
 {
     const auto* s = m_streams->at(row);
-    if (!s || (s->directUrl.isEmpty() && s->infoHash.isEmpty()) || !m_queue) {
+    if (!s) {
         return;
     }
-    m_queue->playNext(*s, currentContext());
+    if (s->directUrl.isEmpty() && s->infoHash.isEmpty()) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "This stream has no playable URL or magnet."),
+            4000);
+        return;
+    }
+    if (!m_actions) {
+        return;
+    }
+    m_actions->playWithBackend(*s, currentContext(),
+        static_cast<api::DownloadBackendKind>(backendKind));
 }
 
-void MovieDetailViewModel::enqueue(int row)
+void MovieDetailViewModel::download(int row)
 {
     const auto* s = m_streams->at(row);
-    if (!s || (s->directUrl.isEmpty() && s->infoHash.isEmpty()) || !m_queue) {
+    if (!s) {
         return;
     }
-    m_queue->enqueue(*s, currentContext());
+    if (s->infoHash.isEmpty() && s->directUrl.isEmpty()) {
+        Q_EMIT statusMessage(i18nc("@info:status",
+            "This stream has no playable URL or magnet."), 4000);
+        return;
+    }
+    if (!m_downloads) {
+        return;
+    }
+    m_downloads->download(*s, currentContext());
+    Q_EMIT statusMessage(
+        i18nc("@info:status starting a background download",
+            "Downloading \u201c%1\u201d\u2026", m_title),
+        3500);
+}
+
+void MovieDetailViewModel::downloadWithBackend(int row, int backendKind)
+{
+    const auto* s = m_streams->at(row);
+    if (!s || !m_downloads) {
+        return;
+    }
+    m_downloads->downloadWithBackend(*s, currentContext(),
+        static_cast<api::DownloadBackendKind>(backendKind));
+}
+
+void MovieDetailViewModel::setDownloadController(
+    controllers::DownloadController* dl)
+{
+    m_downloads = dl;
 }
 
 template <typename Method>

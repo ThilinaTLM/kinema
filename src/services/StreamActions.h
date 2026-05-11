@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "api/Download.h"
 #include "api/Media.h"
 #include "api/PlaybackContext.h"
 
@@ -10,6 +11,8 @@
 
 #include <QObject>
 #include <QUrl>
+
+#include <optional>
 
 namespace kinema::controllers {
 class HistoryController;
@@ -21,6 +24,10 @@ class PlayerLauncher;
 
 namespace kinema::torrent {
 class TorrentStreamingService;
+}
+
+namespace kinema::download {
+class DownloadManager;
 }
 
 namespace kinema::services {
@@ -45,6 +52,11 @@ public:
         torrent::TorrentStreamingService* torrentStreaming,
         QObject* parent = nullptr);
 
+    /// Wire the unified downloader. When set, `play()` always asks
+    /// the manager for a localhost URL; the legacy direct/torrent
+    /// branch is bypassed.
+    void setDownloadManager(download::DownloadManager* manager);
+
     /// Wire the history controller used to seed resume-from and
     /// record play-start entries. Two-phase init because the
     /// controller depends on `this` via resumeFromHistory.
@@ -64,6 +76,22 @@ public Q_SLOTS:
     virtual void play(const api::Stream& stream,
         const api::PlaybackContext& ctx);
 
+    /// Same as `play()` but forces a specific download backend.
+    /// Used by the per-stream override menu.
+    void playWithBackend(const api::Stream& stream,
+        const api::PlaybackContext& ctx,
+        api::DownloadBackendKind backend);
+
+    /// Background full-file download. Maps onto
+    /// `DownloadManager::enqueueDownload` and never launches the
+    /// player. Mode upgrade for already-streaming sessions is
+    /// handled by the manager.
+    void download(const api::Stream& stream,
+        const api::PlaybackContext& ctx);
+    void downloadWithBackend(const api::Stream& stream,
+        const api::PlaybackContext& ctx,
+        api::DownloadBackendKind backend);
+
 Q_SIGNALS:
     /// Status-bar message. MainWindow connects this once.
     void statusMessage(const QString& text, int timeoutMs = 3000);
@@ -76,9 +104,17 @@ private:
 
     QCoro::Task<void> playTorrentTask(api::Stream stream,
         api::PlaybackContext ctx, quint64 epoch);
+    QCoro::Task<void> playLocalTask(api::Stream stream,
+        api::PlaybackContext ctx, quint64 epoch,
+        std::optional<api::DownloadBackendKind> backendOverride);
+
+    void playInternal(const api::Stream& stream,
+        const api::PlaybackContext& ctxIn,
+        std::optional<api::DownloadBackendKind> backendOverride);
 
     core::PlayerLauncher* m_launcher;
     torrent::TorrentStreamingService* m_torrentStreaming;
+    download::DownloadManager* m_downloadManager {};
     controllers::HistoryController* m_history {};
     quint64 m_playEpoch = 0;
 };

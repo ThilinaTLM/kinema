@@ -6,27 +6,26 @@ import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
+// Indexer-agnostic stream filters. Applied client-side after the active
+// indexer has answered, so the same blocklist / exclusion settings
+// work uniformly across Torrentio and Peerflix. Indexer-specific
+// knobs (default sort, base URL) live on the Indexers page.
 FormCard.FormCardPage {
     title: i18nc("@title:tab settings page", "Streams")
 
     readonly property var vm: settingsVm.streams
 
     FormCard.FormHeader {
-        title: i18nc("@title:group", "Defaults")
+        title: i18nc("@title:group streams page intro",
+            "Filters")
     }
     FormCard.FormCard {
-        FormCard.FormComboBoxDelegate {
-            text: i18nc("@label:listbox", "Default torrent sort")
-            model: [
-                i18nc("@item:inlistbox sort mode", "Seeders"),
-                i18nc("@item:inlistbox sort mode", "Size"),
-                i18nc("@item:inlistbox sort mode", "Quality & Size")
-            ]
-            currentIndex: vm.defaultTorrentioSort
-            onActivated: vm.defaultTorrentioSort = currentIndex
-            description: i18nc("@info form delegate hint",
-                "Applied to every Torrentio query. You can still re-sort "
-                + "any column from the streams list header.")
+        FormCard.FormTextDelegate {
+            description: i18nc("@info streams settings intro",
+                "Hide unwanted streams from every indexer. Torrentio "
+                + "also receives these exclusions in its URL so it can "
+                + "trim the payload server-side; Peerflix applies them "
+                + "client-side only.")
         }
     }
 

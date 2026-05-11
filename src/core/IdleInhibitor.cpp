@@ -11,7 +11,7 @@
 
 #include <optional>
 
-#include "kinema_debug.h"
+#include "kinema_log_app.h"
 
 namespace kinema::core {
 
@@ -151,14 +151,14 @@ void IdleInhibitor::setActive(bool active, const QString& reason)
         }
         m_liveBackend = backend;
         m_active = true;
-        qCInfo(KINEMA) << "idle inhibitor enabled via" << backend->name();
+        qCInfo(KINEMA_APP) << "idle inhibitor enabled via" << backend->name();
         return true;
     };
 
     if (tryBackend(m_primary.get()) || tryBackend(m_fallback.get())) {
         return;
     }
-    qCInfo(KINEMA) << "idle inhibitor unavailable";
+    qCInfo(KINEMA_APP) << "idle inhibitor unavailable";
 }
 
 void IdleInhibitor::release()

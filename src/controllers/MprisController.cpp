@@ -5,11 +5,11 @@
 
 #include "controllers/MprisController.h"
 
-#include "controllers/PlayQueueController.h"
 #include "controllers/PlaybackController.h"
+#include "controllers/SeriesPlaybackSessionController.h"
 #include "core/IdleInhibitor.h"
 #include "core/MprisMetadata.h"
-#include "kinema_debug.h"
+#include "kinema_log_controller.h"
 
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
@@ -132,11 +132,11 @@ private:
 } // namespace
 
 MprisController::MprisController(PlaybackController& playback,
-    PlayQueueController* queue,
+    SeriesPlaybackSessionController* seriesSession,
     QObject* parent)
     : QObject(parent)
     , m_playback(playback)
-    , m_queue(queue)
+    , m_seriesSession(seriesSession)
     , m_inhibitor(std::make_unique<core::IdleInhibitor>())
 {
     new MediaPlayer2Adaptor(this);
@@ -148,18 +148,9 @@ MprisController::MprisController(PlaybackController& playback,
         this, &MprisController::refresh);
     connect(&m_playback, &PlaybackController::seeked,
         this, &MprisController::onSeeked);
-    if (m_queue) {
-        connect(m_queue, &PlayQueueController::activeIndexChanged,
-            this, &MprisController::refresh);
-        connect(m_queue, &PlayQueueController::itemsReset,
-            this, &MprisController::refresh);
-        connect(m_queue, &PlayQueueController::itemInserted,
-            this, &MprisController::refresh);
-        connect(m_queue, &PlayQueueController::itemRemoved,
-            this, &MprisController::refresh);
-        connect(m_queue, &PlayQueueController::itemMoved,
-            this, &MprisController::refresh);
-        connect(m_queue, &PlayQueueController::itemChanged,
+    if (m_seriesSession) {
+        connect(m_seriesSession,
+            &SeriesPlaybackSessionController::navigationChanged,
             this, &MprisController::refresh);
     }
 
@@ -225,19 +216,12 @@ double MprisController::rate() const
 
 bool MprisController::canGoNext() const
 {
-    if (!m_queue) {
-        return false;
-    }
-    const int active = m_queue->activeIndex();
-    return active >= 0 && (active + 1) < m_queue->items().size();
+    return m_seriesSession && m_seriesSession->canGoNext();
 }
 
 bool MprisController::canGoPrevious() const
 {
-    if (!m_queue) {
-        return false;
-    }
-    return m_queue->activeIndex() > 0;
+    return m_seriesSession && m_seriesSession->canGoPrevious();
 }
 
 bool MprisController::canPlay() const
@@ -291,18 +275,18 @@ void MprisController::quit()
 
 void MprisController::next()
 {
-    if (!m_queue || !canGoNext()) {
+    if (!m_seriesSession || !canGoNext()) {
         return;
     }
-    m_queue->playNextItem();
+    m_seriesSession->playNextEpisode();
 }
 
 void MprisController::previous()
 {
-    if (!m_queue || !canGoPrevious()) {
+    if (!m_seriesSession || !canGoPrevious()) {
         return;
     }
-    m_queue->playPreviousItem();
+    m_seriesSession->playPreviousEpisode();
 }
 
 void MprisController::pause()
@@ -382,7 +366,7 @@ void MprisController::ensureRegistration()
     m_objectRegistered = QDBusConnection::sessionBus().registerObject(
         QString::fromLatin1(kPath), this, QDBusConnection::ExportAdaptors);
     if (!m_objectRegistered) {
-        qCWarning(KINEMA) << "failed to register MPRIS object";
+        qCWarning(KINEMA_CONTROLLER) << "failed to register MPRIS object";
     }
 }
 
@@ -395,7 +379,7 @@ void MprisController::setRegistered(bool on)
         m_serviceRegistered = QDBusConnection::sessionBus().registerService(
             QString::fromLatin1(kService));
         if (!m_serviceRegistered) {
-            qCWarning(KINEMA) << "failed to acquire MPRIS service name"
+            qCWarning(KINEMA_CONTROLLER) << "failed to acquire MPRIS service name"
                               << kService;
         }
         return;
