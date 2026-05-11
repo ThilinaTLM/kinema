@@ -79,6 +79,19 @@ private Q_SLOTS:
             QStringLiteral("ubuntu-18.04.2-live-server-amd64.iso"));
     }
 
+    void magnetStatus_singleObjectShape_parses()
+    {
+        // AllDebrid /v4.1/magnet/status returns the row as an object
+        // (not a single-element array) when called with a specific
+        // `id`. Make sure the parser accepts that shape.
+        const auto s = parseMagnetStatus(
+            loadJsonFixture("ad_magnet_status_ready_single_object.json"));
+        QCOMPARE(s.id, 123456LL);
+        QCOMPARE(s.statusCode, 4);
+        QCOMPARE(s.filename,
+            QStringLiteral("ubuntu-18.04.2-live-server-amd64.iso"));
+    }
+
     void magnetStatus_downloading_parses()
     {
         const auto s = parseMagnetStatus(

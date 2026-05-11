@@ -180,15 +180,23 @@ AdAddMagnetResult parseAddMagnet(const QJsonDocument& doc)
 AdMagnetStatus parseMagnetStatus(const QJsonDocument& doc)
 {
     const auto data = unwrapEnvelope(doc, "magnet/status");
-    const auto magnets = data.value(QStringLiteral("magnets")).toArray();
+    // /v4.1/magnet/status is inconsistent: when called with a single
+    // `id`, AllDebrid returns the row as a JSON object under
+    // `data.magnets` instead of a one-element array. When called
+    // without an id (list mode) it returns an array. Accept both,
+    // plus a legacy `data.magnet` singular shape just in case.
+    const auto magnetsVal = data.value(QStringLiteral("magnets"));
     QJsonObject row;
-    if (magnets.isEmpty()) {
-        // The endpoint also accepts being passed a single id and
-        // returning the row directly under `magnets`. Some legacy
-        // shapes wrap it under `magnet`.
+    if (magnetsVal.isArray()) {
+        const auto magnets = magnetsVal.toArray();
+        if (!magnets.isEmpty()) {
+            row = magnets.first().toObject();
+        }
+    } else if (magnetsVal.isObject()) {
+        row = magnetsVal.toObject();
+    }
+    if (row.isEmpty()) {
         row = data.value(QStringLiteral("magnet")).toObject();
-    } else {
-        row = magnets.first().toObject();
     }
     if (row.isEmpty()) {
         throw core::HttpError(core::HttpError::Kind::Json, 0,
