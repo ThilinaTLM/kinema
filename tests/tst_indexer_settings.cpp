@@ -35,13 +35,10 @@ private Q_SLOTS:
 
     // ---- Defaults --------------------------------------------------------
 
-    void defaults_activeIsTorrentioAndTorrentioConfigured()
+    void defaults_activeIsTorrentio()
     {
         config::IndexerSettings s(m_config);
         QCOMPARE(s.activeIndexer(), api::IndexerKind::Torrentio);
-        // Torrentio works without setup so it defaults to configured.
-        QVERIFY(s.torrentioConfigured());
-        QVERIFY(!s.mediaFusionConfigured());
     }
 
     // ---- Roundtrip ------------------------------------------------------
@@ -50,30 +47,14 @@ private Q_SLOTS:
     {
         {
             config::IndexerSettings s(m_config);
-            s.setActiveIndexer(api::IndexerKind::MediaFusion);
+            s.setActiveIndexer(api::IndexerKind::Peerflix);
         }
         m_config->sync();
 
         auto cfg2 = KSharedConfig::openConfig(
             m_configPath, KConfig::SimpleConfig);
         config::IndexerSettings s2(cfg2);
-        QCOMPARE(s2.activeIndexer(), api::IndexerKind::MediaFusion);
-    }
-
-    void roundtrip_configuredFlags_persistAcrossInstances()
-    {
-        {
-            config::IndexerSettings s(m_config);
-            s.setMediaFusionConfigured(true);
-            s.setTorrentioConfigured(false);
-        }
-        m_config->sync();
-
-        auto cfg2 = KSharedConfig::openConfig(
-            m_configPath, KConfig::SimpleConfig);
-        config::IndexerSettings s2(cfg2);
-        QVERIFY(s2.mediaFusionConfigured());
-        QVERIFY(!s2.torrentioConfigured());
+        QCOMPARE(s2.activeIndexer(), api::IndexerKind::Peerflix);
     }
 
     // ---- Signals --------------------------------------------------------
@@ -86,27 +67,13 @@ private Q_SLOTS:
         s.setActiveIndexer(api::IndexerKind::Torrentio); // already default
         QCOMPARE(spy.count(), 0);
 
-        s.setActiveIndexer(api::IndexerKind::MediaFusion);
+        s.setActiveIndexer(api::IndexerKind::Peerflix);
         QCOMPARE(spy.count(), 1);
         QCOMPARE(spy.at(0).at(0).value<api::IndexerKind>(),
-            api::IndexerKind::MediaFusion);
+            api::IndexerKind::Peerflix);
 
-        s.setActiveIndexer(api::IndexerKind::MediaFusion); // no-op
+        s.setActiveIndexer(api::IndexerKind::Peerflix); // no-op
         QCOMPARE(spy.count(), 1);
-    }
-
-    void setMediaFusionConfigured_emitsOnlyOnChange()
-    {
-        config::IndexerSettings s(m_config);
-        QSignalSpy spy(&s,
-            &config::IndexerSettings::mediaFusionConfiguredChanged);
-
-        s.setMediaFusionConfigured(false); // already default
-        QCOMPARE(spy.count(), 0);
-
-        s.setMediaFusionConfigured(true);
-        QCOMPARE(spy.count(), 1);
-        QCOMPARE(spy.at(0).at(0).toBool(), true);
     }
 
     // ---- Enum tokens ----------------------------------------------------
@@ -114,7 +81,7 @@ private Q_SLOTS:
     void indexerKindToString_roundTrips()
     {
         for (const auto k :
-            { api::IndexerKind::Torrentio, api::IndexerKind::MediaFusion }) {
+            { api::IndexerKind::Torrentio, api::IndexerKind::Peerflix }) {
             QCOMPARE(api::indexerKindFromString(api::indexerKindToString(k)),
                 k);
         }
@@ -126,8 +93,12 @@ private Q_SLOTS:
             api::IndexerKind::Torrentio);
         QCOMPARE(api::indexerKindFromString(QStringLiteral("bogus")),
             api::IndexerKind::Torrentio);
-        QCOMPARE(api::indexerKindFromString(QStringLiteral("  MediaFusion  ")),
-            api::IndexerKind::MediaFusion);
+        // Legacy "mediafusion" token from old configs → falls back to
+        // the default rather than crashing.
+        QCOMPARE(api::indexerKindFromString(QStringLiteral("mediafusion")),
+            api::IndexerKind::Torrentio);
+        QCOMPARE(api::indexerKindFromString(QStringLiteral("  Peerflix  ")),
+            api::IndexerKind::Peerflix);
     }
 
 private:

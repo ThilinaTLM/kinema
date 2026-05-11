@@ -14,18 +14,15 @@ namespace kinema::config {
 /**
  * Persisted state for the active stream indexer.
  *
- * Mirrors `DebridSettings`: a single radio-style "active" choice plus
- * a couple of "is configured?" booleans the settings page uses to
- * gate Test / Save buttons. Per-indexer config (base URL, sort,
- * MediaFusion token, …) lives in each concrete settings class
- * (`TorrentioSettings`, `MediaFusionSettings`) — this class only
- * owns the active-indexer radio and the configured flags.
+ * Per-indexer config (base URL, sort, …) lives in each concrete
+ * settings class (`TorrentioSettings`, `PeerflixSettings`); this
+ * class only owns the active-indexer radio. Both built-in indexers
+ * have working zero-config defaults, so there are no "configured"
+ * flags to gate the UI.
  *
  * KConfig group: [Indexers]
  * Keys:
- *   active                 string ("torrentio" / "mediafusion")
- *   torrentioConfigured    bool (default true — Torrentio works without setup)
- *   mediaFusionConfigured  bool (default false)
+ *   active   string ("torrentio" / "peerflix")
  */
 class IndexerSettings : public QObject
 {
@@ -37,16 +34,8 @@ public:
     api::IndexerKind activeIndexer() const;
     void setActiveIndexer(api::IndexerKind k);
 
-    bool torrentioConfigured() const;
-    void setTorrentioConfigured(bool);
-
-    bool mediaFusionConfigured() const;
-    void setMediaFusionConfigured(bool);
-
 Q_SIGNALS:
     void activeIndexerChanged(api::IndexerKind);
-    void torrentioConfiguredChanged(bool);
-    void mediaFusionConfiguredChanged(bool);
 
 private:
     KSharedConfigPtr m_config;

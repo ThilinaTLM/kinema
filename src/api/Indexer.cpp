@@ -10,8 +10,8 @@ QString indexerKindToString(IndexerKind k)
     switch (k) {
     case IndexerKind::Torrentio:
         return QStringLiteral("torrentio");
-    case IndexerKind::MediaFusion:
-        return QStringLiteral("mediafusion");
+    case IndexerKind::Peerflix:
+        return QStringLiteral("peerflix");
     }
     return QStringLiteral("torrentio");
 }
@@ -19,8 +19,8 @@ QString indexerKindToString(IndexerKind k)
 IndexerKind indexerKindFromString(const QString& s)
 {
     const auto v = s.trimmed().toLower();
-    if (v == QLatin1String("mediafusion")) {
-        return IndexerKind::MediaFusion;
+    if (v == QLatin1String("peerflix")) {
+        return IndexerKind::Peerflix;
     }
     // Default — covers "torrentio", empty, and anything unknown.
     return IndexerKind::Torrentio;

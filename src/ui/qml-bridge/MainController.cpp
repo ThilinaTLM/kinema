@@ -10,7 +10,7 @@
 #include "api/RealDebridClient.h"
 #include "api/TmdbClient.h"
 #include "api/IndexerSelector.h"
-#include "api/MediaFusionIndexer.h"
+#include "api/PeerflixIndexer.h"
 #include "api/TorrentioIndexer.h"
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
@@ -295,14 +295,14 @@ void MainController::buildCoreServices()
         m_settings.player(), this);
     m_cinemeta = new api::CinemetaClient(m_http.get(), this);
     // Indexer abstraction: a selector owns one or more concrete
-    // indexers (Torrentio today, MediaFusion next) and view-models
-    // call selector->active()->streams(). The active indexer
-    // tracks `IndexerSettings`.
+    // indexers (Torrentio + Peerflix today) and view-models call
+    // `selector->active()->streams()`. The active indexer tracks
+    // `IndexerSettings`.
     m_indexers = new api::IndexerSelector(m_settings.indexers(), this);
     m_indexers->registerIndexer(std::make_unique<api::TorrentioIndexer>(
         m_http.get(), m_settings.torrentio(), m_settings.filter()));
-    m_indexers->registerIndexer(std::make_unique<api::MediaFusionIndexer>(
-        m_http.get(), m_settings.mediaFusion()));
+    m_indexers->registerIndexer(std::make_unique<api::PeerflixIndexer>(
+        m_http.get(), m_settings.peerflix()));
     m_tmdb = new api::TmdbClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
     m_torrentCache = std::make_unique<core::TorrentCache>(

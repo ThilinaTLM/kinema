@@ -25,7 +25,7 @@ AppSettings::AppSettings(KSharedConfigPtr config, QObject* parent)
     , m_torrentStreaming(config, this)
     , m_download(config, this)
     , m_indexers(config, this)
-    , m_mediaFusion(config, this)
+    , m_peerflix(config, this)
 {
 }
 

@@ -6,6 +6,7 @@
 
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QTest>
 
 using namespace kinema::api;
@@ -122,6 +123,103 @@ private Q_SLOTS:
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
         QVERIFY(stremio::parseStreams(doc).isEmpty());
+    }
+
+    void description_preferredOverDeprecatedTitle()
+    {
+        // Modern Stremio spec: `description`. Deprecated `title`
+        // serves as fallback. When both are present, description
+        // wins.
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "aa",
+                "title": "Old.Title\nshould.be.ignored",
+                "description": "New.Description.Release\nDetail line"
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.size(), 1);
+        QCOMPARE(streams.at(0).releaseName,
+            QStringLiteral("New.Description.Release"));
+        QCOMPARE(streams.at(0).detailsText, QStringLiteral("Detail line"));
+    }
+
+    void title_fallbackWhenDescriptionMissing()
+    {
+        // Torrentio backward-compat path.
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "bb",
+                "title": "Legacy.Release\nbits"
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.size(), 1);
+        QCOMPARE(streams.at(0).releaseName,
+            QStringLiteral("Legacy.Release"));
+    }
+
+    void structuredSeed_preferredOverRegex()
+    {
+        // No emoji metadata in the description — seeders comes from
+        // the structured `seed` field.
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "cc",
+                "description": "Some.Release.Without.Emoji",
+                "seed": 14
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QVERIFY(streams.at(0).seeders.has_value());
+        QCOMPARE(*streams.at(0).seeders, 14);
+    }
+
+    void structuredSizebytes_preferredOverRegex()
+    {
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "dd",
+                "description": "Some.Release",
+                "sizebytes": 60333553090
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QVERIFY(streams.at(0).sizeBytes.has_value());
+        QCOMPARE(*streams.at(0).sizeBytes, qint64(60333553090LL));
+    }
+
+    void structuredQuality_preferredOverRegex()
+    {
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "ee",
+                "description": "Release.Without.Resolution.Token",
+                "quality": "4K"
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).resolution, QStringLiteral("4k"));
+    }
+
+    void language_populatedWhenPresent_emptyOtherwise()
+    {
+        const QByteArray body = R"({
+            "streams": [
+                { "infoHash": "ff", "title": "x", "language": "ES" },
+                { "infoHash": "gg", "title": "y" }
+            ]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.size(), 2);
+        QCOMPARE(streams.at(0).language, QStringLiteral("es"));
+        QVERIFY(streams.at(1).language.isEmpty());
     }
 };
 

@@ -37,9 +37,9 @@ bool resolutionMatchesToken(const QString& res, const QString& token)
 
 /// Map a `ClientFilters::excludedCategories` token to a predicate
 /// over the parsed `stream_tokens::Tokens`. Tokens that the parser
-/// doesn't currently surface (e.g. `nonen`, `unknown`, `brremux`)
-/// are accepted but always evaluate to `false`; the keyword
-/// blocklist remains the workaround for those.
+/// can't infer from the release name alone (`threed`, `unknown`)
+/// stay accepted-but-no-op; `nonen` is honoured for any indexer
+/// that populates `Stream::language` (currently Peerflix).
 bool categoryMatchesToken(const api::Stream& s, const QString& token)
 {
     const auto t = stream_tokens::parse(s);
@@ -60,10 +60,20 @@ bool categoryMatchesToken(const api::Stream& s, const QString& token)
     if (token == QLatin1String("brremux")) {
         return t.source == stream_tokens::Source::BluRayRemux;
     }
-    // `threed`, `nonen`, and `unknown` are not currently inferrable
-    // client-side from the parsed Stream alone; users still get them
-    // filtered server-side via Torrentio's URL, and via the keyword
-    // blocklist as a fallback.
+    if (token == QLatin1String("nonen")) {
+        // Indexers that surface a language code (currently Peerflix)
+        // let us drop non-English releases precisely. Indexers that
+        // don't (currently Torrentio) leave `Stream::language` empty,
+        // in which case we keep the row — Torrentio results pass the
+        // URL-level `qualityfilter=nonen` check server-side anyway.
+        return !s.language.isEmpty()
+            && s.language.compare(QLatin1String("en"), Qt::CaseInsensitive)
+                != 0;
+    }
+    // `threed` and `unknown` are not currently inferrable client-side
+    // from the parsed Stream alone; users still get them filtered
+    // server-side via Torrentio's URL, and via the keyword blocklist
+    // as a fallback.
     return false;
 }
 

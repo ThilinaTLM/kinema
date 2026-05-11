@@ -19,7 +19,7 @@ set(kinema_core_SRCS
     api/IndexerSelector.cpp
     config/DebridSettings.cpp
     config/IndexerSettings.cpp
-    config/MediaFusionSettings.cpp
+    config/PeerflixSettings.cpp
     config/SearchSettings.cpp
     config/SubtitleSettings.cpp
     config/TorrentioSettings.cpp
@@ -84,8 +84,7 @@ set(kinema_core_SRCS
     api/PlaybackContext.cpp
     api/RealDebridClient.cpp
     api/RealDebridParse.cpp
-    api/MediaFusionIndexer.cpp
-    api/MediaFusionParse.cpp
+    api/PeerflixIndexer.cpp
     api/StremioStreamParse.cpp
     api/TmdbClient.cpp
     api/TmdbDiscoverUrl.cpp

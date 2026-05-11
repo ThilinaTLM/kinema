@@ -8,7 +8,7 @@ import dev.tlmtech.kinema.app
 
 // Indexer-agnostic stream filters. Applied client-side after the active
 // indexer has answered, so the same blocklist / exclusion settings
-// work uniformly across Torrentio and MediaFusion. Indexer-specific
+// work uniformly across Torrentio and Peerflix. Indexer-specific
 // knobs (default sort, base URL) live on the Indexers page.
 FormCard.FormCardPage {
     title: i18nc("@title:tab settings page", "Streams")
@@ -24,8 +24,8 @@ FormCard.FormCardPage {
             description: i18nc("@info streams settings intro",
                 "Hide unwanted streams from every indexer. Torrentio "
                 + "also receives these exclusions in its URL so it can "
-                + "trim the payload server-side; MediaFusion filters "
-                + "are applied client-side only.")
+                + "trim the payload server-side; Peerflix applies them "
+                + "client-side only.")
         }
     }
 

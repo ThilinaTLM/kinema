@@ -1,0 +1,16 @@
+{
+  "streams": [
+    {
+      "name": "Peerflix\n1080p",
+      "description": "Breaking.Bad.S01E01.Pilot.1080p.BluRay.x264-GROUP\nBreaking.Bad.S01E01.mkv\n  👤 312 💾 2.85 GB 🌐 Peerflix",
+      "infoHash": "ff00112233445566778899aabbccddeeff001122",
+      "sources": [
+        "tracker:udp://tracker.opentrackr.org:1337/announce"
+      ],
+      "language": "en",
+      "quality": "1080p",
+      "seed": 312,
+      "sizebytes": 3060164198
+    }
+  ]
+}

@@ -16,7 +16,7 @@ namespace kinema::core::stream_filter {
  * indexer returned. Exclusions are *always* applied client-side so
  * the same `FilterSettings` work uniformly across indexers; the
  * Torrentio indexer additionally pushes them into the URL
- * `qualityfilter=` segment as an optimisation, but MediaFusion has
+ * `qualityfilter=` segment as an optimisation, but Peerflix has
  * no equivalent knob.
  */
 struct ClientFilters {

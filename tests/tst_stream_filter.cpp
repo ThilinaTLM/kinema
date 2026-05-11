@@ -100,6 +100,42 @@ private Q_SLOTS:
         QVERIFY(!matchesBlocklist(s, {}));
     }
 
+    void excludedCategoriesNonen_dropsRowsWithNonEnglishLanguage()
+    {
+        api::Stream en;
+        en.releaseName = QStringLiteral("en.row");
+        en.language = QStringLiteral("en");
+        api::Stream es;
+        es.releaseName = QStringLiteral("es.row");
+        es.language = QStringLiteral("es");
+        api::Stream unknown;
+        unknown.releaseName = QStringLiteral("unknown.row");
+        // empty language — pass through (Torrentio rows)
+
+        ClientFilters f;
+        f.excludedCategories = { QStringLiteral("nonen") };
+        const auto out = apply({ en, es, unknown }, f);
+        QCOMPARE(out.size(), 2);
+        QCOMPARE(out[0].releaseName, QStringLiteral("en.row"));
+        QCOMPARE(out[1].releaseName, QStringLiteral("unknown.row"));
+    }
+
+    void excludedCategoriesNonen_languageCompareIsCaseInsensitive()
+    {
+        api::Stream upper;
+        upper.releaseName = QStringLiteral("upper.en");
+        upper.language = QStringLiteral("EN");
+        api::Stream mixed;
+        mixed.releaseName = QStringLiteral("mixed.es");
+        mixed.language = QStringLiteral("ES");
+
+        ClientFilters f;
+        f.excludedCategories = { QStringLiteral("nonen") };
+        const auto out = apply({ upper, mixed }, f);
+        QCOMPARE(out.size(), 1);
+        QCOMPARE(out[0].releaseName, QStringLiteral("upper.en"));
+    }
+
     void orderIsPreserved()
     {
         const QList<api::Stream> in {

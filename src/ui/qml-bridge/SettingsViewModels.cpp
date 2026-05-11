@@ -17,7 +17,6 @@
 #include "config/DebridSettings.h"
 #include "config/FilterSettings.h"
 #include "config/IndexerSettings.h"
-#include "config/MediaFusionSettings.h"
 #include "config/PlayerSettings.h"
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
@@ -839,97 +838,46 @@ QCoro::Task<void> TorrentioSectionViewModel::testTask()
     setBusy(false);
 }
 
-// ============================== Indexers: MediaFusion section ============
+// ============================== Indexers: Peerflix section ===============
 
-MediaFusionSectionViewModel::MediaFusionSectionViewModel(
+PeerflixSectionViewModel::PeerflixSectionViewModel(
     api::IndexerSelector* indexers,
-    config::MediaFusionSettings& settings,
-    config::IndexerSettings& indexerSettings,
-    QObject* parent)
+    config::PeerflixSettings& settings, QObject* parent)
     : QObject(parent)
     , m_indexers(indexers)
     , m_settings(settings)
-    , m_indexerSettings(indexerSettings)
 {
-    m_manifestInput = m_settings.manifestUrl();
-    connect(&m_settings,
-        &config::MediaFusionSettings::baseUrlChanged, this,
-        &MediaFusionSectionViewModel::savedConfigChanged);
-    connect(&m_settings,
-        &config::MediaFusionSettings::encryptedConfigChanged, this,
-        &MediaFusionSectionViewModel::savedConfigChanged);
+    connect(&m_settings, &config::PeerflixSettings::baseUrlChanged,
+        this, &PeerflixSectionViewModel::baseUrlChanged);
 }
 
-QString MediaFusionSectionViewModel::baseUrl() const
+QString PeerflixSectionViewModel::baseUrl() const
 {
     return m_settings.baseUrl();
 }
 
-bool MediaFusionSectionViewModel::configured() const
+QString PeerflixSectionViewModel::defaultBaseUrlString() const
 {
-    return m_indexerSettings.mediaFusionConfigured();
+    return config::PeerflixSettings::defaultBaseUrl();
 }
 
-bool MediaFusionSectionViewModel::tokenPresent() const
+void PeerflixSectionViewModel::setBaseUrl(const QString& url)
 {
-    return !m_settings.encryptedConfig().isEmpty();
+    m_settings.setBaseUrl(url);
 }
 
-void MediaFusionSectionViewModel::setManifestUrl(const QString& url)
+void PeerflixSectionViewModel::resetBaseUrl()
 {
-    if (m_manifestInput == url) {
-        return;
-    }
-    m_manifestInput = url;
-    Q_EMIT manifestUrlInputChanged();
+    m_settings.setBaseUrl(config::PeerflixSettings::defaultBaseUrl());
 }
 
-void MediaFusionSectionViewModel::load()
-{
-    m_manifestInput = m_settings.manifestUrl();
-    Q_EMIT manifestUrlInputChanged();
-    Q_EMIT savedConfigChanged();
-}
-
-void MediaFusionSectionViewModel::testConnection()
+void PeerflixSectionViewModel::testConnection()
 {
     auto t = testTask();
     Q_UNUSED(t);
 }
 
-void MediaFusionSectionViewModel::save()
-{
-    const auto trimmed = m_manifestInput.trimmed();
-    if (trimmed.isEmpty()) {
-        setStatus(i18nc("@info mediafusion settings status",
-            "Paste a MediaFusion manifest URL first."), kStatusError);
-        return;
-    }
-    if (!m_settings.saveFromManifestUrl(trimmed)) {
-        setStatus(i18nc("@info mediafusion settings status",
-            "That doesn\u2019t look like a MediaFusion manifest URL. Expected a URL ending in \u201c/manifest.json\u201d."),
-            kStatusError);
-        return;
-    }
-    m_indexerSettings.setMediaFusionConfigured(true);
-    setStatus(i18nc("@info mediafusion settings status",
-        "Saved. MediaFusion is now configured for %1.",
-        m_settings.baseUrl()),
-        kStatusPositive);
-}
-
-void MediaFusionSectionViewModel::clear()
-{
-    m_settings.clear();
-    m_indexerSettings.setMediaFusionConfigured(false);
-    m_manifestInput.clear();
-    Q_EMIT manifestUrlInputChanged();
-    setStatus(i18nc("@info mediafusion settings status",
-        "Cleared. MediaFusion will fall back to the default host."),
-        kStatusInfo);
-}
-
-void MediaFusionSectionViewModel::setStatus(const QString& message, int kind)
+void PeerflixSectionViewModel::setStatus(const QString& message, int kind)
 {
     if (m_statusMessage == message && m_statusKind == kind) {
         return;
@@ -939,7 +887,7 @@ void MediaFusionSectionViewModel::setStatus(const QString& message, int kind)
     Q_EMIT statusChanged();
 }
 
-void MediaFusionSectionViewModel::setBusy(bool on)
+void PeerflixSectionViewModel::setBusy(bool on)
 {
     if (m_busy == on) {
         return;
@@ -948,37 +896,26 @@ void MediaFusionSectionViewModel::setBusy(bool on)
     Q_EMIT busyChanged();
 }
 
-QCoro::Task<void> MediaFusionSectionViewModel::testTask()
+QCoro::Task<void> PeerflixSectionViewModel::testTask()
 {
     auto* indexer = m_indexers
-        ? m_indexers->find(api::IndexerKind::MediaFusion)
+        ? m_indexers->find(api::IndexerKind::Peerflix)
         : nullptr;
     if (!indexer) {
         setStatus(i18nc("@info indexer settings status",
-            "MediaFusion is not registered."), kStatusError);
-        co_return;
-    }
-    // Short-circuit when no manifest URL is saved: the public
-    // MediaFusion host (and any properly-configured private one)
-    // refuses unconfigured stream calls, so probing without one
-    // always 403s.
-    if (m_settings.manifestUrl().isEmpty()) {
-        setStatus(i18nc("@info mediafusion settings status",
-            "Paste a manifest URL above and click \u201cSave manifest URL\u201d first."),
-            kStatusError);
+            "Peerflix is not registered."), kStatusError);
         co_return;
     }
     setBusy(true);
     setStatus(i18nc("@info indexer settings status, in progress",
-        "Probing MediaFusion\u2026"), kStatusInfo);
+        "Probing Peerflix\u2026"), kStatusInfo);
     const bool ok = co_await indexer->testConnection();
     if (ok) {
         setStatus(i18nc("@info indexer settings status",
-            "MediaFusion is reachable at %1.", m_settings.baseUrl()),
-            kStatusPositive);
+            "Peerflix is reachable."), kStatusPositive);
     } else {
         setStatus(i18nc("@info indexer settings status",
-            "MediaFusion did not respond. Re-check the manifest URL or try again later."),
+            "Peerflix did not respond. Check the base URL or try again later."),
             kStatusError);
     }
     setBusy(false);
@@ -990,14 +927,14 @@ IndexerSettingsViewModel::IndexerSettingsViewModel(
     api::IndexerSelector* indexers,
     config::IndexerSettings& indexerSettings,
     config::TorrentioSettings& torrentioSettings,
-    config::MediaFusionSettings& mediaFusionSettings,
+    config::PeerflixSettings& peerflixSettings,
     QObject* parent)
     : QObject(parent)
     , m_settings(indexerSettings)
     , m_torrentio(new TorrentioSectionViewModel(indexers,
           torrentioSettings, this))
-    , m_mediaFusion(new MediaFusionSectionViewModel(indexers,
-          mediaFusionSettings, indexerSettings, this))
+    , m_peerflix(new PeerflixSectionViewModel(indexers,
+          peerflixSettings, this))
 {
     connect(&m_settings, &config::IndexerSettings::activeIndexerChanged,
         this, [this](api::IndexerKind) {
@@ -1014,8 +951,8 @@ void IndexerSettingsViewModel::setActiveIndexer(int kind)
 {
     auto value = api::IndexerKind::Torrentio;
     switch (kind) {
-    case static_cast<int>(api::IndexerKind::MediaFusion):
-        value = api::IndexerKind::MediaFusion;
+    case static_cast<int>(api::IndexerKind::Peerflix):
+        value = api::IndexerKind::Peerflix;
         break;
     case static_cast<int>(api::IndexerKind::Torrentio):
     default:
@@ -1758,7 +1695,7 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
         settings.debrid(), this);
     m_indexers = new IndexerSettingsViewModel(indexers,
         settings.indexers(), settings.torrentio(),
-        settings.mediaFusion(), this);
+        settings.peerflix(), this);
     m_streams = new StreamsSettingsViewModel(settings.filter(), this);
     m_player = new PlayerSettingsViewModel(settings.player(), this);
     m_subs = new SubtitlesSettingsViewModel(http, tokens,

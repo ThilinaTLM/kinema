@@ -32,7 +32,7 @@ class FilterSettings;
 class PlayerSettings;
 class SearchSettings;
 class IndexerSettings;
-class MediaFusionSettings;
+class PeerflixSettings;
 class SubtitleSettings;
 class TorrentioSettings;
 class TorrentStreamingSettings;
@@ -336,44 +336,36 @@ private:
     bool m_busy = false;
 };
 
-// ---- Indexers: MediaFusion section ------------------------------------
-class MediaFusionSectionViewModel : public QObject
+// ---- Indexers: Peerflix section ---------------------------------------
+class PeerflixSectionViewModel : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(QString manifestUrl READ manifestUrl
-        WRITE setManifestUrl NOTIFY manifestUrlInputChanged)
-    Q_PROPERTY(QString baseUrl READ baseUrl NOTIFY savedConfigChanged)
-    Q_PROPERTY(bool configured READ configured NOTIFY savedConfigChanged)
-    Q_PROPERTY(bool tokenPresent READ tokenPresent NOTIFY savedConfigChanged)
+    Q_PROPERTY(QString baseUrl READ baseUrl
+        WRITE setBaseUrl NOTIFY baseUrlChanged)
+    Q_PROPERTY(QString defaultBaseUrl READ defaultBaseUrlString CONSTANT)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
     Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
 
 public:
-    MediaFusionSectionViewModel(api::IndexerSelector* indexers,
-        config::MediaFusionSettings& settings,
-        config::IndexerSettings& indexerSettings,
+    PeerflixSectionViewModel(api::IndexerSelector* indexers,
+        config::PeerflixSettings& settings,
         QObject* parent = nullptr);
 
-    QString manifestUrl() const { return m_manifestInput; }
     QString baseUrl() const;
-    bool configured() const;
-    bool tokenPresent() const;
+    QString defaultBaseUrlString() const;
     QString statusMessage() const { return m_statusMessage; }
     int statusKind() const { return m_statusKind; }
     bool busy() const { return m_busy; }
 
-    void setManifestUrl(const QString& url);
+    void setBaseUrl(const QString& url);
 
 public Q_SLOTS:
-    void load();
     void testConnection();
-    void save();
-    void clear();
+    void resetBaseUrl();
 
 Q_SIGNALS:
-    void manifestUrlInputChanged();
-    void savedConfigChanged();
+    void baseUrlChanged();
     void statusChanged();
     void busyChanged();
 
@@ -383,9 +375,7 @@ private:
     QCoro::Task<void> testTask();
 
     api::IndexerSelector* m_indexers;
-    config::MediaFusionSettings& m_settings;
-    config::IndexerSettings& m_indexerSettings;
-    QString m_manifestInput;
+    config::PeerflixSettings& m_settings;
     QString m_statusMessage;
     int m_statusKind = 0;
     bool m_busy = false;
@@ -395,26 +385,26 @@ private:
 class IndexerSettingsViewModel : public QObject
 {
     Q_OBJECT
-    /// 1 = Torrentio, 2 = MediaFusion. Maps to `api::IndexerKind`.
+    /// 1 = Torrentio, 2 = Peerflix. Maps to `api::IndexerKind`.
     Q_PROPERTY(int activeIndexer READ activeIndexer
         WRITE setActiveIndexer NOTIFY activeIndexerChanged)
     Q_PROPERTY(TorrentioSectionViewModel* torrentio
         READ torrentio CONSTANT)
-    Q_PROPERTY(MediaFusionSectionViewModel* mediaFusion
-        READ mediaFusion CONSTANT)
+    Q_PROPERTY(PeerflixSectionViewModel* peerflix
+        READ peerflix CONSTANT)
 
 public:
     IndexerSettingsViewModel(api::IndexerSelector* indexers,
         config::IndexerSettings& indexerSettings,
         config::TorrentioSettings& torrentioSettings,
-        config::MediaFusionSettings& mediaFusionSettings,
+        config::PeerflixSettings& peerflixSettings,
         QObject* parent = nullptr);
 
     int activeIndexer() const;
     void setActiveIndexer(int kind);
 
     TorrentioSectionViewModel* torrentio() const { return m_torrentio; }
-    MediaFusionSectionViewModel* mediaFusion() const { return m_mediaFusion; }
+    PeerflixSectionViewModel* peerflix() const { return m_peerflix; }
 
 Q_SIGNALS:
     void activeIndexerChanged();
@@ -422,7 +412,7 @@ Q_SIGNALS:
 private:
     config::IndexerSettings& m_settings;
     TorrentioSectionViewModel* m_torrentio {};
-    MediaFusionSectionViewModel* m_mediaFusion {};
+    PeerflixSectionViewModel* m_peerflix {};
 };
 
 // ---- Streams (indexer-agnostic filters) -------------------------------

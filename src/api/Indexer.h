@@ -17,7 +17,7 @@ namespace kinema::api {
  * Which stream indexer the user has chosen as the active one.
  *
  * "Indexer" here is the application-layer abstraction: in practice
- * Torrentio / MediaFusion / Comet etc. are aggregators that talk to
+ * Torrentio / Peerflix / Comet etc. are aggregators that talk to
  * real public indexers (YTS, EZTV, 1337x, …) for us, but from
  * Kinema's perspective they ARE the indexers we query. Naming
  * parallels the *arr stack (Sonarr/Radarr/Prowlarr) where users
@@ -30,11 +30,11 @@ namespace kinema::api {
  */
 enum class IndexerKind {
     Torrentio = 1,
-    MediaFusion = 2,
+    Peerflix = 2,
 };
 
 /// Stable string token for KConfig persistence. Returns
-/// `"torrentio"` / `"mediafusion"`.
+/// `"torrentio"` / `"peerflix"`.
 QString indexerKindToString(IndexerKind);
 
 /// Inverse of `indexerKindToString`. Unknown / empty values map to
@@ -45,13 +45,13 @@ IndexerKind indexerKindFromString(const QString& s);
  * Abstract base for everything that can answer
  * "give me candidate streams for this Stremio stream id."
  *
- * Concrete implementations (`TorrentioIndexer`, `MediaFusionIndexer`,
+ * Concrete implementations (`TorrentioIndexer`, `PeerflixIndexer`,
  * …) read their own per-indexer settings internally — the interface
  * deliberately has no `ConfigOptions` parameter because every
  * service encodes URL config differently (Torrentio uses a
- * pipe-separated path segment; MediaFusion uses an opaque base64
- * blob; future indexers may use query parameters, a POST body,
- * Bearer headers, …).
+ * pipe-separated path segment; Peerflix has no inline URL config;
+ * future indexers may use query parameters, a POST body, Bearer
+ * headers, …).
  */
 class Indexer : public QObject
 {

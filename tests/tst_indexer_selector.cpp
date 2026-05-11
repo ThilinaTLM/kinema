@@ -74,17 +74,17 @@ private Q_SLOTS:
         selector.registerIndexer(
             std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::MediaFusion));
+            std::make_unique<StubIndexer>(api::IndexerKind::Peerflix));
 
         // Default: Torrentio
         auto* a = selector.active();
         QVERIFY(a);
         QCOMPARE(a->kind(), api::IndexerKind::Torrentio);
 
-        settings.setActiveIndexer(api::IndexerKind::MediaFusion);
+        settings.setActiveIndexer(api::IndexerKind::Peerflix);
         a = selector.active();
         QVERIFY(a);
-        QCOMPARE(a->kind(), api::IndexerKind::MediaFusion);
+        QCOMPARE(a->kind(), api::IndexerKind::Peerflix);
     }
 
     void find_returnsIndexerRegardlessOfActive()
@@ -94,24 +94,24 @@ private Q_SLOTS:
         selector.registerIndexer(
             std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::MediaFusion));
+            std::make_unique<StubIndexer>(api::IndexerKind::Peerflix));
 
-        // Active is Torrentio but find() should still surface MediaFusion.
-        auto* mf = selector.find(api::IndexerKind::MediaFusion);
+        // Active is Torrentio but find() should still surface Peerflix.
+        auto* mf = selector.find(api::IndexerKind::Peerflix);
         QVERIFY(mf);
-        QCOMPARE(mf->kind(), api::IndexerKind::MediaFusion);
+        QCOMPARE(mf->kind(), api::IndexerKind::Peerflix);
     }
 
     void active_returnsNullWhenNoIndexerRegisteredForKind()
     {
         config::IndexerSettings settings(m_config);
-        settings.setActiveIndexer(api::IndexerKind::MediaFusion);
+        settings.setActiveIndexer(api::IndexerKind::Peerflix);
 
         api::IndexerSelector selector(settings);
         selector.registerIndexer(
             std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
 
-        // MediaFusion not registered → null.
+        // Peerflix not registered → null.
         QVERIFY(!selector.active());
     }
 
@@ -141,14 +141,14 @@ private Q_SLOTS:
         selector.registerIndexer(
             std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::MediaFusion));
+            std::make_unique<StubIndexer>(api::IndexerKind::Peerflix));
 
         QSignalSpy spy(&selector,
             &api::IndexerSelector::activeIndexerChanged);
-        settings.setActiveIndexer(api::IndexerKind::MediaFusion);
+        settings.setActiveIndexer(api::IndexerKind::Peerflix);
         QCOMPARE(spy.count(), 1);
         QCOMPARE(spy.at(0).at(0).value<api::IndexerKind>(),
-            api::IndexerKind::MediaFusion);
+            api::IndexerKind::Peerflix);
     }
 
     void all_returnsRegistrationOrder()
@@ -156,13 +156,13 @@ private Q_SLOTS:
         config::IndexerSettings settings(m_config);
         api::IndexerSelector selector(settings);
         selector.registerIndexer(
-            std::make_unique<StubIndexer>(api::IndexerKind::MediaFusion));
+            std::make_unique<StubIndexer>(api::IndexerKind::Peerflix));
         selector.registerIndexer(
             std::make_unique<StubIndexer>(api::IndexerKind::Torrentio));
 
         const auto all = selector.all();
         QCOMPARE(all.size(), 2);
-        QCOMPARE(all.at(0)->kind(), api::IndexerKind::MediaFusion);
+        QCOMPARE(all.at(0)->kind(), api::IndexerKind::Peerflix);
         QCOMPARE(all.at(1)->kind(), api::IndexerKind::Torrentio);
     }
 

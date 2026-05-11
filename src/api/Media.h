@@ -80,6 +80,14 @@ struct Stream {
     /// when re-adding the magnet against libtorrent so peer discovery
     /// is not gated on the stripped-down default tracker list.
     QStringList sources;
+
+    /// Lower-cased ISO-ish language code as advertised by the indexer
+    /// (e.g. `"en"`, `"es"`). Empty when the indexer doesn't surface
+    /// a language field — Torrentio rows currently leave this blank;
+    /// Peerflix populates it for every row. Consumed by
+    /// `core::stream_filter::ClientFilters` to honour the
+    /// "Non-English" hide-variant toggle.
+    QString language;
 };
 
 /// One episode row from Cinemeta's series meta.videos[].

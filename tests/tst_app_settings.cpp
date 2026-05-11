@@ -238,13 +238,11 @@ private Q_SLOTS:
 
     // ---- Indexer settings (active radio + per-indexer configured flags) -
 
-    void testIndexerDefaultsAreTorrentioActiveAndConfigured()
+    void testIndexerDefaultsAreTorrentioActive()
     {
         config::AppSettings s(m_config);
         QCOMPARE(s.indexers().activeIndexer(),
             api::IndexerKind::Torrentio);
-        QVERIFY(s.indexers().torrentioConfigured());
-        QVERIFY(!s.indexers().mediaFusionConfigured());
     }
 
 private:

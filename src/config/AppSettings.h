@@ -11,7 +11,7 @@
 #include "config/FilterSettings.h"
 #include "config/IndexerSettings.h"
 #include "config/LibrarySettings.h"
-#include "config/MediaFusionSettings.h"
+#include "config/PeerflixSettings.h"
 #include "config/PlayerSettings.h"
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
@@ -82,8 +82,8 @@ public:
     IndexerSettings& indexers() noexcept { return m_indexers; }
     const IndexerSettings& indexers() const noexcept { return m_indexers; }
 
-    MediaFusionSettings& mediaFusion() noexcept { return m_mediaFusion; }
-    const MediaFusionSettings& mediaFusion() const noexcept { return m_mediaFusion; }
+    PeerflixSettings& peerflix() noexcept { return m_peerflix; }
+    const PeerflixSettings& peerflix() const noexcept { return m_peerflix; }
 
 private:
     SearchSettings m_search;
@@ -99,7 +99,7 @@ private:
     TorrentStreamingSettings m_torrentStreaming;
     DownloadSettings m_download;
     IndexerSettings m_indexers;
-    MediaFusionSettings m_mediaFusion;
+    PeerflixSettings m_peerflix;
 };
 
 } // namespace kinema::config

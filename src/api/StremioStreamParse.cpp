@@ -16,13 +16,20 @@ namespace kinema::api::stremio {
 
 namespace {
 
-// The `title` field these addons return looks like:
+// The descriptive field these addons return looks like:
 //
 //   "The Matrix 1999 1080p BluRay x264-NOGRP\n👤 123 💾 2.1 GB ⚙️ ThePirateBay"
 //
+// The current Stremio Stream spec calls this `description`; the older
+// `title` field is deprecated. Torrentio still emits `title`,
+// Peerflix correctly uses `description`. We prefer `description`
+// when present and fall back to `title`.
+//
 // Sometimes lines are separated by "\n", sometimes by "\r\n". The extra
 // metadata may be on one line or spread across several. Use tolerant
-// regexes over the whole blob.
+// regexes over the whole blob. Indexers that also surface structured
+// fields (`seed`, `sizebytes`, `quality`) get those preferred over
+// regex extraction — see `parseOne` below.
 
 static const QRegularExpression kSeedersRe(QStringLiteral("👤\\s*([0-9]+)"));
 static const QRegularExpression kSizeRe(
@@ -96,9 +103,14 @@ Stream parseOne(const QJsonObject& obj)
     // `name` is sometimes multi-line; first line is the quality label.
     s.qualityLabel = nameRaw.section(QLatin1Char('\n'), 0, 0).trimmed();
 
-    const auto titleRaw = obj.value(QStringLiteral("title")).toString();
-    if (!titleRaw.isEmpty()) {
-        const auto lines = titleRaw.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    // Prefer `description` (current Stremio spec) and fall back to
+    // the deprecated `title` for Torrentio backward compatibility.
+    auto descRaw = obj.value(QStringLiteral("description")).toString();
+    if (descRaw.isEmpty()) {
+        descRaw = obj.value(QStringLiteral("title")).toString();
+    }
+    if (!descRaw.isEmpty()) {
+        const auto lines = descRaw.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
         if (!lines.isEmpty()) {
             s.releaseName = lines.first().trimmed();
             if (lines.size() > 1) {
@@ -107,9 +119,27 @@ Stream parseOne(const QJsonObject& obj)
         }
     }
 
-    s.seeders = parseSeeders(titleRaw);
-    s.sizeBytes = parseSize(titleRaw);
-    s.provider = parseProvider(titleRaw);
+    // Prefer structured numeric fields when present (Peerflix), else
+    // fall back to emoji-regex extraction (Torrentio).
+    if (const auto v = obj.value(QStringLiteral("seed")); v.isDouble()) {
+        s.seeders = v.toInt();
+    } else {
+        s.seeders = parseSeeders(descRaw);
+    }
+    if (const auto v = obj.value(QStringLiteral("sizebytes")); v.isDouble()) {
+        s.sizeBytes = static_cast<qint64>(v.toDouble());
+    } else {
+        s.sizeBytes = parseSize(descRaw);
+    }
+    s.provider = parseProvider(descRaw);
+
+    // Lower-cased ISO language code (Peerflix surfaces this for
+    // every row; Torrentio leaves it empty). Consumed by the
+    // "Non-English" client filter.
+    s.language = obj.value(QStringLiteral("language"))
+                     .toString()
+                     .trimmed()
+                     .toLower();
 
     s.infoHash = obj.value(QStringLiteral("infoHash")).toString();
     const auto bh = obj.value(QStringLiteral("behaviorHints")).toObject();
@@ -148,7 +178,14 @@ Stream parseOne(const QJsonObject& obj)
         s.directUrl = QUrl(urlStr);
     }
 
-    s.resolution = parseResolution(s.qualityLabel, s.releaseName);
+    // Prefer the indexer's structured `quality` field when present
+    // (Peerflix); fall back to regex over the quality label /
+    // release name (Torrentio).
+    const auto qualityStr
+        = obj.value(QStringLiteral("quality")).toString().trimmed();
+    s.resolution = qualityStr.isEmpty()
+        ? parseResolution(s.qualityLabel, s.releaseName)
+        : qualityStr.toLower();
 
     return s;
 }

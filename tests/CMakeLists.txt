@@ -68,13 +68,13 @@ ecm_add_test(tst_indexer_selector.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_mediafusion_settings.cpp
-    TEST_NAME tst_mediafusion_settings
+ecm_add_test(tst_peerflix_settings.cpp
+    TEST_NAME tst_peerflix_settings
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_mediafusion_indexer.cpp
-    TEST_NAME tst_mediafusion_indexer
+ecm_add_test(tst_peerflix_indexer.cpp
+    TEST_NAME tst_peerflix_indexer
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -377,7 +377,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_media_file_selector tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_stremio_stream_parse tst_indexer_settings tst_indexer_selector
-         tst_mediafusion_settings tst_mediafusion_indexer
+         tst_peerflix_settings tst_peerflix_indexer
          tst_realdebrid_parse tst_alldebrid_parse
          tst_player tst_stream_filter
          tst_stream_tokens
