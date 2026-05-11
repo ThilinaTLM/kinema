@@ -4,6 +4,7 @@
 #include "config/AppSettings.h"
 
 #include "api/Debrid.h"
+#include "api/Indexer.h"
 
 #include <KConfig>
 #include <KSharedConfig>
@@ -185,24 +186,6 @@ private Q_SLOTS:
 
     // ---- Signals ---------------------------------------------------------
 
-    void testTorrentioOptionsChangedEmittedOnSortChange()
-    {
-        config::AppSettings s(m_config);
-        QSignalSpy spy(&s, &config::AppSettings::torrentioOptionsChanged);
-        s.torrentio().setDefaultSort(core::torrentio::SortMode::Size);
-        QCOMPARE(spy.count(), 1);
-    }
-
-    void testTorrentioOptionsChangedEmittedOnExclusionsChange()
-    {
-        config::AppSettings s(m_config);
-        QSignalSpy spy(&s, &config::AppSettings::torrentioOptionsChanged);
-        s.filter().setExcludedResolutions({ QStringLiteral("4k") });
-        QCOMPARE(spy.count(), 1);
-        s.filter().setExcludedCategories({ QStringLiteral("cam") });
-        QCOMPARE(spy.count(), 2);
-    }
-
     void testDebridRealDebridConfiguredSignal()
     {
         config::AppSettings s(m_config);
@@ -253,24 +236,15 @@ private Q_SLOTS:
         QCOMPARE(spy.count(), 1);
     }
 
-    // ---- Aggregated torrentioOptions() ----------------------------------
+    // ---- Indexer settings (active radio + per-indexer configured flags) -
 
-    void testTorrentioOptionsAggregates()
+    void testIndexerDefaultsAreTorrentioActiveAndConfigured()
     {
         config::AppSettings s(m_config);
-        s.torrentio().setDefaultSort(
-            core::torrentio::SortMode::QualitySize);
-        s.filter().setExcludedResolutions({ QStringLiteral("4k") });
-        s.filter().setExcludedCategories({ QStringLiteral("cam") });
-
-        const auto opts = s.torrentioOptions();
-        QCOMPARE(static_cast<int>(opts.sort),
-            static_cast<int>(core::torrentio::SortMode::QualitySize));
-        QCOMPARE(opts.excludedResolutions,
-            (QStringList { QStringLiteral("4k") }));
-        QCOMPARE(opts.excludedCategories,
-            (QStringList { QStringLiteral("cam") }));
-        // Torrentio is discovery-only — RD never appears in the URL.
+        QCOMPARE(s.indexers().activeIndexer(),
+            api::IndexerKind::Torrentio);
+        QVERIFY(s.indexers().torrentioConfigured());
+        QVERIFY(!s.indexers().mediaFusionConfigured());
     }
 
 private:

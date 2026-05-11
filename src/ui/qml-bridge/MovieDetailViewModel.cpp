@@ -4,8 +4,9 @@
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 
 #include "api/CinemetaClient.h"
+#include "api/Indexer.h"
+#include "api/IndexerSelector.h"
 #include "api/TmdbClient.h"
-#include "api/TorrentioClient.h"
 #include "config/AppSettings.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
@@ -31,7 +32,7 @@ using SortMode = StreamsListModel::SortMode;
 } // namespace
 
 MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
-    api::TorrentioClient* torrentio,
+    api::IndexerSelector* indexers,
     api::TmdbClient* tmdb,
     services::StreamActions* actions,
     controllers::TokenController* tokens,
@@ -39,14 +40,14 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     const QString& rdTokenRef,
     const QString& adApiKeyRef,
     QObject* parent)
-    : MovieDetailViewModel(cinemeta, torrentio, tmdb, actions,
+    : MovieDetailViewModel(cinemeta, indexers, tmdb, actions,
           /*library=*/nullptr, /*watched=*/nullptr,
           tokens, settings, rdTokenRef, adApiKeyRef, parent)
 {
 }
 
 MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
-    api::TorrentioClient* torrentio,
+    api::IndexerSelector* indexers,
     api::TmdbClient* tmdb,
     services::StreamActions* actions,
     controllers::LibraryController* library,
@@ -58,7 +59,7 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
-    , m_torrentio(torrentio)
+    , m_indexers(indexers)
     , m_tmdb(tmdb)
     , m_actions(actions)
     , m_library(library)
@@ -74,6 +75,9 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });
+    connect(&m_settings.filter(),
+        &config::FilterSettings::exclusionsChanged, this,
+        [this]() { rebuildVisibleStreams(); });
 
     if (m_library) {
         connect(m_library, &controllers::LibraryController::changed,
@@ -390,10 +394,17 @@ QCoro::Task<void> MovieDetailViewModel::loadStreamsTask(
     }
 
     try {
-        // Torrentio is discovery-only — RD is no longer in the URL.
-        auto opts = m_settings.torrentioOptions();
-        auto streams = co_await m_torrentio->streams(
-            api::MediaKind::Movie, imdbId, opts);
+        // The indexer is discovery-only — RD is no longer in the URL.
+        // Per-indexer config (sort, filters) lives inside each
+        // concrete Indexer; the view-model just asks for streams.
+        auto* indexer = m_indexers ? m_indexers->active() : nullptr;
+        if (!indexer) {
+            m_streams->setError(i18nc("@info streams empty",
+                "No stream indexer is configured."));
+            co_return;
+        }
+        auto streams = co_await indexer->streams(
+            api::MediaKind::Movie, imdbId);
         if (expectedEpoch != m_epoch) {
             co_return;
         }
@@ -588,6 +599,8 @@ QList<api::Stream> MovieDetailViewModel::applyFilters() const
     }
     core::stream_filter::ClientFilters f;
     f.keywordBlocklist = m_settings.filter().keywordBlocklist();
+    f.excludedResolutions = m_settings.filter().excludedResolutions();
+    f.excludedCategories = m_settings.filter().excludedCategories();
     auto rows = core::stream_filter::apply(m_rawStreams, f);
 
     return stream_sorting::applyUiFilters(std::move(rows),

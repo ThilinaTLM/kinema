@@ -9,7 +9,9 @@
 #include "api/AllDebridClient.h"
 #include "api/RealDebridClient.h"
 #include "api/TmdbClient.h"
-#include "api/TorrentioClient.h"
+#include "api/IndexerSelector.h"
+#include "api/MediaFusionIndexer.h"
+#include "api/TorrentioIndexer.h"
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
 #include "config/DownloadSettings.h"
@@ -292,7 +294,15 @@ void MainController::buildCoreServices()
     m_player = std::make_unique<core::PlayerLauncher>(
         m_settings.player(), this);
     m_cinemeta = new api::CinemetaClient(m_http.get(), this);
-    m_torrentio = new api::TorrentioClient(m_http.get(), this);
+    // Indexer abstraction: a selector owns one or more concrete
+    // indexers (Torrentio today, MediaFusion next) and view-models
+    // call selector->active()->streams(). The active indexer
+    // tracks `IndexerSettings`.
+    m_indexers = new api::IndexerSelector(m_settings.indexers(), this);
+    m_indexers->registerIndexer(std::make_unique<api::TorrentioIndexer>(
+        m_http.get(), m_settings.torrentio(), m_settings.filter()));
+    m_indexers->registerIndexer(std::make_unique<api::MediaFusionIndexer>(
+        m_http.get(), m_settings.mediaFusion()));
     m_tmdb = new api::TmdbClient(m_http.get(), this);
     m_imageLoader = new ImageLoader(m_http.get(), this);
     m_torrentCache = std::make_unique<core::TorrentCache>(
@@ -410,8 +420,7 @@ void MainController::buildCoreServices()
     // History controller. Two-phase: StreamActions is wired now;
     // `setPlayerWindow` lands in `openEmbeddedPlayer`.
     m_historyCtrl = new controllers::HistoryController(*m_history,
-        m_torrentio, m_settings, m_tokenCtrl->realDebridToken(),
-        this);
+        m_indexers, m_tokenCtrl->realDebridToken(), this);
     m_streamActions->setHistoryController(m_historyCtrl);
     m_historyCtrl->setStreamActions(m_streamActions);
 
@@ -447,13 +456,13 @@ void MainController::buildCoreServices()
         m_settings.search(), this);
     m_browseVm = new BrowseViewModel(m_tmdb, m_settings.browse(), this);
     m_movieDetailVm = new MovieDetailViewModel(m_cinemeta,
-        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
+        m_indexers, m_tmdb, m_streamActions, m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
         m_tokenCtrl->realDebridToken(),
         m_tokenCtrl->allDebridApiKey(), this);
     m_movieDetailVm->setDownloadController(m_downloadCtrl);
     m_seriesDetailVm = new SeriesDetailViewModel(m_cinemeta,
-        m_torrentio, m_tmdb, m_streamActions, m_libraryCtrl,
+        m_indexers, m_tmdb, m_streamActions, m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
         m_tokenCtrl->realDebridToken(),
         m_tokenCtrl->allDebridApiKey(), this);
@@ -638,7 +647,7 @@ void MainController::buildCoreServices()
     // round-trip, matching the legacy SettingsDialog -> MainWindow
     // wiring.
     m_settingsVm = new SettingsRootViewModel(m_http.get(),
-        m_tokens.get(), m_settings, m_subtitleCache.get(),
+        m_tokens.get(), m_indexers, m_settings, m_subtitleCache.get(),
         m_mediaCache.get(), this);
     connect(m_settingsVm,
         &SettingsRootViewModel::tmdbTokenChanged, m_tokenCtrl,

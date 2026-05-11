@@ -20,8 +20,8 @@
 
 namespace kinema::api {
 class CinemetaClient;
+class IndexerSelector;
 class TmdbClient;
-class TorrentioClient;
 }
 
 namespace kinema::config {
@@ -139,7 +139,7 @@ public:
     Q_ENUM(MetaState)
 
     SeriesDetailViewModel(api::CinemetaClient* cinemeta,
-        api::TorrentioClient* torrentio,
+        api::IndexerSelector* indexers,
         api::TmdbClient* tmdb,
         services::StreamActions* actions,
         controllers::LibraryController* library,
@@ -152,7 +152,7 @@ public:
     /// Slim constructor for tests; equivalent to passing
     /// `library = nullptr, watched = nullptr`.
     SeriesDetailViewModel(api::CinemetaClient* cinemeta,
-        api::TorrentioClient* torrentio,
+        api::IndexerSelector* indexers,
         api::TmdbClient* tmdb,
         services::StreamActions* actions,
         controllers::TokenController* tokens,
@@ -346,7 +346,7 @@ private:
     void dispatchStreamAction(int row, Method method);
 
     api::CinemetaClient* m_cinemeta;
-    api::TorrentioClient* m_torrentio;
+    api::IndexerSelector* m_indexers;
     api::TmdbClient* m_tmdb;
     services::StreamActions* m_actions;
     controllers::LibraryController* m_library {};

@@ -12,6 +12,10 @@
 
 #include <QCoro/QCoroTask>
 
+namespace kinema::api {
+class IndexerSelector;
+}
+
 namespace kinema::core {
 class HttpClient;
 class MediaCache;
@@ -27,6 +31,8 @@ class DebridSettings;
 class FilterSettings;
 class PlayerSettings;
 class SearchSettings;
+class IndexerSettings;
+class MediaFusionSettings;
 class SubtitleSettings;
 class TorrentioSettings;
 class TorrentStreamingSettings;
@@ -279,12 +285,150 @@ private:
     AllDebridSectionViewModel* m_ad {};
 };
 
-// ---- Streams ----------------------------------------------------------
+// ---- Indexers: Torrentio section --------------------------------------
+class TorrentioSectionViewModel : public QObject
+{
+    Q_OBJECT
+    /// 0 = Seeders, 1 = Size, 2 = Quality & Size.
+    Q_PROPERTY(int defaultSort READ defaultSort
+        WRITE setDefaultSort NOTIFY defaultSortChanged)
+    Q_PROPERTY(QString baseUrl READ baseUrl
+        WRITE setBaseUrl NOTIFY baseUrlChanged)
+    Q_PROPERTY(QString defaultBaseUrl READ defaultBaseUrlString CONSTANT)
+    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
+    Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
+    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+
+public:
+    TorrentioSectionViewModel(api::IndexerSelector* indexers,
+        config::TorrentioSettings& settings,
+        QObject* parent = nullptr);
+
+    int defaultSort() const;
+    QString baseUrl() const;
+    QString defaultBaseUrlString() const;
+    QString statusMessage() const { return m_statusMessage; }
+    int statusKind() const { return m_statusKind; }
+    bool busy() const { return m_busy; }
+
+    void setDefaultSort(int sort);
+    void setBaseUrl(const QString& url);
+
+public Q_SLOTS:
+    void testConnection();
+    void resetBaseUrl();
+
+Q_SIGNALS:
+    void defaultSortChanged();
+    void baseUrlChanged();
+    void statusChanged();
+    void busyChanged();
+
+private:
+    void setStatus(const QString& message, int kind);
+    void setBusy(bool on);
+    QCoro::Task<void> testTask();
+
+    api::IndexerSelector* m_indexers;
+    config::TorrentioSettings& m_settings;
+    QString m_statusMessage;
+    int m_statusKind = 0;
+    bool m_busy = false;
+};
+
+// ---- Indexers: MediaFusion section ------------------------------------
+class MediaFusionSectionViewModel : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QString manifestUrl READ manifestUrl
+        WRITE setManifestUrl NOTIFY manifestUrlInputChanged)
+    Q_PROPERTY(QString baseUrl READ baseUrl NOTIFY savedConfigChanged)
+    Q_PROPERTY(bool configured READ configured NOTIFY savedConfigChanged)
+    Q_PROPERTY(bool tokenPresent READ tokenPresent NOTIFY savedConfigChanged)
+    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
+    Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
+    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+
+public:
+    MediaFusionSectionViewModel(api::IndexerSelector* indexers,
+        config::MediaFusionSettings& settings,
+        config::IndexerSettings& indexerSettings,
+        QObject* parent = nullptr);
+
+    QString manifestUrl() const { return m_manifestInput; }
+    QString baseUrl() const;
+    bool configured() const;
+    bool tokenPresent() const;
+    QString statusMessage() const { return m_statusMessage; }
+    int statusKind() const { return m_statusKind; }
+    bool busy() const { return m_busy; }
+
+    void setManifestUrl(const QString& url);
+
+public Q_SLOTS:
+    void load();
+    void testConnection();
+    void save();
+    void clear();
+
+Q_SIGNALS:
+    void manifestUrlInputChanged();
+    void savedConfigChanged();
+    void statusChanged();
+    void busyChanged();
+
+private:
+    void setStatus(const QString& message, int kind);
+    void setBusy(bool on);
+    QCoro::Task<void> testTask();
+
+    api::IndexerSelector* m_indexers;
+    config::MediaFusionSettings& m_settings;
+    config::IndexerSettings& m_indexerSettings;
+    QString m_manifestInput;
+    QString m_statusMessage;
+    int m_statusKind = 0;
+    bool m_busy = false;
+};
+
+// ---- Indexers: parent VM ----------------------------------------------
+class IndexerSettingsViewModel : public QObject
+{
+    Q_OBJECT
+    /// 1 = Torrentio, 2 = MediaFusion. Maps to `api::IndexerKind`.
+    Q_PROPERTY(int activeIndexer READ activeIndexer
+        WRITE setActiveIndexer NOTIFY activeIndexerChanged)
+    Q_PROPERTY(TorrentioSectionViewModel* torrentio
+        READ torrentio CONSTANT)
+    Q_PROPERTY(MediaFusionSectionViewModel* mediaFusion
+        READ mediaFusion CONSTANT)
+
+public:
+    IndexerSettingsViewModel(api::IndexerSelector* indexers,
+        config::IndexerSettings& indexerSettings,
+        config::TorrentioSettings& torrentioSettings,
+        config::MediaFusionSettings& mediaFusionSettings,
+        QObject* parent = nullptr);
+
+    int activeIndexer() const;
+    void setActiveIndexer(int kind);
+
+    TorrentioSectionViewModel* torrentio() const { return m_torrentio; }
+    MediaFusionSectionViewModel* mediaFusion() const { return m_mediaFusion; }
+
+Q_SIGNALS:
+    void activeIndexerChanged();
+
+private:
+    config::IndexerSettings& m_settings;
+    TorrentioSectionViewModel* m_torrentio {};
+    MediaFusionSectionViewModel* m_mediaFusion {};
+};
+
+// ---- Streams (indexer-agnostic filters) -------------------------------
 class StreamsSettingsViewModel : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(int defaultTorrentioSort READ defaultTorrentioSort
-        WRITE setDefaultTorrentioSort NOTIFY defaultTorrentioSortChanged)
     Q_PROPERTY(QStringList excludedResolutions READ excludedResolutions
         WRITE setExcludedResolutions NOTIFY excludedResolutionsChanged)
     Q_PROPERTY(QStringList excludedCategories READ excludedCategories
@@ -295,17 +439,15 @@ class StreamsSettingsViewModel : public QObject
     Q_PROPERTY(QVariantList categoryOptions READ categoryOptions CONSTANT)
 
 public:
-    StreamsSettingsViewModel(config::TorrentioSettings& torrentio,
-        config::FilterSettings& settings, QObject* parent = nullptr);
+    StreamsSettingsViewModel(config::FilterSettings& settings,
+        QObject* parent = nullptr);
 
-    int defaultTorrentioSort() const;
     QStringList excludedResolutions() const;
     QStringList excludedCategories() const;
     QString blocklistText() const;
     QVariantList resolutionOptions() const;
     QVariantList categoryOptions() const;
 
-    void setDefaultTorrentioSort(int sort);
     void setExcludedResolutions(const QStringList& tokens);
     void setExcludedCategories(const QStringList& tokens);
     void setBlocklistText(const QString& text);
@@ -317,13 +459,11 @@ public:
     Q_INVOKABLE bool categoryExcluded(const QString& token) const;
 
 Q_SIGNALS:
-    void defaultTorrentioSortChanged();
     void excludedResolutionsChanged();
     void excludedCategoriesChanged();
     void blocklistChanged();
 
 private:
-    config::TorrentioSettings& m_torrentio;
     config::FilterSettings& m_settings;
 };
 
@@ -573,6 +713,7 @@ class SettingsRootViewModel : public QObject
     Q_PROPERTY(GeneralSettingsViewModel* general READ general CONSTANT)
     Q_PROPERTY(TmdbSettingsViewModel* tmdb READ tmdb CONSTANT)
     Q_PROPERTY(DebridSettingsViewModel* debrid READ debrid CONSTANT)
+    Q_PROPERTY(IndexerSettingsViewModel* indexers READ indexers CONSTANT)
     Q_PROPERTY(StreamsSettingsViewModel* streams READ streams CONSTANT)
     Q_PROPERTY(PlayerSettingsViewModel* player READ player CONSTANT)
     Q_PROPERTY(SubtitlesSettingsViewModel* subtitles READ subtitles CONSTANT)
@@ -581,6 +722,7 @@ class SettingsRootViewModel : public QObject
 public:
     SettingsRootViewModel(core::HttpClient* http,
         core::TokenStore* tokens,
+        api::IndexerSelector* indexers,
         config::AppSettings& settings,
         core::SubtitleCacheStore* subtitleCache,
         core::MediaCache* mediaCache,
@@ -589,6 +731,7 @@ public:
     GeneralSettingsViewModel* general() const { return m_general; }
     TmdbSettingsViewModel* tmdb() const { return m_tmdb; }
     DebridSettingsViewModel* debrid() const { return m_debrid; }
+    IndexerSettingsViewModel* indexers() const { return m_indexers; }
     StreamsSettingsViewModel* streams() const { return m_streams; }
     PlayerSettingsViewModel* player() const { return m_player; }
     SubtitlesSettingsViewModel* subtitles() const { return m_subs; }
@@ -610,6 +753,7 @@ private:
     GeneralSettingsViewModel* m_general {};
     TmdbSettingsViewModel* m_tmdb {};
     DebridSettingsViewModel* m_debrid {};
+    IndexerSettingsViewModel* m_indexers {};
     StreamsSettingsViewModel* m_streams {};
     PlayerSettingsViewModel* m_player {};
     SubtitlesSettingsViewModel* m_subs {};

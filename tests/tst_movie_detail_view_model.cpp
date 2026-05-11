@@ -31,7 +31,7 @@ using kinema::services::StreamActions;
 using kinema::tests::FakeCinemetaClient;
 using kinema::tests::FakeTmdbClient;
 using kinema::tests::FakeTokenStore;
-using kinema::tests::FakeTorrentioClient;
+using kinema::tests::IndexerHarness;
 using kinema::tests::drainEvents;
 using kinema::ui::qml::MovieDetailViewModel;
 using kinema::ui::qml::StreamsListModel;
@@ -88,7 +88,7 @@ struct Fixture {
     KSharedConfigPtr config;
     AppSettings settings;
     FakeCinemetaClient cinemeta;
-    FakeTorrentioClient torrentio;
+    IndexerHarness indexers;
     FakeTmdbClient tmdb;
     StreamActions actions { nullptr, nullptr };
     QString rdToken;
@@ -100,11 +100,14 @@ struct Fixture {
             tmp.filePath(QStringLiteral("kinemarc")),
             KConfig::SimpleConfig))
         , settings(config)
-        , vm(&cinemeta, &torrentio, &tmdb, &actions,
+        , vm(&cinemeta, indexers.selector(), &tmdb, &actions,
               /*tokens=*/nullptr, settings, rdToken, adApiKey,
               nullptr)
     {
     }
+
+    // Convenience for tests that want to talk to the underlying fake.
+    auto& torrentio() noexcept { return indexers.fake(); }
 };
 
 class StubTokenController : public TokenController
@@ -154,13 +157,13 @@ private Q_SLOTS:
             KConfig::SimpleConfig);
         AppSettings settings(config);
         FakeCinemetaClient cinemeta;
-        FakeTorrentioClient torrentio;
+        IndexerHarness indexers;
         FakeTmdbClient tmdb;
         StreamActions actions { nullptr, nullptr };
         StubTokenController tokens(settings.debrid());
         QString rdToken;
         QString adApiKey = QStringLiteral("ad-key");
-        MovieDetailViewModel vm(&cinemeta, &torrentio, &tmdb,
+        MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
             &actions, &tokens, settings, rdToken, adApiKey,
             nullptr);
         // AllDebrid alone is enough to flip the chip on.
@@ -175,13 +178,13 @@ private Q_SLOTS:
             KConfig::SimpleConfig);
         AppSettings settings(config);
         FakeCinemetaClient cinemeta;
-        FakeTorrentioClient torrentio;
+        IndexerHarness indexers;
         FakeTmdbClient tmdb;
         StreamActions actions { nullptr, nullptr };
         StubTokenController tokens(settings.debrid());
         QString rdToken;
         QString adApiKey;
-        MovieDetailViewModel vm(&cinemeta, &torrentio, &tmdb,
+        MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
             &actions, &tokens, settings, rdToken, adApiKey,
             nullptr);
         QVERIFY(!vm.debridConfigured());
@@ -194,7 +197,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt0133093"),
                 QStringLiteral("The Matrix")) }
         };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("Matrix.1080p"),
                   QStringLiteral("1080p"), 50, 2'000'000'000) } }
         };
@@ -224,7 +227,7 @@ private Q_SLOTS:
         f.vm.load(QStringLiteral("tt00001"));
         drainEvents();
 
-        QCOMPARE(f.torrentio.callCount, 0);
+        QCOMPARE(f.torrentio().callCount, 0);
         QCOMPARE(f.vm.streams()->state(),
             StreamsListModel::State::Unreleased);
         QVERIFY(f.vm.isUpcoming());
@@ -237,7 +240,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("Matrix")) }
         };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { {}, HttpError(HttpError::Kind::Network, 0,
                   QStringLiteral("torrentio down")) }
         };
@@ -266,7 +269,7 @@ private Q_SLOTS:
         QCOMPARE(f.vm.metaState(),
             MovieDetailViewModel::MetaState::Error);
         QVERIFY(!f.vm.metaError().isEmpty());
-        QCOMPARE(f.torrentio.callCount, 0);
+        QCOMPARE(f.torrentio().callCount, 0);
     }
 
     void testStaleResponseDiscarded()
@@ -280,7 +283,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt-fresh"),
                 QStringLiteral("Fresh")) }
         };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("Fresh.1080p"),
                   QStringLiteral("1080p"), 5, 1) } }
         };
@@ -303,7 +306,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("First v2")) }
         };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { {} },
             { {} },
         };
@@ -325,13 +328,13 @@ private Q_SLOTS:
             KConfig::SimpleConfig);
         AppSettings settings(config);
         FakeCinemetaClient cinemeta;
-        FakeTorrentioClient torrentio;
+        IndexerHarness indexers;
         FakeTmdbClient tmdb;
         StreamActions actions { nullptr, nullptr };
         StubTokenController tokens(settings.debrid());
         QString rdToken = QStringLiteral("rd-token");
         QString adApiKey;
-        MovieDetailViewModel vm(&cinemeta, &torrentio, &tmdb,
+        MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
             &actions, &tokens, settings, rdToken, adApiKey,
             nullptr);
 
@@ -339,7 +342,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("Movie")) }
         };
-        torrentio.scriptedCalls = {
+        indexers.fake().scriptedCalls = {
             { { makeStream(QStringLiteral("Cached"),
                   QStringLiteral("1080p"), 5, 1,
                   QStringLiteral("p"), true) } },
@@ -349,14 +352,14 @@ private Q_SLOTS:
 
         vm.load(QStringLiteral("tt1"));
         drainEvents();
-        QCOMPARE(torrentio.callCount, 1);
+        QCOMPARE(indexers.fake().callCount, 1);
         QVERIFY(!vm.streams()->at(0)->directUrl.isEmpty());
 
         rdToken.clear();
         tokens.publishRealDebridToken(QString {});
         drainEvents(4);
 
-        QCOMPARE(torrentio.callCount, 2);
+        QCOMPARE(indexers.fake().callCount, 2);
         QCOMPARE(vm.streams()->rowCount(), 1);
         QCOMPARE(vm.streams()->at(0)->releaseName,
             QStringLiteral("MagnetOnly"));
@@ -370,7 +373,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("X")) }
         };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("Smol"),
                     QStringLiteral("720p"), 1, 100),
                 makeStream(QStringLiteral("Big"),
@@ -417,7 +420,7 @@ private Q_SLOTS:
         };
         // No direct URL on the stream \u2192 play() should bail with
         // a status message instead of crashing into PlayerLauncher.
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("R"),
                   QStringLiteral("1080p"), 5, 1) } }
         };
@@ -470,7 +473,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1375666"),
                 QStringLiteral("Inception")) }
         };
-        f.torrentio.scriptedCalls = { { {} } };
+        f.torrentio().scriptedCalls = { { {} } };
 
         f.vm.loadByTmdbId(27205, QStringLiteral("Inception"));
         drainEvents();
@@ -504,7 +507,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("X")) }
         };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("R"),
                   QStringLiteral("1080p"), 5, 1) } }
         };
@@ -545,7 +548,7 @@ private Q_SLOTS:
         const Stream low1080 = makeStream(
             QStringLiteral("R.1080p.unloved"),
             QStringLiteral("1080p"), 1, 3'000'000'000);
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { high1080, low1080, low2160 } }
         };
         f.vm.load(QStringLiteral("tt1"));
@@ -573,7 +576,7 @@ private Q_SLOTS:
             QStringLiteral("1080p"), 99, 1);
         const Stream unloved = makeStream(QStringLiteral("Unloved"),
             QStringLiteral("1080p"), 1, 1);
-        f.torrentio.scriptedCalls = { { { unloved, popular } } };
+        f.torrentio().scriptedCalls = { { { unloved, popular } } };
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
@@ -593,7 +596,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("X")) }
         };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("R1.2160p"),
                     QStringLiteral("2160p"), 5, 8'000'000'000),
                 makeStream(QStringLiteral("R2.1080p"),
@@ -623,7 +626,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("X")) }
         };
-        f.torrentio.scriptedCalls = {
+        f.torrentio().scriptedCalls = {
             { { makeStream(QStringLiteral("Plain.1080p.x265"),
                     QStringLiteral("1080p"), 5, 1),
                 makeStream(QStringLiteral("HDR.2160p.HDR10.x265"),
@@ -651,7 +654,7 @@ private Q_SLOTS:
             { makeDetail(QStringLiteral("tt1"),
                 QStringLiteral("X")) }
         };
-        f.torrentio.scriptedCalls = { { {} } };
+        f.torrentio().scriptedCalls = { { {} } };
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 

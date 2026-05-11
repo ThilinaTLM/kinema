@@ -14,11 +14,7 @@
 #include <optional>
 
 namespace kinema::api {
-class TorrentioClient;
-}
-
-namespace kinema::config {
-class AppSettings;
+class IndexerSelector;
 }
 
 namespace kinema::core {
@@ -63,8 +59,7 @@ class HistoryController : public QObject
     Q_OBJECT
 public:
     HistoryController(core::HistoryStore& store,
-        api::TorrentioClient* torrentio,
-        const config::AppSettings& settings,
+        api::IndexerSelector* indexers,
         const QString& rdTokenRef,
         QObject* parent = nullptr);
 
@@ -135,8 +130,7 @@ private:
     void persistActive(bool force);
 
     core::HistoryStore& m_store;
-    api::TorrentioClient* m_torrentio;
-    const config::AppSettings& m_settings;
+    api::IndexerSelector* m_indexers;
     const QString& m_rdToken;
     ui::player::PlayerWindow* m_player {};
     services::StreamActions* m_actions {};

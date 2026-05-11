@@ -3,8 +3,8 @@
 
 #include "controllers/HistoryController.h"
 
-#include "api/TorrentioClient.h"
-#include "config/AppSettings.h"
+#include "api/Indexer.h"
+#include "api/IndexerSelector.h"
 #include "core/HistoryStore.h"
 #include "core/HttpError.h"
 #include "core/HttpErrorPresenter.h"
@@ -65,14 +65,12 @@ QString selectedSubtitleLang(const core::tracks::TrackList& tracks)
 } // namespace
 
 HistoryController::HistoryController(core::HistoryStore& store,
-    api::TorrentioClient* torrentio,
-    const config::AppSettings& settings,
+    api::IndexerSelector* indexers,
     const QString& rdTokenRef,
     QObject* parent)
     : QObject(parent)
     , m_store(store)
-    , m_torrentio(torrentio)
-    , m_settings(settings)
+    , m_indexers(indexers)
     , m_rdToken(rdTokenRef)
 {
     connect(&m_store, &core::HistoryStore::changed,
@@ -253,28 +251,26 @@ QCoro::Task<void> HistoryController::resumeTask(api::HistoryEntry entry)
                 : entry.title),
         0);
 
-    if (!m_torrentio) {
+    auto* indexer = m_indexers ? m_indexers->active() : nullptr;
+    if (!indexer) {
         Q_EMIT resumeFallbackRequested(entry);
         co_return;
     }
 
-    auto opts = m_settings.torrentioOptions();
-
     QList<api::Stream> streams;
     try {
         const auto streamId = entry.key.storageKey();
-        streams = co_await m_torrentio->streams(
-            entry.key.kind, streamId, opts);
+        streams = co_await indexer->streams(entry.key.kind, streamId);
     } catch (const std::exception& e) {
         if (myEpoch != m_resumeEpoch) {
             co_return;
         }
         qCWarning(KINEMA_CONTROLLER)
-            << "HistoryController: torrentio fetch failed for resume:"
-            << core::describeError(e, "resume/torrentio");
+            << "HistoryController: indexer fetch failed for resume:"
+            << core::describeError(e, "resume/indexer");
         Q_EMIT statusMessage(
             i18nc("@info:status",
-                "Could not reach Torrentio to resume \u201c%1\u201d.",
+                "Could not reach the stream indexer to resume \u201c%1\u201d.",
                 entry.title),
             6000);
         Q_EMIT resumeFallbackRequested(entry);

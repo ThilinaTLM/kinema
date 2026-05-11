@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/TorrentioParse.h"
+#include "api/StremioStreamParse.h"
 
 #include "core/HttpError.h"
 
@@ -12,11 +12,11 @@
 #include <QJsonValue>
 #include <QRegularExpression>
 
-namespace kinema::api::torrentio {
+namespace kinema::api::stremio {
 
 namespace {
 
-// The `title` field Torrentio returns looks like:
+// The `title` field these addons return looks like:
 //
 //   "The Matrix 1999 1080p BluRay x264-NOGRP\n👤 123 💾 2.1 GB ⚙️ ThePirateBay"
 //
@@ -113,7 +113,7 @@ Stream parseOne(const QJsonObject& obj)
 
     s.infoHash = obj.value(QStringLiteral("infoHash")).toString();
     const auto bh = obj.value(QStringLiteral("behaviorHints")).toObject();
-    // Some Torrentio responses tuck infoHash inside behaviorHints
+    // Some Stremio addon responses tuck infoHash inside behaviorHints
     // (notably certain RD/AD-resolved entries). Fall back to that
     // nested location when the top-level field is absent so the
     // history layer can still key resume on a stable identifier.
@@ -159,7 +159,7 @@ QList<Stream> parseStreams(const QJsonDocument& doc)
 {
     if (!doc.isObject()) {
         throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("Torrentio response was not a JSON object."));
+            i18n("Stream addon response was not a JSON object."));
     }
     const auto arr = doc.object().value(QStringLiteral("streams"));
     if (!arr.isArray()) {
@@ -182,4 +182,4 @@ QList<Stream> parseStreams(const QJsonDocument& doc)
     return out;
 }
 
-} // namespace kinema::api::torrentio
+} // namespace kinema::api::stremio

@@ -4,6 +4,8 @@
 #include "ui/qml-bridge/SettingsViewModels.h"
 
 #include "api/AllDebridClient.h"
+#include "api/Indexer.h"
+#include "api/IndexerSelector.h"
 #include "api/Media.h"
 #include "api/OpenSubtitlesClient.h"
 #include "api/RealDebridClient.h"
@@ -14,6 +16,8 @@
 #include "config/CacheSettings.h"
 #include "config/DebridSettings.h"
 #include "config/FilterSettings.h"
+#include "config/IndexerSettings.h"
+#include "config/MediaFusionSettings.h"
 #include "config/PlayerSettings.h"
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
@@ -735,20 +739,299 @@ void DebridSettingsViewModel::setActiveProvider(int provider)
     m_settings.setActiveProvider(value);
 }
 
-// ============================== Streams ===================================
+// ============================== Indexers: Torrentio section ==============
 
-StreamsSettingsViewModel::StreamsSettingsViewModel(
-    config::TorrentioSettings& torrentio,
-    config::FilterSettings& settings, QObject* parent)
+TorrentioSectionViewModel::TorrentioSectionViewModel(
+    api::IndexerSelector* indexers,
+    config::TorrentioSettings& settings, QObject* parent)
     : QObject(parent)
-    , m_torrentio(torrentio)
+    , m_indexers(indexers)
     , m_settings(settings)
 {
+    connect(&m_settings, &config::TorrentioSettings::defaultSortChanged,
+        this, &TorrentioSectionViewModel::defaultSortChanged);
+    connect(&m_settings, &config::TorrentioSettings::baseUrlChanged,
+        this, &TorrentioSectionViewModel::baseUrlChanged);
 }
 
-int StreamsSettingsViewModel::defaultTorrentioSort() const
+int TorrentioSectionViewModel::defaultSort() const
 {
-    return sortModeToIndex(m_torrentio.defaultSort());
+    return sortModeToIndex(m_settings.defaultSort());
+}
+
+QString TorrentioSectionViewModel::baseUrl() const
+{
+    return m_settings.baseUrl();
+}
+
+QString TorrentioSectionViewModel::defaultBaseUrlString() const
+{
+    return config::TorrentioSettings::defaultBaseUrl();
+}
+
+void TorrentioSectionViewModel::setDefaultSort(int sort)
+{
+    const auto next = indexToSortMode(sort);
+    if (m_settings.defaultSort() == next) {
+        return;
+    }
+    m_settings.setDefaultSort(next);
+    // settings emits defaultSortChanged → we re-emit via connect.
+}
+
+void TorrentioSectionViewModel::setBaseUrl(const QString& url)
+{
+    m_settings.setBaseUrl(url);
+}
+
+void TorrentioSectionViewModel::resetBaseUrl()
+{
+    m_settings.setBaseUrl(config::TorrentioSettings::defaultBaseUrl());
+}
+
+void TorrentioSectionViewModel::testConnection()
+{
+    auto t = testTask();
+    Q_UNUSED(t);
+}
+
+void TorrentioSectionViewModel::setStatus(const QString& message, int kind)
+{
+    if (m_statusMessage == message && m_statusKind == kind) {
+        return;
+    }
+    m_statusMessage = message;
+    m_statusKind = kind;
+    Q_EMIT statusChanged();
+}
+
+void TorrentioSectionViewModel::setBusy(bool on)
+{
+    if (m_busy == on) {
+        return;
+    }
+    m_busy = on;
+    Q_EMIT busyChanged();
+}
+
+QCoro::Task<void> TorrentioSectionViewModel::testTask()
+{
+    auto* indexer = m_indexers
+        ? m_indexers->find(api::IndexerKind::Torrentio)
+        : nullptr;
+    if (!indexer) {
+        setStatus(i18nc("@info indexer settings status",
+            "Torrentio is not registered."), kStatusError);
+        co_return;
+    }
+    setBusy(true);
+    setStatus(i18nc("@info indexer settings status, in progress",
+        "Probing Torrentio\u2026"), kStatusInfo);
+    const bool ok = co_await indexer->testConnection();
+    if (ok) {
+        setStatus(i18nc("@info indexer settings status",
+            "Torrentio is reachable."), kStatusPositive);
+    } else {
+        setStatus(i18nc("@info indexer settings status",
+            "Torrentio did not respond. Check the base URL or try again later."),
+            kStatusError);
+    }
+    setBusy(false);
+}
+
+// ============================== Indexers: MediaFusion section ============
+
+MediaFusionSectionViewModel::MediaFusionSectionViewModel(
+    api::IndexerSelector* indexers,
+    config::MediaFusionSettings& settings,
+    config::IndexerSettings& indexerSettings,
+    QObject* parent)
+    : QObject(parent)
+    , m_indexers(indexers)
+    , m_settings(settings)
+    , m_indexerSettings(indexerSettings)
+{
+    m_manifestInput = m_settings.manifestUrl();
+    connect(&m_settings,
+        &config::MediaFusionSettings::baseUrlChanged, this,
+        &MediaFusionSectionViewModel::savedConfigChanged);
+    connect(&m_settings,
+        &config::MediaFusionSettings::encryptedConfigChanged, this,
+        &MediaFusionSectionViewModel::savedConfigChanged);
+}
+
+QString MediaFusionSectionViewModel::baseUrl() const
+{
+    return m_settings.baseUrl();
+}
+
+bool MediaFusionSectionViewModel::configured() const
+{
+    return m_indexerSettings.mediaFusionConfigured();
+}
+
+bool MediaFusionSectionViewModel::tokenPresent() const
+{
+    return !m_settings.encryptedConfig().isEmpty();
+}
+
+void MediaFusionSectionViewModel::setManifestUrl(const QString& url)
+{
+    if (m_manifestInput == url) {
+        return;
+    }
+    m_manifestInput = url;
+    Q_EMIT manifestUrlInputChanged();
+}
+
+void MediaFusionSectionViewModel::load()
+{
+    m_manifestInput = m_settings.manifestUrl();
+    Q_EMIT manifestUrlInputChanged();
+    Q_EMIT savedConfigChanged();
+}
+
+void MediaFusionSectionViewModel::testConnection()
+{
+    auto t = testTask();
+    Q_UNUSED(t);
+}
+
+void MediaFusionSectionViewModel::save()
+{
+    const auto trimmed = m_manifestInput.trimmed();
+    if (trimmed.isEmpty()) {
+        setStatus(i18nc("@info mediafusion settings status",
+            "Paste a MediaFusion manifest URL first."), kStatusError);
+        return;
+    }
+    if (!m_settings.saveFromManifestUrl(trimmed)) {
+        setStatus(i18nc("@info mediafusion settings status",
+            "That doesn\u2019t look like a MediaFusion manifest URL. Expected a URL ending in \u201c/manifest.json\u201d."),
+            kStatusError);
+        return;
+    }
+    m_indexerSettings.setMediaFusionConfigured(true);
+    setStatus(i18nc("@info mediafusion settings status",
+        "Saved. MediaFusion is now configured for %1.",
+        m_settings.baseUrl()),
+        kStatusPositive);
+}
+
+void MediaFusionSectionViewModel::clear()
+{
+    m_settings.clear();
+    m_indexerSettings.setMediaFusionConfigured(false);
+    m_manifestInput.clear();
+    Q_EMIT manifestUrlInputChanged();
+    setStatus(i18nc("@info mediafusion settings status",
+        "Cleared. MediaFusion will fall back to the default host."),
+        kStatusInfo);
+}
+
+void MediaFusionSectionViewModel::setStatus(const QString& message, int kind)
+{
+    if (m_statusMessage == message && m_statusKind == kind) {
+        return;
+    }
+    m_statusMessage = message;
+    m_statusKind = kind;
+    Q_EMIT statusChanged();
+}
+
+void MediaFusionSectionViewModel::setBusy(bool on)
+{
+    if (m_busy == on) {
+        return;
+    }
+    m_busy = on;
+    Q_EMIT busyChanged();
+}
+
+QCoro::Task<void> MediaFusionSectionViewModel::testTask()
+{
+    auto* indexer = m_indexers
+        ? m_indexers->find(api::IndexerKind::MediaFusion)
+        : nullptr;
+    if (!indexer) {
+        setStatus(i18nc("@info indexer settings status",
+            "MediaFusion is not registered."), kStatusError);
+        co_return;
+    }
+    // Short-circuit when no manifest URL is saved: the public
+    // MediaFusion host (and any properly-configured private one)
+    // refuses unconfigured stream calls, so probing without one
+    // always 403s.
+    if (m_settings.manifestUrl().isEmpty()) {
+        setStatus(i18nc("@info mediafusion settings status",
+            "Paste a manifest URL above and click \u201cSave manifest URL\u201d first."),
+            kStatusError);
+        co_return;
+    }
+    setBusy(true);
+    setStatus(i18nc("@info indexer settings status, in progress",
+        "Probing MediaFusion\u2026"), kStatusInfo);
+    const bool ok = co_await indexer->testConnection();
+    if (ok) {
+        setStatus(i18nc("@info indexer settings status",
+            "MediaFusion is reachable at %1.", m_settings.baseUrl()),
+            kStatusPositive);
+    } else {
+        setStatus(i18nc("@info indexer settings status",
+            "MediaFusion did not respond. Re-check the manifest URL or try again later."),
+            kStatusError);
+    }
+    setBusy(false);
+}
+
+// ============================== Indexers: parent VM ======================
+
+IndexerSettingsViewModel::IndexerSettingsViewModel(
+    api::IndexerSelector* indexers,
+    config::IndexerSettings& indexerSettings,
+    config::TorrentioSettings& torrentioSettings,
+    config::MediaFusionSettings& mediaFusionSettings,
+    QObject* parent)
+    : QObject(parent)
+    , m_settings(indexerSettings)
+    , m_torrentio(new TorrentioSectionViewModel(indexers,
+          torrentioSettings, this))
+    , m_mediaFusion(new MediaFusionSectionViewModel(indexers,
+          mediaFusionSettings, indexerSettings, this))
+{
+    connect(&m_settings, &config::IndexerSettings::activeIndexerChanged,
+        this, [this](api::IndexerKind) {
+            Q_EMIT activeIndexerChanged();
+        });
+}
+
+int IndexerSettingsViewModel::activeIndexer() const
+{
+    return static_cast<int>(m_settings.activeIndexer());
+}
+
+void IndexerSettingsViewModel::setActiveIndexer(int kind)
+{
+    auto value = api::IndexerKind::Torrentio;
+    switch (kind) {
+    case static_cast<int>(api::IndexerKind::MediaFusion):
+        value = api::IndexerKind::MediaFusion;
+        break;
+    case static_cast<int>(api::IndexerKind::Torrentio):
+    default:
+        value = api::IndexerKind::Torrentio;
+        break;
+    }
+    m_settings.setActiveIndexer(value);
+}
+
+// ============================== Streams (indexer-agnostic filters) =======
+
+StreamsSettingsViewModel::StreamsSettingsViewModel(
+    config::FilterSettings& settings, QObject* parent)
+    : QObject(parent)
+    , m_settings(settings)
+{
 }
 
 QStringList StreamsSettingsViewModel::excludedResolutions() const
@@ -810,16 +1093,6 @@ QVariantList StreamsSettingsViewModel::categoryOptions() const
         out.append(row);
     }
     return out;
-}
-
-void StreamsSettingsViewModel::setDefaultTorrentioSort(int sort)
-{
-    const auto next = indexToSortMode(sort);
-    if (m_torrentio.defaultSort() == next) {
-        return;
-    }
-    m_torrentio.setDefaultSort(next);
-    Q_EMIT defaultTorrentioSortChanged();
 }
 
 void StreamsSettingsViewModel::setExcludedResolutions(
@@ -1471,7 +1744,8 @@ void TorrentStreamingSettingsViewModel::runEvictionNow()
 // ============================== Root ======================================
 
 SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
-    core::TokenStore* tokens, config::AppSettings& settings,
+    core::TokenStore* tokens, api::IndexerSelector* indexers,
+    config::AppSettings& settings,
     core::SubtitleCacheStore* subtitleCache,
     core::MediaCache* mediaCache, QObject* parent)
     : QObject(parent)
@@ -1482,8 +1756,10 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     m_tmdb = new TmdbSettingsViewModel(http, tokens, this);
     m_debrid = new DebridSettingsViewModel(http, tokens,
         settings.debrid(), this);
-    m_streams = new StreamsSettingsViewModel(settings.torrentio(),
-        settings.filter(), this);
+    m_indexers = new IndexerSettingsViewModel(indexers,
+        settings.indexers(), settings.torrentio(),
+        settings.mediaFusion(), this);
+    m_streams = new StreamsSettingsViewModel(settings.filter(), this);
     m_player = new PlayerSettingsViewModel(settings.player(), this);
     m_subs = new SubtitlesSettingsViewModel(http, tokens,
         settings.subtitle(), settings.cache(), subtitleCache, this);

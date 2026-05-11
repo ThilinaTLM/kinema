@@ -15,7 +15,11 @@ set(kinema_core_SRCS
     config/LibrarySettings.cpp
     config/PlayerSettings.cpp
     api/Debrid.cpp
+    api/Indexer.cpp
+    api/IndexerSelector.cpp
     config/DebridSettings.cpp
+    config/IndexerSettings.cpp
+    config/MediaFusionSettings.cpp
     config/SearchSettings.cpp
     config/SubtitleSettings.cpp
     config/TorrentioSettings.cpp
@@ -80,11 +84,13 @@ set(kinema_core_SRCS
     api/PlaybackContext.cpp
     api/RealDebridClient.cpp
     api/RealDebridParse.cpp
+    api/MediaFusionIndexer.cpp
+    api/MediaFusionParse.cpp
+    api/StremioStreamParse.cpp
     api/TmdbClient.cpp
     api/TmdbDiscoverUrl.cpp
     api/TmdbParse.cpp
-    api/TorrentioClient.cpp
-    api/TorrentioParse.cpp
+    api/TorrentioIndexer.cpp
 
     ui/ImageLoader.cpp
 
@@ -349,6 +355,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/settings/AboutSettingsPage.qml
         ui/qml/pages/settings/ApplicationSettingsPage.qml
         ui/qml/pages/settings/DebridSettingsPage.qml
+        ui/qml/pages/settings/IndexersSettingsPage.qml
         ui/qml/pages/settings/PlayerSettingsPage.qml
         ui/qml/pages/settings/StreamsSettingsPage.qml
         ui/qml/pages/settings/SubtitlesSettingsPage.qml

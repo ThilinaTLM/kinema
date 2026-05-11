@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/TorrentioParse.h"
+#include "api/StremioStreamParse.h"
 #include "core/HttpError.h"
 
 #include <QFile>
@@ -10,7 +10,7 @@
 
 using namespace kinema::api;
 
-class TstTorrentioParse : public QObject
+class TstStremioStreamParse : public QObject
 {
     Q_OBJECT
 private:
@@ -28,7 +28,7 @@ private Q_SLOTS:
     void parsesAllActionableStreams_skipsUnactionableRow()
     {
         const auto doc = loadFixture("torrentio_stream_tt0133093.json");
-        const auto streams = torrentio::parseStreams(doc);
+        const auto streams = stremio::parseStreams(doc);
 
         // The fixture has 5 rows; the last one has neither hash nor URL
         // so parseStreams drops it. We expect 4.
@@ -38,7 +38,7 @@ private Q_SLOTS:
     void extractsSeedersSizeProvider()
     {
         const auto doc = loadFixture("torrentio_stream_tt0133093.json");
-        const auto streams = torrentio::parseStreams(doc);
+        const auto streams = stremio::parseStreams(doc);
 
         const auto& first = streams.at(0);
         QCOMPARE(first.resolution, QStringLiteral("1080p"));
@@ -57,7 +57,7 @@ private Q_SLOTS:
     void extractsFileIndexFilenameAndSources()
     {
         const auto doc = loadFixture("torrentio_stream_tt0133093.json");
-        const auto streams = torrentio::parseStreams(doc);
+        const auto streams = stremio::parseStreams(doc);
 
         const auto& first = streams.at(0);
         QCOMPARE(first.fileIndex, 0);
@@ -78,12 +78,12 @@ private Q_SLOTS:
     void exposesDirectUrlWhenPresent()
     {
         const auto doc = loadFixture("torrentio_stream_tt0133093.json");
-        const auto streams = torrentio::parseStreams(doc);
+        const auto streams = stremio::parseStreams(doc);
 
         // Row 1 in the fixture carries an `url` field, simulating an
         // RD-resolved direct hoster link the parser passes through
         // verbatim. Routing decisions live in the download manager;
-        // the parser just surfaces what Torrentio returned.
+        // the parser just surfaces what the addon returned.
         const auto& urlRow = streams.at(1);
         QCOMPARE(urlRow.resolution, QStringLiteral("2160p"));
         QCOMPARE(urlRow.directUrl,
@@ -102,7 +102,7 @@ private Q_SLOTS:
     void handlesMissingMetadataGracefully()
     {
         const auto doc = loadFixture("torrentio_stream_tt0133093.json");
-        const auto streams = torrentio::parseStreams(doc);
+        const auto streams = stremio::parseStreams(doc);
 
         const auto& noMetaRow = streams.at(3);
         QVERIFY(!noMetaRow.seeders.has_value());
@@ -114,16 +114,16 @@ private Q_SLOTS:
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("[]"));
         QVERIFY_EXCEPTION_THROWN(
-            torrentio::parseStreams(doc),
+            stremio::parseStreams(doc),
             kinema::core::HttpError);
     }
 
     void missingStreamsArray_returnsEmpty()
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
-        QVERIFY(torrentio::parseStreams(doc).isEmpty());
+        QVERIFY(stremio::parseStreams(doc).isEmpty());
     }
 };
 
-QTEST_APPLESS_MAIN(TstTorrentioParse)
-#include "tst_torrentio_parse.moc"
+QTEST_APPLESS_MAIN(TstStremioStreamParse)
+#include "tst_stremio_stream_parse.moc"

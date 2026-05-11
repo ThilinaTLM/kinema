@@ -9,13 +9,14 @@
 #include "config/DebridSettings.h"
 #include "config/DownloadSettings.h"
 #include "config/FilterSettings.h"
+#include "config/IndexerSettings.h"
 #include "config/LibrarySettings.h"
+#include "config/MediaFusionSettings.h"
 #include "config/PlayerSettings.h"
 #include "config/SearchSettings.h"
 #include "config/SubtitleSettings.h"
 #include "config/TorrentioSettings.h"
 #include "config/TorrentStreamingSettings.h"
-#include "core/TorrentioConfig.h"
 
 #include <KSharedConfig>
 
@@ -78,20 +79,13 @@ public:
     DownloadSettings& download() noexcept { return m_download; }
     const DownloadSettings& download() const noexcept { return m_download; }
 
-    /// Build the Torrentio options from the current Torrentio + Filter
-    /// state. The RD token is NOT filled — callers merge it in from
-    /// TokenController.
-    core::torrentio::ConfigOptions torrentioOptions() const;
+    IndexerSettings& indexers() noexcept { return m_indexers; }
+    const IndexerSettings& indexers() const noexcept { return m_indexers; }
 
-Q_SIGNALS:
-    /// Fired whenever any input to torrentioOptions() changes
-    /// (default sort or filter exclusions). MainWindow/controllers
-    /// debounce and refetch the visible torrent list.
-    void torrentioOptionsChanged();
+    MediaFusionSettings& mediaFusion() noexcept { return m_mediaFusion; }
+    const MediaFusionSettings& mediaFusion() const noexcept { return m_mediaFusion; }
 
 private:
-    void connectAggregateSignals();
-
     SearchSettings m_search;
     PlayerSettings m_player;
     FilterSettings m_filter;
@@ -104,6 +98,8 @@ private:
     CacheSettings m_cache;
     TorrentStreamingSettings m_torrentStreaming;
     DownloadSettings m_download;
+    IndexerSettings m_indexers;
+    MediaFusionSettings m_mediaFusion;
 };
 
 } // namespace kinema::config

@@ -8,9 +8,15 @@
 namespace kinema::config {
 
 namespace {
-constexpr auto kGroup = "General";
+constexpr auto kGroup = "Torrentio";
 constexpr auto kKeyDefaultSort = "defaultSort";
+constexpr auto kKeyBaseUrl = "baseUrl";
 } // namespace
+
+QString TorrentioSettings::defaultBaseUrl()
+{
+    return QStringLiteral("https://torrentio.strem.fun");
+}
 
 TorrentioSettings::TorrentioSettings(KSharedConfigPtr config, QObject* parent)
     : QObject(parent)
@@ -39,6 +45,24 @@ void TorrentioSettings::setDefaultSort(core::torrentio::SortMode m)
     detail::write(m_config, kGroup, kKeyDefaultSort,
         core::torrentio::toString(m));
     Q_EMIT defaultSortChanged(m);
+}
+
+QString TorrentioSettings::baseUrl() const
+{
+    const auto raw = detail::read(m_config, kGroup, kKeyBaseUrl,
+        defaultBaseUrl());
+    return raw.isEmpty() ? defaultBaseUrl() : raw;
+}
+
+void TorrentioSettings::setBaseUrl(const QString& url)
+{
+    const auto trimmed = url.trimmed();
+    const auto effective = trimmed.isEmpty() ? defaultBaseUrl() : trimmed;
+    if (baseUrl() == effective) {
+        return;
+    }
+    detail::write(m_config, kGroup, kKeyBaseUrl, effective);
+    Q_EMIT baseUrlChanged(effective);
 }
 
 } // namespace kinema::config

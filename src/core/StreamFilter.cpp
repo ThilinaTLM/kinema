@@ -3,7 +3,71 @@
 
 #include "core/StreamFilter.h"
 
+#include "core/StreamTokens.h"
+
 namespace kinema::core::stream_filter {
+
+namespace {
+
+/// Return true when the stream's resolution falls into `token`'s
+/// bucket per the user-facing taxonomy in `ClientFilters`.
+bool resolutionMatchesToken(const QString& res, const QString& token)
+{
+    if (token == QLatin1String("4k")) {
+        return res == QLatin1String("2160p") || res == QLatin1String("1440p");
+    }
+    if (token == QLatin1String("1080p")) {
+        return res == QLatin1String("1080p");
+    }
+    if (token == QLatin1String("720p")) {
+        return res == QLatin1String("720p");
+    }
+    if (token == QLatin1String("480p")) {
+        return res == QLatin1String("480p");
+    }
+    if (token == QLatin1String("other")) {
+        // Anything not in the named buckets. Covers 360p, "SD",
+        // unknown, the "—" placeholder, etc.
+        return res != QLatin1String("2160p") && res != QLatin1String("1440p")
+            && res != QLatin1String("1080p") && res != QLatin1String("720p")
+            && res != QLatin1String("480p");
+    }
+    return false;
+}
+
+/// Map a `ClientFilters::excludedCategories` token to a predicate
+/// over the parsed `stream_tokens::Tokens`. Tokens that the parser
+/// doesn't currently surface (e.g. `nonen`, `unknown`, `brremux`)
+/// are accepted but always evaluate to `false`; the keyword
+/// blocklist remains the workaround for those.
+bool categoryMatchesToken(const api::Stream& s, const QString& token)
+{
+    const auto t = stream_tokens::parse(s);
+    if (token == QLatin1String("cam") || token == QLatin1String("scr")) {
+        // The parser's `Source::Cam` bucket already covers CAM / TS
+        // / TC / SCR releases per the StreamTokens.h taxonomy.
+        return t.source == stream_tokens::Source::Cam;
+    }
+    if (token == QLatin1String("hdr")) {
+        return t.hdr != stream_tokens::Hdr::Sdr;
+    }
+    if (token == QLatin1String("hdr10plus")) {
+        return t.hdr == stream_tokens::Hdr::Hdr10Plus;
+    }
+    if (token == QLatin1String("dolbyvision")) {
+        return t.hdr == stream_tokens::Hdr::DolbyVision;
+    }
+    if (token == QLatin1String("brremux")) {
+        return t.source == stream_tokens::Source::BluRayRemux;
+    }
+    // `threed`, `nonen`, and `unknown` are not currently inferrable
+    // client-side from the parsed Stream alone; users still get them
+    // filtered server-side via Torrentio's URL, and via the keyword
+    // blocklist as a fallback.
+    return false;
+}
+
+} // namespace
 
 bool matchesBlocklist(const api::Stream& s, const QStringList& blocklist)
 {
@@ -19,7 +83,8 @@ bool matchesBlocklist(const api::Stream& s, const QStringList& blocklist)
     return false;
 }
 
-QList<api::Stream> apply(const QList<api::Stream>& in, const ClientFilters& filters)
+QList<api::Stream> apply(const QList<api::Stream>& in,
+    const ClientFilters& filters)
 {
     QList<api::Stream> out;
     out.reserve(in.size());
@@ -28,6 +93,27 @@ QList<api::Stream> apply(const QList<api::Stream>& in, const ClientFilters& filt
             && matchesBlocklist(s, filters.keywordBlocklist)) {
             continue;
         }
+
+        bool dropped = false;
+        for (const auto& tok : filters.excludedResolutions) {
+            if (resolutionMatchesToken(s.resolution, tok)) {
+                dropped = true;
+                break;
+            }
+        }
+        if (dropped) {
+            continue;
+        }
+        for (const auto& tok : filters.excludedCategories) {
+            if (categoryMatchesToken(s, tok)) {
+                dropped = true;
+                break;
+            }
+        }
+        if (dropped) {
+            continue;
+        }
+
         out.append(s);
     }
     return out;

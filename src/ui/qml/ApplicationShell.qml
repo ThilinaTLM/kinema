@@ -229,6 +229,14 @@ Kirigami.ApplicationWindow {
                     "dev.tlmtech.kinema.app", "DebridSettingsPage")
             },
             KirigamiSettings.ConfigurationModule {
+                moduleId: "indexers"
+                text: i18nc("@title:tab settings page", "Indexers")
+                icon.source: AppIcons.url("list-video")
+                icon.color: AppIcons.foreground
+                page: () => Qt.createComponent(
+                    "dev.tlmtech.kinema.app", "IndexersSettingsPage")
+            },
+            KirigamiSettings.ConfigurationModule {
                 moduleId: "streams"
                 text: i18nc("@title:tab settings page", "Streams")
                 icon.source: AppIcons.url("funnel")

@@ -16,9 +16,9 @@ class QUrl;
 
 namespace kinema::api {
 class CinemetaClient;
+class IndexerSelector;
 class OpenSubtitlesClient;
 class TmdbClient;
-class TorrentioClient;
 class PlaybackContext;
 }
 
@@ -299,7 +299,7 @@ private:
 
     // QObject-parented to this controller.
     api::CinemetaClient* m_cinemeta {};
-    api::TorrentioClient* m_torrentio {};
+    api::IndexerSelector* m_indexers {};
     api::TmdbClient* m_tmdb {};
     api::OpenSubtitlesClient* m_openSubtitles {};
     ui::ImageLoader* m_imageLoader {};

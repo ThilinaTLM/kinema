@@ -53,8 +53,28 @@ ecm_add_test(tst_discover_query.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_torrentio_parse.cpp
-    TEST_NAME tst_torrentio_parse
+ecm_add_test(tst_stremio_stream_parse.cpp
+    TEST_NAME tst_stremio_stream_parse
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_indexer_settings.cpp
+    TEST_NAME tst_indexer_settings
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_indexer_selector.cpp
+    TEST_NAME tst_indexer_selector
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_mediafusion_settings.cpp
+    TEST_NAME tst_mediafusion_settings
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_mediafusion_indexer.cpp
+    TEST_NAME tst_mediafusion_indexer
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -163,8 +183,8 @@ ecm_add_test(tst_tmdb_client.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_torrentio_client.cpp
-    TEST_NAME tst_torrentio_client
+ecm_add_test(tst_torrentio_indexer.cpp
+    TEST_NAME tst_torrentio_indexer
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -356,7 +376,9 @@ endif()
 foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_media_file_selector tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
-         tst_torrentio_parse tst_realdebrid_parse tst_alldebrid_parse
+         tst_stremio_stream_parse tst_indexer_settings tst_indexer_selector
+         tst_mediafusion_settings tst_mediafusion_indexer
+         tst_realdebrid_parse tst_alldebrid_parse
          tst_player tst_stream_filter
          tst_stream_tokens
          tst_date_format tst_app_settings
@@ -365,7 +387,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_movie_detail_view_model tst_series_detail_view_model
          tst_stream_actions tst_subtitle_results_model
          tst_token_controller tst_cinemeta_client tst_tmdb_client
-         tst_torrentio_client tst_realdebrid_client tst_alldebrid_client
+         tst_torrentio_indexer tst_realdebrid_client tst_alldebrid_client
          tst_alldebrid_resolver tst_backend_selector
          tst_database tst_history_store tst_history_controller
          tst_library_store tst_watched_store tst_watched_controller

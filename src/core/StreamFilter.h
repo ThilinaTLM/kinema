@@ -12,15 +12,27 @@
 namespace kinema::core::stream_filter {
 
 /**
- * Runtime, client-side filters applied on top of whatever Torrentio has
- * already returned. Server-side filters (resolution/category exclusions)
- * are encoded into the Torrentio URL via core::torrentio::ConfigOptions;
- * these are the knobs we can't push upstream.
+ * Runtime, client-side filters applied on top of whatever the active
+ * indexer returned. Exclusions are *always* applied client-side so
+ * the same `FilterSettings` work uniformly across indexers; the
+ * Torrentio indexer additionally pushes them into the URL
+ * `qualityfilter=` segment as an optimisation, but MediaFusion has
+ * no equivalent knob.
  */
 struct ClientFilters {
     /// Case-insensitive substring blocklist applied to `releaseName`
     /// and `detailsText`. Empty strings are ignored.
     QStringList keywordBlocklist;
+    /// Resolution tokens to drop, matched against `Stream::resolution`.
+    /// Tokens follow the user-facing taxonomy:
+    ///   `4k` covers 2160p & 1440p,
+    ///   `1080p`, `720p`, `480p` map literally,
+    ///   `other` covers everything below 480p plus unknown.
+    QStringList excludedResolutions;
+    /// Variant tokens to drop, matched against parsed tokens from the
+    /// stream's release name (CAM / Screener / HDR / Dolby Vision /
+    /// 3D / non-English / unknown quality / BluRay REMUX).
+    QStringList excludedCategories;
 };
 
 /**

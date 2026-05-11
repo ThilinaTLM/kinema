@@ -24,25 +24,9 @@ AppSettings::AppSettings(KSharedConfigPtr config, QObject* parent)
     , m_cache(config, this)
     , m_torrentStreaming(config, this)
     , m_download(config, this)
+    , m_indexers(config, this)
+    , m_mediaFusion(config, this)
 {
-    connectAggregateSignals();
-}
-
-void AppSettings::connectAggregateSignals()
-{
-    connect(&m_torrentio, &TorrentioSettings::defaultSortChanged,
-        this, &AppSettings::torrentioOptionsChanged);
-    connect(&m_filter, &FilterSettings::exclusionsChanged,
-        this, &AppSettings::torrentioOptionsChanged);
-}
-
-core::torrentio::ConfigOptions AppSettings::torrentioOptions() const
-{
-    core::torrentio::ConfigOptions opts;
-    opts.sort = m_torrentio.defaultSort();
-    opts.excludedResolutions = m_filter.excludedResolutions();
-    opts.excludedCategories = m_filter.excludedCategories();
-    return opts;
 }
 
 } // namespace kinema::config
