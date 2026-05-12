@@ -139,6 +139,7 @@ void HistoryController::onPlayStarting(const domain::PlaybackContext& ctx)
     e.seriesTitle = ctx.seriesTitle;
     e.episodeTitle = ctx.episodeTitle;
     e.poster = ctx.poster;
+    e.backdrop = ctx.backdrop;
     e.lastStream = ctx.streamRef;
     e.lastWatchedAt = QDateTime::currentDateTimeUtc();
 
@@ -321,6 +322,7 @@ QCoro::Task<void> HistoryController::resumeTask(domain::HistoryEntry entry)
     ctx.seriesTitle = entry.seriesTitle;
     ctx.episodeTitle = entry.episodeTitle;
     ctx.poster = entry.poster;
+    ctx.backdrop = entry.backdrop;
     // streamRef and resumeSeconds are filled by StreamActions::play.
 
     if (!m_actions) {

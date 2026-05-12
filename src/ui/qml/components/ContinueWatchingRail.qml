@@ -8,75 +8,67 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Hero rail for the Continue Watching row at the top of Discover.
-// Reads the rail model from `continueWatchingVm.model` (a
-// `DiscoverSectionModel`), but uses `ProgressPosterCard` so each
-// tile carries a progress bar + last-release subtitle.
+// Continue Watching rail for the Up Next page. Thin wrapper over
+// the shared `LibraryRail` (which uses `EpisodeRailCard` cards),
+// adding the four-action right-click context menu the Continue
+// Watching surface owns:
 //
-// Activation modes:
-//   - left click → resume          → `continueWatchingVm.resume(row)`
-//   - right click → context menu   → resume / details / streams / remove
+//   - Resume        \u2192  continueWatchingVm.resume(row)
+//   - Details       \u2192  continueWatchingVm.openDetail(row)
+//   - Streams       \u2192  continueWatchingVm.openStreams(row)
+//   - Remove\u2026     \u2192  prompt, then continueWatchingVm.remove(row)
 //
-// The rail self-hides when `continueWatchingVm.empty` is true; the
-// page binds `visible` accordingly.
+// Left-click on a card still resumes directly. Visual chrome
+// (16:9 frame, progress bar, three meta lines) is identical to
+// Ready to Watch / Airing Soon \u2014 the rail simply binds the
+// LibraryRail to `continueWatchingVm.model` (a `LibraryRailModel`).
 ColumnLayout {
     id: rail
     spacing: Theme.inlineSpacing
 
-    // ---- Header ---------------------------------------------------
-    RowLayout {
+    LibraryRail {
+        id: inner
         Layout.fillWidth: true
-        Layout.leftMargin: Theme.pageMargin
-        Layout.rightMargin: Theme.pageMargin
-
-        Kirigami.Heading {
-            level: 3
-            text: continueWatchingVm.model
-                ? continueWatchingVm.model.title
-                : i18nc("@label discover row", "Continue Watching")
-            Layout.fillWidth: true
-            elide: Text.ElideRight
-        }
-    }
-
-    // ---- List -----------------------------------------------------
-    ListView {
-        id: list
-        Layout.fillWidth: true
-        // Size the rail to the delegate's natural height. Unlike the
-        // generic content rails, Continue Watching cards only show a
-        // single title line, so forcing a taller "poster + meta block"
-        // height leaves an awkward dead band between the artwork and
-        // title.
-        Layout.preferredHeight: cardPrototype.implicitHeight
-
-        orientation: ListView.Horizontal
-        clip: true
-        spacing: Theme.groupSpacing
-        leftMargin: Theme.pageMargin
-        rightMargin: Theme.pageMargin
-        boundsBehavior: Flickable.StopAtBounds
-        cacheBuffer: width
+        title: i18nc("@title library rail", "Continue Watching")
+        artworkShape: "thumbnail"
         model: continueWatchingVm.model
 
-        delegate: ProgressPosterCard {
-            width: Theme.posterMin
-            posterUrl:       model.posterUrl
-            title:           model.title
-            episodeSubtitle: model.episodeSubtitle
-            progress:        model.progress !== undefined ? model.progress : -1
-
-            onClicked: continueWatchingVm.resume(index)
-            onDetailsRequested: continueWatchingVm.openDetail(index)
-            onStreamsRequested: continueWatchingVm.openStreams(index)
-            onRemoveRequested: removeConfirm.openFor(index)
+        onItemActivated: row => continueWatchingVm.resume(row)
+        onContextMenuRequested: row => {
+            contextMenu.targetRow = row;
+            contextMenu.popup();
         }
     }
 
-    ProgressPosterCard {
-        id: cardPrototype
-        visible: false
-        width: Theme.posterMin
+    QQC2.Menu {
+        id: contextMenu
+        property int targetRow: -1
+
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Resume")
+            icon.source: AppIcons.url("play")
+            icon.color: AppIcons.controlColor(enabled, false)
+            onTriggered: continueWatchingVm.resume(contextMenu.targetRow)
+        }
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Details")
+            icon.source: AppIcons.url("info")
+            icon.color: AppIcons.controlColor(enabled, false)
+            onTriggered: continueWatchingVm.openDetail(contextMenu.targetRow)
+        }
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Streams")
+            icon.source: AppIcons.url("list-video")
+            icon.color: AppIcons.controlColor(enabled, false)
+            onTriggered: continueWatchingVm.openStreams(contextMenu.targetRow)
+        }
+        QQC2.MenuSeparator {}
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu", "Remove\u2026")
+            icon.source: AppIcons.url("trash-2")
+            icon.color: AppIcons.controlColor(enabled, false)
+            onTriggered: removeConfirm.openFor(contextMenu.targetRow)
+        }
     }
 
     // Confirm dialog for the "Remove from history" context action.

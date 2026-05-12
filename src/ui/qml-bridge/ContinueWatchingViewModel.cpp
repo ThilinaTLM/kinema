@@ -4,29 +4,19 @@
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 
 #include "controllers/HistoryController.h"
-#include "ui/qml-bridge/DiscoverSectionModel.h"
+#include "ui/qml-bridge/LibraryRailModel.h"
 
 #include <KLocalizedString>
+
+#include <QtGlobal>
 
 namespace kinema::ui::qml {
 
 namespace {
 
-/// Build a `DiscoverItem` view of a `HistoryEntry`. The rail's
-/// delegate reads only title / poster / kind, so non-display fields
-/// stay zeroed.
-domain::DiscoverItem itemFromHistory(const domain::HistoryEntry& e)
-{
-    domain::DiscoverItem it;
-    it.kind = e.key.kind;
-    it.title = e.seriesTitle.isEmpty() ? e.title : e.seriesTitle;
-    it.poster = e.poster;
-    return it;
-}
-
-/// Episode badge string for a series entry: "S01E02" (zero-padded).
-/// Returns an empty string for movies or entries without season/episode.
-QString episodeSubtitle(const domain::HistoryEntry& e)
+/// Episode designator "S01E02" (zero-padded) for a series row.
+/// Empty for movies or rows missing season/episode.
+QString episodeCode(const domain::HistoryEntry& e)
 {
     if (e.key.kind != domain::MediaKind::Series
         || !e.key.season.has_value() || !e.key.episode.has_value()) {
@@ -37,24 +27,60 @@ QString episodeSubtitle(const domain::HistoryEntry& e)
         .arg(*e.key.episode, 2, 10, QLatin1Char('0'));
 }
 
-/// Continue-Watching subtitle line: "1080p — Release.Name", or the
-/// release name alone, or the bare quality label as a last resort.
-/// Mirrors `ui::ContinueWatchingSection::lastReleaseLine` so visual
-/// parity with the legacy widget surface is preserved during the
-/// migration.
-QString lastReleaseLine(const domain::HistoryStreamRef& ref)
+/// Build the secondary text line for an `EpisodeRailCard` row.
+/// Series rows render `S01E02 · Episode title` (or just `S01E02`
+/// when the episode title is empty). Movie rows have no secondary
+/// line so the meta block collapses to two lines, matching how
+/// Ready to Watch handles movies.
+QString secondaryLineFor(const domain::HistoryEntry& e)
 {
-    if (ref.isEmpty()) {
+    const auto code = episodeCode(e);
+    if (code.isEmpty()) {
         return {};
     }
-    if (!ref.resolution.isEmpty() && !ref.releaseName.isEmpty()) {
-        return ref.resolution + QStringLiteral(" \u2014 ")
-            + ref.releaseName;
+    if (e.episodeTitle.isEmpty()) {
+        return code;
     }
-    if (!ref.releaseName.isEmpty()) {
-        return ref.releaseName;
+    return i18nc("@info library rail, episode code dot title",
+        "%1 \u00b7 %2", code, e.episodeTitle);
+}
+
+/// Build the tertiary text line ("Resume from 42%") when the entry
+/// has positive playback progress. Empty otherwise — the card hides
+/// empty meta lines.
+QString tertiaryLineFor(double progressFraction)
+{
+    if (!(progressFraction > 0.0)) {
+        return {};
     }
-    return ref.qualityLabel;
+    const int percent = qRound(
+        qBound(0.0, progressFraction, 1.0) * 100.0);
+    return i18nc("@info continue-watching, resume percent",
+        "Resume from %1%", percent);
+}
+
+LibraryRailRow rowFromHistory(const domain::HistoryEntry& e)
+{
+    LibraryRailRow row;
+    row.kind = e.key.kind;
+    row.imdbId = e.key.imdbId;
+    row.season = e.key.season;
+    row.episode = e.key.episode;
+    row.title = e.seriesTitle.isEmpty() ? e.title : e.seriesTitle;
+    row.posterUrl = e.poster.toString();
+    // `backdrop_url` is captured at play time (see
+    // `HistoryController::onPlayStarting`). When present, the
+    // EpisodeRailCard renders the 16:9 backdrop natively. Pre-v9
+    // history rows / external plays without a backdrop fall through
+    // to the letterboxed-poster path. `thumbnailUrl` stays empty
+    // because Continue Watching points at a parent title (the same
+    // surface the user resumed), not a specific episode still.
+    row.backdropUrl = e.backdrop.toString();
+    row.primaryLine = row.title;
+    row.secondaryLine = secondaryLineFor(e);
+    row.progress = qBound(0.0, e.progressFraction(), 1.0);
+    row.tertiaryLine = tertiaryLineFor(e.progressFraction());
+    return row;
 }
 
 } // namespace
@@ -63,8 +89,7 @@ ContinueWatchingViewModel::ContinueWatchingViewModel(
     controllers::HistoryController* history, QObject* parent)
     : QObject(parent)
     , m_history(history)
-    , m_model(new DiscoverSectionModel(
-          i18nc("@label discover row", "Continue Watching"), this))
+    , m_model(new LibraryRailModel(this))
 {
     if (m_history) {
         connect(m_history,
@@ -87,24 +112,12 @@ void ContinueWatchingViewModel::refresh()
 
 void ContinueWatchingViewModel::rebuildModel()
 {
-    QList<domain::DiscoverItem> items;
-    QList<double> progress;
-    QStringList releases;
-    QStringList episodeSubs;
-    items.reserve(m_entries.size());
-    progress.reserve(m_entries.size());
-    releases.reserve(m_entries.size());
-    episodeSubs.reserve(m_entries.size());
+    QList<LibraryRailRow> rows;
+    rows.reserve(m_entries.size());
     for (const auto& e : m_entries) {
-        items.append(itemFromHistory(e));
-        progress.append(e.progressFraction());
-        releases.append(lastReleaseLine(e.lastStream));
-        episodeSubs.append(episodeSubtitle(e));
+        rows.append(rowFromHistory(e));
     }
-    m_model->setItems(std::move(items));
-    m_model->setProgressList(std::move(progress));
-    m_model->setLastReleaseList(std::move(releases));
-    m_model->setEpisodeSubtitleList(std::move(episodeSubs));
+    m_model->setRows(std::move(rows));
 
     const bool nowEmpty = m_entries.isEmpty();
     if (nowEmpty != m_lastEmpty) {

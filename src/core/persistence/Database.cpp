@@ -486,6 +486,19 @@ bool Database::applyMigration(int toVersion)
             QStringLiteral(
                 "DROP TABLE IF EXISTS download_items"),
         });
+    case 9:
+        // Capture a 16:9 backdrop URL on every play so the
+        // Continue Watching rail can render proper widescreen
+        // artwork in `EpisodeRailCard` instead of letterboxing
+        // the 2:3 poster. Existing rows default to empty until
+        // the user resumes / replays them, at which point
+        // `HistoryController::onPlayStarting` repopulates the
+        // column from the detail VM's `m_backdropUrl`.
+        return runAll(9, {
+            QStringLiteral(
+                "ALTER TABLE history "
+                "ADD COLUMN backdrop_url TEXT NOT NULL DEFAULT ''"),
+        });
     default:
         qCWarning(KINEMA_DB)
             << "Database: no migration registered for version"

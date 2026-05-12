@@ -84,6 +84,11 @@ struct HistoryEntry {
     QString seriesTitle;    ///< empty for movies
     QString episodeTitle;   ///< empty for movies
     QUrl poster;
+    /// 16:9 backdrop URL for the parent title. Captured at play time
+    /// from the detail VM so the Continue Watching rail can render
+    /// proper widescreen artwork in `EpisodeRailCard`'s 16:9 frame
+    /// instead of letterboxing the 2:3 poster.
+    QUrl backdrop;
     double positionSec = 0.0;
     double durationSec = 0.0;
     bool finished = false;
@@ -119,6 +124,10 @@ struct PlaybackContext {
     QString seriesTitle;
     QString episodeTitle;
     QUrl poster;
+    /// 16:9 backdrop URL for the parent title. Threaded from the
+    /// detail VM into `HistoryController::onPlayStarting` so the
+    /// history row persists it for the Continue Watching rail.
+    QUrl backdrop;
     HistoryStreamRef streamRef;
     std::optional<qint64> resumeSeconds;
 };

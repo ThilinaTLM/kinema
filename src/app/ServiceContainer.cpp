@@ -232,8 +232,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_discoverVm = new ui::qml::DiscoverViewModel(m_tmdb, m_tokenCtrl, a);
     m_continueWatchingVm
         = new ui::qml::ContinueWatchingViewModel(m_historyCtrl, a);
-    m_libraryVm = new ui::qml::LibraryViewModel(m_libraryCtrl, m_watchedCtrl,
-        m_settings.library(), a);
+    m_libraryVm = new ui::qml::LibraryViewModel(m_libraryCtrl, m_watchedCtrl, a);
     m_searchVm = new ui::qml::SearchViewModel(m_cinemeta,
         m_settings.search(), a);
     m_browseVm = new ui::qml::BrowseViewModel(m_tmdb, m_settings.browse(), a);

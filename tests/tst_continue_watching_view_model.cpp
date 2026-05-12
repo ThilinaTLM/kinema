@@ -7,7 +7,7 @@
 #include "core/persistence/Database.h"
 #include "core/persistence/HistoryStore.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
-#include "ui/qml-bridge/DiscoverSectionModel.h"
+#include "ui/qml-bridge/LibraryRailModel.h"
 
 #include <KSharedConfig>
 
@@ -26,7 +26,7 @@ using kinema::controllers::HistoryController;
 using kinema::core::Database;
 using kinema::core::HistoryStore;
 using kinema::ui::qml::ContinueWatchingViewModel;
-using kinema::ui::qml::DiscoverSectionModel;
+using kinema::ui::qml::LibraryRailModel;
 
 namespace {
 
@@ -39,6 +39,8 @@ HistoryEntry makeMovieEntry(const QString& imdb, double pos,
     e.title = QStringLiteral("Movie ") + imdb;
     e.poster = QUrl(QStringLiteral("https://example.com/") + imdb
         + QStringLiteral(".jpg"));
+    e.backdrop = QUrl(QStringLiteral("https://example.com/") + imdb
+        + QStringLiteral("-backdrop.jpg"));
     e.positionSec = pos;
     e.durationSec = dur;
     e.lastWatchedAt = QDateTime::currentDateTimeUtc();
@@ -119,23 +121,32 @@ private Q_SLOTS:
         QCOMPARE(vm.model()->rowCount(), 1);
         QCOMPARE(emptySpy.count(), 1);
 
-        // Display fields surface through the section model with named
-        // roles.
-        const auto* item = vm.model()->itemAt(0);
-        QVERIFY(item != nullptr);
-        QCOMPARE(item->title, QStringLiteral("Movie tt1000001"));
+        // Display fields surface through the LibraryRailModel.
+        const auto* row = vm.model()->at(0);
+        QVERIFY(row != nullptr);
+        QCOMPARE(row->title, QStringLiteral("Movie tt1000001"));
+        QCOMPARE(row->primaryLine, QStringLiteral("Movie tt1000001"));
+        // Movies have no secondary line (matches Ready to Watch's
+        // movie handling): the meta block collapses to two lines.
+        QVERIFY(row->secondaryLine.isEmpty());
 
         // Progress overlay reflects the entry's position / duration.
-        const auto progressIdx = vm.model()->index(0);
-        const auto progress = vm.model()->data(progressIdx,
-            DiscoverSectionModel::ProgressRole).toDouble();
+        const auto idx = vm.model()->index(0);
+        const auto progress = vm.model()->data(idx,
+            LibraryRailModel::ProgressRole).toDouble();
         QCOMPARE(progress, 0.1);
 
-        // Last-release subtitle line: "1080p — Release.Name".
-        const auto release = vm.model()->data(progressIdx,
-            DiscoverSectionModel::LastReleaseRole).toString();
-        QVERIFY(release.contains(QStringLiteral("1080p")));
-        QVERIFY(release.contains(QStringLiteral("Release.Name")));
+        // Tertiary line: "Resume from 10%" for an in-progress entry.
+        const auto tertiary = vm.model()->data(idx,
+            LibraryRailModel::TertiaryLineRole).toString();
+        QVERIFY(tertiary.contains(QStringLiteral("10")));
+
+        // Backdrop captured at play time round-trips through the
+        // store into the rail row so `EpisodeRailCard` can render a
+        // proper 16:9 frame instead of letterboxing the poster.
+        const auto backdrop = vm.model()->data(idx,
+            LibraryRailModel::BackdropUrlRole).toString();
+        QVERIFY(backdrop.contains(QStringLiteral("-backdrop.jpg")));
     }
 
     void resumeForwardsTheRightEntry()

@@ -325,6 +325,35 @@ void ShellViewModel::wireNavigationRouting()
         this, &ShellViewModel::openSeriesDetail);
     connect(libraryVm, &LibraryViewModel::openSeriesEpisodeRequested,
         this, &ShellViewModel::openSeriesDetailAt);
+    // Resume-rail activations: load the matching detail VM as the
+    // streams backing context, then push `StreamsPage` directly.
+    // Mirrors the Continue Watching "Streams" action in shape.
+    connect(libraryVm, &LibraryViewModel::openMovieStreamsRequested,
+        this, [this](const QString& imdbId, const QString& /*title*/) {
+            auto* mv = m_services.movieDetailVm();
+            if (!mv || imdbId.isEmpty()) {
+                return;
+            }
+            mv->clear();
+            mv->load(imdbId);
+            Q_EMIT showStreamsRequested(mv);
+        });
+    connect(libraryVm,
+        &LibraryViewModel::openSeriesEpisodeStreamsRequested, this,
+        [this](const QString& imdbId, const QString& title,
+            int season, int episode) {
+            auto* sv = m_services.seriesDetailVm();
+            if (!sv || imdbId.isEmpty() || season <= 0
+                || episode <= 0) {
+                // Fall back to the detail page if anything is
+                // missing -- safer than dropping the click.
+                openSeriesDetailAt(imdbId, title, season, episode);
+                return;
+            }
+            sv->clear();
+            sv->loadAt(imdbId, season, episode);
+            Q_EMIT showStreamsRequested(sv);
+        });
 
     // Discover navigation routing. "Show all" forwards into the
     // Browse VM via a typed (kind, sort) preset and asks the shell

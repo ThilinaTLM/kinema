@@ -9,31 +9,19 @@ import org.kde.kirigamiaddons.formcard as FormCard
 
 import dev.tlmtech.kinema.app
 
-// Library page shell. Two views, switched in-place by a Smart switch
-// sitting next to the page title:
+// Library page. Browse-style filterable poster grid of every
+// saved title. Filter axes (Kind / Status / Genres / Sort) live
+// in the header strip; date window / minimum rating / hide-
+// watched move into an advanced dialog reachable from the header.
 //
-//   * Smart \u2014 horizontal rails (Up Next / Airing Soon /
-//     Recently Added). No filter chrome. Read-only browse surface
-//     focused on "what to do tonight". Title reads "Smart Library".
-//   * List  \u2014 Browse-style filterable grid: Kind / Status /
-//     Genres / Sort dropdowns in the header, advanced dialog for
-//     date window / min rating / hide watched. Title reads
-//     "Library".
-//
-// The toggle state is persisted via `config::LibrarySettings`
-// (KConfig group `[Library]`, key `smartMode`, default true) and
-// surfaced through `LibraryViewModel::smartMode`. The page reads/
-// writes that property exclusively \u2014 there is no in-memory
-// mirror to keep in sync.
+// The "what to watch next" surface (Resume / Airing Soon /
+// Recently Added rails) is a separate top-level page,
+// `UpNextPage.qml`. Both pages share `LibraryViewModel`.
 Kirigami.Page {
     id: page
 
     objectName: "library"
-    // Title morphs with the Smart toggle so the switch needs no
-    // separate label \u2014 the title itself communicates the mode.
-    title: libraryVm.smartMode
-        ? i18nc("@title:window", "Smart Library")
-        : i18nc("@title:window", "Library")
+    title: i18nc("@title:window", "Library")
 
     leftPadding: 0
     rightPadding: 0
@@ -47,9 +35,7 @@ Kirigami.Page {
             icon.color: AppIcons.foreground
             text: i18nc("@action:button reset library filters",
                 "Clear filters")
-            // Only relevant in List mode; hidden in Smart since
-            // Smart has no filter axes.
-            visible: !libraryVm.smartMode && libraryVm.filtersActive
+            visible: libraryVm.filtersActive
             displayHint: Kirigami.DisplayHint.IconOnly
             onTriggered: libraryVm.resetFilters()
         },
@@ -112,7 +98,7 @@ Kirigami.Page {
         }
     }
 
-    // ---- advanced filters dialog (List mode only) --------------
+    // ---- advanced filters dialog -------------------------------
     Kirigami.Dialog {
         id: libraryAdvancedDialog
         title: i18nc("@title:dialog library advanced filters",
@@ -185,42 +171,20 @@ Kirigami.Page {
         }
     }
 
-    // ---- header: title + mode toggle + filter row ---------------
+    // ---- header: title + filter row -----------------------------
     header: PageHeaderBar {
         id: filterBar
         title: page.title
         pageActions: page.actions
         visible: !libraryVm.libraryEmpty
-        advancedFiltersDialog: !libraryVm.smartMode
-            ? libraryAdvancedDialog : null
+        advancedFiltersDialog: libraryAdvancedDialog
         advancedFilterCount:
             (libraryVm.dateWindow !== LibraryViewModel.DateWindowAny ? 1 : 0)
             + (libraryVm.minRatingPct > 0 ? 1 : 0)
             + (libraryVm.hideWatched ? 1 : 0)
 
-        // ---- Smart toggle, left-aligned -------------------------
-        // Bare switch: the page title ("Smart Library" / "Library")
-        // is the visible label. `onToggled` (not `onCheckedChanged`)
-        // keeps the binding loop-free if `smartMode` is ever set
-        // programmatically.
-        QQC2.Switch {
-            Layout.alignment: Qt.AlignVCenter
-            checked: libraryVm.smartMode
-            onToggled: libraryVm.smartMode = checked
-            QQC2.ToolTip.text: i18nc("@info:tooltip",
-                "Toggle smart library view")
-            QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-        }
-
-        // Spacer pushes the filter widgets to the right.
-        Item { Layout.fillWidth: true }
-
-        // ---- List-mode filter widgets ---------------------------
-        // Hidden in Smart mode so the bar stays uncluttered.
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
-            visible: !libraryVm.smartMode
             axisLabel: i18nc("@action:button library filter", "Kind")
             icon.source: AppIcons.url("clapperboard")
             active: libraryVm.kind !== LibraryViewModel.KindFilter.All
@@ -237,7 +201,6 @@ Kirigami.Page {
         }
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
-            visible: !libraryVm.smartMode
             axisLabel: i18nc("@action:button library filter", "Status")
             icon.source: AppIcons.url("circle-check")
             active: libraryVm.status !== LibraryViewModel.StatusFilter.All
@@ -258,7 +221,6 @@ Kirigami.Page {
         }
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
-            visible: !libraryVm.smartMode
             axisLabel: i18nc("@action:button library filter", "Genres")
             icon.source: AppIcons.url("tags")
             multiSelect: true
@@ -281,7 +243,6 @@ Kirigami.Page {
         }
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
-            visible: !libraryVm.smartMode
             axisLabel: i18nc("@action:button library sort", "Sort")
             icon.source: AppIcons.url("arrow-up-down")
             active: libraryVm.sort !== LibraryViewModel.SortMode.RecentlyAdded
@@ -315,29 +276,77 @@ Kirigami.Page {
             + "Library.")
     }
 
-    // ---- body: StackLayout switching Smart \u2194 List ---------
-    // StackLayout sizes its children to its own size, but only
-    // when they declare `Layout.fillWidth` / `Layout.fillHeight`.
-    // Without the explicit bindings, plain `Item` and `Flickable`
-    // children fall back to their (zero) implicit size and nothing
-    // renders.
-    StackLayout {
-        anchors.fill: parent
-        visible: !libraryVm.libraryEmpty
-        currentIndex: libraryVm.smartMode ? 0 : 1
-
-        LibrarySmartView {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            vm: libraryVm
+    // ---- "no matches" placeholder (filters hid everything) -----
+    Kirigami.PlaceholderMessage {
+        anchors.centerIn: parent
+        width: Math.min(parent.width - Theme.pageWideMargin * 2,
+            Theme.placeholderMaxWidth)
+        visible: !libraryVm.libraryEmpty && libraryVm.empty
+        icon.source: AppIcons.url("search")
+        icon.color: AppIcons.foreground
+        text: i18nc("@info placeholder", "No matches")
+        explanation: i18nc("@info placeholder",
+            "Nothing in your Library matches these filters. Try "
+            + "clearing some.")
+        helpfulAction: Kirigami.Action {
+            icon.source: AppIcons.url("eraser")
+            icon.color: AppIcons.foreground
+            text: i18nc("@action:button", "Reset filters")
+            onTriggered: libraryVm.resetFilters()
         }
+    }
 
-        LibraryListView {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            vm: libraryVm
-            onRemoveRequested: (row, title) =>
-                removeDialog.openFor(row, title)
+    // ---- body: filterable poster grid --------------------------
+    GridView {
+        id: grid
+
+        anchors.fill: parent
+        visible: !libraryVm.libraryEmpty && !libraryVm.empty
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        cacheBuffer: cellHeight * 2
+
+        model: libraryVm.model
+
+        leftMargin: Theme.pageMargin
+        rightMargin: Theme.pageMargin
+        topMargin: Theme.pageMargin
+        bottomMargin: Theme.pageBottomSpacing
+
+        readonly property int targetCellWidth:
+            Theme.posterMin + Kirigami.Units.largeSpacing
+        readonly property int availableWidth: Math.max(0,
+            width - leftMargin - rightMargin)
+        readonly property int columns: Math.max(1,
+            Math.floor(availableWidth / targetCellWidth))
+        readonly property int cellInset: Kirigami.Units.smallSpacing
+
+        cellWidth: Math.floor(availableWidth / columns)
+        cellHeight: Math.round((cellWidth - cellInset * 2) * 1.5)
+            + Kirigami.Theme.defaultFont.pixelSize * 4
+
+        delegate: Item {
+            width: grid.cellWidth
+            height: grid.cellHeight
+
+            LibraryCard {
+                anchors.fill: parent
+                anchors.margins: grid.cellInset
+                posterUrl: model.posterUrl !== undefined
+                    ? model.posterUrl : ""
+                title: model.title !== undefined ? model.title : ""
+                subtitle: model.subtitle !== undefined ? model.subtitle : ""
+                rating: (model.rating !== undefined && model.rating !== null)
+                    ? model.rating : -1
+                progress: model.progress !== undefined ? model.progress : -1
+                watched: model.watched !== undefined ? model.watched : false
+                upcoming: model.upcoming !== undefined ? model.upcoming : false
+                onClicked: libraryVm.activate(index)
+                onRemoveRequested: removeDialog.openFor(index,
+                    model.title !== undefined ? model.title : "")
+                onToggleWatchedRequested: libraryVm.toggleWatched(index)
+            }
         }
     }
 }

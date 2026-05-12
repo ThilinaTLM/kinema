@@ -19,7 +19,10 @@ import dev.tlmtech.kinema.app
 //                       "poster" (2:3 poster). Up Next + Airing
 //                       Soon use thumbnails; Recently Added uses
 //                       posters.
-//   * `signal itemActivated(int row)`
+//   * `signal itemActivated(int row)`         — left-click / Enter
+//   * `signal contextMenuRequested(int row)`  — right-click (opt-in;
+//                                              Continue Watching uses
+//                                              this to surface its menu)
 //
 // Self-hides via `visible: !rail.model || rail.model.empty` on the
 // caller side. All Library rails share the same outer left/right
@@ -33,6 +36,7 @@ ColumnLayout {
     property string artworkShape: "thumbnail"
 
     signal itemActivated(int row)
+    signal contextMenuRequested(int row)
 
     // Per-rail vertical structure. Header to ListView spacing is
     // `inlineSpacing`; outer rail-to-rail spacing is owned by the
@@ -100,6 +104,7 @@ ColumnLayout {
             progress: model.progress !== undefined ? model.progress : -1
 
             onClicked: rail.itemActivated(index)
+            onRightClicked: rail.contextMenuRequested(index)
         }
     }
 

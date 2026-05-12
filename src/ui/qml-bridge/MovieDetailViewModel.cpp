@@ -620,6 +620,7 @@ domain::PlaybackContext MovieDetailViewModel::currentContext() const
     ctx.key.imdbId = m_imdbId;
     ctx.title = m_title;
     ctx.poster = QUrl(m_posterUrl);
+    ctx.backdrop = QUrl(m_backdropUrl);
     return ctx;
 }
 

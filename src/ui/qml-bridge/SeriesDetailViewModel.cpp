@@ -922,6 +922,7 @@ domain::PlaybackContext SeriesDetailViewModel::currentContext() const
         ? m_selectedEpisodeLabel
         : m_title;
     ctx.poster = QUrl(m_posterUrl);
+    ctx.backdrop = QUrl(m_backdropUrl);
     return ctx;
 }
 

@@ -19,7 +19,7 @@ import dev.tlmtech.kinema.app
 //   * a thin progress bar along the poster's bottom edge for
 //     in-progress titles (driven by the frame's built-in overlay),
 //   * a right-click context menu for Open / toggle Watched / Remove
-//     from Library, mirroring `ProgressPosterCard`.
+//     from Library.
 //
 // No more hover-revealed kebab button — the menu is accessible via
 // right-click everywhere card-style UIs in the app use it.
@@ -126,7 +126,7 @@ Item {
     }
 
     // Click + hover + right-click handling, mirroring the pattern
-    // used by `ProgressPosterCard`.
+    // used by the Continue Watching rail card.
     MouseArea {
         id: hoverArea
         anchors.fill: parent

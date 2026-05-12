@@ -25,6 +25,7 @@ domain::HistoryEntry makeMovieEntry(const QString& imdb, double pos,
     e.key.imdbId = imdb;
     e.title = QStringLiteral("Movie ") + imdb;
     e.poster = QUrl(QStringLiteral("https://example.com/") + imdb + QStringLiteral(".jpg"));
+    e.backdrop = QUrl(QStringLiteral("https://example.com/") + imdb + QStringLiteral("-backdrop.jpg"));
     e.positionSec = pos;
     e.durationSec = dur;
     e.lastWatchedAt = watched;
@@ -197,6 +198,10 @@ private Q_SLOTS:
         QCOMPARE(got->lastStream.releaseName,
             QStringLiteral("Release.tt1000001"));
         QVERIFY(!got->finished);
+        // Backdrop round-trips through the v9 column so the
+        // Continue Watching rail can render proper 16:9 artwork.
+        QCOMPARE(got->backdrop.toString(),
+            QStringLiteral("https://example.com/tt1000001-backdrop.jpg"));
     }
 
     // ---- Progress-only update preserves the stream ref ------------------
@@ -265,6 +270,7 @@ private Q_SLOTS:
         }
         QVERIFY(columns.contains(QStringLiteral("audio_lang")));
         QVERIFY(columns.contains(QStringLiteral("sub_lang")));
+        QVERIFY(columns.contains(QStringLiteral("backdrop_url")));
 
         core::HistoryStore store(db);
         const auto got = store.find(legacy.key);

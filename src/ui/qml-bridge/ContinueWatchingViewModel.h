@@ -4,7 +4,7 @@
 #pragma once
 
 #include "domain/PlaybackContext.h"
-#include "ui/qml-bridge/DiscoverSectionModel.h"
+#include "ui/qml-bridge/LibraryRailModel.h"
 
 #include <QList>
 #include <QObject>
@@ -18,16 +18,17 @@ namespace kinema::ui::qml {
 /**
  * View-model behind `ContinueWatchingRail.qml`. Wraps
  * `controllers::HistoryController` so QML never sees `HistoryEntry`
- * directly — it walks a `DiscoverSectionModel` row by row instead,
- * consistent with the other Discover rails.
+ * directly — it exposes a `LibraryRailModel`, the same model type
+ * the other Up Next rails use, so the rail can render with the
+ * shared `EpisodeRailCard` chrome.
  *
  * Re-pulls from the controller whenever `HistoryController::changed()`
  * fires (post-record / post-remove); the rail collapses when empty
  * via the `empty` property.
  *
  * Action signals (`resumeRequested`, `detailRequested`,
- * `streamsRequested`, `removeRequested`) are forwarded from
- * `MainController::buildCoreServices`. Each delivers the original
+ * `streamsRequested`, `removeRequested`) are forwarded by
+ * `ShellViewModel::wireNavigationRouting`. Each delivers the original
  * `domain::HistoryEntry` so the receiver has the full record (key,
  * stored stream ref, remembered languages) without re-querying the
  * store.
@@ -35,7 +36,7 @@ namespace kinema::ui::qml {
 class ContinueWatchingViewModel : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(DiscoverSectionModel* model READ model CONSTANT)
+    Q_PROPERTY(LibraryRailModel* model READ model CONSTANT)
     Q_PROPERTY(bool empty READ empty NOTIFY emptyChanged)
 
 public:
@@ -43,7 +44,7 @@ public:
         controllers::HistoryController* history,
         QObject* parent = nullptr);
 
-    DiscoverSectionModel* model() const noexcept { return m_model; }
+    LibraryRailModel* model() const noexcept { return m_model; }
     bool empty() const noexcept { return m_entries.isEmpty(); }
 
     /// Test/inspector accessor — phase 03 uses this only in the unit
@@ -81,7 +82,7 @@ private:
     void rebuildModel();
 
     controllers::HistoryController* m_history;
-    DiscoverSectionModel* m_model;
+    LibraryRailModel* m_model;
     QList<domain::HistoryEntry> m_entries;
     bool m_lastEmpty = true;
 };

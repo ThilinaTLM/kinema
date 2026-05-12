@@ -39,7 +39,7 @@ domain::MediaKind mediaKindFromDb(const QString& s)
 /// hydrate() MUST select these columns in this exact order.
 constexpr const char* kSelectColumns =
     "key, kind, imdb_id, season, episode, "
-    "title, series_title, episode_title, poster_url, "
+    "title, series_title, episode_title, poster_url, backdrop_url, "
     "position_sec, duration_sec, finished, last_watched_at, "
     "stream_info_hash, stream_release_name, stream_resolution, "
     "stream_quality_label, stream_size_bytes, stream_provider, "
@@ -63,20 +63,24 @@ domain::HistoryEntry hydrate(const QSqlQuery& q)
     if (!posterStr.isEmpty()) {
         e.poster = QUrl(posterStr);
     }
-    e.positionSec = q.value(9).toDouble();
-    e.durationSec = q.value(10).toDouble();
-    e.finished = q.value(11).toInt() != 0;
-    e.lastWatchedAt = parseIsoUtc(q.value(12).toString());
-    e.lastStream.infoHash = q.value(13).toString();
-    e.lastStream.releaseName = q.value(14).toString();
-    e.lastStream.resolution = q.value(15).toString();
-    e.lastStream.qualityLabel = q.value(16).toString();
-    if (!q.value(17).isNull()) {
-        e.lastStream.sizeBytes = q.value(17).toLongLong();
+    const auto backdropStr = q.value(9).toString();
+    if (!backdropStr.isEmpty()) {
+        e.backdrop = QUrl(backdropStr);
     }
-    e.lastStream.provider = q.value(18).toString();
-    e.rememberedAudioLang = q.value(19).toString();
-    e.rememberedSubtitleLang = q.value(20).toString();
+    e.positionSec = q.value(10).toDouble();
+    e.durationSec = q.value(11).toDouble();
+    e.finished = q.value(12).toInt() != 0;
+    e.lastWatchedAt = parseIsoUtc(q.value(13).toString());
+    e.lastStream.infoHash = q.value(14).toString();
+    e.lastStream.releaseName = q.value(15).toString();
+    e.lastStream.resolution = q.value(16).toString();
+    e.lastStream.qualityLabel = q.value(17).toString();
+    if (!q.value(18).isNull()) {
+        e.lastStream.sizeBytes = q.value(18).toLongLong();
+    }
+    e.lastStream.provider = q.value(19).toString();
+    e.rememberedAudioLang = q.value(20).toString();
+    e.rememberedSubtitleLang = q.value(21).toString();
     return e;
 }
 
@@ -227,14 +231,14 @@ void HistoryStore::record(const domain::HistoryEntry& entry)
     q.prepare(QStringLiteral(R"(
         INSERT INTO history (
             key, kind, imdb_id, season, episode,
-            title, series_title, episode_title, poster_url,
+            title, series_title, episode_title, poster_url, backdrop_url,
             position_sec, duration_sec, finished, last_watched_at,
             stream_info_hash, stream_release_name, stream_resolution,
             stream_quality_label, stream_size_bytes, stream_provider,
             audio_lang, sub_lang
         ) VALUES (
             ?, ?, ?, ?, ?,
-            ?, ?, ?, ?,
+            ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?,
             ?, ?, ?,
@@ -256,6 +260,9 @@ void HistoryStore::record(const domain::HistoryEntry& entry)
             poster_url = CASE WHEN excluded.poster_url != ''
                               THEN excluded.poster_url
                               ELSE history.poster_url END,
+            backdrop_url = CASE WHEN excluded.backdrop_url != ''
+                                THEN excluded.backdrop_url
+                                ELSE history.backdrop_url END,
             position_sec = excluded.position_sec,
             duration_sec = CASE WHEN excluded.duration_sec > 0
                                 THEN excluded.duration_sec
@@ -297,6 +304,7 @@ void HistoryStore::record(const domain::HistoryEntry& entry)
     q.addBindValue(nullSafe(e.seriesTitle));
     q.addBindValue(nullSafe(e.episodeTitle));
     q.addBindValue(nullSafe(e.poster.isValid() ? e.poster.toString() : QString()));
+    q.addBindValue(nullSafe(e.backdrop.isValid() ? e.backdrop.toString() : QString()));
     q.addBindValue(e.positionSec);
     q.addBindValue(e.durationSec);
     q.addBindValue(e.finished ? 1 : 0);

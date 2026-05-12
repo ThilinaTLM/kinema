@@ -9,7 +9,7 @@ import org.kde.kirigami as Kirigami
 import dev.tlmtech.kinema.app
 
 // "Watched" / "Upcoming" pill used on Library cards. Mirrors the
-// translucent pill styling of `RatingChip` and `EpisodeChip` so the
+// translucent pill styling of `RatingChip` so the
 // three overlay chips read as a coherent family.
 //
 // The chip self-hides when both flags are false. `watched` wins

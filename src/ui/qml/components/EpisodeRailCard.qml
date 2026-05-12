@@ -12,6 +12,11 @@ import dev.tlmtech.kinema.app
 // and `LibraryCard` — `KinemaArtworkFrame` owns the shadow lift,
 // focus ring, hover tint, and rounded-corner clipping.
 //
+// Emits two activation signals: `clicked()` for left-click /
+// keyboard activation, and `rightClicked()` for the optional
+// right-click affordance used by Continue Watching to surface its
+// context menu. Other consumers can ignore `rightClicked()`.
+//
 // Two artwork modes, picked by `artworkAspect`:
 //
 //   * 9 / 16  — wide episode still cropped into the frame,
@@ -53,6 +58,7 @@ Item {
     property string fallbackIcon: "tv"
 
     signal clicked()
+    signal rightClicked()
 
     /// Artwork resolution step:
     ///   0 — try `thumbnailUrl` (cropped 16:9 episode still)
@@ -202,6 +208,13 @@ Item {
     TapHandler {
         acceptedButtons: Qt.LeftButton
         onTapped: card.clicked()
+    }
+    // Right-click is opt-in: consumers that want a context menu
+    // (Continue Watching) connect to `rightClicked()`; the other
+    // rails leave it unconnected and right-click is a no-op.
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: card.rightClicked()
     }
     HoverHandler {
         id: hoverHandler

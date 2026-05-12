@@ -16,10 +16,6 @@
 
 #include <optional>
 
-namespace kinema::config {
-class LibrarySettings;
-}
-
 namespace kinema::controllers {
 class LibraryController;
 class WatchedController;
@@ -27,11 +23,15 @@ class WatchedController;
 
 namespace kinema::ui::qml {
 
-/// Library page view-model.
+/// Library view-model. Shared by two top-level pages:
 ///
-/// Drives a single Browse-style filterable grid (see `model`) plus
-/// three smart rails (`upNextModel`, `airingSoonModel`,
-/// `comingUpModel`). Filter axes:
+///   * **Up Next** binds to the three smart rails (`upNextModel`,
+///     `airingSoonModel`, `recentlyAddedModel`).
+///   * **Library** binds to the filterable grid (`model`) and the
+///     filter properties below.
+///
+/// Entries are materialised once per `refresh()` and reused by both
+/// surfaces. Filter axes:
 ///
 ///   * `kind`         \u2014 All / Movies / Series
 ///   * `status`       \u2014 All / Continue / ToWatch / Watched / Upcoming
@@ -61,8 +61,6 @@ class LibraryViewModel : public QObject
     Q_PROPERTY(int dateWindow READ dateWindow WRITE setDateWindow NOTIFY filtersChanged)
     Q_PROPERTY(int minRatingPct READ minRatingPct WRITE setMinRatingPct NOTIFY filtersChanged)
     Q_PROPERTY(bool hideWatched READ hideWatched WRITE setHideWatched NOTIFY filtersChanged)
-
-    Q_PROPERTY(bool smartMode READ smartMode WRITE setSmartMode NOTIFY smartModeChanged)
 
     Q_PROPERTY(QVariantList availableGenres READ availableGenres NOTIFY availableGenresChanged)
     Q_PROPERTY(bool filtersActive READ filtersActive NOTIFY filtersChanged)
@@ -105,7 +103,6 @@ public:
 
     LibraryViewModel(controllers::LibraryController* library,
         controllers::WatchedController* watched,
-        config::LibrarySettings& settings,
         QObject* parent = nullptr);
     ~LibraryViewModel() override;
 
@@ -135,12 +132,6 @@ public:
     bool hideWatched() const noexcept { return m_hideWatched; }
     void setHideWatched(bool v);
 
-    /// Persisted Library page mode. `true` shows the Smart rails view
-    /// (Up Next / Airing Soon / Recently Added); `false` shows the
-    /// filterable List grid. Backed by `config::LibrarySettings`.
-    bool smartMode() const noexcept { return m_smartMode; }
-    void setSmartMode(bool v);
-
     QVariantList availableGenres() const noexcept { return m_availableGenres; }
     bool filtersActive() const noexcept;
     bool empty() const noexcept { return m_model->rowCount() == 0; }
@@ -164,10 +155,17 @@ Q_SIGNALS:
     void availableGenresChanged();
     void modelChanged();
     void libraryEmptyChanged();
-    void smartModeChanged();
     void openMovieRequested(const QString& imdbId, const QString& title);
     void openSeriesRequested(const QString& imdbId, const QString& title);
     void openSeriesEpisodeRequested(const QString& imdbId,
+        const QString& title, int season, int episode);
+    /// Resume-rail (Up Next) activations skip the detail page and
+    /// land the user directly on `StreamsPage` for the resolved
+    /// title. The shell loads the matching detail VM as a side
+    /// effect so the streams page has its backing data.
+    void openMovieStreamsRequested(const QString& imdbId,
+        const QString& title);
+    void openSeriesEpisodeStreamsRequested(const QString& imdbId,
         const QString& title, int season, int episode);
     void resumeRequested(const domain::HistoryEntry& entry);
     void statusMessage(const QString& text, int timeoutMs = 3000);
@@ -203,7 +201,6 @@ private:
 
     controllers::LibraryController* m_library {};
     controllers::WatchedController* m_watched {};
-    config::LibrarySettings* m_librarySettings {};
 
     LibraryListModel* m_model {};
     LibraryRailModel* m_upNextModel {};
@@ -221,9 +218,6 @@ private:
     int m_dateWindow = DateWindowAny;
     int m_minRatingPct = 0;
     bool m_hideWatched = false;
-
-    // Persisted view mode (mirror of LibrarySettings::smartMode).
-    bool m_smartMode = true;
 
     // Genre catalog: list of { id: int, name: QString } maps; the
     // QML reads this through the `availableGenres` property. The

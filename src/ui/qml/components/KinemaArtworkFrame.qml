@@ -7,9 +7,9 @@ import org.kde.kirigami as Kirigami
 import dev.tlmtech.kinema.app
 
 // Shared artwork chrome used by every poster/thumbnail card in the
-// app: PosterCard (Discover/Browse/Search), ProgressPosterCard
-// (Continue Watching), LibraryCard (Library list view), and
-// EpisodeRailCard (Smart library rails).
+// app: PosterCard (Discover/Browse/Search), LibraryCard (Library
+// list view), and EpisodeRailCard (Up Next rails, including
+// Continue Watching).
 //
 // What the frame owns:
 //   * a `Kirigami.ShadowedImage` rendered through a distance-field
@@ -30,8 +30,7 @@ import dev.tlmtech.kinema.app
 //     its own activation semantics so left-click vs right-click vs
 //     keyboard activation can vary,
 //   * chips and badges — exposed via the `default property alias`
-//     slot so the card composes its own RatingChip / EpisodeChip /
-//     StatusChip.
+//     slot so the card composes its own RatingChip / StatusChip.
 //
 // State (`hovered`, `focusRing`) is driven by the parent so the
 // card owns the truth about hover/focus and can combine multiple
@@ -166,7 +165,7 @@ Item {
         }
 
         // Default-property slot for card-specific overlays
-        // (RatingChip, EpisodeChip, StatusChip, kebab buttons, …).
+        // (RatingChip, StatusChip, kebab buttons, …).
         // Anchored to the image so children can position themselves
         // with anchors against the frame's edges.
         Item {

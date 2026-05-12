@@ -116,6 +116,17 @@ Kirigami.ApplicationWindow {
                 onTriggered: root.showPage("discover")
             },
             Kirigami.Action {
+                icon.source: AppIcons.url("monitor-play",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
+                text: i18nc("@action drawer entry", "Up Next")
+                checkable: true
+                checked: root.currentNavKey === "upnext"
+                onTriggered: root.showPage("upnext")
+            },
+            Kirigami.Action {
                 icon.source: AppIcons.url("library",
                     checked ? AppIcons.accentText : AppIcons.foreground)
                 icon.color: enabled
@@ -354,6 +365,9 @@ Kirigami.ApplicationWindow {
         case "discover":
             root.setTopLevelPage(discoverComp, {});
             break;
+        case "upnext":
+            root.setTopLevelPage(upNextComp, {});
+            break;
         case "library":
             root.setTopLevelPage(libraryComp, {});
             break;
@@ -375,6 +389,7 @@ Kirigami.ApplicationWindow {
     // Phase 03 brought up the Discover page; phase 04 brought up
     // Search and Browse. Detail pages remain stubbed until phase 05.
     Component { id: discoverComp; DiscoverPage { } }
+    Component { id: upNextComp;   UpNextPage   { } }
     Component { id: libraryComp;  LibraryPage  { } }
     Component { id: searchComp;   SearchPage   { } }
     Component { id: browseComp;   BrowsePage   { } }

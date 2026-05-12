@@ -12,7 +12,6 @@ set(kinema_core_SRCS
     config/CacheSettings.cpp
     config/DownloadSettings.cpp
     config/FilterSettings.cpp
-    config/LibrarySettings.cpp
     config/PlayerSettings.cpp
     api/IndexerSelector.cpp
     config/DebridSettings.cpp
@@ -338,17 +337,13 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/FilterMenuButton.qml
         ui/qml/components/KinemaArtworkFrame.qml
         ui/qml/components/LibraryCard.qml
-        ui/qml/components/LibraryListView.qml
         ui/qml/components/LibraryRail.qml
-        ui/qml/components/LibrarySmartView.qml
         ui/qml/components/MediaKindSelect.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
         ui/qml/components/PageHeaderBar.qml
         ui/qml/components/PosterCard.qml
         ui/qml/components/PosterGrid.qml
-        ui/qml/components/EpisodeChip.qml
-        ui/qml/components/ProgressPosterCard.qml
         ui/qml/components/RatingChip.qml
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
@@ -370,6 +365,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/pages/SeriesDetailPage.qml
         ui/qml/pages/StreamsPage.qml
         ui/qml/pages/SubtitlesPage.qml
+        ui/qml/pages/UpNextPage.qml
         ui/qml/pages/settings/AboutSettingsPage.qml
         ui/qml/pages/settings/ApplicationSettingsPage.qml
         ui/qml/pages/settings/DebridSettingsPage.qml
@@ -416,6 +412,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/list-video.svg
         ui/qml/icons/lucide/list-x.svg
         ui/qml/icons/lucide/minus.svg
+        ui/qml/icons/lucide/monitor-play.svg
         ui/qml/icons/lucide/palette.svg
         ui/qml/icons/lucide/pause.svg
         ui/qml/icons/lucide/pin.svg

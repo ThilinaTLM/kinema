@@ -8,16 +8,17 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Discover home: hero `Continue Watching` carousel followed by a
-// stack of TMDB-backed content rails (Trending, Popular Series,
-// Now Playing, On The Air, Top Rated Movies, Top Rated Series).
+// Discover home: a stack of TMDB-backed content rails (Trending,
+// Popular Series, Now Playing, On The Air, Top Rated Movies, Top
+// Rated Series). Activity-derived rails (Continue Watching, Ready
+// to Watch, Airing Soon, Recently Added) live on the Up Next page.
 //
 // Empty / not-configured / auth-failed: a `Kirigami.PlaceholderMessage`
 // fills the page with an "Open Settings" call-to-action — same hook
 // the legacy widget DiscoverPage exposed.
 //
-// Backed by `discoverVm` and `continueWatchingVm` context properties
-// installed on the engine by `MainController::exposeContextProperties`.
+// Backed by the `discoverVm` context property installed on the
+// engine by `MainController::exposeContextProperties`.
 Kirigami.ScrollablePage {
     id: page
 
@@ -27,7 +28,7 @@ Kirigami.ScrollablePage {
     leftPadding: 0
     rightPadding: 0
     // Keep the first rail offset consistent with the spacing
-    // between rails, so Continue Watching doesn't sit tighter to
+    // between rails, so the first section doesn't sit tighter to
     // the page header than the rest of the sections do.
     topPadding: Theme.sectionSpacing
     bottomPadding: Theme.pageBottomSpacing
@@ -72,13 +73,6 @@ Kirigami.ScrollablePage {
         width: page.width
         spacing: Theme.sectionSpacing
         visible: discoverVm.tmdbConfigured && !discoverVm.authFailed
-
-        // Continue Watching hero. Hidden when history is empty so
-        // the rest of the page reflows without an empty band.
-        ContinueWatchingRail {
-            Layout.fillWidth: true
-            visible: !continueWatchingVm.empty
-        }
 
         // TMDB rails. The Repeater iterates over `discoverVm.sections`
         // (a `QList<QObject*>` of `DiscoverSectionModel*`s) and

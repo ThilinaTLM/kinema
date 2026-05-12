@@ -3,7 +3,6 @@
 
 #include "ui/qml-bridge/LibraryViewModel.h"
 
-#include "config/LibrarySettings.h"
 #include "controllers/LibraryController.h"
 #include "controllers/WatchedController.h"
 #include "core/util/DateFormat.h"
@@ -89,17 +88,14 @@ constexpr int kRecentlyAddedLimit = 20;
 LibraryViewModel::LibraryViewModel(
     controllers::LibraryController* library,
     controllers::WatchedController* watched,
-    config::LibrarySettings& settings,
     QObject* parent)
     : QObject(parent)
     , m_library(library)
     , m_watched(watched)
-    , m_librarySettings(&settings)
     , m_model(new LibraryListModel(this))
     , m_upNextModel(new LibraryRailModel(this))
     , m_airingSoonModel(new LibraryRailModel(this))
     , m_recentlyAddedModel(new LibraryRailModel(this))
-    , m_smartMode(settings.smartMode())
 {
     if (m_library) {
         connect(m_library, &controllers::LibraryController::changed,
@@ -130,16 +126,6 @@ bool LibraryViewModel::filtersActive() const noexcept
         || m_dateWindow != DateWindowAny
         || m_minRatingPct > 0
         || m_hideWatched;
-}
-
-void LibraryViewModel::setSmartMode(bool v)
-{
-    if (m_smartMode == v) return;
-    m_smartMode = v;
-    if (m_librarySettings) {
-        m_librarySettings->setSmartMode(v);
-    }
-    Q_EMIT smartModeChanged();
 }
 
 void LibraryViewModel::setKind(KindFilter v)
@@ -287,13 +273,21 @@ void LibraryViewModel::activateRail(const QString& railId, int row)
     if (!m) return;
     const auto* r = m->at(row);
     if (!r) return;
+    const bool isUpNext = railId == QLatin1String("upNext");
     if (r->kind == domain::MediaKind::Movie) {
-        Q_EMIT openMovieRequested(r->imdbId, r->title);
+        // Resume rail: skip the detail page and go straight to
+        // streams. Airing Soon / Recently Added open the detail
+        // page as before.
+        if (isUpNext) {
+            Q_EMIT openMovieStreamsRequested(r->imdbId, r->title);
+        } else {
+            Q_EMIT openMovieRequested(r->imdbId, r->title);
+        }
         return;
     }
-    if (r->season && r->episode && railId == QLatin1String("upNext")) {
+    if (r->season && r->episode && isUpNext) {
         // Up Next episodes have aired -- jump straight into streams.
-        Q_EMIT openSeriesEpisodeRequested(
+        Q_EMIT openSeriesEpisodeStreamsRequested(
             r->imdbId, r->title, *r->season, *r->episode);
         return;
     }
@@ -515,9 +509,16 @@ void LibraryViewModel::rebuildRails()
             airingOrComing.append(std::move(row));
         }
 
-        // "Up Next" surfaces the next unwatched aired episode per
-        // series only; movies don't have a meaningful "next".
-        if (t.kind == domain::MediaKind::Series && e.nextToWatch) {
+        // "Ready to Watch" surfaces the next unwatched aired episode
+        // per series only; movies don't have a meaningful "next".
+        // The rail is dedup'd against Continue Watching: when the
+        // next-up episode already has an in-progress history entry
+        // (`e.resume` is computed against that exact episode in
+        // `buildEntries`), Continue Watching covers the row and we
+        // skip it here so the two rails never duplicate the same
+        // title.
+        if (t.kind == domain::MediaKind::Series && e.nextToWatch
+            && !e.resume.has_value()) {
             const auto& ep = *e.nextToWatch;
             LibraryRailRow row;
             row.kind = domain::MediaKind::Series;
@@ -535,17 +536,10 @@ void LibraryViewModel::rebuildRails()
                 : i18nc(
                     "@info library rail, episode code dot title",
                     "%1 \u00b7 %2", code, ep.title);
-            // Only carry resume progress when the resume *belongs to*
-            // this same episode; otherwise the bar would lie.
-            if (e.resume && e.resume->key.season == ep.season
-                && e.resume->key.episode == ep.episode) {
-                row.progress = e.resumeProgress;
-                row.tertiaryLine = i18nc(
-                    "@info library up-next, resume percent",
-                    "Resume from %1%",
-                    qRound(qBound(0.0, e.resumeProgress, 1.0)
-                        * 100.0));
-            }
+            // No resume bar / tertiary line by construction: the
+            // !e.resume.has_value() guard above guarantees there is
+            // no in-progress entry for this episode (anything with
+            // progress lives in Continue Watching instead).
             upNext.append(std::move(row));
         }
     }
