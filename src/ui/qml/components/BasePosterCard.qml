@@ -84,54 +84,66 @@ Item {
         }
     }
 
+    // Anchor-based layout (deliberately not a ColumnLayout):
+    // `QGridLayoutEngine` distributes any leftover height equally
+    // across rows when no child declares stretch, which centred
+    // both the poster and the meta block inside oversized bands
+    // and produced a visibly larger "poster ↔ title" gap on cards
+    // whose title fits on one line vs. cards whose title wraps to
+    // two. Anchors pin the poster to the top and the title block
+    // to `poster.bottom + smallSpacing`, so every poster on the
+    // page has the same height (`round(width * aspect)`) and the
+    // gap is identical regardless of title length. The unused
+    // slack on short-title cards silently sits at the bottom of
+    // the card.
+    KinemaArtworkFrame {
+        id: poster
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: Math.round(width * card.aspect)
+
+        url: card.posterUrl
+        aspect: card.aspect
+        fallbackIcon: card.fallbackIcon
+        hovered: card._hovered
+        focusRing: card._hovered || card.activeFocus
+        progress: card.progress
+    }
+
     ColumnLayout {
-        anchors.fill: parent
-        spacing: Kirigami.Units.smallSpacing
+        id: meta
+        anchors.top: poster.bottom
+        anchors.topMargin: Kirigami.Units.smallSpacing
+        anchors.left: parent.left
+        anchors.right: parent.right
+        spacing: 0
 
-        KinemaArtworkFrame {
-            id: poster
+        Kirigami.Heading {
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.round(width * card.aspect)
-
-            url: card.posterUrl
-            aspect: card.aspect
-            fallbackIcon: card.fallbackIcon
-            hovered: card._hovered
-            focusRing: card._hovered || card.activeFocus
-            progress: card.progress
+            // Natural height: 1 line for short titles, 2 lines
+            // for wrapped titles. Grid / rail callers budget the
+            // 2-line worst case in their cell / list height; the
+            // surplus on short-title cards stays below this block
+            // (out of view against the transparent card
+            // background) instead of being distributed as padding
+            // around the poster and title.
+            level: 5
+            text: card.title
+            wrapMode: Text.WordWrap
+            elide: Text.ElideRight
+            maximumLineCount: 2
+            color: Kirigami.Theme.textColor
         }
 
-        ColumnLayout {
-            id: meta
+        QQC2.Label {
             Layout.fillWidth: true
-            spacing: 0
-
-            Kirigami.Heading {
-                Layout.fillWidth: true
-                // Natural height: 1 line for short titles, 2 lines
-                // for wrapped titles. The grid's `cellHeight`
-                // already budgets for the 2-line worst case, so
-                // short-title cards just leave the slack at the
-                // bottom — keeping the title and subtitle visually
-                // glued instead of separated by an empty reserved
-                // line.
-                level: 5
-                text: card.title
-                wrapMode: Text.WordWrap
-                elide: Text.ElideRight
-                maximumLineCount: 2
-                color: Kirigami.Theme.textColor
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: card.subtitle.length > 0
-                text: card.subtitle
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                font: Kirigami.Theme.smallFont
-                color: Kirigami.Theme.disabledTextColor
-            }
+            visible: card.subtitle.length > 0
+            text: card.subtitle
+            elide: Text.ElideRight
+            maximumLineCount: 1
+            font: Kirigami.Theme.smallFont
+            color: Kirigami.Theme.disabledTextColor
         }
     }
 
