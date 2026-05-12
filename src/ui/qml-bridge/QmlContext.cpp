@@ -59,9 +59,15 @@ void registerQmlTypes()
     // route through `QML_ELEMENT` so it stays compatible with the
     // kinema_core / kinema_qml_app target split. Calling it once
     // per engine is fine; Qt deduplicates.
+    // The QML element name must be an unqualified, capitalized
+    // identifier, so for namespaced types we register under the
+    // bare class name (e.g. `settings::FooVm` -> `FooVm`).
 #define KINEMA_REGISTER_QML_TYPE(Type) \
     qmlRegisterUncreatableType<Type>("dev.tlmtech.kinema.app", 1, 0, \
         #Type, QStringLiteral(#Type " is owned by C++."))
+#define KINEMA_REGISTER_QML_TYPE_AS(Type, Name) \
+    qmlRegisterUncreatableType<Type>("dev.tlmtech.kinema.app", 1, 0, \
+        Name, QStringLiteral(Name " is owned by C++."))
 
     KINEMA_REGISTER_QML_TYPE(DiscoverSectionModel);
     KINEMA_REGISTER_QML_TYPE(ResultsListModel);
@@ -76,20 +82,21 @@ void registerQmlTypes()
     KINEMA_REGISTER_QML_TYPE(SubtitleResultsModel);
     KINEMA_REGISTER_QML_TYPE(DownloadsViewModel);
     KINEMA_REGISTER_QML_TYPE(DownloadsListModel);
-    KINEMA_REGISTER_QML_TYPE(settings::SettingsRootViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::GeneralSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::TmdbSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::RealDebridSectionViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::AllDebridSectionViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::DebridSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::IndexerSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::TorrentioSectionViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::PeerflixSectionViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::StreamsSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::PlayerSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::SubtitlesSettingsViewModel);
-    KINEMA_REGISTER_QML_TYPE(settings::TorrentStreamingSettingsViewModel);
+    KINEMA_REGISTER_QML_TYPE_AS(settings::SettingsRootViewModel, "SettingsRootViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::GeneralSettingsViewModel, "GeneralSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::TmdbSettingsViewModel, "TmdbSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::RealDebridSectionViewModel, "RealDebridSectionViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::AllDebridSectionViewModel, "AllDebridSectionViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::DebridSettingsViewModel, "DebridSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::IndexerSettingsViewModel, "IndexerSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::TorrentioSectionViewModel, "TorrentioSectionViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::PeerflixSectionViewModel, "PeerflixSectionViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::StreamsSettingsViewModel, "StreamsSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::PlayerSettingsViewModel, "PlayerSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::SubtitlesSettingsViewModel, "SubtitlesSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::TorrentStreamingSettingsViewModel, "TorrentStreamingSettingsViewModel");
 
+#undef KINEMA_REGISTER_QML_TYPE_AS
 #undef KINEMA_REGISTER_QML_TYPE
 }
 

@@ -389,6 +389,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/circle-play.svg
         ui/qml/icons/lucide/clapperboard.svg
         ui/qml/icons/lucide/clock-arrow-down.svg
+        ui/qml/icons/lucide/compass.svg
         ui/qml/icons/lucide/copy.svg
         ui/qml/icons/lucide/download.svg
         ui/qml/icons/lucide/ellipsis-vertical.svg
@@ -403,7 +404,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/grip-vertical.svg
         ui/qml/icons/lucide/headphones.svg
         ui/qml/icons/lucide/history.svg
-        ui/qml/icons/lucide/house.svg
         ui/qml/icons/lucide/info.svg
         ui/qml/icons/lucide/languages.svg
         ui/qml/icons/lucide/library.svg

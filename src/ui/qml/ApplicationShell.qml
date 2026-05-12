@@ -105,7 +105,7 @@ Kirigami.ApplicationWindow {
 
         actions: [
             Kirigami.Action {
-                icon.source: AppIcons.url("house",
+                icon.source: AppIcons.url("compass",
                     checked ? AppIcons.accentText : AppIcons.foreground)
                 icon.color: enabled
                     ? (checked ? AppIcons.accentText : AppIcons.foreground)
