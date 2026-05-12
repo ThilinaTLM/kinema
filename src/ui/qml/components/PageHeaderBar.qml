@@ -17,7 +17,7 @@ import dev.tlmtech.kinema.app
 // and the page-level actions on a single row:
 //
 //   [\u2190 back?] [Title] [\u2014 default-property filter widgets \u2014]
-//   [More filters\u2026 (N)] [page actions\u2026]
+//   [More filters (N)] [page actions\u2026]
 //
 // Caller-side shape:
 //
@@ -59,7 +59,7 @@ QQC2.ToolBar {
     // calls `open()` on the dialog.
     property var advancedFiltersDialog: null
     // Optional override for the filters button label. When empty, the
-    // default "More filters…" / "More filters" wording is used.
+    // default "More filters" wording is used.
     property string advancedFiltersButtonText: ""
     // Drives the "(N)" count in the filters button label.
     property int advancedFilterCount: 0
@@ -179,7 +179,7 @@ QQC2.ToolBar {
                 return root.advancedFiltersButtonText.length > 0
                     ? root.advancedFiltersButtonText
                     : i18nc("@action:button open advanced filters dialog",
-                        "More filters\u2026");
+                        "More filters");
             }
             onClicked: if (root.advancedFiltersDialog) {
                 root.advancedFiltersDialog.open();
