@@ -9,8 +9,8 @@ import org.kde.kirigami as Kirigami
 import dev.tlmtech.kinema.app
 
 // Cinemeta search page. The page header is a `QQC2.ToolBar` with
-// the `MediaKindSelect` (Movies / TV Series) toggle on the left
-// followed by a fill-width `Kirigami.SearchField`. The body renders
+// a `Kind ▾` filter (Movies / TV Series, same shape as the Library
+// row) followed by a fill-width `Kirigami.SearchField`. The body renders
 // one of five surfaces (idle / loading / results / empty / error)
 // chosen by `searchVm.results.state`.
 //
@@ -48,10 +48,19 @@ Kirigami.Page {
 
         Item { Layout.fillWidth: true }
 
-        MediaKindSelect {
+        FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
-            kind: searchVm.kind
-            onActivated: newKind => searchVm.kind = newKind
+            axisLabel: i18nc("@action:button search filter", "Kind")
+            icon.source: AppIcons.url("clapperboard")
+            active: searchVm.kind !== 0
+            options: [
+                { value: 0,
+                  label: i18nc("@item media kind", "Movies") },
+                { value: 1,
+                  label: i18nc("@item media kind", "TV Series") }
+            ]
+            currentValue: searchVm.kind
+            onActivated: v => searchVm.kind = v
         }
 
         Kirigami.SearchField {

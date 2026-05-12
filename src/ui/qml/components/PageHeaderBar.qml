@@ -27,7 +27,6 @@ import dev.tlmtech.kinema.app
 //       advancedFiltersDialog: filtersDlg            // optional
 //       advancedFilterCount: filtersVm.advancedActive // optional
 //
-//       MediaKindSelect { /* \u2026 */ }
 //       FilterMenuButton { /* \u2026 */ }
 //       /* default property: any QtQuick.Layouts-friendly Items */
 //   }

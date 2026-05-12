@@ -338,7 +338,6 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/KinemaArtworkFrame.qml
         ui/qml/components/LibraryCard.qml
         ui/qml/components/LibraryRail.qml
-        ui/qml/components/MediaKindSelect.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
         ui/qml/components/PageHeaderBar.qml

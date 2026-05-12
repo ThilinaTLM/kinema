@@ -12,8 +12,8 @@ import dev.tlmtech.kinema.app
 // Browse: filter-driven TMDB grid. Chrome:
 //
 //   * `header:` is a single merged `PageHeaderBar` that inlines the
-//     page title with the basic filters (`MediaKindSelect`,
-//     `Genres ▾`, `Sort ▾`) and a `More filters… (N)` button. The
+//     page title with the basic filters (`Kind ▾`, `Genres ▾`,
+//     `Sort ▾`) and a `More filters… (N)` button. The
 //     advanced dialog (`browseAdvancedDialog`) carries `Released`,
 //     `★ Min`, and the `Hide obscure` toggle — every uncommon filter
 //     lives behind that one button so the inline bar fits at narrow
@@ -161,10 +161,22 @@ Kirigami.Page {
         Item { Layout.fillWidth: true }
 
         // ---- Movies / TV Series ---------------------------------
-        MediaKindSelect {
+        // Same `FilterMenuButton` shape as the Library row's Kind
+        // filter, minus the "All" option — Browse always targets one
+        // TMDB endpoint at a time.
+        FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
-            kind: browseVm.kind
-            onActivated: newKind => browseVm.kind = newKind
+            axisLabel: i18nc("@action:button browse filter", "Kind")
+            icon.source: AppIcons.url("clapperboard")
+            active: browseVm.kind !== 0
+            options: [
+                { value: 0,
+                  label: i18nc("@item media kind", "Movies") },
+                { value: 1,
+                  label: i18nc("@item media kind", "TV Series") }
+            ]
+            currentValue: browseVm.kind
+            onActivated: v => browseVm.kind = v
         }
 
         // ---- Genres (multi-select) ------------------------------
