@@ -17,6 +17,10 @@ import dev.tlmtech.kinema.app
 // fills the page with an "Open Settings" call-to-action — same hook
 // the legacy widget DiscoverPage exposed.
 //
+// The shared `PageHeaderBar` (see `components/PageHeaderBar.qml`)
+// provides the title + page-actions strip so this page wears the same
+// chrome as Browse, Search, Library, etc.
+//
 // Backed by the `discoverVm` context property installed on the
 // engine by `MainController::exposeContextProperties`.
 Kirigami.ScrollablePage {
@@ -32,6 +36,15 @@ Kirigami.ScrollablePage {
     // the page header than the rest of the sections do.
     topPadding: Theme.sectionSpacing
     bottomPadding: Theme.pageBottomSpacing
+
+    header: PageHeaderBar {
+        title: page.title
+        pageActions: page.actions
+
+        // Right-edge alignment of page actions; no inline filter
+        // widgets on this page.
+        Item { Layout.fillWidth: true }
+    }
 
     actions: [
         Kirigami.Action {

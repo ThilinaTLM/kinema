@@ -28,7 +28,8 @@ import dev.tlmtech.kinema.app
 // Shell mirrors Discover: a `Kirigami.ScrollablePage` hosting a
 // `ColumnLayout` of horizontal rails. The page supplies the vertical
 // Flickable + Kirigami-styled scrollbar; each rail's inner `ListView`
-// flicks horizontally.
+// flicks horizontally. The shared `PageHeaderBar` provides the title +
+// page-actions strip so the chrome matches Discover, Browse, etc.
 Kirigami.ScrollablePage {
     id: page
 
@@ -41,6 +42,15 @@ Kirigami.ScrollablePage {
     // vertically between the two pages.
     topPadding: Theme.sectionSpacing
     bottomPadding: Theme.pageBottomSpacing
+
+    header: PageHeaderBar {
+        title: page.title
+        pageActions: page.actions
+
+        // Right-edge alignment of page actions; no inline filter
+        // widgets on this page.
+        Item { Layout.fillWidth: true }
+    }
 
     actions: [
         Kirigami.Action {

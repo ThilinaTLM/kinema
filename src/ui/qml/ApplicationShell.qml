@@ -11,8 +11,8 @@ import dev.tlmtech.kinema.app
 
 // Phase 02 shell. Owns:
 //
-//  * top-level navigation between Discover / Search / Browse / Settings
-//    pages via `Kirigami.PageRow`
+//  * top-level navigation between Discover / Browse / Search / Up Next /
+//    Library / Downloads pages via `Kirigami.PageRow`, plus Settings
 //  * icon-only primary navigation with a bottom Settings action
 //  * application-wide keyboard shortcuts (Quit, Preferences,
 //    Find, Help, Esc-pop)
@@ -116,6 +116,28 @@ Kirigami.ApplicationWindow {
                 onTriggered: root.showPage("discover")
             },
             Kirigami.Action {
+                icon.source: AppIcons.url("grid-2x2",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
+                text: i18nc("@action drawer entry", "Browse")
+                checkable: true
+                checked: root.currentNavKey === "browse"
+                onTriggered: root.showPage("browse")
+            },
+            Kirigami.Action {
+                icon.source: AppIcons.url("search",
+                    checked ? AppIcons.accentText : AppIcons.foreground)
+                icon.color: enabled
+                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
+                    : AppIcons.muted
+                text: i18nc("@action drawer entry", "Search")
+                checkable: true
+                checked: root.currentNavKey === "search"
+                onTriggered: root.showPage("search")
+            },
+            Kirigami.Action {
                 icon.source: AppIcons.url("monitor-play",
                     checked ? AppIcons.accentText : AppIcons.foreground)
                 icon.color: enabled
@@ -136,28 +158,6 @@ Kirigami.ApplicationWindow {
                 checkable: true
                 checked: root.currentNavKey === "library"
                 onTriggered: root.showPage("library")
-            },
-            Kirigami.Action {
-                icon.source: AppIcons.url("search",
-                    checked ? AppIcons.accentText : AppIcons.foreground)
-                icon.color: enabled
-                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
-                    : AppIcons.muted
-                text: i18nc("@action drawer entry", "Search")
-                checkable: true
-                checked: root.currentNavKey === "search"
-                onTriggered: root.showPage("search")
-            },
-            Kirigami.Action {
-                icon.source: AppIcons.url("grid-2x2",
-                    checked ? AppIcons.accentText : AppIcons.foreground)
-                icon.color: enabled
-                    ? (checked ? AppIcons.accentText : AppIcons.foreground)
-                    : AppIcons.muted
-                text: i18nc("@action drawer entry", "Browse")
-                checkable: true
-                checked: root.currentNavKey === "browse"
-                onTriggered: root.showPage("browse")
             },
             Kirigami.Action {
                 icon.source: AppIcons.url("download",

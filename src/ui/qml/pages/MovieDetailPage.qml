@@ -111,6 +111,15 @@ Kirigami.ScrollablePage {
 
     actions: [ streamsAction, refreshAction ]
 
+    header: PageHeaderBar {
+        title: page.title
+        pageActions: page.actions
+
+        // Right-edge alignment of page actions; no inline filter
+        // widgets on this page (the hero owns Library / Watched).
+        Item { Layout.fillWidth: true }
+    }
+
     Component.onDestruction: movieDetailVm.clear()
 
     // ---- Ready -----------------------------------------------------

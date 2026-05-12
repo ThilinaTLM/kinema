@@ -54,11 +54,23 @@ GridView {
         Math.floor(availableWidth / targetCellWidth))
 
     // Two title lines + caption + spacing. Recomputed when the user
-    // changes their KDE font size.
+    // changes their KDE font size. Use real `FontMetrics.lineSpacing`
+    // (not `pixelSize`) and ceil it so we budget for line leading +
+    // subpixel rounding — must match `BasePosterCard`'s title-height
+    // reservation, otherwise the grid cell is too short and the title
+    // elides to a single line instead of wrapping.
+    FontMetrics {
+        id: titleFM
+        font: Kirigami.Theme.defaultFont
+    }
+    FontMetrics {
+        id: subtitleFM
+        font: Kirigami.Theme.smallFont
+    }
     readonly property int metaBlockHeight:
-        Math.round(Kirigami.Theme.defaultFont.pixelSize * 2.6
-            + Kirigami.Theme.smallFont.pixelSize
-            + Kirigami.Units.smallSpacing * 3)
+        Math.ceil(titleFM.lineSpacing) * 2
+            + Math.ceil(subtitleFM.lineSpacing)
+            + Kirigami.Units.smallSpacing * 3
 
     cellWidth: Math.floor(availableWidth / columns)
     cellHeight: Math.round((cellWidth - cellInset * 2) * 1.5)

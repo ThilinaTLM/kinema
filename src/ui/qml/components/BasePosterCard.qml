@@ -110,8 +110,14 @@ Item {
                 id: titleHeading
                 Layout.fillWidth: true
                 // Reserve a fixed two-line height so grid rows stay
-                // aligned regardless of title length.
-                Layout.preferredHeight: titleMetrics.height * 2
+                // aligned regardless of title length. Use
+                // `lineSpacing` (not `height`) and ceil it so we
+                // budget for line leading + subpixel rounding —
+                // otherwise the second wrapped line gets clipped
+                // and `elide: ElideRight` truncates the first line
+                // instead of wrapping.
+                Layout.preferredHeight:
+                    Math.ceil(titleMetrics.lineSpacing) * 2
                 level: 5
                 text: card.title
                 wrapMode: Text.WordWrap
