@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/PlaybackContext.h"
-#include "core/Database.h"
-#include "core/WatchedStore.h"
+#include "domain/PlaybackContext.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/WatchedStore.h"
 
 #include <QSignalSpy>
 #include <QTest>
@@ -12,18 +12,18 @@ using namespace kinema;
 
 namespace {
 
-api::PlaybackKey movieKey(const QString& imdb)
+domain::PlaybackKey movieKey(const QString& imdb)
 {
-    api::PlaybackKey k;
-    k.kind = api::MediaKind::Movie;
+    domain::PlaybackKey k;
+    k.kind = domain::MediaKind::Movie;
     k.imdbId = imdb;
     return k;
 }
 
-api::PlaybackKey episodeKey(const QString& imdb, int season, int episode)
+domain::PlaybackKey episodeKey(const QString& imdb, int season, int episode)
 {
-    api::PlaybackKey k;
-    k.kind = api::MediaKind::Series;
+    domain::PlaybackKey k;
+    k.kind = domain::MediaKind::Series;
     k.imdbId = imdb;
     k.season = season;
     k.episode = episode;

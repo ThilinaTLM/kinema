@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 
 #include <QAbstractListModel>
 #include <QDate>
@@ -29,7 +29,7 @@ namespace kinema::ui::qml {
 /// line content (movies) and three-line content (episodes) coexist
 /// without forcing uniform whitespace.
 struct LibraryRailRow {
-    api::MediaKind kind = api::MediaKind::Movie;
+    domain::MediaKind kind = domain::MediaKind::Movie;
     QString imdbId;
     std::optional<int> season;
     std::optional<int> episode;

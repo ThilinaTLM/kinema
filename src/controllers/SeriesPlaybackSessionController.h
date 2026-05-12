@@ -5,8 +5,8 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 #include "torrent/MediaFileSelector.h"
 
 #include <QObject>
@@ -43,8 +43,8 @@ public:
 public Q_SLOTS:
     void refreshFromPlayback(bool active);
     void onPlayerEndOfFile(const QString& reason,
-        const api::PlaybackContext& ctx);
-    void onPlayerUserClosed(const api::PlaybackContext& ctx);
+        const domain::PlaybackContext& ctx);
+    void onPlayerUserClosed(const domain::PlaybackContext& ctx);
     void playPreviousEpisode();
     void playNextEpisode();
 
@@ -54,26 +54,26 @@ Q_SIGNALS:
 
 private:
     struct EpisodeTarget {
-        api::PlaybackKey key;
+        domain::PlaybackKey key;
         int fileIndex = -1;
         QString fileNameHint;
         qint64 sizeBytes = 0;
     };
 
     void clearState();
-    void setState(const api::PlaybackContext& ctx,
+    void setState(const domain::PlaybackContext& ctx,
         std::optional<EpisodeTarget> previous,
         std::optional<EpisodeTarget> next);
     void playTarget(const EpisodeTarget& target);
     static QString episodeCode(int season, int episode);
-    static QString displayTitle(const api::PlaybackContext& base,
+    static QString displayTitle(const domain::PlaybackContext& base,
         int season, int episode);
 
     PlaybackController& m_playback;
     torrent::TorrentStreamingService& m_torrentStreaming;
     services::StreamActions& m_actions;
 
-    api::PlaybackContext m_baseContext;
+    domain::PlaybackContext m_baseContext;
     std::optional<EpisodeTarget> m_previous;
     std::optional<EpisodeTarget> m_next;
     bool m_navigationVisible = false;

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 
 #include <QObject>
 #include <QString>
@@ -53,8 +53,8 @@ public:
     QString query() const { return m_query; }
     void setQuery(const QString& q);
 
-    /// `int` (not `api::MediaKind`) for QML binding ergonomics.
-    /// Values mirror `api::MediaKind`: 0 = Movie, 1 = Series.
+    /// `int` (not `domain::MediaKind`) for QML binding ergonomics.
+    /// Values mirror `domain::MediaKind`: 0 = Movie, 1 = Series.
     int kind() const noexcept { return static_cast<int>(m_kind); }
     void setKind(int kind);
 
@@ -90,7 +90,7 @@ Q_SIGNALS:
     void statusMessage(const QString& text, int durationMs);
 
 private:
-    QCoro::Task<void> runSearchTask(QString text, api::MediaKind kind);
+    QCoro::Task<void> runSearchTask(QString text, domain::MediaKind kind);
 
     api::CinemetaClient* m_cinemeta;
     config::SearchSettings* m_settings;
@@ -98,7 +98,7 @@ private:
     QTimer m_debounce;
 
     QString m_query;
-    api::MediaKind m_kind = api::MediaKind::Movie;
+    domain::MediaKind m_kind = domain::MediaKind::Movie;
     quint64 m_epoch = 0;
 };
 

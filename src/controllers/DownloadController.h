@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Download.h"
+#include "domain/Download.h"
 
 #include <QObject>
 #include <QSet>
@@ -43,9 +43,9 @@ public:
         core::DownloadStore& store,
         QObject* parent = nullptr);
 
-    QList<api::DownloadItem> items() const;
-    std::optional<api::DownloadItem> findForKey(
-        const api::PlaybackKey& key) const;
+    QList<domain::DownloadItem> items() const;
+    std::optional<domain::DownloadItem> findForKey(
+        const domain::PlaybackKey& key) const;
 
     /// Snapshot of asset ids that currently have a player attached;
     /// used by the view-model to compute `hasPlayerAttached` per row.
@@ -53,11 +53,11 @@ public:
 
 public Q_SLOTS:
     /// Background full-file download with `Pinned` disposition.
-    void download(const api::Stream& stream,
-        const api::PlaybackContext& ctx);
-    void downloadWithBackend(const api::Stream& stream,
-        const api::PlaybackContext& ctx,
-        api::DownloadBackendKind backend);
+    void download(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx);
+    void downloadWithBackend(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx,
+        domain::DownloadBackendKind backend);
 
     /// Promote an existing OnDemand session to Full + Pinned.
     void upgradeToFull(const QString& assetId);

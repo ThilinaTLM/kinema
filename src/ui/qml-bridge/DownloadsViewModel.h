@@ -91,7 +91,7 @@ public Q_SLOTS:
     void pauseDownload(const QString& assetId);
     void resumeDownload(const QString& assetId);
 
-    /// Play the cached asset directly. Synthesises an `api::Stream` +
+    /// Play the cached asset directly. Synthesises an `domain::Stream` +
     /// `PlaybackContext` from the persisted `DownloadItem` and hands
     /// off to `services::StreamActions::play`. The download manager's
     /// `prepareForPlayback` short-circuits to the local cache file
@@ -114,8 +114,8 @@ Q_SIGNALS:
     void filterChanged();
 
 private:
-    bool rowMatchesFilter(const api::DownloadItem& it) const;
-    void rebuildCountsFrom(const QList<api::DownloadItem>& rows,
+    bool rowMatchesFilter(const domain::DownloadItem& it) const;
+    void rebuildCountsFrom(const QList<domain::DownloadItem>& rows,
         const QHash<QString, DownloadsListModel::LiveRow>& live);
 
     controllers::DownloadController& m_controller;

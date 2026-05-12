@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/AllDebrid.h"
+#include "domain/AllDebrid.h"
 
 #include <QList>
 #include <QObject>
@@ -17,6 +17,7 @@ class HttpClient;
 }
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 /**
  * Client for the AllDebrid REST v4 / v4.1 API.

@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/RealDebridParse.h"
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 
 #include <QFile>
 #include <QJsonDocument>
 #include <QTest>
 
 using namespace kinema::api;
+using namespace kinema::domain;
 
 class TstRealDebridParse : public QObject
 {

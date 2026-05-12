@@ -3,11 +3,12 @@
 
 #pragma once
 
-#include "api/RealDebrid.h"
+#include "domain/RealDebrid.h"
 
 #include <QJsonDocument>
 
 namespace kinema::api::realdebrid {
+using namespace kinema::domain;
 
 /**
  * Parse a Real-Debrid `/rest/1.0/user` response body.

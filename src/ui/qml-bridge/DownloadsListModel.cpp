@@ -10,11 +10,11 @@ namespace kinema::ui::qml {
 
 namespace {
 
-QString stateText(api::DownloadState s, api::DownloadMode mode,
+QString stateText(domain::DownloadState s, domain::DownloadMode mode,
     bool hasPlayer, bool complete)
 {
-    using S = api::DownloadState;
-    using M = api::DownloadMode;
+    using S = domain::DownloadState;
+    using M = domain::DownloadMode;
     switch (s) {
     case S::Queued:
         return i18nc("@label download state", "Queued");
@@ -47,56 +47,56 @@ QString stateText(api::DownloadState s, api::DownloadMode mode,
 
 /// One of {"positive","neutral","warn","negative"}. Used by QML to
 /// pick a chip background colour without leaking enum values out.
-QString stateTone(api::DownloadState s)
+QString stateTone(domain::DownloadState s)
 {
     switch (s) {
-    case api::DownloadState::Completed:
+    case domain::DownloadState::Completed:
         return QStringLiteral("positive");
-    case api::DownloadState::Active:
-    case api::DownloadState::Resolving:
+    case domain::DownloadState::Active:
+    case domain::DownloadState::Resolving:
         return QStringLiteral("neutral");
-    case api::DownloadState::Queued:
-    case api::DownloadState::Idle:
-    case api::DownloadState::Paused:
-    case api::DownloadState::Cancelled:
+    case domain::DownloadState::Queued:
+    case domain::DownloadState::Idle:
+    case domain::DownloadState::Paused:
+    case domain::DownloadState::Cancelled:
         return QStringLiteral("warn");
-    case api::DownloadState::Failed:
+    case domain::DownloadState::Failed:
         return QStringLiteral("negative");
     }
     return QStringLiteral("neutral");
 }
 
-QString modeLabel(api::DownloadMode m)
+QString modeLabel(domain::DownloadMode m)
 {
     switch (m) {
-    case api::DownloadMode::OnDemand:
+    case domain::DownloadMode::OnDemand:
         return i18nc("@label download mode", "Stream");
-    case api::DownloadMode::Full:
+    case domain::DownloadMode::Full:
         return i18nc("@label download mode", "Full");
     }
     return QString();
 }
 
-QString backendIcon(api::DownloadBackendKind k)
+QString backendIcon(domain::DownloadBackendKind k)
 {
     switch (k) {
-    case api::DownloadBackendKind::Torrent:
+    case domain::DownloadBackendKind::Torrent:
         return QStringLiteral("network-server-database");
-    case api::DownloadBackendKind::RealDebridHttp:
-    case api::DownloadBackendKind::AllDebridHttp:
+    case domain::DownloadBackendKind::RealDebridHttp:
+    case domain::DownloadBackendKind::AllDebridHttp:
         return QStringLiteral("folder-cloud");
     }
     return QStringLiteral("download");
 }
 
-QString backendLabel(api::DownloadBackendKind k)
+QString backendLabel(domain::DownloadBackendKind k)
 {
     switch (k) {
-    case api::DownloadBackendKind::Torrent:
+    case domain::DownloadBackendKind::Torrent:
         return i18nc("@label download backend", "Torrent");
-    case api::DownloadBackendKind::RealDebridHttp:
+    case domain::DownloadBackendKind::RealDebridHttp:
         return i18nc("@label download backend", "Real-Debrid");
-    case api::DownloadBackendKind::AllDebridHttp:
+    case domain::DownloadBackendKind::AllDebridHttp:
         return i18nc("@label download backend", "AllDebrid");
     }
     return QString();
@@ -121,7 +121,7 @@ QString etaText(int seconds)
         KFormat::AbbreviatedDuration);
 }
 
-QString sizeText(const api::DownloadItem& it)
+QString sizeText(const domain::DownloadItem& it)
 {
     KFormat fmt;
     if (it.expectedSizeBytes && *it.expectedSizeBytes > 0) {
@@ -139,7 +139,7 @@ QString sizeText(const api::DownloadItem& it)
     return QStringLiteral("\u2014");
 }
 
-QString progressText(const api::DownloadItem& it)
+QString progressText(const domain::DownloadItem& it)
 {
     const double f = it.progressFraction();
     if (f < 0.0) {
@@ -148,7 +148,7 @@ QString progressText(const api::DownloadItem& it)
     return QStringLiteral("%1%").arg(static_cast<int>(f * 100.0));
 }
 
-QString subtitleText(const api::DownloadItem& it)
+QString subtitleText(const domain::DownloadItem& it)
 {
     QStringList parts;
     if (!it.qualityLabel.isEmpty()) {
@@ -216,16 +216,16 @@ QVariant DownloadsListModel::data(const QModelIndex& index, int role) const
     case ModeLabelRole:
         return modeLabel(it.mode);
     case CanUpgradeRole:
-        return it.mode == api::DownloadMode::OnDemand
-            && it.state != api::DownloadState::Completed
-            && it.state != api::DownloadState::Failed
-            && it.state != api::DownloadState::Cancelled;
+        return it.mode == domain::DownloadMode::OnDemand
+            && it.state != domain::DownloadState::Completed
+            && it.state != domain::DownloadState::Failed
+            && it.state != domain::DownloadState::Cancelled;
     case CanPauseRole:
-        return it.state == api::DownloadState::Active
-            || it.state == api::DownloadState::Resolving
-            || it.state == api::DownloadState::Idle;
+        return it.state == domain::DownloadState::Active
+            || it.state == domain::DownloadState::Resolving
+            || it.state == domain::DownloadState::Idle;
     case CanResumeRole:
-        return it.state == api::DownloadState::Paused;
+        return it.state == domain::DownloadState::Paused;
     case HasPlayerAttachedRole:
         return m_attachedPlayers.contains(it.assetId);
     case DispositionRole:
@@ -336,7 +336,7 @@ QHash<int, QByteArray> DownloadsListModel::roleNames() const
     };
 }
 
-void DownloadsListModel::setItems(QList<api::DownloadItem> items,
+void DownloadsListModel::setItems(QList<domain::DownloadItem> items,
     QHash<QString, LiveRow> liveStats,
     QSet<QString> attachedPlayers)
 {

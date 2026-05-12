@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Indexer.h"
-#include "api/Media.h"
+#include "domain/Indexer.h"
+#include "domain/Media.h"
 
 #include <QObject>
 
@@ -19,9 +19,10 @@ class FilterSettings;
 }
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 /**
- * Concrete `Indexer` backed by Torrentio's Stremio addon at
+ * Concrete `domain::Indexer` backed by Torrentio's Stremio addon at
  * `<TorrentioSettings::baseUrl()>/<config>/stream/{kind}/{id}.json`.
  *
  * The URL path config segment (`sort=...|qualityfilter=...`) is
@@ -30,7 +31,7 @@ namespace kinema::api {
  * longer encoded into the URL — RD is handled by the unified
  * downloader after a row is picked.
  */
-class TorrentioIndexer : public Indexer
+class TorrentioIndexer : public domain::Indexer
 {
     Q_OBJECT
 public:
@@ -40,9 +41,9 @@ public:
         QObject* parent = nullptr);
     ~TorrentioIndexer() override;
 
-    IndexerKind kind() const noexcept override
+    domain::IndexerKind kind() const noexcept override
     {
-        return IndexerKind::Torrentio;
+        return domain::IndexerKind::Torrentio;
     }
     QString displayName() const override
     {

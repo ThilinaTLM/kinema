@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/PlaybackContext.h"
-#include "api/Subtitle.h"
+#include "domain/PlaybackContext.h"
+#include "domain/Subtitle.h"
 
 #include <QList>
 #include <QObject>
@@ -72,7 +72,7 @@ public:
 
     /// The current search hits. Read by QML / the search model after
     /// `hitsChanged` fires.
-    QList<api::SubtitleHit> hits() const { return m_hits; }
+    QList<domain::SubtitleHit> hits() const { return m_hits; }
 
     /// Set of cached file ids for the currently queried key. Used by
     /// the search model to badge rows.
@@ -95,14 +95,14 @@ public:
 public Q_SLOTS:
     /// Top-level entry from QML. Forwards every filter the picker
     /// surfaced. Empty `languages` means "no language filter".
-    void runQuery(api::PlaybackKey key,
+    void runQuery(domain::PlaybackKey key,
         QStringList languages,
         QString hearingImpaired,
         QString foreignPartsOnly,
         QString releaseFilter);
 
     /// Resolve `fileId` from cache or fetch + cache it.
-    void download(QString fileId, api::PlaybackKey key);
+    void download(QString fileId, domain::PlaybackKey key);
 
     /// PlaybackController pushes a best-effort moviehash for the
     /// active stream. `setMoviehash("")` invalidates.
@@ -153,23 +153,23 @@ Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
 private:
-    QCoro::Task<void> runSearchTask(api::SubtitleSearchQuery q);
-    QCoro::Task<void> downloadTask(QString fileId, api::PlaybackKey key);
+    QCoro::Task<void> runSearchTask(domain::SubtitleSearchQuery q);
+    QCoro::Task<void> downloadTask(QString fileId, domain::PlaybackKey key);
 
     void setSearching(bool);
     void setError(QString message);
     void evictIfOverBudget();
-    void rebuildCachedFileIds(const api::PlaybackKey& key);
+    void rebuildCachedFileIds(const domain::PlaybackKey& key);
 
     api::OpenSubtitlesClient* m_client;
     core::SubtitleCacheStore* m_cache;
     const config::SubtitleSettings& m_settings;
     const config::CacheSettings& m_cacheSettings;
 
-    QList<api::SubtitleHit> m_hits;
+    QList<domain::SubtitleHit> m_hits;
     QSet<QString> m_cachedFileIds;
     QSet<QString> m_activeLocalPaths;
-    api::PlaybackKey m_currentKey;
+    domain::PlaybackKey m_currentKey;
     bool m_searching = false;
     QString m_lastError;
     QString m_moviehash;

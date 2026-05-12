@@ -4,7 +4,7 @@
 #include "controllers/WatchedController.h"
 
 #include "controllers/HistoryController.h"
-#include "core/WatchedStore.h"
+#include "core/persistence/WatchedStore.h"
 
 namespace kinema::controllers {
 
@@ -24,7 +24,7 @@ WatchedController::WatchedController(core::WatchedStore& store,
 
 WatchedController::~WatchedController() = default;
 
-bool WatchedController::isWatched(const api::PlaybackKey& key) const
+bool WatchedController::isWatched(const domain::PlaybackKey& key) const
 {
     if (!key.isValid()) {
         return false;
@@ -54,7 +54,7 @@ bool WatchedController::isEpisodeWatched(const QString& imdbId,
     return isWatched(episodeKey(imdbId, season, episode));
 }
 
-double WatchedController::progressFor(const api::PlaybackKey& key) const
+double WatchedController::progressFor(const domain::PlaybackKey& key) const
 {
     if (!m_history) {
         return -1.0;
@@ -77,8 +77,8 @@ double WatchedController::episodeProgress(const QString& imdbId,
     return progressFor(episodeKey(imdbId, season, episode));
 }
 
-std::optional<api::HistoryEntry> WatchedController::resumeEntryFor(
-    const api::PlaybackKey& key) const
+std::optional<domain::HistoryEntry> WatchedController::resumeEntryFor(
+    const domain::PlaybackKey& key) const
 {
     if (!m_history) {
         return std::nullopt;
@@ -90,13 +90,13 @@ std::optional<api::HistoryEntry> WatchedController::resumeEntryFor(
     return entry;
 }
 
-std::optional<api::HistoryEntry> WatchedController::resumeEntryForMovie(
+std::optional<domain::HistoryEntry> WatchedController::resumeEntryForMovie(
     const QString& imdbId) const
 {
     return resumeEntryFor(movieKey(imdbId));
 }
 
-std::optional<api::HistoryEntry> WatchedController::resumeEntryForEpisode(
+std::optional<domain::HistoryEntry> WatchedController::resumeEntryForEpisode(
     const QString& imdbId, int season, int episode) const
 {
     return resumeEntryFor(episodeKey(imdbId, season, episode));
@@ -131,24 +131,24 @@ void WatchedController::setEpisodesWatched(const QString& imdbId,
     }
 }
 
-void WatchedController::clearOverride(const api::PlaybackKey& key)
+void WatchedController::clearOverride(const domain::PlaybackKey& key)
 {
     m_store.clearOverride(key);
 }
 
-api::PlaybackKey WatchedController::movieKey(const QString& imdbId) const
+domain::PlaybackKey WatchedController::movieKey(const QString& imdbId) const
 {
-    api::PlaybackKey key;
-    key.kind = api::MediaKind::Movie;
+    domain::PlaybackKey key;
+    key.kind = domain::MediaKind::Movie;
     key.imdbId = imdbId;
     return key;
 }
 
-api::PlaybackKey WatchedController::episodeKey(const QString& imdbId,
+domain::PlaybackKey WatchedController::episodeKey(const QString& imdbId,
     int season, int episode) const
 {
-    api::PlaybackKey key;
-    key.kind = api::MediaKind::Series;
+    domain::PlaybackKey key;
+    key.kind = domain::MediaKind::Series;
     key.imdbId = imdbId;
     key.season = season;
     key.episode = episode;

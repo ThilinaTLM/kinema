@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "app/KinemaApplication.h"
+#include "app/ServiceContainer.h"
 #include "config/AppSettings.h"
-#include "ui/qml-bridge/MainController.h"
+#include "ui/qml-bridge/QmlContext.h"
+#include "ui/qml-bridge/ShellViewModel.h"
 
 #include <QQmlApplicationEngine>
 #include <QQmlExpression>
@@ -119,7 +121,9 @@ void TestApplicationBoot::loadsApplicationShell()
     QQmlApplicationEngine engine;
 
     auto settings = std::make_unique<kinema::config::AppSettings>();
-    kinema::ui::qml::MainController controller(*settings, engine);
+    kinema::app::ServiceContainer services(*settings);
+    kinema::ui::qml::ShellViewModel shell(services);
+    kinema::ui::qml::installQmlContext(engine, services, shell);
 
     engine.loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
         QStringLiteral("ApplicationShell"));
@@ -136,7 +140,7 @@ void TestApplicationBoot::loadsApplicationShell()
     evaluate(engine, window, QStringLiteral("showPage('library')"));
     evaluate(engine, window, QStringLiteral("showPage('downloads')"));
     evaluate(engine, window, QStringLiteral("showPage('settings')"));
-    evaluate(engine, window, QStringLiteral("mainController.requestAbout()"));
+    evaluate(engine, window, QStringLiteral("shell.requestAbout()"));
     evaluate(engine, window, QStringLiteral("showPage('discover')"));
 
     const auto warnings = warningCollector.messages();
@@ -154,8 +158,11 @@ void TestApplicationBoot::teardownOnDownloadsIsQuiet()
 
     auto engine = std::make_unique<QQmlApplicationEngine>();
     auto settings = std::make_unique<kinema::config::AppSettings>();
-    auto controller = std::make_unique<kinema::ui::qml::MainController>(
-        *settings, *engine);
+    auto services = std::make_unique<kinema::app::ServiceContainer>(
+        *settings);
+    auto shell = std::make_unique<kinema::ui::qml::ShellViewModel>(
+        *services);
+    kinema::ui::qml::installQmlContext(*engine, *services, *shell);
 
     engine->loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
         QStringLiteral("ApplicationShell"));
@@ -167,9 +174,11 @@ void TestApplicationBoot::teardownOnDownloadsIsQuiet()
     evaluate(*engine, window, QStringLiteral("showPage('downloads')"));
     QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 
-    // Engine first, then controller — same teardown order as `main.cpp`.
+    // Engine first, then shell, then services — same teardown
+    // order as `main.cpp`.
     engine.reset();
-    controller.reset();
+    shell.reset();
+    services.reset();
     settings.reset();
 
     const auto warnings = warningCollector.messages();

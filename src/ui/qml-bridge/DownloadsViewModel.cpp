@@ -3,10 +3,10 @@
 
 #include "ui/qml-bridge/DownloadsViewModel.h"
 
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 #include "controllers/DownloadController.h"
-#include "core/HttpErrorPresenter.h"
+#include "core/io/HttpErrorPresenter.h"
 #include "download/DownloadManager.h"
 #include "kinema_log_ui.h"
 #include "services/StreamActions.h"
@@ -24,13 +24,13 @@ namespace kinema::ui::qml {
 
 namespace {
 
-bool isActiveState(api::DownloadState s)
+bool isActiveState(domain::DownloadState s)
 {
     switch (s) {
-    case api::DownloadState::Queued:
-    case api::DownloadState::Resolving:
-    case api::DownloadState::Active:
-    case api::DownloadState::Idle:
+    case domain::DownloadState::Queued:
+    case domain::DownloadState::Resolving:
+    case domain::DownloadState::Active:
+    case domain::DownloadState::Idle:
         return true;
     default:
         return false;
@@ -77,7 +77,7 @@ void DownloadsViewModel::refresh()
 
     rebuildCountsFrom(rows, live);
 
-    QList<api::DownloadItem> visible;
+    QList<domain::DownloadItem> visible;
     if (m_filter == FilterAll) {
         visible = rows;
     } else {
@@ -93,22 +93,22 @@ void DownloadsViewModel::refresh()
     Q_EMIT countsChanged();
 }
 
-bool DownloadsViewModel::rowMatchesFilter(const api::DownloadItem& it) const
+bool DownloadsViewModel::rowMatchesFilter(const domain::DownloadItem& it) const
 {
     switch (m_filter) {
     case FilterActive:
         return isActiveState(it.state);
     case FilterCompleted:
-        return it.state == api::DownloadState::Completed;
+        return it.state == domain::DownloadState::Completed;
     case FilterFailed:
-        return it.state == api::DownloadState::Failed;
+        return it.state == domain::DownloadState::Failed;
     default:
         return true;
     }
 }
 
 void DownloadsViewModel::rebuildCountsFrom(
-    const QList<api::DownloadItem>& rows,
+    const QList<domain::DownloadItem>& rows,
     const QHash<QString, DownloadsListModel::LiveRow>& live)
 {
     m_activeCount = 0;
@@ -119,22 +119,22 @@ void DownloadsViewModel::rebuildCountsFrom(
     m_totalRateBps = 0;
     for (const auto& it : rows) {
         switch (it.state) {
-        case api::DownloadState::Queued:
-        case api::DownloadState::Resolving:
-        case api::DownloadState::Active:
-        case api::DownloadState::Idle:
+        case domain::DownloadState::Queued:
+        case domain::DownloadState::Resolving:
+        case domain::DownloadState::Active:
+        case domain::DownloadState::Idle:
             ++m_activeCount;
             break;
-        case api::DownloadState::Paused:
+        case domain::DownloadState::Paused:
             ++m_pausedCount;
             break;
-        case api::DownloadState::Completed:
+        case domain::DownloadState::Completed:
             ++m_completedCount;
             break;
-        case api::DownloadState::Failed:
+        case domain::DownloadState::Failed:
             ++m_failedCount;
             break;
-        case api::DownloadState::Cancelled:
+        case domain::DownloadState::Cancelled:
             break;
         }
         if (const auto liveIt = live.constFind(it.assetId);
@@ -211,7 +211,7 @@ void DownloadsViewModel::playDownload(const QString& assetId)
     try {
         const auto rows = m_controller.items();
         const auto it = std::find_if(rows.begin(), rows.end(),
-            [&](const api::DownloadItem& r) {
+            [&](const domain::DownloadItem& r) {
                 return r.assetId == assetId;
             });
         if (it == rows.end()) {
@@ -220,10 +220,10 @@ void DownloadsViewModel::playDownload(const QString& assetId)
             return;
         }
 
-        // Synthesise an api::Stream from the persisted DownloadItem
+        // Synthesise an domain::Stream from the persisted DownloadItem
         // so the existing StreamActions::play -> DownloadManager
         // pipeline can short-circuit to the local cached file.
-        api::Stream stream;
+        domain::Stream stream;
         stream.qualityLabel = it->qualityLabel;
         stream.resolution = it->resolution;
         stream.releaseName = it->releaseName;
@@ -235,7 +235,7 @@ void DownloadsViewModel::playDownload(const QString& assetId)
             stream.sizeBytes = *it->expectedSizeBytes;
         }
 
-        api::PlaybackContext ctx;
+        domain::PlaybackContext ctx;
         ctx.key = it->key;
         ctx.title = it->title;
         ctx.seriesTitle = it->seriesTitle;
@@ -268,7 +268,7 @@ void DownloadsViewModel::resumeAll()
     const auto rows = m_controller.items();
     int resumed = 0;
     for (const auto& it : rows) {
-        if (it.state == api::DownloadState::Paused) {
+        if (it.state == domain::DownloadState::Paused) {
             m_controller.resume(it.assetId);
             ++resumed;
         }

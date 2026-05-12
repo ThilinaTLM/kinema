@@ -5,8 +5,8 @@
 
 #include "api/TmdbDiscoverUrl.h"
 #include "api/TmdbParse.h"
-#include "core/HttpClient.h"
-#include "core/HttpError.h"
+#include "core/io/HttpClient.h"
+#include "core/io/HttpError.h"
 
 #include <KLocalizedString>
 
@@ -14,6 +14,7 @@
 #include <QNetworkRequest>
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 namespace {
 

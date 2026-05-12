@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Discover.h"
+#include "domain/Discover.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -43,8 +43,8 @@ public:
         PosterUrlRole,    ///< QString URL (QML wraps in image://kinema/poster?u=…)
         OverviewRole,
         VoteAverageRole,
-        KindRole,         ///< api::MediaKind value
-        ItemRole,         ///< QVariant<api::DiscoverItem> for activation handlers
+        KindRole,         ///< domain::MediaKind value
+        ItemRole,         ///< QVariant<domain::DiscoverItem> for activation handlers
         ProgressRole,     ///< double in [0,1]; -1 if not applicable
         LastReleaseRole,  ///< pre-formatted Continue-Watching subtitle line
         EpisodeSubtitleRole, ///< "S01E02" badge for series episodes; empty for movies
@@ -78,11 +78,11 @@ public:
 
     // ---- Mutators (called by view-models) --------------------------
     void setLoading();
-    void setItems(QList<api::DiscoverItem> items);
+    void setItems(QList<domain::DiscoverItem> items);
     /// Append rows after `setItems`. Used by paginated consumers
     /// (`BrowseViewModel::loadMore`) so existing scroll position is
     /// preserved across additional pages. Flips state to `Ready`.
-    void appendItems(QList<api::DiscoverItem> items);
+    void appendItems(QList<domain::DiscoverItem> items);
     void setError(const QString& message);
 
     /// Continue-Watching overlay data; ignored by other rails.
@@ -91,8 +91,8 @@ public:
     void setEpisodeSubtitleList(QStringList subtitles);
 
     /// Pure accessor for unit tests / hosting view-models.
-    const QList<api::DiscoverItem>& items() const noexcept { return m_items; }
-    const api::DiscoverItem* itemAt(int row) const;
+    const QList<domain::DiscoverItem>& items() const noexcept { return m_items; }
+    const domain::DiscoverItem* itemAt(int row) const;
 
 Q_SIGNALS:
     void titleChanged();
@@ -104,7 +104,7 @@ private:
     void resetState(State newState);
 
     QString m_title;
-    QList<api::DiscoverItem> m_items;
+    QList<domain::DiscoverItem> m_items;
     QList<double> m_progress;       ///< parallel to m_items; size matches or empty
     QStringList m_lastReleases;     ///< parallel to m_items; size matches or empty
     QStringList m_episodeSubtitles; ///< parallel to m_items; size matches or empty

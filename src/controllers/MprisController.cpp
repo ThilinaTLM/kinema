@@ -7,8 +7,8 @@
 
 #include "controllers/PlaybackController.h"
 #include "controllers/SeriesPlaybackSessionController.h"
-#include "core/IdleInhibitor.h"
-#include "core/MprisMetadata.h"
+#include "core/io/IdleInhibitor.h"
+#include "core/mpv/MprisMetadata.h"
 #include "kinema_log_controller.h"
 
 #include <QDBusAbstractAdaptor>

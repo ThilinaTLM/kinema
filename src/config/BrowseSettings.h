@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "api/Discover.h"
-#include "api/Media.h"
-#include "core/DateWindow.h"
+#include "domain/Discover.h"
+#include "domain/Media.h"
+#include "core/util/DateWindow.h"
 
 #include <KSharedConfig>
 
@@ -34,8 +34,8 @@ public:
     explicit BrowseSettings(KSharedConfigPtr config,
         QObject* parent = nullptr);
 
-    api::MediaKind kind() const;
-    void setKind(api::MediaKind);
+    domain::MediaKind kind() const;
+    void setKind(domain::MediaKind);
 
     QList<int> genreIds() const;
     void setGenreIds(QList<int>);
@@ -47,8 +47,8 @@ public:
     int minRatingPct() const;
     void setMinRatingPct(int);
 
-    api::DiscoverSort sort() const;
-    void setSort(api::DiscoverSort);
+    domain::DiscoverSort sort() const;
+    void setSort(domain::DiscoverSort);
 
     bool hideObscure() const;
     void setHideObscure(bool);

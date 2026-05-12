@@ -3,7 +3,7 @@
 
 #include "download/TorrentBackend.h"
 
-#include "core/MediaCache.h"
+#include "core/persistence/MediaCache.h"
 #include "download/TorrentAssetSession.h"
 #include "kinema_log_download.h"
 #include "torrent/TorrentStreamingService.h"
@@ -19,21 +19,21 @@ TorrentBackend::TorrentBackend(torrent::TorrentStreamingService& engine,
 
 TorrentBackend::~TorrentBackend() = default;
 
-bool TorrentBackend::canHandle(const api::Stream& s) const
+bool TorrentBackend::canHandle(const domain::Stream& s) const
 {
     return !s.infoHash.isEmpty();
 }
 
 QCoro::Task<std::unique_ptr<AssetSession>> TorrentBackend::open(
-    const api::AssetRef& ref,
-    const api::Stream& s,
-    const api::PlaybackContext& ctx,
-    api::DownloadMode mode)
+    const domain::AssetRef& ref,
+    const domain::Stream& s,
+    const domain::PlaybackContext& ctx,
+    domain::DownloadMode mode)
 {
-    const auto assetId = api::assetIdFor(ref);
+    const auto assetId = domain::assetIdFor(ref);
     m_cache.markActive(assetId);
 
-    const auto prepareMode = mode == api::DownloadMode::Full
+    const auto prepareMode = mode == domain::DownloadMode::Full
         ? torrent::PrepareMode::Background
         : torrent::PrepareMode::Streaming;
     const auto prepared = co_await m_engine.prepareSession(s, ctx, prepareMode);
@@ -43,7 +43,7 @@ QCoro::Task<std::unique_ptr<AssetSession>> TorrentBackend::open(
         prepared.infoHash);
     session->setMode(mode);
 
-    if (mode == api::DownloadMode::Full) {
+    if (mode == domain::DownloadMode::Full) {
         m_engine.setKeepAlive(prepared.infoHash, true);
     }
 
@@ -57,7 +57,7 @@ QCoro::Task<std::unique_ptr<AssetSession>> TorrentBackend::open(
 }
 
 void TorrentBackend::changeMode(AssetSession& session,
-    api::DownloadMode newMode)
+    domain::DownloadMode newMode)
 {
     if (session.mode() == newMode) {
         return;
@@ -69,7 +69,7 @@ void TorrentBackend::changeMode(AssetSession& session,
         return;
     }
     const auto& hash = torrentSession->infoHash();
-    if (newMode == api::DownloadMode::Full) {
+    if (newMode == domain::DownloadMode::Full) {
         m_engine.promoteToFull(hash);
     } else {
         // Demotion (Full -> OnDemand) just clears keepAlive; we

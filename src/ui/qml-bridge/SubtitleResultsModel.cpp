@@ -268,7 +268,7 @@ QHash<int, QByteArray> SubtitleResultsModel::roleNames() const
     };
 }
 
-void SubtitleResultsModel::setHits(const QList<api::SubtitleHit>& hits)
+void SubtitleResultsModel::setHits(const QList<domain::SubtitleHit>& hits)
 {
     beginResetModel();
     m_rows = hits;

@@ -3,13 +3,14 @@
 
 #pragma once
 
-#include "api/AllDebrid.h"
+#include "domain/AllDebrid.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
 
 namespace kinema::api::alldebrid {
+using namespace kinema::domain;
 
 /**
  * Validate the AllDebrid response envelope and return the inner

@@ -4,8 +4,8 @@
 #include "controllers/LibraryController.h"
 
 #include "api/CinemetaClient.h"
-#include "api/Media.h"
-#include "core/LibraryStore.h"
+#include "domain/Media.h"
+#include "core/persistence/LibraryStore.h"
 #include "kinema_log_controller.h"
 
 #include <KLocalizedString>
@@ -24,7 +24,7 @@ namespace {
 /// rate-tolerant but the user's network and CPU are not.
 constexpr int kBackfillConcurrency = 4;
 
-bool needsBackfill(const api::LibraryTitle& t)
+bool needsBackfill(const domain::LibraryTitle& t)
 {
     return t.genres.isEmpty()
         && !t.imdbRating.has_value()
@@ -32,11 +32,11 @@ bool needsBackfill(const api::LibraryTitle& t)
         && t.cast.isEmpty();
 }
 
-api::LibraryTitle titleFromMeta(const api::MetaDetail& meta,
-    api::MediaKind kind)
+domain::LibraryTitle titleFromMeta(const domain::MetaDetail& meta,
+    domain::MediaKind kind)
 {
     const auto& s = meta.summary;
-    api::LibraryTitle t;
+    domain::LibraryTitle t;
     t.kind = kind;
     t.imdbId = s.imdbId;
     t.title = s.title;
@@ -53,10 +53,10 @@ api::LibraryTitle titleFromMeta(const api::MetaDetail& meta,
     return t;
 }
 
-api::LibraryEpisode episodeFromApi(const QString& seriesImdbId,
-    const api::Episode& ep)
+domain::LibraryEpisode episodeFromApi(const QString& seriesImdbId,
+    const domain::Episode& ep)
 {
-    api::LibraryEpisode out;
+    domain::LibraryEpisode out;
     out.seriesImdbId = seriesImdbId;
     out.season = ep.season;
     out.episode = ep.number;
@@ -82,32 +82,32 @@ LibraryController::LibraryController(core::LibraryStore& store,
 
 LibraryController::~LibraryController() = default;
 
-bool LibraryController::isInLibrary(api::MediaKind kind,
+bool LibraryController::isInLibrary(domain::MediaKind kind,
     const QString& imdbId) const
 {
     return m_store.contains(kind, imdbId);
 }
 
-std::optional<api::LibraryTitle> LibraryController::title(
-    api::MediaKind kind, const QString& imdbId) const
+std::optional<domain::LibraryTitle> LibraryController::title(
+    domain::MediaKind kind, const QString& imdbId) const
 {
     return m_store.find(kind, imdbId);
 }
 
-QList<api::LibraryTitle> LibraryController::titles() const
+QList<domain::LibraryTitle> LibraryController::titles() const
 {
     return m_store.titles();
 }
 
-QList<api::LibraryEpisode> LibraryController::episodesForSeries(
+QList<domain::LibraryEpisode> LibraryController::episodesForSeries(
     const QString& imdbId) const
 {
     return m_store.episodesForSeries(imdbId);
 }
 
-void LibraryController::saveMovie(const api::MetaDetail& meta)
+void LibraryController::saveMovie(const domain::MetaDetail& meta)
 {
-    auto t = titleFromMeta(meta, api::MediaKind::Movie);
+    auto t = titleFromMeta(meta, domain::MediaKind::Movie);
     if (t.imdbId.isEmpty() || t.title.isEmpty()) {
         return;
     }
@@ -116,15 +116,15 @@ void LibraryController::saveMovie(const api::MetaDetail& meta)
         i18nc("@info:status", "Added \u201c%1\u201d to Library.", t.title), 3000);
 }
 
-void LibraryController::saveSeries(const api::SeriesDetail& detail)
+void LibraryController::saveSeries(const domain::SeriesDetail& detail)
 {
-    auto t = titleFromMeta(detail.meta, api::MediaKind::Series);
+    auto t = titleFromMeta(detail.meta, domain::MediaKind::Series);
     if (t.imdbId.isEmpty() || t.title.isEmpty()) {
         return;
     }
     m_store.upsertTitle(t);
 
-    QList<api::LibraryEpisode> rows;
+    QList<domain::LibraryEpisode> rows;
     rows.reserve(detail.episodes.size());
     for (const auto& ep : detail.episodes) {
         rows.append(episodeFromApi(t.imdbId, ep));
@@ -134,7 +134,7 @@ void LibraryController::saveSeries(const api::SeriesDetail& detail)
         i18nc("@info:status", "Added \u201c%1\u201d to Library.", t.title), 3000);
 }
 
-void LibraryController::removeFromLibrary(api::MediaKind kind,
+void LibraryController::removeFromLibrary(domain::MediaKind kind,
     const QString& imdbId)
 {
     const auto t = m_store.find(kind, imdbId);
@@ -163,7 +163,7 @@ void LibraryController::backfillMetadata()
         // small and run once per launch.
         const bool dup = std::any_of(
             m_backfillQueue.begin(), m_backfillQueue.end(),
-            [&](const api::LibraryTitle& q) {
+            [&](const domain::LibraryTitle& q) {
                 return q.kind == t.kind && q.imdbId == t.imdbId;
             });
         if (!dup) {
@@ -187,15 +187,15 @@ void LibraryController::pumpBackfill()
 }
 
 QCoro::Task<void> LibraryController::runBackfillOne(
-    api::LibraryTitle seed)
+    domain::LibraryTitle seed)
 {
     try {
-        api::LibraryTitle refreshed;
+        domain::LibraryTitle refreshed;
         refreshed.kind = seed.kind;
         refreshed.imdbId = seed.imdbId;
-        if (seed.kind == api::MediaKind::Movie) {
+        if (seed.kind == domain::MediaKind::Movie) {
             auto m = co_await m_cinemeta->meta(
-                api::MediaKind::Movie, seed.imdbId);
+                domain::MediaKind::Movie, seed.imdbId);
             refreshed.title = m.summary.title;
             refreshed.year = m.summary.year;
             refreshed.poster = m.summary.poster;

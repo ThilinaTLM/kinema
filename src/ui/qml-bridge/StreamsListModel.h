@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Media.h"
-#include "core/StreamTokens.h"
+#include "domain/Media.h"
+#include "core/util/StreamTokens.h"
 
 #include <QAbstractListModel>
 #include <QDate>
@@ -49,7 +49,7 @@ class StreamsListModel : public QAbstractListModel
 
 public:
     enum Roles {
-        StreamRole = Qt::UserRole + 1, ///< full api::Stream as QVariant
+        StreamRole = Qt::UserRole + 1, ///< full domain::Stream as QVariant
         ReleaseNameRole,
         DetailsTextRole,
         ResolutionRole,
@@ -89,7 +89,7 @@ public:
     Q_ENUM(State)
 
     /// Client-side sort axes. Values carry no semantic meaning; the
-    /// view-model maps each to a comparator over `api::Stream`.
+    /// view-model maps each to a comparator over `domain::Stream`.
     /// `Smart` is the default — by resolution rank, then by seeders
     /// descending within each quality bucket. It ignores the
     /// descending toggle.
@@ -120,14 +120,14 @@ public:
     /// Replace the visible row list; flips state to Ready/Empty.
     /// `emptyExplanation` is shown when the resulting state is Empty;
     /// pass an empty string for the default placeholder body.
-    void setItems(QList<api::Stream> visible,
+    void setItems(QList<domain::Stream> visible,
         const QString& emptyExplanation = {});
     void setError(const QString& message);
     void setUnreleased(const QDate& date);
 
     /// Pure accessors for the view-model and tests.
-    const QList<api::Stream>& items() const noexcept { return m_items; }
-    const api::Stream* at(int row) const;
+    const QList<domain::Stream>& items() const noexcept { return m_items; }
+    const domain::Stream* at(int row) const;
 
     /// Localized "1.2 GB" / "—". Exposed publicly so the view-model
     /// can mirror the same formatting in chip strings or the page
@@ -140,20 +140,20 @@ public:
     ///
     /// Legacy, kept for back-compatibility with `chips` role consumers.
     /// New row layouts should use `tagsFor` + `summaryLineFor` instead.
-    static QStringList chipsFor(const api::Stream& s);
+    static QStringList chipsFor(const domain::Stream& s);
 
     /// Build the small chip strip shown on the secondary metadata
     /// line in the redesigned `StreamCard`. Carries only metadata
     /// that is *not* already expressed in `summaryLineFor()`:
     /// language codes / multi-audio / release-group — NOT
     /// resolution, RD, codec, or HDR.
-    static QStringList tagsFor(const api::Stream& s,
+    static QStringList tagsFor(const domain::Stream& s,
         const core::stream_tokens::Tokens& t);
 
     /// Build the single-line human summary (source · codec · hdr ·
     /// audio) shown above the technical subtitle. Empty when no
     /// tokens parsed.
-    static QString summaryLineFor(const api::Stream& s,
+    static QString summaryLineFor(const domain::Stream& s,
         const core::stream_tokens::Tokens& t);
 
 Q_SIGNALS:
@@ -176,7 +176,7 @@ private:
     void clearEmptyExplanationIfAny();
     void clearReleaseDateIfAny();
 
-    QList<api::Stream> m_items;
+    QList<domain::Stream> m_items;
     State m_state = State::Idle;
     QString m_errorMessage;
     QString m_emptyExplanation;

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Download.h"
+#include "domain/Download.h"
 
 #include <QString>
 
@@ -18,11 +18,11 @@ struct Candidate {
 
 /// Score a candidate against the asset hint. Higher is better.
 /// Used by both `RealDebridResolver` and `AllDebridResolver`.
-int score(const QString& path, qint64 sizeBytes, const api::AssetRef& ref);
+int score(const QString& path, qint64 sizeBytes, const domain::AssetRef& ref);
 
 /// Pick the index (into `candidates`) of the best file for `ref`,
 /// or -1 if `candidates` is empty. When two candidates tie on score
 /// the larger one wins.
-int chooseIndex(const QList<Candidate>& candidates, const api::AssetRef& ref);
+int chooseIndex(const QList<Candidate>& candidates, const domain::AssetRef& ref);
 
 } // namespace kinema::download::picker

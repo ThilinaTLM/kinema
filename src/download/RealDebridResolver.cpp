@@ -4,8 +4,8 @@
 #include "download/RealDebridResolver.h"
 
 #include "api/RealDebridClient.h"
-#include "core/HttpError.h"
-#include "core/Magnet.h"
+#include "core/io/HttpError.h"
+#include "core/util/Magnet.h"
 #include "download/DebridFilePicker.h"
 
 #include <KLocalizedString>
@@ -34,8 +34,8 @@ QCoro::Task<void> sleepMs(int ms)
 
 /// Pick the best file id from an RD torrent-info response. Uses the
 /// shared scoring helper but maps back through RD's 1-based file ids.
-int chooseFileId(const QList<api::RdTorrentFile>& files,
-    const api::AssetRef& ref)
+int chooseFileId(const QList<domain::RdTorrentFile>& files,
+    const domain::AssetRef& ref)
 {
     QList<picker::Candidate> candidates;
     candidates.reserve(files.size());
@@ -66,7 +66,7 @@ QCoro::Task<void> RealDebridResolver::cleanup(QString providerTorrentId)
     }
 }
 
-QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(api::AssetRef ref)
+QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref)
 {
     if (ref.infoHash.isEmpty()) {
         throw core::HttpError(core::HttpError::Kind::Json, 0,
@@ -85,7 +85,7 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(api::AssetRef ref)
     const auto added = co_await m_rd.addMagnet(magnet);
 
     // Step 2: Wait until RD has populated the file list.
-    api::RdTorrentInfo info;
+    domain::RdTorrentInfo info;
     int waitedMs = 0;
     while (true) {
         info = co_await m_rd.torrentInfo(added.id);

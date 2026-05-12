@@ -6,19 +6,20 @@
 #include "api/StremioStreamParse.h"
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
-#include "core/HttpClient.h"
-#include "core/TorrentioConfig.h"
+#include "core/io/HttpClient.h"
+#include "core/util/TorrentioConfig.h"
 #include "kinema_log_api.h"
 
 #include <QElapsedTimer>
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 TorrentioIndexer::TorrentioIndexer(core::HttpClient* http,
     const config::TorrentioSettings& settings,
     const config::FilterSettings& filter,
     QObject* parent)
-    : Indexer(parent)
+    : domain::Indexer(parent)
     , m_http(http)
     , m_settings(settings)
     , m_filter(filter)

@@ -7,10 +7,10 @@
 
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
-#include "core/HttpClient.h"
-#include "core/HttpErrorPresenter.h"
-#include "core/Moviehash.h"
-#include "core/UrlRedactor.h"
+#include "core/io/HttpClient.h"
+#include "core/io/HttpErrorPresenter.h"
+#include "core/util/Moviehash.h"
+#include "core/io/UrlRedactor.h"
 #include "ui/player/PlayerWindow.h"
 #include "kinema_log_controller.h"
 
@@ -218,7 +218,7 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
 }
 
 void PlaybackController::play(const QUrl& url,
-    const api::PlaybackContext& ctx)
+    const domain::PlaybackContext& ctx)
 {
     qCInfo(KINEMA_CONTROLLER).nospace()
         << "PlaybackController::play url="
@@ -251,7 +251,7 @@ void PlaybackController::play(const QUrl& url,
         m_window->hideResumePrompt();
     }
 
-    api::PlaybackContext loadCtx = ctx;
+    domain::PlaybackContext loadCtx = ctx;
     if (ctx.resumeSeconds
         && *ctx.resumeSeconds > m_settings.player().resumePromptThresholdSec()) {
         m_pendingResumeSeconds = *ctx.resumeSeconds;
@@ -533,7 +533,7 @@ void PlaybackController::onPositionChanged(double seconds)
         return;
     }
 
-    if (m_ctx.key.kind != api::MediaKind::Series
+    if (m_ctx.key.kind != domain::MediaKind::Series
         || !m_settings.player().skipIntroChapters()) {
         m_skipChapterEnd = -1.0;
         m_window->hideSkipChapter();

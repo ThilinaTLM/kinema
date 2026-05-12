@@ -4,9 +4,9 @@
 #include "services/StreamActions.h"
 
 #include "controllers/HistoryController.h"
-#include "core/Magnet.h"
-#include "core/PlayerLauncher.h"
-#include "core/HttpErrorPresenter.h"
+#include "core/util/Magnet.h"
+#include "core/mpv/PlayerLauncher.h"
+#include "core/io/HttpErrorPresenter.h"
 #include "download/DownloadManager.h"
 #include "kinema_log_ui.h"
 #include "torrent/TorrentStreamingService.h"
@@ -72,7 +72,7 @@ void StreamActions::setDownloadManager(download::DownloadManager* manager)
     m_downloadManager = manager;
 }
 
-void StreamActions::copyMagnet(const api::Stream& stream)
+void StreamActions::copyMagnet(const domain::Stream& stream)
 {
     if (stream.infoHash.isEmpty()) {
         return;
@@ -82,7 +82,7 @@ void StreamActions::copyMagnet(const api::Stream& stream)
     Q_EMIT statusMessage(clipboardCopyMessage(true), 3000);
 }
 
-void StreamActions::openMagnet(const api::Stream& stream)
+void StreamActions::openMagnet(const domain::Stream& stream)
 {
     if (stream.infoHash.isEmpty()) {
         return;
@@ -95,7 +95,7 @@ void StreamActions::openMagnet(const api::Stream& stream)
         "OpenUrlJob (magnet)");
 }
 
-void StreamActions::copyDirectUrl(const api::Stream& stream)
+void StreamActions::copyDirectUrl(const domain::Stream& stream)
 {
     if (stream.directUrl.isEmpty()) {
         return;
@@ -104,7 +104,7 @@ void StreamActions::copyDirectUrl(const api::Stream& stream)
     Q_EMIT statusMessage(clipboardCopyMessage(false), 3000);
 }
 
-void StreamActions::openDirectUrl(const api::Stream& stream)
+void StreamActions::openDirectUrl(const domain::Stream& stream)
 {
     if (stream.directUrl.isEmpty()) {
         return;
@@ -115,22 +115,22 @@ void StreamActions::openDirectUrl(const api::Stream& stream)
         "OpenUrlJob (direct)");
 }
 
-void StreamActions::play(const api::Stream& stream,
-    const api::PlaybackContext& ctxIn)
+void StreamActions::play(const domain::Stream& stream,
+    const domain::PlaybackContext& ctxIn)
 {
     playInternal(stream, ctxIn, std::nullopt);
 }
 
-void StreamActions::playWithBackend(const api::Stream& stream,
-    const api::PlaybackContext& ctxIn,
-    api::DownloadBackendKind backend)
+void StreamActions::playWithBackend(const domain::Stream& stream,
+    const domain::PlaybackContext& ctxIn,
+    domain::DownloadBackendKind backend)
 {
     playInternal(stream, ctxIn, backend);
 }
 
-void StreamActions::playInternal(const api::Stream& stream,
-    const api::PlaybackContext& ctxIn,
-    std::optional<api::DownloadBackendKind> backendOverride)
+void StreamActions::playInternal(const domain::Stream& stream,
+    const domain::PlaybackContext& ctxIn,
+    std::optional<domain::DownloadBackendKind> backendOverride)
 {
     if (stream.directUrl.isEmpty() && stream.infoHash.isEmpty()) {
         Q_EMIT statusMessage(
@@ -142,8 +142,8 @@ void StreamActions::playInternal(const api::Stream& stream,
 
     // Build a local copy so we can fill in the fields the caller
     // can't know (streamRef and resumeSeconds).
-    api::PlaybackContext ctx = ctxIn;
-    ctx.streamRef = api::HistoryStreamRef::fromStream(stream);
+    domain::PlaybackContext ctx = ctxIn;
+    ctx.streamRef = domain::HistoryStreamRef::fromStream(stream);
 
     // Fall back to the stream's release name for display when the
     // caller didn't set a title (e.g. legacy paths that haven't been
@@ -192,16 +192,16 @@ void StreamActions::playInternal(const api::Stream& stream,
     Q_UNUSED(task);
 }
 
-void StreamActions::download(const api::Stream& stream,
-    const api::PlaybackContext& ctxIn)
+void StreamActions::download(const domain::Stream& stream,
+    const domain::PlaybackContext& ctxIn)
 {
     if (!m_downloadManager) {
         Q_EMIT statusMessage(i18nc("@info:status",
             "Downloads are not available in this build."), 5000);
         return;
     }
-    api::PlaybackContext ctx = ctxIn;
-    ctx.streamRef = api::HistoryStreamRef::fromStream(stream);
+    domain::PlaybackContext ctx = ctxIn;
+    ctx.streamRef = domain::HistoryStreamRef::fromStream(stream);
     if (ctx.title.isEmpty()) {
         ctx.title = stream.releaseName.isEmpty()
             ? stream.qualityLabel
@@ -210,17 +210,17 @@ void StreamActions::download(const api::Stream& stream,
     m_downloadManager->enqueueDownload(stream, ctx);
 }
 
-void StreamActions::downloadWithBackend(const api::Stream& stream,
-    const api::PlaybackContext& ctxIn,
-    api::DownloadBackendKind backend)
+void StreamActions::downloadWithBackend(const domain::Stream& stream,
+    const domain::PlaybackContext& ctxIn,
+    domain::DownloadBackendKind backend)
 {
     if (!m_downloadManager) {
         Q_EMIT statusMessage(i18nc("@info:status",
             "Downloads are not available in this build."), 5000);
         return;
     }
-    api::PlaybackContext ctx = ctxIn;
-    ctx.streamRef = api::HistoryStreamRef::fromStream(stream);
+    domain::PlaybackContext ctx = ctxIn;
+    ctx.streamRef = domain::HistoryStreamRef::fromStream(stream);
     if (ctx.title.isEmpty()) {
         ctx.title = stream.releaseName.isEmpty()
             ? stream.qualityLabel
@@ -229,9 +229,9 @@ void StreamActions::downloadWithBackend(const api::Stream& stream,
     m_downloadManager->enqueueDownload(stream, ctx, backend);
 }
 
-QCoro::Task<void> StreamActions::playLocalTask(api::Stream stream,
-    api::PlaybackContext ctx, quint64 epoch,
-    std::optional<api::DownloadBackendKind> backendOverride)
+QCoro::Task<void> StreamActions::playLocalTask(domain::Stream stream,
+    domain::PlaybackContext ctx, quint64 epoch,
+    std::optional<domain::DownloadBackendKind> backendOverride)
 {
     try {
         const QUrl url = co_await m_downloadManager->prepareForPlayback(
@@ -257,8 +257,8 @@ QCoro::Task<void> StreamActions::playLocalTask(api::Stream stream,
     }
 }
 
-QCoro::Task<void> StreamActions::playTorrentTask(api::Stream stream,
-    api::PlaybackContext ctx, quint64 epoch)
+QCoro::Task<void> StreamActions::playTorrentTask(domain::Stream stream,
+    domain::PlaybackContext ctx, quint64 epoch)
 {
     try {
         const QUrl url = co_await m_torrentStreaming->prepare(stream, ctx);

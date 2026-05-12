@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "core/MprisMetadata.h"
+#include "core/mpv/MprisMetadata.h"
 
 #include <QDBusObjectPath>
 #include <QtTest>
 
-using kinema::api::MediaKind;
-using kinema::api::PlaybackContext;
-using kinema::api::PlaybackKey;
+using kinema::domain::MediaKind;
+using kinema::domain::PlaybackContext;
+using kinema::domain::PlaybackKey;
 
 class TestMprisMetadata : public QObject
 {

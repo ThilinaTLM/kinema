@@ -3,15 +3,15 @@
 
 #include "api/TmdbClient.h"
 
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 #include "TestDoubles.h"
 
 #include <QTest>
 #include <QUrlQuery>
 
-using kinema::api::DiscoverQuery;
-using kinema::api::DiscoverSort;
-using kinema::api::MediaKind;
+using kinema::domain::DiscoverQuery;
+using kinema::domain::DiscoverSort;
+using kinema::domain::MediaKind;
 using kinema::api::TmdbClient;
 using kinema::core::HttpError;
 using kinema::tests::FakeHttpClient;

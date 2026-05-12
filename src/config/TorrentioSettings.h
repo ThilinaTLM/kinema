@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/TorrentioConfig.h"
+#include "core/util/TorrentioConfig.h"
 
 #include <KSharedConfig>
 

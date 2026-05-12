@@ -3,7 +3,7 @@
 
 #include "api/StremioStreamParse.h"
 
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 
 #include <KLocalizedString>
 
@@ -13,6 +13,7 @@
 #include <QRegularExpression>
 
 namespace kinema::api::stremio {
+using namespace kinema::domain;
 
 namespace {
 

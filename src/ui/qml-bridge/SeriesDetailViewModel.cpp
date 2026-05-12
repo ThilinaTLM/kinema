@@ -4,7 +4,7 @@
 #include "ui/qml-bridge/SeriesDetailViewModel.h"
 
 #include "api/CinemetaClient.h"
-#include "api/Indexer.h"
+#include "domain/Indexer.h"
 #include "api/IndexerSelector.h"
 #include "api/TmdbClient.h"
 #include "config/AppSettings.h"
@@ -14,10 +14,10 @@
 #include "controllers/LibraryController.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
-#include "core/DateFormat.h"
-#include "core/HttpError.h"
-#include "core/HttpErrorPresenter.h"
-#include "core/StreamFilter.h"
+#include "core/util/DateFormat.h"
+#include "core/io/HttpError.h"
+#include "core/io/HttpErrorPresenter.h"
+#include "core/util/StreamFilter.h"
 #include "kinema_log_ui.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
@@ -32,7 +32,7 @@ namespace {
 using SortMode = StreamsListModel::SortMode;
 
 QString episodeDisplayLabel(const QString& seriesTitle,
-    const api::Episode& ep)
+    const domain::Episode& ep)
 {
     QString display = seriesTitle;
     if (!display.isEmpty()) {
@@ -288,7 +288,7 @@ void SeriesDetailViewModel::clear()
     }
 }
 
-void SeriesDetailViewModel::applyMeta(const api::SeriesDetail& sd)
+void SeriesDetailViewModel::applyMeta(const domain::SeriesDetail& sd)
 {
     m_currentSeries = sd;
     const auto& s = sd.meta.summary;
@@ -360,7 +360,7 @@ void SeriesDetailViewModel::publishCurrentSeasonEpisodes()
         return;
     }
     const int season = m_seasonNumbers.at(m_currentSeasonIdx);
-    QList<api::Episode> rows;
+    QList<domain::Episode> rows;
     rows.reserve(m_allEpisodes.size());
     for (const auto& ep : m_allEpisodes) {
         if (ep.season == season) {
@@ -374,7 +374,7 @@ void SeriesDetailViewModel::publishCurrentSeasonEpisodes()
 void SeriesDetailViewModel::refreshLibraryState()
 {
     const bool inLibrary = m_library && !m_imdbId.isEmpty()
-        && m_library->isInLibrary(api::MediaKind::Series, m_imdbId);
+        && m_library->isInLibrary(domain::MediaKind::Series, m_imdbId);
     if (m_inLibrary != inLibrary) {
         m_inLibrary = inLibrary;
         Q_EMIT libraryStateChanged();
@@ -538,7 +538,7 @@ QCoro::Task<void> SeriesDetailViewModel::loadSeriesMetaTask(
     setSimilarVisible(false);
     m_similar->setItems({});
 
-    api::SeriesDetail sd;
+    domain::SeriesDetail sd;
     try {
         sd = co_await m_cinemeta->seriesMeta(imdbId);
         if (myEpoch != m_metaEpoch) {
@@ -650,7 +650,7 @@ void SeriesDetailViewModel::addToLibrary()
 void SeriesDetailViewModel::removeFromLibrary()
 {
     if (m_library && !m_imdbId.isEmpty()) {
-        m_library->removeFromLibrary(api::MediaKind::Series, m_imdbId);
+        m_library->removeFromLibrary(domain::MediaKind::Series, m_imdbId);
     }
 }
 
@@ -700,7 +700,7 @@ void SeriesDetailViewModel::markSeasonWatched(int season, bool watched)
 }
 
 QCoro::Task<void> SeriesDetailViewModel::loadEpisodeStreamsTask(
-    api::Episode ep)
+    domain::Episode ep)
 {
     const auto myEpoch = ++m_episodeEpoch;
 
@@ -726,7 +726,7 @@ QCoro::Task<void> SeriesDetailViewModel::loadEpisodeStreamsTask(
             co_return;
         }
         auto streams = co_await indexer->streams(
-            api::MediaKind::Series, ep.streamId(m_imdbId));
+            domain::MediaKind::Series, ep.streamId(m_imdbId));
         if (myEpoch != m_episodeEpoch) {
             co_return;
         }
@@ -803,7 +803,7 @@ QCoro::Task<void> SeriesDetailViewModel::resolveByTmdbAndLoad(
 QCoro::Task<void> SeriesDetailViewModel::loadSimilarFor(QString imdbId)
 {
     const auto myEpoch = ++m_similarEpoch;
-    auto kind = api::MediaKind::Series;
+    auto kind = domain::MediaKind::Series;
 
     if (imdbId.isEmpty() || !m_tmdb || !m_tmdb->hasToken()) {
         m_similar->setItems({});
@@ -836,7 +836,7 @@ QCoro::Task<void> SeriesDetailViewModel::loadSimilarFor(QString imdbId)
         co_return;
     }
 
-    QList<api::DiscoverItem> items;
+    QList<domain::DiscoverItem> items;
     try {
         items = co_await m_tmdb->recommendations(kind, tmdbId);
         if (myEpoch != m_similarEpoch) {
@@ -886,7 +886,7 @@ void SeriesDetailViewModel::rebuildVisibleStreams()
     m_streams->setItems(std::move(visible), emptyExplanation);
 }
 
-QList<api::Stream> SeriesDetailViewModel::applyFilters() const
+QList<domain::Stream> SeriesDetailViewModel::applyFilters() const
 {
     if (m_rawStreams.isEmpty()) {
         return {};
@@ -902,15 +902,15 @@ QList<api::Stream> SeriesDetailViewModel::applyFilters() const
             m_uiDolbyVisionOnly, m_uiMultiAudioOnly });
 }
 
-void SeriesDetailViewModel::sortInPlace(QList<api::Stream>& rows) const
+void SeriesDetailViewModel::sortInPlace(QList<domain::Stream>& rows) const
 {
     stream_sorting::sortInPlace(rows, m_sortMode, m_sortDescending);
 }
 
-api::PlaybackContext SeriesDetailViewModel::currentContext() const
+domain::PlaybackContext SeriesDetailViewModel::currentContext() const
 {
-    api::PlaybackContext ctx;
-    ctx.key.kind = api::MediaKind::Series;
+    domain::PlaybackContext ctx;
+    ctx.key.kind = domain::MediaKind::Series;
     ctx.key.imdbId = m_imdbId;
     if (m_selectedEpisodeRow >= 0) {
         ctx.key.season = m_selectedEpisode.season;
@@ -967,7 +967,7 @@ void SeriesDetailViewModel::playWithBackend(int row, int backendKind)
         return;
     }
     m_actions->playWithBackend(*s, currentContext(),
-        static_cast<api::DownloadBackendKind>(backendKind));
+        static_cast<domain::DownloadBackendKind>(backendKind));
 }
 
 void SeriesDetailViewModel::download(int row)
@@ -998,7 +998,7 @@ void SeriesDetailViewModel::downloadWithBackend(int row, int backendKind)
         return;
     }
     m_downloads->downloadWithBackend(*s, currentContext(),
-        static_cast<api::DownloadBackendKind>(backendKind));
+        static_cast<domain::DownloadBackendKind>(backendKind));
 }
 
 template <typename Method>
@@ -1041,7 +1041,7 @@ void SeriesDetailViewModel::requestSubtitlesFor(int row)
 {
     auto ctx = currentContext();
     if (const auto* s = m_streams->at(row)) {
-        ctx.streamRef = api::HistoryStreamRef::fromStream(*s);
+        ctx.streamRef = domain::HistoryStreamRef::fromStream(*s);
     }
     Q_EMIT subtitlesRequested(ctx);
 }
@@ -1052,7 +1052,7 @@ void SeriesDetailViewModel::activateSimilar(int row)
     if (!item) {
         return;
     }
-    if (item->kind == api::MediaKind::Series) {
+    if (item->kind == domain::MediaKind::Series) {
         Q_EMIT openSeriesByTmdbRequested(item->tmdbId, item->title);
     } else {
         Q_EMIT openMovieByTmdbRequested(item->tmdbId, item->title);

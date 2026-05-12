@@ -136,7 +136,7 @@ Kirigami.Page {
                     "Browse")
                 icon.source: AppIcons.url("search")
                 icon.color: AppIcons.foreground
-                onClicked: mainController.navigateToBrowseRequested()
+                onClicked: shell.navigateToBrowseRequested()
             }
         }
 

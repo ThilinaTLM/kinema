@@ -5,16 +5,17 @@
 
 #include "api/StremioStreamParse.h"
 #include "config/PeerflixSettings.h"
-#include "core/HttpClient.h"
+#include "core/io/HttpClient.h"
 #include "kinema_log_api.h"
 
 #include <QElapsedTimer>
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 PeerflixIndexer::PeerflixIndexer(core::HttpClient* http,
     const config::PeerflixSettings& settings, QObject* parent)
-    : Indexer(parent)
+    : domain::Indexer(parent)
     , m_http(http)
     , m_settings(settings)
 {

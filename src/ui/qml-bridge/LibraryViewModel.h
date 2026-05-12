@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Library.h"
-#include "api/PlaybackContext.h"
+#include "domain/Library.h"
+#include "domain/PlaybackContext.h"
 #include "ui/qml-bridge/LibraryListModel.h"
 #include "ui/qml-bridge/LibraryRailModel.h"
 
@@ -169,7 +169,7 @@ Q_SIGNALS:
     void openSeriesRequested(const QString& imdbId, const QString& title);
     void openSeriesEpisodeRequested(const QString& imdbId,
         const QString& title, int season, int episode);
-    void resumeRequested(const api::HistoryEntry& entry);
+    void resumeRequested(const domain::HistoryEntry& entry);
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
 private:
@@ -178,15 +178,15 @@ private:
     /// One library entry materialized as everything we need to drive
     /// both the grid and the rails. Built once per `refresh()`.
     struct Entry {
-        api::LibraryTitle title;
+        domain::LibraryTitle title;
         ResolvedStatus status = ResolvedStatus::ToWatch;
         // Resume data (movie, or latest series episode resume).
-        std::optional<api::HistoryEntry> resume;
+        std::optional<domain::HistoryEntry> resume;
         double resumeProgress = -1.0;
         // Series-only fields.
-        QList<api::LibraryEpisode> episodes;
-        const api::LibraryEpisode* nextToWatch = nullptr;
-        const api::LibraryEpisode* firstUpcoming = nullptr;
+        QList<domain::LibraryEpisode> episodes;
+        const domain::LibraryEpisode* nextToWatch = nullptr;
+        const domain::LibraryEpisode* firstUpcoming = nullptr;
         int upcomingCount = 0;
         int totalAired = 0;
         int watchedAired = 0;

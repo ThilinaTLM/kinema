@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "core/Player.h"
+#include "core/mpv/Player.h"
 
 #include <QTest>
 #include <QUrl>

@@ -3,8 +3,8 @@
 
 #include "ui/ImageLoader.h"
 
-#include "core/HttpClient.h"
-#include "core/UrlRedactor.h"
+#include "core/io/HttpClient.h"
+#include "core/io/UrlRedactor.h"
 #include "kinema_log_http.h"
 
 #include <QCoro/QCoroFuture>

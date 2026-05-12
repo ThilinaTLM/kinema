@@ -3,12 +3,13 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 
 namespace kinema::api::cinemeta {
+using namespace kinema::domain;
 
 /**
  * Parse a Cinemeta `/catalog/.../search=...json` response body.

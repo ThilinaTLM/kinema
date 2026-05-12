@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/CinemetaClient.h"
-#include "api/Media.h"
+#include "domain/Media.h"
 #include "config/SearchSettings.h"
-#include "core/HttpError.h"
+#include "core/io/HttpError.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
 
@@ -16,9 +16,9 @@
 #include <QTest>
 
 using kinema::api::CinemetaClient;
-using kinema::api::MediaKind;
-using kinema::api::MetaDetail;
-using kinema::api::MetaSummary;
+using kinema::domain::MediaKind;
+using kinema::domain::MetaDetail;
+using kinema::domain::MetaSummary;
 using kinema::config::SearchSettings;
 using kinema::core::HttpError;
 using kinema::ui::qml::ResultsListModel;

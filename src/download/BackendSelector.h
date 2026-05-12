@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "api/Debrid.h"
-#include "api/Download.h"
-#include "api/Media.h"
+#include "domain/Debrid.h"
+#include "domain/Download.h"
+#include "domain/Media.h"
 
 #include <memory>
 #include <optional>
@@ -44,11 +44,11 @@ public:
     /// non-active debrid backend is skipped during default routing
     /// (override paths still work). `DebridProvider::None` skips
     /// every debrid backend, leaving only the torrent backend.
-    void setActiveDebridProvider(api::DebridProvider p) noexcept
+    void setActiveDebridProvider(domain::DebridProvider p) noexcept
     {
         m_activeDebrid = p;
     }
-    api::DebridProvider activeDebridProvider() const noexcept
+    domain::DebridProvider activeDebridProvider() const noexcept
     {
         return m_activeDebrid;
     }
@@ -60,17 +60,17 @@ public:
     /// When no override is given, iterate by priority.
     /// Returns `nullptr` when no registered backend can serve the
     /// stream (no override given, no backend `canHandle` it).
-    DownloadBackend* select(const api::Stream& s,
-        std::optional<api::DownloadBackendKind> override = std::nullopt) const;
+    DownloadBackend* select(const domain::Stream& s,
+        std::optional<domain::DownloadBackendKind> override = std::nullopt) const;
 
     /// Look up a previously registered backend by kind. Used by
     /// resume paths that already know which backend produced a
     /// row.
-    DownloadBackend* find(api::DownloadBackendKind kind) const;
+    DownloadBackend* find(domain::DownloadBackendKind kind) const;
 
 private:
     std::vector<std::unique_ptr<DownloadBackend>> m_backends;
-    api::DebridProvider m_activeDebrid = api::DebridProvider::None;
+    domain::DebridProvider m_activeDebrid = domain::DebridProvider::None;
 };
 
 } // namespace kinema::download

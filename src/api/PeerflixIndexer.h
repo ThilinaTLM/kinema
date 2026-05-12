@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Indexer.h"
-#include "api/Media.h"
+#include "domain/Indexer.h"
+#include "domain/Media.h"
 
 #include <QObject>
 
@@ -18,9 +18,10 @@ class PeerflixSettings;
 }
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 /**
- * Concrete `Indexer` backed by Peerflix's Stremio addon at
+ * Concrete `domain::Indexer` backed by Peerflix's Stremio addon at
  * `<PeerflixSettings::baseUrl()>/stream/{kind}/{id}.json`.
  *
  * Peerflix is zero-config: no manifest URL to paste, no opaque
@@ -33,7 +34,7 @@ namespace kinema::api {
  * structured `language` field that the parser propagates to
  * `Stream::language`, making the "Non-English" filter precise.
  */
-class PeerflixIndexer : public Indexer
+class PeerflixIndexer : public domain::Indexer
 {
     Q_OBJECT
 public:
@@ -42,9 +43,9 @@ public:
         QObject* parent = nullptr);
     ~PeerflixIndexer() override;
 
-    IndexerKind kind() const noexcept override
+    domain::IndexerKind kind() const noexcept override
     {
-        return IndexerKind::Peerflix;
+        return domain::IndexerKind::Peerflix;
     }
     QString displayName() const override
     {

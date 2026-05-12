@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "api/Discover.h"
-#include "api/Media.h"
+#include "domain/Discover.h"
+#include "domain/Media.h"
 
 #include <QHash>
 #include <QJsonDocument>
@@ -24,6 +24,7 @@ class HttpClient;
 }
 
 namespace kinema::api {
+using namespace kinema::domain;
 
 /**
  * Client for The Movie Database (TMDB) v3 API, authenticated with a v4

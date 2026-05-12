@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Media.h"
+#include "domain/Media.h"
 #include "config/AppSettings.h"
-#include "core/Magnet.h"
-#include "core/PlayerLauncher.h"
+#include "core/util/Magnet.h"
+#include "core/mpv/PlayerLauncher.h"
 #include "services/StreamActions.h"
 
 #include <KConfig>
@@ -18,7 +18,7 @@
 #include <QTest>
 #include <QUrl>
 
-using kinema::api::Stream;
+using kinema::domain::Stream;
 using kinema::core::PlayerLauncher;
 using kinema::services::StreamActions;
 
@@ -113,8 +113,8 @@ private Q_SLOTS:
         Stream s; // no directUrl
         QSignalSpy spy(m_actions.get(), &StreamActions::statusMessage);
 
-        kinema::api::PlaybackContext ctx;
-        ctx.key.kind = kinema::api::MediaKind::Movie;
+        kinema::domain::PlaybackContext ctx;
+        ctx.key.kind = kinema::domain::MediaKind::Movie;
         ctx.key.imdbId = QStringLiteral("tt0000001");
         m_actions->play(s, ctx);
 

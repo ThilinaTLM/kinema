@@ -8,6 +8,7 @@
 #include <algorithm>
 
 namespace kinema::api::tmdb {
+using namespace kinema::domain;
 
 namespace {
 

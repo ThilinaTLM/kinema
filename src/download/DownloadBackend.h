@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "api/Download.h"
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Download.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 
 #include <QCoro/QCoroTask>
 
@@ -32,12 +32,12 @@ public:
     virtual ~DownloadBackend() = default;
 
     /// Stable enum tag used by selection rules and UI.
-    virtual api::DownloadBackendKind kind() const noexcept = 0;
+    virtual domain::DownloadBackendKind kind() const noexcept = 0;
 
     /// True if this backend is configured + the given Stream has
     /// the affordances this backend needs (info hash for torrent;
     /// RD token + cached/direct URL for Real-Debrid).
-    virtual bool canHandle(const api::Stream& s) const = 0;
+    virtual bool canHandle(const domain::Stream& s) const = 0;
 
     /// Realise a session for the given asset. The backend honours
     /// `mode`: OnDemand sets up streaming-buffer behaviour and
@@ -45,17 +45,17 @@ public:
     /// idle-stop. Throws on unrecoverable failure; the manager
     /// converts thrown exceptions into a `Failed` row update.
     virtual QCoro::Task<std::unique_ptr<AssetSession>> open(
-        const api::AssetRef& ref,
-        const api::Stream& s,
-        const api::PlaybackContext& ctx,
-        api::DownloadMode mode) = 0;
+        const domain::AssetRef& ref,
+        const domain::Stream& s,
+        const domain::PlaybackContext& ctx,
+        domain::DownloadMode mode) = 0;
 
     /// Switch an existing session's policy without recreating it.
     /// Implementations must be idempotent: calling with the
     /// session's current mode is a no-op. Used by upgrade in place
     /// (`OnDemand` -> `Full`) and pause/resume edge cases.
     virtual void changeMode(AssetSession& session,
-        api::DownloadMode newMode) = 0;
+        domain::DownloadMode newMode) = 0;
 };
 
 } // namespace kinema::download

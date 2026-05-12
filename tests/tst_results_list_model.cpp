@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Media.h"
+#include "domain/Media.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 
 #include <QSignalSpy>
 #include <QTest>
 
-using kinema::api::MediaKind;
-using kinema::api::MetaSummary;
+using kinema::domain::MediaKind;
+using kinema::domain::MetaSummary;
 using kinema::ui::qml::ResultsListModel;
 
 namespace {

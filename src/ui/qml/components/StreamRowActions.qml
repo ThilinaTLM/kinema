@@ -84,7 +84,7 @@ QQC2.Menu {
         icon.color: AppIcons.controlColor(enabled, false)
         visible: menu.vm && menu.vm.debridConfigured
         enabled: menu.hasMagnet
-        // 0 == api::DownloadBackendKind::Torrent
+        // 0 == domain::DownloadBackendKind::Torrent
         onTriggered: menu.vm.playWithBackend(menu.row, 0)
     }
     QQC2.MenuItem {
@@ -94,7 +94,7 @@ QQC2.Menu {
         icon.color: AppIcons.controlColor(enabled, false)
         visible: menu.vm && menu.vm.debridConfigured
         enabled: menu.hasMagnet
-        // 0 == api::DownloadBackendKind::Torrent
+        // 0 == domain::DownloadBackendKind::Torrent
         onTriggered: menu.vm.downloadWithBackend(menu.row, 0)
     }
     QQC2.MenuSeparator { }

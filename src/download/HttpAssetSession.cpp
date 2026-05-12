@@ -4,8 +4,8 @@
 #include "download/HttpAssetSession.h"
 
 #include "config/DownloadSettings.h"
-#include "core/HttpClient.h"
-#include "core/HttpError.h"
+#include "core/io/HttpClient.h"
+#include "core/io/HttpError.h"
 #include "kinema_log_download.h"
 
 #include <KLocalizedString>
@@ -30,7 +30,7 @@ constexpr qint64 kDefaultChunk = 4LL * 1024LL * 1024LL;
 HttpAssetSession::HttpAssetSession(core::HttpClient& http,
     DebridResolver& resolver,
     const config::DownloadSettings& settings,
-    api::AssetRef ref,
+    domain::AssetRef ref,
     QString assetId,
     QString localDir,
     QObject* parent)
@@ -228,7 +228,7 @@ void HttpAssetSession::resume()
         << "HttpAssetSession[" << m_assetId << "]: resumed";
     // For Full mode, kick the prefetch loop again. OnDemand stays
     // consumer-driven; the next ensureRange() naturally runs.
-    if (m_mode == api::DownloadMode::Full) {
+    if (m_mode == domain::DownloadMode::Full) {
         auto task = prefetchAll();
         Q_UNUSED(task);
     }
@@ -422,7 +422,7 @@ QCoro::Task<void> HttpAssetSession::prefetchAll()
         // Honour user pause + Full→OnDemand demotion at chunk
         // boundaries. Player-driven `ensureRange` calls remain
         // unaffected because they don't go through this loop.
-        if (m_paused || m_mode != api::DownloadMode::Full) {
+        if (m_paused || m_mode != domain::DownloadMode::Full) {
             co_return;
         }
         if (isChunkAvailable(i)) {

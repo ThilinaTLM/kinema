@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Library.h"
-#include "core/Database.h"
-#include "core/LibraryStore.h"
+#include "domain/Library.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/LibraryStore.h"
 
 #include <QSignalSpy>
 #include <QTest>
@@ -12,10 +12,10 @@ using namespace kinema;
 
 namespace {
 
-api::LibraryTitle movieTitle()
+domain::LibraryTitle movieTitle()
 {
-    api::LibraryTitle t;
-    t.kind = api::MediaKind::Movie;
+    domain::LibraryTitle t;
+    t.kind = domain::MediaKind::Movie;
     t.imdbId = QStringLiteral("tt1000001");
     t.title = QStringLiteral("Saved Movie");
     t.year = 2026;
@@ -24,19 +24,19 @@ api::LibraryTitle movieTitle()
     return t;
 }
 
-api::LibraryTitle seriesTitle()
+domain::LibraryTitle seriesTitle()
 {
-    api::LibraryTitle t;
-    t.kind = api::MediaKind::Series;
+    domain::LibraryTitle t;
+    t.kind = domain::MediaKind::Series;
     t.imdbId = QStringLiteral("tt2000001");
     t.title = QStringLiteral("Saved Series");
     t.year = 2026;
     return t;
 }
 
-api::LibraryEpisode episode(int season, int number)
+domain::LibraryEpisode episode(int season, int number)
 {
-    api::LibraryEpisode e;
+    domain::LibraryEpisode e;
     e.seriesImdbId = QStringLiteral("tt2000001");
     e.season = season;
     e.episode = number;
@@ -79,12 +79,12 @@ private Q_SLOTS:
         drain();
         QCOMPARE(changed.count(), 1);
 
-        const auto got = m_store->find(api::MediaKind::Movie,
+        const auto got = m_store->find(domain::MediaKind::Movie,
             QStringLiteral("tt1000001"));
         QVERIFY(got.has_value());
         QCOMPARE(got->title, QStringLiteral("Saved Movie"));
         QCOMPARE(got->year.value_or(0), 2026);
-        QVERIFY(m_store->contains(api::MediaKind::Movie,
+        QVERIFY(m_store->contains(domain::MediaKind::Movie,
             QStringLiteral("tt1000001")));
 
         const auto all = m_store->titles();
@@ -121,7 +121,7 @@ private Q_SLOTS:
         // (mimicking the pre-v7 row before backfill) should hydrate
         // with empty defaults, not garbage.
         m_store->upsertTitle(movieTitle());
-        const auto got = m_store->find(api::MediaKind::Movie,
+        const auto got = m_store->find(domain::MediaKind::Movie,
             QStringLiteral("tt1000001"));
         QVERIFY(got.has_value());
         QVERIFY(got->genres.isEmpty());
@@ -162,16 +162,16 @@ private Q_SLOTS:
         m_store->upsertEpisodes(s.imdbId,
             { episode(1, 1), episode(1, 2) });
 
-        m_store->remove(api::MediaKind::Series, s.imdbId);
-        QVERIFY(!m_store->find(api::MediaKind::Series, s.imdbId).has_value());
+        m_store->remove(domain::MediaKind::Series, s.imdbId);
+        QVERIFY(!m_store->find(domain::MediaKind::Series, s.imdbId).has_value());
         QVERIFY(m_store->episodesForSeries(s.imdbId).isEmpty());
-        QVERIFY(!m_store->contains(api::MediaKind::Series, s.imdbId));
+        QVERIFY(!m_store->contains(domain::MediaKind::Series, s.imdbId));
     }
 
     void removeIsNoOpForUnknownTitle()
     {
         QSignalSpy changed(m_store.get(), &core::LibraryStore::changed);
-        m_store->remove(api::MediaKind::Movie,
+        m_store->remove(domain::MediaKind::Movie,
             QStringLiteral("tt9999999"));
         drain();
         // Nothing was deleted; no change signal should fire.

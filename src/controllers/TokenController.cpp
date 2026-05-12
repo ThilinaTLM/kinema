@@ -6,7 +6,7 @@
 #include "api/TmdbClient.h"
 #include "config/DebridSettings.h"
 #include "core/TmdbConfig.h"
-#include "core/TokenStore.h"
+#include "core/persistence/TokenStore.h"
 #include "kinema_log_controller.h"
 
 namespace kinema::controllers {

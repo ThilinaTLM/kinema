@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/PlaybackContext.h"
-#include "core/Database.h"
-#include "core/HistoryStore.h"
+#include "domain/PlaybackContext.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/HistoryStore.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -17,11 +17,11 @@ using namespace kinema;
 
 namespace {
 
-api::HistoryEntry makeMovieEntry(const QString& imdb, double pos,
+domain::HistoryEntry makeMovieEntry(const QString& imdb, double pos,
     double dur, const QDateTime& watched = QDateTime::currentDateTimeUtc())
 {
-    api::HistoryEntry e;
-    e.key.kind = api::MediaKind::Movie;
+    domain::HistoryEntry e;
+    e.key.kind = domain::MediaKind::Movie;
     e.key.imdbId = imdb;
     e.title = QStringLiteral("Movie ") + imdb;
     e.poster = QUrl(QStringLiteral("https://example.com/") + imdb + QStringLiteral(".jpg"));
@@ -37,12 +37,12 @@ api::HistoryEntry makeMovieEntry(const QString& imdb, double pos,
     return e;
 }
 
-api::HistoryEntry makeEpisodeEntry(const QString& imdb, int season, int episode,
+domain::HistoryEntry makeEpisodeEntry(const QString& imdb, int season, int episode,
     double pos, double dur,
     const QDateTime& watched = QDateTime::currentDateTimeUtc())
 {
-    api::HistoryEntry e;
-    e.key.kind = api::MediaKind::Series;
+    domain::HistoryEntry e;
+    e.key.kind = domain::MediaKind::Series;
     e.key.imdbId = imdb;
     e.key.season = season;
     e.key.episode = episode;
@@ -60,7 +60,7 @@ api::HistoryEntry makeEpisodeEntry(const QString& imdb, int season, int episode,
     return e;
 }
 
-bool createLegacyHistoryDb(const QString& path, const api::HistoryEntry& entry)
+bool createLegacyHistoryDb(const QString& path, const domain::HistoryEntry& entry)
 {
     const QString connName = QStringLiteral("tst_history_store_legacy_seed");
     const auto nullSafe = [](const QString& s) {
@@ -129,7 +129,7 @@ bool createLegacyHistoryDb(const QString& path, const api::HistoryEntry& entry)
                 )
             )"));
             q.addBindValue(entry.key.storageKey());
-            q.addBindValue(entry.key.kind == api::MediaKind::Series
+            q.addBindValue(entry.key.kind == domain::MediaKind::Series
                     ? QStringLiteral("series")
                     : QStringLiteral("movie"));
             q.addBindValue(entry.key.imdbId);
@@ -209,7 +209,7 @@ private Q_SLOTS:
         m_store->record(e);
 
         // Simulate a position-observer tick with no stream metadata.
-        api::HistoryEntry tick;
+        domain::HistoryEntry tick;
         tick.key = e.key;
         tick.positionSec = 250;
         tick.durationSec = 5000;
@@ -373,7 +373,7 @@ private Q_SLOTS:
             now.addSecs(-300)));
 
         const auto got = m_store->findLatestForMedia(
-            api::MediaKind::Series, QStringLiteral("tt6000001"));
+            domain::MediaKind::Series, QStringLiteral("tt6000001"));
         QVERIFY(got.has_value());
         QCOMPARE(got->key.season.value_or(-1), 2);
         QCOMPARE(got->key.episode.value_or(-1), 3);
@@ -400,11 +400,11 @@ private Q_SLOTS:
 
         m_store->runRetentionPass();
 
-        QVERIFY(!m_store->find({ api::MediaKind::Movie,
+        QVERIFY(!m_store->find({ domain::MediaKind::Movie,
             QStringLiteral("tt7000001"), {}, {} }).has_value());
-        QVERIFY(m_store->find({ api::MediaKind::Movie,
+        QVERIFY(m_store->find({ domain::MediaKind::Movie,
             QStringLiteral("tt7000002"), {}, {} }).has_value());
-        QVERIFY(m_store->find({ api::MediaKind::Movie,
+        QVERIFY(m_store->find({ domain::MediaKind::Movie,
             QStringLiteral("tt7000003"), {}, {} }).has_value());
     }
 

@@ -61,7 +61,7 @@ QVariant DiscoverSectionModel::data(const QModelIndex& index, int role) const
     case VoteAverageRole:
         return it.voteAverage ? QVariant(*it.voteAverage) : QVariant();
     case KindRole:
-        // Expose as int so QML can compare to api::MediaKind via
+        // Expose as int so QML can compare to domain::MediaKind via
         // the enum's underlying type without needing a Q_ENUM
         // declaration on the alias.
         return static_cast<int>(it.kind);
@@ -125,7 +125,7 @@ void DiscoverSectionModel::setLoading()
     resetState(State::Loading);
 }
 
-void DiscoverSectionModel::setItems(QList<api::DiscoverItem> items)
+void DiscoverSectionModel::setItems(QList<domain::DiscoverItem> items)
 {
     beginResetModel();
     m_items = std::move(items);
@@ -143,7 +143,7 @@ void DiscoverSectionModel::setItems(QList<api::DiscoverItem> items)
     resetState(m_items.isEmpty() ? State::Empty : State::Ready);
 }
 
-void DiscoverSectionModel::appendItems(QList<api::DiscoverItem> items)
+void DiscoverSectionModel::appendItems(QList<domain::DiscoverItem> items)
 {
     if (items.isEmpty()) {
         return;
@@ -198,7 +198,7 @@ void DiscoverSectionModel::setEpisodeSubtitleList(QStringList subtitles)
     }
 }
 
-const api::DiscoverItem* DiscoverSectionModel::itemAt(int row) const
+const domain::DiscoverItem* DiscoverSectionModel::itemAt(int row) const
 {
     if (row < 0 || row >= m_items.size()) {
         return nullptr;

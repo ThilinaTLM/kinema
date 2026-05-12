@@ -4,7 +4,7 @@
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 
 #include "api/CinemetaClient.h"
-#include "api/Indexer.h"
+#include "domain/Indexer.h"
 #include "api/IndexerSelector.h"
 #include "api/TmdbClient.h"
 #include "config/AppSettings.h"
@@ -14,10 +14,10 @@
 #include "controllers/LibraryController.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
-#include "core/DateFormat.h"
-#include "core/HttpError.h"
-#include "core/HttpErrorPresenter.h"
-#include "core/StreamFilter.h"
+#include "core/util/DateFormat.h"
+#include "core/io/HttpError.h"
+#include "core/io/HttpErrorPresenter.h"
+#include "core/util/StreamFilter.h"
 #include "kinema_log_ui.h"
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
@@ -255,7 +255,7 @@ void MovieDetailViewModel::setSimilarVisible(bool on)
     Q_EMIT similarChanged();
 }
 
-void MovieDetailViewModel::applyMeta(const api::MetaDetail& detail)
+void MovieDetailViewModel::applyMeta(const domain::MetaDetail& detail)
 {
     m_currentMeta = detail;
     const auto& s = detail.summary;
@@ -281,7 +281,7 @@ void MovieDetailViewModel::applyMeta(const api::MetaDetail& detail)
 void MovieDetailViewModel::refreshLibraryState()
 {
     const bool inLibrary = m_library && !m_imdbId.isEmpty()
-        && m_library->isInLibrary(api::MediaKind::Movie, m_imdbId);
+        && m_library->isInLibrary(domain::MediaKind::Movie, m_imdbId);
     if (m_inLibrary == inLibrary) {
         return;
     }
@@ -354,9 +354,9 @@ QCoro::Task<void> MovieDetailViewModel::loadMetaAndStreams(QString imdbId)
     setSimilarVisible(false);
     m_similar->setItems({});
 
-    api::MetaDetail detail;
+    domain::MetaDetail detail;
     try {
-        detail = co_await m_cinemeta->meta(api::MediaKind::Movie, imdbId);
+        detail = co_await m_cinemeta->meta(domain::MediaKind::Movie, imdbId);
         if (myEpoch != m_epoch) {
             co_return;
         }
@@ -374,7 +374,7 @@ QCoro::Task<void> MovieDetailViewModel::loadMetaAndStreams(QString imdbId)
 
     // Kick off the similar fetch in parallel — it doesn't block the
     // streams fetch and its own epoch guard handles cancellation.
-    auto similarTask = loadSimilarFor(imdbId, api::MediaKind::Movie);
+    auto similarTask = loadSimilarFor(imdbId, domain::MediaKind::Movie);
     Q_UNUSED(similarTask);
 
     co_await loadStreamsTask(imdbId, detail.summary.released, myEpoch);
@@ -404,7 +404,7 @@ QCoro::Task<void> MovieDetailViewModel::loadStreamsTask(
             co_return;
         }
         auto streams = co_await indexer->streams(
-            api::MediaKind::Movie, imdbId);
+            domain::MediaKind::Movie, imdbId);
         if (expectedEpoch != m_epoch) {
             co_return;
         }
@@ -495,7 +495,7 @@ QCoro::Task<void> MovieDetailViewModel::resolveByTmdbAndLoad(
 }
 
 QCoro::Task<void> MovieDetailViewModel::loadSimilarFor(QString imdbId,
-    api::MediaKind kind)
+    domain::MediaKind kind)
 {
     const auto myEpoch = ++m_similarEpoch;
 
@@ -532,7 +532,7 @@ QCoro::Task<void> MovieDetailViewModel::loadSimilarFor(QString imdbId,
         co_return;
     }
 
-    QList<api::DiscoverItem> items;
+    QList<domain::DiscoverItem> items;
     try {
         items = co_await m_tmdb->recommendations(kind, tmdbId);
         if (myEpoch != m_similarEpoch) {
@@ -592,7 +592,7 @@ void MovieDetailViewModel::rebuildVisibleStreams()
     m_streams->setItems(std::move(visible), emptyExplanation);
 }
 
-QList<api::Stream> MovieDetailViewModel::applyFilters() const
+QList<domain::Stream> MovieDetailViewModel::applyFilters() const
 {
     if (m_rawStreams.isEmpty()) {
         return {};
@@ -608,15 +608,15 @@ QList<api::Stream> MovieDetailViewModel::applyFilters() const
             m_uiDolbyVisionOnly, m_uiMultiAudioOnly });
 }
 
-void MovieDetailViewModel::sortInPlace(QList<api::Stream>& rows) const
+void MovieDetailViewModel::sortInPlace(QList<domain::Stream>& rows) const
 {
     stream_sorting::sortInPlace(rows, m_sortMode, m_sortDescending);
 }
 
-api::PlaybackContext MovieDetailViewModel::currentContext() const
+domain::PlaybackContext MovieDetailViewModel::currentContext() const
 {
-    api::PlaybackContext ctx;
-    ctx.key.kind = api::MediaKind::Movie;
+    domain::PlaybackContext ctx;
+    ctx.key.kind = domain::MediaKind::Movie;
     ctx.key.imdbId = m_imdbId;
     ctx.title = m_title;
     ctx.poster = QUrl(m_posterUrl);
@@ -644,7 +644,7 @@ void MovieDetailViewModel::addToLibrary()
 void MovieDetailViewModel::removeFromLibrary()
 {
     if (m_library && !m_imdbId.isEmpty()) {
-        m_library->removeFromLibrary(api::MediaKind::Movie, m_imdbId);
+        m_library->removeFromLibrary(domain::MediaKind::Movie, m_imdbId);
     }
 }
 
@@ -691,7 +691,7 @@ void MovieDetailViewModel::playWithBackend(int row, int backendKind)
         return;
     }
     m_actions->playWithBackend(*s, currentContext(),
-        static_cast<api::DownloadBackendKind>(backendKind));
+        static_cast<domain::DownloadBackendKind>(backendKind));
 }
 
 void MovieDetailViewModel::download(int row)
@@ -722,7 +722,7 @@ void MovieDetailViewModel::downloadWithBackend(int row, int backendKind)
         return;
     }
     m_downloads->downloadWithBackend(*s, currentContext(),
-        static_cast<api::DownloadBackendKind>(backendKind));
+        static_cast<domain::DownloadBackendKind>(backendKind));
 }
 
 void MovieDetailViewModel::setDownloadController(
@@ -771,7 +771,7 @@ void MovieDetailViewModel::requestSubtitlesFor(int row)
 {
     auto ctx = currentContext();
     if (const auto* s = m_streams->at(row)) {
-        ctx.streamRef = api::HistoryStreamRef::fromStream(*s);
+        ctx.streamRef = domain::HistoryStreamRef::fromStream(*s);
     }
     Q_EMIT subtitlesRequested(ctx);
 }
@@ -782,7 +782,7 @@ void MovieDetailViewModel::activateSimilar(int row)
     if (!item) {
         return;
     }
-    if (item->kind == api::MediaKind::Series) {
+    if (item->kind == domain::MediaKind::Series) {
         Q_EMIT openSeriesByTmdbRequested(item->tmdbId, item->title);
     } else {
         Q_EMIT openMovieByTmdbRequested(item->tmdbId, item->title);

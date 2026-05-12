@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Download.h"
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Download.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 #include "api/AllDebridClient.h"
 #include "api/RealDebridClient.h"
 #include "config/DownloadSettings.h"
 #include "config/TorrentStreamingSettings.h"
-#include "core/CachePaths.h"
-#include "core/Database.h"
-#include "core/DownloadStore.h"
-#include "core/HttpClient.h"
-#include "core/MediaCache.h"
+#include "core/io/CachePaths.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/DownloadStore.h"
+#include "core/io/HttpClient.h"
+#include "core/persistence/MediaCache.h"
 #include "download/DownloadManager.h"
 #include "torrent/TorrentStreamingService.h"
 
@@ -43,7 +43,7 @@ public:
     }
 
     QCoro::Task<torrent::PreparedSession> prepareSession(
-        const api::Stream& stream, const api::PlaybackContext& ctx,
+        const domain::Stream& stream, const domain::PlaybackContext& ctx,
         torrent::PrepareMode mode) override
     {
         Q_UNUSED(ctx);
@@ -58,8 +58,8 @@ public:
         co_return ps;
     }
 
-    QCoro::Task<QUrl> prepare(const api::Stream& s,
-        const api::PlaybackContext& ctx) override
+    QCoro::Task<QUrl> prepare(const domain::Stream& s,
+        const domain::PlaybackContext& ctx) override
     {
         Q_UNUSED(s);
         Q_UNUSED(ctx);
@@ -99,9 +99,9 @@ public:
     QList<QString> resumeCalls;
 };
 
-api::Stream makeStream(const QString& infoHash = QString())
+domain::Stream makeStream(const QString& infoHash = QString())
 {
-    api::Stream s;
+    domain::Stream s;
     s.infoHash = infoHash.isEmpty()
         ? QStringLiteral("aabb1122ccdd3344eeff5566778899aabbccddee")
         : infoHash;
@@ -112,10 +112,10 @@ api::Stream makeStream(const QString& infoHash = QString())
     return s;
 }
 
-api::PlaybackContext makeContext(const QString& imdb = QStringLiteral("tt1234567"))
+domain::PlaybackContext makeContext(const QString& imdb = QStringLiteral("tt1234567"))
 {
-    api::PlaybackContext ctx;
-    ctx.key.kind = api::MediaKind::Movie;
+    domain::PlaybackContext ctx;
+    ctx.key.kind = domain::MediaKind::Movie;
     ctx.key.imdbId = imdb;
     ctx.title = QStringLiteral("Sample Movie");
     return ctx;
@@ -200,13 +200,13 @@ private Q_SLOTS:
         // background helper persists Active once the session is
         // realised; allow either Resolving or Active depending on
         // how many event-loop turns have elapsed.
-        const auto ref = api::assetRefFor(stream, ctx);
-        const auto row = m_store->find(api::assetIdFor(ref));
+        const auto ref = domain::assetRefFor(stream, ctx);
+        const auto row = m_store->find(domain::assetIdFor(ref));
         QVERIFY(row.has_value());
-        QVERIFY(row->state == api::DownloadState::Active
-            || row->state == api::DownloadState::Resolving);
-        QCOMPARE(row->disposition, api::CacheDisposition::Pinned);
-        QCOMPARE(row->mode, api::DownloadMode::Full);
+        QVERIFY(row->state == domain::DownloadState::Active
+            || row->state == domain::DownloadState::Resolving);
+        QCOMPARE(row->disposition, domain::CacheDisposition::Pinned);
+        QCOMPARE(row->mode, domain::DownloadMode::Full);
 
         // Full ⇒ engine was told to keep the session alive.
         QVERIFY(!m_engine->keepAliveCalls.isEmpty());
@@ -217,8 +217,8 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = api::assetIdFor(
-            api::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(
+            domain::assetRefFor(stream, ctx));
 
         // Prime an OnDemand session via Play.
         QSignalSpy itemSpy(m_manager.get(),
@@ -233,9 +233,9 @@ private Q_SLOTS:
 
         const auto onDemandRow = m_store->find(assetId);
         QVERIFY(onDemandRow.has_value());
-        QCOMPARE(onDemandRow->mode, api::DownloadMode::OnDemand);
+        QCOMPARE(onDemandRow->mode, domain::DownloadMode::OnDemand);
         QCOMPARE(onDemandRow->disposition,
-            api::CacheDisposition::Ephemeral);
+            domain::CacheDisposition::Ephemeral);
 
         const int beforePrepareCalls = m_engine->prepareCalls;
 
@@ -250,9 +250,9 @@ private Q_SLOTS:
         QCOMPARE(m_engine->prepareCalls, beforePrepareCalls);
         const auto upgraded = m_store->find(assetId);
         QVERIFY(upgraded.has_value());
-        QCOMPARE(upgraded->mode, api::DownloadMode::Full);
+        QCOMPARE(upgraded->mode, domain::DownloadMode::Full);
         QCOMPARE(upgraded->disposition,
-            api::CacheDisposition::Pinned);
+            domain::CacheDisposition::Pinned);
         QVERIFY(!m_engine->promoteCalls.isEmpty());
         QCOMPARE(m_engine->promoteCalls.last(), stream.infoHash);
     }
@@ -261,8 +261,8 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = api::assetIdFor(
-            api::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(
+            domain::assetRefFor(stream, ctx));
 
         m_manager->enqueueDownload(stream, ctx);
         for (int i = 0; i < 20 && m_engine->prepareCalls == 0; ++i) {
@@ -274,53 +274,53 @@ private Q_SLOTS:
         QCOMPARE(m_engine->pauseCalls.last(), stream.infoHash);
         const auto pausedRow = m_store->find(assetId);
         QVERIFY(pausedRow.has_value());
-        QCOMPARE(pausedRow->state, api::DownloadState::Paused);
+        QCOMPARE(pausedRow->state, domain::DownloadState::Paused);
 
         m_manager->resume(assetId);
         QCOMPARE(m_engine->resumeCalls.size(), 1);
         QCOMPARE(m_engine->resumeCalls.last(), stream.infoHash);
         const auto resumedRow = m_store->find(assetId);
         QVERIFY(resumedRow.has_value());
-        QCOMPARE(resumedRow->state, api::DownloadState::Active);
+        QCOMPARE(resumedRow->state, domain::DownloadState::Active);
     }
 
     void resumePersistedRestartsOnlyFullRows()
     {
         // Pre-populate the store directly so we don't realise any
         // sessions through the manager.
-        api::DownloadItem fullActive;
+        domain::DownloadItem fullActive;
         fullActive.assetId = QStringLiteral("asset-full-active");
-        fullActive.backendKind = api::DownloadBackendKind::Torrent;
-        fullActive.state = api::DownloadState::Active;
-        fullActive.mode = api::DownloadMode::Full;
-        fullActive.disposition = api::CacheDisposition::Pinned;
-        fullActive.key.kind = api::MediaKind::Movie;
+        fullActive.backendKind = domain::DownloadBackendKind::Torrent;
+        fullActive.state = domain::DownloadState::Active;
+        fullActive.mode = domain::DownloadMode::Full;
+        fullActive.disposition = domain::CacheDisposition::Pinned;
+        fullActive.key.kind = domain::MediaKind::Movie;
         fullActive.key.imdbId = QStringLiteral("tt9000001");
         fullActive.title = QStringLiteral("Full Active");
         fullActive.infoHash = QStringLiteral(
             "1111222233334444555566667777888899990000");
         m_store->upsert(fullActive);
 
-        api::DownloadItem fullCompleted;
+        domain::DownloadItem fullCompleted;
         fullCompleted.assetId = QStringLiteral("asset-full-done");
-        fullCompleted.backendKind = api::DownloadBackendKind::Torrent;
-        fullCompleted.state = api::DownloadState::Completed;
-        fullCompleted.mode = api::DownloadMode::Full;
-        fullCompleted.disposition = api::CacheDisposition::Pinned;
-        fullCompleted.key.kind = api::MediaKind::Movie;
+        fullCompleted.backendKind = domain::DownloadBackendKind::Torrent;
+        fullCompleted.state = domain::DownloadState::Completed;
+        fullCompleted.mode = domain::DownloadMode::Full;
+        fullCompleted.disposition = domain::CacheDisposition::Pinned;
+        fullCompleted.key.kind = domain::MediaKind::Movie;
         fullCompleted.key.imdbId = QStringLiteral("tt9000002");
         fullCompleted.title = QStringLiteral("Full Done");
         fullCompleted.infoHash = QStringLiteral(
             "aaaa222233334444555566667777888899990000");
         m_store->upsert(fullCompleted);
 
-        api::DownloadItem onDemandActive;
+        domain::DownloadItem onDemandActive;
         onDemandActive.assetId = QStringLiteral("asset-od-active");
-        onDemandActive.backendKind = api::DownloadBackendKind::Torrent;
-        onDemandActive.state = api::DownloadState::Active;
-        onDemandActive.mode = api::DownloadMode::OnDemand;
-        onDemandActive.disposition = api::CacheDisposition::Ephemeral;
-        onDemandActive.key.kind = api::MediaKind::Movie;
+        onDemandActive.backendKind = domain::DownloadBackendKind::Torrent;
+        onDemandActive.state = domain::DownloadState::Active;
+        onDemandActive.mode = domain::DownloadMode::OnDemand;
+        onDemandActive.disposition = domain::CacheDisposition::Ephemeral;
+        onDemandActive.key.kind = domain::MediaKind::Movie;
         onDemandActive.key.imdbId = QStringLiteral("tt9000003");
         onDemandActive.title = QStringLiteral("OnDemand Active");
         onDemandActive.infoHash = QStringLiteral(
@@ -342,7 +342,7 @@ private Q_SLOTS:
 
     void enqueueRejectsStreamsWithoutInfoHash()
     {
-        api::Stream s;
+        domain::Stream s;
         // No info hash, no direct URL.
         s.releaseName = QStringLiteral("Junk");
         QSignalSpy statusSpy(m_manager.get(),
@@ -361,7 +361,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = api::assetIdFor(api::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         m_manager->enqueueDownload(stream, ctx);
         for (int i = 0; i < 20 && m_engine->prepareCalls == 0; ++i) {
@@ -370,7 +370,7 @@ private Q_SLOTS:
         QCOMPARE(m_engine->prepareCalls, 1);
 
         // Simulate a fault.
-        m_store->updateState(assetId, api::DownloadState::Failed,
+        m_store->updateState(assetId, domain::DownloadState::Failed,
             QStringLiteral("network error"));
 
         m_manager->retry(assetId);
@@ -380,7 +380,7 @@ private Q_SLOTS:
         QCOMPARE(m_engine->prepareCalls, 2);
         const auto row = m_store->find(assetId);
         QVERIFY(row.has_value());
-        QVERIFY(row->state != api::DownloadState::Failed);
+        QVERIFY(row->state != domain::DownloadState::Failed);
         QVERIFY(row->lastError.isEmpty());
     }
 
@@ -388,7 +388,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = api::assetIdFor(api::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         m_manager->enqueueDownload(stream, ctx);
         for (int i = 0; i < 20 && m_engine->prepareCalls == 0; ++i) {
@@ -398,7 +398,7 @@ private Q_SLOTS:
         m_manager->cancel(assetId);
         const auto row = m_store->find(assetId);
         QVERIFY(row.has_value());
-        QCOMPARE(row->state, api::DownloadState::Cancelled);
+        QCOMPARE(row->state, domain::DownloadState::Cancelled);
         // Live stats should be cleared.
         QVERIFY(!m_manager->liveStatsFor(assetId).has_value());
     }
@@ -407,7 +407,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = api::assetIdFor(api::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         // Use Play (OnDemand+Ephemeral) so the keepAlive history
         // starts clean; otherwise enqueueDownload's own Pinned
@@ -435,7 +435,7 @@ private Q_SLOTS:
         stream.fileIndex = 3;
         stream.fileNameHint = QStringLiteral("Episode.S01E01.mkv");
         const auto ctx = makeContext();
-        const auto assetId = api::assetIdFor(api::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         const QUrl first = QCoro::waitFor(
             m_manager->prepareForPlayback(stream, ctx));
@@ -457,9 +457,9 @@ private Q_SLOTS:
 
     void synthesiseStartArgsPreservesFileSelectionHints()
     {
-        auto row = api::DownloadItem {};
+        auto row = domain::DownloadItem {};
         row.assetId = QStringLiteral("asset-x");
-        row.key.kind = api::MediaKind::Series;
+        row.key.kind = domain::MediaKind::Series;
         row.key.imdbId = QStringLiteral("tt7654321");
         row.key.season = 1;
         row.key.episode = 2;

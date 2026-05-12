@@ -48,7 +48,7 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
     }
 
     const auto& ctx = m_playback.currentContext();
-    if (ctx.key.kind != api::MediaKind::Series
+    if (ctx.key.kind != domain::MediaKind::Series
         || !ctx.key.season.has_value()
         || !ctx.key.episode.has_value()
         || ctx.streamRef.infoHash.isEmpty()) {
@@ -78,8 +78,8 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
 
     auto toTarget = [this](const torrent::EpisodeFileTarget& target)
         -> EpisodeTarget {
-        api::PlaybackKey key;
-        key.kind = api::MediaKind::Series;
+        domain::PlaybackKey key;
+        key.kind = domain::MediaKind::Series;
         key.imdbId = m_playback.currentContext().key.imdbId;
         key.season = target.season;
         key.episode = target.episode;
@@ -100,7 +100,7 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
 
 void SeriesPlaybackSessionController::onPlayerEndOfFile(
     const QString& reason,
-    const api::PlaybackContext& ctx)
+    const domain::PlaybackContext& ctx)
 {
     Q_UNUSED(ctx);
 
@@ -121,7 +121,7 @@ void SeriesPlaybackSessionController::onPlayerEndOfFile(
 }
 
 void SeriesPlaybackSessionController::onPlayerUserClosed(
-    const api::PlaybackContext& ctx)
+    const domain::PlaybackContext& ctx)
 {
     Q_UNUSED(ctx);
     m_userClosed = true;
@@ -158,7 +158,7 @@ void SeriesPlaybackSessionController::clearState()
 }
 
 void SeriesPlaybackSessionController::setState(
-    const api::PlaybackContext& ctx,
+    const domain::PlaybackContext& ctx,
     std::optional<EpisodeTarget> previous,
     std::optional<EpisodeTarget> next)
 {
@@ -184,7 +184,7 @@ void SeriesPlaybackSessionController::playTarget(const EpisodeTarget& target)
         return;
     }
 
-    api::Stream stream;
+    domain::Stream stream;
     stream.infoHash = m_baseContext.streamRef.infoHash;
     stream.releaseName = m_baseContext.streamRef.releaseName;
     stream.resolution = m_baseContext.streamRef.resolution;
@@ -196,7 +196,7 @@ void SeriesPlaybackSessionController::playTarget(const EpisodeTarget& target)
         stream.sizeBytes = target.sizeBytes;
     }
 
-    api::PlaybackContext ctx;
+    domain::PlaybackContext ctx;
     ctx.key = target.key;
     ctx.seriesTitle = m_baseContext.seriesTitle;
     ctx.episodeTitle = episodeCode(target.key.season.value_or(0),
@@ -217,7 +217,7 @@ QString SeriesPlaybackSessionController::episodeCode(int season, int episode)
 }
 
 QString SeriesPlaybackSessionController::displayTitle(
-    const api::PlaybackContext& base,
+    const domain::PlaybackContext& base,
     int season,
     int episode)
 {

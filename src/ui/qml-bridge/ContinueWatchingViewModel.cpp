@@ -15,9 +15,9 @@ namespace {
 /// Build a `DiscoverItem` view of a `HistoryEntry`. The rail's
 /// delegate reads only title / poster / kind, so non-display fields
 /// stay zeroed.
-api::DiscoverItem itemFromHistory(const api::HistoryEntry& e)
+domain::DiscoverItem itemFromHistory(const domain::HistoryEntry& e)
 {
-    api::DiscoverItem it;
+    domain::DiscoverItem it;
     it.kind = e.key.kind;
     it.title = e.seriesTitle.isEmpty() ? e.title : e.seriesTitle;
     it.poster = e.poster;
@@ -26,9 +26,9 @@ api::DiscoverItem itemFromHistory(const api::HistoryEntry& e)
 
 /// Episode badge string for a series entry: "S01E02" (zero-padded).
 /// Returns an empty string for movies or entries without season/episode.
-QString episodeSubtitle(const api::HistoryEntry& e)
+QString episodeSubtitle(const domain::HistoryEntry& e)
 {
-    if (e.key.kind != api::MediaKind::Series
+    if (e.key.kind != domain::MediaKind::Series
         || !e.key.season.has_value() || !e.key.episode.has_value()) {
         return {};
     }
@@ -42,7 +42,7 @@ QString episodeSubtitle(const api::HistoryEntry& e)
 /// Mirrors `ui::ContinueWatchingSection::lastReleaseLine` so visual
 /// parity with the legacy widget surface is preserved during the
 /// migration.
-QString lastReleaseLine(const api::HistoryStreamRef& ref)
+QString lastReleaseLine(const domain::HistoryStreamRef& ref)
 {
     if (ref.isEmpty()) {
         return {};
@@ -87,7 +87,7 @@ void ContinueWatchingViewModel::refresh()
 
 void ContinueWatchingViewModel::rebuildModel()
 {
-    QList<api::DiscoverItem> items;
+    QList<domain::DiscoverItem> items;
     QList<double> progress;
     QStringList releases;
     QStringList episodeSubs;

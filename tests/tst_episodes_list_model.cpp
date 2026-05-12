@@ -6,7 +6,7 @@
 #include <QSignalSpy>
 #include <QTest>
 
-using kinema::api::Episode;
+using kinema::domain::Episode;
 using kinema::ui::qml::EpisodesListModel;
 
 namespace {

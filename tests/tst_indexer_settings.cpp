@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/Indexer.h"
+#include "domain/Indexer.h"
 #include "config/IndexerSettings.h"
 
 #include <KConfig>
@@ -38,7 +38,7 @@ private Q_SLOTS:
     void defaults_activeIsTorrentio()
     {
         config::IndexerSettings s(m_config);
-        QCOMPARE(s.activeIndexer(), api::IndexerKind::Torrentio);
+        QCOMPARE(s.activeIndexer(), domain::IndexerKind::Torrentio);
     }
 
     // ---- Roundtrip ------------------------------------------------------
@@ -47,14 +47,14 @@ private Q_SLOTS:
     {
         {
             config::IndexerSettings s(m_config);
-            s.setActiveIndexer(api::IndexerKind::Peerflix);
+            s.setActiveIndexer(domain::IndexerKind::Peerflix);
         }
         m_config->sync();
 
         auto cfg2 = KSharedConfig::openConfig(
             m_configPath, KConfig::SimpleConfig);
         config::IndexerSettings s2(cfg2);
-        QCOMPARE(s2.activeIndexer(), api::IndexerKind::Peerflix);
+        QCOMPARE(s2.activeIndexer(), domain::IndexerKind::Peerflix);
     }
 
     // ---- Signals --------------------------------------------------------
@@ -64,15 +64,15 @@ private Q_SLOTS:
         config::IndexerSettings s(m_config);
         QSignalSpy spy(&s, &config::IndexerSettings::activeIndexerChanged);
 
-        s.setActiveIndexer(api::IndexerKind::Torrentio); // already default
+        s.setActiveIndexer(domain::IndexerKind::Torrentio); // already default
         QCOMPARE(spy.count(), 0);
 
-        s.setActiveIndexer(api::IndexerKind::Peerflix);
+        s.setActiveIndexer(domain::IndexerKind::Peerflix);
         QCOMPARE(spy.count(), 1);
-        QCOMPARE(spy.at(0).at(0).value<api::IndexerKind>(),
-            api::IndexerKind::Peerflix);
+        QCOMPARE(spy.at(0).at(0).value<domain::IndexerKind>(),
+            domain::IndexerKind::Peerflix);
 
-        s.setActiveIndexer(api::IndexerKind::Peerflix); // no-op
+        s.setActiveIndexer(domain::IndexerKind::Peerflix); // no-op
         QCOMPARE(spy.count(), 1);
     }
 
@@ -81,24 +81,24 @@ private Q_SLOTS:
     void indexerKindToString_roundTrips()
     {
         for (const auto k :
-            { api::IndexerKind::Torrentio, api::IndexerKind::Peerflix }) {
-            QCOMPARE(api::indexerKindFromString(api::indexerKindToString(k)),
+            { domain::IndexerKind::Torrentio, domain::IndexerKind::Peerflix }) {
+            QCOMPARE(domain::indexerKindFromString(domain::indexerKindToString(k)),
                 k);
         }
     }
 
     void indexerKindFromString_defaultsToTorrentio()
     {
-        QCOMPARE(api::indexerKindFromString(QString {}),
-            api::IndexerKind::Torrentio);
-        QCOMPARE(api::indexerKindFromString(QStringLiteral("bogus")),
-            api::IndexerKind::Torrentio);
+        QCOMPARE(domain::indexerKindFromString(QString {}),
+            domain::IndexerKind::Torrentio);
+        QCOMPARE(domain::indexerKindFromString(QStringLiteral("bogus")),
+            domain::IndexerKind::Torrentio);
         // Legacy "mediafusion" token from old configs → falls back to
         // the default rather than crashing.
-        QCOMPARE(api::indexerKindFromString(QStringLiteral("mediafusion")),
-            api::IndexerKind::Torrentio);
-        QCOMPARE(api::indexerKindFromString(QStringLiteral("  Peerflix  ")),
-            api::IndexerKind::Peerflix);
+        QCOMPARE(domain::indexerKindFromString(QStringLiteral("mediafusion")),
+            domain::IndexerKind::Torrentio);
+        QCOMPARE(domain::indexerKindFromString(QStringLiteral("  Peerflix  ")),
+            domain::IndexerKind::Peerflix);
     }
 
 private:

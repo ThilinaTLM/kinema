@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/AllDebridClient.h"
-#include "api/Download.h"
-#include "core/HttpError.h"
+#include "domain/Download.h"
+#include "core/io/HttpError.h"
 #include "download/AllDebridResolver.h"
 #include "TestDoubles.h"
 
@@ -30,10 +30,10 @@ public:
     }
 
     // Scripted responses.
-    QList<api::AdAddMagnetResult> uploadReplies;
-    QList<api::AdMagnetStatus> statusReplies;
-    QList<QList<api::AdMagnetFile>> filesReplies;
-    QList<api::AdUnlockedLink> unlockReplies;
+    QList<domain::AdAddMagnetResult> uploadReplies;
+    QList<domain::AdMagnetStatus> statusReplies;
+    QList<QList<domain::AdMagnetFile>> filesReplies;
+    QList<domain::AdUnlockedLink> unlockReplies;
     std::optional<core::HttpError> uploadError;
     std::optional<core::HttpError> statusError;
     std::optional<core::HttpError> filesError;
@@ -49,12 +49,12 @@ public:
     qint64 lastDeletedId = 0;
     QUrl lastUnlockedLink;
 
-    QCoro::Task<api::AllDebridUser> user() override
+    QCoro::Task<domain::AllDebridUser> user() override
     {
-        co_return api::AllDebridUser {};
+        co_return domain::AllDebridUser {};
     }
 
-    QCoro::Task<api::AdAddMagnetResult> uploadMagnet(QString magnet) override
+    QCoro::Task<domain::AdAddMagnetResult> uploadMagnet(QString magnet) override
     {
         ++uploadCalls;
         lastUploadMagnet = magnet;
@@ -68,7 +68,7 @@ public:
         co_return uploadReplies.takeFirst();
     }
 
-    QCoro::Task<api::AdMagnetStatus> magnetStatus(qint64) override
+    QCoro::Task<domain::AdMagnetStatus> magnetStatus(qint64) override
     {
         ++statusCalls;
         if (statusError) {
@@ -81,7 +81,7 @@ public:
         co_return statusReplies.takeFirst();
     }
 
-    QCoro::Task<QList<api::AdMagnetFile>> magnetFiles(qint64) override
+    QCoro::Task<QList<domain::AdMagnetFile>> magnetFiles(qint64) override
     {
         ++filesCalls;
         if (filesError) {
@@ -94,7 +94,7 @@ public:
         co_return filesReplies.takeFirst();
     }
 
-    QCoro::Task<api::AdUnlockedLink> unlockLink(QUrl link) override
+    QCoro::Task<domain::AdUnlockedLink> unlockLink(QUrl link) override
     {
         ++unlockCalls;
         lastUnlockedLink = link;
@@ -116,10 +116,10 @@ public:
     }
 };
 
-api::AssetRef makeRef(const QString& hint = QString())
+domain::AssetRef makeRef(const QString& hint = QString())
 {
-    api::AssetRef ref;
-    ref.key.kind = api::MediaKind::Movie;
+    domain::AssetRef ref;
+    ref.key.kind = domain::MediaKind::Movie;
     ref.key.imdbId = QStringLiteral("tt1");
     ref.infoHash = QStringLiteral(
         "aabbccddeeff00112233445566778899aabbccdd");
@@ -128,9 +128,9 @@ api::AssetRef makeRef(const QString& hint = QString())
     return ref;
 }
 
-api::AdAddMagnetResult makeUploadOk(qint64 id = 999)
+domain::AdAddMagnetResult makeUploadOk(qint64 id = 999)
 {
-    api::AdAddMagnetResult r;
+    domain::AdAddMagnetResult r;
     r.id = id;
     r.hash = QStringLiteral("aabbccddeeff00112233445566778899aabbccdd");
     r.name = QStringLiteral("Movie.Release");
@@ -139,9 +139,9 @@ api::AdAddMagnetResult makeUploadOk(qint64 id = 999)
     return r;
 }
 
-api::AdMagnetStatus makeStatus(int code)
+domain::AdMagnetStatus makeStatus(int code)
 {
-    api::AdMagnetStatus s;
+    domain::AdMagnetStatus s;
     s.id = 999;
     s.statusCode = code;
     s.status = code == 4 ? QStringLiteral("Ready")
@@ -149,10 +149,10 @@ api::AdMagnetStatus makeStatus(int code)
     return s;
 }
 
-api::AdMagnetFile makeFile(const QString& path, qint64 bytes,
+domain::AdMagnetFile makeFile(const QString& path, qint64 bytes,
     const QString& url)
 {
-    api::AdMagnetFile f;
+    domain::AdMagnetFile f;
     f.path = path;
     f.bytes = bytes;
     f.hosterLink = QUrl(url);
@@ -172,14 +172,14 @@ private Q_SLOTS:
         stub.uploadReplies = { makeUploadOk() };
         stub.statusReplies = { makeStatus(4) };
         stub.filesReplies = {
-            QList<api::AdMagnetFile> {
+            QList<domain::AdMagnetFile> {
                 makeFile(QStringLiteral("Other.Show.1080p.mkv"), 1'500'000'000,
                     QStringLiteral("https://alldebrid.com/f/other")),
                 makeFile(QStringLiteral("Movie.Release.1080p.mkv"), 1'600'000'000,
                     QStringLiteral("https://alldebrid.com/f/wanted")),
             }
         };
-        api::AdUnlockedLink unlock;
+        domain::AdUnlockedLink unlock;
         unlock.download = QUrl(QStringLiteral(
             "https://p1.alldeb.ovh/dl/wanted.mkv"));
         unlock.fileSize = 1'600'000'000;
@@ -210,12 +210,12 @@ private Q_SLOTS:
             makeStatus(1), makeStatus(1), makeStatus(4),
         };
         stub.filesReplies = {
-            QList<api::AdMagnetFile> {
+            QList<domain::AdMagnetFile> {
                 makeFile(QStringLiteral("Movie.mkv"), 1'500'000'000,
                     QStringLiteral("https://alldebrid.com/f/m"))
             }
         };
-        api::AdUnlockedLink unlock;
+        domain::AdUnlockedLink unlock;
         unlock.download = QUrl(QStringLiteral("https://p1/dl/m.mkv"));
         unlock.fileSize = 1'500'000'000;
         stub.unlockReplies = { unlock };
@@ -247,7 +247,7 @@ private Q_SLOTS:
         StubAllDebridClient stub;
         stub.uploadReplies = { makeUploadOk() };
         stub.statusReplies = { makeStatus(4) };
-        stub.filesReplies = { QList<api::AdMagnetFile> {} };
+        stub.filesReplies = { QList<domain::AdMagnetFile> {} };
 
         download::AllDebridResolver r(stub);
         try {
@@ -282,7 +282,7 @@ private Q_SLOTS:
         stub.uploadReplies = { makeUploadOk() };
         stub.statusReplies = { makeStatus(4) };
         stub.filesReplies = {
-            QList<api::AdMagnetFile> {
+            QList<domain::AdMagnetFile> {
                 makeFile(QStringLiteral("Show.S01E01.1080p.mkv"), 1'400'000'000,
                     QStringLiteral("https://alldebrid.com/f/ep1")),
                 makeFile(QStringLiteral("Show.S01E02.1080p.mkv"), 1'500'000'000,
@@ -291,13 +291,13 @@ private Q_SLOTS:
                     QStringLiteral("https://alldebrid.com/f/ep3")),
             }
         };
-        api::AdUnlockedLink unlock;
+        domain::AdUnlockedLink unlock;
         unlock.download = QUrl(QStringLiteral("https://p1/dl/ep2.mkv"));
         unlock.fileSize = 1'500'000'000;
         stub.unlockReplies = { unlock };
 
-        api::AssetRef ref;
-        ref.key.kind = api::MediaKind::Series;
+        domain::AssetRef ref;
+        ref.key.kind = domain::MediaKind::Series;
         ref.key.imdbId = QStringLiteral("tt2");
         ref.key.season = 1;
         ref.key.episode = 2;

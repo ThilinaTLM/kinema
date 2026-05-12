@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "config/DownloadSettings.h"
-#include "core/CachePaths.h"
-#include "core/MediaCache.h"
+#include "core/io/CachePaths.h"
+#include "core/persistence/MediaCache.h"
 
 #include <KSharedConfig>
 

@@ -3,12 +3,13 @@
 
 #pragma once
 
-#include "api/Discover.h"
+#include "domain/Discover.h"
 
 #include <QString>
 #include <QUrlQuery>
 
 namespace kinema::api::tmdb {
+using namespace kinema::domain;
 
 /**
  * Pure helpers that translate a DiscoverQuery into the URL segments

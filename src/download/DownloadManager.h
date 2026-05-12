@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "api/Debrid.h"
-#include "api/Download.h"
-#include "api/Media.h"
-#include "api/PlaybackContext.h"
+#include "domain/Debrid.h"
+#include "domain/Download.h"
+#include "domain/Media.h"
+#include "domain/PlaybackContext.h"
 
 #include <QHash>
 #include <QObject>
@@ -98,23 +98,23 @@ public:
     /// Forward the user's active-debrid-provider choice to the
     /// internal `BackendSelector`. Called by `MainController` on
     /// `DebridSettings::activeProviderChanged`.
-    void setActiveDebridProvider(api::DebridProvider p);
+    void setActiveDebridProvider(domain::DebridProvider p);
     ~DownloadManager() override;
 
     /// Realise or reuse a session for the asset and return a
     /// localhost URL the player can stream from. Defaults to
     /// `OnDemand + Ephemeral` for a new session; never downgrades
     /// an existing Full session.
-    QCoro::Task<QUrl> prepareForPlayback(api::Stream stream,
-        api::PlaybackContext ctx,
-        std::optional<api::DownloadBackendKind> backendOverride = std::nullopt);
+    QCoro::Task<QUrl> prepareForPlayback(domain::Stream stream,
+        domain::PlaybackContext ctx,
+        std::optional<domain::DownloadBackendKind> backendOverride = std::nullopt);
 
     /// Realise or upgrade a Full + Pinned session for the asset.
     /// On an existing OnDemand session: promotes via
     /// `upgradeToFull` instead of duplicating.
-    void enqueueDownload(api::Stream stream,
-        api::PlaybackContext ctx,
-        std::optional<api::DownloadBackendKind> backendOverride = std::nullopt);
+    void enqueueDownload(domain::Stream stream,
+        domain::PlaybackContext ctx,
+        std::optional<domain::DownloadBackendKind> backendOverride = std::nullopt);
 
     /// Promote an existing OnDemand session to Full + Pinned.
     /// No-op if the asset is already Full or has no active session.
@@ -142,7 +142,7 @@ public:
     void resumePersisted();
 
     /// Look up the persisted item by playback key, if any.
-    std::optional<api::DownloadItem> findForKey(const api::PlaybackKey& key) const;
+    std::optional<domain::DownloadItem> findForKey(const domain::PlaybackKey& key) const;
 
     /// Toggle a pin marker. Updates both the cache marker and the
     /// store row.
@@ -179,23 +179,23 @@ private:
 
     /// Realise a session (creating or reusing) and persist the row.
     /// Returns the localhost URL on success; throws on backend failure.
-    QCoro::Task<QUrl> openSession(api::AssetRef ref,
-        api::Stream stream, api::PlaybackContext ctx,
-        api::DownloadMode mode, api::CacheDisposition disposition,
-        std::optional<api::DownloadBackendKind> backendOverride);
+    QCoro::Task<QUrl> openSession(domain::AssetRef ref,
+        domain::Stream stream, domain::PlaybackContext ctx,
+        domain::DownloadMode mode, domain::CacheDisposition disposition,
+        std::optional<domain::DownloadBackendKind> backendOverride);
 
     /// Fire-and-forget background variant: realises the session,
     /// persists the row, swallows errors into a `Failed` row update.
-    QCoro::Task<void> startBackground(api::AssetRef ref,
-        api::Stream stream, api::PlaybackContext ctx,
-        api::DownloadMode mode, api::CacheDisposition disposition,
-        std::optional<api::DownloadBackendKind> backendOverride);
+    QCoro::Task<void> startBackground(domain::AssetRef ref,
+        domain::Stream stream, domain::PlaybackContext ctx,
+        domain::DownloadMode mode, domain::CacheDisposition disposition,
+        std::optional<domain::DownloadBackendKind> backendOverride);
 
-    api::DownloadItem buildItem(const api::AssetRef& ref,
-        const api::Stream& s, const api::PlaybackContext& ctx,
-        api::DownloadBackendKind backend,
-        api::DownloadMode mode,
-        api::CacheDisposition disposition) const;
+    domain::DownloadItem buildItem(const domain::AssetRef& ref,
+        const domain::Stream& s, const domain::PlaybackContext& ctx,
+        domain::DownloadBackendKind backend,
+        domain::DownloadMode mode,
+        domain::CacheDisposition disposition) const;
 
     /// Wire a session's progress signals to the store + itemChanged
     /// broadcast. Used for both backends.

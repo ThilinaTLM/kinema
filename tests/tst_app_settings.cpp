@@ -3,8 +3,8 @@
 
 #include "config/AppSettings.h"
 
-#include "api/Debrid.h"
-#include "api/Indexer.h"
+#include "domain/Debrid.h"
+#include "domain/Indexer.h"
 
 #include <KConfig>
 #include <KSharedConfig>
@@ -43,7 +43,7 @@ private Q_SLOTS:
     {
         config::AppSettings s(m_config);
         QCOMPARE(static_cast<int>(s.search().kind()),
-            static_cast<int>(api::MediaKind::Movie));
+            static_cast<int>(domain::MediaKind::Movie));
         QCOMPARE(static_cast<int>(s.torrentio().defaultSort()),
             static_cast<int>(core::torrentio::SortMode::Seeders));
         QCOMPARE(s.appearance().closeToTray(), true);
@@ -52,15 +52,15 @@ private Q_SLOTS:
         QCOMPARE(s.debrid().realDebridConfigured(), false);
         QCOMPARE(s.debrid().allDebridConfigured(), false);
         QCOMPARE(s.debrid().activeProvider(),
-            api::DebridProvider::None);
+            domain::DebridProvider::None);
         QVERIFY(s.filter().excludedResolutions().isEmpty());
         QVERIFY(s.filter().excludedCategories().isEmpty());
         QVERIFY(s.filter().keywordBlocklist().isEmpty());
         QCOMPARE(static_cast<int>(s.browse().kind()),
-            static_cast<int>(api::MediaKind::Movie));
+            static_cast<int>(domain::MediaKind::Movie));
         QCOMPARE(s.browse().minRatingPct(), 0);
         QCOMPARE(static_cast<int>(s.browse().sort()),
-            static_cast<int>(api::DiscoverSort::Popularity));
+            static_cast<int>(domain::DiscoverSort::Popularity));
         QCOMPARE(s.browse().hideObscure(), false);
 
         // Embedded-player defaults: hardware decoding on, language
@@ -78,11 +78,11 @@ private Q_SLOTS:
     void testSearchKindRoundtrip()
     {
         config::AppSettings s(m_config);
-        s.search().setKind(api::MediaKind::Series);
+        s.search().setKind(domain::MediaKind::Series);
 
         config::AppSettings s2(m_config);
         QCOMPARE(static_cast<int>(s2.search().kind()),
-            static_cast<int>(api::MediaKind::Series));
+            static_cast<int>(domain::MediaKind::Series));
     }
 
     void testFilterSettingsRoundtrip()
@@ -105,19 +105,19 @@ private Q_SLOTS:
     void testBrowseSettingsRoundtrip()
     {
         config::AppSettings s(m_config);
-        s.browse().setKind(api::MediaKind::Series);
+        s.browse().setKind(domain::MediaKind::Series);
         s.browse().setGenreIds({ 28, 12, 35 });
         s.browse().setMinRatingPct(70);
-        s.browse().setSort(api::DiscoverSort::Rating);
+        s.browse().setSort(domain::DiscoverSort::Rating);
         s.browse().setHideObscure(false);
 
         config::AppSettings s2(m_config);
         QCOMPARE(static_cast<int>(s2.browse().kind()),
-            static_cast<int>(api::MediaKind::Series));
+            static_cast<int>(domain::MediaKind::Series));
         QCOMPARE(s2.browse().genreIds(), (QList<int> { 28, 12, 35 }));
         QCOMPARE(s2.browse().minRatingPct(), 70);
         QCOMPARE(static_cast<int>(s2.browse().sort()),
-            static_cast<int>(api::DiscoverSort::Rating));
+            static_cast<int>(domain::DiscoverSort::Rating));
         QCOMPARE(s2.browse().hideObscure(), false);
     }
 
@@ -216,15 +216,15 @@ private Q_SLOTS:
         QSignalSpy spy(&s.debrid(),
             &config::DebridSettings::activeProviderChanged);
         QCOMPARE(s.debrid().activeProvider(),
-            api::DebridProvider::None);
-        s.debrid().setActiveProvider(api::DebridProvider::AllDebrid);
+            domain::DebridProvider::None);
+        s.debrid().setActiveProvider(domain::DebridProvider::AllDebrid);
         QCOMPARE(spy.count(), 1);
         QCOMPARE(s.debrid().activeProvider(),
-            api::DebridProvider::AllDebrid);
+            domain::DebridProvider::AllDebrid);
         // Persists round-trip through the KConfig backend.
         config::AppSettings s2(m_config);
         QCOMPARE(s2.debrid().activeProvider(),
-            api::DebridProvider::AllDebrid);
+            domain::DebridProvider::AllDebrid);
     }
 
     void testKeywordBlocklistChangedSignal()
@@ -242,7 +242,7 @@ private Q_SLOTS:
     {
         config::AppSettings s(m_config);
         QCOMPARE(s.indexers().activeIndexer(),
-            api::IndexerKind::Torrentio);
+            domain::IndexerKind::Torrentio);
     }
 
 private:

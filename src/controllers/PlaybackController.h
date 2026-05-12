@@ -5,7 +5,7 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 
 #include <QObject>
 #include <QUrl>
@@ -13,8 +13,8 @@
 #include <QCoro/QCoroTask>
 
 #include "controllers/PlaybackLoadWatchdog.h"
-#include "core/MpvChapterList.h"
-#include "core/MpvTrackList.h"
+#include "core/mpv/MpvChapterList.h"
+#include "core/mpv/MpvTrackList.h"
 
 namespace kinema::core {
 class HttpClient;
@@ -62,19 +62,19 @@ public:
 
     /// The PlaybackKey of the actively loaded media. Falls back to
     /// a default-constructed (invalid) key when nothing is playing.
-    const api::PlaybackKey& currentKey() const noexcept { return m_ctx.key; }
+    const domain::PlaybackKey& currentKey() const noexcept { return m_ctx.key; }
 
     /// Full context (key + display titles + poster + stream ref)
     /// for the actively loaded media. Used by the subtitles flow
     /// to build a `Kirigami` page header on top of the player's
     /// in-flight stream.
-    const api::PlaybackContext& currentContext() const noexcept { return m_ctx; }
+    const domain::PlaybackContext& currentContext() const noexcept { return m_ctx; }
 
 public Q_SLOTS:
     /// Entry point for embedded playback. The controller remembers the
     /// active context so later end-of-file / error signals carry media
     /// identity even after the detached window has hidden itself.
-    void play(const QUrl& url, const api::PlaybackContext& ctx);
+    void play(const QUrl& url, const domain::PlaybackContext& ctx);
     void pause();
     void resume();
     void playPause();
@@ -86,9 +86,9 @@ public Q_SLOTS:
 
 Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
-    void fileLoaded(const api::PlaybackContext& ctx);
-    void playbackError(const QString& reason, const api::PlaybackContext& ctx);
-    void endOfFile(const QString& reason, const api::PlaybackContext& ctx);
+    void fileLoaded(const domain::PlaybackContext& ctx);
+    void playbackError(const QString& reason, const domain::PlaybackContext& ctx);
+    void endOfFile(const QString& reason, const domain::PlaybackContext& ctx);
     void visibilityChanged(bool visible);
     void sessionStateChanged();
     void activeSessionChanged(bool active);
@@ -99,7 +99,7 @@ Q_SIGNALS:
     /// Re-emitted from `PlayerWindow::userClosedWindow`. Distinguishes
     /// a user-initiated window close from a natural end-of-file so
     /// downstream (queue) controllers can pause instead of advance.
-    void userClosedWindow(const api::PlaybackContext& ctx);
+    void userClosedWindow(const domain::PlaybackContext& ctx);
 
     /// Best-effort moviehash for the active stream. Empty hex when
     /// the hoster doesn't expose Content-Length or the Range probe
@@ -146,7 +146,7 @@ private:
 
     QCoro::Task<void> kickoffMoviehashCompute(QUrl url, quint64 epoch);
 
-    api::PlaybackContext m_ctx;
+    domain::PlaybackContext m_ctx;
     core::chapters::ChapterList m_chapters;
     qint64 m_pendingResumeSeconds = 0;
     Phase m_phase = Phase::Idle;

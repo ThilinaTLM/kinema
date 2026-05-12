@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Indexer.h"
+#include "domain/Indexer.h"
 
 #include <QList>
 #include <QObject>
@@ -18,7 +18,7 @@ class IndexerSettings;
 namespace kinema::api {
 
 /**
- * Owns the registered `Indexer` instances and exposes the currently
+ * Owns the registered `domain::Indexer` instances and exposes the currently
  * active one per `IndexerSettings::activeIndexer()`.
  *
  * Mirrors `download::BackendSelector`: a single typed radio
@@ -42,31 +42,31 @@ public:
 
     /// Takes ownership. Registering the same kind twice replaces
     /// the previous registration (last write wins).
-    void registerIndexer(std::unique_ptr<Indexer> indexer);
+    void registerIndexer(std::unique_ptr<domain::Indexer> indexer);
 
     /// The indexer matching `IndexerSettings::activeIndexer()`.
     /// Returns `nullptr` if no indexer is registered for that kind
     /// (programmer error; callers should surface "no indexer
     /// configured" instead of crashing).
-    Indexer* active() const;
+    domain::Indexer* active() const;
 
     /// Look up by kind regardless of active status. The settings
     /// page Test button uses this to probe the non-active indexer
     /// without flipping the radio.
-    Indexer* find(IndexerKind) const;
+    domain::Indexer* find(domain::IndexerKind) const;
 
     /// Snapshot of all registered indexers. Order matches
     /// registration order. Used by the settings page to enumerate
     /// sections.
-    QList<Indexer*> all() const;
+    QList<domain::Indexer*> all() const;
 
 Q_SIGNALS:
     /// Re-emitted from `IndexerSettings::activeIndexerChanged`.
-    void activeIndexerChanged(api::IndexerKind);
+    void activeIndexerChanged(domain::IndexerKind);
 
 private:
     config::IndexerSettings& m_settings;
-    std::vector<std::unique_ptr<Indexer>> m_indexers;
+    std::vector<std::unique_ptr<domain::Indexer>> m_indexers;
 };
 
 } // namespace kinema::api

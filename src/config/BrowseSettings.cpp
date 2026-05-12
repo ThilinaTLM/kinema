@@ -19,33 +19,33 @@ constexpr auto kKeyMinRatingPct = "minRatingPct";
 constexpr auto kKeySort = "sort";
 constexpr auto kKeyHideObscure = "hideObscure";
 
-QString discoverSortToToken(api::DiscoverSort s)
+QString discoverSortToToken(domain::DiscoverSort s)
 {
     switch (s) {
-    case api::DiscoverSort::Popularity:
+    case domain::DiscoverSort::Popularity:
         return QStringLiteral("popularity");
-    case api::DiscoverSort::ReleaseDate:
+    case domain::DiscoverSort::ReleaseDate:
         return QStringLiteral("releaseDate");
-    case api::DiscoverSort::Rating:
+    case domain::DiscoverSort::Rating:
         return QStringLiteral("rating");
-    case api::DiscoverSort::TitleAsc:
+    case domain::DiscoverSort::TitleAsc:
         return QStringLiteral("title");
     }
     return QStringLiteral("popularity");
 }
 
-api::DiscoverSort discoverSortFromToken(const QString& s)
+domain::DiscoverSort discoverSortFromToken(const QString& s)
 {
     if (s == QLatin1String("releaseDate")) {
-        return api::DiscoverSort::ReleaseDate;
+        return domain::DiscoverSort::ReleaseDate;
     }
     if (s == QLatin1String("rating")) {
-        return api::DiscoverSort::Rating;
+        return domain::DiscoverSort::Rating;
     }
     if (s == QLatin1String("title")) {
-        return api::DiscoverSort::TitleAsc;
+        return domain::DiscoverSort::TitleAsc;
     }
-    return api::DiscoverSort::Popularity;
+    return domain::DiscoverSort::Popularity;
 }
 
 } // namespace
@@ -56,19 +56,19 @@ BrowseSettings::BrowseSettings(KSharedConfigPtr config, QObject* parent)
 {
 }
 
-api::MediaKind BrowseSettings::kind() const
+domain::MediaKind BrowseSettings::kind() const
 {
     const auto s = detail::read(m_config, kGroup, kKeyKind,
         QStringLiteral("Movie"));
     return s == QLatin1String("Series")
-        ? api::MediaKind::Series
-        : api::MediaKind::Movie;
+        ? domain::MediaKind::Series
+        : domain::MediaKind::Movie;
 }
 
-void BrowseSettings::setKind(api::MediaKind k)
+void BrowseSettings::setKind(domain::MediaKind k)
 {
     detail::write(m_config, kGroup, kKeyKind,
-        k == api::MediaKind::Series
+        k == domain::MediaKind::Series
             ? QStringLiteral("Series")
             : QStringLiteral("Movie"));
 }
@@ -128,14 +128,14 @@ void BrowseSettings::setMinRatingPct(int pct)
     detail::write(m_config, kGroup, kKeyMinRatingPct, pct);
 }
 
-api::DiscoverSort BrowseSettings::sort() const
+domain::DiscoverSort BrowseSettings::sort() const
 {
     const auto s = detail::read(m_config, kGroup, kKeySort,
         QStringLiteral("popularity"));
     return discoverSortFromToken(s);
 }
 
-void BrowseSettings::setSort(api::DiscoverSort s)
+void BrowseSettings::setSort(domain::DiscoverSort s)
 {
     detail::write(m_config, kGroup, kKeySort, discoverSortToToken(s));
 }

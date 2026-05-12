@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 
 #include <QObject>
 #include <QString>
@@ -107,7 +107,7 @@ public:
     /// Set the media context the page targets. Resets selection,
     /// repopulates filter defaults from `SubtitleSettings`, kicks
     /// an automatic search if credentials are configured.
-    void setMedia(const api::PlaybackContext& ctx);
+    void setMedia(const domain::PlaybackContext& ctx);
     /// Switch post-download behaviour. When true, an extra
     /// `downloadCompleted` is emitted with `attachOnDownload`-style
     /// semantics — consumers (the embedded player) sideload the
@@ -141,7 +141,7 @@ Q_SIGNALS:
     /// Always emitted on a successful download. The embedded player
     /// listens via `MainController` and sideloads the file when
     /// `attachOnDownload` was true at request time.
-    void downloadCompleted(api::PlaybackKey key,
+    void downloadCompleted(domain::PlaybackKey key,
         QString fileId,
         QString localPath,
         QString language,
@@ -150,7 +150,7 @@ Q_SIGNALS:
     /// Local-file pick. Routed to the player when the dialog was
     /// opened from the player chrome, otherwise the consumer can
     /// cache it under the current `PlaybackKey`.
-    void localFileChosen(api::PlaybackKey key, QString path);
+    void localFileChosen(domain::PlaybackKey key, QString path);
 
     /// Asks the QML shell to push the Settings page on the given
     /// category (`MainController::requestSettings("subtitles")`).
@@ -184,13 +184,13 @@ private:
     void updateStatusLine();
     void updatePrimarySemantics();
     void refreshModelFlags();
-    QString formatContextTitle(const api::PlaybackContext& ctx) const;
+    QString formatContextTitle(const domain::PlaybackContext& ctx) const;
 
     controllers::SubtitleController* m_controller;
     config::SubtitleSettings& m_settings;
     SubtitleResultsModel* m_model {};
 
-    api::PlaybackContext m_context;
+    domain::PlaybackContext m_context;
     QString m_contextTitle;
     bool m_attachOnDownload = false;
 

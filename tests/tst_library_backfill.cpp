@@ -3,11 +3,11 @@
 
 #include "TestDoubles.h"
 
-#include "api/Library.h"
+#include "domain/Library.h"
 #include "controllers/LibraryController.h"
-#include "core/Database.h"
-#include "core/HttpError.h"
-#include "core/LibraryStore.h"
+#include "core/persistence/Database.h"
+#include "core/io/HttpError.h"
+#include "core/persistence/LibraryStore.h"
 
 #include <QSignalSpy>
 #include <QTest>
@@ -16,30 +16,30 @@ using namespace kinema;
 
 namespace {
 
-api::LibraryTitle plainMovie(const QString& imdbId, const QString& title)
+domain::LibraryTitle plainMovie(const QString& imdbId, const QString& title)
 {
-    api::LibraryTitle t;
-    t.kind = api::MediaKind::Movie;
+    domain::LibraryTitle t;
+    t.kind = domain::MediaKind::Movie;
     t.imdbId = imdbId;
     t.title = title;
     t.year = 2024;
     return t;
 }
 
-api::LibraryTitle plainSeries(const QString& imdbId, const QString& title)
+domain::LibraryTitle plainSeries(const QString& imdbId, const QString& title)
 {
-    api::LibraryTitle t;
-    t.kind = api::MediaKind::Series;
+    domain::LibraryTitle t;
+    t.kind = domain::MediaKind::Series;
     t.imdbId = imdbId;
     t.title = title;
     t.year = 2024;
     return t;
 }
 
-api::MetaDetail richMovieMeta(const QString& imdbId)
+domain::MetaDetail richMovieMeta(const QString& imdbId)
 {
-    api::MetaDetail m;
-    m.summary.kind = api::MediaKind::Movie;
+    domain::MetaDetail m;
+    m.summary.kind = domain::MediaKind::Movie;
     m.summary.imdbId = imdbId;
     m.summary.title = QStringLiteral("Backfilled Movie");
     m.summary.year = 2024;
@@ -50,10 +50,10 @@ api::MetaDetail richMovieMeta(const QString& imdbId)
     return m;
 }
 
-api::SeriesDetail richSeriesMeta(const QString& imdbId)
+domain::SeriesDetail richSeriesMeta(const QString& imdbId)
 {
-    api::SeriesDetail sd;
-    sd.meta.summary.kind = api::MediaKind::Series;
+    domain::SeriesDetail sd;
+    sd.meta.summary.kind = domain::MediaKind::Series;
     sd.meta.summary.imdbId = imdbId;
     sd.meta.summary.title = QStringLiteral("Backfilled Series");
     sd.meta.summary.year = 2023;
@@ -103,7 +103,7 @@ private Q_SLOTS:
         m_ctrl->backfillMetadata();
         tests::drainEvents(8);
 
-        const auto got = m_store->find(api::MediaKind::Movie,
+        const auto got = m_store->find(domain::MediaKind::Movie,
             QStringLiteral("tt7000001"));
         QVERIFY(got.has_value());
         QCOMPARE(got->genres, QStringList({ QStringLiteral("Drama"),
@@ -114,7 +114,7 @@ private Q_SLOTS:
         QCOMPARE(got->cast, QStringList({ QStringLiteral("Actor A"),
             QStringLiteral("Actor B") }));
         // Backfill should not change addedAt.
-        const auto stored = m_store->find(api::MediaKind::Movie,
+        const auto stored = m_store->find(domain::MediaKind::Movie,
             QStringLiteral("tt7000001"));
         QVERIFY(stored.has_value());
     }
@@ -132,7 +132,7 @@ private Q_SLOTS:
         m_ctrl->backfillMetadata();
         tests::drainEvents(8);
 
-        const auto got = m_store->find(api::MediaKind::Series,
+        const auto got = m_store->find(domain::MediaKind::Series,
             QStringLiteral("tt7000002"));
         QVERIFY(got.has_value());
         QCOMPARE(got->genres, QStringList({ QStringLiteral("Crime") }));
@@ -143,7 +143,7 @@ private Q_SLOTS:
     {
         // Pre-populate a movie that already has v7 metadata. Backfill
         // must not call Cinemeta at all for it.
-        api::LibraryTitle t = plainMovie(
+        domain::LibraryTitle t = plainMovie(
             QStringLiteral("tt7000003"),
             QStringLiteral("Already Filled"));
         t.genres = { QStringLiteral("Drama") };
@@ -171,7 +171,7 @@ private Q_SLOTS:
         m_ctrl->backfillMetadata();
         tests::drainEvents(4);
 
-        const auto got = m_store->find(api::MediaKind::Movie,
+        const auto got = m_store->find(domain::MediaKind::Movie,
             QStringLiteral("tt7000004"));
         QVERIFY(got.has_value());
         QVERIFY(got->genres.isEmpty()); // unchanged

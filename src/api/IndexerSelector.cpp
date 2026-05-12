@@ -14,7 +14,7 @@ IndexerSelector::IndexerSelector(config::IndexerSettings& settings,
     , m_settings(settings)
 {
     connect(&m_settings, &config::IndexerSettings::activeIndexerChanged,
-        this, [this](api::IndexerKind k) {
+        this, [this](domain::IndexerKind k) {
             qCDebug(KINEMA_API) << "IndexerSelector: active indexer ->"
                                 << indexerKindToString(k);
             Q_EMIT activeIndexerChanged(k);
@@ -23,7 +23,7 @@ IndexerSelector::IndexerSelector(config::IndexerSettings& settings,
 
 IndexerSelector::~IndexerSelector() = default;
 
-void IndexerSelector::registerIndexer(std::unique_ptr<Indexer> indexer)
+void IndexerSelector::registerIndexer(std::unique_ptr<domain::Indexer> indexer)
 {
     if (!indexer) {
         return;
@@ -40,12 +40,12 @@ void IndexerSelector::registerIndexer(std::unique_ptr<Indexer> indexer)
     m_indexers.push_back(std::move(indexer));
 }
 
-Indexer* IndexerSelector::active() const
+domain::Indexer* IndexerSelector::active() const
 {
     return find(m_settings.activeIndexer());
 }
 
-Indexer* IndexerSelector::find(IndexerKind k) const
+domain::Indexer* IndexerSelector::find(domain::IndexerKind k) const
 {
     for (const auto& i : m_indexers) {
         if (i && i->kind() == k) {
@@ -55,9 +55,9 @@ Indexer* IndexerSelector::find(IndexerKind k) const
     return nullptr;
 }
 
-QList<Indexer*> IndexerSelector::all() const
+QList<domain::Indexer*> IndexerSelector::all() const
 {
-    QList<Indexer*> out;
+    QList<domain::Indexer*> out;
     out.reserve(static_cast<int>(m_indexers.size()));
     for (const auto& i : m_indexers) {
         if (i) {

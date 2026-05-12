@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Download.h"
+#include "domain/Download.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -12,7 +12,7 @@
 
 namespace kinema::ui::qml {
 
-/// QAbstractListModel exposing `api::DownloadItem` rows to QML.
+/// QAbstractListModel exposing `domain::DownloadItem` rows to QML.
 class DownloadsListModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -81,16 +81,16 @@ public:
     QVariant data(const QModelIndex& index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    void setItems(QList<api::DownloadItem> items,
+    void setItems(QList<domain::DownloadItem> items,
         QHash<QString, LiveRow> liveStats = {},
         QSet<QString> attachedPlayers = {});
-    const QList<api::DownloadItem>& items() const noexcept { return m_items; }
+    const QList<domain::DownloadItem>& items() const noexcept { return m_items; }
 
 Q_SIGNALS:
     void countChanged();
 
 private:
-    QList<api::DownloadItem> m_items;
+    QList<domain::DownloadItem> m_items;
     QHash<QString, LiveRow> m_liveStats;
     QSet<QString> m_attachedPlayers;
 };

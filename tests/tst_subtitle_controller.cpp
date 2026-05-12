@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/OpenSubtitlesClient.h"
-#include "api/Subtitle.h"
+#include "domain/Subtitle.h"
 #include "config/AppSettings.h"
 #include "config/CacheSettings.h"
 #include "config/SubtitleSettings.h"
 #include "controllers/SubtitleController.h"
-#include "core/CachePaths.h"
-#include "core/Database.h"
-#include "core/HttpError.h"
-#include "core/SubtitleCacheStore.h"
+#include "core/io/CachePaths.h"
+#include "core/persistence/Database.h"
+#include "core/io/HttpError.h"
+#include "core/persistence/SubtitleCacheStore.h"
 
 #include <KSharedConfig>
 
@@ -39,7 +39,7 @@ public:
         m_password = QStringLiteral("pass");
     }
 
-    QCoro::Task<QList<api::SubtitleHit>> search(api::SubtitleSearchQuery q) override
+    QCoro::Task<QList<domain::SubtitleHit>> search(domain::SubtitleSearchQuery q) override
     {
         searchCount++;
         lastQuery = q;
@@ -53,17 +53,17 @@ public:
 
     QCoro::Task<void> ensureLoggedIn() override { co_return; }
 
-    QCoro::Task<api::SubtitleDownloadTicket> requestDownload(QString fileId) override
+    QCoro::Task<domain::SubtitleDownloadTicket> requestDownload(QString fileId) override
     {
         Q_UNUSED(fileId);
         downloadCount++;
         if (quotaExhausted) {
-            api::SubtitleDownloadTicket t;
+            domain::SubtitleDownloadTicket t;
             t.remaining = 0;
             t.resetAt = QDateTime::currentDateTimeUtc().addSecs(3600);
             co_return t;
         }
-        api::SubtitleDownloadTicket t;
+        domain::SubtitleDownloadTicket t;
         t.link = QUrl(QStringLiteral("https://example.com/dl"));
         t.fileName = QStringLiteral("download.eng.srt");
         t.format = QStringLiteral("srt");
@@ -77,8 +77,8 @@ public:
         co_return QByteArrayLiteral("1\n00:00:01,000 --> 00:00:02,000\nHello\n\n");
     }
 
-    QList<api::SubtitleHit> scriptedHits;
-    api::SubtitleSearchQuery lastQuery;
+    QList<domain::SubtitleHit> scriptedHits;
+    domain::SubtitleSearchQuery lastQuery;
     int searchCount = 0;
     int downloadCount = 0;
     bool failNextSearch = false;
@@ -90,10 +90,10 @@ private:
     QString m_password;
 };
 
-api::SubtitleHit makeHit(const QString& id, const QString& lang,
+domain::SubtitleHit makeHit(const QString& id, const QString& lang,
     int downloads = 100, bool moviehash = false)
 {
-    api::SubtitleHit h;
+    domain::SubtitleHit h;
     h.fileId = id;
     h.language = lang;
     h.languageName = lang == QStringLiteral("eng")
@@ -107,10 +107,10 @@ api::SubtitleHit makeHit(const QString& id, const QString& lang,
     return h;
 }
 
-api::PlaybackKey movieKey(const QString& imdb)
+domain::PlaybackKey movieKey(const QString& imdb)
 {
-    api::PlaybackKey k;
-    k.kind = api::MediaKind::Movie;
+    domain::PlaybackKey k;
+    k.kind = domain::MediaKind::Movie;
     k.imdbId = imdb;
     return k;
 }

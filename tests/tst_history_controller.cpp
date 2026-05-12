@@ -3,11 +3,11 @@
 
 #include "TestDoubles.h"
 
-#include "api/PlaybackContext.h"
+#include "domain/PlaybackContext.h"
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
-#include "core/Database.h"
-#include "core/HistoryStore.h"
+#include "core/persistence/Database.h"
+#include "core/persistence/HistoryStore.h"
 #include "services/StreamActions.h"
 
 #include <KConfig>
@@ -34,24 +34,24 @@ public:
     }
 
     struct Call {
-        api::Stream stream;
-        api::PlaybackContext ctx;
+        domain::Stream stream;
+        domain::PlaybackContext ctx;
     };
 
     QList<Call> calls;
 
-    void play(const api::Stream& stream,
-        const api::PlaybackContext& ctx) override
+    void play(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx) override
     {
         calls.append({ stream, ctx });
     }
 };
 
-api::HistoryEntry makeHistoryEntry(const QString& imdb,
+domain::HistoryEntry makeHistoryEntry(const QString& imdb,
     const QString& title, const QString& releaseSuffix)
 {
-    api::HistoryEntry e;
-    e.key.kind = api::MediaKind::Movie;
+    domain::HistoryEntry e;
+    e.key.kind = domain::MediaKind::Movie;
     e.key.imdbId = imdb;
     e.title = title;
     e.poster = QUrl(QStringLiteral("https://example.com/") + imdb);
@@ -64,10 +64,10 @@ api::HistoryEntry makeHistoryEntry(const QString& imdb,
     return e;
 }
 
-api::Stream makeStream(const QString& releaseSuffix,
+domain::Stream makeStream(const QString& releaseSuffix,
     const QString& directUrl)
 {
-    api::Stream s;
+    domain::Stream s;
     s.infoHash = QStringLiteral("hash-") + releaseSuffix;
     s.releaseName = QStringLiteral("Release.") + releaseSuffix;
     s.resolution = QStringLiteral("1080p");

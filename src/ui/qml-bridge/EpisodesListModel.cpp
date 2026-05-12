@@ -3,7 +3,7 @@
 
 #include "ui/qml-bridge/EpisodesListModel.h"
 
-#include "core/DateFormat.h"
+#include "core/util/DateFormat.h"
 
 namespace kinema::ui::qml {
 
@@ -68,7 +68,7 @@ QHash<int, QByteArray> EpisodesListModel::roleNames() const
     };
 }
 
-void EpisodesListModel::setEpisodes(QList<api::Episode> rows)
+void EpisodesListModel::setEpisodes(QList<domain::Episode> rows)
 {
     beginResetModel();
     m_rows = std::move(rows);
@@ -89,7 +89,7 @@ void EpisodesListModel::setLibraryState(QList<bool> watched,
     }
 }
 
-const api::Episode* EpisodesListModel::at(int row) const
+const domain::Episode* EpisodesListModel::at(int row) const
 {
     if (row < 0 || row >= m_rows.size()) {
         return nullptr;

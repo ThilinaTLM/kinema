@@ -8,7 +8,7 @@
 #include <QTest>
 
 using kinema::api::CinemetaClient;
-using kinema::api::MediaKind;
+using kinema::domain::MediaKind;
 using kinema::tests::FakeHttpClient;
 using kinema::tests::loadJsonFixture;
 

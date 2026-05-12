@@ -5,7 +5,7 @@
 
 #include "api/TmdbClient.h"
 #include "controllers/TokenController.h"
-#include "core/HttpErrorPresenter.h"
+#include "core/io/HttpErrorPresenter.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 
 #include <KLocalizedString>
@@ -93,11 +93,11 @@ void DiscoverViewModel::buildSections()
     // doesn't dereference a deleted client.
     QPointer<api::TmdbClient> tmdb(m_tmdb);
 
-    using FetchFn = std::function<QCoro::Task<QList<api::DiscoverItem>>()>;
+    using FetchFn = std::function<QCoro::Task<QList<domain::DiscoverItem>>()>;
     const auto wrap = [tmdb](auto endpoint) -> FetchFn {
-        return [tmdb, endpoint]() -> QCoro::Task<QList<api::DiscoverItem>> {
+        return [tmdb, endpoint]() -> QCoro::Task<QList<domain::DiscoverItem>> {
             if (!tmdb) {
-                co_return QList<api::DiscoverItem> {};
+                co_return QList<domain::DiscoverItem> {};
             }
             co_return co_await endpoint(tmdb.data());
         };
@@ -106,36 +106,36 @@ void DiscoverViewModel::buildSections()
     const QList<SectionSpec> specs = {
         { i18nc("@label discover row", "Trending this week"),
             wrap([](api::TmdbClient* c) {
-                return c->trending(api::MediaKind::Movie, true);
+                return c->trending(domain::MediaKind::Movie, true);
             }),
-            api::MediaKind::Movie,
-            api::DiscoverSort::Popularity },
+            domain::MediaKind::Movie,
+            domain::DiscoverSort::Popularity },
         { i18nc("@label discover row", "Popular series"),
             wrap([](api::TmdbClient* c) {
-                return c->popular(api::MediaKind::Series);
+                return c->popular(domain::MediaKind::Series);
             }),
-            api::MediaKind::Series,
-            api::DiscoverSort::Popularity },
+            domain::MediaKind::Series,
+            domain::DiscoverSort::Popularity },
         { i18nc("@label discover row", "Now playing in theaters"),
             wrap([](api::TmdbClient* c) { return c->nowPlayingMovies(); }),
-            api::MediaKind::Movie,
-            api::DiscoverSort::ReleaseDate },
+            domain::MediaKind::Movie,
+            domain::DiscoverSort::ReleaseDate },
         { i18nc("@label discover row", "On the air"),
             wrap([](api::TmdbClient* c) { return c->onTheAirSeries(); }),
-            api::MediaKind::Series,
-            api::DiscoverSort::ReleaseDate },
+            domain::MediaKind::Series,
+            domain::DiscoverSort::ReleaseDate },
         { i18nc("@label discover row", "Top rated movies"),
             wrap([](api::TmdbClient* c) {
-                return c->topRated(api::MediaKind::Movie);
+                return c->topRated(domain::MediaKind::Movie);
             }),
-            api::MediaKind::Movie,
-            api::DiscoverSort::Rating },
+            domain::MediaKind::Movie,
+            domain::DiscoverSort::Rating },
         { i18nc("@label discover row", "Top rated series"),
             wrap([](api::TmdbClient* c) {
-                return c->topRated(api::MediaKind::Series);
+                return c->topRated(domain::MediaKind::Series);
             }),
-            api::MediaKind::Series,
-            api::DiscoverSort::Rating },
+            domain::MediaKind::Series,
+            domain::DiscoverSort::Rating },
     };
 
     m_sections.reserve(specs.size());
@@ -259,7 +259,7 @@ void DiscoverViewModel::activateItem(int sectionIndex, int row)
     if (!item) {
         return;
     }
-    if (item->kind == api::MediaKind::Series) {
+    if (item->kind == domain::MediaKind::Series) {
         Q_EMIT openSeriesRequested(item->tmdbId, item->title);
     } else {
         Q_EMIT openMovieRequested(item->tmdbId, item->title);

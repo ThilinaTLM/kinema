@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "api/Media.h"
+#include "domain/Media.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -17,14 +17,14 @@ namespace kinema::ui::qml {
  * QML-friendly list model backing the Search page's results grid.
  *
  * Replaces the widget-side `ui::ResultsModel` with the same payload
- * (`QList<api::MetaSummary>`) and the same role set, but lives in
+ * (`QList<domain::MetaSummary>`) and the same role set, but lives in
  * `qml-bridge/` so it can be exposed via `setContextProperty` from
  * `SearchViewModel`. Carries its own `state` / `errorMessage` so the
  * QML page can switch on `model.state` the same way `ContentRail.qml`
  * does for Discover rails.
  *
  * Search submits return MetaSummary rows from Cinemeta — distinct
- * from `DiscoverSectionModel` which carries `api::DiscoverItem`s
+ * from `DiscoverSectionModel` which carries `domain::DiscoverItem`s
  * from TMDB. We don't generalise across the two: Cinemeta and TMDB
  * disagree on what an id even is (IMDB vs TMDB), and the Search
  * page never wants TMDB rows in its grid.
@@ -43,7 +43,7 @@ public:
         PosterUrlRole,    ///< QString URL (QML wraps in image://kinema/poster?u=…)
         DescriptionRole,
         RatingRole,
-        KindRole,         ///< api::MediaKind value
+        KindRole,         ///< domain::MediaKind value
         SummaryRole,      ///< full MetaSummary as QVariant for activation
     };
     Q_ENUM(Roles)
@@ -72,12 +72,12 @@ public:
     /// Mutators driven by `SearchViewModel`.
     void setIdle();
     void setLoading();
-    void setResults(QList<api::MetaSummary> rows);
+    void setResults(QList<domain::MetaSummary> rows);
     void setError(const QString& message);
 
     /// Pure accessors for the view-model and its tests.
-    const QList<api::MetaSummary>& rows() const noexcept { return m_rows; }
-    const api::MetaSummary* at(int row) const;
+    const QList<domain::MetaSummary>& rows() const noexcept { return m_rows; }
+    const domain::MetaSummary* at(int row) const;
 
 Q_SIGNALS:
     void stateChanged();
@@ -87,7 +87,7 @@ Q_SIGNALS:
 private:
     void resetState(State newState);
 
-    QList<api::MetaSummary> m_rows;
+    QList<domain::MetaSummary> m_rows;
     State m_state = State::Idle;
     QString m_errorMessage;
 };
