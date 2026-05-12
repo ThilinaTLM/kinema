@@ -341,12 +341,10 @@ BaseListCard {
     }
 
     // Action row: contextual primary + overflow. The action row
-    // lives below the body, so the buttons get their own line and
-    // are right-justified within it.
+    // lives below the body, so the buttons get their own line,
+    // left-aligned with the rest of the right column.
     trailing: RowLayout {
         spacing: Kirigami.Units.smallSpacing
-
-        Item { Layout.fillWidth: true }
 
         QQC2.Button {
             id: primaryButton

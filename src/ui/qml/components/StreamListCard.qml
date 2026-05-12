@@ -70,115 +70,89 @@ BaseListCard {
             : card.resolution.toUpperCase()
     }
 
-    // Body slot (default): horizontal two-column layout. Wrapped
-    // in a single RowLayout because the chassis' body slot stacks
-    // children vertically.
+    // Body slot (default): release line + a single meta row that
+    // flows left-to-right with chips, provider, seeders, and size.
+    // Visual hierarchy is preserved via font weight + colour now
+    // that position can't carry it: metrics (seeders / size) read
+    // DemiBold foreground; chrome (provider) reads caption-sized
+    // disabled.
+    QQC2.Label {
+        id: summaryLabel
+        Layout.fillWidth: true
+        text: card.summaryLine.length > 0
+            ? card.summaryLine
+            : card.releaseName
+        wrapMode: Text.NoWrap
+        elide: Text.ElideRight
+        font.pointSize: Theme.captionFont.pointSize
+        font.weight: Font.Medium
+        color: Theme.disabled
+        onTruncatedChanged: card.titleTooltip
+            = (truncated && card.releaseName.length > 0)
+                ? card.releaseName
+                : ""
+    }
+
     RowLayout {
         Layout.fillWidth: true
-        spacing: Theme.groupSpacing
+        spacing: Theme.inlineSpacing
 
-        // ---- 1. Summary column -------------------------------
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.alignment: Qt.AlignVCenter
-            spacing: Math.round(Theme.inlineSpacing / 2)
-
-            QQC2.Label {
-                id: summaryLabel
-                Layout.fillWidth: true
-                text: card.summaryLine.length > 0
-                    ? card.summaryLine
-                    : card.releaseName
-                wrapMode: Text.NoWrap
-                elide: Text.ElideRight
-                font.pointSize: Theme.captionFont.pointSize
-                font.weight: Font.Medium
-                color: Theme.disabled
-                onTruncatedChanged: card.titleTooltip
-                    = (truncated && card.releaseName.length > 0)
-                        ? card.releaseName
-                        : ""
-            }
-
-            // Chip rail: tags + provider as a trailing caption.
-            // RowChipRail strips empty entries, so the conditional
-            // `provider` chip collapses without manual visibility
-            // toggling.
-            RowChipRail {
-                Layout.fillWidth: true
-                chips: {
-                    const list = [];
-                    if (card.tags) {
-                        for (let i = 0; i < card.tags.length; ++i) {
-                            list.push({
-                                text: card.tags[i],
-                                tone: "neutral"
-                            });
-                        }
+        // Tag chips. RowChipRail collapses when chips is empty.
+        RowChipRail {
+            chips: {
+                const list = [];
+                if (card.tags) {
+                    for (let i = 0; i < card.tags.length; ++i) {
+                        list.push({
+                            text: card.tags[i],
+                            tone: "neutral"
+                        });
                     }
-                    return list;
                 }
-                visible: chips.length > 0
-                    || (card.provider && card.provider.length > 0)
-
-                // Provider sits in the trailing slot as a small
-                // caption rather than a chip so the rail stays
-                // visually distinct from "release tag" metadata.
-                QQC2.Label {
-                    visible: card.provider
-                        && card.provider.length > 0
-                    text: card.provider
-                    font.pointSize: Theme.captionFont.pointSize
-                    color: Theme.disabled
-                    verticalAlignment: Text.AlignVCenter
-                }
+                return list;
             }
+            visible: chips.length > 0
         }
 
-        // ---- 2. Metrics column -------------------------------
-        ColumnLayout {
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 6
-            spacing: Kirigami.Units.smallSpacing
+        // Provider as a small caption.
+        QQC2.Label {
+            visible: card.provider && card.provider.length > 0
+            text: card.provider
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
 
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                visible: card.seeders >= 0
-                spacing: Math.round(Theme.inlineSpacing / 2)
+        // Seeders, inline. DemiBold foreground for emphasis.
+        Kirigami.Icon {
+            visible: card.seeders >= 0
+            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+            Layout.preferredHeight: width
+            source: AppIcons.url("users")
+            color: Theme.foreground
+        }
+        QQC2.Label {
+            visible: card.seeders >= 0
+            text: card.seeders
+            font.weight: Font.DemiBold
+            color: Theme.foreground
+            verticalAlignment: Text.AlignVCenter
+        }
 
-                Kirigami.Icon {
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                    Layout.preferredHeight: width
-                    source: AppIcons.url("users")
-                    color: Theme.foreground
-                }
-                QQC2.Label {
-                    text: card.seeders
-                    font.pointSize: Theme.defaultFont.pointSize
-                    font.weight: Font.DemiBold
-                    color: Theme.foreground
-                    horizontalAlignment: Text.AlignRight
-                }
-            }
-
-            QQC2.Label {
-                Layout.alignment: Qt.AlignRight
-                visible: card.sizeText && card.sizeText.length > 0
-                text: card.sizeText
-                font.pointSize: Theme.defaultFont.pointSize
-                font.weight: Font.Medium
-                color: Theme.foreground
-                horizontalAlignment: Text.AlignRight
-            }
+        // Size, inline.
+        QQC2.Label {
+            visible: card.sizeText && card.sizeText.length > 0
+            text: card.sizeText
+            font.weight: Font.Medium
+            color: Theme.foreground
+            verticalAlignment: Text.AlignVCenter
         }
     }
 
     // Action row: primary play / secondary download / overflow.
-    // Right-justified within the action row via a flex spacer.
+    // Left-aligned with the rest of the right column.
     trailing: RowLayout {
         spacing: Theme.inlineSpacing
-
-        Item { Layout.fillWidth: true }
 
         QQC2.Button {
             visible: card.hasDirectUrl || card.hasMagnet

@@ -155,9 +155,7 @@ BaseListCard {
             visible: card.rating > 0
         }
 
-        Item { Layout.fillWidth: true }
-
-        // HI / FPO chips via MetaChip (was Kirigami.Chip).
+        // HI / FPO chips, inline with the rest of the meta row.
         RowChipRail {
             Layout.alignment: Qt.AlignVCenter
             chips: {
@@ -181,11 +179,9 @@ BaseListCard {
         }
     }
 
-    // Action row: per-row primary action button, right-justified.
+    // Action row: per-row primary action button, left-aligned.
     trailing: RowLayout {
         spacing: Theme.inlineSpacing
-
-        Item { Layout.fillWidth: true }
 
         QQC2.Button {
             text: card._primaryActionText
