@@ -107,29 +107,20 @@ Item {
             spacing: 0
 
             Kirigami.Heading {
-                id: titleHeading
                 Layout.fillWidth: true
-                // Reserve a fixed two-line height so grid rows stay
-                // aligned regardless of title length. Use
-                // `lineSpacing` (not `height`) and ceil it so we
-                // budget for line leading + subpixel rounding —
-                // otherwise the second wrapped line gets clipped
-                // and `elide: ElideRight` truncates the first line
-                // instead of wrapping.
-                Layout.preferredHeight:
-                    Math.ceil(titleMetrics.lineSpacing) * 2
+                // Natural height: 1 line for short titles, 2 lines
+                // for wrapped titles. The grid's `cellHeight`
+                // already budgets for the 2-line worst case, so
+                // short-title cards just leave the slack at the
+                // bottom — keeping the title and subtitle visually
+                // glued instead of separated by an empty reserved
+                // line.
                 level: 5
                 text: card.title
                 wrapMode: Text.WordWrap
                 elide: Text.ElideRight
                 maximumLineCount: 2
-                verticalAlignment: Text.AlignTop
                 color: Kirigami.Theme.textColor
-
-                FontMetrics {
-                    id: titleMetrics
-                    font: titleHeading.font
-                }
             }
 
             QQC2.Label {
