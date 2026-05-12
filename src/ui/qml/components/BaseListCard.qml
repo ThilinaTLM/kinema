@@ -69,6 +69,24 @@ QQC2.ItemDelegate {
     /// reachable on hover without a per-row HoverHandler.
     property string titleTooltip: ""
 
+    /// When true (default), the card height grows to match the
+    /// tallest sibling delegate seen so far in the host ListView,
+    /// so every visible row has a uniform height. Relies on the
+    /// ListView exposing a writable `delegateMaxHeight` property
+    /// (real or int); `ListSurface`'s internal ListView and the
+    /// episodes ListView on SeriesDetailPage both do.
+    ///
+    /// The shared max is monotonic during a model's lifetime:
+    /// taller rows scrolling into view grow the max, shorter rows
+    /// never shrink it. The host ListView resets the property when
+    /// its `model` identity changes, so switching content (e.g.
+    /// a different series) starts a fresh max.
+    ///
+    /// Cards with highly variable row shapes can opt out by setting
+    /// `uniformHeightInList: false` (e.g. download rows whose
+    /// active state carries much more body than completed rows).
+    property bool uniformHeightInList: true
+
     // ---- Slots ---------------------------------------------------
     default property alias body: bodyHost.data
     property alias leading: leadingHost.data
@@ -98,6 +116,36 @@ QQC2.ItemDelegate {
         : implicitWidth
     padding: Theme.pageMargin
     implicitHeight: bodyRow.implicitHeight + padding * 2
+
+    // When the host ListView exposes a `delegateMaxHeight` and
+    // uniform sizing is enabled, grow this card's height to the
+    // running max. Otherwise fall back to the natural implicit
+    // height. The card body still anchors to the top of the
+    // contentItem, so taller-than-content rows show empty space
+    // below the right column — the trade-off for visual rhythm.
+    height: (card.uniformHeightInList
+            && ListView.view
+            && ListView.view.delegateMaxHeight !== undefined)
+        ? Math.max(implicitHeight, ListView.view.delegateMaxHeight)
+        : implicitHeight
+
+    // Broadcast our implicit height into the ListView's running
+    // max. Both `onImplicitHeightChanged` and `Component.onCompleted`
+    // are wired because text labels can settle their final laid-out
+    // height across multiple binding evaluations.
+    onImplicitHeightChanged: card._broadcastMaxHeight()
+    Component.onCompleted: card._broadcastMaxHeight()
+
+    function _broadcastMaxHeight() {
+        if (!card.uniformHeightInList) {
+            return;
+        }
+        const lv = card.ListView.view;
+        if (lv && lv.delegateMaxHeight !== undefined
+            && card.implicitHeight > lv.delegateMaxHeight) {
+            lv.delegateMaxHeight = card.implicitHeight;
+        }
+    }
 
     onDoubleClicked: card.activated()
     Keys.onReturnPressed: card.activated()
@@ -160,10 +208,19 @@ QQC2.ItemDelegate {
 
         // Right column — content (body slot) above an optional
         // progress bar above the action row (trailing slot).
+        // Sized to its own content height (no `fillHeight`) and
+        // pinned to the top of the contentItem so the column's
+        // top and bottom padding match the chassis `pageMargin`
+        // on every side, just like the thumbnail. When the row's
+        // height is driven by the right column (the common case)
+        // the column matches the thumbnail edge-for-edge; when
+        // the thumbnail's preferred height is the floor, any
+        // slack ends up below the column without affecting the
+        // top/bottom margin around its content.
         ColumnLayout {
             id: rightColumn
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.alignment: Qt.AlignTop
             spacing: Theme.inlineSpacing
 
             // Body slot — ColumnLayout so children declared inline

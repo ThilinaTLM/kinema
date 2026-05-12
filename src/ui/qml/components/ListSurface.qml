@@ -113,6 +113,14 @@ Item {
                 model: surface.model
                 clip: true
                 spacing: surface.listSpacing
+
+                // Shared max-height target for `BaseListCard`'s
+                // uniform-row-height broadcast. Monotonic during a
+                // single model's lifetime; reset to 0 when the
+                // model identity changes so a new content set
+                // starts a fresh max.
+                property real delegateMaxHeight: 0
+                onModelChanged: list.delegateMaxHeight = 0
                 leftMargin: surface.listLeftMargin
                 rightMargin: surface.listRightMargin
                 topMargin: surface.listTopMargin
