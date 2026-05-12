@@ -340,6 +340,8 @@ Kirigami.Page {
                     ? model.posterUrl : ""
                 title: model.title !== undefined ? model.title : ""
                 subtitle: model.subtitle !== undefined ? model.subtitle : ""
+                year: (model.year !== undefined && model.year !== null)
+                    ? model.year : 0
                 rating: (model.rating !== undefined && model.rating !== null)
                     ? model.rating : -1
                 progress: model.progress !== undefined ? model.progress : -1

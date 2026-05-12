@@ -3,147 +3,85 @@
 
 import QtQuick
 import QtQuick.Controls as QQC2
-import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Library list-view tile. Sibling of `PosterCard` —
-// `KinemaArtworkFrame` provides the same shadow lift, focus ring,
-// hover tint, and rounded-corner clipping; the card adds:
+// Library grid tile. Visual sibling of `PosterCard` — both build
+// on `BasePosterCard` so the artwork frame, hover lift, focus
+// ring, two-line wrapped title, and keyboard activation stay in
+// lockstep across the app.
 //
-//   * a `RatingChip` overlay (top-right) when the entry has an
-//     IMDb rating,
-//   * a `StatusChip` overlay (top-left) for Watched / Upcoming
-//     entries,
-//   * a thin progress bar along the poster's bottom edge for
-//     in-progress titles (driven by the frame's built-in overlay),
-//   * a right-click context menu for Open / toggle Watched / Remove
-//     from Library.
+// What this wrapper adds on top of the base:
 //
-// No more hover-revealed kebab button — the menu is accessible via
-// right-click everywhere card-style UIs in the app use it.
-Item {
+//   * a top-left chip with precedence `Watched → Upcoming → Year`
+//     (mutually exclusive — only one of the two chips ever renders
+//     in that corner),
+//   * a top-right `RatingChip`,
+//   * a per-row subtitle on the third meta line ("Resume from 42%",
+//     "Releases Apr 26", "3 / 8 episodes watched"),
+//   * the progress bar binding for in-progress entries (driven by
+//     `KinemaArtworkFrame`'s built-in overlay via the base's
+//     `progress` prop),
+//   * a right-click context menu (Open / toggle Watched / Remove
+//     from Library), wired through the base's `rightClicked()`
+//     signal.
+BasePosterCard {
     id: card
 
     // ---- Inputs --------------------------------------------------
-    property string posterUrl
-    property string title
-    property string subtitle
+    property int year: 0
     property real rating: -1
-    property real progress: -1
     property bool watched: false
     property bool upcoming: false
 
-    signal clicked()
+    // `posterUrl`, `title`, `subtitle`, `progress`, `clicked()`
+    // come from the base.
+
     signal removeRequested()
     signal toggleWatchedRequested()
 
-    readonly property bool _hovered: hoverArea.containsMouse
+    onRightClicked: contextMenu.popup()
 
-    Kirigami.Theme.colorSet: Kirigami.Theme.View
-    Kirigami.Theme.inherit: false
-
-    implicitWidth: Theme.posterMin
-    implicitHeight: poster.height + meta.implicitHeight
-        + Kirigami.Units.smallSpacing * 2
-
-    activeFocusOnTab: true
-    Keys.onPressed: function (event) {
-        if (event.key === Qt.Key_Return
-            || event.key === Qt.Key_Enter
-            || event.key === Qt.Key_Space) {
-            card.clicked();
-            event.accepted = true;
+    // Top-left precedence: Watched → Upcoming → Year. `StatusChip`
+    // self-hides when neither flag is set; `YearChip` is explicitly
+    // suppressed while a status is showing so the two never
+    // overlap.
+    YearChip {
+        year: card.year
+        visible: card.year > 0 && !card.watched && !card.upcoming
+        anchors {
+            top: parent.top
+            left: parent.left
+            topMargin: Kirigami.Units.smallSpacing
+            leftMargin: Kirigami.Units.smallSpacing
         }
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: Kirigami.Units.smallSpacing
-
-        KinemaArtworkFrame {
-            id: poster
-            Layout.fillWidth: true
-            Layout.preferredHeight: Math.round(width * aspect)
-
-            url: card.posterUrl
-            aspect: 1.5
-            fallbackIcon: "film"
-            hovered: card._hovered
-            focusRing: card._hovered || card.activeFocus
-            progress: card.progress
-
-            // Watched / Upcoming badge (top-left). Self-hides when
-            // both flags are false.
-            StatusChip {
-                watched: card.watched
-                upcoming: card.upcoming
-                anchors {
-                    top: parent.top
-                    left: parent.left
-                    topMargin: Kirigami.Units.smallSpacing
-                    leftMargin: Kirigami.Units.smallSpacing
-                }
-            }
-
-            // IMDb rating chip (top-right). Self-hides when
-            // `rating <= 0`.
-            RatingChip {
-                rating: card.rating
-                anchors {
-                    top: parent.top
-                    right: parent.right
-                    topMargin: Kirigami.Units.smallSpacing
-                    rightMargin: Kirigami.Units.smallSpacing
-                }
-            }
-        }
-
-        ColumnLayout {
-            id: meta
-            spacing: 0
-            Layout.fillWidth: true
-
-            Kirigami.Heading {
-                Layout.fillWidth: true
-                level: 5
-                text: card.title
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                color: Kirigami.Theme.textColor
-            }
-
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: card.subtitle.length > 0
-                text: card.subtitle
-                elide: Text.ElideRight
-                font: Kirigami.Theme.smallFont
-                color: Kirigami.Theme.disabledTextColor
-            }
+    StatusChip {
+        watched: card.watched
+        upcoming: card.upcoming
+        anchors {
+            top: parent.top
+            left: parent.left
+            topMargin: Kirigami.Units.smallSpacing
+            leftMargin: Kirigami.Units.smallSpacing
         }
     }
 
-    // Click + hover + right-click handling, mirroring the pattern
-    // used by the Continue Watching rail card.
-    MouseArea {
-        id: hoverArea
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
-        cursorShape: Qt.PointingHandCursor
-        onClicked: function (mouse) {
-            if (mouse.button === Qt.LeftButton) {
-                card.clicked();
-            } else if (mouse.button === Qt.RightButton) {
-                contextMenu.popup();
-            }
+    RatingChip {
+        rating: card.rating
+        anchors {
+            top: parent.top
+            right: parent.right
+            topMargin: Kirigami.Units.smallSpacing
+            rightMargin: Kirigami.Units.smallSpacing
         }
     }
 
     QQC2.Menu {
         id: contextMenu
+
         QQC2.MenuItem {
             text: i18nc("@action:inmenu", "Open")
             icon.source: AppIcons.url("play")

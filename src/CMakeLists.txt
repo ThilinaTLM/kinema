@@ -329,6 +329,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/AppIcons.qml
         ui/qml/Theme.qml
         ui/qml/components/BackdropHero.qml
+        ui/qml/components/BasePosterCard.qml
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/DetailOverview.qml

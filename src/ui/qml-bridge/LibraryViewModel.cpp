@@ -660,6 +660,7 @@ LibraryListRow LibraryViewModel::toGridRow(const Entry& e) const
     row.title = e.title.title;
     row.posterUrl = posterString(e.title);
     row.releaseDateText = releaseText(e.title.releaseDate);
+    row.year = e.title.year;
     row.rating = e.title.imdbRating;
     row.runtimeMinutes = e.title.runtimeMinutes;
 

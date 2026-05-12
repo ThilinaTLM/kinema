@@ -48,6 +48,8 @@ QVariant LibraryListModel::data(const QModelIndex& index, int role) const
         return r.upcoming;
     case ReleaseDateTextRole:
         return r.releaseDateText;
+    case YearRole:
+        return r.year ? QVariant(*r.year) : QVariant();
     case RatingRole:
         return r.rating ? QVariant(*r.rating) : QVariant();
     case RuntimeMinutesRole:
@@ -71,6 +73,7 @@ QHash<int, QByteArray> LibraryListModel::roleNames() const
         { WatchedRole, "watched" },
         { UpcomingRole, "upcoming" },
         { ReleaseDateTextRole, "releaseDateText" },
+        { YearRole, "year" },
         { RatingRole, "rating" },
         { RuntimeMinutesRole, "runtimeMinutes" },
     };

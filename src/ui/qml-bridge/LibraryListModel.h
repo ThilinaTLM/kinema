@@ -27,6 +27,7 @@ struct LibraryListRow {
     bool watched = false;
     bool upcoming = false;
     QString releaseDateText;
+    std::optional<int> year;
     std::optional<domain::HistoryEntry> resumeEntry;
     std::optional<double> rating;
     std::optional<int> runtimeMinutes;
@@ -49,6 +50,7 @@ public:
         WatchedRole,
         UpcomingRole,
         ReleaseDateTextRole,
+        YearRole,
         RatingRole,
         RuntimeMinutesRole,
     };
