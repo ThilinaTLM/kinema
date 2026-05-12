@@ -96,70 +96,99 @@ Kirigami.Page {
         }
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
+    function _emptyTitle() {
+        switch (downloadsVm.filter) {
+        case 1:
+            return i18nc("@info:placeholder",
+                "No active downloads");
+        case 2:
+            return i18nc("@info:placeholder",
+                "Nothing finished yet");
+        case 3:
+            return i18nc("@info:placeholder",
+                "No failed downloads");
+        default:
+            return i18nc("@info:placeholder", "No downloads yet");
+        }
+    }
 
-        // ---- Empty states --------------------------------------
-        Kirigami.PlaceholderMessage {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            visible: downloadsVm.items.count === 0
-            icon.source: AppIcons.url(downloadsVm.filter === 0
-                ? "download"
-                : "list")
-            icon.color: AppIcons.foreground
-            text: switch (downloadsVm.filter) {
-            case 1:
-                return i18nc("@info:placeholder", "No active downloads")
-            case 2:
-                return i18nc("@info:placeholder", "Nothing finished yet")
-            case 3:
-                return i18nc("@info:placeholder", "No failed downloads")
-            default:
-                return i18nc("@info:placeholder", "No downloads yet")
-            }
+    ListSurface {
+        anchors.fill: parent
+
+        state: downloadsVm.items.count > 0
+            ? ListSurface.Ready
+            : ListSurface.Empty
+        model: downloadsVm.items
+
+        listLeftMargin: Kirigami.Units.largeSpacing
+        listRightMargin: Kirigami.Units.largeSpacing
+        listTopMargin: Kirigami.Units.smallSpacing
+        listBottomMargin: Kirigami.Units.smallSpacing
+        listSpacing: Kirigami.Units.smallSpacing
+
+        delegate: DownloadListCard {
+            required property var model
+            assetId: model.assetId
+            title: model.title
+            seriesTitle: model.seriesTitle
+            episodeTitle: model.episodeTitle
+            posterUrl: model.posterUrl
+            state: model.state
+            stateText: model.stateText
+            stateTone: model.stateTone
+            mode: model.mode
+            modeLabel: model.modeLabel
+            canUpgrade: model.canUpgrade
+            canPause: model.canPause
+            canResume: model.canResume
+            hasPlayerAttached: model.hasPlayerAttached
+            backendKind: model.backendKind
+            backendIcon: model.backendIcon
+            backendLabel: model.backendLabel
+            pinned: model.pinned
+            complete: model.complete
+            progressFraction: model.progressFraction
+            progressText: model.progressText
+            sizeText: model.sizeText
+            downloadRateText: model.downloadRateText
+            peers: model.peers
+            seeds: model.seeds
+            etaText: model.etaText
+            errorText: model.errorText
+            localDir: model.localDir
+            releaseName: model.releaseName
+            qualityLabel: model.qualityLabel
+            resolution: model.resolution
+            provider: model.provider
+            imdbId: model.imdbId
+            kind: model.kind
+            season: model.season
+            episode: model.episode
+        }
+
+        // Custom empty state — the explanation copy carries a long
+        // multi-paragraph hint when no filter is active, plus a
+        // "Browse" call-to-action. The shared `emptyConfig` shape
+        // covers both branches via `actionText`-gating.
+        emptyConfig: ({
+            icon: downloadsVm.filter === 0 ? "download" : "list",
+            iconColor: AppIcons.foreground,
+            title: page._emptyTitle(),
             explanation: downloadsVm.filter === 0
                 ? i18nc("@info:placeholder explanation",
-                    "Click the \u2b07 Download button on a stream to start "
-                    + "a full background download (it keeps going whether "
-                    + "you watch or not). Click \u25b6 Play to stream on "
-                    + "demand \u2014 only the bytes the player needs are "
-                    + "fetched, and the session quiesces when you stop "
-                    + "watching.")
-                : ""
-
-            QQC2.Button {
-                visible: downloadsVm.filter === 0
-                Layout.alignment: Qt.AlignHCenter
-                text: i18nc("@action:button browse to find streams",
+                    "Click the \u2b07 Download button on a stream to "
+                    + "start a full background download (it keeps "
+                    + "going whether you watch or not). Click \u25b6 "
+                    + "Play to stream on demand \u2014 only the bytes "
+                    + "the player needs are fetched, and the session "
+                    + "quiesces when you stop watching.")
+                : "",
+            actionText: downloadsVm.filter === 0
+                ? i18nc("@action:button browse to find streams",
                     "Browse")
-                icon.source: AppIcons.url("search")
-                icon.color: AppIcons.foreground
-                onClicked: shell.navigateToBrowseRequested()
-            }
-        }
-
-        // ---- Downloads list ------------------------------------
-        QQC2.ScrollView {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            visible: downloadsVm.items.count > 0
-            clip: true
-
-            ListView {
-                id: list
-                model: downloadsVm.items
-                spacing: Kirigami.Units.smallSpacing
-                topMargin: Kirigami.Units.smallSpacing
-                bottomMargin: Kirigami.Units.smallSpacing
-                leftMargin: Kirigami.Units.largeSpacing
-                rightMargin: Kirigami.Units.largeSpacing
-
-                delegate: DownloadRow {
-                    width: list.width - list.leftMargin - list.rightMargin
-                }
-            }
-        }
+                : "",
+            actionIcon: "search",
+            onActionTriggered: () => shell.navigateToBrowseRequested()
+        })
     }
 }

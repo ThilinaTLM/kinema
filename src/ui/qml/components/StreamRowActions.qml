@@ -7,7 +7,7 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Per-row action menu installed on each `StreamCard`'s "\u22ee" button.
+// Per-row action menu installed on each `StreamListCard`'s "\u22ee" button.
 // Play is covered by the row's primary button (and Enter / double-click /
 // right-click), so the menu only carries the secondary affordances:
 //   - Copy magnet / Open magnet                 : require infoHash

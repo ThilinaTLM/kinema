@@ -329,16 +329,18 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/AppIcons.qml
         ui/qml/Theme.qml
         ui/qml/components/BackdropHero.qml
+        ui/qml/components/BaseListCard.qml
         ui/qml/components/BasePosterCard.qml
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/DetailOverview.qml
         ui/qml/components/EpisodeRailCard.qml
-        ui/qml/components/EpisodeRow.qml
+        ui/qml/components/EpisodeListCard.qml
         ui/qml/components/FilterMenuButton.qml
         ui/qml/components/KinemaArtworkFrame.qml
         ui/qml/components/LibraryCard.qml
         ui/qml/components/LibraryRail.qml
+        ui/qml/components/ListSurface.qml
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
         ui/qml/components/PageHeaderBar.qml
@@ -346,16 +348,18 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/PosterCard.qml
         ui/qml/components/PosterGrid.qml
         ui/qml/components/RatingChip.qml
+        ui/qml/components/RowChipRail.qml
+        ui/qml/components/RowMediaThumbnail.qml
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml
         ui/qml/components/StatusChip.qml
-        ui/qml/components/StreamCard.qml
+        ui/qml/components/StreamListCard.qml
         ui/qml/components/StreamRowActions.qml
         ui/qml/components/StreamSortDialog.qml
         ui/qml/components/StreamsList.qml
-        ui/qml/components/DownloadRow.qml
+        ui/qml/components/DownloadListCard.qml
         ui/qml/components/UpcomingBadge.qml
-        ui/qml/components/SubtitleResultRow.qml
+        ui/qml/components/SubtitleListCard.qml
         ui/qml/components/SubtitlesPanel.qml
         ui/qml/components/YearChip.qml
         ui/qml/pages/BrowsePage.qml

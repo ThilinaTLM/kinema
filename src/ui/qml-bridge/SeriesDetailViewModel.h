@@ -265,7 +265,7 @@ public Q_SLOTS:
     /// Wire the download controller. Same two-phase pattern.
     void setDownloadController(controllers::DownloadController* dl);
 
-    /// Per-row action handlers driven by `StreamCard.qml`'s ⋮ menu.
+    /// Per-row action handlers driven by `StreamListCard.qml`'s ⋮ menu.
     /// `playNow` routes straight through `services::StreamActions`.
     void playNow(int row);
     /// As `playNow` but forces a specific backend (Torrent /

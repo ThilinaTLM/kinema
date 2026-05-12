@@ -11,7 +11,7 @@ import dev.tlmtech.kinema.app
 // hero (or inline in an episode list). Phase 06's MetaHeaderWidget
 // migration retires the C++ `UpcomingBadge` painter; this is the
 // QML replacement consumed by `MetaSection.qml` and (commit B's)
-// `EpisodeRow.qml`.
+// `EpisodeListCard.qml`.
 //
 // `releaseDateText` is the already-formatted date string supplied
 // by the view-model (which routes through `core::formatReleaseDate`

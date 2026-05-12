@@ -17,7 +17,7 @@ namespace kinema::ui::qml {
  *
  * Replaces the widget-side `ui::EpisodesModel` (`Qt::UserRole + N`
  * positional roles) with a flat named-roles list backing
- * `EpisodeRow.qml`. The owning view-model rebuilds the model whenever
+ * `EpisodeListCard.qml`. The owning view-model rebuilds the model whenever
  * the user flips seasons; there's no async state machine here \u2014
  * loading state lives at the page level on `metaState`.
  */

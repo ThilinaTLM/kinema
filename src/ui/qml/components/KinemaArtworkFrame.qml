@@ -45,6 +45,11 @@ Item {
     /// way for everyone.
     property string url: ""
 
+    /// Image-provider role. Maps to `image://kinema/<role>?u=…`.
+    /// `poster` (default) for 2:3 covers, `still` for 16:9 episode
+    /// stills, `backdrop` for hero art.
+    property string imageRole: "poster"
+
     /// Aspect ratio expressed as `height / width`. 1.5 = 2:3
     /// poster, 9/16 = 16:9 episode still.
     property real aspect: 1.5
@@ -96,7 +101,8 @@ Item {
         color: Kirigami.Theme.alternateBackgroundColor
 
         source: frame.url.length > 0
-            ? "image://kinema/poster?u=" + encodeURIComponent(frame.url)
+            ? "image://kinema/" + frame.imageRole
+                + "?u=" + encodeURIComponent(frame.url)
             : ""
         fillMode: frame.letterbox
             ? Image.PreserveAspectFit

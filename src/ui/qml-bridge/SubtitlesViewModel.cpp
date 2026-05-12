@@ -238,6 +238,15 @@ void SubtitlesViewModel::runPrimaryAction()
     m_controller->download(hit.fileId, m_context.key);
 }
 
+void SubtitlesViewModel::primaryActionForRow(int row)
+{
+    if (row < 0 || !m_model || row >= m_model->count()) {
+        return;
+    }
+    setSelectedRow(row);
+    runPrimaryAction();
+}
+
 void SubtitlesViewModel::openLocalFile()
 {
     // QML opens a `FileDialog` and calls back into

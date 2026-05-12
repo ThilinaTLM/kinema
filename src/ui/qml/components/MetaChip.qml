@@ -8,7 +8,7 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Tiny label pill used by `BackdropHero` and `StreamCard` for genre /
+// Tiny label pill used by `BackdropHero` and the list cards for genre /
 // codec / source / quality tags. Rendered with a 1 px outline rather
 // than a filled background so multiple chips next to each other don't
 // turn into a colour wall over the backdrop.

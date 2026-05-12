@@ -128,6 +128,11 @@ public Q_SLOTS:
     void resetFilters();
     /// Trigger Download / Use / Re-attach for `selectedRow`.
     void runPrimaryAction();
+    /// Per-row primary action used by `SubtitleListCard`'s trailing
+    /// button. Selects the row first (so the row's badges + the
+    /// page-footer primary action reflect the new selection), then
+    /// forwards to the same controller call as `runPrimaryAction()`.
+    void primaryActionForRow(int row);
     /// Open the local-file picker (handled in QML via FileDialog —
     /// QML calls `localFileResolved` once the path is known).
     void openLocalFile();

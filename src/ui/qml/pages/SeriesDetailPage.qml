@@ -136,7 +136,7 @@ Kirigami.ScrollablePage {
         }
 
         // The episode list and season tabs already indent their
-        // content via internal padding (`EpisodeRow.padding`,
+        // content via internal padding (`EpisodeListCard.padding`,
         // `SeasonTabs` Row `leftPadding`), so this column only adds
         // page-edge margin to the heading. Letting the list span
         // edge-to-edge keeps episode content aligned with the title
@@ -168,23 +168,34 @@ Kirigami.ScrollablePage {
                 spacing: Theme.inlineSpacing
                 cacheBuffer: Kirigami.Units.gridUnit * 40
 
-                delegate: EpisodeRow {
+                delegate: EpisodeListCard {
+                    required property int index
+                    required property var model
                     episodeNumber: model.number
                     episodeTitle: model.title
                     description: model.description
                     releasedText: model.releasedText
                     isUpcoming: model.isUpcoming
                     thumbnailUrl: model.thumbnailUrl
-                    watched: model.watched !== undefined ? model.watched : false
-                    progress: model.progress !== undefined ? model.progress : -1
+                    watched: model.watched !== undefined
+                        ? model.watched : false
+                    // Hide the inline progress bar once the episode
+                    // has been marked watched — chassis renders the
+                    // bar whenever 0 < progress < 1.
+                    progress: (model.watched === true)
+                        ? -1
+                        : (model.progress !== undefined
+                            ? model.progress : -1)
                     selected: index === seriesDetailVm.selectedEpisodeRow
-                    onToggleWatchedRequested: seriesDetailVm.toggleEpisodeWatched(index)
+                    onToggleWatchedRequested:
+                        seriesDetailVm.toggleEpisodeWatched(index)
                     onClicked: {
-                        // Tap = "show me how to play this one." The VM
-                        // selects the episode (kicking off the streams
-                        // fetch) and emits `streamsRequested`, which
-                        // MainController forwards to the shell to push
-                        // `StreamsPage` on top of this page.
+                        // Tap = "show me how to play this one." The
+                        // VM selects the episode (kicking off the
+                        // streams fetch) and emits
+                        // `streamsRequested`, which MainController
+                        // forwards to the shell to push `StreamsPage`
+                        // on top of this page.
                         seriesDetailVm.selectEpisodeAndOpenStreams(index);
                     }
                 }

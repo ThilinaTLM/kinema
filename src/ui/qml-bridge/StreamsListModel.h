@@ -21,7 +21,7 @@ namespace kinema::ui::qml {
  *
  * Replaces the widget-side `ui::TorrentsModel` (`QAbstractTableModel`
  * with positional column roles) with a flat list of named roles
- * suitable for a `ListView`-of-`StreamCard`. Carries its own
+ * suitable for a `ListView`-of-`StreamListCard`. Carries its own
  * lifecycle state (`Idle`/`Loading`/`Ready`/`Empty`/`Error`/`Unreleased`)
  * so the page can switch placeholders on `model.state` directly,
  * matching the `DiscoverSectionModel` / `ResultsListModel` shape.
@@ -143,7 +143,7 @@ public:
     static QStringList chipsFor(const domain::Stream& s);
 
     /// Build the small chip strip shown on the secondary metadata
-    /// line in the redesigned `StreamCard`. Carries only metadata
+    /// line in the redesigned `StreamListCard`. Carries only metadata
     /// that is *not* already expressed in `summaryLineFor()`:
     /// language codes / multi-audio / release-group — NOT
     /// resolution, RD, codec, or HDR.
