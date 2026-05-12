@@ -341,6 +341,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
         ui/qml/components/PageHeaderBar.qml
+        ui/qml/components/PosterBadge.qml
         ui/qml/components/PosterCard.qml
         ui/qml/components/PosterGrid.qml
         ui/qml/components/RatingChip.qml
@@ -355,6 +356,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/UpcomingBadge.qml
         ui/qml/components/SubtitleResultRow.qml
         ui/qml/components/SubtitlesPanel.qml
+        ui/qml/components/YearChip.qml
         ui/qml/pages/BrowsePage.qml
         ui/qml/pages/DiscoverPage.qml
         ui/qml/pages/DownloadsPage.qml
@@ -427,6 +429,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/icons/lucide/skip-forward.svg
         ui/qml/icons/lucide/sparkles.svg
         ui/qml/icons/lucide/star.svg
+        ui/qml/icons/lucide/star-filled.svg
         ui/qml/icons/lucide/tags.svg
         ui/qml/icons/lucide/trash-2.svg
         ui/qml/icons/lucide/triangle-alert.svg

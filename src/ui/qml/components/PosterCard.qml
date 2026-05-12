@@ -2,30 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import QtQuick
-import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// One TMDB / Cinemeta tile: 2:3 poster, single-line title, caption
-// subtitle, corner rating chip. Shares chrome with every other
-// poster/thumbnail card in the app via `KinemaArtworkFrame` —
-// hover lift, animated focus ring, hover tint, and fallback icon
-// all live there. This card just composes the frame with the
-// rating chip overlay and the meta block, and wires activation.
+// One TMDB / Cinemeta tile: 2:3 poster, wrapped two-line title,
+// rating chip top-right, year chip top-left. Shares chrome with
+// every other poster/thumbnail card in the app via
+// `KinemaArtworkFrame` — hover lift, animated focus ring, hover
+// tint, and fallback icon all live there. This card just composes
+// the frame with the two overlay chips and the title block, and
+// wires activation.
 //
-// Public surface is intentionally identical to the previous
-// version so `PosterGrid`, `ContentRail`, and `SimilarCarousel`
-// can keep using the delegate without changes.
+// Consumers: `PosterGrid`, `ContentRail`, `SimilarCarousel`.
 Item {
     id: card
 
     // ---- Inputs --------------------------------------------------
     property string posterUrl
     property string title
-    property string subtitle
-    property real rating: -1
+    property int    year: 0
+    property real   rating: -1
 
     signal clicked()
 
@@ -68,6 +66,18 @@ Item {
             hovered: card._hovered
             focusRing: card._hovered || card.activeFocus
 
+            // Year overlay (top-left). Mirror of the rating chip so
+            // the two chips sit symmetrically on the artwork.
+            YearChip {
+                year: card.year
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    topMargin: Kirigami.Units.smallSpacing
+                    leftMargin: Kirigami.Units.smallSpacing
+                }
+            }
+
             // Rating overlay (top-right). Sits inside the inset so
             // it never clips the rounded corner.
             RatingChip {
@@ -87,21 +97,23 @@ Item {
             Layout.fillWidth: true
 
             Kirigami.Heading {
+                id: titleHeading
                 Layout.fillWidth: true
+                // Reserve a fixed two-line height so grid rows stay
+                // aligned regardless of title length.
+                Layout.preferredHeight: titleMetrics.height * 2
                 level: 5
                 text: card.title
+                wrapMode: Text.WordWrap
                 elide: Text.ElideRight
-                maximumLineCount: 1
+                maximumLineCount: 2
+                verticalAlignment: Text.AlignTop
                 color: Kirigami.Theme.textColor
-            }
 
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: card.subtitle.length > 0
-                text: card.subtitle
-                elide: Text.ElideRight
-                font: Kirigami.Theme.smallFont
-                color: Kirigami.Theme.disabledTextColor
+                FontMetrics {
+                    id: titleMetrics
+                    font: titleHeading.font
+                }
             }
         }
     }

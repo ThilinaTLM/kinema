@@ -90,8 +90,7 @@ GridView {
             posterUrl: model.posterUrl !== undefined
                 ? model.posterUrl : ""
             title: model.title !== undefined ? model.title : ""
-            subtitle: (model.year !== undefined && model.year > 0)
-                ? String(model.year) : ""
+            year: model.year !== undefined ? model.year : 0
             rating: (model.rating !== undefined && model.rating !== null)
                 ? model.rating
                 : ((model.voteAverage !== undefined
