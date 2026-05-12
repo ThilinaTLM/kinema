@@ -49,7 +49,6 @@ BaseListCard {
         imageRole: "still"
         fallbackIcon: "play"
         aspect: 9 / 16
-        hovered: card.hovered
     }
 
     // Body (default slot): title row + description. Inline progress

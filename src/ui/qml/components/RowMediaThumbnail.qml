@@ -28,9 +28,6 @@ Item {
     /// `image://kinema/<role>?u=…` so the existing provider cache
     /// is reused.
     property string imageRole: "poster"
-    /// Hover lift, forwarded by the parent row so the frame's
-    /// shadow + tint stays in sync with the row's hover state.
-    property bool hovered: false
     /// Aspect ratio (height / width). 9/16 for stills, 1.5 for
     /// posters. Cards typically set Layout.preferredWidth/Height to
     /// the intended pixel size; this value matches the
@@ -54,7 +51,11 @@ Item {
         imageRole: thumb.imageRole
         aspect: thumb.aspect
         fallbackIcon: thumb.fallbackIcon
-        hovered: thumb.hovered
+        // List-row thumbnails intentionally don't react to the
+        // row's hover state: the shadow lift + tint that
+        // `KinemaArtworkFrame` uses on poster-grid cards reads as
+        // a distracting "glow" inside a dense list.
+        hovered: false
         focusRing: false
     }
 }

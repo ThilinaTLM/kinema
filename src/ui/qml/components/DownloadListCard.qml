@@ -194,7 +194,6 @@ BaseListCard {
         imageRole: "poster"
         fallbackIcon: "clapperboard"
         aspect: 1.5
-        hovered: card.hovered
 
         // Pin overlay. Anchored bottom-right inside the artwork
         // frame, same as before.
