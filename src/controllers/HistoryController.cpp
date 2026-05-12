@@ -100,6 +100,8 @@ void HistoryController::setPlayerWindow(ui::player::PlayerWindow* window)
         this, &HistoryController::onPositionChanged);
     connect(m_player, &ui::player::PlayerWindow::durationChanged,
         this, &HistoryController::onDurationChanged);
+    connect(m_player, &ui::player::PlayerWindow::chaptersChanged,
+        this, &HistoryController::onChaptersChanged);
 #else
     Q_UNUSED(window);
 #endif
@@ -124,6 +126,7 @@ void HistoryController::onPlayStarting(const domain::PlaybackContext& ctx)
         m_lastPosition = 0.0;
         m_duration = 0.0;
         m_lastPersistedPosition = 0.0;
+        m_activeChapters.clear();
     }
 
     m_pending = ctx;
@@ -344,20 +347,48 @@ void HistoryController::onFileLoaded()
     }
     m_lastPosition = 0.0;
     m_lastPersistedPosition = 0.0;
+    // Fresh file → stale chapter list from a previous session must go.
+    // mpv will re-emit `chapter-list` for the new file (possibly
+    // empty, which is fine).
+    m_activeChapters.clear();
 }
 
-void HistoryController::onEndOfFile(const QString& /*reason*/)
+void HistoryController::onEndOfFile(const QString& reason)
 {
     if (!m_active) {
         return;
     }
-    // Persist the final position synchronously.
-    persistActive(/*force=*/true);
+
+    // Map mpv's reason string to the store's session-end taxonomy.
+    // Anything we don't recognise is treated as an error so we never
+    // auto-finish on an unexpected reason.
+    core::HistoryStore::SessionEndReason mapped =
+        core::HistoryStore::SessionEndReason::Error;
+    if (reason == QLatin1String("eof")) {
+        mapped = core::HistoryStore::SessionEndReason::NaturalEof;
+    } else if (reason == QLatin1String("stop")
+            || reason == QLatin1String("quit")) {
+        mapped = core::HistoryStore::SessionEndReason::UserStop;
+    }
+
+    const auto entry = buildActiveEntry();
+    const auto creditsStart = core::chapters::findCreditsStart(
+        m_activeChapters, m_duration);
+    m_store.recordSessionEnd(entry, mapped, creditsStart);
+    m_lastPersistedPosition = m_lastPosition;
+
     m_active.reset();
     m_pending.reset();
     m_lastPosition = 0.0;
     m_duration = 0.0;
     m_lastPersistedPosition = 0.0;
+    m_activeChapters.clear();
+}
+
+void HistoryController::onChaptersChanged(
+    const core::chapters::ChapterList& chapters)
+{
+    m_activeChapters = chapters;
 }
 
 void HistoryController::onDurationChanged(double seconds)
@@ -401,12 +432,22 @@ void HistoryController::persistActive(bool force)
         return;
     }
 
+    m_store.record(buildActiveEntry());
+    m_lastPersistedPosition = m_lastPosition;
+}
+
+domain::HistoryEntry HistoryController::buildActiveEntry() const
+{
     domain::HistoryEntry e;
+    if (!m_active) {
+        return e;
+    }
     e.key = m_active->key;
     e.title = m_active->title;
     e.seriesTitle = m_active->seriesTitle;
     e.episodeTitle = m_active->episodeTitle;
     e.poster = m_active->poster;
+    e.backdrop = m_active->backdrop;
     e.lastStream = m_active->streamRef;
     e.positionSec = m_lastPosition;
     e.durationSec = m_duration;
@@ -419,9 +460,7 @@ void HistoryController::persistActive(bool force)
         e.rememberedSubtitleLang = selectedSubtitleLang(tracks);
     }
 #endif
-
-    m_store.record(e);
-    m_lastPersistedPosition = m_lastPosition;
+    return e;
 }
 
 } // namespace kinema::controllers

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/mpv/MpvChapterList.h"
 #include "domain/PlaybackContext.h"
 
 #include <QList>
@@ -79,6 +80,16 @@ public:
     /// show up in Continue Watching too.
     void onPlayStarting(const domain::PlaybackContext& ctx);
 
+    // ---- Embedded-player event handlers ------------------------------
+    // Public so tests can drive the session lifecycle without a real
+    // `PlayerWindow`. In production these are wired to player signals
+    // by `setPlayerWindow()`.
+    void onFileLoaded();
+    void onEndOfFile(const QString& reason);
+    void onPositionChanged(double seconds);
+    void onDurationChanged(double seconds);
+    void onChaptersChanged(const core::chapters::ChapterList& chapters);
+
     /// Resume-time lookup. Returns the live in-memory position when
     /// the active session matches `key` (mid-session stream swap);
     /// otherwise the stored position.
@@ -119,15 +130,15 @@ Q_SIGNALS:
     void resumeFallbackRequested(const domain::HistoryEntry& entry);
 
 private Q_SLOTS:
-    void onFileLoaded();
-    void onEndOfFile(const QString& reason);
-    void onPositionChanged(double seconds);
-    void onDurationChanged(double seconds);
     void onPersistTick();
 
 private:
     QCoro::Task<void> resumeTask(domain::HistoryEntry entry);
     void persistActive(bool force);
+    /// Snapshot the active session as a `HistoryEntry`, including
+    /// remembered track languages from the player when available.
+    /// Returns a default-constructed entry when no session is active.
+    domain::HistoryEntry buildActiveEntry() const;
 
     core::HistoryStore& m_store;
     api::IndexerSelector* m_indexers;
@@ -142,6 +153,10 @@ private:
     double m_lastPosition = 0.0;
     double m_duration = 0.0;
     double m_lastPersistedPosition = 0.0;
+    /// Latest chapter list reported by mpv for the active session.
+    /// Used by `onEndOfFile` to derive a credits-start hint that's
+    /// authoritative over the percentage threshold.
+    core::chapters::ChapterList m_activeChapters;
 
     quint64 m_resumeEpoch = 0;
 };

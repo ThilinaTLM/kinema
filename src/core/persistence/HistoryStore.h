@@ -27,7 +27,13 @@ class Database;
  *     update.
  *   - `finished` flips automatically when
  *     `position_sec / duration_sec >= finishedThreshold` (default
- *     0.9); this drives the Continue-Watching filter.
+ *     0.9); this drives the Continue-Watching filter. The tick path
+ *     stays conservative against accidental scrubs.
+ *   - `recordSessionEnd()` is the "playback session ended" variant:
+ *     it applies a per-kind, looser stop threshold (0.85 for movies,
+ *     0.90 for episodes — see the auto-watched plan) and honours an
+ *     optional credits-start hint derived from mpv chapter metadata.
+ *     Natural EOF always finishes; `Error` never auto-finishes.
  *   - `changed()` is coalesced to once per event-loop tick.
  *   - Writes are synchronous. With WAL + synchronous=NORMAL each
  *     write is sub-millisecond; no debouncing needed.
@@ -39,6 +45,14 @@ class HistoryStore : public QObject
 {
     Q_OBJECT
 public:
+    /// How the playback session ended. Drives whether (and at what
+    /// threshold) `recordSessionEnd()` auto-finishes the row.
+    enum class SessionEndReason {
+        NaturalEof, ///< mpv reached the literal end of file.
+        UserStop,   ///< user closed the player or hit stop.
+        Error,      ///< playback aborted; never auto-finish.
+    };
+
     explicit HistoryStore(Database& db, QObject* parent = nullptr);
     ~HistoryStore() override;
 
@@ -58,6 +72,13 @@ public:
     void setFinishedThreshold(double fraction);
     double finishedThreshold() const noexcept { return m_finishedThreshold; }
 
+    /// Override the per-kind stop-threshold applied by
+    /// `recordSessionEnd()` when `reason == UserStop`. Defaults are
+    /// 0.85 for movies and 0.90 for episodes (see plan). Bounded to
+    /// [0.5, 1.0].
+    void setStopFinishedThreshold(domain::MediaKind kind, double fraction);
+    double stopFinishedThreshold(domain::MediaKind kind) const noexcept;
+
     std::optional<domain::HistoryEntry> find(const domain::PlaybackKey& key) const;
 
     /// For movies: returns the movie entry if any. For series:
@@ -76,6 +97,20 @@ public:
     /// preserves the previously stored ref.
     void record(const domain::HistoryEntry& entry);
 
+    /// Upsert one entry at the end of a playback session. Compared
+    /// to `record()`:
+    ///   - `NaturalEof`  → always finishes the row.
+    ///   - `UserStop`   → finishes when either the chapter-derived
+    ///                    credits hint is reached (`position >=
+    ///                    creditsStartSec - 2.0`) or the per-kind
+    ///                    stop threshold is met.
+    ///   - `Error`      → forwards to `record()` (no force, no
+    ///                    chapter hint).
+    /// Never un-finishes an already-finished row.
+    void recordSessionEnd(const domain::HistoryEntry& entry,
+        SessionEndReason reason,
+        std::optional<double> creditsStartSec = std::nullopt);
+
     void remove(const domain::PlaybackKey& key);
     void clear();
 
@@ -93,9 +128,14 @@ Q_SIGNALS:
 
 private:
     void scheduleChanged();
+    /// Shared SQL upsert. Both `record()` and `recordSessionEnd()`
+    /// land here after computing the `finished` flag.
+    void upsert(const domain::HistoryEntry& entry);
 
     Database& m_db;
     double m_finishedThreshold = 0.9;
+    double m_stopFinishedThresholdMovie = 0.85;
+    double m_stopFinishedThresholdSeries = 0.90;
     int m_retentionDays = 365;
     bool m_changePending = false;
 };

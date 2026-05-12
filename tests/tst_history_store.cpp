@@ -315,6 +315,162 @@ private Q_SLOTS:
         QVERIFY(got->finished);
     }
 
+    // ---- recordSessionEnd: per-kind stop thresholds, EOF, error --------
+
+    void testRecordSessionEndMovieStopAt86PercentFinishes()
+    {
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000010"), /*pos=*/4300, /*dur=*/5000);
+        m_store->recordSessionEnd(
+            e, core::HistoryStore::SessionEndReason::UserStop);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testRecordSessionEndMovieStopAt80PercentDoesNotFinish()
+    {
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000011"), /*pos=*/4000, /*dur=*/5000);
+        m_store->recordSessionEnd(
+            e, core::HistoryStore::SessionEndReason::UserStop);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(!got->finished);
+    }
+
+    void testRecordSessionEndEpisodeStopAt87PercentDoesNotFinish()
+    {
+        auto e = makeEpisodeEntry(
+            QStringLiteral("tt1000012"), 1, 1, /*pos=*/2349, /*dur=*/2700);
+        m_store->recordSessionEnd(
+            e, core::HistoryStore::SessionEndReason::UserStop);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(!got->finished);
+    }
+
+    void testRecordSessionEndEpisodeStopAt92PercentFinishes()
+    {
+        auto e = makeEpisodeEntry(
+            QStringLiteral("tt1000013"), 1, 2, /*pos=*/2484, /*dur=*/2700);
+        m_store->recordSessionEnd(
+            e, core::HistoryStore::SessionEndReason::UserStop);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testRecordSessionEndNaturalEofAlwaysFinishes()
+    {
+        // Even a malformed duration / wildly-early position must
+        // finish when mpv says we hit literal EOF.
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000014"), /*pos=*/50, /*dur=*/5000);
+        m_store->recordSessionEnd(
+            e, core::HistoryStore::SessionEndReason::NaturalEof);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testRecordSessionEndErrorNeverForcesFinish()
+    {
+        // Position is below the passive 0.9 threshold, so even
+        // record()'s own auto-flip won't trigger. Error must not
+        // auto-finish.
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000015"), /*pos=*/4400, /*dur=*/5000);
+        m_store->recordSessionEnd(
+            e, core::HistoryStore::SessionEndReason::Error);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(!got->finished);
+    }
+
+    void testRecordSessionEndErrorAbove90PercentStillFlipsViaTickRule()
+    {
+        // Error path forwards to record(), which still applies the
+        // 0.9 tick threshold. This documents that behaviour so it's
+        // not accidentally regressed.
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000016"), /*pos=*/4700, /*dur=*/5000);
+        m_store->recordSessionEnd(
+            e, core::HistoryStore::SessionEndReason::Error);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testRecordSessionEndCreditsHintBeatsThreshold()
+    {
+        // 70% played, credits start at 68% -> finished even though
+        // the stop threshold (85%) would not have fired.
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000017"), /*pos=*/3500, /*dur=*/5000);
+        m_store->recordSessionEnd(e,
+            core::HistoryStore::SessionEndReason::UserStop,
+            /*creditsStartSec=*/3400.0);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testRecordSessionEndCreditsHintIgnoredWhenBeforeCredits()
+    {
+        // 60% played, credits start at 70% -> NOT finished (and
+        // below the stop threshold anyway).
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000018"), /*pos=*/3000, /*dur=*/5000);
+        m_store->recordSessionEnd(e,
+            core::HistoryStore::SessionEndReason::UserStop,
+            /*creditsStartSec=*/3500.0);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(!got->finished);
+    }
+
+    void testTickPathThresholdUnchangedAt89Percent()
+    {
+        // Regression guard: record() must not finish at 0.89.
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000019"), /*pos=*/4450, /*dur=*/5000);
+        m_store->record(e);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(!got->finished);
+    }
+
+    void testTickPathThresholdUnchangedAt90Percent()
+    {
+        // Regression guard: record() must still finish at 0.90.
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000020"), /*pos=*/4500, /*dur=*/5000);
+        m_store->record(e);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testStopThresholdSettersBounded()
+    {
+        m_store->setStopFinishedThreshold(
+            domain::MediaKind::Movie, 0.25);
+        QCOMPARE(
+            m_store->stopFinishedThreshold(domain::MediaKind::Movie),
+            0.5);
+        m_store->setStopFinishedThreshold(
+            domain::MediaKind::Series, 1.5);
+        QCOMPARE(
+            m_store->stopFinishedThreshold(domain::MediaKind::Series),
+            1.0);
+        m_store->setStopFinishedThreshold(
+            domain::MediaKind::Movie, 0.75);
+        QCOMPARE(
+            m_store->stopFinishedThreshold(domain::MediaKind::Movie),
+            0.75);
+    }
+
     // ---- Continue-Watching excludes finished, dedupes series ------------
 
     void testContinueWatchingOrderAndDedup()

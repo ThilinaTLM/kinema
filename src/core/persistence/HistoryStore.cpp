@@ -106,6 +106,24 @@ void HistoryStore::setFinishedThreshold(double fraction)
     m_finishedThreshold = qBound(0.5, fraction, 1.0);
 }
 
+void HistoryStore::setStopFinishedThreshold(domain::MediaKind kind,
+    double fraction)
+{
+    const double v = qBound(0.5, fraction, 1.0);
+    if (kind == domain::MediaKind::Movie) {
+        m_stopFinishedThresholdMovie = v;
+    } else {
+        m_stopFinishedThresholdSeries = v;
+    }
+}
+
+double HistoryStore::stopFinishedThreshold(domain::MediaKind kind) const noexcept
+{
+    return kind == domain::MediaKind::Movie
+        ? m_stopFinishedThresholdMovie
+        : m_stopFinishedThresholdSeries;
+}
+
 void HistoryStore::runRetentionPass()
 {
     if (!m_db.isOpen()) {
@@ -222,6 +240,73 @@ void HistoryStore::record(const domain::HistoryEntry& entry)
         e.finished = true;
     }
 
+    upsert(e);
+}
+
+void HistoryStore::recordSessionEnd(const domain::HistoryEntry& entry,
+    SessionEndReason reason,
+    std::optional<double> creditsStartSec)
+{
+    if (!m_db.isOpen() || !entry.key.isValid()) {
+        return;
+    }
+
+    // Error path: never auto-finish on a session that ended in an
+    // error or unknown reason \u2014 just persist whatever position we
+    // have via the standard tick rule.
+    if (reason == SessionEndReason::Error) {
+        record(entry);
+        return;
+    }
+
+    domain::HistoryEntry e = entry;
+    if (!e.lastWatchedAt.isValid()) {
+        e.lastWatchedAt = QDateTime::currentDateTimeUtc();
+    } else {
+        e.lastWatchedAt = e.lastWatchedAt.toUTC();
+    }
+
+    // Decide finished. Honour the explicit `finished` flag the caller
+    // already set; layer auto-finish reasons on top.
+    const char* via = nullptr;
+    if (e.finished) {
+        via = "caller";
+    } else if (reason == SessionEndReason::NaturalEof) {
+        e.finished = true;
+        via = "natural-eof";
+    } else if (creditsStartSec && e.positionSec
+            >= *creditsStartSec - 2.0) {
+        e.finished = true;
+        via = "chapter";
+    } else if (e.durationSec > 0.0
+            && e.positionSec / e.durationSec
+                >= stopFinishedThreshold(e.key.kind)) {
+        e.finished = true;
+        via = "stop-threshold";
+    } else if (e.durationSec > 0.0
+            && e.positionSec / e.durationSec >= m_finishedThreshold) {
+        // Defence in depth: the passive 0.9 should never lose to the
+        // looser stop rule. If somehow we still hit it here, flip.
+        e.finished = true;
+        via = "tick-threshold";
+    } else {
+        via = "below-threshold";
+    }
+
+    qCInfo(KINEMA_DB).nospace()
+        << "HistoryStore: session end key=" << e.key.storageKey()
+        << " reason="
+        << (reason == SessionEndReason::NaturalEof ? "eof" : "stop")
+        << " pos=" << e.positionSec << "/" << e.durationSec
+        << " finished=" << (e.finished ? 1 : 0)
+        << " via=" << via;
+
+    upsert(e);
+}
+
+void HistoryStore::upsert(const domain::HistoryEntry& entry)
+{
+    domain::HistoryEntry e = entry;
     const auto keyStr = e.key.storageKey();
     auto q = m_db.query();
 

@@ -6,6 +6,7 @@
 #include "domain/PlaybackContext.h"
 #include "config/AppSettings.h"
 #include "controllers/HistoryController.h"
+#include "core/mpv/MpvChapterList.h"
 #include "core/persistence/Database.h"
 #include "core/persistence/HistoryStore.h"
 #include "services/StreamActions.h"
@@ -113,6 +114,170 @@ private Q_SLOTS:
         m_historyStore.reset();
         m_db.reset();
         m_tmp.reset();
+    }
+
+    // ---- Session lifecycle: onEndOfFile dispatching ----------------
+
+    void testEndOfFileNaturalEofFinishesEvenAtLowProgress()
+    {
+        domain::PlaybackContext ctx;
+        ctx.key.kind = domain::MediaKind::Movie;
+        ctx.key.imdbId = QStringLiteral("tt9100001");
+        ctx.title = QStringLiteral("Natural EOF");
+        m_historyCtrl->onPlayStarting(ctx);
+        m_historyCtrl->onFileLoaded();
+        m_historyCtrl->onDurationChanged(5000);
+        m_historyCtrl->onPositionChanged(2500);
+        m_historyCtrl->onEndOfFile(QStringLiteral("eof"));
+
+        const auto got = m_historyStore->find(ctx.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testEndOfFileErrorAt99PercentDoesNotForceFinish()
+    {
+        // Error path forwards to record(), which still applies the
+        // 0.9 tick threshold. Position is 0.95 -> the tick rule does
+        // fire. To prove "never *forces*" we use 0.88 which is below
+        // both passive and stop thresholds.
+        domain::PlaybackContext ctx;
+        ctx.key.kind = domain::MediaKind::Movie;
+        ctx.key.imdbId = QStringLiteral("tt9100002");
+        ctx.title = QStringLiteral("Error 88%");
+        m_historyCtrl->onPlayStarting(ctx);
+        m_historyCtrl->onFileLoaded();
+        m_historyCtrl->onDurationChanged(5000);
+        m_historyCtrl->onPositionChanged(4400); // 88%
+        m_historyCtrl->onEndOfFile(QStringLiteral("error"));
+
+        const auto got = m_historyStore->find(ctx.key);
+        QVERIFY(got.has_value());
+        QVERIFY(!got->finished);
+    }
+
+    void testEndOfFileStopAt86PercentMovieFinishes()
+    {
+        domain::PlaybackContext ctx;
+        ctx.key.kind = domain::MediaKind::Movie;
+        ctx.key.imdbId = QStringLiteral("tt9100003");
+        ctx.title = QStringLiteral("Stop 86%");
+        m_historyCtrl->onPlayStarting(ctx);
+        m_historyCtrl->onFileLoaded();
+        m_historyCtrl->onDurationChanged(5000);
+        m_historyCtrl->onPositionChanged(4300); // 86% -> above 0.85
+        m_historyCtrl->onEndOfFile(QStringLiteral("stop"));
+
+        const auto got = m_historyStore->find(ctx.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testEndOfFileStopAt87PercentEpisodeDoesNotFinish()
+    {
+        domain::PlaybackContext ctx;
+        ctx.key.kind = domain::MediaKind::Series;
+        ctx.key.imdbId = QStringLiteral("tt9100004");
+        ctx.key.season = 1;
+        ctx.key.episode = 1;
+        ctx.title = QStringLiteral("Episode 87%");
+        m_historyCtrl->onPlayStarting(ctx);
+        m_historyCtrl->onFileLoaded();
+        m_historyCtrl->onDurationChanged(2700);
+        m_historyCtrl->onPositionChanged(2349); // 87% -> below 0.90
+        m_historyCtrl->onEndOfFile(QStringLiteral("stop"));
+
+        const auto got = m_historyStore->find(ctx.key);
+        QVERIFY(got.has_value());
+        QVERIFY(!got->finished);
+    }
+
+    void testChapterMarkerFlowsToStoreOnStop()
+    {
+        // 70% played, but file has a chapter titled "End Credits"
+        // starting at 68% -> finished via chapter authority,
+        // overriding the 0.85 stop threshold.
+        domain::PlaybackContext ctx;
+        ctx.key.kind = domain::MediaKind::Movie;
+        ctx.key.imdbId = QStringLiteral("tt9100005");
+        ctx.title = QStringLiteral("Chapter Credits");
+        m_historyCtrl->onPlayStarting(ctx);
+        m_historyCtrl->onFileLoaded();
+        m_historyCtrl->onDurationChanged(5000);
+        m_historyCtrl->onPositionChanged(3500); // 70%
+
+        core::chapters::ChapterList chapters;
+        core::chapters::Chapter intro;
+        intro.time = 0.0;
+        intro.title = QStringLiteral("Opening");
+        chapters.append(intro);
+        core::chapters::Chapter credits;
+        credits.time = 3400.0; // 68%
+        credits.title = QStringLiteral("End Credits");
+        chapters.append(credits);
+        m_historyCtrl->onChaptersChanged(chapters);
+
+        m_historyCtrl->onEndOfFile(QStringLiteral("stop"));
+
+        const auto got = m_historyStore->find(ctx.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
+    }
+
+    void testChapterListClearedBetweenSessions()
+    {
+        // Session 1 has a credits chapter; session 2 for a different
+        // key must not inherit it.
+        domain::PlaybackContext first;
+        first.key.kind = domain::MediaKind::Movie;
+        first.key.imdbId = QStringLiteral("tt9100006");
+        first.title = QStringLiteral("First");
+        m_historyCtrl->onPlayStarting(first);
+        m_historyCtrl->onFileLoaded();
+        m_historyCtrl->onDurationChanged(5000);
+        m_historyCtrl->onPositionChanged(3500);
+
+        core::chapters::ChapterList chapters;
+        core::chapters::Chapter credits;
+        credits.time = 3400.0;
+        credits.title = QStringLiteral("Credits");
+        chapters.append(credits);
+        m_historyCtrl->onChaptersChanged(chapters);
+        m_historyCtrl->onEndOfFile(QStringLiteral("stop"));
+
+        // Second session: 70% played, no chapters provided. Must NOT
+        // be auto-finished using session 1's chapter list.
+        domain::PlaybackContext second;
+        second.key.kind = domain::MediaKind::Movie;
+        second.key.imdbId = QStringLiteral("tt9100007");
+        second.title = QStringLiteral("Second");
+        m_historyCtrl->onPlayStarting(second);
+        m_historyCtrl->onFileLoaded();
+        m_historyCtrl->onDurationChanged(5000);
+        m_historyCtrl->onPositionChanged(3500); // 70% -> below 0.85
+        m_historyCtrl->onEndOfFile(QStringLiteral("stop"));
+
+        const auto got = m_historyStore->find(second.key);
+        QVERIFY(got.has_value());
+        QVERIFY(!got->finished);
+    }
+
+    void testQuitMappedToUserStop()
+    {
+        // mpv's "quit" path is treated identically to "stop".
+        domain::PlaybackContext ctx;
+        ctx.key.kind = domain::MediaKind::Movie;
+        ctx.key.imdbId = QStringLiteral("tt9100008");
+        ctx.title = QStringLiteral("Quit");
+        m_historyCtrl->onPlayStarting(ctx);
+        m_historyCtrl->onFileLoaded();
+        m_historyCtrl->onDurationChanged(5000);
+        m_historyCtrl->onPositionChanged(4300); // 86%
+        m_historyCtrl->onEndOfFile(QStringLiteral("quit"));
+
+        const auto got = m_historyStore->find(ctx.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
     }
 
     void resumeDispatchesDirectly()
