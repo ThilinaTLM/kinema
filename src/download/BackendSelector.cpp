@@ -33,6 +33,19 @@ bool matchesActiveDebrid(domain::DownloadBackendKind k,
     return false;
 }
 
+QString activeProviderDisplayName(domain::DebridProvider p)
+{
+    switch (p) {
+    case domain::DebridProvider::RealDebrid:
+        return i18nc("@info debrid provider name", "Real-Debrid");
+    case domain::DebridProvider::AllDebrid:
+        return i18nc("@info debrid provider name", "AllDebrid");
+    case domain::DebridProvider::None:
+        break;
+    }
+    return {};
+}
+
 } // namespace
 
 BackendSelector::BackendSelector() = default;
@@ -63,13 +76,39 @@ DownloadBackend* BackendSelector::select(const domain::Stream& s,
             "The selected download backend cannot serve this stream.")
                                      .toStdString());
     }
+    // When the user has picked a debrid provider as active, that
+    // provider gets first refusal. If it can't serve the stream
+    // (most commonly because no token is saved for it yet, e.g. the
+    // radio was flipped from AllDebrid -> Real-Debrid without
+    // saving an RD token), refuse with a clear message rather than
+    // silently dropping back to libtorrent. Torrent is still
+    // reachable via the per-row "Play via torrent" override.
+    if (m_activeDebrid != domain::DebridProvider::None) {
+        for (const auto& b : m_backends) {
+            if (!matchesActiveDebrid(b->kind(), m_activeDebrid)) {
+                continue;
+            }
+            if (b->canHandle(s)) {
+                return b.get();
+            }
+            throw std::runtime_error(i18nc("@info:status",
+                "%1 is your active debrid provider but cannot serve "
+                "this stream. Save a token for it in Settings, or "
+                "use the row's menu to force libtorrent.",
+                activeProviderDisplayName(m_activeDebrid))
+                                         .toStdString());
+        }
+        // Active debrid backend isn't registered at all (shouldn't
+        // happen in production; defensive). Fall through.
+    }
     for (const auto& b : m_backends) {
-        if (isDebridKind(b->kind())
-            && !matchesActiveDebrid(b->kind(), m_activeDebrid)) {
-            // Skip non-active debrid backends during default
-            // routing; they remain reachable through the explicit
-            // `override` path (per-row override menus, resume of
-            // rows persisted against the other provider).
+        if (isDebridKind(b->kind())) {
+            // Skip every debrid backend in default routing when
+            // either no provider is active, or none of them matched
+            // above. Non-active debrid backends remain reachable
+            // through the explicit `override` path (per-row
+            // override menus, resume of rows persisted against the
+            // other provider).
             continue;
         }
         if (b->canHandle(s)) {

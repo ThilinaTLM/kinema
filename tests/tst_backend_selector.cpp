@@ -133,8 +133,12 @@ private Q_SLOTS:
         QCOMPARE(ad->canHandleCalls, 0);
     }
 
-    void active_debrid_cannotHandle_fallsThroughToTorrent()
+    void active_debrid_cannotHandle_refuses_doesNotFallToTorrent()
     {
+        // Regression: flipping the active provider radio from AD
+        // to RD without saving an RD token used to silently route
+        // the next Play through libtorrent. We now refuse so the
+        // user gets a clear error message instead.
         download::BackendSelector sel;
         auto* rd = new StubBackend(
             domain::DownloadBackendKind::RealDebridHttp, false);
@@ -144,7 +148,34 @@ private Q_SLOTS:
         sel.registerBackend(std::unique_ptr<StubBackend>(tor));
         sel.setActiveDebridProvider(domain::DebridProvider::RealDebrid);
 
-        auto* picked = sel.select(makeStream());
+        bool threw = false;
+        try {
+            (void)sel.select(makeStream());
+        } catch (const std::exception&) {
+            threw = true;
+        }
+        QVERIFY(threw);
+        // Torrent must not have been consulted by default routing
+        // when an active debrid provider was set.
+        QCOMPARE(tor->canHandleCalls, 0);
+    }
+
+    void active_debrid_cannotHandle_overrideStillReachesTorrent()
+    {
+        // The refusal above must not strand the user: the per-row
+        // "Play via torrent" override path still resolves through
+        // the explicit-override branch.
+        download::BackendSelector sel;
+        auto* rd = new StubBackend(
+            domain::DownloadBackendKind::RealDebridHttp, false);
+        auto* tor = new StubBackend(
+            domain::DownloadBackendKind::Torrent, true);
+        sel.registerBackend(std::unique_ptr<StubBackend>(rd));
+        sel.registerBackend(std::unique_ptr<StubBackend>(tor));
+        sel.setActiveDebridProvider(domain::DebridProvider::RealDebrid);
+
+        auto* picked = sel.select(makeStream(),
+            domain::DownloadBackendKind::Torrent);
         QVERIFY(picked != nullptr);
         QCOMPARE(picked->kind(), domain::DownloadBackendKind::Torrent);
     }
