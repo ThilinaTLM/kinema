@@ -314,7 +314,19 @@ Kirigami.ApplicationWindow {
         ? (pageStack.currentItem.objectName || "")
         : ""
 
-    Component.onCompleted: root.setTopLevelPage(discoverComp, {})
+    // Land on Up Next when the user has prior engagement (an
+    // in-progress item, or any saved library title — Recently
+    // Added mirrors the saved library); otherwise fall back to
+    // Discover so a first-launch session never opens to an empty
+    // page. Both view-models populate synchronously in their
+    // constructors, so these rail counts are accurate by the time
+    // this runs.
+    Component.onCompleted: {
+        const hasContinue = !!continueWatchingVm && !continueWatchingVm.empty;
+        const hasLibrary  = !!libraryVm && !libraryVm.recentlyAddedModel.empty;
+        const landing = (hasContinue || hasLibrary) ? upNextComp : discoverComp;
+        root.setTopLevelPage(landing, {});
+    }
 
     function createPage(component, properties) {
         // Instantiate pages unattached and hand the finished item to
