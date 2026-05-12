@@ -68,25 +68,42 @@ BaseListCard {
         ? "circle-check"
         : (card.cached ? "circle-check" : "download")
 
-    // Body slot: release row + meta row.
+    readonly property string _stateChipText: card.active
+        ? i18nc("@info subtitle row, currently attached", "Attached")
+        : (card.cached
+            ? i18nc("@info subtitle row, cached locally", "Cached")
+            : (card.moviehashMatch
+                ? i18nc("@info subtitle row, moviehash match",
+                    "Hash match")
+                : ""))
+
+    readonly property string _stateChipTone: card.active || card.cached
+        ? "positive"
+        : (card.moviehashMatch ? "accent" : "neutral")
+
+    readonly property string _stateChipIcon: card.active
+        ? AppIcons.url("circle-check")
+        : (card.cached
+            ? AppIcons.url("download")
+            : (card.moviehashMatch
+                ? AppIcons.url("star")
+                : ""))
+
+    // Leading tile: language code + readable name. Fills the row's
+    // available height; width tracks the post-layout height via
+    // the tile's square aspect.
+    leading: RowLeadingTile {
+        Layout.fillHeight: true
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 4
+        Layout.preferredWidth: height
+        primary: card.language.toUpperCase()
+        caption: card.languageName
+    }
+
+    // Body slot: title row + meta row.
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.inlineSpacing
-
-        // Leading badge — active / cached / moviehash signal.
-        Kirigami.Icon {
-            visible: card.active || card.cached || card.moviehashMatch
-            source: AppIcons.url(card.active
-                ? "circle-check"
-                : (card.cached ? "download" : "star"))
-            color: card.active
-                ? AppIcons.accent
-                : (card.cached
-                    ? AppIcons.foreground
-                    : AppIcons.accent)
-            Layout.preferredWidth: Kirigami.Units.iconSizes.small
-            Layout.preferredHeight: Kirigami.Units.iconSizes.small
-        }
 
         QQC2.Label {
             Layout.fillWidth: true
@@ -99,10 +116,6 @@ BaseListCard {
         }
 
         QQC2.Label {
-            text: card.language.toUpperCase()
-            opacity: 0.8
-        }
-        QQC2.Label {
             text: card.format
             opacity: 0.8
             visible: card.format.length > 0
@@ -113,16 +126,16 @@ BaseListCard {
         Layout.fillWidth: true
         spacing: Theme.inlineSpacing
 
-        QQC2.Label {
-            text: card.languageName
-            opacity: 0.7
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
+        // State chip — active / cached / moviehash signal, leading
+        // the meta row so it's co-located with the rest of the
+        // row's status text.
+        MetaChip {
+            visible: card._stateChipText.length > 0
+            text: card._stateChipText
+            iconSource: card._stateChipIcon
+            tone: card._stateChipTone
         }
-        QQC2.Label {
-            text: "\u00b7"
-            opacity: 0.5
-            visible: card.downloadCount > 0
-        }
+
         QQC2.Label {
             text: i18ncp("@info subtitles row download count",
                 "%1 download", "%1 downloads", card.downloadCount)
@@ -133,7 +146,7 @@ BaseListCard {
         QQC2.Label {
             text: "\u00b7"
             opacity: 0.5
-            visible: card.rating > 0
+            visible: card.downloadCount > 0 && card.rating > 0
         }
         QQC2.Label {
             text: "\u2605 %1".arg(card.rating.toFixed(1))
@@ -168,20 +181,26 @@ BaseListCard {
         }
     }
 
-    // Trailing slot: per-row primary action button.
-    trailing: QQC2.Button {
-        text: card._primaryActionText
-        icon.source: AppIcons.url(card._primaryActionIcon,
-            AppIcons.controlColor(enabled, highlighted))
-        icon.color: AppIcons.controlColor(enabled, highlighted)
-        display: QQC2.AbstractButton.TextBesideIcon
-        enabled: !card.active
-            && card.vm
-            && card.vm.primaryActionEnabled !== undefined
-        highlighted: card.cached
-        onClicked: {
-            if (card.vm) {
-                card.vm.primaryActionForRow(card.rowIndex);
+    // Action row: per-row primary action button, right-justified.
+    trailing: RowLayout {
+        spacing: Theme.inlineSpacing
+
+        Item { Layout.fillWidth: true }
+
+        QQC2.Button {
+            text: card._primaryActionText
+            icon.source: AppIcons.url(card._primaryActionIcon,
+                AppIcons.controlColor(enabled, highlighted))
+            icon.color: AppIcons.controlColor(enabled, highlighted)
+            display: QQC2.AbstractButton.TextBesideIcon
+            enabled: !card.active
+                && card.vm
+                && card.vm.primaryActionEnabled !== undefined
+            highlighted: card.cached
+            onClicked: {
+                if (card.vm) {
+                    card.vm.primaryActionForRow(card.rowIndex);
+                }
             }
         }
     }

@@ -41,10 +41,12 @@ BaseListCard {
         }
     }
 
-    // 16:9 episode still.
+    // 16:9 episode still. Fills the row's available height; width
+    // tracks the post-layout height via the 16:9 aspect.
     leading: RowMediaThumbnail {
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 7
-        Layout.preferredHeight: Math.round(width * 9 / 16)
+        Layout.fillHeight: true
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 4
+        Layout.preferredWidth: Math.round(height * 16 / 9)
         url: card.thumbnailUrl
         imageRole: "still"
         fallbackIcon: "play"
@@ -102,28 +104,21 @@ BaseListCard {
         color: Theme.disabled
     }
 
-    // Trailing slot: hover- or focus-revealed Mark-Watched toggle.
-    // The full label lives in the right-click menu below; this is the
-    // quick-action affordance for mouse users.
+    // Action row: Mark-Watched toggle. The full label lives in the
+    // right-click menu as well; the dedicated action row affords
+    // the button a permanent home so the affordance no longer
+    // needs to hide behind hover.
     trailing: QQC2.ToolButton {
         visible: !card.isUpcoming
-        opacity: card.hovered || card.activeFocus ? 1 : 0
-        Behavior on opacity {
-            NumberAnimation {
-                duration: Kirigami.Units.shortDuration
-            }
-        }
         icon.source: AppIcons.url(
             card.watched ? "circle-dashed" : "circle-check")
         icon.color: card.watched
             ? Theme.positive
             : Theme.foreground
-        display: QQC2.AbstractButton.IconOnly
-        QQC2.ToolTip.text: card.watched
+        text: card.watched
             ? i18nc("@action:button", "Mark Unwatched")
             : i18nc("@action:button", "Mark Watched")
-        QQC2.ToolTip.visible: hovered
-        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+        display: QQC2.AbstractButton.TextBesideIcon
         onClicked: card.toggleWatchedRequested()
     }
 

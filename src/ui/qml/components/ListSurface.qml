@@ -47,7 +47,7 @@ Item {
     property var model
     property Component delegate
 
-    property int listSpacing: Theme.inlineSpacing
+    property int listSpacing: Theme.listRowSpacing
     property int listLeftMargin: Theme.pageMargin
     property int listRightMargin: Theme.pageMargin
     property int listTopMargin: Theme.inlineSpacing

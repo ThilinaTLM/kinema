@@ -58,30 +58,26 @@ BaseListCard {
         actionMenu.popup(pt.x, pt.y);
     }
 
-    // Body slot (default): horizontal three-column layout. Wrapped
+    // Leading tile: resolution badge. Fills the row's available
+    // height; width tracks the post-layout height via the tile's
+    // square aspect.
+    leading: RowLeadingTile {
+        Layout.fillHeight: true
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 4
+        Layout.preferredWidth: height
+        primary: (!card.resolution || card.resolution === "\u2014")
+            ? i18nc("@label resolution unknown", "?")
+            : card.resolution.toUpperCase()
+    }
+
+    // Body slot (default): horizontal two-column layout. Wrapped
     // in a single RowLayout because the chassis' body slot stacks
     // children vertically.
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.groupSpacing
 
-        // ---- 1. Quality rail ---------------------------------
-        ColumnLayout {
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredWidth: Math.round(
-                Kirigami.Units.gridUnit * 5.5)
-            spacing: Math.round(Theme.inlineSpacing / 2)
-
-            MetaChip {
-                Layout.alignment: Qt.AlignHCenter
-                text: (!card.resolution || card.resolution === "\u2014")
-                    ? i18nc("@label resolution unknown", "?")
-                    : card.resolution.toUpperCase()
-                tone: "neutral"
-            }
-        }
-
-        // ---- 2. Summary column -------------------------------
+        // ---- 1. Summary column -------------------------------
         ColumnLayout {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
@@ -139,7 +135,7 @@ BaseListCard {
             }
         }
 
-        // ---- 3. Metrics column -------------------------------
+        // ---- 2. Metrics column -------------------------------
         ColumnLayout {
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: Kirigami.Units.gridUnit * 6
@@ -177,9 +173,12 @@ BaseListCard {
         }
     }
 
-    // Trailing slot: primary play / secondary download / overflow.
+    // Action row: primary play / secondary download / overflow.
+    // Right-justified within the action row via a flex spacer.
     trailing: RowLayout {
         spacing: Theme.inlineSpacing
+
+        Item { Layout.fillWidth: true }
 
         QQC2.Button {
             visible: card.hasDirectUrl || card.hasMagnet

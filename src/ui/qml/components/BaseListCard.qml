@@ -17,19 +17,31 @@ import dev.tlmtech.kinema.app
 // Used by `EpisodeListCard`, `StreamListCard`, `DownloadListCard`,
 // `SubtitleListCard`.
 //
-// The card body is composed via three `data` aliases over layout
-// hosts so children declared inline pick up the host layout
-// naturally:
+// Two-column shape:
 //
-//   * `leading`  — RowLayout host. Typically a single thumbnail /
-//                  poster Item using `Layout.preferredWidth/Height`.
+//   ┌──────────┬─────────────────────────────────────┐
+//   │          │ body          (content slot)        │
+//   │ leading  │ ─── optional progress bar ───       │
+//   │          │ trailing      (action row slot)     │
+//   └──────────┴─────────────────────────────────────┘
+//
+// The card body exposes three `data` aliases over layout hosts so
+// children declared inline pick up the host layout naturally:
+//
+//   * `leading`  — RowLayout host pinned to the card's top edge,
+//                  typically a single thumbnail / poster /
+//                  `RowLeadingTile` Item using
+//                  `Layout.preferredWidth/Height`.
 //   * `body`     — ColumnLayout host (`default property`). Children
 //                  stack vertically; declare a RowLayout child for a
 //                  horizontal body shape (e.g. StreamListCard).
 //   * `trailing` — RowLayout host for action buttons / overflow.
+//                  Rendered as a row *below* the body, not to the
+//                  right of it. Collapses when empty.
 //
-// The chassis exposes `slotAlignment` so cards with a tall body
-// (DownloadListCard) can pin leading + trailing to the top.
+// Chassis padding equals `Theme.pageMargin` on all four sides, so the
+// leading element sits at the same distance from the card's top,
+// left, and bottom edges.
 QQC2.ItemDelegate {
     id: card
 
@@ -39,8 +51,9 @@ QQC2.ItemDelegate {
     /// EpisodeRow precedent that becomes the app-wide canonical).
     property bool selected: false
 
-    /// Optional row-level progress bar drawn below the body row.
-    /// `< 0` or `>= 1` hides it. Style is the translucent track +
+    /// Optional row-level progress bar drawn between the body and
+    /// the action row, inside the right column.
+    /// `<= 0` or `>= 1` hides it. Style is the translucent track +
     /// theme highlight fill that EpisodeRow / DownloadRow both
     /// hand-rolled.
     property real progress: -1
@@ -55,12 +68,6 @@ QQC2.ItemDelegate {
     /// this from their title `Label.truncated` so long names stay
     /// reachable on hover without a per-row HoverHandler.
     property string titleTooltip: ""
-
-    /// Vertical alignment applied uniformly to the three slots in
-    /// the body row. Default `Qt.AlignVCenter`; DownloadListCard
-    /// passes `Qt.AlignTop` so the poster + action rail pin to the
-    /// row's top edge alongside a multi-line body.
-    property int slotAlignment: Qt.AlignVCenter
 
     // ---- Slots ---------------------------------------------------
     default property alias body: bodyHost.data
@@ -90,7 +97,7 @@ QQC2.ItemDelegate {
             - ListView.view.rightMargin
         : implicitWidth
     padding: Theme.pageMargin
-    implicitHeight: contentColumn.implicitHeight + padding * 2
+    implicitHeight: bodyRow.implicitHeight + padding * 2
 
     onDoubleClicked: card.activated()
     Keys.onReturnPressed: card.activated()
@@ -131,91 +138,103 @@ QQC2.ItemDelegate {
         }
     }
 
-    contentItem: ColumnLayout {
-        id: contentColumn
-        spacing: Theme.inlineSpacing
+    contentItem: RowLayout {
+        id: bodyRow
+        spacing: Theme.groupSpacing
 
+        // Leading slot — a RowLayout so a single thumbnail child
+        // sizes via Layout.preferredWidth/Height. Fills the row's
+        // available height so the leading thumbnail/tile grows
+        // with the right column instead of leaving blank space
+        // below it. Cards size the leading element via
+        // `Layout.fillHeight: true` + a minimum
+        // `Layout.preferredHeight`, and derive width from the
+        // post-layout `height` via the element's aspect ratio.
+        // `visible` collapses the slot when no leading item is set.
         RowLayout {
-            id: bodyRow
-            Layout.fillWidth: true
-            spacing: Theme.groupSpacing
+            id: leadingHost
+            Layout.fillHeight: true
+            visible: leadingHost.children.length > 0
+            spacing: 0
+        }
 
-            // Leading slot — a RowLayout so a single thumbnail child
-            // sizes via Layout.preferredWidth/Height. `visible`
-            // collapses the slot when no leading item is set.
-            RowLayout {
-                id: leadingHost
-                Layout.alignment: card.slotAlignment
-                visible: leadingHost.children.length > 0
-                spacing: 0
-            }
+        // Right column — content (body slot) above an optional
+        // progress bar above the action row (trailing slot).
+        ColumnLayout {
+            id: rightColumn
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: Theme.inlineSpacing
 
             // Body slot — ColumnLayout so children declared inline
             // stack vertically. Cards needing a horizontal body
-            // (StreamListCard's three-column layout) declare a
+            // (StreamListCard's two-column layout) declare a
             // single RowLayout child.
             ColumnLayout {
                 id: bodyHost
                 Layout.fillWidth: true
-                Layout.alignment: card.slotAlignment
                 spacing: Theme.inlineSpacing
             }
 
-            // Trailing slot — RowLayout for action buttons.
+            // Row-level progress bar. Same translucent track +
+            // theme highlight fill that EpisodeRow / DownloadRow
+            // both hand-rolled. Sits between content and actions
+            // so it reads as "this row is loading toward action-
+            // ability".
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Kirigami.Units.smallSpacing
+                visible: card.progress > 0 && card.progress < 1
+                radius: height / 2
+                color: Qt.alpha(Theme.foreground, 0.14)
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                        * Math.max(0, Math.min(1, card.progress))
+                    radius: parent.radius
+                    color: Theme.accent
+                }
+            }
+
+            // Action row — RowLayout for action buttons. Rendered
+            // below the body. Collapses when no actions are
+            // declared.
             RowLayout {
                 id: trailingHost
-                Layout.alignment: card.slotAlignment
+                Layout.fillWidth: true
                 visible: trailingHost.children.length > 0
                 spacing: Theme.inlineSpacing
             }
-
-            // Hover-revealed forward-navigation chevron. Sits at the
-            // far trailing edge; visibility driven by
-            // `navigationHint` so cards that don't navigate omit it.
-            Item {
-                Layout.preferredWidth: chevron.visible
-                    ? chevron.implicitWidth + Kirigami.Units.smallSpacing
-                    : 0
-                Layout.preferredHeight: chevron.implicitHeight
-                Layout.alignment: card.slotAlignment
-                visible: card.navigationHint.length > 0
-
-                Kirigami.Icon {
-                    id: chevron
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    implicitWidth: Kirigami.Units.iconSizes.small
-                    implicitHeight: implicitWidth
-                    source: AppIcons.url("chevron-right")
-                    color: Theme.disabled
-                    opacity: card.hovered || card.activeFocus ? 1 : 0
-                    Behavior on opacity {
-                        NumberAnimation {
-                            duration: Kirigami.Units.shortDuration
-                        }
-                    }
-                }
-            }
         }
 
-        // Row-level progress bar. Same translucent track + theme
-        // highlight fill that EpisodeRow / DownloadRow both hand-
-        // rolled.
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.smallSpacing
-            visible: card.progress > 0 && card.progress < 1
-            radius: height / 2
-            color: Qt.alpha(Theme.foreground, 0.14)
+        // Hover-revealed forward-navigation chevron. Sits at the
+        // far trailing edge, vertically centred against the right
+        // column. Visibility driven by `navigationHint` so cards
+        // that don't navigate omit it.
+        Item {
+            Layout.preferredWidth: chevron.visible
+                ? chevron.implicitWidth + Kirigami.Units.smallSpacing
+                : 0
+            Layout.fillHeight: true
+            visible: card.navigationHint.length > 0
 
-            Rectangle {
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: parent.width
-                    * Math.max(0, Math.min(1, card.progress))
-                radius: parent.radius
-                color: Theme.accent
+            Kirigami.Icon {
+                id: chevron
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                implicitWidth: Kirigami.Units.iconSizes.small
+                implicitHeight: implicitWidth
+                source: AppIcons.url("chevron-right")
+                color: Theme.disabled
+                opacity: card.hovered || card.activeFocus ? 1 : 0
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: Kirigami.Units.shortDuration
+                    }
+                }
             }
         }
     }

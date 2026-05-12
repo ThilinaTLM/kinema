@@ -51,6 +51,8 @@ QtObject {
     readonly property int pageTopSpacing:    Kirigami.Units.smallSpacing
     readonly property int pageBottomSpacing: Kirigami.Units.gridUnit
     readonly property int inlineSpacing:     Kirigami.Units.smallSpacing
+    readonly property int listRowSpacing:
+        Math.round(Kirigami.Units.smallSpacing / 2)
     readonly property int groupSpacing:      Kirigami.Units.largeSpacing
     readonly property int sectionSpacing:    Kirigami.Units.largeSpacing * 2
 

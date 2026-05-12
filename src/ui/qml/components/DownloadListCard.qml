@@ -153,10 +153,6 @@ BaseListCard {
         }
     }
 
-    // Top-align the slots — body is multi-line so leading poster +
-    // trailing action rail should pin to the row's top edge.
-    slotAlignment: Qt.AlignTop
-
     enabled: card.imdbId.length > 0 || card.assetId.length > 0
 
     // Hover-revealed chevron + tooltip via the chassis. Replaces the
@@ -186,10 +182,13 @@ BaseListCard {
         rowMenu.popup(pt.x, pt.y);
     }
 
-    // Leading: 2:3 poster with optional pin overlay.
+    // Leading: 2:3 poster with optional pin overlay. Fills the
+    // row's available height; width tracks the post-layout height
+    // via the 2:3 aspect.
     leading: RowMediaThumbnail {
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+        Layout.fillHeight: true
         Layout.preferredHeight: Kirigami.Units.gridUnit * 4.5
+        Layout.preferredWidth: Math.round(height / 1.5)
         url: card.posterUrl
         imageRole: "poster"
         fallbackIcon: "clapperboard"
@@ -341,69 +340,56 @@ BaseListCard {
         text: card.errorText
     }
 
-    // Trailing slot: contextual primary + overflow.
+    // Action row: contextual primary + overflow. The action row
+    // lives below the body, so the buttons get their own line and
+    // are right-justified within it.
     trailing: RowLayout {
         spacing: Kirigami.Units.smallSpacing
 
-        // Fixed-width wrapper so the overflow column stays put
-        // when the inner ToolButton hides for Cancelled or swaps
-        // between IconOnly and TextBesideIcon labels.
-        Item {
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 5
-            Layout.preferredHeight: primaryButton.implicitHeight
+        Item { Layout.fillWidth: true }
 
-            QQC2.Button {
-                id: primaryButton
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                visible: card.state !== card.stateCancelled
+        QQC2.Button {
+            id: primaryButton
+            visible: card.state !== card.stateCancelled
 
-                readonly property bool isFailed:
-                    card.state === card.stateFailed
-                readonly property bool isPaused:
-                    card.state === card.statePaused
-                readonly property bool isCompleted:
-                    card.state === card.stateCompleted
+            readonly property bool isFailed:
+                card.state === card.stateFailed
+            readonly property bool isPaused:
+                card.state === card.statePaused
+            readonly property bool isCompleted:
+                card.state === card.stateCompleted
 
-                flat: !isCompleted && !isFailed
+            flat: !isCompleted && !isFailed
 
-                icon.source: AppIcons.url(isFailed
-                    ? "refresh-cw"
-                    : (isPaused || isCompleted ? "play" : "pause"))
-                icon.color: AppIcons.controlColor(enabled, false)
-                text: isFailed
-                    ? i18nc("@action:button retry a failed download",
-                        "Retry")
-                    : (isCompleted
-                        ? i18nc(
-                            "@action:button play the cached file",
-                            "Play")
-                        : (isPaused
-                            ? i18nc("@action:button", "Resume")
-                            : i18nc("@action:button", "Pause")))
-                display: (isCompleted || isFailed)
-                    ? QQC2.AbstractButton.TextBesideIcon
-                    : QQC2.AbstractButton.IconOnly
-                QQC2.ToolTip.text: text
-                QQC2.ToolTip.visible: hovered
-                    && display === QQC2.AbstractButton.IconOnly
-                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                onClicked: {
-                    if (isCompleted) {
-                        downloadsVm.playDownload(card.assetId);
-                    } else if (isFailed) {
-                        downloadsVm.retry(card.assetId);
-                    } else if (isPaused) {
-                        downloadsVm.resumeDownload(card.assetId);
-                    } else {
-                        downloadsVm.pauseDownload(card.assetId);
-                    }
+            icon.source: AppIcons.url(isFailed
+                ? "refresh-cw"
+                : (isPaused || isCompleted ? "play" : "pause"))
+            icon.color: AppIcons.controlColor(enabled, false)
+            text: isFailed
+                ? i18nc("@action:button retry a failed download",
+                    "Retry")
+                : (isCompleted
+                    ? i18nc(
+                        "@action:button play the cached file",
+                        "Play")
+                    : (isPaused
+                        ? i18nc("@action:button", "Resume")
+                        : i18nc("@action:button", "Pause")))
+            display: QQC2.AbstractButton.TextBesideIcon
+            onClicked: {
+                if (isCompleted) {
+                    downloadsVm.playDownload(card.assetId);
+                } else if (isFailed) {
+                    downloadsVm.retry(card.assetId);
+                } else if (isPaused) {
+                    downloadsVm.resumeDownload(card.assetId);
+                } else {
+                    downloadsVm.pauseDownload(card.assetId);
                 }
             }
         }
 
         QQC2.ToolButton {
-            Layout.alignment: Qt.AlignVCenter
             icon.source: AppIcons.url("ellipsis-vertical")
             icon.color: AppIcons.controlColor(enabled, false)
             text: i18nc("@action:button overflow", "More")

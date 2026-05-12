@@ -349,6 +349,7 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/PosterGrid.qml
         ui/qml/components/RatingChip.qml
         ui/qml/components/RowChipRail.qml
+        ui/qml/components/RowLeadingTile.qml
         ui/qml/components/RowMediaThumbnail.qml
         ui/qml/components/SeasonTabs.qml
         ui/qml/components/SimilarCarousel.qml

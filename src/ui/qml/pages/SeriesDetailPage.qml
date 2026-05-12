@@ -165,7 +165,7 @@ Kirigami.ScrollablePage {
                 Layout.preferredHeight: contentHeight
                 interactive: false
                 model: seriesDetailVm.episodes
-                spacing: Theme.inlineSpacing
+                spacing: Theme.listRowSpacing
                 cacheBuffer: Kirigami.Units.gridUnit * 40
 
                 delegate: EpisodeListCard {

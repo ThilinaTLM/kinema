@@ -124,7 +124,7 @@ Kirigami.Page {
         listRightMargin: Kirigami.Units.largeSpacing
         listTopMargin: Kirigami.Units.smallSpacing
         listBottomMargin: Kirigami.Units.smallSpacing
-        listSpacing: Kirigami.Units.smallSpacing
+        listSpacing: Theme.listRowSpacing
 
         delegate: DownloadListCard {
             required property var model
