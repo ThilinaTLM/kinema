@@ -34,6 +34,18 @@ Kirigami.Page {
     topPadding: 0
     bottomPadding: 0
 
+    actions: [
+        Kirigami.Action {
+            icon.source: AppIcons.url("refresh-cw")
+            icon.color: AppIcons.foreground
+            text: i18nc("@action:button", "Refresh")
+            displayHint: Kirigami.DisplayHint.IconOnly
+            shortcut: StandardKey.Refresh
+            enabled: searchVm.query.trim().length > 0
+            onTriggered: searchVm.submit()
+        }
+    ]
+
     function focusSearchField() {
         if (searchField) {
             searchField.forceActiveFocus();
@@ -45,6 +57,7 @@ Kirigami.Page {
 
     header: PageHeaderBar {
         title: page.title
+        pageActions: page.actions
 
         Item { Layout.fillWidth: true }
 
@@ -52,7 +65,6 @@ Kirigami.Page {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button search filter", "Kind")
             icon.source: AppIcons.url("clapperboard")
-            active: searchVm.kind !== 0
             options: [
                 { value: 0,
                   label: i18nc("@item media kind", "Movies") },
@@ -73,9 +85,10 @@ Kirigami.Page {
             placeholderText: i18nc("@info:placeholder",
                 "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
             text: searchVm.query
-            // SearchViewModel owns the network debounce; disable
-            // SearchField's shorter auto-accept timer so it does
-            // not bypass that debounce and submit duplicates.
+            // Submission is explicit: Enter (handled by `onAccepted`
+            // below) or the page's Refresh action. Disable Kirigami's
+            // idle auto-accept so a typing pause does not sneak a
+            // request past that contract.
             autoAccept: false
             onTextEdited: searchVm.query = text
             onAccepted: {

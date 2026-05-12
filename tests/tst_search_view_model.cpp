@@ -180,10 +180,15 @@ private Q_SLOTS:
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
         SearchViewModel vm(&cinemeta, settings, nullptr);
-        // setQuery detects the IMDB shortcut and submits eagerly
-        // (no debounce) — calling submit() afterwards would be a
-        // redundant second fetch.
+        // IMDB-id detection only picks the endpoint inside
+        // runSearchTask; submission itself is always explicit
+        // (Enter / Refresh action -> submit()).
         vm.setQuery(QStringLiteral("tt0111161"));
+        drain();
+        QCOMPARE(cinemeta.metaCalls, 0);
+        QCOMPARE(cinemeta.searchCalls, 0);
+
+        vm.submit();
         drain();
 
         QCOMPARE(cinemeta.metaCalls, 1);
@@ -193,8 +198,11 @@ private Q_SLOTS:
         QCOMPARE(vm.results()->rowCount(), 1);
     }
 
-    void testDebounceCoalescesRapidQueryEdits()
+    void testTypingDoesNotSubmit()
     {
+        // Regression guard for the explicit-submit contract:
+        // setQuery() mutates text only, never fires a request,
+        // even after waiting past the old debounce window.
         FakeCinemeta cinemeta;
         cinemeta.cannedSearch
             = { makeRow(QStringLiteral("tt1"), QStringLiteral("X")) };
@@ -204,22 +212,20 @@ private Q_SLOTS:
         SearchViewModel vm(&cinemeta, settings, nullptr);
 
         vm.setQuery(QStringLiteral("mat"));
-        drain();
-        QCOMPARE(cinemeta.searchCalls, 0);
-
-        QTest::qWait(100);
+        vm.setQuery(QStringLiteral("matri"));
         vm.setQuery(QStringLiteral("matrix"));
+        QTest::qWait(400);
         drain();
         QCOMPARE(cinemeta.searchCalls, 0);
-
-        QTest::qWait(300);
-        drain();
-        QCOMPARE(cinemeta.searchCalls, 1);
-        QCOMPARE(cinemeta.lastQuery, QStringLiteral("matrix"));
+        QCOMPARE(cinemeta.metaCalls, 0);
+        QCOMPARE(vm.results()->state(),
+            ResultsListModel::State::Idle);
     }
 
-    void testSubmitCancelsPendingDebounce()
+    void testResubmitRerunsSameQuery()
     {
+        // The Refresh action's whole point: pressing submit() twice
+        // on the same query issues two network calls.
         FakeCinemeta cinemeta;
         cinemeta.cannedSearch
             = { makeRow(QStringLiteral("tt1"), QStringLiteral("X")) };
@@ -233,9 +239,36 @@ private Q_SLOTS:
         drain();
         QCOMPARE(cinemeta.searchCalls, 1);
 
-        QTest::qWait(300);
+        vm.submit();
         drain();
-        QCOMPARE(cinemeta.searchCalls, 1);
+        QCOMPARE(cinemeta.searchCalls, 2);
+    }
+
+    void testEmptyingFieldKeepsLastResults()
+    {
+        // Backspacing to empty must not implicitly reset the model;
+        // only submit() / clear() / Escape change state. Without
+        // this guard, a stale Idle placeholder would replace the
+        // grid as soon as the user cleared the text to retype.
+        FakeCinemeta cinemeta;
+        cinemeta.cannedSearch
+            = { makeRow(QStringLiteral("tt1"),
+                QStringLiteral("Anything")) };
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, settings, nullptr);
+
+        vm.setQuery(QStringLiteral("foo"));
+        vm.submit();
+        drain();
+        QCOMPARE(vm.results()->state(),
+            ResultsListModel::State::Results);
+
+        vm.setQuery(QString());
+        QCOMPARE(vm.results()->state(),
+            ResultsListModel::State::Results);
+        QVERIFY(vm.query().isEmpty());
     }
 
     void testNonImdbQueryUsesSearch()

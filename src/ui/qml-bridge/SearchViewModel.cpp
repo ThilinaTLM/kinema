@@ -16,9 +16,6 @@ namespace kinema::ui::qml {
 
 namespace {
 
-constexpr int kDebounceMs = 250;
-constexpr int kMinChars = 2;
-
 bool looksLikeImdbId(const QString& s)
 {
     static const QRegularExpression re(QStringLiteral("^tt\\d{5,}$"));
@@ -36,10 +33,6 @@ SearchViewModel::SearchViewModel(api::CinemetaClient* cinemeta,
     , m_results(new ResultsListModel(this))
     , m_kind(settings.kind())
 {
-    m_debounce.setSingleShot(true);
-    m_debounce.setInterval(kDebounceMs);
-    connect(&m_debounce, &QTimer::timeout, this,
-        &SearchViewModel::submit);
 }
 
 void SearchViewModel::setQuery(const QString& q)
@@ -49,33 +42,6 @@ void SearchViewModel::setQuery(const QString& q)
     }
     m_query = q;
     Q_EMIT queryChanged();
-
-    // Reset the debounce window every time the user edits.
-    m_debounce.stop();
-
-    const auto trimmed = m_query.trimmed();
-    if (trimmed.isEmpty()) {
-        // Cancel any in-flight result and drop back to Idle so the
-        // placeholder shows through.
-        ++m_epoch;
-        m_results->setIdle();
-        return;
-    }
-
-    if (looksLikeImdbId(trimmed)) {
-        // IMDB ids are deterministic — no point waiting.
-        submit();
-        return;
-    }
-
-    if (trimmed.size() < kMinChars) {
-        // Don't pummel Cinemeta with single-character requests;
-        // leave the model in its current state until the user
-        // types more.
-        return;
-    }
-
-    m_debounce.start();
 }
 
 void SearchViewModel::setKind(int kind)
@@ -93,10 +59,6 @@ void SearchViewModel::setKind(int kind)
 
 void SearchViewModel::submit()
 {
-    // Enter / IMDB-id submits converge here — cancel any pending
-    // debounce so we don't fire a duplicate request.
-    m_debounce.stop();
-
     const auto trimmed = m_query.trimmed();
     if (trimmed.isEmpty()) {
         // Empty submit lands us back on the Idle placeholder so the
@@ -111,7 +73,6 @@ void SearchViewModel::submit()
 
 void SearchViewModel::clear()
 {
-    m_debounce.stop();
     if (!m_query.isEmpty()) {
         m_query.clear();
         Q_EMIT queryChanged();

@@ -183,6 +183,9 @@ Kirigami.Page {
             + (libraryVm.minRatingPct > 0 ? 1 : 0)
             + (libraryVm.hideWatched ? 1 : 0)
 
+        // Right-align filter controls after the title.
+        Item { Layout.fillWidth: true }
+
         FilterMenuButton {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button library filter", "Kind")

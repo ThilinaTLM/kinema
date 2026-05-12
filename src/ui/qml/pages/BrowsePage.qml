@@ -168,7 +168,6 @@ Kirigami.Page {
             Layout.alignment: Qt.AlignVCenter
             axisLabel: i18nc("@action:button browse filter", "Kind")
             icon.source: AppIcons.url("clapperboard")
-            active: browseVm.kind !== 0
             options: [
                 { value: 0,
                   label: i18nc("@item media kind", "Movies") },

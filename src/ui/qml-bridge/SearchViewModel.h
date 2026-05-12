@@ -7,7 +7,6 @@
 
 #include <QObject>
 #include <QString>
-#include <QTimer>
 
 #include <QCoro/QCoroTask>
 
@@ -33,10 +32,11 @@ class ResultsListModel;
  * Bound to the `searchVm` context property; the matching results
  * grid binds to `searchVm.results` (a `ResultsListModel*`).
  *
- * Live search-as-you-type: `setQuery` debounces submission through
- * `m_debounce` (250 ms, minimum 2 trimmed chars). IMDB ids are
- * detected eagerly and submitted without waiting; `submit()` also
- * bypasses the timer.
+ * Submission is explicit: the Search page binds `submit()` to the
+ * SearchField's `Enter` and to the page's Refresh action. `setQuery`
+ * only mutates the text and never fires a request. IMDB-id detection
+ * inside `runSearchTask` still picks between `CinemetaClient::meta`
+ * and `::search`, but it no longer changes *when* submission happens.
  */
 class SearchViewModel : public QObject
 {
@@ -63,8 +63,6 @@ public:
 public Q_SLOTS:
     /// Run the current `query` + `kind` against Cinemeta. No-op on
     /// empty query (the page leaves the Idle placeholder up).
-    /// Stops the debounce timer so Enter / IMDB-id paths submit
-    /// immediately.
     void submit();
 
     /// Reset query to empty, results model to `Idle`. Does not
@@ -95,7 +93,6 @@ private:
     api::CinemetaClient* m_cinemeta;
     config::SearchSettings* m_settings;
     ResultsListModel* m_results;
-    QTimer m_debounce;
 
     QString m_query;
     domain::MediaKind m_kind = domain::MediaKind::Movie;
