@@ -52,10 +52,13 @@ import dev.tlmtech.kinema.app
 // therefore equidistant only from the left edge; its top/bottom
 // inset is the smaller vertical padding. When the host list owns
 // its own vertical scrollbar (`Kirigami.Page` flavors), the
-// scrollbar overlays the rightmost card's `rightPadding` slice
-// rather than reflowing content, mirroring how
-// `Kirigami.ScrollablePage` already paints its overlay scrollbar
-// outside the content area on detail pages.
+// `ListSurface` reserves a dedicated right-side strip for the
+// bar so the card chrome stops at the scrollbar's left edge —
+// the card's own `rightPadding` (= `Theme.pageMargin`) then
+// provides the canonical content gutter measured from the
+// scrollbar inward, mirroring how `Kirigami.ScrollablePage`
+// paints its overlay scrollbar in dedicated chrome outside the
+// content area on detail pages.
 QQC2.ItemDelegate {
     id: card
 

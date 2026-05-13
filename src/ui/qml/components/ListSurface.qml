@@ -54,13 +54,13 @@ Item {
     // Theme.pageMargin`), so card backgrounds reach the page edge
     // while card content sits exactly `Theme.pageMargin` in —
     // matching the detail-page hero, Discover rails, Library grid,
-    // and `PageHeaderBar` title alignment. The internal `ListView`
-    // scrollbar overlays the rightmost card's internal padding
-    // (`pageMargin` ≈ 20 px is comfortably wider than a scrollbar),
-    // mirroring how `Kirigami.ScrollablePage` already overlays its
-    // own scrollbar outside the content area. Override only when
-    // the host (e.g. an outer column with its own horizontal
-    // margins) deliberately wants a tighter list.
+    // and `PageHeaderBar` title alignment. The vertical scrollbar
+    // gets its own reserved strip (added dynamically below) so the
+    // bar never paints over card chrome; the gutter from
+    // scrollbar-to-content equals the same `pageMargin` via the
+    // card's own `rightPadding`. Override only when the host
+    // (e.g. an outer column with its own horizontal margins)
+    // deliberately wants a tighter list.
     property int listLeftMargin: 0
     property int listRightMargin: 0
     property int listTopMargin: Theme.inlineSpacing
@@ -127,15 +127,26 @@ Item {
                 clip: true
                 spacing: surface.listSpacing
                 leftMargin: surface.listLeftMargin
-                // Symmetric horizontal margins. The vertical
-                // scrollbar overlays the rightmost delegate's
-                // own internal padding (cards carry
-                // `Theme.pageMargin` of `rightPadding`, wider
-                // than any platform scrollbar), so we don't
-                // reserve an extra gutter — reflow-free when the
-                // bar appears / disappears, and the visible
-                // content edge stays symmetric.
+                // Reserve a strip on the right for the
+                // scrollbar so card chrome stops at the bar's
+                // left edge instead of rendering behind it.
+                // The bar then lives in its own dedicated
+                // vertical strip flush against the page right
+                // edge; the card's own `rightPadding`
+                // (`Theme.pageMargin`) provides the canonical
+                // content gutter measured from the scrollbar
+                // inward — mirroring the way the left side
+                // measures the gutter from the page edge. When
+                // the bar is hidden (no overflow), the strip
+                // collapses and cards reach the page edge,
+                // matching the left side exactly. Crucially we
+                // reserve only the bar's own width here, not an
+                // additional `pageMargin` — stacking another
+                // outer margin on top of the card's internal
+                // `pageMargin` is what produced the original
+                // double-gutter regression.
                 rightMargin: surface.listRightMargin
+                    + (vbar.visible ? vbar.width : 0)
                 topMargin: surface.listTopMargin
                 bottomMargin: surface.listBottomMargin
                 cacheBuffer: surface.cacheBuffer
@@ -146,10 +157,11 @@ Item {
                 // Page-level scrollbar. Matches the overlay
                 // scrollbar Kirigami.ScrollablePage installs via
                 // ScrollView on detail pages; AsNeeded keeps it
-                // hidden until the list overflows. Overlays the
-                // rightmost card's internal `pageMargin`, so
-                // content stays put when the bar toggles.
+                // hidden until the list overflows. Sits in the
+                // reserved right strip (see `rightMargin`
+                // above) so it never paints over card chrome.
                 QQC2.ScrollBar.vertical: QQC2.ScrollBar {
+                    id: vbar
                     policy: QQC2.ScrollBar.AsNeeded
                 }
 

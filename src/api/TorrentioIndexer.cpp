@@ -8,6 +8,7 @@
 #include "config/TorrentioSettings.h"
 #include "core/io/HttpClient.h"
 #include "core/util/TorrentioConfig.h"
+#include "core/util/TorrentioUrl.h"
 #include "domain/DebridCredentials.h"
 #include "kinema_log_api.h"
 
@@ -69,6 +70,33 @@ QCoro::Task<QList<Stream>> TorrentioIndexer::streams(MediaKind kind,
     t.start();
     const auto doc = co_await m_http->getJson(url);
     auto streams = stremio::parseStreams(doc);
+
+    // When Torrentio is queried with a debrid credential, cached /
+    // pending rows come back with only a `url` field pointing at
+    // Torrentio's own `/resolve/<provider>/<token>/<hash>/<file>/<idx>/<file>`
+    // endpoint and no structured `infoHash`. Recover the hash + file
+    // index from that URL so `StreamActions` routes the row through
+    // the unified downloader (which then uses Kinema's local debrid
+    // resolver), and clear `directUrl` so the embedded credential
+    // never escapes the process via clipboard / URL-open actions.
+    for (auto& s : streams) {
+        if (!s.infoHash.isEmpty() || s.directUrl.isEmpty()) {
+            continue;
+        }
+        const auto info = core::torrentio::parseResolveUrl(s.directUrl);
+        if (!info) {
+            continue;
+        }
+        s.infoHash = info->infoHash;
+        if (s.fileIndex < 0) {
+            s.fileIndex = info->fileIndex;
+        }
+        if (s.fileNameHint.isEmpty()) {
+            s.fileNameHint = info->fileNameHint;
+        }
+        s.directUrl.clear();
+    }
+
     qCInfo(KINEMA_API)
         << "Torrentio:" << mediaKindToPath(kind) << streamId
         << "\u2192" << streams.size() << "streams in" << t.elapsed() << "ms";

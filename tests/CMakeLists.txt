@@ -28,6 +28,11 @@ ecm_add_test(tst_torrentio_config.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_torrentio_url.cpp
+    TEST_NAME tst_torrentio_url
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_media_file_selector.cpp
     TEST_NAME tst_media_file_selector
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -388,7 +393,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
     )
 endif()
 
-foreach(t tst_magnet tst_url_redactor tst_torrentio_config
+foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_media_file_selector tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_stremio_stream_parse tst_indexer_settings tst_indexer_selector

@@ -188,6 +188,56 @@ private Q_SLOTS:
             QStringLiteral("/sort=seeders/stream/movie/tt0133093.json"));
     }
 
+    void testRecoversInfoHashFromDebridResolveUrl()
+    {
+        config::TorrentioSettings settings(m_config);
+        config::FilterSettings filter(m_config);
+        FakeDebridCreds creds;
+        creds.value = { domain::DebridProvider::AllDebrid,
+            QStringLiteral("AAAAAAAAAAAAAAAAAAAA") };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("torrentio_stream_alldebrid.json"));
+
+        api::TorrentioIndexer indexer(&http, settings, filter, &creds);
+        const auto streams = QCoro::waitFor(indexer.streams(
+            domain::MediaKind::Series,
+            QStringLiteral("tt7587890:2:1")));
+
+        QCOMPARE(streams.size(), 3);
+
+        // [AD+] cached row: hash + file index + filename recovered
+        // from the resolve URL; directUrl cleared so the credential
+        // never leaves the process.
+        const auto& cached = streams.at(0);
+        QCOMPARE(cached.infoHash,
+            QStringLiteral("255e2890a1a724bcdd93b1120dd08a5a8e11b949"));
+        QCOMPARE(cached.fileIndex, 20);
+        QCOMPARE(cached.fileNameHint,
+            QStringLiteral("The Rookie S02E01.mkv"));
+        QVERIFY(cached.directUrl.isEmpty());
+
+        // [AD download] uncached row: same recovery path.
+        const auto& pending = streams.at(1);
+        QCOMPARE(pending.infoHash,
+            QStringLiteral("bbccddeeff0011223344556677889900aabbccdd"));
+        QCOMPARE(pending.fileIndex, 0);
+        QCOMPARE(pending.fileNameHint,
+            QStringLiteral("The Rookie S02E01.720p.mkv"));
+        QVERIFY(pending.directUrl.isEmpty());
+
+        // Raw torrent fallback row: untouched. The helper must not
+        // damage rows that already carried their own structured data.
+        const auto& raw = streams.at(2);
+        QCOMPARE(raw.infoHash,
+            QStringLiteral("99aabbccddeeff00112233445566778899aabbcc"));
+        QCOMPARE(raw.fileIndex, 3);
+        QCOMPARE(raw.fileNameHint,
+            QStringLiteral("The.Rookie.S02E01.2160p.mkv"));
+        QVERIFY(raw.directUrl.isEmpty());
+    }
+
     void testDebridSegmentComesAfterQualityFilter()
     {
         config::TorrentioSettings settings(m_config);
