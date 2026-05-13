@@ -120,8 +120,11 @@ Kirigami.Page {
             : ListSurface.Empty
         model: downloadsVm.items
 
-        listLeftMargin: Kirigami.Units.largeSpacing
-        listRightMargin: Kirigami.Units.largeSpacing
+        // Horizontal margins inherit `ListSurface` defaults (0) so
+        // download cards reach the page edge and their content
+        // sits at the canonical `Theme.pageMargin` inset via
+        // `BaseListCard`'s own padding — same as every other
+        // list-style page.
         listTopMargin: Kirigami.Units.smallSpacing
         listBottomMargin: Kirigami.Units.smallSpacing
         listSpacing: Theme.listRowSpacing

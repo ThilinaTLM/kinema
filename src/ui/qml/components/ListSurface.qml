@@ -48,8 +48,21 @@ Item {
     property Component delegate
 
     property int listSpacing: 0
-    property int listLeftMargin: Theme.pageMargin
-    property int listRightMargin: Theme.pageMargin
+    // Horizontal list margins default to 0. The canonical app-wide
+    // page gutter (page edge → visible content edge) lives on the
+    // row chassis itself (`BaseListCard.leftPadding/rightPadding =
+    // Theme.pageMargin`), so card backgrounds reach the page edge
+    // while card content sits exactly `Theme.pageMargin` in —
+    // matching the detail-page hero, Discover rails, Library grid,
+    // and `PageHeaderBar` title alignment. The internal `ListView`
+    // scrollbar overlays the rightmost card's internal padding
+    // (`pageMargin` ≈ 20 px is comfortably wider than a scrollbar),
+    // mirroring how `Kirigami.ScrollablePage` already overlays its
+    // own scrollbar outside the content area. Override only when
+    // the host (e.g. an outer column with its own horizontal
+    // margins) deliberately wants a tighter list.
+    property int listLeftMargin: 0
+    property int listRightMargin: 0
     property int listTopMargin: Theme.inlineSpacing
     property int listBottomMargin: Theme.pageBottomSpacing
     property int currentIndex: -1
@@ -114,18 +127,15 @@ Item {
                 clip: true
                 spacing: surface.listSpacing
                 leftMargin: surface.listLeftMargin
-                // Reserve a gutter equal to the scrollbar's width
-                // plus a small breathing-space pad when it's
-                // visible, so card content shifts left to sit
-                // beside (not under, not flush against) the
-                // overlay scrollbar. Keeps the visual left/right
-                // padding around delegates symmetric whether the
-                // bar is shown or hidden. `vbar.visible` already
-                // encodes the AsNeeded / AlwaysOn policy decision.
+                // Symmetric horizontal margins. The vertical
+                // scrollbar overlays the rightmost delegate's
+                // own internal padding (cards carry
+                // `Theme.pageMargin` of `rightPadding`, wider
+                // than any platform scrollbar), so we don't
+                // reserve an extra gutter — reflow-free when the
+                // bar appears / disappears, and the visible
+                // content edge stays symmetric.
                 rightMargin: surface.listRightMargin
-                    + (vbar.visible
-                        ? vbar.width + Kirigami.Units.smallSpacing
-                        : 0)
                 topMargin: surface.listTopMargin
                 bottomMargin: surface.listBottomMargin
                 cacheBuffer: surface.cacheBuffer
@@ -136,9 +146,10 @@ Item {
                 // Page-level scrollbar. Matches the overlay
                 // scrollbar Kirigami.ScrollablePage installs via
                 // ScrollView on detail pages; AsNeeded keeps it
-                // hidden until the list overflows.
+                // hidden until the list overflows. Overlays the
+                // rightmost card's internal `pageMargin`, so
+                // content stays put when the bar toggles.
                 QQC2.ScrollBar.vertical: QQC2.ScrollBar {
-                    id: vbar
                     policy: QQC2.ScrollBar.AsNeeded
                 }
 

@@ -17,6 +17,16 @@ import dev.tlmtech.kinema.app
 // the state-switched results region (idle / loading / error / empty
 // / not-configured / ready), and the footer toolbar (Open file… /
 // primary action) — all hosted via `ListSurface`.
+//
+// Horizontal padding follows the app-wide rule: every visible
+// content edge sits at exactly `Theme.pageMargin` from the page
+// edge. Concretely, the status `Label` and footer `ToolBar`
+// carry their own per-child `Layout.leftMargin/rightMargin:
+// Theme.pageMargin`, while the inner `ListSurface` spans the
+// panel edge-to-edge — its `SubtitleListCard` rows inherit the
+// same `pageMargin` inset via `BaseListCard`'s internal padding.
+// The outer column therefore carries no horizontal margins of
+// its own (which would otherwise double-inset the list rows).
 Item {
     id: panel
 
@@ -36,11 +46,13 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Theme.pageMargin
         spacing: Theme.groupSpacing
 
         QQC2.Label {
             Layout.fillWidth: true
+            Layout.topMargin: Theme.pageMargin
+            Layout.leftMargin: Theme.pageMargin
+            Layout.rightMargin: Theme.pageMargin
             text: panel.vm ? panel.vm.statusLine : ""
             visible: text.length > 0
             opacity: 0.75
@@ -161,6 +173,9 @@ Item {
 
         QQC2.ToolBar {
             Layout.fillWidth: true
+            Layout.leftMargin: Theme.pageMargin
+            Layout.rightMargin: Theme.pageMargin
+            Layout.bottomMargin: Theme.pageMargin
             contentItem: RowLayout {
                 spacing: Theme.inlineSpacing
 

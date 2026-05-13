@@ -57,15 +57,17 @@ ListSurface {
         ? "resolution" : ""
     sectionCriteria: ViewSection.FullString
     sectionDelegate: Kirigami.ListSectionHeader {
-        // Match the delegate's effective width so the section
-        // separator line ends where cards end, not where the
-        // ListView's geometry ends (which extends under the
-        // overlay scrollbar gutter).
-        width: ListView.view
-            ? ListView.view.width
-                - ListView.view.leftMargin
-                - ListView.view.rightMargin
-            : implicitWidth
+        // The section row spans the full list width so the
+        // separator line reaches the page edge — same as the
+        // cards below it. The heading *text* and trailing
+        // separator are inset by `Theme.pageMargin` via
+        // `leftPadding`/`rightPadding`, lining up with card
+        // content (which is itself inset by `BaseListCard`'s
+        // internal `pageMargin`). Matches the canonical
+        // app-wide "content edge sits at `pageMargin`" rule.
+        width: ListView.view ? ListView.view.width : implicitWidth
+        leftPadding: Theme.pageMargin
+        rightPadding: Theme.pageMargin
         text: (section === "\u2014" || section === "")
             ? i18nc("@title:section unknown resolution", "Other")
             : section.toUpperCase()

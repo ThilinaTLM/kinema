@@ -38,12 +38,24 @@ import dev.tlmtech.kinema.app
 //                  Rendered as a row *below* the body, not to the
 //                  right of it. Collapses when empty.
 //
-// Chassis padding is asymmetric: `Theme.pageMargin` left/right keeps
-// the leading element clear of the rounded card edge, while
-// `Theme.groupSpacing` top/bottom keeps row height tight so adjacent
-// rows don't drift apart from internal padding alone. The leading
-// thumbnail is therefore equidistant only from the left edge; its
-// top/bottom inset is the smaller vertical padding.
+// Chassis padding carries the app-wide page gutter. The card
+// background reaches the page edge of the host `ListView` (lists
+// using `ListSurface` default to zero horizontal margins, so the
+// card chrome spans full width and hover / selection / focus
+// tints fill the row edge to edge). The card's *content* is then
+// inset by `Theme.pageMargin` left/right via this chassis
+// padding, landing card content at the same horizontal offset as
+// the detail-page hero, the Discover rails, the Library grid,
+// and `PageHeaderBar` titles. Vertical padding (`Theme.groupSpacing`)
+// stays tighter than horizontal so adjacent rows don't drift
+// apart from internal padding alone — the leading thumbnail is
+// therefore equidistant only from the left edge; its top/bottom
+// inset is the smaller vertical padding. When the host list owns
+// its own vertical scrollbar (`Kirigami.Page` flavors), the
+// scrollbar overlays the rightmost card's `rightPadding` slice
+// rather than reflowing content, mirroring how
+// `Kirigami.ScrollablePage` already paints its overlay scrollbar
+// outside the content area on detail pages.
 QQC2.ItemDelegate {
     id: card
 

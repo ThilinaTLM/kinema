@@ -27,6 +27,15 @@ import dev.tlmtech.kinema.app
 //     even for `Smart` (which would otherwise spell out its three-key
 //     shape inline).
 //
+// Horizontal padding follows the app-wide rule: the body
+// `StreamsList` (a `ListSurface`) spans the page edge-to-edge,
+// and `StreamListCard` rows inherit the canonical
+// `Theme.pageMargin` content inset via `BaseListCard`'s own
+// internal padding. The section header ("1080P" / "Other")
+// likewise spans full width with its text inset by
+// `Theme.pageMargin`, so card content, section labels, and the
+// `PageHeaderBar` title all line up on the same vertical axis.
+//
 // Esc pops back to the previous page (handled by the shell-level
 // shortcut in `ApplicationShell.qml`).
 Kirigami.Page {
