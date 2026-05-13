@@ -94,7 +94,6 @@ BaseListCard {
     // the tile's square aspect.
     leading: RowLeadingTile {
         Layout.fillHeight: true
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 4
         Layout.preferredWidth: height
         primary: card.language.toUpperCase()
         caption: card.languageName

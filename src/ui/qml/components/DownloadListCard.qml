@@ -187,7 +187,6 @@ BaseListCard {
     // via the 2:3 aspect.
     leading: RowMediaThumbnail {
         Layout.fillHeight: true
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 4.5
         Layout.preferredWidth: Math.round(height / 1.5)
         url: card.posterUrl
         imageRole: "poster"

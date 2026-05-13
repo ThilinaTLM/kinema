@@ -8,11 +8,25 @@ import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// One episode row: 16:9 still · "N · Title" · release date / upcoming
-// pill, with a one-line description below. Tapping the row pushes
-// `StreamsPage`. Built on `BaseListCard`, which owns the row chrome,
-// hover / selection styling, padding, width, right-click signalling,
-// and the inline progress bar.
+// One episode row. Fixed three-row body so every episode delegate
+// has a consistent row height:
+//
+//   1. Title line   — "N · Title", watched indicator, release date /
+//                     Upcoming pill. All left-aligned; a trailing
+//                     flex spacer absorbs leftover width so nothing
+//                     gets pushed to the row's right edge.
+//   2. Description  — always reserves exactly two lines via
+//                     `FontMetrics`, with `WordWrap` + `ElideRight`
+//                     so longer descriptions truncate cleanly and
+//                     shorter ones (or empty ones, e.g. upcoming
+//                     episodes) still take the same vertical space.
+//   3. Action row   — regular `QQC2.Button` (not flat) for the
+//                     Mark Watched / Mark Unwatched toggle, given a
+//                     permanent home in the dedicated action row.
+//
+// Tapping the row pushes `StreamsPage`. Built on `BaseListCard`,
+// which owns the row chrome, hover / selection styling, padding,
+// width, right-click signalling, and the inline progress bar.
 BaseListCard {
     id: card
 
@@ -45,7 +59,6 @@ BaseListCard {
     // tracks the post-layout height via the 16:9 aspect.
     leading: RowMediaThumbnail {
         Layout.fillHeight: true
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 4
         Layout.preferredWidth: Math.round(height * 16 / 9)
         url: card.thumbnailUrl
         imageRole: "still"
@@ -53,9 +66,20 @@ BaseListCard {
         aspect: 9 / 16
     }
 
-    // Body (default slot): title row + description. Inline progress
-    // bar is removed — chassis renders it from `card.progress` when
-    // !watched (gated below by clearing progress in that case).
+    // FontMetrics for the description label — used to reserve
+    // exactly two lines of vertical space regardless of how many
+    // lines the actual text occupies. Keeps every episode row at
+    // the same height.
+    FontMetrics {
+        id: descriptionMetrics
+        font.pointSize: Theme.captionFont.pointSize
+    }
+
+    // Line 1: title + watched indicator + release / upcoming pill.
+    // Title sizes to its content with a soft cap and elide so long
+    // titles don't drag everything to the right edge; the trailing
+    // flex spacer absorbs leftover width so the rest of the line
+    // stays packed against the title on the left.
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.inlineSpacing
@@ -66,7 +90,7 @@ BaseListCard {
                 "%1 \u00b7 %2",
                 card.episodeNumber, card.episodeTitle)
             elide: Text.ElideRight
-            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 30
             font.pointSize: Theme.defaultFont.pointSize
             font.weight: Font.DemiBold
             color: Theme.foreground
@@ -91,11 +115,18 @@ BaseListCard {
             font.pointSize: Theme.captionFont.pointSize
             color: Theme.disabled
         }
+        Item { Layout.fillWidth: true }
     }
 
+    // Line 2: description, always reserves exactly two lines of
+    // vertical space — `WordWrap` + `maximumLineCount: 2` give
+    // long descriptions an ellipsis, and an explicit
+    // `Layout.preferredHeight` keeps short or empty descriptions
+    // at the same height as the multi-line case.
     QQC2.Label {
         Layout.fillWidth: true
-        visible: card.description.length > 0
+        Layout.preferredHeight: descriptionMetrics.height * 2
+        verticalAlignment: Text.AlignTop
         text: card.description
         wrapMode: Text.WordWrap
         maximumLineCount: 2
@@ -104,17 +135,14 @@ BaseListCard {
         color: Theme.disabled
     }
 
-    // Action row: Mark-Watched toggle. The full label lives in the
-    // right-click menu as well; the dedicated action row affords
-    // the button a permanent home so the affordance no longer
-    // needs to hide behind hover.
-    trailing: QQC2.ToolButton {
+    // Line 3: action row — regular Button (not flat ToolButton) so
+    // the affordance reads as a permanent, primary control.
+    trailing: QQC2.Button {
         visible: !card.isUpcoming
         icon.source: AppIcons.url(
-            card.watched ? "circle-dashed" : "circle-check")
-        icon.color: card.watched
-            ? Theme.positive
-            : Theme.foreground
+            card.watched ? "circle-dashed" : "circle-check",
+            AppIcons.controlColor(enabled, highlighted))
+        icon.color: AppIcons.controlColor(enabled, highlighted)
         text: card.watched
             ? i18nc("@action:button", "Mark Unwatched")
             : i18nc("@action:button", "Mark Watched")

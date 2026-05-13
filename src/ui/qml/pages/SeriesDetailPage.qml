@@ -168,12 +168,6 @@ Kirigami.ScrollablePage {
                 spacing: Theme.listRowSpacing
                 cacheBuffer: Kirigami.Units.gridUnit * 40
 
-                // Shared max-height target for `BaseListCard`'s
-                // uniform-row-height broadcast. Reset when the
-                // model identity changes (e.g. switching seasons).
-                property real delegateMaxHeight: 0
-                onModelChanged: episodeList.delegateMaxHeight = 0
-
                 delegate: EpisodeListCard {
                     required property int index
                     required property var model

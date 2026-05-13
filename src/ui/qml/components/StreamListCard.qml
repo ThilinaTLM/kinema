@@ -63,7 +63,6 @@ BaseListCard {
     // square aspect.
     leading: RowLeadingTile {
         Layout.fillHeight: true
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 4
         Layout.preferredWidth: height
         primary: (!card.resolution || card.resolution === "\u2014")
             ? i18nc("@label resolution unknown", "?")

@@ -10,9 +10,8 @@ import dev.tlmtech.kinema.app
 
 // Shared full-row list-card chassis. Mirrors `BasePosterCard.qml` for
 // rows: owns the background, hover overlay, selection styling, focus
-// ring, padding, list-margin-aware width, right-click semantics, an
-// optional hover-revealed "navigate forward" chevron, and an optional
-// row-level progress bar.
+// ring, padding, list-margin-aware width, right-click semantics, and
+// an optional row-level progress bar.
 //
 // Used by `EpisodeListCard`, `StreamListCard`, `DownloadListCard`,
 // `SubtitleListCard`.
@@ -59,33 +58,14 @@ QQC2.ItemDelegate {
     property real progress: -1
 
     /// Optional "this row navigates" affordance. When non-empty the
-    /// chassis fades in a small chevron-right at the trailing edge
-    /// on `hovered || activeFocus`, and surfaces this string as the
-    /// hover tooltip on the row. Empty by default (chevron hidden).
+    /// chassis surfaces this string as the hover tooltip on the row
+    /// (takes precedence over `titleTooltip`). Empty by default.
     property string navigationHint: ""
 
     /// Tooltip surfaced when the row's title has elided. Cards bind
     /// this from their title `Label.truncated` so long names stay
     /// reachable on hover without a per-row HoverHandler.
     property string titleTooltip: ""
-
-    /// When true (default), the card height grows to match the
-    /// tallest sibling delegate seen so far in the host ListView,
-    /// so every visible row has a uniform height. Relies on the
-    /// ListView exposing a writable `delegateMaxHeight` property
-    /// (real or int); `ListSurface`'s internal ListView and the
-    /// episodes ListView on SeriesDetailPage both do.
-    ///
-    /// The shared max is monotonic during a model's lifetime:
-    /// taller rows scrolling into view grow the max, shorter rows
-    /// never shrink it. The host ListView resets the property when
-    /// its `model` identity changes, so switching content (e.g.
-    /// a different series) starts a fresh max.
-    ///
-    /// Cards with highly variable row shapes can opt out by setting
-    /// `uniformHeightInList: false` (e.g. download rows whose
-    /// active state carries much more body than completed rows).
-    property bool uniformHeightInList: true
 
     // ---- Slots ---------------------------------------------------
     default property alias body: bodyHost.data
@@ -115,37 +95,6 @@ QQC2.ItemDelegate {
             - ListView.view.rightMargin
         : implicitWidth
     padding: Theme.pageMargin
-    implicitHeight: bodyRow.implicitHeight + padding * 2
-
-    // When the host ListView exposes a `delegateMaxHeight` and
-    // uniform sizing is enabled, grow this card's height to the
-    // running max. Otherwise fall back to the natural implicit
-    // height. The card body still anchors to the top of the
-    // contentItem, so taller-than-content rows show empty space
-    // below the right column — the trade-off for visual rhythm.
-    height: (card.uniformHeightInList
-            && ListView.view
-            && ListView.view.delegateMaxHeight !== undefined)
-        ? Math.max(implicitHeight, ListView.view.delegateMaxHeight)
-        : implicitHeight
-
-    // Broadcast our implicit height into the ListView's running
-    // max. Both `onImplicitHeightChanged` and `Component.onCompleted`
-    // are wired because text labels can settle their final laid-out
-    // height across multiple binding evaluations.
-    onImplicitHeightChanged: card._broadcastMaxHeight()
-    Component.onCompleted: card._broadcastMaxHeight()
-
-    function _broadcastMaxHeight() {
-        if (!card.uniformHeightInList) {
-            return;
-        }
-        const lv = card.ListView.view;
-        if (lv && lv.delegateMaxHeight !== undefined
-            && card.implicitHeight > lv.delegateMaxHeight) {
-            lv.delegateMaxHeight = card.implicitHeight;
-        }
-    }
 
     onDoubleClicked: card.activated()
     Keys.onReturnPressed: card.activated()
@@ -191,17 +140,21 @@ QQC2.ItemDelegate {
         spacing: Theme.groupSpacing
 
         // Leading slot — a RowLayout so a single thumbnail child
-        // sizes via Layout.preferredWidth/Height. Fills the row's
-        // available height so the leading thumbnail/tile grows
-        // with the right column instead of leaving blank space
-        // below it. Cards size the leading element via
-        // `Layout.fillHeight: true` + a minimum
-        // `Layout.preferredHeight`, and derive width from the
-        // post-layout `height` via the element's aspect ratio.
-        // `visible` collapses the slot when no leading item is set.
+        // sizes via `Layout.preferredWidth` (the child's actual
+        // height drives its width via aspect). The host pins its
+        // own `Layout.preferredHeight` to `rightColumn.implicitHeight`
+        // so the row's height is driven entirely by the right column;
+        // the child thumbnail's `Layout.fillHeight: true` then
+        // stretches it to exactly match. Without this binding, the
+        // child thumbnail's `RowMediaThumbnail.implicitHeight`
+        // (`Theme.posterMin * 1.5`) would propagate up and make
+        // `bodyRow` taller than the right column's content, leaving
+        // slack below the trailing action row. `visible` collapses
+        // the slot when no leading item is set.
         RowLayout {
             id: leadingHost
             Layout.fillHeight: true
+            Layout.preferredHeight: rightColumn.implicitHeight
             visible: leadingHost.children.length > 0
             spacing: 0
         }
@@ -267,33 +220,6 @@ QQC2.ItemDelegate {
             }
         }
 
-        // Hover-revealed forward-navigation chevron. Sits at the
-        // far trailing edge, vertically centred against the right
-        // column. Visibility driven by `navigationHint` so cards
-        // that don't navigate omit it.
-        Item {
-            Layout.preferredWidth: chevron.visible
-                ? chevron.implicitWidth + Kirigami.Units.smallSpacing
-                : 0
-            Layout.fillHeight: true
-            visible: card.navigationHint.length > 0
-
-            Kirigami.Icon {
-                id: chevron
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                implicitWidth: Kirigami.Units.iconSizes.small
-                implicitHeight: implicitWidth
-                source: AppIcons.url("chevron-right")
-                color: Theme.disabled
-                opacity: card.hovered || card.activeFocus ? 1 : 0
-                Behavior on opacity {
-                    NumberAnimation {
-                        duration: Kirigami.Units.shortDuration
-                    }
-                }
-            }
-        }
     }
 
     // Truncation / navigation tooltip. Single QQC2.ToolTip surfaced
