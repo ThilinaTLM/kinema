@@ -189,6 +189,9 @@ QQC2.ItemDelegate {
             ColumnLayout {
                 id: bodyHost
                 Layout.fillWidth: true
+                Layout.topMargin: 4
+                Layout.rightMargin: 4
+                Layout.bottomMargin: 4
                 spacing: Theme.inlineSpacing
             }
 

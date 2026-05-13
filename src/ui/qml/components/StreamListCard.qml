@@ -11,19 +11,30 @@ import dev.tlmtech.kinema.app
 // One stream row. Built on `BaseListCard`, which owns the row chrome,
 // hover / focus styling, padding, width, right-click signalling.
 //
-// Information hierarchy, primary to secondary:
+// Layout, top to bottom in the right column, all left-aligned:
 //
-//   1. Quality rail     — resolution chip. Top-tier signal: this is
-//                         the first thing a user reads.
-//   2. Summary column   — `source · codec · hdr · audio` + chips for
-//                         languages / multi / release group /
-//                         provider. Demoted to caption weight because
-//                         the technical chrome is supporting context.
-//   3. Metrics column   — seeders + size, right-aligned and bold.
-//                         Top-tier signal: drives the play/skip choice.
-//   4. Actions          — primary play/open button + overflow menu.
-//                         The overflow menu doubles as the row's
-//                         right-click context menu via the chassis.
+//   1. Release line     — full `releaseName`, foreground / Medium.
+//                         The strongest identifier, so it leads.
+//   2. Meta row         — four visually distinct zones on a single
+//                         left-flowing line, separated by `large-
+//                         Spacing` whitespace only:
+//                           a. chips      (languages / multi / group)
+//                           b. tech       (`source · codec · hdr ·
+//                                          audio` — middots stay
+//                                          *within* this zone)
+//                           c. provider   (plain caption label)
+//                           d. seeders    (users icon + number)
+//                         Middots are reserved for within-zone
+//                         rhythm; between zones we use spacing
+//                         alone, so unlike kinds of metadata aren't
+//                         glued into a single dot-separated chain.
+//   3. Action row       — `Play`, `Download`, `More` as regular
+//                         text-beside-icon buttons. No tool or
+//                         icon-only buttons anywhere on the row.
+//
+// The leading tile is a stacked two-field badge: resolution on top,
+// size below, separated by a hairline divider. Size therefore moves
+// out of the meta row entirely.
 BaseListCard {
     id: card
 
@@ -43,6 +54,8 @@ BaseListCard {
     /// movie detail VM; the series page rebinds it.
     property var vm: movieDetailVm
 
+    readonly property string _emDash: "\u2014"
+
     function _activatePrimary() {
         if (card.hasDirectUrl || card.hasMagnet) {
             card.vm.playNow(card.row);
@@ -58,46 +71,62 @@ BaseListCard {
         actionMenu.popup(pt.x, pt.y);
     }
 
-    // Leading tile: resolution badge. Fills the row's available
-    // height; width tracks the post-layout height via the tile's
-    // square aspect.
+    // Leading tile: stacked resolution / size badge. The tile is
+    // wider than tall (aspect 1.3) so the size string fits at
+    // caption weight without crowding the resolution. Height still
+    // tracks the right column via `fillHeight`, matching every
+    // other list row.
     leading: RowLeadingTile {
         Layout.fillHeight: true
-        Layout.preferredWidth: height
-        primary: (!card.resolution || card.resolution === "\u2014")
+        Layout.preferredWidth: Math.round(height * 1.3)
+        divided: true
+        primary: (!card.resolution || card.resolution === card._emDash)
             ? i18nc("@label resolution unknown", "?")
             : card.resolution.toUpperCase()
+        caption: (card.sizeText && card.sizeText.length > 0)
+            ? card.sizeText
+            : card._emDash
     }
 
-    // Body slot (default): release line + a single meta row that
-    // flows left-to-right with chips, provider, seeders, and size.
-    // Visual hierarchy is preserved via font weight + colour now
-    // that position can't carry it: metrics (seeders / size) read
-    // DemiBold foreground; chrome (provider) reads caption-sized
-    // disabled.
+    // Line 1: release name. Foreground / Medium so it reads as the
+    // row's primary identifier. Surfaces as a tooltip when elided.
     QQC2.Label {
-        id: summaryLabel
+        id: releaseLabel
         Layout.fillWidth: true
-        text: card.summaryLine.length > 0
-            ? card.summaryLine
-            : card.releaseName
+        visible: card.releaseName.length > 0
+        text: card.releaseName
         wrapMode: Text.NoWrap
         elide: Text.ElideRight
-        font.pointSize: Theme.captionFont.pointSize
         font.weight: Font.Medium
-        color: Theme.disabled
+        color: Theme.foreground
         onTruncatedChanged: card.titleTooltip
             = (truncated && card.releaseName.length > 0)
                 ? card.releaseName
                 : ""
     }
 
+    // Line 2: unified meta row. Four zones, separated by
+    // `largeSpacing` whitespace only — no inter-zone middots, so
+    // the eye reads the line as chunks rather than a flat dot-
+    // separated chain. Within the tech summary the middots are
+    // already baked into `summaryLine`, which is the only zone
+    // that carries a within-zone rhythm.
     RowLayout {
-        Layout.fillWidth: true
-        spacing: Theme.inlineSpacing
+        readonly property bool hasTags:
+            card.tags && card.tags.length > 0
+        readonly property bool hasSummary:
+            card.summaryLine.length > 0
+        readonly property bool hasProvider:
+            card.provider && card.provider.length > 0
+        readonly property bool hasSeeders: card.seeders >= 0
 
-        // Tag chips. RowChipRail collapses when chips is empty.
+        Layout.fillWidth: true
+        spacing: Kirigami.Units.largeSpacing
+
+        // Zone (a): tag chips.
         RowChipRail {
+            Layout.alignment: Qt.AlignVCenter
+            visible: parent.hasTags
             chips: {
                 const list = [];
                 if (card.tags) {
@@ -110,46 +139,82 @@ BaseListCard {
                 }
                 return list;
             }
-            visible: chips.length > 0
         }
 
-        // Provider as a small caption.
+        // Zone (b): tech summary, caption/disabled. Elides right
+        // when the row narrows. `Layout.alignment` is set
+        // explicitly because QtQuick.Layouts defaults children to
+        // top-aligned, which would drop this label off the row's
+        // vertical center against the chip rail and seeders icon.
         QQC2.Label {
-            visible: card.provider && card.provider.length > 0
+            Layout.alignment: Qt.AlignVCenter
+            visible: parent.hasSummary
+            text: card.summaryLine
+            wrapMode: Text.NoWrap
+            elide: Text.ElideRight
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // Zone (c): provider name, caption/disabled. Plain text
+        // — it's chrome, not a metric.
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: parent.hasProvider
             text: card.provider
             font.pointSize: Theme.captionFont.pointSize
             color: Theme.disabled
             verticalAlignment: Text.AlignVCenter
         }
 
-        // Seeders, inline. DemiBold foreground for emphasis.
-        Kirigami.Icon {
-            visible: card.seeders >= 0
-            Layout.preferredWidth: Kirigami.Units.iconSizes.small
-            Layout.preferredHeight: width
-            source: AppIcons.url("users")
-            color: Theme.foreground
-        }
-        QQC2.Label {
-            visible: card.seeders >= 0
-            text: card.seeders
-            font.weight: Font.DemiBold
-            color: Theme.foreground
-            verticalAlignment: Text.AlignVCenter
+        // Zone (d): seeders. Icon as the implicit qualifier, plain
+        // number alongside (no "seeders" suffix, regular weight —
+        // matches the rest of the caption-toned line). Wrapped in a
+        // RowLayout so the icon and number stay tight; the outer
+        // largeSpacing only separates the cluster from zone (c).
+        // The inner icon and label both carry an explicit
+        // `Layout.alignment: Qt.AlignVCenter` so they share a
+        // vertical center inside the nested layout — without it,
+        // QtQuick.Layouts would top-align them and the label would
+        // drop below the sibling labels' baseline.
+        RowLayout {
+            visible: parent.hasSeeders
+            spacing: Theme.inlineSpacing
+            Layout.alignment: Qt.AlignVCenter
+
+            Kirigami.Icon {
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: width
+                source: AppIcons.url("users")
+                color: Theme.disabled
+            }
+            QQC2.Label {
+                Layout.alignment: Qt.AlignVCenter
+                text: card.seeders
+                font.pointSize: Theme.captionFont.pointSize
+                color: Theme.disabled
+                verticalAlignment: Text.AlignVCenter
+                QQC2.ToolTip.text: i18ncp(
+                    "@info:tooltip swarm seeders",
+                    "%1 seeder", "%1 seeders", card.seeders)
+                QQC2.ToolTip.visible: hovered
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                HoverHandler { id: seedersHover }
+                property bool hovered: seedersHover.hovered
+            }
         }
 
-        // Size, inline.
-        QQC2.Label {
-            visible: card.sizeText && card.sizeText.length > 0
-            text: card.sizeText
-            font.weight: Font.Medium
-            color: Theme.foreground
-            verticalAlignment: Text.AlignVCenter
-        }
+        // Trailing fill absorbs slack so the meta row stays packed
+        // flush left when the body stretches it to the card width.
+        Item { Layout.fillWidth: true }
     }
 
-    // Action row: primary play / secondary download / overflow.
-    // Left-aligned with the rest of the right column.
+    // Action row: all regular text-beside-icon buttons, left-
+    // aligned. No tool or icon-only buttons. The chassis renders
+    // `trailing` below the body, so this reads as a dedicated
+    // action band, not a right-edge cluster.
     trailing: RowLayout {
         spacing: Theme.inlineSpacing
 
@@ -166,15 +231,15 @@ BaseListCard {
             onClicked: card._activatePrimary()
         }
 
-        QQC2.ToolButton {
+        QQC2.Button {
             visible: card.hasDirectUrl || card.hasMagnet
             enabled: card.hasDirectUrl || card.hasMagnet
             icon.source: AppIcons.url("download",
                 AppIcons.controlColor(enabled, false))
             icon.color: AppIcons.controlColor(enabled, false)
-            display: QQC2.AbstractButton.IconOnly
             text: i18nc("@action:button background full download",
                 "Download")
+            display: QQC2.AbstractButton.TextBesideIcon
             QQC2.ToolTip.text: i18nc(
                 "@info:tooltip background download",
                 "Download the whole file in the background. "
@@ -184,12 +249,12 @@ BaseListCard {
             onClicked: card.vm.download(card.row)
         }
 
-        QQC2.ToolButton {
-            icon.source: AppIcons.url("ellipsis")
-            icon.color: AppIcons.controlColor(enabled, false)
-            display: QQC2.AbstractButton.IconOnly
-            text: i18nc("@action:button stream actions",
-                "More actions")
+        QQC2.Button {
+            icon.source: AppIcons.url("ellipsis",
+                AppIcons.controlColor(true, false))
+            icon.color: AppIcons.controlColor(true, false)
+            text: i18nc("@action:button stream actions", "More")
+            display: QQC2.AbstractButton.TextBesideIcon
             onClicked: {
                 actionMenu.row = card.row;
                 actionMenu.hasMagnet = card.hasMagnet;
@@ -197,6 +262,10 @@ BaseListCard {
                 actionMenu.popup();
             }
         }
+
+        // Trailing fill keeps the action row left-packed against
+        // the start of the right column.
+        Item { Layout.fillWidth: true }
     }
 
     StreamRowActions {

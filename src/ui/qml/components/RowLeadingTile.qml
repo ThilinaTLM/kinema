@@ -27,6 +27,12 @@ Item {
     property color borderColor: Qt.alpha(Theme.foreground, 0.10)
     property real aspect: 1.0
 
+    /// When true a hairline divider is drawn between `primary` and
+    /// `caption`, turning the tile into a stacked two-field badge
+    /// (e.g. resolution / size on StreamListCard). Defaults to off
+    /// so subtitle / other consumers keep their unified look.
+    property bool divided: false
+
     implicitWidth: Math.round(implicitHeight * aspect)
     implicitHeight: Kirigami.Units.gridUnit * 4
     Layout.preferredWidth: Math.round(Layout.preferredHeight * aspect)
@@ -64,6 +70,25 @@ Item {
                 font.pointSize: Theme.defaultFont.pointSize + 1
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
+            }
+
+            // Hairline divider between primary + caption. Opt-in so
+            // the unified tile (no divider) stays the default. Inset
+            // slightly from the tile edge so it reads as a rule, not
+            // a second border.
+            Rectangle {
+                visible: tile.divided
+                    && tile.primary.length > 0
+                    && tile.caption.length > 0
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                Layout.rightMargin: Kirigami.Units.smallSpacing
+                Layout.topMargin: Math.round(
+                    Kirigami.Units.smallSpacing / 2)
+                Layout.bottomMargin: Math.round(
+                    Kirigami.Units.smallSpacing / 2)
+                Layout.preferredHeight: 1
+                color: tile.borderColor
             }
 
             QQC2.Label {
