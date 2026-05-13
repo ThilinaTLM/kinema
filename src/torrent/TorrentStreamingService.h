@@ -153,12 +153,32 @@ Q_SIGNALS:
     /// Subscribers should mark the asset as failed.
     void torrentFailed(const QString& infoHash, const QString& reason);
 
+public:
+    /// True once `ensureStarted()` has built the libtorrent
+    /// session. Test-only hook used by the lazy-start coverage to
+    /// assert that construction is dormant; do not rely on this
+    /// from production code paths.
+    bool isStartedForTests() const noexcept { return static_cast<bool>(d); }
+
 private:
     Q_INVOKABLE void drainAlerts();
     Q_INVOKABLE void postTorrentUpdates();
 
+    /// Build `d` (libtorrent session, legacy `LocalStreamServer`,
+    /// idle/stats timers) on first real use. Safe to call
+    /// repeatedly; cheap after the first start. Every public
+    /// method that genuinely needs a live session routes through
+    /// this. Calls on a `StubTag` instance (no backing services)
+    /// are no-ops so test doubles stay dormant.
+    void ensureStarted();
+
     struct Private;
     std::unique_ptr<Private> d;
+
+    /// Captured for the production constructor so `ensureStarted()`
+    /// can build `Private` on first use. Null for `StubTag`.
+    core::TorrentCache*                       m_cache    {};
+    const config::TorrentStreamingSettings*   m_settings {};
 };
 
 } // namespace kinema::torrent

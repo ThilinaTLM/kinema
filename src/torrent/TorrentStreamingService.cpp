@@ -317,14 +317,41 @@ struct TorrentStreamingService::Private {
 TorrentStreamingService::TorrentStreamingService(core::TorrentCache& cache,
     const config::TorrentStreamingSettings& settings, QObject* parent)
     : QObject(parent)
-    , d(std::make_unique<Private>(this, cache, settings))
+    , d(nullptr)
+    , m_cache(&cache)
+    , m_settings(&settings)
 {
+    // Lazy-init contract: do not spin up libtorrent here. `Private`
+    // (lt::session, legacy LocalStreamServer, idle/stats timers) is
+    // built by `ensureStarted()` on the first call that genuinely
+    // needs a libtorrent session (`prepare()` / `prepareSession()`).
+    // Until then this instance is dormant and every other public
+    // method is a cheap no-op. Lets users on Real-Debrid / AllDebrid
+    // boot without paying the libtorrent cost.
+    qCDebug(KINEMA_TORRENT)
+        << "TorrentStreamingService constructed (dormant)";
 }
 
 TorrentStreamingService::TorrentStreamingService(StubTag, QObject* parent)
     : QObject(parent)
     , d(nullptr)
 {
+}
+
+void TorrentStreamingService::ensureStarted()
+{
+    if (d) {
+        return;
+    }
+    if (!m_cache || !m_settings) {
+        // StubTag instances have no backing services; refuse to
+        // lazy-start so test doubles stay dormant even if a path
+        // accidentally reaches a real entry point.
+        return;
+    }
+    qCInfo(KINEMA_TORRENT)
+        << "starting libtorrent session on first use";
+    d = std::make_unique<Private>(this, *m_cache, *m_settings);
 }
 
 TorrentStreamingService::~TorrentStreamingService()
@@ -338,6 +365,14 @@ QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
     const domain::Stream& stream, const domain::PlaybackContext& ctx,
     PrepareMode mode)
 {
+    ensureStarted();
+    if (!d) {
+        // StubTag instance reaching the real method; refuse rather
+        // than crash. Production always has `d` after
+        // `ensureStarted()`.
+        throw runtimeError(i18nc("@info:status",
+            "Torrent streaming is not available in this build."));
+    }
     if (stream.infoHash.isEmpty()) {
         throw runtimeError(i18nc("@info:status",
             "This stream has no magnet info hash."));
@@ -512,6 +547,11 @@ QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
 QCoro::Task<QUrl> TorrentStreamingService::prepare(const domain::Stream& stream,
     const domain::PlaybackContext& ctx)
 {
+    ensureStarted();
+    if (!d) {
+        throw runtimeError(i18nc("@info:status",
+            "Torrent streaming is not available in this build."));
+    }
     if (!d->server.listen()) {
         throw runtimeError(i18nc("@info:status",
             "Could not start the local torrent streaming server."));

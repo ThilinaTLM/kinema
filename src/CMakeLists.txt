@@ -90,6 +90,7 @@ set(kinema_core_SRCS
     api/TorrentioIndexer.cpp
 
     domain/Debrid.cpp
+    domain/DebridCredentials.cpp
     domain/Download.cpp
     domain/Indexer.cpp
     domain/PlaybackContext.cpp
@@ -99,6 +100,7 @@ set(kinema_core_SRCS
     app/KinemaApplication.cpp
     app/ServiceContainer.cpp
 
+    controllers/DebridCredentialsResolver.cpp
     controllers/DownloadController.cpp
     controllers/HistoryController.cpp
     controllers/LibraryController.cpp

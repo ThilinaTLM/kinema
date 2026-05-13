@@ -36,6 +36,13 @@ QString toPathSegment(const ConfigOptions& opts)
     if (!opts.providers.isEmpty()) {
         parts.append(QStringLiteral("providers=") + opts.providers.join(QLatin1Char(',')));
     }
+    // Debrid pair is always rendered last so it matches the order
+    // emitted by Torrentio's own `configure` page. Both halves must
+    // be present — an orphan provider or token is dropped silently
+    // rather than producing a malformed `=` segment.
+    if (!opts.debridProvider.isEmpty() && !opts.debridToken.isEmpty()) {
+        parts.append(opts.debridProvider + QLatin1Char('=') + opts.debridToken);
+    }
 
     return parts.join(QLatin1Char('|'));
 }

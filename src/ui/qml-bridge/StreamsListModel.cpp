@@ -151,6 +151,10 @@ QVariant StreamsListModel::data(const QModelIndex& index, int role) const
         return summaryLineFor(s, tokensAt(index.row()));
     case TagsRole:
         return tagsFor(s, tokensAt(index.row()));
+    case DebridProviderRole:
+        return domain::providerToString(s.debridProvider);
+    case DebridCachedRole:
+        return s.debridCached;
     case StreamRole:
         return QVariant::fromValue(s);
     default:
@@ -184,6 +188,8 @@ QHash<int, QByteArray> StreamsListModel::roleNames() const
         { ReleaseGroupRole, "releaseGroup" },
         { SummaryLineRole, "summaryLine" },
         { TagsRole, "tags" },
+        { DebridProviderRole, "debridProvider" },
+        { DebridCachedRole, "debridCached" },
     };
 }
 

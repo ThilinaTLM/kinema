@@ -5,6 +5,7 @@
 
 #include "TestDoubles.h"
 #include "config/PeerflixSettings.h"
+#include "domain/DebridCredentials.h"
 
 #include <KConfig>
 #include <KConfigGroup>
@@ -16,6 +17,13 @@
 #include <QTest>
 
 using namespace kinema;
+
+namespace {
+struct FakeDebridCreds final : public domain::DebridCredentialsProvider {
+    domain::ActiveDebrid value;
+    domain::ActiveDebrid active() const override { return value; }
+};
+} // namespace
 
 class TstPeerflixIndexer : public QObject
 {
@@ -40,7 +48,7 @@ private Q_SLOTS:
     {
         config::PeerflixSettings settings(m_config);
         tests::FakeHttpClient http;
-        api::PeerflixIndexer indexer(&http, settings);
+        api::PeerflixIndexer indexer(&http, settings, nullptr);
         QCOMPARE(indexer.kind(), domain::IndexerKind::Peerflix);
         QCOMPARE(indexer.displayName(), QStringLiteral("Peerflix"));
     }
@@ -52,7 +60,7 @@ private Q_SLOTS:
         http.jsonReplies.append(
             tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
-        api::PeerflixIndexer indexer(&http, settings);
+        api::PeerflixIndexer indexer(&http, settings, nullptr);
         (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
             QStringLiteral("tt0133093")));
 
@@ -72,7 +80,7 @@ private Q_SLOTS:
         http.jsonReplies.append(
             tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
-        api::PeerflixIndexer indexer(&http, settings);
+        api::PeerflixIndexer indexer(&http, settings, nullptr);
         (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
             QStringLiteral("tt0133093")));
 
@@ -89,7 +97,7 @@ private Q_SLOTS:
         http.jsonReplies.append(
             tests::loadJsonFixture("peerflix_stream_tt0903747_1_1.json"));
 
-        api::PeerflixIndexer indexer(&http, settings);
+        api::PeerflixIndexer indexer(&http, settings, nullptr);
         (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Series,
             QStringLiteral("tt0903747:1:1")));
 
@@ -105,7 +113,7 @@ private Q_SLOTS:
         http.jsonReplies.append(
             tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
-        api::PeerflixIndexer indexer(&http, settings);
+        api::PeerflixIndexer indexer(&http, settings, nullptr);
         const auto streams = QCoro::waitFor(indexer.streams(
             domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
@@ -136,6 +144,118 @@ private Q_SLOTS:
         QVERIFY(third.seeders.has_value());
         QCOMPARE(*third.seeders, 0);
         QCOMPARE(third.language, QStringLiteral("es"));
+    }
+
+    void testNoDebridUsesZeroConfigHost()
+    {
+        config::PeerflixSettings settings(m_config);
+        FakeDebridCreds creds;
+        // provider = None → even with the resolver wired in the
+        // indexer must stay on the zero-config IPFS mirror.
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+
+        api::PeerflixIndexer indexer(&http, settings, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.host(),
+            QStringLiteral("peerflix.mov"));
+        QCOMPARE(http.calls.first().url.path(),
+            QStringLiteral("/stream/movie/tt0133093.json"));
+    }
+
+    void testRealDebridSwitchesToAddonHost()
+    {
+        config::PeerflixSettings settings(m_config);
+        FakeDebridCreds creds;
+        creds.value = { domain::DebridProvider::RealDebrid,
+            QStringLiteral("rd-token") };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+
+        api::PeerflixIndexer indexer(&http, settings, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.host(),
+            QStringLiteral("addon.peerflix.mov"));
+        QCOMPARE(http.calls.first().url.path(),
+            QStringLiteral(
+                "/debridoptions=torrentlinks,nocatalog|realdebrid=rd-token"
+                "/stream/movie/tt0133093.json"));
+    }
+
+    void testAllDebridSwitchesToAddonHost()
+    {
+        config::PeerflixSettings settings(m_config);
+        FakeDebridCreds creds;
+        creds.value = { domain::DebridProvider::AllDebrid,
+            QStringLiteral("ad-key") };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+
+        api::PeerflixIndexer indexer(&http, settings, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.host(),
+            QStringLiteral("addon.peerflix.mov"));
+        QCOMPARE(http.calls.first().url.path(),
+            QStringLiteral(
+                "/debridoptions=torrentlinks,nocatalog|alldebrid=ad-key"
+                "/stream/movie/tt0133093.json"));
+    }
+
+    void testCustomAddonBaseUrlIsHonoured()
+    {
+        config::PeerflixSettings settings(m_config);
+        settings.setAddonBaseUrl(
+            QStringLiteral("https://addon.peerflix.mirror.example"));
+        FakeDebridCreds creds;
+        creds.value = { domain::DebridProvider::RealDebrid,
+            QStringLiteral("rd-token") };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+
+        api::PeerflixIndexer indexer(&http, settings, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.host(),
+            QStringLiteral("addon.peerflix.mirror.example"));
+        // baseUrl override left untouched.
+        QCOMPARE(settings.baseUrl(),
+            QStringLiteral("https://peerflix.mov"));
+    }
+
+    void testEmptyTokenStaysOnZeroConfigHost()
+    {
+        config::PeerflixSettings settings(m_config);
+        FakeDebridCreds creds;
+        // Provider radio is set but the credential never made it
+        // into the keyring — indexer must fall back to no-debrid.
+        creds.value = { domain::DebridProvider::RealDebrid, QString {} };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+
+        api::PeerflixIndexer indexer(&http, settings, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.host(),
+            QStringLiteral("peerflix.mov"));
+        QCOMPARE(http.calls.first().url.path(),
+            QStringLiteral("/stream/movie/tt0133093.json"));
     }
 };
 

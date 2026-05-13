@@ -69,14 +69,65 @@ private Q_SLOTS:
             QStringLiteral("sort=seeders|qualityfilter=480p"));
     }
 
-    void doesNotEmbedRealDebridToken()
+    void doesNotEmbedDebridUnlessConfigured()
     {
-        // Torrentio is discovery-only: RD never appears in the URL.
+        // No `debridProvider`/`debridToken` → no debrid pair in URL,
+        // even when other segments are populated.
         ConfigOptions o;
         o.excludedResolutions = { QStringLiteral("4k") };
         o.providers = { QStringLiteral("yts") };
         const auto s = toPathSegment(o);
         QVERIFY(!s.contains(QStringLiteral("realdebrid")));
+        QVERIFY(!s.contains(QStringLiteral("alldebrid")));
+    }
+
+    void debrid_bothFieldsSet_appendsLastSegment()
+    {
+        ConfigOptions o;
+        o.debridProvider = QStringLiteral("realdebrid");
+        o.debridToken = QStringLiteral("rd-token");
+        QCOMPARE(toPathSegment(o),
+            QStringLiteral(
+                "sort=seeders|realdebrid=rd-token"));
+    }
+
+    void debrid_alldebrid_appendsLastSegment()
+    {
+        ConfigOptions o;
+        o.debridProvider = QStringLiteral("alldebrid");
+        o.debridToken = QStringLiteral("ad-key");
+        QCOMPARE(toPathSegment(o),
+            QStringLiteral("sort=seeders|alldebrid=ad-key"));
+    }
+
+    void debrid_segmentOrderIsAfterQualityFilterAndProviders()
+    {
+        ConfigOptions o;
+        o.excludedResolutions = { QStringLiteral("4k") };
+        o.providers = { QStringLiteral("yts") };
+        o.debridProvider = QStringLiteral("realdebrid");
+        o.debridToken = QStringLiteral("rd-token");
+        QCOMPARE(toPathSegment(o),
+            QStringLiteral(
+                "sort=seeders|qualityfilter=4k|providers=yts"
+                "|realdebrid=rd-token"));
+    }
+
+    void debrid_orphanProviderIsDropped()
+    {
+        // A provider without a token must not emit `realdebrid=`
+        // (would produce a malformed URL).
+        ConfigOptions o;
+        o.debridProvider = QStringLiteral("realdebrid");
+        QCOMPARE(toPathSegment(o), QStringLiteral("sort=seeders"));
+    }
+
+    void debrid_orphanTokenIsDropped()
+    {
+        // A bare token with no provider is silently dropped.
+        ConfigOptions o;
+        o.debridToken = QStringLiteral("rd-token");
+        QCOMPARE(toPathSegment(o), QStringLiteral("sort=seeders"));
     }
 };
 

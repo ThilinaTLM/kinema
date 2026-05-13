@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "domain/Debrid.h"
+
 #include <QDate>
 #include <QList>
 #include <QMetaType>
@@ -88,6 +90,22 @@ struct Stream {
     /// `core::stream_filter::ClientFilters` to honour the
     /// "Non-English" hide-variant toggle.
     QString language;
+
+    /// Which debrid provider the upstream indexer associated with
+    /// this row, when it tagged one (`[RD+]`, `[AD download]`, or
+    /// the equivalent Peerflix `providers` array entry).
+    /// `DebridProvider::None` means the row is a plain torrent /
+    /// direct URL with no debrid involvement — the common case
+    /// when no provider is configured upstream.
+    DebridProvider debridProvider = DebridProvider::None;
+
+    /// True when the indexer signalled the row is already cached on
+    /// the debrid account (instantly playable, e.g. Torrentio's
+    /// `[RD+]` tag, or Peerflix surfacing the provider in its
+    /// structured array). False when the indexer signalled the row
+    /// exists in debrid but is not cached yet (e.g. `[RD download]`).
+    /// Only meaningful when `debridProvider != DebridProvider::None`.
+    bool debridCached = false;
 };
 
 /// One episode row from Cinemeta's series meta.videos[].

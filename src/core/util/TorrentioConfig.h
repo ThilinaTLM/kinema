@@ -23,15 +23,17 @@ QString toString(SortMode);
  * Options that shape a Torrentio stream query. Rendered into a pipe-separated
  * URL path segment like:
  *
- *   sort=seeders|qualityfilter=4k,cam,threed|providers=yts,eztv
+ *   sort=seeders|qualityfilter=4k,cam,threed|providers=yts,eztv|realdebrid=TOKEN
  *
  * Torrentio's `qualityfilter` URL param is an **exclusion** list that mixes
  * resolution and variant tags. We keep the two concepts separate in code for
  * clarity and merge them into a single comma-separated value at render time
  * (resolutions first, then categories, preserving input order within each).
  *
- * Real-Debrid is now driven by Kinema directly through the unified
- * downloader — it is no longer encoded into the Torrentio URL.
+ * When a debrid provider is active, Kinema appends the provider's URL
+ * token + credential as the last pipe entry so the upstream addon can
+ * surface its debrid-cached streams. The picked row is still resolved
+ * through the unified downloader at play time.
  */
 struct ConfigOptions {
     SortMode sort = SortMode::Seeders;
@@ -43,6 +45,14 @@ struct ConfigOptions {
     /// `nonen`, `unknown`, `brremux`.
     QStringList excludedCategories;
     QStringList providers; ///< e.g. {"yts","eztv"}
+    /// Active debrid provider URL token, e.g. `"realdebrid"` or
+    /// `"alldebrid"`. Empty when no debrid is active.
+    QString debridProvider;
+    /// Debrid token / API key. Rendered alongside `debridProvider`
+    /// as `<debridProvider>=<debridToken>`. Both must be non-empty
+    /// for the segment to be emitted — a mismatch is silently
+    /// dropped rather than producing a malformed URL.
+    QString debridToken;
 };
 
 /**

@@ -33,6 +33,13 @@ namespace {
 // regex extraction — see `parseOne` below.
 
 static const QRegularExpression kSeedersRe(QStringLiteral("👤\\s*([0-9]+)"));
+// Debrid tag in the `name` field, e.g. "Torrentio\n2160p [RD+]" or
+// "Torrentio\n720p [AD download]". Capture 1 is the provider
+// abbreviation; capture 2 is " download" for the not-yet-cached
+// variant, empty for the cached variant (the trailing `+`).
+static const QRegularExpression kDebridTagRe(
+    QStringLiteral("\\[(RD|AD|PM|DL|ED|OC|TB|PO)(\\+| download)\\]"),
+    QRegularExpression::CaseInsensitiveOption);
 static const QRegularExpression kSizeRe(
     QStringLiteral("💾\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(TB|GB|MB|KB)"),
     QRegularExpression::CaseInsensitiveOption);
@@ -164,6 +171,49 @@ Stream parseOne(const QJsonObject& obj)
         }
     }
     s.fileNameHint = bh.value(QStringLiteral("filename")).toString();
+
+    // Debrid status signal #1: Torrentio-style `[XX+]` /
+    // `[XX download]` tag in the `name` field. We only map the
+    // providers Kinema can act on today (RD/AD) — other recognised
+    // tags (`PM`, `DL`, `ED`, `OC`, `TB`, `PO`) are intentionally
+    // dropped here so the UI doesn't surface a badge for a
+    // provider we cannot route credentials to. Extend when those
+    // providers are added to `DebridProvider`.
+    if (const auto m = kDebridTagRe.match(nameRaw); m.hasMatch()) {
+        const auto tag = m.captured(1).toUpper();
+        if (tag == QLatin1String("RD")) {
+            s.debridProvider = DebridProvider::RealDebrid;
+        } else if (tag == QLatin1String("AD")) {
+            s.debridProvider = DebridProvider::AllDebrid;
+        }
+        s.debridCached = m.captured(2) == QLatin1String("+");
+    }
+
+    // Debrid status signal #2: Peerflix surfaces a structured
+    // `providers` array on debrid-resolved rows, e.g.
+    // `"providers": ["realdebrid"]`. Cache-state can't be derived
+    // from the array alone, so default to cached: a row that came
+    // back tagged with the provider is already streamable through
+    // that debrid (Peerflix's `debridoptions=torrentlinks` flag is
+    // what surfaces the uncached torrent rows, which carry no
+    // `providers` entry).
+    if (s.debridProvider == DebridProvider::None) {
+        const auto provs
+            = obj.value(QStringLiteral("providers")).toArray();
+        for (const auto& v : provs) {
+            const auto t = v.toString().toLower();
+            if (t == QLatin1String("realdebrid")) {
+                s.debridProvider = DebridProvider::RealDebrid;
+                s.debridCached = true;
+                break;
+            }
+            if (t == QLatin1String("alldebrid")) {
+                s.debridProvider = DebridProvider::AllDebrid;
+                s.debridCached = true;
+                break;
+            }
+        }
+    }
 
     // `sources` is an optional list of tracker URIs / DHT hints.
     const auto srcs = obj.value(QStringLiteral("sources")).toArray();

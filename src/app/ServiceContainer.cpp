@@ -14,6 +14,7 @@
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
 #include "config/DownloadSettings.h"
+#include "controllers/DebridCredentialsResolver.h"
 #include "controllers/DownloadController.h"
 #include "controllers/HistoryController.h"
 #include "controllers/LibraryController.h"
@@ -76,16 +77,30 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_player = std::make_unique<core::PlayerLauncher>(
         m_settings.player(), a);
     m_cinemeta = new api::CinemetaClient(m_http.get(), a);
+    m_tmdb = new api::TmdbClient(m_http.get(), a);
+
+    // TokenController is built early so the debrid credentials
+    // resolver can hold a const-ref to it before the indexers
+    // are registered below. Later code (RD/AD client wiring,
+    // OpenSubtitles, etc.) finds it already constructed.
+    m_tokenCtrl = new controllers::TokenController(
+        m_tokens.get(), m_tmdb, m_settings.debrid(), a);
+    m_debridCreds
+        = std::make_unique<controllers::DebridCredentialsResolver>(
+            m_settings.debrid(), *m_tokenCtrl);
+
     // Indexer abstraction: a selector owns one or more concrete
     // indexers (Torrentio + Peerflix today) and view-models call
     // `selector->active()->streams()`. The active indexer tracks
-    // `IndexerSettings`.
+    // `IndexerSettings`. Each indexer takes the credentials
+    // resolver so it can append the active debrid credential
+    // (RD/AD) to its outgoing URL when one is configured.
     m_indexers = new api::IndexerSelector(m_settings.indexers(), a);
     m_indexers->registerIndexer(std::make_unique<api::TorrentioIndexer>(
-        m_http.get(), m_settings.torrentio(), m_settings.filter()));
+        m_http.get(), m_settings.torrentio(), m_settings.filter(),
+        m_debridCreds.get()));
     m_indexers->registerIndexer(std::make_unique<api::PeerflixIndexer>(
-        m_http.get(), m_settings.peerflix()));
-    m_tmdb = new api::TmdbClient(m_http.get(), a);
+        m_http.get(), m_settings.peerflix(), m_debridCreds.get()));
     m_imageLoader = new ui::ImageLoader(m_http.get(), a);
     m_torrentCache = std::make_unique<core::TorrentCache>(
         m_settings.torrentStreaming(), a);
@@ -138,11 +153,11 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     // there is no consumer at startup.
     m_downloadManager->resumePersisted();
 
-    // Tokens — built before the OpenSubtitles client + history
-    // controller because both reference its live `const QString&`
-    // aliases.
-    m_tokenCtrl = new controllers::TokenController(
-        m_tokens.get(), m_tmdb, m_settings.debrid(), a);
+    // Tokens — `m_tokenCtrl` is already constructed above so the
+    // debrid credentials resolver could capture it before the
+    // indexers were registered. The RD / AD client wiring + the
+    // OpenSubtitles client + history controller below all rely on
+    // its live `const QString&` aliases.
 
     // Keep the RD / AD clients' in-memory tokens in sync with the
     // keyring-backed `TokenController`. Both backends check

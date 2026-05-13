@@ -76,6 +76,8 @@ ListSurface {
         hasMagnet: model.hasMagnet
         hasDirectUrl: model.hasDirectUrl
         resolution: model.resolution
+        debridProvider: model.debridProvider
+        debridCached: model.debridCached
         vm: streams.vm
     }
 

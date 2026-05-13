@@ -35,6 +35,7 @@ class WatchedStore;
 }
 
 namespace kinema::controllers {
+class DebridCredentialsResolver;
 class DownloadController;
 class HistoryController;
 class LibraryController;
@@ -174,9 +175,18 @@ public:
 
 private:
     config::AppSettings& m_settings;
-    /// Parent for every QObject we own raw. Lives at the end of
-    /// the member list so it is destroyed last, after every
-    /// `unique_ptr` above has dropped its referent.
+    /// Debrid credential resolver — read-only port consumed by the
+    /// Torrentio + Peerflix indexers (raw pointer). Declared before
+    /// `m_anchor` so it is destroyed *after* the QObject anchor
+    /// (reverse declaration order): any indexer destructor running
+    /// during anchor teardown sees a live resolver, never a
+    /// dangling pointer.
+    std::unique_ptr<controllers::DebridCredentialsResolver> m_debridCreds;
+    /// Parent for every QObject we own raw. Declared after
+    /// `m_debridCreds` so it is destroyed first — the anchor
+    /// tearing down its parented children (`m_indexers` and the
+    /// indexers themselves) happens while the resolver they reference
+    /// is still alive.
     std::unique_ptr<QObject> m_anchor;
 
     // unique_ptr-owned services (raw `new` would be valid too;

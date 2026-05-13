@@ -88,6 +88,59 @@ private Q_SLOTS:
         QCOMPARE(s2.baseUrl(), QStringLiteral("https://mirror.example"));
     }
 
+    void defaults_addonBaseUrlIsConfigurableHost()
+    {
+        config::PeerflixSettings s(m_config);
+        QCOMPARE(s.addonBaseUrl(),
+            config::PeerflixSettings::defaultAddonBaseUrl());
+        QCOMPARE(s.addonBaseUrl(),
+            QStringLiteral("https://addon.peerflix.mov"));
+    }
+
+    void setAddonBaseUrl_emptyResetsToDefault()
+    {
+        config::PeerflixSettings s(m_config);
+        s.setAddonBaseUrl(
+            QStringLiteral("https://addon.mirror.example"));
+        QCOMPARE(s.addonBaseUrl(),
+            QStringLiteral("https://addon.mirror.example"));
+        s.setAddonBaseUrl(QString {});
+        QCOMPARE(s.addonBaseUrl(),
+            config::PeerflixSettings::defaultAddonBaseUrl());
+    }
+
+    void setAddonBaseUrl_emitsOnlyOnChange()
+    {
+        config::PeerflixSettings s(m_config);
+        QSignalSpy spy(&s,
+            &config::PeerflixSettings::addonBaseUrlChanged);
+
+        s.setAddonBaseUrl(
+            config::PeerflixSettings::defaultAddonBaseUrl());
+        QCOMPARE(spy.count(), 0);
+
+        s.setAddonBaseUrl(
+            QStringLiteral("https://addon.mirror.example"));
+        QCOMPARE(spy.count(), 1);
+        s.setAddonBaseUrl(
+            QStringLiteral("https://addon.mirror.example"));
+        QCOMPARE(spy.count(), 1);
+    }
+
+    void baseUrl_andAddonBaseUrl_areIndependent()
+    {
+        // Overriding one must not bleed into the other — they are
+        // distinct upstream hosts and live in distinct KConfig keys.
+        config::PeerflixSettings s(m_config);
+        s.setBaseUrl(QStringLiteral("https://mirror.example"));
+        QCOMPARE(s.addonBaseUrl(),
+            config::PeerflixSettings::defaultAddonBaseUrl());
+        s.setAddonBaseUrl(
+            QStringLiteral("https://addon.mirror.example"));
+        QCOMPARE(s.baseUrl(),
+            QStringLiteral("https://mirror.example"));
+    }
+
 private:
     std::unique_ptr<QTemporaryDir> m_tmp;
     QString m_configPath;

@@ -8,6 +8,7 @@
 #include "config/TorrentioSettings.h"
 #include "core/io/HttpClient.h"
 #include "core/util/TorrentioConfig.h"
+#include "domain/DebridCredentials.h"
 #include "kinema_log_api.h"
 
 #include <QElapsedTimer>
@@ -18,11 +19,13 @@ using namespace kinema::domain;
 TorrentioIndexer::TorrentioIndexer(core::HttpClient* http,
     const config::TorrentioSettings& settings,
     const config::FilterSettings& filter,
+    const domain::DebridCredentialsProvider* creds,
     QObject* parent)
     : domain::Indexer(parent)
     , m_http(http)
     , m_settings(settings)
     , m_filter(filter)
+    , m_creds(creds)
 {
 }
 
@@ -39,6 +42,17 @@ QCoro::Task<QList<Stream>> TorrentioIndexer::streams(MediaKind kind,
     opts.sort = m_settings.defaultSort();
     opts.excludedResolutions = m_filter.excludedResolutions();
     opts.excludedCategories = m_filter.excludedCategories();
+
+    // Forward the currently-active debrid credential, if any. The
+    // resolver collapses empty-token cases to `None`, so we don't
+    // need a separate guard here. Never logged — the token is
+    // sensitive and the existing `qCInfo` line only carries
+    // non-secret request metadata.
+    if (m_creds) {
+        const auto a = m_creds->active();
+        opts.debridProvider = domain::providerToUrlToken(a.provider);
+        opts.debridToken = a.token;
+    }
 
     const auto kindStr = mediaKindToPath(kind);
     const auto cfg = core::torrentio::toPathSegment(opts);

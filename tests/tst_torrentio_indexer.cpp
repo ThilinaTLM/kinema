@@ -7,6 +7,7 @@
 #include "config/FilterSettings.h"
 #include "config/TorrentioSettings.h"
 #include "core/util/TorrentioConfig.h"
+#include "domain/DebridCredentials.h"
 
 #include <KConfig>
 #include <KConfigGroup>
@@ -18,6 +19,15 @@
 #include <QTest>
 
 using namespace kinema;
+
+namespace {
+/// Minimal `DebridCredentialsProvider` for indexer tests. Returns a
+/// fixed snapshot — no keyring, no resolver, no signals.
+struct FakeDebridCreds final : public domain::DebridCredentialsProvider {
+    domain::ActiveDebrid value;
+    domain::ActiveDebrid active() const override { return value; }
+};
+} // namespace
 
 class TstTorrentioIndexer : public QObject
 {
@@ -48,7 +58,7 @@ private Q_SLOTS:
         http.jsonReplies.append(
             tests::loadJsonFixture("torrentio_stream_tt0133093.json"));
 
-        api::TorrentioIndexer indexer(&http, settings, filter);
+        api::TorrentioIndexer indexer(&http, settings, filter, nullptr);
 
         (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
             QStringLiteral("tt0133093")));
@@ -73,7 +83,7 @@ private Q_SLOTS:
         http.jsonReplies.append(
             tests::loadJsonFixture("torrentio_stream_tt0133093.json"));
 
-        api::TorrentioIndexer indexer(&http, settings, filter);
+        api::TorrentioIndexer indexer(&http, settings, filter, nullptr);
 
         (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Series,
             QStringLiteral("tt0903747:1:1")));
@@ -94,7 +104,7 @@ private Q_SLOTS:
         http.jsonReplies.append(
             tests::loadJsonFixture("torrentio_stream_tt0133093.json"));
 
-        api::TorrentioIndexer indexer(&http, settings, filter);
+        api::TorrentioIndexer indexer(&http, settings, filter, nullptr);
 
         (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
             QStringLiteral("tt0133093")));
@@ -108,9 +118,97 @@ private Q_SLOTS:
         config::TorrentioSettings settings(m_config);
         config::FilterSettings filter(m_config);
         tests::FakeHttpClient http;
-        api::TorrentioIndexer indexer(&http, settings, filter);
+        api::TorrentioIndexer indexer(&http, settings, filter, nullptr);
         QCOMPARE(indexer.kind(), domain::IndexerKind::Torrentio);
         QCOMPARE(indexer.displayName(), QStringLiteral("Torrentio"));
+    }
+
+    void testRealDebridAppendedToConfigPath()
+    {
+        config::TorrentioSettings settings(m_config);
+        config::FilterSettings filter(m_config);
+        FakeDebridCreds creds;
+        creds.value = { domain::DebridProvider::RealDebrid,
+            QStringLiteral("rd-token") };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("torrentio_stream_tt0133093.json"));
+
+        api::TorrentioIndexer indexer(&http, settings, filter, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.path(),
+            QStringLiteral(
+                "/sort=seeders|realdebrid=rd-token/stream/movie/tt0133093.json"));
+    }
+
+    void testAllDebridAppendedToConfigPath()
+    {
+        config::TorrentioSettings settings(m_config);
+        config::FilterSettings filter(m_config);
+        FakeDebridCreds creds;
+        creds.value = { domain::DebridProvider::AllDebrid,
+            QStringLiteral("ad-key") };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("torrentio_stream_tt0133093.json"));
+
+        api::TorrentioIndexer indexer(&http, settings, filter, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.path(),
+            QStringLiteral(
+                "/sort=seeders|alldebrid=ad-key/stream/movie/tt0133093.json"));
+    }
+
+    void testEmptyTokenWithProviderFallsBackToNoDebrid()
+    {
+        config::TorrentioSettings settings(m_config);
+        config::FilterSettings filter(m_config);
+        // Token is empty — the resolver normally collapses this to
+        // `{None, {}}`, but we verify the indexer's own guard too:
+        // even if `provider` looks set, the empty token must drop
+        // the segment rather than emitting `realdebrid=`.
+        FakeDebridCreds creds;
+        creds.value = { domain::DebridProvider::RealDebrid, QString {} };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("torrentio_stream_tt0133093.json"));
+
+        api::TorrentioIndexer indexer(&http, settings, filter, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.path(),
+            QStringLiteral("/sort=seeders/stream/movie/tt0133093.json"));
+    }
+
+    void testDebridSegmentComesAfterQualityFilter()
+    {
+        config::TorrentioSettings settings(m_config);
+        config::FilterSettings filter(m_config);
+        filter.setExcludedResolutions({ QStringLiteral("4k") });
+        FakeDebridCreds creds;
+        creds.value = { domain::DebridProvider::RealDebrid,
+            QStringLiteral("rd-token") };
+
+        tests::FakeHttpClient http;
+        http.jsonReplies.append(
+            tests::loadJsonFixture("torrentio_stream_tt0133093.json"));
+
+        api::TorrentioIndexer indexer(&http, settings, filter, &creds);
+        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
+            QStringLiteral("tt0133093")));
+
+        QCOMPARE(http.calls.first().url.path(),
+            QStringLiteral(
+                "/sort=seeders|qualityfilter=4k|realdebrid=rd-token"
+                "/stream/movie/tt0133093.json"));
     }
 };
 

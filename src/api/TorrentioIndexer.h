@@ -17,6 +17,9 @@ namespace kinema::config {
 class TorrentioSettings;
 class FilterSettings;
 }
+namespace kinema::domain {
+class DebridCredentialsProvider;
+}
 
 namespace kinema::api {
 using namespace kinema::domain;
@@ -27,9 +30,15 @@ using namespace kinema::domain;
  *
  * The URL path config segment (`sort=...|qualityfilter=...`) is
  * built internally from `TorrentioSettings` (sort) and
- * `FilterSettings` (server-side exclusions). Real-Debrid is no
- * longer encoded into the URL — RD is handled by the unified
- * downloader after a row is picked.
+ * `FilterSettings` (server-side exclusions).
+ *
+ * When a debrid provider is active (`DebridCredentialsProvider::active()`
+ * returns a non-empty token) the provider key is appended to the URL
+ * config segment so the upstream addon can surface its debrid-cached
+ * streams. The unified downloader still resolves the picked row
+ * through the matching backend at play time. The credentials
+ * provider pointer is optional: a null pointer keeps the indexer in
+ * its pre-debrid behaviour, which is what tests rely on.
  */
 class TorrentioIndexer : public domain::Indexer
 {
@@ -38,6 +47,7 @@ public:
     TorrentioIndexer(core::HttpClient* http,
         const config::TorrentioSettings& settings,
         const config::FilterSettings& filter,
+        const domain::DebridCredentialsProvider* creds,
         QObject* parent = nullptr);
     ~TorrentioIndexer() override;
 
@@ -57,6 +67,7 @@ private:
     core::HttpClient* m_http;
     const config::TorrentioSettings& m_settings;
     const config::FilterSettings& m_filter;
+    const domain::DebridCredentialsProvider* m_creds;
 };
 
 } // namespace kinema::api

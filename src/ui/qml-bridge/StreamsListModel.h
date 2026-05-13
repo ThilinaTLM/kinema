@@ -73,6 +73,8 @@ public:
         ReleaseGroupRole,  ///< QString
         SummaryLineRole,   ///< QString — source · codec · hdr · audio joined
         TagsRole,          ///< QStringList of small chip labels (codec/hdr/lang/group)
+        DebridProviderRole,///< QString token: "none" / "realdebrid" / "alldebrid"
+        DebridCachedRole,  ///< bool; only meaningful when DebridProviderRole != "none"
     };
     Q_ENUM(Roles)
 

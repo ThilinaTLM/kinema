@@ -16,18 +16,30 @@ class HttpClient;
 namespace kinema::config {
 class PeerflixSettings;
 }
+namespace kinema::domain {
+class DebridCredentialsProvider;
+}
 
 namespace kinema::api {
 using namespace kinema::domain;
 
 /**
- * Concrete `domain::Indexer` backed by Peerflix's Stremio addon at
- * `<PeerflixSettings::baseUrl()>/stream/{kind}/{id}.json`.
+ * Concrete `domain::Indexer` backed by Peerflix's Stremio addon.
  *
- * Peerflix is zero-config: no manifest URL to paste, no opaque
- * token segment in the path, no inline filter knobs (unlike
- * Torrentio's `qualityfilter=`). Per-row filtering is handled
- * universally by `core::stream_filter::ClientFilters`.
+ * When no debrid provider is active, Peerflix is queried on the
+ * zero-config IPFS mirror (`PeerflixSettings::baseUrl()`,
+ * `https://peerflix.mov`) with no pipe segment:
+ * `<baseUrl>/stream/{kind}/{id}.json`.
+ *
+ * When a debrid provider is active, requests go to the configurable
+ * Node service (`PeerflixSettings::addonBaseUrl()`,
+ * `https://addon.peerflix.mov`) with a pipe-separated path segment
+ * carrying sensible debrid defaults plus the active credential:
+ * `<addonBaseUrl>/debridoptions=torrentlinks,nocatalog|<provider>=<key>/stream/{kind}/{id}.json`.
+ * Both hosts are user-overridable so self-hosted mirrors keep
+ * working. The credentials provider pointer is optional: a null
+ * pointer keeps the indexer on the zero-config host, which is what
+ * tests rely on.
  *
  * Response payload is the standard Stremio addon JSON, parsed by
  * the shared `api::stremio::parseStreams`. Peerflix surfaces a
@@ -40,6 +52,7 @@ class PeerflixIndexer : public domain::Indexer
 public:
     PeerflixIndexer(core::HttpClient* http,
         const config::PeerflixSettings& settings,
+        const domain::DebridCredentialsProvider* creds,
         QObject* parent = nullptr);
     ~PeerflixIndexer() override;
 
@@ -58,6 +71,7 @@ public:
 private:
     core::HttpClient* m_http;
     const config::PeerflixSettings& m_settings;
+    const domain::DebridCredentialsProvider* m_creds;
 };
 
 } // namespace kinema::api

@@ -33,6 +33,20 @@ Item {
     /// so subtitle / other consumers keep their unified look.
     property bool divided: false
 
+    /// Optional corner-badge slot, rendered as a small pill in the
+    /// top-right corner of the tile. Empty hides the badge
+    /// entirely — non-stream consumers (e.g. SubtitleListCard) get
+    /// the same look as before. Kept short (two characters,
+    /// caption-sized) so it never competes with `primary`.
+    property string badgeText: ""
+    /// Theme role for the pill background and text. "positive" maps
+    /// to `Kirigami.Theme.positive*`, anything else (default) to
+    /// `Kirigami.Theme.neutral*`. Colours come exclusively from the
+    /// Kirigami palette per AGENTS.md.
+    property string badgeTone: "neutral"
+    /// Tooltip surfaced on hover. Empty disables the tooltip.
+    property string badgeTooltip: ""
+
     implicitWidth: Math.round(implicitHeight * aspect)
     implicitHeight: Kirigami.Units.gridUnit * 4
     Layout.preferredWidth: Math.round(Layout.preferredHeight * aspect)
@@ -102,6 +116,50 @@ Item {
             }
 
             Item { Layout.fillHeight: true }
+        }
+
+        // Corner badge: small pill anchored to the top-right of the
+        // tile chrome. Sits *inside* the tile border so the tile's
+        // sizing / aspect / inner layout are untouched when the
+        // badge appears. Visible only when `badgeText` is set.
+        Rectangle {
+            id: badge
+            readonly property bool positive: tile.badgeTone === "positive"
+            readonly property color bgColor: positive
+                ? Kirigami.Theme.positiveBackgroundColor
+                : Kirigami.Theme.neutralBackgroundColor
+            readonly property color fgColor: positive
+                ? Kirigami.Theme.positiveTextColor
+                : Kirigami.Theme.neutralTextColor
+
+            visible: tile.badgeText.length > 0
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Math.round(
+                Kirigami.Units.smallSpacing / 2)
+            implicitWidth: badgeLabel.implicitWidth
+                + Kirigami.Units.smallSpacing * 2
+            implicitHeight: badgeLabel.implicitHeight
+                + Math.round(Kirigami.Units.smallSpacing * 0.6)
+            radius: height / 2
+            color: bgColor
+            border.color: Qt.alpha(fgColor, 0.45)
+            border.width: 1
+
+            QQC2.Label {
+                id: badgeLabel
+                anchors.centerIn: parent
+                text: tile.badgeText
+                font.pointSize: Theme.captionFont.pointSize
+                font.weight: Font.DemiBold
+                color: badge.fgColor
+            }
+
+            HoverHandler { id: badgeHover }
+            QQC2.ToolTip.text: tile.badgeTooltip
+            QQC2.ToolTip.visible: badgeHover.hovered
+                && tile.badgeTooltip.length > 0
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         }
     }
 }

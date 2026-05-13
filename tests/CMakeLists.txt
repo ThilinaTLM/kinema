@@ -38,6 +38,11 @@ ecm_add_test(tst_piece_planner.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_torrent_lazy_start.cpp
+    TEST_NAME tst_torrent_lazy_start
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_cinemeta_parse.cpp
     TEST_NAME tst_cinemeta_parse
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -170,6 +175,11 @@ ecm_add_test(tst_subtitle_results_model.cpp
 
 ecm_add_test(tst_token_controller.cpp
     TEST_NAME tst_token_controller
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_debrid_credentials_resolver.cpp
+    TEST_NAME tst_debrid_credentials_resolver
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -391,7 +401,8 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_streams_list_model tst_episodes_list_model
          tst_movie_detail_view_model tst_series_detail_view_model
          tst_stream_actions tst_subtitle_results_model
-         tst_token_controller tst_cinemeta_client tst_tmdb_client
+         tst_token_controller tst_debrid_credentials_resolver
+         tst_cinemeta_client tst_tmdb_client
          tst_torrentio_indexer tst_realdebrid_client tst_alldebrid_client
          tst_alldebrid_resolver tst_backend_selector
          tst_database tst_history_store tst_history_controller
@@ -405,7 +416,8 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config
          tst_library_view_model tst_library_backfill
          tst_application_boot tst_kinema_image_provider
          tst_download_store tst_download_manager
-         tst_media_cache tst_local_media_server)
+         tst_media_cache tst_local_media_server
+         tst_torrent_lazy_start)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()
 

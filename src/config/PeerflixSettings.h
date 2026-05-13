@@ -13,13 +13,21 @@ namespace kinema::config {
 /**
  * Peerflix per-user settings.
  *
- * Peerflix is a zero-configuration public Stremio addon hosted at
- * `https://peerflix.mov`. The only user-facing knob is an optional
- * Base URL override (for self-hosted instances or community mirrors).
+ * Peerflix is published as two upstream hosts:
+ *   - `https://peerflix.mov` is an IPFS-hosted zero-configuration
+ *     mirror. No `/<config>/` path segment is meaningful there.
+ *   - `https://addon.peerflix.mov` is the configurable Node service
+ *     that accepts a pipe-separated path segment (the same shape
+ *     Torrentio uses) carrying debrid credentials and tuning knobs.
+ *
+ * The Peerflix indexer hits `baseUrl` when no debrid provider is
+ * active and `addonBaseUrl` when one is. Both are independently
+ * user-overridable so self-hosted mirrors can override one or both.
  *
  * KConfig group: [Peerflix]
  * Keys:
- *   baseUrl  URL, default "https://peerflix.mov"
+ *   baseUrl       URL, default "https://peerflix.mov"
+ *   addonBaseUrl  URL, default "https://addon.peerflix.mov"
  */
 class PeerflixSettings : public QObject
 {
@@ -31,11 +39,18 @@ public:
     QString baseUrl() const;
     void setBaseUrl(const QString& url);
 
+    QString addonBaseUrl() const;
+    void setAddonBaseUrl(const QString& url);
+
     /// Default base URL used when no override has been saved.
     static QString defaultBaseUrl();
 
+    /// Default addon base URL used when no override has been saved.
+    static QString defaultAddonBaseUrl();
+
 Q_SIGNALS:
     void baseUrlChanged(const QString&);
+    void addonBaseUrlChanged(const QString&);
 
 private:
     KSharedConfigPtr m_config;

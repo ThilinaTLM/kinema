@@ -222,6 +222,142 @@ private Q_SLOTS:
         QCOMPARE(streams.at(0).language, QStringLiteral("es"));
         QVERIFY(streams.at(1).language.isEmpty());
     }
+
+    void debridTag_RDCached_setsProviderAndCached()
+    {
+        // Fixture row 1: "Torrentio\n2160p [RD+]".
+        const auto doc = loadFixture("torrentio_stream_tt0133093.json");
+        const auto streams = stremio::parseStreams(doc);
+        const auto& row = streams.at(1);
+        QCOMPARE(row.debridProvider, DebridProvider::RealDebrid);
+        QVERIFY(row.debridCached);
+    }
+
+    void debridTag_RDDownload_setsProviderAndNotCached()
+    {
+        // Fixture row 2: "Torrentio\n720p [RD download]".
+        const auto doc = loadFixture("torrentio_stream_tt0133093.json");
+        const auto streams = stremio::parseStreams(doc);
+        const auto& row = streams.at(2);
+        QCOMPARE(row.debridProvider, DebridProvider::RealDebrid);
+        QVERIFY(!row.debridCached);
+    }
+
+    void debridTag_absentLeavesNoneAndNotCached()
+    {
+        // Fixture row 0: "Torrentio\n1080p" — no debrid tag.
+        const auto doc = loadFixture("torrentio_stream_tt0133093.json");
+        const auto streams = stremio::parseStreams(doc);
+        const auto& row = streams.at(0);
+        QCOMPARE(row.debridProvider, DebridProvider::None);
+        QVERIFY(!row.debridCached);
+    }
+
+    void debridTag_ADCached_setsAllDebrid()
+    {
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "aa",
+                "name": "Torrentio\n2160p [AD+]",
+                "title": "Release.AD.Cached"
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.size(), 1);
+        QCOMPARE(streams.at(0).debridProvider,
+            DebridProvider::AllDebrid);
+        QVERIFY(streams.at(0).debridCached);
+    }
+
+    void debridTag_ADDownload_setsAllDebridUncached()
+    {
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "bb",
+                "name": "Torrentio\n1080p [AD download]",
+                "title": "Release.AD.Uncached"
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).debridProvider,
+            DebridProvider::AllDebrid);
+        QVERIFY(!streams.at(0).debridCached);
+    }
+
+    void debridTag_unsupportedProviderLeavesNone()
+    {
+        // Tags like `[PM+]` / `[TB+]` / `[OC+]` are recognised by
+        // the parser regex but the providers aren't wired into
+        // Kinema's domain enum yet. They must map back to None so
+        // the UI does not surface a badge we can't act on.
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "cc",
+                "name": "Torrentio\n4K [PM+]",
+                "title": "Some.Release"
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).debridProvider, DebridProvider::None);
+    }
+
+    void debridProvidersArray_realdebrid_setsCached()
+    {
+        // Peerflix-style structured signal: `providers` array on a
+        // debrid-resolved row. Cache state defaults to true — a row
+        // surfaced this way is already streamable through debrid.
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "dd",
+                "name": "Peerflix\n1080p",
+                "description": "Some.Release",
+                "providers": ["realdebrid", "offcloud"]
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).debridProvider,
+            DebridProvider::RealDebrid);
+        QVERIFY(streams.at(0).debridCached);
+    }
+
+    void debridProvidersArray_alldebrid_setsCached()
+    {
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "ee",
+                "name": "Peerflix\n720p",
+                "description": "Some.Release",
+                "providers": ["alldebrid"]
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).debridProvider,
+            DebridProvider::AllDebrid);
+        QVERIFY(streams.at(0).debridCached);
+    }
+
+    void debridProvidersArray_emptyLeavesNone()
+    {
+        // A row with no debrid tag and no `providers` entry must
+        // leave the new fields at their defaults so plain torrent
+        // rows don't render a phantom badge.
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "ff",
+                "name": "Peerflix\n1080p",
+                "description": "Plain.Torrent.Row"
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).debridProvider, DebridProvider::None);
+        QVERIFY(!streams.at(0).debridCached);
+    }
 };
 
 QTEST_APPLESS_MAIN(TstStremioStreamParse)

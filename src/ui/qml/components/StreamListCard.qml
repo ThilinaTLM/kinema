@@ -49,6 +49,15 @@ BaseListCard {
     property bool hasMagnet: false
     property bool hasDirectUrl: false
     property string resolution
+    /// Persistence token from `domain::providerToString`:
+    /// "none" / "realdebrid" / "alldebrid". Anything else is
+    /// treated as "none" so unknown providers don't show a badge.
+    property string debridProvider: "none"
+    /// True when the upstream indexer signalled the row is already
+    /// cached on the debrid account. Drives the badge tone
+    /// (positive vs neutral). Only meaningful when
+    /// `debridProvider != "none"`.
+    property bool debridCached: false
 
     /// View-model exposing the row action slots. Defaults to the
     /// movie detail VM; the series page rebinds it.
@@ -86,6 +95,28 @@ BaseListCard {
         caption: (card.sizeText && card.sizeText.length > 0)
             ? card.sizeText
             : card._emDash
+
+        // Debrid corner badge: "RD" / "AD" overlaid on the tile,
+        // tinted positive when cached and neutral otherwise.
+        // Rows without a debrid signal leave `badgeText` empty
+        // and the tile renders exactly as before.
+        badgeText: card.debridProvider === "realdebrid" ? "RD"
+            : card.debridProvider === "alldebrid" ? "AD"
+            : ""
+        badgeTone: card.debridCached ? "positive" : "neutral"
+        badgeTooltip: card.debridProvider === "realdebrid"
+            ? (card.debridCached
+                ? i18nc("@info:tooltip debrid cache state",
+                    "Real-Debrid · cached (instant playback)")
+                : i18nc("@info:tooltip debrid cache state",
+                    "Real-Debrid · not cached (will be queued in your account)"))
+            : card.debridProvider === "alldebrid"
+                ? (card.debridCached
+                    ? i18nc("@info:tooltip debrid cache state",
+                        "AllDebrid · cached (instant playback)")
+                    : i18nc("@info:tooltip debrid cache state",
+                        "AllDebrid · not cached (will be queued in your account)"))
+                : ""
     }
 
     // Line 1: release name. Foreground / Medium so it reads as the
