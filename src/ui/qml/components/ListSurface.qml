@@ -47,11 +47,11 @@ Item {
     property var model
     property Component delegate
 
-    property int listSpacing: Theme.listRowSpacing
+    property int listSpacing: 0
     property int listLeftMargin: Theme.pageMargin
     property int listRightMargin: Theme.pageMargin
     property int listTopMargin: Theme.inlineSpacing
-    property int listBottomMargin: Theme.groupSpacing
+    property int listBottomMargin: Theme.pageBottomSpacing
     property int currentIndex: -1
     property int cacheBuffer: Kirigami.Units.gridUnit * 20
 

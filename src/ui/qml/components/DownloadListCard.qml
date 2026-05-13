@@ -12,26 +12,34 @@ import dev.tlmtech.kinema.app
 // the row chrome, hover / selection styling, padding, width, and
 // right-click signalling. The chassis' hover-revealed
 // `navigationHint` chevron carries this row's "tap to open detail"
-// affordance.
+// affordance. The chassis also paints the row's progress bar
+// (`card.progress`) between the body and the trailing action row
+// so the body never has to host the bar itself.
 //
-// Body, in priority order:
-//   1. Title block — primary line "Series · SxxEyy" or movie title;
-//      secondary line is the episode title (hidden for movies).
-//   2. Chip rail (uniform pill rhythm): State · Quality · Backend
-//      with the live download rate in the trailing slot.
-//   3. Stat strip with progress bar + "<percent> · <cached/total> ·
-//      ETA <eta>" on a single caption line (active only).
-//   4. Final size on a single caption line (completed only).
-//   5. Attribution: "via <provider> · <release name>" plus
-//      peers/seeds for active torrent rows.
-//   6. Inline error message (failed only).
+// Body is a fixed 3-line column — the same shape in every state,
+// so the row's height doesn't jitter as a download transitions
+// between Queued → Active → Completed → Failed:
 //
-// Action rail (right side):
+//   1. Title       — `Series · SxxEyy · Episode Title` for series,
+//                    plain movie title otherwise. Left-aligned,
+//                    elides on narrow rows; hover tooltip surfaces
+//                    the full string.
+//   2. Chip rail   — `State · Quality · Backend` left-aligned, with
+//                    the state-specific status one-liner (`38% ·
+//                    540 MB / 1.4 GB · ETA 3 min`, `Saved`,
+//                    `⚠ Tracker timed out…`, etc.) and the live
+//                    download rate appended in the rail's trailing
+//                    slot — all on one left-aligned row.
+//   3. Attribution — `via <provider> · <release name>` plus
+//                    peers/seeds for active torrent rows; falls
+//                    back to `Unknown source` so the body keeps
+//                    its fixed line count.
+//
+// Action rail (trailing slot, rendered as its own line below the
+// body by the chassis):
 //   * Primary slot — `[▶ Play]` (Completed), `[↻ Retry]` (Failed),
-//     `[▶ Resume]` icon-only (Paused), `[⏸]` icon-only (Active /
-//     Idle / Resolving / Queued). Hidden for Cancelled. The slot
-//     has a fixed width so the overflow column doesn't shift
-//     between rows.
+//     `[▶ Resume]` (Paused), `[⏸ Pause]` (Active / Idle /
+//     Resolving / Queued). Hidden for Cancelled.
 //   * Overflow button — same menu as the chassis' right-click
 //     context menu.
 BaseListCard {
@@ -95,29 +103,86 @@ BaseListCard {
         ? progressFraction
         : -1
 
-    readonly property string _primaryTitle: {
+    // Headline — single bold line. For series we fold the episode
+    // title into the headline (`Series · S04E07 · Something
+    // Unforgivable`) so the body keeps its fixed line count; long
+    // strings elide and the chassis' truncation tooltip surfaces
+    // the full text on hover.
+    readonly property string _headlineText: {
         if (card.kind === card.kindSeries
             && card.season >= 0 && card.episode >= 0) {
             const head = card.seriesTitle.length > 0
                 ? card.seriesTitle
                 : card.title;
-            return i18nc("@title download row, series \u00b7 SxxEyy",
+            const base = i18nc("@title download row, series \u00b7 SxxEyy",
                 "%1 \u00b7 S%2E%3",
                 head, card._pad2(card.season),
                 card._pad2(card.episode));
+            if (card.episodeTitle.length > 0) {
+                return i18nc(
+                    "@title download row, series-ep \u00b7 episode title",
+                    "%1 \u00b7 %2", base, card.episodeTitle);
+            }
+            return base;
         }
         return card.title;
     }
-    readonly property string _secondaryTitle: {
-        if (card.kind === card.kindSeries
-            && card.episodeTitle.length > 0) {
-            return card.episodeTitle;
-        }
-        return "";
-    }
+
     readonly property string _qualityChipText: card.qualityLabel.length > 0
         ? card.qualityLabel
         : card.resolution
+
+    // Status caption — one line, content depends on state. Failed
+    // rows are coloured `Theme.negative` and prefixed with `⚠` so
+    // the line acts as the row's error surface (replaces the
+    // separate Kirigami.InlineMessage the body used to host).
+    readonly property string _statusText: {
+        switch (card.state) {
+        case card.stateQueued:
+            return i18nc("@label download status",
+                "Waiting in queue");
+        case card.stateResolving:
+            return i18nc("@label download status",
+                "Resolving stream sources\u2026");
+        case card.stateActive: {
+            const parts = [];
+            if (card.progressText.length > 0)
+                parts.push(card.progressText);
+            if (card.sizeText.length > 0)
+                parts.push(card.sizeText);
+            if (card.etaText.length > 0)
+                parts.push(i18nc("@label download eta",
+                    "ETA %1", card.etaText));
+            return parts.length > 0
+                ? parts.join(" \u00b7 ")
+                : i18nc("@label download status", "Downloading\u2026");
+        }
+        case card.stateIdle: {
+            const head = i18nc("@label download status", "Stalled");
+            return card.sizeText.length > 0
+                ? head + " \u00b7 " + card.sizeText
+                : head;
+        }
+        case card.statePaused: {
+            const head = i18nc("@label download status", "Paused");
+            return card.sizeText.length > 0
+                ? head + " \u00b7 " + card.sizeText
+                : head;
+        }
+        case card.stateCompleted:
+            return card.sizeText.length > 0
+                ? i18nc("@label download status, saved + final size",
+                    "Saved \u00b7 %1", card.sizeText)
+                : i18nc("@label download status", "Saved");
+        case card.stateFailed:
+            return "\u26a0 " + (card.errorText.length > 0
+                ? card.errorText
+                : i18nc("@label download status", "Failed"));
+        case card.stateCancelled:
+            return i18nc("@label download status", "Cancelled");
+        }
+        return "";
+    }
 
     readonly property string _attributionText: {
         const parts = [];
@@ -154,6 +219,12 @@ BaseListCard {
     }
 
     enabled: card.imdbId.length > 0 || card.assetId.length > 0
+
+    // Hand the progress fraction to the chassis so its built-in
+    // row-level bar (between body and trailing) is the only bar on
+    // the row. The chassis hides it automatically when `progress`
+    // falls outside (0, 1), which covers Queued / Completed / etc.
+    progress: card._progress
 
     // Hover-revealed chevron + tooltip via the chassis. Replaces the
     // inline QQC2.ToolTip the old DownloadRow carried.
@@ -224,28 +295,26 @@ BaseListCard {
         }
     }
 
-    // Body (default slot).
+    // Body (default slot) — fixed 3-line column.
+
+    // Line 1: title. Left-aligned bold headline; elides on narrow
+    // rows and surfaces the full string via the chassis tooltip.
     QQC2.Label {
         Layout.fillWidth: true
         elide: Text.ElideRight
-        text: card._primaryTitle
+        text: card._headlineText
         font.weight: Font.DemiBold
         color: Theme.foreground
         onTruncatedChanged: card.titleTooltip
             = truncated ? text : ""
     }
 
-    QQC2.Label {
-        Layout.fillWidth: true
-        visible: card._secondaryTitle.length > 0
-        text: card._secondaryTitle
-        wrapMode: Text.NoWrap
-        elide: Text.ElideRight
-        font.pointSize: Theme.captionFont.pointSize
-        color: Theme.disabled
-    }
-
-    // Chip rail: State · Quality · Backend + live rate in trailing.
+    // Line 2: chip rail (State · Quality · Backend) followed by
+    // the state-specific status caption and the live download
+    // rate, all in the rail's trailing slot so they sit on the
+    // same left-aligned row. Status Label recolours to
+    // `Theme.negative` on failed rows (the `⚠` prefix is baked
+    // into `_statusText`).
     RowChipRail {
         Layout.fillWidth: true
         chips: [
@@ -266,6 +335,16 @@ BaseListCard {
         ]
 
         QQC2.Label {
+            visible: card._statusText.length > 0
+            text: card._statusText
+            elide: Text.ElideRight
+            font.pointSize: Theme.captionFont.pointSize
+            color: card.state === card.stateFailed
+                ? Theme.negative
+                : Theme.disabled
+        }
+
+        QQC2.Label {
             visible: !card.complete
                 && card.downloadRateText.length > 0
             text: card.downloadRateText
@@ -274,74 +353,25 @@ BaseListCard {
         }
     }
 
-    // Progress bar + stat strip (active only).
-    RowLayout {
-        Layout.fillWidth: true
-        spacing: Kirigami.Units.largeSpacing
-        visible: card._progress >= 0 && !card.complete
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.smallSpacing
-            radius: height / 2
-            color: Qt.alpha(Theme.foreground, 0.14)
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: parent.width
-                    * Math.max(0, Math.min(1, card._progress))
-                radius: parent.radius
-                color: Theme.accent
-            }
-        }
-
-        QQC2.Label {
-            text: {
-                const parts = [];
-                if (card.progressText.length > 0)
-                    parts.push(card.progressText);
-                if (card.sizeText.length > 0)
-                    parts.push(card.sizeText);
-                if (card.etaText.length > 0)
-                    parts.push(i18nc("@label download eta",
-                        "ETA %1", card.etaText));
-                return parts.join(" \u00b7 ");
-            }
-            visible: text.length > 0
-            color: Theme.disabled
-            font.pointSize: Theme.captionFont.pointSize
-        }
-    }
-
+    // Line 3: attribution — always present so the body keeps its
+    // fixed line count. Falls back to a generic source string when
+    // no provider / release name is known.
     QQC2.Label {
         Layout.fillWidth: true
-        visible: card.complete && card.sizeText.length > 0
-        text: card.sizeText
-        color: Theme.disabled
-        font.pointSize: Theme.captionFont.pointSize
-    }
-
-    QQC2.Label {
-        Layout.fillWidth: true
-        visible: card._attributionText.length > 0
-        text: card._attributionText
+        text: card._attributionText.length > 0
+            ? card._attributionText
+            : i18nc("@label download attribution unknown",
+                "Unknown source")
         elide: Text.ElideRight
         font.pointSize: Theme.captionFont.pointSize
         color: Theme.disabled
     }
 
-    Kirigami.InlineMessage {
-        Layout.fillWidth: true
-        visible: card.errorText.length > 0
-        type: Kirigami.MessageType.Error
-        text: card.errorText
-    }
-
-    // Action row: contextual primary + overflow. The action row
-    // lives below the body, so the buttons get their own line,
-    // left-aligned with the rest of the right column.
+    // Action row: contextual primary + overflow. Both use
+    // `QQC2.Button` (the filled, framed style) so they share the
+    // same chrome, padding, and baseline; the overflow keeps its
+    // icon-only display and so just renders as a square-ish
+    // button matching the primary's height.
     trailing: RowLayout {
         spacing: Kirigami.Units.smallSpacing
 
@@ -355,8 +385,6 @@ BaseListCard {
                 card.state === card.statePaused
             readonly property bool isCompleted:
                 card.state === card.stateCompleted
-
-            flat: !isCompleted && !isFailed
 
             icon.source: AppIcons.url(isFailed
                 ? "refresh-cw"
@@ -386,7 +414,7 @@ BaseListCard {
             }
         }
 
-        QQC2.ToolButton {
+        QQC2.Button {
             icon.source: AppIcons.url("ellipsis-vertical")
             icon.color: AppIcons.controlColor(enabled, false)
             text: i18nc("@action:button overflow", "More")

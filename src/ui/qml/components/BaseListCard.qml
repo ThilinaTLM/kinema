@@ -38,9 +38,12 @@ import dev.tlmtech.kinema.app
 //                  Rendered as a row *below* the body, not to the
 //                  right of it. Collapses when empty.
 //
-// Chassis padding equals `Theme.pageMargin` on all four sides, so the
-// leading element sits at the same distance from the card's top,
-// left, and bottom edges.
+// Chassis padding is asymmetric: `Theme.pageMargin` left/right keeps
+// the leading element clear of the rounded card edge, while
+// `Theme.groupSpacing` top/bottom keeps row height tight so adjacent
+// rows don't drift apart from internal padding alone. The leading
+// thumbnail is therefore equidistant only from the left edge; its
+// top/bottom inset is the smaller vertical padding.
 QQC2.ItemDelegate {
     id: card
 
@@ -94,7 +97,10 @@ QQC2.ItemDelegate {
         ? ListView.view.width - ListView.view.leftMargin
             - ListView.view.rightMargin
         : implicitWidth
-    padding: Theme.pageMargin
+    leftPadding:   Theme.pageMargin
+    rightPadding:  Theme.pageMargin
+    topPadding:    Theme.groupSpacing
+    bottomPadding: Theme.groupSpacing
 
     onDoubleClicked: card.activated()
     Keys.onReturnPressed: card.activated()
