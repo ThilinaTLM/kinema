@@ -114,13 +114,33 @@ Item {
                 clip: true
                 spacing: surface.listSpacing
                 leftMargin: surface.listLeftMargin
+                // Reserve a gutter equal to the scrollbar's width
+                // plus a small breathing-space pad when it's
+                // visible, so card content shifts left to sit
+                // beside (not under, not flush against) the
+                // overlay scrollbar. Keeps the visual left/right
+                // padding around delegates symmetric whether the
+                // bar is shown or hidden. `vbar.visible` already
+                // encodes the AsNeeded / AlwaysOn policy decision.
                 rightMargin: surface.listRightMargin
+                    + (vbar.visible
+                        ? vbar.width + Kirigami.Units.smallSpacing
+                        : 0)
                 topMargin: surface.listTopMargin
                 bottomMargin: surface.listBottomMargin
                 cacheBuffer: surface.cacheBuffer
                 currentIndex: surface.currentIndex
                 boundsBehavior: Flickable.StopAtBounds
                 delegate: surface.delegate
+
+                // Page-level scrollbar. Matches the overlay
+                // scrollbar Kirigami.ScrollablePage installs via
+                // ScrollView on detail pages; AsNeeded keeps it
+                // hidden until the list overflows.
+                QQC2.ScrollBar.vertical: QQC2.ScrollBar {
+                    id: vbar
+                    policy: QQC2.ScrollBar.AsNeeded
+                }
 
                 section.property: surface.sectionProperty
                 section.criteria: surface.sectionCriteria
