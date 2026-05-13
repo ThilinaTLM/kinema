@@ -105,12 +105,22 @@ BaseListCard {
                 : ""
     }
 
-    // Line 2: unified meta row. Four zones, separated by
-    // `largeSpacing` whitespace only — no inter-zone middots, so
-    // the eye reads the line as chunks rather than a flat dot-
-    // separated chain. Within the tech summary the middots are
-    // already baked into `summaryLine`, which is the only zone
-    // that carries a within-zone rhythm.
+    // Line 2: unified meta row. Four zones — chips, tech summary,
+    // provider, seeders — separated by inter-zone whitespace
+    // only, no middots, so unlike kinds of metadata aren't glued
+    // into a single dot-separated chain.
+    //
+    // Implementation note: every visible item is a *direct* child
+    // of this `RowLayout` and carries `Layout.alignment:
+    // Qt.AlignVCenter` so they share a single vertical-center axis.
+    // The earlier version wrapped the seeders icon + count in a
+    // nested `RowLayout` for tight icon-number spacing; that
+    // introduced a two-level center hierarchy whose inner items
+    // ended up rendering off the sibling labels' baseline. Instead,
+    // the row uses tight `inlineSpacing` throughout and explicit
+    // `zoneGap`-wide `Item` spacers separate the zones, so the
+    // icon and count sit next to each other naturally without a
+    // nested layout.
     RowLayout {
         readonly property bool hasTags:
             card.tags && card.tags.length > 0
@@ -119,9 +129,10 @@ BaseListCard {
         readonly property bool hasProvider:
             card.provider && card.provider.length > 0
         readonly property bool hasSeeders: card.seeders >= 0
+        readonly property int zoneGap: Kirigami.Units.largeSpacing
 
         Layout.fillWidth: true
-        spacing: Kirigami.Units.largeSpacing
+        spacing: Theme.inlineSpacing
 
         // Zone (a): tag chips.
         RowChipRail {
@@ -141,11 +152,17 @@ BaseListCard {
             }
         }
 
+        // Zone separator (a) → (b): only visible when both adjacent
+        // zones are present.
+        Item {
+            visible: parent.hasTags && parent.hasSummary
+            Layout.preferredWidth: parent.zoneGap
+                - parent.spacing * 2
+            Layout.preferredHeight: 1
+        }
+
         // Zone (b): tech summary, caption/disabled. Elides right
-        // when the row narrows. `Layout.alignment` is set
-        // explicitly because QtQuick.Layouts defaults children to
-        // top-aligned, which would drop this label off the row's
-        // vertical center against the chip rail and seeders icon.
+        // when the row narrows.
         QQC2.Label {
             Layout.alignment: Qt.AlignVCenter
             visible: parent.hasSummary
@@ -155,6 +172,15 @@ BaseListCard {
             font.pointSize: Theme.captionFont.pointSize
             color: Theme.disabled
             verticalAlignment: Text.AlignVCenter
+        }
+
+        // Zone separator (b) → (c).
+        Item {
+            visible: (parent.hasTags || parent.hasSummary)
+                && parent.hasProvider
+            Layout.preferredWidth: parent.zoneGap
+                - parent.spacing * 2
+            Layout.preferredHeight: 1
         }
 
         // Zone (c): provider name, caption/disabled. Plain text
@@ -168,42 +194,44 @@ BaseListCard {
             verticalAlignment: Text.AlignVCenter
         }
 
-        // Zone (d): seeders. Icon as the implicit qualifier, plain
-        // number alongside (no "seeders" suffix, regular weight —
-        // matches the rest of the caption-toned line). Wrapped in a
-        // RowLayout so the icon and number stay tight; the outer
-        // largeSpacing only separates the cluster from zone (c).
-        // The inner icon and label both carry an explicit
-        // `Layout.alignment: Qt.AlignVCenter` so they share a
-        // vertical center inside the nested layout — without it,
-        // QtQuick.Layouts would top-align them and the label would
-        // drop below the sibling labels' baseline.
-        RowLayout {
-            visible: parent.hasSeeders
-            spacing: Theme.inlineSpacing
-            Layout.alignment: Qt.AlignVCenter
+        // Zone separator (c) → (d).
+        Item {
+            visible: (parent.hasTags || parent.hasSummary
+                || parent.hasProvider) && parent.hasSeeders
+            Layout.preferredWidth: parent.zoneGap
+                - parent.spacing * 2
+            Layout.preferredHeight: 1
+        }
 
-            Kirigami.Icon {
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                Layout.preferredHeight: width
-                source: AppIcons.url("users")
-                color: Theme.disabled
-            }
-            QQC2.Label {
-                Layout.alignment: Qt.AlignVCenter
-                text: card.seeders
-                font.pointSize: Theme.captionFont.pointSize
-                color: Theme.disabled
-                verticalAlignment: Text.AlignVCenter
-                QQC2.ToolTip.text: i18ncp(
-                    "@info:tooltip swarm seeders",
-                    "%1 seeder", "%1 seeders", card.seeders)
-                QQC2.ToolTip.visible: hovered
-                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                HoverHandler { id: seedersHover }
-                property bool hovered: seedersHover.hovered
-            }
+        // Zone (d), part 1: users icon. Same vertical-center axis
+        // as every other item on the line. Sized down from the
+        // standard `iconSizes.small` so the icon reads as inline
+        // chrome next to the caption-sized count rather than as
+        // its own visual feature.
+        Kirigami.Icon {
+            Layout.alignment: Qt.AlignVCenter
+            visible: parent.hasSeeders
+            Layout.preferredWidth:
+                Math.round(Kirigami.Units.iconSizes.small * 0.8)
+            Layout.preferredHeight: width
+            source: AppIcons.url("users")
+            color: Theme.disabled
+        }
+
+        // Zone (d), part 2: seeders count.
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: parent.hasSeeders
+            text: card.seeders
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+            QQC2.ToolTip.text: i18ncp(
+                "@info:tooltip swarm seeders",
+                "%1 seeder", "%1 seeders", card.seeders)
+            QQC2.ToolTip.visible: seedersHover.hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            HoverHandler { id: seedersHover }
         }
 
         // Trailing fill absorbs slack so the meta row stays packed
