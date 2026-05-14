@@ -47,6 +47,11 @@ public:
     std::optional<domain::DownloadItem> findForKey(
         const domain::PlaybackKey& key) const;
 
+    /// Single-row fetch for the hot path: view-models bind to
+    /// `DownloadManager::itemChanged(assetId)` and re-read just
+    /// that one row instead of doing a full `loadAll()` per tick.
+    std::optional<domain::DownloadItem> find(const QString& assetId) const;
+
     /// Snapshot of asset ids that currently have a player attached;
     /// used by the view-model to compute `hasPlayerAttached` per row.
     QSet<QString> attachedPlayerAssetIds() const;
@@ -74,7 +79,16 @@ public Q_SLOTS:
     void pin(const QString& assetId, bool on);
 
 Q_SIGNALS:
+    /// Structural change to the list (insert / remove / reorder).
+    /// Forwarded from `DownloadStore::changed`, which is already
+    /// coalesced via the store's single-shot scheduler.
     void changed();
+
+    /// In-place mutation of a single row — progress, live stats,
+    /// state, error, etc. View-models translate this into a
+    /// `dataChanged` on the affected row instead of a full reset.
+    void itemChanged(const QString& assetId);
+
     void statusMessage(const QString& text, int timeoutMs);
 
 private:

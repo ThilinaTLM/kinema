@@ -94,9 +94,57 @@ BaseListCard {
     readonly property int stateFailed: 6
     readonly property int stateCancelled: 7
 
+    // domain::DownloadMode integer values.
+    readonly property int modeOnDemand: 0
+    readonly property int modeFull: 1
+
     // domain::MediaKind: 0 = movie, 1 = series.
     readonly property int kindMovie: 0
     readonly property int kindSeries: 1
+
+    // ---- Primary-action kind ------------------------------------
+    // Derived once from (state, mode, hasPlayerAttached, canUpgrade)
+    // and consumed by the button below. Centralising the decision
+    // here keeps the destructive-while-playing guards in one place
+    // and prevents "Pause" from being offered when pausing would
+    // starve the embedded player attached to this row.
+    readonly property int primaryNone:    0
+    readonly property int primaryPause:   1
+    readonly property int primaryResume:  2
+    readonly property int primaryPlay:    3
+    readonly property int primaryRetry:   4
+    readonly property int primaryKeep:    5
+
+    readonly property int _primaryKind: {
+        switch (card.state) {
+        case card.stateCancelled:
+        case card.stateResolving:
+            return card.primaryNone;
+        case card.stateFailed:
+            return card.primaryRetry;
+        case card.statePaused:
+            return card.primaryResume;
+        case card.stateCompleted:
+            return card.primaryPlay;
+        case card.stateIdle:
+            return card.canUpgrade
+                ? card.primaryKeep
+                : card.primaryNone;
+        case card.stateQueued:
+            return card.primaryPause;
+        case card.stateActive:
+            // Pausing while a player is consuming the asset
+            // (OnDemand stream, or Full-with-player) would break
+            // playback. Surface "Play" instead — it re-invokes the
+            // play pipeline, which short-circuits to the existing
+            // session / cache. The Full+player case can still pause
+            // via the overflow menu, with a confirm dialog.
+            return card.hasPlayerAttached
+                ? card.primaryPlay
+                : card.primaryPause;
+        }
+        return card.primaryNone;
+    }
 
     readonly property real _progress: progressFraction !== undefined
         && progressFraction !== null
@@ -377,39 +425,67 @@ BaseListCard {
 
         QQC2.Button {
             id: primaryButton
-            visible: card.state !== card.stateCancelled
+            visible: card._primaryKind !== card.primaryNone
 
-            readonly property bool isFailed:
-                card.state === card.stateFailed
-            readonly property bool isPaused:
-                card.state === card.statePaused
-            readonly property bool isCompleted:
-                card.state === card.stateCompleted
+            readonly property string _iconName: {
+                switch (card._primaryKind) {
+                case card.primaryPause:  return "pause";
+                case card.primaryResume: return "play";
+                case card.primaryPlay:   return "play";
+                case card.primaryRetry:  return "refresh-cw";
+                case card.primaryKeep:   return "download";
+                }
+                return "";
+            }
+            readonly property string _label: {
+                switch (card._primaryKind) {
+                case card.primaryPause:
+                    return i18nc("@action:button pause this download",
+                        "Pause");
+                case card.primaryResume:
+                    return i18nc("@action:button resume this download",
+                        "Resume");
+                case card.primaryPlay:
+                    return i18nc("@action:button send asset to player",
+                        "Play");
+                case card.primaryRetry:
+                    return i18nc("@action:button retry a failed download",
+                        "Retry");
+                case card.primaryKeep:
+                    return i18nc("@action:button keep this asset "
+                        + "(promote OnDemand to Full+Pinned)",
+                        "Keep");
+                }
+                return "";
+            }
 
-            icon.source: AppIcons.url(isFailed
-                ? "refresh-cw"
-                : (isPaused || isCompleted ? "play" : "pause"))
+            icon.source: AppIcons.url(_iconName)
             icon.color: AppIcons.controlColor(enabled, false)
-            text: isFailed
-                ? i18nc("@action:button retry a failed download",
-                    "Retry")
-                : (isCompleted
-                    ? i18nc(
-                        "@action:button play the cached file",
-                        "Play")
-                    : (isPaused
-                        ? i18nc("@action:button", "Resume")
-                        : i18nc("@action:button", "Pause")))
+            text: _label
             display: QQC2.AbstractButton.TextBesideIcon
+            // Surface the "show in player" semantic for the
+            // hasPlayer Active case where Play actually focuses the
+            // existing playback instead of starting fresh.
+            QQC2.ToolTip.text: (card._primaryKind === card.primaryPlay
+                    && card.state === card.stateActive
+                    && card.hasPlayerAttached)
+                ? i18nc("@info:tooltip currently playing in player",
+                    "Show in player")
+                : _label
+            QQC2.ToolTip.visible: hovered && QQC2.ToolTip.text.length > 0
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             onClicked: {
-                if (isCompleted) {
-                    downloadsVm.playDownload(card.assetId);
-                } else if (isFailed) {
-                    downloadsVm.retry(card.assetId);
-                } else if (isPaused) {
-                    downloadsVm.resumeDownload(card.assetId);
-                } else {
-                    downloadsVm.pauseDownload(card.assetId);
+                switch (card._primaryKind) {
+                case card.primaryPause:
+                    downloadsVm.pauseDownload(card.assetId); break;
+                case card.primaryResume:
+                    downloadsVm.resumeDownload(card.assetId); break;
+                case card.primaryPlay:
+                    downloadsVm.playDownload(card.assetId); break;
+                case card.primaryRetry:
+                    downloadsVm.retry(card.assetId); break;
+                case card.primaryKeep:
+                    downloadsVm.upgradeToFull(card.assetId); break;
                 }
             }
         }
@@ -426,6 +502,18 @@ BaseListCard {
         }
     }
 
+    // Overflow menu — short, distinct verbs.
+    //
+    //   Play       → play the cached file (only when complete)
+    //   Open folder→ reveal `localDir` in the file manager
+    //   Pin / Unpin→ toggle eviction policy; Pin also covers the
+    //                OnDemand → Full + Pinned upgrade
+    //   Pause      → only visible for Full+hasPlayer (Active), where
+    //                the primary slot is taken by "Play". Confirms
+    //                first since pausing will starve the player.
+    //   Stop       → stop the in-flight transfer (was "Cancel")
+    //   Remove     → remove the row, keep files on disk
+    //   Delete     → remove the row + delete files (confirm)
     QQC2.Menu {
         id: rowMenu
 
@@ -447,15 +535,13 @@ BaseListCard {
             enabled: card.localDir.length > 0
             onTriggered: downloadsVm.openLocalDir(card.assetId)
         }
-        // "Keep file" covers two paths into Pinned: the OnDemand
-        // → Full + Pinned upgrade (`canUpgrade` && !complete) and
-        // the already-Full-but-ephemeral re-pin. Both end at the
-        // same observable state, so we surface a single label.
         QQC2.MenuItem {
-            text: i18nc("@action:inmenu mark this download as "
-                + "user-requested so eviction skips it",
-                "Keep file")
-            icon.source: AppIcons.url("download")
+            // Pin: save this download so eviction skips it. Also
+            // covers the OnDemand → Full + Pinned upgrade.
+            text: i18nc("@action:inmenu save this download "
+                + "(also upgrades OnDemand to Full+Pinned)",
+                "Pin")
+            icon.source: AppIcons.url("pin")
             icon.color: AppIcons.controlColor(enabled, false)
             visible: !card.pinned
                 && (card.canUpgrade || card.complete)
@@ -469,47 +555,126 @@ BaseListCard {
             }
         }
         QQC2.MenuItem {
-            text: i18nc("@action:inmenu let cache eviction reclaim "
-                + "this download when needed",
-                "Allow eviction")
+            text: i18nc("@action:inmenu allow auto-eviction",
+                "Unpin")
             icon.source: AppIcons.url("circle-dashed")
             icon.color: AppIcons.controlColor(enabled, false)
             visible: card.pinned
             height: visible ? implicitHeight : 0
             onTriggered: downloadsVm.pin(card.assetId, false)
         }
+        // Full+hasPlayer Pause lives only in the menu (primary slot
+        // is "Play" so we don't offer Pause inline while a player
+        // is attached). Confirm before pausing — the playback will
+        // starve once the player catches up to cached bytes.
+        QQC2.MenuItem {
+            text: i18nc("@action:inmenu pause this download",
+                "Pause")
+            icon.source: AppIcons.url("pause")
+            icon.color: AppIcons.controlColor(enabled, false)
+            visible: card.state === card.stateActive
+                && card.mode === card.modeFull
+                && card.hasPlayerAttached
+            height: visible ? implicitHeight : 0
+            onTriggered: pauseWhilePlayingConfirm.open()
+        }
         QQC2.MenuSeparator { }
         QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Cancel")
+            text: i18nc("@action:inmenu stop the in-flight transfer",
+                "Stop")
             icon.source: AppIcons.url("x")
             icon.color: AppIcons.controlColor(enabled, false)
             enabled: card.state !== card.stateCompleted
                 && card.state !== card.stateFailed
                 && card.state !== card.stateCancelled
-            onTriggered: downloadsVm.cancel(card.assetId)
+            onTriggered: {
+                if (card.hasPlayerAttached) {
+                    stopWhilePlayingConfirm.open();
+                } else {
+                    downloadsVm.cancel(card.assetId);
+                }
+            }
         }
         QQC2.MenuItem {
-            text: i18nc("@action:inmenu",
-                "Remove from list (keep files)")
+            text: i18nc("@action:inmenu remove the row, keep files",
+                "Remove")
             icon.source: AppIcons.url("list-x")
             icon.color: AppIcons.controlColor(enabled, false)
             onTriggered: downloadsVm.remove(card.assetId, false)
         }
         QQC2.MenuItem {
-            text: i18nc("@action:inmenu",
-                "Remove and delete files")
+            text: i18nc("@action:inmenu remove the row and delete "
+                + "the cached files",
+                "Delete")
             icon.source: AppIcons.url("trash-2", AppIcons.negative)
             onTriggered: deleteConfirm.open()
         }
     }
 
+    // Pause-while-playing confirmation (Full+hasPlayer only).
+    Kirigami.PromptDialog {
+        id: pauseWhilePlayingConfirm
+        title: i18nc("@title:dialog", "Pause download?")
+        subtitle: i18nc("@info confirm pause while player attached",
+            "The player is currently reading from this download. "
+            + "Pausing will let it run until it catches up to the "
+            + "cached bytes, then playback will buffer-starve.")
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18nc("@action:button", "Cancel")
+                onTriggered: pauseWhilePlayingConfirm.close()
+            },
+            Kirigami.Action {
+                text: i18nc("@action:button pause anyway", "Pause")
+                icon.source: AppIcons.url("pause")
+                onTriggered: {
+                    downloadsVm.pauseDownload(card.assetId);
+                    pauseWhilePlayingConfirm.close();
+                }
+            }
+        ]
+    }
+
+    // Stop-while-playing confirmation. For OnDemand+hasPlayer this
+    // also ends playback; for Full+hasPlayer the cached bytes
+    // remain and playback continues until they run out.
+    Kirigami.PromptDialog {
+        id: stopWhilePlayingConfirm
+        title: i18nc("@title:dialog", "Stop transfer?")
+        subtitle: i18nc("@info confirm stop while player attached",
+            "The player is currently reading from this download. "
+            + "Stopping the transfer will end playback once the "
+            + "player runs out of cached bytes.")
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18nc("@action:button", "Cancel")
+                onTriggered: stopWhilePlayingConfirm.close()
+            },
+            Kirigami.Action {
+                text: i18nc("@action:button stop anyway", "Stop")
+                icon.source: AppIcons.url("x")
+                onTriggered: {
+                    downloadsVm.cancel(card.assetId);
+                    stopWhilePlayingConfirm.close();
+                }
+            }
+        ]
+    }
+
     Kirigami.PromptDialog {
         id: deleteConfirm
         title: i18nc("@title:dialog", "Delete cached files?")
-        subtitle: i18nc(
-            "@info confirm before destructive remove",
-            "Remove this download and delete its cached files? "
-            + "This cannot be undone.")
+        subtitle: card.hasPlayerAttached
+            ? i18nc("@info confirm delete while player attached",
+                "The player is currently reading from this download. "
+                + "Removing and deleting the cached files will end "
+                + "playback. This cannot be undone.")
+            : i18nc(
+                "@info confirm before destructive remove",
+                "Remove this download and delete its cached files? "
+                + "This cannot be undone.")
         standardButtons: Kirigami.Dialog.NoButton
         customFooterActions: [
             Kirigami.Action {

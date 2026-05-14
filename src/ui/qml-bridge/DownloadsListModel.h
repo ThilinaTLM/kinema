@@ -81,18 +81,48 @@ public:
     QVariant data(const QModelIndex& index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
+    /// Structural replacement. Rebuilds the row vector and the
+    /// `assetId -> row` index, then fires beginResetModel /
+    /// endResetModel. Use this for initial load, filter changes,
+    /// and insert/remove fan-out from the store.
     void setItems(QList<domain::DownloadItem> items,
         QHash<QString, LiveRow> liveStats = {},
         QSet<QString> attachedPlayers = {});
+
+    /// Per-row update for the persistent fields (state, progress,
+    /// error, etc.). Emits `dataChanged` for the affected row with
+    /// role hints scoped to the persistent role set. No reset, so
+    /// open popups parented to delegates survive.
+    void updateRow(const QString& assetId,
+        const domain::DownloadItem& item);
+
+    /// Per-row update for the transient live stats. Emits
+    /// `dataChanged` for the affected row with role hints scoped to
+    /// the live-stat role set. No reset.
+    void updateLiveStatsFor(const QString& assetId, const LiveRow& live);
+
+    /// Replace the attached-player set. Emits `dataChanged` for
+    /// every row whose attached-state actually flipped. No reset.
+    void updateAttachedPlayers(QSet<QString> attached);
+
     const QList<domain::DownloadItem>& items() const noexcept { return m_items; }
+    const QHash<QString, LiveRow>& liveStats() const noexcept { return m_liveStats; }
+    const QSet<QString>& attachedPlayers() const noexcept { return m_attachedPlayers; }
+
+    /// Returns the row index for `assetId`, or -1 if not in the
+    /// model.
+    int rowForAssetId(const QString& assetId) const;
 
 Q_SIGNALS:
     void countChanged();
 
 private:
+    void rebuildAssetIndex();
+
     QList<domain::DownloadItem> m_items;
     QHash<QString, LiveRow> m_liveStats;
     QSet<QString> m_attachedPlayers;
+    QHash<QString, int> m_assetIndex;
 };
 
 } // namespace kinema::ui::qml

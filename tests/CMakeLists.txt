@@ -358,6 +358,11 @@ ecm_add_test(tst_kinema_image_provider.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Quick
 )
 
+ecm_add_test(tst_downloads_list_model.cpp
+    TEST_NAME tst_downloads_list_model
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 if(KINEMA_ENABLE_MPV_EMBED)
     ecm_add_test(tst_player_view_model.cpp
         TEST_NAME tst_player_view_model
@@ -420,6 +425,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_discover_view_model tst_continue_watching_view_model
          tst_library_view_model tst_library_backfill
          tst_application_boot tst_kinema_image_provider
+         tst_downloads_list_model
          tst_download_store tst_download_manager
          tst_media_cache tst_local_media_server
          tst_torrent_lazy_start)

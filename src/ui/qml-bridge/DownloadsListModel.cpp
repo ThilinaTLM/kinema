@@ -344,8 +344,127 @@ void DownloadsListModel::setItems(QList<domain::DownloadItem> items,
     m_items = std::move(items);
     m_attachedPlayers = std::move(attachedPlayers);
     m_liveStats = std::move(liveStats);
+    rebuildAssetIndex();
     endResetModel();
     Q_EMIT countChanged();
+}
+
+int DownloadsListModel::rowForAssetId(const QString& assetId) const
+{
+    const auto it = m_assetIndex.constFind(assetId);
+    return it == m_assetIndex.constEnd() ? -1 : *it;
+}
+
+void DownloadsListModel::rebuildAssetIndex()
+{
+    m_assetIndex.clear();
+    m_assetIndex.reserve(m_items.size());
+    for (int i = 0; i < m_items.size(); ++i) {
+        m_assetIndex.insert(m_items.at(i).assetId, i);
+    }
+}
+
+namespace {
+
+// Roles that can change without the list shape changing. These
+// drive the per-row `dataChanged` hint when `DownloadManager`
+// reports an in-place mutation of a row's persistent fields.
+const QVector<int>& persistentRoles()
+{
+    static const QVector<int> roles {
+        DownloadsListModel::StateRole,
+        DownloadsListModel::StateTextRole,
+        DownloadsListModel::StateToneRole,
+        DownloadsListModel::ModeRole,
+        DownloadsListModel::ModeLabelRole,
+        DownloadsListModel::CanUpgradeRole,
+        DownloadsListModel::CanPauseRole,
+        DownloadsListModel::CanResumeRole,
+        DownloadsListModel::DispositionRole,
+        DownloadsListModel::IsPinnedRole,
+        DownloadsListModel::IsCompleteRole,
+        DownloadsListModel::ProgressFractionRole,
+        DownloadsListModel::ProgressTextRole,
+        DownloadsListModel::CachedSizeBytesRole,
+        DownloadsListModel::ExpectedSizeBytesRole,
+        DownloadsListModel::SizeTextRole,
+        DownloadsListModel::ErrorTextRole,
+        DownloadsListModel::LocalDirRole,
+        DownloadsListModel::SubtitleRole,
+    };
+    return roles;
+}
+
+// Roles that change every torrent stats tick / HTTP chunk write.
+// Kept disjoint from `persistentRoles()` so QML bindings that
+// only care about one or the other don't re-evaluate spuriously.
+const QVector<int>& liveRoles()
+{
+    static const QVector<int> roles {
+        DownloadsListModel::DownloadRateBpsRole,
+        DownloadsListModel::DownloadRateTextRole,
+        DownloadsListModel::PeersRole,
+        DownloadsListModel::SeedsRole,
+        DownloadsListModel::EtaSecondsRole,
+        DownloadsListModel::EtaTextRole,
+    };
+    return roles;
+}
+
+} // namespace
+
+void DownloadsListModel::updateRow(const QString& assetId,
+    const domain::DownloadItem& item)
+{
+    const int row = rowForAssetId(assetId);
+    if (row < 0) {
+        return;
+    }
+    m_items[row] = item;
+    const auto idx = index(row);
+    Q_EMIT dataChanged(idx, idx, persistentRoles());
+}
+
+void DownloadsListModel::updateLiveStatsFor(const QString& assetId,
+    const LiveRow& live)
+{
+    const int row = rowForAssetId(assetId);
+    if (row < 0) {
+        return;
+    }
+    m_liveStats.insert(assetId, live);
+    const auto idx = index(row);
+    Q_EMIT dataChanged(idx, idx, liveRoles());
+}
+
+void DownloadsListModel::updateAttachedPlayers(QSet<QString> attached)
+{
+    // Diff: emit dataChanged only for rows whose attached flag
+    // actually flipped. The `stateText` role can change because
+    // `Streaming` vs `Caching` is derived from `(state, mode,
+    // hasPlayer)`, so include both roles in the hint.
+    static const QVector<int> roles {
+        StateTextRole,
+        HasPlayerAttachedRole,
+    };
+    // Union of old and new sets gives every assetId that *could*
+    // have flipped; iterate that and check membership.
+    QSet<QString> candidates = m_attachedPlayers;
+    candidates.unite(attached);
+    for (const QString& assetId : std::as_const(candidates)) {
+        const bool wasAttached = m_attachedPlayers.contains(assetId);
+        const bool isAttached = attached.contains(assetId);
+        if (wasAttached == isAttached) {
+            continue;
+        }
+        const int row = rowForAssetId(assetId);
+        if (row < 0) {
+            continue;
+        }
+        const auto idx = index(row);
+        Q_EMIT dataChanged(idx, idx, roles);
+    }
+    m_attachedPlayers = std::move(attached);
 }
 
 } // namespace kinema::ui::qml

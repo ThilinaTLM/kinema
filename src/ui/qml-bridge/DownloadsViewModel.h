@@ -6,6 +6,7 @@
 #include "ui/qml-bridge/DownloadsListModel.h"
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 
 namespace kinema::controllers {
@@ -113,10 +114,22 @@ Q_SIGNALS:
     void countsChanged();
     void filterChanged();
 
+private Q_SLOTS:
+    /// Cheap per-row handler bound to
+    /// `DownloadController::itemChanged`. Coalesces bursts (e.g.
+    /// `cachedBytesChanged` + `liveStatsChanged` arriving back to
+    /// back) into a single update per event-loop tick.
+    void onItemChanged(const QString& assetId);
+
+    /// Drains `m_dirtyAssetIds` once per tick, pushing per-row
+    /// updates through the model's differential API.
+    void flushDirtyItems();
+
 private:
     bool rowMatchesFilter(const domain::DownloadItem& it) const;
     void rebuildCountsFrom(const QList<domain::DownloadItem>& rows,
         const QHash<QString, DownloadsListModel::LiveRow>& live);
+    void recomputeAggregatesFromModel();
 
     controllers::DownloadController& m_controller;
     download::DownloadManager& m_manager;
@@ -129,6 +142,8 @@ private:
     int m_totalCount = 0;
     qint64 m_totalRateBps = 0;
     int m_filter = FilterAll;
+    QSet<QString> m_dirtyAssetIds;
+    bool m_flushScheduled = false;
 };
 
 } // namespace kinema::ui::qml

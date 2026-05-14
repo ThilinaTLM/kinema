@@ -523,6 +523,21 @@ void ShellViewModel::wireStatusForwarding()
                 if (torrentStreaming) {
                     torrentStreaming->stopForContext(ctx);
                 }
+                // Sharpen `hasPlayerAttached` for the embedded
+                // player: closing the player scene detaches the
+                // download row immediately, so the Downloads page
+                // stops showing `Streaming` / `Downloading +
+                // Playing` chips while no consumer is actually
+                // reading bytes. External-player launches stay
+                // sticky — we don't observe their lifetime — and
+                // the engine's idle-stop timer eventually quiesces
+                // them via `DownloadManager::detachPlayer` from
+                // its own cleanup paths.
+                if (auto* dc = m_services.downloadController()) {
+                    if (const auto row = dc->findForKey(ctx.key)) {
+                        dc->detachPlayer(row->assetId);
+                    }
+                }
                 seriesSessionCtrl->onPlayerUserClosed(ctx);
             });
         connect(seriesSessionCtrl,

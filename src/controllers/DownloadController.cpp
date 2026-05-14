@@ -14,12 +14,17 @@ DownloadController::DownloadController(download::DownloadManager& manager,
     , m_manager(manager)
     , m_store(store)
 {
+    // Structural store changes (insert / remove / coalesced bursts)
+    // map to the list-shape signal.
     connect(&m_store, &core::DownloadStore::changed,
         this, &DownloadController::changed);
     connect(&m_manager, &download::DownloadManager::statusMessage,
         this, &DownloadController::statusMessage);
+    // In-place per-row mutations stay separate so view-models can
+    // route them to a `dataChanged`-only path and keep delegates
+    // (and any open popups) alive across ticks.
     connect(&m_manager, &download::DownloadManager::itemChanged,
-        this, &DownloadController::changed);
+        this, &DownloadController::itemChanged);
 }
 
 QList<domain::DownloadItem> DownloadController::items() const
@@ -31,6 +36,12 @@ std::optional<domain::DownloadItem> DownloadController::findForKey(
     const domain::PlaybackKey& key) const
 {
     return m_store.findForKey(key);
+}
+
+std::optional<domain::DownloadItem> DownloadController::find(
+    const QString& assetId) const
+{
+    return m_store.find(assetId);
 }
 
 QSet<QString> DownloadController::attachedPlayerAssetIds() const

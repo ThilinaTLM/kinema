@@ -15,6 +15,7 @@
 #include <KIO/OpenUrlJob>
 #include <KLocalizedString>
 
+#include <QTimer>
 #include <QUrl>
 
 #include <algorithm>
@@ -50,8 +51,15 @@ DownloadsViewModel::DownloadsViewModel(
     , m_streamActions(streamActions)
     , m_items(new DownloadsListModel(this))
 {
+    // Structural changes — list shape may have changed. Full
+    // reload + reset is the right call here; it's also coalesced
+    // upstream in `DownloadStore::scheduleChanged`.
     connect(&m_controller, &controllers::DownloadController::changed,
         this, &DownloadsViewModel::refresh);
+    // Per-row mutations — route through the differential update
+    // path so delegates (and any open popups) survive ticks.
+    connect(&m_controller, &controllers::DownloadController::itemChanged,
+        this, &DownloadsViewModel::onItemChanged);
     refresh();
 }
 
@@ -90,7 +98,105 @@ void DownloadsViewModel::refresh()
     auto attached = m_controller.attachedPlayerAssetIds();
     m_items->setItems(visible, std::move(live), std::move(attached));
 
+    // Structural rebuild supersedes any pending differential
+    // flushes — the rows we just loaded are already the latest.
+    m_dirtyAssetIds.clear();
+
     Q_EMIT countsChanged();
+}
+
+void DownloadsViewModel::onItemChanged(const QString& assetId)
+{
+    if (assetId.isEmpty()) {
+        return;
+    }
+    m_dirtyAssetIds.insert(assetId);
+    if (m_flushScheduled) {
+        return;
+    }
+    m_flushScheduled = true;
+    // 0-ms single shot — coalesces back-to-back emissions from
+    // the same stats tick (cachedBytesChanged + liveStatsChanged)
+    // into a single update on the next event-loop iteration.
+    QTimer::singleShot(0, this, &DownloadsViewModel::flushDirtyItems);
+}
+
+void DownloadsViewModel::flushDirtyItems()
+{
+    m_flushScheduled = false;
+    if (m_dirtyAssetIds.isEmpty()) {
+        return;
+    }
+    const auto dirty = std::exchange(m_dirtyAssetIds, {});
+    bool needsStructuralRefresh = false;
+    for (const QString& assetId : dirty) {
+        const int row = m_items->rowForAssetId(assetId);
+        const auto fresh = m_controller.find(assetId);
+        if (!fresh) {
+            // Row is gone from the store — fall back to a
+            // structural refresh once, after the loop.
+            needsStructuralRefresh = true;
+            continue;
+        }
+        if (row < 0) {
+            // Row exists in the store but not in the model (e.g.
+            // filtered out, or a brand-new insert). Defer to a
+            // structural refresh; it'll pick the row up if the
+            // filter matches.
+            needsStructuralRefresh = true;
+            continue;
+        }
+        if (m_filter != FilterAll && !rowMatchesFilter(*fresh)) {
+            // The row's state moved out of the active filter
+            // bucket. Structural change.
+            needsStructuralRefresh = true;
+            continue;
+        }
+        // Push live stats first so the row's persistent update
+        // emission lands with the freshest rate / peers visible.
+        DownloadsListModel::LiveRow lr;
+        if (const auto stats = m_manager.liveStatsFor(assetId)) {
+            lr.ratePayloadBps = stats->ratePayloadBps;
+            lr.peers = stats->peers;
+            lr.seeds = stats->seeds;
+            lr.etaSeconds = stats->etaSeconds;
+        }
+        m_items->updateLiveStatsFor(assetId, lr);
+        m_items->updateRow(assetId, *fresh);
+    }
+
+    // The attached-player set is a single read; diff it against
+    // the model and emit role-scoped dataChanged for whatever
+    // flipped. Cheap when nothing changed.
+    m_items->updateAttachedPlayers(m_controller.attachedPlayerAssetIds());
+
+    if (needsStructuralRefresh) {
+        refresh();
+        return;
+    }
+
+    recomputeAggregatesFromModel();
+}
+
+void DownloadsViewModel::recomputeAggregatesFromModel()
+{
+    const int prevActive = m_activeCount;
+    const int prevPaused = m_pausedCount;
+    const int prevCompleted = m_completedCount;
+    const int prevFailed = m_failedCount;
+    const int prevTotal = m_totalCount;
+    const qint64 prevRate = m_totalRateBps;
+
+    rebuildCountsFrom(m_items->items(), m_items->liveStats());
+
+    if (prevActive != m_activeCount
+        || prevPaused != m_pausedCount
+        || prevCompleted != m_completedCount
+        || prevFailed != m_failedCount
+        || prevTotal != m_totalCount
+        || prevRate != m_totalRateBps) {
+        Q_EMIT countsChanged();
+    }
 }
 
 bool DownloadsViewModel::rowMatchesFilter(const domain::DownloadItem& it) const
