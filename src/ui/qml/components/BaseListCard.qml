@@ -163,38 +163,46 @@ QQC2.ItemDelegate {
         // Leading slot — a RowLayout so a single thumbnail child
         // sizes via `Layout.preferredWidth` (the child's actual
         // height drives its width via aspect). The host pins its
-        // own `Layout.preferredHeight` to `rightColumn.implicitHeight`
-        // so the row's height is driven entirely by the right column;
-        // the child thumbnail's `Layout.fillHeight: true` then
-        // stretches it to exactly match. Without this binding, the
-        // child thumbnail's `RowMediaThumbnail.implicitHeight`
-        // (`Theme.posterMin * 1.5`) would propagate up and make
-        // `bodyRow` taller than the right column's content, leaving
-        // slack below the trailing action row. `visible` collapses
-        // the slot when no leading item is set.
+        // own `Layout.preferredHeight` to `rightColumn`'s outer box
+        // (`implicitHeight` plus its top/bottom `smallSpacing`
+        // margins) so the row's height is driven entirely by the
+        // right column; the child thumbnail's `Layout.fillHeight:
+        // true` then stretches it to exactly match — meaning the
+        // thumbnail spans `rightColumn`'s margin box and is
+        // ~`2 * smallSpacing` taller than the column's content area.
+        // Without this binding, the child thumbnail's
+        // `RowMediaThumbnail.implicitHeight` (`Theme.posterMin * 1.5`)
+        // would propagate up and make `bodyRow` taller than the
+        // right column's content, leaving slack below the trailing
+        // action row. `visible` collapses the slot when no leading
+        // item is set.
         RowLayout {
             id: leadingHost
             Layout.fillHeight: true
             Layout.preferredHeight: rightColumn.implicitHeight
+                + 2 * Kirigami.Units.smallSpacing
             visible: leadingHost.children.length > 0
             spacing: 0
         }
 
         // Right column — content (body slot) above an optional
-        // progress bar above the action row (trailing slot).
-        // Sized to its own content height (no `fillHeight`) and
-        // pinned to the top of the contentItem so the column's
-        // top and bottom padding match the chassis `pageMargin`
-        // on every side, just like the thumbnail. When the row's
-        // height is driven by the right column (the common case)
-        // the column matches the thumbnail edge-for-edge; when
-        // the thumbnail's preferred height is the floor, any
-        // slack ends up below the column without affecting the
-        // top/bottom margin around its content.
+        // progress bar above the action row (trailing slot). A
+        // uniform `smallSpacing` inset on top / right / bottom
+        // gives body, progress bar, and trailing action row the
+        // same right edge and the same vertical breathing room
+        // against the chassis. No left inset — body content stays
+        // flush against `bodyRow.spacing` from the leading column.
+        // The column itself has no `fillHeight`, so it is sized to
+        // its content; the leading thumbnail then stretches to
+        // match `implicitHeight + 2 * smallSpacing` (see leading
+        // slot above).
         ColumnLayout {
             id: rightColumn
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignTop
+            Layout.topMargin: Kirigami.Units.smallSpacing
+            Layout.rightMargin: Kirigami.Units.smallSpacing
+            Layout.bottomMargin: Kirigami.Units.smallSpacing
             spacing: Theme.inlineSpacing
 
             // Body slot — ColumnLayout so children declared inline
@@ -204,9 +212,6 @@ QQC2.ItemDelegate {
             ColumnLayout {
                 id: bodyHost
                 Layout.fillWidth: true
-                Layout.topMargin: 4
-                Layout.rightMargin: 4
-                Layout.bottomMargin: 4
                 spacing: Theme.inlineSpacing
             }
 
