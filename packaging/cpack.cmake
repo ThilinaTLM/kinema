@@ -78,7 +78,7 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS
 qml6-module-qtquick-layouts, qml6-module-qtquick-templates, \
 qml6-module-qtquick-window, qml6-module-qtquick-effects, \
 qml6-module-qtqml-workerscript, qml6-module-qt-labs-platform, \
-qml6-module-org-kde-kirigami, qml6-module-org-kde-kirigami-platform, \
+qml6-module-org-kde-kirigami, \
 mpv | vlc")
 
 # Recommends pick up niceties that aren't strictly required (e.g. the
@@ -108,8 +108,7 @@ set(CPACK_RPM_PACKAGE_AUTOPROV        ON)
 # match Fedora 41/42's package naming.
 set(CPACK_RPM_PACKAGE_REQUIRES
     "qt6-qtdeclarative, qt6-qtquickcontrols2, \
-kf6-kirigami, kf6-kirigami-addons, \
-hicolor-icon-theme, mpv")
+kf6-kirigami, hicolor-icon-theme, mpv")
 
 # Don't let rpmbuild auto-strip files we deliberately ship (mpv configs
 # under /usr/share/kinema/mpv/ are text). Suppress the unpackaged-files

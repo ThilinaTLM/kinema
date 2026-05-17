@@ -81,9 +81,9 @@ docker run --rm -it -v "$PWD":/src -w /src debian:trixie bash -lc '
       qt6-tools-dev qt6-svg-dev \
       libkf6kio-dev libkf6i18n-dev libkf6config-dev \
       libkf6notifications-dev libkf6statusnotifieritem-dev \
-      libkf6coreaddons-dev libkf6kirigami-dev \
-      libqcoro6-dev qt6keychain-dev \
-      libmpv-dev libmpvqt6-dev \
+      libkf6coreaddons-dev libkirigami-dev \
+      qcoro-qt6-dev qtkeychain-qt6-dev \
+      libmpv-dev libmpvqt-dev \
       libtorrent-rasterbar-dev libboost-dev libssl-dev
   cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF \
@@ -115,8 +115,12 @@ new dependencies.
 2. Confirm the distro ships the required dep floor (Qt 6.6+, KF6,
    qcoro ≥ 0.10, libmpv ≥ 0.36, libtorrent-rasterbar 2.0). If any dep
    is missing, the matrix entry doesn't belong — recommend AppImage instead.
-3. Verify the dep package names (`libkf6kio-dev` on Debian-family,
-   `kf6-kio-devel` on Fedora) and update the install step.
+3. Verify the dep package names. Debian-family uses a mix of `libkf6*-dev`
+   (kio/i18n/config/notifications/coreaddons/statusnotifieritem),
+   `libkirigami-dev` (no kf6 prefix), `qcoro-qt6-dev`, `qtkeychain-qt6-dev`,
+   `libmpvqt-dev`. Fedora uses `kf6-*-devel`, `qcoro-qt6-devel`,
+   `qtkeychain-qt6-devel`, `mpvqt-devel`. Cross-check on
+   packages.debian.org / packages.fedoraproject.org before pushing.
 4. Add a row to the artifact table at the top of this file.
 
 ## File layout
