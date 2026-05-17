@@ -141,7 +141,21 @@ module ${uri}
 EOF
 done
 
-export QML_SOURCES_PATHS="${REPO_ROOT}/src/ui/qml"
+# qmlimportscanner only follows literal `import` statements. Modules we
+# load by name at runtime (QQuickStyle::setStyle / QT_QUICK_CONTROLS_STYLE
+# in main.cpp + AppRun.sh) won't be picked up. Drop a stub QML file that
+# imports them so the plugin deploys the module + transitively its
+# C++ runtime (libkf6qqc2desktopstyle*).
+RUNTIME_IMPORTS_DIR="${REPO_ROOT}/.appimage-runtime-imports"
+rm -rf "${RUNTIME_IMPORTS_DIR}"
+mkdir -p "${RUNTIME_IMPORTS_DIR}"
+cat >"${RUNTIME_IMPORTS_DIR}/RuntimeImports.qml" <<'EOF'
+import QtQuick
+import org.kde.desktop
+Item {}
+EOF
+
+export QML_SOURCES_PATHS="${REPO_ROOT}/src/ui/qml:${RUNTIME_IMPORTS_DIR}"
 if [[ -d "${REPO_ROOT}/src/ui/player/qml" ]]; then
     QML_SOURCES_PATHS+=":${REPO_ROOT}/src/ui/player/qml"
 fi
