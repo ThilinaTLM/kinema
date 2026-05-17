@@ -146,4 +146,7 @@ if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+# CPack glue (DEB / RPM). No-op unless CI passes -DCPACK_GENERATOR=...
+include(${CMAKE_SOURCE_DIR}/packaging/cpack.cmake)
+
 feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)

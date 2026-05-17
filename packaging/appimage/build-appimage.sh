@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build a Kinema AppImage from a checked-out repo.
+#
+# Intended to run inside the Debian 13 (trixie) container used by
+# .github/workflows/release.yml. Trixie sets the glibc / libstdc++
+# baseline for the AppImage. Required system packages are installed by
+# the workflow before this script is invoked (see release.yml → appimage
+# job). For local reproduction, install the same `apt-get install` list.
+#
+# Outputs:
+#   dist/Kinema-${VERSION}-x86_64.AppImage   — the AppImage itself
+#   dist/AppDir.tar                          — uncompressed AppDir, repackaged
+#                                              into the portable .tar.gz by the
+#                                              same CI job
+#
+# Environment:
+#   VERSION   — required. Release version without leading 'v' (e.g. 0.1.0).
+
+set -euo pipefail
+
+if [[ -z "${VERSION:-}" ]]; then
+    if [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+        VERSION="${GITHUB_REF_NAME#v}"
+    else
+        echo "build-appimage.sh: VERSION env var is required" >&2
+        exit 2
+    fi
+fi
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${REPO_ROOT}"
+
+log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+
+BUILD_DIR="${REPO_ROOT}/build-appimage"
+APPDIR="${REPO_ROOT}/AppDir"
+DIST_DIR="${REPO_ROOT}/dist"
+TOOLS_DIR="${REPO_ROOT}/.appimage-tools"
+
+mkdir -p "${DIST_DIR}" "${TOOLS_DIR}"
+rm -rf "${BUILD_DIR}" "${APPDIR}"
+
+# ---------------------------------------------------------------------------
+# 1. Configure + build into a clean tree.
+# ---------------------------------------------------------------------------
+log "Configuring (Release, prefix=/usr) into ${BUILD_DIR}/"
+cmake -B "${BUILD_DIR}" -S . -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DKINEMA_ENABLE_MPV_EMBED=ON \
+    -DKINEMA_TMDB_DEFAULT_TOKEN=""
+
+log "Building"
+cmake --build "${BUILD_DIR}" -j"$(nproc)"
+
+log "Staging to ${APPDIR}/"
+DESTDIR="${APPDIR}" cmake --install "${BUILD_DIR}"
+
+# linuxdeploy expects the .desktop file and icon at the AppDir root.
+# The install put them under /usr/share/{applications,icons,metainfo}.
+# Symlink (not copy) so the in-AppDir /usr/share tree stays canonical.
+ln -sf "usr/share/applications/dev.tlmtech.kinema.desktop" \
+    "${APPDIR}/dev.tlmtech.kinema.desktop"
+ln -sf "usr/share/icons/hicolor/scalable/apps/dev.tlmtech.kinema.svg" \
+    "${APPDIR}/dev.tlmtech.kinema.svg"
+
+# ---------------------------------------------------------------------------
+# 2. Download linuxdeploy + qt plugin + appimage plugin. Pinned versions
+#    keep the AppImage reproducible-ish across CI runs.
+# ---------------------------------------------------------------------------
+LD_VER="continuous"      # linuxdeploy publishes only 'continuous' atm
+LD_BASE="https://github.com/linuxdeploy/linuxdeploy/releases/download/${LD_VER}"
+LDQT_BASE="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${LD_VER}"
+
+fetch() {
+    local url="$1" out="$2"
+    if [[ ! -f "${out}" ]]; then
+        log "Downloading ${url}"
+        wget -q -O "${out}" "${url}"
+        chmod +x "${out}"
+    fi
+}
+
+fetch "${LD_BASE}/linuxdeploy-x86_64.AppImage" \
+      "${TOOLS_DIR}/linuxdeploy-x86_64.AppImage"
+fetch "${LDQT_BASE}/linuxdeploy-plugin-qt-x86_64.AppImage" \
+      "${TOOLS_DIR}/linuxdeploy-plugin-qt-x86_64.AppImage"
+
+# AppImages need FUSE. In CI we have it; in restricted environments
+# (some Docker setups) we have to extract them and run the AppRun.
+# Detect and fall back automatically.
+extract_if_needed() {
+    local tool="$1"
+    if ! "${tool}" --appimage-version >/dev/null 2>&1; then
+        log "FUSE unavailable, extracting $(basename "${tool}")"
+        local dir
+        dir="${tool}.extracted"
+        rm -rf "${dir}"
+        (cd "$(dirname "${tool}")" && "${tool}" --appimage-extract >/dev/null)
+        mv "$(dirname "${tool}")/squashfs-root" "${dir}"
+        echo "${dir}/AppRun"
+    else
+        echo "${tool}"
+    fi
+}
+
+LINUXDEPLOY="$(extract_if_needed "${TOOLS_DIR}/linuxdeploy-x86_64.AppImage")"
+LINUXDEPLOY_QT="$(extract_if_needed "${TOOLS_DIR}/linuxdeploy-plugin-qt-x86_64.AppImage")"
+
+# linuxdeploy locates plugins by PATH lookup of `linuxdeploy-plugin-<name>`.
+export PATH="$(dirname "${LINUXDEPLOY_QT}"):${PATH}"
+ln -sf "${LINUXDEPLOY_QT}" \
+    "$(dirname "${LINUXDEPLOY_QT}")/linuxdeploy-plugin-qt"
+
+# ---------------------------------------------------------------------------
+# 3. Bundle. QML_SOURCES_PATHS tells linuxdeploy-plugin-qt where to look
+#    for `import` statements — necessary because our own QML files are
+#    compiled into static-lib Qt resources, so the plugin can't walk
+#    them inside the binary.
+# ---------------------------------------------------------------------------
+export QML_SOURCES_PATHS="${REPO_ROOT}/src/ui/qml"
+if [[ -d "${REPO_ROOT}/src/ui/player/qml" ]]; then
+    QML_SOURCES_PATHS+=":${REPO_ROOT}/src/ui/player/qml"
+fi
+
+# Override default AppRun with our custom launcher (sets QML2_IMPORT_PATH
+# and Quick Controls style for non-Plasma sessions).
+cp "${REPO_ROOT}/packaging/appimage/AppRun.sh" "${APPDIR}/AppRun"
+chmod +x "${APPDIR}/AppRun"
+
+log "Running linuxdeploy + qt plugin"
+OUTPUT="appimage" \
+LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
+"${LINUXDEPLOY}" \
+    --appdir "${APPDIR}" \
+    --executable "${APPDIR}/usr/bin/kinema" \
+    --desktop-file "${APPDIR}/dev.tlmtech.kinema.desktop" \
+    --icon-file "${APPDIR}/dev.tlmtech.kinema.svg" \
+    --plugin qt
+
+# linuxdeploy replaces AppRun with its own wrapper — restore ours.
+cp "${REPO_ROOT}/packaging/appimage/AppRun.sh" "${APPDIR}/AppRun"
+chmod +x "${APPDIR}/AppRun"
+
+log "Producing the AppImage"
+OUTPUT="appimage" \
+LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
+"${LINUXDEPLOY}" \
+    --appdir "${APPDIR}" \
+    --output appimage
+
+# linuxdeploy names the file Kinema-${VERSION}-x86_64.AppImage by default
+# (from the .desktop Name= field + version suffix). Move into dist/.
+shopt -s nullglob
+for f in Kinema-*-x86_64.AppImage Kinema*x86_64.AppImage *.AppImage; do
+    [[ -f "${f}" ]] || continue
+    target="${DIST_DIR}/Kinema-${VERSION}-x86_64.AppImage"
+    mv -f "${f}" "${target}"
+    log "Produced ${target}"
+    break
+done
+shopt -u nullglob
+
+# ---------------------------------------------------------------------------
+# 4. Capture the AppDir for the portable-tarball job to repackage.
+#    Uncompressed tar preserves symlinks and avoids double-gzipping.
+# ---------------------------------------------------------------------------
+log "Capturing AppDir for the portable tarball job"
+tar -cf "${DIST_DIR}/AppDir.tar" -C "${REPO_ROOT}" AppDir
+
+log "Done."
+ls -lh "${DIST_DIR}/"
