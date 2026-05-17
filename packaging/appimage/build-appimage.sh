@@ -176,6 +176,15 @@ chmod +x "${APPDIR}/AppRun"
 # filename `<Name>-<version>-<arch>.AppImage` when OUTPUT is unset.
 FINAL_APPIMAGE="Kinema-${VERSION}-x86_64.AppImage"
 
+# Tell linuxdeploy-plugin-qt to also bundle the Wayland platform plugin
+# in addition to the default xcb. Without this, Qt logs
+#   qt.qpa.plugin: Could not find the Qt platform plugin "wayland" in ""
+# on Wayland sessions and silently falls back to xcb. The qt plugin
+# walks libqwayland-generic.so's deps and also pulls in the related
+# wayland-decoration-client / wayland-graphics-integration-client /
+# wayland-shell-integration plugin dirs.
+export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so"
+
 log "Running linuxdeploy + qt plugin (deploy only)"
 LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
 "${LINUXDEPLOY}" \
@@ -184,6 +193,42 @@ LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
     --desktop-file "${APPDIR}/dev.tlmtech.kinema.desktop" \
     --icon-file "${APPDIR}/dev.tlmtech.kinema.svg" \
     --plugin qt
+
+# ---------------------------------------------------------------------------
+# 3b. Manually deploy KF6 platform plugins that linuxdeploy-plugin-qt has
+#     no knowledge of. Kirigami loads its style plugin via
+#     KPluginFactory from <plugin_path>/kf6/kirigami/platform/<style>.so
+#     (see Kirigami's PlatformPluginFactory). Without these, Kirigami
+#     logs:
+#         Failed to find a Kirigami platform plugin for style "org.kde.desktop"
+#     and the UI falls back to its basic theme.
+#
+#     We copy the .so files into the AppDir, then run linuxdeploy once
+#     more with --deploy-deps-only on each so its transitive deps
+#     (libKF6IconThemes, libKF6ColorScheme, …) end up in usr/lib/ and
+#     are filtered against linuxdeploy's excludelist.
+# ---------------------------------------------------------------------------
+KF6_KIRIGAMI_SRC=""
+for candidate in \
+    /usr/lib/x86_64-linux-gnu/qt6/plugins/kf6/kirigami/platform \
+    /usr/lib/qt6/plugins/kf6/kirigami/platform; do
+    if [[ -d "${candidate}" ]] && compgen -G "${candidate}/*.so" >/dev/null; then
+        KF6_KIRIGAMI_SRC="${candidate}"
+        break
+    fi
+done
+if [[ -n "${KF6_KIRIGAMI_SRC}" ]]; then
+    KF6_KIRIGAMI_DST="${APPDIR}/usr/plugins/kf6/kirigami/platform"
+    log "Bundling Kirigami platform plugins from ${KF6_KIRIGAMI_SRC}"
+    mkdir -p "${KF6_KIRIGAMI_DST}"
+    cp -a "${KF6_KIRIGAMI_SRC}/"*.so "${KF6_KIRIGAMI_DST}/"
+    for so in "${KF6_KIRIGAMI_DST}"/*.so; do
+        "${LINUXDEPLOY}" --appdir "${APPDIR}" --deploy-deps-only "${so}"
+    done
+else
+    echo "WARNING: kf6/kirigami/platform/*.so not found on build host;" \
+         "Kirigami will fall back to basic theme in the AppImage." >&2
+fi
 
 # linuxdeploy replaces AppRun with its own wrapper — restore ours.
 cp "${REPO_ROOT}/packaging/appimage/AppRun.sh" "${APPDIR}/AppRun"
