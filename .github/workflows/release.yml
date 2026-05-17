@@ -112,14 +112,25 @@ jobs:
       - name: Verify shlib deps were auto-resolved
         # CPack silently produces a broken .deb when dpkg-shlibdeps is
         # missing or fails. Fail loudly if the Depends field is missing
-        # the libqt6core6 / libkf6 entries we always expect.
+        # the sonames we always expect dpkg-shlibdeps to emit.
+        #
+        # Needle notes:
+        #  - libkf6kiogui (KIOGui) is the directly-linked KIO library.
+        #    libkf6kiocore is pulled in transitively by libkf6kiogui6.
+        #  - libkirigami6 is NOT auto-detected (its shlibs file lists
+        #    only the platform library), but is pulled in transitively
+        #    by qml6-module-org-kde-kirigami in our manual Depends.
+        #  - libmpv matches both libmpv2 (system) and libmpvqt1 (qml).
         run: |
           set -euo pipefail
           DEB=$(ls build/*.deb | head -n1)
           echo "Inspecting ${DEB}"
           DEPS=$(dpkg-deb -f "${DEB}" Depends)
           echo "Depends: ${DEPS}"
-          for needle in libqt6core libkf6kiocore libkf6coreaddons libkirigami libmpv libtorrent-rasterbar; do
+          for needle in libqt6core libqt6gui libqt6qml libqt6quick \
+                        libkf6coreaddons libkf6kiogui libkf6configcore \
+                        libqcoro6 libqt6keychain \
+                        libmpv libtorrent-rasterbar; do
               if ! echo "${DEPS}" | grep -qi "${needle}"; then
                   echo "ERROR: ${needle} missing from Depends; dpkg-shlibdeps probably did not run" >&2
                   exit 1
