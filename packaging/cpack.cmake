@@ -74,11 +74,15 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS    ON)
 # rename happens, surface it as a release-blocking lint failure rather
 # than papering over with "| qml6-module-foo-old".
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "qml6-module-qtquick, qml6-module-qtquick-controls, \
+    "qt6-svg-plugins, \
+qml6-module-qtquick, qml6-module-qtquick-controls, \
 qml6-module-qtquick-layouts, qml6-module-qtquick-templates, \
 qml6-module-qtquick-window, qml6-module-qtquick-effects, \
-qml6-module-qtqml-workerscript, qml6-module-qt-labs-platform, \
+qml6-module-qtquick-shapes, qml6-module-qtquick-dialogs, \
+qml6-module-qtqml-workerscript, \
 qml6-module-org-kde-kirigami, \
+qml6-module-org-kde-kirigamiaddons-formcard, \
+qml6-module-org-kde-kirigamiaddons-settings, \
 mpv | vlc")
 
 # Recommends pick up niceties that aren't strictly required (e.g. the
@@ -107,8 +111,9 @@ set(CPACK_RPM_PACKAGE_AUTOPROV        ON)
 # Pure-QML / runtime-fork deps that autoreq can't see. Names below
 # match Fedora 41/42's package naming.
 set(CPACK_RPM_PACKAGE_REQUIRES
-    "qt6-qtdeclarative, qt6-qtquickcontrols2, \
-kf6-kirigami, hicolor-icon-theme, mpv")
+    "qt6-qtdeclarative, qt6-qtquickcontrols2, qt6-qtsvg, \
+kf6-kirigami, kf6-kirigami-addons, \
+hicolor-icon-theme, mpv")
 
 # Don't let rpmbuild auto-strip files we deliberately ship (mpv configs
 # under /usr/share/kinema/mpv/ are text). Suppress the unpackaged-files

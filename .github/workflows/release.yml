@@ -87,6 +87,7 @@ jobs:
               libkf6kio-dev libkf6i18n-dev libkf6config-dev \
               libkf6notifications-dev libkf6statusnotifieritem-dev \
               libkf6coreaddons-dev libkirigami-dev \
+              kirigami-addons-dev \
               qcoro-qt6-dev qtkeychain-qt6-dev \
               libmpv-dev libmpvqt-dev \
               libtorrent-rasterbar-dev libboost-dev libssl-dev
@@ -146,6 +147,7 @@ jobs:
               kf6-kio-devel kf6-ki18n-devel kf6-kconfig-devel \
               kf6-knotifications-devel kf6-kstatusnotifieritem-devel \
               kf6-kcoreaddons-devel kf6-kirigami-devel \
+              kf6-kirigami-addons-devel \
               qcoro-qt6-devel qtkeychain-qt6-devel \
               mpv-libs-devel mpvqt-devel \
               rb_libtorrent-devel boost-devel openssl-devel
@@ -206,14 +208,19 @@ jobs:
               libkf6kio-dev libkf6i18n-dev libkf6config-dev \
               libkf6notifications-dev libkf6statusnotifieritem-dev \
               libkf6coreaddons-dev libkirigami-dev \
+              kirigami-addons-dev \
               qcoro-qt6-dev qtkeychain-qt6-dev \
               libmpv-dev libmpvqt-dev \
               libtorrent-rasterbar-dev libboost-dev libssl-dev \
+              qt6-svg-plugins \
               qml6-module-qtquick qml6-module-qtquick-controls \
               qml6-module-qtquick-layouts qml6-module-qtquick-templates \
               qml6-module-qtquick-window qml6-module-qtquick-effects \
-              qml6-module-qtqml-workerscript qml6-module-qt-labs-platform \
-              qml6-module-org-kde-kirigami
+              qml6-module-qtquick-shapes qml6-module-qtquick-dialogs \
+              qml6-module-qtqml-workerscript \
+              qml6-module-org-kde-kirigami \
+              qml6-module-org-kde-kirigamiaddons-formcard \
+              qml6-module-org-kde-kirigamiaddons-settings
       - uses: actions/checkout@v4
       - name: Resolve version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"

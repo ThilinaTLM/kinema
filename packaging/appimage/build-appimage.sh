@@ -120,11 +120,36 @@ ln -sf "${LINUXDEPLOY_QT}" \
 #    for `import` statements — necessary because our own QML files are
 #    compiled into static-lib Qt resources, so the plugin can't walk
 #    them inside the binary.
+#
+#    Our QML imports include two internal modules (dev.tlmtech.kinema.app
+#    and dev.tlmtech.kinema.player) whose registration types live inside
+#    the static libs kinema_core / kinema_qml_app and are referenced via
+#    qrc:/qt/qml/... at runtime. qmlimportscanner expects them on disk
+#    under one of QML_IMPORT_PATH and bails out with "Missing qml module"
+#    if it can't find a qmldir. We satisfy it with empty stub qmldirs in
+#    a scratch directory prepended to QML_IMPORT_PATH; nothing from these
+#    stubs is ever copied into the AppImage (linuxdeploy only deploys
+#    files referenced by the qmldir, and the stubs are empty).
 # ---------------------------------------------------------------------------
+QML_STUBS_DIR="${REPO_ROOT}/.appimage-qml-stubs"
+rm -rf "${QML_STUBS_DIR}"
+for mod in dev/tlmtech/kinema/app dev/tlmtech/kinema/player; do
+    mkdir -p "${QML_STUBS_DIR}/${mod}"
+    uri="${mod//\//.}"
+    cat >"${QML_STUBS_DIR}/${mod}/qmldir" <<EOF
+module ${uri}
+EOF
+done
+
 export QML_SOURCES_PATHS="${REPO_ROOT}/src/ui/qml"
 if [[ -d "${REPO_ROOT}/src/ui/player/qml" ]]; then
     QML_SOURCES_PATHS+=":${REPO_ROOT}/src/ui/player/qml"
 fi
+
+# QML_IMPORT_PATH is what qmlimportscanner consults; QML2_IMPORT_PATH is
+# the legacy env var still respected by some Qt builds. Set both.
+export QML_IMPORT_PATH="${QML_STUBS_DIR}:${QML_IMPORT_PATH:-}"
+export QML2_IMPORT_PATH="${QML_STUBS_DIR}:${QML2_IMPORT_PATH:-}"
 
 # Override default AppRun with our custom launcher (sets QML2_IMPORT_PATH
 # and Quick Controls style for non-Plasma sessions).
