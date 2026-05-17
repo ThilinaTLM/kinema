@@ -48,6 +48,41 @@
 
   <content_rating type="oars-1.1"/>
 
+  <screenshots>
+    <screenshot type="default">
+      <caption>Discover — trending, popular series, and now-playing rails powered by TMDB</caption>
+      <image>https://raw.githubusercontent.com/ThilinaTLM/kinema/main/docs/screenshots/discover.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Browse — filter the TMDB catalogue by kind, genre, and sort order</caption>
+      <image>https://raw.githubusercontent.com/ThilinaTLM/kinema/main/docs/screenshots/browse.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Series detail — backdrop, metadata, and per-season episode list</caption>
+      <image>https://raw.githubusercontent.com/ThilinaTLM/kinema/main/docs/screenshots/series-detail.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Up Next — ready to watch, airing soon, and recently added</caption>
+      <image>https://raw.githubusercontent.com/ThilinaTLM/kinema/main/docs/screenshots/up-next.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Library — watched-state and next-episode tracking</caption>
+      <image>https://raw.githubusercontent.com/ThilinaTLM/kinema/main/docs/screenshots/library.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Streams — sorted by quality with source, codec, and seeder chips</caption>
+      <image>https://raw.githubusercontent.com/ThilinaTLM/kinema/main/docs/screenshots/streams.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Downloads — debrid-backed transfers with per-row status</caption>
+      <image>https://raw.githubusercontent.com/ThilinaTLM/kinema/main/docs/screenshots/downloads.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Embedded mpv player with episode-aware chrome and live OpenSubtitles overlay</caption>
+      <image>https://raw.githubusercontent.com/ThilinaTLM/kinema/main/docs/screenshots/player.webp</image>
+    </screenshot>
+  </screenshots>
+
   <releases>
     <release version="0.1.0" date="2026-04-20">
       <description>
