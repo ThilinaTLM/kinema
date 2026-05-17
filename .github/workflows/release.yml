@@ -1,0 +1,318 @@
+# SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+#
+# Release pipeline. Triggered on tag push (v0.1.0, v1.2.3-rc1, ...).
+#
+# Produces six artifacts and one signed checksum manifest:
+#   • kinema-${VERSION}.tar.gz                          (source tarball)
+#   • Kinema-${VERSION}-x86_64.AppImage                 (bundled, glibc ≥ trixie)
+#   • kinema-${VERSION}-x86_64.tar.gz                   (portable, AppImage extracted)
+#   • kinema_${VERSION}_amd64-ubuntu25.04.deb
+#   • kinema_${VERSION}_amd64-debian13.deb
+#   • kinema-${VERSION}-1.fc41.x86_64.rpm
+#   • kinema-${VERSION}-1.fc42.x86_64.rpm
+#   • SHA256SUMS  (+ SHA256SUMS.asc when GPG_PRIVATE_KEY secret is set)
+#
+# Pre-release tags (containing a '-': v0.1.0-rc1) land as draft releases
+# so they can be reviewed before publishing. Final tags publish directly.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1. Source tarball. `git archive` against the tag is reproducible and
+  #    matches what distro packagers expect to download.
+  # -------------------------------------------------------------------------
+  source-tarball:
+    name: Source tarball
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Pack
+        run: |
+          mkdir -p dist
+          git archive --format=tar.gz \
+              --prefix="kinema-${VERSION}/" \
+              -o "dist/kinema-${VERSION}.tar.gz" \
+              "${GITHUB_REF_NAME}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # 2. .deb for Ubuntu 25.04 (plucky) and Debian 13 (trixie). Ubuntu 24.04
+  #    is intentionally excluded — see packaging/cpack.cmake.
+  # -------------------------------------------------------------------------
+  deb:
+    name: deb (${{ matrix.tag }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: "ubuntu:25.04"
+            tag: "ubuntu25.04"
+          - image: "debian:trixie"
+            tag: "debian13"
+    steps:
+      - name: Install build deps
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+              ca-certificates git pkg-config file \
+              cmake ninja-build g++ \
+              extra-cmake-modules gettext \
+              qt6-base-dev qt6-base-private-dev \
+              qt6-declarative-dev qt6-tools-dev qt6-svg-dev \
+              libkf6kio-dev libkf6i18n-dev libkf6config-dev \
+              libkf6notifications-dev libkf6statusnotifieritem-dev \
+              libkf6coreaddons-dev libkf6kirigami-dev \
+              libqcoro6-dev qt6keychain-dev \
+              libmpv-dev libmpvqt6-dev \
+              libtorrent-rasterbar-dev libboost-dev libssl-dev
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Configure
+        run: |
+          cmake -B build -S . -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=/usr \
+              -DKINEMA_ENABLE_MPV_EMBED=ON \
+              -DKINEMA_TMDB_DEFAULT_TOKEN="" \
+              -DBUILD_TESTING=OFF \
+              -DCPACK_GENERATOR=DEB \
+              "-DCPACK_DEBIAN_FILE_NAME=kinema_${VERSION}_amd64-${{ matrix.tag }}.deb"
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Package
+        run: cd build && cpack -G DEB --verbose
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp build/*.deb dist/
+          ls -lh dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.tag }}
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # 3. .rpm for Fedora 41 and 42. CPACK_RPM_PACKAGE_RELEASE injects the
+  #    distro tag so the two rpms don't collide in the release.
+  # -------------------------------------------------------------------------
+  rpm:
+    name: rpm (fc${{ matrix.fcver }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: "fedora:41"
+            fcver: "41"
+          - image: "fedora:42"
+            fcver: "42"
+    steps:
+      - name: Install build deps
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+              git pkgconf-pkg-config rpm-build \
+              cmake ninja-build gcc-c++ \
+              extra-cmake-modules gettext \
+              qt6-qtbase-devel qt6-qtbase-private-devel \
+              qt6-qtdeclarative-devel qt6-qttools-devel qt6-qtsvg-devel \
+              kf6-kio-devel kf6-ki18n-devel kf6-kconfig-devel \
+              kf6-knotifications-devel kf6-kstatusnotifieritem-devel \
+              kf6-kcoreaddons-devel kf6-kirigami-devel \
+              qcoro-qt6-devel qt6-qtkeychain-devel \
+              mpv-libs-devel mpvqt-devel \
+              rb_libtorrent-devel boost-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Configure
+        run: |
+          cmake -B build -S . -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=/usr \
+              -DKINEMA_ENABLE_MPV_EMBED=ON \
+              -DKINEMA_TMDB_DEFAULT_TOKEN="" \
+              -DBUILD_TESTING=OFF \
+              -DCPACK_GENERATOR=RPM \
+              "-DCPACK_RPM_PACKAGE_RELEASE=1.fc${{ matrix.fcver }}"
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Package
+        run: cd build && cpack -G RPM --verbose
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp build/*.rpm dist/
+          ls -lh dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-fc${{ matrix.fcver }}
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # 4. AppImage (built on Debian trixie → glibc ≥ 2.41) + portable .tar.gz
+  #    extracted from the same AppDir.
+  # -------------------------------------------------------------------------
+  appimage:
+    name: AppImage + portable tarball
+    runs-on: ubuntu-latest
+    container:
+      image: "debian:trixie"
+      # AppImageTool needs FUSE. GitHub-hosted runners + Docker means we
+      # extract the AppImage tools manually (build-appimage.sh handles
+      # this via --appimage-extract). No --privileged needed.
+      options: --cap-add=SYS_ADMIN --device /dev/fuse --security-opt apparmor:unconfined
+    steps:
+      - name: Install build + bundle deps
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+              ca-certificates git pkg-config file wget xz-utils \
+              desktop-file-utils appstream \
+              fuse libfuse2t64 \
+              cmake ninja-build g++ \
+              extra-cmake-modules gettext \
+              qt6-base-dev qt6-base-private-dev \
+              qt6-declarative-dev qt6-tools-dev qt6-svg-dev \
+              libkf6kio-dev libkf6i18n-dev libkf6config-dev \
+              libkf6notifications-dev libkf6statusnotifieritem-dev \
+              libkf6coreaddons-dev libkf6kirigami-dev \
+              libqcoro6-dev qt6keychain-dev \
+              libmpv-dev libmpvqt6-dev \
+              libtorrent-rasterbar-dev libboost-dev libssl-dev \
+              qml6-module-qtquick qml6-module-qtquick-controls \
+              qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+              qml6-module-qtquick-window qml6-module-qtquick-effects \
+              qml6-module-qtqml-workerscript qml6-module-qt-labs-platform \
+              qml6-module-org-kde-kirigami qml6-module-org-kde-kirigami-platform
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Build AppImage
+        env:
+          VERSION: ${{ env.VERSION }}
+        run: bash packaging/appimage/build-appimage.sh
+      - name: Build portable tarball
+        run: |
+          set -euo pipefail
+          mkdir -p portable
+          tar -xf dist/AppDir.tar -C portable
+          mv portable/AppDir "portable/kinema-${VERSION}-x86_64"
+          cp packaging/appimage/AppRun.sh "portable/kinema-${VERSION}-x86_64/kinema.sh"
+          chmod +x "portable/kinema-${VERSION}-x86_64/kinema.sh"
+          tar czf "dist/kinema-${VERSION}-x86_64.tar.gz" \
+              -C portable "kinema-${VERSION}-x86_64"
+          rm -f dist/AppDir.tar
+          ls -lh dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage-bundle
+          path: |
+            dist/*.AppImage
+            dist/kinema-*-x86_64.tar.gz
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # 5. Aggregate every artifact, generate SHA256SUMS (signed when the
+  #    GPG_PRIVATE_KEY secret is present), and publish the GitHub Release.
+  # -------------------------------------------------------------------------
+  release:
+    name: GitHub Release
+    needs: [source-tarball, deb, rpm, appimage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f \
+              \( -name "*.tar.gz" -o -name "*.deb" \
+                 -o -name "*.rpm"    -o -name "*.AppImage" \) \
+              -exec cp {} release/ \;
+          ls -lh release/
+      - name: Generate SHA256SUMS
+        working-directory: release
+        run: sha256sum * | sort -k 2 > SHA256SUMS
+      # GPG signing is opt-in: only runs when GPG_PRIVATE_KEY is set in
+      # the repo secrets. Step-level `if:` cannot reference secrets.* in
+      # the condition (security restriction), so we mirror the secret into
+      # an env var on the previous step and gate on its presence here.
+      - name: Probe GPG secret presence
+        id: gpg_probe
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [[ -n "${GPG_PRIVATE_KEY:-}" ]]; then
+            echo "have_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_key=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: GPG-sign SHA256SUMS (optional)
+        if: steps.gpg_probe.outputs.have_key == 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          cd release
+          gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$GPG_PASSPHRASE" \
+              --detach-sign --armor SHA256SUMS
+      - name: Determine release type
+        id: rel
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "draft=true"      >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "draft=false"     >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Kinema ${{ env.VERSION }}"
+          tag_name: ${{ github.ref_name }}
+          files: release/*
+          draft: ${{ steps.rel.outputs.draft }}
+          prerelease: ${{ steps.rel.outputs.prerelease }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          token: ${{ secrets.GITHUB_TOKEN }}
