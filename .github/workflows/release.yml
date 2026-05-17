@@ -81,6 +81,7 @@ jobs:
           apt-get install -y --no-install-recommends \
               ca-certificates git pkg-config file \
               cmake ninja-build g++ \
+              dpkg-dev \
               extra-cmake-modules gettext \
               qt6-base-dev qt6-base-private-dev \
               qt6-declarative-dev qt6-tools-dev qt6-svg-dev \
@@ -108,6 +109,22 @@ jobs:
         run: cmake --build build -j"$(nproc)"
       - name: Package
         run: cd build && cpack -G DEB --verbose
+      - name: Verify shlib deps were auto-resolved
+        # CPack silently produces a broken .deb when dpkg-shlibdeps is
+        # missing or fails. Fail loudly if the Depends field is missing
+        # the libqt6core6 / libkf6 entries we always expect.
+        run: |
+          set -euo pipefail
+          DEB=$(ls build/*.deb | head -n1)
+          echo "Inspecting ${DEB}"
+          DEPS=$(dpkg-deb -f "${DEB}" Depends)
+          echo "Depends: ${DEPS}"
+          for needle in libqt6core libkf6kiocore libkf6coreaddons libkirigami libmpv libtorrent-rasterbar; do
+              if ! echo "${DEPS}" | grep -qi "${needle}"; then
+                  echo "ERROR: ${needle} missing from Depends; dpkg-shlibdeps probably did not run" >&2
+                  exit 1
+              fi
+          done
       - name: Stage artifact
         run: |
           mkdir -p dist
