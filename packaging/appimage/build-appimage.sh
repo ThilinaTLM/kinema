@@ -156,8 +156,13 @@ export QML2_IMPORT_PATH="${QML_STUBS_DIR}:${QML2_IMPORT_PATH:-}"
 cp "${REPO_ROOT}/packaging/appimage/AppRun.sh" "${APPDIR}/AppRun"
 chmod +x "${APPDIR}/AppRun"
 
-log "Running linuxdeploy + qt plugin"
-OUTPUT="appimage" \
+# OUTPUT is the literal output FILENAME for the AppImage (despite the name
+# looking like a format selector — the format is chosen by --output).
+# LINUXDEPLOY_OUTPUT_VERSION is what appimagetool stamps into the default
+# filename `<Name>-<version>-<arch>.AppImage` when OUTPUT is unset.
+FINAL_APPIMAGE="Kinema-${VERSION}-x86_64.AppImage"
+
+log "Running linuxdeploy + qt plugin (deploy only)"
 LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
 "${LINUXDEPLOY}" \
     --appdir "${APPDIR}" \
@@ -170,24 +175,21 @@ LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
 cp "${REPO_ROOT}/packaging/appimage/AppRun.sh" "${APPDIR}/AppRun"
 chmod +x "${APPDIR}/AppRun"
 
-log "Producing the AppImage"
-OUTPUT="appimage" \
+log "Producing the AppImage → ${FINAL_APPIMAGE}"
+OUTPUT="${FINAL_APPIMAGE}" \
 LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
 "${LINUXDEPLOY}" \
     --appdir "${APPDIR}" \
     --output appimage
 
-# linuxdeploy names the file Kinema-${VERSION}-x86_64.AppImage by default
-# (from the .desktop Name= field + version suffix). Move into dist/.
-shopt -s nullglob
-for f in Kinema-*-x86_64.AppImage Kinema*x86_64.AppImage *.AppImage; do
-    [[ -f "${f}" ]] || continue
-    target="${DIST_DIR}/Kinema-${VERSION}-x86_64.AppImage"
-    mv -f "${f}" "${target}"
-    log "Produced ${target}"
-    break
-done
-shopt -u nullglob
+if [[ ! -f "${FINAL_APPIMAGE}" ]]; then
+    echo "build-appimage.sh: expected ${FINAL_APPIMAGE} to exist after" \
+         "linuxdeploy --output appimage, but it does not." >&2
+    ls -la "${REPO_ROOT}" >&2
+    exit 3
+fi
+mv -f "${FINAL_APPIMAGE}" "${DIST_DIR}/${FINAL_APPIMAGE}"
+log "Produced ${DIST_DIR}/${FINAL_APPIMAGE}"
 
 # ---------------------------------------------------------------------------
 # 4. Capture the AppDir for the portable-tarball job to repackage.
