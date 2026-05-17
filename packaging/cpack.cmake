@@ -54,8 +54,12 @@ set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE     "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER   "${CPACK_PACKAGE_CONTACT}")
 
-# Default file name template; overridden by CI to include the distro tag.
-set(CPACK_DEBIAN_FILE_NAME            "DEB-DEFAULT")
+# Default file name template. Use `if(NOT DEFINED ...)` so a CI-level
+# `-DCPACK_DEBIAN_FILE_NAME=kinema_<ver>_amd64-<distro>.deb` is honored.
+# A bare `set()` would shadow the cache value from the command line.
+if(NOT DEFINED CPACK_DEBIAN_FILE_NAME)
+    set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+endif()
 
 # Autodetect ELF library dependencies from the binary's NEEDED entries
 # via dpkg-shlibdeps. This catches everything in the dynamic-link audit
@@ -101,12 +105,16 @@ set(CPACK_RPM_PACKAGE_LICENSE         "Apache-2.0")
 set(CPACK_RPM_PACKAGE_GROUP           "Applications/Multimedia")
 set(CPACK_RPM_PACKAGE_URL             "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_RPM_PACKAGE_VENDOR          "${CPACK_PACKAGE_VENDOR}")
-set(CPACK_RPM_FILE_NAME               "RPM-DEFAULT")
 
 # Autoreq picks up shared-library Requires from the binary's NEEDED
 # entries; no need to enumerate Qt6/KF6 sonames by hand.
 set(CPACK_RPM_PACKAGE_AUTOREQ         ON)
 set(CPACK_RPM_PACKAGE_AUTOPROV        ON)
+
+# Same `if(NOT DEFINED ...)` guard so CI can override.
+if(NOT DEFINED CPACK_RPM_FILE_NAME)
+    set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+endif()
 
 # Pure-QML / runtime-fork deps that autoreq can't see. Names below
 # match Fedora 41/42's package naming.
