@@ -240,7 +240,7 @@ jobs:
               qcoro-qt6-dev qtkeychain-qt6-dev \
               libmpv-dev libmpvqt-dev \
               libtorrent-rasterbar-dev libboost-dev libssl-dev \
-              qt6-svg-plugins qt6-imageformats-plugins qt6-wayland \
+              qt6-svg-plugins qt6-image-formats-plugins qt6-wayland \
               qml6-module-qtquick qml6-module-qtquick-controls \
               qml6-module-qtquick-layouts qml6-module-qtquick-templates \
               qml6-module-qtquick-window qml6-module-qtquick-effects \
