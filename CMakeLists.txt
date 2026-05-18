@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(kinema
-    VERSION 0.1.0
+    VERSION 0.1.1
     DESCRIPTION "Search movies and TV series, grab magnet links, stream via Real-Debrid"
     HOMEPAGE_URL "https://tlmtech.dev/kinema"
     LANGUAGES CXX

@@ -84,6 +84,16 @@
   </screenshots>
 
   <releases>
+    <release version="0.1.1" date="2026-05-18">
+      <description>
+        <p>Packaging and documentation hotfix release.</p>
+        <ul>
+          <li>Bundle Wayland, Kirigami platform, and WebP plugins in the AppImage.</li>
+          <li>Bundle the org.kde.desktop QtQuick Controls style into the AppImage.</li>
+          <li>User-first README with banner and screenshots.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-04-20">
       <description>
         <p>Initial development release (milestone 1 — walking skeleton).</p>
