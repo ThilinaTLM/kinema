@@ -2,6 +2,10 @@
 
 # Kinema
 
+[![Latest release](https://img.shields.io/github/v/release/ThilinaTLM/kinema?sort=semver&display_name=tag&label=release&color=8b5cf6)](https://github.com/ThilinaTLM/kinema/releases/latest)
+[![License: Apache-2.0](https://img.shields.io/github/license/ThilinaTLM/kinema?color=blue)](LICENSE)
+[![KDE Plasma 6](https://img.shields.io/badge/KDE-Plasma%206-1d99f3?logo=kde&logoColor=white)](https://kde.org/plasma-desktop/)
+
 **Cinema in motion.** A native KDE Plasma 6 desktop app for discovering
 movies and TV series, finding stream sources through public
 Stremio-compatible indexers ([Torrentio](https://torrentio.strem.fun/),
@@ -80,13 +84,15 @@ manifest).
 | Arch / openSUSE / NixOS / immutable distros | AppImage or portable tarball                                                           |
 | Don't want to install anything              | Portable tarball                                                                       |
 
-Each command block below pins one version at the top — bump `VERSION`
-to install a different release.
+Each command block below resolves the **latest** release from the
+GitHub API. To install a specific version instead, set `VERSION=x.y.z`
+before running the rest of the block.
 
 ### .deb (Ubuntu 25.04, Debian 13)
 
 ```bash
-VERSION=0.1.0
+VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
+                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
 URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
 
 # Ubuntu 25.04
@@ -105,7 +111,8 @@ external player you want, or neither if the built-in mpv is enough.
 ### .rpm (Fedora 41 / 42)
 
 ```bash
-VERSION=0.1.0
+VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
+                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
 URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
 
 # Fedora 41
@@ -120,7 +127,8 @@ sudo dnf install "./kinema-${VERSION}-1.fc42.x86_64.rpm"
 ### AppImage (anything else, including Ubuntu 24.04 LTS)
 
 ```bash
-VERSION=0.1.0
+VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
+                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
 URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
 
 wget "${URL}/Kinema-${VERSION}-x86_64.AppImage"
@@ -142,7 +150,8 @@ The same AppDir as the AppImage, pre-extracted. No FUSE needed; ideal
 for `/opt` installs or trying Kinema without committing.
 
 ```bash
-VERSION=0.1.0
+VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
+                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
 URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
 
 wget "${URL}/kinema-${VERSION}-x86_64.tar.gz"
@@ -155,7 +164,8 @@ tar -xzf "kinema-${VERSION}-x86_64.tar.gz"
 Every release also publishes `SHA256SUMS`:
 
 ```bash
-VERSION=0.1.0
+VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
+                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
 URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
 
 wget "${URL}/SHA256SUMS"

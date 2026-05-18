@@ -1,7 +1,7 @@
 # Kinema packaging
 
 This directory drives `.github/workflows/release.yml`. The release pipeline
-fires on tag push (`v0.1.0`, `v0.1.0-rc1`, …) and produces:
+fires on tag push (`vX.Y.Z`, `vX.Y.Z-rc1`, …) and produces:
 
 | Artifact                                          | Built where               | Notes |
 |---------------------------------------------------|---------------------------|-------|
@@ -14,7 +14,7 @@ fires on tag push (`v0.1.0`, `v0.1.0-rc1`, …) and produces:
 | `kinema-X.Y.Z-1.fc42.x86_64.rpm`                  | `fedora:42` container     | CPack/`rpmbuild --autoreq` |
 | `SHA256SUMS` (+ `SHA256SUMS.asc` if signed)       | `ubuntu-latest`           | aggregated last |
 
-Pre-release tags (containing a hyphen, e.g. `v0.1.0-rc1`) produce a **draft**
+Pre-release tags (containing a hyphen, e.g. `vX.Y.Z-rc1`) produce a **draft**
 release. Final tags publish directly.
 
 ## Why no Ubuntu 24.04 LTS
@@ -98,7 +98,7 @@ docker run --rm -it -v "$PWD":/src -w /src debian:trixie bash -lc '
 docker run --rm -it --privileged -v "$PWD":/src -w /src debian:trixie bash -lc '
   apt-get update && apt-get install -y --no-install-recommends wget fuse libfuse2t64 \
       ...  # full list mirrored from .github/workflows/release.yml
-  VERSION=0.1.0 bash packaging/appimage/build-appimage.sh
+  VERSION=X.Y.Z bash packaging/appimage/build-appimage.sh
 '
 ```
 

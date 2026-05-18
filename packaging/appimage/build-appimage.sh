@@ -17,7 +17,7 @@
 #                                              same CI job
 #
 # Environment:
-#   VERSION   — required. Release version without leading 'v' (e.g. 0.1.0).
+#   VERSION   — required. Release version without leading 'v' (e.g. X.Y.Z).
 
 set -euo pipefail
 

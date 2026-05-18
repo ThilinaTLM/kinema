@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 #
-# Release pipeline. Triggered on tag push (v0.1.0, v1.2.3-rc1, ...).
+# Release pipeline. Triggered on tag push (vX.Y.Z, vX.Y.Z-rc1, ...).
 #
 # Produces six artifacts and one signed checksum manifest:
 #   • kinema-${VERSION}.tar.gz                          (source tarball)
@@ -13,7 +13,7 @@
 #   • kinema-${VERSION}-1.fc42.x86_64.rpm
 #   • SHA256SUMS  (+ SHA256SUMS.asc when GPG_PRIVATE_KEY secret is set)
 #
-# Pre-release tags (containing a '-': v0.1.0-rc1) land as draft releases
+# Pre-release tags (containing a '-': vX.Y.Z-rc1) land as draft releases
 # so they can be reviewed before publishing. Final tags publish directly.
 
 name: Release
