@@ -5,8 +5,11 @@
 
 #include "api/TmdbClient.h"
 #include "config/BrowseSettings.h"
+#include "controllers/LibraryController.h"
+#include "controllers/WatchedController.h"
 #include "core/io/HttpErrorPresenter.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
+#include "ui/qml-bridge/TitleActions.h"
 
 #include <KLocalizedString>
 
@@ -215,6 +218,55 @@ void BrowseViewModel::activate(int row)
         Q_EMIT openSeriesRequested(item->tmdbId, item->title);
     } else {
         Q_EMIT openMovieRequested(item->tmdbId, item->title);
+    }
+}
+
+void BrowseViewModel::setLibraryController(
+    controllers::LibraryController* lib)
+{
+    m_library = lib;
+}
+
+void BrowseViewModel::setWatchedController(
+    controllers::WatchedController* watched)
+{
+    m_watched = watched;
+}
+
+void BrowseViewModel::addRowToLibrary(int row)
+{
+    const auto* item = m_results->itemAt(row);
+    if (!item) {
+        return;
+    }
+    auto task = title_actions::addToLibraryByTmdb(m_tmdb,
+        m_library, this, item->tmdbId, item->kind, item->title);
+    Q_UNUSED(task);
+}
+
+void BrowseViewModel::markRowWatched(int row)
+{
+    const auto* item = m_results->itemAt(row);
+    if (!item) {
+        return;
+    }
+    auto task = title_actions::markWatchedByTmdb(m_tmdb,
+        m_watched, this, item->tmdbId, item->kind, item->title);
+    Q_UNUSED(task);
+}
+
+void BrowseViewModel::findStreamsForRow(int row)
+{
+    const auto* item = m_results->itemAt(row);
+    if (!item || item->tmdbId <= 0) {
+        return;
+    }
+    if (item->kind == domain::MediaKind::Series) {
+        Q_EMIT findSeriesStreamsByTmdbRequested(
+            item->tmdbId, item->title);
+    } else {
+        Q_EMIT findMovieStreamsByTmdbRequested(
+            item->tmdbId, item->title);
     }
 }
 

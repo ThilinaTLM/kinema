@@ -105,6 +105,44 @@ public Q_SLOTS:
     /// Same shape, but resolves a TMDB id to the IMDB id first.
     void openMovieDetailByTmdb(int tmdbId, const QString& title);
 
+    /// Cross-cutting clipboard / external-URL helpers used by
+    /// context menus throughout the app. They live on the shell
+    /// (rather than per-VM) so every menu can reach the same
+    /// behaviour via the `shell` context property.
+    ///
+    /// `copyToClipboard` copies `text` to the system clipboard and
+    /// surfaces a passive notification. Pass `confirmMessage` to
+    /// customise the toast (e.g. "Title copied"); empty falls back
+    /// to a generic "Copied to clipboard" message. No-ops on empty
+    /// `text`.
+    void copyToClipboard(const QString& text,
+        const QString& confirmMessage = QString());
+
+    /// Hand `url` off to the desktop's default handler via
+    /// `core::io::openExternal`. Surfaces success / failure as a
+    /// passive notification. No-ops on invalid URLs.
+    void openExternalUrl(const QUrl& url);
+
+    /// Open `https://www.imdb.com/title/<imdbId>/` in the default
+    /// browser. No-ops on empty or malformed ids.
+    void openImdbTitle(const QString& imdbId);
+
+    /// Open `https://www.themoviedb.org/{movie|tv}/<tmdbId>` in the
+    /// default browser. `kind` is `domain::MediaKind` (0 = movie,
+    /// 1 = series); other values fall back to the movie path.
+    void openTmdbTitle(int tmdbId, int kind);
+
+    /// Context-menu "Find Streams" navigation. Each loads the
+    /// matching detail VM (movie or series) by IMDb id or TMDB id
+    /// and pushes `StreamsPage`, mirroring the Continue Watching
+    /// streams shortcut.
+    void findMovieStreamsByImdb(const QString& imdbId,
+        const QString& title);
+    void findSeriesStreamsByImdb(const QString& imdbId,
+        const QString& title);
+    void findMovieStreamsByTmdb(int tmdbId, const QString& title);
+    void findSeriesStreamsByTmdb(int tmdbId, const QString& title);
+
     /// Series counterparts.
     void openSeriesDetail(const QString& imdbId, const QString& title);
     void openSeriesDetailAt(const QString& imdbId, const QString& title,

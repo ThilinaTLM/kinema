@@ -25,18 +25,25 @@ Item {
 
     implicitHeight: scroll.implicitHeight
 
-    QQC2.Menu {
+    // Right-click context menu. Per `docs/MenuConventions.md` the
+    // "Mark watched" / "Mark unwatched" pair collapses into a
+    // single stateful item that flips its label and icon based on
+    // the season's current state. `targetWatched` is captured
+    // alongside `targetSeason` when the user right-clicks a tab.
+    KinemaMenu {
         id: seasonMenu
         property int targetSeason: -1
-        Kirigami.Action {
-            text: i18nc("@action:inmenu", "Mark season as watched")
-            icon.source: AppIcons.url("circle-check")
-            onTriggered: tabs.vm.markSeasonWatched(seasonMenu.targetSeason, true)
-        }
-        Kirigami.Action {
-            text: i18nc("@action:inmenu", "Mark season as unwatched")
-            icon.source: AppIcons.url("circle-dashed")
-            onTriggered: tabs.vm.markSeasonWatched(seasonMenu.targetSeason, false)
+        property bool targetWatched: false
+
+        KinemaMenuItem {
+            iconName: seasonMenu.targetWatched
+                ? "circle-dashed" : "circle-check"
+            label: seasonMenu.targetWatched
+                ? i18nc("@action:inmenu season tab", "Mark Unwatched")
+                : i18nc("@action:inmenu season tab", "Mark Watched")
+            onTriggered: tabs.vm.markSeasonWatched(
+                seasonMenu.targetSeason,
+                !seasonMenu.targetWatched)
         }
     }
 
@@ -84,6 +91,8 @@ Item {
                             const seasonNum = tabs.vm.seasonNumbers[index];
                             if (seasonNum !== undefined) {
                                 seasonMenu.targetSeason = seasonNum;
+                                seasonMenu.targetWatched =
+                                    tabs.vm.seasonWatchedList[index] === true;
                                 seasonMenu.popup();
                             }
                         }

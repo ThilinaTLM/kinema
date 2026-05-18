@@ -226,6 +226,32 @@ void LibraryViewModel::activate(int row)
     Q_EMIT openSeriesRequested(r->imdbId, r->title);
 }
 
+void LibraryViewModel::findStreamsForRow(int row)
+{
+    const auto* r = m_model->at(row);
+    if (!r) return;
+    if (r->upcoming) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "\u201c%1\u201d hasn't released yet.", r->title),
+            4000);
+        return;
+    }
+    if (r->kind == domain::MediaKind::Movie) {
+        Q_EMIT openMovieStreamsRequested(r->imdbId, r->title);
+        return;
+    }
+    if (r->season && r->episode) {
+        Q_EMIT openSeriesEpisodeStreamsRequested(
+            r->imdbId, r->title, *r->season, *r->episode);
+        return;
+    }
+    // Series rows that aren't anchored to a specific episode
+    // (e.g. freshly saved series) fall back to opening the
+    // series detail page so the user picks an episode there.
+    Q_EMIT openSeriesRequested(r->imdbId, r->title);
+}
+
 void LibraryViewModel::resume(int row)
 {
     const auto* r = m_model->at(row);
@@ -295,6 +321,67 @@ void LibraryViewModel::activateRail(const QString& railId, int row)
     // be empty; recentlyAdded is just "open the title". In both
     // cases the safe action is to open the series page.
     Q_EMIT openSeriesRequested(r->imdbId, r->title);
+}
+
+void LibraryViewModel::findStreamsForRailRow(
+    const QString& railId, int row)
+{
+    LibraryRailModel* m = nullptr;
+    if (railId == QLatin1String("upNext")) m = m_upNextModel;
+    else if (railId == QLatin1String("airingSoon")) m = m_airingSoonModel;
+    else if (railId == QLatin1String("recentlyAdded")) m = m_recentlyAddedModel;
+    if (!m) return;
+    const auto* r = m->at(row);
+    if (!r) return;
+    if (r->kind == domain::MediaKind::Movie) {
+        Q_EMIT openMovieStreamsRequested(r->imdbId, r->title);
+        return;
+    }
+    if (r->season && r->episode) {
+        Q_EMIT openSeriesEpisodeStreamsRequested(
+            r->imdbId, r->title, *r->season, *r->episode);
+        return;
+    }
+    // Series row without a specific episode (e.g. Recently Added
+    // for a brand-new save) -- fall back to opening the series
+    // detail page so the user can pick an episode there.
+    Q_EMIT openSeriesRequested(r->imdbId, r->title);
+}
+
+void LibraryViewModel::markRailRowWatched(
+    const QString& railId, int row)
+{
+    LibraryRailModel* m = nullptr;
+    if (railId == QLatin1String("upNext")) m = m_upNextModel;
+    else if (railId == QLatin1String("airingSoon")) m = m_airingSoonModel;
+    else if (railId == QLatin1String("recentlyAdded")) m = m_recentlyAddedModel;
+    if (!m || !m_watched) return;
+    const auto* r = m->at(row);
+    if (!r) return;
+    if (r->kind == domain::MediaKind::Movie) {
+        m_watched->setMovieWatched(r->imdbId, /*watched=*/true);
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "Marked \u201c%1\u201d as watched.", r->title),
+            3000);
+        return;
+    }
+    if (r->season && r->episode) {
+        m_watched->setEpisodeWatched(r->imdbId,
+            *r->season, *r->episode, /*watched=*/true);
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "Marked episode as watched."),
+            3000);
+        return;
+    }
+    // Series row without an episode anchor: same nudge as the
+    // poster context menu so the user lands somewhere useful.
+    Q_EMIT statusMessage(
+        i18nc("@info:status",
+            "Open \u201c%1\u201d to mark individual episodes "
+            "as watched.", r->title),
+        4000);
 }
 
 // -- entry construction -----------------------------------------------

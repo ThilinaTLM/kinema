@@ -261,6 +261,9 @@ public Q_SLOTS:
     void openMagnet(int row);
     void copyDirectUrl(int row);
     void openDirectUrl(int row);
+    /// Copy the row's release name to the clipboard via
+    /// `services::StreamActions::copyReleaseName`.
+    void copyReleaseName(int row);
 
     /// Header subtitle action / per-row subtitle action. Phase 05
     /// stubs both with `subtitlesRequested` → passive notification;
@@ -275,6 +278,13 @@ public Q_SLOTS:
     /// `openMovieRequested` / `openSeriesRequested` so the page
     /// stack gets a fresh push for the chosen title.
     void activateSimilar(int row);
+
+    /// Similar-carousel context menu hooks. Mirror the Discover /
+    /// Browse poster menu but bound to `m_similar` rather than a
+    /// page-level results model.
+    void addSimilarToLibrary(int row);
+    void markSimilarWatched(int row);
+    void findSimilarStreams(int row);
 
 Q_SIGNALS:
     void metaChanged();
@@ -297,6 +307,14 @@ Q_SIGNALS:
     /// detail page on top.
     void openMovieByTmdbRequested(int tmdbId, const QString& title);
     void openSeriesByTmdbRequested(int tmdbId, const QString& title);
+
+    /// Similar-row "Find Streams" route. Shape matches
+    /// `BrowseViewModel::findMovieStreamsByTmdbRequested` so
+    /// `ShellViewModel` can route both through the same handler.
+    void findMovieStreamsByTmdbRequested(int tmdbId,
+        const QString& title);
+    void findSeriesStreamsByTmdbRequested(int tmdbId,
+        const QString& title);
 
     /// Phase 06 hook: pushes the Subtitles page with the carried
     /// playback context. Phase 05 stubs the connection in

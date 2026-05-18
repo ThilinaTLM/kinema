@@ -3,28 +3,28 @@
 
 import QtQuick
 import QtQuick.Controls as QQC2
-import org.kde.kirigami as Kirigami
 
 import dev.tlmtech.kinema.app
 
-// Per-row action menu installed on each `StreamListCard`'s "\u22ee" button.
-// Play is covered by the row's primary button (and Enter / double-click /
-// right-click), so the menu only carries the secondary affordances:
-//   - Copy magnet / Open magnet                 : require infoHash
-//   - Copy direct URL / Open direct URL         : require directUrl
-//   - Play via torrent / Use torrent for this
-//     download                                  : require infoHash, and
-//                                                 only meaningful when
-//                                                 a debrid provider is
-//                                                 active (otherwise
-//                                                 torrent is already the
-//                                                 default backend) \u2014 hidden
-//                                                 in that case.
-//   - Subtitles\u2026                                  : always (stub)
+// Per-row action menu installed on each `StreamListCard`'s "\u22ee"
+// button. Play is covered by the row's primary button (and
+// Enter / double-click / right-click), so the menu only carries
+// secondary affordances. Wording, ordering, and ellipsis usage
+// follow `docs/MenuConventions.md` \u2014 see the spec for the full
+// rationale.
+//
+// Layout:
+//
+//   * Copy / Open magnet  (require `hasMagnet`)
+//   * Copy / Open URL     (require `hasDirectUrl`)
+//   * Copy Release Name
+//   * Play / Download with Torrent Backend
+//     (debrid-only escape hatches; require `hasMagnet`)
+//   * Find Subtitles
 //
 // All actions route through the owning view-model's slots so the
 // QML side never reaches into `services::StreamActions` directly.
-QQC2.Menu {
+KinemaMenu {
     id: menu
 
     /// Index of the row in the streams model; passed to the VM
@@ -36,72 +36,71 @@ QQC2.Menu {
     property bool hasDirectUrl: false
 
     /// View-model exposing the per-row action slots.
-    /// Defaults to `movieDetailVm` for the movie page; commit B's
-    /// SeriesDetailPage will pass `seriesDetailVm` instead.
+    /// `MovieDetailPage` / `SeriesDetailPage` each pass their own
+    /// detail VM.
     property var vm: movieDetailVm
 
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "Copy magnet link")
-        icon.source: AppIcons.url("copy")
-        icon.color: AppIcons.controlColor(enabled, false)
+    KinemaMenuItem {
+        iconName: "copy"
+        label: i18nc("@action:inmenu", "Copy Magnet")
         enabled: menu.hasMagnet
         onTriggered: menu.vm.copyMagnet(menu.row)
     }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "Open magnet link")
-        icon.source: AppIcons.url("external-link")
-        icon.color: AppIcons.controlColor(enabled, false)
+    KinemaMenuItem {
+        iconName: "external-link"
+        label: i18nc("@action:inmenu", "Open Magnet")
         enabled: menu.hasMagnet
         onTriggered: menu.vm.openMagnet(menu.row)
     }
     QQC2.MenuSeparator { }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "Copy direct URL")
-        icon.source: AppIcons.url("copy")
-        icon.color: AppIcons.controlColor(enabled, false)
+    KinemaMenuItem {
+        iconName: "copy"
+        label: i18nc("@action:inmenu", "Copy URL")
         enabled: menu.hasDirectUrl
         onTriggered: menu.vm.copyDirectUrl(menu.row)
     }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "Open direct URL")
-        icon.source: AppIcons.url("external-link")
-        icon.color: AppIcons.controlColor(enabled, false)
+    KinemaMenuItem {
+        iconName: "external-link"
+        label: i18nc("@action:inmenu", "Open URL")
         enabled: menu.hasDirectUrl
         onTriggered: menu.vm.openDirectUrl(menu.row)
+    }
+    QQC2.MenuSeparator { }
+    KinemaMenuItem {
+        iconName: "copy"
+        label: i18nc("@action:inmenu", "Copy Release")
+        onTriggered: menu.vm.copyReleaseName(menu.row)
     }
     QQC2.MenuSeparator { }
     // Backend escape hatches. The default Play / Download buttons
     // route through the active debrid provider when configured;
     // these leaves force libtorrent for users who want to bypass
-    // the debrid provider on a specific release (e.g. it's having a
-    // slow day). Hidden when no debrid provider is active \u2014 in that
-    // state torrent is already the default and the override would
-    // be a no-op.
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu force libtorrent backend for play",
-            "Play via torrent")
-        icon.source: AppIcons.url("play")
-        icon.color: AppIcons.controlColor(enabled, false)
+    // the debrid provider on a specific release (e.g. it's having
+    // a slow day). Hidden when no debrid provider is active \u2014 in
+    // that state torrent is already the default and the override
+    // would be a no-op.
+    KinemaMenuItem {
+        iconName: "play"
+        label: i18nc("@action:inmenu force libtorrent backend for play",
+            "Play via Torrent")
         visible: menu.vm && menu.vm.debridConfigured
         enabled: menu.hasMagnet
         // 0 == domain::DownloadBackendKind::Torrent
         onTriggered: menu.vm.playWithBackend(menu.row, 0)
     }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu force libtorrent backend",
-            "Use torrent for this download")
-        icon.source: AppIcons.url("network-server-database")
-        icon.color: AppIcons.controlColor(enabled, false)
+    KinemaMenuItem {
+        iconName: "download"
+        label: i18nc("@action:inmenu force libtorrent backend",
+            "Download via Torrent")
         visible: menu.vm && menu.vm.debridConfigured
         enabled: menu.hasMagnet
         // 0 == domain::DownloadBackendKind::Torrent
         onTriggered: menu.vm.downloadWithBackend(menu.row, 0)
     }
     QQC2.MenuSeparator { }
-    QQC2.MenuItem {
-        text: i18nc("@action:inmenu", "Subtitles\u2026")
-        icon.source: AppIcons.url("captions")
-        icon.color: AppIcons.controlColor(enabled, false)
+    KinemaMenuItem {
+        iconName: "captions"
+        label: i18nc("@action:inmenu", "Subtitles")
         onTriggered: menu.vm.requestSubtitlesFor(menu.row)
     }
 }

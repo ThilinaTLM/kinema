@@ -328,6 +328,11 @@ ecm_add_test(tst_shell_view_model_close_logic.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_shell_view_model_clipboard.cpp
+    TEST_NAME tst_shell_view_model_clipboard
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Gui
+)
+
 ecm_add_test(tst_discover_view_model.cpp
     TEST_NAME tst_discover_view_model
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -421,7 +426,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
          tst_mpv_config_paths tst_mpv_track_list_parse tst_credits_marker
          tst_media_chips tst_mpris_metadata tst_idle_inhibitor
-         tst_shell_view_model_close_logic
+         tst_shell_view_model_close_logic tst_shell_view_model_clipboard
          tst_discover_view_model tst_continue_watching_view_model
          tst_library_view_model tst_library_backfill
          tst_application_boot tst_kinema_image_provider

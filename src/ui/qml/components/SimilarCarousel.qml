@@ -21,6 +21,13 @@ ColumnLayout {
     /// Emitted when the user activates a card. Hosts route this
     /// into a `MovieDetailViewModel.activateSimilar(row)` call.
     signal itemActivated(int row)
+    // Per-row context menu signals forwarded from the embedded
+    // `PosterCard`. Hosts (`MovieDetailPage` / `SeriesDetailPage`)
+    // wire these to the matching `*Similar*` slots on the detail
+    // view-model.
+    signal findStreamsRequested(int row)
+    signal addToLibraryRequested(int row)
+    signal markWatchedRequested(int row)
 
     spacing: Theme.inlineSpacing
 
@@ -56,7 +63,12 @@ ColumnLayout {
             rating: (model.voteAverage !== undefined
                 && model.voteAverage !== null)
                 ? model.voteAverage : -1
+            tmdbId: model.tmdbId !== undefined ? model.tmdbId : 0
+            kindIndex: model.kind !== undefined ? model.kind : 0
             onClicked: carousel.itemActivated(index)
+            onFindStreamsRequested: carousel.findStreamsRequested(index)
+            onAddToLibraryRequested: carousel.addToLibraryRequested(index)
+            onMarkWatchedRequested: carousel.markWatchedRequested(index)
         }
     }
 }

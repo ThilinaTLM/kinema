@@ -19,7 +19,9 @@ class TmdbClient;
 }
 
 namespace kinema::controllers {
+class LibraryController;
 class TokenController;
+class WatchedController;
 }
 
 namespace kinema::ui::qml {
@@ -55,6 +57,12 @@ public:
     DiscoverViewModel(api::TmdbClient* tmdb,
         controllers::TokenController* tokens,
         QObject* parent = nullptr);
+
+    /// Optional injection for the PosterCard row context menu's
+    /// title-level actions ("Add to Library", "Mark Watched").
+    /// Tests that only exercise rail fetches can leave them unset.
+    void setLibraryController(controllers::LibraryController* lib);
+    void setWatchedController(controllers::WatchedController* watched);
 
     QList<QObject*> sectionsList() const;
     bool tmdbConfigured() const noexcept { return m_tmdbConfigured; }
@@ -92,6 +100,14 @@ public Q_SLOTS:
     /// notification until the detail pages land in phase 05.
     void activateItem(int sectionIndex, int row);
 
+    /// PosterCard context-menu hooks. Idempotent; all three
+    /// resolve the row's TMDB id to an IMDb id on demand and
+    /// dispatch through the matching controller / shell route.
+    /// Discover takes `(section, row)` to match `activateItem`.
+    void addRowToLibrary(int sectionIndex, int row);
+    void markRowWatched(int sectionIndex, int row);
+    void findStreamsForRow(int sectionIndex, int row);
+
 Q_SIGNALS:
     void sectionsChanged();
     void tmdbConfiguredChanged();
@@ -106,6 +122,15 @@ Q_SIGNALS:
     void openMovieRequested(int tmdbId, const QString& title);
     void openSeriesRequested(int tmdbId, const QString& title);
 
+    /// Context-menu "Find Streams" route, handled by ShellViewModel.
+    void findMovieStreamsByTmdbRequested(int tmdbId,
+        const QString& title);
+    void findSeriesStreamsByTmdbRequested(int tmdbId,
+        const QString& title);
+
+    /// Fan-in for status messages from `title_actions` helpers.
+    void statusMessage(const QString& text, int durationMs);
+
 private:
     void buildSections();
     void setTmdbConfigured(bool on);
@@ -119,6 +144,8 @@ private:
 
     api::TmdbClient* m_tmdb;
     controllers::TokenController* m_tokens;
+    controllers::LibraryController* m_library {};
+    controllers::WatchedController* m_watched {};
 
     QList<DiscoverSectionModel*> m_sections;
     QList<Fetcher> m_fetchers;

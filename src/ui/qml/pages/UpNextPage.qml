@@ -106,6 +106,14 @@ Kirigami.ScrollablePage {
                 && libraryVm.upNextModel.count > 0)
             onItemActivated: row =>
                 libraryVm.activateRail("upNext", row)
+            onContextMenuRequested:
+                (row, rowTitle, rowImdbId, kindIndex) => {
+                    upNextMenu.targetRow = row;
+                    upNextMenu.rowTitle = rowTitle;
+                    upNextMenu.rowImdbId = rowImdbId;
+                    upNextMenu.kindIndex = kindIndex;
+                    upNextMenu.popup();
+                }
         }
         LibraryRail {
             Layout.fillWidth: true
@@ -116,6 +124,14 @@ Kirigami.ScrollablePage {
                 && libraryVm.airingSoonModel.count > 0)
             onItemActivated: row =>
                 libraryVm.activateRail("airingSoon", row)
+            onContextMenuRequested:
+                (row, rowTitle, rowImdbId, kindIndex) => {
+                    airingSoonMenu.targetRow = row;
+                    airingSoonMenu.rowTitle = rowTitle;
+                    airingSoonMenu.rowImdbId = rowImdbId;
+                    airingSoonMenu.kindIndex = kindIndex;
+                    airingSoonMenu.popup();
+                }
         }
         LibraryRail {
             Layout.fillWidth: true
@@ -126,6 +142,60 @@ Kirigami.ScrollablePage {
                 && libraryVm.recentlyAddedModel.count > 0)
             onItemActivated: row =>
                 libraryVm.activateRail("recentlyAdded", row)
+            onContextMenuRequested:
+                (row, rowTitle, rowImdbId, kindIndex) => {
+                    recentlyAddedMenu.targetRow = row;
+                    recentlyAddedMenu.rowTitle = rowTitle;
+                    recentlyAddedMenu.rowImdbId = rowImdbId;
+                    recentlyAddedMenu.kindIndex = kindIndex;
+                    recentlyAddedMenu.popup();
+                }
+        }
+
+        // Smart-rail context menus. Three instances (one per rail)
+        // so each menu can carry the rail's id when dispatching to
+        // `libraryVm`. No destructive footer — these are computed
+        // views and the user removes via the Library grid.
+        EpisodeRailContextMenu {
+            id: upNextMenu
+            primaryLabel: i18nc("@action:inmenu", "Open")
+            primaryIcon: "play"
+            onPrimaryTriggered:
+                libraryVm.activateRail("upNext", upNextMenu.targetRow)
+            onFindStreamsTriggered:
+                libraryVm.findStreamsForRailRow("upNext",
+                    upNextMenu.targetRow)
+            onMarkWatchedTriggered:
+                libraryVm.markRailRowWatched("upNext",
+                    upNextMenu.targetRow)
+        }
+        EpisodeRailContextMenu {
+            id: airingSoonMenu
+            primaryLabel: i18nc("@action:inmenu", "Open")
+            primaryIcon: "info"
+            onPrimaryTriggered:
+                libraryVm.activateRail("airingSoon",
+                    airingSoonMenu.targetRow)
+            onFindStreamsTriggered:
+                libraryVm.findStreamsForRailRow("airingSoon",
+                    airingSoonMenu.targetRow)
+            onMarkWatchedTriggered:
+                libraryVm.markRailRowWatched("airingSoon",
+                    airingSoonMenu.targetRow)
+        }
+        EpisodeRailContextMenu {
+            id: recentlyAddedMenu
+            primaryLabel: i18nc("@action:inmenu", "Open")
+            primaryIcon: "info"
+            onPrimaryTriggered:
+                libraryVm.activateRail("recentlyAdded",
+                    recentlyAddedMenu.targetRow)
+            onFindStreamsTriggered:
+                libraryVm.findStreamsForRailRow("recentlyAdded",
+                    recentlyAddedMenu.targetRow)
+            onMarkWatchedTriggered:
+                libraryVm.markRailRowWatched("recentlyAdded",
+                    recentlyAddedMenu.targetRow)
         }
 
         // Fallback when the user has saved titles but no rail

@@ -502,88 +502,94 @@ BaseListCard {
         }
     }
 
-    // Overflow menu — short, distinct verbs.
-    //
-    //   Play       → play the cached file (only when complete)
-    //   Open folder→ reveal `localDir` in the file manager
-    //   Pin / Unpin→ toggle eviction policy; Pin also covers the
-    //                OnDemand → Full + Pinned upgrade
-    //   Pause      → only visible for Full+hasPlayer (Active), where
-    //                the primary slot is taken by "Play". Confirms
-    //                first since pausing will starve the player.
-    //   Stop       → stop the in-flight transfer (was "Cancel")
-    //   Remove     → remove the row, keep files on disk
-    //   Delete     → remove the row + delete files (confirm)
-    QQC2.Menu {
+    // Overflow menu — short, distinct verbs. Follows the
+    // conventions in `docs/MenuConventions.md`: primary actions
+    // at the top, copy / external next, destructive footer last.
+    // Items that open a confirm dialog wire it from
+    // `onTriggered` directly; the label stays short.
+    KinemaMenu {
         id: rowMenu
 
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu play the cached file",
-                "Play")
-            icon.source: AppIcons.url("play")
-            icon.color: AppIcons.controlColor(enabled, false)
+        KinemaMenuItem {
+            iconName: "play"
+            label: i18nc("@action:inmenu download row", "Play")
             visible: card.complete
-            height: visible ? implicitHeight : 0
             onTriggered: downloadsVm.playDownload(card.assetId)
         }
-        QQC2.MenuItem {
-            text: i18nc(
-                "@action:inmenu open the local cache folder",
-                "Open folder")
-            icon.source: AppIcons.url("folder-open")
-            icon.color: AppIcons.controlColor(enabled, false)
+        KinemaMenuItem {
+            iconName: "folder-open"
+            label: i18nc("@action:inmenu download row", "Open Folder")
             enabled: card.localDir.length > 0
             onTriggered: downloadsVm.openLocalDir(card.assetId)
         }
-        QQC2.MenuItem {
-            // Pin: save this download so eviction skips it. Also
-            // covers the OnDemand → Full + Pinned upgrade.
-            text: i18nc("@action:inmenu save this download "
-                + "(also upgrades OnDemand to Full+Pinned)",
-                "Pin")
-            icon.source: AppIcons.url("pin")
-            icon.color: AppIcons.controlColor(enabled, false)
-            visible: !card.pinned
-                && (card.canUpgrade || card.complete)
-            height: visible ? implicitHeight : 0
+        QQC2.MenuSeparator { }
+        // Pin / Unpin collapse into one stateful item per the
+        // "toggle pair = one item" convention. Pin also covers the
+        // OnDemand → Full + Pinned upgrade.
+        KinemaMenuItem {
+            iconName: card.pinned ? "circle-dashed" : "pin"
+            label: card.pinned
+                ? i18nc("@action:inmenu download row, allow eviction",
+                    "Unpin")
+                : i18nc("@action:inmenu download row, save (also "
+                    + "upgrades OnDemand to Full+Pinned)",
+                    "Pin")
+            visible: card.pinned
+                || card.canUpgrade
+                || card.complete
             onTriggered: {
-                if (card.canUpgrade && !card.complete) {
+                if (card.pinned) {
+                    downloadsVm.pin(card.assetId, false);
+                } else if (card.canUpgrade && !card.complete) {
                     downloadsVm.upgradeToFull(card.assetId);
                 } else {
                     downloadsVm.pin(card.assetId, true);
                 }
             }
         }
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu allow auto-eviction",
-                "Unpin")
-            icon.source: AppIcons.url("circle-dashed")
-            icon.color: AppIcons.controlColor(enabled, false)
-            visible: card.pinned
-            height: visible ? implicitHeight : 0
-            onTriggered: downloadsVm.pin(card.assetId, false)
-        }
         // Full+hasPlayer Pause lives only in the menu (primary slot
         // is "Play" so we don't offer Pause inline while a player
         // is attached). Confirm before pausing — the playback will
         // starve once the player catches up to cached bytes.
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu pause this download",
+        KinemaMenuItem {
+            iconName: "pause"
+            label: i18nc("@action:inmenu download row, pause this download",
                 "Pause")
-            icon.source: AppIcons.url("pause")
-            icon.color: AppIcons.controlColor(enabled, false)
             visible: card.state === card.stateActive
                 && card.mode === card.modeFull
                 && card.hasPlayerAttached
-            height: visible ? implicitHeight : 0
             onTriggered: pauseWhilePlayingConfirm.open()
         }
         QQC2.MenuSeparator { }
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu stop the in-flight transfer",
+        KinemaMenuItem {
+            iconName: "copy"
+            label: i18nc("@action:inmenu download row", "Copy Title")
+            enabled: card.title.length > 0
+            onTriggered: shell.copyToClipboard(card.title,
+                i18nc("@info:status",
+                    "Title copied to clipboard"))
+        }
+        KinemaMenuItem {
+            iconName: "copy"
+            label: i18nc("@action:inmenu download row", "Copy Path")
+            enabled: card.localDir.length > 0
+            onTriggered: shell.copyToClipboard(card.localDir,
+                i18nc("@info:status",
+                    "File path copied to clipboard"))
+        }
+        KinemaMenuItem {
+            iconName: "external-link"
+            label: i18nc("@action:inmenu download row",
+                "Open on IMDb")
+            enabled: card.imdbId.length > 0
+            onTriggered: shell.openImdbTitle(card.imdbId)
+        }
+        QQC2.MenuSeparator { }
+        KinemaMenuItem {
+            iconName: "x"
+            label: i18nc("@action:inmenu download row, stop transfer",
                 "Stop")
-            icon.source: AppIcons.url("x")
-            icon.color: AppIcons.controlColor(enabled, false)
+            destructive: true
             enabled: card.state !== card.stateCompleted
                 && card.state !== card.stateFailed
                 && card.state !== card.stateCancelled
@@ -595,18 +601,20 @@ BaseListCard {
                 }
             }
         }
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu remove the row, keep files",
+        KinemaMenuItem {
+            iconName: "list-x"
+            label: i18nc("@action:inmenu download row, drop the row",
                 "Remove")
-            icon.source: AppIcons.url("list-x")
-            icon.color: AppIcons.controlColor(enabled, false)
+            destructive: true
+            // Remove keeps files on disk; no confirm prompt.
             onTriggered: downloadsVm.remove(card.assetId, false)
         }
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu remove the row and delete "
-                + "the cached files",
+        KinemaMenuItem {
+            iconName: "trash-2"
+            label: i18nc("@action:inmenu download row, drop the row "
+                + "and delete cached files",
                 "Delete")
-            icon.source: AppIcons.url("trash-2", AppIcons.negative)
+            destructive: true
             onTriggered: deleteConfirm.open()
         }
     }

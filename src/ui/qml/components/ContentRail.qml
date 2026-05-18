@@ -23,6 +23,12 @@ ColumnLayout {
 
     signal itemActivated(int row)
     signal showAllRequested()
+    // Per-row context menu signals forwarded from the embedded
+    // `PosterCard`. The Discover parent (`DiscoverPage`) attaches
+    // the section index when routing to the view-model slots.
+    signal findStreamsRequested(int row)
+    signal addToLibraryRequested(int row)
+    signal markWatchedRequested(int row)
 
     spacing: Theme.inlineSpacing
 
@@ -102,7 +108,12 @@ ColumnLayout {
                 year:      model.year !== undefined ? model.year : 0
                 rating:    model.voteAverage !== undefined
                     ? model.voteAverage : -1
+                tmdbId:    model.tmdbId !== undefined ? model.tmdbId : 0
+                kindIndex: model.kind !== undefined ? model.kind : 0
                 onClicked: rail.itemActivated(index)
+                onFindStreamsRequested: rail.findStreamsRequested(index)
+                onAddToLibraryRequested: rail.addToLibraryRequested(index)
+                onMarkWatchedRequested: rail.markWatchedRequested(index)
             }
         }
     }

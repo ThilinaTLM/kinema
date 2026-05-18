@@ -17,6 +17,7 @@
 #include "controllers/SubtitleController.h"
 #include "controllers/TokenController.h"
 #include "controllers/TrayController.h"
+#include "core/io/OpenUrl.h"
 #include "core/mpv/PlayerLauncher.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
@@ -40,8 +41,12 @@
 #include <KLocalizedString>
 #include <KNotification>
 
+#include <QClipboard>
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QQuickWindow>
+#include <QRegularExpression>
+#include <QUrl>
 
 namespace kinema::ui::qml {
 
@@ -239,6 +244,107 @@ void ShellViewModel::openSeriesDetailByTmdb(int tmdbId,
     Q_EMIT showSeriesDetailRequested();
 }
 
+void ShellViewModel::copyToClipboard(const QString& text,
+    const QString& confirmMessage)
+{
+    if (text.isEmpty()) {
+        return;
+    }
+    QGuiApplication::clipboard()->setText(text);
+    const QString toast = confirmMessage.isEmpty()
+        ? i18nc("@info:status", "Copied to clipboard")
+        : confirmMessage;
+    Q_EMIT passiveMessage(toast, 3000);
+}
+
+void ShellViewModel::openExternalUrl(const QUrl& url)
+{
+    if (!url.isValid() || url.isEmpty()) {
+        return;
+    }
+    core::io::openExternal(url, this,
+        [this](const core::io::OpenExternalResult& r) {
+            if (!r.ok) {
+                Q_EMIT passiveMessage(
+                    i18nc("@info:status",
+                        "Could not open link: %1", r.errorString),
+                    6000);
+            }
+        });
+}
+
+void ShellViewModel::openImdbTitle(const QString& imdbId)
+{
+    static const QRegularExpression kImdbIdRe(
+        QStringLiteral("^tt\\d+$"));
+    if (imdbId.isEmpty() || !kImdbIdRe.match(imdbId).hasMatch()) {
+        return;
+    }
+    openExternalUrl(QUrl(QStringLiteral(
+        "https://www.imdb.com/title/%1/").arg(imdbId)));
+}
+
+void ShellViewModel::openTmdbTitle(int tmdbId, int kind)
+{
+    if (tmdbId <= 0) {
+        return;
+    }
+    const QString seg
+        = (kind == static_cast<int>(domain::MediaKind::Series))
+        ? QStringLiteral("tv")
+        : QStringLiteral("movie");
+    openExternalUrl(QUrl(QStringLiteral(
+        "https://www.themoviedb.org/%1/%2").arg(seg).arg(tmdbId)));
+}
+
+void ShellViewModel::findMovieStreamsByImdb(const QString& imdbId,
+    const QString& /*title*/)
+{
+    auto* mv = m_services.movieDetailVm();
+    if (!mv || imdbId.isEmpty()) {
+        return;
+    }
+    mv->clear();
+    mv->load(imdbId);
+    Q_EMIT showStreamsRequested(mv);
+}
+
+void ShellViewModel::findSeriesStreamsByImdb(const QString& imdbId,
+    const QString& /*title*/)
+{
+    auto* sv = m_services.seriesDetailVm();
+    if (!sv || imdbId.isEmpty()) {
+        return;
+    }
+    sv->clear();
+    sv->load(imdbId);
+    Q_EMIT showStreamsRequested(sv);
+}
+
+void ShellViewModel::findMovieStreamsByTmdb(int tmdbId,
+    const QString& title)
+{
+    auto* mv = m_services.movieDetailVm();
+    if (!mv || tmdbId <= 0) {
+        return;
+    }
+    mv->clear();
+    mv->loadByTmdbId(tmdbId, title);
+    Q_EMIT showStreamsRequested(mv);
+}
+
+void ShellViewModel::findSeriesStreamsByTmdb(int tmdbId,
+    const QString& title)
+{
+    auto* sv = m_services.seriesDetailVm();
+    if (!sv || tmdbId <= 0) {
+        return;
+    }
+    sv->clear();
+    sv->loadByTmdbId(tmdbId, title);
+    Q_EMIT showStreamsRequested(sv);
+}
+
 void ShellViewModel::attachWindow(QQuickWindow* window)
 {
     m_window = window;
@@ -365,6 +471,14 @@ void ShellViewModel::wireNavigationRouting()
         this, &ShellViewModel::openMovieDetailByTmdb);
     connect(discoverVm, &DiscoverViewModel::openSeriesRequested,
         this, &ShellViewModel::openSeriesDetailByTmdb);
+    connect(discoverVm, &DiscoverViewModel::statusMessage, this,
+        &ShellViewModel::passiveMessage);
+    connect(discoverVm,
+        &DiscoverViewModel::findMovieStreamsByTmdbRequested, this,
+        &ShellViewModel::findMovieStreamsByTmdb);
+    connect(discoverVm,
+        &DiscoverViewModel::findSeriesStreamsByTmdbRequested, this,
+        &ShellViewModel::findSeriesStreamsByTmdb);
 
     // Search VM action routing. Both movie and series activations
     // now push their respective detail page directly.
@@ -374,6 +488,12 @@ void ShellViewModel::wireNavigationRouting()
         this, &ShellViewModel::openMovieDetail);
     connect(searchVm, &SearchViewModel::openSeriesRequested,
         this, &ShellViewModel::openSeriesDetail);
+    connect(searchVm,
+        &SearchViewModel::findMovieStreamsByImdbRequested, this,
+        &ShellViewModel::findMovieStreamsByImdb);
+    connect(searchVm,
+        &SearchViewModel::findSeriesStreamsByImdbRequested, this,
+        &ShellViewModel::findSeriesStreamsByImdb);
 
     // Browse VM action routing.
     connect(browseVm, &BrowseViewModel::statusMessage, this,
@@ -382,6 +502,12 @@ void ShellViewModel::wireNavigationRouting()
         this, &ShellViewModel::openMovieDetailByTmdb);
     connect(browseVm, &BrowseViewModel::openSeriesRequested,
         this, &ShellViewModel::openSeriesDetailByTmdb);
+    connect(browseVm,
+        &BrowseViewModel::findMovieStreamsByTmdbRequested, this,
+        &ShellViewModel::findMovieStreamsByTmdb);
+    connect(browseVm,
+        &BrowseViewModel::findSeriesStreamsByTmdbRequested, this,
+        &ShellViewModel::findSeriesStreamsByTmdb);
 
     // Detail VM → shell.
     const auto pushSubtitlesFromDetail
@@ -404,6 +530,12 @@ void ShellViewModel::wireNavigationRouting()
         &MovieDetailViewModel::streamsRequested, this, [this] {
             Q_EMIT showStreamsRequested(m_services.movieDetailVm());
         });
+    connect(movieDetailVm,
+        &MovieDetailViewModel::findMovieStreamsByTmdbRequested, this,
+        &ShellViewModel::findMovieStreamsByTmdb);
+    connect(movieDetailVm,
+        &MovieDetailViewModel::findSeriesStreamsByTmdbRequested, this,
+        &ShellViewModel::findSeriesStreamsByTmdb);
 
     connect(seriesDetailVm,
         &SeriesDetailViewModel::statusMessage, this,
@@ -421,6 +553,12 @@ void ShellViewModel::wireNavigationRouting()
         &SeriesDetailViewModel::streamsRequested, this, [this] {
             Q_EMIT showStreamsRequested(m_services.seriesDetailVm());
         });
+    connect(seriesDetailVm,
+        &SeriesDetailViewModel::findMovieStreamsByTmdbRequested, this,
+        &ShellViewModel::findMovieStreamsByTmdb);
+    connect(seriesDetailVm,
+        &SeriesDetailViewModel::findSeriesStreamsByTmdbRequested, this,
+        &ShellViewModel::findSeriesStreamsByTmdb);
 
     // Subtitles VM. Routes download / local-file / settings
     // requests back through this shell.

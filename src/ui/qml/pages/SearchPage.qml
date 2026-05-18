@@ -143,6 +143,15 @@ Kirigami.Page {
         PosterGrid {
             sourceModel: searchVm.results
             onItemActivated: function (row) { searchVm.activate(row); }
+            onFindStreamsRequested: function (row) {
+                searchVm.findStreamsForRow(row);
+            }
+            onAddToLibraryRequested: function (row) {
+                searchVm.addRowToLibrary(row);
+            }
+            onMarkWatchedRequested: function (row) {
+                searchVm.markRowWatched(row);
+            }
         }
 
         // 3 — Empty.

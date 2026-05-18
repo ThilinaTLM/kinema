@@ -4,9 +4,12 @@
 #include "ui/qml-bridge/DiscoverViewModel.h"
 
 #include "api/TmdbClient.h"
+#include "controllers/LibraryController.h"
 #include "controllers/TokenController.h"
+#include "controllers/WatchedController.h"
 #include "core/io/HttpErrorPresenter.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
+#include "ui/qml-bridge/TitleActions.h"
 
 #include <KLocalizedString>
 
@@ -263,6 +266,64 @@ void DiscoverViewModel::activateItem(int sectionIndex, int row)
         Q_EMIT openSeriesRequested(item->tmdbId, item->title);
     } else {
         Q_EMIT openMovieRequested(item->tmdbId, item->title);
+    }
+}
+
+void DiscoverViewModel::setLibraryController(
+    controllers::LibraryController* lib)
+{
+    m_library = lib;
+}
+
+void DiscoverViewModel::setWatchedController(
+    controllers::WatchedController* watched)
+{
+    m_watched = watched;
+}
+
+void DiscoverViewModel::addRowToLibrary(int sectionIndex, int row)
+{
+    if (sectionIndex < 0 || sectionIndex >= m_sections.size()) {
+        return;
+    }
+    const auto* item = m_sections.at(sectionIndex)->itemAt(row);
+    if (!item) {
+        return;
+    }
+    auto task = title_actions::addToLibraryByTmdb(m_tmdb,
+        m_library, this, item->tmdbId, item->kind, item->title);
+    Q_UNUSED(task);
+}
+
+void DiscoverViewModel::markRowWatched(int sectionIndex, int row)
+{
+    if (sectionIndex < 0 || sectionIndex >= m_sections.size()) {
+        return;
+    }
+    const auto* item = m_sections.at(sectionIndex)->itemAt(row);
+    if (!item) {
+        return;
+    }
+    auto task = title_actions::markWatchedByTmdb(m_tmdb,
+        m_watched, this, item->tmdbId, item->kind, item->title);
+    Q_UNUSED(task);
+}
+
+void DiscoverViewModel::findStreamsForRow(int sectionIndex, int row)
+{
+    if (sectionIndex < 0 || sectionIndex >= m_sections.size()) {
+        return;
+    }
+    const auto* item = m_sections.at(sectionIndex)->itemAt(row);
+    if (!item || item->tmdbId <= 0) {
+        return;
+    }
+    if (item->kind == domain::MediaKind::Series) {
+        Q_EMIT findSeriesStreamsByTmdbRequested(
+            item->tmdbId, item->title);
+    } else {
+        Q_EMIT findMovieStreamsByTmdbRequested(
+            item->tmdbId, item->title);
     }
 }
 
