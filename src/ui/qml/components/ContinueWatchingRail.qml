@@ -15,14 +15,14 @@ import dev.tlmtech.kinema.app
 //
 // Menu items (`EpisodeRailContextMenu`):
 //   - Resume                          \u2192 continueWatchingVm.resume
-//   - Open Series / Open Movie        \u2192 continueWatchingVm.openDetail
-//   - Find Streams                    \u2192 continueWatchingVm.openStreams
+//   - Streams                         \u2192 continueWatchingVm.openStreams
+//   - Details                         \u2192 continueWatchingVm.openDetail
 //   - Mark Episode Watched / Watched  \u2192 (informational stub here;
 //                                       per-episode mutation lives
 //                                       on the detail page)
 //   - Copy Title                      \u2192 shell.copyToClipboard
 //   - Open on IMDb                    \u2192 shell.openImdbTitle
-//   - Remove from Continue Watching\u2026 \u2192 confirm \u2192 vm.remove
+//   - Remove from Continue Watching   \u2192 confirm \u2192 vm.remove
 //
 // Left-click on a card still resumes directly. Visual chrome
 // (16:9 frame, progress bar, three meta lines) is identical to
@@ -53,12 +53,15 @@ ColumnLayout {
         id: contextMenu
         primaryLabel: i18nc("@action:inmenu continue watching", "Resume")
         primaryIcon: "play"
+        detailsVisible: true
         removeLabel: i18nc("@action:inmenu continue watching", "Remove")
         removeIcon: "list-x"
 
         onPrimaryTriggered: continueWatchingVm.resume(contextMenu.targetRow)
         onFindStreamsTriggered:
             continueWatchingVm.openStreams(contextMenu.targetRow)
+        onOpenDetailsTriggered:
+            continueWatchingVm.openDetail(contextMenu.targetRow)
         onMarkWatchedTriggered: {
             // Continue Watching rows are always per-episode (or
             // per-movie). The full mark-watched flow lives on the

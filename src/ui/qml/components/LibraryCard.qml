@@ -24,7 +24,7 @@ import dev.tlmtech.kinema.app
 //     `KinemaArtworkFrame`'s built-in overlay via the base's
 //     `progress` prop),
 //   * a right-click context menu that matches the conventions in
-//     `docs/MenuConventions.md`: Open / Find Streams / Mark
+//     `docs/MenuConventions.md`: Details / Find Streams / Mark
 //     Watched / Copy Title / Open on IMDb / Remove from
 //     Library\u2026 \u2014 wired through the base's `rightClicked()`
 //     signal.
@@ -95,8 +95,8 @@ BasePosterCard {
         id: contextMenu
 
         KinemaMenuItem {
-            iconName: "play"
-            label: i18nc("@action:inmenu library card", "Open")
+            iconName: "info"
+            label: i18nc("@action:inmenu library card", "Details")
             onTriggered: card.clicked()
         }
         KinemaMenuItem {
