@@ -15,19 +15,21 @@ import dev.tlmtech.kinema.app
 //
 //   1. Release line     — full `releaseName`, foreground / Medium.
 //                         The strongest identifier, so it leads.
-//   2. Meta row         — four visually distinct zones on a single
-//                         left-flowing line, separated by `large-
-//                         Spacing` whitespace only:
-//                           a. chips      (languages / multi / group)
-//                           b. tech       (`source · codec · hdr ·
-//                                          audio` — middots stay
-//                                          *within* this zone)
-//                           c. provider   (plain caption label)
-//                           d. seeders    (users icon + number)
-//                         Middots are reserved for within-zone
-//                         rhythm; between zones we use spacing
-//                         alone, so unlike kinds of metadata aren't
-//                         glued into a single dot-separated chain.
+//   2. Meta row         — single dot-separated caption line:
+//                         `<tag> · <tag> · … · source · codec ·
+//                          hdr · audio · provider · ⌂ seeders`.
+//                         Every token renders as caption-sized
+//                         text (with the seeders icon sized to the
+//                         same baseline), so the line height is
+//                         identical whether or not optional tokens
+//                         are present. This replaces an earlier
+//                         four-zone layout that mixed bordered
+//                         `MetaChip` pills (tags) with caption
+//                         text (tech / provider / seeders); the
+//                         chip's vertical padding made the line
+//                         taller whenever any tag was present and
+//                         the row jittered between heights as the
+//                         user scrolled.
 //   3. Action row       — `Play`, `Download`, `More` as regular
 //                         text-beside-icon buttons. No tool or
 //                         icon-only buttons anywhere on the row.
@@ -136,23 +138,15 @@ BaseListCard {
                 : ""
     }
 
-    // Line 2: unified meta row. Four zones — chips, tech summary,
-    // provider, seeders — separated by inter-zone whitespace
-    // only, no middots, so unlike kinds of metadata aren't glued
-    // into a single dot-separated chain.
-    //
-    // Implementation note: every visible item is a *direct* child
-    // of this `RowLayout` and carries `Layout.alignment:
-    // Qt.AlignVCenter` so they share a single vertical-center axis.
-    // The earlier version wrapped the seeders icon + count in a
-    // nested `RowLayout` for tight icon-number spacing; that
-    // introduced a two-level center hierarchy whose inner items
-    // ended up rendering off the sibling labels' baseline. Instead,
-    // the row uses tight `inlineSpacing` throughout and explicit
-    // `zoneGap`-wide `Item` spacers separate the zones, so the
-    // icon and count sit next to each other naturally without a
-    // nested layout.
+    // Line 2: dot-separated caption tokens — tags, tech summary,
+    // provider, seeders icon + count. Every visible token is a
+    // *direct* child of this `RowLayout` carrying
+    // `Layout.alignment: Qt.AlignVCenter` so they share a single
+    // vertical-center axis and a single caption-sized line height
+    // regardless of which tokens render.
     RowLayout {
+        id: metaRow
+
         readonly property bool hasTags:
             card.tags && card.tags.length > 0
         readonly property bool hasSummary:
@@ -160,43 +154,59 @@ BaseListCard {
         readonly property bool hasProvider:
             card.provider && card.provider.length > 0
         readonly property bool hasSeeders: card.seeders >= 0
-        readonly property int zoneGap: Kirigami.Units.largeSpacing
 
         Layout.fillWidth: true
         spacing: Theme.inlineSpacing
 
-        // Zone (a): tag chips.
-        RowChipRail {
-            Layout.alignment: Qt.AlignVCenter
-            visible: parent.hasTags
-            chips: {
-                const list = [];
-                if (card.tags) {
-                    for (let i = 0; i < card.tags.length; ++i) {
-                        list.push({
-                            text: card.tags[i],
-                            tone: "neutral"
-                        });
-                    }
+        // Tag tokens (languages / multi / group). Iterated as
+        // plain caption labels; the row no longer uses pill chips
+        // here, so the line height stays caption-sized in every
+        // state.
+        Repeater {
+            model: metaRow.hasTags ? card.tags : []
+
+            delegate: RowLayout {
+                required property int index
+                required property string modelData
+                Layout.alignment: Qt.AlignVCenter
+                spacing: Theme.inlineSpacing
+
+                // Inter-tag `·` separator; first tag has none.
+                QQC2.Label {
+                    Layout.alignment: Qt.AlignVCenter
+                    visible: index > 0
+                    text: "\u00b7"
+                    font.pointSize: Theme.captionFont.pointSize
+                    color: Theme.disabled
+                    verticalAlignment: Text.AlignVCenter
                 }
-                return list;
+
+                QQC2.Label {
+                    Layout.alignment: Qt.AlignVCenter
+                    text: modelData
+                    font.pointSize: Theme.captionFont.pointSize
+                    color: Theme.disabled
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
         }
 
-        // Zone separator (a) → (b): only visible when both adjacent
-        // zones are present.
-        Item {
-            visible: parent.hasTags && parent.hasSummary
-            Layout.preferredWidth: parent.zoneGap
-                - parent.spacing * 2
-            Layout.preferredHeight: 1
-        }
-
-        // Zone (b): tech summary, caption/disabled. Elides right
-        // when the row narrows.
+        // Separator (tags) → (tech summary).
         QQC2.Label {
             Layout.alignment: Qt.AlignVCenter
-            visible: parent.hasSummary
+            visible: metaRow.hasTags && metaRow.hasSummary
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // Tech summary (source · codec · hdr · audio — middots
+        // baked into the string upstream). Elides right when the
+        // row narrows.
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasSummary
             text: card.summaryLine
             wrapMode: Text.NoWrap
             elide: Text.ElideRight
@@ -205,43 +215,46 @@ BaseListCard {
             verticalAlignment: Text.AlignVCenter
         }
 
-        // Zone separator (b) → (c).
-        Item {
-            visible: (parent.hasTags || parent.hasSummary)
-                && parent.hasProvider
-            Layout.preferredWidth: parent.zoneGap
-                - parent.spacing * 2
-            Layout.preferredHeight: 1
-        }
-
-        // Zone (c): provider name, caption/disabled. Plain text
-        // — it's chrome, not a metric.
+        // Separator (tags|tech) → (provider).
         QQC2.Label {
             Layout.alignment: Qt.AlignVCenter
-            visible: parent.hasProvider
+            visible: (metaRow.hasTags || metaRow.hasSummary)
+                && metaRow.hasProvider
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // Provider name, caption/disabled. Plain text — it's
+        // chrome, not a metric.
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasProvider
             text: card.provider
             font.pointSize: Theme.captionFont.pointSize
             color: Theme.disabled
             verticalAlignment: Text.AlignVCenter
         }
 
-        // Zone separator (c) → (d).
-        Item {
-            visible: (parent.hasTags || parent.hasSummary
-                || parent.hasProvider) && parent.hasSeeders
-            Layout.preferredWidth: parent.zoneGap
-                - parent.spacing * 2
-            Layout.preferredHeight: 1
+        // Separator (tags|tech|provider) → (seeders).
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: (metaRow.hasTags || metaRow.hasSummary
+                || metaRow.hasProvider) && metaRow.hasSeeders
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
         }
 
-        // Zone (d), part 1: users icon. Same vertical-center axis
-        // as every other item on the line. Sized down from the
-        // standard `iconSizes.small` so the icon reads as inline
-        // chrome next to the caption-sized count rather than as
-        // its own visual feature.
+        // Seeders icon. Sized down from the standard
+        // `iconSizes.small` so it reads as inline chrome next to
+        // the caption-sized count rather than as its own visual
+        // feature.
         Kirigami.Icon {
             Layout.alignment: Qt.AlignVCenter
-            visible: parent.hasSeeders
+            visible: metaRow.hasSeeders
             Layout.preferredWidth:
                 Math.round(Kirigami.Units.iconSizes.small * 0.8)
             Layout.preferredHeight: width
@@ -249,10 +262,10 @@ BaseListCard {
             color: Theme.disabled
         }
 
-        // Zone (d), part 2: seeders count.
+        // Seeders count.
         QQC2.Label {
             Layout.alignment: Qt.AlignVCenter
-            visible: parent.hasSeeders
+            visible: metaRow.hasSeeders
             text: card.seeders
             font.pointSize: Theme.captionFont.pointSize
             color: Theme.disabled

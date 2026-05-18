@@ -11,13 +11,21 @@ import dev.tlmtech.kinema.app
 // One subtitle result row. Built on `BaseListCard`, which owns the
 // row chrome, hover / selection styling, padding, right-click
 // signalling. Surfaces the release name (fallback: file name), a
-// per-row primary action button (Download / Use), and the HI / FPO
-// chip rail.
+// per-row primary action button (Download / Use), and a
+// dot-separated caption meta line (state · downloads · rating ·
+// HI · FPO).
 //
 // The footer-level primary action on `SubtitlesPanel` still works
 // for the currently selected row; this card's trailing button adds
 // the same affordance per row so users don't have to select-then-
 // footer for every result.
+//
+// The meta row previously mixed a `MetaChip` (state) and a
+// `RowChipRail` (HI / FPO flags) with plain caption labels;
+// the chip's vertical padding made the row taller whenever any
+// chip was present and the row jittered between heights. All
+// tokens are now caption-sized text (with optional inline icon)
+// so the line height is identical in every state.
 BaseListCard {
     id: card
 
@@ -81,6 +89,18 @@ BaseListCard {
         ? "positive"
         : (card.moviehashMatch ? "accent" : "neutral")
 
+    // Map a state tone string to a palette colour for the state
+    // token on the meta row. Tone moves from a pill-chip border
+    // (old design) to label colour so the meta row keeps a single
+    // caption-sized line height for every state.
+    function _stateColor(tone) {
+        switch (tone) {
+        case "positive": return Theme.positive;
+        case "accent":   return Theme.accent;
+        default:         return Theme.disabled;
+        }
+    }
+
     readonly property string _stateChipIcon: card.active
         ? AppIcons.url("circle-check")
         : (card.cached
@@ -121,61 +141,151 @@ BaseListCard {
         }
     }
 
+    // Meta row: dot-separated caption tokens — state (icon +
+    // toned label), downloads, rating, HI (icon + label), FPO
+    // (icon + label). All caption-sized text + small inline icons
+    // so the line height stays identical regardless of which
+    // tokens render.
     RowLayout {
+        id: metaRow
+
+        readonly property bool hasState: card._stateChipText.length > 0
+        readonly property bool hasDownloads: card.downloadCount > 0
+        readonly property bool hasRating: card.rating > 0
+        readonly property bool hasHi: card.hearingImpaired
+        readonly property bool hasFpo: card.foreignPartsOnly
+
         Layout.fillWidth: true
         spacing: Theme.inlineSpacing
 
-        // State chip — active / cached / moviehash signal, leading
-        // the meta row so it's co-located with the rest of the
-        // row's status text.
-        MetaChip {
-            visible: card._stateChipText.length > 0
+        // State icon — active / cached / moviehash signal. Sized
+        // down so it sits on the caption baseline.
+        Kirigami.Icon {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasState
+                && card._stateChipIcon.length > 0
+            Layout.preferredWidth:
+                Math.round(Kirigami.Units.iconSizes.small * 0.8)
+            Layout.preferredHeight: width
+            source: card._stateChipIcon
+            color: card._stateColor(card._stateChipTone)
+        }
+
+        // State label — tone moves from chip border to label
+        // colour.
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasState
             text: card._stateChipText
-            iconSource: card._stateChipIcon
-            tone: card._stateChipTone
+            font.pointSize: Theme.captionFont.pointSize
+            color: card._stateColor(card._stateChipTone)
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // (state) → (downloads)
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasState && metaRow.hasDownloads
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
         }
 
         QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasDownloads
             text: i18ncp("@info subtitles row download count",
                 "%1 download", "%1 downloads", card.downloadCount)
-            opacity: 0.7
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-            visible: card.downloadCount > 0
-        }
-        QQC2.Label {
-            text: "\u00b7"
-            opacity: 0.5
-            visible: card.downloadCount > 0 && card.rating > 0
-        }
-        QQC2.Label {
-            text: "\u2605 %1".arg(card.rating.toFixed(1))
-            opacity: 0.7
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-            visible: card.rating > 0
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
         }
 
-        // HI / FPO chips, inline with the rest of the meta row.
-        RowChipRail {
+        // (state|downloads) → (rating)
+        QQC2.Label {
             Layout.alignment: Qt.AlignVCenter
-            chips: {
-                const list = [];
-                if (card.hearingImpaired) {
-                    list.push({
-                        text: i18nc("@info subtitles flag", "HI"),
-                        iconSource: AppIcons.url("headphones"),
-                        tone: "neutral"
-                    });
-                }
-                if (card.foreignPartsOnly) {
-                    list.push({
-                        text: i18nc("@info subtitles flag", "FPO"),
-                        iconSource: AppIcons.url("flag"),
-                        tone: "neutral"
-                    });
-                }
-                return list;
-            }
+            visible: (metaRow.hasState || metaRow.hasDownloads)
+                && metaRow.hasRating
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
         }
+
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasRating
+            text: "\u2605 %1".arg(card.rating.toFixed(1))
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // (state|downloads|rating) → (HI)
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: (metaRow.hasState || metaRow.hasDownloads
+                || metaRow.hasRating) && metaRow.hasHi
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        Kirigami.Icon {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasHi
+            Layout.preferredWidth:
+                Math.round(Kirigami.Units.iconSizes.small * 0.8)
+            Layout.preferredHeight: width
+            source: AppIcons.url("headphones")
+            color: Theme.disabled
+        }
+
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasHi
+            text: i18nc("@info subtitles flag", "HI")
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // (state|downloads|rating|HI) → (FPO)
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: (metaRow.hasState || metaRow.hasDownloads
+                || metaRow.hasRating || metaRow.hasHi)
+                && metaRow.hasFpo
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        Kirigami.Icon {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasFpo
+            Layout.preferredWidth:
+                Math.round(Kirigami.Units.iconSizes.small * 0.8)
+            Layout.preferredHeight: width
+            source: AppIcons.url("flag")
+            color: Theme.disabled
+        }
+
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasFpo
+            text: i18nc("@info subtitles flag", "FPO")
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // Trailing fill keeps the row packed flush left when the
+        // body stretches it to the card width.
+        Item { Layout.fillWidth: true }
     }
 
     // Action row: per-row primary action button, left-aligned.
