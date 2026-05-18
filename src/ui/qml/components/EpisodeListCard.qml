@@ -150,28 +150,36 @@ BaseListCard {
         onClicked: card.toggleWatchedRequested()
     }
 
-    QQC2.Menu {
+    KinemaMenu {
         id: rowMenu
 
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu open streams for this episode",
-                "Find streams\u2026")
-            icon.source: AppIcons.url("play")
-            icon.color: AppIcons.foreground
+        KinemaMenuItem {
+            iconName: "list-video"
+            label: i18nc("@action:inmenu episode row", "Streams")
+            // Upcoming episodes have no streams yet; the indexers
+            // return nothing useful for unaired airdates.
+            enabled: !card.isUpcoming
             onTriggered: card.clicked()
         }
-        QQC2.MenuItem {
+        QQC2.MenuSeparator {
             visible: !card.isUpcoming
-            height: visible ? implicitHeight : 0
-            text: card.watched
-                ? i18nc("@action:inmenu", "Mark Unwatched")
-                : i18nc("@action:inmenu", "Mark Watched")
-            icon.source: AppIcons.url(
-                card.watched ? "circle-dashed" : "circle-check")
-            icon.color: card.watched
-                ? AppIcons.positive
-                : AppIcons.foreground
+        }
+        KinemaMenuItem {
+            iconName: card.watched ? "circle-dashed" : "circle-check"
+            label: card.watched
+                ? i18nc("@action:inmenu episode row", "Mark Unwatched")
+                : i18nc("@action:inmenu episode row", "Mark Watched")
+            visible: !card.isUpcoming
             onTriggered: card.toggleWatchedRequested()
+        }
+        QQC2.MenuSeparator { }
+        KinemaMenuItem {
+            iconName: "copy"
+            label: i18nc("@action:inmenu episode row", "Copy Title")
+            enabled: card.episodeTitle.length > 0
+            onTriggered: shell.copyToClipboard(card.episodeTitle,
+                i18nc("@info:status",
+                    "Episode title copied to clipboard"))
         }
     }
 }

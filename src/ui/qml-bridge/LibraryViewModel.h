@@ -150,6 +150,19 @@ public Q_SLOTS:
     /// that rail's model.
     void activateRail(const QString& railId, int row);
 
+    /// Smart-rail context menu: "Find Streams". Routes through
+    /// the same streams-page push as the Continue Watching rail.
+    void findStreamsForRailRow(const QString& railId, int row);
+
+    /// Smart-rail context menu: "Mark Watched" (movie rows only;
+    /// series rows nudge the user to the detail page via the
+    /// existing activate path).
+    void markRailRowWatched(const QString& railId, int row);
+
+    /// Library-grid card context menu: "Find Streams". Same shape
+    /// as the rail version but reads from the main grid model.
+    void findStreamsForRow(int row);
+
 Q_SIGNALS:
     void filtersChanged();
     void availableGenresChanged();

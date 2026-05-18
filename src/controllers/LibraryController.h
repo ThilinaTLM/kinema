@@ -59,6 +59,21 @@ public:
 
     void saveMovie(const domain::MetaDetail& meta);
     void saveSeries(const domain::SeriesDetail& detail);
+
+    /// Fetch metadata for `imdbId` via the wired Cinemeta client
+    /// and save it to the library. Idempotent: when the title is
+    /// already in the library, surfaces a passive "already in
+    /// library" status message and skips the fetch.
+    ///
+    /// Used by Discover / Browse / Search context menus, which
+    /// only carry an IMDb id and no `MetaDetail` in hand — every
+    /// other save path goes through `saveMovie` / `saveSeries`.
+    /// Errors are translated through `core::describeError` and
+    /// emitted as a status message. Requires a non-null Cinemeta
+    /// client; no-ops otherwise.
+    QCoro::Task<void> saveByImdbId(QString imdbId,
+        domain::MediaKind kind);
+
     /// Remove the title (and, for series, its cached episode rows)
     /// from the library. Watched-state and history rows are
     /// preserved.

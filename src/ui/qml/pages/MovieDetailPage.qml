@@ -155,6 +155,15 @@ Kirigami.ScrollablePage {
             onItemActivated: function (row) {
                 movieDetailVm.activateSimilar(row);
             }
+            onFindStreamsRequested: function (row) {
+                movieDetailVm.findSimilarStreams(row);
+            }
+            onAddToLibraryRequested: function (row) {
+                movieDetailVm.addSimilarToLibrary(row);
+            }
+            onMarkWatchedRequested: function (row) {
+                movieDetailVm.markSimilarWatched(row);
+            }
         }
 
         // Bottom breathing room so the last rail clears the scroll edge.

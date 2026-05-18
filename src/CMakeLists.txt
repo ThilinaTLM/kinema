@@ -44,6 +44,7 @@ set(kinema_core_SRCS
     core/io/HttpErrorPresenter.cpp
     core/io/IdleInhibitor.cpp
     core/io/Logging.cpp
+    core/io/OpenUrl.cpp
     core/io/UrlRedactor.cpp
 
     core/util/DateFormat.cpp
@@ -147,6 +148,7 @@ set(kinema_core_SRCS
     ui/qml-bridge/StreamsListModel.cpp
     ui/qml-bridge/SubtitleResultsModel.cpp
     ui/qml-bridge/SubtitlesViewModel.cpp
+    ui/qml-bridge/TitleActions.cpp
 
     tray_resources.qrc
 )
@@ -338,10 +340,13 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/DetailOverview.qml
         ui/qml/components/EpisodeRailCard.qml
+        ui/qml/components/EpisodeRailContextMenu.qml
         ui/qml/components/EpisodeListCard.qml
         ui/qml/components/FilterMenuButton.qml
         ui/qml/components/KinemaArtworkFrame.qml
         ui/qml/components/LibraryCard.qml
+        ui/qml/components/menus/KinemaMenu.qml
+        ui/qml/components/menus/KinemaMenuItem.qml
         ui/qml/components/LibraryRail.qml
         ui/qml/components/ListSurface.qml
         ui/qml/components/MetaChip.qml

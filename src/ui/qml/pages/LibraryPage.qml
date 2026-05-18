@@ -347,10 +347,14 @@ Kirigami.Page {
                 progress: model.progress !== undefined ? model.progress : -1
                 watched: model.watched !== undefined ? model.watched : false
                 upcoming: model.upcoming !== undefined ? model.upcoming : false
+                imdbId: model.imdbId !== undefined ? model.imdbId : ""
+                kindIndex: model.kind !== undefined ? model.kind : 0
                 onClicked: libraryVm.activate(index)
                 onRemoveRequested: removeDialog.openFor(index,
                     model.title !== undefined ? model.title : "")
                 onToggleWatchedRequested: libraryVm.toggleWatched(index)
+                onFindStreamsRequested:
+                    libraryVm.findStreamsForRow(index)
             }
         }
     }

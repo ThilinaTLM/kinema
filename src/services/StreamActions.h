@@ -68,6 +68,14 @@ public Q_SLOTS:
     void copyDirectUrl(const domain::Stream& stream);
     void openDirectUrl(const domain::Stream& stream);
 
+    /// Copy `stream.releaseName` (or a short fallback when the
+    /// release is missing) to the system clipboard and surface a
+    /// passive notification. Per `AGENTS.md`, every action on a
+    /// `domain::Stream` flows through this service, so the menu
+    /// item in `StreamRowActions.qml` dispatches here via the per-
+    /// detail-VM `copyReleaseName(int row)` trampolines.
+    void copyReleaseName(const domain::Stream& stream);
+
     /// Play `stream` with the identity/title information in `ctx`.
     /// Fills `ctx.streamRef` from the stream and asks the history
     /// controller (if wired) for a resume position before handing

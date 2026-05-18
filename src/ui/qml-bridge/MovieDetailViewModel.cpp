@@ -22,6 +22,7 @@
 #include "services/StreamActions.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/StreamSorting.h"
+#include "ui/qml-bridge/TitleActions.h"
 
 #include <KLocalizedString>
 
@@ -763,6 +764,11 @@ void MovieDetailViewModel::openDirectUrl(int row)
     dispatchStreamAction(row, &services::StreamActions::openDirectUrl);
 }
 
+void MovieDetailViewModel::copyReleaseName(int row)
+{
+    dispatchStreamAction(row, &services::StreamActions::copyReleaseName);
+}
+
 void MovieDetailViewModel::requestSubtitles()
 {
     Q_EMIT subtitlesRequested(currentContext());
@@ -787,6 +793,43 @@ void MovieDetailViewModel::activateSimilar(int row)
         Q_EMIT openSeriesByTmdbRequested(item->tmdbId, item->title);
     } else {
         Q_EMIT openMovieByTmdbRequested(item->tmdbId, item->title);
+    }
+}
+
+void MovieDetailViewModel::addSimilarToLibrary(int row)
+{
+    const auto* item = m_similar->itemAt(row);
+    if (!item) {
+        return;
+    }
+    auto task = title_actions::addToLibraryByTmdb(m_tmdb,
+        m_library, this, item->tmdbId, item->kind, item->title);
+    Q_UNUSED(task);
+}
+
+void MovieDetailViewModel::markSimilarWatched(int row)
+{
+    const auto* item = m_similar->itemAt(row);
+    if (!item) {
+        return;
+    }
+    auto task = title_actions::markWatchedByTmdb(m_tmdb,
+        m_watched, this, item->tmdbId, item->kind, item->title);
+    Q_UNUSED(task);
+}
+
+void MovieDetailViewModel::findSimilarStreams(int row)
+{
+    const auto* item = m_similar->itemAt(row);
+    if (!item || item->tmdbId <= 0) {
+        return;
+    }
+    if (item->kind == domain::MediaKind::Series) {
+        Q_EMIT findSeriesStreamsByTmdbRequested(
+            item->tmdbId, item->title);
+    } else {
+        Q_EMIT findMovieStreamsByTmdbRequested(
+            item->tmdbId, item->title);
     }
 }
 

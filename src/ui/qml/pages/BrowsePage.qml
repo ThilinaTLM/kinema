@@ -291,6 +291,15 @@ Kirigami.Page {
                     onItemActivated: function (row) {
                         browseVm.activate(row);
                     }
+                    onFindStreamsRequested: function (row) {
+                        browseVm.findStreamsForRow(row);
+                    }
+                    onAddToLibraryRequested: function (row) {
+                        browseVm.addRowToLibrary(row);
+                    }
+                    onMarkWatchedRequested: function (row) {
+                        browseVm.markRowWatched(row);
+                    }
                     onNearEndOfList: {
                         if (browseVm.canLoadMore) {
                             browseVm.loadMore();

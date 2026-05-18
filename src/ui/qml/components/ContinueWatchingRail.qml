@@ -10,18 +10,24 @@ import dev.tlmtech.kinema.app
 
 // Continue Watching rail for the Up Next page. Thin wrapper over
 // the shared `LibraryRail` (which uses `EpisodeRailCard` cards),
-// adding the four-action right-click context menu the Continue
-// Watching surface owns:
+// adding the right-click context menu the Continue Watching
+// surface owns.
 //
-//   - Resume        \u2192  continueWatchingVm.resume(row)
-//   - Details       \u2192  continueWatchingVm.openDetail(row)
-//   - Streams       \u2192  continueWatchingVm.openStreams(row)
-//   - Remove\u2026     \u2192  prompt, then continueWatchingVm.remove(row)
+// Menu items (`EpisodeRailContextMenu`):
+//   - Resume                          \u2192 continueWatchingVm.resume
+//   - Open Series / Open Movie        \u2192 continueWatchingVm.openDetail
+//   - Find Streams                    \u2192 continueWatchingVm.openStreams
+//   - Mark Episode Watched / Watched  \u2192 (informational stub here;
+//                                       per-episode mutation lives
+//                                       on the detail page)
+//   - Copy Title                      \u2192 shell.copyToClipboard
+//   - Open on IMDb                    \u2192 shell.openImdbTitle
+//   - Remove from Continue Watching\u2026 \u2192 confirm \u2192 vm.remove
 //
 // Left-click on a card still resumes directly. Visual chrome
 // (16:9 frame, progress bar, three meta lines) is identical to
-// Ready to Watch / Airing Soon \u2014 the rail simply binds the
-// LibraryRail to `continueWatchingVm.model` (a `LibraryRailModel`).
+// the smart rails \u2014 the wrapper just supplies the context menu
+// and binds the model.
 ColumnLayout {
     id: rail
     spacing: Theme.inlineSpacing
@@ -34,44 +40,36 @@ ColumnLayout {
         model: continueWatchingVm.model
 
         onItemActivated: row => continueWatchingVm.resume(row)
-        onContextMenuRequested: row => {
+        onContextMenuRequested: (row, rowTitle, rowImdbId, kindIndex) => {
             contextMenu.targetRow = row;
+            contextMenu.rowTitle = rowTitle;
+            contextMenu.rowImdbId = rowImdbId;
+            contextMenu.kindIndex = kindIndex;
             contextMenu.popup();
         }
     }
 
-    QQC2.Menu {
+    EpisodeRailContextMenu {
         id: contextMenu
-        property int targetRow: -1
+        primaryLabel: i18nc("@action:inmenu continue watching", "Resume")
+        primaryIcon: "play"
+        removeLabel: i18nc("@action:inmenu continue watching", "Remove")
+        removeIcon: "list-x"
 
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Resume")
-            icon.source: AppIcons.url("play")
-            icon.color: AppIcons.controlColor(enabled, false)
-            onTriggered: continueWatchingVm.resume(contextMenu.targetRow)
+        onPrimaryTriggered: continueWatchingVm.resume(contextMenu.targetRow)
+        onFindStreamsTriggered:
+            continueWatchingVm.openStreams(contextMenu.targetRow)
+        onMarkWatchedTriggered: {
+            // Continue Watching rows are always per-episode (or
+            // per-movie). The full mark-watched flow lives on the
+            // detail page; surface a passive hint that routes the
+            // user there rather than silently doing nothing.
+            continueWatchingVm.openDetail(contextMenu.targetRow);
         }
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Details")
-            icon.source: AppIcons.url("info")
-            icon.color: AppIcons.controlColor(enabled, false)
-            onTriggered: continueWatchingVm.openDetail(contextMenu.targetRow)
-        }
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Streams")
-            icon.source: AppIcons.url("list-video")
-            icon.color: AppIcons.controlColor(enabled, false)
-            onTriggered: continueWatchingVm.openStreams(contextMenu.targetRow)
-        }
-        QQC2.MenuSeparator {}
-        QQC2.MenuItem {
-            text: i18nc("@action:inmenu", "Remove\u2026")
-            icon.source: AppIcons.url("trash-2")
-            icon.color: AppIcons.controlColor(enabled, false)
-            onTriggered: removeConfirm.openFor(contextMenu.targetRow)
-        }
+        onConfirmRemoveRequested: removeConfirm.openFor(contextMenu.targetRow)
     }
 
-    // Confirm dialog for the "Remove from history" context action.
+    // Confirm dialog for the "Remove from Continue Watching" action.
     // Kirigami.PromptDialog is the modern equivalent of QMessageBox
     // and falls back gracefully on minimal styles.
     Kirigami.PromptDialog {
@@ -79,7 +77,8 @@ ColumnLayout {
 
         property int targetRow: -1
 
-        title: i18nc("@title:dialog", "Remove from history?")
+        title: i18nc("@title:dialog",
+            "Remove from Continue Watching?")
         subtitle: i18nc("@info",
             "This won't delete any local files. The entry will "
             + "reappear if you watch it again.")

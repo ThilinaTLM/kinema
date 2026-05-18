@@ -284,11 +284,20 @@ public Q_SLOTS:
     void openMagnet(int row);
     void copyDirectUrl(int row);
     void openDirectUrl(int row);
+    /// Copy the row's release name to the clipboard via
+    /// `services::StreamActions::copyReleaseName`.
+    void copyReleaseName(int row);
 
     void requestSubtitles();
     void requestSubtitlesFor(int row);
 
     void activateSimilar(int row);
+
+    /// Similar-carousel context menu hooks. Same shape as the
+    /// matching slots on `MovieDetailViewModel`.
+    void addSimilarToLibrary(int row);
+    void markSimilarWatched(int row);
+    void findSimilarStreams(int row);
 
 Q_SIGNALS:
     void metaChanged();
@@ -308,6 +317,13 @@ Q_SIGNALS:
 
     void openMovieByTmdbRequested(int tmdbId, const QString& title);
     void openSeriesByTmdbRequested(int tmdbId, const QString& title);
+
+    /// Similar-row "Find Streams" route, mirroring
+    /// `MovieDetailViewModel`.
+    void findMovieStreamsByTmdbRequested(int tmdbId,
+        const QString& title);
+    void findSeriesStreamsByTmdbRequested(int tmdbId,
+        const QString& title);
 
     void subtitlesRequested(const domain::PlaybackContext& ctx);
 

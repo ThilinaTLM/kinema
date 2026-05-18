@@ -34,6 +34,12 @@ GridView {
     property var sourceModel
     signal nearEndOfList()
     signal itemActivated(int row)
+    // Per-row context menu signals forwarded from the embedded
+    // `PosterCard`. Consumers (`BrowsePage`, `SearchPage`) wire
+    // them to the matching VM slot.
+    signal findStreamsRequested(int row)
+    signal addToLibraryRequested(int row)
+    signal markWatchedRequested(int row)
 
     // Visual breathing room around the whole grid so cards do not
     // kiss the page edge.
@@ -108,7 +114,17 @@ GridView {
                 : ((model.voteAverage !== undefined
                         && model.voteAverage !== null)
                     ? model.voteAverage : -1)
+            // Browse rows carry `tmdbId`; Search rows carry
+            // `imdbId` instead. Pass whichever role the underlying
+            // model exposes; the menu adapts its "Open on …" item
+            // to the available identifier.
+            tmdbId: model.tmdbId !== undefined ? model.tmdbId : 0
+            imdbId: model.imdbId !== undefined ? model.imdbId : ""
+            kindIndex: model.kind !== undefined ? model.kind : 0
             onClicked: grid.itemActivated(index)
+            onFindStreamsRequested: grid.findStreamsRequested(index)
+            onAddToLibraryRequested: grid.addToLibraryRequested(index)
+            onMarkWatchedRequested: grid.markWatchedRequested(index)
         }
     }
 }

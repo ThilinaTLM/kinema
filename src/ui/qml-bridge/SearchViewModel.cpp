@@ -5,6 +5,8 @@
 
 #include "api/CinemetaClient.h"
 #include "config/SearchSettings.h"
+#include "controllers/LibraryController.h"
+#include "controllers/WatchedController.h"
 #include "core/io/HttpErrorPresenter.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 
@@ -93,6 +95,67 @@ void SearchViewModel::activate(int row)
         Q_EMIT openSeriesRequested(item->imdbId, item->title);
     } else {
         Q_EMIT openMovieRequested(item->imdbId, item->title);
+    }
+}
+
+void SearchViewModel::setLibraryController(
+    controllers::LibraryController* lib)
+{
+    m_library = lib;
+}
+
+void SearchViewModel::setWatchedController(
+    controllers::WatchedController* watched)
+{
+    m_watched = watched;
+}
+
+void SearchViewModel::addRowToLibrary(int row)
+{
+    const auto* item = m_results->at(row);
+    if (!item || !m_library || item->imdbId.isEmpty()) {
+        return;
+    }
+    auto task = m_library->saveByImdbId(item->imdbId, item->kind);
+    Q_UNUSED(task);
+}
+
+void SearchViewModel::markRowWatched(int row)
+{
+    const auto* item = m_results->at(row);
+    if (!item || !m_watched || item->imdbId.isEmpty()) {
+        return;
+    }
+    if (item->kind == domain::MediaKind::Series) {
+        // Mirror the Discover / Browse behaviour: marking an entire
+        // series watched from a list is too coarse; nudge the user
+        // toward the detail page instead.
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "Open \u201c%1\u201d to mark individual episodes "
+                "as watched.", item->title),
+            4000);
+        return;
+    }
+    m_watched->setMovieWatched(item->imdbId, /*watched=*/true);
+    Q_EMIT statusMessage(
+        i18nc("@info:status",
+            "Marked \u201c%1\u201d as watched.", item->title),
+        3000);
+}
+
+void SearchViewModel::findStreamsForRow(int row)
+{
+    const auto* item = m_results->at(row);
+    if (!item || item->imdbId.isEmpty()) {
+        return;
+    }
+    if (item->kind == domain::MediaKind::Series) {
+        Q_EMIT findSeriesStreamsByImdbRequested(
+            item->imdbId, item->title);
+    } else {
+        Q_EMIT findMovieStreamsByImdbRequested(
+            item->imdbId, item->title);
     }
 }
 

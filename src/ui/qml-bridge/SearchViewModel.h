@@ -18,6 +18,11 @@ namespace kinema::config {
 class SearchSettings;
 }
 
+namespace kinema::controllers {
+class LibraryController;
+class WatchedController;
+}
+
 namespace kinema::ui::qml {
 
 class ResultsListModel;
@@ -50,6 +55,11 @@ public:
         config::SearchSettings& settings,
         QObject* parent = nullptr);
 
+    /// Optional injection for the PosterCard row context menu's
+    /// title-level actions.
+    void setLibraryController(controllers::LibraryController* lib);
+    void setWatchedController(controllers::WatchedController* watched);
+
     QString query() const { return m_query; }
     void setQuery(const QString& q);
 
@@ -74,6 +84,14 @@ public Q_SLOTS:
     /// or `openSeriesRequested` based on the row's stored kind.
     void activate(int row);
 
+    /// PosterCard context-menu hooks. Search rows already carry an
+    /// IMDb id, so these dispatch directly to the controllers
+    /// without the TMDB→IMDb resolution hop that Discover / Browse
+    /// need.
+    void addRowToLibrary(int row);
+    void markRowWatched(int row);
+    void findStreamsForRow(int row);
+
 Q_SIGNALS:
     void queryChanged();
     void kindChanged();
@@ -82,6 +100,12 @@ Q_SIGNALS:
     /// 04) and, in phase 05, to the real detail page push.
     void openMovieRequested(const QString& imdbId, const QString& title);
     void openSeriesRequested(const QString& imdbId, const QString& title);
+
+    /// Context-menu "Find Streams" route, handled by ShellViewModel.
+    void findMovieStreamsByImdbRequested(const QString& imdbId,
+        const QString& title);
+    void findSeriesStreamsByImdbRequested(const QString& imdbId,
+        const QString& title);
 
     /// Forwarded into `MainController::passiveMessage` so the user
     /// sees "Searching for X…", "No matches", "Search failed".
@@ -93,6 +117,8 @@ private:
     api::CinemetaClient* m_cinemeta;
     config::SearchSettings* m_settings;
     ResultsListModel* m_results;
+    controllers::LibraryController* m_library {};
+    controllers::WatchedController* m_watched {};
 
     QString m_query;
     domain::MediaKind m_kind = domain::MediaKind::Movie;

@@ -12,6 +12,7 @@
 - Load remote artwork through `image://kinema/<role>?u=<url>` so `ui::qml::KinemaImageProvider` and `ui::ImageLoader` handle caching; do not bind QML `Image.source` directly to HTTP URLs.
 - Keep embedded-player code behind `KINEMA_ENABLE_MPV_EMBED` / `KINEMA_HAVE_LIBMPV`; the player chrome is QtQuick/QML in `dev.tlmtech.kinema.player`, with no QWidget overlays, Lua overlays, or IPC bridge.
 - Follow Plasma theming in QML with `Kirigami.Theme` and `Kirigami.Units`; do not add custom palettes or hard-coded colors. Use `/home/tlm/Projects/Kirigami/` as the local Kirigami source reference.
+- Every QML context menu uses `KinemaMenu` + `KinemaMenuItem` from `src/ui/qml/components/menus/`; rules (labels, ellipsis, ordering, destructive styling, keyboard activation) live in `docs/MenuConventions.md`.
 - Add tests with `ecm_add_test(...)` in `tests/CMakeLists.txt` and add the target to the fixture `foreach` at the bottom.
 - Validate with `cmake --build build -j$(nproc)` and `ctest --test-dir build --output-on-failure`.
 - Downloaded Lucide icons are available in `/home/tlm/Downloads/lucide-icons/icons/`.

@@ -122,6 +122,14 @@ Item {
             event.accepted = true;
         }
     }
+    // Keyboard menu key (Shift+F10 / Menu) opens the context menu
+    // via the same `rightClicked()` signal that mouse right-click
+    // uses, so keyboard-only users reach the same menu as mouse
+    // users.
+    Keys.onMenuPressed: function (event) {
+        card.rightClicked();
+        event.accepted = true;
+    }
 
     ColumnLayout {
         anchors.fill: parent

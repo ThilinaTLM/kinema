@@ -5,6 +5,7 @@
 
 #include "api/CinemetaClient.h"
 #include "domain/Media.h"
+#include "core/io/HttpErrorPresenter.h"
 #include "core/persistence/LibraryStore.h"
 #include "kinema_log_controller.h"
 
@@ -132,6 +133,37 @@ void LibraryController::saveSeries(const domain::SeriesDetail& detail)
     m_store.upsertEpisodes(t.imdbId, rows);
     Q_EMIT statusMessage(
         i18nc("@info:status", "Added \u201c%1\u201d to Library.", t.title), 3000);
+}
+
+QCoro::Task<void> LibraryController::saveByImdbId(QString imdbId,
+    domain::MediaKind kind)
+{
+    if (!m_cinemeta || imdbId.isEmpty()) {
+        co_return;
+    }
+    if (m_store.contains(kind, imdbId)) {
+        const auto existing = m_store.find(kind, imdbId);
+        Q_EMIT statusMessage(
+            i18nc("@info:status",
+                "\u201c%1\u201d is already in your library.",
+                existing ? existing->title : imdbId),
+            3000);
+        co_return;
+    }
+    try {
+        if (kind == domain::MediaKind::Series) {
+            auto detail = co_await m_cinemeta->seriesMeta(imdbId);
+            saveSeries(detail);
+        } else {
+            auto meta = co_await m_cinemeta->meta(
+                domain::MediaKind::Movie, imdbId);
+            saveMovie(meta);
+        }
+    } catch (const std::exception& e) {
+        Q_EMIT statusMessage(
+            core::describeError(e, "add to library"), 5000);
+    }
+    co_return;
 }
 
 void LibraryController::removeFromLibrary(domain::MediaKind kind,

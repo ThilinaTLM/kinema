@@ -200,19 +200,39 @@ BaseListCard {
         }
     }
 
-    QQC2.Menu {
+    KinemaMenu {
         id: rowMenu
 
-        QQC2.MenuItem {
-            text: card._primaryActionText
-            icon.source: AppIcons.url(card._primaryActionIcon)
-            icon.color: AppIcons.foreground
+        KinemaMenuItem {
+            iconName: card._primaryActionIcon
+            label: card._primaryActionText
             enabled: !card.active
             onTriggered: {
                 if (card.vm) {
                     card.vm.primaryActionForRow(card.rowIndex);
                 }
             }
+        }
+        QQC2.MenuSeparator { }
+        // TODO: re-add "Open Source URL" / "Copy Source URL" once
+        // `domain::SubtitleHit` carries the OpenSubtitles details
+        // URL (`attributes.url` in the JSON payload, zero extra
+        // network cost). See plan: `/home/tlm/.pi/plans/context-menus.md`.
+        KinemaMenuItem {
+            iconName: "copy"
+            label: i18nc("@action:inmenu subtitle row", "Copy Release")
+            enabled: card.release.length > 0
+            onTriggered: shell.copyToClipboard(card.release,
+                i18nc("@info:status",
+                    "Release name copied to clipboard"))
+        }
+        KinemaMenuItem {
+            iconName: "copy"
+            label: i18nc("@action:inmenu subtitle row", "Copy Filename")
+            enabled: card.fileName.length > 0
+            onTriggered: shell.copyToClipboard(card.fileName,
+                i18nc("@info:status",
+                    "File name copied to clipboard"))
         }
     }
 }

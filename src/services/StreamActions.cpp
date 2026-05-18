@@ -7,11 +7,11 @@
 #include "core/util/Magnet.h"
 #include "core/mpv/PlayerLauncher.h"
 #include "core/io/HttpErrorPresenter.h"
+#include "core/io/OpenUrl.h"
 #include "download/DownloadManager.h"
 #include "kinema_log_ui.h"
 #include "torrent/TorrentStreamingService.h"
 
-#include <KIO/OpenUrlJob>
 #include <KLocalizedString>
 
 #include <QClipboard>
@@ -43,22 +43,22 @@ void StreamActions::launchOpenUrlJob(const QUrl& url,
     const QString& successMsg, const QString& failurePrefix,
     const char* failureLogTag)
 {
-    auto* job = new KIO::OpenUrlJob(url, this);
-    job->setRunExecutables(false);
-    connect(job, &KJob::result, this, [this, job, successMsg,
-                                          failurePrefix, failureLogTag] {
-        if (job->error()) {
-            Q_EMIT statusMessage(
-                i18nc("@info:status", "%1: %2",
-                    failurePrefix, job->errorString()),
-                6000);
-            qCWarning(KINEMA_UI) << failureLogTag << "failed:"
-                              << job->errorString();
-            return;
-        }
-        Q_EMIT statusMessage(successMsg, 3000);
-    });
-    job->start();
+    const QString successCopy = successMsg;
+    const QString failureCopy = failurePrefix;
+    const char* tag = failureLogTag;
+    core::io::openExternal(url, this,
+        [this, successCopy, failureCopy, tag](
+            const core::io::OpenExternalResult& r) {
+            if (!r.ok) {
+                Q_EMIT statusMessage(
+                    i18nc("@info:status", "%1: %2",
+                        failureCopy, r.errorString),
+                    6000);
+                qCWarning(KINEMA_UI) << tag << "failed:" << r.errorString;
+                return;
+            }
+            Q_EMIT statusMessage(successCopy, 3000);
+        });
 }
 
 void StreamActions::setHistoryController(
@@ -113,6 +113,23 @@ void StreamActions::openDirectUrl(const domain::Stream& stream)
         i18nc("@info:status", "Opening stream\u2026"),
         i18nc("@info:status", "Could not open URL"),
         "OpenUrlJob (direct)");
+}
+
+void StreamActions::copyReleaseName(const domain::Stream& stream)
+{
+    // Prefer the full release name; fall back to a short label so
+    // releases that only carry a quality tag still copy something
+    // meaningful instead of silently no-op'ing.
+    const QString text = !stream.releaseName.isEmpty()
+        ? stream.releaseName
+        : stream.qualityLabel;
+    if (text.isEmpty()) {
+        return;
+    }
+    QGuiApplication::clipboard()->setText(text);
+    Q_EMIT statusMessage(
+        i18nc("@info:status", "Release name copied to clipboard"),
+        3000);
 }
 
 void StreamActions::play(const domain::Stream& stream,

@@ -36,7 +36,13 @@ ColumnLayout {
     property string artworkShape: "thumbnail"
 
     signal itemActivated(int row)
-    signal contextMenuRequested(int row)
+    // Context-menu request. Carries `(row, title, imdbId, kind)`
+    // so consumers don't have to round-trip back through the
+    // model's role-by-int API just to populate the menu's
+    // "Copy Title" / "Open on IMDb" items. `kind` is
+    // `domain::MediaKind` (0 = Movie, 1 = Series).
+    signal contextMenuRequested(int row, string rowTitle,
+        string rowImdbId, int kindIndex)
 
     // Per-rail vertical structure. Header to ListView spacing is
     // `inlineSpacing`; outer rail-to-rail spacing is owned by the
@@ -104,7 +110,11 @@ ColumnLayout {
             progress: model.progress !== undefined ? model.progress : -1
 
             onClicked: rail.itemActivated(index)
-            onRightClicked: rail.contextMenuRequested(index)
+            onRightClicked: rail.contextMenuRequested(index,
+                model.primaryLine !== undefined
+                    ? model.primaryLine : "",
+                model.imdbId !== undefined ? model.imdbId : "",
+                model.kind !== undefined ? model.kind : 0)
         }
     }
 

@@ -104,6 +104,15 @@ Kirigami.ScrollablePage {
                     discoverVm.activateItem(index, row);
                 }
                 onShowAllRequested: discoverVm.browseSection(index)
+                onFindStreamsRequested: function (row) {
+                    discoverVm.findStreamsForRow(index, row);
+                }
+                onAddToLibraryRequested: function (row) {
+                    discoverVm.addRowToLibrary(index, row);
+                }
+                onMarkWatchedRequested: function (row) {
+                    discoverVm.markRowWatched(index, row);
+                }
             }
         }
     }

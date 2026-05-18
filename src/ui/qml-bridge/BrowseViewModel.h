@@ -23,6 +23,11 @@ namespace kinema::config {
 class BrowseSettings;
 }
 
+namespace kinema::controllers {
+class LibraryController;
+class WatchedController;
+}
+
 namespace kinema::ui::qml {
 
 /**
@@ -72,6 +77,14 @@ public:
         config::BrowseSettings& settings,
         QObject* parent = nullptr);
 
+    /// Inject the title-level controllers used by the row context
+    /// menu ("Add to Library", "Mark Watched"). Optional — unset
+    /// controllers make those slots no-ops; useful for the
+    /// minimal-fixture unit tests that exercise paging without
+    /// touching the persistence stack.
+    void setLibraryController(controllers::LibraryController* lib);
+    void setWatchedController(controllers::WatchedController* watched);
+
     // ---- filter accessors -----------------------------------------
     int kind() const noexcept { return static_cast<int>(m_kind); }
     void setKind(int kind);
@@ -117,6 +130,13 @@ public Q_SLOTS:
     /// row's stored kind. Browse always has a TMDB id (no IMDB id).
     void activate(int row);
 
+    /// PosterCard context-menu hooks. All three resolve the row's
+    /// TMDB id to an IMDb id on demand and dispatch through the
+    /// appropriate controller / shell route. Idempotent.
+    void addRowToLibrary(int row);
+    void markRowWatched(int row);
+    void findStreamsForRow(int row);
+
     /// Called by `MainController` when a Discover rail's "Show all"
     /// is triggered. Sets kind + sort, clears genres + rating to
     /// match a fresh discover view, persists, refreshes.
@@ -134,6 +154,14 @@ Q_SIGNALS:
     /// phase 04; phase 05 wires these to the real detail page push.
     void openMovieRequested(int tmdbId, const QString& title);
     void openSeriesRequested(int tmdbId, const QString& title);
+
+    /// Context-menu "Find Streams" route. `ShellViewModel` loads
+    /// the matching detail VM by TMDB id and pushes `StreamsPage`,
+    /// mirroring the Continue Watching streams shortcut.
+    void findMovieStreamsByTmdbRequested(int tmdbId,
+        const QString& title);
+    void findSeriesStreamsByTmdbRequested(int tmdbId,
+        const QString& title);
 
     /// `MainController` forwards to a passive notification for
     /// load-more error feedback that doesn't deserve a full page
@@ -155,6 +183,8 @@ private:
     api::TmdbClient* m_tmdb;
     config::BrowseSettings& m_settings;
     DiscoverSectionModel* m_results;
+    controllers::LibraryController* m_library {};
+    controllers::WatchedController* m_watched {};
 
     // Mirror of BrowseSettings; setters write through to KConfig.
     domain::MediaKind m_kind = domain::MediaKind::Movie;
