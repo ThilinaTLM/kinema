@@ -90,8 +90,8 @@ BasePosterCard {
         id: contextMenu
 
         KinemaMenuItem {
-            iconName: "play"
-            label: i18nc("@action:inmenu poster card", "Open")
+            iconName: "info"
+            label: i18nc("@action:inmenu poster card", "Details")
             onTriggered: card.clicked()
         }
         KinemaMenuItem {

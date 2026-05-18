@@ -13,9 +13,12 @@ They are enforced by the shared primitives
   "Open the folder"); `Copy Magnet` (not "Copy magnet link").
 - Toggle items are **single** items whose label and icon flip with
   state: `Mark Watched` ⇄ `Mark Unwatched`, `Pin` ⇄ `Unpin`.
-- `Open` alone is reserved for "navigate to the detail page" — the
-  card's default activation. Other navigations name their target:
-  `Open Streams`, `Open Folder`, `Open on TMDb`.
+- `Details` is reserved for "navigate to the detail page" — the
+  card's default activation — paired with the Lucide `info` icon.
+  The streams-page jump has its own one-word label: `Streams`
+  (Lucide `list-video`). Other navigations keep an `Open` verb
+  prefix that names the target: `Open Folder`, `Open on TMDb`,
+  `Open on IMDb`. Bare `Open` is not used.
 
 ## No ellipses
 
@@ -41,13 +44,14 @@ Top to bottom, with `QQC2.MenuSeparator` between groups; empty groups
 collapse.
 
 1. **Primary** — what the user most often wants
-   (`Play` / `Resume` / `Open`).
+   (`Play` / `Resume` / `Details` / `Streams`).
 2. **Navigate** — alternate destinations
-   (`Open Streams`, `Open Folder`, `Open Series`).
+   (`Streams`, `Details`, `Open Folder`).
 3. **State** — toggles and pins
    (`Mark Watched`, `Pin`).
 4. **Copy / External** — clipboard and external apps
-   (`Copy Title`, `Copy Magnet`, `Open Magnet`, `Open on TMDb`).
+   (`Copy Title`, `Copy Magnet`, `Open Magnet`, `Open on TMDb`,
+   `Open on IMDb`).
 5. **Advanced** — power-user options
    (`Play via Torrent`, `Subtitles`).
 

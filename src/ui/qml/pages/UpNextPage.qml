@@ -156,36 +156,47 @@ Kirigami.ScrollablePage {
         // so each menu can carry the rail's id when dispatching to
         // `libraryVm`. No destructive footer — these are computed
         // views and the user removes via the Library grid.
+
+        // Ready to Watch: card-click jumps straight to streams
+        // ("resume rail" behavior in `LibraryViewModel::activate
+        // Rail`). The menu mirrors that as its primary `Streams`
+        // entry and exposes `Details` as the alternate path back
+        // to the detail page.
         EpisodeRailContextMenu {
             id: upNextMenu
-            primaryLabel: i18nc("@action:inmenu", "Open")
-            primaryIcon: "play"
+            primaryLabel: i18nc("@action:inmenu", "Streams")
+            primaryIcon: "list-video"
+            streamsVisible: false
+            detailsVisible: true
             onPrimaryTriggered:
-                libraryVm.activateRail("upNext", upNextMenu.targetRow)
-            onFindStreamsTriggered:
                 libraryVm.findStreamsForRailRow("upNext",
+                    upNextMenu.targetRow)
+            onOpenDetailsTriggered:
+                libraryVm.openRailRowDetail("upNext",
                     upNextMenu.targetRow)
             onMarkWatchedTriggered:
                 libraryVm.markRailRowWatched("upNext",
                     upNextMenu.targetRow)
         }
+        // Airing Soon rows are unaired; `Mark Watched` is hidden
+        // because it would be semantically wrong. `Streams` stays
+        // available -- streams can occasionally appear a few hours
+        // before the official local-time release.
         EpisodeRailContextMenu {
             id: airingSoonMenu
-            primaryLabel: i18nc("@action:inmenu", "Open")
+            primaryLabel: i18nc("@action:inmenu", "Details")
             primaryIcon: "info"
+            markWatchedVisible: false
             onPrimaryTriggered:
                 libraryVm.activateRail("airingSoon",
                     airingSoonMenu.targetRow)
             onFindStreamsTriggered:
                 libraryVm.findStreamsForRailRow("airingSoon",
                     airingSoonMenu.targetRow)
-            onMarkWatchedTriggered:
-                libraryVm.markRailRowWatched("airingSoon",
-                    airingSoonMenu.targetRow)
         }
         EpisodeRailContextMenu {
             id: recentlyAddedMenu
-            primaryLabel: i18nc("@action:inmenu", "Open")
+            primaryLabel: i18nc("@action:inmenu", "Details")
             primaryIcon: "info"
             onPrimaryTriggered:
                 libraryVm.activateRail("recentlyAdded",

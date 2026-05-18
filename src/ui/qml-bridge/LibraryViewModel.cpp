@@ -348,6 +348,23 @@ void LibraryViewModel::findStreamsForRailRow(
     Q_EMIT openSeriesRequested(r->imdbId, r->title);
 }
 
+void LibraryViewModel::openRailRowDetail(
+    const QString& railId, int row)
+{
+    LibraryRailModel* m = nullptr;
+    if (railId == QLatin1String("upNext")) m = m_upNextModel;
+    else if (railId == QLatin1String("airingSoon")) m = m_airingSoonModel;
+    else if (railId == QLatin1String("recentlyAdded")) m = m_recentlyAddedModel;
+    if (!m) return;
+    const auto* r = m->at(row);
+    if (!r) return;
+    if (r->kind == domain::MediaKind::Movie) {
+        Q_EMIT openMovieRequested(r->imdbId, r->title);
+    } else {
+        Q_EMIT openSeriesRequested(r->imdbId, r->title);
+    }
+}
+
 void LibraryViewModel::markRailRowWatched(
     const QString& railId, int row)
 {

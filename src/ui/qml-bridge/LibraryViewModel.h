@@ -154,6 +154,13 @@ public Q_SLOTS:
     /// the same streams-page push as the Continue Watching rail.
     void findStreamsForRailRow(const QString& railId, int row);
 
+    /// Smart-rail context menu: "Details" (navigate to detail
+    /// page). Mirrors `findStreamsForRailRow` but always emits
+    /// the detail-page open signal regardless of rail id, so
+    /// rails whose primary action skips the detail page (Ready
+    /// to Watch) can still expose it from the context menu.
+    void openRailRowDetail(const QString& railId, int row);
+
     /// Smart-rail context menu: "Mark Watched" (movie rows only;
     /// series rows nudge the user to the detail page via the
     /// existing activate path).
