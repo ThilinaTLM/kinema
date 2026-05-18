@@ -349,14 +349,12 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/menus/KinemaMenuItem.qml
         ui/qml/components/LibraryRail.qml
         ui/qml/components/ListSurface.qml
-        ui/qml/components/MetaChip.qml
         ui/qml/components/MetaSection.qml
         ui/qml/components/PageHeaderBar.qml
         ui/qml/components/PosterBadge.qml
         ui/qml/components/PosterCard.qml
         ui/qml/components/PosterGrid.qml
         ui/qml/components/RatingChip.qml
-        ui/qml/components/RowChipRail.qml
         ui/qml/components/RowLeadingTile.qml
         ui/qml/components/RowMediaThumbnail.qml
         ui/qml/components/SeasonTabs.qml

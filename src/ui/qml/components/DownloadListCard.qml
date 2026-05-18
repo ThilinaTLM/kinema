@@ -24,12 +24,18 @@ import dev.tlmtech.kinema.app
 //                    plain movie title otherwise. Left-aligned,
 //                    elides on narrow rows; hover tooltip surfaces
 //                    the full string.
-//   2. Chip rail   — `State · Quality · Backend` left-aligned, with
-//                    the state-specific status one-liner (`38% ·
-//                    540 MB / 1.4 GB · ETA 3 min`, `Saved`,
-//                    `⚠ Tracker timed out…`, etc.) and the live
-//                    download rate appended in the rail's trailing
-//                    slot — all on one left-aligned row.
+//   2. Meta row    — `State · Quality · <icon> Backend · status
+//                    · rate`. Dot-separated caption tokens on a
+//                    single caption-sized line, so the row's
+//                    height stays identical whether or not the
+//                    optional tokens (status, rate) are present.
+//                    The State token recolours by
+//                    `card.stateTone` (positive/negative/accent),
+//                    Backend renders an inline `Kirigami.Icon` +
+//                    label pair, the status caption recolours
+//                    `Theme.negative` on failed rows, and the
+//                    rate keeps `Theme.foreground` / DemiBold so
+//                    it scans as the live metric on the line.
 //   3. Attribution — `via <provider> · <release name>` plus
 //                    peers/seeds for active torrent rows; falls
 //                    back to `Unknown source` so the body keeps
@@ -257,12 +263,16 @@ BaseListCard {
         return n < 10 ? "0" + n : "" + n;
     }
 
-    function _chipTone(tone) {
+    // Map a `stateTone` string to a palette colour for the state
+    // token on the meta row. Tone moves from a pill-chip border
+    // (old design) to label colour so the meta row keeps a single
+    // caption-sized line height for every state.
+    function _stateColor(tone) {
         switch (tone) {
-        case "positive": return "positive";
-        case "negative": return "negative";
-        case "warn":     return "accent";
-        default:         return "neutral";
+        case "positive": return Theme.positive;
+        case "negative": return Theme.negative;
+        case "warn":     return Theme.accent;
+        default:         return Theme.disabled;
         }
     }
 
@@ -357,48 +367,142 @@ BaseListCard {
             = truncated ? text : ""
     }
 
-    // Line 2: chip rail (State · Quality · Backend) followed by
-    // the state-specific status caption and the live download
-    // rate, all in the rail's trailing slot so they sit on the
-    // same left-aligned row. Status Label recolours to
-    // `Theme.negative` on failed rows (the `⚠` prefix is baked
-    // into `_statusText`).
-    RowChipRail {
-        Layout.fillWidth: true
-        chips: [
-            {
-                text: card.stateText,
-                tone: card._chipTone(card.stateTone)
-            },
-            {
-                text: card._qualityChipText,
-                tone: "neutral"
-            },
-            {
-                text: card.backendLabel,
-                iconSource: card.backendIcon,
-                iconColor: Theme.disabled,
-                tone: "neutral"
-            }
-        ]
+    // Line 2: dot-separated caption tokens — State (toned),
+    // Quality, Backend (icon + label), status, rate. Plain caption
+    // labels and a small inline icon so the row's height stays
+    // identical whether or not the optional tokens render.
+    RowLayout {
+        id: metaRow
 
+        readonly property bool hasState: card.stateText.length > 0
+        readonly property bool hasQuality:
+            card._qualityChipText.length > 0
+        readonly property bool hasBackend: card.backendLabel.length > 0
+        readonly property bool hasStatus: card._statusText.length > 0
+        readonly property bool hasRate: !card.complete
+            && card.downloadRateText.length > 0
+
+        Layout.fillWidth: true
+        spacing: Theme.inlineSpacing
+
+        // State — tone moves from chip border to label colour.
         QQC2.Label {
-            visible: card._statusText.length > 0
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasState
+            text: card.stateText
+            font.pointSize: Theme.captionFont.pointSize
+            color: card._stateColor(card.stateTone)
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // (state) → (quality)
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasState && metaRow.hasQuality
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // Quality (e.g. `1080p WEB-DL` / `720p`).
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasQuality
+            text: card._qualityChipText
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // (state|quality) → (backend)
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: (metaRow.hasState || metaRow.hasQuality)
+                && metaRow.hasBackend
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // Backend icon. Sized down from `iconSizes.small` so it
+        // sits on the caption baseline next to the label rather
+        // than dominating the line.
+        Kirigami.Icon {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasBackend
+                && card.backendIcon.length > 0
+            Layout.preferredWidth:
+                Math.round(Kirigami.Units.iconSizes.small * 0.8)
+            Layout.preferredHeight: width
+            source: card.backendIcon
+            color: Theme.disabled
+        }
+
+        // Backend label.
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasBackend
+            text: card.backendLabel
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // (state|quality|backend) → (status)
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: (metaRow.hasState || metaRow.hasQuality
+                || metaRow.hasBackend) && metaRow.hasStatus
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // Status caption — recolours `Theme.negative` on failed
+        // rows (the `⚠` prefix is baked into `_statusText`).
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            Layout.fillWidth: false
+            visible: metaRow.hasStatus
             text: card._statusText
             elide: Text.ElideRight
             font.pointSize: Theme.captionFont.pointSize
             color: card.state === card.stateFailed
                 ? Theme.negative
                 : Theme.disabled
+            verticalAlignment: Text.AlignVCenter
         }
 
+        // (status) → (rate)
         QQC2.Label {
-            visible: !card.complete
-                && card.downloadRateText.length > 0
+            Layout.alignment: Qt.AlignVCenter
+            visible: (metaRow.hasState || metaRow.hasQuality
+                || metaRow.hasBackend || metaRow.hasStatus)
+                && metaRow.hasRate
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        // Live download rate — the only token in foreground /
+        // DemiBold so it scans as the row's live metric.
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasRate
             text: card.downloadRateText
+            font.pointSize: Theme.captionFont.pointSize
             color: Theme.foreground
             font.weight: Font.DemiBold
+            verticalAlignment: Text.AlignVCenter
         }
+
+        // Trailing fill keeps the row packed flush left when the
+        // body stretches it to the card width.
+        Item { Layout.fillWidth: true }
     }
 
     // Line 3: attribution — always present so the body keeps its
