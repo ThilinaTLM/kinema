@@ -44,6 +44,11 @@ public:
     QByteArray readRange(ByteRange range) const override;
     void touch() override;
 
+    /// Forwards to `TorrentStreamingService::filesForInfoHash`
+    /// so series adjacency can resolve through the unified
+    /// `AssetSession::files()` API.
+    QVector<torrent::TorrentFileEntry> files() const override;
+
     domain::DownloadMode mode() const override { return m_mode; }
     void setMode(domain::DownloadMode m) override { m_mode = m; }
 

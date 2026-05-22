@@ -17,6 +17,10 @@ namespace kinema::controllers {
 class PlaybackController;
 }
 
+namespace kinema::download {
+class DownloadManager;
+}
+
 namespace kinema::services {
 class StreamActions;
 }
@@ -34,6 +38,7 @@ public:
     SeriesPlaybackSessionController(PlaybackController& playback,
         torrent::TorrentStreamingService& torrentStreaming,
         services::StreamActions& actions,
+        download::DownloadManager* downloadManager,
         QObject* parent = nullptr);
 
     bool navigationVisible() const noexcept;
@@ -63,6 +68,16 @@ Q_SIGNALS:
     void packAdjacencyResolved(bool nextAvailable,
         int nextSeason, int nextEpisode);
 
+    /// Fires once per `(infoHash, fileIndex)` per playback session
+    /// when the resolver / engine surfaces a definitive size for the
+    /// currently playing file. Picked up by the detail view-models
+    /// to patch the visible picker row whose original parse left the
+    /// size cell blank (Torrentio packs that omit the \xf0\x9f\x92\xbe
+    /// emoji token). No-op when the row has scrolled out of the
+    /// model.
+    void currentStreamSizeResolved(const QString& infoHash,
+        int fileIndex, qint64 sizeBytes);
+
 private:
     struct EpisodeTarget {
         domain::PlaybackKey key;
@@ -83,6 +98,11 @@ private:
     PlaybackController& m_playback;
     torrent::TorrentStreamingService& m_torrentStreaming;
     services::StreamActions& m_actions;
+    /// Optional in unit-test setups; production wiring always
+    /// provides one. When present, it is consulted first for the
+    /// magnet's file list so HTTP-backed debrid sessions resolve
+    /// adjacency just like libtorrent ones.
+    download::DownloadManager* m_downloadManager = nullptr;
 
     domain::PlaybackContext m_baseContext;
     std::optional<EpisodeTarget> m_previous;
@@ -94,6 +114,10 @@ private:
     /// current episode so player-side refreshes (resume / seek /
     /// metadata re-resolve) don't re-spam the status bar.
     QString m_lastAdjacencyKey;
+    /// De-dup key for `currentStreamSizeResolved`, formatted
+    /// `"<infoHash>:<fileIndex>:<size>"`. Prevents the signal from
+    /// firing for every refresh of the same active file.
+    QString m_lastSizeHydrationKey;
 };
 
 } // namespace kinema::controllers

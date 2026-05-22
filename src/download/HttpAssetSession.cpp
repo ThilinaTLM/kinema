@@ -257,6 +257,14 @@ QCoro::Task<void> HttpAssetSession::ensureResolved()
         if (!resolved.fileName.isEmpty()) {
             m_fileName = resolved.fileName;
         }
+        // Remember the magnet's file list so series auto-next can
+        // ask us for adjacency without spinning up libtorrent. The
+        // list never changes for a given magnet, so we only assign
+        // when the first resolve populates it; URL-only re-resolves
+        // (401/403 retry) deliberately do not clobber it.
+        if (!resolved.files.isEmpty() && m_files.isEmpty()) {
+            m_files = resolved.files;
+        }
         m_resolveInFlight = false;
     } catch (...) {
         m_resolveInFlight = false;

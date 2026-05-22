@@ -155,6 +155,17 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
         ? ref.fileNameHint
         : unrestricted.filename;
     out.providerTorrentId = added.id;
+
+    // Preserve the full magnet file list so the asset session can
+    // surface it to series auto-next without a libtorrent session.
+    // RD uses 1-based ids and may re-number entries; we flatten to
+    // 0-based positional indices here so callers don't have to know
+    // about provider quirks.
+    out.files.reserve(info.files.size());
+    for (int i = 0; i < info.files.size(); ++i) {
+        out.files.append(torrent::TorrentFileEntry {
+            i, info.files[i].path, info.files[i].bytes });
+    }
     co_return out;
 }
 

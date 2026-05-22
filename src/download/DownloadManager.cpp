@@ -591,6 +591,40 @@ void DownloadManager::installProgressBindings(AssetSession* raw,
         });
 }
 
+QVector<torrent::TorrentFileEntry> DownloadManager::filesForInfoHash(
+    const QString& infoHash) const
+{
+    if (infoHash.isEmpty()) {
+        return {};
+    }
+    // Walk active sessions in insertion order and return the first
+    // file list for a session whose backing identity matches. We
+    // check both concrete types so this works regardless of which
+    // backend opened the session. The map is bounded by the number
+    // of concurrent playbacks (single-digit), so the linear walk
+    // is fine.
+    for (const auto& [assetId, sessionPtr] : m_sessions) {
+        if (!sessionPtr) {
+            continue;
+        }
+        auto* session = sessionPtr.get();
+        QString sessionHash;
+        if (auto* t = qobject_cast<TorrentAssetSession*>(session)) {
+            sessionHash = t->infoHash();
+        } else if (auto* h = qobject_cast<HttpAssetSession*>(session)) {
+            sessionHash = h->infoHash();
+        }
+        if (sessionHash.compare(infoHash, Qt::CaseInsensitive) != 0) {
+            continue;
+        }
+        auto files = session->files();
+        if (!files.isEmpty()) {
+            return files;
+        }
+    }
+    return {};
+}
+
 std::optional<LiveAssetStats> DownloadManager::liveStatsFor(
     const QString& assetId) const
 {

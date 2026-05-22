@@ -65,6 +65,11 @@ void TorrentAssetSession::touch()
     m_engine.touchToken(m_token);
 }
 
+QVector<torrent::TorrentFileEntry> TorrentAssetSession::files() const
+{
+    return m_engine.filesForInfoHash(m_infoHash);
+}
+
 void TorrentAssetSession::pause()
 {
     m_engine.pauseInfoHash(m_infoHash);

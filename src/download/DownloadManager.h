@@ -7,6 +7,7 @@
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
+#include "torrent/MediaFileSelector.h" // TorrentFileEntry
 
 #include <QHash>
 #include <QObject>
@@ -14,6 +15,7 @@
 #include <QSet>
 #include <QString>
 #include <QUrl>
+#include <QVector>
 
 #include <QCoro/QCoroTask>
 
@@ -155,6 +157,18 @@ public:
     /// Snapshot of the asset ids that currently have a player
     /// attached. Used by the view-model to compute display chips.
     QSet<QString> attachedPlayerAssetIds() const { return m_attachedPlayers; }
+
+    /// Files of the currently-active session whose `AssetRef`
+    /// matches `infoHash`. Returns the first match (sessions for
+    /// the same magnet share the same file list regardless of which
+    /// `fileIndex` they target). Empty when no session is open for
+    /// that hash or when the backing source hasn't surfaced a file
+    /// list yet. This is the unified replacement for going through
+    /// `TorrentStreamingService::filesForInfoHash` directly: it
+    /// covers HTTP-backed debrid sessions too, where no libtorrent
+    /// session ever exists.
+    QVector<torrent::TorrentFileEntry> filesForInfoHash(
+        const QString& infoHash) const;
 
     /// Delete the persisted row plus any cached files. Stops the
     /// session if active.

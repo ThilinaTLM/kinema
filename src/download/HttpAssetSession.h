@@ -58,6 +58,16 @@ public:
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }
     qint64 cachedBytes() const override;
+    QVector<torrent::TorrentFileEntry> files() const override
+    {
+        return m_files;
+    }
+
+    /// Lower-case hex info hash this session was opened for. Used
+    /// by `DownloadManager::filesForInfoHash` to map an info hash
+    /// back to its asset session without forcing callers to know
+    /// about `AssetRef`. Stable for the lifetime of the session.
+    QString infoHash() const noexcept { return m_ref.infoHash; }
 
     QCoro::Task<bool> ensureRange(ByteRange range) override;
     QByteArray readRange(ByteRange range) const override;
@@ -128,6 +138,13 @@ private:
     /// `m_chunkAvailable[i] == true` means chunk i is fully on disk.
     std::vector<bool> m_chunkAvailable;
     int m_totalChunks = 0;
+
+    /// Magnet file list as the debrid provider reported it the
+    /// first time we resolved. Empty until `ensureResolved()` has
+    /// run at least once. Mirrors `TorrentStreamingService`'s
+    /// view for libtorrent-backed sessions so callers can use one
+    /// abstraction.
+    QVector<torrent::TorrentFileEntry> m_files;
 
     /// EWMA bookkeeping for the synthesised download rate. Updated
     /// every time a chunk lands so the UI sees a live MiB/s figure

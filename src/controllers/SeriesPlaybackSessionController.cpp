@@ -6,6 +6,7 @@
 #include "controllers/SeriesPlaybackSessionController.h"
 
 #include "controllers/PlaybackController.h"
+#include "download/DownloadManager.h"
 #include "services/StreamActions.h"
 #include "torrent/TorrentStreamingService.h"
 
@@ -19,11 +20,13 @@ SeriesPlaybackSessionController::SeriesPlaybackSessionController(
     PlaybackController& playback,
     torrent::TorrentStreamingService& torrentStreaming,
     services::StreamActions& actions,
+    download::DownloadManager* downloadManager,
     QObject* parent)
     : QObject(parent)
     , m_playback(playback)
     , m_torrentStreaming(torrentStreaming)
     , m_actions(actions)
+    , m_downloadManager(downloadManager)
 {
 }
 
@@ -63,12 +66,33 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
         return;
     }
 
-    const auto files = m_torrentStreaming.filesForInfoHash(
-        ctx.streamRef.infoHash);
+    // Prefer the unified download-manager lookup. This covers both
+    // libtorrent sessions and HTTP-backed debrid sessions, the
+    // latter of which never appear in `TorrentStreamingService` at
+    // all. Fall back to the streaming service only when the
+    // manager has no session for the hash (e.g. the legacy
+    // `StreamActions::playTorrentTask` path or test setups that
+    // wire the controller without a download manager).
+    QVector<torrent::TorrentFileEntry> files;
+    const char* fileSource = "none";
+    if (m_downloadManager) {
+        files = m_downloadManager->filesForInfoHash(
+            ctx.streamRef.infoHash);
+        if (!files.isEmpty()) {
+            fileSource = "download-manager";
+        }
+    }
+    if (files.isEmpty()) {
+        files = m_torrentStreaming.filesForInfoHash(
+            ctx.streamRef.infoHash);
+        if (!files.isEmpty()) {
+            fileSource = "torrent-streaming";
+        }
+    }
     const int playable = torrent::playableCandidateCount(files);
     qCDebug(KINEMA_PLAYER).nospace()
-        << "series-pack: filesForInfoHash returned files="
-        << files.size() << " playable=" << playable
+        << "series-pack: filesForInfoHash source=" << fileSource
+        << " files=" << files.size() << " playable=" << playable
         << " target=S" << *ctx.key.season << "E" << *ctx.key.episode
         << " pinnedFileIndex=" << ctx.streamRef.fileIndex;
     if (files.isEmpty()) {
@@ -132,6 +156,23 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
                       : std::nullopt,
         nav->next ? std::make_optional(toTarget(*nav->next))
                   : std::nullopt);
+
+    // Hydrate the currently playing file's size onto the picker
+    // row when the debrid provider (or libtorrent metadata) gave
+    // us a definitive byte count and the original Torrentio parse
+    // didn't surface one. De-dup by (infoHash, fileIndex, size) so
+    // resume / seek refreshes don't re-fire the signal.
+    if (nav->current->file.size > 0) {
+        const QString sizeKey = ctx.streamRef.infoHash
+            + QStringLiteral(":%1:%2")
+                  .arg(nav->current->file.index)
+                  .arg(nav->current->file.size);
+        if (sizeKey != m_lastSizeHydrationKey) {
+            m_lastSizeHydrationKey = sizeKey;
+            Q_EMIT currentStreamSizeResolved(ctx.streamRef.infoHash,
+                nav->current->file.index, nav->current->file.size);
+        }
+    }
 
     // Surface the adjacency outcome to the UI so the picker badge
     // can be paired with a one-shot status confirmation. The
@@ -208,6 +249,7 @@ void SeriesPlaybackSessionController::clearState()
     m_next.reset();
     m_baseContext = {};
     m_lastAdjacencyKey.clear();
+    m_lastSizeHydrationKey.clear();
     if (changed) {
         Q_EMIT navigationChanged();
     }

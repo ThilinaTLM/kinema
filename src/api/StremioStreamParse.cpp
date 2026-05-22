@@ -134,11 +134,9 @@ Stream parseOne(const QJsonObject& obj)
     } else {
         s.seeders = parseSeeders(descRaw);
     }
-    if (const auto v = obj.value(QStringLiteral("sizebytes")); v.isDouble()) {
-        s.sizeBytes = static_cast<qint64>(v.toDouble());
-    } else {
-        s.sizeBytes = parseSize(descRaw);
-    }
+    // Size resolution is deferred until after `behaviorHints` is
+    // parsed below so we can consult the structured `videoSize`
+    // field as a middle tier of the fallback chain.
     s.provider = parseProvider(descRaw);
 
     // Lower-cased ISO language code (Peerflix surfaces this for
@@ -151,6 +149,24 @@ Stream parseOne(const QJsonObject& obj)
 
     s.infoHash = obj.value(QStringLiteral("infoHash")).toString();
     const auto bh = obj.value(QStringLiteral("behaviorHints")).toObject();
+
+    // Per-file byte size. Precedence (highest first):
+    //   1. top-level `sizebytes` (Peerflix convention),
+    //   2. `behaviorHints.videoSize` (Stremio behaviorHints spec,
+    //      defined as "size of the chosen file"),
+    //   3. the descriptive `\xf0\x9f\x92\xbe N GB` token in the
+    //      title/description (Torrentio).
+    // Some Torrentio season-pack rows omit the emoji token and
+    // surface bytes only via behaviorHints, so the structured
+    // fallback is what makes the picker render a size on those rows.
+    if (const auto v = obj.value(QStringLiteral("sizebytes")); v.isDouble()) {
+        s.sizeBytes = static_cast<qint64>(v.toDouble());
+    } else if (const auto v = bh.value(QStringLiteral("videoSize"));
+        v.isDouble()) {
+        s.sizeBytes = static_cast<qint64>(v.toDouble());
+    } else if (const auto parsed = parseSize(descRaw); parsed.has_value()) {
+        s.sizeBytes = parsed;
+    }
     // Some Stremio addon responses tuck infoHash inside behaviorHints
     // (notably certain RD/AD-resolved entries). Fall back to that
     // nested location when the top-level field is absent so the

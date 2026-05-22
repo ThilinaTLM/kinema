@@ -4,11 +4,13 @@
 #pragma once
 
 #include "domain/Download.h"
+#include "torrent/MediaFileSelector.h" // TorrentFileEntry
 #include "torrent/PiecePlanner.h"
 
 #include <QByteArray>
 #include <QObject>
 #include <QString>
+#include <QVector>
 
 #include <QCoro/QCoroTask>
 
@@ -72,6 +74,18 @@ public:
 
     /// Bytes currently available on disk. Used for progress UI.
     virtual qint64 cachedBytes() const { return -1; }
+
+    /// Full list of files inside the underlying torrent / magnet,
+    /// 0-indexed in the order the source enumerated them. Empty
+    /// when the session has not yet resolved metadata or when the
+    /// source does not expose multi-file information. Consumed by
+    /// series adjacency lookup (see
+    /// `download::DownloadManager::filesForInfoHash`). Pure read,
+    /// safe to call from the GUI thread.
+    virtual QVector<torrent::TorrentFileEntry> files() const
+    {
+        return {};
+    }
 
     /// Current download mode. Concrete sessions persist this so a
     /// `BackendSelector::changeMode` can no-op when nothing changes.

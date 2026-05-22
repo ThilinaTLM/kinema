@@ -312,6 +312,53 @@ private Q_SLOTS:
         QCOMPARE(out.downloadUrl,
             QUrl(QStringLiteral("https://p1/dl/ep2.mkv")));
     }
+
+    void resolve_carriesFileListThroughLink()
+    {
+        // The file list the resolver fetched to make its pick must
+        // survive on `ResolvedDebridLink.files` so the asset session
+        // can surface adjacency to series auto-next without a
+        // libtorrent session. Index is the 0-based position in the
+        // flattened list as the provider returned it.
+        StubAllDebridClient stub;
+        stub.uploadReplies = { makeUploadOk() };
+        stub.statusReplies = { makeStatus(4) };
+        stub.filesReplies = {
+            QList<domain::AdMagnetFile> {
+                makeFile(QStringLiteral("Show.S01E01.1080p.mkv"),
+                    1'400'000'000,
+                    QStringLiteral("https://alldebrid.com/f/ep1")),
+                makeFile(QStringLiteral("Show.S01E02.1080p.mkv"),
+                    1'500'000'000,
+                    QStringLiteral("https://alldebrid.com/f/ep2")),
+            }
+        };
+        domain::AdUnlockedLink unlock;
+        unlock.download = QUrl(QStringLiteral("https://p1/dl/ep1.mkv"));
+        unlock.fileSize = 1'400'000'000;
+        stub.unlockReplies = { unlock };
+
+        domain::AssetRef ref;
+        ref.key.kind = domain::MediaKind::Series;
+        ref.key.imdbId = QStringLiteral("tt2");
+        ref.key.season = 1;
+        ref.key.episode = 1;
+        ref.infoHash = QStringLiteral(
+            "1122334455667788990011223344556677889900");
+        ref.releaseName = QStringLiteral("Show.S01");
+
+        download::AllDebridResolver r(stub);
+        const auto out = QCoro::waitFor(r.resolve(ref));
+        QCOMPARE(out.files.size(), 2);
+        QCOMPARE(out.files[0].index, 0);
+        QCOMPARE(out.files[0].path,
+            QStringLiteral("Show.S01E01.1080p.mkv"));
+        QCOMPARE(out.files[0].size, qint64(1'400'000'000));
+        QCOMPARE(out.files[1].index, 1);
+        QCOMPARE(out.files[1].path,
+            QStringLiteral("Show.S01E02.1080p.mkv"));
+        QCOMPARE(out.files[1].size, qint64(1'500'000'000));
+    }
 };
 
 QTEST_MAIN(TstAllDebridResolver)
