@@ -148,7 +148,10 @@ private Q_SLOTS:
                                  QByteArrayLiteral("multiAudio"),
                                  QByteArrayLiteral("releaseGroup"),
                                  QByteArrayLiteral("summaryLine"),
-                                 QByteArrayLiteral("tags") }) {
+                                 QByteArrayLiteral("tags"),
+                                 QByteArrayLiteral("packKind"),
+                                 QByteArrayLiteral("packLabel"),
+                                 QByteArrayLiteral("packClaim") }) {
             QVERIFY2(names.values().contains(key),
                 key.constData());
         }

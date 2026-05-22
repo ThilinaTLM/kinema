@@ -52,6 +52,17 @@ Q_SIGNALS:
     void navigationChanged();
     void windowCloseRequested();
 
+    /// Fires at most once per `(infoHash, season, episode)` per
+    /// playback session, after `refreshFromPlayback()` has resolved
+    /// the adjacency for a multi-file ("pack") torrent. Wired by
+    /// `ShellViewModel` to a `passiveMessage` so the picker's
+    /// "Season pack" badge gets paired with a one-shot status
+    /// confirmation ("Auto-play queued for S01E03" vs "Next episode
+    /// is not in this pack"). Not emitted for single-file torrents
+    /// where the question doesn't apply.
+    void packAdjacencyResolved(bool nextAvailable,
+        int nextSeason, int nextEpisode);
+
 private:
     struct EpisodeTarget {
         domain::PlaybackKey key;
@@ -78,6 +89,11 @@ private:
     std::optional<EpisodeTarget> m_next;
     bool m_navigationVisible = false;
     bool m_userClosed = false;
+    /// De-dup key for `packAdjacencyResolved`. Set to
+    /// `"<infoHash>:S<n>E<m>"` once the signal has fired for the
+    /// current episode so player-side refreshes (resume / seek /
+    /// metadata re-resolve) don't re-spam the status bar.
+    QString m_lastAdjacencyKey;
 };
 
 } // namespace kinema::controllers

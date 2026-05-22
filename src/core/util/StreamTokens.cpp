@@ -495,4 +495,198 @@ QString hdrLabel(Hdr h)
     return {};
 }
 
+// --- pack classifier ------------------------------------------------
+
+namespace {
+
+constexpr int kClaimMaxChars = 40;
+
+QString trimmedClaim(const QString& raw)
+{
+    QString out = raw.trimmed();
+    // Collapse repeated whitespace and normalise dot/underscore
+    // separators so the tooltip reads cleanly regardless of which
+    // separator the release name happened to use.
+    out.replace(QLatin1Char('.'), QLatin1Char(' '));
+    out.replace(QLatin1Char('_'), QLatin1Char(' '));
+    out = out.simplified();
+    if (out.size() > kClaimMaxChars) {
+        out = out.left(kClaimMaxChars - 1).trimmed()
+            + QStringLiteral("\u2026");
+    }
+    return out;
+}
+
+// Match one of the regexes against `text`, returning the matched
+// substring (preferring an explicit captured group when there is one)
+// or an empty string. Case-insensitive.
+QString firstMatch(const QString& text, const QString& pattern)
+{
+    static const auto opts = QRegularExpression::CaseInsensitiveOption;
+    QRegularExpression re(pattern, opts);
+    const auto m = re.match(text);
+    if (!m.hasMatch()) {
+        return {};
+    }
+    if (m.lastCapturedIndex() >= 1) {
+        const auto cap = m.captured(1).trimmed();
+        if (!cap.isEmpty()) {
+            return cap;
+        }
+    }
+    return m.captured(0);
+}
+
+} // namespace
+
+PackHint classifyPack(const domain::Stream& s, domain::MediaKind kind)
+{
+    PackHint out;
+    if (kind != domain::MediaKind::Series) {
+        return out;
+    }
+
+    // The textual signals live in `releaseName` and `detailsText` —
+    // `qualityLabel` is just the provider's first line and never
+    // carries pack hints, so we deliberately skip it.
+    QStringList textParts;
+    if (!s.releaseName.isEmpty()) {
+        textParts << s.releaseName;
+    }
+    if (!s.detailsText.isEmpty()) {
+        textParts << s.detailsText;
+    }
+    const QString text = textParts.join(QLatin1Char(' '));
+
+    // 1) MultiSeason — explicit season range or "Complete Series".
+    //    Tried first so "S01-S05 Complete" doesn't get caught by the
+    //    Season patterns below.
+    {
+        QString claim = firstMatch(text,
+            QStringLiteral("\\b(S\\d{1,2}[ ._-]?-[ ._-]?S?\\d{1,2})\\b"));
+        if (claim.isEmpty()) {
+            claim = firstMatch(text,
+                QStringLiteral("\\b(Seasons?[ ._-]+\\d{1,2}"
+                               "[ ._-]*(?:-|to|thru)[ ._-]*\\d{1,2})\\b"));
+        }
+        if (claim.isEmpty()) {
+            claim = firstMatch(text,
+                QStringLiteral("\\b(Complete[ ._-]+Series)\\b"));
+        }
+        if (claim.isEmpty()) {
+            claim = firstMatch(text,
+                QStringLiteral("\\b(Complete[ ._-]+Collection)\\b"));
+        }
+        if (!claim.isEmpty()) {
+            out.kind = PackKind::MultiSeason;
+            out.claim = trimmedClaim(claim);
+            return out;
+        }
+    }
+
+    // 2) Season — "Season N Complete" / "S0N Complete" /
+    //    "Complete S0N". The "Complete" anchor makes this an
+    //    explicit pack claim regardless of whether `fileIndex` is
+    //    set, because Torrentio sometimes elides `fileIdx` for
+    //    rows that nonetheless point at a multi-file torrent.
+    {
+        QString claim = firstMatch(text,
+            QStringLiteral(
+                "\\b(S\\d{1,2}[ ._-]+Complete)\\b"));
+        if (claim.isEmpty()) {
+            claim = firstMatch(text,
+                QStringLiteral(
+                    "\\b(Complete[ ._-]+S\\d{1,2})\\b"));
+        }
+        if (claim.isEmpty()) {
+            claim = firstMatch(text,
+                QStringLiteral(
+                    "\\b(Season[ ._-]+\\d{1,2}[ ._-]+Complete)\\b"));
+        }
+        if (claim.isEmpty()) {
+            claim = firstMatch(text,
+                QStringLiteral(
+                    "\\b(Complete[ ._-]+Season[ ._-]+\\d{1,2})\\b"));
+        }
+        if (!claim.isEmpty()) {
+            out.kind = PackKind::Season;
+            out.claim = trimmedClaim(claim);
+            return out;
+        }
+    }
+
+    // 3) Bare "Season N" / "S0N" (no "Complete" anchor). This
+    //    pattern *also* appears in plenty of single-episode release
+    //    names ("From.S02E01.Season.2.Premiere.") so we only escalate
+    //    to a pack hint when an `SxxExx` token is absent. Either way,
+    //    we trust `fileIndex >= 0` to upgrade the confidence:
+    //      • SxxExx present  → single episode, no claim.
+    //      • fileIndex >= 0  → Season (text + multi-file = strong).
+    //      • fileIndex == -1 → MultiEpisode (be conservative).
+    {
+        const bool hasEpisodeToken = QRegularExpression(
+            QStringLiteral("\\bS\\d{1,2}E\\d{1,2}\\b"),
+            QRegularExpression::CaseInsensitiveOption)
+            .match(text).hasMatch();
+        if (!hasEpisodeToken) {
+            QString claim = firstMatch(text,
+                QStringLiteral("\\b(Season[ ._-]+\\d{1,2})\\b"));
+            if (claim.isEmpty()) {
+                claim = firstMatch(text,
+                    QStringLiteral("\\b(S\\d{1,2})\\b"));
+            }
+            if (!claim.isEmpty()) {
+                out.kind = (s.fileIndex >= 0) ? PackKind::Season
+                                              : PackKind::MultiEpisode;
+                out.claim = trimmedClaim(claim);
+                return out;
+            }
+        }
+    }
+
+    // 4) No textual signal at all, but Torrentio pinned a fileIndex.
+    //    Torrentio only sets `behaviorHints.fileIdx` on multi-file
+    //    torrents, so this catches packs whose release name omits a
+    //    "Season" / "Complete" keyword. No claim text — the tooltip
+    //    falls back to the generic explanation.
+    if (s.fileIndex >= 0) {
+        out.kind = PackKind::MultiEpisode;
+        return out;
+    }
+
+    return out;
+}
+
+QString packLabel(PackKind k)
+{
+    switch (k) {
+    case PackKind::Season:
+        return i18nc("@label stream chip season pack", "Season pack");
+    case PackKind::MultiSeason:
+        return i18nc("@label stream chip multi-season pack",
+            "Complete series");
+    case PackKind::MultiEpisode:
+        return i18nc("@label stream chip multi-episode pack",
+            "Multi-episode");
+    case PackKind::None:
+        return {};
+    }
+    return {};
+}
+
+QString packKindToken(PackKind k)
+{
+    switch (k) {
+    case PackKind::Season:
+        return QStringLiteral("season");
+    case PackKind::MultiSeason:
+        return QStringLiteral("multiseason");
+    case PackKind::MultiEpisode:
+        return QStringLiteral("multi");
+    case PackKind::None:
+        return QStringLiteral("none");
+    }
+    return QStringLiteral("none");
+}
+
 } // namespace kinema::core::stream_tokens

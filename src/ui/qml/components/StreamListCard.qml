@@ -61,6 +61,21 @@ BaseListCard {
     /// `debridProvider != "none"`.
     property bool debridCached: false
 
+    /// Pack-hint classification from
+    /// `core::stream_tokens::classifyPack`. Stable QML token, one of
+    /// `"none" | "multi" | "season" | "multiseason"`. Drives the
+    /// leading "Season pack" chip on the meta row — only the series
+    /// detail page surfaces a non-"none" value; the movie page leaves
+    /// it at the default, so the chip stays hidden there.
+    property string packKind: "none"
+    /// Localised chip text (e.g. "Season pack", "Complete series",
+    /// "Multi-episode"). Empty when `packKind === "none"`.
+    property string packLabel: ""
+    /// Free-form claim string captured from the release name, used
+    /// only in the tooltip. Empty when the classifier had no textual
+    /// signal to quote (`fileIndex >= 0` with no "Season" keyword).
+    property string packClaim: ""
+
     /// View-model exposing the row action slots. Defaults to the
     /// movie detail VM; the series page rebinds it.
     property var vm: movieDetailVm
@@ -155,8 +170,72 @@ BaseListCard {
             card.provider && card.provider.length > 0
         readonly property bool hasSeeders: card.seeders >= 0
 
+        readonly property bool hasPack: card.packKind !== "none"
+            && card.packLabel.length > 0
+        // "season" / "multiseason" are explicit textual claims and
+        // get the positive tone. "multi" is the conservative
+        // fileIndex-only inference — still useful, but coloured the
+        // same as the rest of the meta row so it doesn't over-promise.
+        readonly property color packColor: (card.packKind === "season"
+                || card.packKind === "multiseason")
+            ? Theme.positive
+            : Theme.disabled
+
         Layout.fillWidth: true
         spacing: Theme.inlineSpacing
+
+        // Leading pack chip ("Season pack" / "Complete series" /
+        // "Multi-episode"). Sits before the tags so a user scanning
+        // the row spots a binge-watchable pack without reading the
+        // release name. Hidden entirely on the movie page (where
+        // `packKind` stays at its default `"none"`).
+        RowLayout {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasPack
+            spacing: Math.max(2, Math.round(Theme.inlineSpacing / 2))
+
+            Kirigami.Icon {
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: Math.round(
+                    Kirigami.Units.iconSizes.small * 0.8)
+                Layout.preferredHeight: width
+                source: AppIcons.url("layers", metaRow.packColor)
+                color: metaRow.packColor
+            }
+            QQC2.Label {
+                Layout.alignment: Qt.AlignVCenter
+                text: card.packLabel
+                font.pointSize: Theme.captionFont.pointSize
+                color: metaRow.packColor
+                verticalAlignment: Text.AlignVCenter
+                QQC2.ToolTip.text: card.packClaim.length > 0
+                    ? i18nc("@info:tooltip stream pack badge with claim",
+                        "Multi-episode torrent (%1). Kinema will "
+                        + "auto-play the next episode if it is in "
+                        + "the pack.", card.packClaim)
+                    : i18nc("@info:tooltip stream pack badge",
+                        "Multi-episode torrent. Kinema will "
+                        + "auto-play the next episode if it is in "
+                        + "the pack.")
+                QQC2.ToolTip.visible: packHover.hovered
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                HoverHandler { id: packHover }
+            }
+        }
+
+        // Separator (pack) → (tags|tech|provider|seeders). Only
+        // visible when the pack chip is present AND something
+        // follows it on the line.
+        QQC2.Label {
+            Layout.alignment: Qt.AlignVCenter
+            visible: metaRow.hasPack
+                && (metaRow.hasTags || metaRow.hasSummary
+                    || metaRow.hasProvider || metaRow.hasSeeders)
+            text: "\u00b7"
+            font.pointSize: Theme.captionFont.pointSize
+            color: Theme.disabled
+            verticalAlignment: Text.AlignVCenter
+        }
 
         // Tag tokens (languages / multi / group). Iterated as
         // plain caption labels; the row no longer uses pill chips

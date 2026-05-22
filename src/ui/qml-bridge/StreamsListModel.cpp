@@ -95,6 +95,18 @@ const core::stream_tokens::Tokens& StreamsListModel::tokensAt(int index) const
     return it.value();
 }
 
+const core::stream_tokens::PackHint&
+StreamsListModel::packHintAt(int index) const
+{
+    auto it = m_packCache.find(index);
+    if (it == m_packCache.end()) {
+        it = m_packCache.insert(index,
+            core::stream_tokens::classifyPack(
+                m_items.at(index), m_mediaKind));
+    }
+    return it.value();
+}
+
 QVariant StreamsListModel::data(const QModelIndex& index, int role) const
 {
     if (!index.isValid() || index.row() < 0
@@ -155,6 +167,14 @@ QVariant StreamsListModel::data(const QModelIndex& index, int role) const
         return domain::providerToString(s.debridProvider);
     case DebridCachedRole:
         return s.debridCached;
+    case PackKindRole:
+        return core::stream_tokens::packKindToken(
+            packHintAt(index.row()).kind);
+    case PackLabelRole:
+        return core::stream_tokens::packLabel(
+            packHintAt(index.row()).kind);
+    case PackClaimRole:
+        return packHintAt(index.row()).claim;
     case StreamRole:
         return QVariant::fromValue(s);
     default:
@@ -190,7 +210,31 @@ QHash<int, QByteArray> StreamsListModel::roleNames() const
         { TagsRole, "tags" },
         { DebridProviderRole, "debridProvider" },
         { DebridCachedRole, "debridCached" },
+        { PackKindRole, "packKind" },
+        { PackLabelRole, "packLabel" },
+        { PackClaimRole, "packClaim" },
     };
+}
+
+void StreamsListModel::setMediaKind(domain::MediaKind kind)
+{
+    if (m_mediaKind == kind) {
+        return;
+    }
+    m_mediaKind = kind;
+    // The pack classifier consults the kind on every row, so the
+    // existing cache is now stale. Tokens are kind-independent and
+    // stay valid. We don't emit per-row dataChanged because the
+    // expected call-site is the owning VM constructor, before any
+    // rows have been inserted; if a runtime caller ever flips the
+    // kind we still need rows to repaint, so issue a full reset.
+    if (!m_items.isEmpty()) {
+        beginResetModel();
+        m_packCache.clear();
+        endResetModel();
+    } else {
+        m_packCache.clear();
+    }
 }
 
 void StreamsListModel::resetState(State newState)
@@ -210,6 +254,7 @@ void StreamsListModel::clearItemsIfAny()
     beginResetModel();
     m_items.clear();
     m_tokenCache.clear();
+    m_packCache.clear();
     endResetModel();
     Q_EMIT countChanged();
 }
@@ -264,6 +309,7 @@ void StreamsListModel::setItems(QList<domain::Stream> visible,
     beginResetModel();
     m_items = std::move(visible);
     m_tokenCache.clear();
+    m_packCache.clear();
     endResetModel();
     Q_EMIT countChanged();
 
