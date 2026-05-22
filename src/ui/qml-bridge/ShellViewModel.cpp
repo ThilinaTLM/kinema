@@ -709,6 +709,21 @@ void ShellViewModel::wireStatusForwarding()
                         "Next episode is not in this pack."), 4000);
                 }
             });
+
+        // Hydrate the picker row's size cell once the playback
+        // pipeline learns the authoritative byte count. Only the
+        // series detail page has a relevant streams model in scope
+        // here \u2014 the controller doesn't fire for movies.
+        connect(seriesSessionCtrl,
+            &controllers::SeriesPlaybackSessionController::currentStreamSizeResolved,
+            this,
+            [this](const QString& infoHash, int fileIndex, qint64 size) {
+                if (auto* vm = m_services.seriesDetailVm()) {
+                    if (auto* model = vm->streams()) {
+                        model->hydrateSize(infoHash, fileIndex, size);
+                    }
+                }
+            });
     }
     if (playbackCtrl) {
         connect(playbackCtrl,

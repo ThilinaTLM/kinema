@@ -90,6 +90,16 @@ public:
         resumeCalls.append(infoHash);
     }
 
+    QVector<torrent::TorrentFileEntry> filesForInfoHash(
+        const QString& infoHash) const override
+    {
+        const auto it = stubFiles.find(infoHash.toLower());
+        if (it == stubFiles.end()) {
+            return {};
+        }
+        return it.value();
+    }
+
     int prepareCalls = 0;
     torrent::PrepareMode lastMode = torrent::PrepareMode::Streaming;
     QString lastInfoHash;
@@ -97,6 +107,9 @@ public:
     QList<QString> promoteCalls;
     QList<QString> pauseCalls;
     QList<QString> resumeCalls;
+    /// Synthetic file lists keyed by lower-case info hash. Used by
+    /// the `filesForInfoHash` test.
+    QHash<QString, QVector<torrent::TorrentFileEntry>> stubFiles;
 };
 
 domain::Stream makeStream(const QString& infoHash = QString())
@@ -453,6 +466,46 @@ private Q_SLOTS:
         QCOMPARE(second.path(), first.path());
         QCOMPARE(second.host(), first.host());
         QVERIFY(second.port() > 0);
+    }
+
+    void filesForInfoHash_returnsTorrentSessionFiles()
+    {
+        // Prime an active torrent session via prepareForPlayback,
+        // then verify that `DownloadManager::filesForInfoHash`
+        // forwards through `TorrentAssetSession::files()` to the
+        // engine's file list. This is the unified lookup the
+        // series session controller uses for adjacency.
+        const auto stream = makeStream();
+        const auto ctx = makeContext();
+
+        m_engine->stubFiles[stream.infoHash.toLower()] = {
+            torrent::TorrentFileEntry {
+                0, QStringLiteral("Show.S01E01.mkv"), 1'400'000'000 },
+            torrent::TorrentFileEntry {
+                1, QStringLiteral("Show.S01E02.mkv"), 1'500'000'000 },
+        };
+
+        auto task = m_manager->prepareForPlayback(stream, ctx);
+        Q_UNUSED(task);
+        for (int i = 0; i < 50 && m_engine->prepareCalls == 0; ++i) {
+            QCoreApplication::processEvents();
+        }
+        QCOMPARE(m_engine->prepareCalls, 1);
+
+        const auto files = m_manager->filesForInfoHash(stream.infoHash);
+        QCOMPARE(files.size(), 2);
+        QCOMPARE(files[0].index, 0);
+        QCOMPARE(files[0].path, QStringLiteral("Show.S01E01.mkv"));
+        QCOMPARE(files[1].size, qint64(1'500'000'000));
+    }
+
+    void filesForInfoHash_emptyWhenNoSession()
+    {
+        // No session opened: lookup is a clean empty.
+        QVERIFY(m_manager->filesForInfoHash(
+            QStringLiteral("ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00"))
+                    .isEmpty());
+        QVERIFY(m_manager->filesForInfoHash(QString()).isEmpty());
     }
 
     void synthesiseStartArgsPreservesFileSelectionHints()

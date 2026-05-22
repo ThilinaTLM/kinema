@@ -147,6 +147,10 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
         m_paused = false;
         m_position = 0.0;
         m_duration = 0.0;
+        // Window detach: any in-flight loadfile transition is
+        // cancelled along with the player surface.
+        m_loadfileInFlight = false;
+        m_loadedCtx = {};
         Q_EMIT sessionStateChanged();
         return;
     }
@@ -226,6 +230,19 @@ void PlaybackController::play(const QUrl& url,
         << " title=\"" << ctx.title << "\""
         << " resumeSec="
         << (ctx.resumeSeconds ? *ctx.resumeSeconds : 0);
+    // Mark the upcoming mpv `end-file reason="stop"` as a
+    // transition artefact rather than a user-meaningful end. mpv's
+    // `loadfile` aborts the current file before loading the new
+    // one; that abort surfaces as `end-file reason="stop"` and
+    // would otherwise look like a stop-of-the-new-file (because
+    // `m_ctx` is overwritten immediately below). Without this
+    // flag, the series session controller's reactive listeners
+    // would clear their prev/next state the moment mpv aborts the
+    // previous file, leaving the transport chrome blank after the
+    // new episode loads.
+    if (m_hasActiveSession && m_window) {
+        m_loadfileInFlight = true;
+    }
     m_ctx = ctx;
     m_duration = 0.0;
     m_position = 0.0;
@@ -322,6 +339,10 @@ void PlaybackController::stop()
     m_paused = false;
     m_position = 0.0;
     m_duration = 0.0;
+    // `stop()` is the explicit user-close path: any in-flight
+    // loadfile that hasn't completed is cancelled, not absorbed.
+    m_loadfileInFlight = false;
+    m_loadedCtx = {};
     m_window->setLoadingVisible(false);
     Q_EMIT activeSessionChanged(m_hasActiveSession);
     Q_EMIT pausedChanged(m_paused);
@@ -456,6 +477,13 @@ void PlaybackController::onFileLoaded()
 {
     qCInfo(KINEMA_CONTROLLER) << "PlaybackController: file-loaded";
     m_loadWatchdog.stop();
+    // The new file is now the live one. Subsequent `end-file`
+    // events refer to *it*, so latch `m_loadedCtx` and clear the
+    // loadfile-in-flight flag. Clearing here is also defensive:
+    // if mpv ever skips the intermediate `end-file reason="stop"`
+    // we still leave a clean slate.
+    m_loadedCtx = m_ctx;
+    m_loadfileInFlight = false;
     if (m_window) {
         m_window->setLoadingVisible(false);
     }
@@ -505,6 +533,31 @@ void PlaybackController::onLoadWatchdogTimedOut()
 void PlaybackController::onEndOfFile(const QString& reason)
 {
     m_loadWatchdog.stop();
+
+    // Filter the loadfile-induced stop. mpv's `loadfile` aborts
+    // the current file before loading the new one; that abort
+    // surfaces here as `end-file reason="stop"`. Externally we
+    // model `play()`-during-active-session as a continuous
+    // session, so swallow the intermediate stop without tearing
+    // anything down. The next genuine end-file (eof / error /
+    // user-stop) goes through the normal teardown path below.
+    if (m_loadfileInFlight && reason == QStringLiteral("stop")) {
+        qCDebug(KINEMA_CONTROLLER).nospace()
+            << "PlaybackController: absorbing loadfile-induced "
+               "end-file=stop for \""
+            << m_loadedCtx.title << "\"";
+        m_loadfileInFlight = false;
+        // Leave m_hasActiveSession, m_phase, m_paused, m_position,
+        // m_duration alone — they belong to the upcoming file
+        // which `play()` already configured for `Loading`.
+        return;
+    }
+    // Past this point any in-flight loadfile is cancelled (we are
+    // tearing down the session). If mpv reports a non-"stop"
+    // reason while the flag is set (e.g. an error before the
+    // intermediate stop), fall through to the standard teardown.
+    m_loadfileInFlight = false;
+
     ++m_epoch;
     m_pendingResumeSeconds = 0;
     if (m_window) {
@@ -522,7 +575,16 @@ void PlaybackController::onEndOfFile(const QString& reason)
     Q_EMIT positionChanged(m_position);
     Q_EMIT durationChanged(m_duration);
     Q_EMIT sessionStateChanged();
-    Q_EMIT endOfFile(reason, m_ctx);
+    // Hand out the ctx of the file that actually ended, not the
+    // current `m_ctx` (which may have been overwritten by a fresh
+    // `play()` that hasn't yet completed its file-load handshake).
+    // Fall back to `m_ctx` for first-play edge cases where no
+    // `file-loaded` has fired yet (e.g. load watchdog timeout).
+    const auto endedCtx = m_loadedCtx.key.isValid()
+        ? m_loadedCtx
+        : m_ctx;
+    m_loadedCtx = {};
+    Q_EMIT endOfFile(reason, endedCtx);
 }
 
 void PlaybackController::onPositionChanged(double seconds)

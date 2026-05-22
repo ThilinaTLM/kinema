@@ -147,6 +147,20 @@ public:
     const QList<domain::Stream>& items() const noexcept { return m_items; }
     const domain::Stream* at(int row) const;
 
+    /// Patch the size of the first visible row that matches
+    /// `(infoHash, fileIndex)`. Used by the playback session
+    /// controller to surface the debrid resolver's authoritative
+    /// per-file byte count onto a picker row whose original parse
+    /// left the size cell blank (Torrentio packs that omit the
+    /// \xf0\x9f\x92\xbe emoji token). When `fileIndex < 0` the
+    /// caller is asking to patch the unique row for that hash;
+    /// the match falls back to infoHash-only in that case.
+    /// Returns `true` when a row was updated, `false` when the
+    /// matching row has scrolled out of the model (filtered /
+    /// sorted away). No-op when `size <= 0`.
+    bool hydrateSize(const QString& infoHash,
+        int fileIndex, qint64 sizeBytes);
+
     /// Localized "1.2 GB" / "—". Exposed publicly so the view-model
     /// can mirror the same formatting in chip strings or the page
     /// header without duplicating the qint64 → string logic.

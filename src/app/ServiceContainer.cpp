@@ -327,7 +327,8 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_playbackCtrl = new controllers::PlaybackController(
         *m_historyCtrl, m_settings, m_http.get(), a);
     m_seriesSessionCtrl = new controllers::SeriesPlaybackSessionController(
-        *m_playbackCtrl, *m_torrentStreaming, *m_streamActions, a);
+        *m_playbackCtrl, *m_torrentStreaming, *m_streamActions,
+        m_downloadManager, a);
     m_mprisCtrl = new controllers::MprisController(
         *m_playbackCtrl, m_seriesSessionCtrl, a);
     // Subtitle ↔ playback coupling (moviehash → search) lives at

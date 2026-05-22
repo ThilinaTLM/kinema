@@ -253,6 +253,71 @@ private Q_SLOTS:
         QVERIFY(!second.contains(QStringLiteral("x265")));
     }
 
+    void hydrateSize_updatesMatchingRowAndEmitsDataChanged()
+    {
+        // The playback session controller pipes the resolver's
+        // authoritative per-file byte count through this method
+        // when the original Torrentio parse left the row blank.
+        StreamsListModel m;
+        Stream row1 = makeStream(QStringLiteral("Pack.S01.x265"),
+            QStringLiteral("1080p"),
+            QStringLiteral("Torrentio"),
+            0, 42);
+        row1.infoHash = QStringLiteral("deadbeef1");
+        row1.fileIndex = 3;
+        row1.sizeBytes = std::nullopt; // unknown initially
+
+        Stream row2 = makeStream(QStringLiteral("Other"),
+            QStringLiteral("720p"),
+            QStringLiteral("Torrentio"),
+            0, 1);
+        row2.infoHash = QStringLiteral("deadbeef2");
+
+        m.setItems({ row1, row2 });
+        QSignalSpy spy(&m, &QAbstractItemModel::dataChanged);
+
+        QVERIFY(m.hydrateSize(QStringLiteral("deadbeef1"),
+            3, 2'500'000'000LL));
+        QCOMPARE(m.data(m.index(0),
+            StreamsListModel::SizeBytesRole).toLongLong(),
+            qint64(2'500'000'000LL));
+        QCOMPARE(spy.count(), 1);
+        const auto args = spy.takeFirst();
+        const QVector<int> roles = args.at(2).value<QVector<int>>();
+        QVERIFY(roles.contains(StreamsListModel::SizeBytesRole));
+        QVERIFY(roles.contains(StreamsListModel::SizeTextRole));
+    }
+
+    void hydrateSize_isNoopWhenRowMissingOrSizeZero()
+    {
+        StreamsListModel m;
+        Stream row = makeStream(QStringLiteral("X"),
+            QStringLiteral("1080p"),
+            QStringLiteral("P"), 100, 5);
+        row.infoHash = QStringLiteral("cafebabe");
+        m.setItems({ row });
+        QVERIFY(!m.hydrateSize(QStringLiteral("deadbeef"), -1, 1234));
+        QVERIFY(!m.hydrateSize(QStringLiteral("cafebabe"), -1, 0));
+        QVERIFY(!m.hydrateSize(QString(), -1, 1234));
+    }
+
+    void hydrateSize_isIdempotentWhenAlreadyEqual()
+    {
+        // Calling twice with the same size doesn't double-emit and
+        // still reports success (the row is in the desired state).
+        StreamsListModel m;
+        Stream row = makeStream(QStringLiteral("X"),
+            QStringLiteral("1080p"),
+            QStringLiteral("P"), 0, 5);
+        row.infoHash = QStringLiteral("deadcafe");
+        row.sizeBytes = std::nullopt;
+        m.setItems({ row });
+        QVERIFY(m.hydrateSize(QStringLiteral("deadcafe"), -1, 4242));
+        QSignalSpy spy(&m, &QAbstractItemModel::dataChanged);
+        QVERIFY(m.hydrateSize(QStringLiteral("deadcafe"), -1, 4242));
+        QCOMPARE(spy.count(), 0);
+    }
+
     void testSortModeEnumOrder()
     {
         // Smart is the new default and lives at index 0; the rest

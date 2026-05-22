@@ -103,7 +103,8 @@ public:
     qint64 fileSizeForToken(const QString& token) const;
     QString fileNameForToken(const QString& token) const;
     void touchToken(const QString& token);
-    QVector<TorrentFileEntry> filesForInfoHash(const QString& infoHash) const;
+    virtual QVector<TorrentFileEntry> filesForInfoHash(
+        const QString& infoHash) const;
 
     /// Mark the session for `infoHash` as exempt from idle-stop.
     /// The unified downloader calls this when the asset is pinned

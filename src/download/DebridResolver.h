@@ -4,11 +4,13 @@
 #pragma once
 
 #include "domain/Download.h"
+#include "torrent/MediaFileSelector.h" // TorrentFileEntry
 
 #include <QMetaType>
 #include <QObject>
 #include <QString>
 #include <QUrl>
+#include <QVector>
 
 
 #include <QCoro/QCoroTask>
@@ -35,6 +37,18 @@ struct ResolvedDebridLink {
     /// (RD: opaque string id; AllDebrid: numeric id rendered as
     /// decimal).
     QString providerTorrentId;
+
+    /// Full file list as reported by the provider's "list files"
+    /// API call (RD: `/torrents/info/{id}.files[]`; AllDebrid:
+    /// `/v4/magnet/files` flattened). One entry per file inside the
+    /// magnet, including non-video entries, ordered as the provider
+    /// returns them. `index` is the 0-based position in this list,
+    /// not the provider's native id; the resolver translates back
+    /// to provider ids internally when issuing per-file calls
+    /// (`selectFiles`, `unlockLink`). Used by `HttpAssetSession::files()`
+    /// to surface adjacency information to series auto-next without a
+    /// libtorrent session.
+    QVector<torrent::TorrentFileEntry> files;
 };
 
 /**

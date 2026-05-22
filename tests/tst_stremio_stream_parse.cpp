@@ -194,6 +194,60 @@ private Q_SLOTS:
         QCOMPARE(*streams.at(0).sizeBytes, qint64(60333553090LL));
     }
 
+    void behaviorHintsVideoSize_usedWhenSizebytesAndRegexMissing()
+    {
+        // No `sizebytes`, no \xf0\x9f\x92\xbe token in description, but
+        // behaviorHints.videoSize present. Verifies the middle tier
+        // of the size fallback chain (Stremio spec field).
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "vh1",
+                "description": "Some.Release.Without.Emoji",
+                "behaviorHints": { "videoSize": 21474836480 }
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.size(), 1);
+        QVERIFY(streams.at(0).sizeBytes.has_value());
+        QCOMPARE(*streams.at(0).sizeBytes, qint64(21474836480LL));
+    }
+
+    void sizebytes_winsOverBehaviorHintsVideoSize()
+    {
+        // Both structured fields present: top-level wins.
+        const QByteArray body = R"({
+            "streams": [{
+                "infoHash": "vh2",
+                "description": "Some.Release",
+                "sizebytes": 12345,
+                "behaviorHints": { "videoSize": 99999 }
+            }]
+        })";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QVERIFY(streams.at(0).sizeBytes.has_value());
+        QCOMPARE(*streams.at(0).sizeBytes, qint64(12345));
+    }
+
+    void emojiSize_stillWins_whenStructuredFieldsAbsent()
+    {
+        // No structured size at all but the \xf0\x9f\x92\xbe (floppy)
+        // token is present in the description. Regression check:
+        // the regex path must keep working when both `sizebytes`
+        // and `behaviorHints.videoSize` are absent.
+        const QByteArray body
+            = "{ \"streams\": [{ \"infoHash\": \"vh3\","
+              " \"description\": \"Movie\\n\xf0\x9f\x91\xa4 5"
+              " \xf0\x9f\x92\xbe 2.5 GB\" }] }";
+        const auto streams
+            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.size(), 1);
+        QVERIFY(streams.at(0).sizeBytes.has_value());
+        // 2.5 * 1024^3 = 2684354560
+        QCOMPARE(*streams.at(0).sizeBytes, qint64(2684354560LL));
+    }
+
     void structuredQuality_preferredOverRegex()
     {
         const QByteArray body = R"({

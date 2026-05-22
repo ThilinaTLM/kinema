@@ -354,4 +354,36 @@ const domain::Stream* StreamsListModel::at(int row) const
     return &m_items.at(row);
 }
 
+bool StreamsListModel::hydrateSize(const QString& infoHash,
+    int fileIndex, qint64 sizeBytes)
+{
+    if (sizeBytes <= 0 || infoHash.isEmpty()) {
+        return false;
+    }
+    // Linear scan: stream lists are bounded by Torrentio's row cap
+    // (a few hundred at the absolute worst, typically < 50). Match
+    // on `(infoHash, fileIndex)` when the caller pinned a file,
+    // otherwise fall back to first hit by infoHash.
+    for (int row = 0; row < m_items.size(); ++row) {
+        auto& s = m_items[row];
+        if (s.infoHash.compare(infoHash, Qt::CaseInsensitive) != 0) {
+            continue;
+        }
+        if (fileIndex >= 0 && s.fileIndex >= 0
+            && s.fileIndex != fileIndex) {
+            continue;
+        }
+        if (s.sizeBytes.has_value() && *s.sizeBytes == sizeBytes) {
+            // Idempotent: nothing to change.
+            return true;
+        }
+        s.sizeBytes = sizeBytes;
+        const auto idx = index(row);
+        Q_EMIT dataChanged(idx, idx,
+            { SizeBytesRole, SizeTextRole });
+        return true;
+    }
+    return false;
+}
+
 } // namespace kinema::ui::qml
