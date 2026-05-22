@@ -97,4 +97,45 @@ QString codecLabel(Codec c, bool tenBit);
 /// string for `Sdr`.
 QString hdrLabel(Hdr h);
 
+// --- pack classifier ------------------------------------------------
+
+/// Heuristic classification of "is this stream row a multi-episode
+/// torrent?" derived purely from `domain::Stream` fields. The
+/// authoritative answer ("does episode N+1 actually exist inside?")
+/// can only come from the libtorrent file list once the torrent has
+/// metadata; this classifier exists so the stream picker can hint at
+/// it *before* the user commits to downloading.
+///
+/// `kind == MediaKind::Movie` always classifies as `None` — multi-part
+/// movie releases are not the same affordance as series packs and
+/// must not show a "Season pack" chip in the movie stream picker.
+enum class PackKind {
+    None,         ///< single-episode (or unknown — be conservative)
+    MultiEpisode, ///< pack spans multiple episodes; scope unclear
+    Season,       ///< explicit "Season N" / "S0N Complete" claim
+    MultiSeason,  ///< "S01-S05" / "Complete Series" claim
+};
+
+struct PackHint {
+    PackKind kind = PackKind::None;
+    /// Free-form claim string captured from the release name,
+    /// e.g. "Season 1", "S01 Complete", "S01-S05". Empty when the
+    /// only signal was `fileIndex >= 0` with no textual hint.
+    /// Trimmed and capped to a tooltip-friendly length.
+    QString claim;
+};
+
+/// Classify a stream as a pack. Pure, no I/O, safe to call per-row.
+/// Movies always return `PackKind::None`.
+PackHint classifyPack(const domain::Stream& s, domain::MediaKind kind);
+
+/// Short localized chip label ("Season pack", "Complete series",
+/// "Multi-episode"). Empty for `PackKind::None`.
+QString packLabel(PackKind k);
+
+/// Stable QML-side token: "none" / "multi" / "season" / "multiseason".
+/// Mirrors the `debridProvider` role convention so QML can compare by
+/// string instead of leaking Qt enums.
+QString packKindToken(PackKind k);
+
 } // namespace kinema::core::stream_tokens

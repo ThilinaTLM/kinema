@@ -685,6 +685,30 @@ void ShellViewModel::wireStatusForwarding()
                     m_playerWindow->stopAndHide();
                 }
             });
+        // Close the loop between the picker's "Season pack" chip and
+        // runtime behaviour: emit a one-shot passive status message
+        // once adjacency has actually resolved against the torrent's
+        // file list. The controller already de-dups per
+        // `(infoHash, season, episode)` so seeks / resumes do not
+        // re-trigger this.
+        connect(seriesSessionCtrl,
+            &controllers::SeriesPlaybackSessionController::packAdjacencyResolved,
+            this,
+            [this](bool nextAvailable, int nextSeason, int nextEpisode) {
+                if (nextAvailable) {
+                    const QString code = QStringLiteral("S%1E%2")
+                        .arg(nextSeason, 2, 10, QLatin1Char('0'))
+                        .arg(nextEpisode, 2, 10, QLatin1Char('0'));
+                    Q_EMIT passiveMessage(i18nc(
+                        "@info:status auto-next episode queued. "
+                        "%1 is an episode code like 'S01E03'",
+                        "Auto-play queued for %1.", code), 4000);
+                } else {
+                    Q_EMIT passiveMessage(i18nc(
+                        "@info:status pack does not include next episode",
+                        "Next episode is not in this pack."), 4000);
+                }
+            });
     }
     if (playbackCtrl) {
         connect(playbackCtrl,

@@ -94,6 +94,10 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     , m_similar(new DiscoverSectionModel(
           i18nc("@label series detail rail", "More like this"), this))
 {
+    // Tell the streams model it's hosting episode streams so the
+    // pack classifier evaluates `classifyPack` instead of returning
+    // `PackKind::None` (the default, used by the movie page).
+    m_streams->setMediaKind(domain::MediaKind::Series);
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });

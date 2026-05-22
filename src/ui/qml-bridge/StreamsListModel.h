@@ -75,6 +75,13 @@ public:
         TagsRole,          ///< QStringList of small chip labels (codec/hdr/lang/group)
         DebridProviderRole,///< QString token: "none" / "realdebrid" / "alldebrid"
         DebridCachedRole,  ///< bool; only meaningful when DebridProviderRole != "none"
+        // Pack hint roles — populated from
+        // `core::stream_tokens::classifyPack`. Only meaningful when
+        // the model was constructed for a series detail page; movie
+        // streams always return `"none"` / empty strings here.
+        PackKindRole,      ///< QString: "none" / "multi" / "season" / "multiseason"
+        PackLabelRole,     ///< localized chip text; empty when PackKindRole == "none"
+        PackClaimRole,     ///< free-form claim string for the tooltip
     };
     Q_ENUM(Roles)
 
@@ -106,6 +113,15 @@ public:
     Q_ENUM(SortMode)
 
     explicit StreamsListModel(QObject* parent = nullptr);
+
+    /// Media kind the owning view-model is browsing. Set once after
+    /// construction (in the series / movie detail VM constructors)
+    /// so the pack classifier knows whether to evaluate or skip
+    /// `classifyPack` for the rows in this model. Defaults to
+    /// `Movie` — the conservative choice that suppresses the
+    /// "Season pack" chip if a caller forgets to set it.
+    void setMediaKind(domain::MediaKind kind);
+    domain::MediaKind mediaKind() const noexcept { return m_mediaKind; }
 
     State state() const noexcept { return m_state; }
     QString errorMessage() const { return m_errorMessage; }
@@ -169,6 +185,10 @@ private:
     void resetState(State newState);
     /// Lazily parse and cache tokens for row `index`.
     const core::stream_tokens::Tokens& tokensAt(int index) const;
+    /// Lazily classify and cache the pack hint for row `index`. The
+    /// result respects `m_mediaKind` — movie rows always cache as
+    /// `PackKind::None`.
+    const core::stream_tokens::PackHint& packHintAt(int index) const;
 
     /// Field clearers used by the lifecycle setters. Each emits the
     /// corresponding change signal only when there was something to
@@ -187,6 +207,11 @@ private:
     /// index because `data()` is called per-role and we don't want to
     /// re-parse the same stream three or four times per paint pass.
     mutable QHash<int, core::stream_tokens::Tokens> m_tokenCache;
+    /// Per-row pack-hint cache, paired lifetime with `m_tokenCache`.
+    mutable QHash<int, core::stream_tokens::PackHint> m_packCache;
+    /// What kind of media this model is rendering streams for.
+    /// Drives the pack classifier; see `setMediaKind`.
+    domain::MediaKind m_mediaKind = domain::MediaKind::Movie;
 };
 
 } // namespace kinema::ui::qml

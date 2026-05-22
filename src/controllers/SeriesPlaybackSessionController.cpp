@@ -9,6 +9,8 @@
 #include "services/StreamActions.h"
 #include "torrent/TorrentStreamingService.h"
 
+#include "kinema_log_player.h"
+
 #include <QFileInfo>
 
 namespace kinema::controllers {
@@ -52,13 +54,27 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
         || !ctx.key.season.has_value()
         || !ctx.key.episode.has_value()
         || ctx.streamRef.infoHash.isEmpty()) {
+        qCDebug(KINEMA_PLAYER) << "series-pack: skipping refresh"
+            << "kind=" << static_cast<int>(ctx.key.kind)
+            << "hasSeason=" << ctx.key.season.has_value()
+            << "hasEpisode=" << ctx.key.episode.has_value()
+            << "infoHashEmpty=" << ctx.streamRef.infoHash.isEmpty();
         clearState();
         return;
     }
 
     const auto files = m_torrentStreaming.filesForInfoHash(
         ctx.streamRef.infoHash);
+    const int playable = torrent::playableCandidateCount(files);
+    qCDebug(KINEMA_PLAYER).nospace()
+        << "series-pack: filesForInfoHash returned files="
+        << files.size() << " playable=" << playable
+        << " target=S" << *ctx.key.season << "E" << *ctx.key.episode
+        << " pinnedFileIndex=" << ctx.streamRef.fileIndex;
     if (files.isEmpty()) {
+        qCDebug(KINEMA_PLAYER)
+            << "series-pack: clearing — empty file list (metadata"
+            << "likely not yet resolved)";
         clearState();
         return;
     }
@@ -66,12 +82,32 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
     const auto nav = torrent::adjacentEpisodeFiles(files,
         *ctx.key.season, *ctx.key.episode);
     if (!nav || !nav->current.has_value()) {
+        qCDebug(KINEMA_PLAYER)
+            << "series-pack: clearing — no current-episode match"
+            << "(parse miss / ambiguous duplicate / single-episode"
+            << "torrent)";
         clearState();
         return;
     }
 
+    qCDebug(KINEMA_PLAYER).nospace()
+        << "series-pack: adjacency previous="
+        << (nav->previous ? QStringLiteral("S%1E%2")
+                .arg(nav->previous->season).arg(nav->previous->episode)
+                          : QStringLiteral("—"))
+        << " current=S" << nav->current->season << "E"
+        << nav->current->episode
+        << " next="
+        << (nav->next ? QStringLiteral("S%1E%2")
+                .arg(nav->next->season).arg(nav->next->episode)
+                      : QStringLiteral("—"));
+
     if (ctx.streamRef.fileIndex >= 0
         && nav->current->file.index != ctx.streamRef.fileIndex) {
+        qCDebug(KINEMA_PLAYER).nospace()
+            << "series-pack: clearing — fileIndex mismatch (pinned="
+            << ctx.streamRef.fileIndex << ", parsed="
+            << nav->current->file.index << ")";
         clearState();
         return;
     }
@@ -96,6 +132,25 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
                       : std::nullopt,
         nav->next ? std::make_optional(toTarget(*nav->next))
                   : std::nullopt);
+
+    // Surface the adjacency outcome to the UI so the picker badge
+    // can be paired with a one-shot status confirmation. The
+    // "is this a pack?" question is gated on `playable > 1` because
+    // a single-file torrent landing here is just a normal episode
+    // playback and shouldn't trigger picker feedback either way.
+    const QString adjacencyKey = ctx.streamRef.infoHash
+        + QStringLiteral(":S%1E%2")
+            .arg(*ctx.key.season).arg(*ctx.key.episode);
+    if (playable > 1 && adjacencyKey != m_lastAdjacencyKey) {
+        m_lastAdjacencyKey = adjacencyKey;
+        if (m_next.has_value()) {
+            Q_EMIT packAdjacencyResolved(true,
+                m_next->key.season.value_or(0),
+                m_next->key.episode.value_or(0));
+        } else {
+            Q_EMIT packAdjacencyResolved(false, 0, 0);
+        }
+    }
 }
 
 void SeriesPlaybackSessionController::onPlayerEndOfFile(
@@ -152,6 +207,7 @@ void SeriesPlaybackSessionController::clearState()
     m_previous.reset();
     m_next.reset();
     m_baseContext = {};
+    m_lastAdjacencyKey.clear();
     if (changed) {
         Q_EMIT navigationChanged();
     }

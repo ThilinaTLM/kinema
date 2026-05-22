@@ -58,4 +58,12 @@ std::optional<EpisodePackNavigation> adjacentEpisodeFiles(
     int season,
     int episode);
 
+/// Diagnostic helper. Returns the number of entries in `files` that
+/// `adjacentEpisodeFiles()` / `selectMediaFile()` would treat as
+/// playable candidates (video extension, non-zero size, not a sample
+/// or extra). Mirrors the internal filter so callers can log how
+/// many real episode candidates a torrent exposed without duplicating
+/// the predicates.
+int playableCandidateCount(const QVector<TorrentFileEntry>& files);
+
 } // namespace kinema::torrent

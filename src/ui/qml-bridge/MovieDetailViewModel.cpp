@@ -73,6 +73,10 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     , m_similar(new DiscoverSectionModel(
           i18nc("@label movie detail rail", "More like this"), this))
 {
+    // Movies never show the "Season pack" chip; this is symmetric
+    // with the series VM and documents intent at the call site even
+    // though `MediaKind::Movie` is also the default.
+    m_streams->setMediaKind(domain::MediaKind::Movie);
     connect(&m_settings.filter(),
         &config::FilterSettings::keywordBlocklistChanged, this,
         [this](const QStringList&) { rebuildVisibleStreams(); });

@@ -229,4 +229,9 @@ std::optional<EpisodePackNavigation> adjacentEpisodeFiles(
     return nav;
 }
 
+int playableCandidateCount(const QVector<TorrentFileEntry>& files)
+{
+    return playableCandidates(files).size();
+}
+
 } // namespace kinema::torrent

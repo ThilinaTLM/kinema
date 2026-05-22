@@ -229,6 +229,137 @@ private Q_SLOTS:
         QCOMPARE(hdrLabel(Hdr::Hdr10), QStringLiteral("HDR10"));
         QVERIFY(hdrLabel(Hdr::Sdr).isEmpty());
     }
+
+    // ---- pack classifier -----------------------------------------
+
+    void pack_movie_kind_alwaysNone()
+    {
+        domain::Stream s = makeStream(
+            QStringLiteral("Show.S01.Complete.1080p.WEB-DL"));
+        s.fileIndex = 4;
+        const auto hint = classifyPack(s, domain::MediaKind::Movie);
+        QCOMPARE(hint.kind, PackKind::None);
+        QVERIFY(hint.claim.isEmpty());
+    }
+
+    void pack_singleEpisodeRow_isNone()
+    {
+        domain::Stream s = makeStream(QStringLiteral(
+            "Show.S01E03.1080p.WEB-DL.x264-GROUP"));
+        s.fileIndex = -1;
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::None);
+    }
+
+    void pack_fileIndexOnly_isMultiEpisode()
+    {
+        // Pack pinned to a file but the release name carries no
+        // "Season" / "Complete" keyword — happens with some
+        // Torrentio rows surfacing per-episode metadata pointing
+        // into a season torrent.
+        domain::Stream s = makeStream(
+            QStringLiteral("Show.1080p.WEB-DL.x264-GROUP"));
+        s.fileIndex = 4;
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::MultiEpisode);
+        QVERIFY(hint.claim.isEmpty());
+    }
+
+    void pack_sxxComplete_isSeason()
+    {
+        domain::Stream s = makeStream(QStringLiteral(
+            "Show.S01.Complete.1080p.BluRay.x265-RARBG"));
+        s.fileIndex = -1;
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::Season);
+        QVERIFY(hint.claim.contains(QStringLiteral("S01"),
+            Qt::CaseInsensitive));
+        QVERIFY(hint.claim.contains(QStringLiteral("Complete"),
+            Qt::CaseInsensitive));
+    }
+
+    void pack_seasonN_withFileIndex_isSeason()
+    {
+        domain::Stream s = makeStream(QStringLiteral(
+            "Show.Season.2.1080p.WEB-DL.x264-GROUP"));
+        s.fileIndex = 4;
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::Season);
+        QVERIFY(hint.claim.contains(QStringLiteral("Season 2"),
+            Qt::CaseInsensitive));
+    }
+
+    void pack_seasonN_noFileIndex_isMultiEpisodeConservative()
+    {
+        // Bare "Season 2" without `fileIndex` is ambiguous; some
+        // single-episode release names mention the season too. Be
+        // conservative — surface a chip, but downgrade the strength.
+        domain::Stream s = makeStream(QStringLiteral(
+            "Show.Season.2.1080p.WEB-DL.x264-GROUP"));
+        s.fileIndex = -1;
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::MultiEpisode);
+        QVERIFY(hint.claim.contains(QStringLiteral("Season 2"),
+            Qt::CaseInsensitive));
+    }
+
+    void pack_seasonRangeS01S07_isMultiSeason()
+    {
+        domain::Stream s = makeStream(QStringLiteral(
+            "Show.Complete.Series.S01-S07.1080p.BluRay.x265"));
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::MultiSeason);
+    }
+
+    void pack_seasonsWordRange_isMultiSeason()
+    {
+        domain::Stream s = makeStream(QStringLiteral(
+            "Show Seasons 1-5 Complete 1080p WEB-DL"));
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::MultiSeason);
+        QVERIFY(hint.claim.contains(QStringLiteral("Seasons 1-5"),
+            Qt::CaseInsensitive));
+    }
+
+    void pack_completeSeries_isMultiSeason()
+    {
+        domain::Stream s = makeStream(QStringLiteral(
+            "Show.Complete.Series.1080p.WEB-DL.x265-QxR"));
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::MultiSeason);
+        QVERIFY(hint.claim.contains(QStringLiteral("Complete Series"),
+            Qt::CaseInsensitive));
+    }
+
+    void pack_episodeTokenWithSeasonWord_isNoneForSingleFile()
+    {
+        // "From.S02E01.Season.2.Premiere" — single episode that
+        // happens to mention "Season 2" in the descriptive part.
+        // The presence of an `SxxExx` token must block branch 3 so
+        // the row classifies as None, not MultiEpisode.
+        domain::Stream s = makeStream(QStringLiteral(
+            "From.S02E01.Season.2.Premiere.1080p.WEB-DL"));
+        s.fileIndex = -1;
+        const auto hint = classifyPack(s, domain::MediaKind::Series);
+        QCOMPARE(hint.kind, PackKind::None);
+    }
+
+    void pack_labelsAndTokensAreStable()
+    {
+        QCOMPARE(packKindToken(PackKind::None),
+            QStringLiteral("none"));
+        QCOMPARE(packKindToken(PackKind::MultiEpisode),
+            QStringLiteral("multi"));
+        QCOMPARE(packKindToken(PackKind::Season),
+            QStringLiteral("season"));
+        QCOMPARE(packKindToken(PackKind::MultiSeason),
+            QStringLiteral("multiseason"));
+
+        QVERIFY(packLabel(PackKind::None).isEmpty());
+        QVERIFY(!packLabel(PackKind::MultiEpisode).isEmpty());
+        QVERIFY(!packLabel(PackKind::Season).isEmpty());
+        QVERIFY(!packLabel(PackKind::MultiSeason).isEmpty());
+    }
 };
 
 QTEST_APPLESS_MAIN(TstStreamTokens)

@@ -88,6 +88,9 @@ ListSurface {
         resolution: model.resolution
         debridProvider: model.debridProvider
         debridCached: model.debridCached
+        packKind: model.packKind
+        packLabel: model.packLabel
+        packClaim: model.packClaim
         vm: streams.vm
     }
 
