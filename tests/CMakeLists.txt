@@ -248,6 +248,11 @@ ecm_add_test(tst_local_media_server.cpp
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Network
 )
 
+ecm_add_test(tst_http_asset_session.cpp
+    TEST_NAME tst_http_asset_session
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_history_store.cpp
     TEST_NAME tst_history_store
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
@@ -432,7 +437,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_application_boot tst_kinema_image_provider
          tst_downloads_list_model
          tst_download_store tst_download_manager
-         tst_media_cache tst_local_media_server
+         tst_media_cache tst_local_media_server tst_http_asset_session
          tst_torrent_lazy_start)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

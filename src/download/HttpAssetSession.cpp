@@ -52,6 +52,24 @@ HttpAssetSession::HttpAssetSession(core::HttpClient& http,
 {
     QDir().mkpath(m_localDir);
     loadChunkMap();
+    // When the constructor was handed a size up-front (the
+    // `AssetRef::sizeBytes` carried by series auto-next when the
+    // adjacent file's size is already known from the magnet's
+    // file list) and the chunk map didn't exist on disk, the
+    // chunk bookkeeping would otherwise stay zero-initialised
+    // until `ensureResolved` discovered a *different* size. Then
+    // `ensureChunk(0)` would synchronously return false because
+    // `chunkIndex >= m_totalChunks` (0 >= 0), and no bytes ever
+    // flow even though the upstream is healthy. Pre-size now so
+    // the session is usable as soon as `ensureResolved` returns,
+    // regardless of whether the resolver's size matched the hint.
+    if (m_fileSize > 0 && m_totalChunks == 0) {
+        m_totalChunks = static_cast<int>(
+            (m_fileSize + m_chunkSize - 1) / m_chunkSize);
+        m_chunkAvailable.assign(
+            static_cast<size_t>(m_totalChunks), false);
+        ensureFileSizedToTotal();
+    }
 }
 
 HttpAssetSession::~HttpAssetSession()
@@ -244,9 +262,27 @@ QCoro::Task<void> HttpAssetSession::ensureResolved()
         const auto resolved = co_await m_resolver.resolve(m_ref);
         m_upstream = resolved.downloadUrl;
         m_providerTorrentId = resolved.providerTorrentId;
-        if (resolved.fileSize > 0
-            && (m_fileSize <= 0 || resolved.fileSize != m_fileSize)) {
+        if (resolved.fileSize > 0 && resolved.fileSize != m_fileSize) {
+            // Provider disagrees with the size hint (or we didn't
+            // have one). Re-seat the chunk bookkeeping to the
+            // authoritative size; any partial cached state is
+            // dropped because chunk indices would no longer line
+            // up.
             m_fileSize = resolved.fileSize;
+            m_totalChunks = static_cast<int>(
+                (m_fileSize + m_chunkSize - 1) / m_chunkSize);
+            m_chunkAvailable.assign(
+                static_cast<size_t>(m_totalChunks), false);
+            ensureFileSizedToTotal();
+            saveChunkMap();
+        } else if (resolved.fileSize > 0 && m_totalChunks == 0) {
+            // Sizes match the constructor-side hint but the chunk
+            // map didn't pre-init (fresh asset dir, no map on
+            // disk). Initialise now so `ensureChunk` has a valid
+            // bookkeeping array to consult \u2014 without this,
+            // `ensureChunk(0)` returns false synchronously because
+            // `chunkIndex >= m_totalChunks` and the local server
+            // can't pull a single byte.
             m_totalChunks = static_cast<int>(
                 (m_fileSize + m_chunkSize - 1) / m_chunkSize);
             m_chunkAvailable.assign(
