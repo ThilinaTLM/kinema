@@ -198,17 +198,17 @@ void SeriesPlaybackSessionController::onPlayerEndOfFile(
     const QString& reason,
     const domain::PlaybackContext& ctx)
 {
-    // The end-file signal carries the context of the playback that
-    // just ended. When the user clicks the Next button (or auto-
-    // next fires on EOF), our own `m_actions.play(...)` calls mpv's
-    // `loadfile` for the new URL; mpv aborts the previous file and
-    // emits `end-file reason="stop"` for it. By the time that
-    // signal reaches us, `refreshFromPlayback` for the new episode
-    // has already run and updated `m_baseContext` to the new ctx.
-    // Ignoring the stale end-file here is what keeps the
-    // transport-bar navigation visible after auto-next \u2014 without
-    // this guard the freshly-set prev/next would be cleared and the
-    // chrome buttons would disappear on the next episode.
+    // Contract: `PlaybackController::endOfFile(reason, ctx)`
+    // delivers the ctx of the file that *actually* ended
+    // (`m_loadedCtx`-scoped over there). The loadfile-induced
+    // intermediate stop is absorbed inside PlaybackController and
+    // never reaches us, so during the normal flow `ctx.key` and
+    // `m_baseContext.key` always agree.
+    //
+    // This guard is belt-and-braces: if a future regression
+    // upstream ever lets a stale end-file leak through, fail safe
+    // by ignoring it rather than clobbering the freshly-set prev/
+    // next state and blanking the transport chrome.
     const bool isCurrent = m_baseContext.key.isValid()
         && m_baseContext.key == ctx.key;
     if (!isCurrent) {

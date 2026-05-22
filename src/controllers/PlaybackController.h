@@ -147,6 +147,14 @@ private:
     QCoro::Task<void> kickoffMoviehashCompute(QUrl url, quint64 epoch);
 
     domain::PlaybackContext m_ctx;
+    /// Ctx of the file mpv has actually loaded — updated on
+    /// `file-loaded`, consumed by `onEndOfFile` to ensure the
+    /// emitted `endOfFile(reason, ctx)` carries the ctx of the
+    /// file that actually ended (not the most recently *requested*
+    /// ctx, which `m_ctx` may already point at after a fresh
+    /// `play()` that hasn't yet completed mpv's stop/load
+    /// handshake).
+    domain::PlaybackContext m_loadedCtx;
     core::chapters::ChapterList m_chapters;
     qint64 m_pendingResumeSeconds = 0;
     Phase m_phase = Phase::Idle;
@@ -155,6 +163,12 @@ private:
     bool m_trackMemoryApplied = false;
     bool m_paused = false;
     bool m_hasActiveSession = false;
+    /// True between a `play()` call that supersedes an active
+    /// session and the subsequent `file-loaded` event. Used to
+    /// filter mpv's loadfile-induced `end-file reason="stop"` so
+    /// it is not surfaced as a user-meaningful end of the
+    /// previous session.
+    bool m_loadfileInFlight = false;
     double m_position = 0.0;
     double m_volumePercent = 100.0;
     double m_playbackRate = 1.0;
