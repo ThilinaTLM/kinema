@@ -198,7 +198,31 @@ void SeriesPlaybackSessionController::onPlayerEndOfFile(
     const QString& reason,
     const domain::PlaybackContext& ctx)
 {
-    Q_UNUSED(ctx);
+    // The end-file signal carries the context of the playback that
+    // just ended. When the user clicks the Next button (or auto-
+    // next fires on EOF), our own `m_actions.play(...)` calls mpv's
+    // `loadfile` for the new URL; mpv aborts the previous file and
+    // emits `end-file reason="stop"` for it. By the time that
+    // signal reaches us, `refreshFromPlayback` for the new episode
+    // has already run and updated `m_baseContext` to the new ctx.
+    // Ignoring the stale end-file here is what keeps the
+    // transport-bar navigation visible after auto-next \u2014 without
+    // this guard the freshly-set prev/next would be cleared and the
+    // chrome buttons would disappear on the next episode.
+    const bool isCurrent = m_baseContext.key.isValid()
+        && m_baseContext.key == ctx.key;
+    if (!isCurrent) {
+        qCDebug(KINEMA_PLAYER).nospace()
+            << "series-pack: ignoring end-file reason=\"" << reason
+            << "\" for superseded ctx (current="
+            << m_baseContext.key.imdbId
+            << " S" << m_baseContext.key.season.value_or(0)
+            << "E" << m_baseContext.key.episode.value_or(0)
+            << ", ended=" << ctx.key.imdbId
+            << " S" << ctx.key.season.value_or(0)
+            << "E" << ctx.key.episode.value_or(0) << ")";
+        return;
+    }
 
     if (m_userClosed || reason == QStringLiteral("stop")) {
         m_userClosed = false;
