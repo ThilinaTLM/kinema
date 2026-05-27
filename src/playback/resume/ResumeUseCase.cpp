@@ -27,4 +27,9 @@ void ResumeUseCase::resume(const domain::HistoryEntry& entry)
     m_history.resumeFromHistory(entry);
 }
 
+void ResumeUseCase::removeEntry(const domain::HistoryEntry& entry)
+{
+    m_history.removeEntry(entry);
+}
+
 } // namespace kinema::playback::resume

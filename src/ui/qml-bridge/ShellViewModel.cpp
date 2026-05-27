@@ -8,6 +8,7 @@
 #include "config/AppearanceSettings.h"
 #include "controllers/DownloadController.h"
 #include "controllers/HistoryController.h"
+#include "playback/resume/ResumeUseCase.h"
 #include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/MprisController.h"
@@ -357,7 +358,7 @@ void ShellViewModel::attachWindow(QQuickWindow* window)
 void ShellViewModel::wireNavigationRouting()
 {
     auto* continueWatchingVm = m_services.continueWatchingVm();
-    auto* historyCtrl = m_services.historyController();
+    auto* resumeUseCase = m_services.resumeUseCase();
     auto* libraryVm = m_services.libraryVm();
     auto* discoverVm = m_services.discoverVm();
     auto* searchVm = m_services.searchVm();
@@ -373,11 +374,11 @@ void ShellViewModel::wireNavigationRouting()
     // push. Series entries thread the saved season + episode through
     // the detail VM so both routes land on the remembered episode.
     connect(continueWatchingVm,
-        &ContinueWatchingViewModel::resumeRequested, historyCtrl,
-        &controllers::HistoryController::resumeFromHistory);
+        &ContinueWatchingViewModel::resumeRequested, resumeUseCase,
+        &playback::resume::ResumeUseCase::resume);
     connect(continueWatchingVm,
-        &ContinueWatchingViewModel::removeRequested, historyCtrl,
-        &controllers::HistoryController::removeEntry);
+        &ContinueWatchingViewModel::removeRequested, resumeUseCase,
+        &playback::resume::ResumeUseCase::removeEntry);
     const auto openHistoryDetail = [this](const domain::HistoryEntry& entry) {
         if (entry.key.kind == domain::MediaKind::Movie) {
             openMovieDetail(entry.key.imdbId, entry.title);
@@ -422,12 +423,12 @@ void ShellViewModel::wireNavigationRouting()
     // Resume-from-history fallback: the saved release is gone, so
     // open the matching detail page so the user can pick another
     // stream.
-    connect(historyCtrl,
-        &controllers::HistoryController::resumeFallbackRequested,
+    connect(resumeUseCase,
+        &playback::resume::ResumeUseCase::resumeFallbackRequested,
         this, openHistoryDetail);
 
     connect(libraryVm, &LibraryViewModel::resumeRequested,
-        historyCtrl, &controllers::HistoryController::resumeFromHistory);
+        resumeUseCase, &playback::resume::ResumeUseCase::resume);
     connect(libraryVm, &LibraryViewModel::openMovieRequested,
         this, &ShellViewModel::openMovieDetail);
     connect(libraryVm, &LibraryViewModel::openSeriesRequested,
@@ -625,8 +626,8 @@ void ShellViewModel::wireStatusForwarding()
     connect(m_services.subtitleController(),
         &controllers::SubtitleController::statusMessage, this,
         &ShellViewModel::passiveMessage);
-    connect(m_services.historyController(),
-        &controllers::HistoryController::statusMessage, this,
+    connect(m_services.resumeUseCase(),
+        &playback::resume::ResumeUseCase::statusMessage, this,
         &ShellViewModel::passiveMessage);
     connect(m_services.libraryController(),
         &controllers::LibraryController::statusMessage, this,

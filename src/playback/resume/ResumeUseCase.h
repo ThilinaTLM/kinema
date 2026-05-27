@@ -31,6 +31,10 @@ public:
 
 public Q_SLOTS:
     void resume(const domain::HistoryEntry& entry);
+    /// Forget a history row. During the refactor this forwards to
+    /// `HistoryController::removeEntry`; the long-term home is a
+    /// dedicated history mutation port.
+    void removeEntry(const domain::HistoryEntry& entry);
 
 Q_SIGNALS:
     /// Forwarded from `HistoryController::resumeFallbackRequested`.
