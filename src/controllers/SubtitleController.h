@@ -45,9 +45,12 @@ namespace kinema::controllers {
  *   - `reconcileCacheOnStartup` walks the cache directory + table to
  *     drop orphan rows / orphan files and run an LRU pass if the
  *     budget is exceeded.
- *   - `setMoviehash` lets `PlaybackController` push a best-effort
+ *   - `setMoviehash` lets the playback subsystem push a best-effort
  *     hash for the active stream so the next search can flag
- *     `moviehash_match` rows.
+ *     `moviehash_match` rows. The publisher is
+ *     `playback::subtitles::MoviehashProbe` via
+ *     `SubtitleSessionService` (event-driven, off
+ *     `MoviehashComputed` on the playback event stream).
  *
  * `downloadEnabled()` is the gate: true iff the OpenSubtitles client
  * has all three credentials (api key + username + password). The
@@ -104,8 +107,9 @@ public Q_SLOTS:
     /// Resolve `fileId` from cache or fetch + cache it.
     void download(QString fileId, domain::PlaybackKey key);
 
-    /// PlaybackController pushes a best-effort moviehash for the
-    /// active stream. `setMoviehash("")` invalidates.
+    /// The playback subsystem pushes a best-effort moviehash for
+    /// the active stream. `setMoviehash("")` invalidates. Driven
+    /// off `MoviehashComputed` by `SubtitleSessionService`.
     void setMoviehash(QString hex);
 
     /// Convenience for stream-changed events.

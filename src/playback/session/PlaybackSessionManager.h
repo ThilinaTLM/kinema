@@ -34,16 +34,16 @@ class PlaybackSession;
 /**
  * User-facing playback orchestrator.
  *
- * This is the long-term replacement for `services::StreamActions`'
- * play paths and `controllers::PlaybackController`'s embedded
- * transport API. During the refactor it forwards to those
- * collaborators; Phase 6 will move the actual playback orchestration
- * here and the inner collaborators will lose their public API.
+ * Replaces the play paths in `services::StreamActions` and the
+ * embedded transport API on the retired
+ * `controllers::PlaybackController`. The manager forwards the
+ * play call into `StreamActions` (until that surface is also
+ * retired) and routes transport / track-selection commands
+ * directly to the embedded adapter's `PlayerPort` slice.
  *
- * UI code (QML, view-models) is expected to depend on this class
- * — not on `StreamActions` or `PlaybackController` directly — so
- * that swapping the inner implementation later is a one-place
- * change.
+ * UI code (QML, view-models) depends on this class — not on
+ * `StreamActions` directly — so swapping the inner implementation
+ * later is a one-place change.
  */
 class PlaybackSessionManager : public QObject
 {

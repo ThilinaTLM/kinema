@@ -15,9 +15,11 @@ namespace kinema::playback::session {
  * reported either a successful load or a terminal end-of-file
  * within the configured deadline.
  *
- * Owned by `PlaybackSession` (and, transitionally, by the legacy
- * `controllers::PlaybackController`); armed when a `play()` is
- * issued, disarmed on first observation of the player's response.
+ * Owned by the player adapters (`EmbeddedMpvPlayerAdapter` arms it
+ * on `play()` and disarms it on first load / EOF; the external
+ * adapter does not use it because external processes report state
+ * out-of-band). Originally lived on the retired
+ * `controllers::PlaybackController`.
  *
  * Extracted as its own type so the timeout policy can be tested
  * without spinning up the rest of the playback graph.

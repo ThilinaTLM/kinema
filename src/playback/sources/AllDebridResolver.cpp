@@ -139,8 +139,9 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
     // Preserve the full magnet file list so the asset session can
     // surface it to series auto-next without a libtorrent session.
     // Index is the position in the flattened list as the provider
-    // returned it; this is the same convention TorrentStreamingService
-    // uses for its torrent-file entries.
+    // returned it; this is the same convention
+    // `playback::torrent::LibtorrentClient` uses for its
+    // torrent-file entries.
     out.files.reserve(files.size());
     for (int i = 0; i < files.size(); ++i) {
         out.files.append(torrent::TorrentFileEntry {

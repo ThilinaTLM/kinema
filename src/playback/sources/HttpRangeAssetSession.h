@@ -145,8 +145,9 @@ private:
 
     /// Magnet file list as the debrid provider reported it the
     /// first time we resolved. Empty until `ensureResolved()` has
-    /// run at least once. Mirrors `TorrentStreamingService`'s
-    /// view for libtorrent-backed sessions so callers can use one
+    /// run at least once. Mirrors
+    /// `playback::torrent::LibtorrentClient`'s view for
+    /// libtorrent-backed sessions so callers can use one
     /// abstraction.
     QVector<torrent::TorrentFileEntry> m_files;
 
