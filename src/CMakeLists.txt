@@ -108,6 +108,7 @@ set(kinema_core_SRCS
     playback/transfer/TransferSupervisor.cpp
     playback/transfer/BackendRegistry.cpp
     playback/torrent/LibtorrentClient.cpp
+    playback/sources/TorrentMediaSource.cpp
     playback/progress/PlaybackProgressProjector.cpp
     playback/session/PlaybackSession.cpp
     playback/session/PlaybackSessionManager.cpp
