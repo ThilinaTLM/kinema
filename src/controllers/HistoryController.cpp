@@ -131,34 +131,15 @@ void HistoryController::onPlayStarting(const domain::PlaybackContext& ctx)
 
     m_pending = ctx;
 
-    // Seed / refresh the history row immediately so:
-    //   - External plays appear in Continue Watching from the moment
-    //     the launcher is fired.
-    //   - The stored stream reference is up-to-date even before the
-    //     first position tick arrives.
-    domain::HistoryEntry e;
-    e.key = ctx.key;
-    e.title = ctx.title;
-    e.seriesTitle = ctx.seriesTitle;
-    e.episodeTitle = ctx.episodeTitle;
-    e.poster = ctx.poster;
-    e.backdrop = ctx.backdrop;
-    e.lastStream = ctx.streamRef;
-    e.lastWatchedAt = QDateTime::currentDateTimeUtc();
-
-    // Preserve any existing progress on an upsert. The store merges
-    // position_sec from `excluded`, so we read-back here to avoid
-    // overwriting a saved position with 0 on a fresh play.
-    if (const auto existing = m_store.find(ctx.key)) {
-        e.positionSec = existing->positionSec;
-        e.durationSec = existing->durationSec;
-        // If the user re-opens an already-finished movie, treat that
-        // as a fresh watch (clear finished) so it reappears in
-        // Continue Watching.
-        e.finished = false;
-    }
-
-    m_store.record(e);
+    // The disk write that used to live here moved to
+    // `playback::progress::PlaybackProgressProjector`, which seeds
+    // the row from the `PlaybackRequested` event with identical
+    // semantics (preserves existing progress on upsert; clears
+    // `finished` so a re-watched finished row reappears in
+    // Continue Watching). We still keep `m_pending` so the
+    // in-memory resume helper (`resumeSecondsFor`) can return the
+    // freshest live position for mid-session stream swaps until
+    // ResumePolicy + ResumeUseCase fully own that path.
 }
 
 std::optional<qint64> HistoryController::resumeSecondsFor(
@@ -371,10 +352,14 @@ void HistoryController::onEndOfFile(const QString& reason)
         mapped = core::HistoryStore::SessionEndReason::UserStop;
     }
 
-    const auto entry = buildActiveEntry();
-    const auto creditsStart = core::chapters::findCreditsStart(
-        m_activeChapters, m_duration);
-    m_store.recordSessionEnd(entry, mapped, creditsStart);
+    // The disk write that used to apply the session-end policy
+    // moved to `playback::progress::PlaybackProgressProjector`,
+    // which translates `PlaybackEnded` into
+    // `recordSessionEnd(...)` with the same reason mapping and the
+    // same chapter-derived credits-start hint. We still clear the
+    // in-memory tracking here so `resumeSecondsFor` no longer
+    // returns a stale live position for the just-ended session.
+    Q_UNUSED(mapped);
     m_lastPersistedPosition = m_lastPosition;
 
     m_active.reset();
@@ -432,7 +417,10 @@ void HistoryController::persistActive(bool force)
         return;
     }
 
-    m_store.record(buildActiveEntry());
+    // Disk write moved to `PlaybackProgressProjector` (throttled
+    // identically). Keep the in-memory cursor up to date so
+    // `resumeSecondsFor` returns the fresh value during
+    // mid-session stream swaps.
     m_lastPersistedPosition = m_lastPosition;
 }
 
