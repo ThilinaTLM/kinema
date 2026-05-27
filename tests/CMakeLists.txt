@@ -93,6 +93,11 @@ ecm_add_test(tst_playback_progress_projector.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_resume_use_case.cpp
+    TEST_NAME tst_resume_use_case
+    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
+)
+
 ecm_add_test(tst_transfer_state_machine.cpp
     TEST_NAME tst_transfer_state_machine
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -480,6 +485,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_playback_state_machine tst_transfer_state_machine
          tst_player_load_watchdog tst_external_player_adapter
          tst_playback_session_play_flow tst_playback_progress_projector
+         tst_resume_use_case
          tst_playback_event_stream tst_sqlite_download_repository
          tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
