@@ -110,6 +110,7 @@ set(kinema_core_SRCS
     playback/torrent/LibtorrentClient.cpp
     playback/sources/TorrentMediaSource.cpp
     playback/sources/RealDebridMediaSource.cpp
+    playback/sources/AllDebridMediaSource.cpp
     playback/progress/PlaybackProgressProjector.cpp
     playback/session/PlaybackSession.cpp
     playback/session/PlaybackSessionManager.cpp

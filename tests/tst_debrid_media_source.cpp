@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "TestDoubles.h"
+#include "api/AllDebridClient.h"
 #include "api/RealDebridClient.h"
 #include "config/DownloadSettings.h"
 #include "core/io/CachePaths.h"
@@ -12,6 +13,7 @@
 #include "domain/PlaybackContext.h"
 #include "download/DebridResolver.h"
 #include "playback/ports/MediaSourcePort.h"
+#include "playback/sources/AllDebridMediaSource.h"
 #include "playback/sources/HttpRangeAssetSession.h"
 #include "playback/sources/RealDebridMediaSource.h"
 
@@ -210,6 +212,63 @@ private Q_SLOTS:
 
         // No-op when the session is already in the requested mode.
         m_source->changeMode(*opened.session, domain::DownloadMode::Full);
+        QCOMPARE(http->mode(), domain::DownloadMode::Full);
+    }
+
+    // --- AllDebrid ----------------------------------------------
+
+    void adKindIsAllDebrid()
+    {
+        api::AllDebridClient ad(m_http.get());
+        StubResolver resolver;
+        playback::sources::AllDebridMediaSource source(*m_http, ad,
+            resolver, *m_cache, *m_settings);
+        QCOMPARE(source.kind(),
+            domain::DownloadBackendKind::AllDebridHttp);
+    }
+
+    void adCanHandleRequiresApiKey()
+    {
+        api::AllDebridClient ad(m_http.get());
+        StubResolver resolver;
+        playback::sources::AllDebridMediaSource source(*m_http, ad,
+            resolver, *m_cache, *m_settings);
+
+        ad.setApiKey(QString());
+        QVERIFY(!source.canHandle(makeStream()));
+
+        ad.setApiKey(QStringLiteral("ad-api-key"));
+        QVERIFY(source.canHandle(makeStream()));
+
+        domain::Stream empty;
+        QVERIFY(!source.canHandle(empty));
+    }
+
+    void adOpenCallsResolverAndSetsMode()
+    {
+        api::AllDebridClient ad(m_http.get());
+        ad.setApiKey(QStringLiteral("ad-api-key"));
+        StubResolver resolver;
+        resolver.reply.downloadUrl
+            = QUrl(QStringLiteral("https://ad-host/file.mp4"));
+        resolver.reply.fileSize = 999'999;
+        resolver.reply.fileName = QStringLiteral("movie.mp4");
+        resolver.reply.providerTorrentId = QStringLiteral("42");
+        playback::sources::AllDebridMediaSource source(*m_http, ad,
+            resolver, *m_cache, *m_settings);
+
+        const auto s = makeStream();
+        auto task = source.open(makeRef(s), s,
+            domain::PlaybackContext {}, domain::DownloadMode::Full);
+        const auto opened = QCoro::waitFor(std::move(task));
+
+        QCOMPARE(resolver.resolveCalls, 1);
+        QVERIFY(opened.session);
+        QCOMPARE(opened.session->fileSize(), qint64(999'999));
+        auto* http = dynamic_cast<
+            playback::sources::HttpRangeAssetSession*>(
+            opened.session.get());
+        QVERIFY(http);
         QCOMPARE(http->mode(), domain::DownloadMode::Full);
     }
 
