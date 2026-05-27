@@ -3,12 +3,14 @@
 
 #include "playback/session/PlaybackSessionManager.h"
 
+#include "playback/adapters/ExternalPlayerAdapter.h"
 #include "playback/events/PlaybackEventStream.h"
 #include "playback/session/PlaybackSession.h"
 #include "services/StreamActions.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/PlaybackController.h"
+#include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
 #endif
 
 namespace kinema::playback::session {
@@ -16,15 +18,35 @@ namespace kinema::playback::session {
 PlaybackSessionManager::PlaybackSessionManager(
     services::StreamActions& actions,
     events::PlaybackEventStream& eventStream,
-    controllers::PlaybackController* embedded,
+    controllers::PlaybackController* embeddedCtrl,
+    adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
+    adapters::ExternalPlayerAdapter* externalAdapter,
     QObject* parent)
     : QObject(parent)
     , m_actions(actions)
     , m_eventStream(eventStream)
-    , m_embedded(embedded)
+    , m_embedded(embeddedCtrl)
+    , m_embeddedAdapter(embeddedAdapter)
+    , m_externalAdapter(externalAdapter)
 {
     connect(&m_actions, &services::StreamActions::statusMessage,
         this, &PlaybackSessionManager::statusMessage);
+}
+
+void PlaybackSessionManager::stampAdapters(const domain::PlaybackContext& ctx)
+{
+    if (!m_session) {
+        return;
+    }
+    const auto id = m_session->id();
+    if (m_externalAdapter) {
+        m_externalAdapter->setActiveSession(id, ctx);
+    }
+#ifdef KINEMA_HAVE_LIBMPV
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->setActiveSession(id, ctx);
+    }
+#endif
 }
 
 PlaybackSessionManager::~PlaybackSessionManager() = default;
@@ -48,6 +70,7 @@ void PlaybackSessionManager::play(const domain::Stream& stream,
     supersedeActiveSession();
     m_session = std::make_unique<PlaybackSession>(m_eventStream);
     m_session->start(stream, ctx);
+    stampAdapters(ctx);
     // Transitional: the legacy StreamActions path still performs
     // the actual resolution / mpv handoff. Once Phase 5 + 6 land
     // the session will drive TransferUseCase + PlayerPort
@@ -62,6 +85,7 @@ void PlaybackSessionManager::playWithBackend(const domain::Stream& stream,
     supersedeActiveSession();
     m_session = std::make_unique<PlaybackSession>(m_eventStream);
     m_session->start(stream, ctx, backend);
+    stampAdapters(ctx);
     m_actions.playWithBackend(stream, ctx, backend);
 }
 

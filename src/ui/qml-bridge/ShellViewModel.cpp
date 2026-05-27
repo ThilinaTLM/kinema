@@ -22,6 +22,9 @@
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
 #include "kinema_log_app.h"
+#ifdef KINEMA_HAVE_LIBMPV
+#include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
+#endif
 #include "services/StreamActions.h"
 #include "torrent/TorrentStreamingService.h"
 #include "ui/qml-bridge/BrowseViewModel.h"
@@ -794,6 +797,7 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
 
     auto* historyCtrl = m_services.historyController();
     auto* playbackCtrl = m_services.playbackController();
+    auto* embeddedAdapter = m_services.embeddedPlayerAdapter();
     auto* seriesSessionCtrl = m_services.seriesSessionController();
     auto* subtitlesVm = m_services.subtitlesVm();
     auto* subtitleCtrl = m_services.subtitleController();
@@ -803,7 +807,7 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     // keeps the libmpv context alive for the next launch. We only
     // react to `destroyed()` for the application-shutdown case.
     connect(m_playerWindow, &QObject::destroyed, this,
-        [this, historyCtrl](QObject* obj) {
+        [this, historyCtrl, embeddedAdapter](QObject* obj) {
             if (obj != m_playerWindow) {
                 return;
             }
@@ -814,6 +818,9 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
             if (historyCtrl) {
                 historyCtrl->setPlayerWindow(nullptr);
             }
+            if (embeddedAdapter) {
+                embeddedAdapter->setPlayerWindow(nullptr);
+            }
         });
 
     if (auto* tray = m_services.tray()) {
@@ -821,6 +828,15 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     }
     if (historyCtrl) {
         historyCtrl->setPlayerWindow(m_playerWindow);
+    }
+    if (embeddedAdapter) {
+        // Parallel wiring: the legacy PlaybackController keeps
+        // driving transport while EmbeddedMpvPlayerAdapter
+        // observes PlayerWindow signals and re-publishes them as
+        // typed events on the PlaybackEventStream. Future
+        // commits move the play()/transport calls fully onto the
+        // adapter and retire the legacy controller.
+        embeddedAdapter->setPlayerWindow(m_playerWindow);
     }
     if (playbackCtrl) {
         playbackCtrl->setPlayerWindow(m_playerWindow);

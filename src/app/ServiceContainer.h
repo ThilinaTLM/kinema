@@ -73,6 +73,11 @@ class HistoryQueryService;
 class SqlitePlaybackHistoryRepository;
 }
 
+namespace kinema::playback::adapters {
+class EmbeddedMpvPlayerAdapter;
+class ExternalPlayerAdapter;
+}
+
 namespace kinema::playback::resume {
 class ResumeUseCase;
 }
@@ -183,7 +188,11 @@ public:
     { return m_historyQueryService; }
     playback::events::PlaybackEventStream* playbackEventStream() const
     { return m_playbackEventStream; }
+    playback::adapters::ExternalPlayerAdapter* externalPlayerAdapter() const
+    { return m_externalPlayerAdapter; }
 #ifdef KINEMA_HAVE_LIBMPV
+    playback::adapters::EmbeddedMpvPlayerAdapter* embeddedPlayerAdapter() const
+    { return m_embeddedPlayerAdapter; }
     playback::series::SeriesSessionService* seriesSessionService() const
     { return m_seriesSessionService; }
 #endif
@@ -278,8 +287,10 @@ private:
     playback::resume::ResumeUseCase* m_resumeUseCase {};
     playback::history::HistoryQueryService* m_historyQueryService {};
     playback::session::PlaybackSessionManager* m_playbackSessionManager {};
+    playback::adapters::ExternalPlayerAdapter* m_externalPlayerAdapter {};
     playback::subtitles::SubtitleSessionService* m_subtitleSessionService {};
 #ifdef KINEMA_HAVE_LIBMPV
+    playback::adapters::EmbeddedMpvPlayerAdapter* m_embeddedPlayerAdapter {};
     playback::series::SeriesSessionService* m_seriesSessionService {};
 #endif
     torrent::TorrentStreamingService* m_torrentStreaming {};

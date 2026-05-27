@@ -22,6 +22,11 @@ namespace kinema::controllers {
 class PlaybackController;
 }
 
+namespace kinema::playback::adapters {
+class EmbeddedMpvPlayerAdapter;
+class ExternalPlayerAdapter;
+}
+
 namespace kinema::playback::events {
 class PlaybackEventStream;
 }
@@ -50,7 +55,9 @@ class PlaybackSessionManager : public QObject
 public:
     PlaybackSessionManager(services::StreamActions& actions,
         events::PlaybackEventStream& eventStream,
-        controllers::PlaybackController* embedded,
+        controllers::PlaybackController* embeddedCtrl,
+        adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
+        adapters::ExternalPlayerAdapter* externalAdapter,
         QObject* parent = nullptr);
     ~PlaybackSessionManager() override;
 
@@ -92,9 +99,16 @@ Q_SIGNALS:
 private:
     void supersedeActiveSession();
 
+    /// Stamp both player adapters with the current session id so
+    /// the events they publish carry the right identity. Called
+    /// immediately before delegating the actual play start.
+    void stampAdapters(const domain::PlaybackContext& ctx);
+
     services::StreamActions& m_actions;
     events::PlaybackEventStream& m_eventStream;
     controllers::PlaybackController* m_embedded;
+    adapters::EmbeddedMpvPlayerAdapter* m_embeddedAdapter;
+    adapters::ExternalPlayerAdapter* m_externalAdapter;
     std::unique_ptr<PlaybackSession> m_session;
 };
 

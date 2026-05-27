@@ -41,6 +41,10 @@
 #include "domain/Debrid.h"
 #include "kinema_log_app.h"
 #include "playback/adapters/ActiveStreamIndexerAdapter.h"
+#include "playback/adapters/ExternalPlayerAdapter.h"
+#ifdef KINEMA_HAVE_LIBMPV
+#include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
+#endif
 #include "playback/downloads/SqliteDownloadRepository.h"
 #include "playback/events/PlaybackEventStream.h"
 #include "playback/history/HistoryQueryService.h"
@@ -239,6 +243,14 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     // without changing the public boundary.
     m_playbackEventStream
         = new playback::events::PlaybackEventStream(a);
+    m_externalPlayerAdapter
+        = new playback::adapters::ExternalPlayerAdapter(
+            *m_player, *m_playbackEventStream, a);
+#ifdef KINEMA_HAVE_LIBMPV
+    m_embeddedPlayerAdapter
+        = new playback::adapters::EmbeddedMpvPlayerAdapter(
+            *m_playbackEventStream, a);
+#endif
     m_historyRepo
         = std::make_unique<playback::history::SqlitePlaybackHistoryRepository>(
             *m_history);
@@ -378,12 +390,14 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
             &controllers::SubtitleController::clearMoviehash);
     }
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, *m_playbackEventStream, m_playbackCtrl, a);
+        *m_streamActions, *m_playbackEventStream, m_playbackCtrl,
+        m_embeddedPlayerAdapter, m_externalPlayerAdapter, a);
     m_seriesSessionService = new playback::series::SeriesSessionService(
         *m_seriesSessionCtrl, a);
 #else
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, *m_playbackEventStream, nullptr, a);
+        *m_streamActions, *m_playbackEventStream, nullptr,
+        nullptr, m_externalPlayerAdapter, a);
 #endif
     if (m_subtitleCtrl) {
         m_subtitleSessionService
