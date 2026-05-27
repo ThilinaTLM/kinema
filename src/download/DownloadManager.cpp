@@ -18,7 +18,7 @@
 #include "download/AllDebridResolver.h"
 #include "download/RealDebridBackend.h"
 #include "download/RealDebridResolver.h"
-#include "download/TorrentAssetSession.h"
+#include "playback/sources/TorrentAssetSession.h"
 #include "download/TorrentBackend.h"
 #include "kinema_log_download.h"
 #include "torrent/TorrentStreamingService.h"
@@ -421,7 +421,7 @@ QCoro::Task<QUrl> DownloadManager::openSession(domain::AssetRef ref,
                 continue;
             }
             auto* torrentSession
-                = qobject_cast<TorrentAssetSession*>(session.get());
+                = qobject_cast<playback::sources::TorrentAssetSession*>(session.get());
             if (!torrentSession
                 || torrentSession->infoHash() != ref.infoHash) {
                 continue;
@@ -611,7 +611,7 @@ QVector<torrent::TorrentFileEntry> DownloadManager::filesForInfoHash(
         }
         auto* session = sessionPtr.get();
         QString sessionHash;
-        if (auto* t = qobject_cast<TorrentAssetSession*>(session)) {
+        if (auto* t = qobject_cast<playback::sources::TorrentAssetSession*>(session)) {
             sessionHash = t->infoHash();
         } else if (auto* h = qobject_cast<HttpAssetSession*>(session)) {
             sessionHash = h->infoHash();

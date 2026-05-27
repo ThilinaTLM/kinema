@@ -6,12 +6,13 @@
 #include "download/AssetSession.h"
 
 #include <QString>
+#include <QVector>
 
 namespace kinema::torrent {
 class TorrentStreamingService;
 }
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
 /**
  * `AssetSession` adapter over the libtorrent-backed
@@ -19,14 +20,16 @@ namespace kinema::download {
  * single (info hash, selected file) tuple already prepared via
  * `TorrentStreamingService::prepareSession(...)`.
  *
- * Lifetime is owned by the `DownloadManager`. The session must be
- * unregistered from the `LocalMediaServer` before destruction.
+ * Implements `playback::ports::ByteRangeSource` via the legacy
+ * `download::AssetSession` base; the base goes away with the rest
+ * of the legacy download/ directory at the end of this refactor
+ * step.
  */
-class TorrentAssetSession : public AssetSession
+class TorrentAssetSession : public kinema::download::AssetSession
 {
     Q_OBJECT
 public:
-    TorrentAssetSession(torrent::TorrentStreamingService& engine,
+    TorrentAssetSession(kinema::torrent::TorrentStreamingService& engine,
         QString assetId,
         QString token,
         QString fileName,
@@ -40,14 +43,14 @@ public:
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }
 
-    QCoro::Task<bool> ensureRange(ByteRange range) override;
-    QByteArray readRange(ByteRange range) const override;
+    QCoro::Task<bool> ensureRange(kinema::torrent::ByteRange range) override;
+    QByteArray readRange(kinema::torrent::ByteRange range) const override;
     void touch() override;
 
     /// Forwards to `TorrentStreamingService::filesForInfoHash`
     /// so series adjacency can resolve through the unified
     /// `AssetSession::files()` API.
-    QVector<torrent::TorrentFileEntry> files() const override;
+    QVector<kinema::torrent::TorrentFileEntry> files() const override;
 
     domain::DownloadMode mode() const override { return m_mode; }
     void setMode(domain::DownloadMode m) override { m_mode = m; }
@@ -60,7 +63,7 @@ public:
     const QString& infoHash() const noexcept { return m_infoHash; }
 
 private:
-    torrent::TorrentStreamingService& m_engine;
+    kinema::torrent::TorrentStreamingService& m_engine;
     QString m_assetId;
     QString m_token;
     QString m_fileName;
@@ -69,4 +72,4 @@ private:
     domain::DownloadMode m_mode = domain::DownloadMode::OnDemand;
 };
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources

@@ -55,7 +55,6 @@ class DebridResolver;
 class DownloadBackend;
 class HttpAssetSession;
 class RealDebridResolver;
-class TorrentAssetSession;
 
 /// Transient per-asset telemetry merged into download rows. The
 /// `DownloadManager` keeps the live values in memory only; only the

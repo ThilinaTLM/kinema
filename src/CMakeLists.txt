@@ -72,7 +72,7 @@ set(kinema_core_SRCS
     download/HttpAssetSession.cpp
     download/RealDebridBackend.cpp
     download/RealDebridResolver.cpp
-    download/TorrentAssetSession.cpp
+    playback/sources/TorrentAssetSession.cpp
     download/TorrentBackend.cpp
 
     api/AllDebridClient.cpp

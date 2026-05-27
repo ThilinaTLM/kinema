@@ -4,7 +4,7 @@
 #include "playback/sources/TorrentMediaSource.h"
 
 #include "core/persistence/MediaCache.h"
-#include "download/TorrentAssetSession.h"
+#include "playback/sources/TorrentAssetSession.h"
 #include "kinema_log_download.h"
 #include "torrent/TorrentStreamingService.h"
 
@@ -41,8 +41,8 @@ QCoro::Task<ports::OpenedSession> TorrentMediaSource::open(
     const auto prepared
         = co_await m_engine.prepareSession(stream, ctx, prepareMode);
 
-    auto session = std::make_unique<download::TorrentAssetSession>(
-        m_engine, assetId, prepared.token, prepared.fileName,
+    auto session = std::make_unique<TorrentAssetSession>(m_engine,
+        assetId, prepared.token, prepared.fileName,
         prepared.fileSize, prepared.infoHash);
     session->setMode(mode);
 
@@ -66,7 +66,7 @@ void TorrentMediaSource::changeMode(ports::ByteRangeSource& session,
     domain::DownloadMode newMode)
 {
     auto* torrentSession
-        = dynamic_cast<download::TorrentAssetSession*>(&session);
+        = dynamic_cast<TorrentAssetSession*>(&session);
     if (!torrentSession) {
         qCWarning(KINEMA_DOWNLOAD)
             << "TorrentMediaSource::changeMode on non-torrent session";
@@ -96,7 +96,7 @@ QVector<domain::MediaFileEntry> TorrentMediaSource::filesFor(
     const ports::ByteRangeSource& session) const
 {
     const auto* torrentSession
-        = dynamic_cast<const download::TorrentAssetSession*>(&session);
+        = dynamic_cast<const TorrentAssetSession*>(&session);
     if (!torrentSession) {
         return {};
     }

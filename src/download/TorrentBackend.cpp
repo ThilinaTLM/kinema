@@ -4,7 +4,7 @@
 #include "download/TorrentBackend.h"
 
 #include "core/persistence/MediaCache.h"
-#include "download/TorrentAssetSession.h"
+#include "playback/sources/TorrentAssetSession.h"
 #include "kinema_log_download.h"
 #include "torrent/TorrentStreamingService.h"
 
@@ -38,7 +38,7 @@ QCoro::Task<std::unique_ptr<AssetSession>> TorrentBackend::open(
         : torrent::PrepareMode::Streaming;
     const auto prepared = co_await m_engine.prepareSession(s, ctx, prepareMode);
 
-    auto session = std::make_unique<TorrentAssetSession>(m_engine,
+    auto session = std::make_unique<playback::sources::TorrentAssetSession>(m_engine,
         assetId, prepared.token, prepared.fileName, prepared.fileSize,
         prepared.infoHash);
     session->setMode(mode);
@@ -62,7 +62,7 @@ void TorrentBackend::changeMode(AssetSession& session,
     if (session.mode() == newMode) {
         return;
     }
-    auto* torrentSession = qobject_cast<TorrentAssetSession*>(&session);
+    auto* torrentSession = qobject_cast<playback::sources::TorrentAssetSession*>(&session);
     if (!torrentSession) {
         qCWarning(KINEMA_DOWNLOAD)
             << "TorrentBackend::changeMode called on non-torrent session";

@@ -1,21 +1,21 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "download/TorrentAssetSession.h"
+#include "playback/sources/TorrentAssetSession.h"
 
 #include "torrent/TorrentStreamingService.h"
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
 TorrentAssetSession::TorrentAssetSession(
-    torrent::TorrentStreamingService& engine,
+    kinema::torrent::TorrentStreamingService& engine,
     QString assetId,
     QString token,
     QString fileName,
     qint64 fileSize,
     QString infoHash,
     QObject* parent)
-    : AssetSession(parent)
+    : kinema::download::AssetSession(parent)
     , m_engine(engine)
     , m_assetId(std::move(assetId))
     , m_token(std::move(token))
@@ -24,7 +24,7 @@ TorrentAssetSession::TorrentAssetSession(
     , m_infoHash(std::move(infoHash))
 {
     // Filter the engine's per-hash signals down to *our* hash.
-    connect(&m_engine, &torrent::TorrentStreamingService::torrentStatsChanged,
+    connect(&m_engine, &kinema::torrent::TorrentStreamingService::torrentStatsChanged,
         this, [this](const QString& hash, qint64 doneBytes,
                    qint64 ratePayloadBps, int peers, int seeds,
                    int etaSeconds) {
@@ -34,13 +34,13 @@ TorrentAssetSession::TorrentAssetSession(
             Q_EMIT cachedBytesChanged(doneBytes);
             Q_EMIT liveStatsChanged(ratePayloadBps, peers, seeds, etaSeconds);
         });
-    connect(&m_engine, &torrent::TorrentStreamingService::torrentFinished,
+    connect(&m_engine, &kinema::torrent::TorrentStreamingService::torrentFinished,
         this, [this](const QString& hash) {
             if (hash == m_infoHash) {
                 Q_EMIT completed();
             }
         });
-    connect(&m_engine, &torrent::TorrentStreamingService::torrentFailed,
+    connect(&m_engine, &kinema::torrent::TorrentStreamingService::torrentFailed,
         this, [this](const QString& hash, const QString& reason) {
             if (hash == m_infoHash) {
                 Q_EMIT failed(reason);
@@ -50,12 +50,12 @@ TorrentAssetSession::TorrentAssetSession(
 
 TorrentAssetSession::~TorrentAssetSession() = default;
 
-QCoro::Task<bool> TorrentAssetSession::ensureRange(ByteRange range)
+QCoro::Task<bool> TorrentAssetSession::ensureRange(kinema::torrent::ByteRange range)
 {
     co_return co_await m_engine.ensureRange(m_token, range);
 }
 
-QByteArray TorrentAssetSession::readRange(ByteRange range) const
+QByteArray TorrentAssetSession::readRange(kinema::torrent::ByteRange range) const
 {
     return m_engine.readRange(m_token, range);
 }
@@ -65,7 +65,7 @@ void TorrentAssetSession::touch()
     m_engine.touchToken(m_token);
 }
 
-QVector<torrent::TorrentFileEntry> TorrentAssetSession::files() const
+QVector<kinema::torrent::TorrentFileEntry> TorrentAssetSession::files() const
 {
     return m_engine.filesForInfoHash(m_infoHash);
 }
@@ -80,4 +80,4 @@ void TorrentAssetSession::resume()
     m_engine.resumeInfoHash(m_infoHash);
 }
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources

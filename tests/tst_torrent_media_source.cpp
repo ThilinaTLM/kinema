@@ -7,7 +7,7 @@
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
-#include "download/TorrentAssetSession.h"
+#include "playback/sources/TorrentAssetSession.h"
 #include "playback/ports/MediaSourcePort.h"
 #include "playback/sources/TorrentMediaSource.h"
 #include "torrent/TorrentStreamingService.h"
@@ -178,7 +178,7 @@ private Q_SLOTS:
         QCOMPARE(m_engine->keepAliveCalls.first().first, s.infoHash);
         QCOMPARE(m_engine->keepAliveCalls.first().second, true);
 
-        auto* legacy = dynamic_cast<download::TorrentAssetSession*>(
+        auto* legacy = dynamic_cast<playback::sources::TorrentAssetSession*>(
             opened.session.get());
         QVERIFY(legacy);
         QCOMPARE(legacy->mode(), domain::DownloadMode::Full);
@@ -196,7 +196,7 @@ private Q_SLOTS:
 
         QCOMPARE(m_engine->promoteCalls.size(), 1);
         QCOMPARE(m_engine->promoteCalls.first(), s.infoHash);
-        auto* legacy = dynamic_cast<download::TorrentAssetSession*>(
+        auto* legacy = dynamic_cast<playback::sources::TorrentAssetSession*>(
             opened.session.get());
         QVERIFY(legacy);
         QCOMPARE(legacy->mode(), domain::DownloadMode::Full);

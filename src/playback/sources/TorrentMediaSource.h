@@ -37,10 +37,11 @@ namespace kinema::playback::sources {
  *   - `filesFor()` returns the file catalog lifted to
  *     `domain::MediaFileEntry`.
  *
- * The transitional `download::TorrentAssetSession` is still used as
- * the underlying byte-range source; Phase 5 of the wider refactor
- * moves that class under `playback::sources/` without changing
- * this surface.
+ * The underlying byte-range source is
+ * `playback::sources::TorrentAssetSession`, which still inherits
+ * from the transitional `download::AssetSession` until the legacy
+ * `download/` directory is deleted at the end of this refactor
+ * step.
  */
 class TorrentMediaSource : public ports::MediaSourcePort
 {
