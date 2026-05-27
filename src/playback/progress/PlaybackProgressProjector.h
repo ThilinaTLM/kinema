@@ -22,9 +22,9 @@ namespace kinema::playback::progress {
 
 /**
  * Event-driven projection from `PlaybackEventStream` into the
- * `PlaybackHistoryRepository`. Replaces the position/finish
- * write path that the legacy `controllers::HistoryController`
- * currently owns.
+ * `PlaybackHistoryRepository`. Owns the position/finish write
+ * path that used to live in the now-deleted
+ * `controllers::HistoryController`.
  *
  * Subscribes to:
  *   - `PlaybackRequested`  — seeds / refreshes the history row
@@ -49,11 +49,6 @@ namespace kinema::playback::progress {
  * publishes synchronously and the SQLite store runs on the same
  * thread.
  *
- * **Note for the transitional refactor**: this object writes to
- * the same SQLite store the legacy `HistoryController` writes to.
- * Until `HistoryController`'s write path is disabled, both will
- * upsert identical rows. The tests assert that parity; production
- * behavior is unchanged.
  */
 class PlaybackProgressProjector : public QObject
 {

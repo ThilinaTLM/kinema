@@ -5,20 +5,27 @@
 
 #include "domain/PlaybackContext.h"
 
+#include <QCoro/QCoroTask>
+
 #include <QObject>
 
 #include <optional>
-
-namespace kinema::controllers {
-class HistoryController;
-}
 
 namespace kinema::playback::history {
 class HistoryQueryService;
 }
 
+namespace kinema::playback::ports {
+class PlaybackHistoryRepository;
+class StreamIndexerPort;
+}
+
 namespace kinema::playback::progress {
 class PlaybackProgressProjector;
+}
+
+namespace kinema::services {
+class StreamActions;
 }
 
 namespace kinema::playback::resume {
@@ -26,18 +33,22 @@ namespace kinema::playback::resume {
 /**
  * One-click resume of a Continue-Watching entry.
  *
- * During the refactor this is a facade over
- * `controllers::HistoryController::resumeFromHistory`; Phase 7 will
- * move the indexer fetch + match logic here over a
- * `StreamIndexerPort`.
+ * Owns the indexer fetch + match logic that previously lived in
+ * `HistoryController::resumeFromHistory`: re-resolves the saved
+ * release against the active indexer, matches by
+ * `lastStream.matches()`, and dispatches the matching stream
+ * through `services::StreamActions::play` (transitional; the
+ * end-state routes to `PlaybackSessionManager::play`).
  */
 class ResumeUseCase : public QObject
 {
     Q_OBJECT
 public:
-    ResumeUseCase(controllers::HistoryController& history,
-        playback::history::HistoryQueryService& queryService,
+    ResumeUseCase(playback::history::HistoryQueryService& queryService,
         playback::progress::PlaybackProgressProjector& projector,
+        ports::StreamIndexerPort& indexer,
+        ports::PlaybackHistoryRepository& historyRepo,
+        services::StreamActions& actions,
         QObject* parent = nullptr);
     ~ResumeUseCase() override;
 
@@ -51,20 +62,25 @@ public:
 
 public Q_SLOTS:
     void resume(const domain::HistoryEntry& entry);
-    /// Forget a history row. During the refactor this forwards to
-    /// `HistoryController::removeEntry`; the long-term home is a
-    /// dedicated history mutation port.
+    /// Forget a history row.
     void removeEntry(const domain::HistoryEntry& entry);
 
 Q_SIGNALS:
-    /// Forwarded from `HistoryController::resumeFallbackRequested`.
+    /// The stored release is no longer available in the active
+    /// indexer's response. The shell opens the matching detail
+    /// page so the user can pick another stream.
     void resumeFallbackRequested(const domain::HistoryEntry& entry);
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
 private:
-    controllers::HistoryController& m_history;
+    QCoro::Task<void> resumeTask(domain::HistoryEntry entry);
+
     playback::history::HistoryQueryService& m_queryService;
     playback::progress::PlaybackProgressProjector& m_projector;
+    ports::StreamIndexerPort& m_indexer;
+    ports::PlaybackHistoryRepository& m_historyRepo;
+    services::StreamActions& m_actions;
+    quint64 m_resumeEpoch = 0;
 };
 
 } // namespace kinema::playback::resume

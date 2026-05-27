@@ -16,7 +16,7 @@
 #include "config/DownloadSettings.h"
 #include "controllers/DebridCredentialsResolver.h"
 #include "controllers/DownloadController.h"
-#include "controllers/HistoryController.h"
+
 #include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/MprisController.h"
@@ -230,15 +230,6 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         &controllers::TokenController::openSubtitlesPasswordChanged,
         m_openSubtitles, onOsCredentialChanged);
 
-    // History controller. Kept alive for now because it owns the
-    // resume-from-history one-click flow and the indexer
-    // re-resolution pipeline; the ResumeUseCase forwards into it.
-    // Phase 12 will inline that flow into ResumeUseCase and delete
-    // this controller.
-    m_historyCtrl = new controllers::HistoryController(*m_history,
-        m_indexers, m_tokenCtrl->realDebridToken(), a);
-    m_historyCtrl->setStreamActions(m_streamActions);
-
     // Playback-subsystem long-lived plumbing. These objects expose
     // the session-centric API surface that QML and projections will
     // grow into. For now each is a thin facade over the existing
@@ -271,8 +262,13 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_historyQueryService = new playback::history::HistoryQueryService(
         *m_historyRepo, *m_history, a);
     m_resumeUseCase
-        = new playback::resume::ResumeUseCase(*m_historyCtrl,
-            *m_historyQueryService, *m_playbackProgressProjector, a);
+        = new playback::resume::ResumeUseCase(
+            *m_historyQueryService,
+            *m_playbackProgressProjector,
+            *m_streamIndexerAdapter,
+            *m_historyRepo,
+            *m_streamActions,
+            a);
     // StreamActions seeds ctx.resumeSeconds via ResumeUseCase, which
     // checks the projector's live position first and then falls
     // back to the on-disk history row via the ResumePolicy.

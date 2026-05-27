@@ -115,8 +115,8 @@ struct HistoryEntry {
  * - Caller (DetailPane / SeriesDetailPane / resume flow) fills `key`,
  *   display fields, and `poster`.
  * - `StreamActions::play` fills `streamRef` from the chosen Stream
- *   and asks `HistoryController::resumeSecondsFor()` to fill
- *   `resumeSeconds`.
+ *   and asks `playback::resume::ResumeUseCase::resumeSecondsFor()`
+ *   to fill `resumeSeconds`.
  */
 struct PlaybackContext {
     PlaybackKey key;
@@ -125,8 +125,10 @@ struct PlaybackContext {
     QString episodeTitle;
     QUrl poster;
     /// 16:9 backdrop URL for the parent title. Threaded from the
-    /// detail VM into `HistoryController::onPlayStarting` so the
-    /// history row persists it for the Continue Watching rail.
+    /// detail VM into the PlaybackContext that
+    /// `PlaybackSessionManager::play` carries; the
+    /// `PlaybackProgressProjector` then persists it on the
+    /// `PlaybackRequested` event for the Continue Watching rail.
     QUrl backdrop;
     HistoryStreamRef streamRef;
     std::optional<qint64> resumeSeconds;

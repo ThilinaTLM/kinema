@@ -126,7 +126,6 @@ set(kinema_core_SRCS
 
     controllers/DebridCredentialsResolver.cpp
     controllers/DownloadController.cpp
-    controllers/HistoryController.cpp
     controllers/LibraryController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp

@@ -37,7 +37,6 @@ class WatchedStore;
 namespace kinema::controllers {
 class DebridCredentialsResolver;
 class DownloadController;
-class HistoryController;
 class LibraryController;
 class MprisController;
 class PlaybackController;
@@ -209,7 +208,7 @@ public:
 
     controllers::DownloadController* downloadController() const { return m_downloadCtrl; }
     controllers::TokenController* tokenController() const { return m_tokenCtrl; }
-    controllers::HistoryController* historyController() const { return m_historyCtrl; }
+
     controllers::LibraryController* libraryController() const { return m_libraryCtrl; }
     controllers::WatchedController* watchedController() const { return m_watchedCtrl; }
     controllers::SubtitleController* subtitleController() const { return m_subtitleCtrl; }
@@ -304,7 +303,7 @@ private:
     download::DownloadManager* m_downloadManager {};
     controllers::DownloadController* m_downloadCtrl {};
     controllers::TokenController* m_tokenCtrl {};
-    controllers::HistoryController* m_historyCtrl {};
+
     controllers::LibraryController* m_libraryCtrl {};
     controllers::WatchedController* m_watchedCtrl {};
     controllers::SubtitleController* m_subtitleCtrl {};

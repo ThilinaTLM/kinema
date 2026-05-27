@@ -7,7 +7,6 @@
 #include "config/AppSettings.h"
 #include "config/AppearanceSettings.h"
 #include "controllers/DownloadController.h"
-#include "controllers/HistoryController.h"
 #include "playback/resume/ResumeUseCase.h"
 #include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
