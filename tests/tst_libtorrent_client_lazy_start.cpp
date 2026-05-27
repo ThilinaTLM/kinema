@@ -30,8 +30,9 @@ private Q_SLOTS:
             QStringLiteral("kinemarc-lazy-torrent-test"),
             KConfig::SimpleConfig);
         config::TorrentStreamingSettings settings(config);
+        core::TorrentCache cache(settings);
 
-        playback::torrent::LibtorrentClient client(settings);
+        playback::torrent::LibtorrentClient client(settings, cache);
         QVERIFY2(!client.isStarted(),
             "LibtorrentClient must not construct lt::session in "
             "its constructor");

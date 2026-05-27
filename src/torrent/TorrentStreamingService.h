@@ -5,6 +5,7 @@
 
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
+#include "playback/torrent/LibtorrentClient.h"
 #include "torrent/PiecePlanner.h"
 #include "torrent/TorrentFileEntry.h"
 
@@ -23,49 +24,29 @@ namespace kinema::core {
 class TorrentCache;
 }
 
-namespace kinema::playback::torrent {
-class LibtorrentClient;
-}
-
 namespace kinema::torrent {
 
 class LocalStreamServer;
 
-/// Per-asset metadata returned by `prepareSession()`. Used by the
-/// unified-downloader's `TorrentAssetSession` to wire the asset into
-/// `download::LocalMediaServer` without going through TSS's own
-/// localhost server.
-struct PreparedSession {
-    QString token;
-    QString fileName;
-    qint64 fileSize = 0;
-    QString infoHash;
-};
-
-/// Controls how aggressively `prepareSession()` blocks before
-/// returning. `Streaming` is the legacy behaviour: wait for the
-/// startup buffer to land so the player can begin playback
-/// immediately. `Background` returns as soon as metadata is fetched
-/// and the file is selected; the swarm keeps pulling pieces in the
-/// background until the file is complete. Used by the unified
-/// downloader for `Save offline` enqueues.
-enum class PrepareMode {
-    Streaming,
-    Background,
-};
+/// Re-exports of the canonical per-asset types so existing consumers
+/// in `kinema::torrent::` continue to compile during the
+/// `playback::torrent::LibtorrentClient` cut-over. New code should
+/// reference `kinema::playback::torrent::PreparedSession` /
+/// `PrepareMode` directly.
+using PreparedSession = kinema::playback::torrent::PreparedSession;
+using PrepareMode = kinema::playback::torrent::PrepareMode;
 
 /**
- * Libtorrent-backed engine. After the unified-downloader refactor
- * this class is the torrent **backend implementation**: it owns the
- * libtorrent session, picks the right file inside multi-file
- * torrents, and exposes per-asset byte-range fetches through
- * `prepareSession()` / `ensureRange()` / `readRange()`. Production
- * playback always reaches it through
- * `download::TorrentAssetSession` + `download::LocalMediaServer`.
+ * Thin facade over `playback::torrent::LibtorrentClient`.
  *
- * The legacy `prepare()` method (and its private `LocalStreamServer`)
- * are retained only for tests that haven't been ported to the
- * unified downloader. New code must use `prepareSession()`.
+ * The per-asset state machine (prepareSession, ensureRange, file
+ * selection, idle-stop, keepAlive, …) lives on `LibtorrentClient`
+ * now. This class survives only as a forwarding shim plus the
+ * legacy `prepare()` entry point that hands out a URL served by
+ * the private `LocalStreamServer`. The legacy URL path is consumed
+ * by `services::StreamActions` as a fallback when the unified
+ * downloader isn't wired (some unit-test setups). Step 7 sub-commit
+ * 3 deletes this class.
  */
 class TorrentStreamingService : public QObject
 {
@@ -90,14 +71,13 @@ public:
 
     /// LEGACY: returns a URL served by the engine's own private
     /// `LocalStreamServer`. New code must call `prepareSession()`
-    /// and register the asset with `download::LocalMediaServer`.
+    /// and register the asset with the unified stream gateway.
     virtual QCoro::Task<QUrl> prepare(const domain::Stream& stream,
         const domain::PlaybackContext& ctx);
 
-    /// Same per-asset preparation as `prepare()` (metadata fetch,
-    /// file selection, startup buffering, piece prioritisation), but
-    /// does not touch the legacy `LocalStreamServer`. Used by the
-    /// new unified downloader pipeline.
+    /// Same per-asset preparation as `prepare()` but without the
+    /// legacy `LocalStreamServer`. Forwards to
+    /// `LibtorrentClient::prepareSession`.
     virtual QCoro::Task<PreparedSession> prepareSession(
         const domain::Stream& stream, const domain::PlaybackContext& ctx,
         PrepareMode mode = PrepareMode::Streaming);
@@ -107,28 +87,13 @@ public:
     qint64 fileSizeForToken(const QString& token) const;
     QString fileNameForToken(const QString& token) const;
     void touchToken(const QString& token);
+
     virtual QVector<TorrentFileEntry> filesForInfoHash(
         const QString& infoHash) const;
 
-    /// Mark the session for `infoHash` as exempt from idle-stop.
-    /// The unified downloader calls this when the asset is pinned
-    /// (Save offline) so background downloads keep running even
-    /// after the user stops watching.
     virtual void setKeepAlive(const QString& infoHash, bool on);
-
-    /// Pause / resume the libtorrent handle behind a session.
-    /// User-initiated; bypasses idle-stop bookkeeping. Pausing
-    /// keeps the session in `m_sessions` so it can resume without
-    /// re-fetching metadata.
     virtual void pauseInfoHash(const QString& infoHash);
     virtual void resumeInfoHash(const QString& infoHash);
-
-    /// Promote a streaming session to a full background download:
-    /// drops every `set_piece_deadline()` entry so libtorrent picks
-    /// pieces in normal order, sets the selected file to top
-    /// priority, and exempts the session from idle-stop.
-    /// Idempotent. Used by `DownloadManager::upgradeToFull` and by
-    /// `TorrentBackend::changeMode(OnDemand\u2192Full)`.
     virtual void promoteToFull(const QString& infoHash);
 
 public Q_SLOTS:
@@ -139,9 +104,9 @@ public Q_SLOTS:
 Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
-    /// Periodic per-session telemetry. Fires roughly every 2 s while
-    /// the swarm is active. `etaSeconds` is `-1` when the rate is
-    /// zero or the file size is unknown.
+    /// Per-session telemetry forwarded from `LibtorrentClient`.
+    /// `etaSeconds` is `-1` when the rate is zero or the file size
+    /// is unknown.
     void torrentStatsChanged(const QString& infoHash,
         qint64 doneBytes,
         qint64 ratePayloadBps,
@@ -150,49 +115,31 @@ Q_SIGNALS:
         int etaSeconds);
 
     /// Fired once when libtorrent reports `torrent_finished_alert`
-    /// for the matching info hash. The asset's selected file is
-    /// fully on disk by this point.
+    /// for the matching info hash.
     void torrentFinished(const QString& infoHash);
 
     /// Fired on a fatal `torrent_error_alert` (storage error, etc.).
-    /// Subscribers should mark the asset as failed.
     void torrentFailed(const QString& infoHash, const QString& reason);
 
 public:
-    /// True once `ensureStarted()` has built the libtorrent
-    /// session. Test-only hook used by the lazy-start coverage to
-    /// assert that construction is dormant; do not rely on this
-    /// from production code paths.
-    bool isStartedForTests() const noexcept { return static_cast<bool>(d); }
+    /// True once the underlying `LibtorrentClient` has built its
+    /// `lt::session`. Test-only hook used by the lazy-start
+    /// coverage to assert construction stays dormant.
+    bool isStartedForTests() const noexcept
+    {
+        return m_client && m_client->isStarted();
+    }
 
 private:
-    Q_INVOKABLE void onLibtorrentStats(const QString& infoHash,
-        qint64 doneBytes, qint64 ratePayloadBps, int peers,
-        int seeds, int etaSeconds, bool finished);
-    Q_INVOKABLE void onLibtorrentFinished(const QString& infoHash);
-    Q_INVOKABLE void onLibtorrentFailed(const QString& infoHash,
-        const QString& reason);
-
-    /// Build `d` (per-asset bookkeeping + legacy `LocalStreamServer`
-    /// + idle timer) and start the underlying
-    /// `playback::torrent::LibtorrentClient` on first real use.
-    /// Safe to call repeatedly; cheap after the first start.
-    /// Calls on a `StubTag` instance (no backing services) are
-    /// no-ops so test doubles stay dormant.
-    void ensureStarted();
-
-    struct Private;
-    std::unique_ptr<Private> d;
-
-    /// Captured for the production constructor so `ensureStarted()`
-    /// can build `Private` on first use. Null for `StubTag`.
-    core::TorrentCache*                       m_cache    {};
-    const config::TorrentStreamingSettings*   m_settings {};
-
-    /// Owns the libtorrent session, settings, and alert pump.
-    /// Constructed dormant for production instances; never built
-    /// for `StubTag` instances. Parented to `this`.
+    /// Owns the libtorrent session, alert pump, per-asset state,
+    /// and the idle-stop timer. Constructed dormant for production
+    /// instances; never built for `StubTag` instances. Parented to
+    /// `this`.
     std::unique_ptr<kinema::playback::torrent::LibtorrentClient> m_client;
+
+    /// Legacy localhost streaming server (only used by `prepare()`).
+    /// Built lazily on the first `prepare()` call.
+    std::unique_ptr<LocalStreamServer> m_legacyServer;
 };
 
 } // namespace kinema::torrent
