@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "download/LocalMediaServer.h"
+#include "playback/streaming/LocalHttpStreamGateway.h"
 
-#include "download/AssetSession.h"
 #include "kinema_log_download.h"
 
 #include <QCoro/QCoroIODevice>
@@ -20,11 +19,12 @@
 #include <algorithm>
 #include <optional>
 
-namespace kinema::download {
+namespace kinema::playback::streaming {
 
 namespace {
 
-using torrent::ByteRange;
+using kinema::playback::ports::ByteRangeSource;
+using kinema::torrent::ByteRange;
 
 struct HttpRequest {
     QString method;
@@ -144,16 +144,16 @@ std::optional<HttpRequest> parseRequestLine(const QByteArray& raw)
 
 } // namespace
 
-LocalMediaServer::LocalMediaServer(QObject* parent)
+LocalHttpStreamGateway::LocalHttpStreamGateway(QObject* parent)
     : QObject(parent)
 {
     connect(&m_server, &QTcpServer::newConnection,
-        this, &LocalMediaServer::acceptConnection);
+        this, &LocalHttpStreamGateway::acceptConnection);
 }
 
-LocalMediaServer::~LocalMediaServer() = default;
+LocalHttpStreamGateway::~LocalHttpStreamGateway() = default;
 
-bool LocalMediaServer::listen()
+bool LocalHttpStreamGateway::listen()
 {
     if (m_server.isListening()) {
         return true;
@@ -161,46 +161,55 @@ bool LocalMediaServer::listen()
     return m_server.listen(QHostAddress::LocalHost, 0);
 }
 
-void LocalMediaServer::registerSession(AssetSession* session)
+QUrl LocalHttpStreamGateway::expose(ByteRangeSource& source)
 {
-    if (!session) {
-        return;
+    m_sources.insert(source.assetId(), &source);
+    return buildUrl(source.assetId(), source.fileName());
+}
+
+QUrl LocalHttpStreamGateway::urlFor(const QString& assetId) const
+{
+    const auto it = m_sources.constFind(assetId);
+    if (it == m_sources.constEnd() || !it.value()) {
+        return {};
     }
-    m_sessions.insert(session->assetId(), QPointer<AssetSession>(session));
+    return buildUrl(assetId, it.value()->fileName());
 }
 
-void LocalMediaServer::unregisterSession(AssetSession* session)
+void LocalHttpStreamGateway::revoke(ByteRangeSource& source)
 {
-    if (!session) {
-        return;
+    const auto id = source.assetId();
+    const auto it = m_sources.constFind(id);
+    if (it != m_sources.constEnd() && it.value() == &source) {
+        m_sources.erase(it);
     }
-    m_sessions.remove(session->assetId());
 }
 
-void LocalMediaServer::unregisterAssetId(const QString& assetId)
+void LocalHttpStreamGateway::revoke(const QString& assetId)
 {
-    m_sessions.remove(assetId);
+    m_sources.remove(assetId);
 }
 
-void LocalMediaServer::setSessionResolver(SessionResolver resolver)
+void LocalHttpStreamGateway::setSessionResolver(SessionResolver resolver)
 {
     m_resolver = std::move(resolver);
 }
 
-AssetSession* LocalMediaServer::sessionForAssetId(const QString& assetId) const
+LocalHttpStreamGateway::ByteRangeSource*
+LocalHttpStreamGateway::sourceForAssetId(const QString& assetId) const
 {
-    const auto it = m_sessions.constFind(assetId);
-    if (it == m_sessions.constEnd()) {
+    const auto it = m_sources.constFind(assetId);
+    if (it == m_sources.constEnd()) {
         return nullptr;
     }
-    return it.value().data();
+    return it.value();
 }
 
-QCoro::Task<AssetSession*> LocalMediaServer::ensureSessionForAssetId(
-    const QString& assetId)
+QCoro::Task<LocalHttpStreamGateway::ByteRangeSource*>
+LocalHttpStreamGateway::ensureSourceForAssetId(const QString& assetId)
 {
-    if (auto* session = sessionForAssetId(assetId)) {
-        co_return session;
+    if (auto* source = sourceForAssetId(assetId)) {
+        co_return source;
     }
     if (!m_resolver || assetId.isEmpty()) {
         co_return nullptr;
@@ -208,28 +217,22 @@ QCoro::Task<AssetSession*> LocalMediaServer::ensureSessionForAssetId(
     co_return co_await m_resolver(assetId);
 }
 
-QUrl LocalMediaServer::urlFor(AssetSession* session) const
+QUrl LocalHttpStreamGateway::buildUrl(const QString& assetId,
+    const QString& fileName) const
 {
-    if (!session) {
-        return {};
-    }
     QUrl url;
     url.setScheme(QStringLiteral("http"));
     url.setHost(QStringLiteral("127.0.0.1"));
     url.setPort(m_server.serverPort());
     // Pass the bare filename to QUrl::setPath; QUrl percent-encodes
     // reserved characters once on toEncoded(). Pre-encoding here
-    // would double-encode (e.g. "%20" -> "%2520"), which mpv
-    // tolerates but pollutes logs and breaks curl-based diagnostics.
-    // Asset ids contain only [0-9a-f-]+ digits/letters so they need
-    // no encoding either.
+    // would double-encode (e.g. "%20" -> "%2520").
     url.setPath(QStringLiteral("/stream/%1/%2").arg(
-        session->assetId(),
-        QFileInfo(session->fileName()).fileName()));
+        assetId, QFileInfo(fileName).fileName()));
     return url;
 }
 
-void LocalMediaServer::acceptConnection()
+void LocalHttpStreamGateway::acceptConnection()
 {
     while (auto* socket = m_server.nextPendingConnection()) {
         socket->setParent(this);
@@ -238,14 +241,8 @@ void LocalMediaServer::acceptConnection()
     }
 }
 
-QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
+QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
 {
-    // 1 MiB streaming window. mpv normally issues sub-megabyte
-    // Range GETs so this only changes behaviour for non-Range
-    // clients (curl without -r, generic external players, our own
-    // diagnostic scripts), but it also caps peak memory per
-    // request and lets ensureRange make progress incrementally
-    // for backends that fetch lazily.
     constexpr qint64 kStreamChunkBytes = 1LL * 1024 * 1024;
 
     QElapsedTimer elapsed;
@@ -274,40 +271,40 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
     const auto req = parseRequestLine(raw);
     if (!req) {
         qCDebug(KINEMA_DOWNLOAD)
-            << "LocalMediaServer: 400 — could not parse request line";
+            << "LocalHttpStreamGateway: 400 — could not parse request line";
         writeHeaders(guard, 400, 0, {});
         guard->disconnectFromHost();
         co_return;
     }
 
     const QString assetId = assetIdFromPath(req->path);
-    auto* session = co_await ensureSessionForAssetId(assetId);
-    if (assetId.isEmpty() || !session) {
+    auto* source = co_await ensureSourceForAssetId(assetId);
+    if (assetId.isEmpty() || !source) {
         qCInfo(KINEMA_DOWNLOAD).nospace()
-            << "LocalMediaServer: 404 " << req->method
+            << "LocalHttpStreamGateway: 404 " << req->method
             << " path=\"" << req->path
-            << "\" assetId=\"" << assetId << "\" (no live session)";
+            << "\" assetId=\"" << assetId << "\" (no live source)";
         writeHeaders(guard, 404, 0, {});
         guard->disconnectFromHost();
         co_return;
     }
-    const qint64 fileSize = session->fileSize();
+    const qint64 fileSize = source->fileSize();
     if (fileSize <= 0) {
         qCInfo(KINEMA_DOWNLOAD).nospace()
-            << "LocalMediaServer: 404 " << req->method
+            << "LocalHttpStreamGateway: 404 " << req->method
             << " assetId=\"" << assetId
             << "\" (fileSize=" << fileSize << ")";
         writeHeaders(guard, 404, 0, {});
         guard->disconnectFromHost();
         co_return;
     }
-    session->touch();
+    source->touch();
 
     const auto rangeOpt = parseRangeHeader(raw.split('\n'), fileSize);
     ByteRange range = rangeOpt.value_or(ByteRange { 0, fileSize - 1 });
     if (!range.isValid() || range.start >= fileSize) {
         qCInfo(KINEMA_DOWNLOAD).nospace()
-            << "LocalMediaServer: 416 " << req->method
+            << "LocalHttpStreamGateway: 416 " << req->method
             << " assetId=\"" << assetId
             << "\" range=" << range.start << "-" << range.endInclusive
             << " fileSize=" << fileSize;
@@ -320,7 +317,7 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
 
     const bool partial = rangeOpt.has_value();
     const qint64 length = range.endInclusive - range.start + 1;
-    const QByteArray ct = contentTypeFor(session->fileName());
+    const QByteArray ct = contentTypeFor(source->fileName());
     QByteArray extra;
     if (partial) {
         extra = "Content-Range: bytes " + QByteArray::number(range.start)
@@ -329,7 +326,7 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
     }
 
     qCInfo(KINEMA_DOWNLOAD).nospace()
-        << "LocalMediaServer: " << (partial ? 206 : 200) << " " << req->method
+        << "LocalHttpStreamGateway: " << (partial ? 206 : 200) << " " << req->method
         << " assetId=\"" << assetId
         << "\" range=" << range.start << "-" << range.endInclusive
         << " length=" << length << " fileSize=" << fileSize;
@@ -341,17 +338,12 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
     }
     if (req->method.compare(QStringLiteral("GET"), Qt::CaseInsensitive) != 0) {
         qCDebug(KINEMA_DOWNLOAD).nospace()
-            << "LocalMediaServer: ignoring unsupported method "
+            << "LocalHttpStreamGateway: ignoring unsupported method "
             << req->method;
         guard->disconnectFromHost();
         co_return;
     }
 
-    // Stream the body chunk by chunk so:
-    //  - non-Range GETs do not have to await ensureRange() on the
-    //    full file before any bytes flow,
-    //  - peak memory per request is bounded by kStreamChunkBytes,
-    //  - a slow consumer can apply backpressure via bytesWritten.
     qint64 cursor = range.start;
     qint64 totalSent = 0;
     bool ensureFailed = false;
@@ -360,7 +352,7 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
             cursor + kStreamChunkBytes - 1, range.endInclusive);
         const ByteRange chunk { cursor, chunkEnd };
 
-        const bool ready = co_await session->ensureRange(chunk);
+        const bool ready = co_await source->ensureRange(chunk);
         if (!guard) {
             break;
         }
@@ -368,14 +360,12 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
             ensureFailed = true;
             break;
         }
-        const QByteArray body = session->readRange(chunk);
+        const QByteArray body = source->readRange(chunk);
         if (body.isEmpty()) {
             ensureFailed = true;
             break;
         }
         guard->write(body);
-        // Backpressure: don't queue another chunk while the kernel
-        // / Qt buffer is still draining the previous one.
         while (guard && guard->bytesToWrite() > kStreamChunkBytes) {
             co_await qCoro(guard.data(), &QTcpSocket::bytesWritten);
         }
@@ -385,14 +375,14 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
 
     if (!guard) {
         qCDebug(KINEMA_DOWNLOAD).nospace()
-            << "LocalMediaServer: client disconnected mid-stream assetId=\""
+            << "LocalHttpStreamGateway: client disconnected mid-stream assetId=\""
             << assetId << "\" sent=" << totalSent
             << "/" << length << " bytes";
         co_return;
     }
     if (ensureFailed) {
         qCWarning(KINEMA_DOWNLOAD).nospace()
-            << "LocalMediaServer: ensureRange/readRange failed assetId=\""
+            << "LocalHttpStreamGateway: ensureRange/readRange failed assetId=\""
             << assetId << "\" cursor=" << cursor
             << " sent=" << totalSent << "/" << length;
         guard->disconnectFromHost();
@@ -401,10 +391,10 @@ QCoro::Task<void> LocalMediaServer::serveSocket(QTcpSocket* socket)
 
     co_await qCoro(guard.data(), &QTcpSocket::bytesWritten);
     qCDebug(KINEMA_DOWNLOAD).nospace()
-        << "LocalMediaServer: complete assetId=\"" << assetId
+        << "LocalHttpStreamGateway: complete assetId=\"" << assetId
         << "\" sent=" << totalSent << "/" << length
         << " elapsedMs=" << elapsed.elapsed();
     guard->disconnectFromHost();
 }
 
-} // namespace kinema::download
+} // namespace kinema::playback::streaming

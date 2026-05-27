@@ -4,6 +4,7 @@
 #pragma once
 
 #include "domain/Download.h"
+#include "playback/ports/ByteRangeSource.h"
 #include "torrent/MediaFileSelector.h" // TorrentFileEntry
 #include "torrent/PiecePlanner.h"
 
@@ -35,7 +36,8 @@ using torrent::ByteRange;
  * `readRange()` reads bytes from the local payload. Both must remain
  * thread-affine to the session's owning thread (the GUI thread today).
  */
-class AssetSession : public QObject
+class AssetSession : public QObject,
+    public playback::ports::ByteRangeSource
 {
     Q_OBJECT
 public:
@@ -49,31 +51,15 @@ public:
     /// Stable for the lifetime of the session.
     virtual QString token() const = 0;
 
-    /// Stable identity in the persistent download store.
-    virtual QString assetId() const = 0;
-
-    /// Display-friendly file name used for the localhost URL path
-    /// (and for the player's `media-title` heuristic).
-    virtual QString fileName() const = 0;
-
-    /// Total file size in bytes. Returns -1 when not yet known
-    /// (e.g. magnet metadata still resolving).
-    virtual qint64 fileSize() const = 0;
-
-    /// Block until `range` is fully available locally. Returns
-    /// `true` on success, `false` on timeout / unrecoverable error.
-    virtual QCoro::Task<bool> ensureRange(ByteRange range) = 0;
-
-    /// Read bytes already stored locally. Caller is responsible for
-    /// having previously co_awaited `ensureRange`.
-    virtual QByteArray readRange(ByteRange range) const = 0;
-
-    /// Update the LRU timestamp; called by the server on every
-    /// inbound request and by the manager on user activity.
-    virtual void touch() = 0;
-
-    /// Bytes currently available on disk. Used for progress UI.
-    virtual qint64 cachedBytes() const { return -1; }
+    // ByteRangeSource: declarations from the port are inherited;
+    // concrete sessions override the pure virtuals below.
+    QString assetId() const override = 0;
+    QString fileName() const override = 0;
+    qint64 fileSize() const override = 0;
+    QCoro::Task<bool> ensureRange(ByteRange range) override = 0;
+    QByteArray readRange(ByteRange range) const override = 0;
+    void touch() override = 0;
+    qint64 cachedBytes() const override { return -1; }
 
     /// Full list of files inside the underlying torrent / magnet,
     /// 0-indexed in the order the source enumerated them. Empty

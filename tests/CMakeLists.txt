@@ -38,6 +38,56 @@ ecm_add_test(tst_media_file_selector.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_media_file_selection_policy.cpp
+    TEST_NAME tst_media_file_selection_policy
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_backend_selection_policy.cpp
+    TEST_NAME tst_backend_selection_policy
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_resume_policy.cpp
+    TEST_NAME tst_resume_policy
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_watched_policy.cpp
+    TEST_NAME tst_watched_policy
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_chapter_skip_policy.cpp
+    TEST_NAME tst_chapter_skip_policy
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_streaming_priority_policy.cpp
+    TEST_NAME tst_streaming_priority_policy
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_playback_state_machine.cpp
+    TEST_NAME tst_playback_state_machine
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_transfer_state_machine.cpp
+    TEST_NAME tst_transfer_state_machine
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_playback_event_stream.cpp
+    TEST_NAME tst_playback_event_stream
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_sqlite_download_repository.cpp
+    TEST_NAME tst_sqlite_download_repository
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_piece_planner.cpp
     TEST_NAME tst_piece_planner
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -243,8 +293,8 @@ ecm_add_test(tst_media_cache.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_local_media_server.cpp
-    TEST_NAME tst_local_media_server
+ecm_add_test(tst_local_http_stream_gateway.cpp
+    TEST_NAME tst_local_http_stream_gateway
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Network
 )
 
@@ -409,7 +459,12 @@ if(KINEMA_ENABLE_MPV_EMBED)
 endif()
 
 foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
-         tst_media_file_selector tst_piece_planner tst_cinemeta_parse
+         tst_media_file_selector tst_media_file_selection_policy
+         tst_backend_selection_policy tst_resume_policy tst_watched_policy
+         tst_chapter_skip_policy tst_streaming_priority_policy
+         tst_playback_state_machine tst_transfer_state_machine
+         tst_playback_event_stream tst_sqlite_download_repository
+         tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
          tst_stremio_stream_parse tst_indexer_settings tst_indexer_selector
          tst_peerflix_settings tst_peerflix_indexer
@@ -437,7 +492,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_application_boot tst_kinema_image_provider
          tst_downloads_list_model
          tst_download_store tst_download_manager
-         tst_media_cache tst_local_media_server tst_http_asset_session
+         tst_media_cache tst_local_http_stream_gateway tst_http_asset_session
          tst_torrent_lazy_start)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

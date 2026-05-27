@@ -56,6 +56,43 @@ namespace kinema::services {
 class StreamActions;
 }
 
+namespace kinema::playback::adapters {
+class ActiveStreamIndexerAdapter;
+}
+
+namespace kinema::playback::downloads {
+class SqliteDownloadRepository;
+}
+
+namespace kinema::playback::events {
+class PlaybackEventStream;
+}
+
+namespace kinema::playback::history {
+class HistoryQueryService;
+class SqlitePlaybackHistoryRepository;
+}
+
+namespace kinema::playback::resume {
+class ResumeUseCase;
+}
+
+namespace kinema::playback::series {
+class SeriesSessionService;
+}
+
+namespace kinema::playback::session {
+class PlaybackSessionManager;
+}
+
+namespace kinema::playback::subtitles {
+class SubtitleSessionService;
+}
+
+namespace kinema::playback::transfer {
+class TransferUseCase;
+}
+
 namespace kinema::torrent {
 class TorrentStreamingService;
 }
@@ -136,6 +173,22 @@ public:
     ui::qml::AppIconResolver* appIconResolver();
 
     services::StreamActions* streamActions() const { return m_streamActions; }
+    playback::session::PlaybackSessionManager* playbackSessionManager() const
+    { return m_playbackSessionManager; }
+    playback::transfer::TransferUseCase* transferUseCase() const
+    { return m_transferUseCase; }
+    playback::resume::ResumeUseCase* resumeUseCase() const
+    { return m_resumeUseCase; }
+    playback::history::HistoryQueryService* historyQueryService() const
+    { return m_historyQueryService; }
+    playback::events::PlaybackEventStream* playbackEventStream() const
+    { return m_playbackEventStream; }
+#ifdef KINEMA_HAVE_LIBMPV
+    playback::series::SeriesSessionService* seriesSessionService() const
+    { return m_seriesSessionService; }
+#endif
+    playback::subtitles::SubtitleSessionService* subtitleSessionService() const
+    { return m_subtitleSessionService; }
     torrent::TorrentStreamingService* torrentStreaming() const { return m_torrentStreaming; }
     download::DownloadManager* downloadManager() const { return m_downloadManager; }
 
@@ -214,6 +267,21 @@ private:
 
     ui::qml::AppIconResolver* m_appIconResolver {};
     services::StreamActions* m_streamActions {};
+    playback::events::PlaybackEventStream* m_playbackEventStream {};
+    std::unique_ptr<playback::history::SqlitePlaybackHistoryRepository>
+        m_historyRepo;
+    std::unique_ptr<playback::downloads::SqliteDownloadRepository>
+        m_downloadRepo;
+    std::unique_ptr<playback::adapters::ActiveStreamIndexerAdapter>
+        m_streamIndexerAdapter;
+    playback::transfer::TransferUseCase* m_transferUseCase {};
+    playback::resume::ResumeUseCase* m_resumeUseCase {};
+    playback::history::HistoryQueryService* m_historyQueryService {};
+    playback::session::PlaybackSessionManager* m_playbackSessionManager {};
+    playback::subtitles::SubtitleSessionService* m_subtitleSessionService {};
+#ifdef KINEMA_HAVE_LIBMPV
+    playback::series::SeriesSessionService* m_seriesSessionService {};
+#endif
     torrent::TorrentStreamingService* m_torrentStreaming {};
     download::DownloadManager* m_downloadManager {};
     controllers::DownloadController* m_downloadCtrl {};

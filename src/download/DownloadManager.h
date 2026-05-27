@@ -42,6 +42,10 @@ namespace kinema::torrent {
 class TorrentStreamingService;
 }
 
+namespace kinema::playback::streaming {
+class LocalHttpStreamGateway;
+}
+
 namespace kinema::download {
 
 class AllDebridResolver;
@@ -50,7 +54,6 @@ class BackendSelector;
 class DebridResolver;
 class DownloadBackend;
 class HttpAssetSession;
-class LocalMediaServer;
 class RealDebridResolver;
 class TorrentAssetSession;
 
@@ -226,7 +229,7 @@ private:
 
     std::unique_ptr<RealDebridResolver> m_rdResolver;
     std::unique_ptr<AllDebridResolver> m_adResolver;
-    std::unique_ptr<LocalMediaServer> m_server;
+    std::unique_ptr<kinema::playback::streaming::LocalHttpStreamGateway> m_server;
     std::unique_ptr<BackendSelector> m_selector;
 
     /// Active sessions keyed by `assetId`. Owned via std::unique_ptr.

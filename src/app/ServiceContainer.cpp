@@ -40,6 +40,17 @@
 #include "download/DownloadManager.h"
 #include "domain/Debrid.h"
 #include "kinema_log_app.h"
+#include "playback/adapters/ActiveStreamIndexerAdapter.h"
+#include "playback/downloads/SqliteDownloadRepository.h"
+#include "playback/events/PlaybackEventStream.h"
+#include "playback/history/HistoryQueryService.h"
+#include "playback/history/SqlitePlaybackHistoryRepository.h"
+#include "playback/resume/ResumeUseCase.h"
+#include "playback/series/SeriesSessionService.h"
+#include "playback/session/PlaybackSessionManager.h"
+#include "playback/subtitles/SubtitleSessionService.h"
+#include "playback/transfer/TransferUseCase.h"
+
 #include "services/StreamActions.h"
 #include "torrent/TorrentStreamingService.h"
 #include "ui/ImageLoader.h"
@@ -221,6 +232,29 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_streamActions->setHistoryController(m_historyCtrl);
     m_historyCtrl->setStreamActions(m_streamActions);
 
+    // Playback-subsystem long-lived plumbing. These objects expose
+    // the session-centric API surface that QML and projections will
+    // grow into. For now each is a thin facade over the existing
+    // controllers; the inside flips during later refactor phases
+    // without changing the public boundary.
+    m_playbackEventStream
+        = new playback::events::PlaybackEventStream(a);
+    m_historyRepo
+        = std::make_unique<playback::history::SqlitePlaybackHistoryRepository>(
+            *m_history);
+    m_downloadRepo
+        = std::make_unique<playback::downloads::SqliteDownloadRepository>(
+            *m_downloadStore);
+    m_streamIndexerAdapter
+        = std::make_unique<playback::adapters::ActiveStreamIndexerAdapter>(
+            m_indexers);
+    m_transferUseCase = new playback::transfer::TransferUseCase(
+        *m_downloadManager, a);
+    m_resumeUseCase
+        = new playback::resume::ResumeUseCase(*m_historyCtrl, a);
+    m_historyQueryService = new playback::history::HistoryQueryService(
+        *m_historyRepo, *m_history, a);
+
     m_libraryCtrl = new controllers::LibraryController(
         *m_library, m_cinemeta, a);
     // Lazy backfill of v7 schema columns (genres / rating / runtime
@@ -343,7 +377,19 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
             m_subtitleCtrl,
             &controllers::SubtitleController::clearMoviehash);
     }
+    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
+        *m_streamActions, m_playbackCtrl, a);
+    m_seriesSessionService = new playback::series::SeriesSessionService(
+        *m_seriesSessionCtrl, a);
+#else
+    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
+        *m_streamActions, nullptr, a);
 #endif
+    if (m_subtitleCtrl) {
+        m_subtitleSessionService
+            = new playback::subtitles::SubtitleSessionService(
+                *m_subtitleCtrl, a);
+    }
 
     if (!m_player->preferredPlayerAvailable()) {
         qCInfo(KINEMA_APP) << "preferred media player not found on $PATH";

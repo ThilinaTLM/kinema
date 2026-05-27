@@ -13,7 +13,7 @@
 #include "download/BackendSelector.h"
 #include "download/DownloadBackend.h"
 #include "download/HttpAssetSession.h"
-#include "download/LocalMediaServer.h"
+#include "playback/streaming/LocalHttpStreamGateway.h"
 #include "download/AllDebridBackend.h"
 #include "download/AllDebridResolver.h"
 #include "download/RealDebridBackend.h"
@@ -86,7 +86,7 @@ DownloadManager::DownloadManager(core::HttpClient& http,
     , m_settings(settings)
     , m_rdResolver(std::make_unique<RealDebridResolver>(rd, this))
     , m_adResolver(std::make_unique<AllDebridResolver>(ad, this))
-    , m_server(std::make_unique<LocalMediaServer>(this))
+    , m_server(std::make_unique<kinema::playback::streaming::LocalHttpStreamGateway>(this))
     , m_selector(std::make_unique<BackendSelector>())
 {
     if (!m_server->listen()) {
@@ -97,8 +97,10 @@ DownloadManager::DownloadManager(core::HttpClient& http,
             << "DownloadManager ready; localhost server listening";
     }
     m_server->setSessionResolver(
-        [this](const QString& assetId) -> QCoro::Task<AssetSession*> {
-            co_return co_await ensureSessionForAssetId(assetId);
+        [this](const QString& assetId)
+            -> QCoro::Task<kinema::playback::ports::ByteRangeSource*> {
+            AssetSession* s = co_await ensureSessionForAssetId(assetId);
+            co_return static_cast<kinema::playback::ports::ByteRangeSource*>(s);
         });
 
     // Order matters: the selector tries backends in priority order
@@ -405,7 +407,7 @@ QCoro::Task<QUrl> DownloadManager::openSession(domain::AssetRef ref,
     if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
         auto* existing = it->second.get();
         existing->touch();
-        co_return m_server->urlFor(existing);
+        co_return m_server->urlFor(existing->assetId());
     }
 
     // Series-pack episode navigation can request a different file
@@ -429,7 +431,7 @@ QCoro::Task<QUrl> DownloadManager::openSession(domain::AssetRef ref,
         for (const auto& otherAssetId : superseded) {
             if (auto it = m_sessions.find(otherAssetId);
                 it != m_sessions.end()) {
-                m_server->unregisterSession(it->second.get());
+                m_server->revoke(*it->second);
                 m_sessions.erase(it);
             }
             m_liveStats.erase(otherAssetId);
@@ -449,14 +451,14 @@ QCoro::Task<QUrl> DownloadManager::openSession(domain::AssetRef ref,
         if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
             auto* existing = it->second.get();
             existing->touch();
-            co_return m_server->urlFor(existing);
+            co_return m_server->urlFor(existing->assetId());
         }
         co_await sleepMs(25);
     }
     if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
         auto* existing = it->second.get();
         existing->touch();
-        co_return m_server->urlFor(existing);
+        co_return m_server->urlFor(existing->assetId());
     }
 
     m_openingAssetIds.insert(assetId);
@@ -486,7 +488,7 @@ QCoro::Task<QUrl> DownloadManager::openSession(domain::AssetRef ref,
         auto session = co_await backend->open(ref, stream, ctx, mode);
         auto* raw = session.get();
         installProgressBindings(raw, assetId);
-        m_server->registerSession(raw);
+        m_server->expose(*raw);
         m_sessions.emplace(assetId, std::move(session));
 
         item.state = domain::DownloadState::Active;
@@ -513,7 +515,7 @@ QCoro::Task<QUrl> DownloadManager::openSession(domain::AssetRef ref,
         m_store.upsert(item);
         Q_EMIT itemChanged(assetId);
 
-        const QUrl url = m_server->urlFor(raw);
+        const QUrl url = m_server->urlFor(raw->assetId());
         m_openingAssetIds.remove(assetId);
         co_return url;
     } catch (...) {
@@ -661,7 +663,7 @@ void DownloadManager::cancel(const QString& assetId)
         m_torrentEngine.stopInfoHash(row->infoHash);
     }
     if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
-        m_server->unregisterSession(it->second.get());
+        m_server->revoke(*it->second);
         m_sessions.erase(it);
     }
     m_liveStats.erase(assetId);
@@ -680,7 +682,7 @@ void DownloadManager::remove(const QString& assetId, bool deleteFiles)
         m_torrentEngine.stopInfoHash(row->infoHash);
     }
     if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
-        m_server->unregisterSession(it->second.get());
+        m_server->revoke(*it->second);
         m_sessions.erase(it);
     }
     m_liveStats.erase(assetId);
@@ -711,7 +713,7 @@ void DownloadManager::retry(const QString& assetId)
 
     // Drop any half-broken session before restarting.
     if (auto it = m_sessions.find(assetId); it != m_sessions.end()) {
-        m_server->unregisterSession(it->second.get());
+        m_server->revoke(*it->second);
         m_sessions.erase(it);
     }
     m_liveStats.erase(assetId);
