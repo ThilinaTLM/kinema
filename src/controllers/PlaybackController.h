@@ -12,7 +12,6 @@
 
 #include <QCoro/QCoroTask>
 
-#include "controllers/PlaybackLoadWatchdog.h"
 #include "core/mpv/MpvChapterList.h"
 #include "core/mpv/MpvTrackList.h"
 
@@ -30,6 +29,10 @@ class HistoryController;
 
 namespace kinema::ui::player {
 class PlayerWindow;
+}
+
+namespace kinema::playback::session {
+class PlayerLoadWatchdog;
 }
 
 namespace kinema::controllers {
@@ -142,7 +145,7 @@ private:
     const config::AppSettings& m_settings;
     core::HttpClient* m_http = nullptr;
     ui::player::PlayerWindow* m_window = nullptr;
-    PlaybackLoadWatchdog m_loadWatchdog { this };
+    playback::session::PlayerLoadWatchdog* m_loadWatchdog = nullptr;
 
     QCoro::Task<void> kickoffMoviehashCompute(QUrl url, quint64 epoch);
 

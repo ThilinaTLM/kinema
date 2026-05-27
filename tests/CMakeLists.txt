@@ -73,6 +73,11 @@ ecm_add_test(tst_playback_state_machine.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_player_load_watchdog.cpp
+    TEST_NAME tst_player_load_watchdog
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_transfer_state_machine.cpp
     TEST_NAME tst_transfer_state_machine
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -448,10 +453,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
         TEST_NAME tst_player_window_presentation
         LINK_LIBRARIES kinema_core Qt6::Test
     )
-    ecm_add_test(tst_playback_load_watchdog.cpp
-        TEST_NAME tst_playback_load_watchdog
-        LINK_LIBRARIES kinema_core Qt6::Test
-    )
     ecm_add_test(tst_shipped_mpv_conf.cpp
         TEST_NAME tst_shipped_mpv_conf
         LINK_LIBRARIES kinema_core Qt6::Test
@@ -463,6 +464,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_backend_selection_policy tst_resume_policy tst_watched_policy
          tst_chapter_skip_policy tst_streaming_priority_policy
          tst_playback_state_machine tst_transfer_state_machine
+         tst_player_load_watchdog
          tst_playback_event_stream tst_sqlite_download_repository
          tst_piece_planner tst_cinemeta_parse
          tst_tmdb_parse tst_discover_query
@@ -500,7 +502,7 @@ endforeach()
 foreach(t tst_player_view_model tst_player_audio_tracks_model
          tst_player_subtitle_tracks_model tst_player_chapters_model
          tst_mpv_load_command tst_player_window_presentation
-         tst_playback_load_watchdog tst_shipped_mpv_conf)
+         tst_shipped_mpv_conf)
     if(TARGET ${t})
         target_compile_definitions(${t} PRIVATE ${test_defs})
     endif()

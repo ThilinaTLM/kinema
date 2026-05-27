@@ -1,17 +1,17 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "controllers/PlaybackLoadWatchdog.h"
+#include "playback/session/PlayerLoadWatchdog.h"
 
 #include <QSignalSpy>
 #include <QTest>
 
 #include <chrono>
 
-using kinema::controllers::PlaybackLoadWatchdog;
+using kinema::playback::session::PlayerLoadWatchdog;
 using namespace std::chrono_literals;
 
-class TestPlaybackLoadWatchdog : public QObject
+class TestPlayerLoadWatchdog : public QObject
 {
     Q_OBJECT
 private Q_SLOTS:
@@ -20,12 +20,12 @@ private Q_SLOTS:
     void restartsCleanlyOnRearm();
 };
 
-void TestPlaybackLoadWatchdog::firesAfterTimeoutWhenNotStopped()
+void TestPlayerLoadWatchdog::firesAfterTimeoutWhenNotStopped()
 {
-    PlaybackLoadWatchdog wd;
+    PlayerLoadWatchdog wd;
     wd.setTimeout(20ms);
 
-    QSignalSpy spy(&wd, &PlaybackLoadWatchdog::timedOut);
+    QSignalSpy spy(&wd, &PlayerLoadWatchdog::timedOut);
     wd.start();
     QVERIFY(wd.isActive());
 
@@ -34,12 +34,12 @@ void TestPlaybackLoadWatchdog::firesAfterTimeoutWhenNotStopped()
     QVERIFY(!wd.isActive());
 }
 
-void TestPlaybackLoadWatchdog::doesNotFireWhenStoppedFirst()
+void TestPlayerLoadWatchdog::doesNotFireWhenStoppedFirst()
 {
-    PlaybackLoadWatchdog wd;
+    PlayerLoadWatchdog wd;
     wd.setTimeout(50ms);
 
-    QSignalSpy spy(&wd, &PlaybackLoadWatchdog::timedOut);
+    QSignalSpy spy(&wd, &PlayerLoadWatchdog::timedOut);
     wd.start();
     wd.stop();
     QVERIFY(!wd.isActive());
@@ -48,15 +48,15 @@ void TestPlaybackLoadWatchdog::doesNotFireWhenStoppedFirst()
     QCOMPARE(spy.count(), 0);
 }
 
-void TestPlaybackLoadWatchdog::restartsCleanlyOnRearm()
+void TestPlayerLoadWatchdog::restartsCleanlyOnRearm()
 {
     // Two consecutive queue items each arm the watchdog. Each load
     // succeeding (i.e. stopping the timer) before the next start
     // must not leak a stale fire.
-    PlaybackLoadWatchdog wd;
+    PlayerLoadWatchdog wd;
     wd.setTimeout(40ms);
 
-    QSignalSpy spy(&wd, &PlaybackLoadWatchdog::timedOut);
+    QSignalSpy spy(&wd, &PlayerLoadWatchdog::timedOut);
 
     wd.start();
     wd.stop();              // first item loaded fine
@@ -66,5 +66,5 @@ void TestPlaybackLoadWatchdog::restartsCleanlyOnRearm()
     QCOMPARE(spy.count(), 1);
 }
 
-QTEST_MAIN(TestPlaybackLoadWatchdog)
-#include "tst_playback_load_watchdog.moc"
+QTEST_MAIN(TestPlayerLoadWatchdog)
+#include "tst_player_load_watchdog.moc"

@@ -11,6 +11,7 @@
 #include "core/io/HttpErrorPresenter.h"
 #include "core/util/Moviehash.h"
 #include "core/io/UrlRedactor.h"
+#include "playback/session/PlayerLoadWatchdog.h"
 #include "ui/player/PlayerWindow.h"
 #include "kinema_log_controller.h"
 
@@ -124,8 +125,10 @@ PlaybackController::PlaybackController(HistoryController& history,
     , m_history(history)
     , m_settings(settings)
     , m_http(http)
+    , m_loadWatchdog(new playback::session::PlayerLoadWatchdog(this))
 {
-    connect(&m_loadWatchdog, &PlaybackLoadWatchdog::timedOut,
+    connect(m_loadWatchdog,
+        &playback::session::PlayerLoadWatchdog::timedOut,
         this, &PlaybackController::onLoadWatchdogTimedOut);
 }
 
@@ -139,7 +142,7 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
     }
     m_window = window;
     if (!m_window) {
-        m_loadWatchdog.stop();
+        m_loadWatchdog->stop();
         ++m_streamEpoch;
         Q_EMIT streamCleared();
         m_phase = Phase::Idle;
@@ -299,7 +302,7 @@ void PlaybackController::play(const QUrl& url,
     // Arm the load watchdog before we hand off to mpv. Disarmed in
     // `onFileLoaded()` / `onEndOfFile()` / `stop()`; on timeout we
     // synthesise an error end-of-file so the queue auto-advances.
-    m_loadWatchdog.start();
+    m_loadWatchdog->start();
     m_window->play(url, loadCtx);
 }
 
@@ -332,7 +335,7 @@ void PlaybackController::stop()
     if (!m_window || !m_hasActiveSession) {
         return;
     }
-    m_loadWatchdog.stop();
+    m_loadWatchdog->stop();
     Q_EMIT userClosedWindow(m_ctx);
     m_phase = Phase::Idle;
     m_hasActiveSession = false;
@@ -476,7 +479,7 @@ QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
 void PlaybackController::onFileLoaded()
 {
     qCInfo(KINEMA_CONTROLLER) << "PlaybackController: file-loaded";
-    m_loadWatchdog.stop();
+    m_loadWatchdog->stop();
     // The new file is now the live one. Subsequent `end-file`
     // events refer to *it*, so latch `m_loadedCtx` and clear the
     // loadfile-in-flight flag. Clearing here is also defensive:
@@ -505,7 +508,7 @@ void PlaybackController::onPlaybackError(const QString& reason)
 {
     qCWarning(KINEMA_CONTROLLER).nospace()
         << "PlaybackController: playback error \"" << reason << "\"";
-    m_loadWatchdog.stop();
+    m_loadWatchdog->stop();
     if (m_window) {
         m_window->setLoadingVisible(false);
     }
@@ -520,7 +523,7 @@ void PlaybackController::onLoadWatchdogTimedOut()
     qCWarning(KINEMA_CONTROLLER)
         << "PlaybackController: load watchdog tripped for"
         << m_ctx.title
-        << "after" << m_loadWatchdog.timeout().count() << "ms;"
+        << "after" << m_loadWatchdog->timeout().count() << "ms;"
         << "treating as a playback error so the queue can advance.";
     Q_EMIT statusMessage(
         i18nc("@info:status",
@@ -532,7 +535,7 @@ void PlaybackController::onLoadWatchdogTimedOut()
 
 void PlaybackController::onEndOfFile(const QString& reason)
 {
-    m_loadWatchdog.stop();
+    m_loadWatchdog->stop();
 
     // Filter the loadfile-induced stop. mpv's `loadfile` aborts
     // the current file before loading the new one; that abort

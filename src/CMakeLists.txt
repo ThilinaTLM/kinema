@@ -107,6 +107,7 @@ set(kinema_core_SRCS
     playback/history/HistoryQueryService.cpp
     playback/subtitles/SubtitleSessionService.cpp
     playback/session/PlaybackStateMachine.cpp
+    playback/session/PlayerLoadWatchdog.cpp
     playback/session/TransferStateMachine.cpp
     playback/policy/BackendSelectionPolicy.cpp
     playback/policy/ChapterSkipPolicy.cpp
@@ -181,7 +182,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
         controllers/MprisController.cpp
         controllers/PlaybackController.cpp
-        controllers/PlaybackLoadWatchdog.cpp
         controllers/SeriesPlaybackSessionController.cpp
         playback/series/SeriesSessionService.cpp
         ui/player/AudioTracksModel.cpp
