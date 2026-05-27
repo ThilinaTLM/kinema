@@ -100,8 +100,13 @@ namespace kinema::playback::session {
 class PlaybackSessionManager;
 }
 
+namespace kinema::playback::history {
+class TrackMemoryService;
+}
+
 namespace kinema::playback::subtitles {
 class SubtitleSessionService;
+class MoviehashProbe;
 }
 
 namespace kinema::playback::transfer {
@@ -322,6 +327,8 @@ private:
 #ifdef KINEMA_HAVE_LIBMPV
     playback::adapters::EmbeddedMpvPlayerAdapter* m_embeddedPlayerAdapter {};
     playback::series::SeriesSessionService* m_seriesSessionService {};
+    playback::subtitles::MoviehashProbe* m_moviehashProbe {};
+    playback::history::TrackMemoryService* m_trackMemoryService {};
 #endif
     torrent::TorrentStreamingService* m_torrentStreaming {};
     controllers::DownloadController* m_downloadCtrl {};

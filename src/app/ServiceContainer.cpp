@@ -49,6 +49,7 @@
 #include "playback/events/PlaybackEventStream.h"
 #include "playback/history/HistoryQueryService.h"
 #include "playback/history/SqlitePlaybackHistoryRepository.h"
+#include "playback/history/TrackMemoryService.h"
 #include "playback/progress/PlaybackProgressProjector.h"
 #include "playback/resume/ResumeUseCase.h"
 #include "playback/series/SeriesSessionService.h"
@@ -59,6 +60,7 @@
 #include "playback/sources/RealDebridResolver.h"
 #include "playback/sources/TorrentMediaSource.h"
 #include "playback/streaming/LocalHttpStreamGateway.h"
+#include "playback/subtitles/MoviehashProbe.h"
 #include "playback/subtitles/SubtitleSessionService.h"
 #include "playback/transfer/BackendRegistry.h"
 #include "playback/transfer/SessionRegistry.h"
@@ -453,20 +455,21 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         });
 
 #ifdef KINEMA_HAVE_LIBMPV
-    m_playbackCtrl = new controllers::PlaybackController(
-        *m_historyQueryService, m_settings, m_http.get(), a);
-    // Subtitle ↔ playback coupling (moviehash → search) lives at
-    // the service layer.
-    if (m_subtitleCtrl) {
-        QObject::connect(m_playbackCtrl,
-            &controllers::PlaybackController::moviehashComputed,
-            m_subtitleCtrl,
-            &controllers::SubtitleController::setMoviehash);
-        QObject::connect(m_playbackCtrl,
-            &controllers::PlaybackController::streamCleared,
-            m_subtitleCtrl,
-            &controllers::SubtitleController::clearMoviehash);
-    }
+    m_playbackCtrl = new controllers::PlaybackController(m_settings, a);
+    // Event-driven moviehash probe. Subscribes to
+    // PlayableUrlReady (published by EmbeddedMpvPlayerAdapter on
+    // play()), runs the HEAD+Range probe, and republishes
+    // MoviehashComputed. Replaces the inline coroutine that
+    // previously lived on PlaybackController.
+    m_moviehashProbe = new playback::subtitles::MoviehashProbe(
+        *m_playbackEventStream, m_http.get(), a);
+    // Track memory: applies remembered audio / subtitle language
+    // preferences to fresh sessions. Subscribes to
+    // PlaybackRequested + TrackListChanged; routes selection
+    // commands through PlayerPort (the embedded adapter).
+    m_trackMemoryService = new playback::history::TrackMemoryService(
+        *m_playbackEventStream, *m_historyQueryService,
+        m_embeddedPlayerAdapter, a);
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
         *m_streamActions, *m_playbackEventStream, m_playbackCtrl,
         m_embeddedPlayerAdapter, m_externalPlayerAdapter, a);
@@ -495,9 +498,13 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         nullptr, m_externalPlayerAdapter, a);
 #endif
     if (m_subtitleCtrl) {
+        // The session service now subscribes to PlaybackRequested
+        // (clearMoviehash) and MoviehashComputed (setMoviehash),
+        // replacing the direct PlaybackController <-> subtitle
+        // signal wiring that lived here before.
         m_subtitleSessionService
             = new playback::subtitles::SubtitleSessionService(
-                *m_subtitleCtrl, a);
+                *m_subtitleCtrl, m_playbackEventStream, a);
     }
 
     if (!m_player->preferredPlayerAvailable()) {

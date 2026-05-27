@@ -111,7 +111,9 @@ set(kinema_core_SRCS
     playback/session/PlaybackSessionManager.cpp
     playback/resume/ResumeUseCase.cpp
     playback/history/HistoryQueryService.cpp
+    playback/history/TrackMemoryService.cpp
     playback/subtitles/SubtitleSessionService.cpp
+    playback/subtitles/MoviehashProbe.cpp
     playback/session/PlaybackStateMachine.cpp
     playback/session/PlayerLoadWatchdog.cpp
     playback/session/TransferStateMachine.cpp

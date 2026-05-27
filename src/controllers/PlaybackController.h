@@ -10,21 +10,11 @@
 #include <QObject>
 #include <QUrl>
 
-#include <QCoro/QCoroTask>
-
 #include "core/mpv/MpvChapterList.h"
 #include "core/mpv/MpvTrackList.h"
 
-namespace kinema::core {
-class HttpClient;
-}
-
 namespace kinema::config {
 class AppSettings;
-}
-
-namespace kinema::playback::history {
-class HistoryQueryService;
 }
 
 namespace kinema::ui::player {
@@ -41,9 +31,7 @@ class PlaybackController : public QObject
 {
     Q_OBJECT
 public:
-    PlaybackController(playback::history::HistoryQueryService& history,
-        const config::AppSettings& settings,
-        core::HttpClient* http = nullptr,
+    PlaybackController(const config::AppSettings& settings,
         QObject* parent = nullptr);
 
     /// Wires / unwires the detached player window. Safe to call
@@ -104,15 +92,6 @@ Q_SIGNALS:
     /// downstream (queue) controllers can pause instead of advance.
     void userClosedWindow(const domain::PlaybackContext& ctx);
 
-    /// Best-effort moviehash for the active stream. Empty hex when
-    /// the hoster doesn't expose Content-Length or the Range probe
-    /// fails. Consumed by `SubtitleController::setMoviehash`.
-    void moviehashComputed(QString hex);
-    /// Fired from `setPlayerWindow(nullptr)` and on end-of-file when
-    /// the stream is no longer relevant. SubtitleController clears
-    /// its cached hash.
-    void streamCleared();
-
 private Q_SLOTS:
     void onFileLoaded();
     void onPlaybackError(const QString& reason);
@@ -127,7 +106,6 @@ private Q_SLOTS:
     void onPausedChanged(bool paused);
     void onVolumeChanged(double percent);
     void onSpeedChanged(double factor);
-    void onTrackListChanged(const core::tracks::TrackList& tracks);
     void onChaptersChanged(const core::chapters::ChapterList& chapters);
     void onResumeAccepted();
     void onResumeDeclined();
@@ -141,13 +119,9 @@ private:
         Playing,
     };
 
-    playback::history::HistoryQueryService& m_history;
     const config::AppSettings& m_settings;
-    core::HttpClient* m_http = nullptr;
     ui::player::PlayerWindow* m_window = nullptr;
     playback::session::PlayerLoadWatchdog* m_loadWatchdog = nullptr;
-
-    QCoro::Task<void> kickoffMoviehashCompute(QUrl url, quint64 epoch);
 
     domain::PlaybackContext m_ctx;
     /// Ctx of the file mpv has actually loaded — updated on
@@ -163,7 +137,6 @@ private:
     Phase m_phase = Phase::Idle;
     double m_duration = 0.0;
     double m_skipChapterEnd = -1.0;
-    bool m_trackMemoryApplied = false;
     bool m_paused = false;
     bool m_hasActiveSession = false;
     /// True between a `play()` call that supersedes an active
@@ -176,7 +149,6 @@ private:
     double m_volumePercent = 100.0;
     double m_playbackRate = 1.0;
     quint64 m_epoch = 0;
-    quint64 m_streamEpoch = 0;
 };
 
 } // namespace kinema::controllers

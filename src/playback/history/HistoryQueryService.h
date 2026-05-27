@@ -35,11 +35,14 @@ public:
         QObject* parent = nullptr);
     ~HistoryQueryService() override;
 
-    std::optional<domain::HistoryEntry> find(
+    // `virtual` so tests can subclass and script lookups without
+    // standing up a full `HistoryStore` + repository chain.
+    virtual std::optional<domain::HistoryEntry> find(
         const domain::PlaybackKey& key) const;
-    std::optional<domain::HistoryEntry> findLatestForMedia(
+    virtual std::optional<domain::HistoryEntry> findLatestForMedia(
         domain::MediaKind kind, const QString& imdbId) const;
-    QList<domain::HistoryEntry> continueWatching(int maxItems = 30) const;
+    virtual QList<domain::HistoryEntry> continueWatching(
+        int maxItems = 30) const;
 
 Q_SIGNALS:
     void changed();

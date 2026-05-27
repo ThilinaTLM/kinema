@@ -117,6 +117,15 @@ void EmbeddedMpvPlayerAdapter::play(const QUrl& url,
     if (m_sessionActive) {
         m_ctx = effectiveCtx;
     }
+    // Surface the playable URL on the event stream so probes
+    // (moviehash) and projections (subtitles) can subscribe
+    // without a direct dependency on the adapter. The assetId is
+    // not known here at the adapter boundary; downstream
+    // consumers that only care about the URL (e.g. MoviehashProbe)
+    // tolerate an empty value.
+    m_eventStream.publish(events::PlayableUrlReady {
+        m_sessionId, /*assetId=*/QString {}, url,
+    });
     m_eventStream.publish(events::PlayerLoading { m_sessionId });
     m_loadWatchdog.start();
     m_window->play(url, effectiveCtx);

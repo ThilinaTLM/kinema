@@ -6,11 +6,7 @@
 #ifdef KINEMA_HAVE_LIBMPV
 
 #include "config/AppSettings.h"
-#include "core/io/HttpClient.h"
-#include "core/io/HttpErrorPresenter.h"
-#include "core/util/Moviehash.h"
 #include "core/io/UrlRedactor.h"
-#include "playback/history/HistoryQueryService.h"
 #include "playback/session/PlayerLoadWatchdog.h"
 #include "ui/player/PlayerWindow.h"
 #include "kinema_log_controller.h"
@@ -31,39 +27,6 @@ bool PlaybackController::isActivelyPlaying() const noexcept
 }
 
 namespace {
-
-QString selectedTrackLang(const core::tracks::TrackList& tracks,
-    const QString& type)
-{
-    for (const auto& track : tracks) {
-        if (track.type == type && track.selected) {
-            return track.lang;
-        }
-    }
-    return {};
-}
-
-int trackIdForLanguage(const core::tracks::TrackList& tracks,
-    const QString& type, const QString& lang)
-{
-    for (const auto& track : tracks) {
-        if (track.type == type && track.lang == lang && track.id > 0) {
-            return track.id;
-        }
-    }
-    return -1;
-}
-
-bool hasTrackType(const core::tracks::TrackList& tracks,
-    const QString& type)
-{
-    for (const auto& track : tracks) {
-        if (track.type == type) {
-            return true;
-        }
-    }
-    return false;
-}
 
 const QRegularExpression kSkipRx(
     QStringLiteral("^(intro|opening|outro|ending|credits|end credits)\\b"),
@@ -118,14 +81,10 @@ QString skipChapterKind(SkipKind kind)
 } // namespace
 
 PlaybackController::PlaybackController(
-    playback::history::HistoryQueryService& history,
     const config::AppSettings& settings,
-    core::HttpClient* http,
     QObject* parent)
     : QObject(parent)
-    , m_history(history)
     , m_settings(settings)
-    , m_http(http)
     , m_loadWatchdog(new playback::session::PlayerLoadWatchdog(this))
 {
     connect(m_loadWatchdog,
@@ -144,8 +103,6 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
     m_window = window;
     if (!m_window) {
         m_loadWatchdog->stop();
-        ++m_streamEpoch;
-        Q_EMIT streamCleared();
         m_phase = Phase::Idle;
         m_hasActiveSession = false;
         m_paused = false;
@@ -177,8 +134,6 @@ void PlaybackController::setPlayerWindow(ui::player::PlayerWindow* window)
         this, &PlaybackController::onSpeedChanged);
     connect(m_window, &ui::player::PlayerWindow::visibilityChanged,
         this, &PlaybackController::visibilityChanged);
-    connect(m_window, &ui::player::PlayerWindow::trackListChanged,
-        this, &PlaybackController::onTrackListChanged);
     connect(m_window, &ui::player::PlayerWindow::chaptersChanged,
         this, &PlaybackController::onChaptersChanged);
     // User-action signals from the QML chrome reach us as plain
@@ -251,7 +206,6 @@ void PlaybackController::play(const QUrl& url,
     m_duration = 0.0;
     m_position = 0.0;
     m_paused = false;
-    m_trackMemoryApplied = false;
     m_pendingResumeSeconds = 0;
     m_skipChapterEnd = -1.0;
     m_chapters.clear();
@@ -277,17 +231,6 @@ void PlaybackController::play(const QUrl& url,
         && *ctx.resumeSeconds > m_settings.player().resumePromptThresholdSec()) {
         m_pendingResumeSeconds = *ctx.resumeSeconds;
         loadCtx.resumeSeconds.reset();
-    }
-
-    // Bump stream epoch + kick off best-effort moviehash compute.
-    // Any failure is logged at debug level and silently dropped —
-    // never user-visible. SubtitleController clears its cached hash
-    // on streamCleared() and on a fresh hash arrival.
-    ++m_streamEpoch;
-    Q_EMIT streamCleared();
-    if (m_http) {
-        auto t = kickoffMoviehashCompute(url, m_streamEpoch);
-        Q_UNUSED(t);
     }
 
     m_phase = Phase::Loading;
@@ -388,93 +331,6 @@ void PlaybackController::setPlaybackRate(double factor)
         return;
     }
     m_window->setSpeed(factor);
-}
-
-QCoro::Task<void> PlaybackController::kickoffMoviehashCompute(QUrl url,
-    quint64 epoch)
-{
-    if (!m_http) {
-        co_return;
-    }
-    if (url.scheme() != QLatin1String("https")) {
-        // Local streams (http://127.0.0.1/...) are served by
-        // LocalMediaServer; we deliberately route OpenSubtitles
-        // moviehash through the upstream HTTPS URL only. A future
-        // change can compute the hash directly from the cached
-        // payload via AssetSession::readRange, but for now just
-        // skip the futile HEAD/GET pair (core::HttpClient enforces
-        // HTTPS and would throw on every probe).
-        qCDebug(KINEMA_CONTROLLER)
-            << "moviehash: skipping non-HTTPS URL"
-            << core::redactUrlForLog(url);
-        co_return;
-    }
-    constexpr qint64 kBlock = 65536;
-
-    const auto rangeGet = [this, &url](qint64 start, qint64 end)
-        -> QCoro::Task<QByteArray> {
-        QNetworkRequest req(url);
-        req.setRawHeader("Range",
-            QByteArrayLiteral("bytes=")
-                + QByteArray::number(start)
-                + "-"
-                + QByteArray::number(end));
-        co_return co_await m_http->get(req);
-    };
-
-    qint64 size = 0;
-    try {
-        const auto headers = co_await m_http->head(QNetworkRequest(url));
-        for (const auto& h : headers) {
-            if (h.first.compare("Content-Length", Qt::CaseInsensitive) == 0) {
-                bool ok = false;
-                size = h.second.toLongLong(&ok);
-                if (!ok) {
-                    size = 0;
-                }
-                break;
-            }
-        }
-    } catch (const std::exception& e) {
-        qCDebug(KINEMA_CONTROLLER) << "moviehash: HEAD failed:" << e.what();
-        co_return;
-    }
-    if (epoch != m_streamEpoch) {
-        co_return;
-    }
-    if (size <= 2 * kBlock) {
-        qCDebug(KINEMA_CONTROLLER) << "moviehash: Content-Length too small or absent";
-        co_return;
-    }
-
-    QByteArray head;
-    QByteArray tail;
-    try {
-        head = co_await rangeGet(0, kBlock - 1);
-    } catch (const std::exception& e) {
-        qCDebug(KINEMA_CONTROLLER) << "moviehash: head Range GET failed:" << e.what();
-        co_return;
-    }
-    if (epoch != m_streamEpoch || head.size() != kBlock) {
-        co_return;
-    }
-    try {
-        tail = co_await rangeGet(size - kBlock, size - 1);
-    } catch (const std::exception& e) {
-        qCDebug(KINEMA_CONTROLLER) << "moviehash: tail Range GET failed:" << e.what();
-        co_return;
-    }
-    if (epoch != m_streamEpoch || tail.size() != kBlock) {
-        co_return;
-    }
-
-    const QString hex = core::moviehash::compute(head, tail, size);
-    if (hex.isEmpty() || epoch != m_streamEpoch) {
-        co_return;
-    }
-    qCDebug(KINEMA_CONTROLLER) << "moviehash: computed" << hex << "for"
-                    << core::redactUrlForLog(url);
-    Q_EMIT moviehashComputed(hex);
 }
 
 void PlaybackController::onFileLoaded()
@@ -670,51 +526,6 @@ void PlaybackController::onSpeedChanged(double factor)
     }
     m_playbackRate = factor;
     Q_EMIT sessionStateChanged();
-}
-
-void PlaybackController::onTrackListChanged(
-    const core::tracks::TrackList& tracks)
-{
-    if (m_trackMemoryApplied || tracks.isEmpty() || !m_window
-        || !m_ctx.key.isValid()) {
-        return;
-    }
-
-    const auto stored = m_history.find(m_ctx.key);
-    if (!stored.has_value()) {
-        m_trackMemoryApplied = true;
-        return;
-    }
-
-    const QString currentAudio = selectedTrackLang(
-        tracks, QStringLiteral("audio"));
-    if (!stored->rememberedAudioLang.isEmpty()
-        && currentAudio != stored->rememberedAudioLang) {
-        const int aid = trackIdForLanguage(tracks,
-            QStringLiteral("audio"), stored->rememberedAudioLang);
-        if (aid > 0) {
-            m_window->setAudioTrack(aid);
-        }
-    }
-
-    if (stored->rememberedSubtitleLang == QLatin1String("off")) {
-        if (hasTrackType(tracks, QStringLiteral("sub"))
-            && !selectedTrackLang(tracks, QStringLiteral("sub")).isEmpty()) {
-            m_window->setSubtitleTrack(-1);
-        }
-    } else if (!stored->rememberedSubtitleLang.isEmpty()) {
-        const QString currentSub = selectedTrackLang(
-            tracks, QStringLiteral("sub"));
-        if (currentSub != stored->rememberedSubtitleLang) {
-            const int sid = trackIdForLanguage(tracks,
-                QStringLiteral("sub"), stored->rememberedSubtitleLang);
-            if (sid > 0) {
-                m_window->setSubtitleTrack(sid);
-            }
-        }
-    }
-
-    m_trackMemoryApplied = true;
 }
 
 void PlaybackController::onChaptersChanged(
