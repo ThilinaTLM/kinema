@@ -4,6 +4,7 @@
 #include "config/TorrentStreamingSettings.h"
 #include "core/persistence/TorrentCache.h"
 #include "domain/PlaybackContext.h"
+#include "playback/torrent/LibtorrentClient.h"
 #include "torrent/TorrentStreamingService.h"
 
 #include <KSharedConfig>
@@ -13,7 +14,7 @@
 
 using namespace kinema;
 
-class TstTorrentLazyStart : public QObject
+class TstLibtorrentClientLazyStart : public QObject
 {
     Q_OBJECT
 
@@ -23,7 +24,26 @@ private Q_SLOTS:
         QStandardPaths::setTestModeEnabled(true);
     }
 
-    void constructionIsDormant()
+    void libtorrentClientConstructionIsDormant()
+    {
+        auto config = KSharedConfig::openConfig(
+            QStringLiteral("kinemarc-lazy-torrent-test"),
+            KConfig::SimpleConfig);
+        config::TorrentStreamingSettings settings(config);
+
+        playback::torrent::LibtorrentClient client(settings);
+        QVERIFY2(!client.isStarted(),
+            "LibtorrentClient must not construct lt::session in "
+            "its constructor");
+        QVERIFY(client.session() == nullptr);
+
+        // Settings application is a no-op until the session is
+        // built; must not crash.
+        client.applyTransferSettings();
+        client.setActiveHandleCount(0);
+    }
+
+    void torrentStreamingServiceStaysDormantWithoutCalls()
     {
         auto config = KSharedConfig::openConfig(
             QStringLiteral("kinemarc-lazy-torrent-test"),
@@ -33,11 +53,11 @@ private Q_SLOTS:
 
         torrent::TorrentStreamingService svc(cache, settings);
         QVERIFY2(!svc.isStartedForTests(),
-            "TorrentStreamingService must not start libtorrent in "
-            "its constructor");
+            "TorrentStreamingService must not start its libtorrent "
+            "client in its constructor");
     }
 
-    void dormantMethodsAreNoOps()
+    void dormantTssMethodsAreNoOps()
     {
         auto config = KSharedConfig::openConfig(
             QStringLiteral("kinemarc-lazy-torrent-test"),
@@ -66,6 +86,6 @@ private Q_SLOTS:
     }
 };
 
-QTEST_GUILESS_MAIN(TstTorrentLazyStart)
+QTEST_GUILESS_MAIN(TstLibtorrentClientLazyStart)
 
-#include "tst_torrent_lazy_start.moc"
+#include "tst_libtorrent_client_lazy_start.moc"

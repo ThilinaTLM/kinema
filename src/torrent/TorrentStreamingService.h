@@ -23,6 +23,10 @@ namespace kinema::core {
 class TorrentCache;
 }
 
+namespace kinema::playback::torrent {
+class LibtorrentClient;
+}
+
 namespace kinema::torrent {
 
 class LocalStreamServer;
@@ -162,15 +166,19 @@ public:
     bool isStartedForTests() const noexcept { return static_cast<bool>(d); }
 
 private:
-    Q_INVOKABLE void drainAlerts();
-    Q_INVOKABLE void postTorrentUpdates();
+    Q_INVOKABLE void onLibtorrentStats(const QString& infoHash,
+        qint64 doneBytes, qint64 ratePayloadBps, int peers,
+        int seeds, int etaSeconds, bool finished);
+    Q_INVOKABLE void onLibtorrentFinished(const QString& infoHash);
+    Q_INVOKABLE void onLibtorrentFailed(const QString& infoHash,
+        const QString& reason);
 
-    /// Build `d` (libtorrent session, legacy `LocalStreamServer`,
-    /// idle/stats timers) on first real use. Safe to call
-    /// repeatedly; cheap after the first start. Every public
-    /// method that genuinely needs a live session routes through
-    /// this. Calls on a `StubTag` instance (no backing services)
-    /// are no-ops so test doubles stay dormant.
+    /// Build `d` (per-asset bookkeeping + legacy `LocalStreamServer`
+    /// + idle timer) and start the underlying
+    /// `playback::torrent::LibtorrentClient` on first real use.
+    /// Safe to call repeatedly; cheap after the first start.
+    /// Calls on a `StubTag` instance (no backing services) are
+    /// no-ops so test doubles stay dormant.
     void ensureStarted();
 
     struct Private;
@@ -180,6 +188,11 @@ private:
     /// can build `Private` on first use. Null for `StubTag`.
     core::TorrentCache*                       m_cache    {};
     const config::TorrentStreamingSettings*   m_settings {};
+
+    /// Owns the libtorrent session, settings, and alert pump.
+    /// Constructed dormant for production instances; never built
+    /// for `StubTag` instances. Parented to `this`.
+    std::unique_ptr<kinema::playback::torrent::LibtorrentClient> m_client;
 };
 
 } // namespace kinema::torrent

@@ -7,6 +7,7 @@
 #include "core/util/Magnet.h"
 #include "core/persistence/TorrentCache.h"
 #include "kinema_log_torrent.h"
+#include "playback/torrent/LibtorrentClient.h"
 #include "torrent/LocalStreamServer.h"
 #include "torrent/MediaFileSelector.h"
 
@@ -21,16 +22,13 @@
 #include <QUuid>
 
 #include <libtorrent/add_torrent_params.hpp>
-#include <libtorrent/alert_types.hpp>
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/file_storage.hpp>
 #include <libtorrent/magnet_uri.hpp>
 #include <libtorrent/session.hpp>
-#include <libtorrent/settings_pack.hpp>
 #include <libtorrent/hex.hpp>
 #include <libtorrent/torrent_handle.hpp>
 #include <libtorrent/torrent_info.hpp>
-#include <libtorrent/torrent_status.hpp>
 
 #include <chrono>
 #include <stdexcept>
@@ -78,21 +76,6 @@ QString fileNameForUrl(const QString& path)
 QString shortHash(const QString& h)
 {
     return h.left(8);
-}
-
-QString hashFromHandle(const lt::torrent_handle& h)
-{
-    if (!h.is_valid()) {
-        return {};
-    }
-    const auto best = h.info_hashes().get_best();
-    return QString::fromStdString(lt::aux::to_hex(best.to_string()))
-        .toLower();
-}
-
-QString hashFromAlert(const lt::torrent_alert* a)
-{
-    return a ? hashFromHandle(a->handle) : QString();
 }
 
 QVector<TorrentFileEntry> torrentFileEntries(
@@ -147,51 +130,26 @@ std::optional<SelectedMediaFile> requestedFileSelection(
 struct TorrentStreamingService::Private {
     Private(TorrentStreamingService* q,
         core::TorrentCache& cacheIn,
-        const config::TorrentStreamingSettings& settingsIn)
+        const config::TorrentStreamingSettings& settingsIn,
+        kinema::playback::torrent::LibtorrentClient& clientIn)
         : owner(q)
         , cache(cacheIn)
         , settings(settingsIn)
+        , client(clientIn)
         , server(*q, q)
         , idleTimer(q)
-        , statsTimer(q)
     {
-        lt::settings_pack pack;
-        applyTransferSettings(pack);
-        // Subscribe to the alert categories the unified downloader
-        // and our diagnostic logging actually consume. `status`
-        // covers torrent_finished + state_changed + state_update;
-        // `error` covers torrent_error / session_error; the rest
-        // give us tracker / DHT / metadata visibility.
-        pack.set_int(lt::settings_pack::alert_mask,
-            lt::alert_category::error
-                | lt::alert_category::status
-                | lt::alert_category::tracker
-                | lt::alert_category::dht
-                | lt::alert_category::port_mapping);
-        session.apply_settings(pack);
-
-        // Wake the GUI thread cheaply when libtorrent has alerts
-        // queued. The lambda runs on libtorrent's internal thread,
-        // so we hop back via a queued invoke.
-        session.set_alert_notify([this] {
-            QMetaObject::invokeMethod(owner,
-                "drainAlerts", Qt::QueuedConnection);
-        });
-
+        // The LibtorrentClient is already started by
+        // `ensureStarted()` before this Private is built — it owns
+        // the lt::session, settings, alert pump, and stats timer.
+        // Alert decoding is wired in `TorrentStreamingService` via
+        // direct Qt signal connections so per-session bookkeeping
+        // updates stay on the same thread as the rest of TSS.
         idleTimer.setInterval(60'000);
         QObject::connect(&idleTimer, &QTimer::timeout, q, [this] {
             stopIdleSessions();
         });
         idleTimer.start();
-
-        // Per-session telemetry tick. `post_torrent_updates()`
-        // schedules a state_update_alert with the current
-        // torrent_status for every torrent in the session.
-        statsTimer.setInterval(2'000);
-        QObject::connect(&statsTimer, &QTimer::timeout, q, [q] {
-            QMetaObject::invokeMethod(q,
-                "postTorrentUpdates", Qt::DirectConnection);
-        });
     }
 
     struct LiveStats {
@@ -216,24 +174,11 @@ struct TorrentStreamingService::Private {
         bool keepAlive = false;
     };
 
-    void applyTransferSettings(lt::settings_pack& pack) const
-    {
-        const int dl = settings.maxDownloadRateKiB();
-        const int ul = settings.maxUploadRateKiB();
-        pack.set_int(lt::settings_pack::download_rate_limit,
-            dl <= 0 ? 0 : dl * 1024);
-        pack.set_int(lt::settings_pack::upload_rate_limit,
-            ul <= 0 ? 0 : ul * 1024);
-    }
+    lt::session& ltSession() { return *client.session(); }
 
     void refreshStatsTimerRunning()
     {
-        const bool shouldRun = !sessions.isEmpty();
-        if (shouldRun && !statsTimer.isActive()) {
-            statsTimer.start();
-        } else if (!shouldRun && statsTimer.isActive()) {
-            statsTimer.stop();
-        }
+        client.setActiveHandleCount(sessions.size());
     }
 
     SessionState* byToken(const QString& token)
@@ -268,7 +213,7 @@ struct TorrentStreamingService::Private {
             << reason << "); was keepAlive=" << it->keepAlive;
         if (it->handle.is_valid()) {
             it->handle.pause();
-            session.remove_torrent(it->handle);
+            ltSession().remove_torrent(it->handle);
         }
         tokenToHash.remove(it->token);
         cache.markInactive(h);
@@ -306,10 +251,9 @@ struct TorrentStreamingService::Private {
     TorrentStreamingService* owner;
     core::TorrentCache& cache;
     const config::TorrentStreamingSettings& settings;
-    lt::session session;
+    kinema::playback::torrent::LibtorrentClient& client;
     LocalStreamServer server;
     QTimer idleTimer;
-    QTimer statsTimer;
     QHash<QString, SessionState> sessions;
     QHash<QString, QString> tokenToHash;
 };
@@ -320,11 +264,14 @@ TorrentStreamingService::TorrentStreamingService(core::TorrentCache& cache,
     , d(nullptr)
     , m_cache(&cache)
     , m_settings(&settings)
+    , m_client(std::make_unique<kinema::playback::torrent::LibtorrentClient>(
+          settings, this))
 {
-    // Lazy-init contract: do not spin up libtorrent here. `Private`
-    // (lt::session, legacy LocalStreamServer, idle/stats timers) is
-    // built by `ensureStarted()` on the first call that genuinely
-    // needs a libtorrent session (`prepare()` / `prepareSession()`).
+    // Lazy-init contract: do not spin up libtorrent here. The
+    // LibtorrentClient is constructed dormant; `Private` (per-asset
+    // bookkeeping + legacy LocalStreamServer + idle timer) is built
+    // by `ensureStarted()` on the first call that genuinely needs
+    // a libtorrent session (`prepare()` / `prepareSession()`).
     // Until then this instance is dormant and every other public
     // method is a cheap no-op. Lets users on Real-Debrid / AllDebrid
     // boot without paying the libtorrent cost.
@@ -343,7 +290,7 @@ void TorrentStreamingService::ensureStarted()
     if (d) {
         return;
     }
-    if (!m_cache || !m_settings) {
+    if (!m_cache || !m_settings || !m_client) {
         // StubTag instances have no backing services; refuse to
         // lazy-start so test doubles stay dormant even if a path
         // accidentally reaches a real entry point.
@@ -351,7 +298,22 @@ void TorrentStreamingService::ensureStarted()
     }
     qCInfo(KINEMA_TORRENT)
         << "starting libtorrent session on first use";
-    d = std::make_unique<Private>(this, *m_cache, *m_settings);
+    m_client->ensureStarted();
+    d = std::make_unique<Private>(this, *m_cache, *m_settings,
+        *m_client);
+
+    // Decode the LibtorrentClient alert stream into TSS's existing
+    // signal surface. Connections live for the lifetime of `this`
+    // because the client is parented to TSS.
+    connect(m_client.get(),
+        &kinema::playback::torrent::LibtorrentClient::statsUpdated,
+        this, &TorrentStreamingService::onLibtorrentStats);
+    connect(m_client.get(),
+        &kinema::playback::torrent::LibtorrentClient::torrentFinished,
+        this, &TorrentStreamingService::onLibtorrentFinished);
+    connect(m_client.get(),
+        &kinema::playback::torrent::LibtorrentClient::torrentFailed,
+        this, &TorrentStreamingService::onLibtorrentFailed);
 }
 
 TorrentStreamingService::~TorrentStreamingService()
@@ -406,7 +368,7 @@ QCoro::Task<PreparedSession> TorrentStreamingService::prepareSession(
         const auto savePath = d->cache.torrentDir(hash).absolutePath();
         atp.save_path = savePath.toStdString();
 
-        lt::torrent_handle handle = d->session.add_torrent(atp, ec);
+        lt::torrent_handle handle = d->ltSession().add_torrent(atp, ec);
         if (ec || !handle.is_valid()) {
             d->cache.markInactive(hash);
             qCWarning(KINEMA_TORRENT).nospace()
@@ -782,142 +744,36 @@ void TorrentStreamingService::promoteToFull(const QString& infoHash)
         << "] promoteToFull: deadlines cleared, keepAlive=on";
 }
 
-void TorrentStreamingService::postTorrentUpdates()
-{
-    if (!d || d->sessions.isEmpty()) {
-        return;
-    }
-    d->session.post_torrent_updates();
-}
-
-void TorrentStreamingService::drainAlerts()
+void TorrentStreamingService::onLibtorrentStats(const QString& infoHash,
+    qint64 doneBytes, qint64 ratePayloadBps, int peers, int seeds,
+    int etaSeconds, bool finished)
 {
     if (!d) {
         return;
     }
-    std::vector<lt::alert*> alerts;
-    d->session.pop_alerts(&alerts);
-    for (lt::alert* a : alerts) {
-        if (auto* su = lt::alert_cast<lt::state_update_alert>(a)) {
-            for (const auto& st : su->status) {
-                const QString hash = hashFromHandle(st.handle);
-                auto sit = d->sessions.find(hash);
-                if (sit == d->sessions.end()) {
-                    continue;
-                }
-                Private::LiveStats ls;
-                ls.doneBytes = static_cast<qint64>(st.total_wanted_done);
-                ls.ratePayloadBps = static_cast<qint64>(
-                    st.download_payload_rate);
-                ls.numPeers = st.num_peers;
-                ls.numSeeds = st.num_seeds;
-                ls.finished = st.is_finished;
-                if (ls.ratePayloadBps > 0
-                    && st.total_wanted > st.total_wanted_done) {
-                    const qint64 remaining = static_cast<qint64>(
-                        st.total_wanted - st.total_wanted_done);
-                    ls.etaSeconds = static_cast<int>(
-                        remaining / ls.ratePayloadBps);
-                } else {
-                    ls.etaSeconds = -1;
-                }
-                sit->lastStats = ls;
-                qCDebug(KINEMA_TORRENT).nospace()
-                    << "[hash=" << shortHash(hash)
-                    << "] peers=" << ls.numPeers
-                    << " seeds=" << ls.numSeeds
-                    << " rate=" << ls.ratePayloadBps
-                    << " done=" << ls.doneBytes;
-                Q_EMIT torrentStatsChanged(hash, ls.doneBytes,
-                    ls.ratePayloadBps, ls.numPeers, ls.numSeeds,
-                    ls.etaSeconds);
-            }
-            continue;
-        }
-        if (auto* fa = lt::alert_cast<lt::torrent_finished_alert>(a)) {
-            const QString h = hashFromAlert(fa);
-            qCInfo(KINEMA_TORRENT).nospace()
-                << "[hash=" << shortHash(h) << "] torrent_finished";
-            Q_EMIT torrentFinished(h);
-            continue;
-        }
-        if (auto* ea = lt::alert_cast<lt::torrent_error_alert>(a)) {
-            const QString h = hashFromAlert(ea);
-            const QString msg = QString::fromStdString(
-                ea->error.message());
-            qCWarning(KINEMA_TORRENT).nospace()
-                << "[hash=" << shortHash(h) << "] torrent_error: "
-                << msg;
-            Q_EMIT torrentFailed(h, msg);
-            continue;
-        }
-        if (auto* ma = lt::alert_cast<lt::metadata_received_alert>(a)) {
-            qCInfo(KINEMA_TORRENT).nospace()
-                << "[hash=" << shortHash(hashFromAlert(ma))
-                << "] metadata_received";
-            continue;
-        }
-        if (auto* sca = lt::alert_cast<lt::state_changed_alert>(a)) {
-            qCInfo(KINEMA_TORRENT).nospace()
-                << "[hash=" << shortHash(hashFromAlert(sca))
-                << "] state_changed: "
-                << QString::fromStdString(sca->message());
-            continue;
-        }
-        if (auto* ata = lt::alert_cast<lt::add_torrent_alert>(a)) {
-            const QString h = hashFromAlert(ata);
-            if (ata->error) {
-                qCWarning(KINEMA_TORRENT).nospace()
-                    << "[hash=" << shortHash(h)
-                    << "] add_torrent_alert error: "
-                    << QString::fromStdString(ata->error.message());
-            } else {
-                qCDebug(KINEMA_TORRENT).nospace()
-                    << "[hash=" << shortHash(h)
-                    << "] add_torrent_alert ok";
-            }
-            continue;
-        }
-        if (auto* tea = lt::alert_cast<lt::tracker_error_alert>(a)) {
-            qCWarning(KINEMA_TORRENT).nospace()
-                << "[hash=" << shortHash(hashFromAlert(tea))
-                << "] tracker_error: "
-                << QString::fromStdString(tea->message());
-            continue;
-        }
-        if (auto* twa = lt::alert_cast<lt::tracker_warning_alert>(a)) {
-            qCInfo(KINEMA_TORRENT).nospace()
-                << "[hash=" << shortHash(hashFromAlert(twa))
-                << "] tracker_warning: "
-                << QString::fromStdString(twa->message());
-            continue;
-        }
-        if (auto* tra = lt::alert_cast<lt::tracker_reply_alert>(a)) {
-            qCDebug(KINEMA_TORRENT).nospace()
-                << "[hash=" << shortHash(hashFromAlert(tra))
-                << "] tracker_reply: peers=" << tra->num_peers
-                << " url=\"" << QString::fromStdString(tra->tracker_url())
-                << "\"";
-            continue;
-        }
-        if (lt::alert_cast<lt::dht_bootstrap_alert>(a)) {
-            qCInfo(KINEMA_TORRENT) << "dht_bootstrap completed";
-            continue;
-        }
-        if (auto* lfa = lt::alert_cast<lt::listen_failed_alert>(a)) {
-            qCWarning(KINEMA_TORRENT).nospace()
-                << "listen_failed: "
-                << QString::fromStdString(lfa->message());
-            continue;
-        }
-        if (a->category() & lt::alert_category::error) {
-            qCWarning(KINEMA_TORRENT).noquote()
-                << "alert(error):" << QString::fromStdString(a->message());
-        } else {
-            qCDebug(KINEMA_TORRENT).noquote()
-                << "alert:" << QString::fromStdString(a->message());
-        }
+    auto sit = d->sessions.find(infoHash);
+    if (sit == d->sessions.end()) {
+        return;
     }
+    sit->lastStats.doneBytes = doneBytes;
+    sit->lastStats.ratePayloadBps = ratePayloadBps;
+    sit->lastStats.numPeers = peers;
+    sit->lastStats.numSeeds = seeds;
+    sit->lastStats.etaSeconds = etaSeconds;
+    sit->lastStats.finished = finished;
+    Q_EMIT torrentStatsChanged(infoHash, doneBytes, ratePayloadBps,
+        peers, seeds, etaSeconds);
+}
+
+void TorrentStreamingService::onLibtorrentFinished(const QString& infoHash)
+{
+    Q_EMIT torrentFinished(infoHash);
+}
+
+void TorrentStreamingService::onLibtorrentFailed(const QString& infoHash,
+    const QString& reason)
+{
+    Q_EMIT torrentFailed(infoHash, reason);
 }
 
 } // namespace kinema::torrent
