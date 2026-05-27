@@ -11,6 +11,10 @@
 #include <QStringList>
 #include <QVariantMap>
 
+namespace kinema::playback::series {
+class SeriesSessionService;
+}
+
 namespace kinema::core {
 class IdleInhibitor;
 }
@@ -18,14 +22,14 @@ class IdleInhibitor;
 namespace kinema::controllers {
 
 class PlaybackController;
-class SeriesPlaybackSessionController;
+
 
 class MprisController : public QObject
 {
     Q_OBJECT
 public:
     MprisController(PlaybackController& playback,
-        SeriesPlaybackSessionController* seriesSession,
+        kinema::playback::series::SeriesSessionService* seriesSession,
         QObject* parent = nullptr);
     ~MprisController() override;
 
@@ -76,7 +80,7 @@ private:
     void emitRootPropertiesChanged();
 
     PlaybackController& m_playback;
-    SeriesPlaybackSessionController* m_seriesSession = nullptr;
+    kinema::playback::series::SeriesSessionService* m_seriesSession = nullptr;
     std::unique_ptr<core::IdleInhibitor> m_inhibitor;
     bool m_objectRegistered = false;
     bool m_serviceRegistered = false;

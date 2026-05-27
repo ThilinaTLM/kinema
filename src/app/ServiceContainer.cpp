@@ -21,7 +21,7 @@
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/MprisController.h"
 #include "controllers/PlaybackController.h"
-#include "controllers/SeriesPlaybackSessionController.h"
+
 #endif
 #include "controllers/SubtitleController.h"
 #include "controllers/TokenController.h"
@@ -455,11 +455,6 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
         *m_historyQueryService, m_settings, m_http.get(), a);
-    m_seriesSessionCtrl = new controllers::SeriesPlaybackSessionController(
-        *m_playbackCtrl, *m_torrentStreaming, *m_streamActions,
-        m_sessionRegistry.get(), a);
-    m_mprisCtrl = new controllers::MprisController(
-        *m_playbackCtrl, m_seriesSessionCtrl, a);
     // Subtitle ↔ playback coupling (moviehash → search) lives at
     // the service layer.
     if (m_subtitleCtrl) {
@@ -475,8 +470,17 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
         *m_streamActions, *m_playbackEventStream, m_playbackCtrl,
         m_embeddedPlayerAdapter, m_externalPlayerAdapter, a);
+    // Event-driven season-pack adjacency. Subscribes to the
+    // playback event stream, reads files via the session catalog,
+    // and dispatches next/previous through PlaybackSessionManager.
+    // Backend-agnostic: torrent and debrid catalogs behave the
+    // same. Only the embedded-player build surfaces auto-next UI,
+    // so the service is constructed inside the libmpv gate.
     m_seriesSessionService = new playback::series::SeriesSessionService(
-        *m_seriesSessionCtrl, a);
+        *m_playbackEventStream, *m_sessionRegistry,
+        *m_playbackSessionManager, a);
+    m_mprisCtrl = new controllers::MprisController(
+        *m_playbackCtrl, m_seriesSessionService, a);
 #else
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
         *m_streamActions, *m_playbackEventStream, nullptr,

@@ -12,7 +12,7 @@
 #ifdef KINEMA_HAVE_LIBMPV
 #include "controllers/MprisController.h"
 #include "controllers/PlaybackController.h"
-#include "controllers/SeriesPlaybackSessionController.h"
+#include "playback/series/SeriesSessionService.h"
 #endif
 #include "controllers/SubtitleController.h"
 #include "controllers/TokenController.h"
@@ -633,23 +633,15 @@ void ShellViewModel::wireStatusForwarding()
         &ShellViewModel::passiveMessage);
 #ifdef KINEMA_HAVE_LIBMPV
     auto* playbackCtrl = m_services.playbackController();
-    auto* seriesSessionCtrl = m_services.seriesSessionController();
+    auto* seriesSession = m_services.seriesSessionService();
     auto* torrentStreaming = m_services.torrentStreaming();
-    // Embedded series-pack navigation + auto-next. The controller
-    // derives prev/next strictly from the active torrent's file list
-    // and requests window close when playback reaches a terminal EOF.
-    if (playbackCtrl && seriesSessionCtrl) {
+    // Series adjacency + auto-next live entirely in
+    // SeriesSessionService now (event-stream driven). The shell
+    // only handles cross-subsystem residue: stopping the torrent
+    // engine and detaching the download row when playback ends.
+    if (playbackCtrl) {
         connect(playbackCtrl,
-            &controllers::PlaybackController::activeSessionChanged,
-            seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::refreshFromPlayback);
-        connect(playbackCtrl,
-            &controllers::PlaybackController::endOfFile,
-            seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::onPlayerEndOfFile);
-        connect(playbackCtrl,
-            &controllers::PlaybackController::endOfFile,
-            this,
+            &controllers::PlaybackController::endOfFile, this,
             [this, torrentStreaming, playbackCtrl](const QString&) {
                 if (torrentStreaming && playbackCtrl) {
                     torrentStreaming->stopForContext(
@@ -657,9 +649,8 @@ void ShellViewModel::wireStatusForwarding()
                 }
             });
         connect(playbackCtrl,
-            &controllers::PlaybackController::userClosedWindow,
-            seriesSessionCtrl,
-            [this, torrentStreaming, seriesSessionCtrl]
+            &controllers::PlaybackController::userClosedWindow, this,
+            [this, torrentStreaming]
             (const domain::PlaybackContext& ctx) {
                 if (torrentStreaming) {
                     torrentStreaming->stopForContext(ctx);
@@ -672,30 +663,31 @@ void ShellViewModel::wireStatusForwarding()
                 // reading bytes. External-player launches stay
                 // sticky — we don't observe their lifetime — and
                 // the engine's idle-stop timer eventually quiesces
-                // them via `DownloadManager::detachPlayer` from
-                // its own cleanup paths.
+                // them via TransferUseCase::detachPlayer from its
+                // own cleanup paths.
                 if (auto* dc = m_services.downloadController()) {
                     if (const auto row = dc->findForKey(ctx.key)) {
                         dc->detachPlayer(row->assetId);
                     }
                 }
-                seriesSessionCtrl->onPlayerUserClosed(ctx);
             });
-        connect(seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::windowCloseRequested,
+    }
+    if (seriesSession) {
+        connect(seriesSession,
+            &playback::series::SeriesSessionService::windowCloseRequested,
             this, [this] {
                 if (m_playerWindow) {
                     m_playerWindow->stopAndHide();
                 }
             });
-        // Close the loop between the picker's "Season pack" chip and
-        // runtime behaviour: emit a one-shot passive status message
-        // once adjacency has actually resolved against the torrent's
-        // file list. The controller already de-dups per
+        // Close the loop between the picker's "Season pack" chip
+        // and runtime behaviour: emit a one-shot passive status
+        // message once adjacency has actually resolved against the
+        // session's file catalog. The service de-dups per
         // `(infoHash, season, episode)` so seeks / resumes do not
         // re-trigger this.
-        connect(seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::packAdjacencyResolved,
+        connect(seriesSession,
+            &playback::series::SeriesSessionService::packAdjacencyResolved,
             this,
             [this](bool nextAvailable, int nextSeason, int nextEpisode) {
                 if (nextAvailable) {
@@ -716,9 +708,9 @@ void ShellViewModel::wireStatusForwarding()
         // Hydrate the picker row's size cell once the playback
         // pipeline learns the authoritative byte count. Only the
         // series detail page has a relevant streams model in scope
-        // here \u2014 the controller doesn't fire for movies.
-        connect(seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::currentStreamSizeResolved,
+        // here \u2014 the service doesn't fire for movies.
+        connect(seriesSession,
+            &playback::series::SeriesSessionService::currentStreamSizeResolved,
             this,
             [this](const QString& infoHash, int fileIndex, qint64 size) {
                 if (auto* vm = m_services.seriesDetailVm()) {
@@ -797,7 +789,7 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
 
     auto* playbackCtrl = m_services.playbackController();
     auto* embeddedAdapter = m_services.embeddedPlayerAdapter();
-    auto* seriesSessionCtrl = m_services.seriesSessionController();
+    auto* seriesSession = m_services.seriesSessionService();
     auto* subtitlesVm = m_services.subtitlesVm();
     auto* subtitleCtrl = m_services.subtitleController();
 
@@ -843,24 +835,24 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     }
 
     auto* playerVm = m_playerWindow->viewModel();
-    if (playerVm && seriesSessionCtrl) {
-        const auto refreshEpisodeNavigation = [seriesSessionCtrl, playerVm] {
+    if (playerVm && seriesSession) {
+        const auto refreshEpisodeNavigation = [seriesSession, playerVm] {
             playerVm->setEpisodeNavigationState(
-                seriesSessionCtrl->navigationVisible(),
-                seriesSessionCtrl->canGoPrevious(),
-                seriesSessionCtrl->canGoNext());
+                seriesSession->navigationVisible(),
+                seriesSession->canGoPrevious(),
+                seriesSession->canGoNext());
         };
 
         refreshEpisodeNavigation();
-        connect(seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::navigationChanged,
+        connect(seriesSession,
+            &playback::series::SeriesSessionService::navigationChanged,
             playerVm, refreshEpisodeNavigation);
         connect(m_playerWindow, &ui::player::PlayerWindow::previousRequested,
-            seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::playPreviousEpisode);
+            seriesSession,
+            &playback::series::SeriesSessionService::playPreviousEpisode);
         connect(m_playerWindow, &ui::player::PlayerWindow::nextRequested,
-            seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::playNextEpisode);
+            seriesSession,
+            &playback::series::SeriesSessionService::playNextEpisode);
     }
 
     // Player chrome's `SubtitlePicker → Download…` lands on the

@@ -72,7 +72,10 @@ public:
     PlaybackSessionId activeSessionId() const noexcept;
 
 public Q_SLOTS:
-    void play(const domain::Stream& stream,
+    /// Play `stream` with the identity/title information in `ctx`.
+    /// Virtual so projections / tests can record auto-next
+    /// dispatches without spinning up the real session machinery.
+    virtual void play(const domain::Stream& stream,
         const domain::PlaybackContext& ctx);
     void playWithBackend(const domain::Stream& stream,
         const domain::PlaybackContext& ctx,

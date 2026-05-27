@@ -40,7 +40,6 @@ class DownloadController;
 class LibraryController;
 class MprisController;
 class PlaybackController;
-class SeriesPlaybackSessionController;
 class SubtitleController;
 class TokenController;
 class TrayController;
@@ -231,10 +230,6 @@ public:
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::MprisController* mprisController() const { return m_mprisCtrl; }
     controllers::PlaybackController* playbackController() const { return m_playbackCtrl; }
-    controllers::SeriesPlaybackSessionController* seriesSessionController() const
-    {
-        return m_seriesSessionCtrl;
-    }
 #endif
 
     // ---- Page view-models ----------------------------------------------
@@ -343,7 +338,6 @@ private:
 #ifdef KINEMA_HAVE_LIBMPV
     controllers::MprisController* m_mprisCtrl {};
     controllers::PlaybackController* m_playbackCtrl {};
-    controllers::SeriesPlaybackSessionController* m_seriesSessionCtrl {};
 #endif
 };
 

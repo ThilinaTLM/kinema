@@ -6,7 +6,7 @@
 #include "controllers/MprisController.h"
 
 #include "controllers/PlaybackController.h"
-#include "controllers/SeriesPlaybackSessionController.h"
+#include "playback/series/SeriesSessionService.h"
 #include "core/io/IdleInhibitor.h"
 #include "core/mpv/MprisMetadata.h"
 #include "kinema_log_controller.h"
@@ -132,7 +132,7 @@ private:
 } // namespace
 
 MprisController::MprisController(PlaybackController& playback,
-    SeriesPlaybackSessionController* seriesSession,
+    kinema::playback::series::SeriesSessionService* seriesSession,
     QObject* parent)
     : QObject(parent)
     , m_playback(playback)
@@ -150,7 +150,7 @@ MprisController::MprisController(PlaybackController& playback,
         this, &MprisController::onSeeked);
     if (m_seriesSession) {
         connect(m_seriesSession,
-            &SeriesPlaybackSessionController::navigationChanged,
+            &kinema::playback::series::SeriesSessionService::navigationChanged,
             this, &MprisController::refresh);
     }
 

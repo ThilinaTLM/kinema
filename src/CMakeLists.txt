@@ -187,7 +187,6 @@ if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
         controllers/MprisController.cpp
         controllers/PlaybackController.cpp
-        controllers/SeriesPlaybackSessionController.cpp
         playback/adapters/EmbeddedMpvPlayerAdapter.cpp
         playback/series/SeriesSessionService.cpp
         ui/player/AudioTracksModel.cpp
