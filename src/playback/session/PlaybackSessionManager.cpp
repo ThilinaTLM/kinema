@@ -3,6 +3,8 @@
 
 #include "playback/session/PlaybackSessionManager.h"
 
+#include "playback/events/PlaybackEventStream.h"
+#include "playback/session/PlaybackSession.h"
 #include "services/StreamActions.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
@@ -13,10 +15,12 @@ namespace kinema::playback::session {
 
 PlaybackSessionManager::PlaybackSessionManager(
     services::StreamActions& actions,
+    events::PlaybackEventStream& eventStream,
     controllers::PlaybackController* embedded,
     QObject* parent)
     : QObject(parent)
     , m_actions(actions)
+    , m_eventStream(eventStream)
     , m_embedded(embedded)
 {
     connect(&m_actions, &services::StreamActions::statusMessage,
@@ -25,9 +29,29 @@ PlaybackSessionManager::PlaybackSessionManager(
 
 PlaybackSessionManager::~PlaybackSessionManager() = default;
 
+PlaybackSessionId PlaybackSessionManager::activeSessionId() const noexcept
+{
+    return m_session ? m_session->id() : PlaybackSessionId();
+}
+
+void PlaybackSessionManager::supersedeActiveSession()
+{
+    if (m_session && !m_session->isTerminal()) {
+        m_session->markReplacedByNewSource();
+    }
+    m_session.reset();
+}
+
 void PlaybackSessionManager::play(const domain::Stream& stream,
     const domain::PlaybackContext& ctx)
 {
+    supersedeActiveSession();
+    m_session = std::make_unique<PlaybackSession>(m_eventStream);
+    m_session->start(stream, ctx);
+    // Transitional: the legacy StreamActions path still performs
+    // the actual resolution / mpv handoff. Once Phase 5 + 6 land
+    // the session will drive TransferUseCase + PlayerPort
+    // directly.
     m_actions.play(stream, ctx);
 }
 
@@ -35,12 +59,18 @@ void PlaybackSessionManager::playWithBackend(const domain::Stream& stream,
     const domain::PlaybackContext& ctx,
     domain::DownloadBackendKind backend)
 {
+    supersedeActiveSession();
+    m_session = std::make_unique<PlaybackSession>(m_eventStream);
+    m_session->start(stream, ctx, backend);
     m_actions.playWithBackend(stream, ctx, backend);
 }
 
 void PlaybackSessionManager::download(const domain::Stream& stream,
     const domain::PlaybackContext& ctx)
 {
+    // Save-offline is not a playback attempt; do not touch the
+    // active session. Eventually this routes through
+    // TransferUseCase::saveOffline.
     m_actions.download(stream, ctx);
 }
 
@@ -86,6 +116,9 @@ void PlaybackSessionManager::stop()
         m_embedded->stop();
     }
 #endif
+    if (m_session && !m_session->isTerminal()) {
+        m_session->stopByUser();
+    }
 }
 
 void PlaybackSessionManager::seekRelativeSeconds(double seconds)
@@ -133,4 +166,3 @@ void PlaybackSessionManager::setPlaybackRate(double factor)
 }
 
 } // namespace kinema::playback::session
-

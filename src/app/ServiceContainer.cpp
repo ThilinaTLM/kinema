@@ -378,12 +378,12 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
             &controllers::SubtitleController::clearMoviehash);
     }
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, m_playbackCtrl, a);
+        *m_streamActions, *m_playbackEventStream, m_playbackCtrl, a);
     m_seriesSessionService = new playback::series::SeriesSessionService(
         *m_seriesSessionCtrl, a);
 #else
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, nullptr, a);
+        *m_streamActions, *m_playbackEventStream, nullptr, a);
 #endif
     if (m_subtitleCtrl) {
         m_subtitleSessionService

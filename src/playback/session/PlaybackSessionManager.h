@@ -6,10 +6,12 @@
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
+#include "playback/events/PlaybackEvent.h"
 
 #include <QObject>
 #include <QString>
 
+#include <memory>
 #include <optional>
 
 namespace kinema::services {
@@ -20,7 +22,13 @@ namespace kinema::controllers {
 class PlaybackController;
 }
 
+namespace kinema::playback::events {
+class PlaybackEventStream;
+}
+
 namespace kinema::playback::session {
+
+class PlaybackSession;
 
 /**
  * User-facing playback orchestrator.
@@ -41,9 +49,20 @@ class PlaybackSessionManager : public QObject
     Q_OBJECT
 public:
     PlaybackSessionManager(services::StreamActions& actions,
+        events::PlaybackEventStream& eventStream,
         controllers::PlaybackController* embedded,
         QObject* parent = nullptr);
     ~PlaybackSessionManager() override;
+
+    /// Currently active session, or nullptr if no play attempt is
+    /// in flight. Exposed for projections (history, series) that
+    /// need to associate inbound events with the current attempt
+    /// during the transitional phase.
+    PlaybackSession* activeSession() const noexcept { return m_session.get(); }
+
+    /// Id of the active session, or a null QUuid when there is no
+    /// active attempt.
+    PlaybackSessionId activeSessionId() const noexcept;
 
 public Q_SLOTS:
     void play(const domain::Stream& stream,
@@ -71,8 +90,12 @@ Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
 private:
+    void supersedeActiveSession();
+
     services::StreamActions& m_actions;
+    events::PlaybackEventStream& m_eventStream;
     controllers::PlaybackController* m_embedded;
+    std::unique_ptr<PlaybackSession> m_session;
 };
 
 } // namespace kinema::playback::session
