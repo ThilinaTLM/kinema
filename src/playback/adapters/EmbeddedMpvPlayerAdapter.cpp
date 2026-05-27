@@ -310,17 +310,18 @@ void EmbeddedMpvPlayerAdapter::onSpeedChanged(double factor)
 }
 
 void EmbeddedMpvPlayerAdapter::onTrackListChanged(
-    const core::tracks::TrackList& /*tracks*/)
+    const core::tracks::TrackList& tracks)
 {
     if (!m_sessionActive) return;
-    m_eventStream.publish(events::TrackListChanged { m_sessionId });
+    m_eventStream.publish(events::TrackListChanged { m_sessionId, tracks });
 }
 
 void EmbeddedMpvPlayerAdapter::onChaptersChanged(
-    const core::chapters::ChapterList& /*chapters*/)
+    const core::chapters::ChapterList& chapters)
 {
     if (!m_sessionActive) return;
-    m_eventStream.publish(events::ChapterListChanged { m_sessionId });
+    m_eventStream.publish(events::ChapterListChanged {
+        m_sessionId, chapters });
 }
 
 void EmbeddedMpvPlayerAdapter::onUserClosedWindow()

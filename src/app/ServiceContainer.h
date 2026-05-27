@@ -78,6 +78,10 @@ class EmbeddedMpvPlayerAdapter;
 class ExternalPlayerAdapter;
 }
 
+namespace kinema::playback::progress {
+class PlaybackProgressProjector;
+}
+
 namespace kinema::playback::resume {
 class ResumeUseCase;
 }
@@ -182,6 +186,8 @@ public:
     { return m_playbackSessionManager; }
     playback::transfer::TransferUseCase* transferUseCase() const
     { return m_transferUseCase; }
+    playback::progress::PlaybackProgressProjector* playbackProgressProjector() const
+    { return m_playbackProgressProjector; }
     playback::resume::ResumeUseCase* resumeUseCase() const
     { return m_resumeUseCase; }
     playback::history::HistoryQueryService* historyQueryService() const
@@ -285,6 +291,7 @@ private:
         m_streamIndexerAdapter;
     playback::transfer::TransferUseCase* m_transferUseCase {};
     playback::resume::ResumeUseCase* m_resumeUseCase {};
+    playback::progress::PlaybackProgressProjector* m_playbackProgressProjector {};
     playback::history::HistoryQueryService* m_historyQueryService {};
     playback::session::PlaybackSessionManager* m_playbackSessionManager {};
     playback::adapters::ExternalPlayerAdapter* m_externalPlayerAdapter {};

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/mpv/MpvChapterList.h"
+#include "core/mpv/MpvTrackList.h"
 #include "domain/Download.h"
 #include "domain/MediaFile.h"
 #include "domain/PlaybackContext.h"
@@ -97,10 +99,12 @@ struct DurationChanged {
 
 struct TrackListChanged {
     PlaybackSessionId sessionId;
+    core::tracks::TrackList tracks;
 };
 
 struct ChapterListChanged {
     PlaybackSessionId sessionId;
+    core::chapters::ChapterList chapters;
 };
 
 struct BufferingChanged {

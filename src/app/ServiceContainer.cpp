@@ -49,6 +49,7 @@
 #include "playback/events/PlaybackEventStream.h"
 #include "playback/history/HistoryQueryService.h"
 #include "playback/history/SqlitePlaybackHistoryRepository.h"
+#include "playback/progress/PlaybackProgressProjector.h"
 #include "playback/resume/ResumeUseCase.h"
 #include "playback/series/SeriesSessionService.h"
 #include "playback/session/PlaybackSessionManager.h"
@@ -264,6 +265,9 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         *m_downloadManager, a);
     m_resumeUseCase
         = new playback::resume::ResumeUseCase(*m_historyCtrl, a);
+    m_playbackProgressProjector
+        = new playback::progress::PlaybackProgressProjector(
+            *m_historyRepo, *m_playbackEventStream, a);
     m_historyQueryService = new playback::history::HistoryQueryService(
         *m_historyRepo, *m_history, a);
 
