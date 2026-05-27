@@ -13,10 +13,6 @@ namespace kinema::controllers {
 class DownloadController;
 }
 
-namespace kinema::playback::transfer {
-class TransferUseCase;
-}
-
 namespace kinema::services {
 class StreamActions;
 }
@@ -59,7 +55,6 @@ public:
     Q_ENUM(Filter)
 
     DownloadsViewModel(controllers::DownloadController& controller,
-        playback::transfer::TransferUseCase& useCase,
         services::StreamActions* streamActions,
         QObject* parent = nullptr);
 
@@ -132,7 +127,6 @@ private:
     void recomputeAggregatesFromModel();
 
     controllers::DownloadController& m_controller;
-    playback::transfer::TransferUseCase& m_useCase;
     services::StreamActions* m_streamActions {};
     DownloadsListModel* m_items {};
     int m_activeCount = 0;

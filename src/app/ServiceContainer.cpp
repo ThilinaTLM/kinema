@@ -363,7 +363,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     // drawer's downloads entry can show counts even before the
     // first navigation to the page.
     m_downloadsVm = new ui::qml::DownloadsViewModel(*m_downloadCtrl,
-        *m_transferUseCase, m_streamActions, a);
+        m_streamActions, a);
 
     // Discover / Search / Browse surface VMs. They sit on top of
     // the existing service graph; action signals route back into

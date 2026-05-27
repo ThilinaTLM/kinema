@@ -52,6 +52,12 @@ QSet<QString> DownloadController::attachedPlayerAssetIds() const
     return m_useCase.attachedPlayerAssetIds();
 }
 
+std::optional<playback::transfer::LiveAssetStats>
+DownloadController::liveStatsFor(const QString& assetId) const
+{
+    return m_useCase.liveStatsFor(assetId);
+}
+
 void DownloadController::download(const domain::Stream& stream,
     const domain::PlaybackContext& ctx)
 {

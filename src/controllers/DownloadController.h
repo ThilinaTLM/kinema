@@ -4,6 +4,7 @@
 #pragma once
 
 #include "domain/Download.h"
+#include "playback/transfer/LiveAssetStats.h"
 
 #include <QObject>
 #include <QSet>
@@ -55,6 +56,15 @@ public:
     /// Snapshot of asset ids that currently have a player attached;
     /// used by the view-model to compute `hasPlayerAttached` per row.
     QSet<QString> attachedPlayerAssetIds() const;
+
+    /// Live transient telemetry (rate / peers / seeds / ETA) for
+    /// the asset's currently-active transfer session. Returns
+    /// nullopt when no session is active. Exposed here so
+    /// `DownloadsViewModel` can read per-row stats through the
+    /// controller boundary instead of holding its own
+    /// `TransferUseCase&`.
+    std::optional<playback::transfer::LiveAssetStats> liveStatsFor(
+        const QString& assetId) const;
 
 public Q_SLOTS:
     /// Background full-file download with `Pinned` disposition.

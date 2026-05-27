@@ -7,7 +7,6 @@
 #include "domain/PlaybackContext.h"
 #include "controllers/DownloadController.h"
 #include "core/io/HttpErrorPresenter.h"
-#include "playback/transfer/TransferUseCase.h"
 #include "kinema_log_ui.h"
 #include "services/StreamActions.h"
 
@@ -42,12 +41,10 @@ bool isActiveState(domain::DownloadState s)
 
 DownloadsViewModel::DownloadsViewModel(
     controllers::DownloadController& controller,
-    playback::transfer::TransferUseCase& useCase,
     services::StreamActions* streamActions,
     QObject* parent)
     : QObject(parent)
     , m_controller(controller)
-    , m_useCase(useCase)
     , m_streamActions(streamActions)
     , m_items(new DownloadsListModel(this))
 {
@@ -69,11 +66,11 @@ void DownloadsViewModel::refresh()
 
     // Pull live stats once per refresh and join them into the
     // model's transient map. This keeps DownloadsListModel free of
-    // any TransferUseCase dependency while still letting QML bind
+    // any transfer-subsystem dependency while still letting QML bind
     // to per-row rate / peers / ETA roles.
     QHash<QString, DownloadsListModel::LiveRow> live;
     for (const auto& it : rows) {
-        if (auto stats = m_useCase.liveStatsFor(it.assetId)) {
+        if (auto stats = m_controller.liveStatsFor(it.assetId)) {
             DownloadsListModel::LiveRow lr;
             lr.ratePayloadBps = stats->ratePayloadBps;
             lr.peers = stats->peers;
@@ -155,7 +152,7 @@ void DownloadsViewModel::flushDirtyItems()
         // Push live stats first so the row's persistent update
         // emission lands with the freshest rate / peers visible.
         DownloadsListModel::LiveRow lr;
-        if (const auto stats = m_useCase.liveStatsFor(assetId)) {
+        if (const auto stats = m_controller.liveStatsFor(assetId)) {
             lr.ratePayloadBps = stats->ratePayloadBps;
             lr.peers = stats->peers;
             lr.seeds = stats->seeds;
