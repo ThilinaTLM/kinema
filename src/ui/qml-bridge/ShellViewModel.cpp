@@ -796,7 +796,6 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     m_playerWindow = new ui::player::PlayerWindow(
         settings.appearance(), settings.player(), m_window);
 
-    auto* historyCtrl = m_services.historyController();
     auto* playbackCtrl = m_services.playbackController();
     auto* embeddedAdapter = m_services.embeddedPlayerAdapter();
     auto* seriesSessionCtrl = m_services.seriesSessionController();
@@ -808,16 +807,13 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     // keeps the libmpv context alive for the next launch. We only
     // react to `destroyed()` for the application-shutdown case.
     connect(m_playerWindow, &QObject::destroyed, this,
-        [this, historyCtrl, embeddedAdapter](QObject* obj) {
+        [this, embeddedAdapter](QObject* obj) {
             if (obj != m_playerWindow) {
                 return;
             }
             m_playerWindow = nullptr;
             if (auto* tray = m_services.tray()) {
                 tray->setPlayerWindow(nullptr);
-            }
-            if (historyCtrl) {
-                historyCtrl->setPlayerWindow(nullptr);
             }
             if (embeddedAdapter) {
                 embeddedAdapter->setPlayerWindow(nullptr);
@@ -826,9 +822,6 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
 
     if (auto* tray = m_services.tray()) {
         tray->setPlayerWindow(m_playerWindow);
-    }
-    if (historyCtrl) {
-        historyCtrl->setPlayerWindow(m_playerWindow);
     }
     if (embeddedAdapter) {
         // Parallel wiring: the legacy PlaybackController keeps

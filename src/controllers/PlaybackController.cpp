@@ -6,11 +6,11 @@
 #ifdef KINEMA_HAVE_LIBMPV
 
 #include "config/AppSettings.h"
-#include "controllers/HistoryController.h"
 #include "core/io/HttpClient.h"
 #include "core/io/HttpErrorPresenter.h"
 #include "core/util/Moviehash.h"
 #include "core/io/UrlRedactor.h"
+#include "playback/history/HistoryQueryService.h"
 #include "playback/session/PlayerLoadWatchdog.h"
 #include "ui/player/PlayerWindow.h"
 #include "kinema_log_controller.h"
@@ -117,7 +117,8 @@ QString skipChapterKind(SkipKind kind)
 
 } // namespace
 
-PlaybackController::PlaybackController(HistoryController& history,
+PlaybackController::PlaybackController(
+    playback::history::HistoryQueryService& history,
     const config::AppSettings& settings,
     core::HttpClient* http,
     QObject* parent)

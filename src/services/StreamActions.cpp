@@ -3,7 +3,7 @@
 
 #include "services/StreamActions.h"
 
-#include "controllers/HistoryController.h"
+#include "playback/resume/ResumeUseCase.h"
 #include "core/util/Magnet.h"
 #include "core/mpv/PlayerLauncher.h"
 #include "core/io/HttpErrorPresenter.h"
@@ -61,10 +61,10 @@ void StreamActions::launchOpenUrlJob(const QUrl& url,
         });
 }
 
-void StreamActions::setHistoryController(
-    controllers::HistoryController* history)
+void StreamActions::setResumeUseCase(
+    playback::resume::ResumeUseCase* useCase)
 {
-    m_history = history;
+    m_resume = useCase;
 }
 
 void StreamActions::setDownloadManager(download::DownloadManager* manager)
@@ -171,9 +171,12 @@ void StreamActions::playInternal(const domain::Stream& stream,
             : stream.releaseName;
     }
 
-    if (m_history) {
-        ctx.resumeSeconds = m_history->resumeSecondsFor(ctx.key);
-        m_history->onPlayStarting(ctx);
+    if (m_resume) {
+        ctx.resumeSeconds = m_resume->resumeSecondsFor(ctx.key);
+        // History row seeding moved to
+        // PlaybackProgressProjector, which observes the
+        // PlaybackRequested event emitted by PlaybackSession
+        // before this play call is dispatched.
     }
 
     // Preferred path: every backend serves through the unified

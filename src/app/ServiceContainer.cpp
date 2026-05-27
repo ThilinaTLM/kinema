@@ -230,11 +230,13 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         &controllers::TokenController::openSubtitlesPasswordChanged,
         m_openSubtitles, onOsCredentialChanged);
 
-    // History controller. Two-phase: StreamActions is wired now;
-    // `setPlayerWindow` lands in `ShellViewModel::ensurePlayerWindow`.
+    // History controller. Kept alive for now because it owns the
+    // resume-from-history one-click flow and the indexer
+    // re-resolution pipeline; the ResumeUseCase forwards into it.
+    // Phase 12 will inline that flow into ResumeUseCase and delete
+    // this controller.
     m_historyCtrl = new controllers::HistoryController(*m_history,
         m_indexers, m_tokenCtrl->realDebridToken(), a);
-    m_streamActions->setHistoryController(m_historyCtrl);
     m_historyCtrl->setStreamActions(m_streamActions);
 
     // Playback-subsystem long-lived plumbing. These objects expose
@@ -263,13 +265,18 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
             m_indexers);
     m_transferUseCase = new playback::transfer::TransferUseCase(
         *m_downloadManager, a);
-    m_resumeUseCase
-        = new playback::resume::ResumeUseCase(*m_historyCtrl, a);
     m_playbackProgressProjector
         = new playback::progress::PlaybackProgressProjector(
             *m_historyRepo, *m_playbackEventStream, a);
     m_historyQueryService = new playback::history::HistoryQueryService(
         *m_historyRepo, *m_history, a);
+    m_resumeUseCase
+        = new playback::resume::ResumeUseCase(*m_historyCtrl,
+            *m_historyQueryService, *m_playbackProgressProjector, a);
+    // StreamActions seeds ctx.resumeSeconds via ResumeUseCase, which
+    // checks the projector's live position first and then falls
+    // back to the on-disk history row via the ResumePolicy.
+    m_streamActions->setResumeUseCase(m_resumeUseCase);
 
     m_libraryCtrl = new controllers::LibraryController(
         *m_library, m_cinemeta, a);
@@ -376,7 +383,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
 
 #ifdef KINEMA_HAVE_LIBMPV
     m_playbackCtrl = new controllers::PlaybackController(
-        *m_historyCtrl, m_settings, m_http.get(), a);
+        *m_historyQueryService, m_settings, m_http.get(), a);
     m_seriesSessionCtrl = new controllers::SeriesPlaybackSessionController(
         *m_playbackCtrl, *m_torrentStreaming, *m_streamActions,
         m_downloadManager, a);

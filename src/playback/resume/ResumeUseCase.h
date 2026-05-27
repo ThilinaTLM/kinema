@@ -7,8 +7,18 @@
 
 #include <QObject>
 
+#include <optional>
+
 namespace kinema::controllers {
 class HistoryController;
+}
+
+namespace kinema::playback::history {
+class HistoryQueryService;
+}
+
+namespace kinema::playback::progress {
+class PlaybackProgressProjector;
 }
 
 namespace kinema::playback::resume {
@@ -25,9 +35,19 @@ class ResumeUseCase : public QObject
 {
     Q_OBJECT
 public:
-    explicit ResumeUseCase(controllers::HistoryController& history,
+    ResumeUseCase(controllers::HistoryController& history,
+        playback::history::HistoryQueryService& queryService,
+        playback::progress::PlaybackProgressProjector& projector,
         QObject* parent = nullptr);
     ~ResumeUseCase() override;
+
+    /// Resume position to seed into `PlaybackContext.resumeSeconds`
+    /// for `key`. Returns the live in-memory position of the
+    /// active session when the keys match (mid-session swap), the
+    /// stored row position otherwise (clamped by ResumePolicy), or
+    /// nullopt when nothing to resume.
+    std::optional<qint64> resumeSecondsFor(
+        const domain::PlaybackKey& key) const;
 
 public Q_SLOTS:
     void resume(const domain::HistoryEntry& entry);
@@ -43,6 +63,8 @@ Q_SIGNALS:
 
 private:
     controllers::HistoryController& m_history;
+    playback::history::HistoryQueryService& m_queryService;
+    playback::progress::PlaybackProgressProjector& m_projector;
 };
 
 } // namespace kinema::playback::resume

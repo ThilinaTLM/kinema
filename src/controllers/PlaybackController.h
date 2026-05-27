@@ -23,8 +23,8 @@ namespace kinema::config {
 class AppSettings;
 }
 
-namespace kinema::controllers {
-class HistoryController;
+namespace kinema::playback::history {
+class HistoryQueryService;
 }
 
 namespace kinema::ui::player {
@@ -41,7 +41,7 @@ class PlaybackController : public QObject
 {
     Q_OBJECT
 public:
-    PlaybackController(HistoryController& history,
+    PlaybackController(playback::history::HistoryQueryService& history,
         const config::AppSettings& settings,
         core::HttpClient* http = nullptr,
         QObject* parent = nullptr);
@@ -141,7 +141,7 @@ private:
         Playing,
     };
 
-    HistoryController& m_history;
+    playback::history::HistoryQueryService& m_history;
     const config::AppSettings& m_settings;
     core::HttpClient* m_http = nullptr;
     ui::player::PlayerWindow* m_window = nullptr;

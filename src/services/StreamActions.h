@@ -14,8 +14,8 @@
 
 #include <optional>
 
-namespace kinema::controllers {
-class HistoryController;
+namespace kinema::playback::resume {
+class ResumeUseCase;
 }
 
 namespace kinema::core {
@@ -57,10 +57,10 @@ public:
     /// branch is bypassed.
     void setDownloadManager(download::DownloadManager* manager);
 
-    /// Wire the history controller used to seed resume-from and
-    /// record play-start entries. Two-phase init because the
-    /// controller depends on `this` via resumeFromHistory.
-    void setHistoryController(controllers::HistoryController* history);
+    /// Wire the resume use-case used to seed `ctx.resumeSeconds`.
+    /// Optional: when null, `play()` does not seed a resume
+    /// position.
+    void setResumeUseCase(playback::resume::ResumeUseCase* useCase);
 
 public Q_SLOTS:
     void copyMagnet(const domain::Stream& stream);
@@ -123,7 +123,7 @@ private:
     core::PlayerLauncher* m_launcher;
     torrent::TorrentStreamingService* m_torrentStreaming;
     download::DownloadManager* m_downloadManager {};
-    controllers::HistoryController* m_history {};
+    playback::resume::ResumeUseCase* m_resume {};
     quint64 m_playEpoch = 0;
 };
 

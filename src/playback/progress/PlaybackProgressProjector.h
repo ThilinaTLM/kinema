@@ -73,11 +73,13 @@ public:
     /// ticking persistence. Default 0.5%.
     void setMinProgressFraction(double f) noexcept;
 
-    // Diagnostics for tests.
+    // Diagnostics for tests and the in-memory resume helper.
     double lastPersistedPosition() const noexcept { return m_lastPersistedPosition; }
     double lastPosition() const noexcept { return m_lastPosition; }
     double duration() const noexcept { return m_duration; }
     bool hasActiveContext() const noexcept { return m_active.has_value(); }
+    const std::optional<domain::PlaybackContext>& activeContext() const noexcept
+    { return m_active; }
 
 private:
     void onEvent(const events::PlaybackEvent& event);
