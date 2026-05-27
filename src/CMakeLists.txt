@@ -103,6 +103,8 @@ set(kinema_core_SRCS
     playback/history/SqlitePlaybackHistoryRepository.cpp
     playback/downloads/SqliteDownloadRepository.cpp
     playback/transfer/TransferUseCase.cpp
+    playback/transfer/TransferSession.cpp
+    playback/transfer/SessionRegistry.cpp
     playback/progress/PlaybackProgressProjector.cpp
     playback/session/PlaybackSession.cpp
     playback/session/PlaybackSessionManager.cpp

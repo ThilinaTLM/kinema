@@ -1,0 +1,118 @@
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+#pragma once
+
+#include "domain/Download.h"
+#include "domain/Media.h"
+#include "domain/MediaFile.h"
+#include "domain/PlaybackContext.h"
+#include "playback/ports/ByteRangeSource.h"
+
+#include <QObject>
+#include <QString>
+#include <QVector>
+
+#include <memory>
+
+namespace kinema::download {
+class AssetSession;
+}
+
+namespace kinema::playback::transfer {
+
+/**
+ * Concrete runtime session owned by `SessionRegistry`.
+ *
+ * Holds the metadata the transfer subsystem needs to reason about a
+ * single active asset (id, ref, playback context, backend kind,
+ * mode + disposition) alongside ownership of the underlying byte
+ * source. Today the underlying source is a legacy
+ * `download::AssetSession` (which implements
+ * `ports::ByteRangeSource`); during Phase 5 of the refactor the
+ * source will be supplied by `MediaSourcePort` implementations
+ * directly and the legacy type is deleted.
+ *
+ * Progress and live telemetry produced by the underlying source
+ * are re-published as QObject signals so the
+ * `TransferSupervisor` can subscribe without depending on a
+ * specific source class.
+ */
+class TransferSession : public QObject
+{
+    Q_OBJECT
+public:
+    TransferSession(domain::AssetRef ref,
+        domain::PlaybackContext ctx,
+        domain::DownloadBackendKind backend,
+        domain::DownloadMode mode,
+        domain::CacheDisposition disposition,
+        std::unique_ptr<download::AssetSession> source,
+        QObject* parent = nullptr);
+    ~TransferSession() override;
+
+    TransferSession(const TransferSession&) = delete;
+    TransferSession& operator=(const TransferSession&) = delete;
+
+    /// Stable identity inside the registry (`domain::assetIdFor`).
+    QString assetId() const;
+
+    /// Lower-case hex info hash this session was opened for. Empty
+    /// when the source has no info hash (e.g. direct URL).
+    QString infoHash() const noexcept { return m_ref.infoHash; }
+
+    const domain::AssetRef& ref() const noexcept { return m_ref; }
+    const domain::PlaybackContext& context() const noexcept { return m_ctx; }
+    domain::DownloadBackendKind backendKind() const noexcept { return m_backend; }
+    domain::DownloadMode mode() const noexcept { return m_mode; }
+    domain::CacheDisposition disposition() const noexcept { return m_disposition; }
+
+    /// Update the in-memory mode + disposition. The caller is
+    /// responsible for asking the backend to apply the change.
+    void setMode(domain::DownloadMode m);
+    void setDisposition(domain::CacheDisposition d);
+
+    /// Borrowed pointer to the underlying byte-range source. Always
+    /// non-null; ownership remains with the `TransferSession`.
+    ports::ByteRangeSource* byteRangeSource() noexcept;
+
+    /// Legacy AssetSession pointer. Returns the same object as
+    /// `byteRangeSource()` but typed for the call sites that still
+    /// need to reach into backend-specific behaviour (pause/resume,
+    /// libtorrent-handle bookkeeping). Goes away in Phase 5.
+    download::AssetSession* legacySession() noexcept { return m_source.get(); }
+
+    /// Convenience forwarders mirroring `AssetSession`'s lifecycle
+    /// surface.
+    qint64 cachedBytes() const;
+    qint64 fileSize() const;
+    QString fileName() const;
+    void touch();
+    void pause();
+    void resume();
+
+    /// Files inside the underlying source, lifted to
+    /// `domain::MediaFileEntry`. Empty when the source hasn't
+    /// resolved metadata yet.
+    QVector<domain::MediaFileEntry> files() const;
+
+Q_SIGNALS:
+    void cachedBytesChanged(qint64 bytes);
+    void completed();
+    void failed(const QString& reason);
+    void liveStatsChanged(qint64 ratePayloadBps,
+        int peers,
+        int seeds,
+        int etaSeconds);
+    void statusMessage(const QString& text, int timeoutMs);
+
+private:
+    domain::AssetRef m_ref;
+    domain::PlaybackContext m_ctx;
+    domain::DownloadBackendKind m_backend;
+    domain::DownloadMode m_mode;
+    domain::CacheDisposition m_disposition;
+    std::unique_ptr<download::AssetSession> m_source;
+};
+
+} // namespace kinema::playback::transfer
