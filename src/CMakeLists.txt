@@ -99,6 +99,7 @@ set(kinema_core_SRCS
     playback/events/PlaybackEventStream.cpp
     playback/streaming/LocalHttpStreamGateway.cpp
     playback/adapters/ActiveStreamIndexerAdapter.cpp
+    playback/adapters/ExternalPlayerAdapter.cpp
     playback/history/SqlitePlaybackHistoryRepository.cpp
     playback/downloads/SqliteDownloadRepository.cpp
     playback/transfer/TransferUseCase.cpp
@@ -183,6 +184,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
         controllers/MprisController.cpp
         controllers/PlaybackController.cpp
         controllers/SeriesPlaybackSessionController.cpp
+        playback/adapters/EmbeddedMpvPlayerAdapter.cpp
         playback/series/SeriesSessionService.cpp
         ui/player/AudioTracksModel.cpp
         ui/player/ChaptersModel.cpp
