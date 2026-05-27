@@ -92,12 +92,30 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     : m_settings(settings)
     , m_anchor(std::make_unique<QObject>())
 {
-    QObject* a = m_anchor.get();
-
     // Identical service graph to the legacy
     // `MainController::buildCoreServices`. Cross-cutting routing
     // that needs ShellViewModel slots is wired separately in
     // `ShellViewModel`'s constructor.
+    //
+    // The construction body is split into five phases. See the
+    // header for the dependency chain.
+    buildInfrastructure();
+    buildRepositories();
+    buildPlaybackSubsystem();
+    buildControllersAndViewModels();
+    wirePresentation();
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 — HTTP / token / launcher backbone, API clients, indexers,
+// RD/AD clients. Everything here is needed by at least one of the
+// later phases; nothing here depends on the database, the playback
+// subsystem, or the QML view-models.
+// ---------------------------------------------------------------------------
+void ServiceContainer::buildInfrastructure()
+{
+    QObject* a = m_anchor.get();
+
     m_http = std::make_unique<core::HttpClient>(a);
     m_tokens = std::make_unique<core::TokenStore>(a);
     m_player = std::make_unique<core::PlayerLauncher>(
@@ -107,8 +125,9 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
 
     // TokenController is built early so the debrid credentials
     // resolver can hold a const-ref to it before the indexers
-    // are registered below. Later code (RD/AD client wiring,
-    // OpenSubtitles, etc.) finds it already constructed.
+    // are registered below. Later phases (RD/AD client wiring,
+    // OpenSubtitles, history controller) find it already
+    // constructed.
     m_tokenCtrl = new controllers::TokenController(
         m_tokens.get(), m_tmdb, m_settings.debrid(), a);
     m_debridCreds
@@ -128,28 +147,35 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_indexers->registerIndexer(std::make_unique<api::PeerflixIndexer>(
         m_http.get(), m_settings.peerflix(), m_debridCreds.get()));
     m_imageLoader = new ui::ImageLoader(m_http.get(), a);
+
+    // RD / AD clients pick up their tokens from the keyring once
+    // the TokenController has fired its initial reads. Routing
+    // between RD/AD and the libtorrent backend is decided by
+    // `playback::transfer::BackendRegistry` at session-open time —
+    // if a debrid provider is configured every stream goes through
+    // it; otherwise libtorrent takes over.
+    m_rd = std::make_unique<api::RealDebridClient>(m_http.get(), a);
+    m_ad = std::make_unique<api::AllDebridClient>(m_http.get(), a);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Disk-backed state: KConfig stores, the cache
+// hierarchy, the libtorrent client (dormant), and the thin SQLite
+// adapters that satisfy the playback `ports` interfaces.
+// Database open is best-effort: a broken DB means history is
+// disabled this session, not that the app refuses to start.
+// ---------------------------------------------------------------------------
+void ServiceContainer::buildRepositories()
+{
+    QObject* a = m_anchor.get();
+
     m_torrentCache = std::make_unique<core::TorrentCache>(
         m_settings.torrentStreaming(), a);
     m_libtorrentClient = new playback::torrent::LibtorrentClient(
         m_settings.torrentStreaming(), *m_torrentCache, a);
-    m_streamActions = new services::StreamActions(
-        m_player.get(), a);
-
-    // Real-Debrid client + unified downloader settings/cache. The
-    // RD client picks up its token from the keyring once the
-    // TokenController has fired its initial reads. Routing between
-    // RD and the libtorrent backend is decided by
-    // `playback::transfer::BackendRegistry` at session-open time —
-    // if RD is configured every stream goes through it; otherwise
-    // libtorrent takes over.
-    m_rd = std::make_unique<api::RealDebridClient>(m_http.get(), a);
-    m_ad = std::make_unique<api::AllDebridClient>(m_http.get(), a);
     m_mediaCache = std::make_unique<core::MediaCache>(
         m_settings.download(), a);
 
-    // History DB. Open is best-effort: a broken DB means history
-    // is disabled for this session, not that the app refuses to
-    // start. HistoryStore handles `!isOpen()` gracefully.
     m_db = std::make_unique<core::Database>(a);
     if (!m_db->open()) {
         qCWarning(KINEMA_APP)
@@ -164,18 +190,44 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         = std::make_unique<core::SubtitleCacheStore>(*m_db, a);
     m_downloadStore = std::make_unique<core::DownloadStore>(*m_db, a);
 
-    // ---- Unified downloader -------------------------------------
-    //
-    // Composition of: `SessionRegistry` (live sessions),
-    // `BackendRegistry` (`MediaSourcePort` strategies),
-    // `TransferSupervisor` (DownloadRepository + event-stream
-    // projection), `LocalHttpStreamGateway` (localhost server),
-    // and `TransferUseCase` (application-level entry point).
-    // Ordering is delicate: the gateway resolver needs the
-    // use-case, so we build the use-case last and assign the
-    // resolver afterwards.
+    // Thin SQLite-backed adapters that satisfy the playback
+    // `ports` interfaces. The supervisor/use-case need
+    // `m_downloadRepo`; the projector / history query / resume
+    // path needs `m_historyRepo`. Both are constructed up-front so
+    // `buildPlaybackSubsystem()` can wire them without further
+    // ordering games.
+    m_historyRepo
+        = std::make_unique<playback::history::SqlitePlaybackHistoryRepository>(
+            *m_history);
+    m_downloadRepo
+        = std::make_unique<playback::downloads::SqliteDownloadRepository>(
+            *m_downloadStore);
+}
 
-    // Resolvers used by the debrid media sources.
+// ---------------------------------------------------------------------------
+// Phase 3 — The full playback subsystem.
+//
+// Composition of: `SessionRegistry` (live sessions),
+// `BackendRegistry` (`MediaSourcePort` strategies), `TransferSupervisor`
+// (event-stream projection), `LocalHttpStreamGateway` (localhost
+// HTTP server), `TransferUseCase` (application entry point), the
+// player adapters (external + libmpv-gated embedded), the
+// progress/history/resume chain, and the event-driven projections
+// (moviehash probe, track memory, series adjacency, MPRIS).
+//
+// Ordering is delicate: the gateway resolver needs the use-case,
+// so we build the use-case first and assign the resolver
+// afterwards. The session manager is constructed last because it
+// needs the adapters and the event stream.
+// ---------------------------------------------------------------------------
+void ServiceContainer::buildPlaybackSubsystem()
+{
+    QObject* a = m_anchor.get();
+
+    m_streamActions = new services::StreamActions(m_player.get(), a);
+
+    // ---- Unified downloader -------------------------------------
+
     m_rdResolver
         = std::make_unique<playback::sources::RealDebridResolver>(
             *m_rd, a);
@@ -214,15 +266,6 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         std::make_unique<playback::sources::TorrentMediaSource>(
             *m_libtorrentClient, *m_mediaCache));
 
-    // Repo + supervisor must exist before the use-case (the
-    // use-case forwards `itemChanged` from the supervisor).
-    m_downloadRepo
-        = std::make_unique<playback::downloads::SqliteDownloadRepository>(
-            *m_downloadStore);
-    // Note: `m_playbackEventStream` is constructed further below
-    // (kept in its original spot for ordering parity with the
-    // playback subsystem block). The supervisor and use-case need
-    // it, so we move the event-stream construction up here.
     m_playbackEventStream
         = new playback::events::PlaybackEventStream(a);
     m_transferSupervisor
@@ -254,70 +297,8 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     // there is no consumer at startup.
     m_transferUseCase->resumePersisted();
 
-    // Tokens — `m_tokenCtrl` is already constructed above so the
-    // debrid credentials resolver could capture it before the
-    // indexers were registered. The RD / AD client wiring + the
-    // OpenSubtitles client + history controller below all rely on
-    // its live `const QString&` aliases.
+    // ---- Player adapters + history-side wiring -------------------
 
-    // Keep the RD / AD clients' in-memory tokens in sync with the
-    // keyring-backed `TokenController`. Both backends check
-    // `client.token()` / `client.apiKey()` for `canHandle`; the
-    // active-provider gate lives in `BackendSelector`.
-    m_rd->setToken(m_tokenCtrl->realDebridToken());
-    m_ad->setApiKey(m_tokenCtrl->allDebridApiKey());
-    QObject::connect(m_tokenCtrl,
-        &controllers::TokenController::realDebridTokenChanged,
-        m_rd.get(), [this](const QString& tok) {
-            m_rd->setToken(tok);
-        });
-    QObject::connect(m_tokenCtrl,
-        &controllers::TokenController::allDebridApiKeyChanged,
-        m_ad.get(), [this](const QString& key) {
-            m_ad->setApiKey(key);
-        });
-
-    // Forward the active-debrid-provider radio to the backend
-    // registry. Initial value + future changes both go through the
-    // same path.
-    m_backendRegistry->setActiveDebridProvider(
-        m_settings.debrid().activeProvider());
-    QObject::connect(&m_settings.debrid(),
-        &config::DebridSettings::activeProviderChanged, a,
-        [this](domain::DebridProvider p) {
-            m_backendRegistry->setActiveDebridProvider(p);
-        });
-
-    // OpenSubtitles + subtitle controller.
-    m_openSubtitles = new api::OpenSubtitlesClient(m_http.get(),
-        m_tokenCtrl->openSubtitlesApiKey(),
-        m_tokenCtrl->openSubtitlesUsername(),
-        m_tokenCtrl->openSubtitlesPassword(), a);
-    m_subtitleCtrl = new controllers::SubtitleController(
-        m_openSubtitles, m_subtitleCache.get(),
-        m_settings.subtitle(), m_settings.cache(), a);
-    QTimer::singleShot(0, m_subtitleCtrl,
-        [this] { m_subtitleCtrl->reconcileCacheOnStartup(); });
-    // Credentials change → drop JWT so the next request re-logs
-    // in, and tell the controller to re-evaluate downloadEnabled.
-    const auto onOsCredentialChanged = [this](const QString&) {
-        m_openSubtitles->clearJwt();
-        m_subtitleCtrl->notifyAuthChanged();
-    };
-    QObject::connect(m_tokenCtrl,
-        &controllers::TokenController::openSubtitlesApiKeyChanged,
-        m_openSubtitles, onOsCredentialChanged);
-    QObject::connect(m_tokenCtrl,
-        &controllers::TokenController::openSubtitlesUsernameChanged,
-        m_openSubtitles, onOsCredentialChanged);
-    QObject::connect(m_tokenCtrl,
-        &controllers::TokenController::openSubtitlesPasswordChanged,
-        m_openSubtitles, onOsCredentialChanged);
-
-    // Playback-subsystem long-lived plumbing. The event stream and
-    // download repository / transfer supervisor were already built
-    // above (the unified-downloader block needs them), so this
-    // block only adds the adapters and history-side wiring.
     m_externalPlayerAdapter
         = new playback::adapters::ExternalPlayerAdapter(
             *m_player, *m_playbackEventStream, a);
@@ -326,9 +307,6 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         = new playback::adapters::EmbeddedMpvPlayerAdapter(
             *m_playbackEventStream, m_settings.player(), a);
 #endif
-    m_historyRepo
-        = std::make_unique<playback::history::SqlitePlaybackHistoryRepository>(
-            *m_history);
     m_streamIndexerAdapter
         = std::make_unique<playback::adapters::ActiveStreamIndexerAdapter>(
             m_indexers);
@@ -349,6 +327,84 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     // checks the projector's live position first and then falls
     // back to the on-disk history row via the ResumePolicy.
     m_streamActions->setResumeUseCase(m_resumeUseCase);
+
+    // ---- Event-driven projections + session manager --------------
+
+#ifdef KINEMA_HAVE_LIBMPV
+    // Event-driven moviehash probe. Subscribes to
+    // PlayableUrlReady (published by EmbeddedMpvPlayerAdapter on
+    // play()), runs the HEAD+Range probe, and republishes
+    // MoviehashComputed. Replaces the inline coroutine that
+    // previously lived on PlaybackController.
+    m_moviehashProbe = new playback::subtitles::MoviehashProbe(
+        *m_playbackEventStream, m_http.get(), a);
+    // Track memory: applies remembered audio / subtitle language
+    // preferences to fresh sessions. Subscribes to
+    // PlaybackRequested + TrackListChanged; routes selection
+    // commands through PlayerPort (the embedded adapter).
+    m_trackMemoryService = new playback::history::TrackMemoryService(
+        *m_playbackEventStream, *m_historyQueryService,
+        m_embeddedPlayerAdapter, a);
+    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
+        *m_streamActions, *m_playbackEventStream,
+        m_embeddedPlayerAdapter, m_externalPlayerAdapter, a);
+    // Event-driven season-pack adjacency. Subscribes to the
+    // playback event stream, reads files via the session catalog,
+    // and dispatches next/previous through PlaybackSessionManager.
+    // Backend-agnostic: torrent and debrid catalogs behave the
+    // same. Only the embedded-player build surfaces auto-next UI,
+    // so the service is constructed inside the libmpv gate.
+    m_seriesSessionService = new playback::series::SeriesSessionService(
+        *m_playbackEventStream, *m_sessionRegistry,
+        *m_playbackSessionManager, a);
+    // Desktop MPRIS surface. Subscribes to PlaybackEventStream,
+    // sends transport commands through PlaybackSessionManager,
+    // queries EmbeddedMpvPlayerAdapter for live snapshots
+    // (Position / Volume / Rate) and SeriesSessionService for
+    // CanGoNext / CanGoPrevious.
+    m_mprisProjection = new playback::desktop::MprisPlaybackProjection(
+        *m_playbackEventStream, *m_playbackSessionManager,
+        m_embeddedPlayerAdapter, m_seriesSessionService, a);
+#else
+    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
+        *m_streamActions, *m_playbackEventStream,
+        nullptr, m_externalPlayerAdapter, a);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — OpenSubtitles client + subtitle controller + library /
+// watched controllers, then every QML page view-model. The
+// SubtitleSessionService also lives here because it depends on the
+// subtitle controller (constructed at the top of this phase) and
+// the playback event stream (constructed in phase 3).
+// ---------------------------------------------------------------------------
+void ServiceContainer::buildControllersAndViewModels()
+{
+    QObject* a = m_anchor.get();
+
+    // OpenSubtitles + subtitle controller. Token / credential
+    // routing back to the live `TokenController` is set up in
+    // `wirePresentation()`.
+    m_openSubtitles = new api::OpenSubtitlesClient(m_http.get(),
+        m_tokenCtrl->openSubtitlesApiKey(),
+        m_tokenCtrl->openSubtitlesUsername(),
+        m_tokenCtrl->openSubtitlesPassword(), a);
+    m_subtitleCtrl = new controllers::SubtitleController(
+        m_openSubtitles, m_subtitleCache.get(),
+        m_settings.subtitle(), m_settings.cache(), a);
+    QTimer::singleShot(0, m_subtitleCtrl,
+        [this] { m_subtitleCtrl->reconcileCacheOnStartup(); });
+
+    if (m_subtitleCtrl) {
+        // The session service subscribes to PlaybackRequested
+        // (clearMoviehash) and MoviehashComputed (setMoviehash),
+        // replacing the direct PlaybackController <-> subtitle
+        // signal wiring that lived here before.
+        m_subtitleSessionService
+            = new playback::subtitles::SubtitleSessionService(
+                *m_subtitleCtrl, m_playbackEventStream, a);
+    }
 
     m_libraryCtrl = new controllers::LibraryController(
         *m_library, m_cinemeta, a);
@@ -400,6 +456,75 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         m_tokenCtrl->allDebridApiKey(), a);
     m_seriesDetailVm->setDownloadController(m_downloadCtrl);
 
+    // Subtitles VM. Wraps `SubtitleController`. Cross-shell
+    // routing (settings request, close, attach-to-player) is wired
+    // in `ShellViewModel`.
+    m_subtitlesVm = new ui::qml::SubtitlesViewModel(m_subtitleCtrl,
+        m_settings.subtitle(), a);
+
+    // Settings root. Token routing back to the live
+    // `TokenController` is set up in `wirePresentation()`.
+    m_settingsVm = new ui::qml::settings::SettingsRootViewModel(m_http.get(),
+        m_tokens.get(), m_indexers, m_settings, m_subtitleCache.get(),
+        m_mediaCache.get(), a);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Cross-cutting routing that requires both the
+// controllers (phase 4) and the playback subsystem (phase 3) to be
+// constructed. Pure connect() calls; no new objects.
+// ---------------------------------------------------------------------------
+void ServiceContainer::wirePresentation()
+{
+    QObject* a = m_anchor.get();
+
+    // ---- TokenController ↔ RD / AD clients ----------------------
+    // Keep the RD / AD clients' in-memory tokens in sync with the
+    // keyring-backed `TokenController`. Both backends check
+    // `client.token()` / `client.apiKey()` for `canHandle`; the
+    // active-provider gate lives in `BackendRegistry`.
+    m_rd->setToken(m_tokenCtrl->realDebridToken());
+    m_ad->setApiKey(m_tokenCtrl->allDebridApiKey());
+    QObject::connect(m_tokenCtrl,
+        &controllers::TokenController::realDebridTokenChanged,
+        m_rd.get(), [this](const QString& tok) {
+            m_rd->setToken(tok);
+        });
+    QObject::connect(m_tokenCtrl,
+        &controllers::TokenController::allDebridApiKeyChanged,
+        m_ad.get(), [this](const QString& key) {
+            m_ad->setApiKey(key);
+        });
+
+    // Forward the active-debrid-provider radio to the backend
+    // registry. Initial value + future changes both go through the
+    // same path.
+    m_backendRegistry->setActiveDebridProvider(
+        m_settings.debrid().activeProvider());
+    QObject::connect(&m_settings.debrid(),
+        &config::DebridSettings::activeProviderChanged, a,
+        [this](domain::DebridProvider p) {
+            m_backendRegistry->setActiveDebridProvider(p);
+        });
+
+    // ---- TokenController ↔ OpenSubtitles -----------------------
+    // Credentials change → drop JWT so the next request re-logs in,
+    // and tell the controller to re-evaluate downloadEnabled.
+    const auto onOsCredentialChanged = [this](const QString&) {
+        m_openSubtitles->clearJwt();
+        m_subtitleCtrl->notifyAuthChanged();
+    };
+    QObject::connect(m_tokenCtrl,
+        &controllers::TokenController::openSubtitlesApiKeyChanged,
+        m_openSubtitles, onOsCredentialChanged);
+    QObject::connect(m_tokenCtrl,
+        &controllers::TokenController::openSubtitlesUsernameChanged,
+        m_openSubtitles, onOsCredentialChanged);
+    QObject::connect(m_tokenCtrl,
+        &controllers::TokenController::openSubtitlesPasswordChanged,
+        m_openSubtitles, onOsCredentialChanged);
+
+    // ---- TMDB token ↔ Browse VM --------------------------------
     // TMDB token gain/loss propagates from `TokenController` to
     // the Browse VM. We refresh on token gain and clear on loss;
     // the Browse VM's own `tmdbConfigured` property toggles the
@@ -414,19 +539,9 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
             }
         });
 
-    // Subtitles VM. Wraps `SubtitleController`. Cross-shell
-    // routing (settings request, close, attach-to-player) is wired
-    // in `ShellViewModel`.
-    m_subtitlesVm = new ui::qml::SubtitlesViewModel(m_subtitleCtrl,
-        m_settings.subtitle(), a);
-
-    // Settings root + token routing back to the live
-    // TokenController. RD / TMDB / OS credential changes refresh
-    // their respective in-memory aliases without a keyring
-    // round-trip.
-    m_settingsVm = new ui::qml::settings::SettingsRootViewModel(m_http.get(),
-        m_tokens.get(), m_indexers, m_settings, m_subtitleCache.get(),
-        m_mediaCache.get(), a);
+    // ---- Settings VM ↔ TokenController -------------------------
+    // RD / TMDB / OS credential changes refresh their respective
+    // in-memory aliases without a keyring round-trip.
     QObject::connect(m_settingsVm,
         &ui::qml::settings::SettingsRootViewModel::tmdbTokenChanged, m_tokenCtrl,
         [this](const QString&) { m_tokenCtrl->refreshTmdb(); });
@@ -453,56 +568,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
             m_tokenCtrl->refreshOpenSubtitlesCredentials();
         });
 
-#ifdef KINEMA_HAVE_LIBMPV
-    // Event-driven moviehash probe. Subscribes to
-    // PlayableUrlReady (published by EmbeddedMpvPlayerAdapter on
-    // play()), runs the HEAD+Range probe, and republishes
-    // MoviehashComputed. Replaces the inline coroutine that
-    // previously lived on PlaybackController.
-    m_moviehashProbe = new playback::subtitles::MoviehashProbe(
-        *m_playbackEventStream, m_http.get(), a);
-    // Track memory: applies remembered audio / subtitle language
-    // preferences to fresh sessions. Subscribes to
-    // PlaybackRequested + TrackListChanged; routes selection
-    // commands through PlayerPort (the embedded adapter).
-    m_trackMemoryService = new playback::history::TrackMemoryService(
-        *m_playbackEventStream, *m_historyQueryService,
-        m_embeddedPlayerAdapter, a);
-    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, *m_playbackEventStream,
-        m_embeddedPlayerAdapter, m_externalPlayerAdapter, a);
-    // Event-driven season-pack adjacency. Subscribes to the
-    // playback event stream, reads files via the session catalog,
-    // and dispatches next/previous through PlaybackSessionManager.
-    // Backend-agnostic: torrent and debrid catalogs behave the
-    // same. Only the embedded-player build surfaces auto-next UI,
-    // so the service is constructed inside the libmpv gate.
-    m_seriesSessionService = new playback::series::SeriesSessionService(
-        *m_playbackEventStream, *m_sessionRegistry,
-        *m_playbackSessionManager, a);
-    // Desktop MPRIS surface. Subscribes to PlaybackEventStream,
-    // sends transport commands through PlaybackSessionManager,
-    // queries EmbeddedMpvPlayerAdapter for live snapshots
-    // (Position / Volume / Rate) and SeriesSessionService for
-    // CanGoNext / CanGoPrevious.
-    m_mprisProjection = new playback::desktop::MprisPlaybackProjection(
-        *m_playbackEventStream, *m_playbackSessionManager,
-        m_embeddedPlayerAdapter, m_seriesSessionService, a);
-#else
-    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, *m_playbackEventStream,
-        nullptr, m_externalPlayerAdapter, a);
-#endif
-    if (m_subtitleCtrl) {
-        // The session service now subscribes to PlaybackRequested
-        // (clearMoviehash) and MoviehashComputed (setMoviehash),
-        // replacing the direct PlaybackController <-> subtitle
-        // signal wiring that lived here before.
-        m_subtitleSessionService
-            = new playback::subtitles::SubtitleSessionService(
-                *m_subtitleCtrl, m_playbackEventStream, a);
-    }
-
+    // ---- Final boot checks --------------------------------------
     if (!m_player->preferredPlayerAvailable()) {
         qCInfo(KINEMA_APP) << "preferred media player not found on $PATH";
     }

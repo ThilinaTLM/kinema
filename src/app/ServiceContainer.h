@@ -263,6 +263,46 @@ public:
     void setTray(controllers::TrayController* t) { m_tray = t; }
 
 private:
+    // ---- Construction helpers ------------------------------------------
+    //
+    // Splits the ~470-line ctor into per-responsibility phases.
+    // Each helper assumes its predecessors have already run; the
+    // dependency chain is:
+    //
+    //   buildInfrastructure()
+    //     ↓ (http, tokens, player, indexers, RD/AD clients,
+    //        TokenController, TmdbClient, CinemetaClient)
+    //   buildRepositories()
+    //     ↓ (database open, KConfig stores, caches,
+    //        TorrentCache, MediaCache, LibtorrentClient,
+    //        SqlitePlaybackHistoryRepository,
+    //        SqliteDownloadRepository)
+    //   buildPlaybackSubsystem()
+    //     ↓ (StreamActions, downloader pipeline, adapters,
+    //        ProgressProjector, HistoryQueryService, ResumeUseCase,
+    //        DownloadController, projections, PlaybackSessionManager,
+    //        SeriesSessionService, MprisPlaybackProjection)
+    //   buildControllersAndViewModels()
+    //     ↓ (OpenSubtitles, SubtitleController +
+    //        SubtitleSessionService, LibraryController,
+    //        WatchedController, every page view-model,
+    //        SettingsRootViewModel)
+    //   wirePresentation()
+    //        (TokenController ↔ RD/AD/OpenSubtitles, settings VM ↔
+    //         TokenController routing, active-debrid-provider sync,
+    //         preferred-player check)
+    //
+    // `EmbeddedMpvPlayerAdapter` still binds its `PlayerWindow`
+    // lazily through `setPlayerWindow` from
+    // `ShellViewModel::ensurePlayerWindow`; the window is created
+    // on first embedded play, which cannot happen during the
+    // ServiceContainer constructor.
+    void buildInfrastructure();
+    void buildRepositories();
+    void buildPlaybackSubsystem();
+    void buildControllersAndViewModels();
+    void wirePresentation();
+
     config::AppSettings& m_settings;
     /// Debrid credential resolver — read-only port consumed by the
     /// Torrentio + Peerflix indexers (raw pointer). Declared before
