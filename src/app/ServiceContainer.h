@@ -34,11 +34,14 @@ class TorrentCache;
 class WatchedStore;
 }
 
+namespace kinema::playback::desktop {
+class MprisPlaybackProjection;
+}
+
 namespace kinema::controllers {
 class DebridCredentialsResolver;
 class DownloadController;
 class LibraryController;
-class MprisController;
 class PlaybackController;
 class SubtitleController;
 class TokenController;
@@ -228,7 +231,12 @@ public:
     controllers::SubtitleController* subtitleController() const { return m_subtitleCtrl; }
 
 #ifdef KINEMA_HAVE_LIBMPV
-    controllers::MprisController* mprisController() const { return m_mprisCtrl; }
+    /// Desktop MPRIS projection — replaces the legacy
+    /// `controllers::MprisController`. Owns the
+    /// `org.mpris.MediaPlayer2.kinema` D-Bus registration and the
+    /// idle inhibitor; drives state off `PlaybackEventStream`.
+    playback::desktop::MprisPlaybackProjection* mprisProjection() const
+    { return m_mprisProjection; }
     controllers::PlaybackController* playbackController() const { return m_playbackCtrl; }
 #endif
 
@@ -336,7 +344,7 @@ private:
     ui::qml::DownloadsViewModel* m_downloadsVm {};
 
 #ifdef KINEMA_HAVE_LIBMPV
-    controllers::MprisController* m_mprisCtrl {};
+    playback::desktop::MprisPlaybackProjection* m_mprisProjection {};
     controllers::PlaybackController* m_playbackCtrl {};
 #endif
 };

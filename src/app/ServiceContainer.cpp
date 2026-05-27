@@ -19,7 +19,7 @@
 
 #include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
-#include "controllers/MprisController.h"
+#include "playback/desktop/MprisPlaybackProjection.h"
 #include "controllers/PlaybackController.h"
 
 #endif
@@ -479,8 +479,16 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_seriesSessionService = new playback::series::SeriesSessionService(
         *m_playbackEventStream, *m_sessionRegistry,
         *m_playbackSessionManager, a);
-    m_mprisCtrl = new controllers::MprisController(
-        *m_playbackCtrl, m_seriesSessionService, a);
+    // Desktop MPRIS surface. Subscribes to PlaybackEventStream,
+    // sends transport commands through PlaybackSessionManager,
+    // queries EmbeddedMpvPlayerAdapter for live snapshots
+    // (Position / Volume / Rate) and SeriesSessionService for
+    // CanGoNext / CanGoPrevious. No reference to the legacy
+    // PlaybackController — the controller will be retired in a
+    // later Step 6 sub-commit.
+    m_mprisProjection = new playback::desktop::MprisPlaybackProjection(
+        *m_playbackEventStream, *m_playbackSessionManager,
+        m_embeddedPlayerAdapter, m_seriesSessionService, a);
 #else
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
         *m_streamActions, *m_playbackEventStream, nullptr,

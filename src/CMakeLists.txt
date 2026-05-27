@@ -185,7 +185,6 @@ set(kinema_core_SRCS
 # scripts; no IPC bridge.
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
-        controllers/MprisController.cpp
         controllers/PlaybackController.cpp
         playback/adapters/EmbeddedMpvPlayerAdapter.cpp
         playback/desktop/MprisPlaybackProjection.cpp

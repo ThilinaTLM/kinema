@@ -10,7 +10,7 @@
 #include "playback/resume/ResumeUseCase.h"
 #include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
-#include "controllers/MprisController.h"
+#include "playback/desktop/MprisPlaybackProjection.h"
 #include "controllers/PlaybackController.h"
 #include "playback/series/SeriesSessionService.h"
 #endif
@@ -574,10 +574,11 @@ void ShellViewModel::wireNavigationRouting()
         [this] { Q_EMIT popPageRequested(); });
 
 #ifdef KINEMA_HAVE_LIBMPV
-    auto* mprisCtrl = m_services.mprisController();
+    auto* mpris = m_services.mprisProjection();
     auto* playerLauncher = m_services.player();
-    if (mprisCtrl) {
-        connect(mprisCtrl, &controllers::MprisController::raiseRequested,
+    if (mpris) {
+        connect(mpris,
+            &playback::desktop::MprisPlaybackProjection::raiseRequested,
             this, [this] {
                 if (m_playerWindow && m_playerWindow->hasEverLoaded()) {
                     m_playerWindow->show();
@@ -591,7 +592,8 @@ void ShellViewModel::wireNavigationRouting()
                     m_window->requestActivate();
                 }
             });
-        connect(mprisCtrl, &controllers::MprisController::quitRequested,
+        connect(mpris,
+            &playback::desktop::MprisPlaybackProjection::quitRequested,
             this, &ShellViewModel::requestQuit);
     }
 
