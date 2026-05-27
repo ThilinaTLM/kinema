@@ -41,6 +41,18 @@ void SqliteDownloadRepository::setLastError(const QString& assetId,
     m_store.updateState(assetId, domain::DownloadState::Failed, error);
 }
 
+void SqliteDownloadRepository::updateMode(const QString& assetId,
+    domain::DownloadMode mode)
+{
+    m_store.updateMode(assetId, mode);
+}
+
+void SqliteDownloadRepository::setDisposition(const QString& assetId,
+    domain::CacheDisposition disposition)
+{
+    m_store.setDisposition(assetId, disposition);
+}
+
 void SqliteDownloadRepository::remove(const QString& assetId)
 {
     m_store.remove(assetId);
@@ -50,6 +62,12 @@ std::optional<domain::DownloadItem> SqliteDownloadRepository::find(
     const QString& assetId) const
 {
     return m_store.find(assetId);
+}
+
+std::optional<domain::DownloadItem> SqliteDownloadRepository::findForKey(
+    const domain::PlaybackKey& key) const
+{
+    return m_store.findForKey(key);
 }
 
 QVector<domain::DownloadItem> SqliteDownloadRepository::all() const

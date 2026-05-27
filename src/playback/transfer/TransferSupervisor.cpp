@@ -27,6 +27,16 @@ TransferSupervisor::TransferSupervisor(SessionRegistry& registry,
 {
     connect(&m_registry, &SessionRegistry::sessionRegistered, this,
         &TransferSupervisor::onSessionRegistered);
+    // Drop in-memory live stats when a session is taken / erased
+    // without having reached terminal state (e.g. cancel + restart
+    // of the same assetId).
+    connect(&m_registry, &SessionRegistry::sessionRemoved, this,
+        &TransferSupervisor::onSessionRemoved);
+}
+
+void TransferSupervisor::onSessionRemoved(const QString& assetId)
+{
+    m_liveStats.erase(assetId);
 }
 
 TransferSupervisor::~TransferSupervisor() = default;
@@ -51,7 +61,20 @@ void TransferSupervisor::onSessionRegistered(const QString& assetId)
     if (!session) {
         return;
     }
+    // A fresh session starts with no telemetry. Wipe any stale
+    // entry left over by a previous session for the same assetId.
+    m_liveStats.erase(assetId);
     bind(session);
+}
+
+std::optional<LiveAssetStats> TransferSupervisor::liveStatsFor(
+    const QString& assetId) const
+{
+    const auto it = m_liveStats.find(assetId);
+    if (it == m_liveStats.end()) {
+        return std::nullopt;
+    }
+    return it->second;
 }
 
 void TransferSupervisor::bind(TransferSession* session)
@@ -112,6 +135,11 @@ void TransferSupervisor::onCompleted(TransferSession* session)
         expected > 0 ? std::optional<qint64>(expected) : std::nullopt,
         true);
     m_repo.updateState(assetId, domain::DownloadState::Completed);
+    // The legacy `DownloadManager::installProgressBindings` wiped
+    // live stats on terminal events. Mirror that so the Downloads
+    // page stops showing a stale rate / peers chip on completed
+    // rows.
+    m_liveStats.erase(assetId);
 
     m_events.publish(events::TransferCompleted {
         .sessionId = resolveSessionId(assetId),
@@ -128,6 +156,7 @@ void TransferSupervisor::onFailed(TransferSession* session,
 {
     const auto assetId = session->assetId();
     m_repo.setLastError(assetId, reason);
+    m_liveStats.erase(assetId);
 
     m_events.publish(events::TransferFailed {
         .sessionId = resolveSessionId(assetId),
@@ -142,9 +171,15 @@ void TransferSupervisor::onFailed(TransferSession* session,
 }
 
 void TransferSupervisor::onLiveStats(TransferSession* session,
-    qint64 rate, int peers, int seeds, int /*eta*/)
+    qint64 rate, int peers, int seeds, int eta)
 {
     const auto assetId = session->assetId();
+    auto& slot = m_liveStats[assetId];
+    slot.ratePayloadBps = rate;
+    slot.peers = peers;
+    slot.seeds = seeds;
+    slot.etaSeconds = eta;
+
     m_events.publish(events::TransferStatsChanged {
         .sessionId = resolveSessionId(assetId),
         .assetId = assetId,
@@ -152,9 +187,10 @@ void TransferSupervisor::onLiveStats(TransferSession* session,
         .peers = peers,
         .seeds = seeds,
     });
-    // Live stats don't touch the repository; the legacy in-memory
-    // `LiveAssetStats` map will be migrated when DownloadManager
-    // retires (sub-commit 12).
+    // Live stats don't touch the repository; only the in-memory
+    // `m_liveStats` map and the typed event are updated. The
+    // legacy `DownloadManager::installProgressBindings` did the
+    // same.
 }
 
 } // namespace kinema::playback::transfer

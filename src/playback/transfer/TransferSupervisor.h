@@ -4,11 +4,14 @@
 #pragma once
 
 #include "playback/events/PlaybackEvent.h"
+#include "playback/transfer/LiveAssetStats.h"
 
 #include <QObject>
 #include <QString>
 
 #include <functional>
+#include <map>
+#include <optional>
 
 namespace kinema::playback::events {
 class PlaybackEventStream;
@@ -67,6 +70,15 @@ public:
     /// owning session in the event stream.
     void setSessionIdResolver(SessionIdResolver fn);
 
+    /// Read-only access to the latest transient telemetry sourced
+    /// from `TransferSession::liveStatsChanged`. Returns nullopt
+    /// when no stats have been observed for `assetId` (e.g. before
+    /// the first tick, or after the session was unregistered).
+    /// View-models join this onto the persistent `DownloadItem`
+    /// rows when populating per-row rate / peers / ETA cells.
+    std::optional<LiveAssetStats> liveStatsFor(
+        const QString& assetId) const;
+
 Q_SIGNALS:
     /// Forwards `DownloadRepository` mutations so legacy QObject
     /// consumers (the soon-to-be-rewired `DownloadController`) can
@@ -76,6 +88,7 @@ Q_SIGNALS:
 
 private:
     void onSessionRegistered(const QString& assetId);
+    void onSessionRemoved(const QString& assetId);
     void bind(TransferSession* session);
     void onCachedBytes(TransferSession* session, qint64 bytes);
     void onCompleted(TransferSession* session);
@@ -89,6 +102,11 @@ private:
     ports::DownloadRepository& m_repo;
     events::PlaybackEventStream& m_events;
     SessionIdResolver m_resolver;
+
+    /// Live telemetry snapshot keyed by `assetId`. Populated from
+    /// the session's `liveStatsChanged` signal; cleared on
+    /// `completed` / `failed` / explicit unregister.
+    std::map<QString, LiveAssetStats> m_liveStats;
 };
 
 } // namespace kinema::playback::transfer

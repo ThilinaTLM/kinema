@@ -34,10 +34,26 @@ public:
     virtual void setLastError(const QString& assetId,
         const QString& error)
         = 0;
+    /// Mutate the user-visible download mode (OnDemand <-> Full).
+    /// Used by `TransferUseCase::upgradeToFull` when promoting an
+    /// OnDemand session in place.
+    virtual void updateMode(const QString& assetId,
+        domain::DownloadMode mode)
+        = 0;
+    /// Toggle the cache disposition (pinned <-> ephemeral).
+    virtual void setDisposition(const QString& assetId,
+        domain::CacheDisposition disposition)
+        = 0;
     virtual void remove(const QString& assetId) = 0;
 
     virtual std::optional<domain::DownloadItem> find(
         const QString& assetId) const
+        = 0;
+    /// Most-recent persisted row matching `key`, when any. Used by
+    /// `TransferUseCase::findForKey` so view-models can answer "is
+    /// there already a local asset for this title?".
+    virtual std::optional<domain::DownloadItem> findForKey(
+        const domain::PlaybackKey& key) const
         = 0;
     virtual QVector<domain::DownloadItem> all() const = 0;
 };

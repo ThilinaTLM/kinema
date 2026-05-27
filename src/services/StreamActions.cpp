@@ -8,7 +8,7 @@
 #include "core/mpv/PlayerLauncher.h"
 #include "core/io/HttpErrorPresenter.h"
 #include "core/io/OpenUrl.h"
-#include "download/DownloadManager.h"
+#include "playback/transfer/TransferUseCase.h"
 #include "kinema_log_ui.h"
 #include "torrent/TorrentStreamingService.h"
 
@@ -67,9 +67,10 @@ void StreamActions::setResumeUseCase(
     m_resume = useCase;
 }
 
-void StreamActions::setDownloadManager(download::DownloadManager* manager)
+void StreamActions::setTransferUseCase(
+    playback::transfer::TransferUseCase* useCase)
 {
-    m_downloadManager = manager;
+    m_transferUseCase = useCase;
 }
 
 void StreamActions::copyMagnet(const domain::Stream& stream)
@@ -181,7 +182,7 @@ void StreamActions::playInternal(const domain::Stream& stream,
 
     // Preferred path: every backend serves through the unified
     // downloader so the player only ever sees localhost URLs.
-    if (m_downloadManager && !stream.infoHash.isEmpty()) {
+    if (m_transferUseCase && !stream.infoHash.isEmpty()) {
         const auto epoch = ++m_playEpoch;
         auto task = playLocalTask(stream, ctx, epoch, backendOverride);
         Q_UNUSED(task);
@@ -198,7 +199,7 @@ void StreamActions::playInternal(const domain::Stream& stream,
 
     // Legacy fallback. Only reached when the unified downloader is
     // not wired (some unit-test setups). Production always takes the
-    // `m_downloadManager` branch above.
+    // `m_transferUseCase` branch above.
     if (!m_torrentStreaming) {
         Q_EMIT statusMessage(
             i18nc("@info:status",
@@ -215,7 +216,7 @@ void StreamActions::playInternal(const domain::Stream& stream,
 void StreamActions::download(const domain::Stream& stream,
     const domain::PlaybackContext& ctxIn)
 {
-    if (!m_downloadManager) {
+    if (!m_transferUseCase) {
         Q_EMIT statusMessage(i18nc("@info:status",
             "Downloads are not available in this build."), 5000);
         return;
@@ -227,14 +228,14 @@ void StreamActions::download(const domain::Stream& stream,
             ? stream.qualityLabel
             : stream.releaseName;
     }
-    m_downloadManager->enqueueDownload(stream, ctx);
+    m_transferUseCase->saveOffline(stream, ctx);
 }
 
 void StreamActions::downloadWithBackend(const domain::Stream& stream,
     const domain::PlaybackContext& ctxIn,
     domain::DownloadBackendKind backend)
 {
-    if (!m_downloadManager) {
+    if (!m_transferUseCase) {
         Q_EMIT statusMessage(i18nc("@info:status",
             "Downloads are not available in this build."), 5000);
         return;
@@ -246,7 +247,7 @@ void StreamActions::downloadWithBackend(const domain::Stream& stream,
             ? stream.qualityLabel
             : stream.releaseName;
     }
-    m_downloadManager->enqueueDownload(stream, ctx, backend);
+    m_transferUseCase->saveOffline(stream, ctx, backend);
 }
 
 QCoro::Task<void> StreamActions::playLocalTask(domain::Stream stream,
@@ -254,12 +255,12 @@ QCoro::Task<void> StreamActions::playLocalTask(domain::Stream stream,
     std::optional<domain::DownloadBackendKind> backendOverride)
 {
     try {
-        const QUrl url = co_await m_downloadManager->prepareForPlayback(
+        const QUrl url = co_await m_transferUseCase->ensurePlayable(
             stream, ctx, backendOverride);
         if (epoch != m_playEpoch) {
             co_return;
         }
-        // attachPlayer was already called by `prepareForPlayback`
+        // attachPlayer was already called by `ensurePlayable`
         // so the Downloads view sees a `Streaming`/`Downloading +
         // Playing` chip immediately. detachPlayer is currently a
         // gap: external player processes are launched detached and

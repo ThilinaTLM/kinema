@@ -28,10 +28,16 @@ public:
         bool complete) override;
     void setLastError(const QString& assetId,
         const QString& error) override;
+    void updateMode(const QString& assetId,
+        domain::DownloadMode mode) override;
+    void setDisposition(const QString& assetId,
+        domain::CacheDisposition disposition) override;
     void remove(const QString& assetId) override;
 
     std::optional<domain::DownloadItem> find(
         const QString& assetId) const override;
+    std::optional<domain::DownloadItem> findForKey(
+        const domain::PlaybackKey& key) const override;
     QVector<domain::DownloadItem> all() const override;
 
     core::DownloadStore& store() noexcept { return m_store; }

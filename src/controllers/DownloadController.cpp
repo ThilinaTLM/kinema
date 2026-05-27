@@ -4,26 +4,29 @@
 #include "controllers/DownloadController.h"
 
 #include "core/persistence/DownloadStore.h"
-#include "download/DownloadManager.h"
+#include "playback/transfer/TransferUseCase.h"
 
 namespace kinema::controllers {
 
-DownloadController::DownloadController(download::DownloadManager& manager,
+DownloadController::DownloadController(
+    playback::transfer::TransferUseCase& useCase,
     core::DownloadStore& store, QObject* parent)
     : QObject(parent)
-    , m_manager(manager)
+    , m_useCase(useCase)
     , m_store(store)
 {
     // Structural store changes (insert / remove / coalesced bursts)
     // map to the list-shape signal.
     connect(&m_store, &core::DownloadStore::changed,
         this, &DownloadController::changed);
-    connect(&m_manager, &download::DownloadManager::statusMessage,
+    connect(&m_useCase,
+        &playback::transfer::TransferUseCase::statusMessage,
         this, &DownloadController::statusMessage);
     // In-place per-row mutations stay separate so view-models can
     // route them to a `dataChanged`-only path and keep delegates
     // (and any open popups) alive across ticks.
-    connect(&m_manager, &download::DownloadManager::itemChanged,
+    connect(&m_useCase,
+        &playback::transfer::TransferUseCase::itemChanged,
         this, &DownloadController::itemChanged);
 }
 
@@ -46,65 +49,65 @@ std::optional<domain::DownloadItem> DownloadController::find(
 
 QSet<QString> DownloadController::attachedPlayerAssetIds() const
 {
-    return m_manager.attachedPlayerAssetIds();
+    return m_useCase.attachedPlayerAssetIds();
 }
 
 void DownloadController::download(const domain::Stream& stream,
     const domain::PlaybackContext& ctx)
 {
-    m_manager.enqueueDownload(stream, ctx);
+    m_useCase.saveOffline(stream, ctx);
 }
 
 void DownloadController::downloadWithBackend(const domain::Stream& stream,
     const domain::PlaybackContext& ctx,
     domain::DownloadBackendKind backend)
 {
-    m_manager.enqueueDownload(stream, ctx, backend);
+    m_useCase.saveOffline(stream, ctx, backend);
 }
 
 void DownloadController::upgradeToFull(const QString& assetId)
 {
-    m_manager.upgradeToFull(assetId);
+    m_useCase.upgradeToFull(assetId);
 }
 
 void DownloadController::pause(const QString& assetId)
 {
-    m_manager.pause(assetId);
+    m_useCase.pause(assetId);
 }
 
 void DownloadController::resume(const QString& assetId)
 {
-    m_manager.resume(assetId);
+    m_useCase.resumeTransfer(assetId);
 }
 
 void DownloadController::attachPlayer(const QString& assetId)
 {
-    m_manager.attachPlayer(assetId);
+    m_useCase.attachPlayer(assetId);
 }
 
 void DownloadController::detachPlayer(const QString& assetId)
 {
-    m_manager.detachPlayer(assetId);
+    m_useCase.detachPlayer(assetId);
 }
 
 void DownloadController::retry(const QString& assetId)
 {
-    m_manager.retry(assetId);
+    m_useCase.retry(assetId);
 }
 
 void DownloadController::cancel(const QString& assetId)
 {
-    m_manager.cancel(assetId);
+    m_useCase.cancel(assetId);
 }
 
 void DownloadController::remove(const QString& assetId, bool deleteFiles)
 {
-    m_manager.remove(assetId, deleteFiles);
+    m_useCase.remove(assetId, deleteFiles);
 }
 
 void DownloadController::pin(const QString& assetId, bool on)
 {
-    m_manager.pin(assetId, on);
+    m_useCase.pin(assetId, on);
 }
 
 } // namespace kinema::controllers

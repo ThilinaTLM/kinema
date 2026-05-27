@@ -6,7 +6,7 @@
 #include "controllers/SeriesPlaybackSessionController.h"
 
 #include "controllers/PlaybackController.h"
-#include "download/DownloadManager.h"
+#include "playback/ports/SessionFileCatalog.h"
 #include "services/StreamActions.h"
 #include "torrent/TorrentStreamingService.h"
 
@@ -20,15 +20,38 @@ SeriesPlaybackSessionController::SeriesPlaybackSessionController(
     PlaybackController& playback,
     torrent::TorrentStreamingService& torrentStreaming,
     services::StreamActions& actions,
-    download::DownloadManager* downloadManager,
+    playback::ports::SessionFileCatalog* sessionFiles,
     QObject* parent)
     : QObject(parent)
     , m_playback(playback)
     , m_torrentStreaming(torrentStreaming)
     , m_actions(actions)
-    , m_downloadManager(downloadManager)
+    , m_sessionFiles(sessionFiles)
 {
 }
+
+namespace {
+
+/// Lift a generic `MediaFileEntry` list back to the legacy
+/// `TorrentFileEntry` shape the season-pack adjacency policy still
+/// consumes. Step 5 rewrites this controller to talk in
+/// `MediaFileEntry` natively; until then we adapt here.
+QVector<torrent::TorrentFileEntry> liftToTorrentEntries(
+    const QVector<domain::MediaFileEntry>& src)
+{
+    QVector<torrent::TorrentFileEntry> out;
+    out.reserve(src.size());
+    for (const auto& f : src) {
+        torrent::TorrentFileEntry e;
+        e.index = f.index;
+        e.path = f.path;
+        e.size = f.size;
+        out.append(e);
+    }
+    return out;
+}
+
+} // namespace
 
 bool SeriesPlaybackSessionController::navigationVisible() const noexcept
 {
@@ -66,20 +89,20 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
         return;
     }
 
-    // Prefer the unified download-manager lookup. This covers both
+    // Prefer the unified session-file catalog. This covers both
     // libtorrent sessions and HTTP-backed debrid sessions, the
     // latter of which never appear in `TorrentStreamingService` at
     // all. Fall back to the streaming service only when the
-    // manager has no session for the hash (e.g. the legacy
+    // catalog has no session for the hash (e.g. the legacy
     // `StreamActions::playTorrentTask` path or test setups that
-    // wire the controller without a download manager).
+    // wire the controller without a session-file catalog).
     QVector<torrent::TorrentFileEntry> files;
     const char* fileSource = "none";
-    if (m_downloadManager) {
-        files = m_downloadManager->filesForInfoHash(
-            ctx.streamRef.infoHash);
+    if (m_sessionFiles) {
+        files = liftToTorrentEntries(
+            m_sessionFiles->filesForStreamRef(ctx.streamRef));
         if (!files.isEmpty()) {
-            fileSource = "download-manager";
+            fileSource = "session-catalog";
         }
     }
     if (files.isEmpty()) {

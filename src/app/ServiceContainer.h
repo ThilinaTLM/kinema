@@ -48,7 +48,8 @@ class WatchedController;
 }
 
 namespace kinema::download {
-class DownloadManager;
+class AllDebridResolver;
+class RealDebridResolver;
 }
 
 namespace kinema::services {
@@ -65,6 +66,10 @@ class SqliteDownloadRepository;
 
 namespace kinema::playback::events {
 class PlaybackEventStream;
+}
+
+namespace kinema::playback::streaming {
+class LocalHttpStreamGateway;
 }
 
 namespace kinema::playback::history {
@@ -98,6 +103,9 @@ class SubtitleSessionService;
 }
 
 namespace kinema::playback::transfer {
+class BackendRegistry;
+class SessionRegistry;
+class TransferSupervisor;
 class TransferUseCase;
 }
 
@@ -204,7 +212,14 @@ public:
     playback::subtitles::SubtitleSessionService* subtitleSessionService() const
     { return m_subtitleSessionService; }
     torrent::TorrentStreamingService* torrentStreaming() const { return m_torrentStreaming; }
-    download::DownloadManager* downloadManager() const { return m_downloadManager; }
+    playback::streaming::LocalHttpStreamGateway* localStreamGateway() const
+    { return m_localStreamGateway; }
+    playback::transfer::SessionRegistry* sessionRegistry() const
+    { return m_sessionRegistry.get(); }
+    playback::transfer::BackendRegistry* backendRegistry() const
+    { return m_backendRegistry.get(); }
+    playback::transfer::TransferSupervisor* transferSupervisor() const
+    { return m_transferSupervisor; }
 
     controllers::DownloadController* downloadController() const { return m_downloadCtrl; }
     controllers::TokenController* tokenController() const { return m_tokenCtrl; }
@@ -288,6 +303,12 @@ private:
         m_downloadRepo;
     std::unique_ptr<playback::adapters::ActiveStreamIndexerAdapter>
         m_streamIndexerAdapter;
+    std::unique_ptr<download::RealDebridResolver> m_rdResolver;
+    std::unique_ptr<download::AllDebridResolver> m_adResolver;
+    std::unique_ptr<playback::transfer::SessionRegistry> m_sessionRegistry;
+    std::unique_ptr<playback::transfer::BackendRegistry> m_backendRegistry;
+    playback::streaming::LocalHttpStreamGateway* m_localStreamGateway {};
+    playback::transfer::TransferSupervisor* m_transferSupervisor {};
     playback::transfer::TransferUseCase* m_transferUseCase {};
     playback::resume::ResumeUseCase* m_resumeUseCase {};
     playback::progress::PlaybackProgressProjector* m_playbackProgressProjector {};
@@ -300,7 +321,6 @@ private:
     playback::series::SeriesSessionService* m_seriesSessionService {};
 #endif
     torrent::TorrentStreamingService* m_torrentStreaming {};
-    download::DownloadManager* m_downloadManager {};
     controllers::DownloadController* m_downloadCtrl {};
     controllers::TokenController* m_tokenCtrl {};
 

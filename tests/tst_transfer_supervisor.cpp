@@ -118,6 +118,20 @@ public:
         lastErrorAssetId = assetId;
         lastError = error;
     }
+    void updateMode(const QString& assetId,
+        domain::DownloadMode mode) override
+    {
+        if (auto it = m_rows.find(assetId); it != m_rows.end()) {
+            it->second.mode = mode;
+        }
+    }
+    void setDisposition(const QString& assetId,
+        domain::CacheDisposition disposition) override
+    {
+        if (auto it = m_rows.find(assetId); it != m_rows.end()) {
+            it->second.disposition = disposition;
+        }
+    }
     void remove(const QString& assetId) override
     {
         m_rows.erase(assetId);
@@ -130,6 +144,17 @@ public:
             return std::nullopt;
         }
         return it->second;
+    }
+    std::optional<domain::DownloadItem> findForKey(
+        const domain::PlaybackKey& key) const override
+    {
+        for (const auto& [id, row] : m_rows) {
+            Q_UNUSED(id);
+            if (row.key == key) {
+                return row;
+            }
+        }
+        return std::nullopt;
     }
     QVector<domain::DownloadItem> all() const override
     {

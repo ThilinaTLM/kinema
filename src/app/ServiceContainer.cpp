@@ -37,7 +37,8 @@
 #include "core/persistence/TokenStore.h"
 #include "core/persistence/TorrentCache.h"
 #include "core/persistence/WatchedStore.h"
-#include "download/DownloadManager.h"
+#include "download/AllDebridResolver.h"
+#include "download/RealDebridResolver.h"
 #include "domain/Debrid.h"
 #include "kinema_log_app.h"
 #include "playback/adapters/ActiveStreamIndexerAdapter.h"
@@ -53,7 +54,14 @@
 #include "playback/resume/ResumeUseCase.h"
 #include "playback/series/SeriesSessionService.h"
 #include "playback/session/PlaybackSessionManager.h"
+#include "playback/sources/AllDebridMediaSource.h"
+#include "playback/sources/RealDebridMediaSource.h"
+#include "playback/sources/TorrentMediaSource.h"
+#include "playback/streaming/LocalHttpStreamGateway.h"
 #include "playback/subtitles/SubtitleSessionService.h"
+#include "playback/transfer/BackendRegistry.h"
+#include "playback/transfer/SessionRegistry.h"
+#include "playback/transfer/TransferSupervisor.h"
 #include "playback/transfer/TransferUseCase.h"
 
 #include "services/StreamActions.h"
@@ -154,20 +162,94 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         = std::make_unique<core::SubtitleCacheStore>(*m_db, a);
     m_downloadStore = std::make_unique<core::DownloadStore>(*m_db, a);
 
-    // The unified downloader. Wires the localhost media server,
-    // RD-resolution pipeline, torrent engine, and persistent store.
-    m_downloadManager = new download::DownloadManager(*m_http, *m_rd,
-        *m_ad, *m_torrentStreaming, *m_downloadStore, *m_mediaCache,
-        m_settings.download(), a);
-    m_streamActions->setDownloadManager(m_downloadManager);
+    // ---- Unified downloader (new wiring) ------------------------
+    //
+    // The legacy `download::DownloadManager` has been replaced by
+    // a composition of: `SessionRegistry` (live sessions),
+    // `BackendRegistry` (`MediaSourcePort` strategies),
+    // `TransferSupervisor` (DownloadRepository + event-stream
+    // projection), `LocalHttpStreamGateway` (localhost server),
+    // and `TransferUseCase` (application-level entry point).
+    // Ordering is delicate: the gateway resolver needs the
+    // use-case, so we build the use-case last and assign the
+    // resolver afterwards.
+
+    // Resolvers used by the debrid media sources.
+    m_rdResolver
+        = std::make_unique<download::RealDebridResolver>(*m_rd, a);
+    m_adResolver
+        = std::make_unique<download::AllDebridResolver>(*m_ad, a);
+
+    m_sessionRegistry
+        = std::make_unique<playback::transfer::SessionRegistry>(a);
+    m_localStreamGateway
+        = new playback::streaming::LocalHttpStreamGateway(a);
+    if (!m_localStreamGateway->listen()) {
+        qCWarning(KINEMA_APP)
+            << "ServiceContainer: could not bind localhost stream gateway";
+    } else {
+        qCInfo(KINEMA_APP)
+            << "ServiceContainer: localhost stream gateway listening";
+    }
+
+    m_backendRegistry
+        = std::make_unique<playback::transfer::BackendRegistry>();
+    // Order matters: the selection policy walks backends in the
+    // order registered when no override is given. Debrid backends
+    // come first; the registry itself gates which one is "active"
+    // via `setActiveDebridProvider`, so swapping providers is a
+    // single setter call rather than re-registration.
+    m_backendRegistry->registerSource(
+        std::make_unique<playback::sources::RealDebridMediaSource>(
+            *m_http, *m_rd, *m_rdResolver, *m_mediaCache,
+            m_settings.download()));
+    m_backendRegistry->registerSource(
+        std::make_unique<playback::sources::AllDebridMediaSource>(
+            *m_http, *m_ad, *m_adResolver, *m_mediaCache,
+            m_settings.download()));
+    m_backendRegistry->registerSource(
+        std::make_unique<playback::sources::TorrentMediaSource>(
+            *m_torrentStreaming, *m_mediaCache));
+
+    // Repo + supervisor must exist before the use-case (the
+    // use-case forwards `itemChanged` from the supervisor).
+    m_downloadRepo
+        = std::make_unique<playback::downloads::SqliteDownloadRepository>(
+            *m_downloadStore);
+    // Note: `m_playbackEventStream` is constructed further below
+    // (kept in its original spot for ordering parity with the
+    // playback subsystem block). The supervisor and use-case need
+    // it, so we move the event-stream construction up here.
+    m_playbackEventStream
+        = new playback::events::PlaybackEventStream(a);
+    m_transferSupervisor
+        = new playback::transfer::TransferSupervisor(
+            *m_sessionRegistry, *m_downloadRepo,
+            *m_playbackEventStream, a);
+    m_transferUseCase = new playback::transfer::TransferUseCase(
+        *m_backendRegistry, *m_sessionRegistry,
+        *m_transferSupervisor, *m_localStreamGateway,
+        *m_downloadRepo, *m_mediaCache, *m_torrentStreaming, a);
+
+    // Gateway's cold-recovery hook: when the player asks for an
+    // asset that has no live session (e.g. after restart with a
+    // pinned row left over), this re-opens it via the use-case.
+    m_localStreamGateway->setSessionResolver(
+        [this](const QString& assetId)
+            -> QCoro::Task<playback::ports::ByteRangeSource*> {
+            co_return co_await m_transferUseCase
+                ->ensureSessionForAssetId(assetId);
+        });
+
+    m_streamActions->setTransferUseCase(m_transferUseCase);
     m_downloadCtrl = new controllers::DownloadController(
-        *m_downloadManager, *m_downloadStore, a);
+        *m_transferUseCase, *m_downloadStore, a);
 
     // Re-attach Full background downloads from the previous run.
     // OnDemand sessions are intentionally skipped: by definition
     // they only do work while a player is consuming them, and
     // there is no consumer at startup.
-    m_downloadManager->resumePersisted();
+    m_transferUseCase->resumePersisted();
 
     // Tokens — `m_tokenCtrl` is already constructed above so the
     // debrid credentials resolver could capture it before the
@@ -192,16 +274,15 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
             m_ad->setApiKey(key);
         });
 
-    // Forward the active-debrid-provider radio to the download
-    // manager's selector. Initial value + future changes both go
-    // through the same path.
-    m_downloadManager->setActiveDebridProvider(
+    // Forward the active-debrid-provider radio to the backend
+    // registry. Initial value + future changes both go through the
+    // same path.
+    m_backendRegistry->setActiveDebridProvider(
         m_settings.debrid().activeProvider());
     QObject::connect(&m_settings.debrid(),
-        &config::DebridSettings::activeProviderChanged,
-        m_downloadManager,
+        &config::DebridSettings::activeProviderChanged, a,
         [this](domain::DebridProvider p) {
-            m_downloadManager->setActiveDebridProvider(p);
+            m_backendRegistry->setActiveDebridProvider(p);
         });
 
     // OpenSubtitles + subtitle controller.
@@ -230,13 +311,10 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         &controllers::TokenController::openSubtitlesPasswordChanged,
         m_openSubtitles, onOsCredentialChanged);
 
-    // Playback-subsystem long-lived plumbing. These objects expose
-    // the session-centric API surface that QML and projections will
-    // grow into. For now each is a thin facade over the existing
-    // controllers; the inside flips during later refactor phases
-    // without changing the public boundary.
-    m_playbackEventStream
-        = new playback::events::PlaybackEventStream(a);
+    // Playback-subsystem long-lived plumbing. The event stream and
+    // download repository / transfer supervisor were already built
+    // above (the unified-downloader block needs them), so this
+    // block only adds the adapters and history-side wiring.
     m_externalPlayerAdapter
         = new playback::adapters::ExternalPlayerAdapter(
             *m_player, *m_playbackEventStream, a);
@@ -248,14 +326,9 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_historyRepo
         = std::make_unique<playback::history::SqlitePlaybackHistoryRepository>(
             *m_history);
-    m_downloadRepo
-        = std::make_unique<playback::downloads::SqliteDownloadRepository>(
-            *m_downloadStore);
     m_streamIndexerAdapter
         = std::make_unique<playback::adapters::ActiveStreamIndexerAdapter>(
             m_indexers);
-    m_transferUseCase = new playback::transfer::TransferUseCase(
-        *m_downloadManager, a);
     m_playbackProgressProjector
         = new playback::progress::PlaybackProgressProjector(
             *m_historyRepo, *m_playbackEventStream, a);
@@ -290,7 +363,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     // drawer's downloads entry can show counts even before the
     // first navigation to the page.
     m_downloadsVm = new ui::qml::DownloadsViewModel(*m_downloadCtrl,
-        *m_downloadManager, m_streamActions, a);
+        *m_transferUseCase, m_streamActions, a);
 
     // Discover / Search / Browse surface VMs. They sit on top of
     // the existing service graph; action signals route back into
@@ -382,7 +455,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         *m_historyQueryService, m_settings, m_http.get(), a);
     m_seriesSessionCtrl = new controllers::SeriesPlaybackSessionController(
         *m_playbackCtrl, *m_torrentStreaming, *m_streamActions,
-        m_downloadManager, a);
+        m_sessionRegistry.get(), a);
     m_mprisCtrl = new controllers::MprisController(
         *m_playbackCtrl, m_seriesSessionCtrl, a);
     // Subtitle ↔ playback coupling (moviehash → search) lives at

@@ -17,8 +17,8 @@ namespace kinema::controllers {
 class PlaybackController;
 }
 
-namespace kinema::download {
-class DownloadManager;
+namespace kinema::playback::ports {
+class SessionFileCatalog;
 }
 
 namespace kinema::services {
@@ -38,7 +38,7 @@ public:
     SeriesPlaybackSessionController(PlaybackController& playback,
         torrent::TorrentStreamingService& torrentStreaming,
         services::StreamActions& actions,
-        download::DownloadManager* downloadManager,
+        playback::ports::SessionFileCatalog* sessionFiles,
         QObject* parent = nullptr);
 
     bool navigationVisible() const noexcept;
@@ -102,7 +102,7 @@ private:
     /// provides one. When present, it is consulted first for the
     /// magnet's file list so HTTP-backed debrid sessions resolve
     /// adjacency just like libtorrent ones.
-    download::DownloadManager* m_downloadManager = nullptr;
+    playback::ports::SessionFileCatalog* m_sessionFiles = nullptr;
 
     domain::PlaybackContext m_baseContext;
     std::optional<EpisodeTarget> m_previous;

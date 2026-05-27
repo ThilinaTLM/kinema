@@ -7,6 +7,7 @@
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
+#include "playback/transfer/LiveAssetStats.h"
 #include "torrent/MediaFileSelector.h" // TorrentFileEntry
 
 #include <QHash>
@@ -56,14 +57,11 @@ class DownloadBackend;
 class RealDebridResolver;
 
 /// Transient per-asset telemetry merged into download rows. The
-/// `DownloadManager` keeps the live values in memory only; only the
-/// persisted (cachedBytes / state) fields make it to the store.
-struct LiveAssetStats {
-    qint64 ratePayloadBps = 0;
-    int    peers = 0;
-    int    seeds = 0;
-    int    etaSeconds = -1;
-};
+/// canonical declaration now lives under
+/// `playback/transfer/LiveAssetStats.h`; this alias preserves the
+/// historical `download::LiveAssetStats` symbol while the legacy
+/// `DownloadManager` is still on the branch.
+using LiveAssetStats = kinema::playback::transfer::LiveAssetStats;
 
 /**
  * Long-lived orchestrator for the unified downloader.

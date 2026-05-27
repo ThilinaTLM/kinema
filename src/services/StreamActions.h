@@ -26,8 +26,8 @@ namespace kinema::torrent {
 class TorrentStreamingService;
 }
 
-namespace kinema::download {
-class DownloadManager;
+namespace kinema::playback::transfer {
+class TransferUseCase;
 }
 
 namespace kinema::services {
@@ -53,9 +53,9 @@ public:
         QObject* parent = nullptr);
 
     /// Wire the unified downloader. When set, `play()` always asks
-    /// the manager for a localhost URL; the legacy direct/torrent
+    /// the use-case for a localhost URL; the legacy direct/torrent
     /// branch is bypassed.
-    void setDownloadManager(download::DownloadManager* manager);
+    void setTransferUseCase(playback::transfer::TransferUseCase* useCase);
 
     /// Wire the resume use-case used to seed `ctx.resumeSeconds`.
     /// Optional: when null, `play()` does not seed a resume
@@ -91,9 +91,9 @@ public Q_SLOTS:
         domain::DownloadBackendKind backend);
 
     /// Background full-file download. Maps onto
-    /// `DownloadManager::enqueueDownload` and never launches the
+    /// `TransferUseCase::saveOffline` and never launches the
     /// player. Mode upgrade for already-streaming sessions is
-    /// handled by the manager.
+    /// handled by the use-case.
     void download(const domain::Stream& stream,
         const domain::PlaybackContext& ctx);
     void downloadWithBackend(const domain::Stream& stream,
@@ -122,7 +122,7 @@ private:
 
     core::PlayerLauncher* m_launcher;
     torrent::TorrentStreamingService* m_torrentStreaming;
-    download::DownloadManager* m_downloadManager {};
+    playback::transfer::TransferUseCase* m_transferUseCase {};
     playback::resume::ResumeUseCase* m_resume {};
     quint64 m_playEpoch = 0;
 };
