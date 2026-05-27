@@ -126,14 +126,29 @@ void SeriesPlaybackSessionController::refreshFromPlayback(bool active)
                 .arg(nav->next->season).arg(nav->next->episode)
                       : QStringLiteral("—"));
 
+    // The pinned `fileIndex` originates from Torrentio's `fileIdx`,
+    // which references the torrent's libtorrent-metadata file
+    // order. `nav->current->file.index` originates from whichever
+    // source `DownloadManager::filesForInfoHash` returned:
+    // libtorrent for torrent-backed sessions (indices align) or
+    // the resolver's flattened list for HTTP-backed sessions
+    // (Real-Debrid / AllDebrid; indices are positional in the
+    // provider's directory walk and routinely differ from the
+    // torrent's order). Because `adjacentEpisodeFiles` only
+    // surfaces a `current` when exactly one playable file in the
+    // pack parses to the requested (season, episode) — see the
+    // `ambiguousCurrentEpisodeDisablesNavigation` invariant in
+    // `tst_media_file_selector` — the parser-side identity is
+    // already sufficient. Keep the diagnostic for support reports
+    // but do not blank the navigation chrome.
     if (ctx.streamRef.fileIndex >= 0
         && nav->current->file.index != ctx.streamRef.fileIndex) {
         qCDebug(KINEMA_PLAYER).nospace()
-            << "series-pack: clearing — fileIndex mismatch (pinned="
+            << "series-pack: fileIndex drift (pinned="
             << ctx.streamRef.fileIndex << ", parsed="
-            << nav->current->file.index << ")";
-        clearState();
-        return;
+            << nav->current->file.index
+            << ") — accepting parser identity; indices come from"
+               " different sources for debrid-backed sessions";
     }
 
     auto toTarget = [this](const torrent::EpisodeFileTarget& target)
