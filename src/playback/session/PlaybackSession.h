@@ -105,6 +105,14 @@ public:
     void markEnded(PlaybackEndReason reason);
     void markFailed(const QString& reason);
 
+    /// Drive the state machine to terminal in response to a
+    /// terminal event that was already published by another
+    /// component (the player adapter). Does NOT publish a fresh
+    /// `PlaybackEnded` event - the caller is the publisher.
+    /// Idempotent.
+    void markTerminatedExternally(PlaybackEndReason reason);
+    void markFailedExternally();
+
     /// User-initiated stop. Publishes `PlaybackEnded(UserStop)`
     /// (idempotent on terminal sessions). Returns true if the
     /// session transitioned, false if it was already terminal.
@@ -114,6 +122,13 @@ public:
     /// Publishes `PlaybackEnded(ReplacedByNewSource)` once and
     /// transitions to terminal `Completed`. Idempotent.
     void markReplacedByNewSource();
+
+private Q_SLOTS:
+    /// Reactive bridge: when a terminal event for THIS session id
+    /// arrives on the stream, drive the state machine to terminal
+    /// without re-publishing. Used so the player adapter is the
+    /// sole publisher of `PlaybackEnded` / `PlaybackFailed`.
+    void onEvent(const events::PlaybackEvent& event);
 
 private:
     events::PlaybackEventStream& m_eventStream;

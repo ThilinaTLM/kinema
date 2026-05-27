@@ -20,7 +20,6 @@
 #include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "playback/desktop/MprisPlaybackProjection.h"
-#include "controllers/PlaybackController.h"
 
 #endif
 #include "controllers/SubtitleController.h"
@@ -325,7 +324,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
 #ifdef KINEMA_HAVE_LIBMPV
     m_embeddedPlayerAdapter
         = new playback::adapters::EmbeddedMpvPlayerAdapter(
-            *m_playbackEventStream, a);
+            *m_playbackEventStream, m_settings.player(), a);
 #endif
     m_historyRepo
         = std::make_unique<playback::history::SqlitePlaybackHistoryRepository>(
@@ -455,7 +454,6 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         });
 
 #ifdef KINEMA_HAVE_LIBMPV
-    m_playbackCtrl = new controllers::PlaybackController(m_settings, a);
     // Event-driven moviehash probe. Subscribes to
     // PlayableUrlReady (published by EmbeddedMpvPlayerAdapter on
     // play()), runs the HEAD+Range probe, and republishes
@@ -471,7 +469,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         *m_playbackEventStream, *m_historyQueryService,
         m_embeddedPlayerAdapter, a);
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, *m_playbackEventStream, m_playbackCtrl,
+        *m_streamActions, *m_playbackEventStream,
         m_embeddedPlayerAdapter, m_externalPlayerAdapter, a);
     // Event-driven season-pack adjacency. Subscribes to the
     // playback event stream, reads files via the session catalog,
@@ -486,15 +484,13 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     // sends transport commands through PlaybackSessionManager,
     // queries EmbeddedMpvPlayerAdapter for live snapshots
     // (Position / Volume / Rate) and SeriesSessionService for
-    // CanGoNext / CanGoPrevious. No reference to the legacy
-    // PlaybackController — the controller will be retired in a
-    // later Step 6 sub-commit.
+    // CanGoNext / CanGoPrevious.
     m_mprisProjection = new playback::desktop::MprisPlaybackProjection(
         *m_playbackEventStream, *m_playbackSessionManager,
         m_embeddedPlayerAdapter, m_seriesSessionService, a);
 #else
     m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, *m_playbackEventStream, nullptr,
+        *m_streamActions, *m_playbackEventStream,
         nullptr, m_externalPlayerAdapter, a);
 #endif
     if (m_subtitleCtrl) {

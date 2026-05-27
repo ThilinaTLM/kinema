@@ -20,6 +20,10 @@
 
 #include <optional>
 
+namespace kinema::config {
+class PlayerSettings;
+}
+
 namespace kinema::ui::player {
 class PlayerWindow;
 }
@@ -54,6 +58,7 @@ class EmbeddedMpvPlayerAdapter : public QObject, public ports::PlayerPort
     Q_OBJECT
 public:
     EmbeddedMpvPlayerAdapter(events::PlaybackEventStream& eventStream,
+        const config::PlayerSettings& settings,
         QObject* parent = nullptr);
     ~EmbeddedMpvPlayerAdapter() override;
 
@@ -97,6 +102,17 @@ public:
         const QString& language) override;
     ports::PlayerSnapshot snapshot() const override;
 
+Q_SIGNALS:
+    /// User-facing status text ("Loading X…", "Could not start X",
+    /// "Embedded player is not available"). Routed to the shell's
+    /// passive notification by `ShellViewModel`.
+    void statusMessage(const QString& text, int timeoutMs = 3000);
+
+    /// Re-emitted from `PlayerWindow::visibilityChanged` so the
+    /// shell can refresh the tray menu without a direct
+    /// `PlayerWindow` dependency.
+    void visibilityChanged(bool visible);
+
 private Q_SLOTS:
     void onFileLoaded();
     void onEndOfFile(const QString& reason);
@@ -110,6 +126,9 @@ private Q_SLOTS:
     void onChaptersChanged(const core::chapters::ChapterList& chapters);
     void onUserClosedWindow();
     void onLoadWatchdogTimedOut();
+    void onResumeAccepted();
+    void onResumeDeclined();
+    void onSkipRequested();
 
 private:
     void disconnectWindow();
@@ -121,11 +140,25 @@ private:
     std::optional<PlaybackEndReason> classifyEndReason(const QString& reason);
 
     events::PlaybackEventStream& m_eventStream;
+    const config::PlayerSettings& m_settings;
     QPointer<ui::player::PlayerWindow> m_window;
     session::PlayerLoadWatchdog m_loadWatchdog { this };
 
     PlaybackSessionId m_sessionId;
     domain::PlaybackContext m_ctx;
+    /// Resume position that exceeds the user's prompt threshold;
+    /// stashed at `play()` so `file-loaded` can render the prompt
+    /// instead of seeking blindly. Consumed by `onResumeAccepted`
+    /// / `onResumeDeclined`.
+    qint64 m_pendingResumeSeconds = 0;
+    /// Cached chapter list from the active session. Re-evaluated
+    /// on every `PositionTicked` to surface the "skip intro / outro
+    /// / credits" prompt at the right windows.
+    core::chapters::ChapterList m_chapters;
+    /// End of the active skip-chapter (exclusive). Drives the
+    /// `Skip…` seek target when the user accepts the prompt.
+    /// -1 when no skip prompt is currently shown.
+    double m_skipChapterEnd = -1.0;
     bool m_sessionActive = false;
     /// True between a fresh `play()` that supersedes an active
     /// session and the corresponding `file-loaded` event. The mpv

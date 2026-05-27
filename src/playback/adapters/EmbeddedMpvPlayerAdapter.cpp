@@ -5,16 +5,24 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
+#include "config/AppSettings.h"
+#include "config/PlayerSettings.h"
 #include "playback/events/PlaybackEventStream.h"
+#include "playback/policy/ChapterSkipPolicy.h"
+#include "playback/policy/ResumePolicy.h"
 #include "ui/player/PlayerWindow.h"
+
+#include <KLocalizedString>
 
 namespace kinema::playback::adapters {
 
 EmbeddedMpvPlayerAdapter::EmbeddedMpvPlayerAdapter(
     events::PlaybackEventStream& eventStream,
+    const config::PlayerSettings& settings,
     QObject* parent)
     : QObject(parent)
     , m_eventStream(eventStream)
+    , m_settings(settings)
 {
     connect(&m_loadWatchdog, &session::PlayerLoadWatchdog::timedOut,
         this, &EmbeddedMpvPlayerAdapter::onLoadWatchdogTimedOut);
@@ -38,6 +46,9 @@ void EmbeddedMpvPlayerAdapter::setPlayerWindow(ui::player::PlayerWindow* window)
     if (!window) {
         m_loadWatchdog.stop();
         m_loadfileInFlight = false;
+        m_pendingResumeSeconds = 0;
+        m_skipChapterEnd = -1.0;
+        m_chapters.clear();
     }
 }
 
@@ -68,6 +79,36 @@ void EmbeddedMpvPlayerAdapter::connectWindow()
         this, &EmbeddedMpvPlayerAdapter::onChaptersChanged);
     connect(m_window.data(), &ui::player::PlayerWindow::userClosedWindow,
         this, &EmbeddedMpvPlayerAdapter::onUserClosedWindow);
+    connect(m_window.data(), &ui::player::PlayerWindow::visibilityChanged,
+        this, &EmbeddedMpvPlayerAdapter::visibilityChanged);
+    // User-action signals from the QML chrome: resume / skip
+    // chapter / picker selections. The pickers route back into
+    // the window's transport API so tests can stub PlayerWindow
+    // without needing a libmpv instance.
+    connect(m_window.data(), &ui::player::PlayerWindow::resumeAccepted,
+        this, &EmbeddedMpvPlayerAdapter::onResumeAccepted);
+    connect(m_window.data(), &ui::player::PlayerWindow::resumeDeclined,
+        this, &EmbeddedMpvPlayerAdapter::onResumeDeclined);
+    connect(m_window.data(), &ui::player::PlayerWindow::skipRequested,
+        this, &EmbeddedMpvPlayerAdapter::onSkipRequested);
+    connect(m_window.data(), &ui::player::PlayerWindow::audioPicked,
+        this, [this](int aid) {
+            if (m_window) {
+                m_window->setAudioTrack(aid);
+            }
+        });
+    connect(m_window.data(), &ui::player::PlayerWindow::subtitlePicked,
+        this, [this](int sid) {
+            if (m_window) {
+                m_window->setSubtitleTrack(sid);
+            }
+        });
+    connect(m_window.data(), &ui::player::PlayerWindow::speedPicked,
+        this, [this](double s) {
+            if (m_window) {
+                m_window->setSpeed(s);
+            }
+        });
 }
 
 void EmbeddedMpvPlayerAdapter::disconnectWindow()
@@ -106,6 +147,8 @@ void EmbeddedMpvPlayerAdapter::play(const QUrl& url,
             QStringLiteral("Embedded player window is not available"),
             ctx,
         });
+        Q_EMIT statusMessage(i18nc("@info:status",
+            "Embedded player is not available."), 6000);
         return;
     }
     domain::PlaybackContext effectiveCtx = ctx;
@@ -117,6 +160,36 @@ void EmbeddedMpvPlayerAdapter::play(const QUrl& url,
     if (m_sessionActive) {
         m_ctx = effectiveCtx;
     }
+
+    // Reset per-attempt UI state (resume prompt + chapter skip).
+    m_pendingResumeSeconds = 0;
+    m_skipChapterEnd = -1.0;
+    m_chapters.clear();
+    m_paused = false;
+    m_position = 0.0;
+    m_duration = 0.0;
+    m_window->setLoadingVisible(true);
+    m_window->hideSkipChapter();
+    m_window->hideResumePrompt();
+
+    // Resume policy: if the stored offset exceeds the user's prompt
+    // threshold we defer to a prompt at file-loaded instead of
+    // seeking blindly. The load itself goes in without a resume
+    // hint so mpv starts from 0 and we land at the deferred seek
+    // only after the user picks.
+    if (effectiveCtx.resumeSeconds.has_value()
+        && policy::shouldShowResumePrompt(*effectiveCtx.resumeSeconds,
+            m_settings.resumePromptThresholdSec())) {
+        m_pendingResumeSeconds = *effectiveCtx.resumeSeconds;
+        effectiveCtx.resumeSeconds.reset();
+    }
+
+    if (!effectiveCtx.title.isEmpty()) {
+        Q_EMIT statusMessage(
+            i18nc("@info:status", "Loading \u201c%1\u201d\u2026",
+                effectiveCtx.title), 3000);
+    }
+
     // Surface the playable URL on the event stream so probes
     // (moviehash) and projections (subtitles) can subscribe
     // without a direct dependency on the adapter. The assetId is
@@ -223,8 +296,19 @@ void EmbeddedMpvPlayerAdapter::onFileLoaded()
 {
     m_loadWatchdog.stop();
     m_loadfileInFlight = false;
+    if (m_window) {
+        m_window->setLoadingVisible(false);
+    }
     if (!m_sessionActive) {
         return;
+    }
+    if (m_pendingResumeSeconds > 0 && m_window) {
+        // Pause the file under the prompt so the user has time to
+        // pick before mpv plays from 0. `onResumeAccepted /
+        // Declined` re-issue the play state.
+        m_window->setPaused(true);
+        m_paused = true;
+        m_window->showResumePrompt(m_pendingResumeSeconds);
     }
     m_eventStream.publish(events::PlayerLoaded { m_sessionId });
 }
@@ -275,6 +359,10 @@ void EmbeddedMpvPlayerAdapter::onEndOfFile(const QString& reason)
 
 void EmbeddedMpvPlayerAdapter::onMpvError(const QString& message)
 {
+    m_loadWatchdog.stop();
+    if (m_window) {
+        m_window->setLoadingVisible(false);
+    }
     if (!m_sessionActive) {
         return;
     }
@@ -290,6 +378,31 @@ void EmbeddedMpvPlayerAdapter::onPositionChanged(double seconds)
     m_position = seconds;
     if (!m_sessionActive) return;
     m_eventStream.publish(events::PositionTicked { m_sessionId, seconds });
+
+    // Skip-chapter prompt is only meaningful for series and only
+    // when the user opted in.
+    if (!m_window) return;
+    if (m_ctx.key.kind != domain::MediaKind::Series
+        || !m_settings.skipIntroChapters()) {
+        if (m_skipChapterEnd > 0.0) {
+            m_skipChapterEnd = -1.0;
+            m_window->hideSkipChapter();
+        }
+        return;
+    }
+    const auto skip = policy::activeSkipChapter(m_chapters, seconds,
+        m_duration);
+    if (skip.has_value()) {
+        m_skipChapterEnd = skip->endSec;
+        m_window->showSkipChapter(
+            policy::skipChapterKind(skip->kind),
+            policy::skipButtonLabel(skip->kind),
+            static_cast<qint64>(skip->startSec),
+            static_cast<qint64>(skip->endSec));
+    } else if (m_skipChapterEnd > 0.0) {
+        m_skipChapterEnd = -1.0;
+        m_window->hideSkipChapter();
+    }
 }
 
 void EmbeddedMpvPlayerAdapter::onDurationChanged(double seconds)
@@ -328,6 +441,7 @@ void EmbeddedMpvPlayerAdapter::onTrackListChanged(
 void EmbeddedMpvPlayerAdapter::onChaptersChanged(
     const core::chapters::ChapterList& chapters)
 {
+    m_chapters = chapters;
     if (!m_sessionActive) return;
     m_eventStream.publish(events::ChapterListChanged {
         m_sessionId, chapters });
@@ -353,6 +467,10 @@ void EmbeddedMpvPlayerAdapter::onLoadWatchdogTimedOut()
     if (!m_sessionActive) {
         return;
     }
+    Q_EMIT statusMessage(
+        i18nc("@info:status",
+            "Could not start \u201c%1\u201d \u2014 the source did not respond.",
+            m_ctx.title), 6000);
     m_eventStream.publish(events::PlaybackEnded {
         m_sessionId,
         PlaybackEndReason::LoadTimeout,
@@ -360,6 +478,42 @@ void EmbeddedMpvPlayerAdapter::onLoadWatchdogTimedOut()
     });
     m_sessionActive = false;
     m_loadfileInFlight = false;
+}
+
+void EmbeddedMpvPlayerAdapter::onResumeAccepted()
+{
+    const qint64 seconds = m_pendingResumeSeconds;
+    m_pendingResumeSeconds = 0;
+    if (!m_window) {
+        return;
+    }
+    m_window->hideResumePrompt();
+    m_window->seekAbsolute(static_cast<double>(seconds));
+    m_window->setPaused(false);
+}
+
+void EmbeddedMpvPlayerAdapter::onResumeDeclined()
+{
+    m_pendingResumeSeconds = 0;
+    if (!m_window) {
+        return;
+    }
+    m_window->hideResumePrompt();
+    m_window->seekAbsolute(0.0);
+    m_window->setPaused(false);
+}
+
+void EmbeddedMpvPlayerAdapter::onSkipRequested()
+{
+    if (!m_window || m_skipChapterEnd <= 0.0) {
+        return;
+    }
+    m_window->hideSkipChapter();
+    // 0.25 s of cushion so we land just after the chapter boundary
+    // and don't immediately re-trigger the prompt on the next
+    // PositionTicked tick.
+    m_window->seekAbsolute(m_skipChapterEnd + 0.25);
+    m_skipChapterEnd = -1.0;
 }
 
 } // namespace kinema::playback::adapters

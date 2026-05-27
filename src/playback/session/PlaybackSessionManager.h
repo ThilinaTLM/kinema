@@ -18,10 +18,6 @@ namespace kinema::services {
 class StreamActions;
 }
 
-namespace kinema::controllers {
-class PlaybackController;
-}
-
 namespace kinema::playback::adapters {
 class EmbeddedMpvPlayerAdapter;
 class ExternalPlayerAdapter;
@@ -55,7 +51,6 @@ class PlaybackSessionManager : public QObject
 public:
     PlaybackSessionManager(services::StreamActions& actions,
         events::PlaybackEventStream& eventStream,
-        controllers::PlaybackController* embeddedCtrl,
         adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
         adapters::ExternalPlayerAdapter* externalAdapter,
         QObject* parent = nullptr);
@@ -112,7 +107,6 @@ private:
 
     services::StreamActions& m_actions;
     events::PlaybackEventStream& m_eventStream;
-    controllers::PlaybackController* m_embedded;
     adapters::EmbeddedMpvPlayerAdapter* m_embeddedAdapter;
     adapters::ExternalPlayerAdapter* m_externalAdapter;
     std::unique_ptr<PlaybackSession> m_session;

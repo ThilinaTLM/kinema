@@ -3,10 +3,15 @@
 
 #include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
 
+#include "config/PlayerSettings.h"
 #include "playback/events/PlaybackEvent.h"
 #include "playback/events/PlaybackEventStream.h"
 
+#include <KConfig>
+#include <KSharedConfig>
+
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTest>
 #include <QUuid>
 
@@ -30,6 +35,19 @@ domain::PlaybackContext makeCtx(const QString& id)
     ctx.key = key;
     ctx.title = id;
     return ctx;
+}
+
+// One scratch PlayerSettings shared across every test in the file.
+// The adapter only reads `resumePromptThresholdSec()` and
+// `skipIntroChapters()`; defaults are fine for the existing
+// assertions.
+config::PlayerSettings& playerSettings()
+{
+    static KSharedConfigPtr cfg = KSharedConfig::openConfig(
+        QStringLiteral("kinema-test-embedded-adapter"),
+        KConfig::SimpleConfig, QStandardPaths::TempLocation);
+    static config::PlayerSettings settings(cfg);
+    return settings;
 }
 
 template<class T>
@@ -65,7 +83,7 @@ private Q_SLOTS:
     void isUnavailableWithoutWindow()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
 
         QVERIFY(!adapter.isAvailable());
         QCOMPARE(adapter.snapshot().active, false);
@@ -74,7 +92,7 @@ private Q_SLOTS:
     void playWithoutWindowPublishesFailure()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
 
         const auto id = QUuid::createUuid();
         const auto ctx = makeCtx(QStringLiteral("tt1"));
@@ -90,7 +108,7 @@ private Q_SLOTS:
     void stopPublishesUserStopAndClearsSession()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
 
         const auto id = QUuid::createUuid();
         adapter.setActiveSession(id, makeCtx(QStringLiteral("tt1")));
@@ -112,7 +130,7 @@ private Q_SLOTS:
     void fileLoadedPublishesPlayerLoadedAndDisarmsWatchdog()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
 
         const auto id = QUuid::createUuid();
         adapter.setActiveSession(id, makeCtx(QStringLiteral("tt1")));
@@ -130,7 +148,7 @@ private Q_SLOTS:
     void naturalEofPublishesPlaybackEnded()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
         const auto id = QUuid::createUuid();
         const auto ctx = makeCtx(QStringLiteral("tt1"));
         adapter.setActiveSession(id, ctx);
@@ -147,7 +165,7 @@ private Q_SLOTS:
     void mpvErrorPublishesPlaybackFailed()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
         const auto id = QUuid::createUuid();
         adapter.setActiveSession(id, makeCtx(QStringLiteral("tt1")));
 
@@ -167,7 +185,7 @@ private Q_SLOTS:
         // active. Expected: no spurious PlaybackEnded — the
         // suppressing m_loadfileInFlight flag must be respected.
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
 
         const auto idA = QUuid::createUuid();
         adapter.setActiveSession(idA, makeCtx(QStringLiteral("ttA")));
@@ -196,7 +214,7 @@ private Q_SLOTS:
     void positionAndDurationFanOutToEvents()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
         const auto id = QUuid::createUuid();
         adapter.setActiveSession(id, makeCtx(QStringLiteral("tt1")));
 
@@ -219,7 +237,7 @@ private Q_SLOTS:
     void watchdogTimeoutPublishesLoadTimeout()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
         const auto id = QUuid::createUuid();
         adapter.setActiveSession(id, makeCtx(QStringLiteral("tt1")));
 
@@ -238,7 +256,7 @@ private Q_SLOTS:
     void userClosedWindowPublishesUserStop()
     {
         PlaybackEventStream stream;
-        EmbeddedMpvPlayerAdapter adapter(stream);
+        EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
         const auto id = QUuid::createUuid();
         adapter.setActiveSession(id, makeCtx(QStringLiteral("tt1")));
 

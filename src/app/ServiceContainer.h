@@ -42,7 +42,6 @@ namespace kinema::controllers {
 class DebridCredentialsResolver;
 class DownloadController;
 class LibraryController;
-class PlaybackController;
 class SubtitleController;
 class TokenController;
 class TrayController;
@@ -242,7 +241,6 @@ public:
     /// idle inhibitor; drives state off `PlaybackEventStream`.
     playback::desktop::MprisPlaybackProjection* mprisProjection() const
     { return m_mprisProjection; }
-    controllers::PlaybackController* playbackController() const { return m_playbackCtrl; }
 #endif
 
     // ---- Page view-models ----------------------------------------------
@@ -352,7 +350,6 @@ private:
 
 #ifdef KINEMA_HAVE_LIBMPV
     playback::desktop::MprisPlaybackProjection* m_mprisProjection {};
-    controllers::PlaybackController* m_playbackCtrl {};
 #endif
 };
 

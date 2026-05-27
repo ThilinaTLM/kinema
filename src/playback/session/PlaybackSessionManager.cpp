@@ -9,7 +9,6 @@
 #include "services/StreamActions.h"
 
 #ifdef KINEMA_HAVE_LIBMPV
-#include "controllers/PlaybackController.h"
 #include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
 #endif
 
@@ -18,14 +17,12 @@ namespace kinema::playback::session {
 PlaybackSessionManager::PlaybackSessionManager(
     services::StreamActions& actions,
     events::PlaybackEventStream& eventStream,
-    controllers::PlaybackController* embeddedCtrl,
     adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
     adapters::ExternalPlayerAdapter* externalAdapter,
     QObject* parent)
     : QObject(parent)
     , m_actions(actions)
     , m_eventStream(eventStream)
-    , m_embedded(embeddedCtrl)
     , m_embeddedAdapter(embeddedAdapter)
     , m_externalAdapter(externalAdapter)
 {
@@ -106,11 +103,17 @@ void PlaybackSessionManager::downloadWithBackend(
     m_actions.downloadWithBackend(stream, ctx, backend);
 }
 
+// Transport commands route directly into the embedded adapter
+// (PlayerPort). The adapter publishes terminal PlaybackEnded /
+// PlaybackFailed events to the stream; PlaybackSession picks
+// those up via its own subscription to terminate the state
+// machine without re-publishing.
+
 void PlaybackSessionManager::pause()
 {
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_embedded) {
-        m_embedded->pause();
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->pause();
     }
 #endif
 }
@@ -118,8 +121,8 @@ void PlaybackSessionManager::pause()
 void PlaybackSessionManager::resume()
 {
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_embedded) {
-        m_embedded->resume();
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->resume();
     }
 #endif
 }
@@ -127,8 +130,8 @@ void PlaybackSessionManager::resume()
 void PlaybackSessionManager::playPause()
 {
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_embedded) {
-        m_embedded->playPause();
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->togglePause();
     }
 #endif
 }
@@ -136,20 +139,20 @@ void PlaybackSessionManager::playPause()
 void PlaybackSessionManager::stop()
 {
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_embedded) {
-        m_embedded->stop();
+    if (m_embeddedAdapter) {
+        // Adapter publishes PlaybackEnded(UserStop); session
+        // subscription terminates the state machine without
+        // re-publishing.
+        m_embeddedAdapter->stop();
     }
 #endif
-    if (m_session && !m_session->isTerminal()) {
-        m_session->stopByUser();
-    }
 }
 
 void PlaybackSessionManager::seekRelativeSeconds(double seconds)
 {
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_embedded) {
-        m_embedded->seekRelativeSeconds(seconds);
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->seekRelative(seconds);
     }
 #else
     Q_UNUSED(seconds);
@@ -159,8 +162,8 @@ void PlaybackSessionManager::seekRelativeSeconds(double seconds)
 void PlaybackSessionManager::seekAbsoluteSeconds(double seconds)
 {
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_embedded) {
-        m_embedded->seekAbsoluteSeconds(seconds);
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->seekAbsolute(seconds);
     }
 #else
     Q_UNUSED(seconds);
@@ -170,8 +173,8 @@ void PlaybackSessionManager::seekAbsoluteSeconds(double seconds)
 void PlaybackSessionManager::setVolumePercent(double percent)
 {
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_embedded) {
-        m_embedded->setVolumePercent(percent);
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->setVolumePercent(percent);
     }
 #else
     Q_UNUSED(percent);
@@ -181,8 +184,8 @@ void PlaybackSessionManager::setVolumePercent(double percent)
 void PlaybackSessionManager::setPlaybackRate(double factor)
 {
 #ifdef KINEMA_HAVE_LIBMPV
-    if (m_embedded) {
-        m_embedded->setPlaybackRate(factor);
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->setPlaybackRate(factor);
     }
 #else
     Q_UNUSED(factor);

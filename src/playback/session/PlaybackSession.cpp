@@ -5,6 +5,8 @@
 
 #include "playback/events/PlaybackEventStream.h"
 
+#include <variant>
+
 namespace kinema::playback::session {
 
 PlaybackSession::PlaybackSession(events::PlaybackEventStream& eventStream,
@@ -26,10 +28,56 @@ void PlaybackSession::start(const domain::Stream& stream,
     m_ctx = ctx;
     m_backendOverride = backendOverride;
     m_state.handle(PlaybackInput::PlayStream);
+    // Reactive bridge: subscribe BEFORE publishing
+    // PlaybackRequested so we cleanly observe any subsequent
+    // terminal event the adapter publishes for this id.
+    connect(&m_eventStream,
+        &events::PlaybackEventStream::eventPublished,
+        this, &PlaybackSession::onEvent);
     m_eventStream.publish(events::PlaybackRequested {
         m_id,
         m_ctx,
     });
+}
+
+void PlaybackSession::markTerminatedExternally(PlaybackEndReason)
+{
+    if (m_terminated) {
+        return;
+    }
+    m_state.handle(PlaybackInput::EndOfFile);
+    if (m_state.state() == PlaybackState::Ending) {
+        m_state.handle(PlaybackInput::EndOfFile);
+    }
+    m_terminated = true;
+}
+
+void PlaybackSession::markFailedExternally()
+{
+    if (m_terminated) {
+        return;
+    }
+    m_state.handle(PlaybackInput::Error);
+    m_terminated = true;
+}
+
+void PlaybackSession::onEvent(const events::PlaybackEvent& event)
+{
+    if (m_terminated) {
+        return;
+    }
+    std::visit([this](const auto& payload) {
+        using T = std::decay_t<decltype(payload)>;
+        if constexpr (std::is_same_v<T, events::PlaybackEnded>) {
+            if (payload.sessionId == m_id) {
+                markTerminatedExternally(payload.reason);
+            }
+        } else if constexpr (std::is_same_v<T, events::PlaybackFailed>) {
+            if (payload.sessionId == m_id) {
+                markFailedExternally();
+            }
+        }
+    }, event);
 }
 
 void PlaybackSession::markSourceResolved(const domain::AssetRef& asset)
