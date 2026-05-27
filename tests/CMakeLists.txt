@@ -497,6 +497,10 @@ if(KINEMA_ENABLE_MPV_EMBED)
         TEST_NAME tst_embedded_mpv_player_adapter
         LINK_LIBRARIES kinema_core Qt6::Test
     )
+    ecm_add_test(tst_mpris_playback_projection.cpp
+        TEST_NAME tst_mpris_playback_projection
+        LINK_LIBRARIES kinema_core Qt6::Test
+    )
     ecm_add_test(tst_shipped_mpv_conf.cpp
         TEST_NAME tst_shipped_mpv_conf
         LINK_LIBRARIES kinema_core Qt6::Test
@@ -552,6 +556,7 @@ foreach(t tst_player_view_model tst_player_audio_tracks_model
          tst_player_subtitle_tracks_model tst_player_chapters_model
          tst_mpv_load_command tst_player_window_presentation
          tst_embedded_mpv_player_adapter
+         tst_mpris_playback_projection
          tst_shipped_mpv_conf)
     if(TARGET ${t})
         target_compile_definitions(${t} PRIVATE ${test_defs})

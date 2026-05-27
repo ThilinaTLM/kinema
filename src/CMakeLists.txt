@@ -188,6 +188,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
         controllers/MprisController.cpp
         controllers/PlaybackController.cpp
         playback/adapters/EmbeddedMpvPlayerAdapter.cpp
+        playback/desktop/MprisPlaybackProjection.cpp
         playback/series/SeriesSessionService.cpp
         ui/player/AudioTracksModel.cpp
         ui/player/ChaptersModel.cpp

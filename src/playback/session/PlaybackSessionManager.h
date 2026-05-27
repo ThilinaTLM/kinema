@@ -86,15 +86,18 @@ public Q_SLOTS:
         const domain::PlaybackContext& ctx,
         domain::DownloadBackendKind backend);
 
-    void pause();
-    void resume();
-    void playPause();
-    void stop();
+    // Transport commands. `virtual` so projections / tests can
+    // intercept dispatches without spinning up an embedded
+    // controller (mirrors the `play()` pattern).
+    virtual void pause();
+    virtual void resume();
+    virtual void playPause();
+    virtual void stop();
 
-    void seekRelativeSeconds(double seconds);
-    void seekAbsoluteSeconds(double seconds);
-    void setVolumePercent(double percent);
-    void setPlaybackRate(double factor);
+    virtual void seekRelativeSeconds(double seconds);
+    virtual void seekAbsoluteSeconds(double seconds);
+    virtual void setVolumePercent(double percent);
+    virtual void setPlaybackRate(double factor);
 
 Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
