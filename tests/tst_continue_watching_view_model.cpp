@@ -3,9 +3,10 @@
 
 #include "domain/PlaybackContext.h"
 #include "config/AppSettings.h"
-#include "controllers/HistoryController.h"
 #include "core/persistence/Database.h"
 #include "core/persistence/HistoryStore.h"
+#include "playback/history/HistoryQueryService.h"
+#include "playback/history/SqlitePlaybackHistoryRepository.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/LibraryRailModel.h"
 
@@ -22,9 +23,10 @@ using kinema::domain::HistoryStreamRef;
 using kinema::domain::MediaKind;
 using kinema::domain::PlaybackKey;
 using kinema::config::AppSettings;
-using kinema::controllers::HistoryController;
 using kinema::core::Database;
 using kinema::core::HistoryStore;
+using kinema::playback::history::HistoryQueryService;
+using kinema::playback::history::SqlitePlaybackHistoryRepository;
 using kinema::ui::qml::ContinueWatchingViewModel;
 using kinema::ui::qml::LibraryRailModel;
 
@@ -80,13 +82,16 @@ private Q_SLOTS:
         m_config = KSharedConfig::openConfig(
             m_tmp->filePath(QStringLiteral("kinemarc")));
         m_settings = std::make_unique<AppSettings>(m_config, nullptr);
-        m_history = std::make_unique<HistoryController>(*m_store,
-            /*indexers=*/nullptr, m_emptyToken);
+        m_historyRepo = std::make_unique<SqlitePlaybackHistoryRepository>(
+            *m_store);
+        m_history = std::make_unique<HistoryQueryService>(
+            *m_historyRepo, *m_store);
     }
 
     void cleanup()
     {
         m_history.reset();
+        m_historyRepo.reset();
         m_settings.reset();
         m_config.reset();
         m_store.reset();
@@ -231,7 +236,7 @@ private Q_SLOTS:
         // Going through the controller exercises the removeEntry()
         // slot we added in phase 03; it must call into the store and
         // the rail must collapse on the next changed() tick.
-        m_history->removeEntry(e);
+        m_store->remove(e.key);
         drain();
 
         QVERIFY(vm.empty());
@@ -257,8 +262,8 @@ private:
     std::unique_ptr<HistoryStore> m_store;
     KSharedConfigPtr m_config;
     std::unique_ptr<AppSettings> m_settings;
-    std::unique_ptr<HistoryController> m_history;
-    QString m_emptyToken;
+    std::unique_ptr<SqlitePlaybackHistoryRepository> m_historyRepo;
+    std::unique_ptr<HistoryQueryService> m_history;
 };
 
 QTEST_MAIN(TstContinueWatchingViewModel)

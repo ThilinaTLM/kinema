@@ -3,13 +3,13 @@
 
 #include "controllers/WatchedController.h"
 
-#include "controllers/HistoryController.h"
 #include "core/persistence/WatchedStore.h"
+#include "playback/history/HistoryQueryService.h"
 
 namespace kinema::controllers {
 
 WatchedController::WatchedController(core::WatchedStore& store,
-    HistoryController* history, QObject* parent)
+    playback::history::HistoryQueryService* history, QObject* parent)
     : QObject(parent)
     , m_store(store)
     , m_history(history)
@@ -17,7 +17,8 @@ WatchedController::WatchedController(core::WatchedStore& store,
     connect(&m_store, &core::WatchedStore::changed,
         this, &WatchedController::changed);
     if (m_history) {
-        connect(m_history, &HistoryController::changed,
+        connect(m_history,
+            &playback::history::HistoryQueryService::changed,
             this, &WatchedController::changed);
     }
 }

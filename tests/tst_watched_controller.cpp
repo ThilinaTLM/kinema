@@ -3,11 +3,12 @@
 
 #include "domain/PlaybackContext.h"
 #include "config/AppSettings.h"
-#include "controllers/HistoryController.h"
 #include "controllers/WatchedController.h"
 #include "core/persistence/Database.h"
 #include "core/persistence/HistoryStore.h"
 #include "core/persistence/WatchedStore.h"
+#include "playback/history/HistoryQueryService.h"
+#include "playback/history/SqlitePlaybackHistoryRepository.h"
 
 #include <KSharedConfig>
 
@@ -80,16 +81,21 @@ private Q_SLOTS:
         m_config = KSharedConfig::openConfig(
             m_tmp->filePath(QStringLiteral("kinemarc")));
         m_settings = std::make_unique<config::AppSettings>(m_config, nullptr);
-        m_historyCtrl = std::make_unique<controllers::HistoryController>(
-            *m_history, /*indexers=*/nullptr, m_emptyToken);
+        m_historyRepo
+            = std::make_unique<playback::history::SqlitePlaybackHistoryRepository>(
+                *m_history);
+        m_historyQueryService
+            = std::make_unique<playback::history::HistoryQueryService>(
+                *m_historyRepo, *m_history);
         m_watchedCtrl = std::make_unique<controllers::WatchedController>(
-            *m_watchedStore, m_historyCtrl.get());
+            *m_watchedStore, m_historyQueryService.get());
     }
 
     void cleanup()
     {
         m_watchedCtrl.reset();
-        m_historyCtrl.reset();
+        m_historyQueryService.reset();
+        m_historyRepo.reset();
         m_settings.reset();
         m_config.reset();
         m_watchedStore.reset();
@@ -182,7 +188,8 @@ private:
     std::unique_ptr<core::WatchedStore> m_watchedStore;
     KSharedConfigPtr m_config;
     std::unique_ptr<config::AppSettings> m_settings;
-    std::unique_ptr<controllers::HistoryController> m_historyCtrl;
+    std::unique_ptr<playback::history::SqlitePlaybackHistoryRepository> m_historyRepo;
+    std::unique_ptr<playback::history::HistoryQueryService> m_historyQueryService;
     std::unique_ptr<controllers::WatchedController> m_watchedCtrl;
 };
 

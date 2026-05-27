@@ -16,14 +16,16 @@ namespace kinema::core {
 class WatchedStore;
 }
 
-namespace kinema::controllers {
+namespace kinema::playback::history {
+class HistoryQueryService;
+}
 
-class HistoryController;
+namespace kinema::controllers {
 
 /**
  * Watched-state mediator. Composes `core::WatchedStore` (manual user
- * override) with `controllers::HistoryController` (playback finished
- * flag) into a single API the UI consumes.
+ * override) with `playback::history::HistoryQueryService` (playback
+ * finished flag) into a single API the UI consumes.
  *
  * Resolution order, identical for movies and episodes:
  *   1. Manual override = `Watched`   \u2192 watched.
@@ -42,7 +44,8 @@ class WatchedController : public QObject
     Q_OBJECT
 public:
     WatchedController(core::WatchedStore& store,
-        HistoryController* history, QObject* parent = nullptr);
+        playback::history::HistoryQueryService* history,
+        QObject* parent = nullptr);
     ~WatchedController() override;
 
     // ---- queries --------------------------------------------------
@@ -91,7 +94,7 @@ private:
         int season, int episode) const;
 
     core::WatchedStore& m_store;
-    HistoryController* m_history {};
+    playback::history::HistoryQueryService* m_history {};
 };
 
 } // namespace kinema::controllers

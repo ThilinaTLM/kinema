@@ -4,7 +4,8 @@
 #include "domain/Library.h"
 #include "domain/PlaybackContext.h"
 #include "config/AppSettings.h"
-#include "controllers/HistoryController.h"
+#include "playback/history/HistoryQueryService.h"
+#include "playback/history/SqlitePlaybackHistoryRepository.h"
 #include "controllers/LibraryController.h"
 #include "controllers/WatchedController.h"
 #include "core/persistence/Database.h"
@@ -96,13 +97,16 @@ private Q_SLOTS:
         m_historyStore = std::make_unique<core::HistoryStore>(*m_db);
         m_library = std::make_unique<controllers::LibraryController>(
             *m_libraryStore);
-        // `WatchedController` resolves resume entries through the
-        // history controller; without it, `resumeEntryFor*` always
-        // returns nullopt and the Ready-to-Watch dedup is untestable.
-        // The HistoryController's resume / indexer plumbing is unused
-        // here — we only exercise the `find()` read path.
-        m_history = std::make_unique<controllers::HistoryController>(
-            *m_historyStore, /*indexers=*/nullptr, m_emptyToken);
+        // WatchedController resolves resume entries through the
+        // history query service; without it, resumeEntryFor*
+        // always returns nullopt and the Ready-to-Watch dedup is
+        // untestable. Only the read path is exercised here.
+        m_historyRepo
+            = std::make_unique<playback::history::SqlitePlaybackHistoryRepository>(
+                *m_historyStore);
+        m_history
+            = std::make_unique<playback::history::HistoryQueryService>(
+                *m_historyRepo, *m_historyStore);
         m_watched = std::make_unique<controllers::WatchedController>(
             *m_watchedStore, m_history.get());
         // Per-test KConfig so other settings groups don't leak
@@ -124,6 +128,7 @@ private Q_SLOTS:
         m_tmpdir.reset();
         m_watched.reset();
         m_history.reset();
+        m_historyRepo.reset();
         m_library.reset();
         m_historyStore.reset();
         m_watchedStore.reset();
@@ -502,7 +507,8 @@ private:
     std::unique_ptr<core::WatchedStore> m_watchedStore;
     std::unique_ptr<core::HistoryStore> m_historyStore;
     std::unique_ptr<controllers::LibraryController> m_library;
-    std::unique_ptr<controllers::HistoryController> m_history;
+    std::unique_ptr<playback::history::SqlitePlaybackHistoryRepository> m_historyRepo;
+    std::unique_ptr<playback::history::HistoryQueryService> m_history;
     std::unique_ptr<controllers::WatchedController> m_watched;
     std::unique_ptr<QTemporaryDir> m_tmpdir;
     KSharedConfigPtr m_config;

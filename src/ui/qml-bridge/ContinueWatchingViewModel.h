@@ -9,20 +9,20 @@
 #include <QList>
 #include <QObject>
 
-namespace kinema::controllers {
-class HistoryController;
+namespace kinema::playback::history {
+class HistoryQueryService;
 }
 
 namespace kinema::ui::qml {
 
 /**
  * View-model behind `ContinueWatchingRail.qml`. Wraps
- * `controllers::HistoryController` so QML never sees `HistoryEntry`
- * directly — it exposes a `LibraryRailModel`, the same model type
- * the other Up Next rails use, so the rail can render with the
- * shared `EpisodeRailCard` chrome.
+ * `playback::history::HistoryQueryService` so QML never sees
+ * `HistoryEntry` directly — it exposes a `LibraryRailModel`, the
+ * same model type the other Up Next rails use, so the rail can
+ * render with the shared `EpisodeRailCard` chrome.
  *
- * Re-pulls from the controller whenever `HistoryController::changed()`
+ * Re-pulls from the service whenever `HistoryQueryService::changed()`
  * fires (post-record / post-remove); the rail collapses when empty
  * via the `empty` property.
  *
@@ -41,7 +41,7 @@ class ContinueWatchingViewModel : public QObject
 
 public:
     explicit ContinueWatchingViewModel(
-        controllers::HistoryController* history,
+        playback::history::HistoryQueryService* history,
         QObject* parent = nullptr);
 
     LibraryRailModel* model() const noexcept { return m_model; }
@@ -55,8 +55,8 @@ public:
     }
 
 public Q_SLOTS:
-    /// Re-pull entries from the controller and rebuild the rail.
-    /// Wired to `HistoryController::changed`; safe to call directly.
+    /// Re-pull entries from the query service and rebuild the rail.
+    /// Wired to `HistoryQueryService::changed`; safe to call directly.
     void refresh();
 
     /// QML hooks: row indices map 1:1 to the rail's display order
@@ -69,10 +69,9 @@ public Q_SLOTS:
 Q_SIGNALS:
     void emptyChanged();
 
-    /// Forwarded to `MainController` which routes them into
-    /// `HistoryController::resumeFromHistory`, detail navigation,
-    /// direct streams-page navigation, or
-    /// `HistoryController::removeEntry`.
+    /// Forwarded to `ShellViewModel` which routes them into
+    /// `playback::resume::ResumeUseCase::resume`, detail navigation,
+    /// direct streams-page navigation, or the history remove path.
     void resumeRequested(const domain::HistoryEntry& entry);
     void detailRequested(const domain::HistoryEntry& entry);
     void streamsRequested(const domain::HistoryEntry& entry);
@@ -81,7 +80,7 @@ Q_SIGNALS:
 private:
     void rebuildModel();
 
-    controllers::HistoryController* m_history;
+    playback::history::HistoryQueryService* m_history;
     LibraryRailModel* m_model;
     QList<domain::HistoryEntry> m_entries;
     bool m_lastEmpty = true;

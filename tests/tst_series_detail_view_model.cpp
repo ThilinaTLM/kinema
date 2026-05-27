@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "config/AppSettings.h"
-#include "controllers/HistoryController.h"
+#include "playback/history/HistoryQueryService.h"
+#include "playback/history/SqlitePlaybackHistoryRepository.h"
 #include "controllers/WatchedController.h"
 #include "core/persistence/Database.h"
 #include "core/persistence/HistoryStore.h"
@@ -118,7 +119,8 @@ struct WatchedFixture {
     KSharedConfigPtr config;
     AppSettings settings;
     QString emptyToken;
-    kinema::controllers::HistoryController historyCtrl;
+    kinema::playback::history::SqlitePlaybackHistoryRepository historyRepo;
+    kinema::playback::history::HistoryQueryService historyQueryService;
     kinema::controllers::WatchedController watchedCtrl;
     FakeCinemetaClient cinemeta;
     IndexerHarness indexers;
@@ -136,8 +138,9 @@ struct WatchedFixture {
             tmp.filePath(QStringLiteral("kinemarc")),
             KConfig::SimpleConfig))
         , settings(config)
-        , historyCtrl(history, indexers.selector(), emptyToken)
-        , watchedCtrl(watchedStore, &historyCtrl)
+        , historyRepo(history)
+        , historyQueryService(historyRepo, history)
+        , watchedCtrl(watchedStore, &historyQueryService)
         , vm(&cinemeta, indexers.selector(), &tmdb, &actions,
               /*library=*/nullptr, &watchedCtrl,
               /*tokens=*/nullptr, settings, rdToken, adApiKey,

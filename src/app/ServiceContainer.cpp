@@ -281,7 +281,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         &controllers::LibraryController::backfillMetadata,
         Qt::QueuedConnection);
     m_watchedCtrl = new controllers::WatchedController(
-        *m_watched, m_historyCtrl, a);
+        *m_watched, m_historyQueryService, a);
 
     // Downloads page VM. Lives over the entire app lifetime so the
     // drawer's downloads entry can show counts even before the
@@ -298,7 +298,8 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_discoverVm->setLibraryController(m_libraryCtrl);
     m_discoverVm->setWatchedController(m_watchedCtrl);
     m_continueWatchingVm
-        = new ui::qml::ContinueWatchingViewModel(m_historyCtrl, a);
+        = new ui::qml::ContinueWatchingViewModel(
+            m_historyQueryService, a);
     m_libraryVm = new ui::qml::LibraryViewModel(m_libraryCtrl, m_watchedCtrl, a);
     m_searchVm = new ui::qml::SearchViewModel(m_cinemeta,
         m_settings.search(), a);
