@@ -7,9 +7,10 @@
 #include "core/util/Magnet.h"
 #include "core/persistence/TorrentCache.h"
 #include "kinema_log_torrent.h"
+#include "playback/policy/MediaFileSelectionPolicy.h"
 #include "playback/torrent/LibtorrentClient.h"
 #include "torrent/LocalStreamServer.h"
-#include "torrent/MediaFileSelector.h"
+#include "torrent/TorrentFileEntry.h"
 
 #include <KLocalizedString>
 
@@ -97,7 +98,7 @@ QVector<TorrentFileEntry> torrentFileEntries(
     return files;
 }
 
-std::optional<SelectedMediaFile> requestedFileSelection(
+std::optional<domain::MediaFileEntry> requestedFileSelection(
     const QVector<TorrentFileEntry>& files,
     const domain::Stream& stream,
     const domain::PlaybackContext& ctx,
@@ -106,7 +107,7 @@ std::optional<SelectedMediaFile> requestedFileSelection(
     if (stream.fileIndex >= 0) {
         for (const auto& f : files) {
             if (f.index == stream.fileIndex) {
-                return SelectedMediaFile { f.index, f.path, f.size };
+                return domain::MediaFileEntry { f.index, f.path, f.size, true };
             }
         }
         if (error) {
@@ -116,7 +117,7 @@ std::optional<SelectedMediaFile> requestedFileSelection(
         return std::nullopt;
     }
 
-    const auto sel = selectMediaFile(files, ctx);
+    const auto sel = playback::policy::selectMediaFile(files, ctx);
     if (!sel.ok()) {
         if (error) {
             *error = sel.error;
@@ -165,7 +166,7 @@ struct TorrentStreamingService::Private {
         QString infoHash;
         QString token;
         lt::torrent_handle handle;
-        SelectedMediaFile selected;
+        domain::MediaFileEntry selected;
         FilePieceLayout layout;
         QString filePath;
         QDateTime lastActivity = QDateTime::currentDateTimeUtc();

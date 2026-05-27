@@ -5,7 +5,7 @@
 
 #include "domain/Download.h"
 #include "playback/ports/ByteRangeSource.h"
-#include "torrent/MediaFileSelector.h" // TorrentFileEntry
+#include "torrent/TorrentFileEntry.h"
 #include "torrent/PiecePlanner.h"
 
 #include <QByteArray>

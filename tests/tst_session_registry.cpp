@@ -7,7 +7,7 @@
 #include "playback/sources/AssetSession.h"
 #include "playback/transfer/SessionRegistry.h"
 #include "playback/transfer/TransferSession.h"
-#include "torrent/MediaFileSelector.h"
+#include "torrent/TorrentFileEntry.h"
 
 #include <QCoro/QCoroTask>
 

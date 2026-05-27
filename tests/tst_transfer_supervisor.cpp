@@ -11,7 +11,7 @@
 #include "playback/transfer/SessionRegistry.h"
 #include "playback/transfer/TransferSession.h"
 #include "playback/transfer/TransferSupervisor.h"
-#include "torrent/MediaFileSelector.h"
+#include "torrent/TorrentFileEntry.h"
 
 #include <QByteArray>
 #include <QCoro/QCoroTask>

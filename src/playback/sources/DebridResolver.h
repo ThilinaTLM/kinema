@@ -4,7 +4,7 @@
 #pragma once
 
 #include "domain/Download.h"
-#include "torrent/MediaFileSelector.h" // TorrentFileEntry
+#include "torrent/TorrentFileEntry.h"
 
 #include <QMetaType>
 #include <QObject>

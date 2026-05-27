@@ -59,7 +59,6 @@ set(kinema_core_SRCS
     core/util/TorrentioUrl.cpp
 
     torrent/LocalStreamServer.cpp
-    torrent/MediaFileSelector.cpp
     torrent/PiecePlanner.cpp
     torrent/TorrentStreamingService.cpp
 

@@ -5,8 +5,8 @@
 
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
-#include "torrent/MediaFileSelector.h"
 #include "torrent/PiecePlanner.h"
+#include "torrent/TorrentFileEntry.h"
 
 #include <QCoro/QCoroTask>
 
