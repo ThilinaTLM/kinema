@@ -108,6 +108,10 @@ class SubtitleSessionService;
 class MoviehashProbe;
 }
 
+namespace kinema::playback::torrent {
+class LibtorrentClient;
+}
+
 namespace kinema::playback::transfer {
 class BackendRegistry;
 class SessionRegistry;
@@ -115,9 +119,6 @@ class TransferSupervisor;
 class TransferUseCase;
 }
 
-namespace kinema::torrent {
-class TorrentStreamingService;
-}
 
 namespace kinema::ui {
 class ImageLoader;
@@ -217,7 +218,7 @@ public:
 #endif
     playback::subtitles::SubtitleSessionService* subtitleSessionService() const
     { return m_subtitleSessionService; }
-    torrent::TorrentStreamingService* torrentStreaming() const { return m_torrentStreaming; }
+    playback::torrent::LibtorrentClient* libtorrentClient() const { return m_libtorrentClient; }
     playback::streaming::LocalHttpStreamGateway* localStreamGateway() const
     { return m_localStreamGateway; }
     playback::transfer::SessionRegistry* sessionRegistry() const
@@ -328,7 +329,7 @@ private:
     playback::subtitles::MoviehashProbe* m_moviehashProbe {};
     playback::history::TrackMemoryService* m_trackMemoryService {};
 #endif
-    torrent::TorrentStreamingService* m_torrentStreaming {};
+    playback::torrent::LibtorrentClient* m_libtorrentClient {};
     controllers::DownloadController* m_downloadCtrl {};
     controllers::TokenController* m_tokenCtrl {};
 

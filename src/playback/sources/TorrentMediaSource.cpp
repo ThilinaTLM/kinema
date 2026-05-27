@@ -4,9 +4,9 @@
 #include "playback/sources/TorrentMediaSource.h"
 
 #include "core/persistence/MediaCache.h"
-#include "playback/sources/TorrentAssetSession.h"
 #include "kinema_log_download.h"
-#include "torrent/TorrentStreamingService.h"
+#include "playback/sources/TorrentAssetSession.h"
+#include "playback/torrent/LibtorrentClient.h"
 
 #include <memory>
 #include <utility>
@@ -14,7 +14,7 @@
 namespace kinema::playback::sources {
 
 TorrentMediaSource::TorrentMediaSource(
-    kinema::torrent::TorrentStreamingService& engine,
+    playback::torrent::LibtorrentClient& engine,
     core::MediaCache& cache)
     : m_engine(engine)
     , m_cache(cache)
@@ -36,8 +36,8 @@ QCoro::Task<ports::OpenedSession> TorrentMediaSource::open(
     m_cache.markActive(assetId);
 
     const auto prepareMode = mode == domain::DownloadMode::Full
-        ? kinema::torrent::PrepareMode::Background
-        : kinema::torrent::PrepareMode::Streaming;
+        ? playback::torrent::PrepareMode::Background
+        : playback::torrent::PrepareMode::Streaming;
     const auto prepared
         = co_await m_engine.prepareSession(stream, ctx, prepareMode);
 
@@ -100,18 +100,9 @@ QVector<domain::MediaFileEntry> TorrentMediaSource::filesFor(
     if (!torrentSession) {
         return {};
     }
-    const auto raw = m_engine.filesForInfoHash(torrentSession->infoHash());
-    QVector<domain::MediaFileEntry> out;
-    out.reserve(raw.size());
-    for (const auto& f : raw) {
-        domain::MediaFileEntry e;
-        e.index = f.index;
-        e.path = f.path;
-        e.size = f.size;
-        e.playable = true;
-        out.append(std::move(e));
-    }
-    return out;
+    // `TorrentFileEntry` is a typedef for `domain::MediaFileEntry`
+    // since the Step 7 unification — no conversion needed.
+    return m_engine.filesForInfoHash(torrentSession->infoHash());
 }
 
 } // namespace kinema::playback::sources

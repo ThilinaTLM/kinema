@@ -3,12 +3,12 @@
 
 #include "playback/sources/TorrentAssetSession.h"
 
-#include "torrent/TorrentStreamingService.h"
+#include "playback/torrent/LibtorrentClient.h"
 
 namespace kinema::playback::sources {
 
 TorrentAssetSession::TorrentAssetSession(
-    kinema::torrent::TorrentStreamingService& engine,
+    playback::torrent::LibtorrentClient& engine,
     QString assetId,
     QString token,
     QString fileName,
@@ -24,23 +24,27 @@ TorrentAssetSession::TorrentAssetSession(
     , m_infoHash(std::move(infoHash))
 {
     // Filter the engine's per-hash signals down to *our* hash.
-    connect(&m_engine, &kinema::torrent::TorrentStreamingService::torrentStatsChanged,
-        this, [this](const QString& hash, qint64 doneBytes,
-                   qint64 ratePayloadBps, int peers, int seeds,
-                   int etaSeconds) {
+    connect(&m_engine,
+        &playback::torrent::LibtorrentClient::statsUpdated,
+        this,
+        [this](const QString& hash, qint64 doneBytes,
+            qint64 ratePayloadBps, int peers, int seeds,
+            int etaSeconds, bool /*finished*/) {
             if (hash != m_infoHash) {
                 return;
             }
             Q_EMIT cachedBytesChanged(doneBytes);
             Q_EMIT liveStatsChanged(ratePayloadBps, peers, seeds, etaSeconds);
         });
-    connect(&m_engine, &kinema::torrent::TorrentStreamingService::torrentFinished,
+    connect(&m_engine,
+        &playback::torrent::LibtorrentClient::torrentFinished,
         this, [this](const QString& hash) {
             if (hash == m_infoHash) {
                 Q_EMIT completed();
             }
         });
-    connect(&m_engine, &kinema::torrent::TorrentStreamingService::torrentFailed,
+    connect(&m_engine,
+        &playback::torrent::LibtorrentClient::torrentFailed,
         this, [this](const QString& hash, const QString& reason) {
             if (hash == m_infoHash) {
                 Q_EMIT failed(reason);
@@ -50,12 +54,14 @@ TorrentAssetSession::TorrentAssetSession(
 
 TorrentAssetSession::~TorrentAssetSession() = default;
 
-QCoro::Task<bool> TorrentAssetSession::ensureRange(kinema::torrent::ByteRange range)
+QCoro::Task<bool> TorrentAssetSession::ensureRange(
+    kinema::torrent::ByteRange range)
 {
     co_return co_await m_engine.ensureRange(m_token, range);
 }
 
-QByteArray TorrentAssetSession::readRange(kinema::torrent::ByteRange range) const
+QByteArray TorrentAssetSession::readRange(
+    kinema::torrent::ByteRange range) const
 {
     return m_engine.readRange(m_token, range);
 }

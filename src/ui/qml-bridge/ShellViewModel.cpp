@@ -27,7 +27,7 @@
 #include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
 #endif
 #include "services/StreamActions.h"
-#include "torrent/TorrentStreamingService.h"
+#include "playback/torrent/LibtorrentClient.h"
 #include "ui/qml-bridge/BrowseViewModel.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
@@ -143,8 +143,8 @@ bool ShellViewModel::handleWindowCloseRequested()
 void ShellViewModel::requestQuit()
 {
     m_reallyQuit = true;
-    if (auto* ts = m_services.torrentStreaming()) {
-        ts->stopAll();
+    if (auto* lt = m_services.libtorrentClient()) {
+        lt->stopAll();
     }
 #ifdef KINEMA_HAVE_LIBMPV
     // Take the player down explicitly so its closeEvent persists
@@ -622,8 +622,8 @@ void ShellViewModel::wireStatusForwarding()
     connect(m_services.streamActions(),
         &services::StreamActions::statusMessage,
         this, &ShellViewModel::passiveMessage);
-    connect(m_services.torrentStreaming(),
-        &torrent::TorrentStreamingService::statusMessage,
+    connect(m_services.libtorrentClient(),
+        &playback::torrent::LibtorrentClient::statusMessage,
         this, &ShellViewModel::passiveMessage);
     connect(m_services.subtitleController(),
         &controllers::SubtitleController::statusMessage, this,
@@ -636,7 +636,7 @@ void ShellViewModel::wireStatusForwarding()
         &ShellViewModel::passiveMessage);
 #ifdef KINEMA_HAVE_LIBMPV
     auto* seriesSession = m_services.seriesSessionService();
-    auto* torrentStreaming = m_services.torrentStreaming();
+    auto* libtorrentClient = m_services.libtorrentClient();
     auto* embeddedAdapter = m_services.embeddedPlayerAdapter();
     // Series adjacency + auto-next live entirely in
     // SeriesSessionService now (event-stream driven). The shell
@@ -648,7 +648,7 @@ void ShellViewModel::wireStatusForwarding()
         connect(eventStream,
             &playback::events::PlaybackEventStream::eventPublished,
             this,
-            [this, torrentStreaming]
+            [this, libtorrentClient]
             (const playback::events::PlaybackEvent& e) {
                 if (!std::holds_alternative<
                         playback::events::PlaybackEnded>(e)) {
@@ -664,8 +664,8 @@ void ShellViewModel::wireStatusForwarding()
                     == playback::PlaybackEndReason::ReplacedByNewSource) {
                     return;
                 }
-                if (torrentStreaming) {
-                    torrentStreaming->stopForContext(ended.ctx);
+                if (libtorrentClient) {
+                    libtorrentClient->stopForContext(ended.ctx);
                 }
                 // Sharpen `hasPlayerAttached` for the embedded
                 // player on user-stop paths (user closed window /

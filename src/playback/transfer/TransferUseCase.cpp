@@ -15,7 +15,7 @@
 #include "playback/transfer/SessionRegistry.h"
 #include "playback/transfer/TransferSession.h"
 #include "playback/transfer/TransferSupervisor.h"
-#include "torrent/TorrentStreamingService.h"
+#include "playback/torrent/LibtorrentClient.h"
 
 #include <KLocalizedString>
 
@@ -91,7 +91,7 @@ TransferUseCase::TransferUseCase(BackendRegistry& backends,
     streaming::LocalHttpStreamGateway& gateway,
     ports::DownloadRepository& repo,
     core::MediaCache& cache,
-    kinema::torrent::TorrentStreamingService& torrentEngine,
+    playback::torrent::LibtorrentClient& torrentEngine,
     QObject* parent)
     : QObject(parent)
     , m_backends(backends)

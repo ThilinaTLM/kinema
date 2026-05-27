@@ -10,7 +10,7 @@
 #include "core/io/OpenUrl.h"
 #include "playback/transfer/TransferUseCase.h"
 #include "kinema_log_ui.h"
-#include "torrent/TorrentStreamingService.h"
+#include "playback/torrent/LibtorrentClient.h"
 
 #include <KLocalizedString>
 
@@ -32,10 +32,9 @@ QString clipboardCopyMessage(bool isMagnet)
 } // namespace
 
 StreamActions::StreamActions(core::PlayerLauncher* launcher,
-    torrent::TorrentStreamingService* torrentStreaming, QObject* parent)
+    QObject* parent)
     : QObject(parent)
     , m_launcher(launcher)
-    , m_torrentStreaming(torrentStreaming)
 {
 }
 
@@ -197,20 +196,14 @@ void StreamActions::playInternal(const domain::Stream& stream,
         return;
     }
 
-    // Legacy fallback. Only reached when the unified downloader is
-    // not wired (some unit-test setups). Production always takes the
+    // No info hash and no direct URL — nothing we can play.
+    // Reached when the unified downloader is not wired (some
+    // unit-test setups). Production always takes the
     // `m_transferUseCase` branch above.
-    if (!m_torrentStreaming) {
-        Q_EMIT statusMessage(
-            i18nc("@info:status",
-                "Torrent streaming is not available in this build."),
-            5000);
-        return;
-    }
-
-    const auto epoch = ++m_playEpoch;
-    auto task = playTorrentTask(stream, ctx, epoch);
-    Q_UNUSED(task);
+    Q_EMIT statusMessage(
+        i18nc("@info:status",
+            "Torrent streaming is not available in this build."),
+        5000);
 }
 
 void StreamActions::download(const domain::Stream& stream,
@@ -274,24 +267,6 @@ QCoro::Task<void> StreamActions::playLocalTask(domain::Stream stream,
             co_return;
         }
         Q_EMIT statusMessage(core::describeError(e, "local playback"),
-            6000);
-    }
-}
-
-QCoro::Task<void> StreamActions::playTorrentTask(domain::Stream stream,
-    domain::PlaybackContext ctx, quint64 epoch)
-{
-    try {
-        const QUrl url = co_await m_torrentStreaming->prepare(stream, ctx);
-        if (epoch != m_playEpoch) {
-            co_return;
-        }
-        m_launcher->play(url, ctx);
-    } catch (const std::exception& e) {
-        if (epoch != m_playEpoch) {
-            co_return;
-        }
-        Q_EMIT statusMessage(core::describeError(e, "torrent playback"),
             6000);
     }
 }

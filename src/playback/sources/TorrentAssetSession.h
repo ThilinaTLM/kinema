@@ -8,17 +8,17 @@
 #include <QString>
 #include <QVector>
 
-namespace kinema::torrent {
-class TorrentStreamingService;
+namespace kinema::playback::torrent {
+class LibtorrentClient;
 }
 
 namespace kinema::playback::sources {
 
 /**
  * `playback::sources::AssetSession` adapter over the
- * libtorrent-backed `torrent::TorrentStreamingService`. The session
- * represents a single (info hash, selected file) tuple already
- * prepared via `TorrentStreamingService::prepareSession(...)`.
+ * libtorrent-backed `playback::torrent::LibtorrentClient`. The
+ * session represents a single (info hash, selected file) tuple
+ * already prepared via `LibtorrentClient::prepareSession(...)`.
  *
  * Implements `playback::ports::ByteRangeSource` through the
  * `AssetSession` QObject base that lives alongside in
@@ -28,7 +28,7 @@ class TorrentAssetSession : public AssetSession
 {
     Q_OBJECT
 public:
-    TorrentAssetSession(kinema::torrent::TorrentStreamingService& engine,
+    TorrentAssetSession(playback::torrent::LibtorrentClient& engine,
         QString assetId,
         QString token,
         QString fileName,
@@ -50,8 +50,8 @@ public:
     QByteArray readRange(kinema::torrent::ByteRange range) const override;
     void touch() override;
 
-    /// Forwards to `TorrentStreamingService::filesForInfoHash`
-    /// so series adjacency can resolve through the unified
+    /// Forwards to `LibtorrentClient::filesForInfoHash` so series
+    /// adjacency can resolve through the unified
     /// `AssetSession::files()` API.
     QVector<kinema::torrent::TorrentFileEntry> files() const override;
 
@@ -66,7 +66,7 @@ public:
     const QString& infoHash() const noexcept { return m_infoHash; }
 
 private:
-    kinema::torrent::TorrentStreamingService& m_engine;
+    playback::torrent::LibtorrentClient& m_engine;
     QString m_assetId;
     QString m_token;
     QString m_fileName;

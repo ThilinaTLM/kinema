@@ -123,8 +123,9 @@ public:
     /// best file, and (for `Streaming`) pre-warm the head/tail
     /// piece windows. Returns the opaque token / filename / size
     /// callers need to wire the asset into a downstream stream
-    /// gateway.
-    QCoro::Task<PreparedSession> prepareSession(
+    /// gateway. Virtual so unit-test doubles can short-circuit
+    /// before any real libtorrent activity.
+    virtual QCoro::Task<PreparedSession> prepareSession(
         const domain::Stream& stream,
         const domain::PlaybackContext& ctx,
         PrepareMode mode = PrepareMode::Streaming);
@@ -150,24 +151,25 @@ public:
 
     /// File catalog for the (already-prepared) session backing
     /// `infoHash`. Empty when no session exists or metadata is not
-    /// yet available.
-    QVector<kinema::torrent::TorrentFileEntry> filesForInfoHash(
+    /// yet available. Virtual so test doubles can publish a
+    /// scripted catalog without going through the engine.
+    virtual QVector<kinema::torrent::TorrentFileEntry> filesForInfoHash(
         const QString& infoHash) const;
 
     /// Exempt the session for `infoHash` from idle-stop (used by
-    /// `Save offline` pins).
-    void setKeepAlive(const QString& infoHash, bool on);
+    /// `Save offline` pins). Virtual for test recording.
+    virtual void setKeepAlive(const QString& infoHash, bool on);
 
     /// Pause / resume the libtorrent handle behind a session.
     /// User-initiated; bypasses idle-stop bookkeeping.
-    void pauseInfoHash(const QString& infoHash);
-    void resumeInfoHash(const QString& infoHash);
+    virtual void pauseInfoHash(const QString& infoHash);
+    virtual void resumeInfoHash(const QString& infoHash);
 
     /// Promote a streaming session to a full background download:
     /// drops every `set_piece_deadline()` entry, sets the selected
     /// file to top priority, and exempts the session from
     /// idle-stop. Idempotent.
-    void promoteToFull(const QString& infoHash);
+    virtual void promoteToFull(const QString& infoHash);
 
     /// Stop and remove the session for `infoHash` (or for the
     /// stream identified by `ctx`). `stopAll` is the shutdown path.

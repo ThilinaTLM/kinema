@@ -22,10 +22,6 @@ namespace kinema::core {
 class PlayerLauncher;
 }
 
-namespace kinema::torrent {
-class TorrentStreamingService;
-}
-
 namespace kinema::playback::transfer {
 class TransferUseCase;
 }
@@ -48,8 +44,7 @@ class StreamActions : public QObject
 {
     Q_OBJECT
 public:
-    StreamActions(core::PlayerLauncher* launcher,
-        torrent::TorrentStreamingService* torrentStreaming,
+    explicit StreamActions(core::PlayerLauncher* launcher,
         QObject* parent = nullptr);
 
     /// Wire the unified downloader. When set, `play()` always asks
@@ -110,8 +105,6 @@ private:
         const QString& failurePrefix,
         const char* failureLogTag);
 
-    QCoro::Task<void> playTorrentTask(domain::Stream stream,
-        domain::PlaybackContext ctx, quint64 epoch);
     QCoro::Task<void> playLocalTask(domain::Stream stream,
         domain::PlaybackContext ctx, quint64 epoch,
         std::optional<domain::DownloadBackendKind> backendOverride);
@@ -121,7 +114,6 @@ private:
         std::optional<domain::DownloadBackendKind> backendOverride);
 
     core::PlayerLauncher* m_launcher;
-    torrent::TorrentStreamingService* m_torrentStreaming;
     playback::transfer::TransferUseCase* m_transferUseCase {};
     playback::resume::ResumeUseCase* m_resume {};
     quint64 m_playEpoch = 0;

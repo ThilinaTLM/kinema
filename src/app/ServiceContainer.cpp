@@ -67,7 +67,7 @@
 #include "playback/transfer/TransferUseCase.h"
 
 #include "services/StreamActions.h"
-#include "torrent/TorrentStreamingService.h"
+#include "playback/torrent/LibtorrentClient.h"
 #include "ui/ImageLoader.h"
 #include "ui/qml-bridge/AppIconResolver.h"
 #include "ui/qml-bridge/BrowseViewModel.h"
@@ -130,10 +130,10 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_imageLoader = new ui::ImageLoader(m_http.get(), a);
     m_torrentCache = std::make_unique<core::TorrentCache>(
         m_settings.torrentStreaming(), a);
-    m_torrentStreaming = new torrent::TorrentStreamingService(
-        *m_torrentCache, m_settings.torrentStreaming(), a);
+    m_libtorrentClient = new playback::torrent::LibtorrentClient(
+        m_settings.torrentStreaming(), *m_torrentCache, a);
     m_streamActions = new services::StreamActions(
-        m_player.get(), m_torrentStreaming, a);
+        m_player.get(), a);
 
     // Real-Debrid client + unified downloader settings/cache. The
     // RD client picks up its token from the keyring once the
@@ -212,7 +212,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
             m_settings.download()));
     m_backendRegistry->registerSource(
         std::make_unique<playback::sources::TorrentMediaSource>(
-            *m_torrentStreaming, *m_mediaCache));
+            *m_libtorrentClient, *m_mediaCache));
 
     // Repo + supervisor must exist before the use-case (the
     // use-case forwards `itemChanged` from the supervisor).
@@ -232,7 +232,7 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     m_transferUseCase = new playback::transfer::TransferUseCase(
         *m_backendRegistry, *m_sessionRegistry,
         *m_transferSupervisor, *m_localStreamGateway,
-        *m_downloadRepo, *m_mediaCache, *m_torrentStreaming, a);
+        *m_downloadRepo, *m_mediaCache, *m_libtorrentClient, a);
 
     // Gateway's cold-recovery hook: when the player asks for an
     // asset that has no live session (e.g. after restart with a

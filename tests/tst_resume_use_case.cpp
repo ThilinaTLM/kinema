@@ -52,8 +52,7 @@ class RecordingActions : public services::StreamActions
 {
 public:
     explicit RecordingActions(QObject* parent = nullptr)
-        : services::StreamActions(/*launcher=*/nullptr,
-              /*torrentStreaming=*/nullptr, parent)
+        : services::StreamActions(/*launcher=*/nullptr, parent)
     {
     }
 

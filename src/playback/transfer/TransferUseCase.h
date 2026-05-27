@@ -32,10 +32,8 @@ namespace kinema::playback::streaming {
 class LocalHttpStreamGateway;
 }
 
-namespace kinema {
-namespace torrent {
-class TorrentStreamingService;
-}
+namespace kinema::playback::torrent {
+class LibtorrentClient;
 }
 
 namespace kinema::playback::transfer {
@@ -68,7 +66,7 @@ public:
         streaming::LocalHttpStreamGateway& gateway,
         ports::DownloadRepository& repo,
         core::MediaCache& cache,
-        kinema::torrent::TorrentStreamingService& torrentEngine,
+        playback::torrent::LibtorrentClient& torrentEngine,
         QObject* parent = nullptr);
     ~TransferUseCase() override;
 
@@ -174,7 +172,7 @@ private:
     streaming::LocalHttpStreamGateway& m_gateway;
     ports::DownloadRepository& m_repo;
     core::MediaCache& m_cache;
-    kinema::torrent::TorrentStreamingService& m_torrentEngine;
+    playback::torrent::LibtorrentClient& m_torrentEngine;
 };
 
 } // namespace kinema::playback::transfer

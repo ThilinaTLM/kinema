@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "config/DownloadSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/persistence/MediaCache.h"
+#include "core/persistence/TorrentCache.h"
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
 #include "playback/sources/TorrentAssetSession.h"
 #include "playback/ports/MediaSourcePort.h"
 #include "playback/sources/TorrentMediaSource.h"
-#include "torrent/TorrentStreamingService.h"
+#include "playback/torrent/LibtorrentClient.h"
 
 #include <KSharedConfig>
 
@@ -25,24 +27,32 @@ using namespace kinema;
 
 namespace {
 
-class StubTorrentEngine final : public torrent::TorrentStreamingService
+// Subclass of `LibtorrentClient` that records lifecycle calls
+// without ever reaching the real `lt::session`. The base ctor only
+// constructs timers + members — the lt::session is built lazily by
+// `ensureStarted()`, which our overrides never call.
+class StubTorrentEngine final
+    : public playback::torrent::LibtorrentClient
 {
 public:
-    explicit StubTorrentEngine(QObject* parent = nullptr)
-        : torrent::TorrentStreamingService(StubTag {}, parent)
+    StubTorrentEngine(
+        const config::TorrentStreamingSettings& settings,
+        core::TorrentCache& cache,
+        QObject* parent = nullptr)
+        : playback::torrent::LibtorrentClient(settings, cache, parent)
     {
     }
 
-    QCoro::Task<torrent::PreparedSession> prepareSession(
+    QCoro::Task<playback::torrent::PreparedSession> prepareSession(
         const domain::Stream& stream,
         const domain::PlaybackContext& ctx,
-        torrent::PrepareMode mode) override
+        playback::torrent::PrepareMode mode) override
     {
         Q_UNUSED(ctx);
         ++prepareCalls;
         lastMode = mode;
         lastInfoHash = stream.infoHash;
-        torrent::PreparedSession ps;
+        playback::torrent::PreparedSession ps;
         ps.token = QStringLiteral("tok-stub");
         ps.fileName = QStringLiteral("movie.mkv");
         ps.fileSize = 4'000'000'000LL;
@@ -70,7 +80,8 @@ public:
     }
 
     int prepareCalls = 0;
-    torrent::PrepareMode lastMode = torrent::PrepareMode::Streaming;
+    playback::torrent::PrepareMode lastMode
+        = playback::torrent::PrepareMode::Streaming;
     QString lastInfoHash;
     QList<QPair<QString, bool>> keepAliveCalls;
     QList<QString> promoteCalls;
@@ -115,8 +126,13 @@ private Q_SLOTS:
             QStringLiteral("kinemarc-tms-test"), KConfig::SimpleConfig);
         m_settings = std::make_unique<config::DownloadSettings>(m_config);
         m_settings->setCacheBudgetGb(1);
+        m_torrentSettings
+            = std::make_unique<config::TorrentStreamingSettings>(m_config);
         m_cache = std::make_unique<core::MediaCache>(*m_settings);
-        m_engine = std::make_unique<StubTorrentEngine>();
+        m_torrentCache
+            = std::make_unique<core::TorrentCache>(*m_torrentSettings);
+        m_engine = std::make_unique<StubTorrentEngine>(
+            *m_torrentSettings, *m_torrentCache);
         m_source = std::make_unique<playback::sources::TorrentMediaSource>(
             *m_engine, *m_cache);
     }
@@ -125,7 +141,9 @@ private Q_SLOTS:
     {
         m_source.reset();
         m_engine.reset();
+        m_torrentCache.reset();
         m_cache.reset();
+        m_torrentSettings.reset();
         m_settings.reset();
     }
 
@@ -153,7 +171,8 @@ private Q_SLOTS:
         const auto opened = QCoro::waitFor(std::move(task));
 
         QCOMPARE(m_engine->prepareCalls, 1);
-        QCOMPARE(m_engine->lastMode, torrent::PrepareMode::Streaming);
+        QCOMPARE(m_engine->lastMode,
+            playback::torrent::PrepareMode::Streaming);
         QCOMPARE(m_engine->lastInfoHash, s.infoHash);
         QVERIFY(opened.session != nullptr);
         QCOMPARE(opened.assetId, domain::assetIdFor(ref));
@@ -173,7 +192,8 @@ private Q_SLOTS:
             domain::DownloadMode::Full);
         const auto opened = QCoro::waitFor(std::move(task));
 
-        QCOMPARE(m_engine->lastMode, torrent::PrepareMode::Background);
+        QCOMPARE(m_engine->lastMode,
+            playback::torrent::PrepareMode::Background);
         QCOMPARE(m_engine->keepAliveCalls.size(), 1);
         QCOMPARE(m_engine->keepAliveCalls.first().first, s.infoHash);
         QCOMPARE(m_engine->keepAliveCalls.first().second, true);
@@ -260,7 +280,9 @@ private Q_SLOTS:
 private:
     KSharedConfigPtr m_config;
     std::unique_ptr<config::DownloadSettings> m_settings;
+    std::unique_ptr<config::TorrentStreamingSettings> m_torrentSettings;
     std::unique_ptr<core::MediaCache> m_cache;
+    std::unique_ptr<core::TorrentCache> m_torrentCache;
     std::unique_ptr<StubTorrentEngine> m_engine;
     std::unique_ptr<playback::sources::TorrentMediaSource> m_source;
 };

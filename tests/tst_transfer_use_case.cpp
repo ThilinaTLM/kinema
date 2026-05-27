@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "config/DownloadSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/persistence/MediaCache.h"
+#include "core/persistence/TorrentCache.h"
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
@@ -12,12 +14,12 @@
 #include "playback/ports/DownloadRepository.h"
 #include "playback/ports/MediaSourcePort.h"
 #include "playback/streaming/LocalHttpStreamGateway.h"
+#include "playback/torrent/LibtorrentClient.h"
 #include "playback/transfer/BackendRegistry.h"
 #include "playback/transfer/SessionRegistry.h"
 #include "playback/transfer/TransferSession.h"
 #include "playback/transfer/TransferSupervisor.h"
 #include "playback/transfer/TransferUseCase.h"
-#include "torrent/TorrentStreamingService.h"
 
 #include <KSharedConfig>
 
@@ -252,29 +254,30 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// StubTorrentEngine — drop-in for `kinema::torrent::TorrentStreamingService`.
-// Lifted from `tst_download_manager.cpp`. Records lifecycle calls only.
+// StubTorrentEngine — drop-in for
+// `playback::torrent::LibtorrentClient`. Subclasses the real engine
+// but every override short-circuits before the lt::session would be
+// built, so no real libtorrent activity occurs.
 // ---------------------------------------------------------------------------
 class StubTorrentEngine final
-    : public kinema::torrent::TorrentStreamingService
+    : public kinema::playback::torrent::LibtorrentClient
 {
 public:
-    explicit StubTorrentEngine(QObject* parent = nullptr)
-        : kinema::torrent::TorrentStreamingService(StubTag {}, parent)
+    StubTorrentEngine(
+        const kinema::config::TorrentStreamingSettings& settings,
+        kinema::core::TorrentCache& cache,
+        QObject* parent = nullptr)
+        : kinema::playback::torrent::LibtorrentClient(
+              settings, cache, parent)
     {
     }
 
-    QCoro::Task<kinema::torrent::PreparedSession> prepareSession(
+    QCoro::Task<kinema::playback::torrent::PreparedSession> prepareSession(
         const domain::Stream&, const domain::PlaybackContext&,
-        kinema::torrent::PrepareMode) override
+        kinema::playback::torrent::PrepareMode) override
     {
-        kinema::torrent::PreparedSession ps;
+        kinema::playback::torrent::PreparedSession ps;
         co_return ps;
-    }
-    QCoro::Task<QUrl> prepare(const domain::Stream&,
-        const domain::PlaybackContext&) override
-    {
-        co_return QUrl();
     }
     void setKeepAlive(const QString& infoHash, bool on) override
     {
@@ -352,8 +355,13 @@ private Q_SLOTS:
         m_dlSettings = std::make_unique<config::DownloadSettings>(m_config);
         m_dlSettings->setCacheBudgetGb(1);
 
+        m_torrentSettings
+            = std::make_unique<config::TorrentStreamingSettings>(m_config);
         m_cache = std::make_unique<core::MediaCache>(*m_dlSettings);
-        m_engine = std::make_unique<StubTorrentEngine>();
+        m_torrentCache
+            = std::make_unique<core::TorrentCache>(*m_torrentSettings);
+        m_engine = std::make_unique<StubTorrentEngine>(
+            *m_torrentSettings, *m_torrentCache);
 
         m_backends = std::make_unique<BackendRegistry>();
         m_torrentSource
@@ -387,7 +395,9 @@ private Q_SLOTS:
         m_backends.reset();
         m_torrentSource = nullptr;
         m_engine.reset();
+        m_torrentCache.reset();
         m_cache.reset();
+        m_torrentSettings.reset();
         m_dlSettings.reset();
         QDir(core::cache::mediaDir()).removeRecursively();
     }
@@ -813,7 +823,9 @@ private Q_SLOTS:
 private:
     KSharedConfig::Ptr m_config;
     std::unique_ptr<config::DownloadSettings> m_dlSettings;
+    std::unique_ptr<config::TorrentStreamingSettings> m_torrentSettings;
     std::unique_ptr<core::MediaCache> m_cache;
+    std::unique_ptr<core::TorrentCache> m_torrentCache;
     std::unique_ptr<StubTorrentEngine> m_engine;
     std::unique_ptr<BackendRegistry> m_backends;
     FakeMediaSourcePort* m_torrentSource = nullptr; // owned by m_backends

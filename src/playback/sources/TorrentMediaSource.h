@@ -12,15 +12,15 @@ namespace kinema::core {
 class MediaCache;
 }
 
-namespace kinema::torrent {
-class TorrentStreamingService;
+namespace kinema::playback::torrent {
+class LibtorrentClient;
 }
 
 namespace kinema::playback::sources {
 
 /**
  * `MediaSourcePort` over the libtorrent-backed
- * `torrent::TorrentStreamingService`.
+ * `playback::torrent::LibtorrentClient`.
  *
  *   - `canHandle()` is true for any stream carrying an info hash.
  *   - `open()` calls `prepareSession()` on the engine in
@@ -28,16 +28,16 @@ namespace kinema::playback::sources {
  *     `DownloadMode`, sets the cache marker, builds a
  *     `playback::sources::TorrentAssetSession`, and applies
  *     keep-alive when the mode is `Full`.
- *   - `changeMode()` honours OnDemand-> Full / Full-> OnDemand by
+ *   - `changeMode()` honours OnDemand→Full / Full→OnDemand by
  *     forwarding to the engine's `promoteToFull` /
  *     `setKeepAlive(false)` paths.
- *   - `filesFor()` returns the file catalog lifted to
- *     `domain::MediaFileEntry`.
+ *   - `filesFor()` returns the engine's file catalog (which is
+ *     already typed as `domain::MediaFileEntry`).
  */
 class TorrentMediaSource : public ports::MediaSourcePort
 {
 public:
-    TorrentMediaSource(kinema::torrent::TorrentStreamingService& engine,
+    TorrentMediaSource(playback::torrent::LibtorrentClient& engine,
         core::MediaCache& cache);
     ~TorrentMediaSource() override;
 
@@ -60,7 +60,7 @@ public:
         const ports::ByteRangeSource& session) const override;
 
 private:
-    kinema::torrent::TorrentStreamingService& m_engine;
+    playback::torrent::LibtorrentClient& m_engine;
     core::MediaCache& m_cache;
 };
 
