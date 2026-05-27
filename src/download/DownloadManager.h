@@ -53,7 +53,6 @@ class AssetSession;
 class BackendSelector;
 class DebridResolver;
 class DownloadBackend;
-class HttpAssetSession;
 class RealDebridResolver;
 
 /// Transient per-asset telemetry merged into download rows. The

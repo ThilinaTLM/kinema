@@ -25,11 +25,11 @@ namespace kinema::config {
 class DownloadSettings;
 }
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
 /**
- * Debrid-backed `AssetSession` that streams an upstream hoster URL
- * into a local sparse file in fixed-size chunks. Each chunk is
+ * Debrid-backed `ByteRangeSource` that streams an upstream hoster
+ * URL into a local sparse file in fixed-size chunks. Each chunk is
  * 4 MiB by default; availability is tracked in a side-car bitmap so
  * the local cache survives restarts.
  *
@@ -40,18 +40,18 @@ namespace kinema::download {
  * provider's resolution pipeline once and retries the request. URLs
  * are not persisted across sessions because hoster URLs expire.
  */
-class HttpAssetSession : public AssetSession
+class HttpRangeAssetSession : public kinema::download::AssetSession
 {
     Q_OBJECT
 public:
-    HttpAssetSession(core::HttpClient& http,
-        DebridResolver& resolver,
+    HttpRangeAssetSession(core::HttpClient& http,
+        kinema::download::DebridResolver& resolver,
         const config::DownloadSettings& settings,
         domain::AssetRef ref,
         QString assetId,
         QString localDir,
         QObject* parent = nullptr);
-    ~HttpAssetSession() override;
+    ~HttpRangeAssetSession() override;
 
     QString token() const override { return m_token; }
     QString assetId() const override { return m_assetId; }
@@ -69,8 +69,8 @@ public:
     /// about `AssetRef`. Stable for the lifetime of the session.
     QString infoHash() const noexcept { return m_ref.infoHash; }
 
-    QCoro::Task<bool> ensureRange(ByteRange range) override;
-    QByteArray readRange(ByteRange range) const override;
+    QCoro::Task<bool> ensureRange(kinema::torrent::ByteRange range) override;
+    QByteArray readRange(kinema::torrent::ByteRange range) const override;
     void touch() override;
 
     domain::DownloadMode mode() const override { return m_mode; }
@@ -111,7 +111,7 @@ private:
     void ensureFileSizedToTotal();
 
     core::HttpClient& m_http;
-    DebridResolver& m_resolver;
+    kinema::download::DebridResolver& m_resolver;
     const config::DownloadSettings& m_settings;
 
     domain::AssetRef m_ref;
@@ -154,4 +154,4 @@ private:
     qint64 m_lastSampleAtMsec = 0;
 };
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// Focused tests for `HttpAssetSession`. These cover the size /
+// focused tests for `playback::sources::HttpRangeAssetSession`. These cover the size /
 // chunk-bookkeeping initialisation paths exercised by series
 // auto-next, where the constructor may be handed an
 // `AssetRef::sizeBytes` that already matches the upstream's true
@@ -10,7 +10,7 @@
 //
 //   1. ref.sizeBytes = X is set when series auto-next builds the
 //      Stream for the next episode.
-//   2. HttpAssetSession ctor sets m_fileSize = X.
+//   2. HttpRangeAssetSession ctor sets m_fileSize = X.
 //   3. AllDebrid resolver returns the same X.
 //   4. ensureResolved sees `resolved.fileSize == m_fileSize` and
 //      previously skipped the `m_totalChunks` / `m_chunkAvailable`
@@ -30,7 +30,7 @@
 #include "config/DownloadSettings.h"
 #include "domain/Download.h"
 #include "download/DebridResolver.h"
-#include "download/HttpAssetSession.h"
+#include "playback/sources/HttpRangeAssetSession.h"
 
 #include <KSharedConfig>
 #include <QCoroTask>
@@ -81,7 +81,7 @@ domain::AssetRef makeRef(qint64 sizeHint)
 
 } // namespace
 
-class TstHttpAssetSession : public QObject
+class TstHttpRangeAssetSession : public QObject
 {
     Q_OBJECT
 
@@ -115,7 +115,7 @@ private Q_SLOTS:
         StubResolver resolver;
 
         const qint64 sizeHint = 243'276'646LL;
-        download::HttpAssetSession session(http, resolver, *m_settings,
+        playback::sources::HttpRangeAssetSession session(http, resolver, *m_settings,
             makeRef(sizeHint),
             QStringLiteral("asset-x"), m_tmp->path());
 
@@ -134,7 +134,7 @@ private Q_SLOTS:
         // filesystem. ensureResolved discovers the size later.
         FakeHttpClient http;
         StubResolver resolver;
-        download::HttpAssetSession session(http, resolver, *m_settings,
+        playback::sources::HttpRangeAssetSession session(http, resolver, *m_settings,
             makeRef(/*sizeHint=*/-1),
             QStringLiteral("asset-y"), m_tmp->path());
 
@@ -158,7 +158,7 @@ private Q_SLOTS:
         resolver.reply.fileSize = size;
         resolver.reply.fileName = QStringLiteral("test.mp4");
 
-        download::HttpAssetSession session(http, resolver, *m_settings,
+        playback::sources::HttpRangeAssetSession session(http, resolver, *m_settings,
             makeRef(/*sizeHint=*/-1),
             QStringLiteral("asset-z"), m_tmp->path());
 
@@ -178,5 +178,5 @@ private:
     std::unique_ptr<QTemporaryDir> m_tmp;
 };
 
-QTEST_MAIN(TstHttpAssetSession)
-#include "tst_http_asset_session.moc"
+QTEST_MAIN(TstHttpRangeAssetSession)
+#include "tst_http_range_asset_session.moc"

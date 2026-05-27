@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "download/HttpAssetSession.h"
+#include "playback/sources/HttpRangeAssetSession.h"
 
 #include "config/DownloadSettings.h"
 #include "core/io/HttpClient.h"
@@ -19,7 +19,7 @@
 
 #include <algorithm>
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
 namespace {
 
@@ -27,14 +27,14 @@ constexpr qint64 kDefaultChunk = 4LL * 1024LL * 1024LL;
 
 } // namespace
 
-HttpAssetSession::HttpAssetSession(core::HttpClient& http,
-    DebridResolver& resolver,
+HttpRangeAssetSession::HttpRangeAssetSession(core::HttpClient& http,
+    kinema::download::DebridResolver& resolver,
     const config::DownloadSettings& settings,
     domain::AssetRef ref,
     QString assetId,
     QString localDir,
     QObject* parent)
-    : AssetSession(parent)
+    : kinema::download::AssetSession(parent)
     , m_http(http)
     , m_resolver(resolver)
     , m_settings(settings)
@@ -72,44 +72,44 @@ HttpAssetSession::HttpAssetSession(core::HttpClient& http,
     }
 }
 
-HttpAssetSession::~HttpAssetSession()
+HttpRangeAssetSession::~HttpRangeAssetSession()
 {
     saveChunkMap();
 }
 
-void HttpAssetSession::setChunkSize(qint64 bytes)
+void HttpRangeAssetSession::setChunkSize(qint64 bytes)
 {
     if (bytes >= 64 * 1024 && bytes <= 64LL * 1024 * 1024) {
         m_chunkSize = bytes;
     }
 }
 
-QString HttpAssetSession::payloadPath() const
+QString HttpRangeAssetSession::payloadPath() const
 {
     return QDir(m_localDir).absoluteFilePath(QStringLiteral("payload.bin"));
 }
 
-QString HttpAssetSession::chunkMapPath() const
+QString HttpRangeAssetSession::chunkMapPath() const
 {
     return QDir(m_localDir).absoluteFilePath(QStringLiteral("chunks.map"));
 }
 
-int HttpAssetSession::chunkIndexForByte(qint64 byte) const noexcept
+int HttpRangeAssetSession::chunkIndexForByte(qint64 byte) const noexcept
 {
     return static_cast<int>(byte / m_chunkSize);
 }
 
-qint64 HttpAssetSession::chunkStart(int idx) const noexcept
+qint64 HttpRangeAssetSession::chunkStart(int idx) const noexcept
 {
     return static_cast<qint64>(idx) * m_chunkSize;
 }
 
-qint64 HttpAssetSession::chunkEndExclusive(int idx) const noexcept
+qint64 HttpRangeAssetSession::chunkEndExclusive(int idx) const noexcept
 {
     return std::min(chunkStart(idx) + m_chunkSize, m_fileSize);
 }
 
-bool HttpAssetSession::isChunkAvailable(int idx) const
+bool HttpRangeAssetSession::isChunkAvailable(int idx) const
 {
     if (idx < 0 || idx >= m_totalChunks) {
         return false;
@@ -117,7 +117,7 @@ bool HttpAssetSession::isChunkAvailable(int idx) const
     return m_chunkAvailable.at(static_cast<size_t>(idx));
 }
 
-void HttpAssetSession::markChunkAvailable(int idx)
+void HttpRangeAssetSession::markChunkAvailable(int idx)
 {
     if (idx < 0 || idx >= m_totalChunks) {
         return;
@@ -125,7 +125,7 @@ void HttpAssetSession::markChunkAvailable(int idx)
     m_chunkAvailable[static_cast<size_t>(idx)] = true;
 }
 
-void HttpAssetSession::loadChunkMap()
+void HttpRangeAssetSession::loadChunkMap()
 {
     QFile f(chunkMapPath());
     if (!f.open(QIODevice::ReadOnly)) {
@@ -170,7 +170,7 @@ void HttpAssetSession::loadChunkMap()
     }
 }
 
-void HttpAssetSession::saveChunkMap() const
+void HttpRangeAssetSession::saveChunkMap() const
 {
     if (m_totalChunks <= 0) {
         return;
@@ -195,7 +195,7 @@ void HttpAssetSession::saveChunkMap() const
     f.write(blob);
 }
 
-void HttpAssetSession::ensureFileSizedToTotal()
+void HttpRangeAssetSession::ensureFileSizedToTotal()
 {
     if (m_fileSize <= 0) {
         return;
@@ -209,7 +209,7 @@ void HttpAssetSession::ensureFileSizedToTotal()
     }
 }
 
-qint64 HttpAssetSession::cachedBytes() const
+qint64 HttpRangeAssetSession::cachedBytes() const
 {
     qint64 total = 0;
     for (int i = 0; i < m_totalChunks; ++i) {
@@ -220,30 +220,30 @@ qint64 HttpAssetSession::cachedBytes() const
     return total;
 }
 
-void HttpAssetSession::touch()
+void HttpRangeAssetSession::touch()
 {
     // No-op here; the manager handles MediaCache.touch() based on
     // server activity through `LocalMediaServer`.
 }
 
-void HttpAssetSession::pause()
+void HttpRangeAssetSession::pause()
 {
     if (m_paused) {
         return;
     }
     m_paused = true;
     qCInfo(KINEMA_DOWNLOAD).nospace()
-        << "HttpAssetSession[" << m_assetId << "]: paused";
+        << "HttpRangeAssetSession[" << m_assetId << "]: paused";
 }
 
-void HttpAssetSession::resume()
+void HttpRangeAssetSession::resume()
 {
     if (!m_paused) {
         return;
     }
     m_paused = false;
     qCInfo(KINEMA_DOWNLOAD).nospace()
-        << "HttpAssetSession[" << m_assetId << "]: resumed";
+        << "HttpRangeAssetSession[" << m_assetId << "]: resumed";
     // For Full mode, kick the prefetch loop again. OnDemand stays
     // consumer-driven; the next ensureRange() naturally runs.
     if (m_mode == domain::DownloadMode::Full) {
@@ -252,7 +252,7 @@ void HttpAssetSession::resume()
     }
 }
 
-QCoro::Task<void> HttpAssetSession::ensureResolved()
+QCoro::Task<void> HttpRangeAssetSession::ensureResolved()
 {
     if (m_resolveInFlight || !m_upstream.isEmpty()) {
         co_return;
@@ -308,7 +308,7 @@ QCoro::Task<void> HttpAssetSession::ensureResolved()
     }
 }
 
-QCoro::Task<bool> HttpAssetSession::fetchChunk(int chunkIndex)
+QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
 {
     co_await ensureResolved();
     if (m_upstream.isEmpty() || m_fileSize <= 0) {
@@ -335,7 +335,7 @@ QCoro::Task<bool> HttpAssetSession::fetchChunk(int chunkIndex)
     } catch (const core::HttpError& e) {
         const int s = e.httpStatus();
         if (s == 401 || s == 403 || s == 410) {
-            qCInfo(KINEMA_DOWNLOAD) << "HttpAssetSession: upstream expired ("
+            qCInfo(KINEMA_DOWNLOAD) << "HttpRangeAssetSession: upstream expired ("
                            << s << "), re-resolving";
             needRetry = true;
         } else {
@@ -408,7 +408,7 @@ QCoro::Task<bool> HttpAssetSession::fetchChunk(int chunkIndex)
     co_return true;
 }
 
-QCoro::Task<bool> HttpAssetSession::ensureChunk(int chunkIndex)
+QCoro::Task<bool> HttpRangeAssetSession::ensureChunk(int chunkIndex)
 {
     if (chunkIndex < 0 || chunkIndex >= m_totalChunks) {
         co_return false;
@@ -419,7 +419,7 @@ QCoro::Task<bool> HttpAssetSession::ensureChunk(int chunkIndex)
     co_return co_await fetchChunk(chunkIndex);
 }
 
-QCoro::Task<bool> HttpAssetSession::ensureRange(ByteRange range)
+QCoro::Task<bool> HttpRangeAssetSession::ensureRange(kinema::torrent::ByteRange range)
 {
     if (!range.isValid()) {
         co_return false;
@@ -440,7 +440,7 @@ QCoro::Task<bool> HttpAssetSession::ensureRange(ByteRange range)
     co_return true;
 }
 
-QByteArray HttpAssetSession::readRange(ByteRange range) const
+QByteArray HttpRangeAssetSession::readRange(kinema::torrent::ByteRange range) const
 {
     if (!range.isValid() || m_fileSize <= 0) {
         return {};
@@ -459,7 +459,7 @@ QByteArray HttpAssetSession::readRange(ByteRange range) const
     return f.read(endIncl - range.start + 1);
 }
 
-QCoro::Task<void> HttpAssetSession::prefetchAll()
+QCoro::Task<void> HttpRangeAssetSession::prefetchAll()
 {
     co_await ensureResolved();
     for (int i = 0; i < m_totalChunks; ++i) {
@@ -476,4 +476,4 @@ QCoro::Task<void> HttpAssetSession::prefetchAll()
     }
 }
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources

@@ -12,7 +12,7 @@
 #include "download/AssetSession.h"
 #include "download/BackendSelector.h"
 #include "download/DownloadBackend.h"
-#include "download/HttpAssetSession.h"
+#include "playback/sources/HttpRangeAssetSession.h"
 #include "playback/streaming/LocalHttpStreamGateway.h"
 #include "download/AllDebridBackend.h"
 #include "download/AllDebridResolver.h"
@@ -613,7 +613,7 @@ QVector<torrent::TorrentFileEntry> DownloadManager::filesForInfoHash(
         QString sessionHash;
         if (auto* t = qobject_cast<playback::sources::TorrentAssetSession*>(session)) {
             sessionHash = t->infoHash();
-        } else if (auto* h = qobject_cast<HttpAssetSession*>(session)) {
+        } else if (auto* h = qobject_cast<playback::sources::HttpRangeAssetSession*>(session)) {
             sessionHash = h->infoHash();
         }
         if (sessionHash.compare(infoHash, Qt::CaseInsensitive) != 0) {

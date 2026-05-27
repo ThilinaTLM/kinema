@@ -6,7 +6,7 @@
 #include "api/AllDebridClient.h"
 #include "core/persistence/MediaCache.h"
 #include "download/DebridResolver.h"
-#include "download/HttpAssetSession.h"
+#include "playback/sources/HttpRangeAssetSession.h"
 #include "kinema_log_download.h"
 
 namespace kinema::download {
@@ -48,7 +48,7 @@ QCoro::Task<std::unique_ptr<AssetSession>> AllDebridBackend::open(
     const auto assetId = domain::assetIdFor(ref);
     m_cache.markActive(assetId);
 
-    auto session = std::make_unique<HttpAssetSession>(m_http, m_resolver,
+    auto session = std::make_unique<playback::sources::HttpRangeAssetSession>(m_http, m_resolver,
         m_settings, ref, assetId,
         m_cache.assetDir(assetId).absolutePath());
     session->setMode(mode);
@@ -75,7 +75,7 @@ void AllDebridBackend::changeMode(AssetSession& session,
     if (session.mode() == newMode) {
         return;
     }
-    auto* http = qobject_cast<HttpAssetSession*>(&session);
+    auto* http = qobject_cast<playback::sources::HttpRangeAssetSession*>(&session);
     if (!http) {
         qCWarning(KINEMA_DOWNLOAD)
             << "AllDebridBackend::changeMode called on non-HTTP session";
