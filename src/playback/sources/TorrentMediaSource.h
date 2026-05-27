@@ -20,28 +20,19 @@ namespace kinema::playback::sources {
 
 /**
  * `MediaSourcePort` over the libtorrent-backed
- * `torrent::TorrentStreamingService`. Long-term replacement for
- * `download::TorrentBackend`.
- *
- * Behaviour mirrors `download::TorrentBackend` exactly:
+ * `torrent::TorrentStreamingService`.
  *
  *   - `canHandle()` is true for any stream carrying an info hash.
  *   - `open()` calls `prepareSession()` on the engine in
  *     `Streaming` or `Background` mode depending on
  *     `DownloadMode`, sets the cache marker, builds a
- *     `download::TorrentAssetSession`, and applies keep-alive when
- *     the mode is `Full`.
+ *     `playback::sources::TorrentAssetSession`, and applies
+ *     keep-alive when the mode is `Full`.
  *   - `changeMode()` honours OnDemand-> Full / Full-> OnDemand by
  *     forwarding to the engine's `promoteToFull` /
  *     `setKeepAlive(false)` paths.
  *   - `filesFor()` returns the file catalog lifted to
  *     `domain::MediaFileEntry`.
- *
- * The underlying byte-range source is
- * `playback::sources::TorrentAssetSession`, which still inherits
- * from the transitional `download::AssetSession` until the legacy
- * `download/` directory is deleted at the end of this refactor
- * step.
  */
 class TorrentMediaSource : public ports::MediaSourcePort
 {

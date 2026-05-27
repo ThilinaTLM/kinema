@@ -15,7 +15,7 @@ TorrentAssetSession::TorrentAssetSession(
     qint64 fileSize,
     QString infoHash,
     QObject* parent)
-    : kinema::download::AssetSession(parent)
+    : AssetSession(parent)
     , m_engine(engine)
     , m_assetId(std::move(assetId))
     , m_token(std::move(token))

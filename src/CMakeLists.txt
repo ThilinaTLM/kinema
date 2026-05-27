@@ -63,17 +63,12 @@ set(kinema_core_SRCS
     torrent/PiecePlanner.cpp
     torrent/TorrentStreamingService.cpp
 
-    download/AllDebridBackend.cpp
-    download/AllDebridResolver.cpp
-    download/AssetSession.cpp
-    download/BackendSelector.cpp
-    download/DebridFilePicker.cpp
-    download/DownloadManager.cpp
+    playback/sources/AllDebridResolver.cpp
+    playback/sources/AssetSession.cpp
+    playback/sources/DebridFilePicker.cpp
     playback/sources/HttpRangeAssetSession.cpp
-    download/RealDebridBackend.cpp
-    download/RealDebridResolver.cpp
+    playback/sources/RealDebridResolver.cpp
     playback/sources/TorrentAssetSession.cpp
-    download/TorrentBackend.cpp
 
     api/AllDebridClient.cpp
     api/AllDebridParse.cpp

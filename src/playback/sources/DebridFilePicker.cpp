@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "download/DebridFilePicker.h"
+#include "playback/sources/DebridFilePicker.h"
 
 #include <QFileInfo>
 #include <QStringList>
 
-namespace kinema::download::picker {
+namespace kinema::playback::sources::picker {
 
 int score(const QString& path,
     qint64 sizeBytes,
@@ -73,4 +73,4 @@ int chooseIndex(const QList<Candidate>& candidates,
     return bestIdx;
 }
 
-} // namespace kinema::download::picker
+} // namespace kinema::playback::sources::picker

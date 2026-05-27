@@ -15,11 +15,11 @@
 
 #include <QCoro/QCoroTask>
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
 /**
  * Outcome of a debrid provider's resolution pipeline. Returned by
- * `DebridResolver::resolve` so `HttpAssetSession` can fetch the
+ * `DebridResolver::resolve` so `HttpRangeAssetSession` can fetch the
  * upstream URL into its sparse local file.
  */
 struct ResolvedDebridLink {
@@ -45,18 +45,18 @@ struct ResolvedDebridLink {
     /// returns them. `index` is the 0-based position in this list,
     /// not the provider's native id; the resolver translates back
     /// to provider ids internally when issuing per-file calls
-    /// (`selectFiles`, `unlockLink`). Used by `HttpAssetSession::files()`
-    /// to surface adjacency information to series auto-next without a
-    /// libtorrent session.
-    QVector<torrent::TorrentFileEntry> files;
+    /// (`selectFiles`, `unlockLink`). Used by
+    /// `HttpRangeAssetSession::files()` to surface adjacency
+    /// information to series auto-next without a libtorrent session.
+    QVector<kinema::torrent::TorrentFileEntry> files;
 };
 
 /**
  * Abstract resolver interface implemented per debrid provider
  * (`RealDebridResolver`, `AllDebridResolver`). Lets
- * `HttpAssetSession` and the per-provider backends share the same
- * chunked-HTTP plumbing while differing only in the API workflow that
- * produces the upstream URL.
+ * `HttpRangeAssetSession` and the per-provider `MediaSourcePort`
+ * implementations share the same chunked-HTTP plumbing while
+ * differing only in the API workflow that produces the upstream URL.
  *
  * Subclasses are expected to:
  *   1. Add the magnet to the user's account.
@@ -88,6 +88,6 @@ protected:
     using QObject::QObject;
 };
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources
 
-Q_DECLARE_METATYPE(kinema::download::ResolvedDebridLink)
+Q_DECLARE_METATYPE(kinema::playback::sources::ResolvedDebridLink)

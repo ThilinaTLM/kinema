@@ -5,7 +5,7 @@
 
 #include "domain/Download.h"
 #include "domain/RealDebrid.h"
-#include "download/DebridResolver.h"
+#include "playback/sources/DebridResolver.h"
 
 #include <QString>
 #include <QUrl>
@@ -16,7 +16,7 @@ namespace kinema::api {
 class RealDebridClient;
 }
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
 /**
  * Encapsulates the RD workflow needed to obtain a fresh hoster URL
@@ -47,4 +47,4 @@ private:
     api::RealDebridClient& m_rd;
 };
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources

@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "download/RealDebridResolver.h"
+#include "playback/sources/RealDebridResolver.h"
 
 #include "api/RealDebridClient.h"
 #include "core/io/HttpError.h"
 #include "core/util/Magnet.h"
-#include "download/DebridFilePicker.h"
+#include "playback/sources/DebridFilePicker.h"
 
 #include <KLocalizedString>
 
@@ -15,7 +15,7 @@
 
 #include <chrono>
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
 namespace {
 
@@ -169,4 +169,4 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
     co_return out;
 }
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources

@@ -37,8 +37,7 @@
 #include "core/persistence/TokenStore.h"
 #include "core/persistence/TorrentCache.h"
 #include "core/persistence/WatchedStore.h"
-#include "download/AllDebridResolver.h"
-#include "download/RealDebridResolver.h"
+
 #include "domain/Debrid.h"
 #include "kinema_log_app.h"
 #include "playback/adapters/ActiveStreamIndexerAdapter.h"
@@ -55,7 +54,9 @@
 #include "playback/series/SeriesSessionService.h"
 #include "playback/session/PlaybackSessionManager.h"
 #include "playback/sources/AllDebridMediaSource.h"
+#include "playback/sources/AllDebridResolver.h"
 #include "playback/sources/RealDebridMediaSource.h"
+#include "playback/sources/RealDebridResolver.h"
 #include "playback/sources/TorrentMediaSource.h"
 #include "playback/streaming/LocalHttpStreamGateway.h"
 #include "playback/subtitles/SubtitleSessionService.h"
@@ -136,10 +137,10 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
     // Real-Debrid client + unified downloader settings/cache. The
     // RD client picks up its token from the keyring once the
     // TokenController has fired its initial reads. Routing between
-    // RD and the libtorrent backend is decided inside
-    // `download::BackendSelector` at enqueue time — if RD is
-    // configured every stream goes through it; otherwise libtorrent
-    // takes over.
+    // RD and the libtorrent backend is decided by
+    // `playback::transfer::BackendRegistry` at session-open time —
+    // if RD is configured every stream goes through it; otherwise
+    // libtorrent takes over.
     m_rd = std::make_unique<api::RealDebridClient>(m_http.get(), a);
     m_ad = std::make_unique<api::AllDebridClient>(m_http.get(), a);
     m_mediaCache = std::make_unique<core::MediaCache>(
@@ -162,10 +163,9 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
         = std::make_unique<core::SubtitleCacheStore>(*m_db, a);
     m_downloadStore = std::make_unique<core::DownloadStore>(*m_db, a);
 
-    // ---- Unified downloader (new wiring) ------------------------
+    // ---- Unified downloader -------------------------------------
     //
-    // The legacy `download::DownloadManager` has been replaced by
-    // a composition of: `SessionRegistry` (live sessions),
+    // Composition of: `SessionRegistry` (live sessions),
     // `BackendRegistry` (`MediaSourcePort` strategies),
     // `TransferSupervisor` (DownloadRepository + event-stream
     // projection), `LocalHttpStreamGateway` (localhost server),
@@ -176,9 +176,11 @@ ServiceContainer::ServiceContainer(config::AppSettings& settings)
 
     // Resolvers used by the debrid media sources.
     m_rdResolver
-        = std::make_unique<download::RealDebridResolver>(*m_rd, a);
+        = std::make_unique<playback::sources::RealDebridResolver>(
+            *m_rd, a);
     m_adResolver
-        = std::make_unique<download::AllDebridResolver>(*m_ad, a);
+        = std::make_unique<playback::sources::AllDebridResolver>(
+            *m_ad, a);
 
     m_sessionRegistry
         = std::make_unique<playback::transfer::SessionRegistry>(a);

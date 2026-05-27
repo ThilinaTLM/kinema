@@ -3,7 +3,7 @@
 
 #include "playback/transfer/TransferSession.h"
 
-#include "download/AssetSession.h"
+#include "playback/sources/AssetSession.h"
 
 #include <utility>
 
@@ -14,7 +14,7 @@ TransferSession::TransferSession(domain::AssetRef ref,
     domain::DownloadBackendKind backend,
     domain::DownloadMode mode,
     domain::CacheDisposition disposition,
-    std::unique_ptr<download::AssetSession> source,
+    std::unique_ptr<sources::AssetSession> source,
     QObject* parent)
     : QObject(parent)
     , m_ref(std::move(ref))
@@ -36,15 +36,15 @@ TransferSession::TransferSession(domain::AssetRef ref,
     // Re-publish progress / telemetry so subscribers can attach to
     // the `TransferSession` without depending on the concrete
     // backend session class.
-    connect(m_source.get(), &download::AssetSession::cachedBytesChanged,
+    connect(m_source.get(), &sources::AssetSession::cachedBytesChanged,
         this, &TransferSession::cachedBytesChanged);
-    connect(m_source.get(), &download::AssetSession::completed,
+    connect(m_source.get(), &sources::AssetSession::completed,
         this, &TransferSession::completed);
-    connect(m_source.get(), &download::AssetSession::failed,
+    connect(m_source.get(), &sources::AssetSession::failed,
         this, &TransferSession::failed);
-    connect(m_source.get(), &download::AssetSession::liveStatsChanged,
+    connect(m_source.get(), &sources::AssetSession::liveStatsChanged,
         this, &TransferSession::liveStatsChanged);
-    connect(m_source.get(), &download::AssetSession::statusMessage,
+    connect(m_source.get(), &sources::AssetSession::statusMessage,
         this, &TransferSession::statusMessage);
 }
 

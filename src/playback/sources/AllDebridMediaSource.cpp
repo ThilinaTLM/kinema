@@ -5,7 +5,7 @@
 
 #include "api/AllDebridClient.h"
 #include "core/persistence/MediaCache.h"
-#include "download/DebridResolver.h"
+#include "playback/sources/DebridResolver.h"
 #include "kinema_log_download.h"
 #include "playback/sources/HttpRangeAssetSession.h"
 
@@ -16,7 +16,7 @@ namespace kinema::playback::sources {
 
 AllDebridMediaSource::AllDebridMediaSource(core::HttpClient& http,
     api::AllDebridClient& ad,
-    kinema::download::DebridResolver& resolver,
+    DebridResolver& resolver,
     core::MediaCache& cache,
     const config::DownloadSettings& settings)
     : m_http(http)

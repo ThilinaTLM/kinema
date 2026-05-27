@@ -28,13 +28,13 @@ constexpr qint64 kDefaultChunk = 4LL * 1024LL * 1024LL;
 } // namespace
 
 HttpRangeAssetSession::HttpRangeAssetSession(core::HttpClient& http,
-    kinema::download::DebridResolver& resolver,
+    DebridResolver& resolver,
     const config::DownloadSettings& settings,
     domain::AssetRef ref,
     QString assetId,
     QString localDir,
     QObject* parent)
-    : kinema::download::AssetSession(parent)
+    : AssetSession(parent)
     , m_http(http)
     , m_resolver(resolver)
     , m_settings(settings)

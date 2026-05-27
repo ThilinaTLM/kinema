@@ -293,11 +293,6 @@ ecm_add_test(tst_alldebrid_resolver.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_backend_selector.cpp
-    TEST_NAME tst_backend_selector
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
 ecm_add_test(tst_database.cpp
     TEST_NAME tst_database
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
@@ -306,11 +301,6 @@ ecm_add_test(tst_database.cpp
 ecm_add_test(tst_download_store.cpp
     TEST_NAME tst_download_store
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
-)
-
-ecm_add_test(tst_download_manager.cpp
-    TEST_NAME tst_download_manager
-    LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql Qt6::Network
 )
 
 ecm_add_test(tst_session_registry.cpp
@@ -532,7 +522,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_token_controller tst_debrid_credentials_resolver
          tst_cinemeta_client tst_tmdb_client
          tst_torrentio_indexer tst_realdebrid_client tst_alldebrid_client
-         tst_alldebrid_resolver tst_backend_selector
+         tst_alldebrid_resolver
          tst_database tst_history_store
          tst_library_store tst_watched_store tst_watched_controller
          tst_subtitle_cache_store tst_cache_paths tst_language
@@ -544,7 +534,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_library_view_model tst_library_backfill
          tst_application_boot tst_kinema_image_provider
          tst_downloads_list_model
-         tst_download_store tst_download_manager tst_session_registry
+         tst_download_store tst_session_registry
          tst_transfer_supervisor tst_transfer_use_case tst_backend_registry
          tst_torrent_media_source tst_debrid_media_source
          tst_media_cache tst_local_http_stream_gateway tst_http_range_asset_session

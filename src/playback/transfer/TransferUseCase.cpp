@@ -5,11 +5,11 @@
 
 #include "core/persistence/DownloadStore.h" // synthesiseStartArgs
 #include "core/persistence/MediaCache.h"
-#include "download/AssetSession.h"
 #include "kinema_log_download.h"
 #include "playback/policy/BackendSelectionPolicy.h"
 #include "playback/ports/DownloadRepository.h"
 #include "playback/ports/MediaSourcePort.h"
+#include "playback/sources/AssetSession.h"
 #include "playback/streaming/LocalHttpStreamGateway.h"
 #include "playback/transfer/BackendRegistry.h"
 #include "playback/transfer/SessionRegistry.h"
@@ -580,15 +580,16 @@ QCoro::Task<QUrl> TransferUseCase::openSession(domain::AssetRef ref,
 
         // The `MediaSourcePort` returns ownership through a
         // `unique_ptr<ByteRangeSource>`. Concrete sources are
-        // currently `download::AssetSession` subclasses
-        // (transitional; sub-commit 12 drops the base), so we
-        // recover the typed pointer to hand into `TransferSession`.
+        // `playback::sources::AssetSession` QObjects (the abstract
+        // base that adds the progress signals over the pure-read
+        // port). Downcast at the boundary to hand the typed pointer
+        // into `TransferSession`.
         auto* baseSource = opened.session.release();
         auto* assetSession
-            = dynamic_cast<download::AssetSession*>(baseSource);
+            = dynamic_cast<sources::AssetSession*>(baseSource);
         Q_ASSERT_X(assetSession, "TransferUseCase::openSession",
             "MediaSourcePort returned a non-AssetSession byte source");
-        std::unique_ptr<download::AssetSession> typedSource(
+        std::unique_ptr<sources::AssetSession> typedSource(
             assetSession);
 
         auto session = std::make_unique<TransferSession>(ref, ctx,

@@ -15,7 +15,7 @@
 
 #include <memory>
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 class AssetSession;
 }
 
@@ -27,11 +27,11 @@ namespace kinema::playback::transfer {
  * Holds the metadata the transfer subsystem needs to reason about a
  * single active asset (id, ref, playback context, backend kind,
  * mode + disposition) alongside ownership of the underlying byte
- * source. Today the underlying source is a legacy
- * `download::AssetSession` (which implements
- * `ports::ByteRangeSource`); during Phase 5 of the refactor the
- * source will be supplied by `MediaSourcePort` implementations
- * directly and the legacy type is deleted.
+ * source. The source is a `playback::sources::AssetSession`
+ * produced by a `MediaSourcePort::open(...)` call; the
+ * `TransferSession` re-publishes its progress signals so the
+ * `TransferSupervisor` can subscribe without depending on the
+ * concrete source class.
  *
  * Progress and live telemetry produced by the underlying source
  * are re-published as QObject signals so the
@@ -47,7 +47,7 @@ public:
         domain::DownloadBackendKind backend,
         domain::DownloadMode mode,
         domain::CacheDisposition disposition,
-        std::unique_ptr<download::AssetSession> source,
+        std::unique_ptr<sources::AssetSession> source,
         QObject* parent = nullptr);
     ~TransferSession() override;
 
@@ -76,11 +76,11 @@ public:
     /// non-null; ownership remains with the `TransferSession`.
     ports::ByteRangeSource* byteRangeSource() noexcept;
 
-    /// Legacy AssetSession pointer. Returns the same object as
-    /// `byteRangeSource()` but typed for the call sites that still
-    /// need to reach into backend-specific behaviour (pause/resume,
-    /// libtorrent-handle bookkeeping). Goes away in Phase 5.
-    download::AssetSession* legacySession() noexcept { return m_source.get(); }
+    /// Borrowed pointer to the concrete `sources::AssetSession`.
+    /// Returns the same object as `byteRangeSource()` but typed for
+    /// the call sites that reach into backend-specific behaviour
+    /// (pause / resume / mode flag).
+    sources::AssetSession* source() noexcept { return m_source.get(); }
 
     /// Convenience forwarders mirroring `AssetSession`'s lifecycle
     /// surface.
@@ -112,7 +112,7 @@ private:
     domain::DownloadBackendKind m_backend;
     domain::DownloadMode m_mode;
     domain::CacheDisposition m_disposition;
-    std::unique_ptr<download::AssetSession> m_source;
+    std::unique_ptr<sources::AssetSession> m_source;
 };
 
 } // namespace kinema::playback::transfer

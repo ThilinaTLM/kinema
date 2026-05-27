@@ -24,8 +24,9 @@ class TransferSession;
 /**
  * Owns active `TransferSession` instances keyed by `assetId`.
  *
- * Provides the in-memory bookkeeping the legacy
- * `download::DownloadManager` did inline:
+ * Provides the in-memory bookkeeping the transfer use-case relies
+ * on (replaces the bookkeeping the legacy `DownloadManager` did
+ * inline):
  *
  *  - asset-id map of live sessions;
  *  - opening-guard set (prevents duplicate creation when multiple

@@ -21,17 +21,14 @@ namespace kinema::config {
 class DownloadSettings;
 }
 
-namespace kinema::download {
-class DebridResolver;
-}
-
 namespace kinema::playback::sources {
+
+class DebridResolver;
 
 /**
  * `MediaSourcePort` over `AllDebridResolver` +
- * `HttpRangeAssetSession`. Long-term replacement for
- * `download::AllDebridBackend`. Mirrors `RealDebridMediaSource`
- * exactly; the only difference is the gate on
+ * `HttpRangeAssetSession`. Mirrors `RealDebridMediaSource` exactly;
+ * the only difference is the gate on
  * `api::AllDebridClient::apiKey()`.
  */
 class AllDebridMediaSource : public ports::MediaSourcePort
@@ -39,7 +36,7 @@ class AllDebridMediaSource : public ports::MediaSourcePort
 public:
     AllDebridMediaSource(core::HttpClient& http,
         api::AllDebridClient& ad,
-        kinema::download::DebridResolver& resolver,
+        DebridResolver& resolver,
         core::MediaCache& cache,
         const config::DownloadSettings& settings);
     ~AllDebridMediaSource() override;
@@ -62,7 +59,7 @@ public:
 private:
     core::HttpClient& m_http;
     api::AllDebridClient& m_ad;
-    kinema::download::DebridResolver& m_resolver;
+    DebridResolver& m_resolver;
     core::MediaCache& m_cache;
     const config::DownloadSettings& m_settings;
 };

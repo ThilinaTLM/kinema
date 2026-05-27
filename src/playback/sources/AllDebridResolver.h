@@ -4,7 +4,7 @@
 #pragma once
 
 #include "domain/Download.h"
-#include "download/DebridResolver.h"
+#include "playback/sources/DebridResolver.h"
 
 #include <QObject>
 #include <QString>
@@ -15,7 +15,7 @@ namespace kinema::api {
 class AllDebridClient;
 }
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
 /**
  * AllDebrid implementation of `DebridResolver`. The pipeline mirrors
@@ -45,4 +45,4 @@ private:
     api::AllDebridClient& m_ad;
 };
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources

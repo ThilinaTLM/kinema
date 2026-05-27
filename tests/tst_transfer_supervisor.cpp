@@ -4,7 +4,7 @@
 #include "domain/Download.h"
 #include "domain/MediaFile.h"
 #include "domain/PlaybackContext.h"
-#include "download/AssetSession.h"
+#include "playback/sources/AssetSession.h"
 #include "playback/events/PlaybackEvent.h"
 #include "playback/events/PlaybackEventStream.h"
 #include "playback/ports/DownloadRepository.h"
@@ -31,7 +31,7 @@ using namespace kinema::playback::transfer;
 
 namespace {
 
-class FakeAssetSession final : public download::AssetSession
+class FakeAssetSession final : public playback::sources::AssetSession
 {
     Q_OBJECT
 public:
@@ -39,13 +39,12 @@ public:
         QString fileName,
         qint64 fileSize,
         QObject* parent = nullptr)
-        : download::AssetSession(parent)
+        : playback::sources::AssetSession(parent)
         , m_assetId(std::move(assetId))
         , m_fileName(std::move(fileName))
         , m_fileSize(fileSize)
     {
     }
-    QString token() const override { return m_assetId; }
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }

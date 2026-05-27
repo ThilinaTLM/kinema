@@ -4,8 +4,8 @@
 #pragma once
 
 #include "domain/Download.h"
-#include "download/AssetSession.h"
-#include "download/DebridResolver.h"
+#include "playback/sources/AssetSession.h"
+#include "playback/sources/DebridResolver.h"
 
 #include <QFile>
 #include <QHash>
@@ -40,12 +40,12 @@ namespace kinema::playback::sources {
  * provider's resolution pipeline once and retries the request. URLs
  * are not persisted across sessions because hoster URLs expire.
  */
-class HttpRangeAssetSession : public kinema::download::AssetSession
+class HttpRangeAssetSession : public AssetSession
 {
     Q_OBJECT
 public:
     HttpRangeAssetSession(core::HttpClient& http,
-        kinema::download::DebridResolver& resolver,
+        DebridResolver& resolver,
         const config::DownloadSettings& settings,
         domain::AssetRef ref,
         QString assetId,
@@ -53,7 +53,11 @@ public:
         QObject* parent = nullptr);
     ~HttpRangeAssetSession() override;
 
-    QString token() const override { return m_token; }
+    /// Opaque session token retained from the resolver handshake.
+    /// Used historically by the legacy `LocalMediaServer`; the new
+    /// gateway keys by `assetId()` directly, so this accessor only
+    /// survives for diagnostics and tests.
+    QString token() const { return m_token; }
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }
@@ -64,7 +68,7 @@ public:
     }
 
     /// Lower-case hex info hash this session was opened for. Used
-    /// by `DownloadManager::filesForInfoHash` to map an info hash
+    /// by `SessionRegistry::filesForStreamRef` to map an info hash
     /// back to its asset session without forcing callers to know
     /// about `AssetRef`. Stable for the lifetime of the session.
     QString infoHash() const noexcept { return m_ref.infoHash; }
@@ -111,7 +115,7 @@ private:
     void ensureFileSizedToTotal();
 
     core::HttpClient& m_http;
-    kinema::download::DebridResolver& m_resolver;
+    DebridResolver& m_resolver;
     const config::DownloadSettings& m_settings;
 
     domain::AssetRef m_ref;

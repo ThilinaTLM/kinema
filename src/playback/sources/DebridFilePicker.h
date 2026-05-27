@@ -7,7 +7,7 @@
 
 #include <QString>
 
-namespace kinema::download::picker {
+namespace kinema::playback::sources::picker {
 
 /// One row passed to `chooseBest`. Both debrid resolvers flatten
 /// their provider-specific file list into this shape before scoring.
@@ -25,4 +25,4 @@ int score(const QString& path, qint64 sizeBytes, const domain::AssetRef& ref);
 /// the larger one wins.
 int chooseIndex(const QList<Candidate>& candidates, const domain::AssetRef& ref);
 
-} // namespace kinema::download::picker
+} // namespace kinema::playback::sources::picker

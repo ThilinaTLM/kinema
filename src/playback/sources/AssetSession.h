@@ -15,26 +15,36 @@
 
 #include <QCoro/QCoroTask>
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 
-using torrent::ByteRange;
+using kinema::torrent::ByteRange;
 
 /**
- * Abstract per-asset session served by the unified
- * `LocalMediaServer`. Concrete implementations:
+ * Abstract per-asset session owned by the transfer subsystem.
  *
- *  - `download::TorrentAssetSession` \u2014 libtorrent-backed; pieces are
+ * Adds Qt signals (progress / completion / failure / live stats)
+ * on top of the pure-read `playback::ports::ByteRangeSource` port,
+ * plus mode / pause / resume / files() hooks needed by
+ * `playback::transfer::TransferSession`.
+ *
+ * Concrete implementations live alongside in `playback::sources`:
+ *
+ *  - `TorrentAssetSession`         \u2014 libtorrent-backed; pieces are
  *    fetched from peers.
- *  - `download::HttpAssetSession` \u2014 RD hoster URL fetched in chunks
- *    into a sparse local file.
+ *  - `HttpRangeAssetSession`       \u2014 debrid hoster URL fetched in
+ *    chunks into a sparse local file.
  *
- * Each session represents a single playable file. The opaque
- * `token()` ties the session to localhost URLs the server hands out.
+ * Each session represents a single playable file. `ensureRange()`
+ * returns true when the requested byte range is available on disk;
+ * false on timeout / fatal error. `readRange()` reads bytes from
+ * the local payload. Both must remain thread-affine to the session's
+ * owning thread (the GUI thread today).
  *
- * `ensureRange()` returns true when the requested byte range is
- * available on disk; false on timeout / fatal error.
- * `readRange()` reads bytes from the local payload. Both must remain
- * thread-affine to the session's owning thread (the GUI thread today).
+ * This is the relocated successor of the legacy
+ * `download::AssetSession`. The transitional `token()` virtual was
+ * dropped together with the legacy `LocalMediaServer`; the unified
+ * `playback::streaming::LocalHttpStreamGateway` keys sources by
+ * `assetId()` directly.
  */
 class AssetSession : public QObject,
     public playback::ports::ByteRangeSource
@@ -46,10 +56,6 @@ public:
 
     AssetSession(const AssetSession&) = delete;
     AssetSession& operator=(const AssetSession&) = delete;
-
-    /// Opaque, server-routed token used inside localhost URLs.
-    /// Stable for the lifetime of the session.
-    virtual QString token() const = 0;
 
     // ByteRangeSource: declarations from the port are inherited;
     // concrete sessions override the pure virtuals below.
@@ -65,22 +71,20 @@ public:
     /// 0-indexed in the order the source enumerated them. Empty
     /// when the session has not yet resolved metadata or when the
     /// source does not expose multi-file information. Consumed by
-    /// series adjacency lookup (see
-    /// `download::DownloadManager::filesForInfoHash`). Pure read,
-    /// safe to call from the GUI thread.
-    virtual QVector<torrent::TorrentFileEntry> files() const
+    /// series adjacency lookup. Pure read, safe to call from the
+    /// GUI thread.
+    virtual QVector<kinema::torrent::TorrentFileEntry> files() const
     {
         return {};
     }
 
     /// Current download mode. Concrete sessions persist this so a
-    /// `BackendSelector::changeMode` can no-op when nothing changes.
+    /// `MediaSourcePort::changeMode` can no-op when nothing changes.
     virtual domain::DownloadMode mode() const = 0;
 
-    /// Update the in-memory mode flag. Backends call this from
-    /// `DownloadBackend::changeMode` after applying the policy
-    /// change to their own state (libtorrent priorities, prefetch
-    /// loop, etc).
+    /// Update the in-memory mode flag. `MediaSourcePort::changeMode`
+    /// calls this after applying the policy change to its own state
+    /// (libtorrent priorities, prefetch loop, etc).
     virtual void setMode(domain::DownloadMode m) = 0;
 
     /// User-initiated pause. Default is a no-op so backends that
@@ -106,4 +110,4 @@ Q_SIGNALS:
         int etaSeconds);
 };
 
-} // namespace kinema::download
+} // namespace kinema::playback::sources

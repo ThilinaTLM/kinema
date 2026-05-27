@@ -4,7 +4,7 @@
 #include "domain/Download.h"
 #include "domain/MediaFile.h"
 #include "domain/PlaybackContext.h"
-#include "download/AssetSession.h"
+#include "playback/sources/AssetSession.h"
 #include "playback/transfer/SessionRegistry.h"
 #include "playback/transfer/TransferSession.h"
 #include "torrent/MediaFileSelector.h"
@@ -24,14 +24,14 @@ using namespace kinema;
 namespace {
 
 /**
- * Minimal fake of `download::AssetSession` for registry tests.
+ * Minimal fake of `playback::sources::AssetSession` for registry tests.
  *
  * The registry only cares about identity, mode, and file list — so
  * the byte-range methods are stubbed with no-ops. Progress signals
  * are exposed via small helpers so tests can verify re-publication
  * through `TransferSession`.
  */
-class FakeAssetSession final : public download::AssetSession
+class FakeAssetSession final : public playback::sources::AssetSession
 {
     Q_OBJECT
 public:
@@ -41,7 +41,7 @@ public:
         qint64 fileSize,
         QVector<torrent::TorrentFileEntry> files,
         QObject* parent = nullptr)
-        : download::AssetSession(parent)
+        : playback::sources::AssetSession(parent)
         , m_assetId(std::move(assetId))
         , m_infoHash(std::move(infoHash))
         , m_fileName(std::move(fileName))
@@ -50,7 +50,6 @@ public:
     {
     }
 
-    QString token() const override { return m_assetId; }
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }

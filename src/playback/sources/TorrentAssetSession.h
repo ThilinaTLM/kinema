@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "download/AssetSession.h"
+#include "playback/sources/AssetSession.h"
 
 #include <QString>
 #include <QVector>
@@ -15,17 +15,16 @@ class TorrentStreamingService;
 namespace kinema::playback::sources {
 
 /**
- * `AssetSession` adapter over the libtorrent-backed
- * `torrent::TorrentStreamingService`. The session represents a
- * single (info hash, selected file) tuple already prepared via
- * `TorrentStreamingService::prepareSession(...)`.
+ * `playback::sources::AssetSession` adapter over the
+ * libtorrent-backed `torrent::TorrentStreamingService`. The session
+ * represents a single (info hash, selected file) tuple already
+ * prepared via `TorrentStreamingService::prepareSession(...)`.
  *
- * Implements `playback::ports::ByteRangeSource` via the legacy
- * `download::AssetSession` base; the base goes away with the rest
- * of the legacy download/ directory at the end of this refactor
- * step.
+ * Implements `playback::ports::ByteRangeSource` through the
+ * `AssetSession` QObject base that lives alongside in
+ * `playback::sources`.
  */
-class TorrentAssetSession : public kinema::download::AssetSession
+class TorrentAssetSession : public AssetSession
 {
     Q_OBJECT
 public:
@@ -38,7 +37,11 @@ public:
         QObject* parent = nullptr);
     ~TorrentAssetSession() override;
 
-    QString token() const override { return m_token; }
+    /// Opaque session token retained from the engine handshake.
+    /// Used historically by the legacy `LocalMediaServer` URL
+    /// generation; the new gateway keys by `assetId()` directly, so
+    /// this accessor only survives for diagnostics and tests.
+    QString token() const { return m_token; }
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }

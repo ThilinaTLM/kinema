@@ -7,7 +7,7 @@
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
-#include "download/AssetSession.h"
+#include "playback/sources/AssetSession.h"
 #include "playback/events/PlaybackEventStream.h"
 #include "playback/ports/DownloadRepository.h"
 #include "playback/ports/MediaSourcePort.h"
@@ -43,17 +43,17 @@ namespace streaming = kinema::playback::streaming;
 namespace {
 
 // ---------------------------------------------------------------------------
-// FakeAssetSession — a `download::AssetSession` subclass we can drive from
-// tests. Mirrors the helper in `tst_transfer_supervisor.cpp` so the
-// supervisor's progress wiring keeps working end-to-end.
+// FakeAssetSession — a `playback::sources::AssetSession` subclass we can
+// drive from tests. Mirrors the helper in `tst_transfer_supervisor.cpp` so
+// the supervisor's progress wiring keeps working end-to-end.
 // ---------------------------------------------------------------------------
-class FakeAssetSession final : public download::AssetSession
+class FakeAssetSession final : public playback::sources::AssetSession
 {
     Q_OBJECT
 public:
     FakeAssetSession(QString assetId, QString fileName, qint64 fileSize,
         qint64 initialCached, QObject* parent = nullptr)
-        : download::AssetSession(parent)
+        : playback::sources::AssetSession(parent)
         , m_assetId(std::move(assetId))
         , m_fileName(std::move(fileName))
         , m_fileSize(fileSize)
@@ -61,7 +61,6 @@ public:
     {
     }
 
-    QString token() const override { return m_assetId; }
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }
@@ -649,7 +648,7 @@ private Q_SLOTS:
         QCOMPARE(m_repo->find(assetId)->state,
             domain::DownloadState::Paused);
         auto* fake = dynamic_cast<FakeAssetSession*>(
-            m_sessions->find(assetId)->legacySession());
+            m_sessions->find(assetId)->source());
         QVERIFY(fake);
         QCOMPARE(fake->pauseCalls, 1);
 

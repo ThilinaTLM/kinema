@@ -11,7 +11,7 @@
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
-#include "download/DebridResolver.h"
+#include "playback/sources/DebridResolver.h"
 #include "playback/ports/MediaSourcePort.h"
 #include "playback/sources/AllDebridMediaSource.h"
 #include "playback/sources/HttpRangeAssetSession.h"
@@ -35,13 +35,13 @@ using kinema::tests::FakeHttpClient;
 
 namespace {
 
-class StubResolver final : public download::DebridResolver
+class StubResolver final : public playback::sources::DebridResolver
 {
 public:
-    download::ResolvedDebridLink reply;
+    playback::sources::ResolvedDebridLink reply;
     int resolveCalls = 0;
 
-    QCoro::Task<download::ResolvedDebridLink> resolve(
+    QCoro::Task<playback::sources::ResolvedDebridLink> resolve(
         domain::AssetRef ref) override
     {
         Q_UNUSED(ref);

@@ -4,7 +4,7 @@
 #include "api/AllDebridClient.h"
 #include "domain/Download.h"
 #include "core/io/HttpError.h"
-#include "download/AllDebridResolver.h"
+#include "playback/sources/AllDebridResolver.h"
 #include "TestDoubles.h"
 
 #include <QCoroSignal>
@@ -186,7 +186,7 @@ private Q_SLOTS:
         unlock.filename = QStringLiteral("Movie.Release.1080p.mkv");
         stub.unlockReplies = { unlock };
 
-        download::AllDebridResolver r(stub);
+        playback::sources::AllDebridResolver r(stub);
         const auto out = QCoro::waitFor(r.resolve(
             makeRef(QStringLiteral("Movie.Release.1080p.mkv"))));
 
@@ -220,7 +220,7 @@ private Q_SLOTS:
         unlock.fileSize = 1'500'000'000;
         stub.unlockReplies = { unlock };
 
-        download::AllDebridResolver r(stub);
+        playback::sources::AllDebridResolver r(stub);
         const auto out = QCoro::waitFor(r.resolve(makeRef()));
 
         QCOMPARE(stub.statusCalls, 3);
@@ -233,7 +233,7 @@ private Q_SLOTS:
         stub.uploadReplies = { makeUploadOk() };
         stub.statusReplies = { makeStatus(8) }; // 8 = File too big.
 
-        download::AllDebridResolver r(stub);
+        playback::sources::AllDebridResolver r(stub);
         try {
             (void)QCoro::waitFor(r.resolve(makeRef()));
             QFAIL("expected HttpError");
@@ -249,7 +249,7 @@ private Q_SLOTS:
         stub.statusReplies = { makeStatus(4) };
         stub.filesReplies = { QList<domain::AdMagnetFile> {} };
 
-        download::AllDebridResolver r(stub);
+        playback::sources::AllDebridResolver r(stub);
         try {
             (void)QCoro::waitFor(r.resolve(makeRef()));
             QFAIL("expected HttpError");
@@ -262,7 +262,7 @@ private Q_SLOTS:
     void cleanup_callsDeleteWithDecodedId()
     {
         StubAllDebridClient stub;
-        download::AllDebridResolver r(stub);
+        playback::sources::AllDebridResolver r(stub);
         QCoro::waitFor(r.cleanup(QStringLiteral("123")));
         QCOMPARE(stub.deleteCalls, 1);
         QCOMPARE(stub.lastDeletedId, 123LL);
@@ -271,7 +271,7 @@ private Q_SLOTS:
     void cleanup_emptyIsNoop()
     {
         StubAllDebridClient stub;
-        download::AllDebridResolver r(stub);
+        playback::sources::AllDebridResolver r(stub);
         QCoro::waitFor(r.cleanup(QString {}));
         QCOMPARE(stub.deleteCalls, 0);
     }
@@ -305,7 +305,7 @@ private Q_SLOTS:
             "1122334455667788990011223344556677889900");
         ref.releaseName = QStringLiteral("Show.S01");
 
-        download::AllDebridResolver r(stub);
+        playback::sources::AllDebridResolver r(stub);
         const auto out = QCoro::waitFor(r.resolve(ref));
         QCOMPARE(stub.lastUnlockedLink,
             QUrl(QStringLiteral("https://alldebrid.com/f/ep2")));
@@ -347,7 +347,7 @@ private Q_SLOTS:
             "1122334455667788990011223344556677889900");
         ref.releaseName = QStringLiteral("Show.S01");
 
-        download::AllDebridResolver r(stub);
+        playback::sources::AllDebridResolver r(stub);
         const auto out = QCoro::waitFor(r.resolve(ref));
         QCOMPARE(out.files.size(), 2);
         QCOMPARE(out.files[0].index, 0);

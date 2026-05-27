@@ -47,7 +47,7 @@ class TrayController;
 class WatchedController;
 }
 
-namespace kinema::download {
+namespace kinema::playback::sources {
 class AllDebridResolver;
 class RealDebridResolver;
 }
@@ -303,8 +303,8 @@ private:
         m_downloadRepo;
     std::unique_ptr<playback::adapters::ActiveStreamIndexerAdapter>
         m_streamIndexerAdapter;
-    std::unique_ptr<download::RealDebridResolver> m_rdResolver;
-    std::unique_ptr<download::AllDebridResolver> m_adResolver;
+    std::unique_ptr<playback::sources::RealDebridResolver> m_rdResolver;
+    std::unique_ptr<playback::sources::AllDebridResolver> m_adResolver;
     std::unique_ptr<playback::transfer::SessionRegistry> m_sessionRegistry;
     std::unique_ptr<playback::transfer::BackendRegistry> m_backendRegistry;
     playback::streaming::LocalHttpStreamGateway* m_localStreamGateway {};
