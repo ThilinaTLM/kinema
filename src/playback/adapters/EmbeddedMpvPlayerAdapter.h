@@ -133,6 +133,7 @@ private Q_SLOTS:
 private:
     void disconnectWindow();
     void connectWindow();
+    void publishPlaybackState();
     /// Convert mpv's stringly-typed `end-file` reason into a
     /// `PlaybackEndReason`. Returns nullopt when the reason should
     /// be filtered (intermediate "stop" caused by loadfile

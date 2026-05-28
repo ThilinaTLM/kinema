@@ -315,6 +315,15 @@ void EmbeddedMpvPlayerAdapter::onFileLoaded()
         m_window->showResumePrompt(m_pendingResumeSeconds);
     }
     m_eventStream.publish(events::PlayerLoaded { m_sessionId });
+    publishPlaybackState();
+}
+
+void EmbeddedMpvPlayerAdapter::publishPlaybackState()
+{
+    if (!m_sessionActive) return;
+    m_eventStream.publish(events::PlaybackStateChanged {
+        m_sessionId, /*playing=*/!m_paused, m_paused, /*buffering=*/false,
+    });
 }
 
 std::optional<PlaybackEndReason>
@@ -419,10 +428,7 @@ void EmbeddedMpvPlayerAdapter::onDurationChanged(double seconds)
 void EmbeddedMpvPlayerAdapter::onPausedChanged(bool paused)
 {
     m_paused = paused;
-    if (!m_sessionActive) return;
-    m_eventStream.publish(events::PlaybackStateChanged {
-        m_sessionId, /*playing=*/!paused, paused, /*buffering=*/false,
-    });
+    publishPlaybackState();
 }
 
 void EmbeddedMpvPlayerAdapter::onVolumeChanged(double percent)

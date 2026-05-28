@@ -127,7 +127,7 @@ private Q_SLOTS:
         QCOMPARE(spy2.count(), 0);
     }
 
-    void fileLoadedPublishesPlayerLoadedAndDisarmsWatchdog()
+    void fileLoadedPublishesPlayerLoadedInitialStateAndDisarmsWatchdog()
     {
         PlaybackEventStream stream;
         EmbeddedMpvPlayerAdapter adapter(stream, playerSettings());
@@ -142,6 +142,12 @@ private Q_SLOTS:
         QVERIFY(QMetaObject::invokeMethod(&adapter, "onFileLoaded"));
 
         QVERIFY(spyHasEvent<PlayerLoaded>(spy));
+        QVERIFY(spyHasEvent<PlaybackStateChanged>(spy));
+        const auto state = extractEvent<PlaybackStateChanged>(spy);
+        QCOMPARE(state.sessionId, id);
+        QCOMPARE(state.playing, true);
+        QCOMPARE(state.paused, false);
+        QCOMPARE(state.buffering, false);
         QVERIFY(!adapter.loadWatchdog().isActive());
     }
 
