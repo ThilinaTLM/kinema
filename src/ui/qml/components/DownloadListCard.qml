@@ -368,141 +368,19 @@ BaseListCard {
     }
 
     // Line 2: dot-separated caption tokens — State (toned),
-    // Quality, Backend (icon + label), status, rate. Plain caption
-    // labels and a small inline icon so the row's height stays
-    // identical whether or not the optional tokens render.
-    RowLayout {
-        id: metaRow
-
-        readonly property bool hasState: card.stateText.length > 0
-        readonly property bool hasQuality:
-            card._qualityChipText.length > 0
-        readonly property bool hasBackend: card.backendLabel.length > 0
-        readonly property bool hasStatus: card._statusText.length > 0
-        readonly property bool hasRate: !card.complete
-            && card.downloadRateText.length > 0
-
+    // Quality, Backend (icon + label), status, rate. Presentation
+    // lives in `DownloadCardMetaRow`; this card owns the token logic
+    // and hands the computed values down.
+    DownloadCardMetaRow {
         Layout.fillWidth: true
-        spacing: Theme.inlineSpacing
-
-        // State — tone moves from chip border to label colour.
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            visible: metaRow.hasState
-            text: card.stateText
-            font.pointSize: Theme.captionFont.pointSize
-            color: card._stateColor(card.stateTone)
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // (state) → (quality)
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            visible: metaRow.hasState && metaRow.hasQuality
-            text: "\u00b7"
-            font.pointSize: Theme.captionFont.pointSize
-            color: Theme.disabled
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // Quality (e.g. `1080p WEB-DL` / `720p`).
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            visible: metaRow.hasQuality
-            text: card._qualityChipText
-            font.pointSize: Theme.captionFont.pointSize
-            color: Theme.disabled
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // (state|quality) → (backend)
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            visible: (metaRow.hasState || metaRow.hasQuality)
-                && metaRow.hasBackend
-            text: "\u00b7"
-            font.pointSize: Theme.captionFont.pointSize
-            color: Theme.disabled
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // Backend icon. Sized down from `iconSizes.small` so it
-        // sits on the caption baseline next to the label rather
-        // than dominating the line.
-        Kirigami.Icon {
-            Layout.alignment: Qt.AlignVCenter
-            visible: metaRow.hasBackend
-                && card.backendIcon.length > 0
-            Layout.preferredWidth:
-                Math.round(Kirigami.Units.iconSizes.small * 0.8)
-            Layout.preferredHeight: width
-            source: card.backendIcon
-            color: Theme.disabled
-        }
-
-        // Backend label.
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            visible: metaRow.hasBackend
-            text: card.backendLabel
-            font.pointSize: Theme.captionFont.pointSize
-            color: Theme.disabled
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // (state|quality|backend) → (status)
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            visible: (metaRow.hasState || metaRow.hasQuality
-                || metaRow.hasBackend) && metaRow.hasStatus
-            text: "\u00b7"
-            font.pointSize: Theme.captionFont.pointSize
-            color: Theme.disabled
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // Status caption — recolours `Theme.negative` on failed
-        // rows (the `⚠` prefix is baked into `_statusText`).
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            Layout.fillWidth: false
-            visible: metaRow.hasStatus
-            text: card._statusText
-            elide: Text.ElideRight
-            font.pointSize: Theme.captionFont.pointSize
-            color: card.state === card.stateFailed
-                ? Theme.negative
-                : Theme.disabled
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // (status) → (rate)
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            visible: (metaRow.hasState || metaRow.hasQuality
-                || metaRow.hasBackend || metaRow.hasStatus)
-                && metaRow.hasRate
-            text: "\u00b7"
-            font.pointSize: Theme.captionFont.pointSize
-            color: Theme.disabled
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // Live download rate — the only token in foreground /
-        // DemiBold so it scans as the row's live metric.
-        QQC2.Label {
-            Layout.alignment: Qt.AlignVCenter
-            visible: metaRow.hasRate
-            text: card.downloadRateText
-            font.pointSize: Theme.captionFont.pointSize
-            color: Theme.foreground
-            font.weight: Font.DemiBold
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        // Trailing fill keeps the row packed flush left when the
-        // body stretches it to the card width.
-        Item { Layout.fillWidth: true }
+        stateText: card.stateText
+        stateColor: card._stateColor(card.stateTone)
+        qualityText: card._qualityChipText
+        backendIcon: card.backendIcon
+        backendLabel: card.backendLabel
+        statusText: card._statusText
+        statusIsError: card.state === card.stateFailed
+        rateText: card.complete ? "" : card.downloadRateText
     }
 
     // Line 3: attribution — always present so the body keeps its
@@ -606,121 +484,24 @@ BaseListCard {
         }
     }
 
-    // Overflow menu — short, distinct verbs. Follows the
-    // conventions in `docs/MenuConventions.md`: primary actions
-    // at the top, copy / external next, destructive footer last.
-    // Items that open a confirm dialog wire it from
-    // `onTriggered` directly; the label stays short.
-    KinemaMenu {
+    // Overflow / right-click context menu. Item logic + ordering
+    // live in `DownloadCardMenu`; the three confirm-prompt actions
+    // are surfaced as signals so this card owns the dialogs below.
+    DownloadCardMenu {
         id: rowMenu
-
-        KinemaMenuItem {
-            iconName: "play"
-            label: i18nc("@action:inmenu download row", "Play")
-            visible: card.complete
-            onTriggered: downloadsVm.playDownload(card.assetId)
-        }
-        KinemaMenuItem {
-            iconName: "folder-open"
-            label: i18nc("@action:inmenu download row", "Open Folder")
-            enabled: card.localDir.length > 0
-            onTriggered: downloadsVm.openLocalDir(card.assetId)
-        }
-        QQC2.MenuSeparator { }
-        // Pin / Unpin collapse into one stateful item per the
-        // "toggle pair = one item" convention. Pin also covers the
-        // OnDemand → Full + Pinned upgrade.
-        KinemaMenuItem {
-            iconName: card.pinned ? "circle-dashed" : "pin"
-            label: card.pinned
-                ? i18nc("@action:inmenu download row, allow eviction",
-                    "Unpin")
-                : i18nc("@action:inmenu download row, save (also "
-                    + "upgrades OnDemand to Full+Pinned)",
-                    "Pin")
-            visible: card.pinned
-                || card.canUpgrade
-                || card.complete
-            onTriggered: {
-                if (card.pinned) {
-                    downloadsVm.pin(card.assetId, false);
-                } else if (card.canUpgrade && !card.complete) {
-                    downloadsVm.upgradeToFull(card.assetId);
-                } else {
-                    downloadsVm.pin(card.assetId, true);
-                }
-            }
-        }
-        // Full+hasPlayer Pause lives only in the menu (primary slot
-        // is "Play" so we don't offer Pause inline while a player
-        // is attached). Confirm before pausing — the playback will
-        // starve once the player catches up to cached bytes.
-        KinemaMenuItem {
-            iconName: "pause"
-            label: i18nc("@action:inmenu download row, pause this download",
-                "Pause")
-            visible: card.state === card.stateActive
-                && card.mode === card.modeFull
-                && card.hasPlayerAttached
-            onTriggered: pauseWhilePlayingConfirm.open()
-        }
-        QQC2.MenuSeparator { }
-        KinemaMenuItem {
-            iconName: "copy"
-            label: i18nc("@action:inmenu download row", "Copy Title")
-            enabled: card.title.length > 0
-            onTriggered: shell.copyToClipboard(card.title,
-                i18nc("@info:status",
-                    "Title copied to clipboard"))
-        }
-        KinemaMenuItem {
-            iconName: "copy"
-            label: i18nc("@action:inmenu download row", "Copy Path")
-            enabled: card.localDir.length > 0
-            onTriggered: shell.copyToClipboard(card.localDir,
-                i18nc("@info:status",
-                    "File path copied to clipboard"))
-        }
-        KinemaMenuItem {
-            iconName: "external-link"
-            label: i18nc("@action:inmenu download row",
-                "Open on IMDb")
-            enabled: card.imdbId.length > 0
-            onTriggered: shell.openImdbTitle(card.imdbId)
-        }
-        QQC2.MenuSeparator { }
-        KinemaMenuItem {
-            iconName: "x"
-            label: i18nc("@action:inmenu download row, stop transfer",
-                "Stop")
-            destructive: true
-            enabled: card.state !== card.stateCompleted
-                && card.state !== card.stateFailed
-                && card.state !== card.stateCancelled
-            onTriggered: {
-                if (card.hasPlayerAttached) {
-                    stopWhilePlayingConfirm.open();
-                } else {
-                    downloadsVm.cancel(card.assetId);
-                }
-            }
-        }
-        KinemaMenuItem {
-            iconName: "list-x"
-            label: i18nc("@action:inmenu download row, drop the row",
-                "Remove")
-            destructive: true
-            // Remove keeps files on disk; no confirm prompt.
-            onTriggered: downloadsVm.remove(card.assetId, false)
-        }
-        KinemaMenuItem {
-            iconName: "trash-2"
-            label: i18nc("@action:inmenu download row, drop the row "
-                + "and delete cached files",
-                "Delete")
-            destructive: true
-            onTriggered: deleteConfirm.open()
-        }
+        assetId: card.assetId
+        rowTitle: card.title
+        localDir: card.localDir
+        imdbId: card.imdbId
+        pinned: card.pinned
+        canUpgrade: card.canUpgrade
+        complete: card.complete
+        hasPlayerAttached: card.hasPlayerAttached
+        state: card.state
+        mode: card.mode
+        onPauseWhilePlayingRequested: pauseWhilePlayingConfirm.open()
+        onStopWhilePlayingRequested: stopWhilePlayingConfirm.open()
+        onDeleteRequested: deleteConfirm.open()
     }
 
     // Pause-while-playing confirmation (Full+hasPlayer only).

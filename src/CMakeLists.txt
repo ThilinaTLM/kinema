@@ -363,6 +363,8 @@ qt_add_qml_module(kinema_qml_app
         ui/qml/components/ContentRail.qml
         ui/qml/components/ContinueWatchingRail.qml
         ui/qml/components/DetailOverview.qml
+        ui/qml/components/DownloadCardMenu.qml
+        ui/qml/components/DownloadCardMetaRow.qml
         ui/qml/components/EpisodeRailCard.qml
         ui/qml/components/EpisodeRailContextMenu.qml
         ui/qml/components/EpisodeListCard.qml
