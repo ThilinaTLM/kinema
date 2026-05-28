@@ -3,7 +3,7 @@
 
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 
-#include "controllers/HistoryController.h"
+#include "playback/history/HistoryQueryService.h"
 #include "ui/qml-bridge/LibraryRailModel.h"
 
 #include <KLocalizedString>
@@ -69,7 +69,8 @@ LibraryRailRow rowFromHistory(const domain::HistoryEntry& e)
     row.title = e.seriesTitle.isEmpty() ? e.title : e.seriesTitle;
     row.posterUrl = e.poster.toString();
     // `backdrop_url` is captured at play time (see
-    // `HistoryController::onPlayStarting`). When present, the
+    // `playback::progress::PlaybackProgressProjector` on the
+    // `PlaybackRequested` event). When present, the
     // EpisodeRailCard renders the 16:9 backdrop natively. Pre-v9
     // history rows / external plays without a backdrop fall through
     // to the letterboxed-poster path. `thumbnailUrl` stays empty
@@ -86,14 +87,14 @@ LibraryRailRow rowFromHistory(const domain::HistoryEntry& e)
 } // namespace
 
 ContinueWatchingViewModel::ContinueWatchingViewModel(
-    controllers::HistoryController* history, QObject* parent)
+    playback::history::HistoryQueryService* history, QObject* parent)
     : QObject(parent)
     , m_history(history)
     , m_model(new LibraryRailModel(this))
 {
     if (m_history) {
         connect(m_history,
-            &controllers::HistoryController::changed, this,
+            &playback::history::HistoryQueryService::changed, this,
             &ContinueWatchingViewModel::refresh);
     }
     refresh();

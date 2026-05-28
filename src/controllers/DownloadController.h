@@ -4,6 +4,7 @@
 #pragma once
 
 #include "domain/Download.h"
+#include "playback/transfer/LiveAssetStats.h"
 
 #include <QObject>
 #include <QSet>
@@ -15,8 +16,8 @@ namespace kinema::core {
 class DownloadStore;
 }
 
-namespace kinema::download {
-class DownloadManager;
+namespace kinema::playback::transfer {
+class TransferUseCase;
 }
 
 namespace kinema::controllers {
@@ -29,17 +30,17 @@ namespace kinema::controllers {
  * The split between Play (`OnDemand`) and Download (`Full`) lives
  * here so view-models don't have to think about lifecycle policies:
  *
- *   - `play()` / `playWithBackend()`   -> manager `prepareForPlayback`
- *   - `download()` / `downloadWithBackend()` -> manager `enqueueDownload`
+ *   - `play()` / `playWithBackend()`   -> use-case `ensurePlayable`
+ *   - `download()` / `downloadWithBackend()` -> use-case `saveOffline`
  *
  * `upgradeToFull/pause/resume/attachPlayer/detachPlayer` are forwarders
- * to the matching manager methods.
+ * to the matching `TransferUseCase` methods.
  */
 class DownloadController : public QObject
 {
     Q_OBJECT
 public:
-    DownloadController(download::DownloadManager& manager,
+    DownloadController(playback::transfer::TransferUseCase& useCase,
         core::DownloadStore& store,
         QObject* parent = nullptr);
 
@@ -48,13 +49,22 @@ public:
         const domain::PlaybackKey& key) const;
 
     /// Single-row fetch for the hot path: view-models bind to
-    /// `DownloadManager::itemChanged(assetId)` and re-read just
+    /// `DownloadController::itemChanged(assetId)` and re-read just
     /// that one row instead of doing a full `loadAll()` per tick.
     std::optional<domain::DownloadItem> find(const QString& assetId) const;
 
     /// Snapshot of asset ids that currently have a player attached;
     /// used by the view-model to compute `hasPlayerAttached` per row.
     QSet<QString> attachedPlayerAssetIds() const;
+
+    /// Live transient telemetry (rate / peers / seeds / ETA) for
+    /// the asset's currently-active transfer session. Returns
+    /// nullopt when no session is active. Exposed here so
+    /// `DownloadsViewModel` can read per-row stats through the
+    /// controller boundary instead of holding its own
+    /// `TransferUseCase&`.
+    std::optional<playback::transfer::LiveAssetStats> liveStatsFor(
+        const QString& assetId) const;
 
 public Q_SLOTS:
     /// Background full-file download with `Pinned` disposition.
@@ -92,7 +102,7 @@ Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs);
 
 private:
-    download::DownloadManager& m_manager;
+    playback::transfer::TransferUseCase& m_useCase;
     core::DownloadStore& m_store;
 };
 

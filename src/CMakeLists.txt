@@ -58,23 +58,14 @@ set(kinema_core_SRCS
     core/util/TorrentioConfig.cpp
     core/util/TorrentioUrl.cpp
 
-    torrent/LocalStreamServer.cpp
-    torrent/MediaFileSelector.cpp
     torrent/PiecePlanner.cpp
-    torrent/TorrentStreamingService.cpp
 
-    download/AllDebridBackend.cpp
-    download/AllDebridResolver.cpp
-    download/AssetSession.cpp
-    download/BackendSelector.cpp
-    download/DebridFilePicker.cpp
-    download/DownloadManager.cpp
-    download/HttpAssetSession.cpp
-    download/LocalMediaServer.cpp
-    download/RealDebridBackend.cpp
-    download/RealDebridResolver.cpp
-    download/TorrentAssetSession.cpp
-    download/TorrentBackend.cpp
+    playback/sources/AllDebridResolver.cpp
+    playback/sources/AssetSession.cpp
+    playback/sources/DebridFilePicker.cpp
+    playback/sources/HttpRangeAssetSession.cpp
+    playback/sources/RealDebridResolver.cpp
+    playback/sources/TorrentAssetSession.cpp
 
     api/AllDebridClient.cpp
     api/AllDebridParse.cpp
@@ -97,6 +88,39 @@ set(kinema_core_SRCS
     domain/Indexer.cpp
     domain/PlaybackContext.cpp
 
+    playback/events/PlaybackEventStream.cpp
+    playback/streaming/LocalHttpStreamGateway.cpp
+    playback/adapters/ActiveStreamIndexerAdapter.cpp
+    playback/adapters/ExternalPlayerAdapter.cpp
+    playback/history/SqlitePlaybackHistoryRepository.cpp
+    playback/downloads/SqliteDownloadRepository.cpp
+    playback/transfer/TransferUseCase.cpp
+    playback/transfer/TransferSession.cpp
+    playback/transfer/SessionRegistry.cpp
+    playback/transfer/TransferSupervisor.cpp
+    playback/transfer/BackendRegistry.cpp
+    playback/torrent/LibtorrentClient.cpp
+    playback/sources/TorrentMediaSource.cpp
+    playback/sources/RealDebridMediaSource.cpp
+    playback/sources/AllDebridMediaSource.cpp
+    playback/progress/PlaybackProgressProjector.cpp
+    playback/session/PlaybackSession.cpp
+    playback/session/PlaybackSessionManager.cpp
+    playback/resume/ResumeUseCase.cpp
+    playback/history/HistoryQueryService.cpp
+    playback/history/TrackMemoryService.cpp
+    playback/subtitles/SubtitleSessionService.cpp
+    playback/subtitles/MoviehashProbe.cpp
+    playback/session/PlaybackStateMachine.cpp
+    playback/session/PlayerLoadWatchdog.cpp
+    playback/session/TransferStateMachine.cpp
+    playback/policy/BackendSelectionPolicy.cpp
+    playback/policy/ChapterSkipPolicy.cpp
+    playback/policy/MediaFileSelectionPolicy.cpp
+    playback/policy/ResumePolicy.cpp
+    playback/policy/StreamingPriorityPolicy.cpp
+    playback/policy/WatchedPolicy.cpp
+
     ui/ImageLoader.cpp
 
     app/KinemaApplication.cpp
@@ -104,14 +128,13 @@ set(kinema_core_SRCS
 
     controllers/DebridCredentialsResolver.cpp
     controllers/DownloadController.cpp
-    controllers/HistoryController.cpp
     controllers/LibraryController.cpp
+    controllers/StreamUtilityController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
     controllers/WatchedController.cpp
 
-    services/StreamActions.cpp
 
     ui/qml-bridge/AppIconResolver.cpp
     ui/qml-bridge/BrowseViewModel.cpp
@@ -161,10 +184,9 @@ set(kinema_core_SRCS
 # scripts; no IPC bridge.
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
-        controllers/MprisController.cpp
-        controllers/PlaybackController.cpp
-        controllers/PlaybackLoadWatchdog.cpp
-        controllers/SeriesPlaybackSessionController.cpp
+        playback/adapters/EmbeddedMpvPlayerAdapter.cpp
+        playback/desktop/MprisPlaybackProjection.cpp
+        playback/series/SeriesSessionService.cpp
         ui/player/AudioTracksModel.cpp
         ui/player/ChaptersModel.cpp
         ui/player/MpvLoadCommand.cpp

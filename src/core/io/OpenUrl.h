@@ -34,7 +34,7 @@ using OpenExternalCallback = std::function<void(const OpenExternalResult&)>;
  * status message.
  *
  * Single entry point for every "open in external app" code path —
- * `StreamActions` (open magnet / open direct URL) and
+ * `StreamUtilityController` (open magnet / open direct URL) and
  * `ShellViewModel` (open IMDb / TMDb / arbitrary URL) both route
  * through here so failure handling stays consistent.
  */

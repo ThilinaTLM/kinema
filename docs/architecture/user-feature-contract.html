@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kinema — User Feature Contract</title>
+  <link rel="stylesheet" href="./richdoc.css">
+  <script src="./richdoc.js" defer></script>
+</head>
+<body>
+<rd-page theme="graphite-modern" mode="auto" width="standard" toc="auto">
+
+  <rd-hero
+    eyebrow="Architecture input"
+    title="User feature contract"
+    lede="The user-facing capabilities Kinema should preserve or improve before we redesign subsystem boundaries."
+    meta="Feature inventory · Parity contract · Refactoring guardrails">
+  </rd-hero>
+
+  <rd-callout type="tldr">
+    <p>
+      This document defines the <strong>feature contract</strong> for the architecture work:
+      we can change internal implementation and even reshape features, but the user must keep
+      the same convenience or get a better one. The core promise is: discover a title, find a
+      reliable source, play it quickly, resume later, manage watched/library state, and use
+      debrid/torrent/subtitle/player integrations without thinking about the transport details.
+    </p>
+  </rd-callout>
+
+  <rd-section title="Product promise">
+    <p>
+      Kinema is not only a torrent player and not only a media catalog. It is a native desktop
+      watching workflow: <em>find → choose source → play/download → continue → track progress</em>.
+      The refactor should protect this workflow first.
+    </p>
+
+    <rd-diagram lang="mermaid" caption="Primary user journey">
+flowchart LR
+  Discover["Discover / Search / Browse"] --> Detail["Movie or series detail"]
+  Detail --> Streams["Find streams<br/>Torrentio / Peerflix"]
+  Streams --> Choose["Choose source<br/>quality / provider / file"]
+  Choose --> Play["Play now<br/>embedded or external"]
+  Choose --> Save["Save offline / cache"]
+  Play --> Track["Progress, watched, MPRIS"]
+  Save --> Downloads["Downloads page"]
+  Track --> Continue["Continue Watching / Up Next"]
+  Continue --> Resume["One-click resume"]
+  Resume --> Play
+  Play --> Subtitles["Search / attach subtitles"]
+  Play --> Next["Series auto-next"]
+  Next --> Play
+    </rd-diagram>
+  </rd-section>
+
+  <rd-section title="Feature groups">
+    <rd-cols n="3">
+      <rd-card title="A. Discover & decide" accent="info">
+        <ul>
+          <li>Discover rails: trending, popular, top-rated, now-playing style groups.</li>
+          <li>Browse by media kind, genre, and sort.</li>
+          <li>Search by title and IMDB id.</li>
+          <li>Movie/series detail pages with metadata, artwork, episodes, and similar titles.</li>
+          <li>Remote artwork caching through the Kinema image provider.</li>
+        </ul>
+      </rd-card>
+
+      <rd-card title="B. Source discovery & selection" accent="info">
+        <ul>
+          <li>Switchable Stremio-compatible indexers: Torrentio and Peerflix.</li>
+          <li>Stream rows with quality, resolution, codec, HDR, audio, language, release group, size, seeders, provider chips.</li>
+          <li>Client-side stream sorting and filtering.</li>
+          <li>Blocklists for resolutions, categories, and keywords.</li>
+          <li>Pack detection for series, including season-pack hints.</li>
+          <li>Actions: play, play with backend, download, download with backend, copy magnet/direct URL/release name.</li>
+        </ul>
+      </rd-card>
+
+      <rd-card title="C. Playback" accent="success">
+        <ul>
+          <li>Embedded mpv player with QtQuick chrome.</li>
+          <li>External mpv, VLC, or custom command hand-off.</li>
+          <li>Resume prompt after configured threshold.</li>
+          <li>Seek, pause/play, volume, speed, fullscreen, previous/next.</li>
+          <li>Audio/subtitle/chapter track selection.</li>
+          <li>Hardware decoding, preferred audio/subtitle languages, remembered volume.</li>
+          <li>Skip intro/chapter prompts.</li>
+        </ul>
+      </rd-card>
+
+      <rd-card title="D. Streaming & downloads" accent="warn">
+        <ul>
+          <li>Torrent playback through libtorrent and local HTTP Range serving.</li>
+          <li>Real-Debrid and AllDebrid playback/download through resolved hoster URLs.</li>
+          <li>Cached-only debrid workflows where configured.</li>
+          <li>On-demand playback cache and full pinned downloads.</li>
+          <li>Downloads page with row status, progress, rate, peers/seeds/ETA where available.</li>
+          <li>Pause, resume, retry, cancel, remove, pin/unpin.</li>
+          <li>Cache budget, startup buffer, readahead, tail buffer, rate caps, idle-stop tuning.</li>
+        </ul>
+      </rd-card>
+
+      <rd-card title="E. Progress, library & watched state" accent="success">
+        <ul>
+          <li>Continue Watching with exact timestamp resume.</li>
+          <li>Per-movie and per-episode history rows.</li>
+          <li>Automatic watched detection at EOF / completion thresholds / credits chapter.</li>
+          <li>Manual watched/unwatched overrides.</li>
+          <li>Library for movies and series.</li>
+          <li>Per-episode watched tracking and next-episode status.</li>
+          <li>Up Next: ready to watch, airing soon, recently added.</li>
+          <li>One-click resume of the same release when still available.</li>
+        </ul>
+      </rd-card>
+
+      <rd-card title="F. Subtitles & desktop integration" accent="info">
+        <ul>
+          <li>OpenSubtitles search with language and filter controls.</li>
+          <li>Subtitle cache with LRU cleanup and cache badges.</li>
+          <li>Download quota visibility.</li>
+          <li>Attach downloaded or local subtitle files to embedded mpv.</li>
+          <li>Best-effort moviehash matching for active streams.</li>
+          <li>MPRIS media-key / desktop control.</li>
+          <li>System tray and close-to-tray behavior.</li>
+          <li>Plasma/Kirigami native theming and keyboard-friendly UI.</li>
+        </ul>
+      </rd-card>
+    </rd-cols>
+  </rd-section>
+
+  <rd-section title="Capability contract">
+    <p>
+      This table states what the architecture must preserve. Internals can change freely as long
+      as the user outcome still holds.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th>User expectation</th>
+          <th>Refactor contract</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Find a title</td>
+          <td>Search, discover, browse, and open rich detail pages quickly.</td>
+          <td>Metadata clients and UI models may be reorganized, but page behavior and cached artwork convenience remain.</td>
+        </tr>
+        <tr>
+          <td>Find a playable stream</td>
+          <td>See enough stream metadata to choose confidently.</td>
+          <td>Keep stream chips, sorting, filters, backend override actions, and pack hints; parser internals can be replaced.</td>
+        </tr>
+        <tr>
+          <td>Play without transport knowledge</td>
+          <td>Click Play and get video, whether the source is torrent, Real-Debrid, AllDebrid, direct URL, or local cache.</td>
+          <td>Architecture should hide transport behind a media-source/session abstraction.</td>
+        </tr>
+        <tr>
+          <td>Resume later</td>
+          <td>Resume the same movie/episode near the last position, preferably same release.</td>
+          <td>History and stream-reference persistence must remain stable; resume can be improved to fall back more gracefully.</td>
+        </tr>
+        <tr>
+          <td>Download for later</td>
+          <td>Promote a stream to a persistent download and manage it in Downloads.</td>
+          <td>OnDemand→Full upgrade, pinned storage, progress, pause/resume/retry/cancel/remove remain.</td>
+        </tr>
+        <tr>
+          <td>Watch series conveniently</td>
+          <td>Move through episodes and auto-next when a pack contains the next file.</td>
+          <td>Episode adjacency must work for torrent and debrid-backed sessions through one file-catalog abstraction.</td>
+        </tr>
+        <tr>
+          <td>Track watched state</td>
+          <td>Automatic watched state is usually right; manual overrides always win.</td>
+          <td>Keep threshold/credits logic and override precedence; move policy to focused code.</td>
+        </tr>
+        <tr>
+          <td>Use subtitles</td>
+          <td>Search, cache, attach, and see which subtitles are active/cached.</td>
+          <td>Subtitle controller can be decoupled from playback internals, but active-stream moviehash and attach flow remain.</td>
+        </tr>
+        <tr>
+          <td>Control from desktop</td>
+          <td>Media keys, MPRIS, tray, close-to-tray behave like a native app.</td>
+          <td>Desktop integration remains an adapter around playback/session state, not business logic.</td>
+        </tr>
+        <tr>
+          <td>Configure advanced behavior</td>
+          <td>Power users can tune indexers, debrid, filters, cache, player, subtitles.</td>
+          <td>Settings surface may be simplified, but not by removing essential control without a better default or automation.</td>
+        </tr>
+      </tbody>
+    </table>
+  </rd-section>
+
+  <rd-section title="Must retain vs can reshape">
+    <rd-cols n="2">
+      <rd-card title="Must retain exactly or near-exactly" accent="success">
+        <ul>
+          <li>Embedded playback and external-player hand-off.</li>
+          <li>Real-Debrid, AllDebrid, and torrent source support.</li>
+          <li>Local HTTP Range streaming compatibility with mpv.</li>
+          <li>Continue Watching and watched-state semantics.</li>
+          <li>Library and per-episode watched tracking.</li>
+          <li>Downloads page and persistent pinned downloads.</li>
+          <li>Stream filtering, sorting, and readable stream metadata chips.</li>
+          <li>OpenSubtitles search/download/cache/attach.</li>
+          <li>MPRIS and tray behavior.</li>
+        </ul>
+      </rd-card>
+
+      <rd-card title="Can reshape if convenience is equal or better" accent="warn">
+        <ul>
+          <li>Backend choice UI: may become automatic with an “advanced override” instead of always prominent options.</li>
+          <li>Separate torrent/debrid settings: may become one “streaming cache” model with backend-specific advanced sections.</li>
+          <li>Resume fallback: may improve from “same release or detail page” to “same release → same quality → best available”.</li>
+          <li>Series auto-next: may become an explicit queue/session model instead of controller-side inferred state.</li>
+          <li>Stream row actions: may be grouped to reduce menu complexity while preserving all actions.</li>
+          <li>Download vs cache language: may be clarified as “Save offline” and “Playback cache”.</li>
+          <li>Indexer-specific settings: may be hidden until an indexer is selected.</li>
+        </ul>
+      </rd-card>
+    </rd-cols>
+  </rd-section>
+
+  <rd-section title="User journeys to design around">
+    <rd-steps>
+      <rd-step title="New movie, play now">
+        User discovers/searches a movie, opens details, sees stream choices, clicks a reliable source,
+        gets embedded playback quickly, optionally picks subtitles, and history starts recording.
+      </rd-step>
+      <rd-step title="Continue an unfinished episode">
+        User opens Continue Watching or Up Next, clicks resume, Kinema tries the same release, resumes
+        near the previous timestamp, and keeps watched state consistent.
+      </rd-step>
+      <rd-step title="Save for offline viewing">
+        User chooses a source and saves it. The item appears in Downloads, can be paused/resumed/retried,
+        survives restart, and can later be played without repeating source selection.
+      </rd-step>
+      <rd-step title="Watch a season pack">
+        User plays an episode from a pack. Kinema knows the current file, patches missing size metadata,
+        detects whether next/previous episodes exist in the pack, and can auto-advance.
+      </rd-step>
+      <rd-step title="Power-user source control">
+        User configures debrid/indexer/filter/player settings, forces a backend for one stream when needed,
+        and copies magnet/direct/release info from stream context menus.
+      </rd-step>
+      <rd-step title="Desktop-native long session">
+        User controls playback via media keys/MPRIS, closes to tray, returns later, and still sees accurate
+        playback state, progress, and downloads.
+      </rd-step>
+    </rd-steps>
+  </rd-section>
+
+  <rd-section title="Feature dependencies">
+    <p>
+      A useful way to think about the architecture: user features should depend on capabilities,
+      not on concrete subsystems. For example, auto-next needs a <em>file catalog</em>, not
+      specifically libtorrent.
+    </p>
+
+    <rd-diagram lang="mermaid" caption="Feature-to-capability map">
+flowchart TB
+  subgraph Features["User features"]
+    Play["Play now"]
+    Save["Save offline"]
+    Resume["Continue Watching"]
+    AutoNext["Series auto-next"]
+    Subs["Subtitles"]
+    Mpris["MPRIS / tray"]
+    Filters["Stream filters"]
+  end
+
+  subgraph Capabilities["Needed capabilities"]
+    SearchCap["Stream discovery"]
+    SourceCap["Playable byte source"]
+    GatewayCap["Range-stream URL"]
+    PlayerCap["Player control & events"]
+    HistoryCap["Playback history"]
+    FileCap["Session file catalog"]
+    StoreCap["Download persistence"]
+    DesktopCap["Desktop integration state"]
+  end
+
+  Play --> SearchCap
+  Play --> SourceCap
+  Play --> GatewayCap
+  Play --> PlayerCap
+  Save --> SourceCap
+  Save --> StoreCap
+  Resume --> HistoryCap
+  Resume --> SearchCap
+  Resume --> Play
+  AutoNext --> FileCap
+  AutoNext --> Play
+  Subs --> PlayerCap
+  Subs --> HistoryCap
+  Mpris --> PlayerCap
+  Mpris --> DesktopCap
+  Filters --> SearchCap
+    </rd-diagram>
+  </rd-section>
+
+  <rd-section title="Architectural implications">
+    <rd-kv layout="stacked">
+      <rd-row key="Playback should be a use case">
+        <code>Play stream</code> is the most important workflow. It should coordinate resume,
+        transfer/session opening, player launch, and progress tracking through ports. UI actions
+        should not know torrent/debrid/local-server details.
+      </rd-row>
+      <rd-row key="Downloads should be transfer sessions">
+        Play cache and saved downloads are two policies over the same transfer/session model.
+        The user sees “play now” and “save offline”; the architecture sees OnDemand vs Full and
+        Ephemeral vs Pinned.
+      </rd-row>
+      <rd-row key="Torrent/debrid should be replaceable sources">
+        Libtorrent, Real-Debrid, AllDebrid, and future sources should all produce a byte-range
+        source plus optional file catalog. The player and history code should not care which one.
+      </rd-row>
+      <rd-row key="Progress should consume events">
+        Progress tracking should listen to player/session events and write history. It should not
+        own resume orchestration or call stream actions directly.
+      </rd-row>
+      <rd-row key="Series navigation needs explicit session state">
+        Current episode, stream ref, file index, file catalog, previous/next targets, and user-close
+        behavior should be represented as one playback session model rather than inferred across
+        multiple controllers.
+      </rd-row>
+    </rd-kv>
+  </rd-section>
+
+  <rd-section title="Questions before architecture brainstorming">
+    <rd-callout type="note">
+      <p>
+        These are product questions, not implementation questions. Answering them lets us decide
+        where simplification is safe.
+      </p>
+    </rd-callout>
+    <ol>
+      <li>Should backend override stay visible on every stream row, or move into an advanced menu?</li>
+      <li>When the exact saved release is unavailable, should resume automatically choose a similar stream?</li>
+      <li>Should “Downloads” and “Playback cache” remain visually separate concepts, or should the UI say “Saved offline” vs “Temporary cache”?</li>
+      <li>Should season-pack auto-next be automatic by default, or should users explicitly enable it per session?</li>
+      <li>Should torrent-only users and debrid users see different simplified settings pages?</li>
+      <li>Should external-player playback be treated as first-class for progress tracking, or best-effort as it is today?</li>
+    </ol>
+  </rd-section>
+
+  <rd-section title="Next step">
+    <p>
+      The architecture proposal should be rewritten as a response to this feature contract:
+      each proposed boundary must explain which user capabilities it protects, which features it
+      simplifies, and how we prove parity through tests.
+    </p>
+  </rd-section>
+
+</rd-page>
+</body>
+</html>

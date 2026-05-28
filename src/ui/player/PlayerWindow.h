@@ -33,10 +33,12 @@ class PlayerViewModel;
  * in one Qt Quick scene graph backed by a single Wayland surface.
  *
  * Public slots / signals are preserved verbatim from the previous
- * QWidget-based implementation so `PlaybackController`,
- * `TrayController`, `HistoryController`, and `MainWindow` are not
- * touched. Internally, the slots forward to `PlayerViewModel`
- * (chrome state) and `MpvVideoItem` (transport).
+ * QWidget-based implementation. The window is driven by
+ * `playback::adapters::EmbeddedMpvPlayerAdapter`, which owns the
+ * connection to the `PlayerPort` transport surface, the resume /
+ * skip-chapter chrome, and the playback event stream. Internally,
+ * the slots forward to `PlayerViewModel` (chrome state) and
+ * `MpvVideoItem` (transport).
  *
  * Geometry persistence and remembered-volume behaviour: applied on
  * first show, saved on every hide. The window and libmpv instance
@@ -75,7 +77,7 @@ public:
     virtual void setAudioTrack(int id);
     virtual void setSubtitleTrack(int id);
     /// Programmatic playback-speed setter, used by
-    /// `PlaybackController` when the QML speed picker emits.
+    /// `EmbeddedMpvPlayerAdapter` when the QML speed picker emits.
     virtual void setSpeed(double factor);
     virtual void showResumePrompt(qint64 seconds);
     virtual void hideResumePrompt();
@@ -102,7 +104,7 @@ public:
     /// no file has loaded yet.
     const core::tracks::TrackList& trackList() const;
     /// Most recent log lines from libmpv. Used by
-    /// `PlaybackController` to classify end-file errors.
+    /// `EmbeddedMpvPlayerAdapter` to classify end-file errors.
     QStringList recentLogLines() const;
 
 Q_SIGNALS:
@@ -129,8 +131,8 @@ Q_SIGNALS:
     void userClosedWindow();
 
     // User-action signals re-emitted from PlayerViewModel.
-    // PlaybackController consumes these eight to drive the resume,
-    // skip-chapter, next-episode, and picker flows.
+    // EmbeddedMpvPlayerAdapter consumes these eight to drive the
+    // resume, skip-chapter, next-episode, and picker flows.
     void resumeAccepted();
     void resumeDeclined();
     void skipRequested();

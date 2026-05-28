@@ -13,12 +13,8 @@ namespace kinema::controllers {
 class DownloadController;
 }
 
-namespace kinema::download {
-class DownloadManager;
-}
-
-namespace kinema::services {
-class StreamActions;
+namespace kinema::playback::session {
+class PlaybackSessionManager;
 }
 
 namespace kinema::ui::qml {
@@ -59,8 +55,7 @@ public:
     Q_ENUM(Filter)
 
     DownloadsViewModel(controllers::DownloadController& controller,
-        download::DownloadManager& manager,
-        services::StreamActions* streamActions,
+        playback::session::PlaybackSessionManager* playback,
         QObject* parent = nullptr);
 
     DownloadsListModel* items() const { return m_items; }
@@ -94,7 +89,7 @@ public Q_SLOTS:
 
     /// Play the cached asset directly. Synthesises an `domain::Stream` +
     /// `PlaybackContext` from the persisted `DownloadItem` and hands
-    /// off to `services::StreamActions::play`. The download manager's
+    /// off to `PlaybackSessionManager::play`. The transfer use-case's
     /// `prepareForPlayback` short-circuits to the local cache file
     /// when the asset is already complete, so this is a no-network
     /// path for finished downloads.
@@ -132,8 +127,7 @@ private:
     void recomputeAggregatesFromModel();
 
     controllers::DownloadController& m_controller;
-    download::DownloadManager& m_manager;
-    services::StreamActions* m_streamActions {};
+    playback::session::PlaybackSessionManager* m_playback {};
     DownloadsListModel* m_items {};
     int m_activeCount = 0;
     int m_pausedCount = 0;

@@ -7,9 +7,8 @@
 #include "domain/PlaybackContext.h"
 #include "controllers/DownloadController.h"
 #include "core/io/HttpErrorPresenter.h"
-#include "download/DownloadManager.h"
 #include "kinema_log_ui.h"
-#include "services/StreamActions.h"
+#include "playback/session/PlaybackSessionManager.h"
 
 #include <KFormat>
 #include <KIO/OpenUrlJob>
@@ -42,13 +41,11 @@ bool isActiveState(domain::DownloadState s)
 
 DownloadsViewModel::DownloadsViewModel(
     controllers::DownloadController& controller,
-    download::DownloadManager& manager,
-    services::StreamActions* streamActions,
+    playback::session::PlaybackSessionManager* playback,
     QObject* parent)
     : QObject(parent)
     , m_controller(controller)
-    , m_manager(manager)
-    , m_streamActions(streamActions)
+    , m_playback(playback)
     , m_items(new DownloadsListModel(this))
 {
     // Structural changes — list shape may have changed. Full
@@ -69,11 +66,11 @@ void DownloadsViewModel::refresh()
 
     // Pull live stats once per refresh and join them into the
     // model's transient map. This keeps DownloadsListModel free of
-    // any DownloadManager dependency while still letting QML bind
+    // any transfer-subsystem dependency while still letting QML bind
     // to per-row rate / peers / ETA roles.
     QHash<QString, DownloadsListModel::LiveRow> live;
     for (const auto& it : rows) {
-        if (auto stats = m_manager.liveStatsFor(it.assetId)) {
+        if (auto stats = m_controller.liveStatsFor(it.assetId)) {
             DownloadsListModel::LiveRow lr;
             lr.ratePayloadBps = stats->ratePayloadBps;
             lr.peers = stats->peers;
@@ -155,7 +152,7 @@ void DownloadsViewModel::flushDirtyItems()
         // Push live stats first so the row's persistent update
         // emission lands with the freshest rate / peers visible.
         DownloadsListModel::LiveRow lr;
-        if (const auto stats = m_manager.liveStatsFor(assetId)) {
+        if (const auto stats = m_controller.liveStatsFor(assetId)) {
             lr.ratePayloadBps = stats->ratePayloadBps;
             lr.peers = stats->peers;
             lr.seeds = stats->seeds;
@@ -309,9 +306,9 @@ void DownloadsViewModel::resumeDownload(const QString& assetId)
 
 void DownloadsViewModel::playDownload(const QString& assetId)
 {
-    if (!m_streamActions) {
+    if (!m_playback) {
         qCWarning(KINEMA_UI)
-            << "playDownload: StreamActions not wired";
+            << "playDownload: PlaybackSessionManager not wired";
         return;
     }
     try {
@@ -326,9 +323,8 @@ void DownloadsViewModel::playDownload(const QString& assetId)
             return;
         }
 
-        // Synthesise an domain::Stream from the persisted DownloadItem
-        // so the existing StreamActions::play -> DownloadManager
-        // pipeline can short-circuit to the local cached file.
+        // Synthesise a domain::Stream from the persisted DownloadItem
+        // so PlaybackSessionManager can reopen/reuse the local transfer.
         domain::Stream stream;
         stream.qualityLabel = it->qualityLabel;
         stream.resolution = it->resolution;
@@ -348,7 +344,7 @@ void DownloadsViewModel::playDownload(const QString& assetId)
         ctx.episodeTitle = it->episodeTitle;
         ctx.poster = it->poster;
 
-        m_streamActions->play(stream, ctx);
+        m_playback->play(stream, ctx);
     } catch (const std::exception& e) {
         qCWarning(KINEMA_UI)
             << "playDownload failed:"

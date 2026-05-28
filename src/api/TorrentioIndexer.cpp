@@ -75,7 +75,7 @@ QCoro::Task<QList<Stream>> TorrentioIndexer::streams(MediaKind kind,
     // pending rows come back with only a `url` field pointing at
     // Torrentio's own `/resolve/<provider>/<token>/<hash>/<file>/<idx>/<file>`
     // endpoint and no structured `infoHash`. Recover the hash + file
-    // index from that URL so `StreamActions` routes the row through
+    // index from that URL so playback routes the row through
     // the unified downloader (which then uses Kinema's local debrid
     // resolver), and clear `directUrl` so the embedded credential
     // never escapes the process via clipboard / URL-open actions.

@@ -163,7 +163,7 @@ Q_SIGNALS:
     void showMovieDetailRequested();
     void showSeriesDetailRequested();
     void showStreamsRequested(QObject* detailVm);
-    /// Fan-in for status messages coming out of `StreamActions`,
+    /// Fan-in for status messages coming out of playback/stream utility services,
     /// `PlayerLauncher`, `SubtitleController`, and view-models.
     /// `ApplicationShell.qml` listens and surfaces each as a
     /// `Kirigami.PassiveNotification`.

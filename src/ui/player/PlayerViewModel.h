@@ -27,8 +27,8 @@ class SubtitleTracksModel;
  * `playerVm` context property. Owns the audio / subtitle / chapter
  * list models that QML pickers bind against, plus the prompt
  * visibility flags that the C++ side toggles in response to
- * `PlaybackController` decisions (resume prompt, next-episode
- * banner, skip pill, cheat sheet).
+ * `EmbeddedMpvPlayerAdapter` decisions (resume prompt,
+ * next-episode banner, skip pill, cheat sheet).
  *
  * Stateful but inert: never calls into mpv directly. The only mpv
  * surface it touches is the `MpvVideoItem` it observes for track
@@ -178,9 +178,10 @@ public Q_SLOTS:
     Q_INVOKABLE void attachExternalSubtitle(const QString& path,
         const QString& title, const QString& lang, bool select);
 
-    // Slots invoked by QML (button clicks, picker selections). Each
-    // emits a matching signal `PlayerWindow` re-emits on its own
-    // surface so `PlaybackController` only sees the window.
+    // Slots invoked by QML (button clicks, picker selections).
+    // Each emits a matching signal `PlayerWindow` re-emits on its
+    // own surface so `EmbeddedMpvPlayerAdapter` only sees the
+    // window.
     void requestResumeAccept();
     void requestResumeDecline();
     void requestSkip();
@@ -213,8 +214,8 @@ Q_SIGNALS:
     void skipEndSecChanged();
 
     // User-action signals re-emitted by `PlayerWindow`. The eight
-    // signals `PlaybackController` consumes drive resume, skip,
-    // next-episode, and picker flows.
+    // signals `EmbeddedMpvPlayerAdapter` consumes drive resume,
+    // skip, next-episode, and picker flows.
     void resumeAccepted();
     void resumeDeclined();
     void skipRequested();

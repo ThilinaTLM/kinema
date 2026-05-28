@@ -14,6 +14,8 @@
 #include "kinema_log_ui.h"
 #include <KLocalizedString>
 
+#include <QPointer>
+
 namespace kinema::ui::qml::settings {
 
 // ============================== Debrid: Real-Debrid section ==============
@@ -84,20 +86,32 @@ void RealDebridSectionViewModel::setBusy(bool on)
 
 QCoro::Task<void> RealDebridSectionViewModel::loadTask()
 {
+    QPointer<RealDebridSectionViewModel> self(this);
     setBusy(true);
     try {
         const auto existing = co_await m_tokens->read(
             QString::fromLatin1(core::TokenStore::kRealDebridKey));
+        if (!self) {
+            co_return;
+        }
         if (!existing.isEmpty()) {
             setToken(existing);
         }
     } catch (const core::TokenStoreError& e) {
+        if (!self) {
+            co_return;
+        }
         setStatus(e.message(), kStatusError);
     } catch (const std::exception& e) {
+        if (!self) {
+            co_return;
+        }
         setStatus(core::describeError(e, "rd settings/load"),
             kStatusError);
     }
-    setBusy(false);
+    if (self) {
+        setBusy(false);
+    }
 }
 
 QCoro::Task<void> RealDebridSectionViewModel::testTask()

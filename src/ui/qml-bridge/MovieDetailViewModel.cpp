@@ -12,6 +12,7 @@
 #include "config/TorrentioSettings.h"
 #include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
+#include "controllers/StreamUtilityController.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
 #include "core/util/DateFormat.h"
@@ -19,7 +20,7 @@
 #include "core/io/HttpErrorPresenter.h"
 #include "core/util/StreamFilter.h"
 #include "kinema_log_ui.h"
-#include "services/StreamActions.h"
+#include "playback/session/PlaybackSessionManager.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/StreamSorting.h"
 #include "ui/qml-bridge/TitleActions.h"
@@ -35,13 +36,14 @@ using SortMode = StreamsListModel::SortMode;
 MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     api::IndexerSelector* indexers,
     api::TmdbClient* tmdb,
-    services::StreamActions* actions,
+    playback::session::PlaybackSessionManager* playback,
+    controllers::StreamUtilityController* streamUtility,
     controllers::TokenController* tokens,
     config::AppSettings& settings,
     const QString& rdTokenRef,
     const QString& adApiKeyRef,
     QObject* parent)
-    : MovieDetailViewModel(cinemeta, indexers, tmdb, actions,
+    : MovieDetailViewModel(cinemeta, indexers, tmdb, playback, streamUtility,
           /*library=*/nullptr, /*watched=*/nullptr,
           tokens, settings, rdTokenRef, adApiKeyRef, parent)
 {
@@ -50,7 +52,8 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
 MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     api::IndexerSelector* indexers,
     api::TmdbClient* tmdb,
-    services::StreamActions* actions,
+    playback::session::PlaybackSessionManager* playback,
+    controllers::StreamUtilityController* streamUtility,
     controllers::LibraryController* library,
     controllers::WatchedController* watched,
     controllers::TokenController* tokens,
@@ -62,7 +65,8 @@ MovieDetailViewModel::MovieDetailViewModel(api::CinemetaClient* cinemeta,
     , m_cinemeta(cinemeta)
     , m_indexers(indexers)
     , m_tmdb(tmdb)
-    , m_actions(actions)
+    , m_playback(playback)
+    , m_streamUtility(streamUtility)
     , m_library(library)
     , m_watched(watched)
     , m_tokens(tokens)
@@ -674,10 +678,10 @@ void MovieDetailViewModel::playNow(int row)
             4000);
         return;
     }
-    if (!m_actions) {
+    if (!m_playback) {
         return;
     }
-    m_actions->play(*s, currentContext());
+    m_playback->play(*s, currentContext());
 }
 
 void MovieDetailViewModel::playWithBackend(int row, int backendKind)
@@ -693,10 +697,10 @@ void MovieDetailViewModel::playWithBackend(int row, int backendKind)
             4000);
         return;
     }
-    if (!m_actions) {
+    if (!m_playback) {
         return;
     }
-    m_actions->playWithBackend(*s, currentContext(),
+    m_playback->playWithBackend(*s, currentContext(),
         static_cast<domain::DownloadBackendKind>(backendKind));
 }
 
@@ -740,37 +744,37 @@ void MovieDetailViewModel::setDownloadController(
 template <typename Method>
 void MovieDetailViewModel::dispatchStreamAction(int row, Method method)
 {
-    if (!m_actions) {
+    if (!m_streamUtility) {
         return;
     }
     if (const auto* s = m_streams->at(row)) {
-        (m_actions->*method)(*s);
+        (m_streamUtility->*method)(*s);
     }
 }
 
 void MovieDetailViewModel::copyMagnet(int row)
 {
-    dispatchStreamAction(row, &services::StreamActions::copyMagnet);
+    dispatchStreamAction(row, &controllers::StreamUtilityController::copyMagnet);
 }
 
 void MovieDetailViewModel::openMagnet(int row)
 {
-    dispatchStreamAction(row, &services::StreamActions::openMagnet);
+    dispatchStreamAction(row, &controllers::StreamUtilityController::openMagnet);
 }
 
 void MovieDetailViewModel::copyDirectUrl(int row)
 {
-    dispatchStreamAction(row, &services::StreamActions::copyDirectUrl);
+    dispatchStreamAction(row, &controllers::StreamUtilityController::copyDirectUrl);
 }
 
 void MovieDetailViewModel::openDirectUrl(int row)
 {
-    dispatchStreamAction(row, &services::StreamActions::openDirectUrl);
+    dispatchStreamAction(row, &controllers::StreamUtilityController::openDirectUrl);
 }
 
 void MovieDetailViewModel::copyReleaseName(int row)
 {
-    dispatchStreamAction(row, &services::StreamActions::copyReleaseName);
+    dispatchStreamAction(row, &controllers::StreamUtilityController::copyReleaseName);
 }
 
 void MovieDetailViewModel::requestSubtitles()

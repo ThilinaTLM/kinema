@@ -94,9 +94,10 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     // `QWindow`), so we can wire it directly as the transient
     // parent — no `windowHandle()` indirection like the old
     // QWidget-owned MainWindow needed. The QObject parent is
-    // owned by `MainController` (passed via
-    // `PlaybackController::setPlayerWindow`); we deliberately do
-    // not also set it as a QObject child of the QML window since
+    // owned by `ShellViewModel` (the window is created lazily and
+    // handed to `EmbeddedMpvPlayerAdapter::setPlayerWindow`); we
+    // deliberately do not also set it as a QObject child of the
+    // QML window since
     // its destruction order is engine-driven.
     if (transientFor) {
         setTransientParent(transientFor);
@@ -117,7 +118,7 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
         QStringLiteral("playerVm"), m_viewModel);
 
     // Re-emit the action signals on our own surface so
-    // PlaybackController only listens to the window.
+    // `EmbeddedMpvPlayerAdapter` only listens to the window.
     connect(m_viewModel, &PlayerViewModel::resumeAccepted,
         this, &PlayerWindow::resumeAccepted);
     connect(m_viewModel, &PlayerViewModel::resumeDeclined,
@@ -188,8 +189,8 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
             m_viewModel->attach(video);
 
             // Forward MpvVideoItem signals to PlayerWindow's public
-            // surface. PlaybackController and HistoryController only
-            // see the window.
+            // surface. `EmbeddedMpvPlayerAdapter` only sees the
+            // window.
             connect(video, &MpvVideoItem::fileLoaded,
                 this, &PlayerWindow::fileLoaded);
             connect(video, &MpvVideoItem::mpvError,

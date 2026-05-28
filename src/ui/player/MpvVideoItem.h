@@ -162,7 +162,8 @@ public:
     VideoStats currentStats() const noexcept { return m_stats; }
 
     /// Most recent log lines from mpv's `MPV_LOG_LEVEL_INFO` stream.
-    /// Used by `PlaybackController` to classify end-file errors.
+    /// Used by `playback::adapters::EmbeddedMpvPlayerAdapter` to
+    /// classify end-file errors.
     QStringList recentLogLines() const;
 
 Q_SIGNALS:

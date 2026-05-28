@@ -14,6 +14,8 @@
 #include "kinema_log_ui.h"
 #include <KLocalizedString>
 
+#include <QPointer>
+
 namespace kinema::ui::qml::settings {
 
 // ============================== Debrid: AllDebrid section ===============
@@ -84,20 +86,32 @@ void AllDebridSectionViewModel::setBusy(bool on)
 
 QCoro::Task<void> AllDebridSectionViewModel::loadTask()
 {
+    QPointer<AllDebridSectionViewModel> self(this);
     setBusy(true);
     try {
         const auto existing = co_await m_tokens->read(
             QString::fromLatin1(core::TokenStore::kAllDebridKey));
+        if (!self) {
+            co_return;
+        }
         if (!existing.isEmpty()) {
             setApiKey(existing);
         }
     } catch (const core::TokenStoreError& e) {
+        if (!self) {
+            co_return;
+        }
         setStatus(e.message(), kStatusError);
     } catch (const std::exception& e) {
+        if (!self) {
+            co_return;
+        }
         setStatus(core::describeError(e, "ad settings/load"),
             kStatusError);
     }
-    setBusy(false);
+    if (self) {
+        setBusy(false);
+    }
 }
 
 QCoro::Task<void> AllDebridSectionViewModel::testTask()

@@ -7,12 +7,14 @@
 #include "config/AppSettings.h"
 #include "config/AppearanceSettings.h"
 #include "controllers/DownloadController.h"
-#include "controllers/HistoryController.h"
+#include "playback/resume/ResumeUseCase.h"
+#include "playback/session/PlaybackSessionManager.h"
 #include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
-#include "controllers/MprisController.h"
-#include "controllers/PlaybackController.h"
-#include "controllers/SeriesPlaybackSessionController.h"
+#include "playback/desktop/MprisPlaybackProjection.h"
+#include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
+#include "playback/events/PlaybackEventStream.h"
+#include "playback/series/SeriesSessionService.h"
 #endif
 #include "controllers/SubtitleController.h"
 #include "controllers/TokenController.h"
@@ -22,8 +24,11 @@
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
 #include "kinema_log_app.h"
-#include "services/StreamActions.h"
-#include "torrent/TorrentStreamingService.h"
+#ifdef KINEMA_HAVE_LIBMPV
+#include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
+#endif
+#include "controllers/StreamUtilityController.h"
+#include "playback/torrent/LibtorrentClient.h"
 #include "ui/qml-bridge/BrowseViewModel.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
@@ -139,8 +144,8 @@ bool ShellViewModel::handleWindowCloseRequested()
 void ShellViewModel::requestQuit()
 {
     m_reallyQuit = true;
-    if (auto* ts = m_services.torrentStreaming()) {
-        ts->stopAll();
+    if (auto* lt = m_services.libtorrentClient()) {
+        lt->stopAll();
     }
 #ifdef KINEMA_HAVE_LIBMPV
     // Take the player down explicitly so its closeEvent persists
@@ -354,7 +359,7 @@ void ShellViewModel::attachWindow(QQuickWindow* window)
 void ShellViewModel::wireNavigationRouting()
 {
     auto* continueWatchingVm = m_services.continueWatchingVm();
-    auto* historyCtrl = m_services.historyController();
+    auto* resumeUseCase = m_services.resumeUseCase();
     auto* libraryVm = m_services.libraryVm();
     auto* discoverVm = m_services.discoverVm();
     auto* searchVm = m_services.searchVm();
@@ -370,11 +375,11 @@ void ShellViewModel::wireNavigationRouting()
     // push. Series entries thread the saved season + episode through
     // the detail VM so both routes land on the remembered episode.
     connect(continueWatchingVm,
-        &ContinueWatchingViewModel::resumeRequested, historyCtrl,
-        &controllers::HistoryController::resumeFromHistory);
+        &ContinueWatchingViewModel::resumeRequested, resumeUseCase,
+        &playback::resume::ResumeUseCase::resume);
     connect(continueWatchingVm,
-        &ContinueWatchingViewModel::removeRequested, historyCtrl,
-        &controllers::HistoryController::removeEntry);
+        &ContinueWatchingViewModel::removeRequested, resumeUseCase,
+        &playback::resume::ResumeUseCase::removeEntry);
     const auto openHistoryDetail = [this](const domain::HistoryEntry& entry) {
         if (entry.key.kind == domain::MediaKind::Movie) {
             openMovieDetail(entry.key.imdbId, entry.title);
@@ -419,12 +424,12 @@ void ShellViewModel::wireNavigationRouting()
     // Resume-from-history fallback: the saved release is gone, so
     // open the matching detail page so the user can pick another
     // stream.
-    connect(historyCtrl,
-        &controllers::HistoryController::resumeFallbackRequested,
+    connect(resumeUseCase,
+        &playback::resume::ResumeUseCase::resumeFallbackRequested,
         this, openHistoryDetail);
 
     connect(libraryVm, &LibraryViewModel::resumeRequested,
-        historyCtrl, &controllers::HistoryController::resumeFromHistory);
+        resumeUseCase, &playback::resume::ResumeUseCase::resume);
     connect(libraryVm, &LibraryViewModel::openMovieRequested,
         this, &ShellViewModel::openMovieDetail);
     connect(libraryVm, &LibraryViewModel::openSeriesRequested,
@@ -571,10 +576,11 @@ void ShellViewModel::wireNavigationRouting()
         [this] { Q_EMIT popPageRequested(); });
 
 #ifdef KINEMA_HAVE_LIBMPV
-    auto* mprisCtrl = m_services.mprisController();
+    auto* mpris = m_services.mprisProjection();
     auto* playerLauncher = m_services.player();
-    if (mprisCtrl) {
-        connect(mprisCtrl, &controllers::MprisController::raiseRequested,
+    if (mpris) {
+        connect(mpris,
+            &playback::desktop::MprisPlaybackProjection::raiseRequested,
             this, [this] {
                 if (m_playerWindow && m_playerWindow->hasEverLoaded()) {
                     m_playerWindow->show();
@@ -588,7 +594,8 @@ void ShellViewModel::wireNavigationRouting()
                     m_window->requestActivate();
                 }
             });
-        connect(mprisCtrl, &controllers::MprisController::quitRequested,
+        connect(mpris,
+            &playback::desktop::MprisPlaybackProjection::quitRequested,
             this, &ShellViewModel::requestQuit);
     }
 
@@ -613,86 +620,101 @@ void ShellViewModel::wireStatusForwarding()
         this, [this](core::player::Kind, const QString& reason) {
             Q_EMIT passiveMessage(reason, 6000);
         });
-    connect(m_services.streamActions(),
-        &services::StreamActions::statusMessage,
+    connect(m_services.streamUtilityController(),
+        &controllers::StreamUtilityController::statusMessage,
         this, &ShellViewModel::passiveMessage);
-    connect(m_services.torrentStreaming(),
-        &torrent::TorrentStreamingService::statusMessage,
+    connect(m_services.playbackSessionManager(),
+        &playback::session::PlaybackSessionManager::statusMessage,
+        this, &ShellViewModel::passiveMessage);
+    connect(m_services.libtorrentClient(),
+        &playback::torrent::LibtorrentClient::statusMessage,
         this, &ShellViewModel::passiveMessage);
     connect(m_services.subtitleController(),
         &controllers::SubtitleController::statusMessage, this,
         &ShellViewModel::passiveMessage);
-    connect(m_services.historyController(),
-        &controllers::HistoryController::statusMessage, this,
+    connect(m_services.resumeUseCase(),
+        &playback::resume::ResumeUseCase::statusMessage, this,
         &ShellViewModel::passiveMessage);
     connect(m_services.libraryController(),
         &controllers::LibraryController::statusMessage, this,
         &ShellViewModel::passiveMessage);
 #ifdef KINEMA_HAVE_LIBMPV
-    auto* playbackCtrl = m_services.playbackController();
-    auto* seriesSessionCtrl = m_services.seriesSessionController();
-    auto* torrentStreaming = m_services.torrentStreaming();
-    // Embedded series-pack navigation + auto-next. The controller
-    // derives prev/next strictly from the active torrent's file list
-    // and requests window close when playback reaches a terminal EOF.
-    if (playbackCtrl && seriesSessionCtrl) {
-        connect(playbackCtrl,
-            &controllers::PlaybackController::activeSessionChanged,
-            seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::refreshFromPlayback);
-        connect(playbackCtrl,
-            &controllers::PlaybackController::endOfFile,
-            seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::onPlayerEndOfFile);
-        connect(playbackCtrl,
-            &controllers::PlaybackController::endOfFile,
+    auto* seriesSession = m_services.seriesSessionService();
+    auto* libtorrentClient = m_services.libtorrentClient();
+    auto* embeddedAdapter = m_services.embeddedPlayerAdapter();
+    // Series adjacency + auto-next live entirely in
+    // SeriesSessionService now (event-stream driven). The shell
+    // only handles cross-subsystem residue: stopping the torrent
+    // engine and detaching the download row when playback ends.
+    // PlaybackEnded carries the typed end reason so we can pick
+    // the right action without parsing mpv's stringly-typed reason.
+    if (auto* eventStream = m_services.playbackEventStream()) {
+        connect(eventStream,
+            &playback::events::PlaybackEventStream::eventPublished,
             this,
-            [this, torrentStreaming, playbackCtrl](const QString&) {
-                if (torrentStreaming && playbackCtrl) {
-                    torrentStreaming->stopForContext(
-                        playbackCtrl->currentContext());
+            [this, libtorrentClient]
+            (const playback::events::PlaybackEvent& e) {
+                if (!std::holds_alternative<
+                        playback::events::PlaybackEnded>(e)) {
+                    return;
                 }
-            });
-        connect(playbackCtrl,
-            &controllers::PlaybackController::userClosedWindow,
-            seriesSessionCtrl,
-            [this, torrentStreaming, seriesSessionCtrl]
-            (const domain::PlaybackContext& ctx) {
-                if (torrentStreaming) {
-                    torrentStreaming->stopForContext(ctx);
+                const auto& ended = std::get<
+                    playback::events::PlaybackEnded>(e);
+                // ReplacedByNewSource is the supersede signal
+                // emitted by `PlaybackSessionManager` itself;
+                // we don't want to stop the engine in that
+                // case — a fresh play is already in flight.
+                if (ended.reason
+                    == playback::PlaybackEndReason::ReplacedByNewSource) {
+                    return;
+                }
+                if (libtorrentClient) {
+                    libtorrentClient->stopForContext(ended.ctx);
                 }
                 // Sharpen `hasPlayerAttached` for the embedded
-                // player: closing the player scene detaches the
-                // download row immediately, so the Downloads page
-                // stops showing `Streaming` / `Downloading +
-                // Playing` chips while no consumer is actually
-                // reading bytes. External-player launches stay
-                // sticky — we don't observe their lifetime — and
-                // the engine's idle-stop timer eventually quiesces
-                // them via `DownloadManager::detachPlayer` from
-                // its own cleanup paths.
-                if (auto* dc = m_services.downloadController()) {
-                    if (const auto row = dc->findForKey(ctx.key)) {
-                        dc->detachPlayer(row->assetId);
+                // player on user-stop paths (user closed window /
+                // MPRIS Stop): the Downloads page stops showing
+                // `Streaming` / `Downloading + Playing` chips
+                // while no consumer is actually reading bytes.
+                // External-player launches stay sticky — we
+                // don't observe their lifetime — and the engine's
+                // idle-stop timer eventually quiesces them via
+                // `TransferUseCase::detachPlayer`. NaturalEof
+                // also detaches: nothing is reading bytes once
+                // mpv has signalled EOF.
+                if (ended.reason
+                        == playback::PlaybackEndReason::UserStop
+                    || ended.reason
+                        == playback::PlaybackEndReason::NaturalEof
+                    || ended.reason
+                        == playback::PlaybackEndReason::LoadTimeout
+                    || ended.reason
+                        == playback::PlaybackEndReason::PlayerError) {
+                    if (auto* dc = m_services.downloadController()) {
+                        if (const auto row
+                                = dc->findForKey(ended.ctx.key)) {
+                            dc->detachPlayer(row->assetId);
+                        }
                     }
                 }
-                seriesSessionCtrl->onPlayerUserClosed(ctx);
             });
-        connect(seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::windowCloseRequested,
+    }
+    if (seriesSession) {
+        connect(seriesSession,
+            &playback::series::SeriesSessionService::windowCloseRequested,
             this, [this] {
                 if (m_playerWindow) {
                     m_playerWindow->stopAndHide();
                 }
             });
-        // Close the loop between the picker's "Season pack" chip and
-        // runtime behaviour: emit a one-shot passive status message
-        // once adjacency has actually resolved against the torrent's
-        // file list. The controller already de-dups per
+        // Close the loop between the picker's "Season pack" chip
+        // and runtime behaviour: emit a one-shot passive status
+        // message once adjacency has actually resolved against the
+        // session's file catalog. The service de-dups per
         // `(infoHash, season, episode)` so seeks / resumes do not
         // re-trigger this.
-        connect(seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::packAdjacencyResolved,
+        connect(seriesSession,
+            &playback::series::SeriesSessionService::packAdjacencyResolved,
             this,
             [this](bool nextAvailable, int nextSeason, int nextEpisode) {
                 if (nextAvailable) {
@@ -713,9 +735,9 @@ void ShellViewModel::wireStatusForwarding()
         // Hydrate the picker row's size cell once the playback
         // pipeline learns the authoritative byte count. Only the
         // series detail page has a relevant streams model in scope
-        // here \u2014 the controller doesn't fire for movies.
-        connect(seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::currentStreamSizeResolved,
+        // here \u2014 the service doesn't fire for movies.
+        connect(seriesSession,
+            &playback::series::SeriesSessionService::currentStreamSizeResolved,
             this,
             [this](const QString& infoHash, int fileIndex, qint64 size) {
                 if (auto* vm = m_services.seriesDetailVm()) {
@@ -725,10 +747,10 @@ void ShellViewModel::wireStatusForwarding()
                 }
             });
     }
-    if (playbackCtrl) {
-        connect(playbackCtrl,
-            &controllers::PlaybackController::statusMessage, this,
-            &ShellViewModel::passiveMessage);
+    if (embeddedAdapter) {
+        connect(embeddedAdapter,
+            &playback::adapters::EmbeddedMpvPlayerAdapter::statusMessage,
+            this, &ShellViewModel::passiveMessage);
     }
 #endif
 }
@@ -792,18 +814,18 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     m_playerWindow = new ui::player::PlayerWindow(
         settings.appearance(), settings.player(), m_window);
 
-    auto* historyCtrl = m_services.historyController();
-    auto* playbackCtrl = m_services.playbackController();
-    auto* seriesSessionCtrl = m_services.seriesSessionController();
+    auto* embeddedAdapter = m_services.embeddedPlayerAdapter();
+    auto* seriesSession = m_services.seriesSessionService();
     auto* subtitlesVm = m_services.subtitlesVm();
     auto* subtitleCtrl = m_services.subtitleController();
+    auto* sessions = m_services.playbackSessionManager();
 
     // The window persists across successive plays now — closing it
     // via the X button hides it and clears playback state, but
     // keeps the libmpv context alive for the next launch. We only
     // react to `destroyed()` for the application-shutdown case.
     connect(m_playerWindow, &QObject::destroyed, this,
-        [this, historyCtrl](QObject* obj) {
+        [this, embeddedAdapter](QObject* obj) {
             if (obj != m_playerWindow) {
                 return;
             }
@@ -811,47 +833,48 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
             if (auto* tray = m_services.tray()) {
                 tray->setPlayerWindow(nullptr);
             }
-            if (historyCtrl) {
-                historyCtrl->setPlayerWindow(nullptr);
+            if (embeddedAdapter) {
+                embeddedAdapter->setPlayerWindow(nullptr);
             }
         });
 
     if (auto* tray = m_services.tray()) {
         tray->setPlayerWindow(m_playerWindow);
     }
-    if (historyCtrl) {
-        historyCtrl->setPlayerWindow(m_playerWindow);
-    }
-    if (playbackCtrl) {
-        playbackCtrl->setPlayerWindow(m_playerWindow);
-        // The visibilityChanged forwarding only needs to be wired
-        // once for the lifetime of this VM; `Qt::UniqueConnection`
-        // requires PMF on both ends.
-        connect(playbackCtrl,
-            &controllers::PlaybackController::visibilityChanged,
+    if (embeddedAdapter) {
+        // The embedded adapter is the sole owner of the player
+        // window now: it drives play / transport, owns the load
+        // watchdog, and publishes typed events on the
+        // PlaybackEventStream. Subscribe to its visibilityChanged
+        // re-emit so the tray menu refreshes on show / hide.
+        embeddedAdapter->setPlayerWindow(m_playerWindow);
+        connect(embeddedAdapter,
+            &playback::adapters::EmbeddedMpvPlayerAdapter::visibilityChanged,
             this, &ShellViewModel::onPlayerVisibilityChanged,
             Qt::UniqueConnection);
     }
 
     auto* playerVm = m_playerWindow->viewModel();
-    if (playerVm && seriesSessionCtrl) {
-        const auto refreshEpisodeNavigation = [seriesSessionCtrl, playerVm] {
+    if (playerVm && seriesSession) {
+        const auto refreshEpisodeNavigation = [seriesSession, playerVm] {
             playerVm->setEpisodeNavigationState(
-                seriesSessionCtrl->navigationVisible(),
-                seriesSessionCtrl->canGoPrevious(),
-                seriesSessionCtrl->canGoNext());
+                seriesSession->navigationVisible(),
+                seriesSession->canGoPrevious(),
+                seriesSession->canGoNext());
         };
 
         refreshEpisodeNavigation();
-        connect(seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::navigationChanged,
+        connect(seriesSession,
+            &playback::series::SeriesSessionService::navigationChanged,
             playerVm, refreshEpisodeNavigation);
-        connect(m_playerWindow, &ui::player::PlayerWindow::previousRequested,
-            seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::playPreviousEpisode);
-        connect(m_playerWindow, &ui::player::PlayerWindow::nextRequested,
-            seriesSessionCtrl,
-            &controllers::SeriesPlaybackSessionController::playNextEpisode);
+        if (sessions) {
+            connect(m_playerWindow, &ui::player::PlayerWindow::previousRequested,
+                sessions,
+                &playback::session::PlaybackSessionManager::playPreviousEpisode);
+            connect(m_playerWindow, &ui::player::PlayerWindow::nextRequested,
+                sessions,
+                &playback::session::PlaybackSessionManager::playNextEpisode);
+        }
     }
 
     // Player chrome's `SubtitlePicker → Download…` lands on the
@@ -861,25 +884,28 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     if (playerVm) {
         connect(playerVm,
             &ui::player::PlayerViewModel::subtitlesDialogRequested,
-            this, [this, playbackCtrl] {
+            this, [this, embeddedAdapter] {
                 if (m_window) {
                     m_window->setVisible(true);
                     m_window->raise();
                     m_window->requestActivate();
                 }
-                if (playbackCtrl) {
-                    pushSubtitlesPage(playbackCtrl->currentContext(),
+                if (embeddedAdapter) {
+                    pushSubtitlesPage(embeddedAdapter->activeContext(),
                         /*fromPlayer=*/true);
                 }
             });
     }
 
     // Subtitles VM → player. Sideload downloaded / picked local
-    // files into mpv via the player's view-model.
+    // files into mpv via the player's view-model. The key filter
+    // protects against subtitles that arrive after a fresh play
+    // attempt has superseded the one the user issued the search
+    // from.
     if (subtitlesVm && playerVm) {
         connect(subtitlesVm,
             &SubtitlesViewModel::downloadCompleted, playerVm,
-            [this, subtitlesVm, playbackCtrl, playerVm]
+            [this, subtitlesVm, embeddedAdapter, playerVm, sessions]
             (domain::PlaybackKey key, const QString& fileId,
                 const QString& localPath, const QString& lang,
                 const QString& langName) {
@@ -887,27 +913,35 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
                 if (!subtitlesVm->attachOnDownload()) {
                     return;
                 }
-                if (playbackCtrl
-                    && playbackCtrl->currentKey() != key) {
+                if (embeddedAdapter
+                    && embeddedAdapter->activeContext().key != key) {
                     return;
                 }
-                playerVm->attachExternalSubtitle(
-                    localPath, langName, lang, /*select=*/true);
+                if (sessions) {
+                    sessions->attachSubtitle(localPath, lang);
+                } else {
+                    playerVm->attachExternalSubtitle(
+                        localPath, langName, lang, /*select=*/true);
+                }
             });
         connect(subtitlesVm,
             &SubtitlesViewModel::localFileChosen, playerVm,
-            [this, subtitlesVm, playbackCtrl, playerVm]
+            [this, subtitlesVm, embeddedAdapter, playerVm, sessions]
             (domain::PlaybackKey key, const QString& path) {
                 if (!subtitlesVm->attachOnDownload()) {
                     return;
                 }
-                if (playbackCtrl
-                    && playbackCtrl->currentKey() != key) {
+                if (embeddedAdapter
+                    && embeddedAdapter->activeContext().key != key) {
                     return;
                 }
-                playerVm->attachExternalSubtitle(
-                    path, QString {}, QString {},
-                    /*select=*/true);
+                if (sessions) {
+                    sessions->attachSubtitle(path, QString {});
+                } else {
+                    playerVm->attachExternalSubtitle(
+                        path, QString {}, QString {},
+                        /*select=*/true);
+                }
             });
     }
 
@@ -930,8 +964,12 @@ void ShellViewModel::openEmbeddedPlayer(const QUrl& url,
     const domain::PlaybackContext& ctx)
 {
     ensurePlayerWindow();
-    if (auto* playbackCtrl = m_services.playbackController()) {
-        playbackCtrl->play(url, ctx);
+    if (auto* adapter = m_services.embeddedPlayerAdapter()) {
+        // The adapter's `play()` consumes `resumeSeconds` either
+        // as a direct seek (below the prompt threshold) or as a
+        // deferred prompt (above the threshold). Forward whatever
+        // the caller put on the ctx; the adapter applies policy.
+        adapter->play(url, ctx, ctx.resumeSeconds);
     }
 }
 

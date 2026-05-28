@@ -34,31 +34,89 @@ class TorrentCache;
 class WatchedStore;
 }
 
+namespace kinema::playback::desktop {
+class MprisPlaybackProjection;
+}
+
 namespace kinema::controllers {
 class DebridCredentialsResolver;
 class DownloadController;
-class HistoryController;
 class LibraryController;
-class MprisController;
-class PlaybackController;
-class SeriesPlaybackSessionController;
+class StreamUtilityController;
 class SubtitleController;
 class TokenController;
 class TrayController;
 class WatchedController;
 }
 
-namespace kinema::download {
-class DownloadManager;
+namespace kinema::playback::sources {
+class AllDebridResolver;
+class RealDebridResolver;
 }
 
-namespace kinema::services {
-class StreamActions;
+
+namespace kinema::playback::adapters {
+class ActiveStreamIndexerAdapter;
 }
 
-namespace kinema::torrent {
-class TorrentStreamingService;
+namespace kinema::playback::downloads {
+class SqliteDownloadRepository;
 }
+
+namespace kinema::playback::events {
+class PlaybackEventStream;
+}
+
+namespace kinema::playback::streaming {
+class LocalHttpStreamGateway;
+}
+
+namespace kinema::playback::history {
+class HistoryQueryService;
+class SqlitePlaybackHistoryRepository;
+}
+
+namespace kinema::playback::adapters {
+class EmbeddedMpvPlayerAdapter;
+class ExternalPlayerAdapter;
+}
+
+namespace kinema::playback::progress {
+class PlaybackProgressProjector;
+}
+
+namespace kinema::playback::resume {
+class ResumeUseCase;
+}
+
+namespace kinema::playback::series {
+class SeriesSessionService;
+}
+
+namespace kinema::playback::session {
+class PlaybackSessionManager;
+}
+
+namespace kinema::playback::history {
+class TrackMemoryService;
+}
+
+namespace kinema::playback::subtitles {
+class SubtitleSessionService;
+class MoviehashProbe;
+}
+
+namespace kinema::playback::torrent {
+class LibtorrentClient;
+}
+
+namespace kinema::playback::transfer {
+class BackendRegistry;
+class SessionRegistry;
+class TransferSupervisor;
+class TransferUseCase;
+}
+
 
 namespace kinema::ui {
 class ImageLoader;
@@ -135,24 +193,53 @@ public:
     ui::ImageLoader* imageLoader() const { return m_imageLoader; }
     ui::qml::AppIconResolver* appIconResolver();
 
-    services::StreamActions* streamActions() const { return m_streamActions; }
-    torrent::TorrentStreamingService* torrentStreaming() const { return m_torrentStreaming; }
-    download::DownloadManager* downloadManager() const { return m_downloadManager; }
+    controllers::StreamUtilityController* streamUtilityController() const { return m_streamUtility; }
+    playback::session::PlaybackSessionManager* playbackSessionManager() const
+    { return m_playbackSessionManager; }
+    playback::transfer::TransferUseCase* transferUseCase() const
+    { return m_transferUseCase; }
+    playback::progress::PlaybackProgressProjector* playbackProgressProjector() const
+    { return m_playbackProgressProjector; }
+    playback::resume::ResumeUseCase* resumeUseCase() const
+    { return m_resumeUseCase; }
+    playback::history::HistoryQueryService* historyQueryService() const
+    { return m_historyQueryService; }
+    playback::events::PlaybackEventStream* playbackEventStream() const
+    { return m_playbackEventStream; }
+    playback::adapters::ExternalPlayerAdapter* externalPlayerAdapter() const
+    { return m_externalPlayerAdapter; }
+#ifdef KINEMA_HAVE_LIBMPV
+    playback::adapters::EmbeddedMpvPlayerAdapter* embeddedPlayerAdapter() const
+    { return m_embeddedPlayerAdapter; }
+    playback::series::SeriesSessionService* seriesSessionService() const
+    { return m_seriesSessionService; }
+#endif
+    playback::subtitles::SubtitleSessionService* subtitleSessionService() const
+    { return m_subtitleSessionService; }
+    playback::torrent::LibtorrentClient* libtorrentClient() const { return m_libtorrentClient; }
+    playback::streaming::LocalHttpStreamGateway* localStreamGateway() const
+    { return m_localStreamGateway; }
+    playback::transfer::SessionRegistry* sessionRegistry() const
+    { return m_sessionRegistry.get(); }
+    playback::transfer::BackendRegistry* backendRegistry() const
+    { return m_backendRegistry.get(); }
+    playback::transfer::TransferSupervisor* transferSupervisor() const
+    { return m_transferSupervisor; }
 
     controllers::DownloadController* downloadController() const { return m_downloadCtrl; }
     controllers::TokenController* tokenController() const { return m_tokenCtrl; }
-    controllers::HistoryController* historyController() const { return m_historyCtrl; }
+
     controllers::LibraryController* libraryController() const { return m_libraryCtrl; }
     controllers::WatchedController* watchedController() const { return m_watchedCtrl; }
     controllers::SubtitleController* subtitleController() const { return m_subtitleCtrl; }
 
 #ifdef KINEMA_HAVE_LIBMPV
-    controllers::MprisController* mprisController() const { return m_mprisCtrl; }
-    controllers::PlaybackController* playbackController() const { return m_playbackCtrl; }
-    controllers::SeriesPlaybackSessionController* seriesSessionController() const
-    {
-        return m_seriesSessionCtrl;
-    }
+    /// Desktop MPRIS projection — replaces the legacy
+    /// `controllers::MprisController`. Owns the
+    /// `org.mpris.MediaPlayer2.kinema` D-Bus registration and the
+    /// idle inhibitor; drives state off `PlaybackEventStream`.
+    playback::desktop::MprisPlaybackProjection* mprisProjection() const
+    { return m_mprisProjection; }
 #endif
 
     // ---- Page view-models ----------------------------------------------
@@ -174,6 +261,46 @@ public:
     void setTray(controllers::TrayController* t) { m_tray = t; }
 
 private:
+    // ---- Construction helpers ------------------------------------------
+    //
+    // Splits the ~470-line ctor into per-responsibility phases.
+    // Each helper assumes its predecessors have already run; the
+    // dependency chain is:
+    //
+    //   buildInfrastructure()
+    //     ↓ (http, tokens, player, indexers, RD/AD clients,
+    //        TokenController, TmdbClient, CinemetaClient)
+    //   buildRepositories()
+    //     ↓ (database open, KConfig stores, caches,
+    //        TorrentCache, MediaCache, LibtorrentClient,
+    //        SqlitePlaybackHistoryRepository,
+    //        SqliteDownloadRepository)
+    //   buildPlaybackSubsystem()
+    //     ↓ (stream utility, downloader pipeline, adapters,
+    //        ProgressProjector, HistoryQueryService, ResumeUseCase,
+    //        DownloadController, projections, PlaybackSessionManager,
+    //        SeriesSessionService, MprisPlaybackProjection)
+    //   buildControllersAndViewModels()
+    //     ↓ (OpenSubtitles, SubtitleController +
+    //        SubtitleSessionService, LibraryController,
+    //        WatchedController, every page view-model,
+    //        SettingsRootViewModel)
+    //   wirePresentation()
+    //        (TokenController ↔ RD/AD/OpenSubtitles, settings VM ↔
+    //         TokenController routing, active-debrid-provider sync,
+    //         preferred-player check)
+    //
+    // `EmbeddedMpvPlayerAdapter` still binds its `PlayerWindow`
+    // lazily through `setPlayerWindow` from
+    // `ShellViewModel::ensurePlayerWindow`; the window is created
+    // on first embedded play, which cannot happen during the
+    // ServiceContainer constructor.
+    void buildInfrastructure();
+    void buildRepositories();
+    void buildPlaybackSubsystem();
+    void buildControllersAndViewModels();
+    void wirePresentation();
+
     config::AppSettings& m_settings;
     /// Debrid credential resolver — read-only port consumed by the
     /// Torrentio + Peerflix indexers (raw pointer). Declared before
@@ -213,12 +340,37 @@ private:
     ui::ImageLoader* m_imageLoader {};
 
     ui::qml::AppIconResolver* m_appIconResolver {};
-    services::StreamActions* m_streamActions {};
-    torrent::TorrentStreamingService* m_torrentStreaming {};
-    download::DownloadManager* m_downloadManager {};
+    controllers::StreamUtilityController* m_streamUtility {};
+    playback::events::PlaybackEventStream* m_playbackEventStream {};
+    std::unique_ptr<playback::history::SqlitePlaybackHistoryRepository>
+        m_historyRepo;
+    std::unique_ptr<playback::downloads::SqliteDownloadRepository>
+        m_downloadRepo;
+    std::unique_ptr<playback::adapters::ActiveStreamIndexerAdapter>
+        m_streamIndexerAdapter;
+    std::unique_ptr<playback::sources::RealDebridResolver> m_rdResolver;
+    std::unique_ptr<playback::sources::AllDebridResolver> m_adResolver;
+    std::unique_ptr<playback::transfer::SessionRegistry> m_sessionRegistry;
+    std::unique_ptr<playback::transfer::BackendRegistry> m_backendRegistry;
+    playback::streaming::LocalHttpStreamGateway* m_localStreamGateway {};
+    playback::transfer::TransferSupervisor* m_transferSupervisor {};
+    playback::transfer::TransferUseCase* m_transferUseCase {};
+    playback::resume::ResumeUseCase* m_resumeUseCase {};
+    playback::progress::PlaybackProgressProjector* m_playbackProgressProjector {};
+    playback::history::HistoryQueryService* m_historyQueryService {};
+    playback::session::PlaybackSessionManager* m_playbackSessionManager {};
+    playback::adapters::ExternalPlayerAdapter* m_externalPlayerAdapter {};
+    playback::subtitles::SubtitleSessionService* m_subtitleSessionService {};
+#ifdef KINEMA_HAVE_LIBMPV
+    playback::adapters::EmbeddedMpvPlayerAdapter* m_embeddedPlayerAdapter {};
+    playback::series::SeriesSessionService* m_seriesSessionService {};
+    playback::subtitles::MoviehashProbe* m_moviehashProbe {};
+    playback::history::TrackMemoryService* m_trackMemoryService {};
+#endif
+    playback::torrent::LibtorrentClient* m_libtorrentClient {};
     controllers::DownloadController* m_downloadCtrl {};
     controllers::TokenController* m_tokenCtrl {};
-    controllers::HistoryController* m_historyCtrl {};
+
     controllers::LibraryController* m_libraryCtrl {};
     controllers::WatchedController* m_watchedCtrl {};
     controllers::SubtitleController* m_subtitleCtrl {};
@@ -236,9 +388,7 @@ private:
     ui::qml::DownloadsViewModel* m_downloadsVm {};
 
 #ifdef KINEMA_HAVE_LIBMPV
-    controllers::MprisController* m_mprisCtrl {};
-    controllers::PlaybackController* m_playbackCtrl {};
-    controllers::SeriesPlaybackSessionController* m_seriesSessionCtrl {};
+    playback::desktop::MprisPlaybackProjection* m_mprisProjection {};
 #endif
 };
 
