@@ -5,12 +5,10 @@
 
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
-#include "ui/qml-bridge/StreamsListModel.h"
+#include "ui/qml-bridge/DetailViewModelBase.h"
 
-#include <QList>
 #include <QObject>
 #include <QString>
-#include <QStringList>
 
 #include <QCoro/QCoroTask>
 
@@ -24,11 +22,7 @@ class IndexerSelector;
 
 namespace kinema::config {
 class AppSettings;
-class FilterSettings;
-class TorrentioSettings;
 }
-
-
 
 namespace kinema::controllers {
 class DownloadController;
@@ -44,77 +38,29 @@ class PlaybackSessionManager;
 
 namespace kinema::ui::qml {
 
-class DiscoverSectionModel;
-
 /**
- * View-model behind `MovieDetailPage.qml`. Replaces the widget-
- * coupled `controllers::MovieDetailController` + `DetailPane` glue
- * outright: same coroutine + epoch pattern, same future-release
- * skip, same Cinemeta → Torrentio chain, but now exposes the
- * resulting state through `Q_PROPERTY` signals + a
- * `StreamsListModel` + a `DiscoverSectionModel` ("More like this").
+ * View-model behind `MovieDetailPage.qml`. The meta block, stream
+ * UI-filters, sort config, debrid chip, "More like this" rail, library
+ * state, and every per-row stream action live in `DetailViewModelBase`.
  *
- * The "Similar" rail mirrors `ui::SimilarStrip`'s two-step path:
- * resolve `imdbId` → `tmdbId` via TMDB's `/find`, then
- * `recommendations(...)` with a `/similar` fallback. Returned items
- * land in a single `DiscoverSectionModel` reused from the Discover
- * surface.
- *
- * Per-row stream actions (Play / Copy / Open) delegate to the
- * shared playback/session and stream utility services. The detail VM is the canonical
- * dispatcher — neither `StreamsListModel` nor the QML delegate
- * tries to reach those services directly.
- *
- * Sort order + keyword-blocklist filtering live here: the VM
- * keeps the unfiltered raw list and re-renders the model whenever
- * any of those inputs change.
+ * This subclass owns only the movie-shaped concerns: the
+ * Cinemeta movie-meta + Torrentio stream fetch (coroutine + epoch
+ * guard, with the future-release skip), runtime / upcoming flags, and
+ * single-flag watched state.
  */
-class MovieDetailViewModel : public QObject
+class MovieDetailViewModel : public DetailViewModelBase
 {
     Q_OBJECT
 
-    // ---- meta ------------------------------------------------------
-    Q_PROPERTY(QString imdbId READ imdbId NOTIFY metaChanged)
-    Q_PROPERTY(QString title READ title NOTIFY metaChanged)
-    Q_PROPERTY(int year READ year NOTIFY metaChanged)
-    Q_PROPERTY(QString posterUrl READ posterUrl NOTIFY metaChanged)
-    Q_PROPERTY(QString backdropUrl READ backdropUrl NOTIFY metaChanged)
-    Q_PROPERTY(QString description READ description NOTIFY metaChanged)
-    Q_PROPERTY(QStringList genres READ genres NOTIFY metaChanged)
-    Q_PROPERTY(QStringList cast READ cast NOTIFY metaChanged)
     Q_PROPERTY(int runtimeMinutes READ runtimeMinutes NOTIFY metaChanged)
-    Q_PROPERTY(double rating READ rating NOTIFY metaChanged)
     Q_PROPERTY(bool isUpcoming READ isUpcoming NOTIFY metaChanged)
-    Q_PROPERTY(QString releaseDateText READ releaseDateText NOTIFY metaChanged)
 
     /// `MetaState` enum mirrored as int for cheap QML comparisons.
+    /// Declared here (not on the base) so QML's `MovieDetailViewModel.Ready`
+    /// attached-enum lookup resolves on the registered type.
     Q_PROPERTY(MetaState metaState READ metaState NOTIFY metaStateChanged)
     Q_PROPERTY(QString metaError READ metaError NOTIFY metaStateChanged)
 
-    // ---- streams + similar -----------------------------------------
-    Q_PROPERTY(StreamsListModel* streams READ streams CONSTANT)
-    Q_PROPERTY(DiscoverSectionModel* similar READ similar CONSTANT)
-    Q_PROPERTY(bool similarVisible READ similarVisible NOTIFY similarChanged)
-
-    // ---- streams configuration -------------------------------------
-    Q_PROPERTY(int sortMode READ sortMode WRITE setSortMode NOTIFY sortChanged)
-    Q_PROPERTY(bool sortDescending READ sortDescending WRITE setSortDescending NOTIFY sortChanged)
-    Q_PROPERTY(bool debridConfigured READ debridConfigured NOTIFY debridConfiguredChanged)
-    Q_PROPERTY(int rawStreamsCount READ rawStreamsCount NOTIFY rawStreamsCountChanged)
-    // Transient UI-only filter axes consumed by the `StreamsPage`
-    // header `Kirigami.ActionToolBar`.
-    // Reset every time `clear()` runs; never persisted.
-    Q_PROPERTY(QString uiResolutionFilter READ uiResolutionFilter
-        WRITE setUiResolutionFilter NOTIFY uiFiltersChanged)
-    Q_PROPERTY(bool uiHdrOnly READ uiHdrOnly WRITE setUiHdrOnly NOTIFY uiFiltersChanged)
-    Q_PROPERTY(bool uiDolbyVisionOnly READ uiDolbyVisionOnly
-        WRITE setUiDolbyVisionOnly NOTIFY uiFiltersChanged)
-    Q_PROPERTY(bool uiMultiAudioOnly READ uiMultiAudioOnly
-        WRITE setUiMultiAudioOnly NOTIFY uiFiltersChanged)
-    Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
-
-    Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY libraryStateChanged)
-    Q_PROPERTY(QString libraryActionText READ libraryActionText NOTIFY libraryStateChanged)
     Q_PROPERTY(bool movieWatched READ movieWatched NOTIFY watchedStateChanged)
     Q_PROPERTY(QString watchedActionText READ watchedActionText NOTIFY watchedStateChanged)
 
@@ -153,53 +99,12 @@ public:
         QObject* parent = nullptr);
     ~MovieDetailViewModel() override;
 
-    // ---- meta accessors --------------------------------------------
-    QString imdbId() const { return m_imdbId; }
-    QString title() const { return m_title; }
-    int year() const noexcept { return m_year; }
-    QString posterUrl() const { return m_posterUrl; }
-    QString backdropUrl() const { return m_backdropUrl; }
-    QString description() const { return m_description; }
-    QStringList genres() const { return m_genres; }
-    QStringList cast() const { return m_cast; }
     int runtimeMinutes() const noexcept { return m_runtimeMinutes; }
-    double rating() const noexcept { return m_rating; }
     bool isUpcoming() const noexcept { return m_isUpcoming; }
-    QString releaseDateText() const { return m_releaseDateText; }
     MetaState metaState() const noexcept { return m_metaState; }
     QString metaError() const { return m_metaError; }
 
-    StreamsListModel* streams() const noexcept { return m_streams; }
-    DiscoverSectionModel* similar() const noexcept { return m_similar; }
-    bool similarVisible() const noexcept { return m_similarVisible; }
-
-    int sortMode() const noexcept { return static_cast<int>(m_sortMode); }
-    void setSortMode(int mode);
-    bool sortDescending() const noexcept { return m_sortDescending; }
-    void setSortDescending(bool desc);
-    bool debridConfigured() const noexcept
-    {
-        return !m_rdToken.isEmpty() || !m_adApiKey.isEmpty();
-    }
-    int rawStreamsCount() const noexcept
-    {
-        return static_cast<int>(m_rawStreams.size());
-    }
-
-    QString uiResolutionFilter() const { return m_uiResolutionFilter; }
-    void setUiResolutionFilter(const QString& res);
-    bool uiHdrOnly() const noexcept { return m_uiHdrOnly; }
-    void setUiHdrOnly(bool on);
-    bool uiDolbyVisionOnly() const noexcept { return m_uiDolbyVisionOnly; }
-    void setUiDolbyVisionOnly(bool on);
-    bool uiMultiAudioOnly() const noexcept { return m_uiMultiAudioOnly; }
-    void setUiMultiAudioOnly(bool on);
-    bool uiAnyFilterActive() const noexcept;
-    Q_INVOKABLE void clearUiFilters();
-
-    bool inLibrary() const noexcept { return m_inLibrary; }
     bool movieWatched() const noexcept { return m_movieWatched; }
-    QString libraryActionText() const;
     QString watchedActionText() const;
 
 public Q_SLOTS:
@@ -210,207 +115,51 @@ public Q_SLOTS:
     void load(const QString& imdbId);
 
     /// Resolve a TMDB id to its IMDB id and load. Used by the
-    /// Browse page and the Discover similar carousel — both hand
-    /// off TMDB ids rather than IMDB ids. `title` is used for the
-    /// in-flight "Looking up …" status message.
+    /// Browse page and the Discover similar carousel.
     void loadByTmdbId(int tmdbId, const QString& title);
 
-    /// Re-run meta + streams for the current IMDB id. Connected to
-    /// the page's "Retry" placeholder action.
+    /// Re-run meta + streams for the current IMDB id.
     void retry();
 
-    /// Drop the loaded title and reset every model. Called when
-    /// the page is popped off the stack so a fresh push lands on
-    /// an empty surface.
+    /// Drop the loaded title and reset every model.
     void clear();
 
-    /// Header action: ask the host to push the Streams page on
-    /// top of the current detail page. Emits `streamsRequested()`;
-    /// `MainController` forwards as `showStreamsRequested(this)`.
+    /// Header action: ask the host to push the Streams page.
     void requestStreams();
 
-    /// Re-run only the streams fetch for the current title. Used by
-    /// the Streams page "Refresh" header action; cheaper than
-    /// `retry()` which also re-fetches the meta.
+    /// Re-run only the streams fetch for the current title.
     void refreshStreams();
     void addToLibrary();
-    void removeFromLibrary();
     void toggleMovieWatched();
 
-    /// Wire the download controller. Same two-phase pattern as the
-    /// other injected services. Safe to leave unset for tests;
-    /// `saveOffline`
-    /// short-circuits on a null controller.
-    void setDownloadController(controllers::DownloadController* dl);
-
-    /// Per-row action handlers driven by `StreamListCard.qml`'s ⋮ menu.
-    /// `playNow` routes through `PlaybackSessionManager`.
-    void playNow(int row);
-    /// As `playNow` but forces a specific backend (Torrent /
-    /// RealDebridHttp). Used by the per-stream override menu.
-    void playWithBackend(int row, int backendKind);
-    /// Hand the row's stream to `controllers::DownloadController::enqueue`.
-    /// `pinned=true` -> Save offline (runs to completion, never
-    /// auto-evicted); `pinned=false` -> ephemeral cache prefetch.
-    /// Background full-file download, mirroring the explicit
-    /// `\u2b07 Download` button on the stream row. Always Full +
-    /// Pinned; mode upgrade for already-streaming sessions is
-    /// handled by `TransferUseCase::saveOffline`.
-    void download(int row);
-    /// As above but forces a specific backend (Torrent /
-    /// RealDebridHttp). Used by the per-stream override menu.
-    void downloadWithBackend(int row, int backendKind);
-    void copyMagnet(int row);
-    void openMagnet(int row);
-    void copyDirectUrl(int row);
-    void openDirectUrl(int row);
-    /// Copy the row's release name to the clipboard via
-    /// `StreamUtilityController::copyReleaseName`.
-    void copyReleaseName(int row);
-
-    /// Header subtitle action / per-row subtitle action. Phase 05
-    /// stubs both with `subtitlesRequested` → passive notification;
-    /// phase 06 wires the `SubtitlesPage` push through
-    /// `MainController`. The per-row variant carries the chosen
-    /// stream's release name so the subtitles dialog has a hint
-    /// for moviehash matching once it lands.
-    void requestSubtitles();
-    void requestSubtitlesFor(int row);
-
-    /// Click on a similar carousel card. Routes through
-    /// `openMovieRequested` / `openSeriesRequested` so the page
-    /// stack gets a fresh push for the chosen title.
-    void activateSimilar(int row);
-
-    /// Similar-carousel context menu hooks. Mirror the Discover /
-    /// Browse poster menu but bound to `m_similar` rather than a
-    /// page-level results model.
-    void addSimilarToLibrary(int row);
-    void markSimilarWatched(int row);
-    void findSimilarStreams(int row);
-
 Q_SIGNALS:
-    void metaChanged();
     void metaStateChanged();
-    void similarChanged();
-    void sortChanged();
-    void debridConfiguredChanged();
-    void rawStreamsCountChanged();
-    void uiFiltersChanged();
-    void libraryStateChanged();
-    void watchedStateChanged();
-
-    /// Forwarded into `MainController::passiveMessage`.
-    void statusMessage(const QString& text, int durationMs);
-
-    /// Emitted when the user activates a card in the "More like
-    /// this" carousel. TMDB ids only (the similar endpoint doesn't
-    /// carry IMDB ids); `MainController` routes them through a
-    /// `loadByTmdbId(...)` push so the page stack gets a fresh
-    /// detail page on top.
-    void openMovieByTmdbRequested(int tmdbId, const QString& title);
-    void openSeriesByTmdbRequested(int tmdbId, const QString& title);
-
-    /// Similar-row "Find Streams" route. Shape matches
-    /// `BrowseViewModel::findMovieStreamsByTmdbRequested` so
-    /// `ShellViewModel` can route both through the same handler.
-    void findMovieStreamsByTmdbRequested(int tmdbId,
-        const QString& title);
-    void findSeriesStreamsByTmdbRequested(int tmdbId,
-        const QString& title);
-
-    /// Phase 06 hook: pushes the Subtitles page with the carried
-    /// playback context. Phase 05 stubs the connection in
-    /// `MainController` with a passive notification.
-    void subtitlesRequested(const domain::PlaybackContext& ctx);
-
-    /// Emitted from `requestStreams()`. `MainController` connects
-    /// to a lambda that forwards as
-    /// `showStreamsRequested(QObject* detailVm)`, identifying
-    /// `this` so the QML shell can bind the pushed `StreamsPage`
-    /// to the right view-model.
-    void streamsRequested();
 
 private:
+    domain::MediaKind mediaKind() const override
+    {
+        return domain::MediaKind::Movie;
+    }
+    domain::PlaybackContext currentContext() const override;
+
     QCoro::Task<void> loadMetaAndStreams(QString imdbId);
     QCoro::Task<void> loadStreamsTask(QString imdbId,
         std::optional<QDate> released, quint64 expectedEpoch);
     QCoro::Task<void> resolveByTmdbAndLoad(int tmdbId, QString title);
-    QCoro::Task<void> loadSimilarFor(QString imdbId,
-        domain::MediaKind kind);
 
     void refreshStreamsForCurrentTitle();
     void resetMeta();
     void applyMeta(const domain::MetaDetail& detail);
-    void refreshLibraryState();
     void refreshWatchedState();
     void setMetaState(MetaState s, const QString& error = {});
-    void setSimilarVisible(bool on);
-
-    /// Re-render `m_streams` from `m_rawStreams` after applying
-    /// cached-only + blocklist + sort. Called when any of those
-    /// inputs change.
-    void rebuildVisibleStreams();
-    QList<domain::Stream> applyFilters() const;
-    void sortInPlace(QList<domain::Stream>& rows) const;
-    domain::PlaybackContext currentContext() const;
-
-    /// Forwards a row's stream to a utility-controller
-    /// pointer-to-member. Lets the per-row trampolines stay
-    /// one-liners.
-    template <typename Method>
-    void dispatchStreamAction(int row, Method method);
-
-    api::CinemetaClient* m_cinemeta;
-    api::IndexerSelector* m_indexers;
-    api::TmdbClient* m_tmdb;
-    playback::session::PlaybackSessionManager* m_playback {};
-    controllers::StreamUtilityController* m_streamUtility {};
-    controllers::LibraryController* m_library {};
-    controllers::WatchedController* m_watched {};
-    controllers::DownloadController* m_downloads {};
-    controllers::TokenController* m_tokens;
-    config::AppSettings& m_settings;
-    const QString& m_rdToken;
-    const QString& m_adApiKey;
-
-    StreamsListModel* m_streams;
-    DiscoverSectionModel* m_similar;
-    bool m_similarVisible = false;
 
     quint64 m_epoch = 0;
-    quint64 m_similarEpoch = 0;
 
-    // Meta fields.
     domain::MetaDetail m_currentMeta;
-    QString m_imdbId;
-    QString m_title;
-    int m_year = 0;
-    QString m_posterUrl;
-    QString m_backdropUrl;
-    QString m_description;
-    QStringList m_genres;
-    QStringList m_cast;
     int m_runtimeMinutes = 0;
-    double m_rating = -1.0;
     bool m_isUpcoming = false;
-    QString m_releaseDateText;
     MetaState m_metaState = MetaState::Idle;
     QString m_metaError;
-
-    // Streams config.
-    QList<domain::Stream> m_rawStreams;
-    StreamsListModel::SortMode m_sortMode
-        = StreamsListModel::SortMode::Smart;
-    bool m_sortDescending = true;
-
-    // Transient UI filter state — not persisted.
-    QString m_uiResolutionFilter; ///< "" | "2160p" | "1080p" | "720p" | "sd"
-    bool m_uiHdrOnly = false;
-    bool m_uiDolbyVisionOnly = false;
-    bool m_uiMultiAudioOnly = false;
-
-    bool m_inLibrary = false;
     bool m_movieWatched = false;
 };
 

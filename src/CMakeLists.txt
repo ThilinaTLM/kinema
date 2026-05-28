@@ -140,6 +140,7 @@ set(kinema_core_SRCS
     ui/qml-bridge/AppIconResolver.cpp
     ui/qml-bridge/BrowseViewModel.cpp
     ui/qml-bridge/ContinueWatchingViewModel.cpp
+    ui/qml-bridge/DetailViewModelBase.cpp
     ui/qml-bridge/DiscoverSectionModel.cpp
     ui/qml-bridge/DiscoverViewModel.cpp
     ui/qml-bridge/DownloadsListModel.cpp

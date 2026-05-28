@@ -5,14 +5,14 @@
 
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
+#include "ui/qml-bridge/DetailViewModelBase.h"
 #include "ui/qml-bridge/EpisodesListModel.h"
-#include "ui/qml-bridge/StreamsListModel.h"
 
-#include <QHash>
 #include <QList>
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 
 #include <QCoro/QCoroTask>
 
@@ -26,8 +26,6 @@ class TmdbClient;
 
 namespace kinema::config {
 class AppSettings;
-class FilterSettings;
-class TorrentioSettings;
 }
 
 namespace kinema::controllers {
@@ -44,53 +42,39 @@ class PlaybackSessionManager;
 
 namespace kinema::ui::qml {
 
-class DiscoverSectionModel;
-
 /**
- * View-model behind `SeriesDetailPage.qml`. Replaces the
- * widget-coupled `controllers::SeriesDetailController` +
- * `SeriesDetailPane` glue.
+ * View-model behind `SeriesDetailPage.qml`. The meta block, stream
+ * UI-filters, sort config, debrid chip, "More like this" rail, library
+ * state, and every per-row stream action live in `DetailViewModelBase`.
  *
- * Three independent epoch counters guard the three coroutines this
- * VM kicks off so a slow response from one can't clobber a fresher
- * one:
+ * This subclass owns the series-shaped concerns: seasons / episodes,
+ * the per-episode Torrentio fetch, and series/episode watched-state.
+ *
+ * Two independent epoch counters guard the coroutines this VM kicks
+ * off (the third, `m_similarEpoch`, lives in the base):
  *
  *   * `m_metaEpoch`     \u2014 series meta + episode list
  *   * `m_episodeEpoch`  \u2014 per-episode Torrentio fetch
- *   * `m_similarEpoch`  \u2014 TMDB recommendations carousel
  *
  * Season picker semantics: seasons are surfaced as a flat
- * `seasonLabels` `QStringList` (e.g. `["Season 1", "Season 2"]`)
- * indexed by `currentSeason`. Specials (season 0) are excluded from
- * the picker but kept in the parsed `SeriesDetail` so a Continue-
- * Watching entry pointing at a special still resolves an episode
- * row.
+ * `seasonLabels` `QStringList` indexed by `currentSeason`. Specials
+ * (season 0) are excluded from the picker but kept in the parsed
+ * `SeriesDetail` so a Continue-Watching entry pointing at a special
+ * still resolves an episode row.
  *
- * Episode picker semantics: `selectedEpisodeRow` is the row inside
- * the current season's episode list (\u2212 1 = collapsed). Selecting
- * a row builds an `domain::PlaybackContext` and kicks the per-episode
- * stream fetch; clearing collapses the streams region.
- *
- * Streams config (sort + cached-only) and per-row action delegation
- * mirror `MovieDetailViewModel` exactly. The streams list itself is
- * a fresh `StreamsListModel` instance; it is NOT shared with the
- * movie VM.
+ * Episode picker semantics: `selectedEpisodeRow` is the row inside the
+ * current season's episode list (\u2212 1 = collapsed). Selecting a row
+ * builds a `domain::PlaybackContext` and kicks the per-episode stream
+ * fetch; clearing collapses the streams region.
  */
-class SeriesDetailViewModel : public QObject
+class SeriesDetailViewModel : public DetailViewModelBase
 {
     Q_OBJECT
 
-    // ---- meta ------------------------------------------------------
-    Q_PROPERTY(QString imdbId READ imdbId NOTIFY metaChanged)
-    Q_PROPERTY(QString title READ title NOTIFY metaChanged)
-    Q_PROPERTY(int year READ year NOTIFY metaChanged)
-    Q_PROPERTY(QString posterUrl READ posterUrl NOTIFY metaChanged)
-    Q_PROPERTY(QString backdropUrl READ backdropUrl NOTIFY metaChanged)
-    Q_PROPERTY(QString description READ description NOTIFY metaChanged)
-    Q_PROPERTY(QStringList genres READ genres NOTIFY metaChanged)
-    Q_PROPERTY(QStringList cast READ cast NOTIFY metaChanged)
-    Q_PROPERTY(double rating READ rating NOTIFY metaChanged)
-    Q_PROPERTY(QString releaseDateText READ releaseDateText NOTIFY metaChanged)
+    /// `MetaState` enum mirrored as int for cheap QML comparisons.
+    /// Declared here (not on the base) so QML's
+    /// `SeriesDetailViewModel.Ready` attached-enum lookup resolves on
+    /// the registered type.
     Q_PROPERTY(MetaState metaState READ metaState NOTIFY metaStateChanged)
     Q_PROPERTY(QString metaError READ metaError NOTIFY metaStateChanged)
 
@@ -103,31 +87,6 @@ class SeriesDetailViewModel : public QObject
     Q_PROPERTY(int selectedEpisodeRow READ selectedEpisodeRow NOTIFY selectedEpisodeChanged)
     Q_PROPERTY(QString selectedEpisodeLabel READ selectedEpisodeLabel NOTIFY selectedEpisodeChanged)
 
-    // ---- streams + similar ----------------------------------------
-    Q_PROPERTY(StreamsListModel* streams READ streams CONSTANT)
-    Q_PROPERTY(DiscoverSectionModel* similar READ similar CONSTANT)
-    Q_PROPERTY(bool similarVisible READ similarVisible NOTIFY similarChanged)
-
-    // ---- streams configuration ------------------------------------
-    Q_PROPERTY(int sortMode READ sortMode WRITE setSortMode NOTIFY sortChanged)
-    Q_PROPERTY(bool sortDescending READ sortDescending WRITE setSortDescending NOTIFY sortChanged)
-    Q_PROPERTY(bool debridConfigured READ debridConfigured NOTIFY debridConfiguredChanged)
-    Q_PROPERTY(int rawStreamsCount READ rawStreamsCount NOTIFY rawStreamsCountChanged)
-    // Transient UI-only filter axes consumed by the `StreamsPage`
-    // header `Kirigami.ActionToolBar`.
-    // Reset every time `clear()` runs and on every episode switch;
-    // never persisted.
-    Q_PROPERTY(QString uiResolutionFilter READ uiResolutionFilter
-        WRITE setUiResolutionFilter NOTIFY uiFiltersChanged)
-    Q_PROPERTY(bool uiHdrOnly READ uiHdrOnly WRITE setUiHdrOnly NOTIFY uiFiltersChanged)
-    Q_PROPERTY(bool uiDolbyVisionOnly READ uiDolbyVisionOnly
-        WRITE setUiDolbyVisionOnly NOTIFY uiFiltersChanged)
-    Q_PROPERTY(bool uiMultiAudioOnly READ uiMultiAudioOnly
-        WRITE setUiMultiAudioOnly NOTIFY uiFiltersChanged)
-    Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
-
-    Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY libraryStateChanged)
-    Q_PROPERTY(QString libraryActionText READ libraryActionText NOTIFY libraryStateChanged)
     Q_PROPERTY(bool seriesWatched READ seriesWatched NOTIFY watchedStateChanged)
 
 public:
@@ -165,17 +124,6 @@ public:
         QObject* parent = nullptr);
     ~SeriesDetailViewModel() override;
 
-    // ---- meta accessors -------------------------------------------
-    QString imdbId() const { return m_imdbId; }
-    QString title() const { return m_title; }
-    int year() const noexcept { return m_year; }
-    QString posterUrl() const { return m_posterUrl; }
-    QString backdropUrl() const { return m_backdropUrl; }
-    QString description() const { return m_description; }
-    QStringList genres() const { return m_genres; }
-    QStringList cast() const { return m_cast; }
-    double rating() const noexcept { return m_rating; }
-    QString releaseDateText() const { return m_releaseDateText; }
     MetaState metaState() const noexcept { return m_metaState; }
     QString metaError() const { return m_metaError; }
 
@@ -189,38 +137,7 @@ public:
     int selectedEpisodeRow() const noexcept { return m_selectedEpisodeRow; }
     QString selectedEpisodeLabel() const { return m_selectedEpisodeLabel; }
 
-    // ---- streams + similar accessors ------------------------------
-    StreamsListModel* streams() const noexcept { return m_streams; }
-    DiscoverSectionModel* similar() const noexcept { return m_similar; }
-    bool similarVisible() const noexcept { return m_similarVisible; }
-
-    int sortMode() const noexcept { return static_cast<int>(m_sortMode); }
-    void setSortMode(int mode);
-    bool sortDescending() const noexcept { return m_sortDescending; }
-    void setSortDescending(bool desc);
-    bool debridConfigured() const noexcept
-    {
-        return !m_rdToken.isEmpty() || !m_adApiKey.isEmpty();
-    }
-    int rawStreamsCount() const noexcept
-    {
-        return static_cast<int>(m_rawStreams.size());
-    }
-
-    QString uiResolutionFilter() const { return m_uiResolutionFilter; }
-    void setUiResolutionFilter(const QString& res);
-    bool uiHdrOnly() const noexcept { return m_uiHdrOnly; }
-    void setUiHdrOnly(bool on);
-    bool uiDolbyVisionOnly() const noexcept { return m_uiDolbyVisionOnly; }
-    void setUiDolbyVisionOnly(bool on);
-    bool uiMultiAudioOnly() const noexcept { return m_uiMultiAudioOnly; }
-    void setUiMultiAudioOnly(bool on);
-    bool uiAnyFilterActive() const noexcept;
-    Q_INVOKABLE void clearUiFilters();
-
-    bool inLibrary() const noexcept { return m_inLibrary; }
     bool seriesWatched() const noexcept { return m_seriesWatched; }
-    QString libraryActionText() const;
 
 public Q_SLOTS:
     /// Open the series detail page for `imdbId`. Optional `season` /
@@ -229,129 +146,58 @@ public Q_SLOTS:
     void load(const QString& imdbId);
     void loadAt(const QString& imdbId, int season, int episode);
 
-    /// Resolve a TMDB id to its IMDB id and load. Used by Browse /
-    /// Discover hand-off (which carry TMDB ids only).
+    /// Resolve a TMDB id to its IMDB id and load.
     void loadByTmdbId(int tmdbId, const QString& title);
 
     /// Re-run meta + (optionally) the selected episode's streams.
     void retry();
 
-    /// Drop the loaded title and reset every model. Called when
-    /// the page is popped off the stack.
+    /// Drop the loaded title and reset every model.
     void clear();
 
     /// Picker hooks.
     void selectEpisode(int row);
     /// Collapse the streams region by clearing the selected episode.
     void clearEpisode();
-    /// Convenience for the QML episode tap handler: select the row
-    /// (kicking off the streams fetch as `selectEpisode` does) and
-    /// immediately ask the host to push the Streams page.
+    /// Select the row (kicking off the streams fetch) and immediately
+    /// ask the host to push the Streams page.
     void selectEpisodeAndOpenStreams(int row);
 
-    /// Header action: ask the host to push the Streams page for
-    /// the currently-selected episode. No-op when no episode is
-    /// selected.
+    /// Header action: ask the host to push the Streams page for the
+    /// currently-selected episode. No-op when no episode is selected.
     void requestStreams();
 
     /// Re-run only the streams fetch for the currently-selected
-    /// episode. Used by the Streams page "Refresh" header action;
-    /// cheaper than `retry()` which also re-fetches the series meta.
-    /// No-op when no episode is selected.
+    /// episode. No-op when no episode is selected.
     void refreshStreams();
     void addToLibrary();
-    void removeFromLibrary();
     void toggleEpisodeWatched(int row);
     void toggleSeriesWatched();
     void markSeasonWatched(int season, bool watched);
 
-    /// Wire the download controller. Same two-phase pattern.
-    void setDownloadController(controllers::DownloadController* dl);
-
-    /// Per-row action handlers driven by `StreamListCard.qml`'s ⋮ menu.
-    /// `playNow` routes straight through `PlaybackSessionManager`.
-    void playNow(int row);
-    /// As `playNow` but forces a specific backend (Torrent /
-    /// RealDebridHttp). Used by the per-stream override menu.
-    void playWithBackend(int row, int backendKind);
-    /// Hand the row's stream to `controllers::DownloadController::enqueue`.
-    /// Background full-file episode download, mirroring the
-    /// explicit `\u2b07 Download` button on the stream row. Always
-    /// Full + Pinned; mode upgrade for already-streaming sessions
-    /// is handled by `TransferUseCase::saveOffline`.
-    void download(int row);
-    /// As above but forces a specific backend (Torrent /
-    /// RealDebridHttp).
-    void downloadWithBackend(int row, int backendKind);
-    void copyMagnet(int row);
-    void openMagnet(int row);
-    void copyDirectUrl(int row);
-    void openDirectUrl(int row);
-    /// Copy the row's release name to the clipboard via
-    /// `StreamUtilityController::copyReleaseName`.
-    void copyReleaseName(int row);
-
-    void requestSubtitles();
-    void requestSubtitlesFor(int row);
-
-    void activateSimilar(int row);
-
-    /// Similar-carousel context menu hooks. Same shape as the
-    /// matching slots on `MovieDetailViewModel`.
-    void addSimilarToLibrary(int row);
-    void markSimilarWatched(int row);
-    void findSimilarStreams(int row);
-
 Q_SIGNALS:
-    void metaChanged();
     void metaStateChanged();
     void seasonsChanged();
     void currentSeasonChanged();
     void selectedEpisodeChanged();
-    void similarChanged();
-    void sortChanged();
-    void debridConfiguredChanged();
-    void rawStreamsCountChanged();
-    void uiFiltersChanged();
-    void libraryStateChanged();
-    void watchedStateChanged();
-
-    void statusMessage(const QString& text, int durationMs);
-
-    void openMovieByTmdbRequested(int tmdbId, const QString& title);
-    void openSeriesByTmdbRequested(int tmdbId, const QString& title);
-
-    /// Similar-row "Find Streams" route, mirroring
-    /// `MovieDetailViewModel`.
-    void findMovieStreamsByTmdbRequested(int tmdbId,
-        const QString& title);
-    void findSeriesStreamsByTmdbRequested(int tmdbId,
-        const QString& title);
-
-    void subtitlesRequested(const domain::PlaybackContext& ctx);
-
-    /// Emitted from `requestStreams()` /
-    /// `selectEpisodeAndOpenStreams()`. `MainController` connects
-    /// to a lambda that forwards as
-    /// `showStreamsRequested(QObject* detailVm)`, identifying
-    /// `this` so the QML shell can bind the pushed `StreamsPage`
-    /// to the right view-model.
-    void streamsRequested();
 
 private:
+    domain::MediaKind mediaKind() const override
+    {
+        return domain::MediaKind::Series;
+    }
+    domain::PlaybackContext currentContext() const override;
+
     QCoro::Task<void> loadSeriesMetaTask(QString imdbId,
         std::optional<int> pendingSeason,
         std::optional<int> pendingEpisode);
     QCoro::Task<void> loadEpisodeStreamsTask(domain::Episode ep);
     QCoro::Task<void> resolveByTmdbAndLoad(int tmdbId, QString title);
-    QCoro::Task<void> loadSimilarFor(QString imdbId);
 
     void applyMeta(const domain::SeriesDetail& sd);
     void resetMeta();
-    void refreshLibraryState();
     void refreshEpisodeWatchedState();
     void setMetaState(MetaState s, const QString& error = {});
-    void setSimilarVisible(bool on);
 
     /// Re-derive `m_seasonLabels` + per-season episode lists from
     /// `m_allEpisodes`. Specials (season 0) are filtered out of the
@@ -360,50 +206,12 @@ private:
     /// Push the current season's episode list into `m_episodes`.
     void publishCurrentSeasonEpisodes();
 
-    void rebuildVisibleStreams();
-    QList<domain::Stream> applyFilters() const;
-    void sortInPlace(QList<domain::Stream>& rows) const;
-    domain::PlaybackContext currentContext() const;
-
-    /// Forwards a row's stream to a `PlaybackSessionManager`
-    /// pointer-to-member.
-    template <typename Method>
-    void dispatchStreamAction(int row, Method method);
-
-    api::CinemetaClient* m_cinemeta;
-    api::IndexerSelector* m_indexers;
-    api::TmdbClient* m_tmdb;
-    playback::session::PlaybackSessionManager* m_playback {};
-    controllers::StreamUtilityController* m_streamUtility {};
-    controllers::LibraryController* m_library {};
-    controllers::WatchedController* m_watched {};
-    controllers::DownloadController* m_downloads {};
-    controllers::TokenController* m_tokens;
-    config::AppSettings& m_settings;
-    const QString& m_rdToken;
-    const QString& m_adApiKey;
-
-    StreamsListModel* m_streams;
     EpisodesListModel* m_episodes;
-    DiscoverSectionModel* m_similar;
-    bool m_similarVisible = false;
 
     quint64 m_metaEpoch = 0;
     quint64 m_episodeEpoch = 0;
-    quint64 m_similarEpoch = 0;
 
-    // Series meta.
     domain::SeriesDetail m_currentSeries;
-    QString m_imdbId;
-    QString m_title;
-    int m_year = 0;
-    QString m_posterUrl;
-    QString m_backdropUrl;
-    QString m_description;
-    QStringList m_genres;
-    QStringList m_cast;
-    double m_rating = -1.0;
-    QString m_releaseDateText;
     MetaState m_metaState = MetaState::Idle;
     QString m_metaError;
 
@@ -422,19 +230,6 @@ private:
     domain::Episode m_selectedEpisode;
     QString m_selectedEpisodeLabel;
 
-    // Streams config.
-    QList<domain::Stream> m_rawStreams;
-    StreamsListModel::SortMode m_sortMode
-        = StreamsListModel::SortMode::Smart;
-    bool m_sortDescending = true;
-
-    // Transient UI filter state — not persisted.
-    QString m_uiResolutionFilter;
-    bool m_uiHdrOnly = false;
-    bool m_uiDolbyVisionOnly = false;
-    bool m_uiMultiAudioOnly = false;
-
-    bool m_inLibrary = false;
     bool m_seriesWatched = false;
 };
 

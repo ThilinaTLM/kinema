@@ -8,30 +8,22 @@
 #include "api/IndexerSelector.h"
 #include "api/TmdbClient.h"
 #include "config/AppSettings.h"
-#include "config/FilterSettings.h"
-#include "config/TorrentioSettings.h"
-#include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
-#include "controllers/StreamUtilityController.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
 #include "core/util/DateFormat.h"
 #include "core/io/HttpError.h"
 #include "core/io/HttpErrorPresenter.h"
-#include "core/util/StreamFilter.h"
 #include "kinema_log_ui.h"
-#include "playback/session/PlaybackSessionManager.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
-#include "ui/qml-bridge/StreamSorting.h"
-#include "ui/qml-bridge/TitleActions.h"
 
 #include <KLocalizedString>
+
+#include <algorithm>
 
 namespace kinema::ui::qml {
 
 namespace {
-
-using SortMode = StreamsListModel::SortMode;
 
 QString episodeDisplayLabel(const QString& seriesTitle,
     const domain::Episode& ep)
@@ -81,38 +73,12 @@ SeriesDetailViewModel::SeriesDetailViewModel(
     const QString& rdTokenRef,
     const QString& adApiKeyRef,
     QObject* parent)
-    : QObject(parent)
-    , m_cinemeta(cinemeta)
-    , m_indexers(indexers)
-    , m_tmdb(tmdb)
-    , m_playback(playback)
-    , m_streamUtility(streamUtility)
-    , m_library(library)
-    , m_watched(watched)
-    , m_tokens(tokens)
-    , m_settings(settings)
-    , m_rdToken(rdTokenRef)
-    , m_adApiKey(adApiKeyRef)
-    , m_streams(new StreamsListModel(this))
+    : DetailViewModelBase(cinemeta, indexers, tmdb, playback, streamUtility,
+          library, watched, tokens, settings, rdTokenRef, adApiKeyRef,
+          domain::MediaKind::Series,
+          i18nc("@label series detail rail", "More like this"), parent)
     , m_episodes(new EpisodesListModel(this))
-    , m_similar(new DiscoverSectionModel(
-          i18nc("@label series detail rail", "More like this"), this))
 {
-    // Tell the streams model it's hosting episode streams so the
-    // pack classifier evaluates `classifyPack` instead of returning
-    // `PackKind::None` (the default, used by the movie page).
-    m_streams->setMediaKind(domain::MediaKind::Series);
-    connect(&m_settings.filter(),
-        &config::FilterSettings::keywordBlocklistChanged, this,
-        [this](const QStringList&) { rebuildVisibleStreams(); });
-    connect(&m_settings.filter(),
-        &config::FilterSettings::exclusionsChanged, this,
-        [this]() { rebuildVisibleStreams(); });
-
-    if (m_library) {
-        connect(m_library, &controllers::LibraryController::changed,
-            this, &SeriesDetailViewModel::refreshLibraryState);
-    }
     if (m_watched) {
         connect(m_watched, &controllers::WatchedController::changed,
             this, &SeriesDetailViewModel::refreshEpisodeWatchedState);
@@ -139,86 +105,6 @@ SeriesDetailViewModel::SeriesDetailViewModel(
 
 SeriesDetailViewModel::~SeriesDetailViewModel() = default;
 
-void SeriesDetailViewModel::setSortMode(int mode)
-{
-    const auto m = static_cast<SortMode>(mode);
-    if (m_sortMode == m) {
-        return;
-    }
-    m_sortMode = m;
-    Q_EMIT sortChanged();
-    rebuildVisibleStreams();
-}
-
-void SeriesDetailViewModel::setSortDescending(bool desc)
-{
-    if (m_sortDescending == desc) {
-        return;
-    }
-    m_sortDescending = desc;
-    Q_EMIT sortChanged();
-    rebuildVisibleStreams();
-}
-
-void SeriesDetailViewModel::setUiResolutionFilter(const QString& res)
-{
-    if (m_uiResolutionFilter == res) {
-        return;
-    }
-    m_uiResolutionFilter = res;
-    Q_EMIT uiFiltersChanged();
-    rebuildVisibleStreams();
-}
-
-void SeriesDetailViewModel::setUiHdrOnly(bool on)
-{
-    if (m_uiHdrOnly == on) {
-        return;
-    }
-    m_uiHdrOnly = on;
-    Q_EMIT uiFiltersChanged();
-    rebuildVisibleStreams();
-}
-
-void SeriesDetailViewModel::setUiDolbyVisionOnly(bool on)
-{
-    if (m_uiDolbyVisionOnly == on) {
-        return;
-    }
-    m_uiDolbyVisionOnly = on;
-    Q_EMIT uiFiltersChanged();
-    rebuildVisibleStreams();
-}
-
-void SeriesDetailViewModel::setUiMultiAudioOnly(bool on)
-{
-    if (m_uiMultiAudioOnly == on) {
-        return;
-    }
-    m_uiMultiAudioOnly = on;
-    Q_EMIT uiFiltersChanged();
-    rebuildVisibleStreams();
-}
-
-bool SeriesDetailViewModel::uiAnyFilterActive() const noexcept
-{
-    return !m_uiResolutionFilter.isEmpty()
-        || m_uiHdrOnly || m_uiDolbyVisionOnly || m_uiMultiAudioOnly;
-}
-
-void SeriesDetailViewModel::clearUiFilters()
-{
-    if (!uiAnyFilterActive()) {
-        return;
-    }
-    m_uiResolutionFilter.clear();
-    m_uiHdrOnly = false;
-    m_uiDolbyVisionOnly = false;
-    m_uiMultiAudioOnly = false;
-    Q_EMIT uiFiltersChanged();
-    rebuildVisibleStreams();
-}
-
 void SeriesDetailViewModel::setMetaState(MetaState s, const QString& error)
 {
     bool changed = false;
@@ -235,27 +121,9 @@ void SeriesDetailViewModel::setMetaState(MetaState s, const QString& error)
     }
 }
 
-void SeriesDetailViewModel::setSimilarVisible(bool on)
-{
-    if (m_similarVisible == on) {
-        return;
-    }
-    m_similarVisible = on;
-    Q_EMIT similarChanged();
-}
-
 void SeriesDetailViewModel::resetMeta()
 {
-    m_imdbId.clear();
-    m_title.clear();
-    m_year = 0;
-    m_posterUrl.clear();
-    m_backdropUrl.clear();
-    m_description.clear();
-    m_genres.clear();
-    m_cast.clear();
-    m_rating = -1.0;
-    m_releaseDateText.clear();
+    clearCommonMeta();
     m_currentSeries = {};
     refreshLibraryState();
     refreshEpisodeWatchedState();
@@ -283,36 +151,13 @@ void SeriesDetailViewModel::clear()
     ++m_similarEpoch;
     resetMeta();
     setMetaState(MetaState::Idle);
-    m_streams->setIdle();
-    m_rawStreams.clear();
-    Q_EMIT rawStreamsCountChanged();
-    m_similar->setItems({});
-    setSimilarVisible(false);
-    if (uiAnyFilterActive()) {
-        m_uiResolutionFilter.clear();
-        m_uiHdrOnly = false;
-        m_uiDolbyVisionOnly = false;
-        m_uiMultiAudioOnly = false;
-        Q_EMIT uiFiltersChanged();
-    }
+    resetStreamsAndFilters();
 }
 
 void SeriesDetailViewModel::applyMeta(const domain::SeriesDetail& sd)
 {
     m_currentSeries = sd;
-    const auto& s = sd.meta.summary;
-    m_imdbId = s.imdbId;
-    m_title = s.title;
-    m_year = s.year.value_or(0);
-    m_posterUrl = s.poster.toString();
-    m_backdropUrl = sd.meta.background.toString();
-    m_description = s.description;
-    m_genres = sd.meta.genres;
-    m_cast = sd.meta.cast;
-    m_rating = s.imdbRating.value_or(-1.0);
-    m_releaseDateText = (s.released && s.released->isValid())
-        ? core::formatReleaseDate(*s.released)
-        : QString();
+    assignCommonMeta(sd.meta);
     Q_EMIT metaChanged();
     refreshLibraryState();
 
@@ -378,16 +223,6 @@ void SeriesDetailViewModel::publishCurrentSeasonEpisodes()
     }
     m_episodes->setEpisodes(std::move(rows));
     refreshEpisodeWatchedState();
-}
-
-void SeriesDetailViewModel::refreshLibraryState()
-{
-    const bool inLibrary = m_library && !m_imdbId.isEmpty()
-        && m_library->isInLibrary(domain::MediaKind::Series, m_imdbId);
-    if (m_inLibrary != inLibrary) {
-        m_inLibrary = inLibrary;
-        Q_EMIT libraryStateChanged();
-    }
 }
 
 void SeriesDetailViewModel::refreshEpisodeWatchedState()
@@ -459,13 +294,6 @@ QVariantList SeriesDetailViewModel::seasonNumbers() const
         out.append(n);
     }
     return out;
-}
-
-QString SeriesDetailViewModel::libraryActionText() const
-{
-    return m_inLibrary
-        ? i18nc("@action:button", "Remove from Library")
-        : i18nc("@action:button", "Add to Library");
 }
 
 void SeriesDetailViewModel::setCurrentSeason(int idx)
@@ -565,7 +393,7 @@ QCoro::Task<void> SeriesDetailViewModel::loadSeriesMetaTask(
     }
 
     // Kick off similar in parallel \u2014 its own epoch handles cancellation.
-    auto similarTask = loadSimilarFor(imdbId);
+    auto similarTask = loadSimilarFor(imdbId, domain::MediaKind::Series);
     Q_UNUSED(similarTask);
 
     // Auto-select pending (season, episode) seed (Continue Watching).
@@ -654,13 +482,6 @@ void SeriesDetailViewModel::addToLibrary()
         return;
     }
     m_library->saveSeries(m_currentSeries);
-}
-
-void SeriesDetailViewModel::removeFromLibrary()
-{
-    if (m_library && !m_imdbId.isEmpty()) {
-        m_library->removeFromLibrary(domain::MediaKind::Series, m_imdbId);
-    }
 }
 
 void SeriesDetailViewModel::toggleEpisodeWatched(int row)
@@ -809,113 +630,6 @@ QCoro::Task<void> SeriesDetailViewModel::resolveByTmdbAndLoad(
     co_return;
 }
 
-QCoro::Task<void> SeriesDetailViewModel::loadSimilarFor(QString imdbId)
-{
-    const auto myEpoch = ++m_similarEpoch;
-    auto kind = domain::MediaKind::Series;
-
-    if (imdbId.isEmpty() || !m_tmdb || !m_tmdb->hasToken()) {
-        m_similar->setItems({});
-        setSimilarVisible(false);
-        co_return;
-    }
-
-    m_similar->setLoading();
-
-    int tmdbId = 0;
-    try {
-        const auto [id, found] = co_await m_tmdb->findByImdb(imdbId, kind);
-        if (myEpoch != m_similarEpoch) {
-            co_return;
-        }
-        tmdbId = id;
-        kind = found;
-        if (tmdbId == 0) {
-            m_similar->setItems({});
-            setSimilarVisible(false);
-            co_return;
-        }
-    } catch (const std::exception& e) {
-        if (myEpoch != m_similarEpoch) {
-            co_return;
-        }
-        Q_UNUSED(core::describeError(e, "series detail/similar/find"));
-        m_similar->setItems({});
-        setSimilarVisible(false);
-        co_return;
-    }
-
-    QList<domain::DiscoverItem> items;
-    try {
-        items = co_await m_tmdb->recommendations(kind, tmdbId);
-        if (myEpoch != m_similarEpoch) {
-            co_return;
-        }
-        if (items.isEmpty()) {
-            items = co_await m_tmdb->similar(kind, tmdbId);
-            if (myEpoch != m_similarEpoch) {
-                co_return;
-            }
-        }
-    } catch (const std::exception& e) {
-        if (myEpoch != m_similarEpoch) {
-            co_return;
-        }
-        Q_UNUSED(core::describeError(e,
-            "series detail/similar/recommendations"));
-        m_similar->setItems({});
-        setSimilarVisible(false);
-        co_return;
-    }
-
-    if (items.isEmpty()) {
-        m_similar->setItems({});
-        setSimilarVisible(false);
-        co_return;
-    }
-
-    m_similar->setItems(std::move(items));
-    setSimilarVisible(true);
-}
-
-void SeriesDetailViewModel::rebuildVisibleStreams()
-{
-    if (m_rawStreams.isEmpty()) {
-        return;
-    }
-    auto visible = applyFilters();
-    sortInPlace(visible);
-
-    QString emptyExplanation;
-    if (visible.isEmpty()) {
-        emptyExplanation = i18nc("@info streams empty",
-            "Loosen the exclusions or keyword blocklist in "
-            "Settings.");
-    }
-    m_streams->setItems(std::move(visible), emptyExplanation);
-}
-
-QList<domain::Stream> SeriesDetailViewModel::applyFilters() const
-{
-    if (m_rawStreams.isEmpty()) {
-        return {};
-    }
-    core::stream_filter::ClientFilters f;
-    f.keywordBlocklist = m_settings.filter().keywordBlocklist();
-    f.excludedResolutions = m_settings.filter().excludedResolutions();
-    f.excludedCategories = m_settings.filter().excludedCategories();
-    auto rows = core::stream_filter::apply(m_rawStreams, f);
-
-    return stream_sorting::applyUiFilters(std::move(rows),
-        { m_uiResolutionFilter, m_uiHdrOnly,
-            m_uiDolbyVisionOnly, m_uiMultiAudioOnly });
-}
-
-void SeriesDetailViewModel::sortInPlace(QList<domain::Stream>& rows) const
-{
-    stream_sorting::sortInPlace(rows, m_sortMode, m_sortDescending);
-}
-
 domain::PlaybackContext SeriesDetailViewModel::currentContext() const
 {
     domain::PlaybackContext ctx;
@@ -933,182 +647,6 @@ domain::PlaybackContext SeriesDetailViewModel::currentContext() const
     ctx.poster = QUrl(m_posterUrl);
     ctx.backdrop = QUrl(m_backdropUrl);
     return ctx;
-}
-
-void SeriesDetailViewModel::setDownloadController(
-    controllers::DownloadController* dl)
-{
-    m_downloads = dl;
-}
-
-void SeriesDetailViewModel::playNow(int row)
-{
-    const auto* s = m_streams->at(row);
-    if (!s) {
-        return;
-    }
-    if (s->directUrl.isEmpty() && s->infoHash.isEmpty()) {
-        Q_EMIT statusMessage(
-            i18nc("@info:status",
-                "This stream has no playable URL or magnet."),
-            4000);
-        return;
-    }
-    if (!m_playback) {
-        return;
-    }
-    m_playback->play(*s, currentContext());
-}
-
-void SeriesDetailViewModel::playWithBackend(int row, int backendKind)
-{
-    const auto* s = m_streams->at(row);
-    if (!s) {
-        return;
-    }
-    if (s->directUrl.isEmpty() && s->infoHash.isEmpty()) {
-        Q_EMIT statusMessage(
-            i18nc("@info:status",
-                "This stream has no playable URL or magnet."),
-            4000);
-        return;
-    }
-    if (!m_playback) {
-        return;
-    }
-    m_playback->playWithBackend(*s, currentContext(),
-        static_cast<domain::DownloadBackendKind>(backendKind));
-}
-
-void SeriesDetailViewModel::download(int row)
-{
-    const auto* s = m_streams->at(row);
-    if (!s) {
-        return;
-    }
-    if (s->infoHash.isEmpty() && s->directUrl.isEmpty()) {
-        Q_EMIT statusMessage(i18nc("@info:status",
-            "This stream has no playable URL or magnet."), 4000);
-        return;
-    }
-    if (!m_downloads) {
-        return;
-    }
-    m_downloads->download(*s, currentContext());
-    Q_EMIT statusMessage(
-        i18nc("@info:status starting a background episode download",
-            "Downloading \u201c%1\u201d\u2026", currentContext().title),
-        3500);
-}
-
-void SeriesDetailViewModel::downloadWithBackend(int row, int backendKind)
-{
-    const auto* s = m_streams->at(row);
-    if (!s || !m_downloads) {
-        return;
-    }
-    m_downloads->downloadWithBackend(*s, currentContext(),
-        static_cast<domain::DownloadBackendKind>(backendKind));
-}
-
-template <typename Method>
-void SeriesDetailViewModel::dispatchStreamAction(int row, Method method)
-{
-    if (!m_streamUtility) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        (m_streamUtility->*method)(*s);
-    }
-}
-
-void SeriesDetailViewModel::copyMagnet(int row)
-{
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyMagnet);
-}
-
-void SeriesDetailViewModel::openMagnet(int row)
-{
-    dispatchStreamAction(row, &controllers::StreamUtilityController::openMagnet);
-}
-
-void SeriesDetailViewModel::copyDirectUrl(int row)
-{
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyDirectUrl);
-}
-
-void SeriesDetailViewModel::openDirectUrl(int row)
-{
-    dispatchStreamAction(row, &controllers::StreamUtilityController::openDirectUrl);
-}
-
-void SeriesDetailViewModel::copyReleaseName(int row)
-{
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyReleaseName);
-}
-
-void SeriesDetailViewModel::requestSubtitles()
-{
-    Q_EMIT subtitlesRequested(currentContext());
-}
-
-void SeriesDetailViewModel::requestSubtitlesFor(int row)
-{
-    auto ctx = currentContext();
-    if (const auto* s = m_streams->at(row)) {
-        ctx.streamRef = domain::HistoryStreamRef::fromStream(*s);
-    }
-    Q_EMIT subtitlesRequested(ctx);
-}
-
-void SeriesDetailViewModel::activateSimilar(int row)
-{
-    const auto* item = m_similar->itemAt(row);
-    if (!item) {
-        return;
-    }
-    if (item->kind == domain::MediaKind::Series) {
-        Q_EMIT openSeriesByTmdbRequested(item->tmdbId, item->title);
-    } else {
-        Q_EMIT openMovieByTmdbRequested(item->tmdbId, item->title);
-    }
-}
-
-void SeriesDetailViewModel::addSimilarToLibrary(int row)
-{
-    const auto* item = m_similar->itemAt(row);
-    if (!item) {
-        return;
-    }
-    auto task = title_actions::addToLibraryByTmdb(m_tmdb,
-        m_library, this, item->tmdbId, item->kind, item->title);
-    Q_UNUSED(task);
-}
-
-void SeriesDetailViewModel::markSimilarWatched(int row)
-{
-    const auto* item = m_similar->itemAt(row);
-    if (!item) {
-        return;
-    }
-    auto task = title_actions::markWatchedByTmdb(m_tmdb,
-        m_watched, this, item->tmdbId, item->kind, item->title);
-    Q_UNUSED(task);
-}
-
-void SeriesDetailViewModel::findSimilarStreams(int row)
-{
-    const auto* item = m_similar->itemAt(row);
-    if (!item || item->tmdbId <= 0) {
-        return;
-    }
-    if (item->kind == domain::MediaKind::Series) {
-        Q_EMIT findSeriesStreamsByTmdbRequested(
-            item->tmdbId, item->title);
-    } else {
-        Q_EMIT findMovieStreamsByTmdbRequested(
-            item->tmdbId, item->title);
-    }
 }
 
 } // namespace kinema::ui::qml
