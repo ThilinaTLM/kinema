@@ -66,7 +66,7 @@
 #include "playback/transfer/TransferSupervisor.h"
 #include "playback/transfer/TransferUseCase.h"
 
-#include "services/StreamActions.h"
+#include "controllers/StreamUtilityController.h"
 #include "playback/torrent/LibtorrentClient.h"
 #include "ui/ImageLoader.h"
 #include "ui/qml-bridge/AppIconResolver.h"
@@ -224,7 +224,7 @@ void ServiceContainer::buildPlaybackSubsystem()
 {
     QObject* a = m_anchor.get();
 
-    m_streamActions = new services::StreamActions(m_player.get(), a);
+    m_streamUtility = new controllers::StreamUtilityController(a);
 
     // ---- Unified downloader -------------------------------------
 
@@ -287,7 +287,6 @@ void ServiceContainer::buildPlaybackSubsystem()
                 ->ensureSessionForAssetId(assetId);
         });
 
-    m_streamActions->setTransferUseCase(m_transferUseCase);
     m_downloadCtrl = new controllers::DownloadController(
         *m_transferUseCase, *m_downloadStore, a);
 
@@ -315,20 +314,28 @@ void ServiceContainer::buildPlaybackSubsystem()
             *m_historyRepo, *m_playbackEventStream, a);
     m_historyQueryService = new playback::history::HistoryQueryService(
         *m_historyRepo, *m_history, a);
+
+    // ---- Event-driven projections + session manager --------------
+
+#ifdef KINEMA_HAVE_LIBMPV
+    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
+        *m_playbackEventStream, *m_transferUseCase,
+        m_embeddedPlayerAdapter, m_externalPlayerAdapter, a);
+#else
+    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
+        *m_playbackEventStream, *m_transferUseCase,
+        nullptr, m_externalPlayerAdapter, a);
+#endif
+
     m_resumeUseCase
         = new playback::resume::ResumeUseCase(
             *m_historyQueryService,
             *m_playbackProgressProjector,
             *m_streamIndexerAdapter,
             *m_historyRepo,
-            *m_streamActions,
+            *m_playbackSessionManager,
             a);
-    // StreamActions seeds ctx.resumeSeconds via ResumeUseCase, which
-    // checks the projector's live position first and then falls
-    // back to the on-disk history row via the ResumePolicy.
-    m_streamActions->setResumeUseCase(m_resumeUseCase);
-
-    // ---- Event-driven projections + session manager --------------
+    m_playbackSessionManager->setResumeUseCase(m_resumeUseCase);
 
 #ifdef KINEMA_HAVE_LIBMPV
     // Event-driven moviehash probe. Subscribes to
@@ -345,9 +352,6 @@ void ServiceContainer::buildPlaybackSubsystem()
     m_trackMemoryService = new playback::history::TrackMemoryService(
         *m_playbackEventStream, *m_historyQueryService,
         m_embeddedPlayerAdapter, a);
-    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, *m_playbackEventStream,
-        m_embeddedPlayerAdapter, m_externalPlayerAdapter, a);
     // Event-driven season-pack adjacency. Subscribes to the
     // playback event stream, reads files via the session catalog,
     // and dispatches next/previous through PlaybackSessionManager.
@@ -357,6 +361,7 @@ void ServiceContainer::buildPlaybackSubsystem()
     m_seriesSessionService = new playback::series::SeriesSessionService(
         *m_playbackEventStream, *m_sessionRegistry,
         *m_playbackSessionManager, a);
+    m_playbackSessionManager->setSeriesSessionService(m_seriesSessionService);
     // Desktop MPRIS surface. Subscribes to PlaybackEventStream,
     // sends transport commands through PlaybackSessionManager,
     // queries EmbeddedMpvPlayerAdapter for live snapshots
@@ -366,9 +371,6 @@ void ServiceContainer::buildPlaybackSubsystem()
         *m_playbackEventStream, *m_playbackSessionManager,
         m_embeddedPlayerAdapter, m_seriesSessionService, a);
 #else
-    m_playbackSessionManager = new playback::session::PlaybackSessionManager(
-        *m_streamActions, *m_playbackEventStream,
-        nullptr, m_externalPlayerAdapter, a);
 #endif
 }
 
@@ -422,7 +424,7 @@ void ServiceContainer::buildControllersAndViewModels()
     // drawer's downloads entry can show counts even before the
     // first navigation to the page.
     m_downloadsVm = new ui::qml::DownloadsViewModel(*m_downloadCtrl,
-        m_streamActions, a);
+        m_playbackSessionManager, a);
 
     // Discover / Search / Browse surface VMs. They sit on top of
     // the existing service graph; action signals route back into
@@ -444,13 +446,15 @@ void ServiceContainer::buildControllersAndViewModels()
     m_browseVm->setLibraryController(m_libraryCtrl);
     m_browseVm->setWatchedController(m_watchedCtrl);
     m_movieDetailVm = new ui::qml::MovieDetailViewModel(m_cinemeta,
-        m_indexers, m_tmdb, m_streamActions, m_libraryCtrl,
+        m_indexers, m_tmdb, m_playbackSessionManager, m_streamUtility,
+        m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
         m_tokenCtrl->realDebridToken(),
         m_tokenCtrl->allDebridApiKey(), a);
     m_movieDetailVm->setDownloadController(m_downloadCtrl);
     m_seriesDetailVm = new ui::qml::SeriesDetailViewModel(m_cinemeta,
-        m_indexers, m_tmdb, m_streamActions, m_libraryCtrl,
+        m_indexers, m_tmdb, m_playbackSessionManager, m_streamUtility,
+        m_libraryCtrl,
         m_watchedCtrl, m_tokenCtrl, m_settings,
         m_tokenCtrl->realDebridToken(),
         m_tokenCtrl->allDebridApiKey(), a);

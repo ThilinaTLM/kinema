@@ -13,7 +13,6 @@
 #include "playback/ports/PlaybackHistoryRepository.h"
 #include "playback/ports/StreamIndexerPort.h"
 #include "playback/progress/PlaybackProgressProjector.h"
-#include "services/StreamActions.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -48,14 +47,8 @@ public:
     }
 };
 
-class RecordingActions : public services::StreamActions
+struct RecordingPlayback
 {
-public:
-    explicit RecordingActions(QObject* parent = nullptr)
-        : services::StreamActions(/*launcher=*/nullptr, parent)
-    {
-    }
-
     struct Call {
         domain::Stream stream;
         domain::PlaybackContext ctx;
@@ -63,7 +56,7 @@ public:
     QList<Call> calls;
 
     void play(const domain::Stream& s,
-        const domain::PlaybackContext& ctx) override
+        const domain::PlaybackContext& ctx)
     {
         calls.append({ s, ctx });
     }
@@ -129,15 +122,19 @@ private Q_SLOTS:
         m_projector = std::make_unique<progress::PlaybackProgressProjector>(
             *m_repo, *m_eventStream);
         m_indexer = std::make_unique<StubIndexer>();
-        m_actions = std::make_unique<RecordingActions>();
+        m_playback = std::make_unique<RecordingPlayback>();
         m_useCase = std::make_unique<ResumeUseCase>(*m_query, *m_projector,
-            *m_indexer, *m_repo, *m_actions);
+            *m_indexer, *m_repo,
+            [this](const domain::Stream& stream,
+                const domain::PlaybackContext& ctx) {
+                m_playback->play(stream, ctx);
+            });
     }
 
     void cleanup()
     {
         m_useCase.reset();
-        m_actions.reset();
+        m_playback.reset();
         m_indexer.reset();
         m_projector.reset();
         m_eventStream.reset();
@@ -237,10 +234,10 @@ private Q_SLOTS:
         m_useCase->resume(e);
         drain();
 
-        QCOMPARE(m_actions->calls.size(), 1);
-        QCOMPARE(m_actions->calls[0].stream.infoHash,
+        QCOMPARE(m_playback->calls.size(), 1);
+        QCOMPARE(m_playback->calls[0].stream.infoHash,
             QStringLiteral("hashX"));
-        QCOMPARE(m_actions->calls[0].stream.directUrl.toString(),
+        QCOMPARE(m_playback->calls[0].stream.directUrl.toString(),
             QStringLiteral("http://x/direct.mkv"));
         QCOMPARE(fallbackSpy.count(), 0);
         // An initial "Resuming..." status is emitted.
@@ -259,7 +256,7 @@ private Q_SLOTS:
         m_useCase->resume(e);
         drain();
 
-        QCOMPARE(m_actions->calls.size(), 0);
+        QCOMPARE(m_playback->calls.size(), 0);
         QCOMPARE(fallbackSpy.count(), 1);
     }
 
@@ -275,7 +272,7 @@ private Q_SLOTS:
         // Empty release reference is rejected synchronously; the
         // indexer is never queried.
         QCOMPARE(m_indexer->calls, 0);
-        QCOMPARE(m_actions->calls.size(), 0);
+        QCOMPARE(m_playback->calls.size(), 0);
         QCOMPARE(fallbackSpy.count(), 1);
     }
 
@@ -290,7 +287,7 @@ private Q_SLOTS:
         m_useCase->resume(e);
         drain();
 
-        QCOMPARE(m_actions->calls.size(), 0);
+        QCOMPARE(m_playback->calls.size(), 0);
         QCOMPARE(fallbackSpy.count(), 1);
     }
 
@@ -303,7 +300,7 @@ private:
     std::unique_ptr<events::PlaybackEventStream> m_eventStream;
     std::unique_ptr<progress::PlaybackProgressProjector> m_projector;
     std::unique_ptr<StubIndexer> m_indexer;
-    std::unique_ptr<RecordingActions> m_actions;
+    std::unique_ptr<RecordingPlayback> m_playback;
     std::unique_ptr<ResumeUseCase> m_useCase;
 };
 

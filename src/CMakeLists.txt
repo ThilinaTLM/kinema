@@ -129,12 +129,12 @@ set(kinema_core_SRCS
     controllers/DebridCredentialsResolver.cpp
     controllers/DownloadController.cpp
     controllers/LibraryController.cpp
+    controllers/StreamUtilityController.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
     controllers/WatchedController.cpp
 
-    services/StreamActions.cpp
 
     ui/qml-bridge/AppIconResolver.cpp
     ui/qml-bridge/BrowseViewModel.cpp

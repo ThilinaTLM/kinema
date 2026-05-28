@@ -8,6 +8,7 @@
 #include "domain/MediaFile.h"
 #include "domain/PlaybackContext.h"
 #include "playback/ports/ByteRangeSource.h"
+#include "playback/sources/AssetSession.h"
 
 #include <QCoro/QCoroTask>
 
@@ -20,20 +21,21 @@ namespace kinema::playback::ports {
 
 /**
  * Open-session result from `MediaSourcePort::open`. Owns the
- * underlying byte-range session so the caller can register it on
- * `LocalHttpStreamGateway` and surface progress events.
+ * underlying transfer source so the caller can register its
+ * byte-range surface on `LocalHttpStreamGateway` and observe
+ * progress events without downcasting.
  */
 struct OpenedSession {
     QString assetId;
-    std::unique_ptr<ByteRangeSource> session;
+    std::unique_ptr<sources::AssetSession> session;
 };
 
 /**
  * Strategy interface for one media backend (torrent / debrid).
  *
  * Mirrors `download::DownloadBackend` but speaks in terms of the
- * playback subsystem's port types (`ByteRangeSource`,
- * `domain::MediaFileEntry`). Implementations live in
+ * playback subsystem's transfer-source abstraction and
+ * `domain::MediaFileEntry`. Implementations live in
  * `playback::sources`.
  */
 class MediaSourcePort
@@ -49,8 +51,8 @@ public:
     virtual bool canHandle(const domain::Stream& s) const = 0;
 
     /// Open a session for `ref` in the requested `mode`. The
-    /// returned `OpenedSession.session` must implement
-    /// `ByteRangeSource` and be ready to take requests.
+    /// returned `OpenedSession.session` is ready to take byte-range
+    /// requests and emit transfer progress.
     virtual QCoro::Task<OpenedSession> open(
         const domain::AssetRef& ref,
         const domain::Stream& stream,

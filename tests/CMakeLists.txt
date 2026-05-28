@@ -238,10 +238,6 @@ ecm_add_test(tst_series_detail_view_model.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_stream_actions.cpp
-    TEST_NAME tst_stream_actions
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
 
 ecm_add_test(tst_subtitle_results_model.cpp
     TEST_NAME tst_subtitle_results_model
@@ -532,7 +528,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_search_view_model tst_browse_view_model tst_results_list_model
          tst_streams_list_model tst_episodes_list_model
          tst_movie_detail_view_model tst_series_detail_view_model
-         tst_stream_actions tst_subtitle_results_model
+         tst_subtitle_results_model
          tst_token_controller tst_debrid_credentials_resolver
          tst_cinemeta_client tst_tmdb_client
          tst_torrentio_indexer tst_realdebrid_client tst_alldebrid_client

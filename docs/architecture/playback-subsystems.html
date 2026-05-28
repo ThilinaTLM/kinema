@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kinema — Playback Subsystems Walkthrough</title>
+  <link rel="stylesheet" href="./richdoc.css">
+  <script src="./richdoc.js" defer></script>
+</head>
+<body>
+<rd-page theme="graphite-modern" mode="auto" width="standard" toc="auto">
+
+  <rd-hero
+    eyebrow="Architecture walkthrough"
+    title="Playback subsystems"
+    lede="How the embedded player, local streaming server, downloader, torrent engine, and progress tracker fit together"
+    meta="Kinema · KDE Plasma 6 · libmpv + libtorrent + QCoro">
+  </rd-hero>
+
+  <rd-callout type="tldr">
+    <p>
+      A play action flows through five cooperating subsystems. The <strong>downloader</strong>
+      picks a backend (Torrent, Real-Debrid, or AllDebrid) and creates an
+      <strong>AssetSession</strong>. The <strong>torrent engine</strong> (libtorrent) or a
+      debrid resolver supplies bytes. The <strong>local streaming server</strong>
+      (<code>127.0.0.1</code>) exposes those bytes as an HTTP URL with Range support. The
+      <strong>embedded mpv player</strong> consumes that URL and emits time-pos updates. The
+      <strong>progress tracker</strong> debounces, throttles, persists, and decides when a
+      title is finished — and, for series, what plays next.
+    </p>
+  </rd-callout>
+
+  <rd-section title="System map">
+    <p>
+      Every play action — whether the user clicked a stream row, hit "Resume" on Continue
+      Watching, or auto-advanced to the next episode — converges on the same pipeline:
+    </p>
+
+    <rd-diagram lang="mermaid" caption="High-level dataflow across the five subsystems">
+flowchart LR
+  subgraph UI["UI / QML"]
+    QmlCard["StreamCard / Resume button"]
+    QmlPlayer["PlayerScene.qml"]
+  end
+
+  subgraph Ctrl["Controllers"]
+    SA["services::StreamActions"]
+    DC["DownloadController"]
+    PC["PlaybackController"]
+    HC["HistoryController"]
+    WC["WatchedController"]
+    SS["SeriesPlaybackSessionController"]
+  end
+
+  subgraph DL["Downloader (src/download)"]
+    DM["DownloadManager"]
+    BS["BackendSelector"]
+    AS["AssetSession<br/>(Torrent / Http)"]
+    LMS["LocalMediaServer<br/>127.0.0.1:PORT"]
+    RES["Debrid Resolvers<br/>(RD / AD)"]
+  end
+
+  subgraph TE["Torrent engine (src/torrent)"]
+    TSS["TorrentStreamingService<br/>(libtorrent session)"]
+    PP["PiecePlanner"]
+    MFS["MediaFileSelector"]
+  end
+
+  subgraph PL["Embedded player (src/ui/player)"]
+    PVM["PlayerViewModel"]
+    MVI["MpvVideoItem (mpvqt)"]
+    Mpv[(libmpv)]
+  end
+
+  subgraph DB["Persistence (src/core/persistence)"]
+    HS["HistoryStore"]
+    WS["WatchedStore"]
+    DS["DownloadStore"]
+    MC["MediaCache / disk"]
+  end
+
+  QmlCard --> SA --> DC --> DM
+  DM --> BS --> AS
+  AS -- "registers /stream/&lt;id&gt;/file" --> LMS
+  AS --> TSS
+  AS --> RES
+  TSS --> PP
+  TSS --> MFS
+  TSS --> MC
+
+  LMS -- "http://127.0.0.1:PORT/..." --> PC --> PVM --> MVI --> Mpv
+  Mpv -- "HTTP GET Range" --> LMS
+
+  MVI -- "time-pos / eof" --> PC --> HC --> HS
+  HC --> WC --> WS
+  PC --> SS --> DM
+  QmlPlayer <--> PVM
+  DM <--> DS
+    </rd-diagram>
+
+    <rd-callout type="note">
+      <p>
+        The same <code>AssetSession</code> abstraction sits in front of both the torrent
+        engine and the debrid HTTP backends. The player never knows which transport is
+        actually serving bytes — it just opens an <code>http://127.0.0.1:PORT/stream/&lt;id&gt;/...</code>
+        URL like any other source.
+      </p>
+    </rd-callout>
+  </rd-section>
+
+  <rd-section title="Embedded mpv player">
+    <p>
+      Three layers — a top-level <code>QQuickView</code> window, a state-bearing view-model,
+      and a QtQuick item that owns the actual libmpv context (via KDE's
+      <a href="https://invent.kde.org/libraries/mpvqt"><code>mpvqt</code></a> library).
+      libmpv decodes on its own worker thread and ships property changes back to the GUI
+      thread via <code>Qt::QueuedConnection</code>. There are no mutexes anywhere in the
+      player code.
+    </p>
+
+    <rd-cols n="3">
+      <rd-card title="PlayerWindow" accent="info">
+        Owns the <code>QQuickView</code>, the Wayland surface, fullscreen handling, and
+        signal forwarding between <code>PlaybackController</code> and
+        <code>MpvVideoItem</code>.
+      </rd-card>
+      <rd-card title="PlayerViewModel">
+        Exposes <code>AudioTracksModel</code>, <code>SubtitleTracksModel</code>,
+        <code>ChaptersModel</code>, plus prompt-visibility flags. Binds to QML pickers
+        and the seekbar.
+      </rd-card>
+      <rd-card title="MpvVideoItem" accent="success">
+        Subclasses <code>MpvAbstractItem</code> from mpvqt. Builds the
+        <code>loadfile</code> command, observes properties (<code>time-pos</code>,
+        <code>track-list</code>, <code>chapter-list</code>, <code>aid</code>,
+        <code>sid</code>…), and emits typed Qt signals.
+      </rd-card>
+    </rd-cols>
+
+    <rd-kv layout="inline">
+      <rd-row key="Build flag">Behind <code>KINEMA_ENABLE_MPV_EMBED</code> / <code>KINEMA_HAVE_LIBMPV</code></rd-row>
+      <rd-row key="Threading">libmpv worker thread → GUI thread via queued property-change signals</rd-row>
+      <rd-row key="Position debounce">250 ms epsilon inside <code>MpvVideoItem</code> before emitting <code>positionChanged</code></rd-row>
+      <rd-row key="QML chrome">8-layer <code>PlayerScene.qml</code> (video → dim → top bar → transport → pickers → prompts → input)</rd-row>
+    </rd-kv>
+
+    <rd-diagram lang="mermaid" caption="Loading a stream into the embedded player">
+sequenceDiagram
+  autonumber
+  participant Ctrl as PlaybackController
+  participant Win as PlayerWindow
+  participant Item as MpvVideoItem
+  participant Mpv as libmpv (worker)
+  participant VM as PlayerViewModel
+  participant QML as PlayerScene.qml
+
+  Ctrl->>Win: play(url, context)
+  Win->>Item: loadFile(url)
+  Item->>Mpv: command(["loadfile", url])
+  Mpv-->>Item: file-loaded (queued)
+  Mpv-->>Item: property duration / track-list / chapter-list
+  Item->>VM: durationChanged / trackListChanged
+  VM->>QML: models repopulate, pickers refresh
+  loop ~4 Hz (after 250 ms epsilon)
+    Mpv-->>Item: property time-pos
+    Item->>Win: positionChanged(t)
+    Win->>Ctrl: re-emit positionChanged
+  end
+  Mpv-->>Item: end-file(reason)
+  Item->>Win: endOfFile(reason)
+  Win->>Ctrl: re-emit endOfFile
+    </rd-diagram>
+
+    <rd-detail summary="Key signals/slots the QML chrome touches">
+      <rd-kv layout="stacked">
+        <rd-row key="Control slots (C++ → QML state)">
+          <code>play(url, ctx)</code>, <code>togglePause()</code>,
+          <code>seekAbsolute/Relative()</code>, <code>setAudioTrack()</code>,
+          <code>setSubtitleTrack()</code>, <code>setSpeed()</code>,
+          <code>showResumePrompt()</code>, <code>showSkipChapter()</code>,
+          <code>setLoadingVisible()</code>, <code>stopAndHide()</code>
+        </rd-row>
+        <rd-row key="Action signals (QML → C++)">
+          <code>pickAudio()</code>, <code>pickSubtitle()</code>, <code>pickSpeed()</code>,
+          <code>requestResumeAccept/Decline()</code>, <code>requestSkip()</code>,
+          <code>requestClose()</code>, <code>requestToggleFullscreen()</code>,
+          <code>requestPrevious()</code>, <code>requestNext()</code>,
+          <code>requestSubtitlesDialog()</code>, <code>requestLocalSubtitleFile()</code>
+        </rd-row>
+        <rd-row key="Broadcast signals (Mpv → controllers)">
+          <code>fileLoaded()</code>, <code>endOfFile(reason)</code>,
+          <code>positionChanged(t)</code>, <code>durationChanged(d)</code>,
+          <code>pausedChanged()</code>, <code>trackListChanged()</code>,
+          <code>chaptersChanged()</code>, <code>bufferingChanged()</code>,
+          <code>cacheAheadChanged()</code>, <code>mpvError(msg)</code>
+        </rd-row>
+      </rd-kv>
+    </rd-detail>
+  </rd-section>
+
+  <rd-section title="Local streaming server">
+    <p>
+      A localhost-only HTTP server in <code>src/download/LocalMediaServer.cpp</code> that
+      bridges in-flight bytes (libtorrent pieces or partially-downloaded debrid chunks) into
+      a URL mpv can open. It binds <code>127.0.0.1:0</code>, lets the kernel pick a free
+      port, and serves one route:
+    </p>
+
+    <rd-code lang="text">GET http://127.0.0.1:&lt;port&gt;/stream/&lt;assetId&gt;/&lt;filename&gt;
+Range: bytes=START-END     (RFC 7233; mpv aggressively probes)</rd-code>
+
+    <rd-kv layout="inline">
+      <rd-row key="Owner">Single instance owned by <code>DownloadManager</code>; lazy start on first session.</rd-row>
+      <rd-row key="Binding">Loopback only — never exposed to LAN.</rd-row>
+      <rd-row key="Chunk size">1 MiB writes per loop iteration, with socket backpressure (<code>bytesToWrite</code> threshold + <code>co_await bytesWritten</code>).</rd-row>
+      <rd-row key="Readahead">When asked for byte N, requests pieces up to <em>N + 16 MiB</em> ahead from the torrent layer.</rd-row>
+      <rd-row key="Wait policy">Polls piece availability every 100 ms; gives up after 120 s and returns 503.</rd-row>
+    </rd-kv>
+
+    <rd-diagram lang="mermaid" caption="One Range request, end to end">
+sequenceDiagram
+  autonumber
+  participant Mpv as mpv (HTTP client)
+  participant Srv as LocalMediaServer
+  participant Sess as AssetSession
+  participant Tss as TorrentStreamingService
+  participant Lt as libtorrent
+
+  Mpv->>Srv: GET /stream/abc/file.mkv<br/>Range: bytes=0-1048575
+  Srv->>Srv: parse Range, resolve assetId → session
+  Srv->>Sess: ensureRange([0, 1048575])
+  Sess->>Tss: readaheadRange(0, 1048575, +16 MiB)
+  Tss->>Tss: PiecePlanner::pieceRangeForBytes(...)
+  Tss->>Lt: set_piece_deadline(p, deadline_ms) per piece
+  loop every 100 ms (≤ 120 s)
+    Tss->>Lt: have_piece(p)?
+    Lt-->>Tss: true/false
+  end
+  Sess->>Tss: readRange(0..1048575) → bytes from disk cache
+  Tss-->>Sess: QByteArray
+  Sess-->>Srv: ready
+  Srv-->>Mpv: 206 Partial Content (1 MiB chunks)
+  loop until end of range
+    Srv->>Mpv: sock.write(chunk)
+    Mpv-->>Srv: bytesWritten (backpressure release)
+  end
+    </rd-diagram>
+
+    <rd-callout type="info">
+      <p>
+        A legacy torrent-only server (<code>src/torrent/LocalStreamServer.cpp</code>) still
+        exists for older tests, but the modern path goes through <code>LocalMediaServer</code>
+        because it can also serve <code>HttpAssetSession</code> (debrid) bytes through the
+        exact same Range protocol.
+      </p>
+    </rd-callout>
+  </rd-section>
+
+  <rd-section title="Downloader">
+    <p>
+      The download subsystem orchestrates "get bytes for this asset" regardless of
+      transport. It chooses a backend, drives a resolver if needed, creates an
+      <code>AssetSession</code>, and registers it with <code>LocalMediaServer</code>.
+    </p>
+
+    <rd-cols n="2">
+      <rd-card title="Two session types" accent="info">
+        <p><strong><code>TorrentAssetSession</code></strong> — wraps
+        <code>TorrentStreamingService</code>. Magnets / info-hashes flow through here.</p>
+        <p><strong><code>HttpAssetSession</code></strong> — for resolved debrid URLs.
+        Streams in 4 MiB blocks into a sparse file, with an in-memory bitmap so the
+        player can seek before download finishes.</p>
+      </rd-card>
+      <rd-card title="Two intents per session" accent="warn">
+        <p><strong>Mode</strong>: <code>OnDemand</code> (fetch only what the player asks
+        for; stop when consumer detaches) vs <code>Full</code> (eager fetch to
+        completion).</p>
+        <p><strong>Disposition</strong>: <code>Ephemeral</code> (play cache, LRU-evictable)
+        vs <code>Pinned</code> (user clicked Download — keep forever).</p>
+      </rd-card>
+    </rd-cols>
+
+    <rd-kv layout="inline">
+      <rd-row key="Backend priority">Active provider chosen by the user; otherwise Real-Debrid → AllDebrid → Torrent. No silent fallback if the active provider explicitly fails.</rd-row>
+      <rd-row key="File picker">Heuristic scoring: video extension (+4), filename match (+16 exact / +8 substring), <code>S##E##</code> match (+8), size ≥ 50 MiB (+2). Largest file wins ties.</rd-row>
+      <rd-row key="UI signals"><code>itemChanged(assetId)</code> for per-row updates, <code>changed()</code> for structural ones (coalesced), <code>statusMessage(text, timeoutMs)</code> for toasts.</rd-row>
+      <rd-row key="Persistence"><code>download_items</code> SQLite table keyed by <code>assetId</code>; cached bytes under <code>~/.cache/kinema/downloads/&lt;assetId&gt;/</code>.</rd-row>
+      <rd-row key="Race guard"><code>m_openingAssetIds</code> set in <code>DownloadManager</code> prevents two concurrent <code>prepareForPlayback()</code> calls from spawning duplicate sessions.</rd-row>
+    </rd-kv>
+
+    <rd-diagram lang="mermaid" caption="Lifecycle of a download / playback prep">
+sequenceDiagram
+  autonumber
+  participant U as User / QML
+  participant SA as StreamActions
+  participant DC as DownloadController
+  participant DM as DownloadManager
+  participant BS as BackendSelector
+  participant B as DownloadBackend<br/>(Torrent | RD | AD)
+  participant R as Debrid Resolver<br/>(only for RD/AD)
+  participant AS as AssetSession
+  participant LMS as LocalMediaServer
+
+  U->>SA: play(stream) / download(stream)
+  SA->>DC: prepareForPlayback / enqueueDownload
+  DC->>DM: same
+  DM->>BS: select(stream, settings)
+  BS-->>DM: chosen backend
+  DM->>B: start(stream, mode, disposition)
+  alt Debrid backend
+    B->>R: resolve(magnet/url, credentials)
+    R-->>B: hoster HTTP URL + file list
+    B->>AS: new HttpAssetSession(url, file)
+  else Torrent backend
+    B->>AS: new TorrentAssetSession(infoHash, file)
+  end
+  AS->>LMS: register(assetId, session)
+  DM-->>DC: assetId + localhost URL
+  DC-->>SA: streamReady(url, ctx)
+  SA->>U: pass URL to PlaybackController.play(...)
+  loop while playing / downloading
+    AS-->>DM: progress, bytes cached, rate (EWMA)
+    DM-->>U: itemChanged(assetId)
+  end
+  AS-->>DM: completed() or failed(err)
+  DM-->>U: itemChanged + statusMessage
+    </rd-diagram>
+  </rd-section>
+
+  <rd-section title="Torrent engine">
+    <p>
+      A single <code>TorrentStreamingService</code> <code>QObject</code> wraps one
+      <code>lt::session</code>. It is lazily initialized — debrid-only users never pay
+      the cost. All public API runs on the GUI thread; libtorrent's networking and
+      piece I/O runs on its own thread, and the two communicate exclusively through
+      libtorrent alerts drained on a <code>Qt::QueuedConnection</code>.
+    </p>
+
+    <rd-cols n="3">
+      <rd-card title="MediaFileSelector">
+        Picks the playable file inside a multi-file torrent. Detects <code>S##E##</code> /
+        <code>##x##</code> patterns, filters samples/trailers, and scans the rest of the
+        pack to populate previous/next episode adjacency.
+      </rd-card>
+      <rd-card title="PiecePlanner" accent="success">
+        Pure functions converting byte ranges to piece indices given a torrent's piece
+        layout. Used both for the initial head/tail prioritization and for every
+        sliding-window readahead during playback.
+      </rd-card>
+      <rd-card title="Streaming strategy" accent="info">
+        Head window (first 10 MiB) and tail window (last 5 MiB) prioritized immediately
+        so the demuxer can read the moov atom; a 5 MiB sliding window tracks player
+        position with <code>set_piece_deadline()</code> hints.
+      </rd-card>
+    </rd-cols>
+
+    <rd-kv layout="inline">
+      <rd-row key="Locking model">Zero mutexes. Main thread mutates session-hash maps; libtorrent thread only posts alerts.</rd-row>
+      <rd-row key="Disk cache"><code>~/.local/share/kinema/cache/torrents/&lt;hash&gt;/</code>; LRU pruned to a 50 GB budget by default; <code>.access</code> file mtime marks recent use.</rd-row>
+      <rd-row key="Resume data">Saved by libtorrent on session close; replayed on next add.</rd-row>
+      <rd-row key="Exported API"><code>prepareSession(infoHash, …)</code>, <code>ensureRange()</code>, <code>readRange()</code>, <code>filesForInfoHash(hash)</code>, <code>adjacentEpisodeFiles()</code>.</rd-row>
+    </rd-kv>
+
+    <rd-diagram lang="mermaid" caption="Streaming a torrent from magnet to bytes">
+sequenceDiagram
+  autonumber
+  participant DM as DownloadManager
+  participant TSS as TorrentStreamingService
+  participant Lt as libtorrent session
+  participant MFS as MediaFileSelector
+  participant PP as PiecePlanner
+  participant Disk as Disk cache
+  participant LMS as LocalMediaServer
+
+  DM->>TSS: prepareSession(magnet, hint)
+  TSS->>Lt: async_add_torrent(magnet)
+  Lt-->>TSS: metadata_received_alert
+  TSS->>MFS: pickFile(files, hint)
+  MFS-->>TSS: chosen file + adjacency
+  TSS->>PP: pieceRangeForBytes(headWindow + tailWindow)
+  TSS->>Lt: set_piece_deadline(p, 0..N ms) — head & tail first
+  Lt-->>TSS: piece_finished_alert(s)
+  TSS-->>DM: ready (with localhost URL)
+  loop player Range requests
+    LMS->>TSS: ensureRange(byte range)
+    TSS->>PP: pieceRangeForBytes(range + 5 MiB ahead)
+    TSS->>Lt: set_piece_deadline (sliding window)
+    Lt-->>TSS: piece_finished_alert
+    TSS->>Disk: readRange()
+    Disk-->>LMS: bytes
+  end
+    </rd-diagram>
+  </rd-section>
+
+  <rd-section title="Playback progress tracking">
+    <p>
+      A five-layer pipeline: <em>sample → debounce → throttle → persist → resolve</em>.
+      <code>time-pos</code> is sampled by mpv, debounced at 250 ms inside
+      <code>MpvVideoItem</code>, then throttled to a 5 s persistence cadence in
+      <code>HistoryController</code>. End-of-file finalizes the row with a
+      <code>finished</code> flag derived from completion percentage and chapter metadata.
+    </p>
+
+    <rd-cols n="2">
+      <rd-card title="HistoryController" accent="info">
+        <p>Persists every ~5 s if Δposition warrants it; ignores updates inside the first
+        0.5 % of duration. Captures the stream reference (<code>infoHash</code>,
+        <code>releaseName</code>, <code>resolution</code>, size, provider) <strong>once at
+        play time</strong> — never overwritten by later position ticks, which is what makes
+        Continue-Watching resume across different releases work.</p>
+      </rd-card>
+      <rd-card title="WatchedController">
+        <p>Layered resolution: manual <em>Watched</em> override &gt; manual <em>Unwatched</em>
+        override &gt; <code>history.finished</code>. Users can flip status without re-watching;
+        auto-finish never destroys an explicit override.</p>
+      </rd-card>
+      <rd-card title="SeriesPlaybackSessionController" accent="success">
+        <p>For series, derives previous/next episode files from the active session via
+        <code>DownloadManager::filesForInfoHash()</code> (covers both libtorrent and
+        debrid-cached lists). Emits <code>packAdjacencyResolved(nextAvailable, S, E)</code>
+        one-shot when a season pack actually carries the next episode.</p>
+      </rd-card>
+      <rd-card title="PlaybackLoadWatchdog">
+        <p>Sentinel timer that fires if <code>loadfile</code> doesn't progress to
+        <code>file-loaded</code> within the configured window — surfaces a passive error so
+        the UI can recover instead of spinning forever on a dead source.</p>
+      </rd-card>
+    </rd-cols>
+
+    <rd-kv layout="inline">
+      <rd-row key="Position debounce">250 ms inside <code>MpvVideoItem</code></rd-row>
+      <rd-row key="Persist throttle">5 s in <code>HistoryController</code>; in-memory <code>m_lastPosition</code> always fresh for resume lookups</rd-row>
+      <rd-row key="Auto-finish thresholds">Movies 85 %, episodes 90 %; <em>or</em> credits chapter reached − 2 s; configurable</rd-row>
+      <rd-row key="Resume clamp"><code>min(stored, duration − 5 s)</code> to avoid landing inside credits</rd-row>
+      <rd-row key="Schema (history)">25 columns; PK <code>key</code> = <code>tt&lt;id&gt;</code> (movie) or <code>tt&lt;id&gt;:S:E</code> (episode); indices on <code>last_watched_at DESC</code> and <code>(imdb_id, last_watched_at DESC)</code></rd-row>
+      <rd-row key="Schema (watched_overrides)">PK <code>key</code>, <code>state</code> ∈ {1 Watched, 2 Unwatched}, <code>changed_at</code> UTC</rd-row>
+    </rd-kv>
+
+    <rd-diagram lang="mermaid" caption="Tick, throttle, finalize, advance">
+sequenceDiagram
+  autonumber
+  participant Mpv as libmpv
+  participant Item as MpvVideoItem
+  participant PC as PlaybackController
+  participant HC as HistoryController
+  participant HS as HistoryStore (SQLite)
+  participant WC as WatchedController
+  participant SS as SeriesPlaybackSessionController
+  participant SA as StreamActions
+
+  loop time-pos
+    Mpv-->>Item: time-pos = t
+    Item->>Item: debounce 250 ms
+    Item-->>PC: positionChanged(t)
+    PC->>HC: onPositionChanged(t)
+    alt Δt ≥ 5 s AND progress &gt; 0.5 %
+      HC->>HS: upsert(history row)
+    else
+      HC->>HC: update m_lastPosition only
+    end
+  end
+
+  Mpv-->>Item: end-file(reason)
+  Item-->>PC: endOfFile(reason)
+  PC->>HC: onEndOfFile(reason, creditsStartSec)
+  HC->>HS: recordSessionEnd(entry, reason)
+  Note over HS: NaturalEof → finished=1<br/>UserStop → finished=1 iff threshold met<br/>Error → preserve
+
+  PC->>WC: refresh status for (imdb, S, E)
+  WC->>WC: manual override beats history.finished
+
+  alt Series with adjacency
+    PC->>SS: onPlayerEndOfFile()
+    SS->>SA: play(nextEpisodeStream, nextCtx)
+  end
+
+  Note over HC,HS: Continue Watching = SELECT WHERE finished=0 ORDER BY last_watched_at DESC
+    </rd-diagram>
+  </rd-section>
+
+  <rd-section title="How a single play action threads through everything">
+    <p>This is the canonical happy path — a torrent-backed episode the user clicks once:</p>
+
+    <rd-steps>
+      <rd-step title="QML → StreamActions">
+        QML stream card calls <code>services::StreamActions::play(stream, ctx)</code>.
+      </rd-step>
+      <rd-step title="DownloadController → DownloadManager">
+        <code>prepareForPlayback()</code> requests a session for the stream.
+        <code>m_openingAssetIds</code> guards against duplicates.
+      </rd-step>
+      <rd-step title="BackendSelector picks a backend">
+        Active provider first; falls back to torrent if nothing else is configured.
+      </rd-step>
+      <rd-step title="TorrentBackend creates a TorrentAssetSession">
+        Hands the magnet/info-hash to <code>TorrentStreamingService::prepareSession()</code>.
+        Libtorrent adds the torrent; MediaFileSelector picks the playable file once metadata
+        arrives.
+      </rd-step>
+      <rd-step title="LocalMediaServer registers and yields a URL">
+        Returns <code>http://127.0.0.1:&lt;port&gt;/stream/&lt;assetId&gt;/&lt;file&gt;</code>.
+      </rd-step>
+      <rd-step title="PlaybackController → PlayerWindow → MpvVideoItem">
+        <code>loadfile</code> goes to libmpv on its worker thread; the GUI thread keeps
+        ticking.
+      </rd-step>
+      <rd-step title="mpv issues HTTP Range requests against LocalMediaServer">
+        Each range triggers a <code>PiecePlanner</code> calculation; libtorrent gets
+        per-piece deadlines and a sliding 5 MiB readahead.
+      </rd-step>
+      <rd-step title="Bytes arrive, file-loaded fires">
+        Track lists, chapters, duration populate. <code>PlayerViewModel</code> models refresh
+        QML pickers.
+      </rd-step>
+      <rd-step title="Playback ticks for hours">
+        <code>positionChanged</code> at ≤ 4 Hz → <code>HistoryController</code> writes every
+        5 s. EWMA download rate and cached-byte progress feed <code>itemChanged()</code> for
+        the Downloads page.
+      </rd-step>
+      <rd-step title="end-of-file → finalize → next episode">
+        <code>HistoryStore::recordSessionEnd()</code> stamps <code>finished=1</code>;
+        <code>WatchedController</code> recomputes; if it's a series and
+        <code>SeriesPlaybackSessionController</code> has a next-episode target, it calls
+        <code>StreamActions::play()</code> with the next stream — and the whole pipeline
+        starts again, often without ever leaving the same torrent's piece cache.
+      </rd-step>
+    </rd-steps>
+  </rd-section>
+
+  <rd-section title="Where to read the source">
+    <rd-kv layout="stacked">
+      <rd-row key="Embedded player">
+        <code>src/ui/player/</code> (<code>PlayerWindow</code>, <code>PlayerViewModel</code>,
+        <code>MpvVideoItem</code>, <code>MpvLoadCommand</code>, track/chapter models,
+        <code>qml/PlayerScene.qml</code>) + <code>src/core/mpv/</code> (<code>Player</code>,
+        <code>PlayerLauncher</code>, <code>MprisMetadata</code>).
+      </rd-row>
+      <rd-row key="Local streaming server">
+        <code>src/download/LocalMediaServer.{h,cpp}</code> (modern, transport-agnostic) and
+        the legacy <code>src/torrent/LocalStreamServer.{h,cpp}</code>.
+      </rd-row>
+      <rd-row key="Downloader">
+        <code>src/download/</code>: <code>DownloadManager</code>, <code>AssetSession</code>,
+        <code>HttpAssetSession</code>, <code>TorrentAssetSession</code>,
+        <code>BackendSelector</code>, <code>TorrentBackend</code>,
+        <code>RealDebridBackend</code>, <code>AllDebridBackend</code>, the
+        <code>*Resolver</code>s, and <code>DebridFilePicker</code>. UI side:
+        <code>src/controllers/DownloadController.{h,cpp}</code>.
+      </rd-row>
+      <rd-row key="Torrent engine">
+        <code>src/torrent/</code>: <code>TorrentStreamingService</code>,
+        <code>PiecePlanner</code>, <code>MediaFileSelector</code>.
+      </rd-row>
+      <rd-row key="Progress tracking">
+        <code>src/controllers/</code>: <code>PlaybackController</code>,
+        <code>HistoryController</code>, <code>WatchedController</code>,
+        <code>SeriesPlaybackSessionController</code>, <code>PlaybackLoadWatchdog</code>.
+        Storage in <code>src/core/persistence/</code> (<code>HistoryStore</code>,
+        <code>WatchedStore</code>, <code>DownloadStore</code>, <code>MediaCache</code>).
+      </rd-row>
+    </rd-kv>
+  </rd-section>
+
+  <rd-callout type="info">
+    <p>
+      Composition lives in <code>app::ServiceContainer</code> — every controller, every
+      store, and the single <code>DownloadManager</code> / <code>TorrentStreamingService</code>
+      / <code>PlayerWindow</code> instance are created and wired there. If you want to trace
+      who-owns-what, that's the file to open first.
+    </p>
+  </rd-callout>
+
+</rd-page>
+</body>
+</html>

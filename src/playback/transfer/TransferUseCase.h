@@ -7,6 +7,7 @@
 #include "domain/Media.h"
 #include "domain/MediaFile.h"
 #include "domain/PlaybackContext.h"
+#include "playback/events/PlaybackEvent.h"
 #include "playback/ports/ByteRangeSource.h"
 #include "playback/ports/SessionFileCatalog.h"
 #include "playback/transfer/LiveAssetStats.h"
@@ -19,6 +20,7 @@
 #include <QUrl>
 
 #include <optional>
+#include <utility>
 
 namespace kinema::core {
 class MediaCache;
@@ -74,10 +76,19 @@ public:
     /// localhost URL the player should load. Defaults to
     /// `OnDemand + Ephemeral` for a fresh session; never downgrades
     /// an existing Full session. Also attaches the player.
-    QCoro::Task<QUrl> ensurePlayable(domain::Stream stream,
+    QCoro::Task<QUrl> ensurePlayable(PlaybackSessionId sessionId,
+        domain::Stream stream,
         domain::PlaybackContext ctx,
         std::optional<domain::DownloadBackendKind> backendOverride
             = std::nullopt);
+    QCoro::Task<QUrl> ensurePlayable(domain::Stream stream,
+        domain::PlaybackContext ctx,
+        std::optional<domain::DownloadBackendKind> backendOverride
+            = std::nullopt)
+    {
+        return ensurePlayable({}, std::move(stream), std::move(ctx),
+            backendOverride);
+    }
 
     /// Open a Full/Pinned session in the background; upgrades an
     /// existing OnDemand session in place rather than spawning a
@@ -139,7 +150,8 @@ private:
         domain::PlaybackContext ctx,
         domain::DownloadMode mode,
         domain::CacheDisposition disposition,
-        std::optional<domain::DownloadBackendKind> backendOverride);
+        std::optional<domain::DownloadBackendKind> backendOverride,
+        PlaybackSessionId sessionId = {});
 
     /// Fire-and-forget wrapper around `openSession` for background
     /// downloads. Translates failure into a `Failed` repository
@@ -149,7 +161,8 @@ private:
         domain::PlaybackContext ctx,
         domain::DownloadMode mode,
         domain::CacheDisposition disposition,
-        std::optional<domain::DownloadBackendKind> backendOverride);
+        std::optional<domain::DownloadBackendKind> backendOverride,
+        PlaybackSessionId sessionId = {});
 
     /// Compose the persisted row from the inputs. Mirrors the
     /// legacy `DownloadManager::buildItem` shape.

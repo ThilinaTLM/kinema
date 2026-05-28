@@ -8,6 +8,7 @@
 #include "config/AppearanceSettings.h"
 #include "controllers/DownloadController.h"
 #include "playback/resume/ResumeUseCase.h"
+#include "playback/session/PlaybackSessionManager.h"
 #include "controllers/LibraryController.h"
 #ifdef KINEMA_HAVE_LIBMPV
 #include "playback/desktop/MprisPlaybackProjection.h"
@@ -26,7 +27,7 @@
 #ifdef KINEMA_HAVE_LIBMPV
 #include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
 #endif
-#include "services/StreamActions.h"
+#include "controllers/StreamUtilityController.h"
 #include "playback/torrent/LibtorrentClient.h"
 #include "ui/qml-bridge/BrowseViewModel.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
@@ -619,8 +620,11 @@ void ShellViewModel::wireStatusForwarding()
         this, [this](core::player::Kind, const QString& reason) {
             Q_EMIT passiveMessage(reason, 6000);
         });
-    connect(m_services.streamActions(),
-        &services::StreamActions::statusMessage,
+    connect(m_services.streamUtilityController(),
+        &controllers::StreamUtilityController::statusMessage,
+        this, &ShellViewModel::passiveMessage);
+    connect(m_services.playbackSessionManager(),
+        &playback::session::PlaybackSessionManager::statusMessage,
         this, &ShellViewModel::passiveMessage);
     connect(m_services.libtorrentClient(),
         &playback::torrent::LibtorrentClient::statusMessage,
@@ -814,6 +818,7 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     auto* seriesSession = m_services.seriesSessionService();
     auto* subtitlesVm = m_services.subtitlesVm();
     auto* subtitleCtrl = m_services.subtitleController();
+    auto* sessions = m_services.playbackSessionManager();
 
     // The window persists across successive plays now — closing it
     // via the X button hides it and clears playback state, but
@@ -862,12 +867,14 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
         connect(seriesSession,
             &playback::series::SeriesSessionService::navigationChanged,
             playerVm, refreshEpisodeNavigation);
-        connect(m_playerWindow, &ui::player::PlayerWindow::previousRequested,
-            seriesSession,
-            &playback::series::SeriesSessionService::playPreviousEpisode);
-        connect(m_playerWindow, &ui::player::PlayerWindow::nextRequested,
-            seriesSession,
-            &playback::series::SeriesSessionService::playNextEpisode);
+        if (sessions) {
+            connect(m_playerWindow, &ui::player::PlayerWindow::previousRequested,
+                sessions,
+                &playback::session::PlaybackSessionManager::playPreviousEpisode);
+            connect(m_playerWindow, &ui::player::PlayerWindow::nextRequested,
+                sessions,
+                &playback::session::PlaybackSessionManager::playNextEpisode);
+        }
     }
 
     // Player chrome's `SubtitlePicker → Download…` lands on the
@@ -898,7 +905,7 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
     if (subtitlesVm && playerVm) {
         connect(subtitlesVm,
             &SubtitlesViewModel::downloadCompleted, playerVm,
-            [this, subtitlesVm, embeddedAdapter, playerVm]
+            [this, subtitlesVm, embeddedAdapter, playerVm, sessions]
             (domain::PlaybackKey key, const QString& fileId,
                 const QString& localPath, const QString& lang,
                 const QString& langName) {
@@ -910,12 +917,16 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
                     && embeddedAdapter->activeContext().key != key) {
                     return;
                 }
-                playerVm->attachExternalSubtitle(
-                    localPath, langName, lang, /*select=*/true);
+                if (sessions) {
+                    sessions->attachSubtitle(localPath, lang);
+                } else {
+                    playerVm->attachExternalSubtitle(
+                        localPath, langName, lang, /*select=*/true);
+                }
             });
         connect(subtitlesVm,
             &SubtitlesViewModel::localFileChosen, playerVm,
-            [this, subtitlesVm, embeddedAdapter, playerVm]
+            [this, subtitlesVm, embeddedAdapter, playerVm, sessions]
             (domain::PlaybackKey key, const QString& path) {
                 if (!subtitlesVm->attachOnDownload()) {
                     return;
@@ -924,9 +935,13 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
                     && embeddedAdapter->activeContext().key != key) {
                     return;
                 }
-                playerVm->attachExternalSubtitle(
-                    path, QString {}, QString {},
-                    /*select=*/true);
+                if (sessions) {
+                    sessions->attachSubtitle(path, QString {});
+                } else {
+                    playerVm->attachExternalSubtitle(
+                        path, QString {}, QString {},
+                        /*select=*/true);
+                }
             });
     }
 

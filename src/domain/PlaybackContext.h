@@ -114,7 +114,7 @@ struct HistoryEntry {
  * Field ownership:
  * - Caller (DetailPane / SeriesDetailPane / resume flow) fills `key`,
  *   display fields, and `poster`.
- * - `StreamActions::play` fills `streamRef` from the chosen Stream
+ * - `PlaybackSessionManager::play` fills `streamRef` from the chosen Stream
  *   and asks `playback::resume::ResumeUseCase::resumeSecondsFor()`
  *   to fill `resumeSeconds`.
  */

@@ -9,7 +9,6 @@
 #include "playback/events/PlaybackEventStream.h"
 #include "playback/ports/PlayerPort.h"
 #include "playback/session/PlaybackSessionManager.h"
-#include "services/StreamActions.h"
 
 #include <QSignalSpy>
 #include <QString>
@@ -119,11 +118,8 @@ class TstMprisPlaybackProjection : public QObject
 private Q_SLOTS:
     void init()
     {
-        m_actions = std::make_unique<services::StreamActions>(
-            nullptr, nullptr);
         m_events = std::make_unique<PlaybackEventStream>();
-        m_mgr = std::make_unique<RecordingSessionManager>(*m_actions,
-            *m_events, nullptr, nullptr, nullptr);
+        m_mgr = std::make_unique<RecordingSessionManager>(*m_events, nullptr, nullptr, nullptr);
         m_player = std::make_unique<StubPlayerPort>();
         m_projection = std::make_unique<MprisPlaybackProjection>(
             *m_events, *m_mgr, m_player.get(), /*series=*/nullptr);
@@ -135,7 +131,6 @@ private Q_SLOTS:
         m_player.reset();
         m_mgr.reset();
         m_events.reset();
-        m_actions.reset();
     }
 
     // -----------------------------------------------------------
@@ -424,8 +419,7 @@ private Q_SLOTS:
     }
 
 private:
-    std::unique_ptr<services::StreamActions> m_actions;
-    std::unique_ptr<PlaybackEventStream> m_events;
+        std::unique_ptr<PlaybackEventStream> m_events;
     std::unique_ptr<RecordingSessionManager> m_mgr;
     std::unique_ptr<StubPlayerPort> m_player;
     std::unique_ptr<MprisPlaybackProjection> m_projection;

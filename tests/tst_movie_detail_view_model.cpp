@@ -6,7 +6,7 @@
 #include "config/TorrentioSettings.h"
 #include "controllers/TokenController.h"
 #include "core/io/HttpError.h"
-#include "services/StreamActions.h"
+#include "controllers/StreamUtilityController.h"
 #include "TestDoubles.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
@@ -27,7 +27,7 @@ using kinema::domain::Stream;
 using kinema::config::AppSettings;
 using kinema::controllers::TokenController;
 using kinema::core::HttpError;
-using kinema::services::StreamActions;
+using kinema::controllers::StreamUtilityController;
 using kinema::tests::FakeCinemetaClient;
 using kinema::tests::FakeTmdbClient;
 using kinema::tests::FakeTokenStore;
@@ -90,7 +90,7 @@ struct Fixture {
     FakeCinemetaClient cinemeta;
     IndexerHarness indexers;
     FakeTmdbClient tmdb;
-    StreamActions actions { nullptr, nullptr };
+    StreamUtilityController streamUtility;
     QString rdToken;
     QString adApiKey;
     MovieDetailViewModel vm;
@@ -100,7 +100,7 @@ struct Fixture {
             tmp.filePath(QStringLiteral("kinemarc")),
             KConfig::SimpleConfig))
         , settings(config)
-        , vm(&cinemeta, indexers.selector(), &tmdb, &actions,
+        , vm(&cinemeta, indexers.selector(), &tmdb, nullptr, &streamUtility,
               /*tokens=*/nullptr, settings, rdToken, adApiKey,
               nullptr)
     {
@@ -159,12 +159,12 @@ private Q_SLOTS:
         FakeCinemetaClient cinemeta;
         IndexerHarness indexers;
         FakeTmdbClient tmdb;
-        StreamActions actions { nullptr, nullptr };
+        StreamUtilityController streamUtility;
         StubTokenController tokens(settings.debrid());
         QString rdToken;
         QString adApiKey = QStringLiteral("ad-key");
         MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
-            &actions, &tokens, settings, rdToken, adApiKey,
+            nullptr, &streamUtility, &tokens, settings, rdToken, adApiKey,
             nullptr);
         // AllDebrid alone is enough to flip the chip on.
         QVERIFY(vm.debridConfigured());
@@ -180,12 +180,12 @@ private Q_SLOTS:
         FakeCinemetaClient cinemeta;
         IndexerHarness indexers;
         FakeTmdbClient tmdb;
-        StreamActions actions { nullptr, nullptr };
+        StreamUtilityController streamUtility;
         StubTokenController tokens(settings.debrid());
         QString rdToken;
         QString adApiKey;
         MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
-            &actions, &tokens, settings, rdToken, adApiKey,
+            nullptr, &streamUtility, &tokens, settings, rdToken, adApiKey,
             nullptr);
         QVERIFY(!vm.debridConfigured());
     }
@@ -330,12 +330,12 @@ private Q_SLOTS:
         FakeCinemetaClient cinemeta;
         IndexerHarness indexers;
         FakeTmdbClient tmdb;
-        StreamActions actions { nullptr, nullptr };
+        StreamUtilityController streamUtility;
         StubTokenController tokens(settings.debrid());
         QString rdToken = QStringLiteral("rd-token");
         QString adApiKey;
         MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
-            &actions, &tokens, settings, rdToken, adApiKey,
+            nullptr, &streamUtility, &tokens, settings, rdToken, adApiKey,
             nullptr);
 
         cinemeta.metaScripts = {

@@ -7,6 +7,7 @@
 #include "domain/Media.h"
 #include "domain/MediaFile.h"
 #include "domain/PlaybackContext.h"
+#include "playback/events/PlaybackEvent.h"
 #include "playback/ports/ByteRangeSource.h"
 
 #include <QObject>
@@ -48,6 +49,7 @@ public:
         domain::DownloadMode mode,
         domain::CacheDisposition disposition,
         std::unique_ptr<sources::AssetSession> source,
+        PlaybackSessionId playbackSessionId = {},
         QObject* parent = nullptr);
     ~TransferSession() override;
 
@@ -66,6 +68,8 @@ public:
     domain::DownloadBackendKind backendKind() const noexcept { return m_backend; }
     domain::DownloadMode mode() const noexcept { return m_mode; }
     domain::CacheDisposition disposition() const noexcept { return m_disposition; }
+    PlaybackSessionId playbackSessionId() const noexcept { return m_playbackSessionId; }
+    void setPlaybackSessionId(PlaybackSessionId id) noexcept { m_playbackSessionId = id; }
 
     /// Update the in-memory mode + disposition. The caller is
     /// responsible for asking the backend to apply the change.
@@ -112,6 +116,7 @@ private:
     domain::DownloadBackendKind m_backend;
     domain::DownloadMode m_mode;
     domain::CacheDisposition m_disposition;
+    PlaybackSessionId m_playbackSessionId;
     std::unique_ptr<sources::AssetSession> m_source;
 };
 

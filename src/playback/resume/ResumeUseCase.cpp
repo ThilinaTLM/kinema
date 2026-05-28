@@ -10,9 +10,11 @@
 #include "playback/ports/PlaybackHistoryRepository.h"
 #include "playback/ports/StreamIndexerPort.h"
 #include "playback/progress/PlaybackProgressProjector.h"
-#include "services/StreamActions.h"
+#include "playback/session/PlaybackSessionManager.h"
 
 #include <KLocalizedString>
+
+#include <utility>
 
 namespace kinema::playback::resume {
 
@@ -21,14 +23,29 @@ ResumeUseCase::ResumeUseCase(
     playback::progress::PlaybackProgressProjector& projector,
     ports::StreamIndexerPort& indexer,
     ports::PlaybackHistoryRepository& historyRepo,
-    services::StreamActions& actions,
+    playback::session::PlaybackSessionManager& sessions,
+    QObject* parent)
+    : ResumeUseCase(queryService, projector, indexer, historyRepo,
+          [&sessions](const domain::Stream& stream,
+              const domain::PlaybackContext& ctx) {
+              sessions.play(stream, ctx);
+          }, parent)
+{
+}
+
+ResumeUseCase::ResumeUseCase(
+    playback::history::HistoryQueryService& queryService,
+    playback::progress::PlaybackProgressProjector& projector,
+    ports::StreamIndexerPort& indexer,
+    ports::PlaybackHistoryRepository& historyRepo,
+    PlaybackDispatcher dispatcher,
     QObject* parent)
     : QObject(parent)
     , m_queryService(queryService)
     , m_projector(projector)
     , m_indexer(indexer)
     , m_historyRepo(historyRepo)
-    , m_actions(actions)
+    , m_dispatchPlayback(std::move(dispatcher))
 {
 }
 
@@ -119,9 +136,8 @@ QCoro::Task<void> ResumeUseCase::resumeTask(domain::HistoryEntry entry)
         co_return;
     }
 
-    // Match by infoHash/release. Prefer Real-Debrid direct URLs when
-    // available, otherwise let StreamActions use built-in torrent
-    // streaming for magnet-only rows.
+    // Match by infoHash/release. Prefer direct URLs when available,
+    // otherwise let the session manager open a local transfer stream.
     const domain::Stream* hit = nullptr;
     for (const auto& s : streams) {
         if (entry.lastStream.matches(s)
@@ -160,8 +176,10 @@ QCoro::Task<void> ResumeUseCase::resumeTask(domain::HistoryEntry entry)
     ctx.episodeTitle = entry.episodeTitle;
     ctx.poster = entry.poster;
     ctx.backdrop = entry.backdrop;
-    // streamRef and resumeSeconds are filled by StreamActions::play.
-    m_actions.play(*hit, ctx);
+    // streamRef and resumeSeconds are filled by PlaybackSessionManager::play.
+    if (m_dispatchPlayback) {
+        m_dispatchPlayback(*hit, ctx);
+    }
 }
 
 } // namespace kinema::playback::resume

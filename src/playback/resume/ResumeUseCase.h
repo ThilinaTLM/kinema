@@ -9,6 +9,7 @@
 
 #include <QObject>
 
+#include <functional>
 #include <optional>
 
 namespace kinema::playback::history {
@@ -24,8 +25,8 @@ namespace kinema::playback::progress {
 class PlaybackProgressProjector;
 }
 
-namespace kinema::services {
-class StreamActions;
+namespace kinema::playback::session {
+class PlaybackSessionManager;
 }
 
 namespace kinema::playback::resume {
@@ -37,18 +38,26 @@ namespace kinema::playback::resume {
  * `HistoryController::resumeFromHistory`: re-resolves the saved
  * release against the active indexer, matches by
  * `lastStream.matches()`, and dispatches the matching stream
- * through `services::StreamActions::play` (transitional; the
- * end-state routes to `PlaybackSessionManager::play`).
+ * through `PlaybackSessionManager::play`.
  */
 class ResumeUseCase : public QObject
 {
     Q_OBJECT
 public:
+    using PlaybackDispatcher = std::function<void(
+        const domain::Stream&, const domain::PlaybackContext&)>;
+
     ResumeUseCase(playback::history::HistoryQueryService& queryService,
         playback::progress::PlaybackProgressProjector& projector,
         ports::StreamIndexerPort& indexer,
         ports::PlaybackHistoryRepository& historyRepo,
-        services::StreamActions& actions,
+        playback::session::PlaybackSessionManager& sessions,
+        QObject* parent = nullptr);
+    ResumeUseCase(playback::history::HistoryQueryService& queryService,
+        playback::progress::PlaybackProgressProjector& projector,
+        ports::StreamIndexerPort& indexer,
+        ports::PlaybackHistoryRepository& historyRepo,
+        PlaybackDispatcher dispatcher,
         QObject* parent = nullptr);
     ~ResumeUseCase() override;
 
@@ -79,7 +88,7 @@ private:
     playback::progress::PlaybackProgressProjector& m_projector;
     ports::StreamIndexerPort& m_indexer;
     ports::PlaybackHistoryRepository& m_historyRepo;
-    services::StreamActions& m_actions;
+    PlaybackDispatcher m_dispatchPlayback;
     quint64 m_resumeEpoch = 0;
 };
 

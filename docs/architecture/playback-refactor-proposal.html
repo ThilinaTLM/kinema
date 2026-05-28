@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kinema — Playback Architecture Refactoring Proposal</title>
+  <link rel="stylesheet" href="./richdoc.css">
+  <script src="./richdoc.js" defer></script>
+</head>
+<body>
+<rd-page theme="graphite-modern" mode="auto" width="standard" toc="auto">
+
+  <rd-hero
+    eyebrow="Architecture proposal"
+    title="Decoupling Kinema's playback pipeline"
+    lede="A pragmatic refactoring plan to keep the same user-facing features while reducing coupling, improving cohesion, and making playback/download/torrent/history behavior easier to evolve."
+    meta="Proposal · Playback · Downloader · Torrent · Local streaming · History">
+  </rd-hero>
+
+  <rd-callout type="tldr">
+    <p>
+      The current system already has useful abstractions (<code>AssetSession</code>,
+      <code>DownloadBackend</code>, <code>PlaybackContext</code>, stores/controllers), but several
+      classes still act as multi-purpose coordinators. The proposal is to keep Qt/QML and
+      QCoro, keep all features, and evolve toward a small <strong>application-use-case layer</strong>
+      with explicit ports: <code>PlayerPort</code>, <code>MediaSourcePort</code>,
+      <code>StreamGatewayPort</code>, <code>PlaybackHistoryRepository</code>, and
+      <code>DownloadRepository</code>. Concrete adapters remain mpv, libtorrent, debrid,
+      SQLite, and localhost HTTP.
+    </p>
+  </rd-callout>
+
+  <rd-section title="Executive recommendation">
+    <rd-cols n="3">
+      <rd-card title="Keep" accent="success">
+        <ul>
+          <li>Embedded mpv player and QtQuick chrome.</li>
+          <li>Localhost Range streaming model.</li>
+          <li>Unified <code>AssetSession</code>-style byte source abstraction.</li>
+          <li>Real-Debrid / AllDebrid / torrent backend parity.</li>
+          <li>Continue Watching, watched state, resume, subtitles, MPRIS, series auto-next.</li>
+        </ul>
+      </rd-card>
+      <rd-card title="Change" accent="warn">
+        <ul>
+          <li>Split orchestration out of large managers/controllers.</li>
+          <li>Hide torrent-specific DTOs from generic download headers.</li>
+          <li>Replace controller-to-controller cycles with application use cases.</li>
+          <li>Move policy decisions into small pure services.</li>
+          <li>Delete legacy torrent-local server after tests are migrated.</li>
+        </ul>
+      </rd-card>
+      <rd-card title="Avoid">
+        <ul>
+          <li>No big-bang rewrite.</li>
+          <li>No global event bus as a substitute for clear ownership.</li>
+          <li>No migration of the user database/config as part of this work.</li>
+          <li>No QML-facing churn unless a boundary leak forces it.</li>
+        </ul>
+      </rd-card>
+    </rd-cols>
+
+    <rd-decision status="proposed" title="Adopt a ports-and-use-cases architecture for playback">
+      <p>
+        Introduce a cohesive application layer for user workflows and keep infrastructure
+        behind ports. Controllers/view-models become thin adapters. Existing concrete code
+        is migrated behind those ports incrementally.
+      </p>
+    </rd-decision>
+  </rd-section>
+
+  <rd-section title="What is coupled today">
+    <p>
+      The current pipeline works, but feature growth has pushed several classes beyond one
+      reason to change. These are the coupling seams worth addressing first.
+    </p>
+
+    <rd-diagram lang="mermaid" caption="Current coupling shape — behavior is concentrated in managers/controllers">
+flowchart LR
+  SC["ServiceContainer<br/>large composition root"]
+  SA["StreamActions<br/>clipboard + open URL + history + downloader + launcher"]
+  DM["DownloadManager<br/>selection + sessions + server + persistence + recovery + telemetry"]
+  TSS["TorrentStreamingService<br/>libtorrent + file selection + piece policy + legacy server"]
+  PC["PlaybackController<br/>mpv routing + resume prompts + chapters + load watchdog + moviehash"]
+  HC["HistoryController<br/>progress + resume lookup + resume action orchestration"]
+  SSC["SeriesPlaybackSessionController<br/>episode nav + downloader/torrent file lookup + play action"]
+  QML["QML / VMs"]
+  MPV["PlayerWindow / MpvVideoItem"]
+  DB["SQLite stores"]
+  LMS["LocalMediaServer"]
+
+  SC --> SA
+  SC --> DM
+  SC --> TSS
+  SC --> PC
+  SC --> HC
+  SC --> SSC
+  QML --> SA
+  SA --> DM
+  SA --> HC
+  SA --> TSS
+  SA --> MPV
+  DM --> TSS
+  DM --> LMS
+  DM --> DB
+  PC --> MPV
+  PC --> HC
+  HC --> DB
+  HC --> SA
+  SSC --> PC
+  SSC --> DM
+  SSC --> TSS
+  SSC --> SA
+    </rd-diagram>
+
+    <rd-kv layout="stacked">
+      <rd-row key="ServiceContainer">
+        It is correctly acting as a composition root, but it also reveals how many concrete
+        services know about each other. The wiring is fragile because ownership, cross-service
+        subscriptions, and feature-level routing all happen in one constructor.
+      </rd-row>
+      <rd-row key="StreamActions">
+        It is a UI action façade, but it also decides playback path, consults history, calls
+        downloader, supports torrent legacy paths, and launches players. That makes a simple
+        menu action depend on too many subsystems.
+      </rd-row>
+      <rd-row key="DownloadManager">
+        It owns backend selection, sessions, local HTTP server, persistent rows, live stats,
+        recovery, attach/detach semantics, and pin/eviction policy. It is cohesive around
+        downloads, but too broad to test or modify safely.
+      </rd-row>
+      <rd-row key="TorrentStreamingService">
+        It is both the libtorrent adapter and a policy engine: file selection, startup buffer,
+        sliding-window priorities, stats, cache/touch semantics, and a legacy local server.
+      </rd-row>
+      <rd-row key="HistoryController">
+        It persists progress, computes resume, and performs one-click resume by fetching streams
+        and routing through <code>StreamActions</code>. Persistence and orchestration are mixed.
+      </rd-row>
+      <rd-row key="SeriesPlaybackSessionController">
+        It needs files from both <code>DownloadManager</code> and <code>TorrentStreamingService</code>,
+        then calls <code>StreamActions</code>. This is a sign that "current playback session" is
+        not a first-class application concept yet.
+      </rd-row>
+    </rd-kv>
+  </rd-section>
+
+  <rd-section title="Target architecture">
+    <p>
+      The target is not "more layers" for their own sake. The target is explicit direction of
+      dependencies: UI calls application use cases; use cases depend on small ports and pure
+      policies; infrastructure implements ports. The domain objects remain simple C++ values.
+    </p>
+
+    <rd-diagram lang="mermaid" caption="Proposed target boundaries">
+flowchart TB
+  subgraph Presentation["Presentation adapters"]
+    QML["QML + ViewModels"]
+    PlayerUI["PlayerWindow + PlayerViewModel"]
+  end
+
+  subgraph App["Application use cases (QObject-friendly)"]
+    PlayUC["PlaybackUseCase"]
+    TransferUC["TransferUseCase"]
+    ProgressUC["PlaybackProgressService"]
+    ResumeUC["ResumeUseCase"]
+    SeriesUC["SeriesSessionService"]
+  end
+
+  subgraph Policies["Pure policies / domain services"]
+    BackendPolicy["BackendSelectionPolicy"]
+    FilePolicy["MediaFileSelectionPolicy"]
+    WatchPolicy["WatchedPolicy"]
+    ResumePolicy["ResumePolicy"]
+    PriorityPolicy["StreamingPriorityPolicy"]
+  end
+
+  subgraph Ports["Ports"]
+    PlayerPort["PlayerPort"]
+    MediaSourcePort["MediaSourcePort"]
+    GatewayPort["StreamGatewayPort"]
+    HistoryRepo["PlaybackHistoryRepository"]
+    DownloadRepo["DownloadRepository"]
+    IndexerPort["IndexerPort"]
+    CredentialPort["CredentialPort"]
+  end
+
+  subgraph Infra["Infrastructure adapters"]
+    MpvAdapter["EmbeddedMpvPlayerAdapter"]
+    ExternalAdapter["ExternalPlayerAdapter"]
+    Gateway["LocalHttpStreamGateway"]
+    TorrentAdapter["TorrentMediaSource<br/>(libtorrent)"]
+    DebridAdapter["DebridMediaSource<br/>(RD / AD HTTP)"]
+    Sqlite["SQLite repositories"]
+    TmdbIndexer["Indexer adapters"]
+  end
+
+  QML --> PlayUC
+  QML --> TransferUC
+  PlayerUI --> PlayerPort
+
+  PlayUC --> PlayerPort
+  PlayUC --> TransferUC
+  PlayUC --> ProgressUC
+  PlayUC --> ResumeUC
+  PlayUC --> SeriesUC
+  TransferUC --> MediaSourcePort
+  TransferUC --> GatewayPort
+  TransferUC --> DownloadRepo
+  ProgressUC --> HistoryRepo
+  ProgressUC --> WatchPolicy
+  ResumeUC --> HistoryRepo
+  ResumeUC --> IndexerPort
+  ResumeUC --> PlayUC
+  SeriesUC --> TransferUC
+  SeriesUC --> PlayUC
+
+  TransferUC --> BackendPolicy
+  TransferUC --> FilePolicy
+  TorrentAdapter --> PriorityPolicy
+  ProgressUC --> ResumePolicy
+
+  PlayerPort <|.. MpvAdapter
+  PlayerPort <|.. ExternalAdapter
+  GatewayPort <|.. Gateway
+  MediaSourcePort <|.. TorrentAdapter
+  MediaSourcePort <|.. DebridAdapter
+  HistoryRepo <|.. Sqlite
+  DownloadRepo <|.. Sqlite
+  IndexerPort <|.. TmdbIndexer
+  CredentialPort <|.. TmdbIndexer
+    </rd-diagram>
+
+    <rd-callout type="info">
+      <p>
+        This is a hexagonal architecture in a Qt shape: application services may still be
+        <code>QObject</code>s and may expose signals for QML, but their dependencies are ports,
+        not concrete mpv/libtorrent/debrid/SQLite classes.
+      </p>
+    </rd-callout>
+  </rd-section>
+
+  <rd-section title="New component responsibilities">
+    <rd-cols n="2">
+      <rd-card title="PlaybackUseCase" accent="success">
+        <p>The single entry point for "play this stream/context". It obtains a playable URL
+        from <code>TransferUseCase</code>, asks <code>ResumeUseCase</code> for a resume point,
+        starts the player through <code>PlayerPort</code>, and publishes session lifecycle events.</p>
+      </rd-card>
+      <rd-card title="TransferUseCase">
+        <p>Replaces the broad center of <code>DownloadManager</code>. It opens/reuses sessions,
+        upgrades OnDemand to Full, pins/unpins, pauses/resumes, and asks
+        <code>StreamGatewayPort</code> for a local URL. It delegates storage and telemetry to
+        smaller collaborators.</p>
+      </rd-card>
+      <rd-card title="PlaybackProgressService">
+        <p>Owns progress persistence, watched finalization, and track-memory snapshots. It
+        consumes typed player/session events rather than being wired directly to a player window.</p>
+      </rd-card>
+      <rd-card title="SeriesSessionService" accent="info">
+        <p>Owns previous/next episode targets for the active playback session. It obtains file
+        lists through a generic <code>SessionFileCatalog</code> instead of knowing whether they
+        came from libtorrent or a debrid resolver.</p>
+      </rd-card>
+      <rd-card title="LocalHttpStreamGateway">
+        <p>Owns the TCP server only. It maps token → <code>ByteRangeSource</code>, parses Range
+        requests, enforces backpressure, and emits request telemetry. It does not know downloads,
+        debrid, torrents, history, or players.</p>
+      </rd-card>
+      <rd-card title="MediaSource adapters" accent="warn">
+        <p><code>TorrentMediaSource</code>, <code>RealDebridMediaSource</code>, and
+        <code>AllDebridMediaSource</code> all implement the same <code>MediaSourcePort</code> and
+        produce a <code>PlayableAssetSession</code> / <code>ByteRangeSource</code>.</p>
+      </rd-card>
+    </rd-cols>
+  </rd-section>
+
+  <rd-section title="Port model">
+    <p>
+      The following ports are intentionally small. They are not meant to abstract Qt away; they
+      abstract feature boundaries away from concrete infrastructure.
+    </p>
+
+    <rd-code lang="cpp">// Application-facing player capability.
+class PlayerPort {
+public:
+    virtual ~PlayerPort() = default;
+    virtual void play(QUrl url, domain::PlaybackContext ctx,
+        std::optional&lt;qint64&gt; resumeSeconds) = 0;
+    virtual void stop(domain::PlaybackEndReason reason) = 0;
+    virtual PlayerSnapshot snapshot() const = 0;
+
+    // In Qt this can remain signals on a QObject-derived adapter.
+    // Conceptually: fileLoaded, positionChanged, durationChanged, endOfFile, error, tracksChanged.
+};
+
+// Backend-agnostic source of playable bytes.
+class MediaSourcePort {
+public:
+    virtual ~MediaSourcePort() = default;
+    virtual bool canOpen(const domain::Stream&amp; stream) const = 0;
+    virtual QCoro::Task&lt;std::unique_ptr&lt;PlayableAssetSession&gt;&gt; open(
+        const domain::AssetRef&amp; ref,
+        const domain::Stream&amp; stream,
+        const domain::PlaybackContext&amp; ctx,
+        domain::DownloadMode mode) = 0;
+};
+
+// Local URL provider. Implementation is localhost HTTP today.
+class StreamGatewayPort {
+public:
+    virtual ~StreamGatewayPort() = default;
+    virtual QUrl expose(QString assetId, ByteRangeSource&amp; source) = 0;
+    virtual void revoke(QString assetId) = 0;
+};
+
+class ByteRangeSource {
+public:
+    virtual ~ByteRangeSource() = default;
+    virtual QString fileName() const = 0;
+    virtual qint64 size() const = 0;
+    virtual QCoro::Task&lt;bool&gt; ensure(ByteRange range) = 0;
+    virtual QByteArray read(ByteRange range) const = 0;
+};</rd-code>
+
+    <rd-callout type="note">
+      <p>
+        A port can be introduced as an abstract C++ class first and only later moved to a
+        cleaner folder. The first milestone should be behavioral containment, not perfect
+        directory structure.
+      </p>
+    </rd-callout>
+  </rd-section>
+
+  <rd-section title="Refactoring proposal by subsystem">
+
+    <rd-card title="1. Embedded player: make it an adapter, not a controller target" accent="success">
+      <p>
+        Keep <code>PlayerWindow</code>, <code>PlayerViewModel</code>, and
+        <code>MpvVideoItem</code>. Add a small <code>EmbeddedMpvPlayerAdapter</code> that implements
+        <code>PlayerPort</code> and owns the signal translation. Then application code no longer
+        needs to know about <code>PlayerWindow</code> directly.
+      </p>
+      <ul>
+        <li><strong>Move out:</strong> resume prompt orchestration, load watchdog policy, moviehash kickoff.</li>
+        <li><strong>Keep in player:</strong> mpv commands, track/chapter parsing, QtQuick chrome state.</li>
+        <li><strong>Benefit:</strong> external player support can use the same <code>PlaybackUseCase</code> path where possible.</li>
+      </ul>
+    </rd-card>
+
+    <rd-card title="2. Local streaming server: isolate it as StreamGateway" accent="info">
+      <p>
+        Rename the role, not necessarily the class immediately: <code>LocalMediaServer</code>
+        becomes the implementation of <code>StreamGatewayPort</code>. It should depend on a
+        <code>ByteRangeSource</code> interface only.
+      </p>
+      <ul>
+        <li>Remove knowledge of <code>AssetSession</code> subclasses from server code.</li>
+        <li>Keep Range parsing, 206/416 responses, chunk writes, and backpressure exactly as-is.</li>
+        <li>Make request logging/telemetry generic: <code>assetId</code>, range, wait ms, bytes served.</li>
+      </ul>
+    </rd-card>
+
+    <rd-card title="3. Downloader: split manager into cohesive services" accent="warn">
+      <p>
+        Keep the external QML-facing API stable initially, but internally split
+        <code>DownloadManager</code> into four collaborators.
+      </p>
+      <table>
+        <thead><tr><th>New piece</th><th>Owns</th><th>Moves from</th></tr></thead>
+        <tbody>
+          <tr><td><code>SessionRegistry</code></td><td>active sessions, attached players, opening guards</td><td><code>DownloadManager</code></td></tr>
+          <tr><td><code>TransferSupervisor</code></td><td>progress bindings, completion/failure transitions, live stats</td><td><code>DownloadManager</code></td></tr>
+          <tr><td><code>BackendRegistry</code></td><td>registered media sources + selection policy</td><td><code>BackendSelector</code> + manager wiring</td></tr>
+          <tr><td><code>DownloadRepository</code></td><td>store reads/writes, recovery queries</td><td><code>DownloadStore</code> calls in manager</td></tr>
+        </tbody>
+      </table>
+    </rd-card>
+
+    <rd-card title="4. Torrent engine: separate libtorrent adapter from streaming policies" accent="success">
+      <p>
+        Split <code>TorrentStreamingService</code> into a low-level <code>LibtorrentClient</code>
+        and a <code>TorrentMediaSource</code> adapter. Move file selection and priority windows
+        to pure policies.
+      </p>
+      <ul>
+        <li><code>LibtorrentClient</code>: add magnet, alerts, read disk, pause/resume, stats.</li>
+        <li><code>MediaFileSelectionPolicy</code>: choose file, expose adjacency.</li>
+        <li><code>StreamingPriorityPolicy</code>: head/tail/startup/sliding-window piece plans.</li>
+        <li>Delete legacy <code>src/torrent/LocalStreamServer</code> after tests use <code>StreamGatewayPort</code>.</li>
+      </ul>
+    </rd-card>
+
+    <rd-card title="5. Progress tracking: make it event-driven and policy-backed" accent="info">
+      <p>
+        Convert <code>HistoryController</code>'s player-window wiring into a
+        <code>PlaybackProgressService</code> that consumes typed events from <code>PlayerPort</code>.
+      </p>
+      <ul>
+        <li><code>ResumePolicy</code>: stored-vs-live resume position, duration clamp, trivial-position filtering.</li>
+        <li><code>WatchedPolicy</code>: NaturalEof, UserStop threshold, credits-start rule.</li>
+        <li><code>PlaybackHistoryRepository</code>: persistence only.</li>
+        <li><code>ResumeUseCase</code>: one-click resume orchestration; no longer lives in the persistence controller.</li>
+      </ul>
+    </rd-card>
+
+    <rd-card title="6. Series auto-next: create a session-level catalog" accent="warn">
+      <p>
+        Replace direct dependency on both <code>DownloadManager</code> and
+        <code>TorrentStreamingService</code> with <code>SessionFileCatalog</code>:
+      </p>
+      <rd-code lang="cpp">class SessionFileCatalog {
+public:
+    virtual QVector&lt;MediaFileEntry&gt; filesForStreamRef(
+        const domain::HistoryStreamRef&amp; ref) const = 0;
+};</rd-code>
+      <p>
+        Debrid resolver-cached file lists and libtorrent file lists become two implementations
+        behind the same catalog. <code>SeriesSessionService</code> only sees media files and
+        episode numbers.
+      </p>
+    </rd-card>
+  </rd-section>
+
+  <rd-section title="Target play sequence">
+    <rd-diagram lang="mermaid" caption="Same feature set, clearer ownership">
+sequenceDiagram
+  autonumber
+  participant QML as QML / VM
+  participant Play as PlaybackUseCase
+  participant Resume as ResumeUseCase
+  participant Transfer as TransferUseCase
+  participant Source as MediaSourcePort<br/>(Torrent/RD/AD)
+  participant Gateway as StreamGatewayPort<br/>(Local HTTP)
+  participant Player as PlayerPort<br/>(mpv adapter)
+  participant Progress as PlaybackProgressService
+  participant Series as SeriesSessionService
+
+  QML->>Play: play(stream, context, options)
+  Play->>Resume: resumeSecondsFor(context.key)
+  Resume-->>Play: optional seconds
+  Play->>Transfer: ensurePlayable(stream, context, OnDemand)
+  Transfer->>Source: open(ref, stream, ctx, OnDemand)
+  Source-->>Transfer: PlayableAssetSession + ByteRangeSource
+  Transfer->>Gateway: expose(assetId, source)
+  Gateway-->>Transfer: localhost URL
+  Transfer-->>Play: PlayableAsset(assetId, url, streamRef)
+  Play->>Progress: onPlayStarting(context + streamRef)
+  Play->>Player: play(url, context, resumeSeconds)
+
+  loop playback
+    Player-->>Progress: position/duration/tracks events
+    Progress-->>Progress: debounce/throttle/policy
+  end
+
+  Player-->>Play: endOfFile(reason)
+  Play->>Progress: finalize(reason)
+  Play->>Series: onEnded(context, reason)
+  alt next episode available
+    Series->>Play: play(nextStream, nextContext)
+  end
+    </rd-diagram>
+  </rd-section>
+
+  <rd-section title="Folder/package shape">
+    <p>
+      A possible final layout. It is intentionally close to the existing tree to reduce churn.
+    </p>
+
+    <rd-code lang="text">src/
+  application/
+    playback/
+      PlaybackUseCase.{h,cpp}
+      PlaybackProgressService.{h,cpp}
+      ResumeUseCase.{h,cpp}
+      SeriesSessionService.{h,cpp}
+      ports/PlayerPort.h
+    transfer/
+      TransferUseCase.{h,cpp}
+      SessionRegistry.{h,cpp}
+      TransferSupervisor.{h,cpp}
+      BackendRegistry.{h,cpp}
+      ports/MediaSourcePort.h
+      ports/StreamGatewayPort.h
+      ports/SessionFileCatalog.h
+    policies/
+      BackendSelectionPolicy.{h,cpp}
+      MediaFileSelectionPolicy.{h,cpp}
+      ResumePolicy.{h,cpp}
+      WatchedPolicy.{h,cpp}
+      StreamingPriorityPolicy.{h,cpp}
+
+  infrastructure/
+    player/mpv/EmbeddedMpvPlayerAdapter.{h,cpp}
+    player/external/ExternalPlayerAdapter.{h,cpp}
+    streaming/LocalHttpStreamGateway.{h,cpp}
+    torrent/LibtorrentClient.{h,cpp}
+    torrent/TorrentMediaSource.{h,cpp}
+    debrid/RealDebridMediaSource.{h,cpp}
+    debrid/AllDebridMediaSource.{h,cpp}
+    persistence/SqliteHistoryRepository.{h,cpp}
+    persistence/SqliteDownloadRepository.{h,cpp}
+
+  ui/ ... existing QML bridge and player chrome
+  domain/ ... value objects and repository DTOs</rd-code>
+
+    <rd-callout type="note">
+      <p>
+        The existing folders can host these classes first. The package move can be the last
+        step, after tests prove behavior is stable.
+      </p>
+    </rd-callout>
+  </rd-section>
+
+  <rd-section title="Migration roadmap">
+    <rd-steps>
+      <rd-step title="Phase 0 — characterize behavior before moving code">
+        Add targeted tests around: backend selection, LocalMediaServer Range behavior,
+        torrent file selection, progress thresholds, resume lookup, series adjacency, and
+        OnDemand→Full upgrade. These are the safety rails for all later refactors.
+      </rd-step>
+      <rd-step title="Phase 1 — introduce ports with adapters over existing classes">
+        Add <code>PlayerPort</code>, <code>StreamGatewayPort</code>, <code>MediaSourcePort</code>,
+        repository interfaces, and adapters that simply forward to current classes. No logic
+        moves yet.
+      </rd-step>
+      <rd-step title="Phase 2 — split DownloadManager internally">
+        Extract <code>SessionRegistry</code>, <code>TransferSupervisor</code>, and
+        <code>DownloadRepository</code> while keeping <code>DownloadManager</code>'s public API as a
+        compatibility façade for QML/controllers.
+      </rd-step>
+      <rd-step title="Phase 3 — create PlaybackUseCase and route StreamActions through it">
+        <code>StreamActions</code> becomes mostly clipboard/open-url/context-menu glue. Playback
+        and download actions route to <code>PlaybackUseCase</code> / <code>TransferUseCase</code>.
+      </rd-step>
+      <rd-step title="Phase 4 — extract progress and resume policies">
+        Move threshold math, credits handling, duration clamp, and resume lookup into pure
+        services. <code>HistoryController</code> becomes a façade for existing QML view-models.
+      </rd-step>
+      <rd-step title="Phase 5 — split TorrentStreamingService">
+        Introduce <code>LibtorrentClient</code>, <code>TorrentMediaSource</code>, and pure policies.
+        Port tests away from the legacy torrent <code>LocalStreamServer</code>, then delete it.
+      </rd-step>
+      <rd-step title="Phase 6 — slim ServiceContainer into modules">
+        Keep a single composition root, but organize construction into functions/modules:
+        <code>buildInfrastructure()</code>, <code>buildRepositories()</code>,
+        <code>buildApplicationUseCases()</code>, <code>buildViewModels()</code>,
+        <code>wirePresentation()</code>.
+      </rd-step>
+    </rd-steps>
+  </rd-section>
+
+  <rd-section title="Risk and mitigation">
+    <table>
+      <thead>
+        <tr><th>Risk</th><th>Why it matters</th><th>Mitigation</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Playback regressions</td>
+          <td>mpv/loadfile/Range interactions are timing-sensitive.</td>
+          <td>Keep LocalMediaServer and MpvVideoItem behavior unchanged until ports are stable; add integration tests around Range serving and end-of-file.</td>
+        </tr>
+        <tr>
+          <td>Async lifetime bugs</td>
+          <td>QCoro tasks can outlive QObject owners during teardown.</td>
+          <td>Continue using epoch counters and QPointer guards; centralize task ownership in use cases.</td>
+        </tr>
+        <tr>
+          <td>Architecture over-abstraction</td>
+          <td>Too many interfaces can make a small app harder to navigate.</td>
+          <td>Only introduce ports where there is a real infrastructure boundary or existing cyclic dependency.</td>
+        </tr>
+        <tr>
+          <td>QML churn</td>
+          <td>View-model changes are visible and easy to break.</td>
+          <td>Keep current controllers as façades while moving internals behind them.</td>
+        </tr>
+        <tr>
+          <td>Feature parity drift</td>
+          <td>Auto-next, resume, debrid file lists, and stream-size hydration rely on subtle state.</td>
+          <td>Represent playback session state explicitly and test one path per backend.</td>
+        </tr>
+      </tbody>
+    </table>
+  </rd-section>
+
+  <rd-section title="Definition of done">
+    <rd-checklist>
+      <rd-task done="false">No production code uses <code>src/torrent/LocalStreamServer</code>; tests use the generic stream gateway.</rd-task>
+      <rd-task done="false"><code>DownloadManager</code> public API is either a thin façade or replaced by <code>TransferUseCase</code>.</rd-task>
+      <rd-task done="false"><code>StreamActions::play()</code> no longer knows about torrent vs downloader vs player launcher details.</rd-task>
+      <rd-task done="false"><code>HistoryController</code> no longer fetches indexer streams or calls <code>StreamActions</code>; one-click resume lives in <code>ResumeUseCase</code>.</rd-task>
+      <rd-task done="false">Torrent-specific file-list types do not appear in generic download/session headers.</rd-task>
+      <rd-task done="false">Watched/resume/backend/file-selection/priority policies have focused unit tests without Qt windows or libtorrent.</rd-task>
+      <rd-task done="false">The end-user feature set is unchanged: embedded playback, external playback, debrid, torrents, local HTTP streaming, downloads, resume, watched state, subtitles, MPRIS, and series auto-next all still work.</rd-task>
+    </rd-checklist>
+  </rd-section>
+
+  <rd-section title="First implementation slice">
+    <p>
+      If we want a low-risk first PR that proves the direction, start here:
+    </p>
+    <ol>
+      <li>Create <code>application/transfer/ports/ByteRangeSource.h</code> and adapt <code>AssetSession</code> to implement it.</li>
+      <li>Rename the conceptual role of <code>LocalMediaServer</code> by adding a thin <code>StreamGatewayPort</code> interface and a <code>LocalHttpStreamGateway</code> adapter that delegates to the existing server.</li>
+      <li>Change <code>DownloadManager</code> to depend on the gateway interface internally. Public API unchanged.</li>
+      <li>Add tests for <code>LocalMediaServer</code> through the gateway with a fake byte-range source.</li>
+    </ol>
+    <rd-callout type="success">
+      <p>
+        This slice decouples the most stable boundary — HTTP Range serving — without touching
+        mpv, libtorrent, debrid credentials, QML, or database schema.
+      </p>
+    </rd-callout>
+  </rd-section>
+
+</rd-page>
+</body>
+</html>

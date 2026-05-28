@@ -15,6 +15,7 @@ TransferSession::TransferSession(domain::AssetRef ref,
     domain::DownloadMode mode,
     domain::CacheDisposition disposition,
     std::unique_ptr<sources::AssetSession> source,
+    PlaybackSessionId playbackSessionId,
     QObject* parent)
     : QObject(parent)
     , m_ref(std::move(ref))
@@ -22,15 +23,15 @@ TransferSession::TransferSession(domain::AssetRef ref,
     , m_backend(backend)
     , m_mode(mode)
     , m_disposition(disposition)
+    , m_playbackSessionId(playbackSessionId)
     , m_source(std::move(source))
 {
     Q_ASSERT(m_source);
     if (!m_source) {
         return;
     }
-    // Keep the legacy session's mode flag aligned with ours so any
-    // direct `AssetSession::mode()` reads stay coherent during the
-    // transitional period.
+    // Keep the source's mode flag aligned with the owning transfer
+    // session so direct `AssetSession::mode()` reads stay coherent.
     m_source->setMode(m_mode);
 
     // Re-publish progress / telemetry so subscribers can attach to

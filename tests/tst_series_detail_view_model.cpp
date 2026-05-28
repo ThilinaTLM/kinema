@@ -9,7 +9,7 @@
 #include "core/persistence/HistoryStore.h"
 #include "core/io/HttpError.h"
 #include "core/persistence/WatchedStore.h"
-#include "services/StreamActions.h"
+#include "controllers/StreamUtilityController.h"
 #include "TestDoubles.h"
 #include "ui/qml-bridge/DiscoverSectionModel.h"
 #include "ui/qml-bridge/EpisodesListModel.h"
@@ -31,7 +31,7 @@ using kinema::domain::SeriesDetail;
 using kinema::domain::Stream;
 using kinema::config::AppSettings;
 using kinema::core::HttpError;
-using kinema::services::StreamActions;
+using kinema::controllers::StreamUtilityController;
 using kinema::tests::FakeCinemetaClient;
 using kinema::tests::FakeTmdbClient;
 using kinema::tests::IndexerHarness;
@@ -92,7 +92,7 @@ struct Fixture {
     FakeCinemetaClient cinemeta;
     IndexerHarness indexers;
     FakeTmdbClient tmdb;
-    StreamActions actions { nullptr, nullptr };
+    StreamUtilityController streamUtility;
     QString rdToken;
     QString adApiKey;
     SeriesDetailViewModel vm;
@@ -102,7 +102,7 @@ struct Fixture {
             tmp.filePath(QStringLiteral("kinemarc")),
             KConfig::SimpleConfig))
         , settings(config)
-        , vm(&cinemeta, indexers.selector(), &tmdb, &actions,
+        , vm(&cinemeta, indexers.selector(), &tmdb, nullptr, &streamUtility,
               /*tokens=*/nullptr, settings, rdToken, adApiKey,
               nullptr)
     {
@@ -125,7 +125,7 @@ struct WatchedFixture {
     FakeCinemetaClient cinemeta;
     IndexerHarness indexers;
     FakeTmdbClient tmdb;
-    StreamActions actions { nullptr, nullptr };
+    StreamUtilityController streamUtility;
     QString rdToken;
     QString adApiKey;
     SeriesDetailViewModel vm;
@@ -141,7 +141,7 @@ struct WatchedFixture {
         , historyRepo(history)
         , historyQueryService(historyRepo, history)
         , watchedCtrl(watchedStore, &historyQueryService)
-        , vm(&cinemeta, indexers.selector(), &tmdb, &actions,
+        , vm(&cinemeta, indexers.selector(), &tmdb, nullptr, &streamUtility,
               /*library=*/nullptr, &watchedCtrl,
               /*tokens=*/nullptr, settings, rdToken, adApiKey,
               nullptr)

@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kinema — Playback Subsystem Architecture Patterns</title>
+  <link rel="stylesheet" href="./richdoc.css">
+  <script src="./richdoc.js" defer></script>
+</head>
+<body>
+<rd-page theme="graphite-modern" mode="auto" width="standard" toc="auto">
+
+  <rd-hero
+    eyebrow="Architecture addendum"
+    title="A session-centric event-driven playback architecture"
+    lede="Recommended computer-science-level patterns for decoupling Kinema's embedded playback, streaming, downloader, torrent/debrid sources, subtitles, MPRIS, tray, and progress tracking."
+    meta="Scope: playback subsystem only · not discovery/search/library redesign">
+  </rd-hero>
+
+  <rd-callout type="tldr">
+    <p>
+      The strongest fit is a <strong>session-centric event-driven architecture</strong>: every play
+      request creates or resumes a <code>PlaybackSession</code> that accepts commands, emits typed
+      events, and is governed by explicit state machines. Around that, use
+      <strong>ports/adapters</strong> for mpv, local HTTP, torrent, debrid, subtitles, MPRIS, tray,
+      and persistence. Avoid a global app-wide event bus; use a small typed event stream scoped
+      to the playback subsystem.
+    </p>
+  </rd-callout>
+
+  <rd-section title="Recommendation">
+    <rd-decision status="proposed" title="Use a session actor + typed events + state machines">
+      <p>
+        Model playback as a long-running session process. UI sends commands such as
+        <code>PlayStream</code>, <code>Pause</code>, <code>Seek</code>, <code>SaveOffline</code>,
+        <code>SelectSubtitle</code>, and <code>Stop</code>. The subsystem emits facts such as
+        <code>PlaybackStarted</code>, <code>PlayableUrlReady</code>, <code>BufferingChanged</code>,
+        <code>PositionTicked</code>, <code>DownloadProgressed</code>, <code>SubtitleAttached</code>,
+        and <code>PlaybackEnded</code>. Independent consumers update history, MPRIS, subtitles,
+        downloads UI, tray state, and series auto-next.
+      </p>
+    </rd-decision>
+
+    <rd-cols n="3">
+      <rd-card title="1. Event-driven" accent="success">
+        Decouples producers from consumers. mpv no longer directly drives history, MPRIS,
+        subtitle state, and series logic through controller chains; it emits playback events.
+      </rd-card>
+      <rd-card title="2. State machines" accent="info">
+        Makes lifecycle rules explicit: loading, buffering, playing, paused, seeking, ending,
+        failed; transfer states such as resolving, streaming, downloading, paused, completed.
+      </rd-card>
+      <rd-card title="3. Ports/adapters" accent="warn">
+        Keeps infrastructure replaceable: embedded mpv, external player, local HTTP gateway,
+        torrent engine, debrid HTTP, OpenSubtitles, MPRIS, tray, SQLite stores.
+      </rd-card>
+    </rd-cols>
+  </rd-section>
+
+  <rd-section title="Why this fits Kinema naturally">
+    <p>
+      This subsystem is already asynchronous and event-like: mpv emits property changes,
+      libtorrent emits alerts, LocalMediaServer responds to Range requests, debrid resolvers
+      complete later, downloads progress over time, and history/MPRIS/subtitles/tray are all
+      observers of playback state. The missing piece is not event-driven behavior itself — Qt
+      signals already provide that — but an explicit <strong>domain event model</strong> and
+      <strong>session state</strong> that prevent point-to-point coupling.
+    </p>
+
+    <rd-kv layout="stacked">
+      <rd-row key="Current Qt signals">
+        Good for object-to-object notification, but dependencies become implicit and hard to trace
+        when controllers connect directly to other controllers.
+      </rd-row>
+      <rd-row key="Proposed typed events">
+        Facts named in playback language, carrying a <code>sessionId</code>, <code>assetId</code>,
+        <code>PlaybackContext</code>, stream reference, timestamp, and reason. Consumers subscribe
+        to facts, not concrete objects.
+      </rd-row>
+      <rd-row key="Current controllers">
+        Some classes both decide workflow and react to player/network events.
+      </rd-row>
+      <rd-row key="Proposed session process">
+        One process manager owns the workflow. Subsystems become adapters or projections.
+      </rd-row>
+    </rd-kv>
+  </rd-section>
+
+  <rd-section title="Proposed subsystem shape">
+    <rd-diagram lang="mermaid" caption="Playback subsystem boundaries with a scoped event stream">
+flowchart TB
+  subgraph UI["Presentation"]
+    QML["QML / ViewModels"]
+    PlayerChrome["PlayerWindow / PlayerViewModel"]
+  end
+
+  subgraph Core["Playback application core"]
+    Cmd["PlaybackCommandBus<br/>(scoped)"]
+    Session["PlaybackSession<br/>process manager / actor"]
+    PSM["Playback state machine"]
+    TSM["Transfer state machine"]
+    Events["PlaybackEventStream<br/>(typed events)"]
+  end
+
+  subgraph Policies["Pure policies"]
+    Backend["BackendSelectionPolicy"]
+    FilePick["MediaFileSelectionPolicy"]
+    Watch["WatchedPolicy"]
+    Resume["ResumePolicy"]
+    Priority["StreamingPriorityPolicy"]
+  end
+
+  subgraph Adapters["Infrastructure adapters"]
+    Player["PlayerPort<br/>mpv / external"]
+    Gateway["StreamGatewayPort<br/>local HTTP Range"]
+    Torrent["MediaSourcePort<br/>torrent"]
+    Debrid["MediaSourcePort<br/>RD / AD"]
+    Subs["SubtitlePort<br/>OpenSubtitles + local files"]
+    Store["Repositories<br/>history/download"]
+    Desktop["Desktop adapters<br/>MPRIS / tray"]
+  end
+
+  QML --> Cmd
+  PlayerChrome --> Player
+  Cmd --> Session
+  Session --> PSM
+  Session --> TSM
+  Session --> Backend
+  Session --> Resume
+  Session --> Player
+  Session --> Gateway
+  Session --> Torrent
+  Session --> Debrid
+  Torrent --> FilePick
+  Torrent --> Priority
+  Debrid --> FilePick
+  Session --> Events
+
+  Events --> Store
+  Events --> Desktop
+  Events --> Subs
+  Events --> QML
+  Events --> Session
+  Store --> Watch
+    </rd-diagram>
+  </rd-section>
+
+  <rd-section title="Core concepts">
+    <rd-cols n="2">
+      <rd-card title="PlaybackSession as process manager / actor" accent="success">
+        <p>
+          A session is the owner of one user-visible playback attempt. It has a stable
+          <code>sessionId</code>, accepts commands sequentially, owns current context, current
+          asset, selected backend, local URL, loaded player state, transfer state, and next/prev
+          episode targets.
+        </p>
+        <p>
+          This is close to the actor model, but implemented with Qt/QCoro: one QObject, one
+          thread affinity, one command queue, epoch guards for async work.
+        </p>
+      </rd-card>
+
+      <rd-card title="Typed event stream, not a global bus" accent="warn">
+        <p>
+          Use a small playback-subsystem event stream. It is not a global app event bus.
+          Events are typed C++ structs or <code>std::variant</code> alternatives, and every event
+          includes correlation identity.
+        </p>
+        <p>
+          Examples: <code>PlaybackRequested</code>, <code>SourceResolving</code>,
+          <code>PlayableUrlReady</code>, <code>PlayerLoaded</code>, <code>PositionTicked</code>,
+          <code>TransferProgressed</code>, <code>SubtitleAttached</code>,
+          <code>PlaybackEnded</code>, <code>PlaybackFailed</code>.
+        </p>
+      </rd-card>
+
+      <rd-card title="Explicit state machines" accent="info">
+        <p>
+          State machines make race handling visible. For example, an mpv <code>end-file: stop</code>
+          while replacing a URL is ignored because the state machine is in
+          <code>ReplacingSource</code>, not because a scattered boolean happened to be set.
+        </p>
+      </rd-card>
+
+      <rd-card title="Functional core, imperative shell">
+        <p>
+          Keep policies pure: backend selection, file selection, watched thresholds, resume
+          clamping, and piece-priority plans. Infrastructure remains imperative and asynchronous,
+          but decisions become easy to test.
+        </p>
+      </rd-card>
+    </rd-cols>
+  </rd-section>
+
+  <rd-section title="State machines">
+    <rd-diagram lang="mermaid" caption="Playback session state machine">
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> ResolvingSource: PlayStream
+  ResolvingSource --> PreparingTransfer: SourceChosen
+  PreparingTransfer --> LoadingPlayer: PlayableUrlReady
+  LoadingPlayer --> ResumePrompt: ResumeAvailable
+  ResumePrompt --> Playing: AcceptResume / DeclineResume
+  LoadingPlayer --> Playing: PlayerLoaded
+  Playing --> Paused: Pause
+  Paused --> Playing: Resume
+  Playing --> Seeking: Seek
+  Seeking --> Playing: SeekCompleted
+  Playing --> Buffering: BufferingStarted
+  Buffering --> Playing: BufferingEnded
+  Playing --> Ending: EndOfFile
+  Playing --> Stopping: Stop / UserClosed
+  LoadingPlayer --> Failed: LoadTimeout / PlayerError
+  ResolvingSource --> Failed: SourceError
+  PreparingTransfer --> Failed: TransferError
+  Ending --> Completed: Finalized
+  Stopping --> Idle: Finalized
+  Failed --> Idle: Dismiss / RetryNewSession
+  Completed --> Idle
+    </rd-diagram>
+
+    <rd-diagram lang="mermaid" caption="Transfer/download state machine">
+stateDiagram-v2
+  [*] --> None
+  None --> Resolving: OpenSession
+  Resolving --> Streaming: OnDemandReady
+  Resolving --> Downloading: FullReady
+  Streaming --> Downloading: SaveOffline / PromoteToFull
+  Streaming --> IdleCached: PlayerDetached
+  IdleCached --> Streaming: PlayerAttached
+  Downloading --> Paused: Pause
+  Paused --> Downloading: Resume
+  Downloading --> Complete: AllBytesCached
+  Streaming --> Failed: Error
+  Downloading --> Failed: Error
+  Paused --> Cancelled: Cancel
+  Streaming --> Cancelled: Cancel
+  Failed --> Resolving: Retry
+  Complete --> Removed: Remove
+  Cancelled --> Removed: Remove
+    </rd-diagram>
+  </rd-section>
+
+  <rd-section title="Command and event examples">
+    <rd-code lang="cpp">using PlaybackSessionId = QUuid;
+
+struct PlayStream {
+    PlaybackSessionId sessionId;
+    domain::Stream stream;
+    domain::PlaybackContext context;
+    std::optional&lt;domain::DownloadBackendKind&gt; backendOverride;
+};
+
+struct SaveOffline {
+    PlaybackSessionId sessionId;
+    QString assetId;
+};
+
+struct PlayableUrlReady {
+    PlaybackSessionId sessionId;
+    QString assetId;
+    domain::PlaybackContext context;
+    domain::HistoryStreamRef streamRef;
+    QUrl localOrRemoteUrl;
+};
+
+struct PositionTicked {
+    PlaybackSessionId sessionId;
+    domain::PlaybackKey key;
+    double positionSec;
+    double durationSec;
+};
+
+struct PlaybackEnded {
+    PlaybackSessionId sessionId;
+    domain::PlaybackContext context;
+    QString reason; // eof, user-stop, error, load-timeout
+};
+
+using PlaybackEvent = std::variant&lt;
+    PlayableUrlReady,
+    PlayerLoaded,
+    PositionTicked,
+    TransferProgressed,
+    SubtitleAttached,
+    PlaybackEnded,
+    PlaybackFailed
+&gt;;</rd-code>
+
+    <rd-callout type="note">
+      <p>
+        This does not require event sourcing. We do <strong>not</strong> need to persist every event.
+        Persist the existing history/download rows. The event stream is primarily for runtime
+        decoupling and testability.
+      </p>
+    </rd-callout>
+  </rd-section>
+
+  <rd-section title="How subsystem features attach">
+    <table>
+      <thead>
+        <tr><th>Feature</th><th>Command/event relationship</th><th>Decoupling benefit</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Embedded playback</td>
+          <td><code>PlaybackSession</code> sends <code>PlayerPort::play</code>; mpv adapter emits <code>PlayerLoaded</code>, <code>PositionTicked</code>, <code>PlaybackEnded</code>.</td>
+          <td>mpv is one adapter; business logic does not depend on <code>PlayerWindow</code>.</td>
+        </tr>
+        <tr>
+          <td>Local streaming server</td>
+          <td>Gateway exposes <code>ByteRangeSource</code>; emits <code>RangeRequested</code>, <code>RangeReady</code>, <code>RangeFailed</code> telemetry.</td>
+          <td>Server does not know torrent/debrid/download manager.</td>
+        </tr>
+        <tr>
+          <td>Torrent engine</td>
+          <td>Torrent source handles <code>OpenSession</code>; emits transfer and file-catalog events.</td>
+          <td>Libtorrent alerts stay inside torrent adapter; session sees generic facts.</td>
+        </tr>
+        <tr>
+          <td>Debrid services</td>
+          <td>Debrid source resolves magnet/file/hoster URL; emits same session events as torrent source.</td>
+          <td>Playback and series auto-next do not care whether bytes are RD, AD, or torrent.</td>
+        </tr>
+        <tr>
+          <td>Downloads UI</td>
+          <td>Projection from <code>TransferProgressed</code>, <code>TransferPaused</code>, <code>TransferCompleted</code>, <code>TransferFailed</code>.</td>
+          <td>Downloads page becomes a read model, not an owner of transfer rules.</td>
+        </tr>
+        <tr>
+          <td>History / Continue Watching</td>
+          <td>Projection from <code>PlaybackStarted</code>, <code>PositionTicked</code>, <code>PlaybackEnded</code>.</td>
+          <td>Progress persistence no longer wires directly to player window.</td>
+        </tr>
+        <tr>
+          <td>Subtitles</td>
+          <td>Subtitle service reacts to <code>PlaybackStarted</code>, <code>MoviehashComputed</code>, <code>TrackListChanged</code>; command <code>AttachSubtitle</code>.</td>
+          <td>Subtitle logic does not depend on playback controller internals.</td>
+        </tr>
+        <tr>
+          <td>MPRIS / tray</td>
+          <td>Projection from <code>PlaybackStateChanged</code>, <code>PositionTicked</code>, <code>MetadataChanged</code>.</td>
+          <td>Desktop adapters become observers of session state.</td>
+        </tr>
+        <tr>
+          <td>Series auto-next</td>
+          <td>Session/catalog events populate next target; <code>PlaybackEnded(eof)</code> triggers <code>PlayStream(next)</code>.</td>
+          <td>No direct dependency on both downloader and torrent engine.</td>
+        </tr>
+      </tbody>
+    </table>
+  </rd-section>
+
+  <rd-section title="What is already in the previous proposal">
+    <rd-kv layout="stacked">
+      <rd-row key="Already present">
+        Ports/adapters, use cases, pure policies, stream gateway, media source abstraction, and
+        a recommendation to avoid broad controllers.
+      </rd-row>
+      <rd-row key="Missing / should be strengthened">
+        The previous proposal should explicitly name <code>PlaybackSession</code> as the central
+        process manager and define a typed event stream plus state machines. That is the main
+        architecture-level improvement beyond ordinary decoupling.
+      </rd-row>
+      <rd-row key="Do not add">
+        Do not add a global pub/sub bus for the whole app. Do not persist all runtime events.
+        Do not force discovery/search/library into this architecture work.
+      </rd-row>
+    </rd-kv>
+  </rd-section>
+
+  <rd-section title="Implementation technology choices">
+    <table>
+      <thead>
+        <tr><th>Option</th><th>Fit</th><th>Recommendation</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Qt signals only</td>
+          <td>Already used; low friction, but point-to-point coupling remains hard to reason about.</td>
+          <td>Keep for adapter edges, but wrap important facts as typed domain events.</td>
+        </tr>
+        <tr>
+          <td>Global event bus</td>
+          <td>Decouples quickly but often hides dependencies and makes ordering/debugging hard.</td>
+          <td>Avoid.</td>
+        </tr>
+        <tr>
+          <td>Scoped typed event stream</td>
+          <td>Good fit for playback subsystem: clear contracts, correlation IDs, testable event sequences.</td>
+          <td>Use.</td>
+        </tr>
+        <tr>
+          <td>Event sourcing</td>
+          <td>Useful when audit/replay is a product requirement. Here it adds storage complexity.</td>
+          <td>Do not use initially.</td>
+        </tr>
+        <tr>
+          <td>Actor model</td>
+          <td>Good conceptual fit for long-lived playback/transfer sessions.</td>
+          <td>Use the idea with QObject/QCoro, not a new actor framework.</td>
+        </tr>
+        <tr>
+          <td>Statechart library</td>
+          <td>Could help if lifecycle complexity grows; introduces dependency/learning curve.</td>
+          <td>Start with explicit enum + transition table; consider Qt SCXML or Boost.SML later.</td>
+        </tr>
+      </tbody>
+    </table>
+  </rd-section>
+
+  <rd-section title="First slice">
+    <rd-steps>
+      <rd-step title="Introduce PlaybackSessionId and typed event structs">
+        Do this without moving behavior. Have current controllers emit a small event stream in parallel
+        with existing signals.
+      </rd-step>
+      <rd-step title="Create PlaybackSession façade">
+        It initially delegates to current <code>StreamActions</code>, <code>DownloadManager</code>,
+        <code>PlaybackController</code>, and <code>HistoryController</code>. Then behavior moves inward.
+      </rd-step>
+      <rd-step title="Move progress persistence to an event subscriber">
+        Convert history writes to consume <code>PlaybackStarted</code>, <code>PositionTicked</code>,
+        and <code>PlaybackEnded</code>. Keep public controller APIs for QML compatibility.
+      </rd-step>
+      <rd-step title="Move MPRIS/tray/subtitle reactions to projections">
+        They subscribe to session/player events instead of directly observing concrete controller chains.
+      </rd-step>
+      <rd-step title="Extract state machines last">
+        Once events reveal the real lifecycle, codify transitions and delete scattered booleans/epoch rules
+        where the state machine makes them unnecessary.
+      </rd-step>
+    </rd-steps>
+  </rd-section>
+
+</rd-page>
+</body>
+</html>

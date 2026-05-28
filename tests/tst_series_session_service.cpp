@@ -8,7 +8,6 @@
 #include "playback/ports/SessionFileCatalog.h"
 #include "playback/series/SeriesSessionService.h"
 #include "playback/session/PlaybackSessionManager.h"
-#include "services/StreamActions.h"
 
 #include <QSignalSpy>
 #include <QString>
@@ -118,11 +117,9 @@ class TstSeriesSessionService : public QObject
 private Q_SLOTS:
     void init()
     {
-        m_actions = std::make_unique<services::StreamActions>(nullptr, nullptr);
         m_events = std::make_unique<PlaybackEventStream>();
         m_catalog = std::make_unique<FakeCatalog>();
-        m_mgr = std::make_unique<RecordingSessionManager>(*m_actions,
-            *m_events, nullptr, nullptr, nullptr);
+        m_mgr = std::make_unique<RecordingSessionManager>(*m_events, nullptr, nullptr, nullptr);
         m_svc = std::make_unique<SeriesSessionService>(*m_events,
             *m_catalog, *m_mgr);
     }
@@ -133,7 +130,6 @@ private Q_SLOTS:
         m_mgr.reset();
         m_catalog.reset();
         m_events.reset();
-        m_actions.reset();
     }
 
     // -----------------------------------------------------------------
@@ -402,8 +398,7 @@ private Q_SLOTS:
     }
 
 private:
-    std::unique_ptr<services::StreamActions> m_actions;
-    std::unique_ptr<PlaybackEventStream> m_events;
+        std::unique_ptr<PlaybackEventStream> m_events;
     std::unique_ptr<FakeCatalog> m_catalog;
     std::unique_ptr<RecordingSessionManager> m_mgr;
     std::unique_ptr<SeriesSessionService> m_svc;

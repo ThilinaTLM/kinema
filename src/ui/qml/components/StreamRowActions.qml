@@ -23,7 +23,7 @@ import dev.tlmtech.kinema.app
 //   * Find Subtitles
 //
 // All actions route through the owning view-model's slots so the
-// QML side never reaches into `services::StreamActions` directly.
+// QML side never reaches into `the playback/session utility services` directly.
 KinemaMenu {
     id: menu
 

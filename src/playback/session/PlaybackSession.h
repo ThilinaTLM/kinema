@@ -27,19 +27,10 @@ namespace kinema::playback::session {
  * and the user-visible context (stream + playback metadata).
  * Publishes typed events to `PlaybackEventStream`.
  *
- * In the transitional design used by the current scaffold,
- * `PlaybackSession` is a thin lifecycle wrapper:
- *   - `start(...)` publishes `PlaybackRequested` and transitions
- *     the state machine to `ResolvingSource`. The actual work of
- *     resolving / opening / handing-off-to-mpv is performed by
- *     the legacy `services::StreamActions` path that
- *     `PlaybackSessionManager` invokes alongside the session.
- *   - `markPlayerLoaded()` / `markEnded(reason)` /
- *     `markFailed(reason)` are called by the manager when the
- *     legacy controller surfaces those events. Eventually they
- *     will be driven by `PlaybackEventStream` subscriptions from
- *     the player adapter, but during the migration the manager
- *     still owns the translation.
+ * `PlaybackSessionManager` owns orchestration; this object owns the
+ * per-attempt id, state transitions, context, and event publication.
+ * Player adapters publish terminal events for the same session id;
+ * this session observes them and terminates without duplicate events.
  *
  * Tests construct a `PlaybackSession` directly with a stub event
  * stream and assert the event sequence and state transitions
@@ -91,10 +82,10 @@ public:
         const domain::PlaybackContext& ctx,
         std::optional<domain::DownloadBackendKind> backendOverride = std::nullopt);
 
-    // --------------- transitional event hooks ----------------
-    // Called by `PlaybackSessionManager` as it observes the legacy
-    // controller signals. Each one drives the state machine and
-    // publishes the corresponding typed event.
+    // --------------- event hooks ----------------
+    // Called by `PlaybackSessionManager` as orchestration progresses.
+    // Each one drives the state machine and publishes the corresponding
+    // typed event.
 
     void markSourceResolved(const domain::AssetRef& asset);
     void markPlayableUrl(const QString& assetId, const QUrl& url);

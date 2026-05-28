@@ -124,8 +124,7 @@ void PlaybackSession::markEnded(PlaybackEndReason reason)
     }
     m_state.handle(PlaybackInput::EndOfFile);
     // Advance the machine one more step so we land on Completed
-    // rather than Ending — the transitional code expects a single
-    // terminal observation per attempt.
+    // rather than Ending after a single terminal observation.
     if (m_state.state() == PlaybackState::Ending) {
         m_state.handle(PlaybackInput::EndOfFile);
     }

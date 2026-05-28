@@ -167,7 +167,9 @@ void TransferUseCase::supersedeSameHashSessions(const QString& infoHash,
     }
 }
 
-QCoro::Task<QUrl> TransferUseCase::ensurePlayable(domain::Stream stream,
+QCoro::Task<QUrl> TransferUseCase::ensurePlayable(
+    PlaybackSessionId sessionId,
+    domain::Stream stream,
     domain::PlaybackContext ctx,
     std::optional<domain::DownloadBackendKind> backendOverride)
 {
@@ -199,7 +201,7 @@ QCoro::Task<QUrl> TransferUseCase::ensurePlayable(domain::Stream stream,
         << " disposition=" << dispositionName(disposition);
 
     const auto url = co_await openSession(ref, std::move(stream),
-        std::move(ctx), mode, disposition, backendOverride);
+        std::move(ctx), mode, disposition, backendOverride, sessionId);
     attachPlayer(assetId);
     co_return url;
 }
@@ -522,12 +524,16 @@ QVector<domain::MediaFileEntry> TransferUseCase::filesForAssetId(
 QCoro::Task<QUrl> TransferUseCase::openSession(domain::AssetRef ref,
     domain::Stream stream, domain::PlaybackContext ctx,
     domain::DownloadMode mode, domain::CacheDisposition disposition,
-    std::optional<domain::DownloadBackendKind> backendOverride)
+    std::optional<domain::DownloadBackendKind> backendOverride,
+    PlaybackSessionId sessionId)
 {
     const auto assetId = domain::assetIdFor(ref);
 
     // Reuse an active session if one exists for this exact asset.
     if (auto* session = m_sessions.find(assetId)) {
+        if (!sessionId.isNull()) {
+            session->setPlaybackSessionId(sessionId);
+        }
         session->touch();
         co_return m_gateway.urlFor(session->assetId());
     }
@@ -540,12 +546,18 @@ QCoro::Task<QUrl> TransferUseCase::openSession(domain::AssetRef ref,
 
     while (m_sessions.isOpening(assetId)) {
         if (auto* session = m_sessions.find(assetId)) {
+            if (!sessionId.isNull()) {
+                session->setPlaybackSessionId(sessionId);
+            }
             session->touch();
             co_return m_gateway.urlFor(session->assetId());
         }
         co_await sleepMs(25);
     }
     if (auto* session = m_sessions.find(assetId)) {
+        if (!sessionId.isNull()) {
+            session->setPlaybackSessionId(sessionId);
+        }
         session->touch();
         co_return m_gateway.urlFor(session->assetId());
     }
@@ -578,23 +590,9 @@ QCoro::Task<QUrl> TransferUseCase::openSession(domain::AssetRef ref,
 
         auto opened = co_await backend->open(ref, stream, ctx, mode);
 
-        // The `MediaSourcePort` returns ownership through a
-        // `unique_ptr<ByteRangeSource>`. Concrete sources are
-        // `playback::sources::AssetSession` QObjects (the abstract
-        // base that adds the progress signals over the pure-read
-        // port). Downcast at the boundary to hand the typed pointer
-        // into `TransferSession`.
-        auto* baseSource = opened.session.release();
-        auto* assetSession
-            = dynamic_cast<sources::AssetSession*>(baseSource);
-        Q_ASSERT_X(assetSession, "TransferUseCase::openSession",
-            "MediaSourcePort returned a non-AssetSession byte source");
-        std::unique_ptr<sources::AssetSession> typedSource(
-            assetSession);
-
         auto session = std::make_unique<TransferSession>(ref, ctx,
             backend->kind(), mode, disposition,
-            std::move(typedSource));
+            std::move(opened.session), sessionId);
         auto* raw = session.get();
 
         // Register first so the supervisor wires its progress
@@ -640,12 +638,13 @@ QCoro::Task<QUrl> TransferUseCase::openSession(domain::AssetRef ref,
 QCoro::Task<void> TransferUseCase::startBackground(domain::AssetRef ref,
     domain::Stream stream, domain::PlaybackContext ctx,
     domain::DownloadMode mode, domain::CacheDisposition disposition,
-    std::optional<domain::DownloadBackendKind> backendOverride)
+    std::optional<domain::DownloadBackendKind> backendOverride,
+    PlaybackSessionId sessionId)
 {
     const auto assetId = domain::assetIdFor(ref);
     try {
         co_await openSession(std::move(ref), std::move(stream),
-            std::move(ctx), mode, disposition, backendOverride);
+            std::move(ctx), mode, disposition, backendOverride, sessionId);
     } catch (const std::exception& e) {
         const auto reason = QString::fromUtf8(e.what());
         m_repo.updateState(assetId, domain::DownloadState::Failed);

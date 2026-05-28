@@ -52,6 +52,12 @@ void TransferSupervisor::setSessionIdResolver(SessionIdResolver fn)
 PlaybackSessionId TransferSupervisor::resolveSessionId(
     const QString& assetId) const
 {
+    if (auto* session = m_registry.find(assetId)) {
+        const auto id = session->playbackSessionId();
+        if (!id.isNull()) {
+            return id;
+        }
+    }
     return m_resolver ? m_resolver(assetId) : PlaybackSessionId {};
 }
 

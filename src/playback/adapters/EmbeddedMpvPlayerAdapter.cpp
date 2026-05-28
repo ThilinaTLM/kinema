@@ -11,6 +11,7 @@
 #include "playback/policy/ChapterSkipPolicy.h"
 #include "playback/policy/ResumePolicy.h"
 #include "ui/player/PlayerWindow.h"
+#include "ui/player/PlayerViewModel.h"
 
 #include <KLocalizedString>
 
@@ -266,18 +267,21 @@ void EmbeddedMpvPlayerAdapter::selectSubtitleTrack(int id)
     if (m_window) m_window->setSubtitleTrack(id);
 }
 
-bool EmbeddedMpvPlayerAdapter::attachSubtitleFile(const QString& /*localPath*/,
-    const QString& /*language*/)
+bool EmbeddedMpvPlayerAdapter::attachSubtitleFile(const QString& localPath,
+    const QString& language)
 {
-    if (!m_window || !m_sessionActive) {
+    if (!m_window || !m_sessionActive || localPath.isEmpty()) {
         return false;
     }
-    // The actual sub-add command runs through the chrome
-    // view-model; SubtitleSessionService (Phase 9) will route this
-    // call. Returning true here would lie about the attachment;
-    // returning false until that wiring is in place is the safer
-    // default.
-    return false;
+    auto* vm = m_window->viewModel();
+    if (!vm) {
+        return false;
+    }
+    vm->attachExternalSubtitle(localPath, QString {}, language,
+        /*select=*/true);
+    m_eventStream.publish(events::SubtitleAttached {
+        m_sessionId, localPath, language });
+    return true;
 }
 
 ports::PlayerSnapshot EmbeddedMpvPlayerAdapter::snapshot() const

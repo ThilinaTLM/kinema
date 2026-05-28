@@ -32,13 +32,14 @@ class TorrentioSettings;
 
 namespace kinema::controllers {
 class DownloadController;
+class StreamUtilityController;
 class LibraryController;
 class TokenController;
 class WatchedController;
 }
 
-namespace kinema::services {
-class StreamActions;
+namespace kinema::playback::session {
+class PlaybackSessionManager;
 }
 
 namespace kinema::ui::qml {
@@ -141,7 +142,8 @@ public:
     SeriesDetailViewModel(api::CinemetaClient* cinemeta,
         api::IndexerSelector* indexers,
         api::TmdbClient* tmdb,
-        services::StreamActions* actions,
+        playback::session::PlaybackSessionManager* playback,
+        controllers::StreamUtilityController* streamUtility,
         controllers::LibraryController* library,
         controllers::WatchedController* watched,
         controllers::TokenController* tokens,
@@ -154,7 +156,8 @@ public:
     SeriesDetailViewModel(api::CinemetaClient* cinemeta,
         api::IndexerSelector* indexers,
         api::TmdbClient* tmdb,
-        services::StreamActions* actions,
+        playback::session::PlaybackSessionManager* playback,
+        controllers::StreamUtilityController* streamUtility,
         controllers::TokenController* tokens,
         config::AppSettings& settings,
         const QString& rdTokenRef,
@@ -266,7 +269,7 @@ public Q_SLOTS:
     void setDownloadController(controllers::DownloadController* dl);
 
     /// Per-row action handlers driven by `StreamListCard.qml`'s ⋮ menu.
-    /// `playNow` routes straight through `services::StreamActions`.
+    /// `playNow` routes straight through `PlaybackSessionManager`.
     void playNow(int row);
     /// As `playNow` but forces a specific backend (Torrent /
     /// RealDebridHttp). Used by the per-stream override menu.
@@ -275,7 +278,7 @@ public Q_SLOTS:
     /// Background full-file episode download, mirroring the
     /// explicit `\u2b07 Download` button on the stream row. Always
     /// Full + Pinned; mode upgrade for already-streaming sessions
-    /// is handled by `DownloadManager::enqueueDownload`.
+    /// is handled by `TransferUseCase::saveOffline`.
     void download(int row);
     /// As above but forces a specific backend (Torrent /
     /// RealDebridHttp).
@@ -285,7 +288,7 @@ public Q_SLOTS:
     void copyDirectUrl(int row);
     void openDirectUrl(int row);
     /// Copy the row's release name to the clipboard via
-    /// `services::StreamActions::copyReleaseName`.
+    /// `StreamUtilityController::copyReleaseName`.
     void copyReleaseName(int row);
 
     void requestSubtitles();
@@ -362,7 +365,7 @@ private:
     void sortInPlace(QList<domain::Stream>& rows) const;
     domain::PlaybackContext currentContext() const;
 
-    /// Forwards a row's stream to a `services::StreamActions`
+    /// Forwards a row's stream to a `PlaybackSessionManager`
     /// pointer-to-member.
     template <typename Method>
     void dispatchStreamAction(int row, Method method);
@@ -370,7 +373,8 @@ private:
     api::CinemetaClient* m_cinemeta;
     api::IndexerSelector* m_indexers;
     api::TmdbClient* m_tmdb;
-    services::StreamActions* m_actions;
+    playback::session::PlaybackSessionManager* m_playback {};
+    controllers::StreamUtilityController* m_streamUtility {};
     controllers::LibraryController* m_library {};
     controllers::WatchedController* m_watched {};
     controllers::DownloadController* m_downloads {};

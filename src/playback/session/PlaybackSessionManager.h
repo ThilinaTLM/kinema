@@ -8,15 +8,13 @@
 #include "domain/PlaybackContext.h"
 #include "playback/events/PlaybackEvent.h"
 
+#include <QCoro/QCoroTask>
+
 #include <QObject>
 #include <QString>
 
 #include <memory>
 #include <optional>
-
-namespace kinema::services {
-class StreamActions;
-}
 
 namespace kinema::playback::adapters {
 class EmbeddedMpvPlayerAdapter;
@@ -27,49 +25,57 @@ namespace kinema::playback::events {
 class PlaybackEventStream;
 }
 
+namespace kinema::playback::ports {
+class PlayerPort;
+}
+
+namespace kinema::playback::resume {
+class ResumeUseCase;
+}
+
+namespace kinema::playback::series {
+class SeriesSessionService;
+}
+
+namespace kinema::playback::transfer {
+class TransferUseCase;
+}
+
 namespace kinema::playback::session {
 
 class PlaybackSession;
 
 /**
- * User-facing playback orchestrator.
- *
- * Replaces the play paths in `services::StreamActions` and the
- * embedded transport API on the retired
- * `controllers::PlaybackController`. The manager forwards the
- * play call into `StreamActions` (until that surface is also
- * retired) and routes transport / track-selection commands
- * directly to the embedded adapter's `PlayerPort` slice.
- *
- * UI code (QML, view-models) depends on this class — not on
- * `StreamActions` directly — so swapping the inner implementation
- * later is a one-place change.
+ * Session-centric playback orchestrator. Every user-visible play
+ * request enters here, receives a stable PlaybackSessionId, and then
+ * drives source resolution, transfer opening, player load and command
+ * routing through typed playback events.
  */
 class PlaybackSessionManager : public QObject
 {
     Q_OBJECT
 public:
-    PlaybackSessionManager(services::StreamActions& actions,
-        events::PlaybackEventStream& eventStream,
+    PlaybackSessionManager(events::PlaybackEventStream& eventStream,
+        transfer::TransferUseCase& transfers,
+        adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
+        adapters::ExternalPlayerAdapter* externalAdapter,
+        QObject* parent = nullptr);
+    /// Test/command-only constructor. `play()`/`download()` fail with a
+    /// status message unless a transfer use-case is supplied by the full
+    /// constructor, but transport methods remain usable for projections.
+    PlaybackSessionManager(events::PlaybackEventStream& eventStream,
         adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
         adapters::ExternalPlayerAdapter* externalAdapter,
         QObject* parent = nullptr);
     ~PlaybackSessionManager() override;
 
-    /// Currently active session, or nullptr if no play attempt is
-    /// in flight. Exposed for projections (history, series) that
-    /// need to associate inbound events with the current attempt
-    /// during the transitional phase.
     PlaybackSession* activeSession() const noexcept { return m_session.get(); }
-
-    /// Id of the active session, or a null QUuid when there is no
-    /// active attempt.
     PlaybackSessionId activeSessionId() const noexcept;
 
+    void setResumeUseCase(resume::ResumeUseCase* resume) noexcept;
+    void setSeriesSessionService(series::SeriesSessionService* series) noexcept;
+
 public Q_SLOTS:
-    /// Play `stream` with the identity/title information in `ctx`.
-    /// Virtual so projections / tests can record auto-next
-    /// dispatches without spinning up the real session machinery.
     virtual void play(const domain::Stream& stream,
         const domain::PlaybackContext& ctx);
     void playWithBackend(const domain::Stream& stream,
@@ -81,9 +87,6 @@ public Q_SLOTS:
         const domain::PlaybackContext& ctx,
         domain::DownloadBackendKind backend);
 
-    // Transport commands. `virtual` so projections / tests can
-    // intercept dispatches without spinning up an embedded
-    // controller (mirrors the `play()` pattern).
     virtual void pause();
     virtual void resume();
     virtual void playPause();
@@ -93,22 +96,44 @@ public Q_SLOTS:
     virtual void seekAbsoluteSeconds(double seconds);
     virtual void setVolumePercent(double percent);
     virtual void setPlaybackRate(double factor);
+    virtual void selectAudioTrack(int id);
+    virtual void selectSubtitleTrack(int id);
+    virtual void attachSubtitle(const QString& localPath,
+        const QString& language = {});
+    virtual void playNextEpisode();
+    virtual void playPreviousEpisode();
 
 Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
+    void activeSessionChanged(bool active);
+    void playbackStateChanged();
+    void positionChanged(double seconds);
+    void durationChanged(double seconds);
+    void pausedChanged(bool paused);
+    void navigationChanged();
+    void visibilityChanged(bool visible);
 
 private:
     void supersedeActiveSession();
-
-    /// Stamp both player adapters with the current session id so
-    /// the events they publish carry the right identity. Called
-    /// immediately before delegating the actual play start.
+    domain::PlaybackContext effectiveContext(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx) const;
+    void startPlay(const domain::Stream& stream,
+        const domain::PlaybackContext& ctx,
+        std::optional<domain::DownloadBackendKind> backendOverride);
+    QCoro::Task<void> playTask(PlaybackSessionId sessionId,
+        domain::Stream stream,
+        domain::PlaybackContext ctx,
+        std::optional<domain::DownloadBackendKind> backendOverride);
     void stampAdapters(const domain::PlaybackContext& ctx);
+    ports::PlayerPort* commandPlayer() const noexcept;
+    void onEvent(const events::PlaybackEvent& event);
 
-    services::StreamActions& m_actions;
     events::PlaybackEventStream& m_eventStream;
+    transfer::TransferUseCase* m_transfers {};
     adapters::EmbeddedMpvPlayerAdapter* m_embeddedAdapter;
     adapters::ExternalPlayerAdapter* m_externalAdapter;
+    resume::ResumeUseCase* m_resume {};
+    series::SeriesSessionService* m_series {};
     std::unique_ptr<PlaybackSession> m_session;
 };
 

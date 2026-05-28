@@ -42,6 +42,7 @@ namespace kinema::controllers {
 class DebridCredentialsResolver;
 class DownloadController;
 class LibraryController;
+class StreamUtilityController;
 class SubtitleController;
 class TokenController;
 class TrayController;
@@ -53,9 +54,6 @@ class AllDebridResolver;
 class RealDebridResolver;
 }
 
-namespace kinema::services {
-class StreamActions;
-}
 
 namespace kinema::playback::adapters {
 class ActiveStreamIndexerAdapter;
@@ -195,7 +193,7 @@ public:
     ui::ImageLoader* imageLoader() const { return m_imageLoader; }
     ui::qml::AppIconResolver* appIconResolver();
 
-    services::StreamActions* streamActions() const { return m_streamActions; }
+    controllers::StreamUtilityController* streamUtilityController() const { return m_streamUtility; }
     playback::session::PlaybackSessionManager* playbackSessionManager() const
     { return m_playbackSessionManager; }
     playback::transfer::TransferUseCase* transferUseCase() const
@@ -278,7 +276,7 @@ private:
     //        SqlitePlaybackHistoryRepository,
     //        SqliteDownloadRepository)
     //   buildPlaybackSubsystem()
-    //     ↓ (StreamActions, downloader pipeline, adapters,
+    //     ↓ (stream utility, downloader pipeline, adapters,
     //        ProgressProjector, HistoryQueryService, ResumeUseCase,
     //        DownloadController, projections, PlaybackSessionManager,
     //        SeriesSessionService, MprisPlaybackProjection)
@@ -342,7 +340,7 @@ private:
     ui::ImageLoader* m_imageLoader {};
 
     ui::qml::AppIconResolver* m_appIconResolver {};
-    services::StreamActions* m_streamActions {};
+    controllers::StreamUtilityController* m_streamUtility {};
     playback::events::PlaybackEventStream* m_playbackEventStream {};
     std::unique_ptr<playback::history::SqlitePlaybackHistoryRepository>
         m_historyRepo;
