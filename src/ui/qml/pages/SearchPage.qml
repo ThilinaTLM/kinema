@@ -83,7 +83,7 @@ Kirigami.Page {
             Layout.preferredWidth: Theme.wideContentMaxWidth
             Layout.maximumWidth: Theme.wideContentMaxWidth
             placeholderText: i18nc("@info:placeholder",
-                "Search Cinemeta — title or IMDB id (ttXXXXXXX)")
+                "Search by title, IMDb id, or IMDb URL")
             text: searchVm.query
             // Submission is explicit: Enter (handled by `onAccepted`
             // below) or the page's Refresh action. Disable Kirigami's
@@ -127,7 +127,7 @@ Kirigami.Page {
                 text: i18nc("@info placeholder",
                     "Find something to watch")
                 explanation: i18nc("@info placeholder",
-                    "Type a title or paste an IMDB id (ttXXXXXXX).")
+                    "Type a title, paste an IMDb id, or paste an IMDb title URL.")
             }
         }
 
@@ -164,8 +164,8 @@ Kirigami.Page {
                 icon.color: AppIcons.foreground
                 text: i18nc("@info placeholder", "No results")
                 explanation: i18nc("@info placeholder",
-                    "Cinemeta returned no matches for this query. "
-                    + "Try a different spelling, or browse the catalog.")
+                    "No metadata source returned a match. "
+                    + "Try a different spelling, an IMDb id, or browse the catalog.")
                 helpfulAction: Kirigami.Action {
                     icon.source: AppIcons.url("grid-2x2")
                     icon.color: AppIcons.foreground

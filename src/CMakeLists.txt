@@ -71,6 +71,7 @@ set(kinema_core_SRCS
     api/AllDebridParse.cpp
     api/CinemetaClient.cpp
     api/CinemetaParse.cpp
+    api/MetadataQuery.cpp
     api/OpenSubtitlesClient.cpp
     api/OpenSubtitlesParse.cpp
     api/RealDebridClient.cpp

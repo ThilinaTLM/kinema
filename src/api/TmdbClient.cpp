@@ -13,6 +13,8 @@
 #include <QLocale>
 #include <QNetworkRequest>
 
+#include <utility>
+
 namespace kinema::api {
 using namespace kinema::domain;
 
@@ -235,6 +237,17 @@ QCoro::Task<DiscoverPageResult> TmdbClient::discover(DiscoverQuery q)
     const auto url = buildUrl(tmdb::discoverPath(q.kind),
         tmdb::discoverQueryToQuery(q));
     co_return tmdb::parsePagedList(co_await fetch(url), q.kind);
+}
+
+QCoro::Task<DiscoverPageResult> TmdbClient::search(
+    MediaKind kind, QString query, int page)
+{
+    requireToken();
+    const auto url = buildUrl(
+        QStringLiteral("/search/%1").arg(kindMovieOrTv(kind)),
+        { { QStringLiteral("query"), std::move(query) },
+          { QStringLiteral("page"), QString::number(page) } });
+    co_return tmdb::parsePagedList(co_await fetch(url), kind);
 }
 
 QCoro::Task<QList<TmdbGenre>> TmdbClient::genreList(MediaKind kind)

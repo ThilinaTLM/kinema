@@ -4,6 +4,8 @@
 #include "ui/qml-bridge/SearchViewModel.h"
 
 #include "api/CinemetaClient.h"
+#include "api/MetadataQuery.h"
+#include "api/TmdbClient.h"
 #include "config/SearchSettings.h"
 #include "controllers/LibraryController.h"
 #include "controllers/WatchedController.h"
@@ -12,25 +14,36 @@
 
 #include <KLocalizedString>
 
-#include <QRegularExpression>
+#include <algorithm>
+#include <exception>
 
 namespace kinema::ui::qml {
 
 namespace {
 
-bool looksLikeImdbId(const QString& s)
+constexpr int kTmdbFallbackLimit = 10;
+
+domain::MediaKind oppositeKind(domain::MediaKind kind)
 {
-    static const QRegularExpression re(QStringLiteral("^tt\\d{5,}$"));
-    return re.match(s).hasMatch();
+    return kind == domain::MediaKind::Movie
+        ? domain::MediaKind::Series
+        : domain::MediaKind::Movie;
+}
+
+bool hasUsableSummary(const domain::MetaSummary& summary)
+{
+    return !summary.imdbId.isEmpty() && !summary.title.isEmpty();
 }
 
 } // namespace
 
 SearchViewModel::SearchViewModel(api::CinemetaClient* cinemeta,
+    api::TmdbClient* tmdb,
     config::SearchSettings& settings,
     QObject* parent)
     : QObject(parent)
     , m_cinemeta(cinemeta)
+    , m_tmdb(tmdb)
     , m_settings(&settings)
     , m_results(new ResultsListModel(this))
     , m_kind(settings.kind())
@@ -171,16 +184,24 @@ QCoro::Task<void> SearchViewModel::runSearchTask(QString text,
 
     try {
         QList<domain::MetaSummary> results;
-        if (looksLikeImdbId(text)) {
-            auto detail = co_await m_cinemeta->meta(kind, text);
+        if (const auto imdbId = api::metadata_query::extractImdbTitleId(text)) {
+            const auto summary = co_await lookupExactImdb(*imdbId, kind);
             if (myEpoch != m_epoch) {
                 co_return;
             }
-            results.append(detail.summary);
+            if (summary) {
+                results.append(*summary);
+            }
         } else {
             results = co_await m_cinemeta->search(kind, text);
             if (myEpoch != m_epoch) {
                 co_return;
+            }
+            if (results.isEmpty()) {
+                results = co_await searchTmdbFallback(kind, text);
+                if (myEpoch != m_epoch) {
+                    co_return;
+                }
             }
         }
 
@@ -206,6 +227,85 @@ QCoro::Task<void> SearchViewModel::runSearchTask(QString text,
         Q_EMIT statusMessage(
             i18nc("@info:status", "Search failed"), 4000);
     }
+}
+
+QCoro::Task<std::optional<domain::MetaSummary>>
+SearchViewModel::lookupExactImdb(QString imdbId,
+    domain::MediaKind preferredKind)
+{
+    std::exception_ptr firstException;
+
+    try {
+        auto detail = co_await m_cinemeta->meta(preferredKind, imdbId);
+        if (hasUsableSummary(detail.summary)) {
+            co_return detail.summary;
+        }
+    } catch (...) {
+        firstException = std::current_exception();
+    }
+
+    try {
+        auto detail = co_await m_cinemeta->meta(
+            oppositeKind(preferredKind), imdbId);
+        if (hasUsableSummary(detail.summary)) {
+            co_return detail.summary;
+        }
+    } catch (...) {
+        if (firstException) {
+            std::rethrow_exception(firstException);
+        }
+        throw;
+    }
+
+    if (firstException) {
+        std::rethrow_exception(firstException);
+    }
+    co_return std::nullopt;
+}
+
+QCoro::Task<QList<domain::MetaSummary>> SearchViewModel::searchTmdbFallback(
+    domain::MediaKind kind, QString text)
+{
+    QList<domain::MetaSummary> out;
+    if (!m_tmdb || !m_tmdb->hasToken()) {
+        co_return out;
+    }
+
+    domain::DiscoverPageResult page;
+    try {
+        page = co_await m_tmdb->search(kind, std::move(text), 1);
+    } catch (...) {
+        co_return out;
+    }
+
+    const int limit = std::min(kTmdbFallbackLimit,
+        static_cast<int>(page.items.size()));
+    out.reserve(limit);
+    for (int i = 0; i < limit; ++i) {
+        const auto& item = page.items.at(i);
+        QString imdbId;
+        try {
+            imdbId = item.kind == domain::MediaKind::Series
+                ? co_await m_tmdb->imdbIdForTmdbSeries(item.tmdbId)
+                : co_await m_tmdb->imdbIdForTmdbMovie(item.tmdbId);
+        } catch (...) {
+            continue;
+        }
+        if (imdbId.isEmpty()) {
+            continue;
+        }
+
+        domain::MetaSummary summary;
+        summary.imdbId = std::move(imdbId);
+        summary.kind = item.kind;
+        summary.title = item.title;
+        summary.year = item.year;
+        summary.poster = item.poster;
+        summary.description = item.overview;
+        out.append(std::move(summary));
+    }
+
+    co_return out;
 }
 
 } // namespace kinema::ui::qml

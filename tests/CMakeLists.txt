@@ -123,6 +123,11 @@ ecm_add_test(tst_cinemeta_parse.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_metadata_query.cpp
+    TEST_NAME tst_metadata_query
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_tmdb_parse.cpp
     TEST_NAME tst_tmdb_parse
     LINK_LIBRARIES kinema_core Qt6::Test

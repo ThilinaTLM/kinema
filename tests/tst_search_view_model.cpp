@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/CinemetaClient.h"
-#include "domain/Media.h"
+#include "api/TmdbClient.h"
 #include "config/SearchSettings.h"
+#include "domain/Discover.h"
+#include "domain/Media.h"
 #include "core/io/HttpError.h"
 #include "ui/qml-bridge/ResultsListModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
@@ -16,6 +18,9 @@
 #include <QTest>
 
 using kinema::api::CinemetaClient;
+using kinema::api::TmdbClient;
+using kinema::domain::DiscoverItem;
+using kinema::domain::DiscoverPageResult;
 using kinema::domain::MediaKind;
 using kinema::domain::MetaDetail;
 using kinema::domain::MetaSummary;
@@ -39,14 +44,22 @@ public:
     {
     }
 
+    struct MetaReply {
+        MetaDetail detail;
+        bool throwHttpError = false;
+    };
+
     QList<MetaSummary> cannedSearch;
     MetaDetail cannedMeta;
+    QList<MetaReply> scriptedMetaReplies;
     bool throwHttpError = false;
 
     int searchCalls = 0;
     int metaCalls = 0;
     QString lastQuery;
+    QString lastImdbId;
     MediaKind lastKind = MediaKind::Movie;
+    QList<MediaKind> metaKinds;
 
     QCoro::Task<QList<MetaSummary>> search(MediaKind kind,
         QString query) override
@@ -61,15 +74,73 @@ public:
         co_return cannedSearch;
     }
 
-    QCoro::Task<MetaDetail> meta(MediaKind /*kind*/,
-        QString /*imdbId*/) override
+    QCoro::Task<MetaDetail> meta(MediaKind kind,
+        QString imdbId) override
     {
         ++metaCalls;
+        lastKind = kind;
+        lastImdbId = imdbId;
+        metaKinds.append(kind);
+        if (!scriptedMetaReplies.isEmpty()) {
+            const auto reply = scriptedMetaReplies.takeFirst();
+            if (reply.throwHttpError) {
+                throw HttpError(HttpError::Kind::Network, 0,
+                    QStringLiteral("canned failure"));
+            }
+            co_return reply.detail;
+        }
         if (throwHttpError) {
             throw HttpError(HttpError::Kind::Network, 0,
                 QStringLiteral("canned failure"));
         }
         co_return cannedMeta;
+    }
+};
+
+class FakeTmdb : public TmdbClient
+{
+public:
+    FakeTmdb()
+        : TmdbClient(nullptr)
+    {
+        setToken(QStringLiteral("tmdb-token"));
+    }
+
+    DiscoverPageResult cannedSearch;
+    QHash<int, QString> movieImdbIds;
+    QHash<int, QString> seriesImdbIds;
+    bool throwSearchError = false;
+
+    int searchCalls = 0;
+    int movieLookupCalls = 0;
+    int seriesLookupCalls = 0;
+    QString lastQuery;
+    MediaKind lastKind = MediaKind::Movie;
+
+    QCoro::Task<DiscoverPageResult> search(MediaKind kind,
+        QString query, int page = 1) override
+    {
+        Q_UNUSED(page);
+        ++searchCalls;
+        lastKind = kind;
+        lastQuery = query;
+        if (throwSearchError) {
+            throw HttpError(HttpError::Kind::Network, 0,
+                QStringLiteral("tmdb failure"));
+        }
+        co_return cannedSearch;
+    }
+
+    QCoro::Task<QString> imdbIdForTmdbMovie(int tmdbId) override
+    {
+        ++movieLookupCalls;
+        co_return movieImdbIds.value(tmdbId);
+    }
+
+    QCoro::Task<QString> imdbIdForTmdbSeries(int tmdbId) override
+    {
+        ++seriesLookupCalls;
+        co_return seriesImdbIds.value(tmdbId);
     }
 };
 
@@ -104,7 +175,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         QCOMPARE(vm.results()->state(), ResultsListModel::State::Idle);
         QVERIFY(vm.query().isEmpty());
         QCOMPARE(vm.kind(), 0);
@@ -116,7 +187,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         vm.setQuery(QStringLiteral("   "));
         vm.submit();
         drain();
@@ -135,7 +206,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         vm.setQuery(QStringLiteral("shawshank"));
 
         QSignalSpy statusSpy(&vm, &SearchViewModel::statusMessage);
@@ -159,13 +230,58 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         vm.setQuery(QStringLiteral("nothing-matches"));
         vm.submit();
         drain();
         QCOMPARE(vm.results()->state(),
             ResultsListModel::State::Empty);
         QCOMPARE(vm.results()->rowCount(), 0);
+    }
+
+    void testTextSearchFallsBackToTmdbWhenCinemetaEmpty()
+    {
+        FakeCinemeta cinemeta;
+        cinemeta.cannedSearch = {};
+
+        FakeTmdb tmdb;
+        DiscoverItem item;
+        item.tmdbId = 1041054;
+        item.kind = MediaKind::Movie;
+        item.title = QStringLiteral("Freddy");
+        item.year = 2022;
+        item.poster = QUrl(QStringLiteral("https://image.tmdb.org/t/p/w342/freddy.jpg"));
+        item.overview = QStringLiteral("A shy dentist becomes obsessed.");
+        tmdb.cannedSearch.items = { item };
+        tmdb.movieImdbIds.insert(1041054, QStringLiteral("tt15145764"));
+
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, &tmdb, settings, nullptr);
+        QSignalSpy movieSpy(&vm,
+            &SearchViewModel::openMovieRequested);
+
+        vm.setQuery(QStringLiteral("freddy hindi"));
+        vm.submit();
+        drain();
+
+        QCOMPARE(cinemeta.searchCalls, 1);
+        QCOMPARE(tmdb.searchCalls, 1);
+        QCOMPARE(tmdb.movieLookupCalls, 1);
+        QCOMPARE(tmdb.lastQuery, QStringLiteral("freddy hindi"));
+        QCOMPARE(vm.results()->state(),
+            ResultsListModel::State::Results);
+        QCOMPARE(vm.results()->rowCount(), 1);
+        const auto* row = vm.results()->at(0);
+        QVERIFY(row != nullptr);
+        QCOMPARE(row->imdbId, QStringLiteral("tt15145764"));
+        QCOMPARE(row->title, QStringLiteral("Freddy"));
+
+        vm.activate(0);
+        QCOMPARE(movieSpy.count(), 1);
+        QCOMPARE(movieSpy.first().at(0).toString(),
+            QStringLiteral("tt15145764"));
     }
 
     void testImdbIdShortcutUsesMeta()
@@ -179,7 +295,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         // IMDB-id detection only picks the endpoint inside
         // runSearchTask; submission itself is always explicit
         // (Enter / Refresh action -> submit()).
@@ -192,10 +308,70 @@ private Q_SLOTS:
         drain();
 
         QCOMPARE(cinemeta.metaCalls, 1);
+        QCOMPARE(cinemeta.lastImdbId, QStringLiteral("tt0111161"));
         QCOMPARE(cinemeta.searchCalls, 0);
         QCOMPARE(vm.results()->state(),
             ResultsListModel::State::Results);
         QCOMPARE(vm.results()->rowCount(), 1);
+    }
+
+    void testImdbUrlShortcutUsesMeta()
+    {
+        FakeCinemeta cinemeta;
+        MetaDetail d;
+        d.summary = makeRow(QStringLiteral("tt15145764"),
+            QStringLiteral("Freddy"));
+        cinemeta.cannedMeta = d;
+
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
+        vm.setQuery(QStringLiteral("https://www.imdb.com/title/tt15145764/?ref_=fn_al_tt_1"));
+
+        vm.submit();
+        drain();
+
+        QCOMPARE(cinemeta.metaCalls, 1);
+        QCOMPARE(cinemeta.lastImdbId, QStringLiteral("tt15145764"));
+        QCOMPARE(cinemeta.searchCalls, 0);
+        QCOMPARE(vm.results()->state(),
+            ResultsListModel::State::Results);
+        QCOMPARE(vm.results()->rowCount(), 1);
+    }
+
+    void testImdbShortcutFallsBackToOppositeKind()
+    {
+        FakeCinemeta cinemeta;
+        MetaDetail d;
+        d.summary = makeRow(QStringLiteral("tt15145764"),
+            QStringLiteral("Freddy"), MediaKind::Movie);
+        cinemeta.scriptedMetaReplies = {
+            { {}, true },
+            { d, false },
+        };
+
+        QTemporaryDir tmp;
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
+        SearchSettings settings(config);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
+        vm.setKind(static_cast<int>(MediaKind::Series));
+        vm.setQuery(QStringLiteral("https://m.imdb.com/title/tt15145764/"));
+
+        vm.submit();
+        drain();
+
+        QCOMPARE(cinemeta.metaCalls, 2);
+        QCOMPARE(cinemeta.searchCalls, 0);
+        QCOMPARE(cinemeta.metaKinds.at(0), MediaKind::Series);
+        QCOMPARE(cinemeta.metaKinds.at(1), MediaKind::Movie);
+        QCOMPARE(vm.results()->state(),
+            ResultsListModel::State::Results);
+        QCOMPARE(vm.results()->rowCount(), 1);
+        const auto* row = vm.results()->at(0);
+        QVERIFY(row != nullptr);
+        QCOMPARE(row->kind, MediaKind::Movie);
+        QCOMPARE(row->title, QStringLiteral("Freddy"));
     }
 
     void testTypingDoesNotSubmit()
@@ -209,7 +385,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
 
         vm.setQuery(QStringLiteral("mat"));
         vm.setQuery(QStringLiteral("matri"));
@@ -232,7 +408,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
 
         vm.setQuery(QStringLiteral("matrix"));
         vm.submit();
@@ -257,7 +433,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
 
         vm.setQuery(QStringLiteral("foo"));
         vm.submit();
@@ -279,7 +455,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         // 'tt' alone (no digits) shouldn't trigger the IMDB-id
         // shortcut — same regression-guard the widget controller
         // had.
@@ -297,7 +473,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         vm.setQuery(QStringLiteral("anything"));
         vm.submit();
         drain();
@@ -312,7 +488,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         QSignalSpy kindSpy(&vm, &SearchViewModel::kindChanged);
         vm.setKind(static_cast<int>(MediaKind::Series));
         QCOMPARE(vm.kind(), static_cast<int>(MediaKind::Series));
@@ -336,7 +512,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         QSignalSpy movieSpy(&vm,
             &SearchViewModel::openMovieRequested);
         QSignalSpy seriesSpy(&vm,
@@ -374,7 +550,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
 
         vm.setQuery(QStringLiteral("first"));
         vm.submit();
@@ -403,7 +579,7 @@ private Q_SLOTS:
         QTemporaryDir tmp;
         auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")), KConfig::SimpleConfig);
         SearchSettings settings(config);
-        SearchViewModel vm(&cinemeta, settings, nullptr);
+        SearchViewModel vm(&cinemeta, nullptr, settings, nullptr);
         vm.setQuery(QStringLiteral("foo"));
         vm.submit();
         drain();
