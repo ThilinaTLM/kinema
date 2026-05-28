@@ -16,7 +16,7 @@ class TstWatchedPolicy : public QObject
 private Q_SLOTS:
     void defaultsAreCorrect()
     {
-        QCOMPARE(defaultStopThreshold(domain::MediaKind::Movie), 0.85);
+        QCOMPARE(defaultStopThreshold(domain::MediaKind::Movie), 0.90);
         QCOMPARE(defaultStopThreshold(domain::MediaKind::Series), 0.90);
     }
 
@@ -45,7 +45,7 @@ private Q_SLOTS:
         in.reason = PlaybackEndReason::UserStop;
         in.positionSec = 500.0;
         in.durationSec = 1000.0;
-        in.stopThreshold = 0.85;
+        in.stopThreshold = 0.90;
         QVERIFY(!decideWatched(in).finished);
     }
 
@@ -55,7 +55,7 @@ private Q_SLOTS:
         in.reason = PlaybackEndReason::UserStop;
         in.positionSec = 900.0;
         in.durationSec = 1000.0;
-        in.stopThreshold = 0.85;
+        in.stopThreshold = 0.90;
         QVERIFY(decideWatched(in).finished);
     }
 
@@ -63,10 +63,10 @@ private Q_SLOTS:
     {
         WatchedInputs in;
         in.reason = PlaybackEndReason::UserStop;
-        in.positionSec = 550.0; // below 85% but past credits-2
+        in.positionSec = 550.0; // below 90% but past credits-2
         in.durationSec = 1000.0;
         in.creditsStartSec = 540.0;
-        in.stopThreshold = 0.85;
+        in.stopThreshold = 0.90;
         QVERIFY(decideWatched(in).finished);
     }
 

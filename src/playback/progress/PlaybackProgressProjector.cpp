@@ -8,6 +8,7 @@
 
 #include <QDateTime>
 
+#include <algorithm>
 #include <cmath>
 
 namespace kinema::playback::progress {
@@ -104,6 +105,7 @@ void PlaybackProgressProjector::onPlaybackRequested(
     m_active = e.ctx;
     m_activeSessionId = e.sessionId;
     m_lastPosition = 0.0;
+    m_highestPosition = 0.0;
     m_duration = 0.0;
     m_lastPersistedPosition = 0.0;
     m_activeChapters.clear();
@@ -141,6 +143,7 @@ void PlaybackProgressProjector::onPlayerLoaded(const events::PlayerLoaded& e)
         return;
     }
     m_lastPosition = 0.0;
+    m_highestPosition = 0.0;
     m_lastPersistedPosition = 0.0;
     // Fresh file → stale chapter list from a previous session must
     // go; the adapter will re-emit ChapterListChanged when mpv
@@ -158,6 +161,7 @@ void PlaybackProgressProjector::onPositionTicked(
         return;
     }
     m_lastPosition = e.seconds;
+    m_highestPosition = std::max(m_highestPosition, e.seconds);
 
     if (m_duration <= 0.0) {
         return;
@@ -217,6 +221,7 @@ void PlaybackProgressProjector::onPlaybackEnded(const events::PlaybackEnded& e)
         m_active.reset();
         m_activeSessionId = PlaybackSessionId();
         m_lastPosition = 0.0;
+        m_highestPosition = 0.0;
         m_duration = 0.0;
         m_lastPersistedPosition = 0.0;
         m_activeChapters.clear();
@@ -234,6 +239,7 @@ void PlaybackProgressProjector::onPlaybackEnded(const events::PlaybackEnded& e)
     m_active.reset();
     m_activeSessionId = PlaybackSessionId();
     m_lastPosition = 0.0;
+    m_highestPosition = 0.0;
     m_duration = 0.0;
     m_lastPersistedPosition = 0.0;
     m_activeChapters.clear();
@@ -252,6 +258,7 @@ void PlaybackProgressProjector::onPlaybackFailed(const events::PlaybackFailed& e
     m_active.reset();
     m_activeSessionId = PlaybackSessionId();
     m_lastPosition = 0.0;
+    m_highestPosition = 0.0;
     m_duration = 0.0;
     m_lastPersistedPosition = 0.0;
     m_activeChapters.clear();
@@ -283,7 +290,7 @@ domain::HistoryEntry PlaybackProgressProjector::buildActiveEntry() const
     entry.poster = m_active->poster;
     entry.backdrop = m_active->backdrop;
     entry.lastStream = m_active->streamRef;
-    entry.positionSec = m_lastPosition;
+    entry.positionSec = std::max(m_lastPosition, m_highestPosition);
     entry.durationSec = m_duration;
     entry.lastWatchedAt = QDateTime::currentDateTimeUtc();
     entry.rememberedAudioLang = m_rememberedAudioLang;

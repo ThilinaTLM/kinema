@@ -101,6 +101,9 @@ private:
     PlaybackSessionId m_activeSessionId;
 
     double m_lastPosition = 0.0;
+    /// Highest non-negative position observed in the active session.
+    /// Used at terminal events to ignore shutdown reset noise from mpv.
+    double m_highestPosition = 0.0;
     double m_duration = 0.0;
     double m_lastPersistedPosition = 0.0;
     core::chapters::ChapterList m_activeChapters;

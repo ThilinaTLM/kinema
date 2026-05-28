@@ -317,26 +317,26 @@ private Q_SLOTS:
 
     // ---- recordSessionEnd: per-kind stop thresholds, EOF, error --------
 
-    void testRecordSessionEndMovieStopAt86PercentFinishes()
+    void testRecordSessionEndMovieStopAt89PercentDoesNotFinish()
     {
         auto e = makeMovieEntry(
-            QStringLiteral("tt1000010"), /*pos=*/4300, /*dur=*/5000);
-        m_store->recordSessionEnd(
-            e, core::HistoryStore::SessionEndReason::UserStop);
-        const auto got = m_store->find(e.key);
-        QVERIFY(got.has_value());
-        QVERIFY(got->finished);
-    }
-
-    void testRecordSessionEndMovieStopAt80PercentDoesNotFinish()
-    {
-        auto e = makeMovieEntry(
-            QStringLiteral("tt1000011"), /*pos=*/4000, /*dur=*/5000);
+            QStringLiteral("tt1000010"), /*pos=*/4450, /*dur=*/5000);
         m_store->recordSessionEnd(
             e, core::HistoryStore::SessionEndReason::UserStop);
         const auto got = m_store->find(e.key);
         QVERIFY(got.has_value());
         QVERIFY(!got->finished);
+    }
+
+    void testRecordSessionEndMovieStopAt90PercentFinishes()
+    {
+        auto e = makeMovieEntry(
+            QStringLiteral("tt1000011"), /*pos=*/4500, /*dur=*/5000);
+        m_store->recordSessionEnd(
+            e, core::HistoryStore::SessionEndReason::UserStop);
+        const auto got = m_store->find(e.key);
+        QVERIFY(got.has_value());
+        QVERIFY(got->finished);
     }
 
     void testRecordSessionEndEpisodeStopAt87PercentDoesNotFinish()
@@ -350,10 +350,10 @@ private Q_SLOTS:
         QVERIFY(!got->finished);
     }
 
-    void testRecordSessionEndEpisodeStopAt92PercentFinishes()
+    void testRecordSessionEndEpisodeStopAt90PercentFinishes()
     {
         auto e = makeEpisodeEntry(
-            QStringLiteral("tt1000013"), 1, 2, /*pos=*/2484, /*dur=*/2700);
+            QStringLiteral("tt1000013"), 1, 2, /*pos=*/2430, /*dur=*/2700);
         m_store->recordSessionEnd(
             e, core::HistoryStore::SessionEndReason::UserStop);
         const auto got = m_store->find(e.key);
@@ -405,7 +405,7 @@ private Q_SLOTS:
     void testRecordSessionEndCreditsHintBeatsThreshold()
     {
         // 70% played, credits start at 68% -> finished even though
-        // the stop threshold (85%) would not have fired.
+        // the stop threshold (90%) would not have fired.
         auto e = makeMovieEntry(
             QStringLiteral("tt1000017"), /*pos=*/3500, /*dur=*/5000);
         m_store->recordSessionEnd(e,

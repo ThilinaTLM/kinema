@@ -134,6 +134,9 @@ private:
     void disconnectWindow();
     void connectWindow();
     void publishPlaybackState();
+    /// Finalize an explicit user stop/close before tearing down mpv
+    /// so the history projector sees the last reliable position.
+    void finalizeUserStop(bool stopAndHideWindow);
     /// Convert mpv's stringly-typed `end-file` reason into a
     /// `PlaybackEndReason`. Returns nullopt when the reason should
     /// be filtered (intermediate "stop" caused by loadfile

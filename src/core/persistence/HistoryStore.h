@@ -30,8 +30,8 @@ class Database;
  *     0.9); this drives the Continue-Watching filter. The tick path
  *     stays conservative against accidental scrubs.
  *   - `recordSessionEnd()` is the "playback session ended" variant:
- *     it applies a per-kind, looser stop threshold (0.85 for movies,
- *     0.90 for episodes — see the auto-watched plan) and honours an
+ *     it applies a per-kind stop threshold (0.90 for movies and
+ *     episodes) and honours an
  *     optional credits-start hint derived from mpv chapter metadata.
  *     Natural EOF always finishes; `Error` never auto-finishes.
  *   - `changed()` is coalesced to once per event-loop tick.
@@ -74,7 +74,7 @@ public:
 
     /// Override the per-kind stop-threshold applied by
     /// `recordSessionEnd()` when `reason == UserStop`. Defaults are
-    /// 0.85 for movies and 0.90 for episodes (see plan). Bounded to
+    /// 0.90 for movies and episodes. Bounded to
     /// [0.5, 1.0].
     void setStopFinishedThreshold(domain::MediaKind kind, double fraction);
     double stopFinishedThreshold(domain::MediaKind kind) const noexcept;
@@ -134,7 +134,7 @@ private:
 
     Database& m_db;
     double m_finishedThreshold = 0.9;
-    double m_stopFinishedThresholdMovie = 0.85;
+    double m_stopFinishedThresholdMovie = 0.90;
     double m_stopFinishedThresholdSeries = 0.90;
     int m_retentionDays = 365;
     bool m_changePending = false;
