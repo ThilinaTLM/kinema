@@ -86,6 +86,53 @@ private Q_SLOTS:
             QStringLiteral("2"));
     }
 
+    void testSearchMovieBuildsExpectedUrl()
+    {
+        FakeHttpClient http;
+        http.jsonReplies = { loadJsonFixture("tmdb_discover_movie_page1.json") };
+
+        TmdbClient client(&http);
+        client.setToken(QStringLiteral("tmdb-token"));
+        client.setLanguage(QStringLiteral("en-US"));
+
+        const auto page = QCoro::waitFor(
+            client.search(MediaKind::Movie, QStringLiteral("freddy"), 2));
+
+        QCOMPARE(page.items.size(), 2);
+        QCOMPARE(http.calls.size(), 1);
+        const auto& request = http.calls.first().request;
+        QCOMPARE(request.url().path(), QStringLiteral("/3/search/movie"));
+        const QUrlQuery query(request.url());
+        QCOMPARE(query.queryItemValue(QStringLiteral("language")),
+            QStringLiteral("en-US"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("query")),
+            QStringLiteral("freddy"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("page")),
+            QStringLiteral("2"));
+    }
+
+    void testSearchSeriesBuildsExpectedUrl()
+    {
+        FakeHttpClient http;
+        http.jsonReplies = { loadJsonFixture("tmdb_popular_tv.json") };
+
+        TmdbClient client(&http);
+        client.setToken(QStringLiteral("tmdb-token"));
+        client.setLanguage(QStringLiteral("en-US"));
+
+        (void)QCoro::waitFor(
+            client.search(MediaKind::Series, QStringLiteral("dark")));
+
+        QCOMPARE(http.calls.size(), 1);
+        const auto& request = http.calls.first().request;
+        QCOMPARE(request.url().path(), QStringLiteral("/3/search/tv"));
+        const QUrlQuery query(request.url());
+        QCOMPARE(query.queryItemValue(QStringLiteral("query")),
+            QStringLiteral("dark"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("page")),
+            QStringLiteral("1"));
+    }
+
     void testNoTokenFailsBeforeRequest()
     {
         FakeHttpClient http;

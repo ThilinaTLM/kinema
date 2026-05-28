@@ -438,7 +438,7 @@ void ServiceContainer::buildControllersAndViewModels()
         = new ui::qml::ContinueWatchingViewModel(
             m_historyQueryService, a);
     m_libraryVm = new ui::qml::LibraryViewModel(m_libraryCtrl, m_watchedCtrl, a);
-    m_searchVm = new ui::qml::SearchViewModel(m_cinemeta,
+    m_searchVm = new ui::qml::SearchViewModel(m_cinemeta, m_tmdb,
         m_settings.search(), a);
     m_searchVm->setLibraryController(m_libraryCtrl);
     m_searchVm->setWatchedController(m_watchedCtrl);

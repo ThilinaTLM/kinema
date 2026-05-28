@@ -29,8 +29,9 @@ using namespace kinema::domain;
 /**
  * Client for The Movie Database (TMDB) v3 API, authenticated with a v4
  * bearer Read Access Token. Powers the Discover surface (home rows +
- * "More like this" strips). Search and per-title metadata still go
- * through CinemetaClient.
+ * "More like this" strips) and optional Search fallback rows when
+ * Cinemeta title search has no matches. Per-title metadata still goes
+ * through CinemetaClient after TMDB rows are resolved to IMDb ids.
  *
  * Endpoint reference (all prefixed with `/3` off api.themoviedb.org):
  *
@@ -39,6 +40,7 @@ using namespace kinema::domain;
  *   /movie/top_rated, /tv/top_rated
  *   /movie/now_playing
  *   /tv/on_the_air
+ *   /search/movie, /search/tv
  *   /movie/{id}?append_to_response=external_ids
  *   /tv/{id}/external_ids
  *   /find/{imdb_id}?external_source=imdb_id
@@ -84,6 +86,11 @@ public:
     /// requested page plus paging metadata. See TmdbDiscoverUrl.h for
     /// the exact query-string mapping.
     virtual QCoro::Task<DiscoverPageResult> discover(DiscoverQuery q);
+
+    /// Hit /search/{movie|tv} with a text query. Used as a Search-page
+    /// fallback only; Cinemeta remains the primary search source.
+    virtual QCoro::Task<DiscoverPageResult> search(
+        MediaKind kind, QString query, int page = 1);
 
     /// Fetch the genre list for a given kind. Results are memoised per
     /// kind; the second call returns immediately. Invalidated by

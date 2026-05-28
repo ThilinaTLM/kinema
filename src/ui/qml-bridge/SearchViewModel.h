@@ -10,8 +10,11 @@
 
 #include <QCoro/QCoroTask>
 
+#include <optional>
+
 namespace kinema::api {
 class CinemetaClient;
+class TmdbClient;
 }
 
 namespace kinema::config {
@@ -30,7 +33,7 @@ class ResultsListModel;
 /**
  * Search page view-model. Replaces the widget-coupled
  * `controllers::SearchController` outright: same coroutine + epoch
- * pattern, same IMDB-id shortcut, but exposes its state through
+ * pattern, same IMDb-id / IMDb-URL shortcut, but exposes its state through
  * Q_PROPERTY signals instead of writing into a `ResultsModel` /
  * `StateWidget` / `NavigationController` triplet.
  *
@@ -39,9 +42,9 @@ class ResultsListModel;
  *
  * Submission is explicit: the Search page binds `submit()` to the
  * SearchField's `Enter` and to the page's Refresh action. `setQuery`
- * only mutates the text and never fires a request. IMDB-id detection
+ * only mutates the text and never fires a request. IMDb exact lookup
  * inside `runSearchTask` still picks between `CinemetaClient::meta`
- * and `::search`, but it no longer changes *when* submission happens.
+ * and text search, but it no longer changes *when* submission happens.
  */
 class SearchViewModel : public QObject
 {
@@ -52,6 +55,7 @@ class SearchViewModel : public QObject
 
 public:
     SearchViewModel(api::CinemetaClient* cinemeta,
+        api::TmdbClient* tmdb,
         config::SearchSettings& settings,
         QObject* parent = nullptr);
 
@@ -113,8 +117,13 @@ Q_SIGNALS:
 
 private:
     QCoro::Task<void> runSearchTask(QString text, domain::MediaKind kind);
+    QCoro::Task<std::optional<domain::MetaSummary>> lookupExactImdb(
+        QString imdbId, domain::MediaKind preferredKind);
+    QCoro::Task<QList<domain::MetaSummary>> searchTmdbFallback(
+        domain::MediaKind kind, QString text);
 
     api::CinemetaClient* m_cinemeta;
+    api::TmdbClient* m_tmdb;
     config::SearchSettings* m_settings;
     ResultsListModel* m_results;
     controllers::LibraryController* m_library {};
