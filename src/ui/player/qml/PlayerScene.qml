@@ -263,6 +263,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
             iconKind: volumeCluster._volumeGlyph()
+            accessibleName: mpv.muted ? qsTr("Unmute") : qsTr("Mute")
             onClicked: mpv.setMuted(!mpv.muted)
         }
     }

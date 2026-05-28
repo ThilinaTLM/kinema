@@ -34,6 +34,12 @@ Item {
 
     signal volumeChanged(double v)
 
+    Accessible.role: Accessible.Slider
+    Accessible.name: qsTr("Volume")
+    Accessible.value: root.muted ? 0 : root.volumePercent
+    Accessible.minimumValue: 0.0
+    Accessible.maximumValue: Theme.volumeMaxPercent
+
     readonly property double _ratio:
         muted
             ? 0

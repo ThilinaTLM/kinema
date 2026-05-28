@@ -98,6 +98,7 @@ Item {
             IconButton {
                 visible: root.closable
                 iconKind: "x"
+                accessibleName: qsTr("Close")
                 onClicked: root.closeRequested()
             }
         }

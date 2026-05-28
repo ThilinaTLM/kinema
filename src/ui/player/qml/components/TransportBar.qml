@@ -88,6 +88,9 @@ Item {
 
             IconButton {
                 iconKind: root.mpv && root.mpv.paused ? "play" : "pause"
+                accessibleName: root.mpv && root.mpv.paused
+                    ? qsTr("Play")
+                    : qsTr("Pause")
                 onClicked: if (root.mpv) root.mpv.cyclePause()
             }
 
@@ -111,6 +114,7 @@ Item {
                             id: prevBtn
                             anchors.fill: parent
                             iconKind: "skipBack"
+                            accessibleName: qsTr("Previous episode")
                             enabled: playerVm.canGoPrevious
                             onClicked: playerVm.requestPrevious()
                         }
@@ -124,6 +128,7 @@ Item {
                             id: nextBtn
                             anchors.fill: parent
                             iconKind: "skipForward"
+                            accessibleName: qsTr("Next episode")
                             enabled: playerVm.canGoNext
                             onClicked: playerVm.requestNext()
                         }
@@ -132,11 +137,13 @@ Item {
             }
             IconButton {
                 iconKind: "captions"
+                accessibleName: qsTr("Subtitles")
                 visible: playerVm.subtitleTracks.count > 0
                 onClicked: root.subtitlePickerRequested()
             }
             IconButton {
                 iconKind: "audioLines"
+                accessibleName: qsTr("Audio track")
                 visible: playerVm.audioTracks.count > 0
                 onClicked: root.audioPickerRequested()
             }
@@ -145,10 +152,14 @@ Item {
 
             IconButton {
                 iconKind: "gauge"
+                accessibleName: qsTr("Playback speed")
                 onClicked: root.speedPickerRequested()
             }
             IconButton {
                 iconKind: root._isFullscreen ? "minimize" : "maximize"
+                accessibleName: root._isFullscreen
+                    ? qsTr("Exit fullscreen")
+                    : qsTr("Enter fullscreen")
                 onClicked: root.fullscreenToggled()
             }
         }

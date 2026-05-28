@@ -37,6 +37,12 @@ Item {
 
     signal seekRequested(double seconds)
 
+    Accessible.role: Accessible.Slider
+    Accessible.name: qsTr("Seek position")
+    Accessible.value: root.position
+    Accessible.minimumValue: 0.0
+    Accessible.maximumValue: root.duration
+
     readonly property bool _hover: hoverArea.containsMouse || dragArea.pressed
     readonly property double _ratio:
         duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0
