@@ -812,7 +812,7 @@ ui::player::PlayerWindow* ShellViewModel::ensurePlayerWindow()
 
     auto& settings = m_services.settings();
     m_playerWindow = new ui::player::PlayerWindow(
-        settings.appearance(), settings.player(), m_window);
+        settings.appearance(), settings.player());
 
     auto* embeddedAdapter = m_services.embeddedPlayerAdapter();
     auto* seriesSession = m_services.seriesSessionService();

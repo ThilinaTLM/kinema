@@ -31,7 +31,6 @@
 #include <QString>
 #include <QUrl>
 #include <QWidget>
-#include <QWindow>
 
 #include "kinema_log_player.h"
 
@@ -84,28 +83,20 @@ QStringList chipsFromJson(const QByteArray& json)
 } // namespace
 
 PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
-    config::PlayerSettings& player, QWindow* transientFor)
+    config::PlayerSettings& player)
     : QQuickView(/*parent=*/nullptr)
     , m_appearanceSettings(appearance)
     , m_playerSettings(player)
-    , m_windowParent(transientFor)
 {
-    // The application's main QML window is a `QQuickWindow` (a
-    // `QWindow`), so we can wire it directly as the transient
-    // parent — no `windowHandle()` indirection like the old
-    // QWidget-owned MainWindow needed. The QObject parent is
-    // owned by `ShellViewModel` (the window is created lazily and
-    // handed to `EmbeddedMpvPlayerAdapter::setPlayerWindow`); we
-    // deliberately do not also set it as a QObject child of the
-    // QML window since
-    // its destruction order is engine-driven.
-    if (transientFor) {
-        setTransientParent(transientFor);
-    }
+    // Keep this as an independent top-level window rather than a
+    // transient child of the main shell. That lets the desktop
+    // environment apply separate minimize / maximize / fullscreen
+    // behavior and user window rules to the player surface.
 
     // Standard window chrome.
     setTitle(i18nc("@title:window", "Kinema Player"));
-    setIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema")));
+    setIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema-player"),
+        QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema"))));
 
     // Resize the QML root to fill the window so the scene fills
     // the available area.
@@ -491,10 +482,7 @@ void PlayerWindow::loadGeometry()
     }
 
     resize(1280, 720);
-    QScreen* s = nullptr;
-    if (m_windowParent) {
-        s = m_windowParent->screen();
-    }
+    QScreen* s = QGuiApplication::screenAt(QCursor::pos());
     if (!s) {
         s = QGuiApplication::primaryScreen();
     }

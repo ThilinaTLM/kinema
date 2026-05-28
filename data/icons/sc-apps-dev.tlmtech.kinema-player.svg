@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com> -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1224 1224">
+  <!-- Kinema player icon: same blue tile with a video-surface cue. -->
+  <rect x="0" y="0" width="1224" height="1224" rx="140" fill="#1d99f3"/>
+  <rect x="214" y="282" width="796" height="562" rx="72" fill="#102331" opacity="0.92"/>
+  <rect x="274" y="342" width="676" height="442" rx="42" fill="#0b1720"/>
+  <path d="M538 448v230l197-115z" fill="#ffffff"/>
+  <path d="M384 906h456" fill="none" stroke="#ffffff" stroke-width="72" stroke-linecap="round" opacity="0.95"/>
+  <path d="M612 820v86" fill="none" stroke="#ffffff" stroke-width="72" stroke-linecap="round" opacity="0.95"/>
+</svg>

@@ -15,8 +15,6 @@
 #include <QUrl>
 #include <QtQuick/QQuickView>
 
-class QWindow;
-
 namespace kinema::config {
 class AppearanceSettings;
 class PlayerSettings;
@@ -44,21 +42,20 @@ class PlayerViewModel;
  * first show, saved on every hide. The window and libmpv instance
  * are reused across sequential queue items; closing the window just
  * hides it and stops playback.
+ *
+ * The player is intentionally not transient for the main shell
+ * window. It should be a normal, independently-managed top-level
+ * window so desktop environments can apply separate minimize,
+ * maximize, fullscreen, and window-rule behavior.
  */
 class PlayerWindow : public QQuickView
 {
     Q_OBJECT
 public:
-    /// `transientFor` is the application's main `QWindow` (the
-    /// QML `Kirigami.ApplicationWindow`). It is wired as the
-    /// `transientParent` so the window manager places the player
-    /// relative to the main window and follows focus rules. The
-    /// player is NOT owned by it as a QObject parent: it lives
-    /// for the lifetime of `MainController` like every other
-    /// long-running service.
+    /// The player is created lazily and lives for the lifetime of
+    /// `MainController` like every other long-running service.
     explicit PlayerWindow(config::AppearanceSettings& appearance,
-        config::PlayerSettings& player,
-        QWindow* transientFor = nullptr);
+        config::PlayerSettings& player);
     ~PlayerWindow() override;
 
     PlayerWindow(const PlayerWindow&) = delete;
@@ -168,7 +165,6 @@ private:
 
     PlayerViewModel* m_viewModel = nullptr;
     QPointer<MpvVideoItem> m_video;
-    QPointer<QWindow> m_windowParent;
 
     // Public-API stability check: zero-overhead empty fallback
     // returned from `trackList()` / `recentLogLines()` when no

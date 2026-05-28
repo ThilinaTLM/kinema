@@ -14,6 +14,7 @@ install(FILES kinema.notifyrc
 
 ecm_install_icons(ICONS
     icons/sc-apps-dev.tlmtech.kinema.svg
+    icons/sc-apps-dev.tlmtech.kinema-player.svg
     icons/sc-apps-dev.tlmtech.kinema-symbolic.svg
     DESTINATION ${KDE_INSTALL_ICONDIR}
 )
