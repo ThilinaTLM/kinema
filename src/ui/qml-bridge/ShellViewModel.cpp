@@ -144,16 +144,16 @@ bool ShellViewModel::handleWindowCloseRequested()
 void ShellViewModel::requestQuit()
 {
     m_reallyQuit = true;
-    if (auto* lt = m_services.libtorrentClient()) {
-        lt->stopAll();
-    }
 #ifdef KINEMA_HAVE_LIBMPV
-    // Take the player down explicitly so its closeEvent persists
-    // geometry / volume and stops playback before exit.
+    // Finalize playback before tearing down transfer engines so the
+    // history layer can record the last reliable position.
     if (m_playerWindow) {
         m_playerWindow->close();
     }
 #endif
+    if (auto* lt = m_services.libtorrentClient()) {
+        lt->stopAll();
+    }
     QCoreApplication::quit();
 }
 

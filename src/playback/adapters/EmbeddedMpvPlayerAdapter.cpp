@@ -222,18 +222,30 @@ void EmbeddedMpvPlayerAdapter::togglePause()
 
 void EmbeddedMpvPlayerAdapter::stop()
 {
-    m_loadWatchdog.stop();
-    if (m_window) {
-        m_window->stopAndHide();
+    finalizeUserStop(/*stopAndHideWindow=*/true);
+}
+
+void EmbeddedMpvPlayerAdapter::finalizeUserStop(bool stopAndHideWindow)
+{
+    if (!m_sessionActive) {
+        return;
     }
-    if (m_sessionActive) {
-        m_eventStream.publish(events::PlaybackEnded {
-            m_sessionId,
-            PlaybackEndReason::UserStop,
-            m_ctx,
-        });
-        m_sessionActive = false;
-        m_loadfileInFlight = false;
+
+    m_loadWatchdog.stop();
+
+    // Publish before stopping mpv. `stopAndHide()` can synchronously or
+    // asynchronously trigger mpv `end-file reason="stop"` and may reset
+    // position state; history needs the pre-teardown playback position.
+    m_eventStream.publish(events::PlaybackEnded {
+        m_sessionId,
+        PlaybackEndReason::UserStop,
+        m_ctx,
+    });
+    m_sessionActive = false;
+    m_loadfileInFlight = false;
+
+    if (stopAndHideWindow && m_window) {
+        m_window->stopAndHide();
     }
 }
 
@@ -459,17 +471,9 @@ void EmbeddedMpvPlayerAdapter::onChaptersChanged(
 
 void EmbeddedMpvPlayerAdapter::onUserClosedWindow()
 {
-    if (!m_sessionActive) {
-        return;
-    }
-    m_loadWatchdog.stop();
-    m_eventStream.publish(events::PlaybackEnded {
-        m_sessionId,
-        PlaybackEndReason::UserStop,
-        m_ctx,
-    });
-    m_sessionActive = false;
-    m_loadfileInFlight = false;
+    // PlayerWindow::closeEvent() calls stopAndHide() after this signal
+    // returns, so only finalize the session here.
+    finalizeUserStop(/*stopAndHideWindow=*/false);
 }
 
 void EmbeddedMpvPlayerAdapter::onLoadWatchdogTimedOut()

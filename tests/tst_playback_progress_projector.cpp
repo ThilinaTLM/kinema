@@ -275,6 +275,32 @@ private Q_SLOTS:
         QVERIFY(p.hasActiveContext());
     }
 
+    void terminalUserStopUsesHighestObservedPosition()
+    {
+        FakeHistoryRepo repo;
+        PlaybackEventStream stream;
+        PlaybackProgressProjector p(repo, stream);
+        p.setPersistIntervalSeconds(5.0);
+
+        const auto sessionId = QUuid::createUuid();
+        const auto ctx = makeCtx(QStringLiteral("tt1"));
+        stream.publish(PlaybackRequested { sessionId, ctx });
+        stream.publish(DurationChanged { sessionId, 1000.0 });
+        stream.publish(PositionTicked { sessionId, 910.0 });
+
+        // Some shutdown paths can produce a reset-like position update
+        // before the terminal event. The session-end record must still
+        // use the last reliable high-water mark.
+        stream.publish(PositionTicked { sessionId, 0.0 });
+        stream.publish(PlaybackEnded {
+            sessionId, PlaybackEndReason::UserStop, ctx });
+
+        QCOMPARE(repo.recordSessionEndCalls, 1);
+        QCOMPARE(repo.last.positionSec, 910.0);
+        QCOMPARE(repo.last.durationSec, 1000.0);
+        QCOMPARE(*repo.lastReason, PlaybackEndReason::UserStop);
+    }
+
     void replacedByNewSourcePersistsButDoesNotApplyPolicy()
     {
         FakeHistoryRepo repo;

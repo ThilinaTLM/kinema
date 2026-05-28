@@ -285,8 +285,8 @@ void HistoryStore::recordSessionEnd(const domain::HistoryEntry& entry,
         via = "stop-threshold";
     } else if (e.durationSec > 0.0
             && e.positionSec / e.durationSec >= m_finishedThreshold) {
-        // Defence in depth: the passive 0.9 should never lose to the
-        // looser stop rule. If somehow we still hit it here, flip.
+        // Defence in depth: keep the passive completion rule aligned
+        // with session-end completion.
         e.finished = true;
         via = "tick-threshold";
     } else {

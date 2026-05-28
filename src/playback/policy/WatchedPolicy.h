@@ -29,9 +29,9 @@ struct WatchedInputs {
     /// Already-finished flag passed by the caller (e.g. a previously
     /// persisted row). Honoured: if true, output is always true.
     bool callerFinishedHint = false;
-    /// Threshold for stop-completion. Defaults: 0.85 movies / 0.90
-    /// episodes.
-    double stopThreshold = 0.85;
+    /// Threshold for stop-completion. Defaults to 0.90 for movies
+    /// and episodes.
+    double stopThreshold = 0.90;
     /// Passive tick threshold (defence-in-depth). Defaults 0.9.
     double passiveThreshold = 0.9;
 };

@@ -7,7 +7,8 @@ namespace kinema::playback::policy {
 
 double defaultStopThreshold(domain::MediaKind kind) noexcept
 {
-    return kind == domain::MediaKind::Movie ? 0.85 : 0.90;
+    (void)kind;
+    return 0.90;
 }
 
 WatchedDecision decideWatched(const WatchedInputs& in)

@@ -121,9 +121,11 @@ private Q_SLOTS:
         QCOMPARE(ended.reason, PlaybackEndReason::UserStop);
         QCOMPARE(ended.sessionId, id);
 
-        // Subsequent stop is a no-op.
+        // Subsequent stop and late mpv stop events are no-ops.
         QSignalSpy spy2(&stream, &PlaybackEventStream::eventPublished);
         adapter.stop();
+        QVERIFY(QMetaObject::invokeMethod(&adapter, "onEndOfFile",
+            Q_ARG(QString, QStringLiteral("stop"))));
         QCOMPARE(spy2.count(), 0);
     }
 
