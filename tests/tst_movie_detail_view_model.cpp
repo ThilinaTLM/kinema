@@ -398,6 +398,40 @@ private Q_SLOTS:
             QStringLiteral("Smol"));
     }
 
+    void testCachedOnlyFilter()
+    {
+        Fixture f;
+        f.cinemeta.metaScripts = {
+            { makeDetail(QStringLiteral("tt1"), QStringLiteral("X")) }
+        };
+        Stream cached = makeStream(QStringLiteral("Cached"),
+            QStringLiteral("1080p"), 10, 100);
+        cached.debridCached = true;
+        Stream uncached = makeStream(QStringLiteral("Uncached"),
+            QStringLiteral("1080p"), 90, 200);
+        uncached.debridCached = false;
+        f.torrentio().scriptedCalls = { { { cached, uncached } } };
+        f.vm.load(QStringLiteral("tt1"));
+        drainEvents();
+
+        QCOMPARE(f.vm.streams()->rowCount(), 2);
+        QVERIFY(!f.vm.uiCachedOnly());
+        QVERIFY(!f.vm.uiAnyFilterActive());
+
+        // Toggling cached-only drops the uncached row.
+        f.vm.setUiCachedOnly(true);
+        QVERIFY(f.vm.uiCachedOnly());
+        QVERIFY(f.vm.uiAnyFilterActive());
+        QCOMPARE(f.vm.streams()->rowCount(), 1);
+        QCOMPARE(f.vm.streams()->at(0)->releaseName,
+            QStringLiteral("Cached"));
+
+        // clearUiFilters() resets it and restores both rows.
+        f.vm.clearUiFilters();
+        QVERIFY(!f.vm.uiCachedOnly());
+        QCOMPARE(f.vm.streams()->rowCount(), 2);
+    }
+
     void testRequestStreamsEmitsSignal()
     {
         // `requestStreams()` is the QML "Play" handler on the

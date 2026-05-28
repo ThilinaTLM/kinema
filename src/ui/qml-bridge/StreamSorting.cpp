@@ -23,7 +23,7 @@ int resolutionRank(const QString& res)
 bool UiFilters::any() const noexcept
 {
     return !resolution.isEmpty()
-        || hdrOnly || dolbyVisionOnly || multiAudioOnly;
+        || hdrOnly || dolbyVisionOnly || multiAudioOnly || cachedOnly;
 }
 
 QList<domain::Stream> applyUiFilters(QList<domain::Stream> rows,
@@ -36,6 +36,9 @@ QList<domain::Stream> applyUiFilters(QList<domain::Stream> rows,
     QList<domain::Stream> out;
     out.reserve(rows.size());
     for (auto& s : rows) {
+        if (filters.cachedOnly && !s.debridCached) {
+            continue;
+        }
         if (!filters.resolution.isEmpty()) {
             const auto& res = s.resolution;
             if (filters.resolution == QStringLiteral("sd")) {
@@ -73,11 +76,16 @@ void sortInPlace(QList<domain::Stream>& rows,
     using SortMode = StreamsListModel::SortMode;
 
     if (mode == SortMode::Smart) {
-        // Grouped by resolution descending, then seeders descending
-        // within each quality group. "Smart" has a fixed shape; the
-        // descending toggle is ignored.
+        // Fixed shape: debrid-cached first (instant playback), then
+        // resolution descending, then seeders descending, then size
+        // within each group. The cached key is a no-op when no debrid
+        // provider is configured (every row is uncached). The
+        // `descending` toggle is ignored for Smart.
         std::stable_sort(rows.begin(), rows.end(),
             [](const domain::Stream& a, const domain::Stream& b) {
+                if (a.debridCached != b.debridCached) {
+                    return a.debridCached;
+                }
                 const int aRes = resolutionRank(a.resolution);
                 const int bRes = resolutionRank(b.resolution);
                 if (aRes != bRes) return aRes > bRes;

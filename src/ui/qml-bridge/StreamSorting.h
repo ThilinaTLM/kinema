@@ -17,13 +17,16 @@ namespace kinema::ui::qml::stream_sorting {
 int resolutionRank(const QString& res);
 
 /// Transient (page-scoped) UI filters surfaced by the
-/// `StreamsPage`'s ActionToolBar. Persistent filters
-/// (cached-only / keyword blocklist) stay on `core::stream_filter`.
+/// `StreamsPage`'s ActionToolBar. The persistent keyword blocklist /
+/// excluded-resolution filters stay on `core::stream_filter`.
 struct UiFilters {
     QString resolution; ///< "" | "2160p" | "1080p" | "720p" | "sd"
     bool hdrOnly = false;
     bool dolbyVisionOnly = false;
     bool multiAudioOnly = false;
+    /// Keep only debrid-cached rows (instant playback). A no-op when
+    /// no debrid provider is configured — every row is then uncached.
+    bool cachedOnly = false;
 
     bool any() const noexcept;
 };

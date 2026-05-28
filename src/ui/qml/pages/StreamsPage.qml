@@ -117,7 +117,8 @@ Kirigami.Page {
                     && (page.detailVm.uiResolutionFilter.length > 0
                         || page.detailVm.uiHdrOnly
                         || page.detailVm.uiDolbyVisionOnly
-                        || page.detailVm.uiMultiAudioOnly)
+                        || page.detailVm.uiMultiAudioOnly
+                        || page.detailVm.uiCachedOnly)
                 QQC2.DialogButtonBox.buttonRole: QQC2.DialogButtonBox.ActionRole
                 onClicked: {
                     if (page.detailVm) {
@@ -134,6 +135,20 @@ Kirigami.Page {
         }
 
         FormCard.FormCard {
+            // Cached-only leads: a debrid-cached stream plays instantly,
+            // so it's the most decision-relevant axis. Only meaningful
+            // when a debrid provider is configured.
+            FormCard.FormSwitchDelegate {
+                text: i18nc("@option:check stream filter", "Cached only")
+                description: i18nc("@info:tooltip stream filter",
+                    "Only streams already cached by your debrid provider "
+                    + "(instant playback).")
+                visible: page.detailVm && page.detailVm.debridConfigured
+                checked: page.detailVm && page.detailVm.uiCachedOnly
+                onToggled: if (page.detailVm) {
+                    page.detailVm.uiCachedOnly = checked;
+                }
+            }
             FormCard.FormComboBoxDelegate {
                 text: i18nc("@label stream filter", "Resolution")
                 model: streamsAdvancedDialog.resolutionLabels
@@ -194,7 +209,8 @@ Kirigami.Page {
             ? ((page.detailVm.uiResolutionFilter.length > 0 ? 1 : 0)
                 + (page.detailVm.uiHdrOnly ? 1 : 0)
                 + (page.detailVm.uiDolbyVisionOnly ? 1 : 0)
-                + (page.detailVm.uiMultiAudioOnly ? 1 : 0))
+                + (page.detailVm.uiMultiAudioOnly ? 1 : 0)
+                + (page.detailVm.uiCachedOnly ? 1 : 0))
             : 0
 
         // Right-align controls after the title.

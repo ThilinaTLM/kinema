@@ -132,10 +132,21 @@ void DetailViewModelBase::setUiMultiAudioOnly(bool on)
     rebuildVisibleStreams();
 }
 
+void DetailViewModelBase::setUiCachedOnly(bool on)
+{
+    if (m_uiCachedOnly == on) {
+        return;
+    }
+    m_uiCachedOnly = on;
+    Q_EMIT uiFiltersChanged();
+    rebuildVisibleStreams();
+}
+
 bool DetailViewModelBase::uiAnyFilterActive() const noexcept
 {
     return !m_uiResolutionFilter.isEmpty()
-        || m_uiHdrOnly || m_uiDolbyVisionOnly || m_uiMultiAudioOnly;
+        || m_uiHdrOnly || m_uiDolbyVisionOnly || m_uiMultiAudioOnly
+        || m_uiCachedOnly;
 }
 
 void DetailViewModelBase::clearUiFilters()
@@ -147,6 +158,7 @@ void DetailViewModelBase::clearUiFilters()
     m_uiHdrOnly = false;
     m_uiDolbyVisionOnly = false;
     m_uiMultiAudioOnly = false;
+    m_uiCachedOnly = false;
     Q_EMIT uiFiltersChanged();
     rebuildVisibleStreams();
 }
@@ -230,6 +242,7 @@ void DetailViewModelBase::resetStreamsAndFilters()
         m_uiHdrOnly = false;
         m_uiDolbyVisionOnly = false;
         m_uiMultiAudioOnly = false;
+        m_uiCachedOnly = false;
         Q_EMIT uiFiltersChanged();
     }
 }
@@ -271,7 +284,7 @@ QList<domain::Stream> DetailViewModelBase::applyFilters() const
 
     return stream_sorting::applyUiFilters(std::move(rows),
         { m_uiResolutionFilter, m_uiHdrOnly,
-            m_uiDolbyVisionOnly, m_uiMultiAudioOnly });
+            m_uiDolbyVisionOnly, m_uiMultiAudioOnly, m_uiCachedOnly });
 }
 
 void DetailViewModelBase::sortInPlace(QList<domain::Stream>& rows) const

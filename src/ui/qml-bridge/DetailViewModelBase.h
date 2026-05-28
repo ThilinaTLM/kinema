@@ -99,6 +99,8 @@ class DetailViewModelBase : public QObject
         WRITE setUiDolbyVisionOnly NOTIFY uiFiltersChanged)
     Q_PROPERTY(bool uiMultiAudioOnly READ uiMultiAudioOnly
         WRITE setUiMultiAudioOnly NOTIFY uiFiltersChanged)
+    Q_PROPERTY(bool uiCachedOnly READ uiCachedOnly
+        WRITE setUiCachedOnly NOTIFY uiFiltersChanged)
     Q_PROPERTY(bool uiAnyFilterActive READ uiAnyFilterActive NOTIFY uiFiltersChanged)
 
     Q_PROPERTY(bool inLibrary READ inLibrary NOTIFY libraryStateChanged)
@@ -144,6 +146,8 @@ public:
     void setUiDolbyVisionOnly(bool on);
     bool uiMultiAudioOnly() const noexcept { return m_uiMultiAudioOnly; }
     void setUiMultiAudioOnly(bool on);
+    bool uiCachedOnly() const noexcept { return m_uiCachedOnly; }
+    void setUiCachedOnly(bool on);
     bool uiAnyFilterActive() const noexcept;
     Q_INVOKABLE void clearUiFilters();
 
@@ -297,6 +301,7 @@ protected:
     bool m_uiHdrOnly = false;
     bool m_uiDolbyVisionOnly = false;
     bool m_uiMultiAudioOnly = false;
+    bool m_uiCachedOnly = false;
 
     bool m_inLibrary = false;
 };
