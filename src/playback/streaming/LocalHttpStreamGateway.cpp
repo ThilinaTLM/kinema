@@ -11,6 +11,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHostAddress>
+#include <QObject>
 #include <QPointer>
 #include <QStringList>
 #include <QTcpSocket>
@@ -288,7 +289,18 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
         guard->disconnectFromHost();
         co_return;
     }
+    auto* sourceObject = dynamic_cast<QObject*>(source);
+    QPointer<QObject> sourceGuard(sourceObject);
+    const auto sourceAlive = [&sourceGuard, sourceObject]() {
+        return sourceObject == nullptr || !sourceGuard.isNull();
+    };
+
     const qint64 fileSize = source->fileSize();
+    if (!sourceAlive()) {
+        writeHeaders(guard, 404, 0, {});
+        guard->disconnectFromHost();
+        co_return;
+    }
     if (fileSize <= 0) {
         qCInfo(KINEMA_DOWNLOAD).nospace()
             << "LocalHttpStreamGateway: 404 " << req->method
@@ -352,8 +364,16 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
             cursor + kStreamChunkBytes - 1, range.endInclusive);
         const ByteRange chunk { cursor, chunkEnd };
 
+        if (!sourceAlive()) {
+            ensureFailed = true;
+            break;
+        }
         const bool ready = co_await source->ensureRange(chunk);
         if (!guard) {
+            break;
+        }
+        if (!sourceAlive()) {
+            ensureFailed = true;
             break;
         }
         if (!ready) {

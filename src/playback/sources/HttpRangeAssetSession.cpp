@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QNetworkRequest>
+#include <QPointer>
 #include <QUuid>
 
 #include <algorithm>
@@ -254,12 +255,16 @@ void HttpRangeAssetSession::resume()
 
 QCoro::Task<void> HttpRangeAssetSession::ensureResolved()
 {
+    QPointer<HttpRangeAssetSession> self(this);
     if (m_resolveInFlight || !m_upstream.isEmpty()) {
         co_return;
     }
     m_resolveInFlight = true;
     try {
         const auto resolved = co_await m_resolver.resolve(m_ref);
+        if (!self) {
+            co_return;
+        }
         m_upstream = resolved.downloadUrl;
         m_providerTorrentId = resolved.providerTorrentId;
         if (resolved.fileSize > 0 && resolved.fileSize != m_fileSize) {
@@ -303,6 +308,9 @@ QCoro::Task<void> HttpRangeAssetSession::ensureResolved()
         }
         m_resolveInFlight = false;
     } catch (...) {
+        if (!self) {
+            co_return;
+        }
         m_resolveInFlight = false;
         throw;
     }
@@ -310,7 +318,11 @@ QCoro::Task<void> HttpRangeAssetSession::ensureResolved()
 
 QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
 {
+    QPointer<HttpRangeAssetSession> self(this);
     co_await ensureResolved();
+    if (!self) {
+        co_return false;
+    }
     if (m_upstream.isEmpty() || m_fileSize <= 0) {
         co_return false;
     }
@@ -332,7 +344,13 @@ QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
     QString failReason;
     try {
         body = co_await m_http.get(req);
+        if (!self) {
+            co_return false;
+        }
     } catch (const core::HttpError& e) {
+        if (!self) {
+            co_return false;
+        }
         const int s = e.httpStatus();
         if (s == 401 || s == 403 || s == 410) {
             qCInfo(KINEMA_DOWNLOAD) << "HttpRangeAssetSession: upstream expired ("
@@ -342,6 +360,9 @@ QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
             failReason = e.message();
         }
     } catch (const std::exception& e2) {
+        if (!self) {
+            co_return false;
+        }
         failReason = QString::fromUtf8(e2.what());
     }
     if (!failReason.isEmpty()) {
@@ -352,10 +373,19 @@ QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
         m_upstream = QUrl();
         try {
             co_await ensureResolved();
+            if (!self) {
+                co_return false;
+            }
             QNetworkRequest req2(m_upstream);
             req2.setRawHeader("Range", rangeHeader);
             body = co_await m_http.get(req2);
+            if (!self) {
+                co_return false;
+            }
         } catch (const std::exception& e2) {
+            if (!self) {
+                co_return false;
+            }
             Q_EMIT failed(QString::fromUtf8(e2.what()));
             co_return false;
         }
@@ -421,10 +451,14 @@ QCoro::Task<bool> HttpRangeAssetSession::ensureChunk(int chunkIndex)
 
 QCoro::Task<bool> HttpRangeAssetSession::ensureRange(kinema::torrent::ByteRange range)
 {
+    QPointer<HttpRangeAssetSession> self(this);
     if (!range.isValid()) {
         co_return false;
     }
     co_await ensureResolved();
+    if (!self) {
+        co_return false;
+    }
     if (m_fileSize <= 0) {
         co_return false;
     }
@@ -434,6 +468,9 @@ QCoro::Task<bool> HttpRangeAssetSession::ensureRange(kinema::torrent::ByteRange 
 
     for (int i = firstChunk; i <= lastChunk; ++i) {
         if (!co_await ensureChunk(i)) {
+            co_return false;
+        }
+        if (!self) {
             co_return false;
         }
     }
@@ -461,7 +498,11 @@ QByteArray HttpRangeAssetSession::readRange(kinema::torrent::ByteRange range) co
 
 QCoro::Task<void> HttpRangeAssetSession::prefetchAll()
 {
+    QPointer<HttpRangeAssetSession> self(this);
     co_await ensureResolved();
+    if (!self) {
+        co_return;
+    }
     for (int i = 0; i < m_totalChunks; ++i) {
         // Honour user pause + Full→OnDemand demotion at chunk
         // boundaries. Player-driven `ensureRange` calls remain
@@ -473,6 +514,9 @@ QCoro::Task<void> HttpRangeAssetSession::prefetchAll()
             continue;
         }
         co_await ensureChunk(i);
+        if (!self) {
+            co_return;
+        }
     }
 }
 

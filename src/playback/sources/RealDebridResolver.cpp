@@ -32,16 +32,47 @@ QCoro::Task<void> sleepMs(int ms)
     co_await qCoro(&t, &QTimer::timeout);
 }
 
-/// Pick the best file id from an RD torrent-info response. Uses the
-/// shared scoring helper but maps back through RD's 1-based file ids.
+/// Pick the best file id from an RD torrent-info response. For normal
+/// Torrentio clicks `ref.fileIndex` is usually RD's id - 1, but series
+/// auto-next can feed us an index from the already-resolved RD catalog.
+/// That catalog index is positional, while RD's file ids may skip / drift
+/// when non-video rows are present. Prefer strong filename / episode
+/// evidence when available; fall back to the historical id mapping only
+/// when the scorer cannot distinguish the target.
 int chooseFileId(const QList<domain::RdTorrentFile>& files,
     const domain::AssetRef& ref)
 {
     QList<picker::Candidate> candidates;
     candidates.reserve(files.size());
-    for (const auto& f : files) {
+    int bestIdx = -1;
+    int bestScore = -1;
+    for (int i = 0; i < files.size(); ++i) {
+        const auto& f = files[i];
         candidates.append({ f.path, f.bytes });
+        const int sc = picker::score(f.path, f.bytes, ref);
+        if (sc > bestScore) {
+            bestScore = sc;
+            bestIdx = i;
+        }
     }
+
+    // Generic playable video rows score up to 6 (size + video suffix).
+    // Anything higher means the filename hint or SxxExx/1x episode token
+    // matched the requested asset, which is safer than assuming RD ids are
+    // positional. This is the critical path for embedded auto-next.
+    if (bestIdx >= 0 && bestScore > 6) {
+        return files[bestIdx].id;
+    }
+
+    if (ref.fileIndex >= 0) {
+        const int candidate = ref.fileIndex + 1;
+        for (const auto& f : files) {
+            if (f.id == candidate) {
+                return candidate;
+            }
+        }
+    }
+
     const int idx = picker::chooseIndex(candidates, ref);
     return idx < 0 ? -1 : files[idx].id;
 }
@@ -100,24 +131,8 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
         waitedMs += kPollIntervalMs;
     }
 
-    // Step 3: choose file id (uses our scoring) and ask RD to select it.
-    int chosenId = -1;
-    if (ref.fileIndex >= 0) {
-        // Torrentio reports `fileIdx` as a 0-based index; RD ids are
-        // 1-based and may be re-numbered if RD's file list excludes
-        // some entries. Try the 1-based equivalent first, then fall
-        // back to scoring.
-        const int candidate = ref.fileIndex + 1;
-        for (const auto& f : info.files) {
-            if (f.id == candidate) {
-                chosenId = candidate;
-                break;
-            }
-        }
-    }
-    if (chosenId < 0) {
-        chosenId = chooseFileId(info.files, ref);
-    }
+    // Step 3: choose file id and ask RD to select it.
+    int chosenId = chooseFileId(info.files, ref);
     if (chosenId < 0) {
         throw core::HttpError(core::HttpError::Kind::Json, 0,
             i18n("Real-Debrid did not return a usable file."));

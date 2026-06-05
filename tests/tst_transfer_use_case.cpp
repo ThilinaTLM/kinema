@@ -715,7 +715,7 @@ private Q_SLOTS:
     // Same-infoHash supersede: a second open() on a different
     // assetId but the same hash revokes the previous session.
     // -----------------------------------------------------------------
-    void sameInfoHashSupersedesPriorSession()
+    void sameInfoHashSupersedesPriorTorrentSession()
     {
         // Mimic series-pack episode swap: same infoHash, two
         // different file indices inside the pack. assetIdFor()
@@ -760,8 +760,63 @@ private Q_SLOTS:
         }();
         spinUntil([&] { return bDone; });
         QVERIFY(m_sessions->contains(assetB));
-        // The earlier session was revoked.
+        // The earlier torrent session was revoked.
         QVERIFY(!m_sessions->contains(assetA));
+    }
+
+    void debridSameInfoHashDoesNotSupersedePriorSession()
+    {
+        auto* debridSource = new FakeMediaSourcePort(
+            domain::DownloadBackendKind::AllDebridHttp,
+            /*fileSize*/ 2'000'000);
+        m_backends->registerSource(
+            std::unique_ptr<ports::MediaSourcePort>(debridSource));
+
+        auto streamA = makeStream();
+        streamA.fileIndex = 0;
+        streamA.fileNameHint = QStringLiteral("S01E01.mkv");
+        auto streamB = makeStream();
+        streamB.fileIndex = 1;
+        streamB.fileNameHint = QStringLiteral("S01E02.mkv");
+
+        domain::PlaybackContext ctxA;
+        ctxA.key.kind = domain::MediaKind::Series;
+        ctxA.key.imdbId = QStringLiteral("tt5555555");
+        ctxA.key.season = 1;
+        ctxA.key.episode = 1;
+        ctxA.title = QStringLiteral("Show S01E01");
+
+        domain::PlaybackContext ctxB = ctxA;
+        ctxB.key.episode = 2;
+        ctxB.title = QStringLiteral("Show S01E02");
+
+        const auto assetA = domain::assetIdFor(
+            domain::assetRefFor(streamA, ctxA));
+        const auto assetB = domain::assetIdFor(
+            domain::assetRefFor(streamB, ctxB));
+        QVERIFY(assetA != assetB);
+
+        bool aDone = false;
+        auto playA = [&]() -> QCoro::Task<void> {
+            co_await m_useCase->ensurePlayable(streamA, ctxA,
+                domain::DownloadBackendKind::AllDebridHttp);
+            aDone = true;
+        }();
+        spinUntil([&] { return aDone; });
+        QVERIFY(m_sessions->contains(assetA));
+        QVERIFY(m_gateway->urlFor(assetA).isValid());
+
+        bool bDone = false;
+        auto playB = [&]() -> QCoro::Task<void> {
+            co_await m_useCase->ensurePlayable(streamB, ctxB,
+                domain::DownloadBackendKind::AllDebridHttp);
+            bDone = true;
+        }();
+        spinUntil([&] { return bDone; });
+        QVERIFY(m_sessions->contains(assetB));
+        QVERIFY(m_sessions->contains(assetA));
+        QVERIFY(m_gateway->urlFor(assetA).isValid());
+        QVERIFY(m_gateway->urlFor(assetB).isValid());
     }
 
     // -----------------------------------------------------------------

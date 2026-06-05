@@ -149,9 +149,19 @@ void TransferUseCase::supersedeSameHashSessions(const QString& infoHash,
     }
     const auto victims = m_sessions.superseded(infoHash, keepAssetId);
     for (const auto& otherAssetId : victims) {
-        if (auto* session = m_sessions.find(otherAssetId)) {
-            m_gateway.revoke(*session->byteRangeSource());
+        auto* session = m_sessions.find(otherAssetId);
+        if (!session) {
+            continue;
         }
+        if (session->backendKind()
+            != domain::DownloadBackendKind::Torrent) {
+            qCDebug(KINEMA_DOWNLOAD).nospace()
+                << "supersedeSameHashSessions: keeping non-torrent "
+                << "assetId=" << otherAssetId;
+            continue;
+        }
+
+        m_gateway.revoke(*session->byteRangeSource());
         m_sessions.erase(otherAssetId); // also drops attached-player
         // Mirror the legacy OnDemand→Idle bookkeeping so the
         // Downloads page reflects the swap rather than leaving a
