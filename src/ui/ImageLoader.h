@@ -67,6 +67,10 @@ public:
     /// in-process negative cache so previously-failed URLs are retried.
     void clearMemoryCache();
 
+    /// Clear both the in-memory image cache and the on-disk poster /
+    /// artwork cache, then recreate the disk-cache directory.
+    bool clearDiskCache();
+
 Q_SIGNALS:
     /// Emitted after a poster is fetched (from any source), so views can refresh.
     void posterReady(const QUrl& url);

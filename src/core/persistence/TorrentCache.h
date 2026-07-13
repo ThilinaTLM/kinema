@@ -42,6 +42,18 @@ public:
     bool isActive(const QString& infoHash) const;
 
     void touch(const QString& infoHash) const;
+
+    struct CleanupResult {
+        int removedTorrents = 0;
+        int failedTorrents = 0;
+        qint64 bytesFreed = 0;
+    };
+
+    /// Remove every torrent cache directory except protected info
+    /// hashes. Callers pass hashes referenced by pinned downloads so
+    /// destructive cache cleanup leaves offline torrent payloads intact.
+    CleanupResult removeAllExcept(const QSet<QString>& protectedInfoHashes);
+
     qint64 sizeBytes() const;
     qint64 budgetBytes() const;
 

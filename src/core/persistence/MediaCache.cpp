@@ -142,6 +142,48 @@ bool MediaCache::removeAsset(const QString& assetId)
     return removeRecursively(rootDir().absoluteFilePath(normalized));
 }
 
+MediaCache::CleanupResult MediaCache::removeUnpinnedExcept(
+    const QSet<QString>& protectedAssetIds)
+{
+    QSet<QString> protectedNormalized;
+    protectedNormalized.reserve(protectedAssetIds.size());
+    for (const auto& id : protectedAssetIds) {
+        const auto normalized = normalizedAssetId(id);
+        if (!normalized.isEmpty()) {
+            protectedNormalized.insert(normalized);
+        }
+    }
+
+    CleanupResult result;
+    QDir root = rootDir();
+    const auto dirs = root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot,
+        QDir::Name);
+    for (const auto& info : dirs) {
+        const auto assetId = normalizedAssetId(info.fileName());
+        if (assetId.isEmpty()) {
+            continue;
+        }
+        if (protectedNormalized.contains(assetId) || hasPinnedMarker(assetId)) {
+            continue;
+        }
+
+        const auto size = directorySize(info.absoluteFilePath());
+        if (!removeRecursively(info.absoluteFilePath())) {
+            ++result.failedAssets;
+            qCWarning(KINEMA_DOWNLOAD)
+                << "MediaCache: failed to remove unpinned asset"
+                << info.absoluteFilePath();
+            continue;
+        }
+        m_active.remove(assetId);
+        ++result.removedAssets;
+        result.bytesFreed += size;
+        qCInfo(KINEMA_DOWNLOAD)
+            << "MediaCache: removed unpinned asset" << assetId;
+    }
+    return result;
+}
+
 qint64 MediaCache::directorySize(const QString& path) const
 {
     return cache::dirSizeBytes(QDir(path));

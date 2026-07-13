@@ -67,6 +67,15 @@ void ImageLoader::clearMemoryCache()
     m_failedUrls.clear();
 }
 
+bool ImageLoader::clearDiskCache()
+{
+    clearMemoryCache();
+    QDir d(m_diskDir);
+    const bool removed = !d.exists() || d.removeRecursively();
+    const bool recreated = QDir().mkpath(m_diskDir);
+    return removed && recreated;
+}
+
 QCoro::Task<QImage> ImageLoader::requestPoster(QUrl url)
 {
     if (!url.isValid() || url.isEmpty()) {

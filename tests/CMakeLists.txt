@@ -354,6 +354,11 @@ ecm_add_test(tst_media_cache.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_torrent_cache.cpp
+    TEST_NAME tst_torrent_cache
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_local_http_stream_gateway.cpp
     TEST_NAME tst_local_http_stream_gateway
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Network
@@ -559,7 +564,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_series_session_service
          tst_moviehash_probe tst_track_memory_service
          tst_torrent_media_source tst_debrid_media_source
-         tst_media_cache tst_local_http_stream_gateway tst_http_range_asset_session
+         tst_media_cache tst_torrent_cache tst_local_http_stream_gateway tst_http_range_asset_session
          tst_libtorrent_client_lazy_start)
     target_compile_definitions(${t} PRIVATE ${test_defs})
 endforeach()

@@ -21,6 +21,36 @@ FormCard.FormCardPage {
 
     readonly property var vm: settingsVm.torrentStreaming
 
+    Kirigami.PromptDialog {
+        id: cleanupConfirm
+        // Settings opens in a separate ConfigurationView window on
+        // desktop. Kirigami.Dialog's default parent is
+        // applicationWindow().overlay (the main shell), which puts
+        // this prompt behind the settings window. Parent it to the
+        // page's own window overlay instead.
+        parent: page.QQC2.Overlay.overlay
+        title: i18nc("@title:dialog", "Clean up downloads and cache?")
+        subtitle: i18nc("@info confirm destructive downloads cleanup",
+            "Unpinned downloads, subtitle cache, artwork cache, "
+            + "and unused media/torrent cache files will be deleted. "
+            + "Pinned downloads will be kept. This cannot be undone.")
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18nc("@action:button", "Cancel")
+                onTriggered: cleanupConfirm.close()
+            },
+            Kirigami.Action {
+                text: i18nc("@action:button destructive", "Clean Up")
+                icon.source: AppIcons.url("trash-2", AppIcons.negative)
+                onTriggered: {
+                    page.vm.cleanupDownloadsAndCache();
+                    cleanupConfirm.close();
+                }
+            }
+        ]
+    }
+
     // ---- Cache usage (live) -----------------------------------
     FormCard.FormHeader {
         title: i18nc("@title:group downloads settings", "Cache")
@@ -79,7 +109,29 @@ FormCard.FormCardPage {
                 "Drop ephemeral cache entries until the budget is "
                 + "satisfied. Pinned items are never evicted.")
             icon.name: "edit-clear-history"
+            enabled: !page.vm.busy
             onClicked: page.vm.runEvictionNow()
+        }
+        FormCard.FormDelegateSeparator {}
+        FormCard.FormButtonDelegate {
+            text: i18nc("@action:button destructive downloads cleanup",
+                "Clean up downloads and cache")
+            description: i18nc("@info destructive downloads cleanup",
+                "Delete unpinned downloads and clear local caches. "
+                + "Pinned downloads are kept.")
+            icon.source: AppIcons.url("trash-2", AppIcons.negative)
+            icon.color: AppIcons.negative
+            enabled: !page.vm.busy
+            onClicked: cleanupConfirm.open()
+        }
+        FormCard.AbstractFormDelegate {
+            visible: page.vm.statusMessage.length > 0
+            background: null
+            contentItem: Kirigami.InlineMessage {
+                visible: page.vm.statusMessage.length > 0
+                text: page.vm.statusMessage
+                type: page.vm.statusKind
+            }
         }
     }
 

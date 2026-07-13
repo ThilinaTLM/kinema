@@ -22,11 +22,20 @@ namespace kinema::config {
 class AppSettings;
 }
 
+namespace kinema::controllers {
+class DownloadController;
+}
+
 namespace kinema::core {
 class HttpClient;
 class MediaCache;
 class SubtitleCacheStore;
 class TokenStore;
+class TorrentCache;
+}
+
+namespace kinema::ui {
+class ImageLoader;
 }
 
 namespace kinema::ui::qml::settings {
@@ -50,6 +59,9 @@ public:
         config::AppSettings& settings,
         core::SubtitleCacheStore* subtitleCache,
         core::MediaCache* mediaCache,
+        core::TorrentCache* torrentCache,
+        controllers::DownloadController* downloads,
+        kinema::ui::ImageLoader* imageLoader,
         QObject* parent = nullptr);
 
     GeneralSettingsViewModel* general() const { return m_general; }

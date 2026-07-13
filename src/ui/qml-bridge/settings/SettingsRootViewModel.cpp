@@ -4,10 +4,13 @@
 #include "ui/qml-bridge/settings/SettingsRootViewModel.h"
 #include "api/IndexerSelector.h"
 #include "config/AppSettings.h"
+#include "controllers/DownloadController.h"
 #include "core/io/HttpClient.h"
 #include "core/persistence/MediaCache.h"
 #include "core/persistence/SubtitleCacheStore.h"
 #include "core/persistence/TokenStore.h"
+#include "core/persistence/TorrentCache.h"
+#include "ui/ImageLoader.h"
 
 namespace kinema::ui::qml::settings {
 
@@ -17,7 +20,11 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     core::TokenStore* tokens, api::IndexerSelector* indexers,
     config::AppSettings& settings,
     core::SubtitleCacheStore* subtitleCache,
-    core::MediaCache* mediaCache, QObject* parent)
+    core::MediaCache* mediaCache,
+    core::TorrentCache* torrentCache,
+    controllers::DownloadController* downloads,
+    kinema::ui::ImageLoader* imageLoader,
+    QObject* parent)
     : QObject(parent)
 {
     Q_ASSERT(mediaCache);
@@ -34,7 +41,8 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     m_subs = new SubtitlesSettingsViewModel(http, tokens,
         settings.subtitle(), settings.cache(), subtitleCache, this);
     m_torrentStreaming = new TorrentStreamingSettingsViewModel(
-        settings.torrentStreaming(), *mediaCache, this);
+        settings.torrentStreaming(), *mediaCache, downloads,
+        torrentCache, subtitleCache, imageLoader, this);
 
     // Forward token / credential changes through the root so
     // `MainController` can route them to `TokenController`.

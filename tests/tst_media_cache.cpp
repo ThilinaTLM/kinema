@@ -9,6 +9,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -147,6 +148,33 @@ private Q_SLOTS:
         // ephemeralSizeBytes excludes pinned (a) but includes b and c.
         const auto eph = m_cache->ephemeralSizeBytes();
         QVERIFY(eph >= 2048);
+    }
+
+    void removeUnpinnedExceptKeepsPinnedAndProtected()
+    {
+        const auto pinned = QStringLiteral("asset-pinned");
+        const auto protectedId = QStringLiteral("asset-protected");
+        const auto unpinned = QStringLiteral("asset-unpinned");
+
+        const auto pinnedPayload = m_cache->assetDir(pinned)
+                                       .absoluteFilePath(QStringLiteral("p"));
+        const auto protectedPayload = m_cache->assetDir(protectedId)
+                                          .absoluteFilePath(QStringLiteral("p"));
+        const auto unpinnedPayload = m_cache->assetDir(unpinned)
+                                         .absoluteFilePath(QStringLiteral("p"));
+        writeFile(pinnedPayload, 128);
+        writeFile(protectedPayload, 128);
+        writeFile(unpinnedPayload, 128);
+        m_cache->setPinned(pinned, true);
+
+        const auto result = m_cache->removeUnpinnedExcept(
+            QSet<QString> { protectedId });
+
+        QCOMPARE(result.failedAssets, 0);
+        QCOMPARE(result.removedAssets, 1);
+        QVERIFY(QFile::exists(pinnedPayload));
+        QVERIFY(QFile::exists(protectedPayload));
+        QVERIFY(!QFile::exists(unpinnedPayload));
     }
 
     void removeAssetWipesDirectory()

@@ -68,6 +68,19 @@ public:
     /// Recursively delete an asset directory.
     bool removeAsset(const QString& assetId);
 
+    struct CleanupResult {
+        int removedAssets = 0;
+        int failedAssets = 0;
+        qint64 bytesFreed = 0;
+    };
+
+    /// Remove every unpinned asset directory except explicit
+    /// protections. Used by the destructive settings cleanup: pinned
+    /// downloads (marker or protected id) are left intact; stale
+    /// unpinned/orphaned cache directories are deleted.
+    CleanupResult removeUnpinnedExcept(
+        const QSet<QString>& protectedAssetIds);
+
     /// Total bytes used across the entire media cache.
     qint64 sizeBytes() const;
 

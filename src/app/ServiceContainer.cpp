@@ -470,7 +470,8 @@ void ServiceContainer::buildControllersAndViewModels()
     // `TokenController` is set up in `wirePresentation()`.
     m_settingsVm = new ui::qml::settings::SettingsRootViewModel(m_http.get(),
         m_tokens.get(), m_indexers, m_settings, m_subtitleCache.get(),
-        m_mediaCache.get(), a);
+        m_mediaCache.get(), m_torrentCache.get(), m_downloadCtrl,
+        m_imageLoader, a);
 }
 
 // ---------------------------------------------------------------------------

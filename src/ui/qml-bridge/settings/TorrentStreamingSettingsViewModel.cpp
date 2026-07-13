@@ -2,12 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ui/qml-bridge/settings/TorrentStreamingSettingsViewModel.h"
+#include "ui/qml-bridge/settings/SettingsStatus.h"
 #include "config/TorrentStreamingSettings.h"
+#include "controllers/DownloadController.h"
+#include "core/io/CachePaths.h"
+#include "core/io/HttpErrorPresenter.h"
 #include "core/persistence/MediaCache.h"
+#include "core/persistence/SubtitleCacheStore.h"
+#include "core/persistence/TorrentCache.h"
 #include "core/util/DateFormat.h"
+#include "domain/Download.h"
 #include "kinema_log_ui.h"
+#include "ui/ImageLoader.h"
 #include <KFormat>
+#include <KLocalizedString>
+#include <QDir>
+#include <QFile>
 #include <QTimer>
+
+#include <exception>
 
 namespace kinema::ui::qml::settings {
 
@@ -15,10 +28,19 @@ namespace kinema::ui::qml::settings {
 
 TorrentStreamingSettingsViewModel::TorrentStreamingSettingsViewModel(
     config::TorrentStreamingSettings& settings,
-    core::MediaCache& cache, QObject* parent)
+    core::MediaCache& cache,
+    controllers::DownloadController* downloads,
+    core::TorrentCache* torrentCache,
+    core::SubtitleCacheStore* subtitleCache,
+    kinema::ui::ImageLoader* imageLoader,
+    QObject* parent)
     : QObject(parent)
     , m_settings(settings)
     , m_cache(cache)
+    , m_downloads(downloads)
+    , m_torrentCache(torrentCache)
+    , m_subtitleCache(subtitleCache)
+    , m_imageLoader(imageLoader)
 {
     // Cache stats are read on demand from `MediaCache` (which walks
     // the asset dirs). A 5 s poll keeps the settings page's usage
@@ -132,6 +154,121 @@ void TorrentStreamingSettingsViewModel::runEvictionNow()
         << "Downloads settings: manual cache eviction triggered";
     m_cache.enforceBudget();
     Q_EMIT cacheChanged();
+}
+
+void TorrentStreamingSettingsViewModel::cleanupDownloadsAndCache()
+{
+    if (m_busy) {
+        return;
+    }
+
+    setBusy(true);
+    try {
+        qCInfo(KINEMA_UI)
+            << "Downloads settings: cleanup downloads/cache triggered";
+
+        QSet<QString> protectedAssetIds;
+        QSet<QString> protectedInfoHashes;
+        int removedRows = 0;
+        if (m_downloads) {
+            const auto rows = m_downloads->items();
+            for (const auto& row : rows) {
+                if (row.disposition == domain::CacheDisposition::Pinned) {
+                    protectedAssetIds.insert(row.assetId);
+                    if (row.backendKind == domain::DownloadBackendKind::Torrent
+                        && !row.infoHash.isEmpty()) {
+                        protectedInfoHashes.insert(row.infoHash);
+                    }
+                }
+            }
+            for (const auto& row : rows) {
+                if (row.disposition == domain::CacheDisposition::Pinned) {
+                    continue;
+                }
+                m_downloads->remove(row.assetId, true);
+                ++removedRows;
+            }
+        }
+
+        const auto mediaCleanup
+            = m_cache.removeUnpinnedExcept(protectedAssetIds);
+
+        core::TorrentCache::CleanupResult torrentCleanup;
+        if (m_torrentCache) {
+            torrentCleanup = m_torrentCache->removeAllExcept(
+                protectedInfoHashes);
+        }
+
+        int subtitleFiles = 0;
+        if (m_subtitleCache) {
+            const auto entries = m_subtitleCache->all();
+            for (const auto& entry : entries) {
+                if (!entry.localPath.isEmpty()) {
+                    QFile::remove(entry.localPath);
+                }
+            }
+            subtitleFiles = entries.size();
+            m_subtitleCache->clearAll();
+
+            auto subtitleDir = core::cache::subtitlesDir();
+            subtitleDir.removeRecursively();
+            QDir().mkpath(subtitleDir.absolutePath());
+        }
+
+        bool imageCacheOk = true;
+        if (m_imageLoader) {
+            imageCacheOk = m_imageLoader->clearDiskCache();
+        }
+
+        const int failures = mediaCleanup.failedAssets
+            + torrentCleanup.failedTorrents
+            + (imageCacheOk ? 0 : 1);
+
+        qCInfo(KINEMA_UI)
+            << "Downloads settings cleanup removed rows=" << removedRows
+            << "mediaDirs=" << mediaCleanup.removedAssets
+            << "torrentDirs=" << torrentCleanup.removedTorrents
+            << "subtitleFiles=" << subtitleFiles
+            << "failures=" << failures;
+
+        Q_EMIT cacheChanged();
+        if (failures > 0) {
+            setStatus(i18ncp("@info downloads cache cleanup partial failure",
+                          "Cleanup finished, but %1 cache item could not be deleted.",
+                          "Cleanup finished, but %1 cache items could not be deleted.",
+                          failures),
+                kStatusError);
+        } else {
+            setStatus(i18nc("@info downloads cache cleanup complete",
+                          "Cleanup complete. Removed %1 unpinned download(s) and cleared local caches; pinned downloads were kept.",
+                          removedRows),
+                kStatusPositive);
+        }
+    } catch (const std::exception& e) {
+        setStatus(core::describeError(e, "clean downloads and cache"),
+            kStatusError);
+    }
+    setBusy(false);
+}
+
+void TorrentStreamingSettingsViewModel::setStatus(
+    const QString& message, int kind)
+{
+    if (m_statusMessage == message && m_statusKind == kind) {
+        return;
+    }
+    m_statusMessage = message;
+    m_statusKind = kind;
+    Q_EMIT statusChanged();
+}
+
+void TorrentStreamingSettingsViewModel::setBusy(bool on)
+{
+    if (m_busy == on) {
+        return;
+    }
+    m_busy = on;
+    Q_EMIT busyChanged();
 }
 
 } // namespace kinema::ui::qml::settings

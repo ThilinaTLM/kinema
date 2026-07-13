@@ -108,6 +108,52 @@ void TorrentCache::touch(const QString& infoHash) const
             .toString(Qt::ISODateWithMs).toUtf8());
 }
 
+TorrentCache::CleanupResult TorrentCache::removeAllExcept(
+    const QSet<QString>& protectedInfoHashes)
+{
+    QSet<QString> protectedNormalized;
+    protectedNormalized.reserve(protectedInfoHashes.size());
+    for (const auto& hash : protectedInfoHashes) {
+        const auto normalized = normalizedHash(hash);
+        if (!normalized.isEmpty()) {
+            protectedNormalized.insert(normalized);
+        }
+    }
+
+    CleanupResult result;
+    QDir root = rootDir();
+    const auto dirs = root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot,
+        QDir::Name);
+    for (const auto& info : dirs) {
+        const auto hash = normalizedHash(info.fileName());
+        if (hash.isEmpty() || protectedNormalized.contains(hash)) {
+            continue;
+        }
+        // A known active session should normally have a persisted row
+        // and be stopped before this cache-level sweep runs. If one
+        // remains active, leave it alone rather than deleting files
+        // from under libtorrent.
+        if (isActive(hash)) {
+            continue;
+        }
+
+        const auto size = directorySize(info.absoluteFilePath());
+        if (!removeRecursively(info.absoluteFilePath())) {
+            ++result.failedTorrents;
+            qCWarning(KINEMA_TORRENT)
+                << "TorrentCache: failed to remove"
+                << info.absoluteFilePath();
+            continue;
+        }
+        m_active.remove(hash);
+        ++result.removedTorrents;
+        result.bytesFreed += size;
+        qCInfo(KINEMA_TORRENT)
+            << "TorrentCache: removed cache" << hash;
+    }
+    return result;
+}
+
 qint64 TorrentCache::sizeBytes() const
 {
     return cache::dirSizeBytes(rootDir());
