@@ -13,6 +13,7 @@
 
 #include <QCoro/QCoroSignal>
 
+#include <QByteArray>
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
@@ -22,7 +23,6 @@
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/file_storage.hpp>
-#include <libtorrent/hex.hpp>
 #include <libtorrent/magnet_uri.hpp>
 #include <libtorrent/session.hpp>
 #include <libtorrent/settings_pack.hpp>
@@ -78,8 +78,8 @@ QString hashFromHandle(const lt::torrent_handle& h)
         return {};
     }
     const auto best = h.info_hashes().get_best();
-    return QString::fromStdString(lt::aux::to_hex(best.to_string()))
-        .toLower();
+    return QString::fromLatin1(
+        QByteArray::fromStdString(best.to_string()).toHex());
 }
 
 QString hashFromAlert(const lt::torrent_alert* a)
