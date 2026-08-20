@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ui/qml-bridge/settings/PlayerSettingsViewModel.h"
+#include "ui/qml-bridge/settings/WriteThrough.h"
 #include "config/PlayerSettings.h"
 #include "core/mpv/Player.h"
 
@@ -94,51 +95,51 @@ void PlayerSettingsViewModel::setPreferredPlayer(int kind)
 }
 void PlayerSettingsViewModel::setCustomCommand(const QString& cmd)
 {
-    if (m_settings.customCommand() == cmd) {
-        return;
+    if (settings::setIfChanged(m_settings, cmd,
+            &config::PlayerSettings::customCommand,
+            &config::PlayerSettings::setCustomCommand)) {
+        Q_EMIT customCommandChanged();
     }
-    m_settings.setCustomCommand(cmd);
-    Q_EMIT customCommandChanged();
 }
 void PlayerSettingsViewModel::setHardwareDecoding(bool on)
 {
-    if (m_settings.hardwareDecoding() == on) {
-        return;
+    if (settings::setIfChanged(m_settings, on,
+            &config::PlayerSettings::hardwareDecoding,
+            &config::PlayerSettings::setHardwareDecoding)) {
+        Q_EMIT hardwareDecodingChanged();
     }
-    m_settings.setHardwareDecoding(on);
-    Q_EMIT hardwareDecodingChanged();
 }
 void PlayerSettingsViewModel::setPreferredAudioLang(const QString& v)
 {
-    if (m_settings.preferredAudioLang() == v) {
-        return;
+    if (settings::setIfChanged(m_settings, v,
+            &config::PlayerSettings::preferredAudioLang,
+            &config::PlayerSettings::setPreferredAudioLang)) {
+        Q_EMIT preferredAudioLangChanged();
     }
-    m_settings.setPreferredAudioLang(v);
-    Q_EMIT preferredAudioLangChanged();
 }
 void PlayerSettingsViewModel::setPreferredSubtitleLang(const QString& v)
 {
-    if (m_settings.preferredSubtitleLang() == v) {
-        return;
+    if (settings::setIfChanged(m_settings, v,
+            &config::PlayerSettings::preferredSubtitleLang,
+            &config::PlayerSettings::setPreferredSubtitleLang)) {
+        Q_EMIT preferredSubtitleLangChanged();
     }
-    m_settings.setPreferredSubtitleLang(v);
-    Q_EMIT preferredSubtitleLangChanged();
 }
 void PlayerSettingsViewModel::setSkipIntroChapters(bool on)
 {
-    if (m_settings.skipIntroChapters() == on) {
-        return;
+    if (settings::setIfChanged(m_settings, on,
+            &config::PlayerSettings::skipIntroChapters,
+            &config::PlayerSettings::setSkipIntroChapters)) {
+        Q_EMIT skipIntroChaptersChanged();
     }
-    m_settings.setSkipIntroChapters(on);
-    Q_EMIT skipIntroChaptersChanged();
 }
 void PlayerSettingsViewModel::setResumePromptThresholdSec(int v)
 {
-    if (m_settings.resumePromptThresholdSec() == v) {
-        return;
+    if (settings::setIfChanged(m_settings, v,
+            &config::PlayerSettings::resumePromptThresholdSec,
+            &config::PlayerSettings::setResumePromptThresholdSec)) {
+        Q_EMIT resumePromptThresholdSecChanged();
     }
-    m_settings.setResumePromptThresholdSec(v);
-    Q_EMIT resumePromptThresholdSecChanged();
 }
 
 } // namespace kinema::ui::qml::settings

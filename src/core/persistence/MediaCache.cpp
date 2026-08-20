@@ -3,7 +3,7 @@
 
 #include "core/persistence/MediaCache.h"
 
-#include "config/DownloadSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "kinema_log_download.h"
 
@@ -28,7 +28,7 @@ bool removeRecursively(const QString& path)
 }
 }
 
-MediaCache::MediaCache(const config::DownloadSettings& settings, QObject* parent)
+MediaCache::MediaCache(const config::TorrentStreamingSettings& settings, QObject* parent)
     : QObject(parent)
     , m_settings(settings)
 {

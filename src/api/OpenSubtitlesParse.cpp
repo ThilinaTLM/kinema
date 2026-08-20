@@ -3,6 +3,7 @@
 
 #include "api/OpenSubtitlesParse.h"
 
+#include "api/RequestUtil.h"
 #include "core/util/Language.h"
 
 #include <QFileInfo>
@@ -56,18 +57,7 @@ double doubleField(const QJsonObject& obj, const char* key)
 
 bool boolField(const QJsonObject& obj, const char* key)
 {
-    const auto v = obj.value(QLatin1String(key));
-    if (v.isBool()) {
-        return v.toBool();
-    }
-    if (v.isDouble()) {
-        return v.toInt() != 0;
-    }
-    if (v.isString()) {
-        const auto s = v.toString().toLower();
-        return s == QLatin1String("true") || s == QLatin1String("1");
-    }
-    return false;
+    return kinema::api::jsonBool(obj.value(QLatin1String(key)));
 }
 
 QString inferFormat(const QString& fileName)

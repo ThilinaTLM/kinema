@@ -3,13 +3,7 @@
 
 #pragma once
 
-#include <QObject>
-#include <QString>
-#include <QCoro/QCoroTask>
-
-namespace kinema::api {
-class IndexerSelector;
-}
+#include "ui/qml-bridge/settings/IndexerSectionViewModelBase.h"
 
 namespace kinema::config {
 class TorrentioSettings;
@@ -17,7 +11,12 @@ class TorrentioSettings;
 
 namespace kinema::ui::qml::settings {
 
-class TorrentioSectionViewModel : public QObject
+/**
+ * Torrentio indexer settings section. Inherits status/busy and the
+ * connection test from `IndexerSectionViewModelBase`; owns the
+ * Torrentio-specific `defaultSort` plus its base URL editing.
+ */
+class TorrentioSectionViewModel : public IndexerSectionViewModelBase
 {
     Q_OBJECT
     /// 0 = Seeders, 1 = Size, 2 = Quality & Size.
@@ -26,9 +25,6 @@ class TorrentioSectionViewModel : public QObject
     Q_PROPERTY(QString baseUrl READ baseUrl
         WRITE setBaseUrl NOTIFY baseUrlChanged)
     Q_PROPERTY(QString defaultBaseUrl READ defaultBaseUrlString CONSTANT)
-    Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
-    Q_PROPERTY(int statusKind READ statusKind NOTIFY statusChanged)
-    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
 
 public:
     TorrentioSectionViewModel(api::IndexerSelector* indexers,
@@ -38,33 +34,23 @@ public:
     int defaultSort() const;
     QString baseUrl() const;
     QString defaultBaseUrlString() const;
-    QString statusMessage() const { return m_statusMessage; }
-    int statusKind() const { return m_statusKind; }
-    bool busy() const { return m_busy; }
 
     void setDefaultSort(int sort);
     void setBaseUrl(const QString& url);
 
 public Q_SLOTS:
-    void testConnection();
     void resetBaseUrl();
 
 Q_SIGNALS:
     void defaultSortChanged();
     void baseUrlChanged();
-    void statusChanged();
-    void busyChanged();
+
+protected:
+    domain::IndexerKind indexerKind() const override;
+    QString providerName() const override;
 
 private:
-    void setStatus(const QString& message, int kind);
-    void setBusy(bool on);
-    QCoro::Task<void> testTask();
-
-    api::IndexerSelector* m_indexers;
     config::TorrentioSettings& m_settings;
-    QString m_statusMessage;
-    int m_statusKind = 0;
-    bool m_busy = false;
 };
 
 } // namespace kinema::ui::qml::settings

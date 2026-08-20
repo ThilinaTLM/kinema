@@ -16,6 +16,7 @@ constexpr auto kTailBufferMiB = "tailBufferMiB";
 constexpr auto kMaxDownloadRateKiB = "maxDownloadRateKiB";
 constexpr auto kMaxUploadRateKiB = "maxUploadRateKiB";
 constexpr auto kIdleStopMinutes = "idleStopMinutes";
+constexpr auto kMaxBackgroundJobs = "maxBackgroundJobs";
 
 constexpr int kDefaultCacheBudgetGb = 50;
 constexpr int kDefaultStartupBufferMiB = 32;
@@ -24,6 +25,7 @@ constexpr int kDefaultTailBufferMiB = 16;
 constexpr int kDefaultDownloadRateKiB = 0;
 constexpr int kDefaultUploadRateKiB = 512;
 constexpr int kDefaultIdleStopMinutes = 5;
+constexpr int kDefaultMaxBackgroundJobs = 2;
 }
 
 TorrentStreamingSettings::TorrentStreamingSettings(
@@ -143,6 +145,22 @@ void TorrentStreamingSettings::setIdleStopMinutes(int minutes)
     }
     detail::write(m_config, kGroup, kIdleStopMinutes, minutes);
     Q_EMIT idleStopMinutesChanged(minutes);
+}
+
+int TorrentStreamingSettings::maxBackgroundJobs() const
+{
+    return qBound(1, detail::read(m_config, kGroup, kMaxBackgroundJobs,
+                         kDefaultMaxBackgroundJobs), 32);
+}
+
+void TorrentStreamingSettings::setMaxBackgroundJobs(int count)
+{
+    count = qBound(1, count, 32);
+    if (maxBackgroundJobs() == count) {
+        return;
+    }
+    detail::write(m_config, kGroup, kMaxBackgroundJobs, count);
+    Q_EMIT maxBackgroundJobsChanged(count);
 }
 
 } // namespace kinema::config

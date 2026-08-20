@@ -94,18 +94,6 @@ HistoryStore::HistoryStore(Database& db, QObject* parent)
 
 HistoryStore::~HistoryStore() = default;
 
-void HistoryStore::setRetentionDays(int days)
-{
-    if (days > 0) {
-        m_retentionDays = days;
-    }
-}
-
-void HistoryStore::setFinishedThreshold(double fraction)
-{
-    m_finishedThreshold = qBound(0.5, fraction, 1.0);
-}
-
 void HistoryStore::setStopFinishedThreshold(domain::MediaKind kind,
     double fraction)
 {

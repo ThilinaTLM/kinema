@@ -28,8 +28,6 @@ namespace kinema::playback::sources {
  *   5. unlockLink(file)       -> direct hoster URL (handles delayed
  *                                links transparently inside the
  *                                client)
- *
- * `cleanup` calls `deleteMagnet` on the stored numeric id.
  */
 class AllDebridResolver : public DebridResolver
 {
@@ -39,7 +37,6 @@ public:
         QObject* parent = nullptr);
 
     QCoro::Task<ResolvedDebridLink> resolve(domain::AssetRef ref) override;
-    QCoro::Task<void> cleanup(QString providerTorrentId) override;
 
 private:
     api::AllDebridClient& m_ad;

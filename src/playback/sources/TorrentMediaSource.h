@@ -31,8 +31,6 @@ namespace kinema::playback::sources {
  *   - `changeMode()` honours OnDemand→Full / Full→OnDemand by
  *     forwarding to the engine's `promoteToFull` /
  *     `setKeepAlive(false)` paths.
- *   - `filesFor()` returns the engine's file catalog (which is
- *     already typed as `domain::MediaFileEntry`).
  */
 class TorrentMediaSource : public ports::MediaSourcePort
 {
@@ -55,9 +53,6 @@ public:
 
     void changeMode(ports::ByteRangeSource& session,
         domain::DownloadMode newMode) override;
-
-    QVector<domain::MediaFileEntry> filesFor(
-        const ports::ByteRangeSource& session) const override;
 
 private:
     playback::torrent::LibtorrentClient& m_engine;

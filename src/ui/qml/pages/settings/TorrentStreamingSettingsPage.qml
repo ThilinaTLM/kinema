@@ -13,7 +13,7 @@ import dev.tlmtech.kinema.app
 // name (`TorrentStreamingSettingsViewModel`, file
 // `TorrentStreamingSettings.qml`), this page covers both backends:
 // the libtorrent-backed cache and the Real-Debrid HTTP cache share
-// the same `MediaCache` and `DownloadSettings`. The user-facing tab
+// the same `MediaCache` and `TorrentStreamingSettings`. The user-facing tab
 // label in `ApplicationShell.qml` is "Downloads".
 FormCard.FormCardPage {
     id: page

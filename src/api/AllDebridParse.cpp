@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/AllDebridParse.h"
+#include "api/RequestUtil.h"
 
 #include "core/io/HttpError.h"
 
@@ -15,32 +16,6 @@ namespace kinema::api::alldebrid {
 using namespace kinema::domain;
 
 namespace {
-
-qint64 readInt64(const QJsonValue& v)
-{
-    if (v.isDouble()) {
-        return static_cast<qint64>(v.toDouble());
-    }
-    if (v.isString()) {
-        return v.toString().toLongLong();
-    }
-    return 0;
-}
-
-bool readBool(const QJsonValue& v)
-{
-    if (v.isBool()) {
-        return v.toBool();
-    }
-    if (v.isDouble()) {
-        return v.toInt() != 0;
-    }
-    if (v.isString()) {
-        const auto s = v.toString().toLower();
-        return s == QLatin1String("true") || s == QLatin1String("1");
-    }
-    return false;
-}
 
 [[noreturn]] void throwApiError(const QString& code,
     const QString& message,
@@ -96,7 +71,7 @@ void flattenFilesTree(const QJsonArray& nodes,
         f.path = prefix.isEmpty()
             ? name
             : prefix + QLatin1Char('/') + name;
-        f.bytes = readInt64(obj.value(QStringLiteral("s")));
+        f.bytes = jsonInt64(obj.value(QStringLiteral("s")));
         const auto link = obj.value(QStringLiteral("l")).toString();
         if (link.isEmpty()) {
             // Folder-like node without children, or a file the
@@ -146,9 +121,9 @@ AllDebridUser parseUser(const QJsonDocument& doc)
     AllDebridUser u;
     u.username = user.value(QStringLiteral("username")).toString();
     u.email = user.value(QStringLiteral("email")).toString();
-    u.isPremium = readBool(user.value(QStringLiteral("isPremium")));
-    u.isTrial = readBool(user.value(QStringLiteral("isTrial")));
-    const auto until = readInt64(user.value(QStringLiteral("premiumUntil")));
+    u.isPremium = jsonBool(user.value(QStringLiteral("isPremium")));
+    u.isTrial = jsonBool(user.value(QStringLiteral("isTrial")));
+    const auto until = jsonInt64(user.value(QStringLiteral("premiumUntil")));
     if (until > 0) {
         u.premiumUntil = QDateTime::fromSecsSinceEpoch(until);
     }
@@ -166,11 +141,11 @@ AdAddMagnetResult parseAddMagnet(const QJsonDocument& doc)
     const auto row = magnets.first().toObject();
     throwIfRowError(row, "magnet/upload");
     AdAddMagnetResult r;
-    r.id = readInt64(row.value(QStringLiteral("id")));
+    r.id = jsonInt64(row.value(QStringLiteral("id")));
     r.hash = row.value(QStringLiteral("hash")).toString().toLower();
     r.name = row.value(QStringLiteral("name")).toString();
-    r.sizeBytes = readInt64(row.value(QStringLiteral("size")));
-    r.ready = readBool(row.value(QStringLiteral("ready")));
+    r.sizeBytes = jsonInt64(row.value(QStringLiteral("size")));
+    r.ready = jsonBool(row.value(QStringLiteral("ready")));
     if (r.id <= 0) {
         throw core::HttpError(core::HttpError::Kind::Json, 0,
             i18n("AllDebrid magnet/upload response is missing the magnet id."));
@@ -205,16 +180,16 @@ AdMagnetStatus parseMagnetStatus(const QJsonDocument& doc)
     }
     throwIfRowError(row, "magnet/status");
     AdMagnetStatus s;
-    s.id = readInt64(row.value(QStringLiteral("id")));
+    s.id = jsonInt64(row.value(QStringLiteral("id")));
     s.filename = row.value(QStringLiteral("filename")).toString();
-    s.size = readInt64(row.value(QStringLiteral("size")));
+    s.size = jsonInt64(row.value(QStringLiteral("size")));
     s.status = row.value(QStringLiteral("status")).toString();
     s.statusCode = static_cast<int>(
-        readInt64(row.value(QStringLiteral("statusCode"))));
-    s.downloaded = readInt64(row.value(QStringLiteral("downloaded")));
-    s.downloadSpeed = readInt64(row.value(QStringLiteral("downloadSpeed")));
+        jsonInt64(row.value(QStringLiteral("statusCode"))));
+    s.downloaded = jsonInt64(row.value(QStringLiteral("downloaded")));
+    s.downloadSpeed = jsonInt64(row.value(QStringLiteral("downloadSpeed")));
     s.seeders = static_cast<int>(
-        readInt64(row.value(QStringLiteral("seeders"))));
+        jsonInt64(row.value(QStringLiteral("seeders"))));
     return s;
 }
 
@@ -243,9 +218,9 @@ AdUnlockedLink parseUnlock(const QJsonDocument& doc)
         u.download = QUrl(link);
     }
     u.filename = data.value(QStringLiteral("filename")).toString();
-    u.fileSize = readInt64(data.value(QStringLiteral("filesize")));
+    u.fileSize = jsonInt64(data.value(QStringLiteral("filesize")));
     u.host = data.value(QStringLiteral("host")).toString();
-    u.delayedId = readInt64(data.value(QStringLiteral("delayed")));
+    u.delayedId = jsonInt64(data.value(QStringLiteral("delayed")));
     if (u.download.isEmpty() && u.delayedId == 0) {
         throw core::HttpError(core::HttpError::Kind::Json, 0,
             i18n("AllDebrid link/unlock response has neither a download URL "
@@ -258,7 +233,7 @@ AdUnlockedLink parseDelayed(const QJsonDocument& doc)
 {
     const auto data = unwrapEnvelope(doc, "link/delayed");
     const int status = static_cast<int>(
-        readInt64(data.value(QStringLiteral("status"))));
+        jsonInt64(data.value(QStringLiteral("status"))));
     if (status == 3) {
         throwApiError(QStringLiteral("DELAYED_FAILED"),
             i18n("Could not generate the delayed download link."),

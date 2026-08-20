@@ -19,7 +19,6 @@ using namespace kinema::domain;
 /// small set of known-good sizes; the `/configuration` endpoint exists
 /// if you ever need to audit them.
 inline constexpr const char* kPosterSize = "w342";
-inline constexpr const char* kBackdropSize = "w780";
 
 /// Compose an image URL from a TMDB relative path (e.g.
 /// "/abc.jpg"). Returns an empty URL if `path` is empty or missing.

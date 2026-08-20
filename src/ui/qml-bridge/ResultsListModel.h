@@ -75,8 +75,6 @@ public:
     void setResults(QList<domain::MetaSummary> rows);
     void setError(const QString& message);
 
-    /// Pure accessors for the view-model and its tests.
-    const QList<domain::MetaSummary>& rows() const noexcept { return m_rows; }
     const domain::MetaSummary* at(int row) const;
 
 Q_SIGNALS:

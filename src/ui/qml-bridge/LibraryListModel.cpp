@@ -6,16 +6,8 @@
 namespace kinema::ui::qml {
 
 LibraryListModel::LibraryListModel(QObject* parent)
-    : QAbstractListModel(parent)
+    : ListModelBase<LibraryListRow>(parent)
 {
-}
-
-int LibraryListModel::rowCount(const QModelIndex& parent) const
-{
-    if (parent.isValid()) {
-        return 0;
-    }
-    return static_cast<int>(m_rows.size());
 }
 
 QVariant LibraryListModel::data(const QModelIndex& index, int role) const
@@ -81,18 +73,8 @@ QHash<int, QByteArray> LibraryListModel::roleNames() const
 
 void LibraryListModel::setRows(QList<LibraryListRow> rows)
 {
-    beginResetModel();
-    m_rows = std::move(rows);
-    endResetModel();
+    replaceRows(std::move(rows));
     Q_EMIT countChanged();
-}
-
-const LibraryListRow* LibraryListModel::at(int row) const
-{
-    if (row < 0 || row >= m_rows.size()) {
-        return nullptr;
-    }
-    return &m_rows.at(row);
 }
 
 } // namespace kinema::ui::qml

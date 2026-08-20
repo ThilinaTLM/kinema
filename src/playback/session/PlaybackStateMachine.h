@@ -50,9 +50,6 @@ enum class PlaybackInput {
     LoadTimeout, ///< load watchdog tripped
 };
 
-QString playbackStateName(PlaybackState s);
-QString playbackInputName(PlaybackInput i);
-
 /**
  * Pure state machine for `PlaybackSession`. No Qt signals, no I/O.
  *

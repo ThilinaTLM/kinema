@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+#pragma once
+
+#include "controllers/StreamUtilityController.h"
+#include "ui/qml-bridge/StreamsListModel.h"
+
+namespace kinema::ui::qml {
+
+/// Resolve the stream at `row` and route it to one of
+/// `StreamUtilityController`'s utility commands (`copyMagnet`,
+/// `openMagnet`, `copyDirectUrl`, `openDirectUrl`,
+/// `copyReleaseName`). Shared by the movie and series detail
+/// view-models, which used to each carry their own copy.
+template <typename Method>
+void dispatchStreamAction(StreamsListModel* streams,
+    controllers::StreamUtilityController* utility, int row, Method method)
+{
+    if (!utility) {
+        return;
+    }
+    if (const auto* s = streams->at(row)) {
+        (utility->*method)(*s);
+    }
+}
+
+} // namespace kinema::ui::qml

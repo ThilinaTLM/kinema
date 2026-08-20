@@ -45,8 +45,6 @@ TransferSession::TransferSession(domain::AssetRef ref,
         this, &TransferSession::failed);
     connect(m_source.get(), &sources::AssetSession::liveStatsChanged,
         this, &TransferSession::liveStatsChanged);
-    connect(m_source.get(), &sources::AssetSession::statusMessage,
-        this, &TransferSession::statusMessage);
 }
 
 TransferSession::~TransferSession() = default;

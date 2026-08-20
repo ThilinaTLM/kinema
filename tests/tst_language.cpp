@@ -32,13 +32,6 @@ private Q_SLOTS:
     {
         QCOMPARE(displayName(QString {}), QString {});
     }
-
-    void testInverseLookup()
-    {
-        QCOMPARE(codeForDisplayName(QStringLiteral("English")),
-            QStringLiteral("eng"));
-        QVERIFY(codeForDisplayName(QStringLiteral("Klingon")).isEmpty());
-    }
 };
 
 QTEST_MAIN(TstLanguage)

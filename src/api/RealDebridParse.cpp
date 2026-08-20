@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "api/RealDebridParse.h"
+#include "api/RequestUtil.h"
 
 #include "core/io/HttpError.h"
 
@@ -15,17 +16,6 @@ namespace kinema::api::realdebrid {
 using namespace kinema::domain;
 
 namespace {
-
-qint64 readInt64(const QJsonValue& v)
-{
-    if (v.isDouble()) {
-        return static_cast<qint64>(v.toDouble());
-    }
-    if (v.isString()) {
-        return v.toString().toLongLong();
-    }
-    return 0;
-}
 
 } // namespace
 
@@ -83,7 +73,7 @@ RdTorrentInfo parseTorrentInfo(const QJsonDocument& doc)
     info.id = obj.value(QStringLiteral("id")).toString();
     info.filename = obj.value(QStringLiteral("filename")).toString();
     info.hash = obj.value(QStringLiteral("hash")).toString().toLower();
-    info.bytes = readInt64(obj.value(QStringLiteral("bytes")));
+    info.bytes = jsonInt64(obj.value(QStringLiteral("bytes")));
     info.host = obj.value(QStringLiteral("host")).toString();
     info.status = obj.value(QStringLiteral("status")).toString();
     {
@@ -103,7 +93,7 @@ RdTorrentInfo parseTorrentInfo(const QJsonDocument& doc)
         RdTorrentFile f;
         f.id = fObj.value(QStringLiteral("id")).toInt();
         f.path = fObj.value(QStringLiteral("path")).toString();
-        f.bytes = readInt64(fObj.value(QStringLiteral("bytes")));
+        f.bytes = jsonInt64(fObj.value(QStringLiteral("bytes")));
         const auto sel = fObj.value(QStringLiteral("selected"));
         if (sel.isDouble()) {
             f.selected = sel.toInt() != 0;
@@ -134,7 +124,7 @@ RdUnrestrictedLink parseUnrestrictedLink(const QJsonDocument& doc)
     RdUnrestrictedLink u;
     u.id = obj.value(QStringLiteral("id")).toString();
     u.filename = obj.value(QStringLiteral("filename")).toString();
-    u.fileSize = readInt64(obj.value(QStringLiteral("filesize")));
+    u.fileSize = jsonInt64(obj.value(QStringLiteral("filesize")));
     const auto dl = obj.value(QStringLiteral("download")).toString();
     if (!dl.isEmpty()) {
         u.download = QUrl(dl);

@@ -4,7 +4,7 @@
 #include "TestDoubles.h"
 #include "api/AllDebridClient.h"
 #include "api/RealDebridClient.h"
-#include "config/DownloadSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/io/HttpClient.h"
 #include "core/persistence/MediaCache.h"
@@ -48,7 +48,6 @@ public:
         ++resolveCalls;
         co_return reply;
     }
-    QCoro::Task<void> cleanup(QString) override { co_return; }
 };
 
 domain::Stream makeStream()
@@ -83,7 +82,7 @@ private Q_SLOTS:
         m_config = KSharedConfig::openConfig(
             QStringLiteral("kinemarc-debrid-mediasource-test"),
             KConfig::SimpleConfig);
-        m_settings = std::make_unique<config::DownloadSettings>(m_config);
+        m_settings = std::make_unique<config::TorrentStreamingSettings>(m_config);
     }
 
     void init()
@@ -144,8 +143,6 @@ private Q_SLOTS:
             = QUrl(QStringLiteral("https://host/file.mp4"));
         m_resolver->reply.fileSize = 12'345'678LL;
         m_resolver->reply.fileName = QStringLiteral("movie.mp4");
-        m_resolver->reply.providerTorrentId
-            = QStringLiteral("rdtid-123");
 
         const auto s = makeStream();
         const auto ref = makeRef(s);
@@ -173,8 +170,6 @@ private Q_SLOTS:
             = QUrl(QStringLiteral("https://host/file.mp4"));
         m_resolver->reply.fileSize = 1'000;
         m_resolver->reply.fileName = QStringLiteral("movie.mp4");
-        m_resolver->reply.providerTorrentId
-            = QStringLiteral("rdtid-200");
 
         const auto s = makeStream();
         auto task = m_source->open(makeRef(s), s,
@@ -195,8 +190,6 @@ private Q_SLOTS:
             = QUrl(QStringLiteral("https://host/file.mp4"));
         m_resolver->reply.fileSize = 1'000;
         m_resolver->reply.fileName = QStringLiteral("movie.mp4");
-        m_resolver->reply.providerTorrentId
-            = QStringLiteral("rdtid-300");
 
         const auto s = makeStream();
         auto task = m_source->open(makeRef(s), s,
@@ -253,7 +246,6 @@ private Q_SLOTS:
             = QUrl(QStringLiteral("https://ad-host/file.mp4"));
         resolver.reply.fileSize = 999'999;
         resolver.reply.fileName = QStringLiteral("movie.mp4");
-        resolver.reply.providerTorrentId = QStringLiteral("42");
         playback::sources::AllDebridMediaSource source(*m_http, ad,
             resolver, *m_cache, *m_settings);
 
@@ -274,7 +266,7 @@ private Q_SLOTS:
 
 private:
     KSharedConfigPtr m_config;
-    std::unique_ptr<config::DownloadSettings> m_settings;
+    std::unique_ptr<config::TorrentStreamingSettings> m_settings;
     std::unique_ptr<core::MediaCache> m_cache;
     std::unique_ptr<FakeHttpClient> m_http;
     std::unique_ptr<api::RealDebridClient> m_rd;

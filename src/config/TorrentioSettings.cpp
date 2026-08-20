@@ -49,15 +49,13 @@ void TorrentioSettings::setDefaultSort(core::torrentio::SortMode m)
 
 QString TorrentioSettings::baseUrl() const
 {
-    const auto raw = detail::read(m_config, kGroup, kKeyBaseUrl,
+    return detail::readDefaulted(m_config, kGroup, kKeyBaseUrl,
         defaultBaseUrl());
-    return raw.isEmpty() ? defaultBaseUrl() : raw;
 }
 
 void TorrentioSettings::setBaseUrl(const QString& url)
 {
-    const auto trimmed = url.trimmed();
-    const auto effective = trimmed.isEmpty() ? defaultBaseUrl() : trimmed;
+    const auto effective = detail::normalizeUrl(url, defaultBaseUrl());
     if (baseUrl() == effective) {
         return;
     }

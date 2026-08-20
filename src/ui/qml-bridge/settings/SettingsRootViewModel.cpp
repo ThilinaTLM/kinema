@@ -49,10 +49,10 @@ SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
     connect(m_tmdb, &TmdbSettingsViewModel::tokenChanged, this,
         &SettingsRootViewModel::tmdbTokenChanged);
     connect(m_debrid->realDebrid(),
-        &RealDebridSectionViewModel::tokenChanged, this,
+        &RealDebridSectionViewModel::credentialChanged, this,
         &SettingsRootViewModel::realDebridTokenChanged);
     connect(m_debrid->allDebrid(),
-        &AllDebridSectionViewModel::apiKeyChanged, this,
+        &AllDebridSectionViewModel::credentialChanged, this,
         &SettingsRootViewModel::allDebridApiKeyChanged);
     connect(m_debrid,
         &DebridSettingsViewModel::activeProviderChanged, this,

@@ -3,6 +3,7 @@
 
 #include "ui/qml-bridge/settings/TorrentStreamingSettingsViewModel.h"
 #include "ui/qml-bridge/settings/SettingsStatus.h"
+#include "ui/qml-bridge/settings/WriteThrough.h"
 #include "config/TorrentStreamingSettings.h"
 #include "controllers/DownloadController.h"
 #include "core/io/CachePaths.h"
@@ -63,47 +64,61 @@ int TorrentStreamingSettingsViewModel::idleStopMinutes() const { return m_settin
 
 void TorrentStreamingSettingsViewModel::setCacheBudgetGb(int v)
 {
-    if (cacheBudgetGb() == v) return;
-    m_settings.setCacheBudgetGb(v);
-    Q_EMIT cacheBudgetGbChanged();
-    // Budget changed → the usage bar's denominator changed too.
-    Q_EMIT cacheChanged();
+    if (settings::setIfChanged(m_settings, v,
+            &config::TorrentStreamingSettings::cacheBudgetGb,
+            &config::TorrentStreamingSettings::setCacheBudgetGb)) {
+        Q_EMIT cacheBudgetGbChanged();
+        // Budget changed → the usage bar's denominator changed too.
+        Q_EMIT cacheChanged();
+    }
 }
 void TorrentStreamingSettingsViewModel::setStartupBufferMiB(int v)
 {
-    if (startupBufferMiB() == v) return;
-    m_settings.setStartupBufferMiB(v);
-    Q_EMIT startupBufferMiBChanged();
+    if (settings::setIfChanged(m_settings, v,
+            &config::TorrentStreamingSettings::startupBufferMiB,
+            &config::TorrentStreamingSettings::setStartupBufferMiB)) {
+        Q_EMIT startupBufferMiBChanged();
+    }
 }
 void TorrentStreamingSettingsViewModel::setReadaheadMiB(int v)
 {
-    if (readaheadMiB() == v) return;
-    m_settings.setReadaheadMiB(v);
-    Q_EMIT readaheadMiBChanged();
+    if (settings::setIfChanged(m_settings, v,
+            &config::TorrentStreamingSettings::readaheadMiB,
+            &config::TorrentStreamingSettings::setReadaheadMiB)) {
+        Q_EMIT readaheadMiBChanged();
+    }
 }
 void TorrentStreamingSettingsViewModel::setTailBufferMiB(int v)
 {
-    if (tailBufferMiB() == v) return;
-    m_settings.setTailBufferMiB(v);
-    Q_EMIT tailBufferMiBChanged();
+    if (settings::setIfChanged(m_settings, v,
+            &config::TorrentStreamingSettings::tailBufferMiB,
+            &config::TorrentStreamingSettings::setTailBufferMiB)) {
+        Q_EMIT tailBufferMiBChanged();
+    }
 }
 void TorrentStreamingSettingsViewModel::setMaxDownloadRateKiB(int v)
 {
-    if (maxDownloadRateKiB() == v) return;
-    m_settings.setMaxDownloadRateKiB(v);
-    Q_EMIT maxDownloadRateKiBChanged();
+    if (settings::setIfChanged(m_settings, v,
+            &config::TorrentStreamingSettings::maxDownloadRateKiB,
+            &config::TorrentStreamingSettings::setMaxDownloadRateKiB)) {
+        Q_EMIT maxDownloadRateKiBChanged();
+    }
 }
 void TorrentStreamingSettingsViewModel::setMaxUploadRateKiB(int v)
 {
-    if (maxUploadRateKiB() == v) return;
-    m_settings.setMaxUploadRateKiB(v);
-    Q_EMIT maxUploadRateKiBChanged();
+    if (settings::setIfChanged(m_settings, v,
+            &config::TorrentStreamingSettings::maxUploadRateKiB,
+            &config::TorrentStreamingSettings::setMaxUploadRateKiB)) {
+        Q_EMIT maxUploadRateKiBChanged();
+    }
 }
 void TorrentStreamingSettingsViewModel::setIdleStopMinutes(int v)
 {
-    if (idleStopMinutes() == v) return;
-    m_settings.setIdleStopMinutes(v);
-    Q_EMIT idleStopMinutesChanged();
+    if (settings::setIfChanged(m_settings, v,
+            &config::TorrentStreamingSettings::idleStopMinutes,
+            &config::TorrentStreamingSettings::setIdleStopMinutes)) {
+        Q_EMIT idleStopMinutesChanged();
+    }
 }
 
 qint64 TorrentStreamingSettingsViewModel::cacheSizeBytes() const

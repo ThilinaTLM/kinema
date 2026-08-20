@@ -6,16 +6,8 @@
 namespace kinema::ui::qml {
 
 LibraryRailModel::LibraryRailModel(QObject* parent)
-    : QAbstractListModel(parent)
+    : ListModelBase<LibraryRailRow>(parent)
 {
-}
-
-int LibraryRailModel::rowCount(const QModelIndex& parent) const
-{
-    if (parent.isValid()) {
-        return 0;
-    }
-    return static_cast<int>(m_rows.size());
 }
 
 QVariant LibraryRailModel::data(const QModelIndex& index, int role) const
@@ -76,18 +68,8 @@ QHash<int, QByteArray> LibraryRailModel::roleNames() const
 
 void LibraryRailModel::setRows(QList<LibraryRailRow> rows)
 {
-    beginResetModel();
-    m_rows = std::move(rows);
-    endResetModel();
+    replaceRows(std::move(rows));
     Q_EMIT countChanged();
-}
-
-const LibraryRailRow* LibraryRailModel::at(int row) const
-{
-    if (row < 0 || row >= m_rows.size()) {
-        return nullptr;
-    }
-    return &m_rows.at(row);
 }
 
 } // namespace kinema::ui::qml

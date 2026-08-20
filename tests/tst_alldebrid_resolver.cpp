@@ -44,9 +44,7 @@ public:
     int statusCalls = 0;
     int filesCalls = 0;
     int unlockCalls = 0;
-    int deleteCalls = 0;
     QString lastUploadMagnet;
-    qint64 lastDeletedId = 0;
     QUrl lastUnlockedLink;
 
     QCoro::Task<domain::AllDebridUser> user() override
@@ -106,13 +104,6 @@ public:
                 QStringLiteral("StubAllDebridClient: no unlock reply"));
         }
         co_return unlockReplies.takeFirst();
-    }
-
-    QCoro::Task<void> deleteMagnet(qint64 id) override
-    {
-        ++deleteCalls;
-        lastDeletedId = id;
-        co_return;
     }
 };
 
@@ -198,7 +189,6 @@ private Q_SLOTS:
         QCOMPARE(out.downloadUrl,
             QUrl(QStringLiteral("https://p1.alldeb.ovh/dl/wanted.mkv")));
         QCOMPARE(out.fileSize, 1'600'000'000LL);
-        QCOMPARE(out.providerTorrentId, QStringLiteral("999"));
     }
 
     void resolve_pollsUntilReady()
@@ -257,23 +247,6 @@ private Q_SLOTS:
             QVERIFY(e.message().contains(QStringLiteral("file"),
                 Qt::CaseInsensitive));
         }
-    }
-
-    void cleanup_callsDeleteWithDecodedId()
-    {
-        StubAllDebridClient stub;
-        playback::sources::AllDebridResolver r(stub);
-        QCoro::waitFor(r.cleanup(QStringLiteral("123")));
-        QCOMPARE(stub.deleteCalls, 1);
-        QCOMPARE(stub.lastDeletedId, 123LL);
-    }
-
-    void cleanup_emptyIsNoop()
-    {
-        StubAllDebridClient stub;
-        playback::sources::AllDebridResolver r(stub);
-        QCoro::waitFor(r.cleanup(QString {}));
-        QCOMPARE(stub.deleteCalls, 0);
     }
 
     void resolve_seriesEpisodeFavoursMatchingPath()

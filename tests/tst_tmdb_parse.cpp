@@ -66,8 +66,6 @@ private Q_SLOTS:
         QCOMPARE(*rows.at(0).voteAverage, 8.7);
         QCOMPARE(rows.at(0).poster, QUrl(QStringLiteral(
             "https://image.tmdb.org/t/p/w342/matrix_poster.jpg")));
-        QCOMPARE(rows.at(0).backdrop, QUrl(QStringLiteral(
-            "https://image.tmdb.org/t/p/w780/trend_bd_1.jpg")));
 
         // The empty-title / fallback-to-original_title row:
         QCOMPARE(rows.at(2).tmdbId, 777);

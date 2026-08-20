@@ -32,11 +32,6 @@ struct ResolvedDebridLink {
     /// File name announced by the provider. Used as a fallback
     /// display name.
     QString fileName;
-    /// Provider-specific torrent / magnet id, kept around so callers
-    /// can `cleanup()` on completion. Format is provider-defined
-    /// (RD: opaque string id; AllDebrid: numeric id rendered as
-    /// decimal).
-    QString providerTorrentId;
 
     /// Full file list as reported by the provider's "list files"
     /// API call (RD: `/torrents/info/{id}.files[]`; AllDebrid:
@@ -79,10 +74,6 @@ public:
 
     /// Run the full pipeline. Throws on failure.
     virtual QCoro::Task<ResolvedDebridLink> resolve(domain::AssetRef ref) = 0;
-
-    /// Best-effort cleanup of the provider-side torrent/magnet entry.
-    /// Implementations swallow errors.
-    virtual QCoro::Task<void> cleanup(QString providerTorrentId) = 0;
 
 protected:
     using QObject::QObject;

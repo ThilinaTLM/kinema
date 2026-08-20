@@ -26,7 +26,6 @@ struct DiscoverItem {
     QString title;
     std::optional<int> year; ///< from release_date or first_air_date
     QUrl poster; ///< full https://image.tmdb.org/t/p/... URL
-    QUrl backdrop; ///< unused in M1/M2, parsed for later use
     QString overview;
     std::optional<double> voteAverage;
 };

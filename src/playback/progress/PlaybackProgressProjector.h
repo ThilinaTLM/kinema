@@ -40,7 +40,7 @@ namespace kinema::playback::progress {
  *     subtitle language hints recorded with the row.
  *   - `ChapterListChanged` — captures chapters so end-of-file
  *     can derive a credits-start hint.
- *   - `PlaybackEnded`      — applies the WatchedPolicy via
+ *   - `PlaybackEnded`      — applies the watched policy via
  *     `recordSessionEnd`, including the inferred credits-start.
  *   - `PlaybackFailed`     — persists the final position
  *     without flipping `finished`.
@@ -62,16 +62,13 @@ public:
     /// Override the throttle interval for tests. Production default
     /// is 5 seconds.
     void setPersistIntervalSeconds(double s) noexcept;
-    double persistIntervalSeconds() const noexcept { return m_persistIntervalSec; }
 
     /// Minimum fraction of duration that must elapse before any
     /// ticking persistence. Default 0.5%.
     void setMinProgressFraction(double f) noexcept;
 
     // Diagnostics for tests and the in-memory resume helper.
-    double lastPersistedPosition() const noexcept { return m_lastPersistedPosition; }
     double lastPosition() const noexcept { return m_lastPosition; }
-    double duration() const noexcept { return m_duration; }
     bool hasActiveContext() const noexcept { return m_active.has_value(); }
     const std::optional<domain::PlaybackContext>& activeContext() const noexcept
     { return m_active; }

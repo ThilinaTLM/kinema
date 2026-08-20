@@ -7,7 +7,6 @@
 #include "config/BrowseSettings.h"
 #include "config/CacheSettings.h"
 #include "config/DebridSettings.h"
-#include "config/DownloadSettings.h"
 #include "config/FilterSettings.h"
 #include "config/IndexerSettings.h"
 #include "config/PeerflixSettings.h"
@@ -72,9 +71,6 @@ public:
     TorrentStreamingSettings& torrentStreaming() noexcept { return m_torrentStreaming; }
     const TorrentStreamingSettings& torrentStreaming() const noexcept { return m_torrentStreaming; }
 
-    DownloadSettings& download() noexcept { return m_download; }
-    const DownloadSettings& download() const noexcept { return m_download; }
-
     IndexerSettings& indexers() noexcept { return m_indexers; }
     const IndexerSettings& indexers() const noexcept { return m_indexers; }
 
@@ -92,7 +88,6 @@ private:
     SubtitleSettings m_subtitle;
     CacheSettings m_cache;
     TorrentStreamingSettings m_torrentStreaming;
-    DownloadSettings m_download;
     IndexerSettings m_indexers;
     PeerflixSettings m_peerflix;
 };

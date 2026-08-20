@@ -8,16 +8,8 @@
 namespace kinema::ui::qml {
 
 EpisodesListModel::EpisodesListModel(QObject* parent)
-    : QAbstractListModel(parent)
+    : ListModelBase<domain::Episode>(parent)
 {
-}
-
-int EpisodesListModel::rowCount(const QModelIndex& parent) const
-{
-    if (parent.isValid()) {
-        return 0;
-    }
-    return static_cast<int>(m_rows.size());
 }
 
 QVariant EpisodesListModel::data(const QModelIndex& index, int role) const
@@ -70,11 +62,9 @@ QHash<int, QByteArray> EpisodesListModel::roleNames() const
 
 void EpisodesListModel::setEpisodes(QList<domain::Episode> rows)
 {
-    beginResetModel();
-    m_rows = std::move(rows);
     m_watched.clear();
     m_progress.clear();
-    endResetModel();
+    replaceRows(std::move(rows));
     Q_EMIT countChanged();
 }
 
@@ -87,14 +77,6 @@ void EpisodesListModel::setLibraryState(QList<bool> watched,
         Q_EMIT dataChanged(index(0), index(rowCount() - 1),
             { WatchedRole, ProgressRole });
     }
-}
-
-const domain::Episode* EpisodesListModel::at(int row) const
-{
-    if (row < 0 || row >= m_rows.size()) {
-        return nullptr;
-    }
-    return &m_rows.at(row);
 }
 
 int EpisodesListModel::rowFor(int season, int episodeNumber) const

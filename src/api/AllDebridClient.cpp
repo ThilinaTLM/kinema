@@ -4,16 +4,14 @@
 #include "api/AllDebridClient.h"
 
 #include "api/AllDebridParse.h"
+#include "api/RequestUtil.h"
 #include "core/io/HttpClient.h"
 #include "core/io/HttpError.h"
 
 #include <KLocalizedString>
 
 #include <QCoro/QCoroSignal>
-#include <QNetworkRequest>
 #include <QTimer>
-#include <QUrl>
-#include <QUrlQuery>
 
 namespace kinema::api {
 using namespace kinema::domain;
@@ -22,26 +20,6 @@ namespace {
 
 constexpr int kDelayedPollMs = 5'000;
 constexpr int kDelayedTimeoutMs = 90'000;
-
-QByteArray bearer(const QString& key)
-{
-    return QByteArrayLiteral("Bearer ") + key.toUtf8();
-}
-
-QUrl appendPath(QUrl base, QString path)
-{
-    base.setPath(base.path() + std::move(path));
-    return base;
-}
-
-QByteArray urlEncode(const QList<QPair<QString, QString>>& fields)
-{
-    QUrlQuery q;
-    for (const auto& kv : fields) {
-        q.addQueryItem(kv.first, kv.second);
-    }
-    return q.toString(QUrl::FullyEncoded).toUtf8();
-}
 
 void requireApiKey(const QString& key)
 {
@@ -57,15 +35,6 @@ QCoro::Task<void> sleepMs(int ms)
     t.setSingleShot(true);
     t.start(ms);
     co_await qCoro(&t, &QTimer::timeout);
-}
-
-QNetworkRequest makePostRequest(const QUrl& url, const QString& apiKey)
-{
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", bearer(apiKey));
-    req.setHeader(QNetworkRequest::ContentTypeHeader,
-        QStringLiteral("application/x-www-form-urlencoded"));
-    return req;
 }
 
 } // namespace
@@ -106,9 +75,8 @@ QCoro::Task<AdAddMagnetResult> AllDebridClient::uploadMagnet(QString magnetUri)
             i18n("AllDebrid magnet/upload: empty magnet URI."));
     }
 
-    auto req = makePostRequest(
-        appendPath(m_baseUrl, QStringLiteral("/v4/magnet/upload")),
-        m_apiKey);
+    auto req = bearerFormPost(
+        appendPath(m_baseUrl, QStringLiteral("/v4/magnet/upload")), bearer(m_apiKey));
     const auto body = urlEncode({
         { QStringLiteral("magnets[]"), magnetUri },
     });
@@ -124,9 +92,8 @@ QCoro::Task<AdMagnetStatus> AllDebridClient::magnetStatus(qint64 magnetId)
             i18n("AllDebrid magnet/status: invalid magnet id."));
     }
 
-    auto req = makePostRequest(
-        appendPath(m_baseUrl, QStringLiteral("/v4.1/magnet/status")),
-        m_apiKey);
+    auto req = bearerFormPost(
+        appendPath(m_baseUrl, QStringLiteral("/v4.1/magnet/status")), bearer(m_apiKey));
     const auto body = urlEncode({
         { QStringLiteral("id"), QString::number(magnetId) },
     });
@@ -142,9 +109,8 @@ QCoro::Task<QList<AdMagnetFile>> AllDebridClient::magnetFiles(qint64 magnetId)
             i18n("AllDebrid magnet/files: invalid magnet id."));
     }
 
-    auto req = makePostRequest(
-        appendPath(m_baseUrl, QStringLiteral("/v4/magnet/files")),
-        m_apiKey);
+    auto req = bearerFormPost(
+        appendPath(m_baseUrl, QStringLiteral("/v4/magnet/files")), bearer(m_apiKey));
     const auto body = urlEncode({
         { QStringLiteral("id[]"), QString::number(magnetId) },
     });
@@ -160,9 +126,8 @@ QCoro::Task<AdUnlockedLink> AllDebridClient::unlockLink(QUrl link)
             i18n("AllDebrid link/unlock: empty link."));
     }
 
-    auto req = makePostRequest(
-        appendPath(m_baseUrl, QStringLiteral("/v4/link/unlock")),
-        m_apiKey);
+    auto req = bearerFormPost(
+        appendPath(m_baseUrl, QStringLiteral("/v4/link/unlock")), bearer(m_apiKey));
     const auto body = urlEncode({
         { QStringLiteral("link"), link.toString() },
     });
@@ -190,9 +155,8 @@ QCoro::Task<AdUnlockedLink> AllDebridClient::pollDelayed(qint64 delayedId)
 {
     int waitedMs = 0;
     while (true) {
-        auto req = makePostRequest(
-            appendPath(m_baseUrl, QStringLiteral("/v4/link/delayed")),
-            m_apiKey);
+        auto req = bearerFormPost(
+            appendPath(m_baseUrl, QStringLiteral("/v4/link/delayed")), bearer(m_apiKey));
         const auto body = urlEncode({
             { QStringLiteral("id"), QString::number(delayedId) },
         });
@@ -217,9 +181,8 @@ QCoro::Task<void> AllDebridClient::deleteMagnet(qint64 magnetId)
         co_return;
     }
 
-    auto req = makePostRequest(
-        appendPath(m_baseUrl, QStringLiteral("/v4/magnet/delete")),
-        m_apiKey);
+    auto req = bearerFormPost(
+        appendPath(m_baseUrl, QStringLiteral("/v4/magnet/delete")), bearer(m_apiKey));
     const auto body = urlEncode({
         { QStringLiteral("id"), QString::number(magnetId) },
     });

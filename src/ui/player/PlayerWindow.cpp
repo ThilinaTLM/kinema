@@ -397,7 +397,6 @@ void PlayerWindow::stopAndHide()
 
 void PlayerWindow::closeEvent(QCloseEvent* e)
 {
-    saveGeometryToConfig();
     saveVolumeToConfig();
     // Notify subscribers BEFORE stopping mpv. The queue controller
     // listens here to flag the active item as user-paused so the
@@ -435,7 +434,6 @@ void PlayerWindow::showEvent(QShowEvent* e)
 
 void PlayerWindow::hideEvent(QHideEvent* e)
 {
-    saveGeometryToConfig();
     saveVolumeToConfig();
     QQuickView::hideEvent(e);
     Q_EMIT visibilityChanged(false);
@@ -491,14 +489,6 @@ void PlayerWindow::loadGeometry()
         setPosition(avail.center().x() - width() / 2,
             avail.center().y() - height() / 2);
     }
-}
-
-void PlayerWindow::saveGeometryToConfig()
-{
-    // Preserved API; serialisation format change is tracked in
-    // loadGeometry's TODO. Writing the existing key with a
-    // non-QWidget blob would corrupt downgrades, so leave the
-    // stored value untouched here.
 }
 
 void PlayerWindow::saveVolumeToConfig()

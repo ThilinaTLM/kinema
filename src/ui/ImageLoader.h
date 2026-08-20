@@ -86,17 +86,8 @@ private:
     mutable QCache<QUrl, QImage> m_memCache;
 
     // De-dupe in-flight requests: each URL maps to a shared future-like
-    // handle. We stash a small shared record so multiple awaiters get the
-    // same image without triggering multiple downloads.
-    struct Pending {
-        QCoro::Task<QImage> task;
-    };
-    // We can't easily "share" a QCoro::Task<T>; instead we store a
-    // QSharedPointer<QPromise<QImage>>-style shim: the original requester
-    // does the work, other awaiters poll an ordinary Qt signal. Simpler
-    // approach: keep a map of QUrl→QSharedPointer<QPromise<QImage>>; the
-    // first caller does the fetch and fulfils the promise, others co_await
-    // a task that watches the promise's future.
+    // handle. The first caller does the fetch and fulfils the promise;
+    // other awaiters co_await a task that watches the promise's future.
     struct InFlight {
         QSharedPointer<QPromise<QImage>> promise;
     };

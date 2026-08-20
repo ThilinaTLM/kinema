@@ -102,8 +102,6 @@ DiscoverItem itemFromObject(const QJsonObject& obj, MediaKind kind)
 
     d.poster = composeImageUrl(QString::fromLatin1(kPosterSize),
         obj.value(QStringLiteral("poster_path")).toString());
-    d.backdrop = composeImageUrl(QString::fromLatin1(kBackdropSize),
-        obj.value(QStringLiteral("backdrop_path")).toString());
 
     return d;
 }

@@ -519,18 +519,6 @@ TransferUseCase::ensureSessionForAssetId(const QString& assetId)
     co_return nullptr;
 }
 
-QVector<domain::MediaFileEntry> TransferUseCase::filesForStreamRef(
-    const domain::HistoryStreamRef& streamRef) const
-{
-    return m_sessions.filesForStreamRef(streamRef);
-}
-
-QVector<domain::MediaFileEntry> TransferUseCase::filesForAssetId(
-    const QString& assetId) const
-{
-    return m_sessions.filesForAssetId(assetId);
-}
-
 QCoro::Task<QUrl> TransferUseCase::openSession(domain::AssetRef ref,
     domain::Stream stream, domain::PlaybackContext ctx,
     domain::DownloadMode mode, domain::CacheDisposition disposition,

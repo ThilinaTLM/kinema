@@ -156,7 +156,6 @@ private:
     void toggleFullscreen();
     void leaveFullscreenOrClose();
     void loadGeometry();
-    void saveGeometryToConfig();
     void saveVolumeToConfig();
     void pushMediaChips();
 

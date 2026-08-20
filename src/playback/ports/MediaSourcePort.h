@@ -65,14 +65,6 @@ public:
     virtual void changeMode(ByteRangeSource& /*session*/,
         domain::DownloadMode /*mode*/) {}
 
-    /// File catalog for a previously-opened session. Defaults to
-    /// empty so backends that only expose one file don't need to
-    /// override.
-    virtual QVector<domain::MediaFileEntry> filesFor(
-        const ByteRangeSource& /*session*/) const
-    {
-        return {};
-    }
 };
 
 } // namespace kinema::playback::ports

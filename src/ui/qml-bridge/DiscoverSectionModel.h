@@ -91,7 +91,6 @@ public:
     void setEpisodeSubtitleList(QStringList subtitles);
 
     /// Pure accessor for unit tests / hosting view-models.
-    const QList<domain::DiscoverItem>& items() const noexcept { return m_items; }
     const domain::DiscoverItem* itemAt(int row) const;
 
 Q_SIGNALS:
