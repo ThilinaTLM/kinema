@@ -5,6 +5,7 @@
 
 #include "api/TmdbDiscoverUrl.h"
 #include "api/TmdbParse.h"
+#include "api/RequestUtil.h"
 #include "core/io/HttpClient.h"
 #include "core/io/HttpError.h"
 
@@ -78,9 +79,7 @@ void TmdbClient::setRegion(QString region)
 QUrl TmdbClient::buildUrl(const QString& path,
     std::initializer_list<std::pair<QString, QString>> extra) const
 {
-    QUrl url = m_baseUrl;
-    // m_baseUrl has path "/3"; append without stomping it.
-    url.setPath(m_baseUrl.path() + path);
+    QUrl url = appendPath(m_baseUrl, path);
 
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("language"), m_language);
@@ -95,8 +94,7 @@ QUrl TmdbClient::buildUrl(const QString& path,
 
 QUrl TmdbClient::buildUrl(const QString& path, const QUrlQuery& extra) const
 {
-    QUrl url = m_baseUrl;
-    url.setPath(m_baseUrl.path() + path);
+    QUrl url = appendPath(m_baseUrl, path);
 
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("language"), m_language);
@@ -111,8 +109,7 @@ QUrl TmdbClient::buildUrl(const QString& path, const QUrlQuery& extra) const
 QNetworkRequest TmdbClient::authed(const QUrl& url) const
 {
     QNetworkRequest req(url);
-    req.setRawHeader("Authorization",
-        QByteArrayLiteral("Bearer ") + m_token.toUtf8());
+    req.setRawHeader("Authorization", bearer(m_token));
     req.setRawHeader("Accept", "application/json");
     return req;
 }

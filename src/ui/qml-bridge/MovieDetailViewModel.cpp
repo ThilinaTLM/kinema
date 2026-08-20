@@ -13,6 +13,7 @@
 #include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
 #include "controllers/StreamUtilityController.h"
+#include "ui/qml-bridge/StreamUtilityDispatch.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
 #include "core/util/DateFormat.h"
@@ -741,40 +742,29 @@ void MovieDetailViewModel::setDownloadController(
     m_downloads = dl;
 }
 
-template <typename Method>
-void MovieDetailViewModel::dispatchStreamAction(int row, Method method)
-{
-    if (!m_streamUtility) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        (m_streamUtility->*method)(*s);
-    }
-}
-
 void MovieDetailViewModel::copyMagnet(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyMagnet);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::copyMagnet);
 }
 
 void MovieDetailViewModel::openMagnet(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::openMagnet);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::openMagnet);
 }
 
 void MovieDetailViewModel::copyDirectUrl(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyDirectUrl);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::copyDirectUrl);
 }
 
 void MovieDetailViewModel::openDirectUrl(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::openDirectUrl);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::openDirectUrl);
 }
 
 void MovieDetailViewModel::copyReleaseName(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyReleaseName);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::copyReleaseName);
 }
 
 void MovieDetailViewModel::requestSubtitles()

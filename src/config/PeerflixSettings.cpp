@@ -31,15 +31,13 @@ PeerflixSettings::PeerflixSettings(KSharedConfigPtr config, QObject* parent)
 
 QString PeerflixSettings::baseUrl() const
 {
-    const auto raw = detail::read(m_config, kGroup, kKeyBaseUrl,
+    return detail::readDefaulted(m_config, kGroup, kKeyBaseUrl,
         defaultBaseUrl());
-    return raw.isEmpty() ? defaultBaseUrl() : raw;
 }
 
 void PeerflixSettings::setBaseUrl(const QString& url)
 {
-    const auto trimmed = url.trimmed();
-    const auto effective = trimmed.isEmpty() ? defaultBaseUrl() : trimmed;
+    const auto effective = detail::normalizeUrl(url, defaultBaseUrl());
     if (baseUrl() == effective) {
         return;
     }
@@ -49,16 +47,14 @@ void PeerflixSettings::setBaseUrl(const QString& url)
 
 QString PeerflixSettings::addonBaseUrl() const
 {
-    const auto raw = detail::read(m_config, kGroup, kKeyAddonBaseUrl,
+    return detail::readDefaulted(m_config, kGroup, kKeyAddonBaseUrl,
         defaultAddonBaseUrl());
-    return raw.isEmpty() ? defaultAddonBaseUrl() : raw;
 }
 
 void PeerflixSettings::setAddonBaseUrl(const QString& url)
 {
-    const auto trimmed = url.trimmed();
     const auto effective
-        = trimmed.isEmpty() ? defaultAddonBaseUrl() : trimmed;
+        = detail::normalizeUrl(url, defaultAddonBaseUrl());
     if (addonBaseUrl() == effective) {
         return;
     }

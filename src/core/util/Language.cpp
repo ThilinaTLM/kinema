@@ -74,21 +74,6 @@ QString displayName(const QString& iso639_2)
     return iso639_2;
 }
 
-QString codeForDisplayName(const QString& englishName)
-{
-    const auto needle = englishName.trimmed().toLower();
-    if (needle.isEmpty()) {
-        return {};
-    }
-    const auto& t = table();
-    for (auto it = t.cbegin(); it != t.cend(); ++it) {
-        if (it.value().toLower() == needle) {
-            return it.key();
-        }
-    }
-    return {};
-}
-
 QList<CommonLanguage> commonLanguages()
 {
     // Ordered by English display name to match the settings page

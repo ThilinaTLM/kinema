@@ -3,7 +3,7 @@
 
 #include "playback/sources/HttpRangeAssetSession.h"
 
-#include "config/DownloadSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "core/io/HttpClient.h"
 #include "core/io/HttpError.h"
 #include "kinema_log_download.h"
@@ -16,7 +16,6 @@
 #include <QFileInfo>
 #include <QNetworkRequest>
 #include <QPointer>
-#include <QUuid>
 
 #include <algorithm>
 
@@ -30,7 +29,7 @@ constexpr qint64 kDefaultChunk = 4LL * 1024LL * 1024LL;
 
 HttpRangeAssetSession::HttpRangeAssetSession(core::HttpClient& http,
     DebridResolver& resolver,
-    const config::DownloadSettings& settings,
+    const config::TorrentStreamingSettings& settings,
     domain::AssetRef ref,
     QString assetId,
     QString localDir,
@@ -41,7 +40,6 @@ HttpRangeAssetSession::HttpRangeAssetSession(core::HttpClient& http,
     , m_settings(settings)
     , m_ref(std::move(ref))
     , m_assetId(std::move(assetId))
-    , m_token(QUuid::createUuid().toString(QUuid::WithoutBraces))
     , m_localDir(std::move(localDir))
     , m_fileName(m_ref.fileNameHint.isEmpty()
               ? (m_ref.releaseName.isEmpty()
@@ -266,7 +264,6 @@ QCoro::Task<void> HttpRangeAssetSession::ensureResolved()
             co_return;
         }
         m_upstream = resolved.downloadUrl;
-        m_providerTorrentId = resolved.providerTorrentId;
         if (resolved.fileSize > 0 && resolved.fileSize != m_fileSize) {
             // Provider disagrees with the size hint (or we didn't
             // have one). Re-seat the chunk bookkeeping to the

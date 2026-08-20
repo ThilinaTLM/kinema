@@ -2,23 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ui/qml-bridge/settings/PeerflixSectionViewModel.h"
-#include "ui/qml-bridge/settings/SettingsStatus.h"
-#include "api/IndexerSelector.h"
+
 #include "config/PeerflixSettings.h"
 #include "domain/Indexer.h"
-#include "domain/Media.h"
-#include "kinema_log_ui.h"
-#include <KLocalizedString>
 
 namespace kinema::ui::qml::settings {
-
-// ============================== Indexers: Peerflix section ===============
 
 PeerflixSectionViewModel::PeerflixSectionViewModel(
     api::IndexerSelector* indexers,
     config::PeerflixSettings& settings, QObject* parent)
-    : QObject(parent)
-    , m_indexers(indexers)
+    : IndexerSectionViewModelBase(indexers, parent)
     , m_settings(settings)
 {
     connect(&m_settings, &config::PeerflixSettings::baseUrlChanged,
@@ -45,54 +38,14 @@ void PeerflixSectionViewModel::resetBaseUrl()
     m_settings.setBaseUrl(config::PeerflixSettings::defaultBaseUrl());
 }
 
-void PeerflixSectionViewModel::testConnection()
+domain::IndexerKind PeerflixSectionViewModel::indexerKind() const
 {
-    auto t = testTask();
-    Q_UNUSED(t);
+    return domain::IndexerKind::Peerflix;
 }
 
-void PeerflixSectionViewModel::setStatus(const QString& message, int kind)
+QString PeerflixSectionViewModel::providerName() const
 {
-    if (m_statusMessage == message && m_statusKind == kind) {
-        return;
-    }
-    m_statusMessage = message;
-    m_statusKind = kind;
-    Q_EMIT statusChanged();
-}
-
-void PeerflixSectionViewModel::setBusy(bool on)
-{
-    if (m_busy == on) {
-        return;
-    }
-    m_busy = on;
-    Q_EMIT busyChanged();
-}
-
-QCoro::Task<void> PeerflixSectionViewModel::testTask()
-{
-    auto* indexer = m_indexers
-        ? m_indexers->find(domain::IndexerKind::Peerflix)
-        : nullptr;
-    if (!indexer) {
-        setStatus(i18nc("@info indexer settings status",
-            "Peerflix is not registered."), kStatusError);
-        co_return;
-    }
-    setBusy(true);
-    setStatus(i18nc("@info indexer settings status, in progress",
-        "Probing Peerflix\u2026"), kStatusInfo);
-    const bool ok = co_await indexer->testConnection();
-    if (ok) {
-        setStatus(i18nc("@info indexer settings status",
-            "Peerflix is reachable."), kStatusPositive);
-    } else {
-        setStatus(i18nc("@info indexer settings status",
-            "Peerflix did not respond. Check the base URL or try again later."),
-            kStatusError);
-    }
-    setBusy(false);
+    return QStringLiteral("Peerflix");
 }
 
 } // namespace kinema::ui::qml::settings

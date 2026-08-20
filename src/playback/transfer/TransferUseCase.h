@@ -9,7 +9,6 @@
 #include "domain/PlaybackContext.h"
 #include "playback/events/PlaybackEvent.h"
 #include "playback/ports/ByteRangeSource.h"
-#include "playback/ports/SessionFileCatalog.h"
 #include "playback/transfer/LiveAssetStats.h"
 
 #include <QCoro/QCoroTask>
@@ -57,8 +56,7 @@ class TransferSupervisor;
  * the controllers depended on (`prepareForPlayback` becomes
  * `ensurePlayable`, `enqueueDownload` becomes `saveOffline`).
  */
-class TransferUseCase : public QObject,
-    public ports::SessionFileCatalog
+class TransferUseCase : public QObject
 {
     Q_OBJECT
 public:
@@ -131,12 +129,6 @@ public:
     /// `SessionRegistry`; do not delete.
     QCoro::Task<ports::ByteRangeSource*> ensureSessionForAssetId(
         const QString& assetId);
-
-    // SessionFileCatalog
-    QVector<domain::MediaFileEntry> filesForStreamRef(
-        const domain::HistoryStreamRef& streamRef) const override;
-    QVector<domain::MediaFileEntry> filesForAssetId(
-        const QString& assetId) const override;
 
 Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);

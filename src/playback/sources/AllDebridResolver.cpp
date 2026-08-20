@@ -7,26 +7,15 @@
 #include "core/io/HttpError.h"
 #include "core/util/Magnet.h"
 #include "playback/sources/DebridFilePicker.h"
+#include "playback/sources/DebridResolverUtil.h"
 
 #include <KLocalizedString>
-
-#include <QCoro/QCoroSignal>
-#include <QTimer>
 
 namespace kinema::playback::sources {
 
 namespace {
 
 constexpr int kReadyTimeoutMs = 90'000;
-constexpr int kPollIntervalMs = 1'000;
-
-QCoro::Task<void> sleepMs(int ms)
-{
-    QTimer t;
-    t.setSingleShot(true);
-    t.start(ms);
-    co_await qCoro(&t, &QTimer::timeout);
-}
 
 bool isTerminalErrorStatus(int statusCode)
 {
@@ -50,29 +39,9 @@ AllDebridResolver::AllDebridResolver(api::AllDebridClient& ad,
 {
 }
 
-QCoro::Task<void> AllDebridResolver::cleanup(QString providerTorrentId)
-{
-    if (providerTorrentId.isEmpty()) {
-        co_return;
-    }
-    bool ok = false;
-    const qint64 id = providerTorrentId.toLongLong(&ok);
-    if (!ok || id <= 0) {
-        co_return;
-    }
-    try {
-        co_await m_ad.deleteMagnet(id);
-    } catch (...) {
-        // best-effort
-    }
-}
-
 QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
 {
-    if (ref.infoHash.isEmpty()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("AllDebrid resolution requires an info hash."));
-    }
+    requireInfoHash(ref, QStringLiteral("AllDebrid"));
 
     // Step 1: upload the magnet.
     const auto magnet = core::magnet::build(ref.infoHash, ref.releaseName);
@@ -80,7 +49,7 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
 
     // Step 2: poll until Ready or terminal error or timeout.
     domain::AdMagnetStatus status;
-    int waitedMs = 0;
+    PollBudget budget(kReadyTimeoutMs);
     while (true) {
         status = co_await m_ad.magnetStatus(added.id);
         if (isReadyStatus(status.statusCode)) {
@@ -94,12 +63,11 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
                 i18n("AllDebrid magnet failed (status %1: %2).",
                     QString::number(status.statusCode), label));
         }
-        if (waitedMs >= kReadyTimeoutMs) {
+        if (budget.expired()) {
             throw core::HttpError(core::HttpError::Kind::HttpStatus, 504,
                 i18n("AllDebrid did not produce a ready magnet in time."));
         }
-        co_await sleepMs(kPollIntervalMs);
-        waitedMs += kPollIntervalMs;
+        co_await budget.tick();
     }
 
     // Step 3: list the files.
@@ -134,19 +102,10 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
     out.fileName = unlocked.filename.isEmpty()
         ? (chosen.path.isEmpty() ? ref.fileNameHint : chosen.path)
         : unlocked.filename;
-    out.providerTorrentId = QString::number(added.id);
 
     // Preserve the full magnet file list so the asset session can
     // surface it to series auto-next without a libtorrent session.
-    // Index is the position in the flattened list as the provider
-    // returned it; this is the same convention
-    // `playback::torrent::LibtorrentClient` uses for its
-    // torrent-file entries.
-    out.files.reserve(files.size());
-    for (int i = 0; i < files.size(); ++i) {
-        out.files.append(torrent::TorrentFileEntry {
-            i, files[i].path, files[i].bytes });
-    }
+    out.files = flattenFileList(files);
     co_return out;
 }
 

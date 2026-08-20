@@ -13,6 +13,7 @@
 #include "controllers/DownloadController.h"
 #include "controllers/LibraryController.h"
 #include "controllers/StreamUtilityController.h"
+#include "ui/qml-bridge/StreamUtilityDispatch.h"
 #include "controllers/TokenController.h"
 #include "controllers/WatchedController.h"
 #include "core/util/DateFormat.h"
@@ -1011,40 +1012,29 @@ void SeriesDetailViewModel::downloadWithBackend(int row, int backendKind)
         static_cast<domain::DownloadBackendKind>(backendKind));
 }
 
-template <typename Method>
-void SeriesDetailViewModel::dispatchStreamAction(int row, Method method)
-{
-    if (!m_streamUtility) {
-        return;
-    }
-    if (const auto* s = m_streams->at(row)) {
-        (m_streamUtility->*method)(*s);
-    }
-}
-
 void SeriesDetailViewModel::copyMagnet(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyMagnet);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::copyMagnet);
 }
 
 void SeriesDetailViewModel::openMagnet(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::openMagnet);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::openMagnet);
 }
 
 void SeriesDetailViewModel::copyDirectUrl(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyDirectUrl);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::copyDirectUrl);
 }
 
 void SeriesDetailViewModel::openDirectUrl(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::openDirectUrl);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::openDirectUrl);
 }
 
 void SeriesDetailViewModel::copyReleaseName(int row)
 {
-    dispatchStreamAction(row, &controllers::StreamUtilityController::copyReleaseName);
+    dispatchStreamAction(m_streams, m_streamUtility, row, &controllers::StreamUtilityController::copyReleaseName);
 }
 
 void SeriesDetailViewModel::requestSubtitles()

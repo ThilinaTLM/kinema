@@ -10,11 +10,8 @@
 #include "core/io/HttpError.h"
 #include "core/io/HttpErrorPresenter.h"
 #include "core/persistence/TokenStore.h"
-#include "domain/Debrid.h"
 #include "kinema_log_ui.h"
 #include <KLocalizedString>
-
-#include <QPointer>
 
 namespace kinema::ui::qml::settings {
 
@@ -23,100 +20,39 @@ namespace kinema::ui::qml::settings {
 AllDebridSectionViewModel::AllDebridSectionViewModel(
     core::HttpClient* http, core::TokenStore* tokens,
     config::DebridSettings& settings, QObject* parent)
-    : QObject(parent)
-    , m_http(http)
-    , m_tokens(tokens)
-    , m_settings(settings)
+    : CredentialSectionViewModelBase(http, tokens, settings, parent)
 {
 }
 
-bool AllDebridSectionViewModel::apiKeySaved() const
+QString AllDebridSectionViewModel::credentialKey() const
+{
+    return QString::fromLatin1(core::TokenStore::kAllDebridKey);
+}
+
+bool AllDebridSectionViewModel::isSaved() const
 {
     return m_settings.allDebridConfigured();
 }
 
-void AllDebridSectionViewModel::setApiKey(const QString& apiKey)
+void AllDebridSectionViewModel::setConfigured(bool configured)
 {
-    if (m_apiKey == apiKey) {
-        return;
-    }
-    m_apiKey = apiKey;
-    Q_EMIT apiKeyInputChanged();
+    m_settings.setAllDebridConfigured(configured);
 }
 
-void AllDebridSectionViewModel::load()
+QString AllDebridSectionViewModel::errorContext() const
 {
-    auto t = loadTask();
-    Q_UNUSED(t);
+    return QStringLiteral("ad settings");
 }
+
 void AllDebridSectionViewModel::testConnection()
 {
     auto t = testTask();
     Q_UNUSED(t);
 }
-void AllDebridSectionViewModel::save()
-{
-    auto t = saveTask();
-    Q_UNUSED(t);
-}
-void AllDebridSectionViewModel::remove()
-{
-    auto t = removeTask();
-    Q_UNUSED(t);
-}
-
-void AllDebridSectionViewModel::setStatus(const QString& message, int kind)
-{
-    if (m_statusMessage == message && m_statusKind == kind) {
-        return;
-    }
-    m_statusMessage = message;
-    m_statusKind = kind;
-    Q_EMIT statusChanged();
-}
-
-void AllDebridSectionViewModel::setBusy(bool on)
-{
-    if (m_busy == on) {
-        return;
-    }
-    m_busy = on;
-    Q_EMIT busyChanged();
-}
-
-QCoro::Task<void> AllDebridSectionViewModel::loadTask()
-{
-    QPointer<AllDebridSectionViewModel> self(this);
-    setBusy(true);
-    try {
-        const auto existing = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kAllDebridKey));
-        if (!self) {
-            co_return;
-        }
-        if (!existing.isEmpty()) {
-            setApiKey(existing);
-        }
-    } catch (const core::TokenStoreError& e) {
-        if (!self) {
-            co_return;
-        }
-        setStatus(e.message(), kStatusError);
-    } catch (const std::exception& e) {
-        if (!self) {
-            co_return;
-        }
-        setStatus(core::describeError(e, "ad settings/load"),
-            kStatusError);
-    }
-    if (self) {
-        setBusy(false);
-    }
-}
 
 QCoro::Task<void> AllDebridSectionViewModel::testTask()
 {
-    const auto apiKey = m_apiKey.trimmed();
+    const auto apiKey = m_credential.trimmed();
     if (apiKey.isEmpty()) {
         co_return;
     }
@@ -156,53 +92,6 @@ QCoro::Task<void> AllDebridSectionViewModel::testTask()
             setStatus(core::describeError(e, "ad settings/test"),
                 kStatusError);
         }
-    }
-    setBusy(false);
-}
-
-QCoro::Task<void> AllDebridSectionViewModel::saveTask()
-{
-    const auto apiKey = m_apiKey.trimmed();
-    if (apiKey.isEmpty()) {
-        co_return;
-    }
-    setBusy(true);
-    try {
-        co_await m_tokens->write(
-            QString::fromLatin1(core::TokenStore::kAllDebridKey),
-            apiKey);
-        m_settings.setAllDebridConfigured(true);
-        Q_EMIT apiKeySavedChanged();
-        Q_EMIT apiKeyChanged(apiKey);
-        setStatus(i18nc("@info ad settings status",
-            "API key saved to keyring."), kStatusPositive);
-    } catch (const core::TokenStoreError& e) {
-        setStatus(e.message(), kStatusError);
-    } catch (const std::exception& e) {
-        setStatus(core::describeError(e, "ad settings/save"),
-            kStatusError);
-    }
-    setBusy(false);
-}
-
-QCoro::Task<void> AllDebridSectionViewModel::removeTask()
-{
-    setBusy(true);
-    try {
-        co_await m_tokens->remove(
-            QString::fromLatin1(core::TokenStore::kAllDebridKey));
-        m_settings.setAllDebridConfigured(false);
-        m_apiKey.clear();
-        Q_EMIT apiKeyInputChanged();
-        Q_EMIT apiKeySavedChanged();
-        Q_EMIT apiKeyChanged(QString {});
-        setStatus(i18nc("@info ad settings status",
-            "API key removed from keyring."), kStatusInfo);
-    } catch (const core::TokenStoreError& e) {
-        setStatus(e.message(), kStatusError);
-    } catch (const std::exception& e) {
-        setStatus(core::describeError(e, "ad settings/remove"),
-            kStatusError);
     }
     setBusy(false);
 }

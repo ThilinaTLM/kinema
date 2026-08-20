@@ -108,22 +108,15 @@ QList<domain::LibraryEpisode> LibraryController::episodesForSeries(
 
 void LibraryController::saveMovie(const domain::MetaDetail& meta)
 {
-    auto t = titleFromMeta(meta, domain::MediaKind::Movie);
-    if (t.imdbId.isEmpty() || t.title.isEmpty()) {
-        return;
-    }
-    m_store.upsertTitle(t);
-    Q_EMIT statusMessage(
-        i18nc("@info:status", "Added \u201c%1\u201d to Library.", t.title), 3000);
+    commitTitle(titleFromMeta(meta, domain::MediaKind::Movie));
 }
 
 void LibraryController::saveSeries(const domain::SeriesDetail& detail)
 {
     auto t = titleFromMeta(detail.meta, domain::MediaKind::Series);
-    if (t.imdbId.isEmpty() || t.title.isEmpty()) {
+    if (!commitTitle(t)) {
         return;
     }
-    m_store.upsertTitle(t);
 
     QList<domain::LibraryEpisode> rows;
     rows.reserve(detail.episodes.size());
@@ -131,8 +124,17 @@ void LibraryController::saveSeries(const domain::SeriesDetail& detail)
         rows.append(episodeFromApi(t.imdbId, ep));
     }
     m_store.upsertEpisodes(t.imdbId, rows);
+}
+
+bool LibraryController::commitTitle(const domain::LibraryTitle& t)
+{
+    if (t.imdbId.isEmpty() || t.title.isEmpty()) {
+        return false;
+    }
+    m_store.upsertTitle(t);
     Q_EMIT statusMessage(
         i18nc("@info:status", "Added \u201c%1\u201d to Library.", t.title), 3000);
+    return true;
 }
 
 QCoro::Task<void> LibraryController::saveByImdbId(QString imdbId,

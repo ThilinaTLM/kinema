@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "config/DownloadSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/persistence/MediaCache.h"
@@ -352,7 +352,7 @@ private Q_SLOTS:
         m_config = KSharedConfig::openConfig(
             QStringLiteral("kinemarc-tuc-test"),
             KConfig::SimpleConfig);
-        m_dlSettings = std::make_unique<config::DownloadSettings>(m_config);
+        m_dlSettings = std::make_unique<config::TorrentStreamingSettings>(m_config);
         m_dlSettings->setCacheBudgetGb(1);
 
         m_torrentSettings
@@ -820,38 +820,6 @@ private Q_SLOTS:
     }
 
     // -----------------------------------------------------------------
-    // SessionFileCatalog: files lookup via streamRef and assetId.
-    // -----------------------------------------------------------------
-    void filesForStreamRefAndAssetIdRouteThroughRegistry()
-    {
-        const auto stream = makeStream();
-        const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
-
-        bool done = false;
-        auto play = [&]() -> QCoro::Task<void> {
-            co_await m_useCase->ensurePlayable(stream, ctx);
-            done = true;
-        }();
-        spinUntil([&] { return done; });
-
-        // FakeAssetSession::files() returns an empty vector, so we
-        // assert the call routes through cleanly rather than asserting
-        // contents. The supervisor's existing tests cover content
-        // semantics.
-        domain::HistoryStreamRef ref;
-        ref.infoHash = stream.infoHash;
-        const auto byRef = m_useCase->filesForStreamRef(ref);
-        const auto byId = m_useCase->filesForAssetId(assetId);
-        QCOMPARE(byRef.size(), 0);
-        QCOMPARE(byId.size(), 0);
-
-        // Empty streamRef gracefully short-circuits.
-        QCOMPARE(m_useCase->filesForStreamRef({}).size(), 0);
-    }
-
-    // -----------------------------------------------------------------
     // ensurePlayable on a stream without info hash throws the
     // "no playable info hash" runtime_error.
     // -----------------------------------------------------------------
@@ -877,7 +845,7 @@ private Q_SLOTS:
 
 private:
     KSharedConfig::Ptr m_config;
-    std::unique_ptr<config::DownloadSettings> m_dlSettings;
+    std::unique_ptr<config::TorrentStreamingSettings> m_dlSettings;
     std::unique_ptr<config::TorrentStreamingSettings> m_torrentSettings;
     std::unique_ptr<core::MediaCache> m_cache;
     std::unique_ptr<core::TorrentCache> m_torrentCache;

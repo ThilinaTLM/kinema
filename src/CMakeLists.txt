@@ -10,7 +10,6 @@ set(kinema_core_SRCS
     config/AppSettings.cpp
     config/BrowseSettings.cpp
     config/CacheSettings.cpp
-    config/DownloadSettings.cpp
     config/FilterSettings.cpp
     config/PlayerSettings.cpp
     api/IndexerSelector.cpp
@@ -63,6 +62,7 @@ set(kinema_core_SRCS
     playback/sources/AllDebridResolver.cpp
     playback/sources/AssetSession.cpp
     playback/sources/DebridFilePicker.cpp
+    playback/sources/DebridHttpMediaSource.cpp
     playback/sources/HttpRangeAssetSession.cpp
     playback/sources/RealDebridResolver.cpp
     playback/sources/TorrentAssetSession.cpp
@@ -114,13 +114,10 @@ set(kinema_core_SRCS
     playback/subtitles/MoviehashProbe.cpp
     playback/session/PlaybackStateMachine.cpp
     playback/session/PlayerLoadWatchdog.cpp
-    playback/session/TransferStateMachine.cpp
     playback/policy/BackendSelectionPolicy.cpp
     playback/policy/ChapterSkipPolicy.cpp
     playback/policy/MediaFileSelectionPolicy.cpp
     playback/policy/ResumePolicy.cpp
-    playback/policy/StreamingPriorityPolicy.cpp
-    playback/policy/WatchedPolicy.cpp
 
     ui/ImageLoader.cpp
 
@@ -156,9 +153,11 @@ set(kinema_core_SRCS
     ui/qml-bridge/SearchViewModel.cpp
     ui/qml-bridge/SeriesDetailViewModel.cpp
     ui/qml-bridge/settings/AllDebridSectionViewModel.cpp
+    ui/qml-bridge/settings/CredentialSectionViewModelBase.cpp
     ui/qml-bridge/settings/DebridSettingsViewModel.cpp
     ui/qml-bridge/settings/GeneralSettingsViewModel.cpp
     ui/qml-bridge/settings/IndexerSettingsViewModel.cpp
+    ui/qml-bridge/settings/IndexerSectionViewModelBase.cpp
     ui/qml-bridge/settings/PeerflixSectionViewModel.cpp
     ui/qml-bridge/settings/PlayerSettingsViewModel.cpp
     ui/qml-bridge/settings/RealDebridSectionViewModel.cpp

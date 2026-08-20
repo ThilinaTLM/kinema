@@ -4,6 +4,7 @@
 #include "api/RealDebridClient.h"
 
 #include "api/RealDebridParse.h"
+#include "api/RequestUtil.h"
 #include "core/io/HttpClient.h"
 #include "core/io/HttpError.h"
 
@@ -11,32 +12,11 @@
 
 #include <QNetworkRequest>
 #include <QUrl>
-#include <QUrlQuery>
 
 namespace kinema::api {
 using namespace kinema::domain;
 
 namespace {
-
-QByteArray bearer(const QString& token)
-{
-    return QByteArrayLiteral("Bearer ") + token.toUtf8();
-}
-
-QUrl appendPath(QUrl base, QString path)
-{
-    base.setPath(base.path() + std::move(path));
-    return base;
-}
-
-QByteArray urlEncode(const QList<QPair<QString, QString>>& fields)
-{
-    QUrlQuery q;
-    for (const auto& kv : fields) {
-        q.addQueryItem(kv.first, kv.second);
-    }
-    return q.toString(QUrl::FullyEncoded).toUtf8();
-}
 
 void requireToken(const QString& token)
 {
@@ -69,8 +49,8 @@ QCoro::Task<RealDebridUser> RealDebridClient::user()
 {
     requireToken(m_token);
 
-    QNetworkRequest req(appendPath(m_baseUrl, QStringLiteral("/user")));
-    req.setRawHeader("Authorization", bearer(m_token));
+    const QUrl url = appendPath(m_baseUrl, QStringLiteral("/user"));
+    QNetworkRequest req(bearerGet(url, bearer(m_token)));
 
     const auto doc = co_await m_http->getJson(std::move(req));
     co_return realdebrid::parseUser(doc);
@@ -84,10 +64,8 @@ QCoro::Task<RdAddMagnetResult> RealDebridClient::addMagnet(QString magnet)
             i18n("Real-Debrid addMagnet: empty magnet URI."));
     }
 
-    QNetworkRequest req(appendPath(m_baseUrl, QStringLiteral("/torrents/addMagnet")));
-    req.setRawHeader("Authorization", bearer(m_token));
-    req.setHeader(QNetworkRequest::ContentTypeHeader,
-        QStringLiteral("application/x-www-form-urlencoded"));
+    const QUrl url = appendPath(m_baseUrl, QStringLiteral("/torrents/addMagnet"));
+    QNetworkRequest req(bearerFormPost(url, bearer(m_token)));
 
     const auto body = urlEncode({ { QStringLiteral("magnet"), magnet } });
     const auto doc = co_await m_http->postJsonForJson(std::move(req), body);
@@ -102,9 +80,9 @@ QCoro::Task<RdTorrentInfo> RealDebridClient::torrentInfo(QString rdTorrentId)
             i18n("Real-Debrid torrentInfo: empty torrent id."));
     }
 
-    QNetworkRequest req(appendPath(m_baseUrl,
-        QStringLiteral("/torrents/info/") + rdTorrentId));
-    req.setRawHeader("Authorization", bearer(m_token));
+    const QUrl url = appendPath(m_baseUrl,
+        QStringLiteral("/torrents/info/") + rdTorrentId);
+    QNetworkRequest req(bearerGet(url, bearer(m_token)));
 
     const auto doc = co_await m_http->getJson(std::move(req));
     co_return realdebrid::parseTorrentInfo(doc);
@@ -119,11 +97,9 @@ QCoro::Task<void> RealDebridClient::selectFiles(QString rdTorrentId,
             i18n("Real-Debrid selectFiles: empty torrent id."));
     }
 
-    QNetworkRequest req(appendPath(m_baseUrl,
-        QStringLiteral("/torrents/selectFiles/") + rdTorrentId));
-    req.setRawHeader("Authorization", bearer(m_token));
-    req.setHeader(QNetworkRequest::ContentTypeHeader,
-        QStringLiteral("application/x-www-form-urlencoded"));
+    const QUrl url = appendPath(m_baseUrl,
+        QStringLiteral("/torrents/selectFiles/") + rdTorrentId);
+    QNetworkRequest req(bearerFormPost(url, bearer(m_token)));
 
     QString filesField = QStringLiteral("all");
     if (!fileIds.isEmpty()) {
@@ -147,10 +123,8 @@ QCoro::Task<RdUnrestrictedLink> RealDebridClient::unrestrictLink(QUrl link)
             i18n("Real-Debrid unrestrict: empty link."));
     }
 
-    QNetworkRequest req(appendPath(m_baseUrl, QStringLiteral("/unrestrict/link")));
-    req.setRawHeader("Authorization", bearer(m_token));
-    req.setHeader(QNetworkRequest::ContentTypeHeader,
-        QStringLiteral("application/x-www-form-urlencoded"));
+    const QUrl url = appendPath(m_baseUrl, QStringLiteral("/unrestrict/link"));
+    QNetworkRequest req(bearerFormPost(url, bearer(m_token)));
 
     const auto body = urlEncode({ { QStringLiteral("link"), link.toString() } });
     const auto doc = co_await m_http->postJsonForJson(std::move(req), body);
@@ -164,9 +138,9 @@ QCoro::Task<void> RealDebridClient::deleteTorrent(QString rdTorrentId)
         co_return;
     }
 
-    QNetworkRequest req(appendPath(m_baseUrl,
-        QStringLiteral("/torrents/delete/") + rdTorrentId));
-    req.setRawHeader("Authorization", bearer(m_token));
+    const QUrl url = appendPath(m_baseUrl,
+        QStringLiteral("/torrents/delete/") + rdTorrentId);
+    QNetworkRequest req(bearerGet(url, bearer(m_token)));
 
     co_await m_http->del(std::move(req));
     co_return;

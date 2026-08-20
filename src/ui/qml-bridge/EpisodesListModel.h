@@ -3,12 +3,14 @@
 
 #pragma once
 
+#include "ui/qml-bridge/ListModelBase.h"
+
 #include "domain/Media.h"
 
-#include <QAbstractListModel>
 #include <QHash>
-#include <QList>
 #include <QString>
+
+#include <QList>
 
 namespace kinema::ui::qml {
 
@@ -21,7 +23,7 @@ namespace kinema::ui::qml {
  * the user flips seasons; there's no async state machine here \u2014
  * loading state lives at the page level on `metaState`.
  */
-class EpisodesListModel : public QAbstractListModel
+class EpisodesListModel : public ListModelBase<domain::Episode>
 {
     Q_OBJECT
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
@@ -41,15 +43,13 @@ public:
 
     explicit EpisodesListModel(QObject* parent = nullptr);
 
-    int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    /// Replace the row list. Pure mutator \u2014 no implicit filtering.
+    /// Replace the row list. Pure mutator — no implicit filtering.
     void setEpisodes(QList<domain::Episode> rows);
     void setLibraryState(QList<bool> watched, QList<double> progress);
     const QList<domain::Episode>& episodes() const noexcept { return m_rows; }
-    const domain::Episode* at(int row) const;
 
     /// Find the row index for the given (season, number) pair, or -1.
     int rowFor(int season, int episodeNumber) const;
@@ -58,7 +58,6 @@ Q_SIGNALS:
     void countChanged();
 
 private:
-    QList<domain::Episode> m_rows;
     QList<bool> m_watched;
     QList<double> m_progress;
 };

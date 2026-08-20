@@ -108,7 +108,6 @@ Q_SIGNALS:
         int peers,
         int seeds,
         int etaSeconds);
-    void statusMessage(const QString& text, int timeoutMs);
 
 private:
     domain::AssetRef m_ref;

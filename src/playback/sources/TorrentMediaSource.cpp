@@ -92,17 +92,4 @@ void TorrentMediaSource::changeMode(ports::ByteRangeSource& session,
         << "\" -> mode=" << static_cast<int>(newMode);
 }
 
-QVector<domain::MediaFileEntry> TorrentMediaSource::filesFor(
-    const ports::ByteRangeSource& session) const
-{
-    const auto* torrentSession
-        = dynamic_cast<const TorrentAssetSession*>(&session);
-    if (!torrentSession) {
-        return {};
-    }
-    // `TorrentFileEntry` is a typedef for `domain::MediaFileEntry`
-    // since the Step 7 unification — no conversion needed.
-    return m_engine.filesForInfoHash(torrentSession->infoHash());
-}
-
 } // namespace kinema::playback::sources

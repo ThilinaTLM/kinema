@@ -21,14 +21,21 @@ void CinemetaClient::setBaseUrl(QUrl url)
     m_baseUrl = std::move(url);
 }
 
+QUrl CinemetaClient::buildUrl(const QString& path) const
+{
+    QUrl url = m_baseUrl;
+    url.setPath(path);
+    return url;
+}
+
 QCoro::Task<QList<MetaSummary>> CinemetaClient::search(MediaKind kind, QString query)
 {
     const auto kindStr = mediaKindToPath(kind);
     // Path has to be assembled carefully: the "search=..." token is part of
     // the .json filename, not a real query string.
     const auto encoded = QString::fromUtf8(QUrl::toPercentEncoding(query));
-    QUrl url = m_baseUrl;
-    url.setPath(QStringLiteral("/catalog/%1/top/search=%2.json").arg(kindStr, encoded));
+    const QUrl url = buildUrl(
+        QStringLiteral("/catalog/%1/top/search=%2.json").arg(kindStr, encoded));
 
     const auto doc = co_await m_http->getJson(url);
     co_return cinemeta::parseSearch(doc, kind);
@@ -37,8 +44,8 @@ QCoro::Task<QList<MetaSummary>> CinemetaClient::search(MediaKind kind, QString q
 QCoro::Task<MetaDetail> CinemetaClient::meta(MediaKind kind, QString imdbId)
 {
     const auto kindStr = mediaKindToPath(kind);
-    QUrl url = m_baseUrl;
-    url.setPath(QStringLiteral("/meta/%1/%2.json").arg(kindStr, imdbId));
+    const QUrl url = buildUrl(
+        QStringLiteral("/meta/%1/%2.json").arg(kindStr, imdbId));
 
     const auto doc = co_await m_http->getJson(url);
     co_return cinemeta::parseMeta(doc, kind);
@@ -46,8 +53,7 @@ QCoro::Task<MetaDetail> CinemetaClient::meta(MediaKind kind, QString imdbId)
 
 QCoro::Task<SeriesDetail> CinemetaClient::seriesMeta(QString imdbId)
 {
-    QUrl url = m_baseUrl;
-    url.setPath(QStringLiteral("/meta/series/%1.json").arg(imdbId));
+    const QUrl url = buildUrl(QStringLiteral("/meta/series/%1.json").arg(imdbId));
 
     const auto doc = co_await m_http->getJson(url);
     co_return cinemeta::parseSeriesMeta(doc);

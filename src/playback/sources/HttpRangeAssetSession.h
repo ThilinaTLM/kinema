@@ -22,7 +22,7 @@ class HttpClient;
 }
 
 namespace kinema::config {
-class DownloadSettings;
+class TorrentStreamingSettings;
 }
 
 namespace kinema::playback::sources {
@@ -46,18 +46,13 @@ class HttpRangeAssetSession : public AssetSession
 public:
     HttpRangeAssetSession(core::HttpClient& http,
         DebridResolver& resolver,
-        const config::DownloadSettings& settings,
+        const config::TorrentStreamingSettings& settings,
         domain::AssetRef ref,
         QString assetId,
         QString localDir,
         QObject* parent = nullptr);
     ~HttpRangeAssetSession() override;
 
-    /// Opaque session token retained from the resolver handshake.
-    /// Used historically by the legacy `LocalMediaServer`; the new
-    /// gateway keys by `assetId()` directly, so this accessor only
-    /// survives for diagnostics and tests.
-    QString token() const { return m_token; }
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }
@@ -116,18 +111,16 @@ private:
 
     core::HttpClient& m_http;
     DebridResolver& m_resolver;
-    const config::DownloadSettings& m_settings;
+    const config::TorrentStreamingSettings& m_settings;
 
     domain::AssetRef m_ref;
     QString m_assetId;
-    QString m_token;
     QString m_localDir;
     QString m_fileName;
     qint64 m_fileSize = -1;
     qint64 m_chunkSize = 4LL * 1024LL * 1024LL;
 
     QUrl m_upstream;
-    QString m_providerTorrentId;
     bool m_resolveInFlight = false;
 
     /// User-visible mode. Defaults to OnDemand; promoted to Full

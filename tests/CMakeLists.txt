@@ -48,18 +48,8 @@ ecm_add_test(tst_resume_policy.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
-ecm_add_test(tst_watched_policy.cpp
-    TEST_NAME tst_watched_policy
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
 ecm_add_test(tst_chapter_skip_policy.cpp
     TEST_NAME tst_chapter_skip_policy
-    LINK_LIBRARIES kinema_core Qt6::Test
-)
-
-ecm_add_test(tst_streaming_priority_policy.cpp
-    TEST_NAME tst_streaming_priority_policy
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -91,11 +81,6 @@ ecm_add_test(tst_playback_progress_projector.cpp
 ecm_add_test(tst_resume_use_case.cpp
     TEST_NAME tst_resume_use_case
     LINK_LIBRARIES kinema_core Qt6::Test Qt6::Sql
-)
-
-ecm_add_test(tst_transfer_state_machine.cpp
-    TEST_NAME tst_transfer_state_machine
-    LINK_LIBRARIES kinema_core Qt6::Test
 )
 
 ecm_add_test(tst_playback_event_stream.cpp
@@ -525,9 +510,9 @@ endif()
 
 foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_media_file_selection_policy
-         tst_backend_selection_policy tst_resume_policy tst_watched_policy
-         tst_chapter_skip_policy tst_streaming_priority_policy
-         tst_playback_state_machine tst_transfer_state_machine
+         tst_backend_selection_policy tst_resume_policy
+         tst_chapter_skip_policy
+         tst_playback_state_machine
          tst_player_load_watchdog tst_external_player_adapter
          tst_playback_session_play_flow tst_playback_progress_projector
          tst_resume_use_case

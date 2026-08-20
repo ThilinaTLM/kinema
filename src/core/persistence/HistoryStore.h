@@ -63,15 +63,6 @@ public:
     /// Idempotent; safe to call once at startup.
     void runRetentionPass();
 
-    /// Override the default 365-day retention window. Primarily for
-    /// tests.
-    void setRetentionDays(int days);
-
-    /// Override the finished-at threshold (fraction of duration).
-    /// Primarily for tests. Default 0.9.
-    void setFinishedThreshold(double fraction);
-    double finishedThreshold() const noexcept { return m_finishedThreshold; }
-
     /// Override the per-kind stop-threshold applied by
     /// `recordSessionEnd()` when `reason == UserStop`. Defaults are
     /// 0.90 for movies and episodes. Bounded to

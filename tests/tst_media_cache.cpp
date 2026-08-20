@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "config/DownloadSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/persistence/MediaCache.h"
 
@@ -48,7 +48,7 @@ private Q_SLOTS:
         m_config = KSharedConfig::openConfig(
             QStringLiteral("kinemarc-mediacache-test"),
             KConfig::SimpleConfig);
-        m_settings = std::make_unique<config::DownloadSettings>(m_config);
+        m_settings = std::make_unique<config::TorrentStreamingSettings>(m_config);
         m_settings->setCacheBudgetGb(1); // 1 GiB
         m_cache = std::make_unique<core::MediaCache>(*m_settings);
     }
@@ -191,7 +191,7 @@ private Q_SLOTS:
 
 private:
     KSharedConfigPtr m_config;
-    std::unique_ptr<config::DownloadSettings> m_settings;
+    std::unique_ptr<config::TorrentStreamingSettings> m_settings;
     std::unique_ptr<core::MediaCache> m_cache;
 };
 

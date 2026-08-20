@@ -7,30 +7,15 @@
 #include "core/io/HttpError.h"
 #include "core/util/Magnet.h"
 #include "playback/sources/DebridFilePicker.h"
+#include "playback/sources/DebridResolverUtil.h"
 
 #include <KLocalizedString>
-
-#include <QCoro/QCoroSignal>
-#include <QTimer>
-
-#include <chrono>
 
 namespace kinema::playback::sources {
 
 namespace {
 
-using namespace std::chrono_literals;
-
 constexpr int kTorrentReadyTimeoutMs = 90'000;
-constexpr int kPollIntervalMs = 1'000;
-
-QCoro::Task<void> sleepMs(int ms)
-{
-    QTimer t;
-    t.setSingleShot(true);
-    t.start(ms);
-    co_await qCoro(&t, &QTimer::timeout);
-}
 
 /// Pick the best file id from an RD torrent-info response. For normal
 /// Torrentio clicks `ref.fileIndex` is usually RD's id - 1, but series
@@ -85,28 +70,13 @@ RealDebridResolver::RealDebridResolver(api::RealDebridClient& rd, QObject* paren
 {
 }
 
-QCoro::Task<void> RealDebridResolver::cleanup(QString providerTorrentId)
-{
-    if (providerTorrentId.isEmpty()) {
-        co_return;
-    }
-    try {
-        co_await m_rd.deleteTorrent(providerTorrentId);
-    } catch (...) {
-        // best-effort
-    }
-}
-
 QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref)
 {
-    if (ref.infoHash.isEmpty()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("Real-Debrid resolution requires an info hash."));
-    }
+    requireInfoHash(ref, QStringLiteral("Real-Debrid"));
 
     // RD deprecated the `/torrents/instantAvailability/` endpoint
     // (it returns 403 / empty objects in practice), so we no longer
-    // probe cache state up front \u2014 the result was unused anyway.
+    // probe cache state up front — the result was unused anyway.
     // We go straight to addMagnet; if RD has the bytes already the
     // status flips to `downloaded` near-instantly and the loops
     // below return in one tick.
@@ -117,18 +87,17 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
 
     // Step 2: Wait until RD has populated the file list.
     domain::RdTorrentInfo info;
-    int waitedMs = 0;
+    PollBudget filesBudget(kTorrentReadyTimeoutMs);
     while (true) {
         info = co_await m_rd.torrentInfo(added.id);
         if (!info.files.isEmpty()) {
             break;
         }
-        if (waitedMs >= kTorrentReadyTimeoutMs) {
+        if (filesBudget.expired()) {
             throw core::HttpError(core::HttpError::Kind::Json, 0,
                 i18n("Real-Debrid did not produce a file list in time."));
         }
-        co_await sleepMs(kPollIntervalMs);
-        waitedMs += kPollIntervalMs;
+        co_await filesBudget.tick();
     }
 
     // Step 3: choose file id and ask RD to select it.
@@ -141,7 +110,7 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
     co_await m_rd.selectFiles(added.id, QList<int> { chosenId });
 
     // Step 4: Wait until RD has produced a link for the selected file.
-    waitedMs = 0;
+    PollBudget linkBudget(kTorrentReadyTimeoutMs);
     while (true) {
         info = co_await m_rd.torrentInfo(added.id);
         if (!info.links.isEmpty()
@@ -151,12 +120,11 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
                 || info.status == QLatin1String("downloading"))) {
             break;
         }
-        if (waitedMs >= kTorrentReadyTimeoutMs) {
+        if (linkBudget.expired()) {
             throw core::HttpError(core::HttpError::Kind::Json, 0,
                 i18n("Real-Debrid did not produce a download link in time."));
         }
-        co_await sleepMs(kPollIntervalMs);
-        waitedMs += kPollIntervalMs;
+        co_await linkBudget.tick();
     }
 
     // Step 5: unrestrict the (first) hoster link.
@@ -169,18 +137,12 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
     out.fileName = unrestricted.filename.isEmpty()
         ? ref.fileNameHint
         : unrestricted.filename;
-    out.providerTorrentId = added.id;
 
     // Preserve the full magnet file list so the asset session can
     // surface it to series auto-next without a libtorrent session.
-    // RD uses 1-based ids and may re-number entries; we flatten to
-    // 0-based positional indices here so callers don't have to know
-    // about provider quirks.
-    out.files.reserve(info.files.size());
-    for (int i = 0; i < info.files.size(); ++i) {
-        out.files.append(torrent::TorrentFileEntry {
-            i, info.files[i].path, info.files[i].bytes });
-    }
+    // We flatten to 0-based positional indices here so callers don't
+    // have to know about RD's 1-based provider ids.
+    out.files = flattenFileList(info.files);
     co_return out;
 }
 

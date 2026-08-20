@@ -3,13 +3,11 @@
 
 #pragma once
 
+#include "ui/qml-bridge/ListModelBase.h"
+
 #include "domain/Media.h"
 
-#include <QAbstractListModel>
 #include <QDate>
-#include <QHash>
-#include <QList>
-#include <QString>
 
 #include <optional>
 
@@ -60,7 +58,7 @@ struct LibraryRailRow {
     double progress = -1.0;
 };
 
-class LibraryRailModel : public QAbstractListModel
+class LibraryRailModel : public ListModelBase<LibraryRailRow>
 {
     Q_OBJECT
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
@@ -84,21 +82,15 @@ public:
 
     explicit LibraryRailModel(QObject* parent = nullptr);
 
-    int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
 
     bool empty() const noexcept { return m_rows.isEmpty(); }
 
     void setRows(QList<LibraryRailRow> rows);
-    const LibraryRailRow* at(int row) const;
-    const QList<LibraryRailRow>& rows() const noexcept { return m_rows; }
 
 Q_SIGNALS:
     void countChanged();
-
-private:
-    QList<LibraryRailRow> m_rows;
 };
 
 } // namespace kinema::ui::qml

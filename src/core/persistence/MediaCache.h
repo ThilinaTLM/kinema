@@ -10,7 +10,7 @@
 #include <QString>
 
 namespace kinema::config {
-class DownloadSettings;
+class TorrentStreamingSettings;
 }
 
 namespace kinema::core {
@@ -39,7 +39,7 @@ class MediaCache : public QObject
 {
     Q_OBJECT
 public:
-    explicit MediaCache(const config::DownloadSettings& settings,
+    explicit MediaCache(const config::TorrentStreamingSettings& settings,
         QObject* parent = nullptr);
 
     /// `cache::mediaDir()`.
@@ -89,7 +89,7 @@ public:
     /// configurable budget.
     qint64 ephemeralSizeBytes() const;
 
-    /// Configured budget in bytes (`DownloadSettings::cacheBudgetGb`).
+    /// Configured budget in bytes (`TorrentStreamingSettings::cacheBudgetGb`).
     qint64 budgetBytes() const;
 
 public Q_SLOTS:
@@ -102,7 +102,7 @@ private:
     bool hasPinnedMarker(const QString& assetId) const;
     qint64 directorySize(const QString& path) const;
 
-    const config::DownloadSettings& m_settings;
+    const config::TorrentStreamingSettings& m_settings;
     QSet<QString> m_active;
 };
 

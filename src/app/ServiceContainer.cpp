@@ -13,7 +13,6 @@
 #include "api/TorrentioIndexer.h"
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
-#include "config/DownloadSettings.h"
 #include "controllers/DebridCredentialsResolver.h"
 #include "controllers/DownloadController.h"
 
@@ -174,7 +173,7 @@ void ServiceContainer::buildRepositories()
     m_libtorrentClient = new playback::torrent::LibtorrentClient(
         m_settings.torrentStreaming(), *m_torrentCache, a);
     m_mediaCache = std::make_unique<core::MediaCache>(
-        m_settings.download(), a);
+        m_settings.torrentStreaming(), a);
 
     m_db = std::make_unique<core::Database>(a);
     if (!m_db->open()) {
@@ -257,11 +256,11 @@ void ServiceContainer::buildPlaybackSubsystem()
     m_backendRegistry->registerSource(
         std::make_unique<playback::sources::RealDebridMediaSource>(
             *m_http, *m_rd, *m_rdResolver, *m_mediaCache,
-            m_settings.download()));
+            m_settings.torrentStreaming()));
     m_backendRegistry->registerSource(
         std::make_unique<playback::sources::AllDebridMediaSource>(
             *m_http, *m_ad, *m_adResolver, *m_mediaCache,
-            m_settings.download()));
+            m_settings.torrentStreaming()));
     m_backendRegistry->registerSource(
         std::make_unique<playback::sources::TorrentMediaSource>(
             *m_libtorrentClient, *m_mediaCache));

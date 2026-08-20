@@ -4,6 +4,7 @@
 #include "config/BrowseSettings.h"
 
 #include "config/ConfigAccess.h"
+#include "config/MediaKindConfig.h"
 
 #include <QStringList>
 
@@ -60,17 +61,13 @@ domain::MediaKind BrowseSettings::kind() const
 {
     const auto s = detail::read(m_config, kGroup, kKeyKind,
         QStringLiteral("Movie"));
-    return s == QLatin1String("Series")
-        ? domain::MediaKind::Series
-        : domain::MediaKind::Movie;
+    return mediaKindFromConfigString(s);
 }
 
 void BrowseSettings::setKind(domain::MediaKind k)
 {
     detail::write(m_config, kGroup, kKeyKind,
-        k == domain::MediaKind::Series
-            ? QStringLiteral("Series")
-            : QStringLiteral("Movie"));
+        mediaKindToConfigString(k));
 }
 
 QList<int> BrowseSettings::genreIds() const

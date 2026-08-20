@@ -39,4 +39,21 @@ inline void erase(const KSharedConfigPtr& cfg, const char* groupName,
     g.sync();
 }
 
+/// Read a string entry, falling back to `def` when it is absent or
+/// empty (an empty stored value is treated as "unset").
+inline QString readDefaulted(const KSharedConfigPtr& cfg,
+    const char* groupName, const char* key, const QString& def)
+{
+    const auto raw = read(cfg, groupName, key, def);
+    return raw.isEmpty() ? def : raw;
+}
+
+/// Trim `value`, falling back to `def` when the result is empty.
+/// Used by setters that persist a user-editable URL.
+inline QString normalizeUrl(QString value, const QString& def)
+{
+    const auto trimmed = value.trimmed();
+    return trimmed.isEmpty() ? def : trimmed;
+}
+
 } // namespace kinema::config::detail

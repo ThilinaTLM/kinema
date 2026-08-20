@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "config/DownloadSettings.h"
+#include "config/TorrentStreamingSettings.h"
 #include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/persistence/MediaCache.h"
@@ -124,7 +124,7 @@ private Q_SLOTS:
         QDir().mkpath(core::cache::mediaDir().absolutePath());
         m_config = KSharedConfig::openConfig(
             QStringLiteral("kinemarc-tms-test"), KConfig::SimpleConfig);
-        m_settings = std::make_unique<config::DownloadSettings>(m_config);
+        m_settings = std::make_unique<config::TorrentStreamingSettings>(m_config);
         m_settings->setCacheBudgetGb(1);
         m_torrentSettings
             = std::make_unique<config::TorrentStreamingSettings>(m_config);
@@ -254,32 +254,9 @@ private Q_SLOTS:
         QVERIFY(m_engine->promoteCalls.isEmpty());
     }
 
-    void filesForLiftsToMediaFileEntry()
-    {
-        const auto s = makeStream();
-        torrent::TorrentFileEntry e1 { 0, QStringLiteral("S01E01.mkv"),
-            500'000 };
-        torrent::TorrentFileEntry e2 { 1, QStringLiteral("S01E02.mkv"),
-            600'000 };
-        m_engine->stubFiles[s.infoHash.toLower()]
-            = QVector<torrent::TorrentFileEntry> { e1, e2 };
-
-        auto task = m_source->open(makeRef(s), s,
-            domain::PlaybackContext {}, domain::DownloadMode::OnDemand);
-        const auto opened = QCoro::waitFor(std::move(task));
-
-        const auto files = m_source->filesFor(*opened.session);
-        QCOMPARE(files.size(), 2);
-        QCOMPARE(files.at(0).index, 0);
-        QCOMPARE(files.at(0).path, QStringLiteral("S01E01.mkv"));
-        QCOMPARE(files.at(0).size, qint64(500'000));
-        QVERIFY(files.at(0).playable);
-        QCOMPARE(files.at(1).index, 1);
-    }
-
 private:
     KSharedConfigPtr m_config;
-    std::unique_ptr<config::DownloadSettings> m_settings;
+    std::unique_ptr<config::TorrentStreamingSettings> m_settings;
     std::unique_ptr<config::TorrentStreamingSettings> m_torrentSettings;
     std::unique_ptr<core::MediaCache> m_cache;
     std::unique_ptr<core::TorrentCache> m_torrentCache;

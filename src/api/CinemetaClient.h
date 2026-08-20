@@ -50,6 +50,8 @@ public:
     virtual ~CinemetaClient() = default;
 
 private:
+    QUrl buildUrl(const QString& path) const;
+
     core::HttpClient* m_http;
     QUrl m_baseUrl;
 };

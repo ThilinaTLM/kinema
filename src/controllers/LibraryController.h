@@ -92,6 +92,11 @@ Q_SIGNALS:
     void statusMessage(const QString& text, int timeoutMs = 3000);
 
 private:
+    /// Guard, upsert and announce a title. Returns false when the
+    /// title has no usable identity/title (caller bails). Shared by
+    /// `saveMovie` and `saveSeries`.
+    bool commitTitle(const domain::LibraryTitle& title);
+
     void pumpBackfill();
     QCoro::Task<void> runBackfillOne(domain::LibraryTitle seed);
 

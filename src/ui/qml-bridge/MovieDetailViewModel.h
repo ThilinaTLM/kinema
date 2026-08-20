@@ -355,12 +355,6 @@ private:
     void sortInPlace(QList<domain::Stream>& rows) const;
     domain::PlaybackContext currentContext() const;
 
-    /// Forwards a row's stream to a utility-controller
-    /// pointer-to-member. Lets the per-row trampolines stay
-    /// one-liners.
-    template <typename Method>
-    void dispatchStreamAction(int row, Method method);
-
     api::CinemetaClient* m_cinemeta;
     api::IndexerSelector* m_indexers;
     api::TmdbClient* m_tmdb;

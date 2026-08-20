@@ -5,52 +5,6 @@
 
 namespace kinema::playback::session {
 
-QString playbackStateName(PlaybackState s)
-{
-    switch (s) {
-    case PlaybackState::Idle: return QStringLiteral("Idle");
-    case PlaybackState::ResolvingSource: return QStringLiteral("ResolvingSource");
-    case PlaybackState::PreparingTransfer: return QStringLiteral("PreparingTransfer");
-    case PlaybackState::LoadingPlayer: return QStringLiteral("LoadingPlayer");
-    case PlaybackState::ShowingResumePrompt: return QStringLiteral("ShowingResumePrompt");
-    case PlaybackState::Playing: return QStringLiteral("Playing");
-    case PlaybackState::Paused: return QStringLiteral("Paused");
-    case PlaybackState::Seeking: return QStringLiteral("Seeking");
-    case PlaybackState::Buffering: return QStringLiteral("Buffering");
-    case PlaybackState::Stopping: return QStringLiteral("Stopping");
-    case PlaybackState::Ending: return QStringLiteral("Ending");
-    case PlaybackState::Completed: return QStringLiteral("Completed");
-    case PlaybackState::Failed: return QStringLiteral("Failed");
-    }
-    return QStringLiteral("Unknown");
-}
-
-QString playbackInputName(PlaybackInput i)
-{
-    switch (i) {
-    case PlaybackInput::PlayStream: return QStringLiteral("PlayStream");
-    case PlaybackInput::SourceResolved: return QStringLiteral("SourceResolved");
-    case PlaybackInput::TransferReady: return QStringLiteral("TransferReady");
-    case PlaybackInput::PlayableUrlReady: return QStringLiteral("PlayableUrlReady");
-    case PlaybackInput::ResumePromptRequired: return QStringLiteral("ResumePromptRequired");
-    case PlaybackInput::ResumeAccepted: return QStringLiteral("ResumeAccepted");
-    case PlaybackInput::ResumeDeclined: return QStringLiteral("ResumeDeclined");
-    case PlaybackInput::PlayerLoaded: return QStringLiteral("PlayerLoaded");
-    case PlaybackInput::Pause: return QStringLiteral("Pause");
-    case PlaybackInput::Resume: return QStringLiteral("Resume");
-    case PlaybackInput::SeekStarted: return QStringLiteral("SeekStarted");
-    case PlaybackInput::SeekCompleted: return QStringLiteral("SeekCompleted");
-    case PlaybackInput::BufferingStarted: return QStringLiteral("BufferingStarted");
-    case PlaybackInput::BufferingEnded: return QStringLiteral("BufferingEnded");
-    case PlaybackInput::EndOfFile: return QStringLiteral("EndOfFile");
-    case PlaybackInput::Stop: return QStringLiteral("Stop");
-    case PlaybackInput::UserClosed: return QStringLiteral("UserClosed");
-    case PlaybackInput::Error: return QStringLiteral("Error");
-    case PlaybackInput::LoadTimeout: return QStringLiteral("LoadTimeout");
-    }
-    return QStringLiteral("Unknown");
-}
-
 PlaybackState PlaybackStateMachine::handle(PlaybackInput input) noexcept
 {
     using S = PlaybackState;

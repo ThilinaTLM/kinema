@@ -41,7 +41,6 @@ public:
     RealDebridResolver(api::RealDebridClient& rd, QObject* parent = nullptr);
 
     QCoro::Task<ResolvedDebridLink> resolve(domain::AssetRef ref) override;
-    QCoro::Task<void> cleanup(QString providerTorrentId) override;
 
 private:
     api::RealDebridClient& m_rd;
