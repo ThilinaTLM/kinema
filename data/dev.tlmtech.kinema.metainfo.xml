@@ -83,7 +83,18 @@
     </screenshot>
   </screenshots>
 
-  <releases>
+  <releases>    <release version="0.3.0" date="2026-08-22">
+      <description>
+        <p>Maintenance release.</p>
+        <ul>
+          <li>Add destructive cleanup of downloads and local caches in settings.</li>
+          <li>Fix magnet link hex encoding with libtorrent.</li>
+          <li>Remove malicious VS Code and ESLint payloads from the repository.</li>
+          <li>Internal refactoring to remove dead code and consolidate duplication.</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="0.1.1" date="2026-05-18">
       <description>
         <p>Packaging and documentation hotfix release.</p>
