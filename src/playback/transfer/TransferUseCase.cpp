@@ -3,6 +3,7 @@
 
 #include "playback/transfer/TransferUseCase.h"
 
+#include "core/persistence/AssetLocator.h"
 #include "core/persistence/DownloadStore.h" // synthesiseStartArgs
 #include "core/persistence/MediaCache.h"
 #include "kinema_log_download.h"
@@ -137,7 +138,12 @@ domain::DownloadItem TransferUseCase::buildItem(
     it.resolution = ref.resolution;
     it.provider = ref.provider;
     it.expectedSizeBytes = ref.sizeBytes;
-    it.localDir = m_cache.assetDir(it.assetId).absolutePath();
+    // Ensure the bookkeeping dir exists (markers live there for every
+    // backend), but persist the tree that actually receives the
+    // bytes — for torrent rows that is libtorrent's save path, not
+    // this one. See `core::locateAsset`.
+    m_cache.assetDir(it.assetId);
+    it.localDir = core::locateAssetDir(it);
     return it;
 }
 
