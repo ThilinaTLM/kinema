@@ -179,6 +179,10 @@ published.
 
 ## First-run setup
 
+See the [configuration guide](docs/Configuration.md) for how TMDB, debrid
+providers, stream indexers, and players fit together, with complete setup and
+troubleshooting steps. The essentials are summarized below.
+
 ### TMDB (Discover)
 
 Official builds ship with **no embedded TMDB token** (TMDB's terms of
