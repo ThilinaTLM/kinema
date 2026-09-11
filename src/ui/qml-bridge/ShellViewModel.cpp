@@ -32,6 +32,7 @@
 #include "ui/qml-bridge/BrowseViewModel.h"
 #include "ui/qml-bridge/ContinueWatchingViewModel.h"
 #include "ui/qml-bridge/DiscoverViewModel.h"
+#include "ui/qml-bridge/DownloadsViewModel.h"
 #include "ui/qml-bridge/LibraryViewModel.h"
 #include "ui/qml-bridge/MovieDetailViewModel.h"
 #include "ui/qml-bridge/SearchViewModel.h"
@@ -632,6 +633,10 @@ void ShellViewModel::wireStatusForwarding()
     connect(m_services.subtitleController(),
         &controllers::SubtitleController::statusMessage, this,
         &ShellViewModel::passiveMessage);
+    if (auto* downloadsVm = m_services.downloadsVm()) {
+        connect(downloadsVm, &DownloadsViewModel::statusMessage, this,
+            &ShellViewModel::passiveMessage);
+    }
     connect(m_services.resumeUseCase(),
         &playback::resume::ResumeUseCase::statusMessage, this,
         &ShellViewModel::passiveMessage);

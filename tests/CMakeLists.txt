@@ -384,6 +384,11 @@ ecm_add_test(tst_cache_paths.cpp
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
+ecm_add_test(tst_asset_locator.cpp
+    TEST_NAME tst_asset_locator
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
 ecm_add_test(tst_language.cpp
     TEST_NAME tst_language
     LINK_LIBRARIES kinema_core Qt6::Test
@@ -535,7 +540,8 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_alldebrid_resolver tst_realdebrid_resolver
          tst_database tst_history_store
          tst_library_store tst_watched_store tst_watched_controller
-         tst_subtitle_cache_store tst_cache_paths tst_language
+         tst_subtitle_cache_store tst_cache_paths tst_asset_locator
+         tst_language
          tst_moviehash tst_opensubtitles_parse tst_subtitle_controller
          tst_mpv_config_paths tst_mpv_track_list_parse tst_credits_marker
          tst_media_chips tst_mpris_metadata tst_idle_inhibitor

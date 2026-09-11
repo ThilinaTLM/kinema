@@ -3,6 +3,8 @@
 
 #include "ui/qml-bridge/DownloadsListModel.h"
 
+#include "core/persistence/AssetLocator.h"
+
 #include <KFormat>
 #include <KLocalizedString>
 
@@ -263,7 +265,11 @@ QVariant DownloadsListModel::data(const QModelIndex& index, int role) const
     case ErrorTextRole:
         return it.lastError;
     case LocalDirRole:
-        return it.localDir;
+        // Resolved, not the stored column: `localDir` points at the
+        // bookkeeping dir for torrent rows, which never holds media.
+        // Directory-only so this stays free of a filesystem walk on
+        // the repaint path.
+        return core::locateAssetDir(it);
     case DownloadRateBpsRole:
         return live.ratePayloadBps;
     case DownloadRateTextRole:

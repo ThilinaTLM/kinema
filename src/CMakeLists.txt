@@ -21,6 +21,7 @@ set(kinema_core_SRCS
     config/TorrentioSettings.cpp
     config/TorrentStreamingSettings.cpp
 
+    core/persistence/AssetLocator.cpp
     core/persistence/Database.cpp
     core/persistence/DownloadStore.cpp
     core/persistence/HistoryStore.cpp
