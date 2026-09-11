@@ -7,11 +7,13 @@
 #include "domain/PlaybackContext.h"
 #include "controllers/DownloadController.h"
 #include "core/io/HttpErrorPresenter.h"
+#include "core/io/OpenUrl.h"
+#include "core/persistence/AssetLocator.h"
 #include "kinema_log_ui.h"
 #include "playback/session/PlaybackSessionManager.h"
 
 #include <KFormat>
-#include <KIO/OpenUrlJob>
+#include <KIO/OpenFileManagerWindowJob>
 #include <KLocalizedString>
 
 #include <QTimer>
@@ -380,20 +382,57 @@ void DownloadsViewModel::resumeAll()
 
 void DownloadsViewModel::openLocalDir(const QString& assetId)
 {
-    const auto rows = m_controller.items();
-    QString dir;
-    for (const auto& it : rows) {
-        if (it.assetId == assetId) {
-            dir = it.localDir;
-            break;
-        }
-    }
-    if (dir.isEmpty()) {
+    const auto row = m_controller.find(assetId);
+    if (!row) {
+        qCWarning(KINEMA_UI) << "openLocalDir: no row for assetId"
+                             << assetId;
         return;
     }
-    auto* job = new KIO::OpenUrlJob(QUrl::fromLocalFile(dir), this);
-    job->setRunExecutables(false);
-    job->start();
+
+    const auto loc = core::locateAsset(*row);
+    if (loc.dir.isEmpty()) {
+        qCWarning(KINEMA_UI)
+            << "openLocalDir: unresolved location for assetId"
+            << assetId;
+        Q_EMIT statusMessage(i18nc("@info:status",
+                                 "No local folder for this download yet"),
+            5000);
+        return;
+    }
+    if (!loc.exists) {
+        qCWarning(KINEMA_UI).nospace().noquote()
+            << "openLocalDir: dir missing assetId=\"" << assetId
+            << "\" dir=\"" << loc.dir << "\"";
+        Q_EMIT statusMessage(i18nc("@info:status",
+                                 "Folder no longer exists: %1", loc.dir),
+            6000);
+        return;
+    }
+
+    // Select the file itself where we could pin it down; a pack whose
+    // member stays ambiguous falls back to opening the directory.
+    if (!loc.file.isEmpty()) {
+        qCDebug(KINEMA_UI).nospace().noquote()
+            << "openLocalDir: highlighting \"" << loc.file << "\"";
+        KIO::highlightInFileManager({ QUrl::fromLocalFile(loc.file) });
+        return;
+    }
+
+    qCDebug(KINEMA_UI).nospace().noquote()
+        << "openLocalDir: opening \"" << loc.dir << "\"";
+    core::io::openExternal(QUrl::fromLocalFile(loc.dir), this,
+        [this, dir = loc.dir](const core::io::OpenExternalResult& r) {
+            if (r.ok) {
+                return;
+            }
+            qCWarning(KINEMA_UI).nospace().noquote()
+                << "openLocalDir failed dir=\"" << dir
+                << "\" error=\"" << r.errorString << "\"";
+            Q_EMIT statusMessage(i18nc("@info:status",
+                                     "Could not open folder: %1",
+                                     r.errorString),
+                6000);
+        });
 }
 
 } // namespace kinema::ui::qml

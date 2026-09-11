@@ -102,12 +102,19 @@ public Q_SLOTS:
     void pauseAll();
     void resumeAll();
 
-    /// Reveal the asset's local cache directory in the file manager.
+    /// Reveal the asset's payload in the file manager — the file
+    /// itself when it can be pinned down, else its directory.
+    /// Resolves the location from the backend's real payload tree
+    /// rather than the row's `localDir` column; see
+    /// `core::locateAsset`.
     void openLocalDir(const QString& assetId);
 
 Q_SIGNALS:
     void countsChanged();
     void filterChanged();
+    /// Surfaced through `ShellViewModel::passiveMessage`. Carries
+    /// reveal failures, which were previously swallowed whole.
+    void statusMessage(const QString& text, int durationMs);
 
 private Q_SLOTS:
     /// Cheap per-row handler bound to
