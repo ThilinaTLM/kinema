@@ -19,7 +19,8 @@ namespace kinema::core::io {
  * `errorString` carries the KIO error text on failure; empty on
  * success.
  */
-struct OpenExternalResult {
+struct OpenExternalResult
+{
     bool ok = false;
     QString errorString;
 };
@@ -34,12 +35,10 @@ using OpenExternalCallback = std::function<void(const OpenExternalResult&)>;
  * status message.
  *
  * Single entry point for every "open in external app" code path —
- * `StreamUtilityController` (open magnet / open direct URL) and
+ * `StreamActions` (open magnet / open direct URL) and
  * `ShellViewModel` (open IMDb / TMDb / arbitrary URL) both route
  * through here so failure handling stays consistent.
  */
-void openExternal(const QUrl& url,
-    QObject* parent,
-    OpenExternalCallback callback = {});
+void openExternal(const QUrl& url, QObject* parent, OpenExternalCallback callback = {});
 
 } // namespace kinema::core::io

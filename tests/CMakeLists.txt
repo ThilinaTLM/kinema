@@ -13,9 +13,14 @@ set(test_defs
     KINEMA_TEST_PROJECT_ROOT="${KINEMA_TEST_PROJECT_ROOT}"
 )
 
+ecm_add_test(tst_architecture_boundaries.cpp
+    TEST_NAME tst_architecture_boundaries
+    LINK_LIBRARIES Qt6::Test
+)
+
 ecm_add_test(tst_magnet.cpp
     TEST_NAME tst_magnet
-    LINK_LIBRARIES kinema_core Qt6::Test
+    LINK_LIBRARIES kinema_torrent_primitives Qt6::Test
 )
 
 ecm_add_test(tst_url_redactor.cpp
@@ -35,22 +40,22 @@ ecm_add_test(tst_torrentio_url.cpp
 
 ecm_add_test(tst_media_file_selection_policy.cpp
     TEST_NAME tst_media_file_selection_policy
-    LINK_LIBRARIES kinema_core Qt6::Test
+    LINK_LIBRARIES kinema_playback_policy Qt6::Test
 )
 
 ecm_add_test(tst_backend_selection_policy.cpp
     TEST_NAME tst_backend_selection_policy
-    LINK_LIBRARIES kinema_core Qt6::Test
+    LINK_LIBRARIES kinema_playback_policy Qt6::Test
 )
 
 ecm_add_test(tst_resume_policy.cpp
     TEST_NAME tst_resume_policy
-    LINK_LIBRARIES kinema_core Qt6::Test
+    LINK_LIBRARIES kinema_playback_policy Qt6::Test
 )
 
 ecm_add_test(tst_chapter_skip_policy.cpp
     TEST_NAME tst_chapter_skip_policy
-    LINK_LIBRARIES kinema_core Qt6::Test
+    LINK_LIBRARIES kinema_playback_policy Qt6::Test
 )
 
 ecm_add_test(tst_playback_state_machine.cpp
@@ -95,7 +100,7 @@ ecm_add_test(tst_sqlite_download_repository.cpp
 
 ecm_add_test(tst_piece_planner.cpp
     TEST_NAME tst_piece_planner
-    LINK_LIBRARIES kinema_core Qt6::Test
+    LINK_LIBRARIES kinema_torrent_primitives Qt6::Test
 )
 
 ecm_add_test(tst_libtorrent_client_lazy_start.cpp
@@ -210,6 +215,11 @@ ecm_add_test(tst_results_list_model.cpp
 
 ecm_add_test(tst_streams_list_model.cpp
     TEST_NAME tst_streams_list_model
+    LINK_LIBRARIES kinema_core Qt6::Test
+)
+
+ecm_add_test(tst_stream_list_state.cpp
+    TEST_NAME tst_stream_list_state
     LINK_LIBRARIES kinema_core Qt6::Test
 )
 
@@ -513,7 +523,8 @@ if(KINEMA_ENABLE_MPV_EMBED)
     )
 endif()
 
-foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
+foreach(t tst_architecture_boundaries
+         tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_media_file_selection_policy
          tst_backend_selection_policy tst_resume_policy
          tst_chapter_skip_policy
@@ -531,7 +542,7 @@ foreach(t tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_stream_tokens
          tst_date_format tst_app_settings
          tst_search_view_model tst_browse_view_model tst_results_list_model
-         tst_streams_list_model tst_episodes_list_model
+         tst_streams_list_model tst_stream_list_state tst_episodes_list_model
          tst_movie_detail_view_model tst_series_detail_view_model
          tst_subtitle_results_model
          tst_token_controller tst_debrid_credentials_resolver

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "domain/Media.h"
-#include "ui/qml-bridge/ResultsListModel.h"
+#include "ui/qml-bridge/search/ResultsListModel.h"
 
 #include <QSignalSpy>
 #include <QTest>
@@ -13,16 +13,15 @@ using kinema::ui::qml::ResultsListModel;
 
 namespace {
 
-MetaSummary makeRow(const QString& imdb, const QString& title,
-    int year, MediaKind kind = MediaKind::Movie)
+MetaSummary
+makeRow(const QString& imdb, const QString& title, int year, MediaKind kind = MediaKind::Movie)
 {
     MetaSummary s;
     s.imdbId = imdb;
     s.title = title;
     s.year = year;
     s.kind = kind;
-    s.poster = QUrl(QStringLiteral(
-        "https://images.metahub.space/poster/medium/%1/img").arg(imdb));
+    s.poster = QUrl(QStringLiteral("https://images.metahub.space/poster/medium/%1/img").arg(imdb));
     s.imdbRating = 8.4;
     s.description = QStringLiteral("desc");
     return s;
@@ -67,8 +66,7 @@ private Q_SLOTS:
         QSignalSpy countSpy(&m, &ResultsListModel::countChanged);
         m.setResults({
             makeRow(QStringLiteral("tt1"), QStringLiteral("A"), 2020),
-            makeRow(QStringLiteral("tt2"), QStringLiteral("B"), 2021,
-                MediaKind::Series),
+            makeRow(QStringLiteral("tt2"), QStringLiteral("B"), 2021, MediaKind::Series),
         });
 
         QCOMPARE(m.rowCount(), 2);
@@ -127,8 +125,7 @@ private Q_SLOTS:
         m.setResults({
             makeRow(QStringLiteral("tt1"), QStringLiteral("A"), 2020),
         });
-        const auto v = m.data(m.index(0),
-            ResultsListModel::PosterUrlRole);
+        const auto v = m.data(m.index(0), ResultsListModel::PosterUrlRole);
         QCOMPARE(v.metaType().id(), QMetaType::QString);
         QVERIFY(v.toString().startsWith(QStringLiteral("https://")));
     }

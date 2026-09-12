@@ -35,7 +35,7 @@ namespace kinema::controllers {
  *
  * Debrid: both the RD token and the AllDebrid apikey are published
  * raw whenever the keyring has them. `download::BackendSelector`
- * (configured by `MainController` from
+ * (configured by `ShellViewModel` from
  * `config::DebridSettings::activeProvider()`) is what actually
  * decides which provider serves new sessions; the per-client tokens
  * still need to be set so explicit override paths (resume, per-row
@@ -45,12 +45,11 @@ class TokenController : public QObject
 {
     Q_OBJECT
 public:
-    TokenController(
-        core::TokenStore* tokens,
-        api::TmdbClient* tmdb,
-        const config::DebridSettings& debridSettings,
-        QObject* parent = nullptr,
-        QString tmdbCompiledDefaultToken = QString());
+    TokenController(core::TokenStore* tokens,
+                    api::TmdbClient* tmdb,
+                    const config::DebridSettings& debridSettings,
+                    QObject* parent = nullptr,
+                    QString tmdbCompiledDefaultToken = QString());
 
     const QString& realDebridToken() const noexcept { return m_rdToken; }
     const QString& allDebridApiKey() const noexcept { return m_adApiKey; }

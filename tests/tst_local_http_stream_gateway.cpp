@@ -4,21 +4,21 @@
 #include "playback/ports/ByteRangeSource.h"
 #include "playback/streaming/LocalHttpStreamGateway.h"
 
-#include <QCoro/QCoroNetworkReply>
-#include <QCoro/QCoroSignal>
-#include <QCoro/QCoroTask>
-
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSignalSpy>
 #include <QTest>
 
+#include <QCoro/QCoroNetworkReply>
+#include <QCoro/QCoroSignal>
+#include <QCoro/QCoroTask>
+
 #include <vector>
 
+using kinema::core::ByteRange;
 using kinema::playback::ports::ByteRangeSource;
 using kinema::playback::streaming::LocalHttpStreamGateway;
-using kinema::torrent::ByteRange;
 
 namespace {
 
@@ -26,13 +26,12 @@ class FakeByteRangeSource : public ByteRangeSource
 {
 public:
     explicit FakeByteRangeSource(QByteArray content,
-        QString fileName = QStringLiteral("test.mkv"),
-        QString assetId = QStringLiteral("asset-1"))
+                                 QString fileName = QStringLiteral("test.mkv"),
+                                 QString assetId = QStringLiteral("asset-1"))
         : m_content(std::move(content))
         , m_fileName(std::move(fileName))
         , m_assetId(std::move(assetId))
-    {
-    }
+    { }
 
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
@@ -50,8 +49,7 @@ public:
             return {};
         }
         const qint64 len = r.endInclusive - r.start + 1;
-        return m_content.mid(static_cast<int>(r.start),
-            static_cast<int>(len));
+        return m_content.mid(static_cast<int>(r.start), static_cast<int>(len));
     }
     void touch() override { ++touchCount; }
 
@@ -79,8 +77,9 @@ QByteArray fetchPath(const QUrl& url, const QByteArray& rangeHeader = {})
     return body;
 }
 
-int fetchStatus(const QUrl& url, const QByteArray& method = "GET",
-    const QByteArray& rangeHeader = {})
+int fetchStatus(const QUrl& url,
+                const QByteArray& method = "GET",
+                const QByteArray& rangeHeader = {})
 {
     QNetworkAccessManager nam;
     QNetworkRequest req(url);
@@ -94,8 +93,7 @@ int fetchStatus(const QUrl& url, const QByteArray& method = "GET",
         reply = nam.get(req);
     }
     QCoro::waitFor(qCoro(reply).waitForFinished());
-    const int status = reply->attribute(
-        QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     reply->deleteLater();
     return status;
 }
@@ -128,11 +126,10 @@ private Q_SLOTS:
         QVERIFY(gw.listen());
 
         FakeByteRangeSource source(QByteArray("x"),
-            QStringLiteral("The Show (1080p) [foo].mkv"),
-            QStringLiteral("asset-1"));
+                                   QStringLiteral("The Show (1080p) [foo].mkv"),
+                                   QStringLiteral("asset-1"));
         const QUrl url = gw.expose(source);
-        QCOMPARE(url.path(),
-            QStringLiteral("/stream/asset-1/The Show (1080p) [foo].mkv"));
+        QCOMPARE(url.path(), QStringLiteral("/stream/asset-1/The Show (1080p) [foo].mkv"));
         const QByteArray encoded = url.toEncoded();
         QVERIFY(!encoded.contains("%2520"));
         QVERIFY(encoded.contains("%20"));
@@ -179,17 +176,15 @@ private Q_SLOTS:
         QVERIFY(gw.listen());
 
         const QByteArray content("Recovered payload");
-        FakeByteRangeSource source(content,
-            QStringLiteral("episode.mkv"),
-            QStringLiteral("asset-recovered"));
+        FakeByteRangeSource source(
+            content, QStringLiteral("episode.mkv"), QStringLiteral("asset-recovered"));
         // Expose it once to learn the port, then revoke and rely on
         // the resolver to "rehydrate" it.
         QUrl url = gw.expose(source);
         gw.revoke(source);
 
         gw.setSessionResolver(
-            [&gw, &source](const QString& assetId)
-                -> QCoro::Task<ByteRangeSource*> {
+            [&gw, &source](const QString& assetId) -> QCoro::Task<ByteRangeSource*> {
                 if (assetId == source.assetId()) {
                     gw.expose(source);
                     co_return &source;
@@ -213,9 +208,7 @@ private Q_SLOTS:
         for (int i = 0; i < kSize; ++i) {
             content[i] = static_cast<char>((i * 31) & 0xff);
         }
-        FakeByteRangeSource source(content,
-            QStringLiteral("big.mkv"),
-            QStringLiteral("asset-big"));
+        FakeByteRangeSource source(content, QStringLiteral("big.mkv"), QStringLiteral("asset-big"));
         const QUrl url = gw.expose(source);
         const auto body = fetchPath(url);
         QCOMPARE(body.size(), content.size());

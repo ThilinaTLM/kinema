@@ -2,27 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ui/qml-bridge/settings/AllDebridSectionViewModel.h"
-#include "core/util/DateFormat.h"
-#include "ui/qml-bridge/settings/SettingsStatus.h"
-#include "api/AllDebridClient.h"
+
+#include "api/alldebrid/AllDebridClient.h"
 #include "config/DebridSettings.h"
 #include "core/io/HttpClient.h"
 #include "core/io/HttpError.h"
 #include "core/io/HttpErrorPresenter.h"
 #include "core/persistence/TokenStore.h"
+#include "core/util/DateFormat.h"
 #include "kinema_log_ui.h"
+#include "ui/qml-bridge/settings/SettingsStatus.h"
+
 #include <KLocalizedString>
 
 namespace kinema::ui::qml::settings {
 
 // ============================== Debrid: AllDebrid section ===============
 
-AllDebridSectionViewModel::AllDebridSectionViewModel(
-    core::HttpClient* http, core::TokenStore* tokens,
-    config::DebridSettings& settings, QObject* parent)
+AllDebridSectionViewModel::AllDebridSectionViewModel(core::HttpClient* http,
+                                                     core::TokenStore* tokens,
+                                                     config::DebridSettings& settings,
+                                                     QObject* parent)
     : CredentialSectionViewModelBase(http, tokens, settings, parent)
-{
-}
+{ }
 
 QString AllDebridSectionViewModel::credentialKey() const
 {
@@ -57,40 +59,35 @@ QCoro::Task<void> AllDebridSectionViewModel::testTask()
         co_return;
     }
     setBusy(true);
-    setStatus(i18nc("@info ad settings status, in progress",
-        "Testing AllDebrid API key…"), kStatusInfo);
+    setStatus(i18nc("@info ad settings status, in progress", "Testing AllDebrid API key…"),
+              kStatusInfo);
     api::AllDebridClient client(m_http);
     client.setApiKey(apiKey);
     try {
         const auto user = co_await client.user();
-        const auto plan = user.isPremium
-            ? (user.isTrial
-                ? i18nc("@info ad plan label", "trial")
-                : i18nc("@info ad plan label", "premium"))
-            : i18nc("@info ad plan label", "free");
+        const auto plan = user.isPremium ? (user.isTrial ? i18nc("@info ad plan label", "trial")
+                                                         : i18nc("@info ad plan label", "premium"))
+                                         : i18nc("@info ad plan label", "free");
         QString msg = i18nc("@info ad settings status",
-            "Signed in as %1 (%2)",
-            user.username.isEmpty() ? QStringLiteral("—")
-                                    : user.username,
-            plan);
+                            "Signed in as %1 (%2)",
+                            user.username.isEmpty() ? QStringLiteral("—") : user.username,
+                            plan);
         if (user.premiumUntil) {
             msg += QLatin1Char('\n')
-                + i18nc("@info ad settings status premium expiry",
-                    "Premium until: %1",
-                    core::formatReleaseDate(*user.premiumUntil));
+                   + i18nc("@info ad settings status premium expiry",
+                           "Premium until: %1",
+                           core::formatReleaseDate(*user.premiumUntil));
         }
         setStatus(msg, kStatusPositive);
     } catch (const std::exception& e) {
         if (const auto* he = core::asHttpError(e);
-            he
-            && (he->httpStatus() == 401 || he->httpStatus() == 403)) {
+            he && (he->httpStatus() == 401 || he->httpStatus() == 403)) {
             setStatus(i18nc("@info ad settings status",
-                "AllDebrid rejected the API key (HTTP %1).",
-                he->httpStatus()),
-                kStatusError);
+                            "AllDebrid rejected the API key (HTTP %1).",
+                            he->httpStatus()),
+                      kStatusError);
         } else {
-            setStatus(core::describeError(e, "ad settings/test"),
-                kStatusError);
+            setStatus(core::describeError(e, "ad settings/test"), kStatusError);
         }
     }
     setBusy(false);

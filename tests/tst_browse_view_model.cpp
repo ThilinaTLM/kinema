@@ -1,33 +1,33 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+#include "api/tmdb/TmdbClient.h"
+#include "config/BrowseSettings.h"
+#include "core/io/HttpError.h"
+#include "core/util/DateWindow.h"
 #include "domain/Discover.h"
 #include "domain/Media.h"
-#include "api/TmdbClient.h"
-#include "config/BrowseSettings.h"
-#include "core/util/DateWindow.h"
-#include "core/io/HttpError.h"
-#include "ui/qml-bridge/BrowseViewModel.h"
-#include "ui/qml-bridge/DiscoverSectionModel.h"
-
-#include <KConfig>
-#include <KSharedConfig>
+#include "ui/qml-bridge/browse/BrowseViewModel.h"
+#include "ui/qml-bridge/discover/DiscoverSectionModel.h"
 
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <KConfig>
+#include <KSharedConfig>
+
+using kinema::api::TmdbClient;
+using kinema::config::BrowseSettings;
+using kinema::core::DateWindow;
+using kinema::core::HttpError;
 using kinema::domain::DiscoverItem;
 using kinema::domain::DiscoverPageResult;
 using kinema::domain::DiscoverQuery;
 using kinema::domain::DiscoverSort;
 using kinema::domain::MediaKind;
-using kinema::api::TmdbClient;
 using kinema::domain::TmdbGenre;
-using kinema::config::BrowseSettings;
-using kinema::core::DateWindow;
-using kinema::core::HttpError;
 using kinema::ui::qml::BrowseViewModel;
 using kinema::ui::qml::DiscoverSectionModel;
 
@@ -36,10 +36,7 @@ namespace {
 class FakeTmdb : public TmdbClient
 {
 public:
-    FakeTmdb()
-        : TmdbClient(nullptr)
-    {
-    }
+    FakeTmdb() : TmdbClient(nullptr) { }
 
     // Canned response for /discover. The view-model uses
     // `result.totalPages` for pagination so populate it explicitly.
@@ -59,12 +56,10 @@ public:
         ++discoverCalls;
         lastQuery = q;
         if (throwAuth) {
-            throw HttpError(HttpError::Kind::HttpStatus, 401,
-                QStringLiteral("auth"));
+            throw HttpError(HttpError::Kind::HttpStatus, 401, QStringLiteral("auth"));
         }
         if (throwGeneric) {
-            throw HttpError(HttpError::Kind::Network, 0,
-                QStringLiteral("network"));
+            throw HttpError(HttpError::Kind::Network, 0, QStringLiteral("network"));
         }
         co_return cannedPage;
     }
@@ -72,8 +67,7 @@ public:
     QCoro::Task<QList<TmdbGenre>> genreList(MediaKind kind) override
     {
         ++genreCalls;
-        co_return kind == MediaKind::Series
-            ? cannedGenresSeries : cannedGenresMovie;
+        co_return kind == MediaKind::Series ? cannedGenresSeries : cannedGenresMovie;
     }
 };
 
@@ -102,20 +96,15 @@ class TstBrowseViewModel : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
-    void initTestCase()
-    {
-        QStandardPaths::setTestModeEnabled(true);
-    }
+    void initTestCase() { QStandardPaths::setTestModeEnabled(true); }
 
     void init()
     {
         m_tmpdir = std::make_unique<QTemporaryDir>();
         QVERIFY(m_tmpdir->isValid());
-        m_config = KSharedConfig::openConfig(
-            m_tmpdir->filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig);
-        m_settings
-            = std::make_unique<BrowseSettings>(m_config, nullptr);
+        m_config = KSharedConfig::openConfig(m_tmpdir->filePath(QStringLiteral("kinemarc")),
+                                             KConfig::SimpleConfig);
+        m_settings = std::make_unique<BrowseSettings>(m_config, nullptr);
     }
 
     void cleanup()
@@ -135,8 +124,7 @@ private Q_SLOTS:
         vm.refresh();
         drain();
         QCOMPARE(tmdb.discoverCalls, 0);
-        QCOMPARE(vm.results()->state(),
-            DiscoverSectionModel::State::Empty);
+        QCOMPARE(vm.results()->state(), DiscoverSectionModel::State::Empty);
     }
 
     void testRefreshPopulatesResults()
@@ -158,8 +146,7 @@ private Q_SLOTS:
         drain();
 
         QCOMPARE(tmdb.discoverCalls, 1);
-        QCOMPARE(vm.results()->state(),
-            DiscoverSectionModel::State::Ready);
+        QCOMPARE(vm.results()->state(), DiscoverSectionModel::State::Ready);
         QCOMPARE(vm.results()->rowCount(), 2);
         QVERIFY(vm.canLoadMore());
     }
@@ -169,8 +156,7 @@ private Q_SLOTS:
         FakeTmdb tmdb;
         tmdb.setToken(QStringLiteral("token"));
         DiscoverPageResult page1;
-        page1.items
-            = { makeItem(1, MediaKind::Movie, QStringLiteral("A")) };
+        page1.items = {makeItem(1, MediaKind::Movie, QStringLiteral("A"))};
         page1.page = 1;
         page1.totalPages = 2;
         tmdb.cannedPage = page1;
@@ -182,8 +168,7 @@ private Q_SLOTS:
         QCOMPARE(vm.results()->rowCount(), 1);
 
         DiscoverPageResult page2;
-        page2.items
-            = { makeItem(2, MediaKind::Movie, QStringLiteral("B")) };
+        page2.items = {makeItem(2, MediaKind::Movie, QStringLiteral("B"))};
         page2.page = 2;
         page2.totalPages = 2;
         tmdb.cannedPage = page2;
@@ -209,8 +194,7 @@ private Q_SLOTS:
         tmdb.throwAuth = true;
 
         BrowseViewModel vm(&tmdb, *m_settings, nullptr);
-        QSignalSpy authSpy(&vm,
-            &BrowseViewModel::authFailedChanged);
+        QSignalSpy authSpy(&vm, &BrowseViewModel::authFailedChanged);
         vm.refresh();
         drain();
 
@@ -229,8 +213,7 @@ private Q_SLOTS:
         vm.refresh();
         drain();
         QVERIFY(!vm.authFailed());
-        QCOMPARE(vm.results()->state(),
-            DiscoverSectionModel::State::Error);
+        QCOMPARE(vm.results()->state(), DiscoverSectionModel::State::Error);
         QVERIFY(!vm.results()->errorMessage().isEmpty());
     }
 
@@ -241,8 +224,7 @@ private Q_SLOTS:
         BrowseViewModel vm(&tmdb, *m_settings, nullptr);
 
         vm.setSort(static_cast<int>(DiscoverSort::Rating));
-        QCOMPARE(static_cast<int>(m_settings->sort()),
-            static_cast<int>(DiscoverSort::Rating));
+        QCOMPARE(static_cast<int>(m_settings->sort()), static_cast<int>(DiscoverSort::Rating));
 
         vm.setMinRatingPct(70);
         QCOMPARE(m_settings->minRatingPct(), 70);
@@ -252,14 +234,14 @@ private Q_SLOTS:
 
         vm.setDateWindow(static_cast<int>(DateWindow::Past3Years));
         QCOMPARE(static_cast<int>(m_settings->dateWindow()),
-            static_cast<int>(DateWindow::Past3Years));
+                 static_cast<int>(DateWindow::Past3Years));
     }
 
     void testKindFlipClearsGenreSelection()
     {
         FakeTmdb tmdb;
         tmdb.setToken(QStringLiteral("token"));
-        m_settings->setGenreIds({ 28, 18 });
+        m_settings->setGenreIds({28, 18});
         BrowseViewModel vm(&tmdb, *m_settings, nullptr);
         QCOMPARE(vm.genreIds().size(), 2);
 
@@ -276,11 +258,9 @@ private Q_SLOTS:
         tmdb.setToken(QStringLiteral("token"));
         BrowseViewModel vm(&tmdb, *m_settings, nullptr);
 
-        QSignalSpy filtersSpy(&vm,
-            &BrowseViewModel::filtersChanged);
+        QSignalSpy filtersSpy(&vm, &BrowseViewModel::filtersChanged);
 
-        vm.applyPreset(static_cast<int>(MediaKind::Series),
-            static_cast<int>(DiscoverSort::Rating));
+        vm.applyPreset(static_cast<int>(MediaKind::Series), static_cast<int>(DiscoverSort::Rating));
 
         QCOMPARE(vm.kind(), static_cast<int>(MediaKind::Series));
         QCOMPARE(vm.sort(), static_cast<int>(DiscoverSort::Rating));
@@ -294,9 +274,7 @@ private Q_SLOTS:
         FakeTmdb tmdb;
         tmdb.setToken(QStringLiteral("token"));
         DiscoverPageResult first;
-        first.items
-            = { makeItem(1, MediaKind::Movie,
-                QStringLiteral("First")) };
+        first.items = {makeItem(1, MediaKind::Movie, QStringLiteral("First"))};
         first.page = 1;
         first.totalPages = 1;
         tmdb.cannedPage = first;
@@ -305,9 +283,7 @@ private Q_SLOTS:
         vm.refresh();
         // Don't drain — second refresh supersedes the first.
         DiscoverPageResult second;
-        second.items
-            = { makeItem(2, MediaKind::Movie,
-                QStringLiteral("Second")) };
+        second.items = {makeItem(2, MediaKind::Movie, QStringLiteral("Second"))};
         second.page = 1;
         second.totalPages = 1;
         tmdb.cannedPage = second;
@@ -337,10 +313,8 @@ private Q_SLOTS:
         vm.refresh();
         drain();
 
-        QSignalSpy movieSpy(&vm,
-            &BrowseViewModel::openMovieRequested);
-        QSignalSpy seriesSpy(&vm,
-            &BrowseViewModel::openSeriesRequested);
+        QSignalSpy movieSpy(&vm, &BrowseViewModel::openMovieRequested);
+        QSignalSpy seriesSpy(&vm, &BrowseViewModel::openSeriesRequested);
 
         vm.activate(0);
         QCOMPARE(movieSpy.count(), 1);

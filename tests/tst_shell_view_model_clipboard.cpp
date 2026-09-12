@@ -3,7 +3,7 @@
 
 #include "app/ServiceContainer.h"
 #include "config/AppSettings.h"
-#include "ui/qml-bridge/ShellViewModel.h"
+#include "ui/qml-bridge/shell/ShellViewModel.h"
 
 #include <QClipboard>
 #include <QGuiApplication>
@@ -52,16 +52,16 @@ void TestShellViewModelClipboard::initTestCase()
 
 namespace {
 
-struct ShellFixture {
-    std::unique_ptr<AppSettings> settings
-        = std::make_unique<AppSettings>();
+struct ShellFixture
+{
+    std::unique_ptr<AppSettings> settings = std::make_unique<AppSettings>();
     std::unique_ptr<ServiceContainer> services;
     std::unique_ptr<ShellViewModel> shell;
 
     ShellFixture()
     {
         services = std::make_unique<ServiceContainer>(*settings);
-        shell = std::make_unique<ShellViewModel>(*services);
+        shell = std::make_unique<ShellViewModel>(services->shellDependencies());
     }
 };
 
@@ -75,8 +75,7 @@ void TestShellViewModelClipboard::copyToClipboardDefaultToast()
 
     fx.shell->copyToClipboard(QStringLiteral("hello"));
 
-    QCOMPARE(QGuiApplication::clipboard()->text(),
-        QStringLiteral("hello"));
+    QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("hello"));
     QCOMPARE(spy.count(), 1);
     const auto args = spy.takeFirst();
     QVERIFY(!args.at(0).toString().isEmpty());
@@ -88,12 +87,10 @@ void TestShellViewModelClipboard::copyToClipboardCustomToast()
     ShellFixture fx;
     QSignalSpy spy(fx.shell.get(), &ShellViewModel::passiveMessage);
 
-    fx.shell->copyToClipboard(QStringLiteral("Inception"),
-        QStringLiteral("Title copied"));
+    fx.shell->copyToClipboard(QStringLiteral("Inception"), QStringLiteral("Title copied"));
 
     QCOMPARE(spy.count(), 1);
-    QCOMPARE(spy.takeFirst().at(0).toString(),
-        QStringLiteral("Title copied"));
+    QCOMPARE(spy.takeFirst().at(0).toString(), QStringLiteral("Title copied"));
 }
 
 void TestShellViewModelClipboard::copyToClipboardEmptyIsNoop()
@@ -102,10 +99,9 @@ void TestShellViewModelClipboard::copyToClipboardEmptyIsNoop()
     QSignalSpy spy(fx.shell.get(), &ShellViewModel::passiveMessage);
     QGuiApplication::clipboard()->setText(QStringLiteral("sentinel"));
 
-    fx.shell->copyToClipboard(QString {});
+    fx.shell->copyToClipboard(QString{});
 
-    QCOMPARE(QGuiApplication::clipboard()->text(),
-        QStringLiteral("sentinel"));
+    QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("sentinel"));
     QCOMPARE(spy.count(), 0);
 }
 
@@ -116,7 +112,7 @@ void TestShellViewModelClipboard::openImdbTitleRejectsGarbage()
 
     // Each of these should be rejected at the regex gate and never
     // reach KIO::OpenUrlJob, so the test stays hermetic on CI.
-    fx.shell->openImdbTitle(QString {});
+    fx.shell->openImdbTitle(QString{});
     fx.shell->openImdbTitle(QStringLiteral("not-an-id"));
     fx.shell->openImdbTitle(QStringLiteral("123456"));
     fx.shell->openImdbTitle(QStringLiteral("tt"));

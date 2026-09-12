@@ -3,8 +3,8 @@
 
 #include "ui/qml-bridge/settings/TorrentioSectionViewModel.h"
 
+#include "api/torrentio/TorrentioConfig.h"
 #include "config/TorrentioSettings.h"
-#include "core/util/TorrentioConfig.h"
 #include "domain/Indexer.h"
 #include "domain/Media.h"
 
@@ -15,9 +15,12 @@ namespace {
 int sortModeToIndex(core::torrentio::SortMode m)
 {
     switch (m) {
-    case core::torrentio::SortMode::Seeders: return 0;
-    case core::torrentio::SortMode::Size: return 1;
-    case core::torrentio::SortMode::QualitySize: return 2;
+    case core::torrentio::SortMode::Seeders:
+        return 0;
+    case core::torrentio::SortMode::Size:
+        return 1;
+    case core::torrentio::SortMode::QualitySize:
+        return 2;
     }
     return 0;
 }
@@ -25,24 +28,30 @@ int sortModeToIndex(core::torrentio::SortMode m)
 core::torrentio::SortMode indexToSortMode(int idx)
 {
     switch (idx) {
-    case 1: return core::torrentio::SortMode::Size;
-    case 2: return core::torrentio::SortMode::QualitySize;
-    default: return core::torrentio::SortMode::Seeders;
+    case 1:
+        return core::torrentio::SortMode::Size;
+    case 2:
+        return core::torrentio::SortMode::QualitySize;
+    default:
+        return core::torrentio::SortMode::Seeders;
     }
 }
 
 } // namespace
 
-TorrentioSectionViewModel::TorrentioSectionViewModel(
-    api::IndexerSelector* indexers,
-    config::TorrentioSettings& settings, QObject* parent)
-    : IndexerSectionViewModelBase(indexers, parent)
-    , m_settings(settings)
+TorrentioSectionViewModel::TorrentioSectionViewModel(api::IndexerSelector* indexers,
+                                                     config::TorrentioSettings& settings,
+                                                     QObject* parent)
+    : IndexerSectionViewModelBase(indexers, parent), m_settings(settings)
 {
-    connect(&m_settings, &config::TorrentioSettings::defaultSortChanged,
-        this, &TorrentioSectionViewModel::defaultSortChanged);
-    connect(&m_settings, &config::TorrentioSettings::baseUrlChanged,
-        this, &TorrentioSectionViewModel::baseUrlChanged);
+    connect(&m_settings,
+            &config::TorrentioSettings::defaultSortChanged,
+            this,
+            &TorrentioSectionViewModel::defaultSortChanged);
+    connect(&m_settings,
+            &config::TorrentioSettings::baseUrlChanged,
+            this,
+            &TorrentioSectionViewModel::baseUrlChanged);
 }
 
 int TorrentioSectionViewModel::defaultSort() const

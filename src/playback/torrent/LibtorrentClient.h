@@ -9,12 +9,13 @@
 #include "torrent/TorrentFileEntry.h"
 
 #include <QByteArray>
-#include <QCoro/QCoroTask>
 #include <QHash>
 #include <QObject>
 #include <QString>
 #include <QTimer>
 #include <QVector>
+
+#include <QCoro/QCoroTask>
 
 #include <memory>
 
@@ -40,7 +41,8 @@ namespace kinema::playback::torrent {
  * unified downloader needs to register the asset with the localhost
  * gateway and present a meaningful filename to the user.
  */
-struct PreparedSession {
+struct PreparedSession
+{
     QString token;
     QString fileName;
     qint64 fileSize = 0;
@@ -83,10 +85,9 @@ class LibtorrentClient : public QObject
 {
     Q_OBJECT
 public:
-    LibtorrentClient(
-        const config::TorrentStreamingSettings& settings,
-        core::TorrentCache& cache,
-        QObject* parent = nullptr);
+    LibtorrentClient(const config::TorrentStreamingSettings& settings,
+                     core::TorrentCache& cache,
+                     QObject* parent = nullptr);
     ~LibtorrentClient() override;
 
     LibtorrentClient(const LibtorrentClient&) = delete;
@@ -101,10 +102,7 @@ public:
     /// Raw libtorrent session. Returns nullptr until
     /// `ensureStarted()` has been called.
     libtorrent::session* session() noexcept { return m_session.get(); }
-    const libtorrent::session* session() const noexcept
-    {
-        return m_session.get();
-    }
+    const libtorrent::session* session() const noexcept { return m_session.get(); }
 
     /// Re-apply transfer rate limits from `settings`. Safe to call
     /// before `ensureStarted()`; no-ops until the session is built.
@@ -125,24 +123,21 @@ public:
     /// callers need to wire the asset into a downstream stream
     /// gateway. Virtual so unit-test doubles can short-circuit
     /// before any real libtorrent activity.
-    virtual QCoro::Task<PreparedSession> prepareSession(
-        const domain::Stream& stream,
-        const domain::PlaybackContext& ctx,
-        PrepareMode mode = PrepareMode::Streaming);
+    virtual QCoro::Task<PreparedSession> prepareSession(const domain::Stream& stream,
+                                                        const domain::PlaybackContext& ctx,
+                                                        PrepareMode mode = PrepareMode::Streaming);
 
     /// Wait until every piece backing `[range.start..range.endInclusive]`
     /// is on disk. Bumps the in-flight read-ahead window so the
     /// torrent prioritises subsequent reads. False on timeout / no
     /// such token / invalid range.
-    QCoro::Task<bool> ensureRange(const QString& token,
-        kinema::torrent::ByteRange range);
+    QCoro::Task<bool> ensureRange(const QString& token, kinema::core::ByteRange range);
 
     /// Synchronous read against the local payload file. Bytes
     /// beyond `ensureRange()` are not guaranteed to be present.
-    QByteArray readRange(const QString& token,
-        kinema::torrent::ByteRange range) const;
+    QByteArray readRange(const QString& token, kinema::core::ByteRange range) const;
 
-    qint64  fileSizeForToken(const QString& token) const;
+    qint64 fileSizeForToken(const QString& token) const;
     QString fileNameForToken(const QString& token) const;
 
     /// Mark a session as recently active so the idle-stop timer
@@ -153,8 +148,8 @@ public:
     /// `infoHash`. Empty when no session exists or metadata is not
     /// yet available. Virtual so test doubles can publish a
     /// scripted catalog without going through the engine.
-    virtual QVector<kinema::torrent::TorrentFileEntry> filesForInfoHash(
-        const QString& infoHash) const;
+    virtual QVector<kinema::torrent::TorrentFileEntry>
+    filesForInfoHash(const QString& infoHash) const;
 
     /// Exempt the session for `infoHash` from idle-stop (used by
     /// `Save offline` pins). Virtual for test recording.
@@ -186,9 +181,13 @@ Q_SIGNALS:
     /// `state_update_alert` decoded into per-handle telemetry.
     /// `etaSeconds` is `-1` when the rate is zero or remaining
     /// bytes can't be computed.
-    void statsUpdated(QString infoHash, qint64 doneBytes,
-        qint64 ratePayloadBps, int peers, int seeds,
-        int etaSeconds, bool finished);
+    void statsUpdated(QString infoHash,
+                      qint64 doneBytes,
+                      qint64 ratePayloadBps,
+                      int peers,
+                      int seeds,
+                      int etaSeconds,
+                      bool finished);
 
     /// `torrent_finished_alert` for an info hash.
     void torrentFinished(QString infoHash);
@@ -208,19 +207,19 @@ private Q_SLOTS:
 private:
     struct Session;
 
-    Session*       byToken(const QString& token);
+    Session* byToken(const QString& token);
     const Session* byToken(const QString& token) const;
-    void           stopHash(const QString& hash, const char* reason);
-    void           refreshStatsTimerRunning();
+    void stopHash(const QString& hash, const char* reason);
+    void refreshStatsTimerRunning();
 
     const config::TorrentStreamingSettings& m_settings;
-    core::TorrentCache&                     m_cache;
-    std::unique_ptr<libtorrent::session>    m_session;
-    QTimer                                  m_statsTimer;
-    QTimer                                  m_idleTimer;
-    QHash<QString, Session>                 m_sessions;
-    QHash<QString, QString>                 m_tokenToHash;
-    int                                     m_activeHandles = 0;
+    core::TorrentCache& m_cache;
+    std::unique_ptr<libtorrent::session> m_session;
+    QTimer m_statsTimer;
+    QTimer m_idleTimer;
+    QHash<QString, Session> m_sessions;
+    QHash<QString, QString> m_tokenToHash;
+    int m_activeHandles = 0;
 };
 
 } // namespace kinema::playback::torrent

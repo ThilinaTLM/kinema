@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "ui/qml-bridge/DownloadsListModel.h"
-
 #include "domain/Download.h"
+#include "ui/qml-bridge/downloads/DownloadsListModel.h"
 
 #include <QSignalSpy>
 #include <QTest>
@@ -15,8 +14,8 @@ using kinema::ui::qml::DownloadsListModel;
 
 namespace {
 
-DownloadItem makeRow(const QString& assetId, const QString& title,
-    DownloadState state = DownloadState::Active)
+DownloadItem
+makeRow(const QString& assetId, const QString& title, DownloadState state = DownloadState::Active)
 {
     DownloadItem it;
     it.assetId = assetId;
@@ -60,8 +59,7 @@ private Q_SLOTS:
         });
 
         QSignalSpy resetSpy(&m, &DownloadsListModel::modelReset);
-        QSignalSpy aboutToResetSpy(&m,
-            &DownloadsListModel::modelAboutToBeReset);
+        QSignalSpy aboutToResetSpy(&m, &DownloadsListModel::modelAboutToBeReset);
         QSignalSpy dataSpy(&m, &DownloadsListModel::dataChanged);
 
         DownloadsListModel::LiveRow lr;
@@ -92,9 +90,7 @@ private Q_SLOTS:
         QVERIFY(!roles.contains(DownloadsListModel::ProgressFractionRole));
 
         const auto idx = m.index(1);
-        QCOMPARE(m.data(idx,
-                     DownloadsListModel::DownloadRateBpsRole).toLongLong(),
-            qint64(1234));
+        QCOMPARE(m.data(idx, DownloadsListModel::DownloadRateBpsRole).toLongLong(), qint64(1234));
         QCOMPARE(m.data(idx, DownloadsListModel::PeersRole).toInt(), 5);
     }
 
@@ -102,15 +98,13 @@ private Q_SLOTS:
     {
         DownloadsListModel m;
         m.setItems({
-            makeRow(QStringLiteral("a"), QStringLiteral("Alpha"),
-                DownloadState::Active),
+            makeRow(QStringLiteral("a"), QStringLiteral("Alpha"), DownloadState::Active),
         });
 
         QSignalSpy resetSpy(&m, &DownloadsListModel::modelReset);
         QSignalSpy dataSpy(&m, &DownloadsListModel::dataChanged);
 
-        auto fresh = makeRow(QStringLiteral("a"), QStringLiteral("Alpha"),
-            DownloadState::Paused);
+        auto fresh = makeRow(QStringLiteral("a"), QStringLiteral("Alpha"), DownloadState::Paused);
         fresh.cachedSizeBytes = 500;
         m.updateRow(QStringLiteral("a"), fresh);
 
@@ -129,23 +123,21 @@ private Q_SLOTS:
 
         const auto idx = m.index(0);
         QCOMPARE(m.data(idx, DownloadsListModel::StateRole).toInt(),
-            static_cast<int>(DownloadState::Paused));
-        QCOMPARE(
-            m.data(idx, DownloadsListModel::CachedSizeBytesRole).toLongLong(),
-            qint64(500));
+                 static_cast<int>(DownloadState::Paused));
+        QCOMPARE(m.data(idx, DownloadsListModel::CachedSizeBytesRole).toLongLong(), qint64(500));
     }
 
     void updateForUnknownAssetIdIsNoOp()
     {
         DownloadsListModel m;
-        m.setItems({ makeRow(QStringLiteral("a"), QStringLiteral("Alpha")) });
+        m.setItems({makeRow(QStringLiteral("a"), QStringLiteral("Alpha"))});
 
         QSignalSpy resetSpy(&m, &DownloadsListModel::modelReset);
         QSignalSpy dataSpy(&m, &DownloadsListModel::dataChanged);
 
         m.updateLiveStatsFor(QStringLiteral("nope"), {});
         m.updateRow(QStringLiteral("nope"),
-            makeRow(QStringLiteral("nope"), QStringLiteral("Nope")));
+                    makeRow(QStringLiteral("nope"), QStringLiteral("Nope")));
 
         QCOMPARE(resetSpy.count(), 0);
         QCOMPARE(dataSpy.count(), 0);
@@ -154,17 +146,20 @@ private Q_SLOTS:
     void updateAttachedPlayersEmitsForFlippedRowsOnly()
     {
         DownloadsListModel m;
-        m.setItems({
-            makeRow(QStringLiteral("a"), QStringLiteral("Alpha")),
-            makeRow(QStringLiteral("b"), QStringLiteral("Beta")),
-            makeRow(QStringLiteral("c"), QStringLiteral("Gamma")),
-        }, {}, { QStringLiteral("a") });
+        m.setItems(
+            {
+                makeRow(QStringLiteral("a"), QStringLiteral("Alpha")),
+                makeRow(QStringLiteral("b"), QStringLiteral("Beta")),
+                makeRow(QStringLiteral("c"), QStringLiteral("Gamma")),
+            },
+            {},
+            {QStringLiteral("a")});
 
         QSignalSpy resetSpy(&m, &DownloadsListModel::modelReset);
         QSignalSpy dataSpy(&m, &DownloadsListModel::dataChanged);
 
         // a was attached, b becomes attached, c stays detached.
-        m.updateAttachedPlayers({ QStringLiteral("b") });
+        m.updateAttachedPlayers({QStringLiteral("b")});
 
         QCOMPARE(resetSpy.count(), 0);
         // One emission for a (true -> false), one for b (false -> true).
@@ -176,8 +171,7 @@ private Q_SLOTS:
             const auto top = args.at(0).toModelIndex();
             flippedRows.insert(top.row());
             const auto roles = args.at(2).value<QVector<int>>();
-            QVERIFY(roles.contains(
-                DownloadsListModel::HasPlayerAttachedRole));
+            QVERIFY(roles.contains(DownloadsListModel::HasPlayerAttachedRole));
             QVERIFY(roles.contains(DownloadsListModel::StateTextRole));
         }
         QVERIFY(flippedRows.contains(0));
@@ -186,10 +180,8 @@ private Q_SLOTS:
 
         const auto rowA = m.index(0);
         const auto rowB = m.index(1);
-        QVERIFY(!m.data(rowA,
-                      DownloadsListModel::HasPlayerAttachedRole).toBool());
-        QVERIFY(m.data(rowB,
-                    DownloadsListModel::HasPlayerAttachedRole).toBool());
+        QVERIFY(!m.data(rowA, DownloadsListModel::HasPlayerAttachedRole).toBool());
+        QVERIFY(m.data(rowB, DownloadsListModel::HasPlayerAttachedRole).toBool());
     }
 
     void setItemsResetsAssetIndexAcrossCalls()

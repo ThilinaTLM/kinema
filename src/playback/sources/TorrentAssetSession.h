@@ -29,12 +29,12 @@ class TorrentAssetSession : public AssetSession
     Q_OBJECT
 public:
     TorrentAssetSession(playback::torrent::LibtorrentClient& engine,
-        QString assetId,
-        QString token,
-        QString fileName,
-        qint64 fileSize,
-        QString infoHash,
-        QObject* parent = nullptr);
+                        QString assetId,
+                        QString token,
+                        QString fileName,
+                        qint64 fileSize,
+                        QString infoHash,
+                        QObject* parent = nullptr);
     ~TorrentAssetSession() override;
 
     /// Opaque session token retained from the engine handshake.
@@ -46,8 +46,8 @@ public:
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }
 
-    QCoro::Task<bool> ensureRange(kinema::torrent::ByteRange range) override;
-    QByteArray readRange(kinema::torrent::ByteRange range) const override;
+    QCoro::Task<bool> ensureRange(kinema::core::ByteRange range) override;
+    QByteArray readRange(kinema::core::ByteRange range) const override;
     void touch() override;
 
     /// Forwards to `LibtorrentClient::filesForInfoHash` so series

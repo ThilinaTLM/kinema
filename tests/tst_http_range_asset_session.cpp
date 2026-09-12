@@ -26,18 +26,18 @@
 // resolved size matches the constructor hint.
 
 #include "TestDoubles.h"
-
 #include "config/TorrentStreamingSettings.h"
 #include "domain/Download.h"
 #include "playback/sources/DebridResolver.h"
 #include "playback/sources/HttpRangeAssetSession.h"
 
-#include <KSharedConfig>
 #include <QCoroTask>
 #include <QDir>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+
+#include <KSharedConfig>
 
 using namespace kinema;
 using kinema::tests::FakeHttpClient;
@@ -47,11 +47,11 @@ namespace {
 class StubResolver : public playback::sources::DebridResolver
 {
 public:
+    bool isConfigured() const override { return true; }
     playback::sources::ResolvedDebridLink reply;
     int calls = 0;
 
-    QCoro::Task<playback::sources::ResolvedDebridLink> resolve(
-        domain::AssetRef ref) override
+    QCoro::Task<playback::sources::ResolvedDebridLink> resolve(domain::AssetRef ref) override
     {
         Q_UNUSED(ref);
         ++calls;
@@ -66,11 +66,9 @@ domain::AssetRef makeRef(qint64 sizeHint)
     ref.key.imdbId = QStringLiteral("tt0460681");
     ref.key.season = 6;
     ref.key.episode = 3;
-    ref.infoHash = QStringLiteral(
-        "0123456789abcdef0123456789abcdef01234567");
+    ref.infoHash = QStringLiteral("0123456789abcdef0123456789abcdef01234567");
     ref.fileIndex = 113;
-    ref.fileNameHint = QStringLiteral(
-        "Supernatural.S06E03.The Third Man.1080p.H265-Zero00.mp4");
+    ref.fileNameHint = QStringLiteral("Supernatural.S06E03.The Third Man.1080p.H265-Zero00.mp4");
     if (sizeHint > 0) {
         ref.sizeBytes = sizeHint;
     }
@@ -87,9 +85,8 @@ private Q_SLOTS:
     void initTestCase()
     {
         QStandardPaths::setTestModeEnabled(true);
-        m_config = KSharedConfig::openConfig(
-            QStringLiteral("kinemarc-http-session-test"),
-            KConfig::SimpleConfig);
+        m_config = KSharedConfig::openConfig(QStringLiteral("kinemarc-http-session-test"),
+                                             KConfig::SimpleConfig);
         m_settings = std::make_unique<config::TorrentStreamingSettings>(m_config);
     }
 
@@ -113,15 +110,16 @@ private Q_SLOTS:
         StubResolver resolver;
 
         const qint64 sizeHint = 243'276'646LL;
-        playback::sources::HttpRangeAssetSession session(http, resolver, *m_settings,
-            makeRef(sizeHint),
-            QStringLiteral("asset-x"), m_tmp->path());
+        playback::sources::HttpRangeAssetSession session(http,
+                                                         resolver,
+                                                         *m_settings,
+                                                         makeRef(sizeHint),
+                                                         QStringLiteral("asset-x"),
+                                                         m_tmp->path());
 
         // The payload file should have been pre-sized to the hint.
-        QFile f(QDir(m_tmp->path()).absoluteFilePath(
-            QStringLiteral("payload.bin")));
-        QVERIFY2(f.exists(),
-            "payload.bin should be created when the ctor is given a size hint");
+        QFile f(QDir(m_tmp->path()).absoluteFilePath(QStringLiteral("payload.bin")));
+        QVERIFY2(f.exists(), "payload.bin should be created when the ctor is given a size hint");
         QCOMPARE(f.size(), sizeHint);
         QCOMPARE(session.fileSize(), sizeHint);
     }
@@ -132,12 +130,14 @@ private Q_SLOTS:
         // filesystem. ensureResolved discovers the size later.
         FakeHttpClient http;
         StubResolver resolver;
-        playback::sources::HttpRangeAssetSession session(http, resolver, *m_settings,
-            makeRef(/*sizeHint=*/-1),
-            QStringLiteral("asset-y"), m_tmp->path());
+        playback::sources::HttpRangeAssetSession session(http,
+                                                         resolver,
+                                                         *m_settings,
+                                                         makeRef(/*sizeHint=*/-1),
+                                                         QStringLiteral("asset-y"),
+                                                         m_tmp->path());
 
-        QFile f(QDir(m_tmp->path()).absoluteFilePath(
-            QStringLiteral("payload.bin")));
+        QFile f(QDir(m_tmp->path()).absoluteFilePath(QStringLiteral("payload.bin")));
         QVERIFY(!f.exists());
         QCOMPARE(session.fileSize(), qint64(-1));
     }
@@ -151,19 +151,20 @@ private Q_SLOTS:
         FakeHttpClient http;
         StubResolver resolver;
         const qint64 size = 243'276'646LL;
-        resolver.reply.downloadUrl = QUrl(QStringLiteral(
-            "https://hoster.example/test.mp4"));
+        resolver.reply.downloadUrl = QUrl(QStringLiteral("https://hoster.example/test.mp4"));
         resolver.reply.fileSize = size;
         resolver.reply.fileName = QStringLiteral("test.mp4");
 
-        playback::sources::HttpRangeAssetSession session(http, resolver, *m_settings,
-            makeRef(/*sizeHint=*/-1),
-            QStringLiteral("asset-z"), m_tmp->path());
+        playback::sources::HttpRangeAssetSession session(http,
+                                                         resolver,
+                                                         *m_settings,
+                                                         makeRef(/*sizeHint=*/-1),
+                                                         QStringLiteral("asset-z"),
+                                                         m_tmp->path());
 
         QCoro::waitFor(session.ensureResolved());
 
-        QFile f(QDir(m_tmp->path()).absoluteFilePath(
-            QStringLiteral("payload.bin")));
+        QFile f(QDir(m_tmp->path()).absoluteFilePath(QStringLiteral("payload.bin")));
         QVERIFY(f.exists());
         QCOMPARE(f.size(), size);
         QCOMPARE(session.fileSize(), size);

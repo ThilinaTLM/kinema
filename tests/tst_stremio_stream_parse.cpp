@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/StremioStreamParse.h"
+#include "api/indexers/StremioStreamParse.h"
 #include "core/io/HttpError.h"
 
 #include <QFile>
@@ -19,7 +19,7 @@ private:
     static QJsonDocument loadFixture(const char* name)
     {
         QFile f(QStringLiteral(KINEMA_TEST_FIXTURES_DIR) + QLatin1Char('/')
-            + QString::fromLatin1(name));
+                + QString::fromLatin1(name));
         if (!f.open(QIODevice::ReadOnly)) {
             qFatal("Cannot open fixture %s", name);
         }
@@ -44,8 +44,7 @@ private Q_SLOTS:
 
         const auto& first = streams.at(0);
         QCOMPARE(first.resolution, QStringLiteral("1080p"));
-        QCOMPARE(first.releaseName,
-            QStringLiteral("The.Matrix.1999.1080p.BluRay.x264-NOGRP"));
+        QCOMPARE(first.releaseName, QStringLiteral("The.Matrix.1999.1080p.BluRay.x264-NOGRP"));
         QVERIFY(first.seeders.has_value());
         QCOMPARE(*first.seeders, 1500);
         QVERIFY(first.sizeBytes.has_value());
@@ -63,11 +62,9 @@ private Q_SLOTS:
 
         const auto& first = streams.at(0);
         QCOMPARE(first.fileIndex, 0);
-        QCOMPARE(first.fileNameHint,
-            QStringLiteral("The.Matrix.1999.1080p.BluRay.x264-NOGRP.mkv"));
+        QCOMPARE(first.fileNameHint, QStringLiteral("The.Matrix.1999.1080p.BluRay.x264-NOGRP.mkv"));
         QCOMPARE(first.sources.size(), 2);
-        QCOMPARE(first.sources.at(0),
-            QStringLiteral("tracker:udp://tracker.example.com:80"));
+        QCOMPARE(first.sources.at(0), QStringLiteral("tracker:udp://tracker.example.com:80"));
 
         // Rows that don't carry fileIdx default to -1 and an empty
         // filename / sources list.
@@ -89,7 +86,7 @@ private Q_SLOTS:
         const auto& urlRow = streams.at(1);
         QCOMPARE(urlRow.resolution, QStringLiteral("2160p"));
         QCOMPARE(urlRow.directUrl,
-            QUrl(QStringLiteral("https://real-debrid.com/d/ABCDEF/matrix.mkv")));
+                 QUrl(QStringLiteral("https://real-debrid.com/d/ABCDEF/matrix.mkv")));
         // No 👤 tag in fixture → seeders is unset.
         QVERIFY(!urlRow.seeders.has_value());
 
@@ -115,9 +112,7 @@ private Q_SLOTS:
     void throwsOnNonObjectTopLevel()
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("[]"));
-        QVERIFY_EXCEPTION_THROWN(
-            stremio::parseStreams(doc),
-            kinema::core::HttpError);
+        QVERIFY_EXCEPTION_THROWN(stremio::parseStreams(doc), kinema::core::HttpError);
     }
 
     void missingStreamsArray_returnsEmpty()
@@ -138,11 +133,9 @@ private Q_SLOTS:
                 "description": "New.Description.Release\nDetail line"
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.size(), 1);
-        QCOMPARE(streams.at(0).releaseName,
-            QStringLiteral("New.Description.Release"));
+        QCOMPARE(streams.at(0).releaseName, QStringLiteral("New.Description.Release"));
         QCOMPARE(streams.at(0).detailsText, QStringLiteral("Detail line"));
     }
 
@@ -155,11 +148,9 @@ private Q_SLOTS:
                 "title": "Legacy.Release\nbits"
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.size(), 1);
-        QCOMPARE(streams.at(0).releaseName,
-            QStringLiteral("Legacy.Release"));
+        QCOMPARE(streams.at(0).releaseName, QStringLiteral("Legacy.Release"));
     }
 
     void structuredSeed_preferredOverRegex()
@@ -173,8 +164,7 @@ private Q_SLOTS:
                 "seed": 14
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QVERIFY(streams.at(0).seeders.has_value());
         QCOMPARE(*streams.at(0).seeders, 14);
     }
@@ -188,8 +178,7 @@ private Q_SLOTS:
                 "sizebytes": 60333553090
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QVERIFY(streams.at(0).sizeBytes.has_value());
         QCOMPARE(*streams.at(0).sizeBytes, qint64(60333553090LL));
     }
@@ -206,8 +195,7 @@ private Q_SLOTS:
                 "behaviorHints": { "videoSize": 21474836480 }
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.size(), 1);
         QVERIFY(streams.at(0).sizeBytes.has_value());
         QCOMPARE(*streams.at(0).sizeBytes, qint64(21474836480LL));
@@ -224,8 +212,7 @@ private Q_SLOTS:
                 "behaviorHints": { "videoSize": 99999 }
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QVERIFY(streams.at(0).sizeBytes.has_value());
         QCOMPARE(*streams.at(0).sizeBytes, qint64(12345));
     }
@@ -236,12 +223,10 @@ private Q_SLOTS:
         // token is present in the description. Regression check:
         // the regex path must keep working when both `sizebytes`
         // and `behaviorHints.videoSize` are absent.
-        const QByteArray body
-            = "{ \"streams\": [{ \"infoHash\": \"vh3\","
-              " \"description\": \"Movie\\n\xf0\x9f\x91\xa4 5"
-              " \xf0\x9f\x92\xbe 2.5 GB\" }] }";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const QByteArray body = "{ \"streams\": [{ \"infoHash\": \"vh3\","
+                                " \"description\": \"Movie\\n\xf0\x9f\x91\xa4 5"
+                                " \xf0\x9f\x92\xbe 2.5 GB\" }] }";
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.size(), 1);
         QVERIFY(streams.at(0).sizeBytes.has_value());
         // 2.5 * 1024^3 = 2684354560
@@ -257,8 +242,7 @@ private Q_SLOTS:
                 "quality": "4K"
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.at(0).resolution, QStringLiteral("4k"));
     }
 
@@ -270,8 +254,7 @@ private Q_SLOTS:
                 { "infoHash": "gg", "title": "y" }
             ]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.size(), 2);
         QCOMPARE(streams.at(0).language, QStringLiteral("es"));
         QVERIFY(streams.at(1).language.isEmpty());
@@ -316,11 +299,9 @@ private Q_SLOTS:
                 "title": "Release.AD.Cached"
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.size(), 1);
-        QCOMPARE(streams.at(0).debridProvider,
-            DebridProvider::AllDebrid);
+        QCOMPARE(streams.at(0).debridProvider, DebridProvider::AllDebrid);
         QVERIFY(streams.at(0).debridCached);
     }
 
@@ -333,10 +314,8 @@ private Q_SLOTS:
                 "title": "Release.AD.Uncached"
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
-        QCOMPARE(streams.at(0).debridProvider,
-            DebridProvider::AllDebrid);
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).debridProvider, DebridProvider::AllDebrid);
         QVERIFY(!streams.at(0).debridCached);
     }
 
@@ -353,8 +332,7 @@ private Q_SLOTS:
                 "title": "Some.Release"
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.at(0).debridProvider, DebridProvider::None);
     }
 
@@ -371,10 +349,8 @@ private Q_SLOTS:
                 "providers": ["realdebrid", "offcloud"]
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
-        QCOMPARE(streams.at(0).debridProvider,
-            DebridProvider::RealDebrid);
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).debridProvider, DebridProvider::RealDebrid);
         QVERIFY(streams.at(0).debridCached);
     }
 
@@ -388,10 +364,8 @@ private Q_SLOTS:
                 "providers": ["alldebrid"]
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
-        QCOMPARE(streams.at(0).debridProvider,
-            DebridProvider::AllDebrid);
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
+        QCOMPARE(streams.at(0).debridProvider, DebridProvider::AllDebrid);
         QVERIFY(streams.at(0).debridCached);
     }
 
@@ -407,8 +381,7 @@ private Q_SLOTS:
                 "description": "Plain.Torrent.Row"
             }]
         })";
-        const auto streams
-            = stremio::parseStreams(QJsonDocument::fromJson(body));
+        const auto streams = stremio::parseStreams(QJsonDocument::fromJson(body));
         QCOMPARE(streams.at(0).debridProvider, DebridProvider::None);
         QVERIFY(!streams.at(0).debridCached);
     }

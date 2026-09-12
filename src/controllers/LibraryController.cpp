@@ -3,15 +3,15 @@
 
 #include "controllers/LibraryController.h"
 
-#include "api/CinemetaClient.h"
-#include "domain/Media.h"
+#include "api/cinemeta/CinemetaClient.h"
 #include "core/io/HttpErrorPresenter.h"
 #include "core/persistence/LibraryStore.h"
+#include "domain/Media.h"
 #include "kinema_log_controller.h"
 
-#include <KLocalizedString>
-
 #include <QDateTime>
+
+#include <KLocalizedString>
 
 #include <algorithm>
 #include <exception>
@@ -27,14 +27,11 @@ constexpr int kBackfillConcurrency = 4;
 
 bool needsBackfill(const domain::LibraryTitle& t)
 {
-    return t.genres.isEmpty()
-        && !t.imdbRating.has_value()
-        && !t.runtimeMinutes.has_value()
-        && t.cast.isEmpty();
+    return t.genres.isEmpty() && !t.imdbRating.has_value() && !t.runtimeMinutes.has_value()
+           && t.cast.isEmpty();
 }
 
-domain::LibraryTitle titleFromMeta(const domain::MetaDetail& meta,
-    domain::MediaKind kind)
+domain::LibraryTitle titleFromMeta(const domain::MetaDetail& meta, domain::MediaKind kind)
 {
     const auto& s = meta.summary;
     domain::LibraryTitle t;
@@ -54,8 +51,7 @@ domain::LibraryTitle titleFromMeta(const domain::MetaDetail& meta,
     return t;
 }
 
-domain::LibraryEpisode episodeFromApi(const QString& seriesImdbId,
-    const domain::Episode& ep)
+domain::LibraryEpisode episodeFromApi(const QString& seriesImdbId, const domain::Episode& ep)
 {
     domain::LibraryEpisode out;
     out.seriesImdbId = seriesImdbId;
@@ -72,25 +68,22 @@ domain::LibraryEpisode episodeFromApi(const QString& seriesImdbId,
 } // namespace
 
 LibraryController::LibraryController(core::LibraryStore& store,
-    api::CinemetaClient* cinemeta, QObject* parent)
-    : QObject(parent)
-    , m_store(store)
-    , m_cinemeta(cinemeta)
+                                     api::CinemetaClient* cinemeta,
+                                     QObject* parent)
+    : QObject(parent), m_store(store), m_cinemeta(cinemeta)
 {
-    connect(&m_store, &core::LibraryStore::changed,
-        this, &LibraryController::changed);
+    connect(&m_store, &core::LibraryStore::changed, this, &LibraryController::changed);
 }
 
 LibraryController::~LibraryController() = default;
 
-bool LibraryController::isInLibrary(domain::MediaKind kind,
-    const QString& imdbId) const
+bool LibraryController::isInLibrary(domain::MediaKind kind, const QString& imdbId) const
 {
     return m_store.contains(kind, imdbId);
 }
 
-std::optional<domain::LibraryTitle> LibraryController::title(
-    domain::MediaKind kind, const QString& imdbId) const
+std::optional<domain::LibraryTitle> LibraryController::title(domain::MediaKind kind,
+                                                             const QString& imdbId) const
 {
     return m_store.find(kind, imdbId);
 }
@@ -100,8 +93,7 @@ QList<domain::LibraryTitle> LibraryController::titles() const
     return m_store.titles();
 }
 
-QList<domain::LibraryEpisode> LibraryController::episodesForSeries(
-    const QString& imdbId) const
+QList<domain::LibraryEpisode> LibraryController::episodesForSeries(const QString& imdbId) const
 {
     return m_store.episodesForSeries(imdbId);
 }
@@ -132,24 +124,21 @@ bool LibraryController::commitTitle(const domain::LibraryTitle& t)
         return false;
     }
     m_store.upsertTitle(t);
-    Q_EMIT statusMessage(
-        i18nc("@info:status", "Added \u201c%1\u201d to Library.", t.title), 3000);
+    Q_EMIT statusMessage(i18nc("@info:status", "Added \u201c%1\u201d to Library.", t.title), 3000);
     return true;
 }
 
-QCoro::Task<void> LibraryController::saveByImdbId(QString imdbId,
-    domain::MediaKind kind)
+QCoro::Task<void> LibraryController::saveByImdbId(QString imdbId, domain::MediaKind kind)
 {
     if (!m_cinemeta || imdbId.isEmpty()) {
         co_return;
     }
     if (m_store.contains(kind, imdbId)) {
         const auto existing = m_store.find(kind, imdbId);
-        Q_EMIT statusMessage(
-            i18nc("@info:status",
-                "\u201c%1\u201d is already in your library.",
-                existing ? existing->title : imdbId),
-            3000);
+        Q_EMIT statusMessage(i18nc("@info:status",
+                                   "\u201c%1\u201d is already in your library.",
+                                   existing ? existing->title : imdbId),
+                             3000);
         co_return;
     }
     try {
@@ -157,27 +146,22 @@ QCoro::Task<void> LibraryController::saveByImdbId(QString imdbId,
             auto detail = co_await m_cinemeta->seriesMeta(imdbId);
             saveSeries(detail);
         } else {
-            auto meta = co_await m_cinemeta->meta(
-                domain::MediaKind::Movie, imdbId);
+            auto meta = co_await m_cinemeta->meta(domain::MediaKind::Movie, imdbId);
             saveMovie(meta);
         }
     } catch (const std::exception& e) {
-        Q_EMIT statusMessage(
-            core::describeError(e, "add to library"), 5000);
+        Q_EMIT statusMessage(core::describeError(e, "add to library"), 5000);
     }
     co_return;
 }
 
-void LibraryController::removeFromLibrary(domain::MediaKind kind,
-    const QString& imdbId)
+void LibraryController::removeFromLibrary(domain::MediaKind kind, const QString& imdbId)
 {
     const auto t = m_store.find(kind, imdbId);
     m_store.remove(kind, imdbId);
     if (t) {
         Q_EMIT statusMessage(
-            i18nc("@info:status",
-                "Removed \u201c%1\u201d from Library.", t->title),
-            3000);
+            i18nc("@info:status", "Removed \u201c%1\u201d from Library.", t->title), 3000);
     }
 }
 
@@ -196,8 +180,7 @@ void LibraryController::backfillMetadata()
         // batch finished). O(n) scan is fine — backfill queues are
         // small and run once per launch.
         const bool dup = std::any_of(
-            m_backfillQueue.begin(), m_backfillQueue.end(),
-            [&](const domain::LibraryTitle& q) {
+            m_backfillQueue.begin(), m_backfillQueue.end(), [&](const domain::LibraryTitle& q) {
                 return q.kind == t.kind && q.imdbId == t.imdbId;
             });
         if (!dup) {
@@ -209,8 +192,7 @@ void LibraryController::backfillMetadata()
 
 void LibraryController::pumpBackfill()
 {
-    while (m_backfillInFlight < kBackfillConcurrency
-        && !m_backfillQueue.isEmpty()) {
+    while (m_backfillInFlight < kBackfillConcurrency && !m_backfillQueue.isEmpty()) {
         auto seed = m_backfillQueue.dequeue();
         ++m_backfillInFlight;
         // Fire-and-forget: the coroutine is owned by its own task
@@ -220,16 +202,14 @@ void LibraryController::pumpBackfill()
     }
 }
 
-QCoro::Task<void> LibraryController::runBackfillOne(
-    domain::LibraryTitle seed)
+QCoro::Task<void> LibraryController::runBackfillOne(domain::LibraryTitle seed)
 {
     try {
         domain::LibraryTitle refreshed;
         refreshed.kind = seed.kind;
         refreshed.imdbId = seed.imdbId;
         if (seed.kind == domain::MediaKind::Movie) {
-            auto m = co_await m_cinemeta->meta(
-                domain::MediaKind::Movie, seed.imdbId);
+            auto m = co_await m_cinemeta->meta(domain::MediaKind::Movie, seed.imdbId);
             refreshed.title = m.summary.title;
             refreshed.year = m.summary.year;
             refreshed.poster = m.summary.poster;
@@ -261,8 +241,7 @@ QCoro::Task<void> LibraryController::runBackfillOne(
         }
     } catch (const std::exception& e) {
         qCDebug(KINEMA_CONTROLLER)
-            << "LibraryController: backfill failed for"
-            << seed.imdbId << "—" << e.what();
+            << "LibraryController: backfill failed for" << seed.imdbId << "—" << e.what();
     }
     --m_backfillInFlight;
     pumpBackfill();

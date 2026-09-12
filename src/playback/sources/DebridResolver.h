@@ -12,7 +12,6 @@
 #include <QUrl>
 #include <QVector>
 
-
 #include <QCoro/QCoroTask>
 
 namespace kinema::playback::sources {
@@ -22,7 +21,8 @@ namespace kinema::playback::sources {
  * `DebridResolver::resolve` so `HttpRangeAssetSession` can fetch the
  * upstream URL into its sparse local file.
  */
-struct ResolvedDebridLink {
+struct ResolvedDebridLink
+{
     /// Hoster URL the `HttpAssetSession` will fetch from. Only valid
     /// for ~24 hours — callers should re-resolve on 401 / 403.
     QUrl downloadUrl;
@@ -71,6 +71,9 @@ class DebridResolver : public QObject
     // Q_OBJECT macros.
 public:
     ~DebridResolver() override = default;
+
+    /// Whether this provider currently has usable credentials.
+    virtual bool isConfigured() const = 0;
 
     /// Run the full pipeline. Throws on failure.
     virtual QCoro::Task<ResolvedDebridLink> resolve(domain::AssetRef ref) = 0;

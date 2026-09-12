@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "torrent/PiecePlanner.h" // ByteRange
+#include "core/util/ByteRange.h"
 
 #include <QByteArray>
 #include <QString>
@@ -12,7 +12,7 @@
 
 namespace kinema::playback::ports {
 
-using kinema::torrent::ByteRange;
+using core::ByteRange;
 
 /**
  * Minimal byte-range read interface required by the local HTTP

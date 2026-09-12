@@ -5,21 +5,17 @@
 
 #include "config/AppSettings.h"
 #include "core/io/Logging.h"
-
-#include <KAboutData>
-#include <KLocalizedString>
+#include "kinema_version.h"
 
 #include <QIcon>
 #include <QSystemTrayIcon>
 
-#include "kinema_version.h"
+#include <KAboutData>
+#include <KLocalizedString>
 
 namespace kinema {
 
-KinemaApplication::KinemaApplication(int& argc, char** argv)
-    : QApplication(argc, argv)
-{
-}
+KinemaApplication::KinemaApplication(int& argc, char** argv) : QApplication(argc, argv) { }
 
 KinemaApplication::~KinemaApplication() = default;
 
@@ -58,10 +54,9 @@ void KinemaApplication::configure()
         i18n("© 2026 Thilina Lakshan"),
         QString{},
         QStringLiteral("https://tlmtech.dev/kinema"));
-    about.addAuthor(
-        i18nc("@info:credit", "Thilina Lakshan"),
-        i18nc("@info:credit", "Author and maintainer"),
-        QStringLiteral("thilinalakshanmail@gmail.com"));
+    about.addAuthor(i18nc("@info:credit", "Thilina Lakshan"),
+                    i18nc("@info:credit", "Author and maintainer"),
+                    QStringLiteral("thilinalakshanmail@gmail.com"));
     about.setDesktopFileName(QStringLiteral("dev.tlmtech.kinema"));
     about.setProductName(QByteArrayLiteral("kinema"));
     about.setOrganizationDomain(QByteArrayLiteral("tlmtech.dev"));
@@ -70,11 +65,10 @@ void KinemaApplication::configure()
 
     // When a system tray is available, the QML application window
     // hides to tray on close (see
-    // `MainController::handleWindowCloseRequested`) and we want the
+    // `ShellViewModel::handleWindowCloseRequested`) and we want the
     // app to keep running even if every window is hidden. When no
     // tray host is available, quit when the last window closes.
-    setQuitOnLastWindowClosed(
-        !QSystemTrayIcon::isSystemTrayAvailable());
+    setQuitOnLastWindowClosed(!QSystemTrayIcon::isSystemTrayAvailable());
 }
 
 } // namespace kinema

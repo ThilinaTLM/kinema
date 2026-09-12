@@ -3,20 +3,21 @@
 
 #include "app/KinemaApplication.h"
 #include "app/ServiceContainer.h"
-#include "ui/qml-bridge/QmlContext.h"
-#include "ui/qml-bridge/ShellViewModel.h"
-
-#include <KAboutData>
+#include "ui/qml-bridge/shell/QmlContext.h"
+#include "ui/qml-bridge/shell/ShellViewModel.h"
 
 #include <QCommandLineParser>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
 
+#include <KAboutData>
+
 #include <memory>
 
 #ifdef KINEMA_HAVE_LIBMPV
 #include <QSGRendererInterface>
+
 #include <clocale>
 #endif
 
@@ -25,11 +26,9 @@
 // `QQmlModuleRegistration` static (kinema_core / kinema_qml_app
 // are static libraries) and the QML engine reports `<C++ type>
 // is not a type` for every `QML_ELEMENT` declared in the module.
-Q_DECL_IMPORT void
-qml_register_types_dev_tlmtech_kinema_app();
+Q_DECL_IMPORT void qml_register_types_dev_tlmtech_kinema_app();
 #ifdef KINEMA_HAVE_LIBMPV
-Q_DECL_IMPORT void
-qml_register_types_dev_tlmtech_kinema_player();
+Q_DECL_IMPORT void qml_register_types_dev_tlmtech_kinema_player();
 #endif
 
 int main(int argc, char* argv[])
@@ -91,18 +90,17 @@ int main(int argc, char* argv[])
     // `KINEMA_HAVE_LIBMPV`) the embedded player window. Exposed
     // to QML as the `shell` context property by
     // `installQmlContext()`.
-    kinema::ui::qml::ShellViewModel shell(services, &app);
+    kinema::ui::qml::ShellViewModel shell(services.shellDependencies(), &app);
 
     kinema::ui::qml::installQmlContext(*engine, services, shell);
 
     engine->loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
-        QStringLiteral("ApplicationShell"));
+                           QStringLiteral("ApplicationShell"));
     if (engine->rootObjects().isEmpty()) {
         return 1;
     }
 
-    auto* window
-        = qobject_cast<QQuickWindow*>(engine->rootObjects().first());
+    auto* window = qobject_cast<QQuickWindow*>(engine->rootObjects().first());
     Q_ASSERT(window);
     // Hand the live window over so the shell can wire the tray,
     // embedded-player transient parenting, and the close handler

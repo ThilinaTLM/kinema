@@ -1,0 +1,155 @@
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+#include "ui/qml-bridge/shell/QmlContext.h"
+
+#include "app/ServiceContainer.h"
+#include "ui/ImageLoader.h"
+#include "ui/qml-bridge/browse/BrowseViewModel.h"
+#include "ui/qml-bridge/details/EpisodesListModel.h"
+#include "ui/qml-bridge/details/MovieDetailViewModel.h"
+#include "ui/qml-bridge/details/SeriesDetailViewModel.h"
+#include "ui/qml-bridge/discover/DiscoverSectionModel.h"
+#include "ui/qml-bridge/discover/DiscoverViewModel.h"
+#include "ui/qml-bridge/downloads/DownloadsListModel.h"
+#include "ui/qml-bridge/downloads/DownloadsViewModel.h"
+#include "ui/qml-bridge/library/ContinueWatchingViewModel.h"
+#include "ui/qml-bridge/library/LibraryListModel.h"
+#include "ui/qml-bridge/library/LibraryRailModel.h"
+#include "ui/qml-bridge/library/LibraryViewModel.h"
+#include "ui/qml-bridge/search/ResultsListModel.h"
+#include "ui/qml-bridge/search/SearchViewModel.h"
+#include "ui/qml-bridge/settings/AllDebridSectionViewModel.h"
+#include "ui/qml-bridge/settings/DebridSettingsViewModel.h"
+#include "ui/qml-bridge/settings/GeneralSettingsViewModel.h"
+#include "ui/qml-bridge/settings/IndexerSettingsViewModel.h"
+#include "ui/qml-bridge/settings/PeerflixSectionViewModel.h"
+#include "ui/qml-bridge/settings/PlayerSettingsViewModel.h"
+#include "ui/qml-bridge/settings/RealDebridSectionViewModel.h"
+#include "ui/qml-bridge/settings/SettingsRootViewModel.h"
+#include "ui/qml-bridge/settings/StreamsSettingsViewModel.h"
+#include "ui/qml-bridge/settings/SubtitlesSettingsViewModel.h"
+#include "ui/qml-bridge/settings/TmdbSettingsViewModel.h"
+#include "ui/qml-bridge/settings/TorrentStreamingSettingsViewModel.h"
+#include "ui/qml-bridge/settings/TorrentioSectionViewModel.h"
+#include "ui/qml-bridge/shell/AppIconResolver.h"
+#include "ui/qml-bridge/shell/KinemaImageProvider.h"
+#include "ui/qml-bridge/shell/ShellViewModel.h"
+#include "ui/qml-bridge/streams/StreamsListModel.h"
+#include "ui/qml-bridge/subtitles/SubtitleResultsModel.h"
+#include "ui/qml-bridge/subtitles/SubtitlesViewModel.h"
+
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QString>
+
+#include <KLocalizedContext>
+
+namespace kinema::ui::qml {
+
+namespace {
+
+void registerQmlTypes()
+{
+    // Register the section / list / view-model classes as
+    // uncreatable QML types so QML can read their `State` enums
+    // by name (e.g. `DiscoverSectionModel.Loading`). Runtime
+    // registration scoped to the engine's type system; does NOT
+    // route through `QML_ELEMENT` so it stays compatible with the
+    // kinema_core / kinema_qml_app target split. Calling it once
+    // per engine is fine; Qt deduplicates.
+    // The QML element name must be an unqualified, capitalized
+    // identifier, so for namespaced types we register under the
+    // bare class name (e.g. `settings::FooVm` -> `FooVm`).
+#define KINEMA_REGISTER_QML_TYPE(Type) \
+    qmlRegisterUncreatableType<Type>(  \
+        "dev.tlmtech.kinema.app", 1, 0, #Type, QStringLiteral(#Type " is owned by C++."))
+#define KINEMA_REGISTER_QML_TYPE_AS(Type, Name) \
+    qmlRegisterUncreatableType<Type>(           \
+        "dev.tlmtech.kinema.app", 1, 0, Name, QStringLiteral(Name " is owned by C++."))
+
+    KINEMA_REGISTER_QML_TYPE(DiscoverSectionModel);
+    KINEMA_REGISTER_QML_TYPE(ResultsListModel);
+    KINEMA_REGISTER_QML_TYPE(StreamsListModel);
+    KINEMA_REGISTER_QML_TYPE(LibraryListModel);
+    KINEMA_REGISTER_QML_TYPE(LibraryRailModel);
+    KINEMA_REGISTER_QML_TYPE(LibraryViewModel);
+    KINEMA_REGISTER_QML_TYPE(MovieDetailViewModel);
+    KINEMA_REGISTER_QML_TYPE(SeriesDetailViewModel);
+    KINEMA_REGISTER_QML_TYPE(EpisodesListModel);
+    KINEMA_REGISTER_QML_TYPE(SubtitlesViewModel);
+    KINEMA_REGISTER_QML_TYPE(SubtitleResultsModel);
+    KINEMA_REGISTER_QML_TYPE(DownloadsViewModel);
+    KINEMA_REGISTER_QML_TYPE(DownloadsListModel);
+    KINEMA_REGISTER_QML_TYPE_AS(settings::SettingsRootViewModel, "SettingsRootViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::GeneralSettingsViewModel, "GeneralSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::TmdbSettingsViewModel, "TmdbSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::RealDebridSectionViewModel, "RealDebridSectionViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::AllDebridSectionViewModel, "AllDebridSectionViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::DebridSettingsViewModel, "DebridSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::IndexerSettingsViewModel, "IndexerSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::TorrentioSectionViewModel, "TorrentioSectionViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::PeerflixSectionViewModel, "PeerflixSectionViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::StreamsSettingsViewModel, "StreamsSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::PlayerSettingsViewModel, "PlayerSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::SubtitlesSettingsViewModel, "SubtitlesSettingsViewModel");
+    KINEMA_REGISTER_QML_TYPE_AS(settings::TorrentStreamingSettingsViewModel,
+                                "TorrentStreamingSettingsViewModel");
+
+#undef KINEMA_REGISTER_QML_TYPE_AS
+#undef KINEMA_REGISTER_QML_TYPE
+}
+
+} // namespace
+
+void installQmlContext(QQmlApplicationEngine& engine,
+                       app::ServiceContainer& services,
+                       ShellViewModel& shell)
+{
+    // QQmlEngine takes ownership of the provider. Provider id is
+    // referenced from QML as `image://kinema/<id>`.
+    engine.addImageProvider(QStringLiteral("kinema"),
+                            new KinemaImageProvider(services.imageLoader()));
+
+    registerQmlTypes();
+
+    // The app-icon resolver is a singleton accessible from QML by
+    // module URI. Container creates it lazily on first call.
+    qmlRegisterSingletonInstance(
+        "dev.tlmtech.kinema.app", 1, 0, "AppIconResolver", services.appIconResolver());
+
+    // Wire `KLocalizedContext` so QML can call `i18n(...)` /
+    // `i18nc(...)` and have them route through the same KCatalog
+    // that `KLocalizedString` uses on the C++ side. Owned by the
+    // engine's root context.
+    auto* localized = new KLocalizedContext(&engine);
+    engine.rootContext()->setContextObject(localized);
+
+    auto* rootCtx = engine.rootContext();
+    const std::pair<const char*, QObject*> contextProps[] = {
+        {"shell", &shell},
+        {"discoverVm", services.discoverVm()},
+        {"continueWatchingVm", services.continueWatchingVm()},
+        {"libraryVm", services.libraryVm()},
+        {"searchVm", services.searchVm()},
+        {"browseVm", services.browseVm()},
+        {"movieDetailVm", services.movieDetailVm()},
+        {"seriesDetailVm", services.seriesDetailVm()},
+        {"subtitlesVm", services.subtitlesVm()},
+        {"settingsVm", services.settingsVm()},
+        {"downloadsVm", services.downloadsVm()},
+    };
+    for (const auto& [name, obj] : contextProps) {
+        rootCtx->setContextProperty(QString::fromLatin1(name), obj);
+    }
+
+    // Kick the initial Discover + Browse fetches once everything's
+    // wired so each page lands populated rather than empty-spinner.
+    // Token resolution may finish later via `loadAll()`; both VMs
+    // listen on `tmdbTokenChanged` for a delayed-arrival refresh.
+    services.discoverVm()->refresh();
+    services.browseVm()->refresh();
+}
+
+} // namespace kinema::ui::qml

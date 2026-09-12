@@ -5,8 +5,8 @@
 
 #include "domain/Download.h"
 #include "playback/ports/ByteRangeSource.h"
-#include "torrent/TorrentFileEntry.h"
 #include "torrent/PiecePlanner.h"
+#include "torrent/TorrentFileEntry.h"
 
 #include <QByteArray>
 #include <QObject>
@@ -17,7 +17,7 @@
 
 namespace kinema::playback::sources {
 
-using kinema::torrent::ByteRange;
+using kinema::core::ByteRange;
 
 /**
  * Abstract per-asset session owned by the transfer subsystem.
@@ -46,8 +46,9 @@ using kinema::torrent::ByteRange;
  * `playback::streaming::LocalHttpStreamGateway` keys sources by
  * `assetId()` directly.
  */
-class AssetSession : public QObject,
-    public playback::ports::ByteRangeSource
+class AssetSession
+    : public QObject
+    , public playback::ports::ByteRangeSource
 {
     Q_OBJECT
 public:
@@ -73,10 +74,7 @@ public:
     /// source does not expose multi-file information. Consumed by
     /// series adjacency lookup. Pure read, safe to call from the
     /// GUI thread.
-    virtual QVector<kinema::torrent::TorrentFileEntry> files() const
-    {
-        return {};
-    }
+    virtual QVector<kinema::torrent::TorrentFileEntry> files() const { return {}; }
 
     /// Current download mode. Concrete sessions persist this so a
     /// `MediaSourcePort::changeMode` can no-op when nothing changes.
@@ -89,10 +87,10 @@ public:
 
     /// User-initiated pause. Default is a no-op so backends that
     /// don't yet honour pause keep working.
-    virtual void pause() {}
+    virtual void pause() { }
 
     /// User-initiated resume; mirror of `pause()`.
-    virtual void resume() {}
+    virtual void resume() { }
 
 Q_SIGNALS:
     void cachedBytesChanged(qint64 bytes);
@@ -104,10 +102,7 @@ Q_SIGNALS:
     /// torrent backend forwards engine-side stats, the HTTP backend
     /// computes a rate from byte deltas and reports `peers=0`.
     /// Subscribers must not assume a fixed cadence.
-    void liveStatsChanged(qint64 ratePayloadBps,
-        int peers,
-        int seeds,
-        int etaSeconds);
+    void liveStatsChanged(qint64 ratePayloadBps, int peers, int seeds, int etaSeconds);
 };
 
 } // namespace kinema::playback::sources

@@ -1,45 +1,44 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+#include "TestDoubles.h"
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
 #include "config/TorrentioSettings.h"
 #include "controllers/TokenController.h"
 #include "core/io/HttpError.h"
-#include "controllers/StreamUtilityController.h"
-#include "TestDoubles.h"
-#include "ui/qml-bridge/DiscoverSectionModel.h"
-#include "ui/qml-bridge/MovieDetailViewModel.h"
-#include "ui/qml-bridge/StreamsListModel.h"
-
-#include <KConfig>
-#include <KSharedConfig>
+#include "services/StreamActions.h"
+#include "ui/qml-bridge/details/MovieDetailViewModel.h"
+#include "ui/qml-bridge/discover/DiscoverSectionModel.h"
+#include "ui/qml-bridge/streams/StreamsListModel.h"
 
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <KConfig>
+#include <KSharedConfig>
+
+using kinema::config::AppSettings;
+using kinema::controllers::TokenController;
+using kinema::core::HttpError;
 using kinema::domain::DiscoverItem;
 using kinema::domain::MediaKind;
 using kinema::domain::MetaDetail;
 using kinema::domain::MetaSummary;
 using kinema::domain::Stream;
-using kinema::config::AppSettings;
-using kinema::controllers::TokenController;
-using kinema::core::HttpError;
-using kinema::controllers::StreamUtilityController;
+using kinema::services::StreamActions;
+using kinema::tests::drainEvents;
 using kinema::tests::FakeCinemetaClient;
 using kinema::tests::FakeTmdbClient;
 using kinema::tests::FakeTokenStore;
 using kinema::tests::IndexerHarness;
-using kinema::tests::drainEvents;
 using kinema::ui::qml::MovieDetailViewModel;
 using kinema::ui::qml::StreamsListModel;
 
 namespace {
 
-MetaSummary makeSummary(const QString& imdb, const QString& title,
-    int year = 2010)
+MetaSummary makeSummary(const QString& imdb, const QString& title, int year = 2010)
 {
     MetaSummary s;
     s.imdbId = imdb;
@@ -49,8 +48,8 @@ MetaSummary makeSummary(const QString& imdb, const QString& title,
     return s;
 }
 
-MetaDetail makeDetail(const QString& imdb, const QString& title,
-    std::optional<QDate> released = std::nullopt)
+MetaDetail
+makeDetail(const QString& imdb, const QString& title, std::optional<QDate> released = std::nullopt)
 {
     MetaDetail d;
     d.summary = makeSummary(imdb, title);
@@ -58,16 +57,18 @@ MetaDetail makeDetail(const QString& imdb, const QString& title,
     d.summary.released = released;
     d.summary.poster = QUrl(QStringLiteral("https://img/poster.jpg"));
     d.background = QUrl(QStringLiteral("https://img/back.jpg"));
-    d.genres = { QStringLiteral("Sci-Fi"), QStringLiteral("Action") };
+    d.genres = {QStringLiteral("Sci-Fi"), QStringLiteral("Action")};
     d.runtimeMinutes = 148;
     d.summary.imdbRating = 8.4;
     return d;
 }
 
-Stream makeStream(const QString& release, const QString& resolution,
-    int seeders, qint64 sizeBytes,
-    const QString& provider = QStringLiteral("p"),
-    bool hasDirectUrl = false)
+Stream makeStream(const QString& release,
+                  const QString& resolution,
+                  int seeders,
+                  qint64 sizeBytes,
+                  const QString& provider = QStringLiteral("p"),
+                  bool hasDirectUrl = false)
 {
     Stream s;
     s.releaseName = release;
@@ -77,34 +78,39 @@ Stream makeStream(const QString& release, const QString& resolution,
     s.sizeBytes = sizeBytes;
     s.infoHash = QStringLiteral("0123456789abcdef");
     if (hasDirectUrl) {
-        s.directUrl = QUrl(QStringLiteral(
-            "https://rd.local/stream"));
+        s.directUrl = QUrl(QStringLiteral("https://rd.local/stream"));
     }
     return s;
 }
 
-struct Fixture {
+struct Fixture
+{
     QTemporaryDir tmp;
     KSharedConfigPtr config;
     AppSettings settings;
     FakeCinemetaClient cinemeta;
     IndexerHarness indexers;
     FakeTmdbClient tmdb;
-    StreamUtilityController streamUtility;
+    StreamActions streamUtility;
     QString rdToken;
     QString adApiKey;
     MovieDetailViewModel vm;
 
     Fixture()
-        : config(KSharedConfig::openConfig(
-            tmp.filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig))
+        : config(KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")),
+                                           KConfig::SimpleConfig))
         , settings(config)
-        , vm(&cinemeta, indexers.selector(), &tmdb, nullptr, &streamUtility,
-              /*tokens=*/nullptr, settings, rdToken, adApiKey,
-              nullptr)
-    {
-    }
+        , vm(&cinemeta,
+             indexers.selector(),
+             &tmdb,
+             nullptr,
+             &streamUtility,
+             /*tokens=*/nullptr,
+             settings,
+             rdToken,
+             adApiKey,
+             nullptr)
+    { }
 
     // Convenience for tests that want to talk to the underlying fake.
     auto& torrentio() noexcept { return indexers.fake(); }
@@ -114,16 +120,11 @@ class StubTokenController : public TokenController
 {
 public:
     explicit StubTokenController(kinema::config::DebridSettings& debridSettings,
-        QObject* parent = nullptr)
-        : TokenController(&m_tokens, /*tmdb=*/nullptr,
-              debridSettings, parent, QStringLiteral(""))
-    {
-    }
+                                 QObject* parent = nullptr)
+        : TokenController(&m_tokens, /*tmdb=*/nullptr, debridSettings, parent, QStringLiteral(""))
+    { }
 
-    void publishRealDebridToken(const QString& token)
-    {
-        Q_EMIT realDebridTokenChanged(token);
-    }
+    void publishRealDebridToken(const QString& token) { Q_EMIT realDebridTokenChanged(token); }
 
 private:
     FakeTokenStore m_tokens;
@@ -141,8 +142,7 @@ private Q_SLOTS:
         Fixture f;
         QCOMPARE(f.vm.metaState(), MovieDetailViewModel::MetaState::Idle);
         QVERIFY(f.vm.title().isEmpty());
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Idle);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Idle);
         QVERIFY(f.vm.similar() != nullptr);
         QVERIFY(!f.vm.similarVisible());
         // No debrid credentials ⇒ chip hidden.
@@ -152,20 +152,26 @@ private Q_SLOTS:
     void testDebridConfiguredReflectsAllDebridApiKey()
     {
         QTemporaryDir tmp;
-        auto config = KSharedConfig::openConfig(
-            tmp.filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig);
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")),
+                                                KConfig::SimpleConfig);
         AppSettings settings(config);
         FakeCinemetaClient cinemeta;
         IndexerHarness indexers;
         FakeTmdbClient tmdb;
-        StreamUtilityController streamUtility;
+        StreamActions streamUtility;
         StubTokenController tokens(settings.debrid());
         QString rdToken;
         QString adApiKey = QStringLiteral("ad-key");
-        MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
-            nullptr, &streamUtility, &tokens, settings, rdToken, adApiKey,
-            nullptr);
+        MovieDetailViewModel vm(&cinemeta,
+                                indexers.selector(),
+                                &tmdb,
+                                nullptr,
+                                &streamUtility,
+                                &tokens,
+                                settings,
+                                rdToken,
+                                adApiKey,
+                                nullptr);
         // AllDebrid alone is enough to flip the chip on.
         QVERIFY(vm.debridConfigured());
     }
@@ -173,20 +179,26 @@ private Q_SLOTS:
     void testDebridConfiguredFalseWithoutAnyCredential()
     {
         QTemporaryDir tmp;
-        auto config = KSharedConfig::openConfig(
-            tmp.filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig);
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")),
+                                                KConfig::SimpleConfig);
         AppSettings settings(config);
         FakeCinemetaClient cinemeta;
         IndexerHarness indexers;
         FakeTmdbClient tmdb;
-        StreamUtilityController streamUtility;
+        StreamActions streamUtility;
         StubTokenController tokens(settings.debrid());
         QString rdToken;
         QString adApiKey;
-        MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
-            nullptr, &streamUtility, &tokens, settings, rdToken, adApiKey,
-            nullptr);
+        MovieDetailViewModel vm(&cinemeta,
+                                indexers.selector(),
+                                &tmdb,
+                                nullptr,
+                                &streamUtility,
+                                &tokens,
+                                settings,
+                                rdToken,
+                                adApiKey,
+                                nullptr);
         QVERIFY(!vm.debridConfigured());
     }
 
@@ -194,64 +206,47 @@ private Q_SLOTS:
     {
         Fixture f;
         f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt0133093"),
-                QStringLiteral("The Matrix")) }
-        };
-        f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("Matrix.1080p"),
-                  QStringLiteral("1080p"), 50, 2'000'000'000) } }
-        };
+            {makeDetail(QStringLiteral("tt0133093"), QStringLiteral("The Matrix"))}};
+        f.torrentio().scriptedCalls = {{{makeStream(
+            QStringLiteral("Matrix.1080p"), QStringLiteral("1080p"), 50, 2'000'000'000)}}};
 
         f.vm.load(QStringLiteral("tt0133093"));
         drainEvents();
 
-        QCOMPARE(f.vm.metaState(),
-            MovieDetailViewModel::MetaState::Ready);
+        QCOMPARE(f.vm.metaState(), MovieDetailViewModel::MetaState::Ready);
         QCOMPARE(f.vm.title(), QStringLiteral("The Matrix"));
         QCOMPARE(f.vm.year(), 2010);
         QCOMPARE(f.vm.runtimeMinutes(), 148);
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Ready);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Ready);
         QCOMPARE(f.vm.streams()->rowCount(), 1);
     }
 
     void testFutureReleaseSkipsTorrentioFetch()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt00001"),
-                QStringLiteral("Soon"),
-                QDate::currentDate().addDays(30)) }
-        };
+        f.cinemeta.metaScripts = {{makeDetail(
+            QStringLiteral("tt00001"), QStringLiteral("Soon"), QDate::currentDate().addDays(30))}};
 
         f.vm.load(QStringLiteral("tt00001"));
         drainEvents();
 
         QCOMPARE(f.torrentio().callCount, 0);
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Unreleased);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Unreleased);
         QVERIFY(f.vm.isUpcoming());
     }
 
     void testStreamFetchErrorShowsError()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("Matrix")) }
-        };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("Matrix"))}};
         f.torrentio().scriptedCalls = {
-            { {}, HttpError(HttpError::Kind::Network, 0,
-                  QStringLiteral("torrentio down")) }
-        };
+            {{}, HttpError(HttpError::Kind::Network, 0, QStringLiteral("torrentio down"))}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
-        QCOMPARE(f.vm.metaState(),
-            MovieDetailViewModel::MetaState::Ready);
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Error);
+        QCOMPARE(f.vm.metaState(), MovieDetailViewModel::MetaState::Ready);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Error);
         QVERIFY(!f.vm.streams()->errorMessage().isEmpty());
     }
 
@@ -259,15 +254,12 @@ private Q_SLOTS:
     {
         Fixture f;
         f.cinemeta.metaScripts = {
-            { {}, HttpError(HttpError::Kind::HttpStatus, 404,
-                  QStringLiteral("not found")) }
-        };
+            {{}, HttpError(HttpError::Kind::HttpStatus, 404, QStringLiteral("not found"))}};
 
         f.vm.load(QStringLiteral("tt-bogus"));
         drainEvents();
 
-        QCOMPARE(f.vm.metaState(),
-            MovieDetailViewModel::MetaState::Error);
+        QCOMPARE(f.vm.metaState(), MovieDetailViewModel::MetaState::Error);
         QVERIFY(!f.vm.metaError().isEmpty());
         QCOMPARE(f.torrentio().callCount, 0);
     }
@@ -278,15 +270,10 @@ private Q_SLOTS:
         // Two loads in quick succession; only the second should
         // populate the model, regardless of fake-resolution order.
         f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt-stale"),
-                QStringLiteral("Stale")), std::nullopt, true },
-            { makeDetail(QStringLiteral("tt-fresh"),
-                QStringLiteral("Fresh")) }
-        };
+            {makeDetail(QStringLiteral("tt-stale"), QStringLiteral("Stale")), std::nullopt, true},
+            {makeDetail(QStringLiteral("tt-fresh"), QStringLiteral("Fresh"))}};
         f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("Fresh.1080p"),
-                  QStringLiteral("1080p"), 5, 1) } }
-        };
+            {{makeStream(QStringLiteral("Fresh.1080p"), QStringLiteral("1080p"), 5, 1)}}};
 
         f.vm.load(QStringLiteral("tt-stale"));
         f.vm.load(QStringLiteral("tt-fresh"));
@@ -300,15 +287,11 @@ private Q_SLOTS:
     void testRetryReusesCurrentImdbId()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("First")) },
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("First v2")) }
-        };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("First"))},
+                                  {makeDetail(QStringLiteral("tt1"), QStringLiteral("First v2"))}};
         f.torrentio().scriptedCalls = {
-            { {} },
-            { {} },
+            {{}},
+            {{}},
         };
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -323,32 +306,36 @@ private Q_SLOTS:
     {
         QTemporaryDir tmp;
         QVERIFY(tmp.isValid());
-        auto config = KSharedConfig::openConfig(
-            tmp.filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig);
+        auto config = KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")),
+                                                KConfig::SimpleConfig);
         AppSettings settings(config);
         FakeCinemetaClient cinemeta;
         IndexerHarness indexers;
         FakeTmdbClient tmdb;
-        StreamUtilityController streamUtility;
+        StreamActions streamUtility;
         StubTokenController tokens(settings.debrid());
         QString rdToken = QStringLiteral("rd-token");
         QString adApiKey;
-        MovieDetailViewModel vm(&cinemeta, indexers.selector(), &tmdb,
-            nullptr, &streamUtility, &tokens, settings, rdToken, adApiKey,
-            nullptr);
+        MovieDetailViewModel vm(&cinemeta,
+                                indexers.selector(),
+                                &tmdb,
+                                nullptr,
+                                &streamUtility,
+                                &tokens,
+                                settings,
+                                rdToken,
+                                adApiKey,
+                                nullptr);
 
-        cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("Movie")) }
-        };
+        cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("Movie"))}};
         indexers.fake().scriptedCalls = {
-            { { makeStream(QStringLiteral("Cached"),
-                  QStringLiteral("1080p"), 5, 1,
-                  QStringLiteral("p"), true) } },
-            { { makeStream(QStringLiteral("MagnetOnly"),
-                  QStringLiteral("1080p"), 5, 1) } }
-        };
+            {{makeStream(QStringLiteral("Cached"),
+                         QStringLiteral("1080p"),
+                         5,
+                         1,
+                         QStringLiteral("p"),
+                         true)}},
+            {{makeStream(QStringLiteral("MagnetOnly"), QStringLiteral("1080p"), 5, 1)}}};
 
         vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -356,46 +343,35 @@ private Q_SLOTS:
         QVERIFY(!vm.streams()->at(0)->directUrl.isEmpty());
 
         rdToken.clear();
-        tokens.publishRealDebridToken(QString {});
+        tokens.publishRealDebridToken(QString{});
         drainEvents(4);
 
         QCOMPARE(indexers.fake().callCount, 2);
         QCOMPARE(vm.streams()->rowCount(), 1);
-        QCOMPARE(vm.streams()->at(0)->releaseName,
-            QStringLiteral("MagnetOnly"));
+        QCOMPARE(vm.streams()->at(0)->releaseName, QStringLiteral("MagnetOnly"));
         QVERIFY(vm.streams()->at(0)->directUrl.isEmpty());
     }
 
     void testSortOrdersStreams()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("X"))}};
         f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("Smol"),
-                    QStringLiteral("720p"), 1, 100),
-                makeStream(QStringLiteral("Big"),
-                    QStringLiteral("1080p"), 99, 200),
-                makeStream(QStringLiteral("Mid"),
-                    QStringLiteral("1080p"), 50, 150) } }
-        };
+            {{makeStream(QStringLiteral("Smol"), QStringLiteral("720p"), 1, 100),
+              makeStream(QStringLiteral("Big"), QStringLiteral("1080p"), 99, 200),
+              makeStream(QStringLiteral("Mid"), QStringLiteral("1080p"), 50, 150)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
         // Default smart sort keeps 1080p rows ahead of 720p and
         // orders the 1080p group by seeders: \u2192 Big, Mid, Smol.
         QCOMPARE(f.vm.streams()->rowCount(), 3);
-        QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("Big"));
+        QCOMPARE(f.vm.streams()->at(0)->releaseName, QStringLiteral("Big"));
 
         // Switch to size asc.
-        f.vm.setSortMode(static_cast<int>(
-            StreamsListModel::SortMode::Size));
+        f.vm.setSortMode(static_cast<int>(StreamsListModel::SortMode::Size));
         f.vm.setSortDescending(false);
-        QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("Smol"));
+        QCOMPARE(f.vm.streams()->at(0)->releaseName, QStringLiteral("Smol"));
     }
 
     void testRequestStreamsEmitsSignal()
@@ -405,8 +381,7 @@ private Q_SLOTS:
         // `streamsRequested` so MainController can push the
         // Streams page; the slot itself does no validation.
         Fixture f;
-        QSignalSpy spy(&f.vm,
-            &MovieDetailViewModel::streamsRequested);
+        QSignalSpy spy(&f.vm, &MovieDetailViewModel::streamsRequested);
         f.vm.requestStreams();
         QCOMPARE(spy.count(), 1);
     }
@@ -414,21 +389,15 @@ private Q_SLOTS:
     void testPlayWithoutDirectUrlUsesMagnetFallback()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("X"))}};
         // No direct URL on the stream \u2192 play() should bail with
         // a status message instead of crashing into PlayerLauncher.
         f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("R"),
-                  QStringLiteral("1080p"), 5, 1) } }
-        };
+            {{makeStream(QStringLiteral("R"), QStringLiteral("1080p"), 5, 1)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
-        QSignalSpy spy(&f.vm,
-            &MovieDetailViewModel::statusMessage);
+        QSignalSpy spy(&f.vm, &MovieDetailViewModel::statusMessage);
         f.vm.playNow(0);
         QCOMPARE(spy.count(), 0);
     }
@@ -444,12 +413,10 @@ private Q_SLOTS:
         seriesItem.tmdbId = 1399;
         seriesItem.kind = MediaKind::Series;
         seriesItem.title = QStringLiteral("GoT");
-        f.vm.similar()->setItems({ movieItem, seriesItem });
+        f.vm.similar()->setItems({movieItem, seriesItem});
 
-        QSignalSpy movieSpy(&f.vm,
-            &MovieDetailViewModel::openMovieByTmdbRequested);
-        QSignalSpy seriesSpy(&f.vm,
-            &MovieDetailViewModel::openSeriesByTmdbRequested);
+        QSignalSpy movieSpy(&f.vm, &MovieDetailViewModel::openMovieByTmdbRequested);
+        QSignalSpy seriesSpy(&f.vm, &MovieDetailViewModel::openSeriesByTmdbRequested);
 
         f.vm.activateSimilar(0);
         QCOMPARE(movieSpy.count(), 1);
@@ -470,10 +437,8 @@ private Q_SLOTS:
         Fixture f;
         f.tmdb.movieImdbId = QStringLiteral("tt1375666");
         f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1375666"),
-                QStringLiteral("Inception")) }
-        };
-        f.torrentio().scriptedCalls = { { {} } };
+            {makeDetail(QStringLiteral("tt1375666"), QStringLiteral("Inception"))}};
+        f.torrentio().scriptedCalls = {{{}}};
 
         f.vm.loadByTmdbId(27205, QStringLiteral("Inception"));
         drainEvents();
@@ -485,12 +450,10 @@ private Q_SLOTS:
     void testLoadByTmdb404SurfacesStatus()
     {
         Fixture f;
-        f.tmdb.movieLookupError = HttpError(
-            HttpError::Kind::HttpStatus, 404,
-            QStringLiteral("nope"));
+        f.tmdb.movieLookupError =
+            HttpError(HttpError::Kind::HttpStatus, 404, QStringLiteral("nope"));
 
-        QSignalSpy spy(&f.vm,
-            &MovieDetailViewModel::statusMessage);
+        QSignalSpy spy(&f.vm, &MovieDetailViewModel::statusMessage);
         f.vm.loadByTmdbId(99'999, QStringLiteral("Phantom"));
         drainEvents();
 
@@ -503,115 +466,82 @@ private Q_SLOTS:
     void testClearResetsState()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("X"))}};
         f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("R"),
-                  QStringLiteral("1080p"), 5, 1) } }
-        };
+            {{makeStream(QStringLiteral("R"), QStringLiteral("1080p"), 5, 1)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
         QVERIFY(!f.vm.title().isEmpty());
 
         f.vm.clear();
-        QCOMPARE(f.vm.metaState(),
-            MovieDetailViewModel::MetaState::Idle);
+        QCOMPARE(f.vm.metaState(), MovieDetailViewModel::MetaState::Idle);
         QVERIFY(f.vm.title().isEmpty());
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Idle);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Idle);
         QVERIFY(!f.vm.similarVisible());
     }
 
     void testDefaultSortIsSmart()
     {
         Fixture f;
-        QCOMPARE(f.vm.sortMode(),
-            static_cast<int>(StreamsListModel::SortMode::Smart));
+        QCOMPARE(f.vm.sortMode(), static_cast<int>(StreamsListModel::SortMode::Smart));
         QCOMPARE(f.vm.sortDescending(), true);
     }
 
     void testSmartSortByResolutionThenSeeders()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
-        const Stream low2160 = makeStream(
-            QStringLiteral("R.2160p"),
-            QStringLiteral("2160p"), 5, 8'000'000'000);
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("X"))}};
+        const Stream low2160 =
+            makeStream(QStringLiteral("R.2160p"), QStringLiteral("2160p"), 5, 8'000'000'000);
         const Stream high1080 = makeStream(
-            QStringLiteral("R.1080p.popular"),
-            QStringLiteral("1080p"), 99, 1'500'000'000);
+            QStringLiteral("R.1080p.popular"), QStringLiteral("1080p"), 99, 1'500'000'000);
         const Stream low1080 = makeStream(
-            QStringLiteral("R.1080p.unloved"),
-            QStringLiteral("1080p"), 1, 3'000'000'000);
-        f.torrentio().scriptedCalls = {
-            { { high1080, low1080, low2160 } }
-        };
+            QStringLiteral("R.1080p.unloved"), QStringLiteral("1080p"), 1, 3'000'000'000);
+        f.torrentio().scriptedCalls = {{{high1080, low1080, low2160}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
         // Smart: 2160p first (resolution rank), then 1080p ordered
         // by seeders desc within the quality group.
         QCOMPARE(f.vm.streams()->rowCount(), 3);
-        QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("R.2160p"));
-        QCOMPARE(f.vm.streams()->at(1)->releaseName,
-            QStringLiteral("R.1080p.popular"));
-        QCOMPARE(f.vm.streams()->at(2)->releaseName,
-            QStringLiteral("R.1080p.unloved"));
+        QCOMPARE(f.vm.streams()->at(0)->releaseName, QStringLiteral("R.2160p"));
+        QCOMPARE(f.vm.streams()->at(1)->releaseName, QStringLiteral("R.1080p.popular"));
+        QCOMPARE(f.vm.streams()->at(2)->releaseName, QStringLiteral("R.1080p.unloved"));
     }
 
     void testSmartSortIgnoresDescendingToggle()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
-        const Stream popular = makeStream(QStringLiteral("Popular"),
-            QStringLiteral("1080p"), 99, 1);
-        const Stream unloved = makeStream(QStringLiteral("Unloved"),
-            QStringLiteral("1080p"), 1, 1);
-        f.torrentio().scriptedCalls = { { { unloved, popular } } };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("X"))}};
+        const Stream popular =
+            makeStream(QStringLiteral("Popular"), QStringLiteral("1080p"), 99, 1);
+        const Stream unloved = makeStream(QStringLiteral("Unloved"), QStringLiteral("1080p"), 1, 1);
+        f.torrentio().scriptedCalls = {{{unloved, popular}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
-        QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("Popular"));
+        QCOMPARE(f.vm.streams()->at(0)->releaseName, QStringLiteral("Popular"));
         f.vm.setSortDescending(true);
         // Smart still ignores the toggle: higher-seeder row stays
         // first regardless of `sortDescending`.
-        QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("Popular"));
+        QCOMPARE(f.vm.streams()->at(0)->releaseName, QStringLiteral("Popular"));
     }
 
     void testUiResolutionFilterNarrowsList()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("X"))}};
         f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("R1.2160p"),
-                    QStringLiteral("2160p"), 5, 8'000'000'000),
-                makeStream(QStringLiteral("R2.1080p"),
-                    QStringLiteral("1080p"), 5, 2'000'000'000),
-                makeStream(QStringLiteral("R3.720p"),
-                    QStringLiteral("720p"), 5, 1'000'000'000) } }
-        };
+            {{makeStream(QStringLiteral("R1.2160p"), QStringLiteral("2160p"), 5, 8'000'000'000),
+              makeStream(QStringLiteral("R2.1080p"), QStringLiteral("1080p"), 5, 2'000'000'000),
+              makeStream(QStringLiteral("R3.720p"), QStringLiteral("720p"), 5, 1'000'000'000)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
         QCOMPARE(f.vm.streams()->rowCount(), 3);
 
         f.vm.setUiResolutionFilter(QStringLiteral("1080p"));
         QCOMPARE(f.vm.streams()->rowCount(), 1);
-        QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("R2.1080p"));
+        QCOMPARE(f.vm.streams()->at(0)->releaseName, QStringLiteral("R2.1080p"));
         QVERIFY(f.vm.uiAnyFilterActive());
 
         f.vm.clearUiFilters();
@@ -622,18 +552,11 @@ private Q_SLOTS:
     void testUiHdrAndDolbyVisionFilters()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("X"))}};
         f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("Plain.1080p.x265"),
-                    QStringLiteral("1080p"), 5, 1),
-                makeStream(QStringLiteral("HDR.2160p.HDR10.x265"),
-                    QStringLiteral("2160p"), 5, 1),
-                makeStream(QStringLiteral("DV.2160p.DV.x265"),
-                    QStringLiteral("2160p"), 5, 1) } }
-        };
+            {{makeStream(QStringLiteral("Plain.1080p.x265"), QStringLiteral("1080p"), 5, 1),
+              makeStream(QStringLiteral("HDR.2160p.HDR10.x265"), QStringLiteral("2160p"), 5, 1),
+              makeStream(QStringLiteral("DV.2160p.DV.x265"), QStringLiteral("2160p"), 5, 1)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
@@ -643,18 +566,14 @@ private Q_SLOTS:
         f.vm.setUiHdrOnly(false);
         f.vm.setUiDolbyVisionOnly(true);
         QCOMPARE(f.vm.streams()->rowCount(), 1);
-        QCOMPARE(f.vm.streams()->at(0)->releaseName,
-            QStringLiteral("DV.2160p.DV.x265"));
+        QCOMPARE(f.vm.streams()->at(0)->releaseName, QStringLiteral("DV.2160p.DV.x265"));
     }
 
     void testUiFiltersResetOnClear()
     {
         Fixture f;
-        f.cinemeta.metaScripts = {
-            { makeDetail(QStringLiteral("tt1"),
-                QStringLiteral("X")) }
-        };
-        f.torrentio().scriptedCalls = { { {} } };
+        f.cinemeta.metaScripts = {{makeDetail(QStringLiteral("tt1"), QStringLiteral("X"))}};
+        f.torrentio().scriptedCalls = {{{}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 

@@ -3,11 +3,11 @@
 
 #include "playback/sources/AllDebridResolver.h"
 
-#include "api/AllDebridClient.h"
+#include "api/alldebrid/AllDebridClient.h"
 #include "core/io/HttpError.h"
-#include "core/util/Magnet.h"
 #include "playback/sources/DebridFilePicker.h"
 #include "playback/sources/DebridResolverUtil.h"
+#include "torrent/Magnet.h"
 
 #include <KLocalizedString>
 
@@ -32,11 +32,13 @@ bool isReadyStatus(int statusCode)
 
 } // namespace
 
-AllDebridResolver::AllDebridResolver(api::AllDebridClient& ad,
-    QObject* parent)
-    : DebridResolver(parent)
-    , m_ad(ad)
+AllDebridResolver::AllDebridResolver(api::AllDebridClient& ad, QObject* parent)
+    : DebridResolver(parent), m_ad(ad)
+{ }
+
+bool AllDebridResolver::isConfigured() const
 {
+    return !m_ad.apiKey().isEmpty();
 }
 
 QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
@@ -44,7 +46,7 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
     requireInfoHash(ref, QStringLiteral("AllDebrid"));
 
     // Step 1: upload the magnet.
-    const auto magnet = core::magnet::build(ref.infoHash, ref.releaseName);
+    const auto magnet = kinema::torrent::magnet::build(ref.infoHash, ref.releaseName);
     const auto added = co_await m_ad.uploadMagnet(magnet);
 
     // Step 2: poll until Ready or terminal error or timeout.
@@ -56,16 +58,17 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
             break;
         }
         if (isTerminalErrorStatus(status.statusCode)) {
-            const auto label = status.status.isEmpty()
-                ? i18n("error")
-                : status.status;
-            throw core::HttpError(core::HttpError::Kind::HttpStatus, 502,
-                i18n("AllDebrid magnet failed (status %1: %2).",
-                    QString::number(status.statusCode), label));
+            const auto label = status.status.isEmpty() ? i18n("error") : status.status;
+            throw core::HttpError(core::HttpError::Kind::HttpStatus,
+                                  502,
+                                  i18n("AllDebrid magnet failed (status %1: %2).",
+                                       QString::number(status.statusCode),
+                                       label));
         }
         if (budget.expired()) {
-            throw core::HttpError(core::HttpError::Kind::HttpStatus, 504,
-                i18n("AllDebrid did not produce a ready magnet in time."));
+            throw core::HttpError(core::HttpError::Kind::HttpStatus,
+                                  504,
+                                  i18n("AllDebrid did not produce a ready magnet in time."));
         }
         co_await budget.tick();
     }
@@ -73,20 +76,21 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
     // Step 3: list the files.
     const auto files = co_await m_ad.magnetFiles(added.id);
     if (files.isEmpty()) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("AllDebrid did not return any files for the magnet."));
+        throw core::HttpError(core::HttpError::Kind::Json,
+                              0,
+                              i18n("AllDebrid did not return any files for the magnet."));
     }
 
     // Step 4: pick the best file via the shared scoring helper.
     QList<picker::Candidate> candidates;
     candidates.reserve(files.size());
     for (const auto& f : files) {
-        candidates.append({ f.path, f.bytes });
+        candidates.append({f.path, f.bytes});
     }
     const int idx = picker::chooseIndex(candidates, ref);
     if (idx < 0) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("AllDebrid did not return a usable file."));
+        throw core::HttpError(
+            core::HttpError::Kind::Json, 0, i18n("AllDebrid did not return a usable file."));
     }
     const auto& chosen = files[idx];
 
@@ -96,12 +100,10 @@ QCoro::Task<ResolvedDebridLink> AllDebridResolver::resolve(domain::AssetRef ref)
 
     ResolvedDebridLink out;
     out.downloadUrl = unlocked.download;
-    out.fileSize = unlocked.fileSize > 0
-        ? unlocked.fileSize
-        : chosen.bytes;
+    out.fileSize = unlocked.fileSize > 0 ? unlocked.fileSize : chosen.bytes;
     out.fileName = unlocked.filename.isEmpty()
-        ? (chosen.path.isEmpty() ? ref.fileNameHint : chosen.path)
-        : unlocked.filename;
+                       ? (chosen.path.isEmpty() ? ref.fileNameHint : chosen.path)
+                       : unlocked.filename;
 
     // Preserve the full magnet file list so the asset session can
     // surface it to series auto-next without a libtorrent session.

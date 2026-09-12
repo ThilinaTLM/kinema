@@ -5,20 +5,21 @@
 
 #ifdef KINEMA_HAVE_LIBMPV
 
-#include "domain/PlaybackContext.h"
 #include "core/mpv/MpvChapterList.h"
 #include "core/mpv/MpvTrackList.h"
+#include "domain/PlaybackContext.h"
 
 #include <QPointer>
 #include <QString>
 #include <QStringList>
 #include <QUrl>
+
 #include <QtQuick/QQuickView>
 
 namespace kinema::config {
 class AppearanceSettings;
 class PlayerSettings;
-}
+} // namespace kinema::config
 
 namespace kinema::ui::player {
 
@@ -32,7 +33,7 @@ class PlayerViewModel;
  *
  * Public slots / signals are preserved verbatim from the previous
  * QWidget-based implementation. The window is driven by
- * `playback::adapters::EmbeddedMpvPlayerAdapter`, which owns the
+ * `ui::player::EmbeddedMpvPlayerAdapter`, which owns the
  * connection to the `PlayerPort` transport surface, the resume /
  * skip-chapter chrome, and the playback event stream. Internally,
  * the slots forward to `PlayerViewModel` (chrome state) and
@@ -53,17 +54,15 @@ class PlayerWindow : public QQuickView
     Q_OBJECT
 public:
     /// The player is created lazily and lives for the lifetime of
-    /// `MainController` like every other long-running service.
-    explicit PlayerWindow(config::AppearanceSettings& appearance,
-        config::PlayerSettings& player);
+    /// `ShellViewModel` like every other long-running service.
+    explicit PlayerWindow(config::AppearanceSettings& appearance, config::PlayerSettings& player);
     ~PlayerWindow() override;
 
     PlayerWindow(const PlayerWindow&) = delete;
     PlayerWindow& operator=(const PlayerWindow&) = delete;
 
     /// Load `url` into mpv and show the window.
-    virtual void play(const QUrl& url,
-        const kinema::domain::PlaybackContext& ctx);
+    virtual void play(const QUrl& url, const kinema::domain::PlaybackContext& ctx);
 
     // Imperative control surface (matches the previous public API).
     virtual void setPaused(bool paused);
@@ -78,8 +77,8 @@ public:
     virtual void setSpeed(double factor);
     virtual void showResumePrompt(qint64 seconds);
     virtual void hideResumePrompt();
-    virtual void showSkipChapter(const QString& kind,
-        const QString& label, qint64 startSec, qint64 endSec);
+    virtual void
+    showSkipChapter(const QString& kind, const QString& label, qint64 startSec, qint64 endSec);
     virtual void hideSkipChapter();
     virtual void setLoadingVisible(bool on);
 

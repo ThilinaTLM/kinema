@@ -8,10 +8,6 @@
 #include "domain/PlaybackContext.h"
 #include "playback/sources/DebridHttpMediaSource.h"
 
-namespace kinema::api {
-class AllDebridClient;
-}
-
 namespace kinema::playback::sources {
 
 class DebridResolver;
@@ -27,10 +23,9 @@ class AllDebridMediaSource : public DebridHttpMediaSource
 {
 public:
     AllDebridMediaSource(core::HttpClient& http,
-        api::AllDebridClient& ad,
-        DebridResolver& resolver,
-        core::MediaCache& cache,
-        const config::TorrentStreamingSettings& settings);
+                         DebridResolver& resolver,
+                         core::MediaCache& cache,
+                         const config::TorrentStreamingSettings& settings);
     ~AllDebridMediaSource() override;
 
     domain::DownloadBackendKind kind() const noexcept override
@@ -41,7 +36,7 @@ public:
     bool canHandle(const domain::Stream& s) const override;
 
 private:
-    api::AllDebridClient& m_ad;
+    DebridResolver& m_resolver;
 };
 
 } // namespace kinema::playback::sources

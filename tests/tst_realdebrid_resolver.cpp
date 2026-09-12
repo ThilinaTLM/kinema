@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/RealDebridClient.h"
+#include "api/realdebrid/RealDebridClient.h"
 #include "core/io/HttpError.h"
 #include "domain/Download.h"
 #include "playback/sources/RealDebridResolver.h"
@@ -16,10 +16,7 @@ namespace {
 class StubRealDebridClient : public api::RealDebridClient
 {
 public:
-    StubRealDebridClient()
-        : api::RealDebridClient(nullptr)
-    {
-    }
+    StubRealDebridClient() : api::RealDebridClient(nullptr) { }
 
     QList<domain::RdAddMagnetResult> addReplies;
     QList<domain::RdTorrentInfo> infoReplies;
@@ -32,17 +29,15 @@ public:
     QList<int> lastSelectedIds;
     QUrl lastUnrestrictedLink;
 
-    QCoro::Task<domain::RealDebridUser> user() override
-    {
-        co_return domain::RealDebridUser {};
-    }
+    QCoro::Task<domain::RealDebridUser> user() override { co_return domain::RealDebridUser{}; }
 
     QCoro::Task<domain::RdAddMagnetResult> addMagnet(QString) override
     {
         ++addCalls;
         if (addReplies.isEmpty()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                QStringLiteral("StubRealDebridClient: no add reply"));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  QStringLiteral("StubRealDebridClient: no add reply"));
         }
         co_return addReplies.takeFirst();
     }
@@ -51,8 +46,9 @@ public:
     {
         ++infoCalls;
         if (infoReplies.isEmpty()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                QStringLiteral("StubRealDebridClient: no info reply"));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  QStringLiteral("StubRealDebridClient: no info reply"));
         }
         co_return infoReplies.takeFirst();
     }
@@ -69,8 +65,9 @@ public:
         ++unrestrictCalls;
         lastUnrestrictedLink = link;
         if (unrestrictReplies.isEmpty()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                QStringLiteral("StubRealDebridClient: no unrestrict reply"));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  QStringLiteral("StubRealDebridClient: no unrestrict reply"));
         }
         co_return unrestrictReplies.takeFirst();
     }
@@ -103,12 +100,11 @@ domain::RdTorrentInfo infoWithFiles(QList<domain::RdTorrentFile> files)
     return info;
 }
 
-domain::RdTorrentInfo readyWithLink(QList<domain::RdTorrentFile> files,
-    const QUrl& link)
+domain::RdTorrentInfo readyWithLink(QList<domain::RdTorrentFile> files, const QUrl& link)
 {
     auto info = infoWithFiles(std::move(files));
     info.status = QStringLiteral("downloaded");
-    info.links = { link };
+    info.links = {link};
     return info;
 }
 
@@ -121,8 +117,8 @@ domain::RdUnrestrictedLink unrestricted(const QString& fileName)
     return link;
 }
 
-domain::AssetRef seriesRef(int episode, int positionalIndex,
-    const QString& fileNameHint = QString())
+domain::AssetRef
+seriesRef(int episode, int positionalIndex, const QString& fileNameHint = QString())
 {
     domain::AssetRef ref;
     ref.key.kind = domain::MediaKind::Series;
@@ -160,13 +156,13 @@ private Q_SLOTS:
         // position. RD ids can be non-positional; id=(fileIndex+1) exists
         // here but points to the previous episode. The resolver must follow
         // the requested episode / filename instead.
-        const QList<domain::RdTorrentFile> files {
+        const QList<domain::RdTorrentFile> files{
             rdFile(2, QStringLiteral("Show.S01E06.1080p.mkv"), 1'400'000'000LL),
             rdFile(10, QStringLiteral("Show.S01E07.1080p.mkv"), 1'500'000'000LL),
         };
 
         StubRealDebridClient stub;
-        stub.addReplies = { addOk() };
+        stub.addReplies = {addOk()};
         stub.infoReplies = {
             infoWithFiles(files),
             readyWithLink(files, QUrl(QStringLiteral("https://rd/hoster/ep7"))),
@@ -176,25 +172,24 @@ private Q_SLOTS:
         };
 
         playback::sources::RealDebridResolver resolver(stub);
-        const auto out = QCoro::waitFor(resolver.resolve(seriesRef(7, 1,
-            QStringLiteral("Show.S01E07.1080p.mkv"))));
+        const auto out = QCoro::waitFor(
+            resolver.resolve(seriesRef(7, 1, QStringLiteral("Show.S01E07.1080p.mkv"))));
 
         QCOMPARE(stub.selectCalls, 1);
-        QCOMPARE(stub.lastSelectedIds, QList<int> { 10 });
-        QCOMPARE(stub.lastUnrestrictedLink,
-            QUrl(QStringLiteral("https://rd/hoster/ep7")));
+        QCOMPARE(stub.lastSelectedIds, QList<int>{10});
+        QCOMPARE(stub.lastUnrestrictedLink, QUrl(QStringLiteral("https://rd/hoster/ep7")));
         QCOMPARE(out.fileName, QStringLiteral("Show.S01E07.1080p.mkv"));
     }
 
     void resolve_withoutStrongHintStillUsesFileIndexIdFallback()
     {
-        const QList<domain::RdTorrentFile> files {
+        const QList<domain::RdTorrentFile> files{
             rdFile(1, QStringLiteral("Movie.PartA.mkv"), 1'500'000'000LL),
             rdFile(2, QStringLiteral("Movie.PartB.mkv"), 1'400'000'000LL),
         };
 
         StubRealDebridClient stub;
-        stub.addReplies = { addOk() };
+        stub.addReplies = {addOk()};
         stub.infoReplies = {
             infoWithFiles(files),
             readyWithLink(files, QUrl(QStringLiteral("https://rd/hoster/partB"))),
@@ -207,7 +202,7 @@ private Q_SLOTS:
         (void)QCoro::waitFor(resolver.resolve(movieRef(/*fileIndex=*/1)));
 
         QCOMPARE(stub.selectCalls, 1);
-        QCOMPARE(stub.lastSelectedIds, QList<int> { 2 });
+        QCOMPARE(stub.lastSelectedIds, QList<int>{2});
     }
 };
 

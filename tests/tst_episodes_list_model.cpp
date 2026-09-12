@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "ui/qml-bridge/EpisodesListModel.h"
+#include "ui/qml-bridge/details/EpisodesListModel.h"
 
 #include <QSignalSpy>
 #include <QTest>
@@ -11,8 +11,8 @@ using kinema::ui::qml::EpisodesListModel;
 
 namespace {
 
-Episode makeEp(int season, int number, const QString& title,
-    std::optional<QDate> released = std::nullopt)
+Episode
+makeEp(int season, int number, const QString& title, std::optional<QDate> released = std::nullopt)
 {
     Episode e;
     e.season = season;
@@ -58,25 +58,23 @@ private Q_SLOTS:
     {
         EpisodesListModel m;
         m.setEpisodes({
-            makeEp(2, 7, QStringLiteral("Hand of the King"),
-                QDate(2030, 5, 1)),
+            makeEp(2, 7, QStringLiteral("Hand of the King"), QDate(2030, 5, 1)),
         });
         const auto names = m.roleNames();
-        for (const auto& key : { QByteArrayLiteral("number"),
-                                 QByteArrayLiteral("title"),
-                                 QByteArrayLiteral("description"),
-                                 QByteArrayLiteral("releasedText"),
-                                 QByteArrayLiteral("isUpcoming"),
-                                 QByteArrayLiteral("thumbnailUrl"),
-                                 QByteArrayLiteral("episode") }) {
+        for (const auto& key : {QByteArrayLiteral("number"),
+                                QByteArrayLiteral("title"),
+                                QByteArrayLiteral("description"),
+                                QByteArrayLiteral("releasedText"),
+                                QByteArrayLiteral("isUpcoming"),
+                                QByteArrayLiteral("thumbnailUrl"),
+                                QByteArrayLiteral("episode")}) {
             QVERIFY2(names.values().contains(key), key.constData());
         }
 
         const auto idx = m.index(0);
         QCOMPARE(m.data(idx, EpisodesListModel::NumberRole).toInt(), 7);
         QVERIFY(m.data(idx, EpisodesListModel::IsUpcomingRole).toBool());
-        QVERIFY(!m.data(idx, EpisodesListModel::ReleasedTextRole)
-                     .toString().isEmpty());
+        QVERIFY(!m.data(idx, EpisodesListModel::ReleasedTextRole).toString().isEmpty());
     }
 
     void testRowFor()
@@ -95,7 +93,7 @@ private Q_SLOTS:
     void testThumbnailUrlIsString()
     {
         EpisodesListModel m;
-        m.setEpisodes({ makeEp(1, 1, QStringLiteral("Pilot")) });
+        m.setEpisodes({makeEp(1, 1, QStringLiteral("Pilot"))});
         const auto idx = m.index(0);
         const auto v = m.data(idx, EpisodesListModel::ThumbnailUrlRole);
         QCOMPARE(v.typeId(), QMetaType::QString);

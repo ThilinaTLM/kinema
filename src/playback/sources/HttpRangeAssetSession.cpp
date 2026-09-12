@@ -8,14 +8,14 @@
 #include "core/io/HttpError.h"
 #include "kinema_log_download.h"
 
-#include <KLocalizedString>
-
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QNetworkRequest>
 #include <QPointer>
+
+#include <KLocalizedString>
 
 #include <algorithm>
 
@@ -28,12 +28,12 @@ constexpr qint64 kDefaultChunk = 4LL * 1024LL * 1024LL;
 } // namespace
 
 HttpRangeAssetSession::HttpRangeAssetSession(core::HttpClient& http,
-    DebridResolver& resolver,
-    const config::TorrentStreamingSettings& settings,
-    domain::AssetRef ref,
-    QString assetId,
-    QString localDir,
-    QObject* parent)
+                                             DebridResolver& resolver,
+                                             const config::TorrentStreamingSettings& settings,
+                                             domain::AssetRef ref,
+                                             QString assetId,
+                                             QString localDir,
+                                             QObject* parent)
     : AssetSession(parent)
     , m_http(http)
     , m_resolver(resolver)
@@ -42,10 +42,9 @@ HttpRangeAssetSession::HttpRangeAssetSession(core::HttpClient& http,
     , m_assetId(std::move(assetId))
     , m_localDir(std::move(localDir))
     , m_fileName(m_ref.fileNameHint.isEmpty()
-              ? (m_ref.releaseName.isEmpty()
-                        ? QStringLiteral("stream.mkv")
-                        : m_ref.releaseName + QStringLiteral(".mkv"))
-              : m_ref.fileNameHint)
+                     ? (m_ref.releaseName.isEmpty() ? QStringLiteral("stream.mkv")
+                                                    : m_ref.releaseName + QStringLiteral(".mkv"))
+                     : m_ref.fileNameHint)
     , m_fileSize(m_ref.sizeBytes.value_or(-1))
     , m_chunkSize(kDefaultChunk)
 {
@@ -63,10 +62,8 @@ HttpRangeAssetSession::HttpRangeAssetSession(core::HttpClient& http,
     // the session is usable as soon as `ensureResolved` returns,
     // regardless of whether the resolver's size matched the hint.
     if (m_fileSize > 0 && m_totalChunks == 0) {
-        m_totalChunks = static_cast<int>(
-            (m_fileSize + m_chunkSize - 1) / m_chunkSize);
-        m_chunkAvailable.assign(
-            static_cast<size_t>(m_totalChunks), false);
+        m_totalChunks = static_cast<int>((m_fileSize + m_chunkSize - 1) / m_chunkSize);
+        m_chunkAvailable.assign(static_cast<size_t>(m_totalChunks), false);
         ensureFileSizedToTotal();
     }
 }
@@ -150,8 +147,7 @@ void HttpRangeAssetSession::loadChunkMap()
         m_fileSize = storedFileSize;
     }
     if (m_fileSize > 0) {
-        m_totalChunks = static_cast<int>(
-            (m_fileSize + m_chunkSize - 1) / m_chunkSize);
+        m_totalChunks = static_cast<int>((m_fileSize + m_chunkSize - 1) / m_chunkSize);
         m_chunkAvailable.assign(static_cast<size_t>(m_totalChunks), false);
 
         const auto bitmap = blob.mid(16);
@@ -161,8 +157,7 @@ void HttpRangeAssetSession::loadChunkMap()
             if (byteIdx >= bitmap.size()) {
                 break;
             }
-            if ((static_cast<unsigned char>(bitmap.at(byteIdx))
-                    >> bitIdx) & 0x1) {
+            if ((static_cast<unsigned char>(bitmap.at(byteIdx)) >> bitIdx) & 0x1) {
                 m_chunkAvailable[static_cast<size_t>(i)] = true;
             }
         }
@@ -231,8 +226,7 @@ void HttpRangeAssetSession::pause()
         return;
     }
     m_paused = true;
-    qCInfo(KINEMA_DOWNLOAD).nospace()
-        << "HttpRangeAssetSession[" << m_assetId << "]: paused";
+    qCInfo(KINEMA_DOWNLOAD).nospace() << "HttpRangeAssetSession[" << m_assetId << "]: paused";
 }
 
 void HttpRangeAssetSession::resume()
@@ -241,8 +235,7 @@ void HttpRangeAssetSession::resume()
         return;
     }
     m_paused = false;
-    qCInfo(KINEMA_DOWNLOAD).nospace()
-        << "HttpRangeAssetSession[" << m_assetId << "]: resumed";
+    qCInfo(KINEMA_DOWNLOAD).nospace() << "HttpRangeAssetSession[" << m_assetId << "]: resumed";
     // For Full mode, kick the prefetch loop again. OnDemand stays
     // consumer-driven; the next ensureRange() naturally runs.
     if (m_mode == domain::DownloadMode::Full) {
@@ -271,10 +264,8 @@ QCoro::Task<void> HttpRangeAssetSession::ensureResolved()
             // dropped because chunk indices would no longer line
             // up.
             m_fileSize = resolved.fileSize;
-            m_totalChunks = static_cast<int>(
-                (m_fileSize + m_chunkSize - 1) / m_chunkSize);
-            m_chunkAvailable.assign(
-                static_cast<size_t>(m_totalChunks), false);
+            m_totalChunks = static_cast<int>((m_fileSize + m_chunkSize - 1) / m_chunkSize);
+            m_chunkAvailable.assign(static_cast<size_t>(m_totalChunks), false);
             ensureFileSizedToTotal();
             saveChunkMap();
         } else if (resolved.fileSize > 0 && m_totalChunks == 0) {
@@ -285,10 +276,8 @@ QCoro::Task<void> HttpRangeAssetSession::ensureResolved()
             // `ensureChunk(0)` returns false synchronously because
             // `chunkIndex >= m_totalChunks` and the local server
             // can't pull a single byte.
-            m_totalChunks = static_cast<int>(
-                (m_fileSize + m_chunkSize - 1) / m_chunkSize);
-            m_chunkAvailable.assign(
-                static_cast<size_t>(m_totalChunks), false);
+            m_totalChunks = static_cast<int>((m_fileSize + m_chunkSize - 1) / m_chunkSize);
+            m_chunkAvailable.assign(static_cast<size_t>(m_totalChunks), false);
             ensureFileSizedToTotal();
             saveChunkMap();
         }
@@ -330,10 +319,7 @@ QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
     }
 
     QNetworkRequest req(m_upstream);
-    const auto rangeHeader = QStringLiteral("bytes=%1-%2")
-                                 .arg(start)
-                                 .arg(endIncl)
-                                 .toUtf8();
+    const auto rangeHeader = QStringLiteral("bytes=%1-%2").arg(start).arg(endIncl).toUtf8();
     req.setRawHeader("Range", rangeHeader);
 
     QByteArray body;
@@ -350,8 +336,8 @@ QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
         }
         const int s = e.httpStatus();
         if (s == 401 || s == 403 || s == 410) {
-            qCInfo(KINEMA_DOWNLOAD) << "HttpRangeAssetSession: upstream expired ("
-                           << s << "), re-resolving";
+            qCInfo(KINEMA_DOWNLOAD)
+                << "HttpRangeAssetSession: upstream expired (" << s << "), re-resolving";
             needRetry = true;
         } else {
             failReason = e.message();
@@ -413,9 +399,7 @@ QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
         const qint64 dBytes = cached - m_lastSampleBytes;
         if (dtMs > 50 && dBytes >= 0) {
             const qint64 instBps = (dBytes * 1000) / dtMs;
-            m_emaRateBps = (m_emaRateBps == 0)
-                ? instBps
-                : (instBps * 4 + m_emaRateBps * 6) / 10;
+            m_emaRateBps = (m_emaRateBps == 0) ? instBps : (instBps * 4 + m_emaRateBps * 6) / 10;
         }
     }
     m_lastSampleAtMsec = nowMs;
@@ -428,8 +412,8 @@ QCoro::Task<bool> HttpRangeAssetSession::fetchChunk(int chunkIndex)
     Q_EMIT liveStatsChanged(m_emaRateBps, /*peers=*/0, /*seeds=*/0, eta);
 
     if (chunkIndex == m_totalChunks - 1
-        && std::all_of(m_chunkAvailable.begin(),
-            m_chunkAvailable.end(), [](bool v) { return v; })) {
+        && std::all_of(
+            m_chunkAvailable.begin(), m_chunkAvailable.end(), [](bool v) { return v; })) {
         Q_EMIT completed();
     }
     co_return true;
@@ -446,7 +430,7 @@ QCoro::Task<bool> HttpRangeAssetSession::ensureChunk(int chunkIndex)
     co_return co_await fetchChunk(chunkIndex);
 }
 
-QCoro::Task<bool> HttpRangeAssetSession::ensureRange(kinema::torrent::ByteRange range)
+QCoro::Task<bool> HttpRangeAssetSession::ensureRange(kinema::core::ByteRange range)
 {
     QPointer<HttpRangeAssetSession> self(this);
     if (!range.isValid()) {
@@ -474,7 +458,7 @@ QCoro::Task<bool> HttpRangeAssetSession::ensureRange(kinema::torrent::ByteRange 
     co_return true;
 }
 
-QByteArray HttpRangeAssetSession::readRange(kinema::torrent::ByteRange range) const
+QByteArray HttpRangeAssetSession::readRange(kinema::core::ByteRange range) const
 {
     if (!range.isValid() || m_fileSize <= 0) {
         return {};

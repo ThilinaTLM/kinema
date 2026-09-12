@@ -1,18 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/OpenSubtitlesClient.h"
-#include "domain/Subtitle.h"
+#include "api/opensubtitles/OpenSubtitlesClient.h"
 #include "config/AppSettings.h"
 #include "config/CacheSettings.h"
 #include "config/SubtitleSettings.h"
 #include "controllers/SubtitleController.h"
 #include "core/io/CachePaths.h"
-#include "core/persistence/Database.h"
 #include "core/io/HttpError.h"
+#include "core/persistence/Database.h"
 #include "core/persistence/SubtitleCacheStore.h"
-
-#include <KSharedConfig>
+#include "domain/Subtitle.h"
 
 #include <QDir>
 #include <QFile>
@@ -20,6 +18,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+
+#include <KSharedConfig>
 
 #include <QCoro/QCoroTask>
 
@@ -31,8 +31,7 @@ class FakeOpenSubtitles : public api::OpenSubtitlesClient
 {
 public:
     FakeOpenSubtitles()
-        : api::OpenSubtitlesClient(/*http=*/nullptr,
-              m_apiKey, m_username, m_password, nullptr)
+        : api::OpenSubtitlesClient(/*http=*/nullptr, m_apiKey, m_username, m_password, nullptr)
     {
         m_apiKey = QStringLiteral("key");
         m_username = QStringLiteral("user");
@@ -45,8 +44,8 @@ public:
         lastQuery = q;
         if (failNextSearch) {
             failNextSearch = false;
-            throw core::HttpError(core::HttpError::Kind::HttpStatus, 500,
-                QStringLiteral("simulated failure"));
+            throw core::HttpError(
+                core::HttpError::Kind::HttpStatus, 500, QStringLiteral("simulated failure"));
         }
         co_return scriptedHits;
     }
@@ -90,15 +89,14 @@ private:
     QString m_password;
 };
 
-domain::SubtitleHit makeHit(const QString& id, const QString& lang,
-    int downloads = 100, bool moviehash = false)
+domain::SubtitleHit
+makeHit(const QString& id, const QString& lang, int downloads = 100, bool moviehash = false)
 {
     domain::SubtitleHit h;
     h.fileId = id;
     h.language = lang;
-    h.languageName = lang == QStringLiteral("eng")
-        ? QStringLiteral("English")
-        : QStringLiteral("Other");
+    h.languageName =
+        lang == QStringLiteral("eng") ? QStringLiteral("English") : QStringLiteral("Other");
     h.releaseName = QStringLiteral("Some.Release.") + id;
     h.fileName = QStringLiteral("subtitle.") + id + QStringLiteral(".srt");
     h.format = QStringLiteral("srt");
@@ -129,26 +127,21 @@ class TstSubtitleController : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
-    void initTestCase()
-    {
-        QStandardPaths::setTestModeEnabled(true);
-    }
+    void initTestCase() { QStandardPaths::setTestModeEnabled(true); }
 
     void init()
     {
         m_tmp = std::make_unique<QTemporaryDir>();
         QVERIFY(m_tmp->isValid());
-        m_db = std::make_unique<core::Database>(
-            m_tmp->filePath(QStringLiteral("kinema.db")), nullptr);
+        m_db =
+            std::make_unique<core::Database>(m_tmp->filePath(QStringLiteral("kinema.db")), nullptr);
         QVERIFY(m_db->open());
         m_cache = std::make_unique<core::SubtitleCacheStore>(*m_db);
-        m_config = KSharedConfig::openConfig(
-            m_tmp->filePath(QStringLiteral("kinemarc")));
+        m_config = KSharedConfig::openConfig(m_tmp->filePath(QStringLiteral("kinemarc")));
         m_settings = std::make_unique<config::AppSettings>(m_config, nullptr);
         m_client = std::make_unique<FakeOpenSubtitles>();
         m_controller = std::make_unique<controllers::SubtitleController>(
-            m_client.get(), m_cache.get(),
-            m_settings->subtitle(), m_settings->cache());
+            m_client.get(), m_cache.get(), m_settings->subtitle(), m_settings->cache());
     }
 
     void cleanup()
@@ -171,11 +164,13 @@ private Q_SLOTS:
             makeHit(QStringLiteral("F2"), QStringLiteral("eng"), 50, true),
             makeHit(QStringLiteral("F3"), QStringLiteral("eng"), 500, true),
         };
-        QSignalSpy spy(m_controller.get(),
-            &controllers::SubtitleController::hitsChanged);
+        QSignalSpy spy(m_controller.get(), &controllers::SubtitleController::hitsChanged);
 
         m_controller->runQuery(movieKey(QStringLiteral("tt0133093")),
-            {}, QStringLiteral("off"), QStringLiteral("off"), QString {});
+                               {},
+                               QStringLiteral("off"),
+                               QStringLiteral("off"),
+                               QString{});
         drain();
 
         QVERIFY(spy.count() >= 1);
@@ -191,30 +186,35 @@ private Q_SLOTS:
     void testMoviehashForwardedToQuery()
     {
         m_controller->setMoviehash(QStringLiteral("0123456789abcdef"));
-        m_client->scriptedHits = { makeHit(QStringLiteral("F1"),
-            QStringLiteral("eng")) };
+        m_client->scriptedHits = {makeHit(QStringLiteral("F1"), QStringLiteral("eng"))};
         m_controller->runQuery(movieKey(QStringLiteral("tt0133093")),
-            {}, QStringLiteral("off"), QStringLiteral("off"), QString {});
+                               {},
+                               QStringLiteral("off"),
+                               QStringLiteral("off"),
+                               QString{});
         drain();
-        QCOMPARE(m_client->lastQuery.moviehash,
-            QStringLiteral("0123456789abcdef"));
+        QCOMPARE(m_client->lastQuery.moviehash, QStringLiteral("0123456789abcdef"));
     }
 
     // ---- Stale (epoch) responses are dropped ----------------------------
 
     void testStaleResponsesDropped()
     {
-        m_client->scriptedHits = { makeHit(QStringLiteral("OLD"),
-            QStringLiteral("eng")) };
+        m_client->scriptedHits = {makeHit(QStringLiteral("OLD"), QStringLiteral("eng"))};
         m_controller->runQuery(movieKey(QStringLiteral("tt0133093")),
-            {}, QStringLiteral("off"), QStringLiteral("off"), QString {});
+                               {},
+                               QStringLiteral("off"),
+                               QStringLiteral("off"),
+                               QString{});
         // Immediately fire a second query before the first coroutine
         // resumes. With our co_await-on-an-immediate task, both resolve
         // synchronously \u2014 but the epoch check still drops the first.
-        m_client->scriptedHits = { makeHit(QStringLiteral("NEW"),
-            QStringLiteral("eng")) };
+        m_client->scriptedHits = {makeHit(QStringLiteral("NEW"), QStringLiteral("eng"))};
         m_controller->runQuery(movieKey(QStringLiteral("tt0133093")),
-            {}, QStringLiteral("off"), QStringLiteral("off"), QString {});
+                               {},
+                               QStringLiteral("off"),
+                               QStringLiteral("off"),
+                               QString{});
         drain();
 
         const auto hits = m_controller->hits();
@@ -245,10 +245,8 @@ private Q_SLOTS:
         e.lastUsedAt = e.addedAt;
         QVERIFY(m_cache->insert(e));
 
-        QSignalSpy finished(m_controller.get(),
-            &controllers::SubtitleController::downloadFinished);
-        m_controller->download(QStringLiteral("F-cached"),
-            movieKey(QStringLiteral("tt0133093")));
+        QSignalSpy finished(m_controller.get(), &controllers::SubtitleController::downloadFinished);
+        m_controller->download(QStringLiteral("F-cached"), movieKey(QStringLiteral("tt0133093")));
         drain();
 
         QCOMPARE(finished.count(), 1);
@@ -260,11 +258,9 @@ private Q_SLOTS:
     void testQuotaExhaustedMessage()
     {
         m_client->quotaExhausted = true;
-        QSignalSpy failed(m_controller.get(),
-            &controllers::SubtitleController::downloadFailed);
+        QSignalSpy failed(m_controller.get(), &controllers::SubtitleController::downloadFailed);
 
-        m_controller->download(QStringLiteral("F-quota"),
-            movieKey(QStringLiteral("tt0133093")));
+        m_controller->download(QStringLiteral("F-quota"), movieKey(QStringLiteral("tt0133093")));
         drain();
 
         QCOMPARE(failed.count(), 1);
@@ -299,11 +295,13 @@ private Q_SLOTS:
     void testSearchErrorSurfaces()
     {
         m_client->failNextSearch = true;
-        QSignalSpy errSpy(m_controller.get(),
-            &controllers::SubtitleController::errorChanged);
+        QSignalSpy errSpy(m_controller.get(), &controllers::SubtitleController::errorChanged);
 
         m_controller->runQuery(movieKey(QStringLiteral("tt0133093")),
-            {}, QStringLiteral("off"), QStringLiteral("off"), QString {});
+                               {},
+                               QStringLiteral("off"),
+                               QStringLiteral("off"),
+                               QString{});
         drain();
         QVERIFY(errSpy.count() >= 1);
         QVERIFY(!m_controller->lastError().isEmpty());

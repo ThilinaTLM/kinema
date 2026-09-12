@@ -4,8 +4,8 @@
 #include "app/KinemaApplication.h"
 #include "app/ServiceContainer.h"
 #include "config/AppSettings.h"
-#include "ui/qml-bridge/QmlContext.h"
-#include "ui/qml-bridge/ShellViewModel.h"
+#include "ui/qml-bridge/shell/QmlContext.h"
+#include "ui/qml-bridge/shell/ShellViewModel.h"
 
 #include <QQmlApplicationEngine>
 #include <QQmlExpression>
@@ -20,28 +20,23 @@ namespace {
 
 bool isTargetWarning(const QString& message)
 {
-    return message.contains(QStringLiteral(
-               "Created graphical object was not placed in the graphics scene"))
-        || message.contains(QStringLiteral(
-               "Detected anchors on an item that is managed by a layout"))
-        || message.contains(QStringLiteral(
-               "ReferenceError: subtitleSearchSheet is not defined"))
-        || (message.contains(QStringLiteral("ToolBarPageHeader.qml"))
-            && message.contains(QStringLiteral(
-                "Unable to assign [undefined] to bool")))
-        || (message.contains(QStringLiteral("PageRow.qml"))
-            && message.contains(QStringLiteral(
-                "Value is null and could not be converted to an object")))
-        || message.contains(QStringLiteral(
-            "Cannot read property 'Success' of undefined"))
-        || message.contains(QStringLiteral(
-            "Cannot read property 'flickable' of null"))
-        || message.contains(QStringLiteral(
-            "Cannot read property 'visibleChildren' of null"))
-        || (message.contains(QStringLiteral("TypeError: Cannot read property"))
-            && message.contains(QStringLiteral("of null")))
-        || message.contains(QStringLiteral(
-            "items in the process of being created at engine destruction"));
+    return message.contains(
+               QStringLiteral("Created graphical object was not placed in the graphics scene"))
+           || message.contains(
+               QStringLiteral("Detected anchors on an item that is managed by a layout"))
+           || message.contains(QStringLiteral("ReferenceError: subtitleSearchSheet is not defined"))
+           || (message.contains(QStringLiteral("ToolBarPageHeader.qml"))
+               && message.contains(QStringLiteral("Unable to assign [undefined] to bool")))
+           || (message.contains(QStringLiteral("PageRow.qml"))
+               && message.contains(
+                   QStringLiteral("Value is null and could not be converted to an object")))
+           || message.contains(QStringLiteral("Cannot read property 'Success' of undefined"))
+           || message.contains(QStringLiteral("Cannot read property 'flickable' of null"))
+           || message.contains(QStringLiteral("Cannot read property 'visibleChildren' of null"))
+           || (message.contains(QStringLiteral("TypeError: Cannot read property"))
+               && message.contains(QStringLiteral("of null")))
+           || message.contains(
+               QStringLiteral("items in the process of being created at engine destruction"));
 }
 
 QStringList& capturedWarnings()
@@ -56,8 +51,7 @@ QtMessageHandler& previousMessageHandler()
     return handler;
 }
 
-void warningCollector(QtMsgType type, const QMessageLogContext& context,
-    const QString& message)
+void warningCollector(QtMsgType type, const QMessageLogContext& context, const QString& message)
 {
     if (type == QtWarningMsg && isTargetWarning(message)) {
         capturedWarnings().append(message);
@@ -84,8 +78,7 @@ public:
     QStringList messages() const { return capturedWarnings(); }
 };
 
-void evaluate(QQmlApplicationEngine& engine, QObject* scope,
-    const QString& source)
+void evaluate(QQmlApplicationEngine& engine, QObject* scope, const QString& source)
 {
     QQmlExpression expression(engine.rootContext(), scope, source);
     const QVariant result = expression.evaluate();
@@ -122,18 +115,18 @@ void TestApplicationBoot::loadsApplicationShell()
 
     auto settings = std::make_unique<kinema::config::AppSettings>();
     kinema::app::ServiceContainer services(*settings);
-    kinema::ui::qml::ShellViewModel shell(services);
+    kinema::ui::qml::ShellViewModel shell(services.shellDependencies());
     kinema::ui::qml::installQmlContext(engine, services, shell);
 
     engine.loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
-        QStringLiteral("ApplicationShell"));
+                          QStringLiteral("ApplicationShell"));
 
     QVERIFY2(!engine.rootObjects().isEmpty(),
-        "ApplicationShell failed to load; check QML imports and QML_FILES.");
+             "ApplicationShell failed to load; check QML imports and QML_FILES.");
     auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().constFirst());
     QVERIFY2(window, "ApplicationShell root object is not a QQuickWindow.");
     QVERIFY2(window->property("pageStack").isValid(),
-        "ApplicationShell root does not expose Kirigami.ApplicationWindow.pageStack.");
+             "ApplicationShell root does not expose Kirigami.ApplicationWindow.pageStack.");
 
     evaluate(engine, window, QStringLiteral("showPage('search')"));
     evaluate(engine, window, QStringLiteral("showPage('browse')"));
@@ -158,17 +151,14 @@ void TestApplicationBoot::teardownOnDownloadsIsQuiet()
 
     auto engine = std::make_unique<QQmlApplicationEngine>();
     auto settings = std::make_unique<kinema::config::AppSettings>();
-    auto services = std::make_unique<kinema::app::ServiceContainer>(
-        *settings);
-    auto shell = std::make_unique<kinema::ui::qml::ShellViewModel>(
-        *services);
+    auto services = std::make_unique<kinema::app::ServiceContainer>(*settings);
+    auto shell = std::make_unique<kinema::ui::qml::ShellViewModel>(services->shellDependencies());
     kinema::ui::qml::installQmlContext(*engine, *services, *shell);
 
     engine->loadFromModule(QStringLiteral("dev.tlmtech.kinema.app"),
-        QStringLiteral("ApplicationShell"));
+                           QStringLiteral("ApplicationShell"));
     QVERIFY(!engine->rootObjects().isEmpty());
-    auto* window = qobject_cast<QQuickWindow*>(
-        engine->rootObjects().constFirst());
+    auto* window = qobject_cast<QQuickWindow*>(engine->rootObjects().constFirst());
     QVERIFY(window);
 
     evaluate(*engine, window, QStringLiteral("showPage('downloads')"));

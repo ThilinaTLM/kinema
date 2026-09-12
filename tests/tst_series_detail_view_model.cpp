@@ -1,48 +1,48 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+#include "TestDoubles.h"
 #include "config/AppSettings.h"
-#include "playback/history/HistoryQueryService.h"
-#include "playback/history/SqlitePlaybackHistoryRepository.h"
 #include "controllers/WatchedController.h"
+#include "core/io/HttpError.h"
 #include "core/persistence/Database.h"
 #include "core/persistence/HistoryStore.h"
-#include "core/io/HttpError.h"
 #include "core/persistence/WatchedStore.h"
-#include "controllers/StreamUtilityController.h"
-#include "TestDoubles.h"
-#include "ui/qml-bridge/DiscoverSectionModel.h"
-#include "ui/qml-bridge/EpisodesListModel.h"
-#include "ui/qml-bridge/SeriesDetailViewModel.h"
-#include "ui/qml-bridge/StreamsListModel.h"
-
-#include <KConfig>
-#include <KSharedConfig>
+#include "playback/history/HistoryQueryService.h"
+#include "playback/history/SqlitePlaybackHistoryRepository.h"
+#include "services/StreamActions.h"
+#include "ui/qml-bridge/details/EpisodesListModel.h"
+#include "ui/qml-bridge/details/SeriesDetailViewModel.h"
+#include "ui/qml-bridge/discover/DiscoverSectionModel.h"
+#include "ui/qml-bridge/streams/StreamsListModel.h"
 
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <KConfig>
+#include <KSharedConfig>
+
+using kinema::config::AppSettings;
+using kinema::core::HttpError;
 using kinema::domain::Episode;
 using kinema::domain::MediaKind;
 using kinema::domain::MetaDetail;
 using kinema::domain::SeriesDetail;
 using kinema::domain::Stream;
-using kinema::config::AppSettings;
-using kinema::core::HttpError;
-using kinema::controllers::StreamUtilityController;
+using kinema::services::StreamActions;
+using kinema::tests::drainEvents;
 using kinema::tests::FakeCinemetaClient;
 using kinema::tests::FakeTmdbClient;
 using kinema::tests::IndexerHarness;
-using kinema::tests::drainEvents;
 using kinema::ui::qml::SeriesDetailViewModel;
 using kinema::ui::qml::StreamsListModel;
 
 namespace {
 
-Episode makeEp(int season, int number, const QString& title,
-    std::optional<QDate> released = std::nullopt)
+Episode
+makeEp(int season, int number, const QString& title, std::optional<QDate> released = std::nullopt)
 {
     Episode e;
     e.season = season;
@@ -53,8 +53,7 @@ Episode makeEp(int season, int number, const QString& title,
     return e;
 }
 
-SeriesDetail makeSeries(const QString& imdb, const QString& title,
-    QList<Episode> episodes)
+SeriesDetail makeSeries(const QString& imdb, const QString& title, QList<Episode> episodes)
 {
     SeriesDetail sd;
     sd.meta.summary.imdbId = imdb;
@@ -64,13 +63,12 @@ SeriesDetail makeSeries(const QString& imdb, const QString& title,
     sd.meta.summary.description = QStringLiteral("synopsis");
     sd.meta.summary.poster = QUrl(QStringLiteral("https://p"));
     sd.meta.background = QUrl(QStringLiteral("https://b"));
-    sd.meta.genres = { QStringLiteral("Drama") };
+    sd.meta.genres = {QStringLiteral("Drama")};
     sd.episodes = std::move(episodes);
     return sd;
 }
 
-Stream makeStream(const QString& release, int seeders, qint64 size,
-    bool hasDirectUrl = false)
+Stream makeStream(const QString& release, int seeders, qint64 size, bool hasDirectUrl = false)
 {
     Stream s;
     s.releaseName = release;
@@ -85,33 +83,40 @@ Stream makeStream(const QString& release, int seeders, qint64 size,
     return s;
 }
 
-struct Fixture {
+struct Fixture
+{
     QTemporaryDir tmp;
     KSharedConfigPtr config;
     AppSettings settings;
     FakeCinemetaClient cinemeta;
     IndexerHarness indexers;
     FakeTmdbClient tmdb;
-    StreamUtilityController streamUtility;
+    StreamActions streamUtility;
     QString rdToken;
     QString adApiKey;
     SeriesDetailViewModel vm;
 
     Fixture()
-        : config(KSharedConfig::openConfig(
-            tmp.filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig))
+        : config(KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")),
+                                           KConfig::SimpleConfig))
         , settings(config)
-        , vm(&cinemeta, indexers.selector(), &tmdb, nullptr, &streamUtility,
-              /*tokens=*/nullptr, settings, rdToken, adApiKey,
-              nullptr)
-    {
-    }
+        , vm(&cinemeta,
+             indexers.selector(),
+             &tmdb,
+             nullptr,
+             &streamUtility,
+             /*tokens=*/nullptr,
+             settings,
+             rdToken,
+             adApiKey,
+             nullptr)
+    { }
 
     auto& torrentio() noexcept { return indexers.fake(); }
 };
 
-struct WatchedFixture {
+struct WatchedFixture
+{
     QTemporaryDir tmp;
     kinema::core::Database db;
     kinema::core::HistoryStore history;
@@ -125,7 +130,7 @@ struct WatchedFixture {
     FakeCinemetaClient cinemeta;
     IndexerHarness indexers;
     FakeTmdbClient tmdb;
-    StreamUtilityController streamUtility;
+    StreamActions streamUtility;
     QString rdToken;
     QString adApiKey;
     SeriesDetailViewModel vm;
@@ -134,17 +139,24 @@ struct WatchedFixture {
         : db(tmp.filePath(QStringLiteral("kinema.db")), nullptr)
         , history(db)
         , watchedStore(db)
-        , config(KSharedConfig::openConfig(
-            tmp.filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig))
+        , config(KSharedConfig::openConfig(tmp.filePath(QStringLiteral("kinemarc")),
+                                           KConfig::SimpleConfig))
         , settings(config)
         , historyRepo(history)
         , historyQueryService(historyRepo, history)
         , watchedCtrl(watchedStore, &historyQueryService)
-        , vm(&cinemeta, indexers.selector(), &tmdb, nullptr, &streamUtility,
-              /*library=*/nullptr, &watchedCtrl,
-              /*tokens=*/nullptr, settings, rdToken, adApiKey,
-              nullptr)
+        , vm(&cinemeta,
+             indexers.selector(),
+             &tmdb,
+             nullptr,
+             &streamUtility,
+             /*library=*/nullptr,
+             &watchedCtrl,
+             /*tokens=*/nullptr,
+             settings,
+             rdToken,
+             adApiKey,
+             nullptr)
     {
         if (!tmp.isValid() || !db.open()) {
             qFatal("WatchedFixture setup failed");
@@ -161,40 +173,33 @@ class TstSeriesDetailViewModel : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
-    void initTestCase()
-    {
-        QStandardPaths::setTestModeEnabled(true);
-    }
+    void initTestCase() { QStandardPaths::setTestModeEnabled(true); }
 
     void testInitialState()
     {
         Fixture f;
-        QCOMPARE(f.vm.metaState(),
-            SeriesDetailViewModel::MetaState::Idle);
+        QCOMPARE(f.vm.metaState(), SeriesDetailViewModel::MetaState::Idle);
         QVERIFY(f.vm.title().isEmpty());
         QCOMPARE(f.vm.seasonLabels().size(), 0);
         QCOMPARE(f.vm.currentSeason(), -1);
         QCOMPARE(f.vm.selectedEpisodeRow(), -1);
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Idle);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Idle);
     }
 
     void testLoadPopulatesMetaAndSeasons()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt0903747"),
-            QStringLiteral("Breaking Bad"),
-            { makeEp(1, 1, QStringLiteral("Pilot")),
-              makeEp(1, 2, QStringLiteral("Cat's in the Bag")),
-              makeEp(2, 1, QStringLiteral("Seven Thirty-Seven")),
-              makeEp(0, 1, QStringLiteral("Special")) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(QStringLiteral("tt0903747"),
+                                                QStringLiteral("Breaking Bad"),
+                                                {makeEp(1, 1, QStringLiteral("Pilot")),
+                                                 makeEp(1, 2, QStringLiteral("Cat's in the Bag")),
+                                                 makeEp(2, 1, QStringLiteral("Seven Thirty-Seven")),
+                                                 makeEp(0, 1, QStringLiteral("Special"))})}};
 
         f.vm.load(QStringLiteral("tt0903747"));
         drainEvents();
 
-        QCOMPARE(f.vm.metaState(),
-            SeriesDetailViewModel::MetaState::Ready);
+        QCOMPARE(f.vm.metaState(), SeriesDetailViewModel::MetaState::Ready);
         QCOMPARE(f.vm.title(), QStringLiteral("Breaking Bad"));
         // Specials excluded \u2192 two seasons.
         QCOMPARE(f.vm.seasonLabels().size(), 2);
@@ -205,11 +210,11 @@ private Q_SLOTS:
     void testSeasonSwitchPublishesNewEpisodes()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("S1E1")),
-              makeEp(2, 1, QStringLiteral("S2E1")),
-              makeEp(2, 2, QStringLiteral("S2E2")) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(QStringLiteral("tt1"),
+                                                QStringLiteral("X"),
+                                                {makeEp(1, 1, QStringLiteral("S1E1")),
+                                                 makeEp(2, 1, QStringLiteral("S2E1")),
+                                                 makeEp(2, 2, QStringLiteral("S2E2"))})}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
@@ -223,13 +228,10 @@ private Q_SLOTS:
     void testSelectEpisodeFetchesStreams()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"), {makeEp(1, 1, QStringLiteral("Pilot"))})}};
         f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("Pilot.1080p"),
-                  10, 1'000'000'000) } }
-        };
+            {{makeStream(QStringLiteral("Pilot.1080p"), 10, 1'000'000'000)}}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -238,20 +240,18 @@ private Q_SLOTS:
         drainEvents();
 
         QCOMPARE(f.vm.selectedEpisodeRow(), 0);
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Ready);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Ready);
         QCOMPARE(f.vm.streams()->rowCount(), 1);
-        QCOMPARE(f.torrentio().lastStreamId,
-            QStringLiteral("tt1:1:1"));
+        QCOMPARE(f.torrentio().lastStreamId, QStringLiteral("tt1:1:1"));
     }
 
     void testFutureEpisodeSkipsTorrentioFetch()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Future"),
-                  QDate::currentDate().addDays(30)) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"),
+            QStringLiteral("X"),
+            {makeEp(1, 1, QStringLiteral("Future"), QDate::currentDate().addDays(30))})}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -260,17 +260,16 @@ private Q_SLOTS:
         drainEvents();
 
         QCOMPARE(f.torrentio().callCount, 0);
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Unreleased);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Unreleased);
     }
 
     void testToggleEpisodeWatchedIgnoresFutureEpisode()
     {
         WatchedFixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Future"),
-                  QDate::currentDate().addDays(30)) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"),
+            QStringLiteral("X"),
+            {makeEp(1, 1, QStringLiteral("Future"), QDate::currentDate().addDays(30))})}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -278,19 +277,17 @@ private Q_SLOTS:
         f.vm.toggleEpisodeWatched(0);
         drainEvents();
 
-        QVERIFY(!f.watchedCtrl.isEpisodeWatched(
-            QStringLiteral("tt1"), 1, 1));
+        QVERIFY(!f.watchedCtrl.isEpisodeWatched(QStringLiteral("tt1"), 1, 1));
     }
 
     void testToggleSeriesWatchedSkipsFutureEpisodes()
     {
         WatchedFixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Aired"),
-                  QDate::currentDate().addDays(-7)),
-              makeEp(1, 2, QStringLiteral("Future"),
-                  QDate::currentDate().addDays(30)) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"),
+            QStringLiteral("X"),
+            {makeEp(1, 1, QStringLiteral("Aired"), QDate::currentDate().addDays(-7)),
+             makeEp(1, 2, QStringLiteral("Future"), QDate::currentDate().addDays(30))})}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -298,21 +295,18 @@ private Q_SLOTS:
         f.vm.toggleSeriesWatched();
         drainEvents(4);
 
-        QVERIFY(f.watchedCtrl.isEpisodeWatched(
-            QStringLiteral("tt1"), 1, 1));
-        QVERIFY(!f.watchedCtrl.isEpisodeWatched(
-            QStringLiteral("tt1"), 1, 2));
+        QVERIFY(f.watchedCtrl.isEpisodeWatched(QStringLiteral("tt1"), 1, 1));
+        QVERIFY(!f.watchedCtrl.isEpisodeWatched(QStringLiteral("tt1"), 1, 2));
     }
 
     void testMarkSeasonWatchedSkipsFutureEpisodes()
     {
         WatchedFixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Aired"),
-                  QDate::currentDate().addDays(-7)),
-              makeEp(1, 2, QStringLiteral("Future"),
-                  QDate::currentDate().addDays(30)) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"),
+            QStringLiteral("X"),
+            {makeEp(1, 1, QStringLiteral("Aired"), QDate::currentDate().addDays(-7)),
+             makeEp(1, 2, QStringLiteral("Future"), QDate::currentDate().addDays(30))})}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -320,21 +314,18 @@ private Q_SLOTS:
         f.vm.markSeasonWatched(1, true);
         drainEvents(4);
 
-        QVERIFY(f.watchedCtrl.isEpisodeWatched(
-            QStringLiteral("tt1"), 1, 1));
-        QVERIFY(!f.watchedCtrl.isEpisodeWatched(
-            QStringLiteral("tt1"), 1, 2));
+        QVERIFY(f.watchedCtrl.isEpisodeWatched(QStringLiteral("tt1"), 1, 1));
+        QVERIFY(!f.watchedCtrl.isEpisodeWatched(QStringLiteral("tt1"), 1, 2));
     }
 
     void testSeasonWatchedBadgeStaysFalseWhenUpcomingEpisodesRemain()
     {
         WatchedFixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Aired"),
-                  QDate::currentDate().addDays(-7)),
-              makeEp(1, 2, QStringLiteral("Future"),
-                  QDate::currentDate().addDays(30)) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"),
+            QStringLiteral("X"),
+            {makeEp(1, 1, QStringLiteral("Aired"), QDate::currentDate().addDays(-7)),
+             makeEp(1, 2, QStringLiteral("Future"), QDate::currentDate().addDays(30))})}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -349,12 +340,11 @@ private Q_SLOTS:
     void testSeasonWatchedBadgeTurnsTrueWhenAllEpisodesAreAiredAndWatched()
     {
         WatchedFixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Aired"),
-                  QDate::currentDate().addDays(-7)),
-              makeEp(1, 2, QStringLiteral("Also aired"),
-                  QDate::currentDate().addDays(-1)) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"),
+            QStringLiteral("X"),
+            {makeEp(1, 1, QStringLiteral("Aired"), QDate::currentDate().addDays(-7)),
+             makeEp(1, 2, QStringLiteral("Also aired"), QDate::currentDate().addDays(-1))})}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -369,12 +359,11 @@ private Q_SLOTS:
     void testSeriesWatchedStaysTrueWhenOnlyUpcomingEpisodesRemain()
     {
         WatchedFixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Aired"),
-                  QDate::currentDate().addDays(-7)),
-              makeEp(1, 2, QStringLiteral("Future"),
-                  QDate::currentDate().addDays(30)) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"),
+            QStringLiteral("X"),
+            {makeEp(1, 1, QStringLiteral("Aired"), QDate::currentDate().addDays(-7)),
+             makeEp(1, 2, QStringLiteral("Future"), QDate::currentDate().addDays(30))})}};
 
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
@@ -389,58 +378,45 @@ private Q_SLOTS:
     void testEpisodeStreamsErrorShowsError()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"), {makeEp(1, 1, QStringLiteral("Pilot"))})}};
         f.torrentio().scriptedCalls = {
-            { {}, HttpError(HttpError::Kind::Network, 0,
-                  QStringLiteral("down")) }
-        };
+            {{}, HttpError(HttpError::Kind::Network, 0, QStringLiteral("down"))}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
         f.vm.selectEpisode(0);
         drainEvents();
 
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Error);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Error);
     }
 
     void testClearEpisodeCollapsesStreams()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("R"), 1, 1) } }
-        };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"), {makeEp(1, 1, QStringLiteral("Pilot"))})}};
+        f.torrentio().scriptedCalls = {{{makeStream(QStringLiteral("R"), 1, 1)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
         f.vm.selectEpisode(0);
         drainEvents();
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Ready);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Ready);
 
         f.vm.clearEpisode();
         QCOMPARE(f.vm.selectedEpisodeRow(), -1);
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Idle);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Idle);
     }
 
     void testSelectEpisodeAndOpenStreamsEmitsSignal()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("R"), 1, 1) } }
-        };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"), {makeEp(1, 1, QStringLiteral("Pilot"))})}};
+        f.torrentio().scriptedCalls = {{{makeStream(QStringLiteral("R"), 1, 1)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
-        QSignalSpy streamsSpy(&f.vm,
-            &SeriesDetailViewModel::streamsRequested);
+        QSignalSpy streamsSpy(&f.vm, &SeriesDetailViewModel::streamsRequested);
         f.vm.selectEpisodeAndOpenStreams(0);
         QCOMPARE(f.vm.selectedEpisodeRow(), 0);
         QCOMPARE(streamsSpy.count(), 1);
@@ -449,14 +425,12 @@ private Q_SLOTS:
     void testSelectEpisodeAndOpenStreamsBailsOnInvalidRow()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"), {makeEp(1, 1, QStringLiteral("Pilot"))})}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
-        QSignalSpy streamsSpy(&f.vm,
-            &SeriesDetailViewModel::streamsRequested);
+        QSignalSpy streamsSpy(&f.vm, &SeriesDetailViewModel::streamsRequested);
         f.vm.selectEpisodeAndOpenStreams(99);
         QCOMPARE(f.vm.selectedEpisodeRow(), -1);
         QCOMPARE(streamsSpy.count(), 0);
@@ -465,17 +439,13 @@ private Q_SLOTS:
     void testRequestStreamsRequiresSelection()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("R"), 1, 1) } }
-        };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"), {makeEp(1, 1, QStringLiteral("Pilot"))})}};
+        f.torrentio().scriptedCalls = {{{makeStream(QStringLiteral("R"), 1, 1)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
 
-        QSignalSpy streamsSpy(&f.vm,
-            &SeriesDetailViewModel::streamsRequested);
+        QSignalSpy streamsSpy(&f.vm, &SeriesDetailViewModel::streamsRequested);
         f.vm.requestStreams();
         QCOMPARE(streamsSpy.count(), 0);
 
@@ -488,36 +458,32 @@ private Q_SLOTS:
     void testLoadAtAutoSelectsEpisode()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("S1E1")),
-              makeEp(2, 1, QStringLiteral("S2E1")),
-              makeEp(2, 2, QStringLiteral("S2E2")) }) } };
-        f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("S2E2"), 1, 1) } }
-        };
+        f.cinemeta.seriesScripts = {{makeSeries(QStringLiteral("tt1"),
+                                                QStringLiteral("X"),
+                                                {makeEp(1, 1, QStringLiteral("S1E1")),
+                                                 makeEp(2, 1, QStringLiteral("S2E1")),
+                                                 makeEp(2, 2, QStringLiteral("S2E2"))})}};
+        f.torrentio().scriptedCalls = {{{makeStream(QStringLiteral("S2E2"), 1, 1)}}};
 
         f.vm.loadAt(QStringLiteral("tt1"), 2, 2);
         drainEvents();
 
         QCOMPARE(f.vm.currentSeason(), 1); // index of season 2
         QCOMPARE(f.vm.selectedEpisodeRow(), 1);
-        QCOMPARE(f.torrentio().lastStreamId,
-            QStringLiteral("tt1:2:2"));
+        QCOMPARE(f.torrentio().lastStreamId, QStringLiteral("tt1:2:2"));
     }
 
     void testStaleResponseDiscarded()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = {
-            { makeSeries(QStringLiteral("tt-stale"),
-                  QStringLiteral("Stale"),
-                  { makeEp(1, 1, QStringLiteral("S")) }),
-                std::nullopt, true },
-            { makeSeries(QStringLiteral("tt-fresh"),
-                  QStringLiteral("Fresh"),
-                  { makeEp(1, 1, QStringLiteral("F")) }) }
-        };
+        f.cinemeta.seriesScripts = {{makeSeries(QStringLiteral("tt-stale"),
+                                                QStringLiteral("Stale"),
+                                                {makeEp(1, 1, QStringLiteral("S"))}),
+                                     std::nullopt,
+                                     true},
+                                    {makeSeries(QStringLiteral("tt-fresh"),
+                                                QStringLiteral("Fresh"),
+                                                {makeEp(1, 1, QStringLiteral("F"))})}};
 
         f.vm.load(QStringLiteral("tt-stale"));
         f.vm.load(QStringLiteral("tt-fresh"));
@@ -531,14 +497,11 @@ private Q_SLOTS:
     {
         Fixture f;
         f.cinemeta.seriesScripts = {
-            { {}, HttpError(HttpError::Kind::HttpStatus, 500,
-                  QStringLiteral("oops")) }
-        };
+            {{}, HttpError(HttpError::Kind::HttpStatus, 500, QStringLiteral("oops"))}};
         f.vm.load(QStringLiteral("tt-bogus"));
         drainEvents();
 
-        QCOMPARE(f.vm.metaState(),
-            SeriesDetailViewModel::MetaState::Error);
+        QCOMPARE(f.vm.metaState(), SeriesDetailViewModel::MetaState::Error);
         QVERIFY(!f.vm.metaError().isEmpty());
     }
 
@@ -546,10 +509,9 @@ private Q_SLOTS:
     {
         Fixture f;
         f.tmdb.seriesImdbId = QStringLiteral("tt0903747");
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt0903747"),
-            QStringLiteral("Breaking Bad"),
-            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
+        f.cinemeta.seriesScripts = {{makeSeries(QStringLiteral("tt0903747"),
+                                                QStringLiteral("Breaking Bad"),
+                                                {makeEp(1, 1, QStringLiteral("Pilot"))})}};
 
         f.vm.loadByTmdbId(1396, QStringLiteral("Breaking Bad"));
         drainEvents();
@@ -569,12 +531,10 @@ private Q_SLOTS:
         series.tmdbId = 200;
         series.kind = MediaKind::Series;
         series.title = QStringLiteral("S");
-        f.vm.similar()->setItems({ movie, series });
+        f.vm.similar()->setItems({movie, series});
 
-        QSignalSpy movieSpy(&f.vm,
-            &SeriesDetailViewModel::openMovieByTmdbRequested);
-        QSignalSpy seriesSpy(&f.vm,
-            &SeriesDetailViewModel::openSeriesByTmdbRequested);
+        QSignalSpy movieSpy(&f.vm, &SeriesDetailViewModel::openMovieByTmdbRequested);
+        QSignalSpy seriesSpy(&f.vm, &SeriesDetailViewModel::openSeriesByTmdbRequested);
 
         f.vm.activateSimilar(0);
         QCOMPARE(movieSpy.count(), 1);
@@ -588,12 +548,9 @@ private Q_SLOTS:
     void testClearResetsAll()
     {
         Fixture f;
-        f.cinemeta.seriesScripts = { { makeSeries(
-            QStringLiteral("tt1"), QStringLiteral("X"),
-            { makeEp(1, 1, QStringLiteral("Pilot")) }) } };
-        f.torrentio().scriptedCalls = {
-            { { makeStream(QStringLiteral("R"), 1, 1) } }
-        };
+        f.cinemeta.seriesScripts = {{makeSeries(
+            QStringLiteral("tt1"), QStringLiteral("X"), {makeEp(1, 1, QStringLiteral("Pilot"))})}};
+        f.torrentio().scriptedCalls = {{{makeStream(QStringLiteral("R"), 1, 1)}}};
         f.vm.load(QStringLiteral("tt1"));
         drainEvents();
         f.vm.selectEpisode(0);
@@ -601,14 +558,12 @@ private Q_SLOTS:
         QVERIFY(!f.vm.title().isEmpty());
 
         f.vm.clear();
-        QCOMPARE(f.vm.metaState(),
-            SeriesDetailViewModel::MetaState::Idle);
+        QCOMPARE(f.vm.metaState(), SeriesDetailViewModel::MetaState::Idle);
         QVERIFY(f.vm.title().isEmpty());
         QCOMPARE(f.vm.seasonLabels().size(), 0);
         QCOMPARE(f.vm.currentSeason(), -1);
         QCOMPARE(f.vm.selectedEpisodeRow(), -1);
-        QCOMPARE(f.vm.streams()->state(),
-            StreamsListModel::State::Idle);
+        QCOMPARE(f.vm.streams()->state(), StreamsListModel::State::Idle);
     }
 };
 

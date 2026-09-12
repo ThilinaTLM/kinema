@@ -1,0 +1,281 @@
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+#include "api/indexers/StremioStreamParse.h"
+
+#include "core/io/HttpError.h"
+
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QRegularExpression>
+
+#include <KLocalizedString>
+
+namespace kinema::api::stremio {
+using namespace kinema::domain;
+
+namespace {
+
+// The descriptive field these addons return looks like:
+//
+//   "The Matrix 1999 1080p BluRay x264-NOGRP\n👤 123 💾 2.1 GB ⚙️ ThePirateBay"
+//
+// The current Stremio Stream spec calls this `description`; the older
+// `title` field is deprecated. Torrentio still emits `title`,
+// Peerflix correctly uses `description`. We prefer `description`
+// when present and fall back to `title`.
+//
+// Sometimes lines are separated by "\n", sometimes by "\r\n". The extra
+// metadata may be on one line or spread across several. Use tolerant
+// regexes over the whole blob. Indexers that also surface structured
+// fields (`seed`, `sizebytes`, `quality`) get those preferred over
+// regex extraction — see `parseOne` below.
+
+static const QRegularExpression kSeedersRe(QStringLiteral("👤\\s*([0-9]+)"));
+// Debrid tag in the `name` field, e.g. "Torrentio\n2160p [RD+]" or
+// "Torrentio\n720p [AD download]". Capture 1 is the provider
+// abbreviation; capture 2 is " download" for the not-yet-cached
+// variant, empty for the cached variant (the trailing `+`).
+static const QRegularExpression
+    kDebridTagRe(QStringLiteral("\\[(RD|AD|PM|DL|ED|OC|TB|PO)(\\+| download)\\]"),
+                 QRegularExpression::CaseInsensitiveOption);
+static const QRegularExpression
+    kSizeRe(QStringLiteral("💾\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(TB|GB|MB|KB)"),
+            QRegularExpression::CaseInsensitiveOption);
+static const QRegularExpression kProviderRe(QStringLiteral("⚙️\\s*(\\S+)"));
+static const QRegularExpression
+    kResolutionRe(QStringLiteral("\\b(2160p|1440p|1080p|720p|480p|360p|4K|SD|HD)\\b"),
+                  QRegularExpression::CaseInsensitiveOption);
+
+std::optional<qint64> parseSize(const QString& text)
+{
+    const auto m = kSizeRe.match(text);
+    if (!m.hasMatch()) {
+        return std::nullopt;
+    }
+    bool ok = false;
+    const double value = m.captured(1).toDouble(&ok);
+    if (!ok) {
+        return std::nullopt;
+    }
+    const auto unit = m.captured(2).toUpper();
+    qint64 multiplier = 1;
+    if (unit == QLatin1String("KB")) {
+        multiplier = 1024LL;
+    } else if (unit == QLatin1String("MB")) {
+        multiplier = 1024LL * 1024;
+    } else if (unit == QLatin1String("GB")) {
+        multiplier = 1024LL * 1024 * 1024;
+    } else if (unit == QLatin1String("TB")) {
+        multiplier = 1024LL * 1024 * 1024 * 1024;
+    }
+    return static_cast<qint64>(value * static_cast<double>(multiplier));
+}
+
+std::optional<int> parseSeeders(const QString& text)
+{
+    const auto m = kSeedersRe.match(text);
+    if (!m.hasMatch()) {
+        return std::nullopt;
+    }
+    bool ok = false;
+    const int v = m.captured(1).toInt(&ok);
+    return ok ? std::optional<int>{v} : std::nullopt;
+}
+
+QString parseProvider(const QString& text)
+{
+    const auto m = kProviderRe.match(text);
+    return m.hasMatch() ? m.captured(1) : QString{};
+}
+
+QString parseResolution(const QString& qualityLabel, const QString& releaseName)
+{
+    // Quality label is first; the release name is a useful fallback.
+    for (const QString* src : {&qualityLabel, &releaseName}) {
+        const auto m = kResolutionRe.match(*src);
+        if (m.hasMatch()) {
+            return m.captured(1).toLower();
+        }
+    }
+    return QStringLiteral("—");
+}
+
+Stream parseOne(const QJsonObject& obj)
+{
+    Stream s;
+
+    const auto nameRaw = obj.value(QStringLiteral("name")).toString();
+    // `name` is sometimes multi-line; first line is the quality label.
+    s.qualityLabel = nameRaw.section(QLatin1Char('\n'), 0, 0).trimmed();
+
+    // Prefer `description` (current Stremio spec) and fall back to
+    // the deprecated `title` for Torrentio backward compatibility.
+    auto descRaw = obj.value(QStringLiteral("description")).toString();
+    if (descRaw.isEmpty()) {
+        descRaw = obj.value(QStringLiteral("title")).toString();
+    }
+    if (!descRaw.isEmpty()) {
+        const auto lines = descRaw.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        if (!lines.isEmpty()) {
+            s.releaseName = lines.first().trimmed();
+            if (lines.size() > 1) {
+                s.detailsText = lines.mid(1).join(QStringLiteral(" · ")).trimmed();
+            }
+        }
+    }
+
+    // Prefer structured numeric fields when present (Peerflix), else
+    // fall back to emoji-regex extraction (Torrentio).
+    if (const auto v = obj.value(QStringLiteral("seed")); v.isDouble()) {
+        s.seeders = v.toInt();
+    } else {
+        s.seeders = parseSeeders(descRaw);
+    }
+    // Size resolution is deferred until after `behaviorHints` is
+    // parsed below so we can consult the structured `videoSize`
+    // field as a middle tier of the fallback chain.
+    s.provider = parseProvider(descRaw);
+
+    // Lower-cased ISO language code (Peerflix surfaces this for
+    // every row; Torrentio leaves it empty). Consumed by the
+    // "Non-English" client filter.
+    s.language = obj.value(QStringLiteral("language")).toString().trimmed().toLower();
+
+    s.infoHash = obj.value(QStringLiteral("infoHash")).toString();
+    const auto bh = obj.value(QStringLiteral("behaviorHints")).toObject();
+
+    // Per-file byte size. Precedence (highest first):
+    //   1. top-level `sizebytes` (Peerflix convention),
+    //   2. `behaviorHints.videoSize` (Stremio behaviorHints spec,
+    //      defined as "size of the chosen file"),
+    //   3. the descriptive `\xf0\x9f\x92\xbe N GB` token in the
+    //      title/description (Torrentio).
+    // Some Torrentio season-pack rows omit the emoji token and
+    // surface bytes only via behaviorHints, so the structured
+    // fallback is what makes the picker render a size on those rows.
+    if (const auto v = obj.value(QStringLiteral("sizebytes")); v.isDouble()) {
+        s.sizeBytes = static_cast<qint64>(v.toDouble());
+    } else if (const auto v = bh.value(QStringLiteral("videoSize")); v.isDouble()) {
+        s.sizeBytes = static_cast<qint64>(v.toDouble());
+    } else if (const auto parsed = parseSize(descRaw); parsed.has_value()) {
+        s.sizeBytes = parsed;
+    }
+    // Some Stremio addon responses tuck infoHash inside behaviorHints
+    // (notably certain RD/AD-resolved entries). Fall back to that
+    // nested location when the top-level field is absent so the
+    // history layer can still key resume on a stable identifier.
+    if (s.infoHash.isEmpty()) {
+        s.infoHash = bh.value(QStringLiteral("infoHash")).toString();
+    }
+
+    // `fileIdx` may live at the top level or under behaviorHints.
+    // Default to -1 when absent so the backend can choose its own
+    // file from the torrent contents.
+    {
+        const auto top = obj.value(QStringLiteral("fileIdx"));
+        const auto nested = bh.value(QStringLiteral("fileIdx"));
+        const QJsonValue chosen = top.isUndefined() ? nested : top;
+        if (chosen.isDouble()) {
+            s.fileIndex = chosen.toInt(-1);
+        }
+    }
+    s.fileNameHint = bh.value(QStringLiteral("filename")).toString();
+
+    // Debrid status signal #1: Torrentio-style `[XX+]` /
+    // `[XX download]` tag in the `name` field. We only map the
+    // providers Kinema can act on today (RD/AD) — other recognised
+    // tags (`PM`, `DL`, `ED`, `OC`, `TB`, `PO`) are intentionally
+    // dropped here so the UI doesn't surface a badge for a
+    // provider we cannot route credentials to. Extend when those
+    // providers are added to `DebridProvider`.
+    if (const auto m = kDebridTagRe.match(nameRaw); m.hasMatch()) {
+        const auto tag = m.captured(1).toUpper();
+        if (tag == QLatin1String("RD")) {
+            s.debridProvider = DebridProvider::RealDebrid;
+        } else if (tag == QLatin1String("AD")) {
+            s.debridProvider = DebridProvider::AllDebrid;
+        }
+        s.debridCached = m.captured(2) == QLatin1String("+");
+    }
+
+    // Debrid status signal #2: Peerflix surfaces a structured
+    // `providers` array on debrid-resolved rows, e.g.
+    // `"providers": ["realdebrid"]`. Cache-state can't be derived
+    // from the array alone, so default to cached: a row that came
+    // back tagged with the provider is already streamable through
+    // that debrid (Peerflix's `debridoptions=torrentlinks` flag is
+    // what surfaces the uncached torrent rows, which carry no
+    // `providers` entry).
+    if (s.debridProvider == DebridProvider::None) {
+        const auto provs = obj.value(QStringLiteral("providers")).toArray();
+        for (const auto& v : provs) {
+            const auto t = v.toString().toLower();
+            if (t == QLatin1String("realdebrid")) {
+                s.debridProvider = DebridProvider::RealDebrid;
+                s.debridCached = true;
+                break;
+            }
+            if (t == QLatin1String("alldebrid")) {
+                s.debridProvider = DebridProvider::AllDebrid;
+                s.debridCached = true;
+                break;
+            }
+        }
+    }
+
+    // `sources` is an optional list of tracker URIs / DHT hints.
+    const auto srcs = obj.value(QStringLiteral("sources")).toArray();
+    s.sources.reserve(srcs.size());
+    for (const auto& v : srcs) {
+        if (v.isString()) {
+            s.sources.append(v.toString());
+        }
+    }
+
+    const auto urlStr = obj.value(QStringLiteral("url")).toString();
+    if (!urlStr.isEmpty()) {
+        s.directUrl = QUrl(urlStr);
+    }
+
+    // Prefer the indexer's structured `quality` field when present
+    // (Peerflix); fall back to regex over the quality label /
+    // release name (Torrentio).
+    const auto qualityStr = obj.value(QStringLiteral("quality")).toString().trimmed();
+    s.resolution = qualityStr.isEmpty() ? parseResolution(s.qualityLabel, s.releaseName)
+                                        : qualityStr.toLower();
+
+    return s;
+}
+
+} // namespace
+
+QList<Stream> parseStreams(const QJsonDocument& doc)
+{
+    if (!doc.isObject()) {
+        throw core::HttpError(
+            core::HttpError::Kind::Json, 0, i18n("Stream addon response was not a JSON object."));
+    }
+    const auto arr = doc.object().value(QStringLiteral("streams"));
+    if (!arr.isArray()) {
+        return {};
+    }
+
+    QList<Stream> out;
+    out.reserve(arr.toArray().size());
+    for (const auto& v : arr.toArray()) {
+        if (!v.isObject()) {
+            continue;
+        }
+        auto s = parseOne(v.toObject());
+        // A row with neither a hash nor a direct URL is not actionable.
+        if (s.infoHash.isEmpty() && s.directUrl.isEmpty()) {
+            continue;
+        }
+        out.append(std::move(s));
+    }
+    return out;
+}
+
+} // namespace kinema::api::stremio

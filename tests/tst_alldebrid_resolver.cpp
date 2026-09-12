@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/AllDebridClient.h"
-#include "domain/Download.h"
-#include "core/io/HttpError.h"
-#include "playback/sources/AllDebridResolver.h"
 #include "TestDoubles.h"
+#include "api/alldebrid/AllDebridClient.h"
+#include "core/io/HttpError.h"
+#include "domain/Download.h"
+#include "playback/sources/AllDebridResolver.h"
 
 #include <QCoroSignal>
 #include <QCoroTask>
@@ -24,10 +24,7 @@ namespace {
 class StubAllDebridClient : public api::AllDebridClient
 {
 public:
-    StubAllDebridClient()
-        : api::AllDebridClient(nullptr)
-    {
-    }
+    StubAllDebridClient() : api::AllDebridClient(nullptr) { }
 
     // Scripted responses.
     QList<domain::AdAddMagnetResult> uploadReplies;
@@ -47,10 +44,7 @@ public:
     QString lastUploadMagnet;
     QUrl lastUnlockedLink;
 
-    QCoro::Task<domain::AllDebridUser> user() override
-    {
-        co_return domain::AllDebridUser {};
-    }
+    QCoro::Task<domain::AllDebridUser> user() override { co_return domain::AllDebridUser{}; }
 
     QCoro::Task<domain::AdAddMagnetResult> uploadMagnet(QString magnet) override
     {
@@ -60,8 +54,9 @@ public:
             throw *uploadError;
         }
         if (uploadReplies.isEmpty()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                QStringLiteral("StubAllDebridClient: no upload reply"));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  QStringLiteral("StubAllDebridClient: no upload reply"));
         }
         co_return uploadReplies.takeFirst();
     }
@@ -73,8 +68,9 @@ public:
             throw *statusError;
         }
         if (statusReplies.isEmpty()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                QStringLiteral("StubAllDebridClient: no status reply"));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  QStringLiteral("StubAllDebridClient: no status reply"));
         }
         co_return statusReplies.takeFirst();
     }
@@ -86,8 +82,9 @@ public:
             throw *filesError;
         }
         if (filesReplies.isEmpty()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                QStringLiteral("StubAllDebridClient: no files reply"));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  QStringLiteral("StubAllDebridClient: no files reply"));
         }
         co_return filesReplies.takeFirst();
     }
@@ -100,8 +97,9 @@ public:
             throw *unlockError;
         }
         if (unlockReplies.isEmpty()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                QStringLiteral("StubAllDebridClient: no unlock reply"));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  QStringLiteral("StubAllDebridClient: no unlock reply"));
         }
         co_return unlockReplies.takeFirst();
     }
@@ -112,8 +110,7 @@ domain::AssetRef makeRef(const QString& hint = QString())
     domain::AssetRef ref;
     ref.key.kind = domain::MediaKind::Movie;
     ref.key.imdbId = QStringLiteral("tt1");
-    ref.infoHash = QStringLiteral(
-        "aabbccddeeff00112233445566778899aabbccdd");
+    ref.infoHash = QStringLiteral("aabbccddeeff00112233445566778899aabbccdd");
     ref.releaseName = QStringLiteral("Movie.Release");
     ref.fileNameHint = hint;
     return ref;
@@ -135,13 +132,11 @@ domain::AdMagnetStatus makeStatus(int code)
     domain::AdMagnetStatus s;
     s.id = 999;
     s.statusCode = code;
-    s.status = code == 4 ? QStringLiteral("Ready")
-                         : QStringLiteral("Other");
+    s.status = code == 4 ? QStringLiteral("Ready") : QStringLiteral("Other");
     return s;
 }
 
-domain::AdMagnetFile makeFile(const QString& path, qint64 bytes,
-    const QString& url)
+domain::AdMagnetFile makeFile(const QString& path, qint64 bytes, const QString& url)
 {
     domain::AdMagnetFile f;
     f.path = path;
@@ -160,55 +155,52 @@ private Q_SLOTS:
     void resolve_pickByFileNameHint()
     {
         StubAllDebridClient stub;
-        stub.uploadReplies = { makeUploadOk() };
-        stub.statusReplies = { makeStatus(4) };
-        stub.filesReplies = {
-            QList<domain::AdMagnetFile> {
-                makeFile(QStringLiteral("Other.Show.1080p.mkv"), 1'500'000'000,
-                    QStringLiteral("https://alldebrid.com/f/other")),
-                makeFile(QStringLiteral("Movie.Release.1080p.mkv"), 1'600'000'000,
-                    QStringLiteral("https://alldebrid.com/f/wanted")),
-            }
-        };
+        stub.uploadReplies = {makeUploadOk()};
+        stub.statusReplies = {makeStatus(4)};
+        stub.filesReplies = {QList<domain::AdMagnetFile>{
+            makeFile(QStringLiteral("Other.Show.1080p.mkv"),
+                     1'500'000'000,
+                     QStringLiteral("https://alldebrid.com/f/other")),
+            makeFile(QStringLiteral("Movie.Release.1080p.mkv"),
+                     1'600'000'000,
+                     QStringLiteral("https://alldebrid.com/f/wanted")),
+        }};
         domain::AdUnlockedLink unlock;
-        unlock.download = QUrl(QStringLiteral(
-            "https://p1.alldeb.ovh/dl/wanted.mkv"));
+        unlock.download = QUrl(QStringLiteral("https://p1.alldeb.ovh/dl/wanted.mkv"));
         unlock.fileSize = 1'600'000'000;
         unlock.filename = QStringLiteral("Movie.Release.1080p.mkv");
-        stub.unlockReplies = { unlock };
+        stub.unlockReplies = {unlock};
 
         playback::sources::AllDebridResolver r(stub);
-        const auto out = QCoro::waitFor(r.resolve(
-            makeRef(QStringLiteral("Movie.Release.1080p.mkv"))));
+        const auto out =
+            QCoro::waitFor(r.resolve(makeRef(QStringLiteral("Movie.Release.1080p.mkv"))));
 
         QCOMPARE(stub.uploadCalls, 1);
         QCOMPARE(stub.filesCalls, 1);
         QCOMPARE(stub.unlockCalls, 1);
-        QCOMPARE(stub.lastUnlockedLink,
-            QUrl(QStringLiteral("https://alldebrid.com/f/wanted")));
-        QCOMPARE(out.downloadUrl,
-            QUrl(QStringLiteral("https://p1.alldeb.ovh/dl/wanted.mkv")));
+        QCOMPARE(stub.lastUnlockedLink, QUrl(QStringLiteral("https://alldebrid.com/f/wanted")));
+        QCOMPARE(out.downloadUrl, QUrl(QStringLiteral("https://p1.alldeb.ovh/dl/wanted.mkv")));
         QCOMPARE(out.fileSize, 1'600'000'000LL);
     }
 
     void resolve_pollsUntilReady()
     {
         StubAllDebridClient stub;
-        stub.uploadReplies = { makeUploadOk() };
+        stub.uploadReplies = {makeUploadOk()};
         // Two polls before Ready.
         stub.statusReplies = {
-            makeStatus(1), makeStatus(1), makeStatus(4),
+            makeStatus(1),
+            makeStatus(1),
+            makeStatus(4),
         };
         stub.filesReplies = {
-            QList<domain::AdMagnetFile> {
-                makeFile(QStringLiteral("Movie.mkv"), 1'500'000'000,
-                    QStringLiteral("https://alldebrid.com/f/m"))
-            }
-        };
+            QList<domain::AdMagnetFile>{makeFile(QStringLiteral("Movie.mkv"),
+                                                 1'500'000'000,
+                                                 QStringLiteral("https://alldebrid.com/f/m"))}};
         domain::AdUnlockedLink unlock;
         unlock.download = QUrl(QStringLiteral("https://p1/dl/m.mkv"));
         unlock.fileSize = 1'500'000'000;
-        stub.unlockReplies = { unlock };
+        stub.unlockReplies = {unlock};
 
         playback::sources::AllDebridResolver r(stub);
         const auto out = QCoro::waitFor(r.resolve(makeRef()));
@@ -220,8 +212,8 @@ private Q_SLOTS:
     void resolve_terminalStatusThrows()
     {
         StubAllDebridClient stub;
-        stub.uploadReplies = { makeUploadOk() };
-        stub.statusReplies = { makeStatus(8) }; // 8 = File too big.
+        stub.uploadReplies = {makeUploadOk()};
+        stub.statusReplies = {makeStatus(8)}; // 8 = File too big.
 
         playback::sources::AllDebridResolver r(stub);
         try {
@@ -235,55 +227,52 @@ private Q_SLOTS:
     void resolve_emptyFilesThrows()
     {
         StubAllDebridClient stub;
-        stub.uploadReplies = { makeUploadOk() };
-        stub.statusReplies = { makeStatus(4) };
-        stub.filesReplies = { QList<domain::AdMagnetFile> {} };
+        stub.uploadReplies = {makeUploadOk()};
+        stub.statusReplies = {makeStatus(4)};
+        stub.filesReplies = {QList<domain::AdMagnetFile>{}};
 
         playback::sources::AllDebridResolver r(stub);
         try {
             (void)QCoro::waitFor(r.resolve(makeRef()));
             QFAIL("expected HttpError");
         } catch (const core::HttpError& e) {
-            QVERIFY(e.message().contains(QStringLiteral("file"),
-                Qt::CaseInsensitive));
+            QVERIFY(e.message().contains(QStringLiteral("file"), Qt::CaseInsensitive));
         }
     }
 
     void resolve_seriesEpisodeFavoursMatchingPath()
     {
         StubAllDebridClient stub;
-        stub.uploadReplies = { makeUploadOk() };
-        stub.statusReplies = { makeStatus(4) };
-        stub.filesReplies = {
-            QList<domain::AdMagnetFile> {
-                makeFile(QStringLiteral("Show.S01E01.1080p.mkv"), 1'400'000'000,
-                    QStringLiteral("https://alldebrid.com/f/ep1")),
-                makeFile(QStringLiteral("Show.S01E02.1080p.mkv"), 1'500'000'000,
-                    QStringLiteral("https://alldebrid.com/f/ep2")),
-                makeFile(QStringLiteral("Show.S01E03.1080p.mkv"), 1'600'000'000,
-                    QStringLiteral("https://alldebrid.com/f/ep3")),
-            }
-        };
+        stub.uploadReplies = {makeUploadOk()};
+        stub.statusReplies = {makeStatus(4)};
+        stub.filesReplies = {QList<domain::AdMagnetFile>{
+            makeFile(QStringLiteral("Show.S01E01.1080p.mkv"),
+                     1'400'000'000,
+                     QStringLiteral("https://alldebrid.com/f/ep1")),
+            makeFile(QStringLiteral("Show.S01E02.1080p.mkv"),
+                     1'500'000'000,
+                     QStringLiteral("https://alldebrid.com/f/ep2")),
+            makeFile(QStringLiteral("Show.S01E03.1080p.mkv"),
+                     1'600'000'000,
+                     QStringLiteral("https://alldebrid.com/f/ep3")),
+        }};
         domain::AdUnlockedLink unlock;
         unlock.download = QUrl(QStringLiteral("https://p1/dl/ep2.mkv"));
         unlock.fileSize = 1'500'000'000;
-        stub.unlockReplies = { unlock };
+        stub.unlockReplies = {unlock};
 
         domain::AssetRef ref;
         ref.key.kind = domain::MediaKind::Series;
         ref.key.imdbId = QStringLiteral("tt2");
         ref.key.season = 1;
         ref.key.episode = 2;
-        ref.infoHash = QStringLiteral(
-            "1122334455667788990011223344556677889900");
+        ref.infoHash = QStringLiteral("1122334455667788990011223344556677889900");
         ref.releaseName = QStringLiteral("Show.S01");
 
         playback::sources::AllDebridResolver r(stub);
         const auto out = QCoro::waitFor(r.resolve(ref));
-        QCOMPARE(stub.lastUnlockedLink,
-            QUrl(QStringLiteral("https://alldebrid.com/f/ep2")));
-        QCOMPARE(out.downloadUrl,
-            QUrl(QStringLiteral("https://p1/dl/ep2.mkv")));
+        QCOMPARE(stub.lastUnlockedLink, QUrl(QStringLiteral("https://alldebrid.com/f/ep2")));
+        QCOMPARE(out.downloadUrl, QUrl(QStringLiteral("https://p1/dl/ep2.mkv")));
     }
 
     void resolve_carriesFileListThroughLink()
@@ -294,42 +283,37 @@ private Q_SLOTS:
         // libtorrent session. Index is the 0-based position in the
         // flattened list as the provider returned it.
         StubAllDebridClient stub;
-        stub.uploadReplies = { makeUploadOk() };
-        stub.statusReplies = { makeStatus(4) };
-        stub.filesReplies = {
-            QList<domain::AdMagnetFile> {
-                makeFile(QStringLiteral("Show.S01E01.1080p.mkv"),
-                    1'400'000'000,
-                    QStringLiteral("https://alldebrid.com/f/ep1")),
-                makeFile(QStringLiteral("Show.S01E02.1080p.mkv"),
-                    1'500'000'000,
-                    QStringLiteral("https://alldebrid.com/f/ep2")),
-            }
-        };
+        stub.uploadReplies = {makeUploadOk()};
+        stub.statusReplies = {makeStatus(4)};
+        stub.filesReplies = {QList<domain::AdMagnetFile>{
+            makeFile(QStringLiteral("Show.S01E01.1080p.mkv"),
+                     1'400'000'000,
+                     QStringLiteral("https://alldebrid.com/f/ep1")),
+            makeFile(QStringLiteral("Show.S01E02.1080p.mkv"),
+                     1'500'000'000,
+                     QStringLiteral("https://alldebrid.com/f/ep2")),
+        }};
         domain::AdUnlockedLink unlock;
         unlock.download = QUrl(QStringLiteral("https://p1/dl/ep1.mkv"));
         unlock.fileSize = 1'400'000'000;
-        stub.unlockReplies = { unlock };
+        stub.unlockReplies = {unlock};
 
         domain::AssetRef ref;
         ref.key.kind = domain::MediaKind::Series;
         ref.key.imdbId = QStringLiteral("tt2");
         ref.key.season = 1;
         ref.key.episode = 1;
-        ref.infoHash = QStringLiteral(
-            "1122334455667788990011223344556677889900");
+        ref.infoHash = QStringLiteral("1122334455667788990011223344556677889900");
         ref.releaseName = QStringLiteral("Show.S01");
 
         playback::sources::AllDebridResolver r(stub);
         const auto out = QCoro::waitFor(r.resolve(ref));
         QCOMPARE(out.files.size(), 2);
         QCOMPARE(out.files[0].index, 0);
-        QCOMPARE(out.files[0].path,
-            QStringLiteral("Show.S01E01.1080p.mkv"));
+        QCOMPARE(out.files[0].path, QStringLiteral("Show.S01E01.1080p.mkv"));
         QCOMPARE(out.files[0].size, qint64(1'400'000'000));
         QCOMPARE(out.files[1].index, 1);
-        QCOMPARE(out.files[1].path,
-            QStringLiteral("Show.S01E02.1080p.mkv"));
+        QCOMPARE(out.files[1].path, QStringLiteral("Show.S01E02.1080p.mkv"));
         QCOMPARE(out.files[1].size, qint64(1'500'000'000));
     }
 };

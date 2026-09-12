@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/MetadataQuery.h"
+#include "api/common/MetadataQuery.h"
 
 #include <QTest>
 
@@ -14,16 +14,14 @@ class TstMetadataQuery : public QObject
 private Q_SLOTS:
     void bareLowercaseId()
     {
-        const auto id = metadata_query::extractImdbTitleId(
-            QStringLiteral("tt15145764"));
+        const auto id = metadata_query::extractImdbTitleId(QStringLiteral("tt15145764"));
         QVERIFY(id.has_value());
         QCOMPARE(*id, QStringLiteral("tt15145764"));
     }
 
     void bareUppercaseIdNormalizes()
     {
-        const auto id = metadata_query::extractImdbTitleId(
-            QStringLiteral("TT15145764"));
+        const auto id = metadata_query::extractImdbTitleId(QStringLiteral("TT15145764"));
         QVERIFY(id.has_value());
         QCOMPARE(*id, QStringLiteral("tt15145764"));
     }
@@ -53,8 +51,8 @@ private Q_SLOTS:
 
     void ordinaryTitleContainingIdReturnsEmpty()
     {
-        const auto id = metadata_query::extractImdbTitleId(
-            QStringLiteral("movie tt15145764 freddy"));
+        const auto id =
+            metadata_query::extractImdbTitleId(QStringLiteral("movie tt15145764 freddy"));
         QVERIFY(!id.has_value());
     }
 };

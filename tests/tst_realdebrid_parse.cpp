@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/RealDebridParse.h"
+#include "api/realdebrid/RealDebridParse.h"
 #include "core/io/HttpError.h"
 
 #include <QFile>
@@ -18,7 +18,7 @@ private:
     static QJsonDocument loadFixture(const char* name)
     {
         QFile f(QStringLiteral(KINEMA_TEST_FIXTURES_DIR) + QLatin1Char('/')
-            + QString::fromLatin1(name));
+                + QString::fromLatin1(name));
         if (!f.open(QIODevice::ReadOnly)) {
             qFatal("Cannot open fixture %s", name);
         }
@@ -51,9 +51,7 @@ private Q_SLOTS:
     void throwsOnNonObjectDocument()
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("[1,2,3]"));
-        QVERIFY_EXCEPTION_THROWN(
-            realdebrid::parseUser(doc),
-            kinema::core::HttpError);
+        QVERIFY_EXCEPTION_THROWN(realdebrid::parseUser(doc), kinema::core::HttpError);
     }
 
     void toleratesMissingFields()
@@ -77,9 +75,7 @@ private Q_SLOTS:
     void addMagnet_throwsOnMissingId()
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
-        QVERIFY_EXCEPTION_THROWN(
-            realdebrid::parseAddMagnet(doc),
-            kinema::core::HttpError);
+        QVERIFY_EXCEPTION_THROWN(realdebrid::parseAddMagnet(doc), kinema::core::HttpError);
     }
 
     void torrentInfo_listsFilesAndLinks()
@@ -108,9 +104,7 @@ private Q_SLOTS:
     void unrestrictLink_throwsOnMissingDownload()
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("{}"));
-        QVERIFY_EXCEPTION_THROWN(
-            realdebrid::parseUnrestrictedLink(doc),
-            kinema::core::HttpError);
+        QVERIFY_EXCEPTION_THROWN(realdebrid::parseUnrestrictedLink(doc), kinema::core::HttpError);
     }
 };
 

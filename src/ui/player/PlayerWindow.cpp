@@ -8,21 +8,20 @@
 #include "config/AppearanceSettings.h"
 #include "config/PlayerSettings.h"
 #include "core/util/MediaChips.h"
+#include "kinema_log_player.h"
 #include "ui/player/MpvVideoItem.h"
 #include "ui/player/PlayerViewModel.h"
 #include "ui/player/PlayerWindowPresentation.h"
 
-#include <KLocalizedString>
-
 #include <QCloseEvent>
 #include <QCursor>
 #include <QGuiApplication>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QMetaMethod>
 #include <QHideEvent>
 #include <QIcon>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QKeyEvent>
+#include <QMetaMethod>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickItem>
@@ -32,7 +31,7 @@
 #include <QUrl>
 #include <QWidget>
 
-#include "kinema_log_player.h"
+#include <KLocalizedString>
 
 namespace kinema::ui::player {
 
@@ -56,10 +55,11 @@ QString buildSubtitleLabel(const domain::PlaybackContext& ctx)
     if (ctx.episodeTitle.isEmpty()) {
         return code;
     }
-    return i18nc(
-        "@label subtitle on the player title strip, e.g. "
-        "\"S01E03 \u2014 Episode Title\"",
-        "%1 \u2014 %2", code, ctx.episodeTitle);
+    return i18nc("@label subtitle on the player title strip, e.g. "
+                 "\"S01E03 \u2014 Episode Title\"",
+                 "%1 \u2014 %2",
+                 code,
+                 ctx.episodeTitle);
 }
 
 QStringList chipsFromJson(const QByteArray& json)
@@ -82,11 +82,8 @@ QStringList chipsFromJson(const QByteArray& json)
 
 } // namespace
 
-PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
-    config::PlayerSettings& player)
-    : QQuickView(/*parent=*/nullptr)
-    , m_appearanceSettings(appearance)
-    , m_playerSettings(player)
+PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance, config::PlayerSettings& player)
+    : QQuickView(/*parent=*/nullptr), m_appearanceSettings(appearance), m_playerSettings(player)
 {
     // Keep this as an independent top-level window rather than a
     // transient child of the main shell. That lets the desktop
@@ -96,7 +93,7 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     // Standard window chrome.
     setTitle(i18nc("@title:window", "Kinema Player"));
     setIcon(QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema-player"),
-        QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema"))));
+                             QIcon::fromTheme(QStringLiteral("dev.tlmtech.kinema"))));
 
     // Resize the QML root to fill the window so the scene fills
     // the available area.
@@ -105,31 +102,24 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     // Construct the chrome view-model and expose it to QML before
     // the scene loads.
     m_viewModel = new PlayerViewModel(this);
-    rootContext()->setContextProperty(
-        QStringLiteral("playerVm"), m_viewModel);
+    rootContext()->setContextProperty(QStringLiteral("playerVm"), m_viewModel);
 
     // Re-emit the action signals on our own surface so
     // `EmbeddedMpvPlayerAdapter` only listens to the window.
-    connect(m_viewModel, &PlayerViewModel::resumeAccepted,
-        this, &PlayerWindow::resumeAccepted);
-    connect(m_viewModel, &PlayerViewModel::resumeDeclined,
-        this, &PlayerWindow::resumeDeclined);
-    connect(m_viewModel, &PlayerViewModel::skipRequested,
-        this, &PlayerWindow::skipRequested);
-    connect(m_viewModel, &PlayerViewModel::audioPicked,
-        this, &PlayerWindow::audioPicked);
-    connect(m_viewModel, &PlayerViewModel::subtitlePicked,
-        this, &PlayerWindow::subtitlePicked);
-    connect(m_viewModel, &PlayerViewModel::speedPicked,
-        this, &PlayerWindow::speedPicked);
-    connect(m_viewModel, &PlayerViewModel::closeRequested,
-        this, [this] { close(); });
-    connect(m_viewModel, &PlayerViewModel::fullscreenToggleRequested,
-        this, &PlayerWindow::toggleFullscreen);
-    connect(m_viewModel, &PlayerViewModel::previousRequested,
-        this, &PlayerWindow::previousRequested);
-    connect(m_viewModel, &PlayerViewModel::nextRequested,
-        this, &PlayerWindow::nextRequested);
+    connect(m_viewModel, &PlayerViewModel::resumeAccepted, this, &PlayerWindow::resumeAccepted);
+    connect(m_viewModel, &PlayerViewModel::resumeDeclined, this, &PlayerWindow::resumeDeclined);
+    connect(m_viewModel, &PlayerViewModel::skipRequested, this, &PlayerWindow::skipRequested);
+    connect(m_viewModel, &PlayerViewModel::audioPicked, this, &PlayerWindow::audioPicked);
+    connect(m_viewModel, &PlayerViewModel::subtitlePicked, this, &PlayerWindow::subtitlePicked);
+    connect(m_viewModel, &PlayerViewModel::speedPicked, this, &PlayerWindow::speedPicked);
+    connect(m_viewModel, &PlayerViewModel::closeRequested, this, [this] { close(); });
+    connect(m_viewModel,
+            &PlayerViewModel::fullscreenToggleRequested,
+            this,
+            &PlayerWindow::toggleFullscreen);
+    connect(
+        m_viewModel, &PlayerViewModel::previousRequested, this, &PlayerWindow::previousRequested);
+    connect(m_viewModel, &PlayerViewModel::nextRequested, this, &PlayerWindow::nextRequested);
 
     // Load the QML scene. The MpvVideoItem inside it will be the
     // first MpvVideoItem child of the root; we look it up after
@@ -138,15 +128,13 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
     // source-relative path under the module prefix, so PlayerScene
     // lives at .../ui/player/qml/PlayerScene.qml. Other QML files
     // resolve via the import system once this loads.
-    setSource(QUrl(QStringLiteral(
-        "qrc:/qt/qml/dev/tlmtech/kinema/player"
-        "/ui/player/qml/PlayerScene.qml")));
+    setSource(QUrl(QStringLiteral("qrc:/qt/qml/dev/tlmtech/kinema/player"
+                                  "/ui/player/qml/PlayerScene.qml")));
 
     if (status() == QQuickView::Error) {
         const auto errors = QQuickView::errors();
         for (const auto& e : errors) {
-            qCWarning(KINEMA_PLAYER) << "PlayerScene.qml load error:"
-                              << e.toString();
+            qCWarning(KINEMA_PLAYER) << "PlayerScene.qml load error:" << e.toString();
         }
     }
 
@@ -156,16 +144,12 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
         // (`property bool chromeVisible: true`); Qt auto-generates a
         // `chromeVisibleChanged()` notify signal we can connect to
         // by name via the meta-object.
-        const int notifyIdx = root->metaObject()->indexOfSignal(
-            "chromeVisibleChanged()");
+        const int notifyIdx = root->metaObject()->indexOfSignal("chromeVisibleChanged()");
         if (notifyIdx >= 0) {
-            const QMetaMethod notify =
-                root->metaObject()->method(notifyIdx);
-            const int slotIdx = this->metaObject()->indexOfSlot(
-                "onChromeVisibleChanged()");
+            const QMetaMethod notify = root->metaObject()->method(notifyIdx);
+            const int slotIdx = this->metaObject()->indexOfSlot("onChromeVisibleChanged()");
             if (slotIdx >= 0) {
-                const QMetaMethod slot =
-                    this->metaObject()->method(slotIdx);
+                const QMetaMethod slot = this->metaObject()->method(slotIdx);
                 QObject::connect(root, notify, this, slot);
             }
         }
@@ -173,8 +157,7 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
         // so this just unsets the cursor; harmless either way).
         onChromeVisibleChanged();
 
-        if (auto* video = root->findChild<MpvVideoItem*>(
-                QStringLiteral("kinemaMpvVideoItem"))) {
+        if (auto* video = root->findChild<MpvVideoItem*>(QStringLiteral("kinemaMpvVideoItem"))) {
             m_video = video;
             video->applySettings(m_playerSettings);
             m_viewModel->attach(video);
@@ -182,48 +165,37 @@ PlayerWindow::PlayerWindow(config::AppearanceSettings& appearance,
             // Forward MpvVideoItem signals to PlayerWindow's public
             // surface. `EmbeddedMpvPlayerAdapter` only sees the
             // window.
-            connect(video, &MpvVideoItem::fileLoaded,
-                this, &PlayerWindow::fileLoaded);
-            connect(video, &MpvVideoItem::mpvError,
-                this, &PlayerWindow::mpvError);
-            connect(video, &MpvVideoItem::endOfFile,
-                this, [this](const QString& reason) {
-                    // Forward the reason; let the queue controller
-                    // (or whoever is wired in) decide whether to
-                    // load the next file in place or hide the
-                    // window. Fallback for the no-receiver case:
-                    // stopAndHide so the window doesn't sit on a
-                    // black frame indefinitely.
-                    if (receivers(SIGNAL(endOfFile(QString))) <= 0) {
-                        stopAndHide();
-                    }
-                    Q_EMIT endOfFile(reason);
-                });
-            connect(video, &MpvVideoItem::positionChanged,
-                this, &PlayerWindow::positionChanged);
-            connect(video, &MpvVideoItem::durationChanged,
-                this, &PlayerWindow::durationChanged);
-            connect(video, &MpvVideoItem::pausedChanged,
-                this, &PlayerWindow::pausedChanged);
-            connect(video, &MpvVideoItem::volumeChanged,
-                this, &PlayerWindow::volumeChanged);
-            connect(video, &MpvVideoItem::speedChanged,
-                this, &PlayerWindow::speedChanged);
-            connect(video, &MpvVideoItem::trackListChanged,
-                this, &PlayerWindow::trackListChanged);
-            connect(video, &MpvVideoItem::chaptersChanged,
-                this, &PlayerWindow::chaptersChanged);
-            connect(video, &MpvVideoItem::videoStatsChanged,
-                this, [this](const MpvVideoItem::VideoStats&) {
-                    pushMediaChips();
-                });
-            connect(video, &MpvVideoItem::trackListChanged,
-                this, [this](const core::tracks::TrackList&) {
-                    pushMediaChips();
-                });
+            connect(video, &MpvVideoItem::fileLoaded, this, &PlayerWindow::fileLoaded);
+            connect(video, &MpvVideoItem::mpvError, this, &PlayerWindow::mpvError);
+            connect(video, &MpvVideoItem::endOfFile, this, [this](const QString& reason) {
+                // Forward the reason; let the queue controller
+                // (or whoever is wired in) decide whether to
+                // load the next file in place or hide the
+                // window. Fallback for the no-receiver case:
+                // stopAndHide so the window doesn't sit on a
+                // black frame indefinitely.
+                if (receivers(SIGNAL(endOfFile(QString))) <= 0) {
+                    stopAndHide();
+                }
+                Q_EMIT endOfFile(reason);
+            });
+            connect(video, &MpvVideoItem::positionChanged, this, &PlayerWindow::positionChanged);
+            connect(video, &MpvVideoItem::durationChanged, this, &PlayerWindow::durationChanged);
+            connect(video, &MpvVideoItem::pausedChanged, this, &PlayerWindow::pausedChanged);
+            connect(video, &MpvVideoItem::volumeChanged, this, &PlayerWindow::volumeChanged);
+            connect(video, &MpvVideoItem::speedChanged, this, &PlayerWindow::speedChanged);
+            connect(video, &MpvVideoItem::trackListChanged, this, &PlayerWindow::trackListChanged);
+            connect(video, &MpvVideoItem::chaptersChanged, this, &PlayerWindow::chaptersChanged);
+            connect(video,
+                    &MpvVideoItem::videoStatsChanged,
+                    this,
+                    [this](const MpvVideoItem::VideoStats&) { pushMediaChips(); });
+            connect(video,
+                    &MpvVideoItem::trackListChanged,
+                    this,
+                    [this](const core::tracks::TrackList&) { pushMediaChips(); });
         } else {
-            qCWarning(KINEMA_PLAYER)
-                << "PlayerWindow: kinemaMpvVideoItem not found in QML";
+            qCWarning(KINEMA_PLAYER) << "PlayerWindow: kinemaMpvVideoItem not found in QML";
         }
     }
 }
@@ -266,9 +238,8 @@ void PlayerWindow::play(const QUrl& url, const domain::PlaybackContext& ctx)
 
     const auto& title = ctx.title;
     setTitle(title.isEmpty()
-        ? QStringLiteral("Kinema")
-        : i18nc("@title:window window title with media title",
-              "%1 \u2014 Kinema", title));
+                 ? QStringLiteral("Kinema")
+                 : i18nc("@title:window window title with media title", "%1 \u2014 Kinema", title));
 
     if (!m_geometryApplied) {
         loadGeometry();
@@ -281,10 +252,10 @@ void PlayerWindow::play(const QUrl& url, const domain::PlaybackContext& ctx)
 
     if (m_viewModel) {
         m_viewModel->setMediaContext(ctx.title,
-            buildSubtitleLabel(ctx),
-            ctx.key.kind == domain::MediaKind::Series
-                ? QStringLiteral("series")
-                : QStringLiteral("movie"));
+                                     buildSubtitleLabel(ctx),
+                                     ctx.key.kind == domain::MediaKind::Series
+                                         ? QStringLiteral("series")
+                                         : QStringLiteral("movie"));
         m_viewModel->setMediaChips({});
     }
 
@@ -293,8 +264,7 @@ void PlayerWindow::play(const QUrl& url, const domain::PlaybackContext& ctx)
         m_video->loadFile(url, startSec);
     }
 
-    const auto presentation =
-        window_presentation::forPlayback(isVisible());
+    const auto presentation = window_presentation::forPlayback(isVisible());
     if (presentation.showWindow) {
         show();
     }
@@ -311,56 +281,68 @@ void PlayerWindow::play(const QUrl& url, const domain::PlaybackContext& ctx)
 
 void PlayerWindow::setPaused(bool paused)
 {
-    if (m_video) m_video->setPaused(paused);
+    if (m_video)
+        m_video->setPaused(paused);
 }
 
 void PlayerWindow::togglePause()
 {
-    if (m_video) m_video->cyclePause();
+    if (m_video)
+        m_video->cyclePause();
 }
 
 void PlayerWindow::seekAbsolute(double seconds)
 {
-    if (m_video) m_video->seekAbsolute(seconds);
+    if (m_video)
+        m_video->seekAbsolute(seconds);
 }
 
 void PlayerWindow::seekRelative(double seconds)
 {
-    if (m_video) m_video->seekRelative(seconds);
+    if (m_video)
+        m_video->seekRelative(seconds);
 }
 
 void PlayerWindow::setVolumePercent(double percent)
 {
-    if (m_video) m_video->setVolumePercent(percent);
+    if (m_video)
+        m_video->setVolumePercent(percent);
 }
 
 void PlayerWindow::setAudioTrack(int id)
 {
-    if (m_video) m_video->setAudioTrack(id);
+    if (m_video)
+        m_video->setAudioTrack(id);
 }
 
 void PlayerWindow::setSubtitleTrack(int id)
 {
-    if (m_video) m_video->setSubtitleTrack(id);
+    if (m_video)
+        m_video->setSubtitleTrack(id);
 }
 
 void PlayerWindow::setSpeed(double factor)
 {
-    if (m_video) m_video->setSpeed(factor);
+    if (m_video)
+        m_video->setSpeed(factor);
 }
 
 void PlayerWindow::showResumePrompt(qint64 seconds)
 {
-    if (m_viewModel) m_viewModel->showResume(seconds);
+    if (m_viewModel)
+        m_viewModel->showResume(seconds);
 }
 
 void PlayerWindow::hideResumePrompt()
 {
-    if (m_viewModel) m_viewModel->hideResume();
+    if (m_viewModel)
+        m_viewModel->hideResume();
 }
 
 void PlayerWindow::showSkipChapter(const QString& kind,
-    const QString& label, qint64 startSec, qint64 endSec)
+                                   const QString& label,
+                                   qint64 startSec,
+                                   qint64 endSec)
 {
     if (m_viewModel) {
         m_viewModel->showSkip(kind, label, startSec, endSec);
@@ -369,7 +351,8 @@ void PlayerWindow::showSkipChapter(const QString& kind,
 
 void PlayerWindow::hideSkipChapter()
 {
-    if (m_viewModel) m_viewModel->hideSkip();
+    if (m_viewModel)
+        m_viewModel->hideSkip();
 }
 
 void PlayerWindow::setLoadingVisible(bool on)
@@ -407,7 +390,7 @@ void PlayerWindow::closeEvent(QCloseEvent* e)
     e->accept();
     // Window is no longer one-shot: with the play queue we keep
     // a persistent libmpv context across queue items. The host
-    // (`MainController`) destroys us only when it destroys itself.
+    // (`ShellViewModel`) destroys us only when it destroys itself.
 }
 
 void PlayerWindow::keyPressEvent(QKeyEvent* e)
@@ -486,8 +469,7 @@ void PlayerWindow::loadGeometry()
     }
     if (s) {
         const QRect avail = s->availableGeometry();
-        setPosition(avail.center().x() - width() / 2,
-            avail.center().y() - height() / 2);
+        setPosition(avail.center().x() - width() / 2, avail.center().y() - height() / 2);
     }
 }
 
@@ -512,12 +494,12 @@ void PlayerWindow::pushMediaChips()
     }
     const auto stats = m_video->currentStats();
     core::media_chips::ChipInputs in;
-    in.videoHeight   = stats.height;
-    in.videoCodec    = stats.videoCodec;
-    in.audioCodec    = stats.audioCodec;
+    in.videoHeight = stats.height;
+    in.videoCodec = stats.videoCodec;
+    in.audioCodec = stats.audioCodec;
     in.audioChannels = stats.audioChannels;
-    in.hdrPrimaries  = stats.hdrPrimaries;
-    in.hdrGamma      = stats.hdrGamma;
+    in.hdrPrimaries = stats.hdrPrimaries;
+    in.hdrGamma = stats.hdrGamma;
     const auto json = core::media_chips::toIpcJson(in);
     m_viewModel->setMediaChips(chipsFromJson(json));
 }

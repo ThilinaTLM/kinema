@@ -14,7 +14,7 @@ class IndexerSelector;
 class OpenSubtitlesClient;
 class RealDebridClient;
 class TmdbClient;
-}
+} // namespace kinema::api
 
 namespace kinema::config {
 class AppSettings;
@@ -32,28 +32,30 @@ class SubtitleCacheStore;
 class TokenStore;
 class TorrentCache;
 class WatchedStore;
-}
+} // namespace kinema::core
 
 namespace kinema::playback::desktop {
 class MprisPlaybackProjection;
+}
+
+namespace kinema::services {
+class StreamActions;
 }
 
 namespace kinema::controllers {
 class DebridCredentialsResolver;
 class DownloadController;
 class LibraryController;
-class StreamUtilityController;
 class SubtitleController;
 class TokenController;
 class TrayController;
 class WatchedController;
-}
+} // namespace kinema::controllers
 
 namespace kinema::playback::sources {
 class AllDebridResolver;
 class RealDebridResolver;
-}
-
+} // namespace kinema::playback::sources
 
 namespace kinema::playback::adapters {
 class ActiveStreamIndexerAdapter;
@@ -74,10 +76,9 @@ class LocalHttpStreamGateway;
 namespace kinema::playback::history {
 class HistoryQueryService;
 class SqlitePlaybackHistoryRepository;
-}
+} // namespace kinema::playback::history
 
 namespace kinema::playback::adapters {
-class EmbeddedMpvPlayerAdapter;
 class ExternalPlayerAdapter;
 }
 
@@ -104,7 +105,7 @@ class TrackMemoryService;
 namespace kinema::playback::subtitles {
 class SubtitleSessionService;
 class MoviehashProbe;
-}
+} // namespace kinema::playback::subtitles
 
 namespace kinema::playback::torrent {
 class LibtorrentClient;
@@ -115,11 +116,14 @@ class BackendRegistry;
 class SessionRegistry;
 class TransferSupervisor;
 class TransferUseCase;
-}
-
+} // namespace kinema::playback::transfer
 
 namespace kinema::ui {
 class ImageLoader;
+}
+
+namespace kinema::ui::player {
+class EmbeddedMpvPlayerAdapter;
 }
 
 namespace kinema::ui::qml {
@@ -131,9 +135,10 @@ class DownloadsViewModel;
 class LibraryViewModel;
 class MovieDetailViewModel;
 class SearchViewModel;
+struct ShellDependencies;
 class SeriesDetailViewModel;
 class SubtitlesViewModel;
-}
+} // namespace kinema::ui::qml
 
 namespace kinema::ui::qml::settings {
 class SettingsRootViewModel;
@@ -169,6 +174,7 @@ public:
     ServiceContainer& operator=(const ServiceContainer&) = delete;
 
     config::AppSettings& settings() { return m_settings; }
+    ui::qml::ShellDependencies shellDependencies();
 
     // ---- Owned services (`unique_ptr`) ---------------------------------
     core::HttpClient* http() const { return m_http.get(); }
@@ -193,38 +199,54 @@ public:
     ui::ImageLoader* imageLoader() const { return m_imageLoader; }
     ui::qml::AppIconResolver* appIconResolver();
 
-    controllers::StreamUtilityController* streamUtilityController() const { return m_streamUtility; }
+    services::StreamActions* streamActions() const { return m_streamActions; }
     playback::session::PlaybackSessionManager* playbackSessionManager() const
-    { return m_playbackSessionManager; }
-    playback::transfer::TransferUseCase* transferUseCase() const
-    { return m_transferUseCase; }
+    {
+        return m_playbackSessionManager;
+    }
+    playback::transfer::TransferUseCase* transferUseCase() const { return m_transferUseCase; }
     playback::progress::PlaybackProgressProjector* playbackProgressProjector() const
-    { return m_playbackProgressProjector; }
-    playback::resume::ResumeUseCase* resumeUseCase() const
-    { return m_resumeUseCase; }
+    {
+        return m_playbackProgressProjector;
+    }
+    playback::resume::ResumeUseCase* resumeUseCase() const { return m_resumeUseCase; }
     playback::history::HistoryQueryService* historyQueryService() const
-    { return m_historyQueryService; }
+    {
+        return m_historyQueryService;
+    }
     playback::events::PlaybackEventStream* playbackEventStream() const
-    { return m_playbackEventStream; }
+    {
+        return m_playbackEventStream;
+    }
     playback::adapters::ExternalPlayerAdapter* externalPlayerAdapter() const
-    { return m_externalPlayerAdapter; }
+    {
+        return m_externalPlayerAdapter;
+    }
 #ifdef KINEMA_HAVE_LIBMPV
-    playback::adapters::EmbeddedMpvPlayerAdapter* embeddedPlayerAdapter() const
-    { return m_embeddedPlayerAdapter; }
+    ui::player::EmbeddedMpvPlayerAdapter* embeddedPlayerAdapter() const
+    {
+        return m_embeddedPlayerAdapter;
+    }
     playback::series::SeriesSessionService* seriesSessionService() const
-    { return m_seriesSessionService; }
+    {
+        return m_seriesSessionService;
+    }
 #endif
     playback::subtitles::SubtitleSessionService* subtitleSessionService() const
-    { return m_subtitleSessionService; }
+    {
+        return m_subtitleSessionService;
+    }
     playback::torrent::LibtorrentClient* libtorrentClient() const { return m_libtorrentClient; }
     playback::streaming::LocalHttpStreamGateway* localStreamGateway() const
-    { return m_localStreamGateway; }
-    playback::transfer::SessionRegistry* sessionRegistry() const
-    { return m_sessionRegistry.get(); }
-    playback::transfer::BackendRegistry* backendRegistry() const
-    { return m_backendRegistry.get(); }
+    {
+        return m_localStreamGateway;
+    }
+    playback::transfer::SessionRegistry* sessionRegistry() const { return m_sessionRegistry.get(); }
+    playback::transfer::BackendRegistry* backendRegistry() const { return m_backendRegistry.get(); }
     playback::transfer::TransferSupervisor* transferSupervisor() const
-    { return m_transferSupervisor; }
+    {
+        return m_transferSupervisor;
+    }
 
     controllers::DownloadController* downloadController() const { return m_downloadCtrl; }
     controllers::TokenController* tokenController() const { return m_tokenCtrl; }
@@ -239,7 +261,9 @@ public:
     /// `org.mpris.MediaPlayer2.kinema` D-Bus registration and the
     /// idle inhibitor; drives state off `PlaybackEventStream`.
     playback::desktop::MprisPlaybackProjection* mprisProjection() const
-    { return m_mprisProjection; }
+    {
+        return m_mprisProjection;
+    }
 #endif
 
     // ---- Page view-models ----------------------------------------------
@@ -333,62 +357,59 @@ private:
     std::unique_ptr<api::AllDebridClient> m_ad;
 
     // QObject-parented to `m_anchor`.
-    api::CinemetaClient* m_cinemeta {};
-    api::IndexerSelector* m_indexers {};
-    api::TmdbClient* m_tmdb {};
-    api::OpenSubtitlesClient* m_openSubtitles {};
-    ui::ImageLoader* m_imageLoader {};
+    api::CinemetaClient* m_cinemeta{};
+    api::IndexerSelector* m_indexers{};
+    api::TmdbClient* m_tmdb{};
+    api::OpenSubtitlesClient* m_openSubtitles{};
+    ui::ImageLoader* m_imageLoader{};
 
-    ui::qml::AppIconResolver* m_appIconResolver {};
-    controllers::StreamUtilityController* m_streamUtility {};
-    playback::events::PlaybackEventStream* m_playbackEventStream {};
-    std::unique_ptr<playback::history::SqlitePlaybackHistoryRepository>
-        m_historyRepo;
-    std::unique_ptr<playback::downloads::SqliteDownloadRepository>
-        m_downloadRepo;
-    std::unique_ptr<playback::adapters::ActiveStreamIndexerAdapter>
-        m_streamIndexerAdapter;
+    ui::qml::AppIconResolver* m_appIconResolver{};
+    services::StreamActions* m_streamActions{};
+    playback::events::PlaybackEventStream* m_playbackEventStream{};
+    std::unique_ptr<playback::history::SqlitePlaybackHistoryRepository> m_historyRepo;
+    std::unique_ptr<playback::downloads::SqliteDownloadRepository> m_downloadRepo;
+    std::unique_ptr<playback::adapters::ActiveStreamIndexerAdapter> m_streamIndexerAdapter;
     std::unique_ptr<playback::sources::RealDebridResolver> m_rdResolver;
     std::unique_ptr<playback::sources::AllDebridResolver> m_adResolver;
     std::unique_ptr<playback::transfer::SessionRegistry> m_sessionRegistry;
     std::unique_ptr<playback::transfer::BackendRegistry> m_backendRegistry;
-    playback::streaming::LocalHttpStreamGateway* m_localStreamGateway {};
-    playback::transfer::TransferSupervisor* m_transferSupervisor {};
-    playback::transfer::TransferUseCase* m_transferUseCase {};
-    playback::resume::ResumeUseCase* m_resumeUseCase {};
-    playback::progress::PlaybackProgressProjector* m_playbackProgressProjector {};
-    playback::history::HistoryQueryService* m_historyQueryService {};
-    playback::session::PlaybackSessionManager* m_playbackSessionManager {};
-    playback::adapters::ExternalPlayerAdapter* m_externalPlayerAdapter {};
-    playback::subtitles::SubtitleSessionService* m_subtitleSessionService {};
+    playback::streaming::LocalHttpStreamGateway* m_localStreamGateway{};
+    playback::transfer::TransferSupervisor* m_transferSupervisor{};
+    playback::transfer::TransferUseCase* m_transferUseCase{};
+    playback::resume::ResumeUseCase* m_resumeUseCase{};
+    playback::progress::PlaybackProgressProjector* m_playbackProgressProjector{};
+    playback::history::HistoryQueryService* m_historyQueryService{};
+    playback::session::PlaybackSessionManager* m_playbackSessionManager{};
+    playback::adapters::ExternalPlayerAdapter* m_externalPlayerAdapter{};
+    playback::subtitles::SubtitleSessionService* m_subtitleSessionService{};
 #ifdef KINEMA_HAVE_LIBMPV
-    playback::adapters::EmbeddedMpvPlayerAdapter* m_embeddedPlayerAdapter {};
-    playback::series::SeriesSessionService* m_seriesSessionService {};
-    playback::subtitles::MoviehashProbe* m_moviehashProbe {};
-    playback::history::TrackMemoryService* m_trackMemoryService {};
+    ui::player::EmbeddedMpvPlayerAdapter* m_embeddedPlayerAdapter{};
+    playback::series::SeriesSessionService* m_seriesSessionService{};
+    playback::subtitles::MoviehashProbe* m_moviehashProbe{};
+    playback::history::TrackMemoryService* m_trackMemoryService{};
 #endif
-    playback::torrent::LibtorrentClient* m_libtorrentClient {};
-    controllers::DownloadController* m_downloadCtrl {};
-    controllers::TokenController* m_tokenCtrl {};
+    playback::torrent::LibtorrentClient* m_libtorrentClient{};
+    controllers::DownloadController* m_downloadCtrl{};
+    controllers::TokenController* m_tokenCtrl{};
 
-    controllers::LibraryController* m_libraryCtrl {};
-    controllers::WatchedController* m_watchedCtrl {};
-    controllers::SubtitleController* m_subtitleCtrl {};
-    controllers::TrayController* m_tray {};
+    controllers::LibraryController* m_libraryCtrl{};
+    controllers::WatchedController* m_watchedCtrl{};
+    controllers::SubtitleController* m_subtitleCtrl{};
+    controllers::TrayController* m_tray{};
 
-    ui::qml::DiscoverViewModel* m_discoverVm {};
-    ui::qml::ContinueWatchingViewModel* m_continueWatchingVm {};
-    ui::qml::LibraryViewModel* m_libraryVm {};
-    ui::qml::SearchViewModel* m_searchVm {};
-    ui::qml::BrowseViewModel* m_browseVm {};
-    ui::qml::MovieDetailViewModel* m_movieDetailVm {};
-    ui::qml::SeriesDetailViewModel* m_seriesDetailVm {};
-    ui::qml::SubtitlesViewModel* m_subtitlesVm {};
-    ui::qml::settings::SettingsRootViewModel* m_settingsVm {};
-    ui::qml::DownloadsViewModel* m_downloadsVm {};
+    ui::qml::DiscoverViewModel* m_discoverVm{};
+    ui::qml::ContinueWatchingViewModel* m_continueWatchingVm{};
+    ui::qml::LibraryViewModel* m_libraryVm{};
+    ui::qml::SearchViewModel* m_searchVm{};
+    ui::qml::BrowseViewModel* m_browseVm{};
+    ui::qml::MovieDetailViewModel* m_movieDetailVm{};
+    ui::qml::SeriesDetailViewModel* m_seriesDetailVm{};
+    ui::qml::SubtitlesViewModel* m_subtitlesVm{};
+    ui::qml::settings::SettingsRootViewModel* m_settingsVm{};
+    ui::qml::DownloadsViewModel* m_downloadsVm{};
 
 #ifdef KINEMA_HAVE_LIBMPV
-    playback::desktop::MprisPlaybackProjection* m_mprisProjection {};
+    playback::desktop::MprisPlaybackProjection* m_mprisProjection{};
 #endif
 };
 

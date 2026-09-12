@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/PeerflixIndexer.h"
-
 #include "TestDoubles.h"
+#include "api/indexers/PeerflixIndexer.h"
 #include "config/PeerflixSettings.h"
 #include "domain/DebridCredentials.h"
+
+#include <QTemporaryDir>
+#include <QTest>
 
 #include <KConfig>
 #include <KConfigGroup>
@@ -13,13 +15,12 @@
 
 #include <QCoro/QCoroSignal>
 #include <QCoro/QCoroTask>
-#include <QTemporaryDir>
-#include <QTest>
 
 using namespace kinema;
 
 namespace {
-struct FakeDebridCreds final : public domain::DebridCredentialsProvider {
+struct FakeDebridCreds final : public domain::DebridCredentialsProvider
+{
     domain::ActiveDebrid value;
     domain::ActiveDebrid active() const override { return value; }
 };
@@ -35,9 +36,8 @@ private:
 
     void resetConfig()
     {
-        m_config = KSharedConfig::openConfig(
-            m_tmp.filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig);
+        m_config = KSharedConfig::openConfig(m_tmp.filePath(QStringLiteral("kinemarc")),
+                                             KConfig::SimpleConfig);
         m_config->group(QStringLiteral("Peerflix")).deleteGroup();
     }
 
@@ -57,18 +57,15 @@ private Q_SLOTS:
     {
         config::PeerflixSettings settings(m_config);
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings, nullptr);
-        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
-            QStringLiteral("tt0133093")));
+        (void)QCoro::waitFor(
+            indexer.streams(domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
         QCOMPARE(http.calls.size(), 1);
-        QCOMPARE(http.calls.first().url.host(),
-            QStringLiteral("peerflix.mov"));
-        QCOMPARE(http.calls.first().url.path(),
-            QStringLiteral("/stream/movie/tt0133093.json"));
+        QCOMPARE(http.calls.first().url.host(), QStringLiteral("peerflix.mov"));
+        QCOMPARE(http.calls.first().url.path(), QStringLiteral("/stream/movie/tt0133093.json"));
     }
 
     void testCustomBaseUrlIsHonoured()
@@ -77,52 +74,46 @@ private Q_SLOTS:
         settings.setBaseUrl(QStringLiteral("https://peerflix.mirror.example"));
 
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings, nullptr);
-        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
-            QStringLiteral("tt0133093")));
+        (void)QCoro::waitFor(
+            indexer.streams(domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
-        QCOMPARE(http.calls.first().url.host(),
-            QStringLiteral("peerflix.mirror.example"));
-        QCOMPARE(http.calls.first().url.path(),
-            QStringLiteral("/stream/movie/tt0133093.json"));
+        QCOMPARE(http.calls.first().url.host(), QStringLiteral("peerflix.mirror.example"));
+        QCOMPARE(http.calls.first().url.path(), QStringLiteral("/stream/movie/tt0133093.json"));
     }
 
     void testSeriesPathShape()
     {
         config::PeerflixSettings settings(m_config);
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0903747_1_1.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0903747_1_1.json"));
 
         api::PeerflixIndexer indexer(&http, settings, nullptr);
-        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Series,
-            QStringLiteral("tt0903747:1:1")));
+        (void)QCoro::waitFor(
+            indexer.streams(domain::MediaKind::Series, QStringLiteral("tt0903747:1:1")));
 
         QCOMPARE(http.calls.size(), 1);
         QCOMPARE(http.calls.first().url.path(),
-            QStringLiteral("/stream/series/tt0903747:1:1.json"));
+                 QStringLiteral("/stream/series/tt0903747:1:1.json"));
     }
 
     void testParserExtractsStructuredFields()
     {
         config::PeerflixSettings settings(m_config);
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings, nullptr);
-        const auto streams = QCoro::waitFor(indexer.streams(
-            domain::MediaKind::Movie, QStringLiteral("tt0133093")));
+        const auto streams =
+            QCoro::waitFor(indexer.streams(domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
         QCOMPARE(streams.size(), 3);
 
         // Row 0: structured fields preferred over emoji regex.
         const auto& first = streams.at(0);
-        QCOMPARE(first.infoHash,
-            QStringLiteral("4927c5658396e63e40bc9061bd805a7bb1e06966"));
+        QCOMPARE(first.infoHash, QStringLiteral("4927c5658396e63e40bc9061bd805a7bb1e06966"));
         QVERIFY(first.seeders.has_value());
         QCOMPARE(*first.seeders, 14);
         QVERIFY(first.sizeBytes.has_value());
@@ -153,87 +144,71 @@ private Q_SLOTS:
         // provider = None → even with the resolver wired in the
         // indexer must stay on the zero-config IPFS mirror.
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings, &creds);
-        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
-            QStringLiteral("tt0133093")));
+        (void)QCoro::waitFor(
+            indexer.streams(domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
-        QCOMPARE(http.calls.first().url.host(),
-            QStringLiteral("peerflix.mov"));
-        QCOMPARE(http.calls.first().url.path(),
-            QStringLiteral("/stream/movie/tt0133093.json"));
+        QCOMPARE(http.calls.first().url.host(), QStringLiteral("peerflix.mov"));
+        QCOMPARE(http.calls.first().url.path(), QStringLiteral("/stream/movie/tt0133093.json"));
     }
 
     void testRealDebridSwitchesToAddonHost()
     {
         config::PeerflixSettings settings(m_config);
         FakeDebridCreds creds;
-        creds.value = { domain::DebridProvider::RealDebrid,
-            QStringLiteral("rd-token") };
+        creds.value = {domain::DebridProvider::RealDebrid, QStringLiteral("rd-token")};
 
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings, &creds);
-        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
-            QStringLiteral("tt0133093")));
+        (void)QCoro::waitFor(
+            indexer.streams(domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
-        QCOMPARE(http.calls.first().url.host(),
-            QStringLiteral("addon.peerflix.mov"));
+        QCOMPARE(http.calls.first().url.host(), QStringLiteral("addon.peerflix.mov"));
         QCOMPARE(http.calls.first().url.path(),
-            QStringLiteral(
-                "/debridoptions=torrentlinks,nocatalog|realdebrid=rd-token"
-                "/stream/movie/tt0133093.json"));
+                 QStringLiteral("/debridoptions=torrentlinks,nocatalog|realdebrid=rd-token"
+                                "/stream/movie/tt0133093.json"));
     }
 
     void testAllDebridSwitchesToAddonHost()
     {
         config::PeerflixSettings settings(m_config);
         FakeDebridCreds creds;
-        creds.value = { domain::DebridProvider::AllDebrid,
-            QStringLiteral("ad-key") };
+        creds.value = {domain::DebridProvider::AllDebrid, QStringLiteral("ad-key")};
 
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings, &creds);
-        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
-            QStringLiteral("tt0133093")));
+        (void)QCoro::waitFor(
+            indexer.streams(domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
-        QCOMPARE(http.calls.first().url.host(),
-            QStringLiteral("addon.peerflix.mov"));
+        QCOMPARE(http.calls.first().url.host(), QStringLiteral("addon.peerflix.mov"));
         QCOMPARE(http.calls.first().url.path(),
-            QStringLiteral(
-                "/debridoptions=torrentlinks,nocatalog|alldebrid=ad-key"
-                "/stream/movie/tt0133093.json"));
+                 QStringLiteral("/debridoptions=torrentlinks,nocatalog|alldebrid=ad-key"
+                                "/stream/movie/tt0133093.json"));
     }
 
     void testCustomAddonBaseUrlIsHonoured()
     {
         config::PeerflixSettings settings(m_config);
-        settings.setAddonBaseUrl(
-            QStringLiteral("https://addon.peerflix.mirror.example"));
+        settings.setAddonBaseUrl(QStringLiteral("https://addon.peerflix.mirror.example"));
         FakeDebridCreds creds;
-        creds.value = { domain::DebridProvider::RealDebrid,
-            QStringLiteral("rd-token") };
+        creds.value = {domain::DebridProvider::RealDebrid, QStringLiteral("rd-token")};
 
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings, &creds);
-        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
-            QStringLiteral("tt0133093")));
+        (void)QCoro::waitFor(
+            indexer.streams(domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
-        QCOMPARE(http.calls.first().url.host(),
-            QStringLiteral("addon.peerflix.mirror.example"));
+        QCOMPARE(http.calls.first().url.host(), QStringLiteral("addon.peerflix.mirror.example"));
         // baseUrl override left untouched.
-        QCOMPARE(settings.baseUrl(),
-            QStringLiteral("https://peerflix.mov"));
+        QCOMPARE(settings.baseUrl(), QStringLiteral("https://peerflix.mov"));
     }
 
     void testEmptyTokenStaysOnZeroConfigHost()
@@ -242,20 +217,17 @@ private Q_SLOTS:
         FakeDebridCreds creds;
         // Provider radio is set but the credential never made it
         // into the keyring — indexer must fall back to no-debrid.
-        creds.value = { domain::DebridProvider::RealDebrid, QString {} };
+        creds.value = {domain::DebridProvider::RealDebrid, QString{}};
 
         tests::FakeHttpClient http;
-        http.jsonReplies.append(
-            tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
+        http.jsonReplies.append(tests::loadJsonFixture("peerflix_stream_tt0133093.json"));
 
         api::PeerflixIndexer indexer(&http, settings, &creds);
-        (void)QCoro::waitFor(indexer.streams(domain::MediaKind::Movie,
-            QStringLiteral("tt0133093")));
+        (void)QCoro::waitFor(
+            indexer.streams(domain::MediaKind::Movie, QStringLiteral("tt0133093")));
 
-        QCOMPARE(http.calls.first().url.host(),
-            QStringLiteral("peerflix.mov"));
-        QCOMPARE(http.calls.first().url.path(),
-            QStringLiteral("/stream/movie/tt0133093.json"));
+        QCOMPARE(http.calls.first().url.host(), QStringLiteral("peerflix.mov"));
+        QCOMPARE(http.calls.first().url.path(), QStringLiteral("/stream/movie/tt0133093.json"));
     }
 };
 
