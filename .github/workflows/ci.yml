@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+
+jobs:
+  format:
+    name: C++ format
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 10
+    env:
+      BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+      HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Install formatter
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git clang-format
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.HEAD_SHA }}
+      - name: Check changed C++ lines
+        run: scripts/check-format.sh "$BASE_SHA" "$HEAD_SHA"
+
+  qml-lint-build-test:
+    name: QML lint, build, and tests
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 60
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+    steps:
+      - name: Install build and runtime dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+              ca-certificates git pkg-config dbus-daemon \
+              cmake ninja-build g++ \
+              extra-cmake-modules gettext \
+              qt6-base-dev qt6-base-private-dev \
+              qt6-declarative-dev qt6-tools-dev qt6-svg-dev \
+              libkf6kio-dev libkf6i18n-dev libkf6config-dev \
+              libkf6notifications-dev libkf6statusnotifieritem-dev \
+              libkf6coreaddons-dev libkirigami-dev \
+              kirigami-addons-dev \
+              qcoro-qt6-dev qtkeychain-qt6-dev \
+              libmpv-dev libmpvqt-dev \
+              libtorrent-rasterbar-dev libboost-dev libssl-dev \
+              qml6-module-qtquick qml6-module-qtquick-controls \
+              qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+              qml6-module-qtquick-window qml6-module-qtquick-effects \
+              qml6-module-qtquick-shapes qml6-module-qtquick-dialogs \
+              qml6-module-qtqml-workerscript \
+              qml6-module-org-kde-kirigami \
+              qml6-module-org-kde-kirigamiaddons-formcard \
+              qml6-module-org-kde-kirigamiaddons-settings \
+              qml6-module-org-kde-desktop
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: |
+          cmake -B build -S . -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DBUILD_TESTING=ON \
+              -DKINEMA_ENABLE_MPV_EMBED=ON \
+              -DKINEMA_TMDB_DEFAULT_TOKEN=""
+      - name: Lint QML
+        run: cmake --build build --target all_qmllint
+      - name: Build
+        run: cmake --build build
+      - name: Run tests
+        run: dbus-run-session -- ctest --test-dir build --output-on-failure
