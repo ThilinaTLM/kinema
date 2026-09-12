@@ -1,8 +1,45 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # ---------------------------------------------------------------------------
-# kinema_core — object library containing everything except main(). Re-used
-# by the test binaries so they can link against the same code the app uses.
+# Narrow, dependency-light libraries. These targets make the innermost
+# architectural boundaries visible to CMake instead of relying only on
+# directory names.
+# ---------------------------------------------------------------------------
+
+add_library(kinema_domain STATIC
+    domain/Debrid.cpp
+    domain/DebridCredentials.cpp
+    domain/Download.cpp
+    domain/Indexer.cpp
+    domain/PlaybackContext.cpp
+)
+target_include_directories(kinema_domain PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kinema_domain PUBLIC Qt6::Core QCoro6::Core)
+set_target_properties(kinema_domain PROPERTIES AUTOMOC ON POSITION_INDEPENDENT_CODE ON)
+kde_target_enable_exceptions(kinema_domain PUBLIC)
+
+add_library(kinema_torrent_primitives STATIC
+    torrent/Magnet.cpp
+    torrent/PiecePlanner.cpp
+)
+target_include_directories(kinema_torrent_primitives PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kinema_torrent_primitives PUBLIC Qt6::Core)
+set_target_properties(kinema_torrent_primitives PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+add_library(kinema_playback_policy STATIC
+    playback/policy/BackendSelectionPolicy.cpp
+    playback/policy/ChapterSkipPolicy.cpp
+    playback/policy/MediaFileSelectionPolicy.cpp
+    playback/policy/ResumePolicy.cpp
+)
+target_include_directories(kinema_playback_policy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kinema_playback_policy
+    PUBLIC kinema_domain Qt6::Core KF6::I18n)
+set_target_properties(kinema_playback_policy PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# ---------------------------------------------------------------------------
+# kinema_core — application aggregation library containing everything except
+# main(). Re-used by integration and UI tests.
 # ---------------------------------------------------------------------------
 
 set(kinema_core_SRCS
@@ -12,7 +49,7 @@ set(kinema_core_SRCS
     config/CacheSettings.cpp
     config/FilterSettings.cpp
     config/PlayerSettings.cpp
-    api/IndexerSelector.cpp
+    api/indexers/IndexerSelector.cpp
     config/DebridSettings.cpp
     config/IndexerSettings.cpp
     config/PeerflixSettings.cpp
@@ -50,15 +87,12 @@ set(kinema_core_SRCS
     core/util/DateFormat.cpp
     core/util/DateWindow.cpp
     core/util/Language.cpp
-    core/util/Magnet.cpp
     core/util/MediaChips.cpp
     core/util/Moviehash.cpp
     core/util/StreamFilter.cpp
     core/util/StreamTokens.cpp
-    core/util/TorrentioConfig.cpp
-    core/util/TorrentioUrl.cpp
-
-    torrent/PiecePlanner.cpp
+    api/torrentio/TorrentioConfig.cpp
+    api/torrentio/TorrentioUrl.cpp
 
     playback/sources/AllDebridResolver.cpp
     playback/sources/AssetSession.cpp
@@ -68,27 +102,21 @@ set(kinema_core_SRCS
     playback/sources/RealDebridResolver.cpp
     playback/sources/TorrentAssetSession.cpp
 
-    api/AllDebridClient.cpp
-    api/AllDebridParse.cpp
-    api/CinemetaClient.cpp
-    api/CinemetaParse.cpp
-    api/MetadataQuery.cpp
-    api/OpenSubtitlesClient.cpp
-    api/OpenSubtitlesParse.cpp
-    api/RealDebridClient.cpp
-    api/RealDebridParse.cpp
-    api/PeerflixIndexer.cpp
-    api/StremioStreamParse.cpp
-    api/TmdbClient.cpp
-    api/TmdbDiscoverUrl.cpp
-    api/TmdbParse.cpp
-    api/TorrentioIndexer.cpp
-
-    domain/Debrid.cpp
-    domain/DebridCredentials.cpp
-    domain/Download.cpp
-    domain/Indexer.cpp
-    domain/PlaybackContext.cpp
+    api/alldebrid/AllDebridClient.cpp
+    api/alldebrid/AllDebridParse.cpp
+    api/cinemeta/CinemetaClient.cpp
+    api/cinemeta/CinemetaParse.cpp
+    api/common/MetadataQuery.cpp
+    api/opensubtitles/OpenSubtitlesClient.cpp
+    api/opensubtitles/OpenSubtitlesParse.cpp
+    api/realdebrid/RealDebridClient.cpp
+    api/realdebrid/RealDebridParse.cpp
+    api/indexers/PeerflixIndexer.cpp
+    api/indexers/StremioStreamParse.cpp
+    api/tmdb/TmdbClient.cpp
+    api/tmdb/TmdbDiscoverUrl.cpp
+    api/tmdb/TmdbParse.cpp
+    api/indexers/TorrentioIndexer.cpp
 
     playback/events/PlaybackEventStream.cpp
     playback/streaming/LocalHttpStreamGateway.cpp
@@ -113,46 +141,48 @@ set(kinema_core_SRCS
     playback/history/TrackMemoryService.cpp
     playback/subtitles/SubtitleSessionService.cpp
     playback/subtitles/MoviehashProbe.cpp
+    playback/series/SeriesSessionService.cpp
     playback/session/PlaybackStateMachine.cpp
     playback/session/PlayerLoadWatchdog.cpp
-    playback/policy/BackendSelectionPolicy.cpp
-    playback/policy/ChapterSkipPolicy.cpp
-    playback/policy/MediaFileSelectionPolicy.cpp
-    playback/policy/ResumePolicy.cpp
 
     ui/ImageLoader.cpp
 
     app/KinemaApplication.cpp
     app/ServiceContainer.cpp
+    app/ServiceContainerInfrastructure.cpp
+    app/ServiceContainerPlayback.cpp
+    app/ServiceContainerPresentation.cpp
 
     controllers/DebridCredentialsResolver.cpp
     controllers/DownloadController.cpp
     controllers/LibraryController.cpp
-    controllers/StreamUtilityController.cpp
+    services/StreamActions.cpp
     controllers/SubtitleController.cpp
     controllers/TokenController.cpp
     controllers/TrayController.cpp
     controllers/WatchedController.cpp
 
 
-    ui/qml-bridge/AppIconResolver.cpp
-    ui/qml-bridge/BrowseViewModel.cpp
-    ui/qml-bridge/ContinueWatchingViewModel.cpp
-    ui/qml-bridge/DiscoverSectionModel.cpp
-    ui/qml-bridge/DiscoverViewModel.cpp
-    ui/qml-bridge/DownloadsListModel.cpp
-    ui/qml-bridge/DownloadsViewModel.cpp
-    ui/qml-bridge/EpisodesListModel.cpp
-    ui/qml-bridge/KinemaImageProvider.cpp
-    ui/qml-bridge/LibraryListModel.cpp
-    ui/qml-bridge/LibraryRailModel.cpp
-    ui/qml-bridge/LibraryViewModel.cpp
-    ui/qml-bridge/MovieDetailViewModel.cpp
-    ui/qml-bridge/QmlContext.cpp
-    ui/qml-bridge/ShellViewModel.cpp
-    ui/qml-bridge/ResultsListModel.cpp
-    ui/qml-bridge/SearchViewModel.cpp
-    ui/qml-bridge/SeriesDetailViewModel.cpp
+    ui/qml-bridge/shell/AppIconResolver.cpp
+    ui/qml-bridge/browse/BrowseViewModel.cpp
+    ui/qml-bridge/library/ContinueWatchingViewModel.cpp
+    ui/qml-bridge/discover/DiscoverSectionModel.cpp
+    ui/qml-bridge/discover/DiscoverViewModel.cpp
+    ui/qml-bridge/downloads/DownloadsListModel.cpp
+    ui/qml-bridge/downloads/DownloadsViewModel.cpp
+    ui/qml-bridge/details/EpisodesListModel.cpp
+    ui/qml-bridge/shell/KinemaImageProvider.cpp
+    ui/qml-bridge/library/LibraryListModel.cpp
+    ui/qml-bridge/library/LibraryRailModel.cpp
+    ui/qml-bridge/library/LibraryViewModel.cpp
+    ui/qml-bridge/details/MovieDetailViewModel.cpp
+    ui/qml-bridge/shell/QmlContext.cpp
+    ui/qml-bridge/shell/ShellNavigation.cpp
+    ui/qml-bridge/shell/ShellStatusWiring.cpp
+    ui/qml-bridge/shell/ShellViewModel.cpp
+    ui/qml-bridge/search/ResultsListModel.cpp
+    ui/qml-bridge/search/SearchViewModel.cpp
+    ui/qml-bridge/details/SeriesDetailViewModel.cpp
     ui/qml-bridge/settings/AllDebridSectionViewModel.cpp
     ui/qml-bridge/settings/CredentialSectionViewModelBase.cpp
     ui/qml-bridge/settings/DebridSettingsViewModel.cpp
@@ -168,11 +198,12 @@ set(kinema_core_SRCS
     ui/qml-bridge/settings/TmdbSettingsViewModel.cpp
     ui/qml-bridge/settings/TorrentStreamingSettingsViewModel.cpp
     ui/qml-bridge/settings/TorrentioSectionViewModel.cpp
-    ui/qml-bridge/StreamSorting.cpp
-    ui/qml-bridge/StreamsListModel.cpp
-    ui/qml-bridge/SubtitleResultsModel.cpp
-    ui/qml-bridge/SubtitlesViewModel.cpp
-    ui/qml-bridge/TitleActions.cpp
+    ui/qml-bridge/streams/StreamListState.cpp
+    ui/qml-bridge/streams/StreamSorting.cpp
+    ui/qml-bridge/streams/StreamsListModel.cpp
+    ui/qml-bridge/subtitles/SubtitleResultsModel.cpp
+    ui/qml-bridge/subtitles/SubtitlesViewModel.cpp
+    ui/qml-bridge/details/TitleActions.cpp
 
     tray_resources.qrc
 )
@@ -185,9 +216,9 @@ set(kinema_core_SRCS
 # scripts; no IPC bridge.
 if(KINEMA_ENABLE_MPV_EMBED)
     list(APPEND kinema_core_SRCS
-        playback/adapters/EmbeddedMpvPlayerAdapter.cpp
+        ui/player/EmbeddedMpvPlayerAdapter.cpp
+        ui/qml-bridge/shell/ShellPlayer.cpp
         playback/desktop/MprisPlaybackProjection.cpp
-        playback/series/SeriesSessionService.cpp
         ui/player/AudioTracksModel.cpp
         ui/player/ChaptersModel.cpp
         ui/player/MpvLoadCommand.cpp
@@ -319,6 +350,10 @@ target_link_libraries(kinema_core
         Qt6Keychain::Qt6Keychain
         Boost::headers
         PkgConfig::LIBTORRENT
+    PRIVATE
+        kinema_domain
+        kinema_torrent_primitives
+        kinema_playback_policy
 )
 
 # ---- App-side QML module (always built) ----------------------------------

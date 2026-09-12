@@ -3,11 +3,11 @@
 
 #include "playback/sources/RealDebridResolver.h"
 
-#include "api/RealDebridClient.h"
+#include "api/realdebrid/RealDebridClient.h"
 #include "core/io/HttpError.h"
-#include "core/util/Magnet.h"
 #include "playback/sources/DebridFilePicker.h"
 #include "playback/sources/DebridResolverUtil.h"
+#include "torrent/Magnet.h"
 
 #include <KLocalizedString>
 
@@ -24,8 +24,7 @@ constexpr int kTorrentReadyTimeoutMs = 90'000;
 /// when non-video rows are present. Prefer strong filename / episode
 /// evidence when available; fall back to the historical id mapping only
 /// when the scorer cannot distinguish the target.
-int chooseFileId(const QList<domain::RdTorrentFile>& files,
-    const domain::AssetRef& ref)
+int chooseFileId(const QList<domain::RdTorrentFile>& files, const domain::AssetRef& ref)
 {
     QList<picker::Candidate> candidates;
     candidates.reserve(files.size());
@@ -33,7 +32,7 @@ int chooseFileId(const QList<domain::RdTorrentFile>& files,
     int bestScore = -1;
     for (int i = 0; i < files.size(); ++i) {
         const auto& f = files[i];
-        candidates.append({ f.path, f.bytes });
+        candidates.append({f.path, f.bytes});
         const int sc = picker::score(f.path, f.bytes, ref);
         if (sc > bestScore) {
             bestScore = sc;
@@ -65,9 +64,12 @@ int chooseFileId(const QList<domain::RdTorrentFile>& files,
 } // namespace
 
 RealDebridResolver::RealDebridResolver(api::RealDebridClient& rd, QObject* parent)
-    : DebridResolver(parent)
-    , m_rd(rd)
+    : DebridResolver(parent), m_rd(rd)
+{ }
+
+bool RealDebridResolver::isConfigured() const
 {
+    return !m_rd.token().isEmpty();
 }
 
 QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref)
@@ -82,7 +84,7 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
     // below return in one tick.
 
     // Step 1: Add the magnet to the user's torrents.
-    const auto magnet = core::magnet::build(ref.infoHash, ref.releaseName);
+    const auto magnet = kinema::torrent::magnet::build(ref.infoHash, ref.releaseName);
     const auto added = co_await m_rd.addMagnet(magnet);
 
     // Step 2: Wait until RD has populated the file list.
@@ -94,8 +96,9 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
             break;
         }
         if (filesBudget.expired()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                i18n("Real-Debrid did not produce a file list in time."));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  i18n("Real-Debrid did not produce a file list in time."));
         }
         co_await filesBudget.tick();
     }
@@ -103,26 +106,26 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
     // Step 3: choose file id and ask RD to select it.
     int chosenId = chooseFileId(info.files, ref);
     if (chosenId < 0) {
-        throw core::HttpError(core::HttpError::Kind::Json, 0,
-            i18n("Real-Debrid did not return a usable file."));
+        throw core::HttpError(
+            core::HttpError::Kind::Json, 0, i18n("Real-Debrid did not return a usable file."));
     }
 
-    co_await m_rd.selectFiles(added.id, QList<int> { chosenId });
+    co_await m_rd.selectFiles(added.id, QList<int>{chosenId});
 
     // Step 4: Wait until RD has produced a link for the selected file.
     PollBudget linkBudget(kTorrentReadyTimeoutMs);
     while (true) {
         info = co_await m_rd.torrentInfo(added.id);
         if (!info.links.isEmpty()
-            && (info.status == QLatin1String("downloaded")
-                || info.status == QLatin1String("queued")
+            && (info.status == QLatin1String("downloaded") || info.status == QLatin1String("queued")
                 || info.status == QLatin1String("compressing")
                 || info.status == QLatin1String("downloading"))) {
             break;
         }
         if (linkBudget.expired()) {
-            throw core::HttpError(core::HttpError::Kind::Json, 0,
-                i18n("Real-Debrid did not produce a download link in time."));
+            throw core::HttpError(core::HttpError::Kind::Json,
+                                  0,
+                                  i18n("Real-Debrid did not produce a download link in time."));
         }
         co_await linkBudget.tick();
     }
@@ -134,9 +137,7 @@ QCoro::Task<ResolvedDebridLink> RealDebridResolver::resolve(domain::AssetRef ref
     ResolvedDebridLink out;
     out.downloadUrl = unrestricted.download;
     out.fileSize = unrestricted.fileSize;
-    out.fileName = unrestricted.filename.isEmpty()
-        ? ref.fileNameHint
-        : unrestricted.filename;
+    out.fileName = unrestricted.filename.isEmpty() ? ref.fileNameHint : unrestricted.filename;
 
     // Preserve the full magnet file list so the asset session can
     // surface it to series auto-next without a libtorrent session.

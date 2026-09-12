@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "ui/qml-bridge/StreamsListModel.h"
+#include "ui/qml-bridge/streams/StreamsListModel.h"
 
 #include <QSignalSpy>
 #include <QTest>
@@ -12,10 +12,10 @@ using kinema::ui::qml::StreamsListModel;
 namespace {
 
 Stream makeStream(const QString& releaseName,
-    const QString& resolution,
-    const QString& provider,
-    qint64 size,
-    int seeders)
+                  const QString& resolution,
+                  const QString& provider,
+                  qint64 size,
+                  int seeders)
 {
     Stream s;
     s.releaseName = releaseName;
@@ -47,9 +47,11 @@ private Q_SLOTS:
     void testSetItemsReadyAndEmpty()
     {
         StreamsListModel m;
-        m.setItems({ makeStream(QStringLiteral("Foo.1080p"),
-            QStringLiteral("1080p"),
-            QStringLiteral("rargb"), 1'000'000, 5) });
+        m.setItems({makeStream(QStringLiteral("Foo.1080p"),
+                               QStringLiteral("1080p"),
+                               QStringLiteral("rargb"),
+                               1'000'000,
+                               5)});
         QCOMPARE(m.state(), StreamsListModel::State::Ready);
         QCOMPARE(m.rowCount(), 1);
 
@@ -63,13 +65,14 @@ private Q_SLOTS:
         StreamsListModel m;
         m.setItems({}, QStringLiteral("filtered out"));
         QCOMPARE(m.state(), StreamsListModel::State::Empty);
-        QCOMPARE(m.emptyExplanation(),
-            QStringLiteral("filtered out"));
+        QCOMPARE(m.emptyExplanation(), QStringLiteral("filtered out"));
 
         // A successful `setItems` clears the explanation again.
-        m.setItems({ makeStream(QStringLiteral("Bar.720p"),
-            QStringLiteral("720p"),
-            QStringLiteral("eztv"), 5'000'000, 1) });
+        m.setItems({makeStream(QStringLiteral("Bar.720p"),
+                               QStringLiteral("720p"),
+                               QStringLiteral("eztv"),
+                               5'000'000,
+                               1)});
         QVERIFY(m.emptyExplanation().isEmpty());
     }
 
@@ -88,9 +91,8 @@ private Q_SLOTS:
     void testSetError()
     {
         StreamsListModel m;
-        m.setItems({ makeStream(QStringLiteral("X"),
-            QStringLiteral("720p"),
-            QStringLiteral("p"), 1, 1) });
+        m.setItems(
+            {makeStream(QStringLiteral("X"), QStringLiteral("720p"), QStringLiteral("p"), 1, 1)});
         QSignalSpy stateSpy(&m, &StreamsListModel::stateChanged);
 
         m.setError(QStringLiteral("torrentio down"));
@@ -113,9 +115,8 @@ private Q_SLOTS:
     void testSetIdleClearsAllSideChannels()
     {
         StreamsListModel m;
-        m.setItems({ makeStream(QStringLiteral("X"),
-            QStringLiteral("1080p"),
-            QStringLiteral("p"), 1, 1) });
+        m.setItems(
+            {makeStream(QStringLiteral("X"), QStringLiteral("1080p"), QStringLiteral("p"), 1, 1)});
         m.setError(QStringLiteral("e"));
         m.setUnreleased(QDate(2099, 1, 1));
 
@@ -131,37 +132,26 @@ private Q_SLOTS:
     {
         StreamsListModel m;
         const auto names = m.roleNames();
-        for (const auto& key : { QByteArrayLiteral("releaseName"),
-                                 QByteArrayLiteral("resolution"),
-                                 QByteArrayLiteral("qualityLabel"),
-                                 QByteArrayLiteral("sizeText"),
-                                 QByteArrayLiteral("seeders"),
-                                 QByteArrayLiteral("provider"),
-                                 QByteArrayLiteral("hasMagnet"),
-                                 QByteArrayLiteral("hasDirectUrl"),
-                                 QByteArrayLiteral("chips"),
-                                 QByteArrayLiteral("source"),
-                                 QByteArrayLiteral("codec"),
-                                 QByteArrayLiteral("hdr"),
-                                 QByteArrayLiteral("audioSummary"),
-                                 QByteArrayLiteral("languages"),
-                                 QByteArrayLiteral("multiAudio"),
-                                 QByteArrayLiteral("releaseGroup"),
-                                 QByteArrayLiteral("summaryLine"),
-                                 QByteArrayLiteral("tags"),
-                                 QByteArrayLiteral("packKind"),
-                                 QByteArrayLiteral("packLabel"),
-                                 QByteArrayLiteral("packClaim") }) {
-            QVERIFY2(names.values().contains(key),
-                key.constData());
+        for (const auto& key :
+             {QByteArrayLiteral("releaseName"),  QByteArrayLiteral("resolution"),
+              QByteArrayLiteral("qualityLabel"), QByteArrayLiteral("sizeText"),
+              QByteArrayLiteral("seeders"),      QByteArrayLiteral("provider"),
+              QByteArrayLiteral("hasMagnet"),    QByteArrayLiteral("hasDirectUrl"),
+              QByteArrayLiteral("chips"),        QByteArrayLiteral("source"),
+              QByteArrayLiteral("codec"),        QByteArrayLiteral("hdr"),
+              QByteArrayLiteral("audioSummary"), QByteArrayLiteral("languages"),
+              QByteArrayLiteral("multiAudio"),   QByteArrayLiteral("releaseGroup"),
+              QByteArrayLiteral("summaryLine"),  QByteArrayLiteral("tags"),
+              QByteArrayLiteral("packKind"),     QByteArrayLiteral("packLabel"),
+              QByteArrayLiteral("packClaim")}) {
+            QVERIFY2(names.values().contains(key), key.constData());
         }
     }
 
     void testChipsForBuildsExpectedList()
     {
-        const auto raw = makeStream(QStringLiteral("X"),
-            QStringLiteral("1080p"),
-            QStringLiteral("rargb"), 1, 5);
+        const auto raw =
+            makeStream(QStringLiteral("X"), QStringLiteral("1080p"), QStringLiteral("rargb"), 1, 5);
         const auto chips = StreamsListModel::chipsFor(raw);
         // Expected: resolution + provider.
         QVERIFY(chips.contains(QStringLiteral("1080p")));
@@ -171,45 +161,38 @@ private Q_SLOTS:
 
     void testFormatSize()
     {
-        QCOMPARE(StreamsListModel::formatSize(std::nullopt),
-            QStringLiteral("\u2014"));
-        QCOMPARE(StreamsListModel::formatSize(0),
-            QStringLiteral("\u2014"));
+        QCOMPARE(StreamsListModel::formatSize(std::nullopt), QStringLiteral("\u2014"));
+        QCOMPARE(StreamsListModel::formatSize(0), QStringLiteral("\u2014"));
         QVERIFY(!StreamsListModel::formatSize(1'500'000'000).isEmpty());
     }
 
     void testQualityLabelRoleIsResolution()
     {
         StreamsListModel m;
-        m.setItems({ makeStream(QStringLiteral("X"),
-            QStringLiteral("1080p"),
-            QStringLiteral("p"), 1, 1) });
-        const auto label = m.data(m.index(0),
-            StreamsListModel::QualityLabelRole).toString();
+        m.setItems(
+            {makeStream(QStringLiteral("X"), QStringLiteral("1080p"), QStringLiteral("p"), 1, 1)});
+        const auto label = m.data(m.index(0), StreamsListModel::QualityLabelRole).toString();
         QCOMPARE(label, QStringLiteral("1080p"));
     }
 
     void testSummaryLineAndTagsRoles()
     {
         StreamsListModel m;
-        Stream s = makeStream(
-            QStringLiteral("From.S01.1080p.WEB-DL.x265.10bit.DV.HDR10Plus.EAC3-QxR"),
-            QStringLiteral("1080p"),
-            QStringLiteral("TorrentGalaxy"),
-            1'500'000'000, 42);
-        m.setItems({ s });
+        Stream s =
+            makeStream(QStringLiteral("From.S01.1080p.WEB-DL.x265.10bit.DV.HDR10Plus.EAC3-QxR"),
+                       QStringLiteral("1080p"),
+                       QStringLiteral("TorrentGalaxy"),
+                       1'500'000'000,
+                       42);
+        m.setItems({s});
 
-        const auto summary = m.data(m.index(0),
-            StreamsListModel::SummaryLineRole).toString();
+        const auto summary = m.data(m.index(0), StreamsListModel::SummaryLineRole).toString();
         QVERIFY2(summary.contains(QStringLiteral("WEB-DL")), qPrintable(summary));
-        QVERIFY2(summary.contains(QStringLiteral("x265 10-bit")),
-            qPrintable(summary));
-        QVERIFY2(summary.contains(QStringLiteral("Dolby Vision")),
-            qPrintable(summary));
+        QVERIFY2(summary.contains(QStringLiteral("x265 10-bit")), qPrintable(summary));
+        QVERIFY2(summary.contains(QStringLiteral("Dolby Vision")), qPrintable(summary));
         QVERIFY2(summary.contains(QStringLiteral("EAC3")), qPrintable(summary));
 
-        const auto tags = m.data(m.index(0),
-            StreamsListModel::TagsRole).toStringList();
+        const auto tags = m.data(m.index(0), StreamsListModel::TagsRole).toStringList();
         // Tags do NOT include resolution — it has dedicated visual
         // treatment in the leading quality block.
         QVERIFY(!tags.contains(QStringLiteral("1080p")));
@@ -224,31 +207,31 @@ private Q_SLOTS:
     void testEmptySummaryWhenNoTokens()
     {
         StreamsListModel m;
-        m.setItems({ makeStream(QStringLiteral("NoMetadataHere"),
-            QStringLiteral("\u2014"),
-            QString {}, 1, 0) });
-        const auto summary = m.data(m.index(0),
-            StreamsListModel::SummaryLineRole).toString();
+        m.setItems({makeStream(
+            QStringLiteral("NoMetadataHere"), QStringLiteral("\u2014"), QString{}, 1, 0)});
+        const auto summary = m.data(m.index(0), StreamsListModel::SummaryLineRole).toString();
         QVERIFY(summary.isEmpty());
     }
 
     void testTokenCacheClearsOnSetItems()
     {
         StreamsListModel m;
-        m.setItems({ makeStream(
-            QStringLiteral("A.1080p.WEB-DL.x265"),
-            QStringLiteral("1080p"), QStringLiteral("p"), 1, 1) });
-        const auto first = m.data(m.index(0),
-            StreamsListModel::SummaryLineRole).toString();
+        m.setItems({makeStream(QStringLiteral("A.1080p.WEB-DL.x265"),
+                               QStringLiteral("1080p"),
+                               QStringLiteral("p"),
+                               1,
+                               1)});
+        const auto first = m.data(m.index(0), StreamsListModel::SummaryLineRole).toString();
         QVERIFY(first.contains(QStringLiteral("x265")));
 
         // Replace with a different release — the cache must be wiped
         // so role 0 reflects the new row's tokens, not the old.
-        m.setItems({ makeStream(
-            QStringLiteral("B.1080p.BluRay.x264"),
-            QStringLiteral("1080p"), QStringLiteral("p"), 1, 1) });
-        const auto second = m.data(m.index(0),
-            StreamsListModel::SummaryLineRole).toString();
+        m.setItems({makeStream(QStringLiteral("B.1080p.BluRay.x264"),
+                               QStringLiteral("1080p"),
+                               QStringLiteral("p"),
+                               1,
+                               1)});
+        const auto second = m.data(m.index(0), StreamsListModel::SummaryLineRole).toString();
         QVERIFY(second.contains(QStringLiteral("x264")));
         QVERIFY(!second.contains(QStringLiteral("x265")));
     }
@@ -260,27 +243,24 @@ private Q_SLOTS:
         // when the original Torrentio parse left the row blank.
         StreamsListModel m;
         Stream row1 = makeStream(QStringLiteral("Pack.S01.x265"),
-            QStringLiteral("1080p"),
-            QStringLiteral("Torrentio"),
-            0, 42);
+                                 QStringLiteral("1080p"),
+                                 QStringLiteral("Torrentio"),
+                                 0,
+                                 42);
         row1.infoHash = QStringLiteral("deadbeef1");
         row1.fileIndex = 3;
         row1.sizeBytes = std::nullopt; // unknown initially
 
-        Stream row2 = makeStream(QStringLiteral("Other"),
-            QStringLiteral("720p"),
-            QStringLiteral("Torrentio"),
-            0, 1);
+        Stream row2 = makeStream(
+            QStringLiteral("Other"), QStringLiteral("720p"), QStringLiteral("Torrentio"), 0, 1);
         row2.infoHash = QStringLiteral("deadbeef2");
 
-        m.setItems({ row1, row2 });
+        m.setItems({row1, row2});
         QSignalSpy spy(&m, &QAbstractItemModel::dataChanged);
 
-        QVERIFY(m.hydrateSize(QStringLiteral("deadbeef1"),
-            3, 2'500'000'000LL));
-        QCOMPARE(m.data(m.index(0),
-            StreamsListModel::SizeBytesRole).toLongLong(),
-            qint64(2'500'000'000LL));
+        QVERIFY(m.hydrateSize(QStringLiteral("deadbeef1"), 3, 2'500'000'000LL));
+        QCOMPARE(m.data(m.index(0), StreamsListModel::SizeBytesRole).toLongLong(),
+                 qint64(2'500'000'000LL));
         QCOMPARE(spy.count(), 1);
         const auto args = spy.takeFirst();
         const QVector<int> roles = args.at(2).value<QVector<int>>();
@@ -291,11 +271,10 @@ private Q_SLOTS:
     void hydrateSize_isNoopWhenRowMissingOrSizeZero()
     {
         StreamsListModel m;
-        Stream row = makeStream(QStringLiteral("X"),
-            QStringLiteral("1080p"),
-            QStringLiteral("P"), 100, 5);
+        Stream row =
+            makeStream(QStringLiteral("X"), QStringLiteral("1080p"), QStringLiteral("P"), 100, 5);
         row.infoHash = QStringLiteral("cafebabe");
-        m.setItems({ row });
+        m.setItems({row});
         QVERIFY(!m.hydrateSize(QStringLiteral("deadbeef"), -1, 1234));
         QVERIFY(!m.hydrateSize(QStringLiteral("cafebabe"), -1, 0));
         QVERIFY(!m.hydrateSize(QString(), -1, 1234));
@@ -306,12 +285,11 @@ private Q_SLOTS:
         // Calling twice with the same size doesn't double-emit and
         // still reports success (the row is in the desired state).
         StreamsListModel m;
-        Stream row = makeStream(QStringLiteral("X"),
-            QStringLiteral("1080p"),
-            QStringLiteral("P"), 0, 5);
+        Stream row =
+            makeStream(QStringLiteral("X"), QStringLiteral("1080p"), QStringLiteral("P"), 0, 5);
         row.infoHash = QStringLiteral("deadcafe");
         row.sizeBytes = std::nullopt;
-        m.setItems({ row });
+        m.setItems({row});
         QVERIFY(m.hydrateSize(QStringLiteral("deadcafe"), -1, 4242));
         QSignalSpy spy(&m, &QAbstractItemModel::dataChanged);
         QVERIFY(m.hydrateSize(QStringLiteral("deadcafe"), -1, 4242));

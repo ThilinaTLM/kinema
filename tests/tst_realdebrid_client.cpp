@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/RealDebridClient.h"
-
-#include "core/io/HttpError.h"
 #include "TestDoubles.h"
+#include "api/realdebrid/RealDebridClient.h"
+#include "core/io/HttpError.h"
 
 #include <QTest>
 
@@ -21,7 +20,7 @@ private Q_SLOTS:
     void testUserEndpointAddsAuthorizationHeader()
     {
         FakeHttpClient http;
-        http.jsonReplies = { loadJsonFixture("rd_user_premium.json") };
+        http.jsonReplies = {loadJsonFixture("rd_user_premium.json")};
 
         RealDebridClient client(&http);
         client.setToken(QStringLiteral("rd-token"));
@@ -31,10 +30,9 @@ private Q_SLOTS:
         QCOMPARE(user.username, QStringLiteral("alice"));
         QCOMPARE(http.calls.size(), 1);
         QVERIFY(http.calls.first().usedRequest);
-        QCOMPARE(http.calls.first().request.url().path(),
-            QStringLiteral("/rest/1.0/user"));
+        QCOMPARE(http.calls.first().request.url().path(), QStringLiteral("/rest/1.0/user"));
         QCOMPARE(http.calls.first().request.rawHeader("Authorization"),
-            QByteArrayLiteral("Bearer rd-token"));
+                 QByteArrayLiteral("Bearer rd-token"));
     }
 
     void testMissingTokenFailsBeforeRequest()
@@ -54,31 +52,28 @@ private Q_SLOTS:
     void addMagnet_postsFormEncodedMagnet()
     {
         FakeHttpClient http;
-        http.jsonReplies = { loadJsonFixture("rd_add_magnet.json") };
+        http.jsonReplies = {loadJsonFixture("rd_add_magnet.json")};
 
         RealDebridClient client(&http);
         client.setToken(QStringLiteral("rd-token"));
 
-        const auto magnet = QStringLiteral(
-            "magnet:?xt=urn:btih:AABB&dn=movie");
+        const auto magnet = QStringLiteral("magnet:?xt=urn:btih:AABB&dn=movie");
         const auto r = QCoro::waitFor(client.addMagnet(magnet));
 
         QCOMPARE(r.id, QStringLiteral("ABC123ID"));
         QCOMPARE(http.calls.size(), 1);
         const auto& call = http.calls.first();
         QCOMPARE(call.method, FakeHttpClient::Method::Post);
-        QCOMPARE(call.request.url().path(),
-            QStringLiteral("/rest/1.0/torrents/addMagnet"));
-        QCOMPARE(call.request.header(QNetworkRequest::ContentTypeHeader)
-                     .toString(),
-            QStringLiteral("application/x-www-form-urlencoded"));
+        QCOMPARE(call.request.url().path(), QStringLiteral("/rest/1.0/torrents/addMagnet"));
+        QCOMPARE(call.request.header(QNetworkRequest::ContentTypeHeader).toString(),
+                 QStringLiteral("application/x-www-form-urlencoded"));
         QVERIFY(call.body.contains("magnet="));
     }
 
     void selectFiles_emptyListSendsAll()
     {
         FakeHttpClient http;
-        http.byteReplies = { QByteArray() };
+        http.byteReplies = {QByteArray()};
 
         RealDebridClient client(&http);
         client.setToken(QStringLiteral("rd-token"));
@@ -89,48 +84,47 @@ private Q_SLOTS:
         const auto& call = http.calls.first();
         QCOMPARE(call.method, FakeHttpClient::Method::Post);
         QCOMPARE(call.request.url().path(),
-            QStringLiteral("/rest/1.0/torrents/selectFiles/ABC123ID"));
+                 QStringLiteral("/rest/1.0/torrents/selectFiles/ABC123ID"));
         QVERIFY(call.body.contains("files=all"));
     }
 
     void selectFiles_listJoinsCommaSeparated()
     {
         FakeHttpClient http;
-        http.byteReplies = { QByteArray() };
+        http.byteReplies = {QByteArray()};
 
         RealDebridClient client(&http);
         client.setToken(QStringLiteral("rd-token"));
 
-        QCoro::waitFor(client.selectFiles(
-            QStringLiteral("ABC123ID"), QList<int> { 1, 3, 5 }));
+        QCoro::waitFor(client.selectFiles(QStringLiteral("ABC123ID"), QList<int>{1, 3, 5}));
 
         QCOMPARE(http.calls.size(), 1);
         QVERIFY(http.calls.first().body.contains("files=1%2C3%2C5")
-            || http.calls.first().body.contains("files=1,3,5"));
+                || http.calls.first().body.contains("files=1,3,5"));
     }
 
     void unrestrictLink_returnsDownloadUrl()
     {
         FakeHttpClient http;
-        http.jsonReplies = { loadJsonFixture("rd_unrestrict_link.json") };
+        http.jsonReplies = {loadJsonFixture("rd_unrestrict_link.json")};
 
         RealDebridClient client(&http);
         client.setToken(QStringLiteral("rd-token"));
 
-        const auto u = QCoro::waitFor(client.unrestrictLink(
-            QUrl(QStringLiteral("https://real-debrid.com/d/X/Y.mkv"))));
+        const auto u = QCoro::waitFor(
+            client.unrestrictLink(QUrl(QStringLiteral("https://real-debrid.com/d/X/Y.mkv"))));
 
         QVERIFY(!u.download.isEmpty());
         QCOMPARE(u.fileSize, qint64(2147483648));
         QCOMPARE(http.calls.size(), 1);
         QCOMPARE(http.calls.first().request.url().path(),
-            QStringLiteral("/rest/1.0/unrestrict/link"));
+                 QStringLiteral("/rest/1.0/unrestrict/link"));
     }
 
     void deleteTorrent_issuesDelete()
     {
         FakeHttpClient http;
-        http.byteReplies = { QByteArray() };
+        http.byteReplies = {QByteArray()};
 
         RealDebridClient client(&http);
         client.setToken(QStringLiteral("rd-token"));
@@ -140,8 +134,7 @@ private Q_SLOTS:
         QCOMPARE(http.calls.size(), 1);
         const auto& call = http.calls.first();
         QCOMPARE(call.method, FakeHttpClient::Method::Delete);
-        QCOMPARE(call.request.url().path(),
-            QStringLiteral("/rest/1.0/torrents/delete/ABC123ID"));
+        QCOMPARE(call.request.url().path(), QStringLiteral("/rest/1.0/torrents/delete/ABC123ID"));
     }
 };
 

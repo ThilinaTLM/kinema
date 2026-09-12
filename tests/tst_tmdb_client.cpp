@@ -1,19 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/TmdbClient.h"
-
-#include "core/io/HttpError.h"
 #include "TestDoubles.h"
+#include "api/tmdb/TmdbClient.h"
+#include "core/io/HttpError.h"
 
 #include <QTest>
 #include <QUrlQuery>
 
+using kinema::api::TmdbClient;
+using kinema::core::HttpError;
 using kinema::domain::DiscoverQuery;
 using kinema::domain::DiscoverSort;
 using kinema::domain::MediaKind;
-using kinema::api::TmdbClient;
-using kinema::core::HttpError;
 using kinema::tests::FakeHttpClient;
 using kinema::tests::loadJsonFixture;
 
@@ -25,7 +24,7 @@ private Q_SLOTS:
     void testTrendingAddsAuthAndLanguageHeader()
     {
         FakeHttpClient http;
-        http.jsonReplies = { loadJsonFixture("tmdb_trending_week_movie.json") };
+        http.jsonReplies = {loadJsonFixture("tmdb_trending_week_movie.json")};
 
         TmdbClient client(&http);
         client.setToken(QStringLiteral("tmdb-token"));
@@ -37,20 +36,18 @@ private Q_SLOTS:
         QCOMPARE(http.calls.size(), 1);
         QVERIFY(http.calls.first().usedRequest);
         QCOMPARE(http.calls.first().request.rawHeader("Authorization"),
-            QByteArrayLiteral("Bearer tmdb-token"));
+                 QByteArrayLiteral("Bearer tmdb-token"));
         QCOMPARE(http.calls.first().request.rawHeader("Accept"),
-            QByteArrayLiteral("application/json"));
-        QCOMPARE(http.calls.first().request.url().path(),
-            QStringLiteral("/3/trending/movie/week"));
+                 QByteArrayLiteral("application/json"));
+        QCOMPARE(http.calls.first().request.url().path(), QStringLiteral("/3/trending/movie/week"));
         const QUrlQuery query(http.calls.first().request.url());
-        QCOMPARE(query.queryItemValue(QStringLiteral("language")),
-            QStringLiteral("en-US"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("language")), QStringLiteral("en-US"));
     }
 
     void testDiscoverBuildsExpectedUrl()
     {
         FakeHttpClient http;
-        http.jsonReplies = { loadJsonFixture("tmdb_discover_movie_page1.json") };
+        http.jsonReplies = {loadJsonFixture("tmdb_discover_movie_page1.json")};
 
         TmdbClient client(&http);
         client.setToken(QStringLiteral("tmdb-token"));
@@ -59,7 +56,7 @@ private Q_SLOTS:
 
         DiscoverQuery q;
         q.kind = MediaKind::Movie;
-        q.withGenreIds = { 28, 12 };
+        q.withGenreIds = {28, 12};
         q.voteAverageGte = 7.5;
         q.voteCountGte = 500;
         q.sort = DiscoverSort::Rating;
@@ -72,65 +69,54 @@ private Q_SLOTS:
         const auto& request = http.calls.first().request;
         QCOMPARE(request.url().path(), QStringLiteral("/3/discover/movie"));
         const QUrlQuery query(request.url());
-        QCOMPARE(query.queryItemValue(QStringLiteral("language")),
-            QStringLiteral("en-US"));
-        QCOMPARE(query.queryItemValue(QStringLiteral("with_genres")),
-            QStringLiteral("28,12"));
-        QCOMPARE(query.queryItemValue(QStringLiteral("vote_average.gte")),
-            QStringLiteral("7.5"));
-        QCOMPARE(query.queryItemValue(QStringLiteral("vote_count.gte")),
-            QStringLiteral("500"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("language")), QStringLiteral("en-US"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("with_genres")), QStringLiteral("28,12"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("vote_average.gte")), QStringLiteral("7.5"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("vote_count.gte")), QStringLiteral("500"));
         QCOMPARE(query.queryItemValue(QStringLiteral("sort_by")),
-            QStringLiteral("vote_average.desc"));
-        QCOMPARE(query.queryItemValue(QStringLiteral("page")),
-            QStringLiteral("2"));
+                 QStringLiteral("vote_average.desc"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("page")), QStringLiteral("2"));
     }
 
     void testSearchMovieBuildsExpectedUrl()
     {
         FakeHttpClient http;
-        http.jsonReplies = { loadJsonFixture("tmdb_discover_movie_page1.json") };
+        http.jsonReplies = {loadJsonFixture("tmdb_discover_movie_page1.json")};
 
         TmdbClient client(&http);
         client.setToken(QStringLiteral("tmdb-token"));
         client.setLanguage(QStringLiteral("en-US"));
 
-        const auto page = QCoro::waitFor(
-            client.search(MediaKind::Movie, QStringLiteral("freddy"), 2));
+        const auto page =
+            QCoro::waitFor(client.search(MediaKind::Movie, QStringLiteral("freddy"), 2));
 
         QCOMPARE(page.items.size(), 2);
         QCOMPARE(http.calls.size(), 1);
         const auto& request = http.calls.first().request;
         QCOMPARE(request.url().path(), QStringLiteral("/3/search/movie"));
         const QUrlQuery query(request.url());
-        QCOMPARE(query.queryItemValue(QStringLiteral("language")),
-            QStringLiteral("en-US"));
-        QCOMPARE(query.queryItemValue(QStringLiteral("query")),
-            QStringLiteral("freddy"));
-        QCOMPARE(query.queryItemValue(QStringLiteral("page")),
-            QStringLiteral("2"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("language")), QStringLiteral("en-US"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("query")), QStringLiteral("freddy"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("page")), QStringLiteral("2"));
     }
 
     void testSearchSeriesBuildsExpectedUrl()
     {
         FakeHttpClient http;
-        http.jsonReplies = { loadJsonFixture("tmdb_popular_tv.json") };
+        http.jsonReplies = {loadJsonFixture("tmdb_popular_tv.json")};
 
         TmdbClient client(&http);
         client.setToken(QStringLiteral("tmdb-token"));
         client.setLanguage(QStringLiteral("en-US"));
 
-        (void)QCoro::waitFor(
-            client.search(MediaKind::Series, QStringLiteral("dark")));
+        (void)QCoro::waitFor(client.search(MediaKind::Series, QStringLiteral("dark")));
 
         QCOMPARE(http.calls.size(), 1);
         const auto& request = http.calls.first().request;
         QCOMPARE(request.url().path(), QStringLiteral("/3/search/tv"));
         const QUrlQuery query(request.url());
-        QCOMPARE(query.queryItemValue(QStringLiteral("query")),
-            QStringLiteral("dark"));
-        QCOMPARE(query.queryItemValue(QStringLiteral("page")),
-            QStringLiteral("1"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("query")), QStringLiteral("dark"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("page")), QStringLiteral("1"));
     }
 
     void testNoTokenFailsBeforeRequest()

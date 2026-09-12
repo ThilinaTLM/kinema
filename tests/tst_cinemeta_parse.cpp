@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/CinemetaParse.h"
+#include "api/cinemeta/CinemetaParse.h"
 #include "core/io/HttpError.h"
 
 #include <QFile>
@@ -18,7 +18,7 @@ private:
     static QJsonDocument loadFixture(const char* name)
     {
         QFile f(QStringLiteral(KINEMA_TEST_FIXTURES_DIR) + QLatin1Char('/')
-            + QString::fromLatin1(name));
+                + QString::fromLatin1(name));
         if (!f.open(QIODevice::ReadOnly)) {
             qFatal("Cannot open fixture %s", name);
         }
@@ -46,9 +46,8 @@ private Q_SLOTS:
     void search_throwsOnNonObjectDocument()
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("[]"));
-        QVERIFY_EXCEPTION_THROWN(
-            cinemeta::parseSearch(doc, MediaKind::Movie),
-            kinema::core::HttpError);
+        QVERIFY_EXCEPTION_THROWN(cinemeta::parseSearch(doc, MediaKind::Movie),
+                                 kinema::core::HttpError);
     }
 
     void search_emptyMetasReturnsEmpty_notError()
@@ -68,16 +67,14 @@ private Q_SLOTS:
         QCOMPARE(d.genres.size(), 2);
         QCOMPARE(d.genres.first(), QStringLiteral("Action"));
         QCOMPARE(d.cast.size(), 3);
-        QCOMPARE(d.background,
-            QUrl(QStringLiteral("https://example.com/matrix_bg.jpg")));
+        QCOMPARE(d.background, QUrl(QStringLiteral("https://example.com/matrix_bg.jpg")));
     }
 
     void meta_throwsOnMissingMetaObject()
     {
         const auto doc = QJsonDocument::fromJson(QByteArray("{\"meta\": null}"));
-        QVERIFY_EXCEPTION_THROWN(
-            cinemeta::parseMeta(doc, MediaKind::Movie),
-            kinema::core::HttpError);
+        QVERIFY_EXCEPTION_THROWN(cinemeta::parseMeta(doc, MediaKind::Movie),
+                                 kinema::core::HttpError);
     }
 
     void series_parsesMetaAndEpisodes()
@@ -113,11 +110,12 @@ private Q_SLOTS:
         const auto sd = cinemeta::parseSeriesMeta(doc);
 
         // Find S1E1.
-        const auto pilot = std::find_if(sd.episodes.begin(), sd.episodes.end(),
-            [](const Episode& e) { return e.season == 1 && e.number == 1; });
+        const auto pilot =
+            std::find_if(sd.episodes.begin(), sd.episodes.end(), [](const Episode& e) {
+                return e.season == 1 && e.number == 1;
+            });
         QVERIFY(pilot != sd.episodes.end());
-        QCOMPARE(pilot->streamId(QStringLiteral("tt0903747")),
-            QStringLiteral("tt0903747:1:1"));
+        QCOMPARE(pilot->streamId(QStringLiteral("tt0903747")), QStringLiteral("tt0903747:1:1"));
     }
 
     void series_seasonNumbersExcludesSpecials()
@@ -126,7 +124,7 @@ private Q_SLOTS:
         const auto sd = cinemeta::parseSeriesMeta(doc);
 
         const auto seasons = cinemeta::seasonNumbers(sd.episodes);
-        QCOMPARE(seasons, (QList<int> { 1, 2 }));
+        QCOMPARE(seasons, (QList<int>{1, 2}));
     }
 
     void series_toleratesDateOnlyAndMissingThumbnail()
@@ -135,15 +133,19 @@ private Q_SLOTS:
         const auto sd = cinemeta::parseSeriesMeta(doc);
 
         // S1E2 has "released": "2008-01-27" (date-only).
-        const auto s1e2 = std::find_if(sd.episodes.begin(), sd.episodes.end(),
-            [](const Episode& e) { return e.season == 1 && e.number == 2; });
+        const auto s1e2 =
+            std::find_if(sd.episodes.begin(), sd.episodes.end(), [](const Episode& e) {
+                return e.season == 1 && e.number == 2;
+            });
         QVERIFY(s1e2 != sd.episodes.end());
         QVERIFY(s1e2->released.has_value());
         QCOMPARE(*s1e2->released, QDate(2008, 1, 27));
 
         // S1E3 has an empty thumbnail field.
-        const auto s1e3 = std::find_if(sd.episodes.begin(), sd.episodes.end(),
-            [](const Episode& e) { return e.season == 1 && e.number == 3; });
+        const auto s1e3 =
+            std::find_if(sd.episodes.begin(), sd.episodes.end(), [](const Episode& e) {
+                return e.season == 1 && e.number == 3;
+            });
         QVERIFY(s1e3 != sd.episodes.end());
         QVERIFY(s1e3->thumbnail.isEmpty());
     }
@@ -157,8 +159,10 @@ private Q_SLOTS:
         const auto doc = loadFixture("cinemeta_meta_tt0903747_breaking_bad.json");
         const auto sd = cinemeta::parseSeriesMeta(doc);
 
-        const auto down = std::find_if(sd.episodes.begin(), sd.episodes.end(),
-            [](const Episode& e) { return e.season == 2 && e.number == 4; });
+        const auto down =
+            std::find_if(sd.episodes.begin(), sd.episodes.end(), [](const Episode& e) {
+                return e.season == 2 && e.number == 4;
+            });
         QVERIFY(down != sd.episodes.end());
         QCOMPARE(down->title, QStringLiteral("Down"));
         QVERIFY(down->released.has_value());

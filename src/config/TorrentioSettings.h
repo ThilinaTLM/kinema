@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "core/util/TorrentioConfig.h"
-
-#include <KSharedConfig>
+#include "api/torrentio/TorrentioConfig.h"
 
 #include <QObject>
+
+#include <KSharedConfig>
 
 namespace kinema::config {
 
@@ -25,8 +25,7 @@ class TorrentioSettings : public QObject
 {
     Q_OBJECT
 public:
-    explicit TorrentioSettings(KSharedConfigPtr config,
-        QObject* parent = nullptr);
+    explicit TorrentioSettings(KSharedConfigPtr config, QObject* parent = nullptr);
 
     core::torrentio::SortMode defaultSort() const;
     void setDefaultSort(core::torrentio::SortMode);

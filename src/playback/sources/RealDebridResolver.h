@@ -40,6 +40,7 @@ class RealDebridResolver : public DebridResolver
 public:
     RealDebridResolver(api::RealDebridClient& rd, QObject* parent = nullptr);
 
+    bool isConfigured() const override;
     QCoro::Task<ResolvedDebridLink> resolve(domain::AssetRef ref) override;
 
 private:

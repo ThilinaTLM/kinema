@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "core/util/Magnet.h"
+#include "torrent/Magnet.h"
 
 #include <QTest>
 
-using namespace kinema::core::magnet;
+using namespace kinema::torrent::magnet;
 
 class TstMagnet : public QObject
 {
@@ -20,7 +20,8 @@ private Q_SLOTS:
     void build_containsInfoHash()
     {
         const auto m = build(QStringLiteral("aabb1122ccdd3344eeff5566778899aabbccddee"));
-        QVERIFY(m.startsWith(QLatin1String("magnet:?xt=urn:btih:aabb1122ccdd3344eeff5566778899aabbccddee")));
+        QVERIFY(m.startsWith(
+            QLatin1String("magnet:?xt=urn:btih:aabb1122ccdd3344eeff5566778899aabbccddee")));
     }
 
     void build_appendsAllDefaultTrackers_inOrder()
@@ -29,8 +30,7 @@ private Q_SLOTS:
         for (const auto& t : defaultTrackers()) {
             // The tracker must appear, URL-encoded, somewhere after the hash.
             const auto encoded = QString::fromUtf8(QUrl::toPercentEncoding(t));
-            QVERIFY2(m.contains(encoded),
-                qPrintable(QStringLiteral("missing tracker: %1").arg(t)));
+            QVERIFY2(m.contains(encoded), qPrintable(QStringLiteral("missing tracker: %1").arg(t)));
         }
 
         // Trackers must be in declared order.
@@ -45,8 +45,7 @@ private Q_SLOTS:
 
     void build_encodesDisplayNameSpecialChars()
     {
-        const auto m = build(QStringLiteral("deadbeef"),
-            QStringLiteral("Foo & Bar+Baz.mkv"));
+        const auto m = build(QStringLiteral("deadbeef"), QStringLiteral("Foo & Bar+Baz.mkv"));
         // '&' must be escaped so it doesn't open a new query param.
         QVERIFY(m.contains(QLatin1String("&dn=")));
         QVERIFY(m.contains(QLatin1String("%26"))); // the ampersand inside the name

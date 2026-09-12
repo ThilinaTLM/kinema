@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ui/qml-bridge/settings/IndexerSettingsViewModel.h"
-#include "api/IndexerSelector.h"
+
+#include "api/indexers/IndexerSelector.h"
 #include "config/IndexerSettings.h"
 #include "config/PeerflixSettings.h"
 #include "config/TorrentioSettings.h"
@@ -12,23 +13,20 @@ namespace kinema::ui::qml::settings {
 
 // ============================== Indexers: parent VM ======================
 
-IndexerSettingsViewModel::IndexerSettingsViewModel(
-    api::IndexerSelector* indexers,
-    config::IndexerSettings& indexerSettings,
-    config::TorrentioSettings& torrentioSettings,
-    config::PeerflixSettings& peerflixSettings,
-    QObject* parent)
+IndexerSettingsViewModel::IndexerSettingsViewModel(api::IndexerSelector* indexers,
+                                                   config::IndexerSettings& indexerSettings,
+                                                   config::TorrentioSettings& torrentioSettings,
+                                                   config::PeerflixSettings& peerflixSettings,
+                                                   QObject* parent)
     : QObject(parent)
     , m_settings(indexerSettings)
-    , m_torrentio(new TorrentioSectionViewModel(indexers,
-          torrentioSettings, this))
-    , m_peerflix(new PeerflixSectionViewModel(indexers,
-          peerflixSettings, this))
+    , m_torrentio(new TorrentioSectionViewModel(indexers, torrentioSettings, this))
+    , m_peerflix(new PeerflixSectionViewModel(indexers, peerflixSettings, this))
 {
-    connect(&m_settings, &config::IndexerSettings::activeIndexerChanged,
-        this, [this](domain::IndexerKind) {
-            Q_EMIT activeIndexerChanged();
-        });
+    connect(&m_settings,
+            &config::IndexerSettings::activeIndexerChanged,
+            this,
+            [this](domain::IndexerKind) { Q_EMIT activeIndexerChanged(); });
 }
 
 int IndexerSettingsViewModel::activeIndexer() const

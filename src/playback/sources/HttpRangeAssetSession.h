@@ -45,22 +45,19 @@ class HttpRangeAssetSession : public AssetSession
     Q_OBJECT
 public:
     HttpRangeAssetSession(core::HttpClient& http,
-        DebridResolver& resolver,
-        const config::TorrentStreamingSettings& settings,
-        domain::AssetRef ref,
-        QString assetId,
-        QString localDir,
-        QObject* parent = nullptr);
+                          DebridResolver& resolver,
+                          const config::TorrentStreamingSettings& settings,
+                          domain::AssetRef ref,
+                          QString assetId,
+                          QString localDir,
+                          QObject* parent = nullptr);
     ~HttpRangeAssetSession() override;
 
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }
     qint64 cachedBytes() const override;
-    QVector<torrent::TorrentFileEntry> files() const override
-    {
-        return m_files;
-    }
+    QVector<torrent::TorrentFileEntry> files() const override { return m_files; }
 
     /// Lower-case hex info hash this session was opened for. Used
     /// by `SessionRegistry::filesForStreamRef` to map an info hash
@@ -68,8 +65,8 @@ public:
     /// about `AssetRef`. Stable for the lifetime of the session.
     QString infoHash() const noexcept { return m_ref.infoHash; }
 
-    QCoro::Task<bool> ensureRange(kinema::torrent::ByteRange range) override;
-    QByteArray readRange(kinema::torrent::ByteRange range) const override;
+    QCoro::Task<bool> ensureRange(kinema::core::ByteRange range) override;
+    QByteArray readRange(kinema::core::ByteRange range) const override;
     void touch() override;
 
     domain::DownloadMode mode() const override { return m_mode; }

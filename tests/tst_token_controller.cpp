@@ -1,44 +1,42 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "controllers/TokenController.h"
-
-#include "api/TmdbClient.h"
+#include "TestDoubles.h"
+#include "api/tmdb/TmdbClient.h"
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
+#include "controllers/TokenController.h"
 #include "core/persistence/TokenStore.h"
-#include "TestDoubles.h"
-
-#include <KConfig>
-#include <KSharedConfig>
 
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <KConfig>
+#include <KSharedConfig>
+
 using kinema::api::TmdbClient;
 using kinema::config::AppSettings;
 using kinema::controllers::TokenController;
 using kinema::core::TokenStore;
-using kinema::tests::FakeTokenStore;
 using kinema::tests::drainEvents;
+using kinema::tests::FakeTokenStore;
 
 namespace {
 
-struct Fixture {
+struct Fixture
+{
     QTemporaryDir tmpDir;
     KSharedConfigPtr config;
     AppSettings settings;
     FakeTokenStore tokens;
-    TmdbClient tmdb { nullptr };
+    TmdbClient tmdb{nullptr};
 
     Fixture()
-        : config(KSharedConfig::openConfig(
-            tmpDir.filePath(QStringLiteral("kinemarc")),
-            KConfig::SimpleConfig))
+        : config(KSharedConfig::openConfig(tmpDir.filePath(QStringLiteral("kinemarc")),
+                                           KConfig::SimpleConfig))
         , settings(config)
-    {
-    }
+    { }
 };
 
 } // namespace
@@ -52,22 +50,19 @@ private Q_SLOTS:
     {
         Fixture f;
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kTmdbKey),
-            QStringLiteral("tmdb-user"));
+                               QStringLiteral("tmdb-user"));
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kRealDebridKey),
-            QStringLiteral("rd-token"));
+                               QStringLiteral("rd-token"));
 
         TokenController controller(
-            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr,
-            QStringLiteral("compiled-default"));
+            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr, QStringLiteral("compiled-default"));
         controller.loadAll();
         drainEvents();
 
         // RD must NOT be read when no token has been saved (the
         // configured flag flips to true via Save in the settings VM).
-        QVERIFY(!f.tokens.readKeys.contains(
-            QString::fromLatin1(TokenStore::kRealDebridKey)));
-        QVERIFY(f.tokens.readKeys.contains(
-            QString::fromLatin1(TokenStore::kTmdbKey)));
+        QVERIFY(!f.tokens.readKeys.contains(QString::fromLatin1(TokenStore::kRealDebridKey)));
+        QVERIFY(f.tokens.readKeys.contains(QString::fromLatin1(TokenStore::kTmdbKey)));
         QVERIFY(controller.realDebridToken().isEmpty());
         QCOMPARE(controller.tmdbToken(), QStringLiteral("tmdb-user"));
     }
@@ -77,20 +72,17 @@ private Q_SLOTS:
         Fixture f;
         f.settings.debrid().setRealDebridConfigured(true);
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kTmdbKey),
-            QStringLiteral("tmdb-user"));
+                               QStringLiteral("tmdb-user"));
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kRealDebridKey),
-            QStringLiteral("rd-token"));
+                               QStringLiteral("rd-token"));
 
         TokenController controller(
-            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr,
-            QStringLiteral("compiled-default"));
+            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr, QStringLiteral("compiled-default"));
         controller.loadAll();
         drainEvents();
 
-        QVERIFY(f.tokens.readKeys.contains(
-            QString::fromLatin1(TokenStore::kRealDebridKey)));
-        QVERIFY(f.tokens.readKeys.contains(
-            QString::fromLatin1(TokenStore::kTmdbKey)));
+        QVERIFY(f.tokens.readKeys.contains(QString::fromLatin1(TokenStore::kRealDebridKey)));
+        QVERIFY(f.tokens.readKeys.contains(QString::fromLatin1(TokenStore::kTmdbKey)));
         QCOMPARE(controller.realDebridToken(), QStringLiteral("rd-token"));
     }
 
@@ -99,16 +91,14 @@ private Q_SLOTS:
         Fixture f;
         f.settings.debrid().setAllDebridConfigured(true);
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kAllDebridKey),
-            QStringLiteral("ad-key"));
+                               QStringLiteral("ad-key"));
 
         TokenController controller(
-            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr,
-            QStringLiteral(""));
+            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr, QStringLiteral(""));
         controller.loadAll();
         drainEvents();
 
-        QVERIFY(f.tokens.readKeys.contains(
-            QString::fromLatin1(TokenStore::kAllDebridKey)));
+        QVERIFY(f.tokens.readKeys.contains(QString::fromLatin1(TokenStore::kAllDebridKey)));
         QCOMPARE(controller.allDebridApiKey(), QStringLiteral("ad-key"));
     }
 
@@ -116,16 +106,14 @@ private Q_SLOTS:
     {
         Fixture f;
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kAllDebridKey),
-            QStringLiteral("ad-key"));
+                               QStringLiteral("ad-key"));
 
         TokenController controller(
-            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr,
-            QStringLiteral(""));
+            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr, QStringLiteral(""));
         controller.loadAll();
         drainEvents();
 
-        QVERIFY(!f.tokens.readKeys.contains(
-            QString::fromLatin1(TokenStore::kAllDebridKey)));
+        QVERIFY(!f.tokens.readKeys.contains(QString::fromLatin1(TokenStore::kAllDebridKey)));
         QVERIFY(controller.allDebridApiKey().isEmpty());
     }
 
@@ -133,11 +121,10 @@ private Q_SLOTS:
     {
         Fixture f;
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kTmdbKey),
-            QStringLiteral("user-token"));
+                               QStringLiteral("user-token"));
 
         TokenController controller(
-            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr,
-            QStringLiteral("compiled-default"));
+            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr, QStringLiteral("compiled-default"));
         controller.loadAll();
         drainEvents();
 
@@ -153,8 +140,7 @@ private Q_SLOTS:
 
         TmdbClient tmdbNoDefault(nullptr);
         TokenController noDefault(
-            &f.tokens, &tmdbNoDefault, f.settings.debrid(), nullptr,
-            QStringLiteral(""));
+            &f.tokens, &tmdbNoDefault, f.settings.debrid(), nullptr, QStringLiteral(""));
         noDefault.refreshTmdb();
         drainEvents();
 
@@ -166,14 +152,12 @@ private Q_SLOTS:
     {
         Fixture f;
         f.settings.debrid().setRealDebridConfigured(true);
-        f.tokens.values.insert(QString::fromLatin1(TokenStore::kTmdbKey),
-            QStringLiteral("tmdb-a"));
+        f.tokens.values.insert(QString::fromLatin1(TokenStore::kTmdbKey), QStringLiteral("tmdb-a"));
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kRealDebridKey),
-            QStringLiteral("rd-a"));
+                               QStringLiteral("rd-a"));
 
         TokenController controller(
-            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr,
-            QStringLiteral("compiled-default"));
+            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr, QStringLiteral("compiled-default"));
         QSignalSpy rdSpy(&controller, &TokenController::realDebridTokenChanged);
         QSignalSpy tmdbSpy(&controller, &TokenController::tmdbTokenChanged);
 
@@ -187,8 +171,7 @@ private Q_SLOTS:
         QCOMPARE(rdSpy.count(), 1);
         QCOMPARE(tmdbSpy.count(), 1);
 
-        f.tokens.values.insert(QString::fromLatin1(TokenStore::kTmdbKey),
-            QStringLiteral("tmdb-b"));
+        f.tokens.values.insert(QString::fromLatin1(TokenStore::kTmdbKey), QStringLiteral("tmdb-b"));
         controller.refreshTmdb();
         drainEvents();
         QCOMPARE(tmdbSpy.count(), 2);
@@ -200,11 +183,10 @@ private Q_SLOTS:
         Fixture f;
         f.settings.debrid().setAllDebridConfigured(true);
         f.tokens.values.insert(QString::fromLatin1(TokenStore::kAllDebridKey),
-            QStringLiteral("ad-a"));
+                               QStringLiteral("ad-a"));
 
         TokenController controller(
-            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr,
-            QStringLiteral(""));
+            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr, QStringLiteral(""));
         QSignalSpy adSpy(&controller, &TokenController::allDebridApiKeyChanged);
 
         controller.loadAll();
@@ -221,21 +203,18 @@ private Q_SLOTS:
 
         QVERIFY(controller.allDebridApiKey().isEmpty());
         QCOMPARE(adSpy.count(), 2);
-        QCOMPARE(adSpy.last().at(0).toString(), QString {});
+        QCOMPARE(adSpy.last().at(0).toString(), QString{});
     }
 
     void testReadFailureLeavesSafeState()
     {
         Fixture f;
         f.settings.debrid().setRealDebridConfigured(true);
-        f.tokens.failingReads = {
-            QString::fromLatin1(TokenStore::kTmdbKey),
-            QString::fromLatin1(TokenStore::kRealDebridKey)
-        };
+        f.tokens.failingReads = {QString::fromLatin1(TokenStore::kTmdbKey),
+                                 QString::fromLatin1(TokenStore::kRealDebridKey)};
 
         TokenController controller(
-            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr,
-            QStringLiteral(""));
+            &f.tokens, &f.tmdb, f.settings.debrid(), nullptr, QStringLiteral(""));
         QSignalSpy rdSpy(&controller, &TokenController::realDebridTokenChanged);
         QSignalSpy tmdbSpy(&controller, &TokenController::tmdbTokenChanged);
 

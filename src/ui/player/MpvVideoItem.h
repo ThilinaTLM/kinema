@@ -8,14 +8,13 @@
 #include "core/mpv/MpvChapterList.h"
 #include "core/mpv/MpvTrackList.h"
 
-#include <MpvAbstractItem>
-
 #include <QString>
 #include <QStringList>
 #include <QUrl>
 #include <QVariant>
-#include <QtQmlIntegration/qqmlintegration.h>
 
+#include <MpvAbstractItem>
+#include <QtQmlIntegration/qqmlintegration.h>
 #include <deque>
 #include <optional>
 
@@ -74,14 +73,10 @@ class MpvVideoItem : public MpvAbstractItem
     Q_PROPERTY(bool muted READ isMuted NOTIFY muteChanged)
     Q_PROPERTY(double speed READ speed NOTIFY speedChanged)
     Q_PROPERTY(bool buffering READ isBuffering NOTIFY bufferingChanged)
-    Q_PROPERTY(int bufferingPercent READ bufferingPercent
-        NOTIFY bufferingChanged)
-    Q_PROPERTY(double cacheAhead READ cacheAhead
-        NOTIFY cacheAheadChanged)
-    Q_PROPERTY(int audioTrackId READ audioTrackId
-        NOTIFY audioTrackChanged)
-    Q_PROPERTY(int subtitleTrackId READ subtitleTrackId
-        NOTIFY subtitleTrackChanged)
+    Q_PROPERTY(int bufferingPercent READ bufferingPercent NOTIFY bufferingChanged)
+    Q_PROPERTY(double cacheAhead READ cacheAhead NOTIFY cacheAheadChanged)
+    Q_PROPERTY(int audioTrackId READ audioTrackId NOTIFY audioTrackChanged)
+    Q_PROPERTY(int subtitleTrackId READ subtitleTrackId NOTIFY subtitleTrackChanged)
 
 public:
     explicit MpvVideoItem(QQuickItem* parent = nullptr);
@@ -95,8 +90,7 @@ public:
 
     // ---- Imperative slots used by PlayerWindow / PlayerViewModel -----
 
-    Q_INVOKABLE void loadFile(const QUrl& url,
-        std::optional<double> startSeconds = std::nullopt);
+    Q_INVOKABLE void loadFile(const QUrl& url, std::optional<double> startSeconds = std::nullopt);
     Q_INVOKABLE void stop();
     Q_INVOKABLE void setPaused(bool paused);
     Q_INVOKABLE void cyclePause();
@@ -114,8 +108,8 @@ public:
     /// on its own slang/forced rules. `lang` is the ISO 639-2 code
     /// ("eng"); `title` is the display label that shows up in
     /// `track-list`.
-    Q_INVOKABLE void addSubtitleFile(const QString& path,
-        const QString& title, const QString& lang, bool select);
+    Q_INVOKABLE void
+    addSubtitleFile(const QString& path, const QString& title, const QString& lang, bool select);
 
     // ---- Cached property accessors -----------------------------------
 
@@ -134,19 +128,14 @@ public:
     /// The most recent track-list parsed from mpv. Owned by this
     /// item; `PlayerViewModel` mirrors it into the QML-visible
     /// audio / subtitle list models.
-    const core::tracks::TrackList& tracks() const noexcept
-    {
-        return m_tracks;
-    }
+    const core::tracks::TrackList& tracks() const noexcept { return m_tracks; }
     /// The most recent chapter list.
-    const core::chapters::ChapterList& chapters() const noexcept
-    {
-        return m_chapters;
-    }
+    const core::chapters::ChapterList& chapters() const noexcept { return m_chapters; }
 
     /// Snapshot of decoder / cache statistics. Used by the chip
     /// row and by `HistoryController` for codec-aware track memory.
-    struct VideoStats {
+    struct VideoStats
+    {
         int width = 0;
         int height = 0;
         QString videoCodec;
@@ -162,7 +151,7 @@ public:
     VideoStats currentStats() const noexcept { return m_stats; }
 
     /// Most recent log lines from mpv's `MPV_LOG_LEVEL_INFO` stream.
-    /// Used by `playback::adapters::EmbeddedMpvPlayerAdapter` to
+    /// Used by `ui::player::EmbeddedMpvPlayerAdapter` to
     /// classify end-file errors.
     QStringList recentLogLines() const;
 

@@ -7,15 +7,12 @@
 #include "domain/Download.h"
 #include "playback/adapters/ExternalPlayerAdapter.h"
 #include "playback/events/PlaybackEventStream.h"
+#include "playback/ports/EmbeddedPlayerPort.h"
 #include "playback/ports/PlayerPort.h"
 #include "playback/resume/ResumeUseCase.h"
 #include "playback/series/SeriesSessionService.h"
 #include "playback/session/PlaybackSession.h"
 #include "playback/transfer/TransferUseCase.h"
-
-#ifdef KINEMA_HAVE_LIBMPV
-#include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
-#endif
 
 #include <KLocalizedString>
 
@@ -24,73 +21,76 @@
 
 namespace kinema::playback::session {
 
-PlaybackSessionManager::PlaybackSessionManager(
-    events::PlaybackEventStream& eventStream,
-    transfer::TransferUseCase& transfers,
-    adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
-    adapters::ExternalPlayerAdapter* externalAdapter,
-    QObject* parent)
+PlaybackSessionManager::PlaybackSessionManager(events::PlaybackEventStream& eventStream,
+                                               transfer::TransferUseCase& transfers,
+                                               ports::EmbeddedPlayerPort* embeddedAdapter,
+                                               adapters::ExternalPlayerAdapter* externalAdapter,
+                                               QObject* parent)
     : QObject(parent)
     , m_eventStream(eventStream)
     , m_transfers(&transfers)
     , m_embeddedAdapter(embeddedAdapter)
     , m_externalAdapter(externalAdapter)
 {
-    connect(m_transfers, &transfer::TransferUseCase::statusMessage,
-        this, &PlaybackSessionManager::statusMessage);
-    connect(&m_eventStream, &events::PlaybackEventStream::eventPublished,
-        this, &PlaybackSessionManager::onEvent);
-#ifdef KINEMA_HAVE_LIBMPV
+    connect(m_transfers,
+            &transfer::TransferUseCase::statusMessage,
+            this,
+            &PlaybackSessionManager::statusMessage);
+    connect(&m_eventStream,
+            &events::PlaybackEventStream::eventPublished,
+            this,
+            &PlaybackSessionManager::onEvent);
     if (m_embeddedAdapter) {
-        connect(m_embeddedAdapter,
-            &adapters::EmbeddedMpvPlayerAdapter::visibilityChanged,
-            this, &PlaybackSessionManager::visibilityChanged);
-        connect(m_embeddedAdapter,
-            &adapters::EmbeddedMpvPlayerAdapter::statusMessage,
-            this, &PlaybackSessionManager::statusMessage);
+        m_embeddedAdapter->setVisibilityHandler(
+            [this](bool visible) { Q_EMIT visibilityChanged(visible); });
+        m_embeddedAdapter->setStatusHandler(
+            [this](const QString& text, int timeoutMs) { Q_EMIT statusMessage(text, timeoutMs); });
     }
-#endif
 }
 
-PlaybackSessionManager::PlaybackSessionManager(
-    events::PlaybackEventStream& eventStream,
-    adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
-    adapters::ExternalPlayerAdapter* externalAdapter,
-    QObject* parent)
+PlaybackSessionManager::PlaybackSessionManager(events::PlaybackEventStream& eventStream,
+                                               ports::EmbeddedPlayerPort* embeddedAdapter,
+                                               adapters::ExternalPlayerAdapter* externalAdapter,
+                                               QObject* parent)
     : QObject(parent)
     , m_eventStream(eventStream)
     , m_embeddedAdapter(embeddedAdapter)
     , m_externalAdapter(externalAdapter)
 {
-    connect(&m_eventStream, &events::PlaybackEventStream::eventPublished,
-        this, &PlaybackSessionManager::onEvent);
-#ifdef KINEMA_HAVE_LIBMPV
+    connect(&m_eventStream,
+            &events::PlaybackEventStream::eventPublished,
+            this,
+            &PlaybackSessionManager::onEvent);
     if (m_embeddedAdapter) {
-        connect(m_embeddedAdapter,
-            &adapters::EmbeddedMpvPlayerAdapter::visibilityChanged,
-            this, &PlaybackSessionManager::visibilityChanged);
-        connect(m_embeddedAdapter,
-            &adapters::EmbeddedMpvPlayerAdapter::statusMessage,
-            this, &PlaybackSessionManager::statusMessage);
+        m_embeddedAdapter->setVisibilityHandler(
+            [this](bool visible) { Q_EMIT visibilityChanged(visible); });
+        m_embeddedAdapter->setStatusHandler(
+            [this](const QString& text, int timeoutMs) { Q_EMIT statusMessage(text, timeoutMs); });
     }
-#endif
 }
 
-PlaybackSessionManager::~PlaybackSessionManager() = default;
+PlaybackSessionManager::~PlaybackSessionManager()
+{
+    if (m_embeddedAdapter) {
+        m_embeddedAdapter->setVisibilityHandler({});
+        m_embeddedAdapter->setStatusHandler({});
+    }
+}
 
-void PlaybackSessionManager::setResumeUseCase(
-    resume::ResumeUseCase* resume) noexcept
+void PlaybackSessionManager::setResumeUseCase(resume::ResumeUseCase* resume) noexcept
 {
     m_resume = resume;
 }
 
-void PlaybackSessionManager::setSeriesSessionService(
-    series::SeriesSessionService* series) noexcept
+void PlaybackSessionManager::setSeriesSessionService(series::SeriesSessionService* series) noexcept
 {
     m_series = series;
     if (m_series) {
-        connect(m_series, SIGNAL(navigationChanged()),
-            this, SIGNAL(navigationChanged()), Qt::UniqueConnection);
+        connect(m_series,
+                SIGNAL(navigationChanged()),
+                this,
+                SIGNAL(navigationChanged()),
+                Qt::UniqueConnection);
     }
 }
 
@@ -110,16 +110,14 @@ void PlaybackSessionManager::supersedeActiveSession()
     }
 }
 
-domain::PlaybackContext PlaybackSessionManager::effectiveContext(
-    const domain::Stream& stream,
-    const domain::PlaybackContext& ctxIn) const
+domain::PlaybackContext
+PlaybackSessionManager::effectiveContext(const domain::Stream& stream,
+                                         const domain::PlaybackContext& ctxIn) const
 {
     domain::PlaybackContext ctx = ctxIn;
     ctx.streamRef = domain::HistoryStreamRef::fromStream(stream);
     if (ctx.title.isEmpty()) {
-        ctx.title = stream.releaseName.isEmpty()
-            ? stream.qualityLabel
-            : stream.releaseName;
+        ctx.title = stream.releaseName.isEmpty() ? stream.qualityLabel : stream.releaseName;
     }
     if (m_resume) {
         ctx.resumeSeconds = m_resume->resumeSecondsFor(ctx.key);
@@ -127,8 +125,7 @@ domain::PlaybackContext PlaybackSessionManager::effectiveContext(
     return ctx;
 }
 
-void PlaybackSessionManager::stampAdapters(
-    const domain::PlaybackContext& ctx)
+void PlaybackSessionManager::stampAdapters(const domain::PlaybackContext& ctx)
 {
     if (!m_session) {
         return;
@@ -144,26 +141,25 @@ void PlaybackSessionManager::stampAdapters(
 #endif
 }
 
-void PlaybackSessionManager::play(const domain::Stream& stream,
-    const domain::PlaybackContext& ctx)
+void PlaybackSessionManager::play(const domain::Stream& stream, const domain::PlaybackContext& ctx)
 {
     startPlay(stream, ctx, std::nullopt);
 }
 
 void PlaybackSessionManager::playWithBackend(const domain::Stream& stream,
-    const domain::PlaybackContext& ctx,
-    domain::DownloadBackendKind backend)
+                                             const domain::PlaybackContext& ctx,
+                                             domain::DownloadBackendKind backend)
 {
     startPlay(stream, ctx, backend);
 }
 
 void PlaybackSessionManager::startPlay(const domain::Stream& stream,
-    const domain::PlaybackContext& ctxIn,
-    std::optional<domain::DownloadBackendKind> backendOverride)
+                                       const domain::PlaybackContext& ctxIn,
+                                       std::optional<domain::DownloadBackendKind> backendOverride)
 {
     if (stream.directUrl.isEmpty() && stream.infoHash.isEmpty()) {
-        Q_EMIT statusMessage(i18nc("@info:status",
-            "This release has no playable URL or magnet."), 5000);
+        Q_EMIT statusMessage(i18nc("@info:status", "This release has no playable URL or magnet."),
+                             5000);
         return;
     }
 
@@ -179,11 +175,11 @@ void PlaybackSessionManager::startPlay(const domain::Stream& stream,
     Q_UNUSED(task);
 }
 
-QCoro::Task<void> PlaybackSessionManager::playTask(
-    PlaybackSessionId sessionId,
-    domain::Stream stream,
-    domain::PlaybackContext ctx,
-    std::optional<domain::DownloadBackendKind> backendOverride)
+QCoro::Task<void>
+PlaybackSessionManager::playTask(PlaybackSessionId sessionId,
+                                 domain::Stream stream,
+                                 domain::PlaybackContext ctx,
+                                 std::optional<domain::DownloadBackendKind> backendOverride)
 {
     try {
         QUrl url;
@@ -192,29 +188,27 @@ QCoro::Task<void> PlaybackSessionManager::playTask(
             const auto ref = domain::assetRefFor(stream, ctx);
             assetId = domain::assetIdFor(ref);
             if (m_session && m_session->id() == sessionId) {
-                m_eventStream.publish(events::SourceResolving { sessionId });
+                m_eventStream.publish(events::SourceResolving{sessionId});
                 m_session->markSourceResolved(ref);
-                m_eventStream.publish(events::TransferOpening {
-                    sessionId, assetId });
+                m_eventStream.publish(events::TransferOpening{sessionId, assetId});
             }
             if (!m_transfers) {
-                throw std::runtime_error(i18nc("@info:status",
-                    "Torrent streaming is not available in this build.")
+                throw std::runtime_error(
+                    i18nc("@info:status", "Torrent streaming is not available in this build.")
                         .toStdString());
             }
-            url = co_await m_transfers->ensurePlayable(sessionId,
-                stream, ctx, backendOverride);
+            url = co_await m_transfers->ensurePlayable(sessionId, stream, ctx, backendOverride);
             if (!m_session || m_session->id() != sessionId) {
                 co_return;
             }
-            m_eventStream.publish(events::TransferReady { sessionId, assetId });
+            m_eventStream.publish(events::TransferReady{sessionId, assetId});
         } else {
             url = stream.directUrl;
         }
 
         if (!url.isValid() || url.isEmpty()) {
-            throw std::runtime_error(i18nc("@info:status",
-                "No playable URL available for this item.").toStdString());
+            throw std::runtime_error(
+                i18nc("@info:status", "No playable URL available for this item.").toStdString());
         }
 
         if (!m_session || m_session->id() != sessionId) {
@@ -239,8 +233,9 @@ QCoro::Task<void> PlaybackSessionManager::playTask(
             // Let PlayerLauncher produce the canonical failure/status text.
             m_externalAdapter->play(url, ctx, ctx.resumeSeconds);
         } else {
-            throw std::runtime_error(i18nc("@info:status",
-                "No supported media player found. Install mpv or VLC, then try again.")
+            throw std::runtime_error(
+                i18nc("@info:status",
+                      "No supported media player found. Install mpv or VLC, then try again.")
                     .toStdString());
         }
     } catch (const std::exception& e) {
@@ -254,24 +249,23 @@ QCoro::Task<void> PlaybackSessionManager::playTask(
 }
 
 void PlaybackSessionManager::download(const domain::Stream& stream,
-    const domain::PlaybackContext& ctx)
+                                      const domain::PlaybackContext& ctx)
 {
     if (!m_transfers) {
-        Q_EMIT statusMessage(i18nc("@info:status",
-            "Downloads are not available in this build."), 5000);
+        Q_EMIT statusMessage(i18nc("@info:status", "Downloads are not available in this build."),
+                             5000);
         return;
     }
     m_transfers->saveOffline(stream, effectiveContext(stream, ctx));
 }
 
-void PlaybackSessionManager::downloadWithBackend(
-    const domain::Stream& stream,
-    const domain::PlaybackContext& ctx,
-    domain::DownloadBackendKind backend)
+void PlaybackSessionManager::downloadWithBackend(const domain::Stream& stream,
+                                                 const domain::PlaybackContext& ctx,
+                                                 domain::DownloadBackendKind backend)
 {
     if (!m_transfers) {
-        Q_EMIT statusMessage(i18nc("@info:status",
-            "Downloads are not available in this build."), 5000);
+        Q_EMIT statusMessage(i18nc("@info:status", "Downloads are not available in this build."),
+                             5000);
         return;
     }
     m_transfers->saveOffline(stream, effectiveContext(stream, ctx), backend);
@@ -289,17 +283,20 @@ ports::PlayerPort* PlaybackSessionManager::commandPlayer() const noexcept
 
 void PlaybackSessionManager::pause()
 {
-    if (auto* p = commandPlayer()) p->pause();
+    if (auto* p = commandPlayer())
+        p->pause();
 }
 
 void PlaybackSessionManager::resume()
 {
-    if (auto* p = commandPlayer()) p->resume();
+    if (auto* p = commandPlayer())
+        p->resume();
 }
 
 void PlaybackSessionManager::playPause()
 {
-    if (auto* p = commandPlayer()) p->togglePause();
+    if (auto* p = commandPlayer())
+        p->togglePause();
 }
 
 void PlaybackSessionManager::stop()
@@ -315,36 +312,41 @@ void PlaybackSessionManager::stop()
 
 void PlaybackSessionManager::seekRelativeSeconds(double seconds)
 {
-    if (auto* p = commandPlayer()) p->seekRelative(seconds);
+    if (auto* p = commandPlayer())
+        p->seekRelative(seconds);
 }
 
 void PlaybackSessionManager::seekAbsoluteSeconds(double seconds)
 {
-    if (auto* p = commandPlayer()) p->seekAbsolute(seconds);
+    if (auto* p = commandPlayer())
+        p->seekAbsolute(seconds);
 }
 
 void PlaybackSessionManager::setVolumePercent(double percent)
 {
-    if (auto* p = commandPlayer()) p->setVolumePercent(percent);
+    if (auto* p = commandPlayer())
+        p->setVolumePercent(percent);
 }
 
 void PlaybackSessionManager::setPlaybackRate(double factor)
 {
-    if (auto* p = commandPlayer()) p->setPlaybackRate(factor);
+    if (auto* p = commandPlayer())
+        p->setPlaybackRate(factor);
 }
 
 void PlaybackSessionManager::selectAudioTrack(int id)
 {
-    if (auto* p = commandPlayer()) p->selectAudioTrack(id);
+    if (auto* p = commandPlayer())
+        p->selectAudioTrack(id);
 }
 
 void PlaybackSessionManager::selectSubtitleTrack(int id)
 {
-    if (auto* p = commandPlayer()) p->selectSubtitleTrack(id);
+    if (auto* p = commandPlayer())
+        p->selectSubtitleTrack(id);
 }
 
-void PlaybackSessionManager::attachSubtitle(const QString& localPath,
-    const QString& language)
+void PlaybackSessionManager::attachSubtitle(const QString& localPath, const QString& language)
 {
     if (localPath.isEmpty()) {
         return;
@@ -374,24 +376,26 @@ void PlaybackSessionManager::onEvent(const events::PlaybackEvent& event)
     if (sid.isNull() || sid != activeSessionId()) {
         return;
     }
-    std::visit([this](const auto& payload) {
-        using T = std::decay_t<decltype(payload)>;
-        if constexpr (std::is_same_v<T, events::PlayerLoaded>
-            || std::is_same_v<T, events::PlayerLoading>) {
-            Q_EMIT playbackStateChanged();
-        } else if constexpr (std::is_same_v<T, events::PlaybackStateChanged>) {
-            Q_EMIT playbackStateChanged();
-            Q_EMIT pausedChanged(payload.paused);
-        } else if constexpr (std::is_same_v<T, events::PositionTicked>) {
-            Q_EMIT positionChanged(payload.seconds);
-        } else if constexpr (std::is_same_v<T, events::DurationChanged>) {
-            Q_EMIT durationChanged(payload.seconds);
-        } else if constexpr (std::is_same_v<T, events::PlaybackEnded>
-            || std::is_same_v<T, events::PlaybackFailed>) {
-            Q_EMIT playbackStateChanged();
-            Q_EMIT activeSessionChanged(false);
-        }
-    }, event);
+    std::visit(
+        [this](const auto& payload) {
+            using T = std::decay_t<decltype(payload)>;
+            if constexpr (std::is_same_v<T, events::PlayerLoaded>
+                          || std::is_same_v<T, events::PlayerLoading>) {
+                Q_EMIT playbackStateChanged();
+            } else if constexpr (std::is_same_v<T, events::PlaybackStateChanged>) {
+                Q_EMIT playbackStateChanged();
+                Q_EMIT pausedChanged(payload.paused);
+            } else if constexpr (std::is_same_v<T, events::PositionTicked>) {
+                Q_EMIT positionChanged(payload.seconds);
+            } else if constexpr (std::is_same_v<T, events::DurationChanged>) {
+                Q_EMIT durationChanged(payload.seconds);
+            } else if constexpr (std::is_same_v<T, events::PlaybackEnded>
+                                 || std::is_same_v<T, events::PlaybackFailed>) {
+                Q_EMIT playbackStateChanged();
+                Q_EMIT activeSessionChanged(false);
+            }
+        },
+        event);
 }
 
 } // namespace kinema::playback::session

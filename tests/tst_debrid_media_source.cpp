@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "TestDoubles.h"
-#include "api/AllDebridClient.h"
-#include "api/RealDebridClient.h"
 #include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/io/HttpClient.h"
@@ -11,22 +9,21 @@
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
-#include "playback/sources/DebridResolver.h"
 #include "playback/ports/MediaSourcePort.h"
 #include "playback/sources/AllDebridMediaSource.h"
+#include "playback/sources/DebridResolver.h"
 #include "playback/sources/HttpRangeAssetSession.h"
 #include "playback/sources/RealDebridMediaSource.h"
 
-#include <KSharedConfig>
-
 #include <QCoroSignal>
 #include <QCoroTask>
-
 #include <QDir>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
+
+#include <KSharedConfig>
 
 #include <memory>
 
@@ -40,9 +37,11 @@ class StubResolver final : public playback::sources::DebridResolver
 public:
     playback::sources::ResolvedDebridLink reply;
     int resolveCalls = 0;
+    bool configured = false;
 
-    QCoro::Task<playback::sources::ResolvedDebridLink> resolve(
-        domain::AssetRef ref) override
+    bool isConfigured() const override { return configured; }
+
+    QCoro::Task<playback::sources::ResolvedDebridLink> resolve(domain::AssetRef ref) override
     {
         Q_UNUSED(ref);
         ++resolveCalls;
@@ -53,8 +52,7 @@ public:
 domain::Stream makeStream()
 {
     domain::Stream s;
-    s.infoHash = QStringLiteral(
-        "0123456789abcdef0123456789abcdef01234567");
+    s.infoHash = QStringLiteral("0123456789abcdef0123456789abcdef01234567");
     s.releaseName = QStringLiteral("Sample.Movie.2024");
     return s;
 }
@@ -79,9 +77,8 @@ private Q_SLOTS:
     void initTestCase()
     {
         QStandardPaths::setTestModeEnabled(true);
-        m_config = KSharedConfig::openConfig(
-            QStringLiteral("kinemarc-debrid-mediasource-test"),
-            KConfig::SimpleConfig);
+        m_config = KSharedConfig::openConfig(QStringLiteral("kinemarc-debrid-mediasource-test"),
+                                             KConfig::SimpleConfig);
         m_settings = std::make_unique<config::TorrentStreamingSettings>(m_config);
     }
 
@@ -92,18 +89,15 @@ private Q_SLOTS:
 
         m_cache = std::make_unique<core::MediaCache>(*m_settings);
         m_http = std::make_unique<FakeHttpClient>();
-        m_rd = std::make_unique<api::RealDebridClient>(m_http.get());
         m_resolver = std::make_unique<StubResolver>();
-        m_source = std::make_unique<
-            playback::sources::RealDebridMediaSource>(*m_http, *m_rd,
-            *m_resolver, *m_cache, *m_settings);
+        m_source = std::make_unique<playback::sources::RealDebridMediaSource>(
+            *m_http, *m_resolver, *m_cache, *m_settings);
     }
 
     void cleanup()
     {
         m_source.reset();
         m_resolver.reset();
-        m_rd.reset();
         m_http.reset();
         m_cache.reset();
     }
@@ -112,18 +106,17 @@ private Q_SLOTS:
 
     void kindIsRealDebrid()
     {
-        QCOMPARE(m_source->kind(),
-            domain::DownloadBackendKind::RealDebridHttp);
+        QCOMPARE(m_source->kind(), domain::DownloadBackendKind::RealDebridHttp);
     }
 
-    void canHandleRequiresTokenAndActionableId()
+    void canHandleRequiresConfiguredProviderAndActionableId()
     {
-        // No token -> never can handle.
-        m_rd->setToken(QString());
+        // An unconfigured provider cannot handle streams.
+        m_resolver->configured = false;
         QVERIFY(!m_source->canHandle(makeStream()));
 
-        m_rd->setToken(QStringLiteral("rd-token"));
-        // With token: needs infoHash OR directUrl.
+        m_resolver->configured = true;
+        // A configured provider still needs an info hash or direct URL.
         domain::Stream empty;
         QVERIFY(!m_source->canHandle(empty));
 
@@ -131,23 +124,21 @@ private Q_SLOTS:
         QVERIFY(m_source->canHandle(s));
 
         domain::Stream onlyDirect;
-        onlyDirect.directUrl
-            = QUrl(QStringLiteral("https://host/file.mp4"));
+        onlyDirect.directUrl = QUrl(QStringLiteral("https://host/file.mp4"));
         QVERIFY(m_source->canHandle(onlyDirect));
     }
 
     void openCallsResolverAndSetsModeAndFileSize()
     {
-        m_rd->setToken(QStringLiteral("rd-token"));
-        m_resolver->reply.downloadUrl
-            = QUrl(QStringLiteral("https://host/file.mp4"));
+        m_resolver->configured = true;
+        m_resolver->reply.downloadUrl = QUrl(QStringLiteral("https://host/file.mp4"));
         m_resolver->reply.fileSize = 12'345'678LL;
         m_resolver->reply.fileName = QStringLiteral("movie.mp4");
 
         const auto s = makeStream();
         const auto ref = makeRef(s);
-        auto task = m_source->open(ref, s, domain::PlaybackContext {},
-            domain::DownloadMode::OnDemand);
+        auto task =
+            m_source->open(ref, s, domain::PlaybackContext{}, domain::DownloadMode::OnDemand);
         const auto opened = QCoro::waitFor(std::move(task));
 
         QVERIFY(opened.session != nullptr);
@@ -156,50 +147,42 @@ private Q_SLOTS:
         QCOMPARE(opened.session->fileSize(), qint64(12'345'678));
         QCOMPARE(m_resolver->resolveCalls, 1);
 
-        auto* http = dynamic_cast<
-            playback::sources::HttpRangeAssetSession*>(
-            opened.session.get());
+        auto* http = dynamic_cast<playback::sources::HttpRangeAssetSession*>(opened.session.get());
         QVERIFY(http);
         QCOMPARE(http->mode(), domain::DownloadMode::OnDemand);
     }
 
     void openFullSetsModeFull()
     {
-        m_rd->setToken(QStringLiteral("rd-token"));
-        m_resolver->reply.downloadUrl
-            = QUrl(QStringLiteral("https://host/file.mp4"));
+        m_resolver->configured = true;
+        m_resolver->reply.downloadUrl = QUrl(QStringLiteral("https://host/file.mp4"));
         m_resolver->reply.fileSize = 1'000;
         m_resolver->reply.fileName = QStringLiteral("movie.mp4");
 
         const auto s = makeStream();
-        auto task = m_source->open(makeRef(s), s,
-            domain::PlaybackContext {}, domain::DownloadMode::Full);
+        auto task =
+            m_source->open(makeRef(s), s, domain::PlaybackContext{}, domain::DownloadMode::Full);
         const auto opened = QCoro::waitFor(std::move(task));
 
-        auto* http = dynamic_cast<
-            playback::sources::HttpRangeAssetSession*>(
-            opened.session.get());
+        auto* http = dynamic_cast<playback::sources::HttpRangeAssetSession*>(opened.session.get());
         QVERIFY(http);
         QCOMPARE(http->mode(), domain::DownloadMode::Full);
     }
 
     void changeModeFlipsSessionMode()
     {
-        m_rd->setToken(QStringLiteral("rd-token"));
-        m_resolver->reply.downloadUrl
-            = QUrl(QStringLiteral("https://host/file.mp4"));
+        m_resolver->configured = true;
+        m_resolver->reply.downloadUrl = QUrl(QStringLiteral("https://host/file.mp4"));
         m_resolver->reply.fileSize = 1'000;
         m_resolver->reply.fileName = QStringLiteral("movie.mp4");
 
         const auto s = makeStream();
-        auto task = m_source->open(makeRef(s), s,
-            domain::PlaybackContext {}, domain::DownloadMode::OnDemand);
+        auto task = m_source->open(
+            makeRef(s), s, domain::PlaybackContext{}, domain::DownloadMode::OnDemand);
         const auto opened = QCoro::waitFor(std::move(task));
 
         m_source->changeMode(*opened.session, domain::DownloadMode::Full);
-        auto* http = dynamic_cast<
-            playback::sources::HttpRangeAssetSession*>(
-            opened.session.get());
+        auto* http = dynamic_cast<playback::sources::HttpRangeAssetSession*>(opened.session.get());
         QVERIFY(http);
         QCOMPARE(http->mode(), domain::DownloadMode::Full);
 
@@ -212,25 +195,20 @@ private Q_SLOTS:
 
     void adKindIsAllDebrid()
     {
-        api::AllDebridClient ad(m_http.get());
         StubResolver resolver;
-        playback::sources::AllDebridMediaSource source(*m_http, ad,
-            resolver, *m_cache, *m_settings);
-        QCOMPARE(source.kind(),
-            domain::DownloadBackendKind::AllDebridHttp);
+        playback::sources::AllDebridMediaSource source(*m_http, resolver, *m_cache, *m_settings);
+        QCOMPARE(source.kind(), domain::DownloadBackendKind::AllDebridHttp);
     }
 
-    void adCanHandleRequiresApiKey()
+    void adCanHandleRequiresConfiguredProvider()
     {
-        api::AllDebridClient ad(m_http.get());
         StubResolver resolver;
-        playback::sources::AllDebridMediaSource source(*m_http, ad,
-            resolver, *m_cache, *m_settings);
+        playback::sources::AllDebridMediaSource source(*m_http, resolver, *m_cache, *m_settings);
 
-        ad.setApiKey(QString());
+        resolver.configured = false;
         QVERIFY(!source.canHandle(makeStream()));
 
-        ad.setApiKey(QStringLiteral("ad-api-key"));
+        resolver.configured = true;
         QVERIFY(source.canHandle(makeStream()));
 
         domain::Stream empty;
@@ -239,27 +217,21 @@ private Q_SLOTS:
 
     void adOpenCallsResolverAndSetsMode()
     {
-        api::AllDebridClient ad(m_http.get());
-        ad.setApiKey(QStringLiteral("ad-api-key"));
         StubResolver resolver;
-        resolver.reply.downloadUrl
-            = QUrl(QStringLiteral("https://ad-host/file.mp4"));
+        resolver.reply.downloadUrl = QUrl(QStringLiteral("https://ad-host/file.mp4"));
         resolver.reply.fileSize = 999'999;
         resolver.reply.fileName = QStringLiteral("movie.mp4");
-        playback::sources::AllDebridMediaSource source(*m_http, ad,
-            resolver, *m_cache, *m_settings);
+        playback::sources::AllDebridMediaSource source(*m_http, resolver, *m_cache, *m_settings);
 
         const auto s = makeStream();
-        auto task = source.open(makeRef(s), s,
-            domain::PlaybackContext {}, domain::DownloadMode::Full);
+        auto task =
+            source.open(makeRef(s), s, domain::PlaybackContext{}, domain::DownloadMode::Full);
         const auto opened = QCoro::waitFor(std::move(task));
 
         QCOMPARE(resolver.resolveCalls, 1);
         QVERIFY(opened.session);
         QCOMPARE(opened.session->fileSize(), qint64(999'999));
-        auto* http = dynamic_cast<
-            playback::sources::HttpRangeAssetSession*>(
-            opened.session.get());
+        auto* http = dynamic_cast<playback::sources::HttpRangeAssetSession*>(opened.session.get());
         QVERIFY(http);
         QCOMPARE(http->mode(), domain::DownloadMode::Full);
     }
@@ -269,7 +241,6 @@ private:
     std::unique_ptr<config::TorrentStreamingSettings> m_settings;
     std::unique_ptr<core::MediaCache> m_cache;
     std::unique_ptr<FakeHttpClient> m_http;
-    std::unique_ptr<api::RealDebridClient> m_rd;
     std::unique_ptr<StubResolver> m_resolver;
     std::unique_ptr<playback::sources::RealDebridMediaSource> m_source;
 };

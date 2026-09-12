@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "ui/qml-bridge/ShellViewModel.h"
+#include "ui/qml-bridge/shell/ShellViewModel.h"
 
 #include <QTest>
 
@@ -39,8 +39,10 @@ void TestShellViewModelCloseLogic::reallyQuitAcceptsClose()
 {
     // Even with every "should hide" knob on, reallyQuit wins.
     auto d = ShellViewModel::evaluateCloseRequest(
-        /*reallyQuit=*/true, /*closeToTrayPref=*/true,
-        /*trayAvail=*/true, /*toastShown=*/false);
+        /*reallyQuit=*/true,
+        /*closeToTrayPref=*/true,
+        /*trayAvail=*/true,
+        /*toastShown=*/false);
     QVERIFY(d.acceptClose);
     QVERIFY(!d.hideWindow);
     QVERIFY(!d.emitToast);
@@ -49,8 +51,10 @@ void TestShellViewModelCloseLogic::reallyQuitAcceptsClose()
 void TestShellViewModelCloseLogic::closeToTrayDisabledAcceptsClose()
 {
     auto d = ShellViewModel::evaluateCloseRequest(
-        /*reallyQuit=*/false, /*closeToTrayPref=*/false,
-        /*trayAvail=*/true, /*toastShown=*/false);
+        /*reallyQuit=*/false,
+        /*closeToTrayPref=*/false,
+        /*trayAvail=*/true,
+        /*toastShown=*/false);
     QVERIFY(d.acceptClose);
     QVERIFY(!d.hideWindow);
     QVERIFY(!d.emitToast);
@@ -59,8 +63,10 @@ void TestShellViewModelCloseLogic::closeToTrayDisabledAcceptsClose()
 void TestShellViewModelCloseLogic::noTrayAvailableAcceptsClose()
 {
     auto d = ShellViewModel::evaluateCloseRequest(
-        /*reallyQuit=*/false, /*closeToTrayPref=*/true,
-        /*trayAvail=*/false, /*toastShown=*/false);
+        /*reallyQuit=*/false,
+        /*closeToTrayPref=*/true,
+        /*trayAvail=*/false,
+        /*toastShown=*/false);
     QVERIFY(d.acceptClose);
     QVERIFY(!d.hideWindow);
     QVERIFY(!d.emitToast);
@@ -69,8 +75,10 @@ void TestShellViewModelCloseLogic::noTrayAvailableAcceptsClose()
 void TestShellViewModelCloseLogic::hideToTrayFirstTime()
 {
     auto d = ShellViewModel::evaluateCloseRequest(
-        /*reallyQuit=*/false, /*closeToTrayPref=*/true,
-        /*trayAvail=*/true, /*toastShown=*/false);
+        /*reallyQuit=*/false,
+        /*closeToTrayPref=*/true,
+        /*trayAvail=*/true,
+        /*toastShown=*/false);
     QVERIFY(!d.acceptClose);
     QVERIFY(d.hideWindow);
     QVERIFY(d.emitToast);
@@ -79,8 +87,10 @@ void TestShellViewModelCloseLogic::hideToTrayFirstTime()
 void TestShellViewModelCloseLogic::hideToTrayDoesNotRepeatToast()
 {
     auto d = ShellViewModel::evaluateCloseRequest(
-        /*reallyQuit=*/false, /*closeToTrayPref=*/true,
-        /*trayAvail=*/true, /*toastShown=*/true);
+        /*reallyQuit=*/false,
+        /*closeToTrayPref=*/true,
+        /*trayAvail=*/true,
+        /*toastShown=*/true);
     QVERIFY(!d.acceptClose);
     QVERIFY(d.hideWindow);
     QVERIFY(!d.emitToast);

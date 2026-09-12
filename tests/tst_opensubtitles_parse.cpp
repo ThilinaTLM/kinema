@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/OpenSubtitlesParse.h"
+#include "api/opensubtitles/OpenSubtitlesParse.h"
 
 #include <QFile>
 #include <QJsonDocument>
@@ -20,7 +20,7 @@ namespace {
 QJsonDocument loadFixture(const char* name)
 {
     QFile f(QString::fromLatin1(KINEMA_TEST_FIXTURES_DIR) + QLatin1Char('/')
-        + QString::fromLatin1("opensubtitles/") + QString::fromLatin1(name));
+            + QString::fromLatin1("opensubtitles/") + QString::fromLatin1(name));
     if (!f.open(QIODevice::ReadOnly)) {
         return {};
     }
@@ -71,7 +71,7 @@ private Q_SLOTS:
         QCOMPARE(hits.size(), 1);
         QCOMPARE(hits.first().fileId, QStringLiteral("777333"));
         QCOMPARE(hits.first().releaseName,
-            QStringLiteral("Game.of.Thrones.S01E02.The.Kingsroad.1080p"));
+                 QStringLiteral("Game.of.Thrones.S01E02.The.Kingsroad.1080p"));
     }
 
     void testDownloadOk()
@@ -91,8 +91,7 @@ private Q_SLOTS:
         const auto doc = loadFixture("download-quota.json");
         QVERIFY(!doc.isNull());
         const auto t = opensubtitles::parseDownload(doc);
-        QVERIFY(t.link.isEmpty() || !t.link.isValid()
-            || t.link.toString().isEmpty());
+        QVERIFY(t.link.isEmpty() || !t.link.isValid() || t.link.toString().isEmpty());
         QCOMPARE(t.remaining, 0);
         QVERIFY(t.resetAt.isValid());
     }
@@ -108,20 +107,15 @@ private Q_SLOTS:
     void testInvalidShapesThrow()
     {
         const auto bad = QJsonDocument::fromJson(QByteArrayLiteral("[1,2,3]"));
-        QVERIFY_EXCEPTION_THROWN(opensubtitles::parseSearch(bad),
-            std::runtime_error);
-        QVERIFY_EXCEPTION_THROWN(opensubtitles::parseDownload(bad),
-            std::runtime_error);
-        QVERIFY_EXCEPTION_THROWN(opensubtitles::parseLogin(bad),
-            std::runtime_error);
+        QVERIFY_EXCEPTION_THROWN(opensubtitles::parseSearch(bad), std::runtime_error);
+        QVERIFY_EXCEPTION_THROWN(opensubtitles::parseDownload(bad), std::runtime_error);
+        QVERIFY_EXCEPTION_THROWN(opensubtitles::parseLogin(bad), std::runtime_error);
     }
 
     void testLoginMissingTokenThrows()
     {
-        const auto doc = QJsonDocument::fromJson(QByteArrayLiteral(
-            "{\"status\": 200}"));
-        QVERIFY_EXCEPTION_THROWN(opensubtitles::parseLogin(doc),
-            std::runtime_error);
+        const auto doc = QJsonDocument::fromJson(QByteArrayLiteral("{\"status\": 200}"));
+        QVERIFY_EXCEPTION_THROWN(opensubtitles::parseLogin(doc), std::runtime_error);
     }
 };
 

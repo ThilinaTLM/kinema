@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "ui/qml-bridge/KinemaImageProvider.h"
+#include "ui/qml-bridge/shell/KinemaImageProvider.h"
 
 #include <QQuickImageResponse>
 #include <QQuickTextureFactory>
@@ -32,9 +32,8 @@ private Q_SLOTS:
         // ImageLoader instance.
         KinemaImageProvider provider(nullptr);
 
-        QQuickImageResponse* response
-            = provider.requestImageResponse(
-                QStringLiteral("poster?u="), QSize());
+        QQuickImageResponse* response =
+            provider.requestImageResponse(QStringLiteral("poster?u="), QSize());
         QVERIFY(response);
 
         QSignalSpy spy(response, &QQuickImageResponse::finished);
@@ -43,8 +42,8 @@ private Q_SLOTS:
         // Non-empty errorString() is what makes Qt set the Image
         // status to Error rather than Ready-with-null-texture.
         QVERIFY2(!response->errorString().isEmpty(),
-            "provider must report a non-empty errorString on "
-            "failed load so Image.status becomes Image.Error");
+                 "provider must report a non-empty errorString on "
+                 "failed load so Image.status becomes Image.Error");
 
         // textureFactory() is allowed to return nullptr in the
         // failure path — Qt won't call it once errorString() is

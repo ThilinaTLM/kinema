@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+#include "api/cinemeta/CinemetaClient.h"
+
+#include "api/cinemeta/CinemetaParse.h"
+#include "core/io/HttpClient.h"
+
+namespace kinema::api {
+using namespace kinema::domain;
+
+CinemetaClient::CinemetaClient(core::HttpClient* http, QObject* parent)
+    : QObject(parent), m_http(http), m_baseUrl(QStringLiteral("https://v3-cinemeta.strem.io"))
+{ }
+
+void CinemetaClient::setBaseUrl(QUrl url)
+{
+    m_baseUrl = std::move(url);
+}
+
+QUrl CinemetaClient::buildUrl(const QString& path) const
+{
+    QUrl url = m_baseUrl;
+    url.setPath(path);
+    return url;
+}
+
+QCoro::Task<QList<MetaSummary>> CinemetaClient::search(MediaKind kind, QString query)
+{
+    const auto kindStr = mediaKindToPath(kind);
+    // Path has to be assembled carefully: the "search=..." token is part of
+    // the .json filename, not a real query string.
+    const auto encoded = QString::fromUtf8(QUrl::toPercentEncoding(query));
+    const QUrl url =
+        buildUrl(QStringLiteral("/catalog/%1/top/search=%2.json").arg(kindStr, encoded));
+
+    const auto doc = co_await m_http->getJson(url);
+    co_return cinemeta::parseSearch(doc, kind);
+}
+
+QCoro::Task<MetaDetail> CinemetaClient::meta(MediaKind kind, QString imdbId)
+{
+    const auto kindStr = mediaKindToPath(kind);
+    const QUrl url = buildUrl(QStringLiteral("/meta/%1/%2.json").arg(kindStr, imdbId));
+
+    const auto doc = co_await m_http->getJson(url);
+    co_return cinemeta::parseMeta(doc, kind);
+}
+
+QCoro::Task<SeriesDetail> CinemetaClient::seriesMeta(QString imdbId)
+{
+    const QUrl url = buildUrl(QStringLiteral("/meta/series/%1.json").arg(imdbId));
+
+    const auto doc = co_await m_http->getJson(url);
+    co_return cinemeta::parseSeriesMeta(doc);
+}
+
+} // namespace kinema::api

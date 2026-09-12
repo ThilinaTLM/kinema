@@ -3,23 +3,23 @@
 
 #include "controllers/SubtitleController.h"
 
-#include "api/OpenSubtitlesClient.h"
+#include "api/opensubtitles/OpenSubtitlesClient.h"
 #include "config/CacheSettings.h"
 #include "config/SubtitleSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/io/HttpError.h"
 #include "core/io/HttpErrorPresenter.h"
-#include "core/util/Language.h"
 #include "core/persistence/SubtitleCacheStore.h"
+#include "core/util/Language.h"
 #include "kinema_log_controller.h"
-
-#include <KLocalizedString>
 
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+
+#include <KLocalizedString>
 
 #include <algorithm>
 
@@ -33,7 +33,7 @@ bool matchesReleaseFilter(const domain::SubtitleHit& hit, const QString& filter)
         return true;
     }
     return hit.releaseName.contains(filter, Qt::CaseInsensitive)
-        || hit.fileName.contains(filter, Qt::CaseInsensitive);
+           || hit.fileName.contains(filter, Qt::CaseInsensitive);
 }
 
 QString writeTempThenRename(const QString& finalPath, const QByteArray& bytes)
@@ -47,14 +47,14 @@ QString writeTempThenRename(const QString& finalPath, const QByteArray& bytes)
     // ".part" extension is implicit.
     QSaveFile out(finalPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        return QString {};
+        return QString{};
     }
     if (out.write(bytes) != bytes.size()) {
         out.cancelWriting();
-        return QString {};
+        return QString{};
     }
     if (!out.commit()) {
-        return QString {};
+        return QString{};
     }
     return finalPath;
 }
@@ -62,17 +62,16 @@ QString writeTempThenRename(const QString& finalPath, const QByteArray& bytes)
 } // namespace
 
 SubtitleController::SubtitleController(api::OpenSubtitlesClient* client,
-    core::SubtitleCacheStore* cache,
-    const config::SubtitleSettings& settings,
-    const config::CacheSettings& cacheSettings,
-    QObject* parent)
+                                       core::SubtitleCacheStore* cache,
+                                       const config::SubtitleSettings& settings,
+                                       const config::CacheSettings& cacheSettings,
+                                       QObject* parent)
     : QObject(parent)
     , m_client(client)
     , m_cache(cache)
     , m_settings(settings)
     , m_cacheSettings(cacheSettings)
-{
-}
+{ }
 
 bool SubtitleController::downloadEnabled() const
 {
@@ -106,7 +105,7 @@ void SubtitleController::setMoviehash(QString hex)
     }
     m_moviehash = std::move(hex);
     qCDebug(KINEMA_CONTROLLER) << "SubtitleController: moviehash ="
-                    << (m_moviehash.isEmpty() ? "<unset>" : qPrintable(m_moviehash));
+                               << (m_moviehash.isEmpty() ? "<unset>" : qPrintable(m_moviehash));
     Q_EMIT moviehashChanged(m_moviehash);
 }
 
@@ -131,10 +130,10 @@ void SubtitleController::setActiveSubtitlePaths(const QStringList& paths)
 }
 
 void SubtitleController::runQuery(domain::PlaybackKey key,
-    QStringList languages,
-    QString hearingImpaired,
-    QString foreignPartsOnly,
-    QString releaseFilter)
+                                  QStringList languages,
+                                  QString hearingImpaired,
+                                  QString foreignPartsOnly,
+                                  QString releaseFilter)
 {
     if (!key.isValid()) {
         setError(i18n("Cannot search subtitles without an IMDb id."));
@@ -168,30 +167,30 @@ QCoro::Task<void> SubtitleController::runSearchTask(domain::SubtitleSearchQuery 
         // Client-side release-name filter.
         if (!q.releaseFilter.trimmed().isEmpty()) {
             const auto needle = q.releaseFilter.trimmed();
-            hits.erase(std::remove_if(hits.begin(), hits.end(),
-                           [&needle](const domain::SubtitleHit& h) {
-                               return !matchesReleaseFilter(h, needle);
-                           }),
-                hits.end());
+            hits.erase(std::remove_if(hits.begin(),
+                                      hits.end(),
+                                      [&needle](const domain::SubtitleHit& h) {
+                                          return !matchesReleaseFilter(h, needle);
+                                      }),
+                       hits.end());
         }
 
         // moviehash_match first; ties broken by download_count desc.
-        std::stable_sort(hits.begin(), hits.end(),
-            [](const domain::SubtitleHit& a, const domain::SubtitleHit& b) {
-                if (a.moviehashMatch != b.moviehashMatch) {
-                    return a.moviehashMatch && !b.moviehashMatch;
-                }
-                return a.downloadCount > b.downloadCount;
-            });
+        std::stable_sort(hits.begin(),
+                         hits.end(),
+                         [](const domain::SubtitleHit& a, const domain::SubtitleHit& b) {
+                             if (a.moviehashMatch != b.moviehashMatch) {
+                                 return a.moviehashMatch && !b.moviehashMatch;
+                             }
+                             return a.downloadCount > b.downloadCount;
+                         });
 
         m_hits = std::move(hits);
         rebuildCachedFileIds(q.key);
         Q_EMIT hitsChanged();
 
-        Q_EMIT statusMessage(i18ncp("@info:status",
-                                 "%1 subtitle found", "%1 subtitles found",
-                                 m_hits.size()),
-            3000);
+        Q_EMIT statusMessage(
+            i18ncp("@info:status", "%1 subtitle found", "%1 subtitles found", m_hits.size()), 3000);
     } catch (const std::exception& e) {
         if (myEpoch != m_epoch) {
             co_return;
@@ -210,8 +209,7 @@ void SubtitleController::download(QString fileId, domain::PlaybackKey key)
     Q_UNUSED(t);
 }
 
-QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
-    domain::PlaybackKey key)
+QCoro::Task<void> SubtitleController::downloadTask(QString fileId, domain::PlaybackKey key)
 {
     if (fileId.isEmpty()) {
         co_return;
@@ -220,21 +218,18 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
     // Cache hit short-circuit.
     if (m_cache) {
         if (auto cached = m_cache->findByFileId(fileId);
-            cached.has_value()
-            && QFile::exists(cached->localPath)) {
-            qCDebug(KINEMA_CONTROLLER)
-                << "SubtitleController: cache hit for" << fileId;
+            cached.has_value() && QFile::exists(cached->localPath)) {
+            qCDebug(KINEMA_CONTROLLER) << "SubtitleController: cache hit for" << fileId;
             m_cache->touch(fileId);
-            Q_EMIT downloadFinished(fileId, cached->localPath,
-                cached->language, cached->languageName);
-            Q_EMIT statusMessage(
-                i18nc("@info:status", "Subtitle loaded from cache."), 3000);
+            Q_EMIT downloadFinished(
+                fileId, cached->localPath, cached->language, cached->languageName);
+            Q_EMIT statusMessage(i18nc("@info:status", "Subtitle loaded from cache."), 3000);
             co_return;
         }
     }
 
     qCDebug(KINEMA_CONTROLLER) << "SubtitleController: cache miss for" << fileId
-                    << "— fetching from OpenSubtitles";
+                               << "— fetching from OpenSubtitles";
 
     // Find the matching hit so we can fill display metadata.
     const domain::SubtitleHit* hit = nullptr;
@@ -258,17 +253,15 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
         }
         if (ticket.link.isEmpty() || !ticket.link.isValid()) {
             // Quota-exhausted path.
-            qCDebug(KINEMA_CONTROLLER)
-                << "SubtitleController: quota exhausted, reset at"
-                << ticket.resetAt.toString(Qt::ISODate);
+            qCDebug(KINEMA_CONTROLLER) << "SubtitleController: quota exhausted, reset at"
+                                       << ticket.resetAt.toString(Qt::ISODate);
             QString msg;
             if (ticket.resetAt.isValid()) {
                 msg = i18nc("@info",
-                    "Daily download quota exceeded. Try again at %1.",
-                    ticket.resetAt.toLocalTime().toString(Qt::TextDate));
+                            "Daily download quota exceeded. Try again at %1.",
+                            ticket.resetAt.toLocalTime().toString(Qt::TextDate));
             } else {
-                msg = i18nc("@info",
-                    "Daily download quota exceeded.");
+                msg = i18nc("@info", "Daily download quota exceeded.");
             }
             setError(msg);
             Q_EMIT downloadFailed(fileId, msg);
@@ -285,8 +278,8 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
     }
 
     const QString fileName = !ticket.fileName.isEmpty()
-        ? ticket.fileName
-        : (hit ? hit->fileName : QStringLiteral("subtitle.srt"));
+                                 ? ticket.fileName
+                                 : (hit ? hit->fileName : QStringLiteral("subtitle.srt"));
     QString format = ticket.format;
     if (format.isEmpty() && hit) {
         format = hit->format;
@@ -295,12 +288,10 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
         format = QStringLiteral("srt");
     }
 
-    const auto localPath = core::SubtitleCacheStore::buildLocalPath(
-        key.imdbId, fileName, format);
+    const auto localPath = core::SubtitleCacheStore::buildLocalPath(key.imdbId, fileName, format);
     const auto written = writeTempThenRename(localPath, bytes);
     if (written.isEmpty()) {
-        const auto msg = i18nc("@info",
-            "Could not write subtitle file to disk.");
+        const auto msg = i18nc("@info", "Could not write subtitle file to disk.");
         setError(msg);
         Q_EMIT downloadFailed(fileId, msg);
         Q_EMIT statusMessage(msg, 6000);
@@ -312,10 +303,9 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
     entry.imdbId = key.imdbId;
     entry.season = key.season;
     entry.episode = key.episode;
-    entry.language = hit ? hit->language : QString {};
-    entry.languageName = hit ? hit->languageName
-                             : core::language::displayName(entry.language);
-    entry.releaseName = hit ? hit->releaseName : QString {};
+    entry.language = hit ? hit->language : QString{};
+    entry.languageName = hit ? hit->languageName : core::language::displayName(entry.language);
+    entry.releaseName = hit ? hit->releaseName : QString{};
     entry.fileName = fileName;
     entry.format = format;
     entry.hearingImpaired = hit ? hit->hearingImpaired : false;
@@ -326,13 +316,11 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
     entry.lastUsedAt = entry.addedAt;
 
     if (m_cache && !m_cache->insert(entry)) {
-        qCWarning(KINEMA_CONTROLLER)
-            << "SubtitleController: cache row insert failed for" << fileId;
+        qCWarning(KINEMA_CONTROLLER) << "SubtitleController: cache row insert failed for" << fileId;
         // The file is on disk but unreferenced; remove it so the
         // reconcile pass doesn't have to clean up later.
         QFile::remove(written);
-        const auto msg = i18nc("@info",
-            "Could not record subtitle in cache index.");
+        const auto msg = i18nc("@info", "Could not record subtitle in cache index.");
         Q_EMIT downloadFailed(fileId, msg);
         Q_EMIT statusMessage(msg, 6000);
         co_return;
@@ -344,9 +332,8 @@ QCoro::Task<void> SubtitleController::downloadTask(QString fileId,
     evictIfOverBudget();
 
     Q_EMIT downloadFinished(fileId, written, entry.language, entry.languageName);
-    Q_EMIT statusMessage(
-        i18nc("@info:status", "Subtitle downloaded (%1).", entry.languageName),
-        3000);
+    Q_EMIT statusMessage(i18nc("@info:status", "Subtitle downloaded (%1).", entry.languageName),
+                         3000);
 }
 
 void SubtitleController::evictIfOverBudget()
@@ -354,8 +341,7 @@ void SubtitleController::evictIfOverBudget()
     if (!m_cache) {
         return;
     }
-    const qint64 budget = static_cast<qint64>(m_cacheSettings.subtitleBudgetMb())
-        * 1024 * 1024;
+    const qint64 budget = static_cast<qint64>(m_cacheSettings.subtitleBudgetMb()) * 1024 * 1024;
     const qint64 total = m_cache->totalSizeBytes();
     if (total <= budget) {
         return;
@@ -370,8 +356,7 @@ void SubtitleController::evictIfOverBudget()
     }
     if (!victims.isEmpty()) {
         qCDebug(KINEMA_CONTROLLER)
-            << "SubtitleController: evicted" << victims.size()
-            << "subtitles to fit budget";
+            << "SubtitleController: evicted" << victims.size() << "subtitles to fit budget";
         Q_EMIT cacheChanged();
     }
 }
@@ -410,8 +395,8 @@ void SubtitleController::reconcileCacheOnStartup()
     int orphanFiles = 0;
     if (subsDir.exists()) {
         QDirIterator it(subsDir.absolutePath(),
-            QDir::Files | QDir::NoDotAndDotDot,
-            QDirIterator::Subdirectories);
+                        QDir::Files | QDir::NoDotAndDotDot,
+                        QDirIterator::Subdirectories);
         while (it.hasNext()) {
             it.next();
             const auto canonical = it.fileInfo().canonicalFilePath();
@@ -422,9 +407,8 @@ void SubtitleController::reconcileCacheOnStartup()
         }
     }
 
-    qCDebug(KINEMA_CONTROLLER)
-        << "SubtitleController: reconcile dropped" << orphanRows
-        << "orphan rows and" << orphanFiles << "orphan files";
+    qCDebug(KINEMA_CONTROLLER) << "SubtitleController: reconcile dropped" << orphanRows
+                               << "orphan rows and" << orphanFiles << "orphan files";
 
     evictIfOverBudget();
 

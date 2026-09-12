@@ -1,29 +1,29 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "domain/Discover.h"
-#include "domain/Media.h"
-#include "api/TmdbClient.h"
+#include "api/tmdb/TmdbClient.h"
 #include "config/AppSettings.h"
 #include "config/DebridSettings.h"
 #include "controllers/TokenController.h"
 #include "core/io/HttpError.h"
 #include "core/persistence/TokenStore.h"
-#include "ui/qml-bridge/DiscoverSectionModel.h"
-#include "ui/qml-bridge/DiscoverViewModel.h"
+#include "domain/Discover.h"
+#include "domain/Media.h"
+#include "ui/qml-bridge/discover/DiscoverSectionModel.h"
+#include "ui/qml-bridge/discover/DiscoverViewModel.h"
 
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
+using kinema::api::TmdbClient;
+using kinema::core::HttpError;
 using kinema::domain::DiscoverItem;
 using kinema::domain::DiscoverPageResult;
 using kinema::domain::DiscoverQuery;
 using kinema::domain::MediaKind;
-using kinema::api::TmdbClient;
 using kinema::domain::TmdbGenre;
-using kinema::core::HttpError;
 using kinema::ui::qml::DiscoverSectionModel;
 using kinema::ui::qml::DiscoverViewModel;
 
@@ -36,10 +36,7 @@ namespace {
 class FakeTmdb : public TmdbClient
 {
 public:
-    FakeTmdb()
-        : TmdbClient(nullptr)
-    {
-    }
+    FakeTmdb() : TmdbClient(nullptr) { }
 
     QList<DiscoverItem> trendingItems;
     QList<DiscoverItem> popularSeriesItems;
@@ -60,17 +57,14 @@ public:
     void maybeThrow() const
     {
         if (throwAuth) {
-            throw HttpError(HttpError::Kind::HttpStatus, 401,
-                QStringLiteral("auth"));
+            throw HttpError(HttpError::Kind::HttpStatus, 401, QStringLiteral("auth"));
         }
         if (throwGeneric) {
-            throw HttpError(HttpError::Kind::Network, 0,
-                QStringLiteral("network down"));
+            throw HttpError(HttpError::Kind::Network, 0, QStringLiteral("network down"));
         }
     }
 
-    QCoro::Task<QList<DiscoverItem>> trending(MediaKind /*kind*/,
-        bool /*weekly*/) override
+    QCoro::Task<QList<DiscoverItem>> trending(MediaKind /*kind*/, bool /*weekly*/) override
     {
         ++trendingCalls;
         maybeThrow();
@@ -81,16 +75,14 @@ public:
     {
         ++popularCalls;
         maybeThrow();
-        co_return kind == MediaKind::Series
-            ? popularSeriesItems : QList<DiscoverItem> {};
+        co_return kind == MediaKind::Series ? popularSeriesItems : QList<DiscoverItem>{};
     }
 
     QCoro::Task<QList<DiscoverItem>> topRated(MediaKind kind) override
     {
         ++topRatedCalls;
         maybeThrow();
-        co_return kind == MediaKind::Series
-            ? topSeriesItems : topMoviesItems;
+        co_return kind == MediaKind::Series ? topSeriesItems : topMoviesItems;
     }
 
     QCoro::Task<QList<DiscoverItem>> nowPlayingMovies() override
@@ -188,12 +180,12 @@ private Q_SLOTS:
     {
         FakeTmdb tmdb;
         tmdb.setToken(QStringLiteral("token"));
-        tmdb.trendingItems = { makeItem(1, MediaKind::Movie, QStringLiteral("A")) };
-        tmdb.popularSeriesItems = { makeItem(2, MediaKind::Series, QStringLiteral("B")) };
-        tmdb.nowPlayingItems = { makeItem(3, MediaKind::Movie, QStringLiteral("C")) };
-        tmdb.onTheAirItems = { makeItem(4, MediaKind::Series, QStringLiteral("D")) };
-        tmdb.topMoviesItems = { makeItem(5, MediaKind::Movie, QStringLiteral("E")) };
-        tmdb.topSeriesItems = { makeItem(6, MediaKind::Series, QStringLiteral("F")) };
+        tmdb.trendingItems = {makeItem(1, MediaKind::Movie, QStringLiteral("A"))};
+        tmdb.popularSeriesItems = {makeItem(2, MediaKind::Series, QStringLiteral("B"))};
+        tmdb.nowPlayingItems = {makeItem(3, MediaKind::Movie, QStringLiteral("C"))};
+        tmdb.onTheAirItems = {makeItem(4, MediaKind::Series, QStringLiteral("D"))};
+        tmdb.topMoviesItems = {makeItem(5, MediaKind::Movie, QStringLiteral("E"))};
+        tmdb.topSeriesItems = {makeItem(6, MediaKind::Series, QStringLiteral("F"))};
 
         DiscoverViewModel vm(&tmdb, nullptr, nullptr);
         QVERIFY(vm.tmdbConfigured());
@@ -287,19 +279,18 @@ private Q_SLOTS:
         // make sure only the second call's data lands in the model).
         FakeTmdb tmdb;
         tmdb.setToken(QStringLiteral("token"));
-        tmdb.trendingItems = { makeItem(1, MediaKind::Movie, QStringLiteral("First")) };
+        tmdb.trendingItems = {makeItem(1, MediaKind::Movie, QStringLiteral("First"))};
 
         DiscoverViewModel vm(&tmdb, nullptr, nullptr);
         vm.refresh();
         // Don't drain in between; back-to-back refresh bumps the
         // epoch and the queued continuation from the first call
         // should be dropped.
-        tmdb.trendingItems = { makeItem(2, MediaKind::Movie, QStringLiteral("Second")) };
+        tmdb.trendingItems = {makeItem(2, MediaKind::Movie, QStringLiteral("Second"))};
         vm.refresh();
         drain();
 
-        auto* trending
-            = qobject_cast<DiscoverSectionModel*>(vm.sectionsList().first());
+        auto* trending = qobject_cast<DiscoverSectionModel*>(vm.sectionsList().first());
         QVERIFY(trending != nullptr);
         QCOMPARE(trending->state(), DiscoverSectionModel::State::Ready);
         QCOMPARE(trending->rowCount(), 1);
@@ -316,8 +307,8 @@ private Q_SLOTS:
     {
         FakeTmdb tmdb;
         tmdb.setToken(QStringLiteral("token"));
-        tmdb.trendingItems = { makeItem(11, MediaKind::Movie, QStringLiteral("M")) };
-        tmdb.popularSeriesItems = { makeItem(22, MediaKind::Series, QStringLiteral("S")) };
+        tmdb.trendingItems = {makeItem(11, MediaKind::Movie, QStringLiteral("M"))};
+        tmdb.popularSeriesItems = {makeItem(22, MediaKind::Series, QStringLiteral("S"))};
 
         DiscoverViewModel vm(&tmdb, nullptr, nullptr);
         QSignalSpy movieSpy(&vm, &DiscoverViewModel::openMovieRequested);

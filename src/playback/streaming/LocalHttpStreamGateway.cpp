@@ -5,9 +5,6 @@
 
 #include "kinema_log_download.h"
 
-#include <QCoro/QCoroIODevice>
-#include <QCoro/QCoroSignal>
-
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHostAddress>
@@ -17,6 +14,9 @@
 #include <QTcpSocket>
 #include <QUrlQuery>
 
+#include <QCoro/QCoroIODevice>
+#include <QCoro/QCoroSignal>
+
 #include <algorithm>
 #include <optional>
 
@@ -24,10 +24,11 @@ namespace kinema::playback::streaming {
 
 namespace {
 
+using kinema::core::ByteRange;
 using kinema::playback::ports::ByteRangeSource;
-using kinema::torrent::ByteRange;
 
-struct HttpRequest {
+struct HttpRequest
+{
     QString method;
     QString path;
     std::optional<ByteRange> range;
@@ -36,13 +37,20 @@ struct HttpRequest {
 QByteArray reason(int status)
 {
     switch (status) {
-    case 200: return QByteArrayLiteral("OK");
-    case 206: return QByteArrayLiteral("Partial Content");
-    case 400: return QByteArrayLiteral("Bad Request");
-    case 404: return QByteArrayLiteral("Not Found");
-    case 416: return QByteArrayLiteral("Range Not Satisfiable");
-    case 500: return QByteArrayLiteral("Internal Server Error");
-    default: return QByteArrayLiteral("Error");
+    case 200:
+        return QByteArrayLiteral("OK");
+    case 206:
+        return QByteArrayLiteral("Partial Content");
+    case 400:
+        return QByteArrayLiteral("Bad Request");
+    case 404:
+        return QByteArrayLiteral("Not Found");
+    case 416:
+        return QByteArrayLiteral("Range Not Satisfiable");
+    case 500:
+        return QByteArrayLiteral("Internal Server Error");
+    default:
+        return QByteArrayLiteral("Error");
     }
 }
 
@@ -70,9 +78,11 @@ QByteArray contentTypeFor(const QString& fileName)
     return QByteArrayLiteral("application/octet-stream");
 }
 
-void writeHeaders(QTcpSocket* socket, int status, qint64 contentLength,
-    const QByteArray& contentType,
-    const QByteArray& extra = {})
+void writeHeaders(QTcpSocket* socket,
+                  int status,
+                  qint64 contentLength,
+                  const QByteArray& contentType,
+                  const QByteArray& extra = {})
 {
     QByteArray h;
     h += "HTTP/1.1 " + QByteArray::number(status) + " " + reason(status) + "\r\n";
@@ -96,8 +106,7 @@ QString assetIdFromPath(const QString& path)
     return parts.at(1);
 }
 
-std::optional<ByteRange> parseRangeHeader(const QList<QByteArray>& lines,
-    qint64 fileSize)
+std::optional<ByteRange> parseRangeHeader(const QList<QByteArray>& lines, qint64 fileSize)
 {
     for (const auto& line : lines) {
         if (!line.toLower().startsWith("range:")) {
@@ -117,12 +126,12 @@ std::optional<ByteRange> parseRangeHeader(const QList<QByteArray>& lines,
         const qint64 start = spec.left(dash).toLongLong(&okStart);
         qint64 end = spec.mid(dash + 1).toLongLong(&okEnd);
         if (!okStart || start < 0 || start >= fileSize) {
-            return ByteRange { 1, 0 };
+            return ByteRange{1, 0};
         }
         if (!okEnd || end >= fileSize) {
             end = fileSize - 1;
         }
-        return ByteRange { start, end };
+        return ByteRange{start, end};
     }
     return std::nullopt;
 }
@@ -145,11 +154,9 @@ std::optional<HttpRequest> parseRequestLine(const QByteArray& raw)
 
 } // namespace
 
-LocalHttpStreamGateway::LocalHttpStreamGateway(QObject* parent)
-    : QObject(parent)
+LocalHttpStreamGateway::LocalHttpStreamGateway(QObject* parent) : QObject(parent)
 {
-    connect(&m_server, &QTcpServer::newConnection,
-        this, &LocalHttpStreamGateway::acceptConnection);
+    connect(&m_server, &QTcpServer::newConnection, this, &LocalHttpStreamGateway::acceptConnection);
 }
 
 LocalHttpStreamGateway::~LocalHttpStreamGateway() = default;
@@ -218,8 +225,7 @@ LocalHttpStreamGateway::ensureSourceForAssetId(const QString& assetId)
     co_return co_await m_resolver(assetId);
 }
 
-QUrl LocalHttpStreamGateway::buildUrl(const QString& assetId,
-    const QString& fileName) const
+QUrl LocalHttpStreamGateway::buildUrl(const QString& assetId, const QString& fileName) const
 {
     QUrl url;
     url.setScheme(QStringLiteral("http"));
@@ -228,8 +234,7 @@ QUrl LocalHttpStreamGateway::buildUrl(const QString& assetId,
     // Pass the bare filename to QUrl::setPath; QUrl percent-encodes
     // reserved characters once on toEncoded(). Pre-encoding here
     // would double-encode (e.g. "%20" -> "%2520").
-    url.setPath(QStringLiteral("/stream/%1/%2").arg(
-        assetId, QFileInfo(fileName).fileName()));
+    url.setPath(QStringLiteral("/stream/%1/%2").arg(assetId, QFileInfo(fileName).fileName()));
     return url;
 }
 
@@ -271,8 +276,7 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
 
     const auto req = parseRequestLine(raw);
     if (!req) {
-        qCDebug(KINEMA_DOWNLOAD)
-            << "LocalHttpStreamGateway: 400 — could not parse request line";
+        qCDebug(KINEMA_DOWNLOAD) << "LocalHttpStreamGateway: 400 — could not parse request line";
         writeHeaders(guard, 400, 0, {});
         guard->disconnectFromHost();
         co_return;
@@ -282,8 +286,7 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
     auto* source = co_await ensureSourceForAssetId(assetId);
     if (assetId.isEmpty() || !source) {
         qCInfo(KINEMA_DOWNLOAD).nospace()
-            << "LocalHttpStreamGateway: 404 " << req->method
-            << " path=\"" << req->path
+            << "LocalHttpStreamGateway: 404 " << req->method << " path=\"" << req->path
             << "\" assetId=\"" << assetId << "\" (no live source)";
         writeHeaders(guard, 404, 0, {});
         guard->disconnectFromHost();
@@ -303,8 +306,7 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
     }
     if (fileSize <= 0) {
         qCInfo(KINEMA_DOWNLOAD).nospace()
-            << "LocalHttpStreamGateway: 404 " << req->method
-            << " assetId=\"" << assetId
+            << "LocalHttpStreamGateway: 404 " << req->method << " assetId=\"" << assetId
             << "\" (fileSize=" << fileSize << ")";
         writeHeaders(guard, 404, 0, {});
         guard->disconnectFromHost();
@@ -313,13 +315,11 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
     source->touch();
 
     const auto rangeOpt = parseRangeHeader(raw.split('\n'), fileSize);
-    ByteRange range = rangeOpt.value_or(ByteRange { 0, fileSize - 1 });
+    ByteRange range = rangeOpt.value_or(ByteRange{0, fileSize - 1});
     if (!range.isValid() || range.start >= fileSize) {
         qCInfo(KINEMA_DOWNLOAD).nospace()
-            << "LocalHttpStreamGateway: 416 " << req->method
-            << " assetId=\"" << assetId
-            << "\" range=" << range.start << "-" << range.endInclusive
-            << " fileSize=" << fileSize;
+            << "LocalHttpStreamGateway: 416 " << req->method << " assetId=\"" << assetId
+            << "\" range=" << range.start << "-" << range.endInclusive << " fileSize=" << fileSize;
         QByteArray extra = "Content-Range: bytes */" + QByteArray::number(fileSize) + "\r\n";
         writeHeaders(guard, 416, 0, {}, extra);
         guard->disconnectFromHost();
@@ -332,15 +332,14 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
     const QByteArray ct = contentTypeFor(source->fileName());
     QByteArray extra;
     if (partial) {
-        extra = "Content-Range: bytes " + QByteArray::number(range.start)
-            + "-" + QByteArray::number(range.endInclusive)
-            + "/" + QByteArray::number(fileSize) + "\r\n";
+        extra = "Content-Range: bytes " + QByteArray::number(range.start) + "-"
+                + QByteArray::number(range.endInclusive) + "/" + QByteArray::number(fileSize)
+                + "\r\n";
     }
 
     qCInfo(KINEMA_DOWNLOAD).nospace()
         << "LocalHttpStreamGateway: " << (partial ? 206 : 200) << " " << req->method
-        << " assetId=\"" << assetId
-        << "\" range=" << range.start << "-" << range.endInclusive
+        << " assetId=\"" << assetId << "\" range=" << range.start << "-" << range.endInclusive
         << " length=" << length << " fileSize=" << fileSize;
     writeHeaders(guard, partial ? 206 : 200, length, ct, extra);
 
@@ -350,8 +349,7 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
     }
     if (req->method.compare(QStringLiteral("GET"), Qt::CaseInsensitive) != 0) {
         qCDebug(KINEMA_DOWNLOAD).nospace()
-            << "LocalHttpStreamGateway: ignoring unsupported method "
-            << req->method;
+            << "LocalHttpStreamGateway: ignoring unsupported method " << req->method;
         guard->disconnectFromHost();
         co_return;
     }
@@ -360,9 +358,8 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
     qint64 totalSent = 0;
     bool ensureFailed = false;
     while (cursor <= range.endInclusive && guard) {
-        const qint64 chunkEnd = std::min(
-            cursor + kStreamChunkBytes - 1, range.endInclusive);
-        const ByteRange chunk { cursor, chunkEnd };
+        const qint64 chunkEnd = std::min(cursor + kStreamChunkBytes - 1, range.endInclusive);
+        const ByteRange chunk{cursor, chunkEnd};
 
         if (!sourceAlive()) {
             ensureFailed = true;
@@ -395,25 +392,22 @@ QCoro::Task<void> LocalHttpStreamGateway::serveSocket(QTcpSocket* socket)
 
     if (!guard) {
         qCDebug(KINEMA_DOWNLOAD).nospace()
-            << "LocalHttpStreamGateway: client disconnected mid-stream assetId=\""
-            << assetId << "\" sent=" << totalSent
-            << "/" << length << " bytes";
+            << "LocalHttpStreamGateway: client disconnected mid-stream assetId=\"" << assetId
+            << "\" sent=" << totalSent << "/" << length << " bytes";
         co_return;
     }
     if (ensureFailed) {
         qCWarning(KINEMA_DOWNLOAD).nospace()
-            << "LocalHttpStreamGateway: ensureRange/readRange failed assetId=\""
-            << assetId << "\" cursor=" << cursor
-            << " sent=" << totalSent << "/" << length;
+            << "LocalHttpStreamGateway: ensureRange/readRange failed assetId=\"" << assetId
+            << "\" cursor=" << cursor << " sent=" << totalSent << "/" << length;
         guard->disconnectFromHost();
         co_return;
     }
 
     co_await qCoro(guard.data(), &QTcpSocket::bytesWritten);
     qCDebug(KINEMA_DOWNLOAD).nospace()
-        << "LocalHttpStreamGateway: complete assetId=\"" << assetId
-        << "\" sent=" << totalSent << "/" << length
-        << " elapsedMs=" << elapsed.elapsed();
+        << "LocalHttpStreamGateway: complete assetId=\"" << assetId << "\" sent=" << totalSent
+        << "/" << length << " elapsedMs=" << elapsed.elapsed();
     guard->disconnectFromHost();
 }
 

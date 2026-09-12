@@ -33,9 +33,9 @@ class AllDebridResolver : public DebridResolver
 {
     Q_OBJECT
 public:
-    explicit AllDebridResolver(api::AllDebridClient& ad,
-        QObject* parent = nullptr);
+    explicit AllDebridResolver(api::AllDebridClient& ad, QObject* parent = nullptr);
 
+    bool isConfigured() const override;
     QCoro::Task<ResolvedDebridLink> resolve(domain::AssetRef ref) override;
 
 private:

@@ -1,16 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "domain/PlaybackContext.h"
 #include "config/AppSettings.h"
 #include "core/persistence/Database.h"
 #include "core/persistence/HistoryStore.h"
+#include "domain/PlaybackContext.h"
 #include "playback/history/HistoryQueryService.h"
 #include "playback/history/SqlitePlaybackHistoryRepository.h"
-#include "ui/qml-bridge/ContinueWatchingViewModel.h"
-#include "ui/qml-bridge/LibraryRailModel.h"
-
-#include <KSharedConfig>
+#include "ui/qml-bridge/library/ContinueWatchingViewModel.h"
+#include "ui/qml-bridge/library/LibraryRailModel.h"
 
 #include <QDateTime>
 #include <QSignalSpy>
@@ -18,13 +16,15 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <KSharedConfig>
+
+using kinema::config::AppSettings;
+using kinema::core::Database;
+using kinema::core::HistoryStore;
 using kinema::domain::HistoryEntry;
 using kinema::domain::HistoryStreamRef;
 using kinema::domain::MediaKind;
 using kinema::domain::PlaybackKey;
-using kinema::config::AppSettings;
-using kinema::core::Database;
-using kinema::core::HistoryStore;
 using kinema::playback::history::HistoryQueryService;
 using kinema::playback::history::SqlitePlaybackHistoryRepository;
 using kinema::ui::qml::ContinueWatchingViewModel;
@@ -32,17 +32,18 @@ using kinema::ui::qml::LibraryRailModel;
 
 namespace {
 
-HistoryEntry makeMovieEntry(const QString& imdb, double pos,
-    double dur, const QString& release = QStringLiteral("Release.Name"))
+HistoryEntry makeMovieEntry(const QString& imdb,
+                            double pos,
+                            double dur,
+                            const QString& release = QStringLiteral("Release.Name"))
 {
     HistoryEntry e;
     e.key.kind = MediaKind::Movie;
     e.key.imdbId = imdb;
     e.title = QStringLiteral("Movie ") + imdb;
-    e.poster = QUrl(QStringLiteral("https://example.com/") + imdb
-        + QStringLiteral(".jpg"));
-    e.backdrop = QUrl(QStringLiteral("https://example.com/") + imdb
-        + QStringLiteral("-backdrop.jpg"));
+    e.poster = QUrl(QStringLiteral("https://example.com/") + imdb + QStringLiteral(".jpg"));
+    e.backdrop =
+        QUrl(QStringLiteral("https://example.com/") + imdb + QStringLiteral("-backdrop.jpg"));
     e.positionSec = pos;
     e.durationSec = dur;
     e.lastWatchedAt = QDateTime::currentDateTimeUtc();
@@ -66,26 +67,19 @@ class TstContinueWatchingViewModel : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
-    void initTestCase()
-    {
-        QStandardPaths::setTestModeEnabled(true);
-    }
+    void initTestCase() { QStandardPaths::setTestModeEnabled(true); }
 
     void init()
     {
         m_tmp = std::make_unique<QTemporaryDir>();
         QVERIFY(m_tmp->isValid());
-        m_db = std::make_unique<Database>(
-            m_tmp->filePath(QStringLiteral("kinema.db")), nullptr);
+        m_db = std::make_unique<Database>(m_tmp->filePath(QStringLiteral("kinema.db")), nullptr);
         QVERIFY(m_db->open());
         m_store = std::make_unique<HistoryStore>(*m_db);
-        m_config = KSharedConfig::openConfig(
-            m_tmp->filePath(QStringLiteral("kinemarc")));
+        m_config = KSharedConfig::openConfig(m_tmp->filePath(QStringLiteral("kinemarc")));
         m_settings = std::make_unique<AppSettings>(m_config, nullptr);
-        m_historyRepo = std::make_unique<SqlitePlaybackHistoryRepository>(
-            *m_store);
-        m_history = std::make_unique<HistoryQueryService>(
-            *m_historyRepo, *m_store);
+        m_historyRepo = std::make_unique<SqlitePlaybackHistoryRepository>(*m_store);
+        m_history = std::make_unique<HistoryQueryService>(*m_historyRepo, *m_store);
     }
 
     void cleanup()
@@ -115,8 +109,7 @@ private Q_SLOTS:
         ContinueWatchingViewModel vm(m_history.get());
         QSignalSpy emptySpy(&vm, &ContinueWatchingViewModel::emptyChanged);
 
-        m_store->record(makeMovieEntry(
-            QStringLiteral("tt1000001"), 600, 6000));
+        m_store->record(makeMovieEntry(QStringLiteral("tt1000001"), 600, 6000));
         // HistoryStore::changed() is coalesced via a queued signal —
         // the VM's slot fires once we drain.
         drain();
@@ -137,20 +130,17 @@ private Q_SLOTS:
 
         // Progress overlay reflects the entry's position / duration.
         const auto idx = vm.model()->index(0);
-        const auto progress = vm.model()->data(idx,
-            LibraryRailModel::ProgressRole).toDouble();
+        const auto progress = vm.model()->data(idx, LibraryRailModel::ProgressRole).toDouble();
         QCOMPARE(progress, 0.1);
 
         // Tertiary line: "Resume from 10%" for an in-progress entry.
-        const auto tertiary = vm.model()->data(idx,
-            LibraryRailModel::TertiaryLineRole).toString();
+        const auto tertiary = vm.model()->data(idx, LibraryRailModel::TertiaryLineRole).toString();
         QVERIFY(tertiary.contains(QStringLiteral("10")));
 
         // Backdrop captured at play time round-trips through the
         // store into the rail row so `EpisodeRailCard` can render a
         // proper 16:9 frame instead of letterboxing the poster.
-        const auto backdrop = vm.model()->data(idx,
-            LibraryRailModel::BackdropUrlRole).toString();
+        const auto backdrop = vm.model()->data(idx, LibraryRailModel::BackdropUrlRole).toString();
         QVERIFY(backdrop.contains(QStringLiteral("-backdrop.jpg")));
     }
 
@@ -168,8 +158,7 @@ private Q_SLOTS:
         vm.resume(0);
         QCOMPARE(resumeSpy.count(), 1);
         const auto firstEntry = vm.entries().at(0);
-        const auto signalEntry = qvariant_cast<HistoryEntry>(
-            resumeSpy.first().at(0));
+        const auto signalEntry = qvariant_cast<HistoryEntry>(resumeSpy.first().at(0));
         QCOMPARE(signalEntry.key.imdbId, firstEntry.key.imdbId);
     }
 
@@ -182,9 +171,8 @@ private Q_SLOTS:
         QSignalSpy detailSpy(&vm, &ContinueWatchingViewModel::detailRequested);
         vm.openDetail(0);
         QCOMPARE(detailSpy.count(), 1);
-        QCOMPARE(qvariant_cast<HistoryEntry>(detailSpy.first().at(0))
-                     .key.imdbId,
-            QStringLiteral("tt5"));
+        QCOMPARE(qvariant_cast<HistoryEntry>(detailSpy.first().at(0)).key.imdbId,
+                 QStringLiteral("tt5"));
     }
 
     void openStreamsForwardsEntryAndOutOfRangeIsNoOp()
@@ -193,8 +181,7 @@ private Q_SLOTS:
         m_store->record(makeMovieEntry(QStringLiteral("tt6"), 45, 6000));
         drain();
 
-        QSignalSpy streamsSpy(&vm,
-            &ContinueWatchingViewModel::streamsRequested);
+        QSignalSpy streamsSpy(&vm, &ContinueWatchingViewModel::streamsRequested);
         vm.openStreams(99);
         QCOMPARE(streamsSpy.count(), 0);
         vm.openStreams(-1);
@@ -202,9 +189,8 @@ private Q_SLOTS:
 
         vm.openStreams(0);
         QCOMPARE(streamsSpy.count(), 1);
-        QCOMPARE(qvariant_cast<HistoryEntry>(streamsSpy.first().at(0))
-                     .key.imdbId,
-            QStringLiteral("tt6"));
+        QCOMPARE(qvariant_cast<HistoryEntry>(streamsSpy.first().at(0)).key.imdbId,
+                 QStringLiteral("tt6"));
     }
 
     void removeForwardsAndOutOfRangeIsNoOp()

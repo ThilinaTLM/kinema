@@ -2,17 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "config/TorrentStreamingSettings.h"
-#include "config/TorrentStreamingSettings.h"
 #include "core/io/CachePaths.h"
 #include "core/persistence/MediaCache.h"
 #include "core/persistence/TorrentCache.h"
 #include "domain/Download.h"
 #include "domain/Media.h"
 #include "domain/PlaybackContext.h"
-#include "playback/sources/AssetSession.h"
 #include "playback/events/PlaybackEventStream.h"
 #include "playback/ports/DownloadRepository.h"
 #include "playback/ports/MediaSourcePort.h"
+#include "playback/sources/AssetSession.h"
 #include "playback/streaming/LocalHttpStreamGateway.h"
 #include "playback/torrent/LibtorrentClient.h"
 #include "playback/transfer/BackendRegistry.h"
@@ -21,16 +20,15 @@
 #include "playback/transfer/TransferSupervisor.h"
 #include "playback/transfer/TransferUseCase.h"
 
-#include <KSharedConfig>
-
 #include <QCoroSignal>
 #include <QCoroTask>
-
 #include <QDir>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+
+#include <KSharedConfig>
 
 #include <map>
 #include <memory>
@@ -53,28 +51,24 @@ class FakeAssetSession final : public playback::sources::AssetSession
 {
     Q_OBJECT
 public:
-    FakeAssetSession(QString assetId, QString fileName, qint64 fileSize,
-        qint64 initialCached, QObject* parent = nullptr)
+    FakeAssetSession(QString assetId,
+                     QString fileName,
+                     qint64 fileSize,
+                     qint64 initialCached,
+                     QObject* parent = nullptr)
         : playback::sources::AssetSession(parent)
         , m_assetId(std::move(assetId))
         , m_fileName(std::move(fileName))
         , m_fileSize(fileSize)
         , m_cached(initialCached)
-    {
-    }
+    { }
 
     QString assetId() const override { return m_assetId; }
     QString fileName() const override { return m_fileName; }
     qint64 fileSize() const override { return m_fileSize; }
     qint64 cachedBytes() const override { return m_cached; }
-    QCoro::Task<bool> ensureRange(kinema::torrent::ByteRange) override
-    {
-        co_return true;
-    }
-    QByteArray readRange(kinema::torrent::ByteRange) const override
-    {
-        return {};
-    }
+    QCoro::Task<bool> ensureRange(kinema::core::ByteRange) override { co_return true; }
+    QByteArray readRange(kinema::core::ByteRange) const override { return {}; }
     void touch() override { ++touchCalls; }
     void pause() override { ++pauseCalls; }
     void resume() override { ++resumeCalls; }
@@ -100,34 +94,24 @@ private:
 class FakeMediaSourcePort : public ports::MediaSourcePort
 {
 public:
-    FakeMediaSourcePort(domain::DownloadBackendKind kind,
-        qint64 fileSize, qint64 initialCached = 0)
-        : m_kind(kind)
-        , m_fileSize(fileSize)
-        , m_initialCached(initialCached)
-    {
-    }
+    FakeMediaSourcePort(domain::DownloadBackendKind kind, qint64 fileSize, qint64 initialCached = 0)
+        : m_kind(kind), m_fileSize(fileSize), m_initialCached(initialCached)
+    { }
 
-    domain::DownloadBackendKind kind() const noexcept override
-    {
-        return m_kind;
-    }
+    domain::DownloadBackendKind kind() const noexcept override { return m_kind; }
 
-    bool canHandle(const domain::Stream& s) const override
-    {
-        return !s.infoHash.isEmpty();
-    }
+    bool canHandle(const domain::Stream& s) const override { return !s.infoHash.isEmpty(); }
 
     QCoro::Task<ports::OpenedSession> open(const domain::AssetRef& ref,
-        const domain::Stream&, const domain::PlaybackContext&,
-        domain::DownloadMode mode) override
+                                           const domain::Stream&,
+                                           const domain::PlaybackContext&,
+                                           domain::DownloadMode mode) override
     {
         ++openCalls;
         lastMode = mode;
         const auto assetId = domain::assetIdFor(ref);
-        auto session = std::make_unique<FakeAssetSession>(assetId,
-            QStringLiteral("episode.mkv"), m_fileSize,
-            m_initialCached);
+        auto session = std::make_unique<FakeAssetSession>(
+            assetId, QStringLiteral("episode.mkv"), m_fileSize, m_initialCached);
         session->setMode(mode);
         lastOpenedAssetId = assetId;
         ports::OpenedSession out;
@@ -136,8 +120,7 @@ public:
         co_return out;
     }
 
-    void changeMode(ports::ByteRangeSource& session,
-        domain::DownloadMode newMode) override
+    void changeMode(ports::ByteRangeSource& session, domain::DownloadMode newMode) override
     {
         ++changeModeCalls;
         lastChangeMode = newMode;
@@ -165,19 +148,17 @@ private:
 class FakeDownloadRepo final : public ports::DownloadRepository
 {
 public:
-    void upsert(const domain::DownloadItem& item) override
-    {
-        m_rows[item.assetId] = item;
-    }
-    void updateState(const QString& assetId,
-        domain::DownloadState state) override
+    void upsert(const domain::DownloadItem& item) override { m_rows[item.assetId] = item; }
+    void updateState(const QString& assetId, domain::DownloadState state) override
     {
         if (auto it = m_rows.find(assetId); it != m_rows.end()) {
             it->second.state = state;
         }
     }
-    void updateCachedBytes(const QString& assetId, qint64 cachedBytes,
-        std::optional<qint64> expectedBytes, bool complete) override
+    void updateCachedBytes(const QString& assetId,
+                           qint64 cachedBytes,
+                           std::optional<qint64> expectedBytes,
+                           bool complete) override
     {
         if (auto it = m_rows.find(assetId); it != m_rows.end()) {
             it->second.cachedSizeBytes = cachedBytes;
@@ -187,34 +168,27 @@ public:
             }
         }
     }
-    void setLastError(const QString& assetId,
-        const QString& error) override
+    void setLastError(const QString& assetId, const QString& error) override
     {
         if (auto it = m_rows.find(assetId); it != m_rows.end()) {
             it->second.lastError = error;
             it->second.state = domain::DownloadState::Failed;
         }
     }
-    void updateMode(const QString& assetId,
-        domain::DownloadMode mode) override
+    void updateMode(const QString& assetId, domain::DownloadMode mode) override
     {
         if (auto it = m_rows.find(assetId); it != m_rows.end()) {
             it->second.mode = mode;
         }
     }
-    void setDisposition(const QString& assetId,
-        domain::CacheDisposition disposition) override
+    void setDisposition(const QString& assetId, domain::CacheDisposition disposition) override
     {
         if (auto it = m_rows.find(assetId); it != m_rows.end()) {
             it->second.disposition = disposition;
         }
     }
-    void remove(const QString& assetId) override
-    {
-        m_rows.erase(assetId);
-    }
-    std::optional<domain::DownloadItem> find(
-        const QString& assetId) const override
+    void remove(const QString& assetId) override { m_rows.erase(assetId); }
+    std::optional<domain::DownloadItem> find(const QString& assetId) const override
     {
         const auto it = m_rows.find(assetId);
         if (it == m_rows.end()) {
@@ -222,8 +196,7 @@ public:
         }
         return it->second;
     }
-    std::optional<domain::DownloadItem> findForKey(
-        const domain::PlaybackKey& key) const override
+    std::optional<domain::DownloadItem> findForKey(const domain::PlaybackKey& key) const override
     {
         for (const auto& [id, row] : m_rows) {
             Q_UNUSED(id);
@@ -244,10 +217,7 @@ public:
         return out;
     }
 
-    void seedRow(const domain::DownloadItem& row)
-    {
-        m_rows[row.assetId] = row;
-    }
+    void seedRow(const domain::DownloadItem& row) { m_rows[row.assetId] = row; }
 
 private:
     std::map<QString, domain::DownloadItem> m_rows;
@@ -259,29 +229,26 @@ private:
 // but every override short-circuits before the lt::session would be
 // built, so no real libtorrent activity occurs.
 // ---------------------------------------------------------------------------
-class StubTorrentEngine final
-    : public kinema::playback::torrent::LibtorrentClient
+class StubTorrentEngine final : public kinema::playback::torrent::LibtorrentClient
 {
 public:
-    StubTorrentEngine(
-        const kinema::config::TorrentStreamingSettings& settings,
-        kinema::core::TorrentCache& cache,
-        QObject* parent = nullptr)
-        : kinema::playback::torrent::LibtorrentClient(
-              settings, cache, parent)
-    {
-    }
+    StubTorrentEngine(const kinema::config::TorrentStreamingSettings& settings,
+                      kinema::core::TorrentCache& cache,
+                      QObject* parent = nullptr)
+        : kinema::playback::torrent::LibtorrentClient(settings, cache, parent)
+    { }
 
-    QCoro::Task<kinema::playback::torrent::PreparedSession> prepareSession(
-        const domain::Stream&, const domain::PlaybackContext&,
-        kinema::playback::torrent::PrepareMode) override
+    QCoro::Task<kinema::playback::torrent::PreparedSession>
+    prepareSession(const domain::Stream&,
+                   const domain::PlaybackContext&,
+                   kinema::playback::torrent::PrepareMode) override
     {
         kinema::playback::torrent::PreparedSession ps;
         co_return ps;
     }
     void setKeepAlive(const QString& infoHash, bool on) override
     {
-        keepAliveCalls.append({ infoHash, on });
+        keepAliveCalls.append({infoHash, on});
     }
 
     QList<QPair<QString, bool>> keepAliveCalls;
@@ -294,16 +261,14 @@ public:
 domain::Stream makeStream(const QString& infoHash = {})
 {
     domain::Stream s;
-    s.infoHash = infoHash.isEmpty()
-        ? QStringLiteral("aabb1122ccdd3344eeff5566778899aabbccddee")
-        : infoHash;
+    s.infoHash =
+        infoHash.isEmpty() ? QStringLiteral("aabb1122ccdd3344eeff5566778899aabbccddee") : infoHash;
     s.releaseName = QStringLiteral("Sample.Movie.2024.1080p");
     s.qualityLabel = QStringLiteral("1080p");
     return s;
 }
 
-domain::PlaybackContext makeContext(const QString& imdb
-    = QStringLiteral("tt7654321"))
+domain::PlaybackContext makeContext(const QString& imdb = QStringLiteral("tt7654321"))
 {
     domain::PlaybackContext ctx;
     ctx.key.kind = domain::MediaKind::Movie;
@@ -337,10 +302,7 @@ class TstTransferUseCase : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
-    void initTestCase()
-    {
-        QStandardPaths::setTestModeEnabled(true);
-    }
+    void initTestCase() { QStandardPaths::setTestModeEnabled(true); }
 
     void init()
     {
@@ -349,39 +311,30 @@ private Q_SLOTS:
         QDir(core::cache::mediaDir()).removeRecursively();
         QDir().mkpath(core::cache::mediaDir().absolutePath());
 
-        m_config = KSharedConfig::openConfig(
-            QStringLiteral("kinemarc-tuc-test"),
-            KConfig::SimpleConfig);
+        m_config =
+            KSharedConfig::openConfig(QStringLiteral("kinemarc-tuc-test"), KConfig::SimpleConfig);
         m_dlSettings = std::make_unique<config::TorrentStreamingSettings>(m_config);
         m_dlSettings->setCacheBudgetGb(1);
 
-        m_torrentSettings
-            = std::make_unique<config::TorrentStreamingSettings>(m_config);
+        m_torrentSettings = std::make_unique<config::TorrentStreamingSettings>(m_config);
         m_cache = std::make_unique<core::MediaCache>(*m_dlSettings);
-        m_torrentCache
-            = std::make_unique<core::TorrentCache>(*m_torrentSettings);
-        m_engine = std::make_unique<StubTorrentEngine>(
-            *m_torrentSettings, *m_torrentCache);
+        m_torrentCache = std::make_unique<core::TorrentCache>(*m_torrentSettings);
+        m_engine = std::make_unique<StubTorrentEngine>(*m_torrentSettings, *m_torrentCache);
 
         m_backends = std::make_unique<BackendRegistry>();
-        m_torrentSource
-            = new FakeMediaSourcePort(domain::DownloadBackendKind::Torrent,
-                /*fileSize*/ 2'000'000);
-        m_backends->registerSource(
-            std::unique_ptr<ports::MediaSourcePort>(m_torrentSource));
+        m_torrentSource = new FakeMediaSourcePort(domain::DownloadBackendKind::Torrent,
+                                                  /*fileSize*/ 2'000'000);
+        m_backends->registerSource(std::unique_ptr<ports::MediaSourcePort>(m_torrentSource));
 
         m_sessions = std::make_unique<SessionRegistry>();
         m_repo = std::make_unique<FakeDownloadRepo>();
         m_events = std::make_unique<events::PlaybackEventStream>();
-        m_supervisor = std::make_unique<TransferSupervisor>(
-            *m_sessions, *m_repo, *m_events);
-        m_gateway
-            = std::make_unique<streaming::LocalHttpStreamGateway>();
+        m_supervisor = std::make_unique<TransferSupervisor>(*m_sessions, *m_repo, *m_events);
+        m_gateway = std::make_unique<streaming::LocalHttpStreamGateway>();
         QVERIFY(m_gateway->listen());
 
-        m_useCase = std::make_unique<TransferUseCase>(*m_backends,
-            *m_sessions, *m_supervisor, *m_gateway, *m_repo, *m_cache,
-            *m_engine);
+        m_useCase = std::make_unique<TransferUseCase>(
+            *m_backends, *m_sessions, *m_supervisor, *m_gateway, *m_repo, *m_cache, *m_engine);
     }
 
     void cleanup()
@@ -410,8 +363,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         QUrl url;
         bool done = false;
@@ -428,8 +380,7 @@ private Q_SLOTS:
 
         // Backend was asked to open one session in OnDemand mode.
         QCOMPARE(m_torrentSource->openCalls, 1);
-        QCOMPARE(m_torrentSource->lastMode,
-            domain::DownloadMode::OnDemand);
+        QCOMPARE(m_torrentSource->lastMode, domain::DownloadMode::OnDemand);
 
         // Registry now holds a session for the asset; player is
         // attached.
@@ -451,8 +402,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         m_useCase->saveOffline(stream, ctx);
         spinUntil([&] { return m_torrentSource->openCalls >= 1; });
@@ -475,8 +425,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         // Prime with an OnDemand play.
         bool playDone = false;
@@ -492,8 +441,7 @@ private Q_SLOTS:
         spin(5);
         QCOMPARE(m_torrentSource->openCalls, 1);
         QCOMPARE(m_torrentSource->changeModeCalls, 1);
-        QCOMPARE(m_torrentSource->lastChangeMode,
-            domain::DownloadMode::Full);
+        QCOMPARE(m_torrentSource->lastChangeMode, domain::DownloadMode::Full);
 
         const auto row = m_repo->find(assetId);
         QVERIFY(row.has_value());
@@ -509,8 +457,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         bool playDone = false;
         auto play = [&]() -> QCoro::Task<void> {
@@ -540,8 +487,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         m_useCase->saveOffline(stream, ctx);
         spinUntil([&] { return m_torrentSource->openCalls >= 1; });
@@ -562,8 +508,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         m_useCase->saveOffline(stream, ctx);
         spinUntil([&] { return m_torrentSource->openCalls >= 1; });
@@ -582,8 +527,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         m_useCase->saveOffline(stream, ctx);
         spinUntil([&] { return m_torrentSource->openCalls >= 1; });
@@ -612,8 +556,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         bool playDone = false;
         auto play = [&]() -> QCoro::Task<void> {
@@ -625,15 +568,12 @@ private Q_SLOTS:
         const int before = m_engine->keepAliveCalls.size();
         m_useCase->pin(assetId, true);
         QVERIFY(m_engine->keepAliveCalls.size() > before);
-        QCOMPARE(m_engine->keepAliveCalls.last(),
-            qMakePair(stream.infoHash, true));
+        QCOMPARE(m_engine->keepAliveCalls.last(), qMakePair(stream.infoHash, true));
         QVERIFY(m_cache->isPinned(assetId));
-        QCOMPARE(m_repo->find(assetId)->disposition,
-            domain::CacheDisposition::Pinned);
+        QCOMPARE(m_repo->find(assetId)->disposition, domain::CacheDisposition::Pinned);
 
         m_useCase->pin(assetId, false);
-        QCOMPARE(m_engine->keepAliveCalls.last(),
-            qMakePair(stream.infoHash, false));
+        QCOMPARE(m_engine->keepAliveCalls.last(), qMakePair(stream.infoHash, false));
         QVERIFY(!m_cache->isPinned(assetId));
     }
 
@@ -644,8 +584,7 @@ private Q_SLOTS:
     {
         const auto stream = makeStream();
         const auto ctx = makeContext();
-        const auto assetId = domain::assetIdFor(
-            domain::assetRefFor(stream, ctx));
+        const auto assetId = domain::assetIdFor(domain::assetRefFor(stream, ctx));
 
         bool playDone = false;
         auto play = [&]() -> QCoro::Task<void> {
@@ -655,16 +594,13 @@ private Q_SLOTS:
         spinUntil([&] { return playDone; });
 
         m_useCase->pause(assetId);
-        QCOMPARE(m_repo->find(assetId)->state,
-            domain::DownloadState::Paused);
-        auto* fake = dynamic_cast<FakeAssetSession*>(
-            m_sessions->find(assetId)->source());
+        QCOMPARE(m_repo->find(assetId)->state, domain::DownloadState::Paused);
+        auto* fake = dynamic_cast<FakeAssetSession*>(m_sessions->find(assetId)->source());
         QVERIFY(fake);
         QCOMPARE(fake->pauseCalls, 1);
 
         m_useCase->resumeTransfer(assetId);
-        QCOMPARE(m_repo->find(assetId)->state,
-            domain::DownloadState::Active);
+        QCOMPARE(m_repo->find(assetId)->state, domain::DownloadState::Active);
         QCOMPARE(fake->resumeCalls, 1);
     }
 
@@ -684,16 +620,14 @@ private Q_SLOTS:
         fullActive.disposition = domain::CacheDisposition::Pinned;
         fullActive.key.kind = domain::MediaKind::Movie;
         fullActive.key.imdbId = QStringLiteral("tt0000001");
-        fullActive.infoHash = QStringLiteral(
-            "1111222233334444555566667777888899990001");
+        fullActive.infoHash = QStringLiteral("1111222233334444555566667777888899990001");
         m_repo->seedRow(fullActive);
 
         domain::DownloadItem fullDone = fullActive;
         fullDone.assetId = QStringLiteral("a-2");
         fullDone.state = domain::DownloadState::Completed;
         fullDone.key.imdbId = QStringLiteral("tt0000002");
-        fullDone.infoHash = QStringLiteral(
-            "1111222233334444555566667777888899990002");
+        fullDone.infoHash = QStringLiteral("1111222233334444555566667777888899990002");
         m_repo->seedRow(fullDone);
 
         domain::DownloadItem onDemandActive = fullActive;
@@ -701,8 +635,7 @@ private Q_SLOTS:
         onDemandActive.mode = domain::DownloadMode::OnDemand;
         onDemandActive.disposition = domain::CacheDisposition::Ephemeral;
         onDemandActive.key.imdbId = QStringLiteral("tt0000003");
-        onDemandActive.infoHash = QStringLiteral(
-            "1111222233334444555566667777888899990003");
+        onDemandActive.infoHash = QStringLiteral("1111222233334444555566667777888899990003");
         m_repo->seedRow(onDemandActive);
 
         m_useCase->resumePersisted();
@@ -739,10 +672,8 @@ private Q_SLOTS:
         ctxB.key.episode = 2;
         ctxB.title = QStringLiteral("Show S01E02");
 
-        const auto assetA = domain::assetIdFor(
-            domain::assetRefFor(streamA, ctxA));
-        const auto assetB = domain::assetIdFor(
-            domain::assetRefFor(streamB, ctxB));
+        const auto assetA = domain::assetIdFor(domain::assetRefFor(streamA, ctxA));
+        const auto assetB = domain::assetIdFor(domain::assetRefFor(streamB, ctxB));
         QVERIFY(assetA != assetB);
 
         bool aDone = false;
@@ -766,11 +697,9 @@ private Q_SLOTS:
 
     void debridSameInfoHashDoesNotSupersedePriorSession()
     {
-        auto* debridSource = new FakeMediaSourcePort(
-            domain::DownloadBackendKind::AllDebridHttp,
-            /*fileSize*/ 2'000'000);
-        m_backends->registerSource(
-            std::unique_ptr<ports::MediaSourcePort>(debridSource));
+        auto* debridSource = new FakeMediaSourcePort(domain::DownloadBackendKind::AllDebridHttp,
+                                                     /*fileSize*/ 2'000'000);
+        m_backends->registerSource(std::unique_ptr<ports::MediaSourcePort>(debridSource));
 
         auto streamA = makeStream();
         streamA.fileIndex = 0;
@@ -790,16 +719,14 @@ private Q_SLOTS:
         ctxB.key.episode = 2;
         ctxB.title = QStringLiteral("Show S01E02");
 
-        const auto assetA = domain::assetIdFor(
-            domain::assetRefFor(streamA, ctxA));
-        const auto assetB = domain::assetIdFor(
-            domain::assetRefFor(streamB, ctxB));
+        const auto assetA = domain::assetIdFor(domain::assetRefFor(streamA, ctxA));
+        const auto assetB = domain::assetIdFor(domain::assetRefFor(streamB, ctxB));
         QVERIFY(assetA != assetB);
 
         bool aDone = false;
         auto playA = [&]() -> QCoro::Task<void> {
-            co_await m_useCase->ensurePlayable(streamA, ctxA,
-                domain::DownloadBackendKind::AllDebridHttp);
+            co_await m_useCase->ensurePlayable(
+                streamA, ctxA, domain::DownloadBackendKind::AllDebridHttp);
             aDone = true;
         }();
         spinUntil([&] { return aDone; });
@@ -808,8 +735,8 @@ private Q_SLOTS:
 
         bool bDone = false;
         auto playB = [&]() -> QCoro::Task<void> {
-            co_await m_useCase->ensurePlayable(streamB, ctxB,
-                domain::DownloadBackendKind::AllDebridHttp);
+            co_await m_useCase->ensurePlayable(
+                streamB, ctxB, domain::DownloadBackendKind::AllDebridHttp);
             bDone = true;
         }();
         spinUntil([&] { return bDone; });

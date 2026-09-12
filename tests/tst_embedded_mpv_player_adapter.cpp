@@ -1,26 +1,25 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "playback/adapters/EmbeddedMpvPlayerAdapter.h"
-
 #include "config/PlayerSettings.h"
 #include "playback/events/PlaybackEvent.h"
 #include "playback/events/PlaybackEventStream.h"
-
-#include <KConfig>
-#include <KSharedConfig>
+#include "ui/player/EmbeddedMpvPlayerAdapter.h"
 
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTest>
 #include <QUuid>
 
+#include <KConfig>
+#include <KSharedConfig>
+
 #include <chrono>
 #include <variant>
 
 using namespace kinema;
 using namespace kinema::playback;
-using namespace kinema::playback::adapters;
+using namespace kinema::ui::player;
 using namespace kinema::playback::events;
 using namespace std::chrono_literals;
 
@@ -43,14 +42,15 @@ domain::PlaybackContext makeCtx(const QString& id)
 // assertions.
 config::PlayerSettings& playerSettings()
 {
-    static KSharedConfigPtr cfg = KSharedConfig::openConfig(
-        QStringLiteral("kinema-test-embedded-adapter"),
-        KConfig::SimpleConfig, QStandardPaths::TempLocation);
+    static KSharedConfigPtr cfg =
+        KSharedConfig::openConfig(QStringLiteral("kinema-test-embedded-adapter"),
+                                  KConfig::SimpleConfig,
+                                  QStandardPaths::TempLocation);
     static config::PlayerSettings settings(cfg);
     return settings;
 }
 
-template<class T>
+template <class T>
 bool spyHasEvent(const QSignalSpy& spy)
 {
     for (const auto& row : spy) {
@@ -62,7 +62,7 @@ bool spyHasEvent(const QSignalSpy& spy)
     return false;
 }
 
-template<class T>
+template <class T>
 T extractEvent(const QSignalSpy& spy)
 {
     for (const auto& row : spy) {
@@ -71,7 +71,7 @@ T extractEvent(const QSignalSpy& spy)
             return std::get<T>(event);
         }
     }
-    return T {};
+    return T{};
 }
 
 } // namespace
@@ -124,8 +124,8 @@ private Q_SLOTS:
         // Subsequent stop and late mpv stop events are no-ops.
         QSignalSpy spy2(&stream, &PlaybackEventStream::eventPublished);
         adapter.stop();
-        QVERIFY(QMetaObject::invokeMethod(&adapter, "onEndOfFile",
-            Q_ARG(QString, QStringLiteral("stop"))));
+        QVERIFY(QMetaObject::invokeMethod(
+            &adapter, "onEndOfFile", Q_ARG(QString, QStringLiteral("stop"))));
         QCOMPARE(spy2.count(), 0);
     }
 
@@ -162,8 +162,8 @@ private Q_SLOTS:
         adapter.setActiveSession(id, ctx);
 
         QSignalSpy spy(&stream, &PlaybackEventStream::eventPublished);
-        QVERIFY(QMetaObject::invokeMethod(&adapter, "onEndOfFile",
-            Q_ARG(QString, QStringLiteral("eof"))));
+        QVERIFY(QMetaObject::invokeMethod(
+            &adapter, "onEndOfFile", Q_ARG(QString, QStringLiteral("eof"))));
 
         const auto ended = extractEvent<PlaybackEnded>(spy);
         QCOMPARE(ended.reason, PlaybackEndReason::NaturalEof);
@@ -178,8 +178,8 @@ private Q_SLOTS:
         adapter.setActiveSession(id, makeCtx(QStringLiteral("tt1")));
 
         QSignalSpy spy(&stream, &PlaybackEventStream::eventPublished);
-        QVERIFY(QMetaObject::invokeMethod(&adapter, "onMpvError",
-            Q_ARG(QString, QStringLiteral("network error"))));
+        QVERIFY(QMetaObject::invokeMethod(
+            &adapter, "onMpvError", Q_ARG(QString, QStringLiteral("network error"))));
 
         const auto failed = extractEvent<PlaybackFailed>(spy);
         QCOMPARE(failed.sessionId, id);
@@ -202,8 +202,8 @@ private Q_SLOTS:
         adapter.setActiveSession(idB, makeCtx(QStringLiteral("ttB")));
 
         QSignalSpy spy(&stream, &PlaybackEventStream::eventPublished);
-        QVERIFY(QMetaObject::invokeMethod(&adapter, "onEndOfFile",
-            Q_ARG(QString, QStringLiteral("stop"))));
+        QVERIFY(QMetaObject::invokeMethod(
+            &adapter, "onEndOfFile", Q_ARG(QString, QStringLiteral("stop"))));
 
         // The stale "stop" should be filtered: no PlaybackEnded.
         QVERIFY(!spyHasEvent<PlaybackEnded>(spy));
@@ -212,8 +212,8 @@ private Q_SLOTS:
         // subsequent natural EOF for B is published normally.
         QVERIFY(QMetaObject::invokeMethod(&adapter, "onFileLoaded"));
         QSignalSpy spy2(&stream, &PlaybackEventStream::eventPublished);
-        QVERIFY(QMetaObject::invokeMethod(&adapter, "onEndOfFile",
-            Q_ARG(QString, QStringLiteral("eof"))));
+        QVERIFY(QMetaObject::invokeMethod(
+            &adapter, "onEndOfFile", Q_ARG(QString, QStringLiteral("eof"))));
         const auto ended = extractEvent<PlaybackEnded>(spy2);
         QCOMPARE(ended.reason, PlaybackEndReason::NaturalEof);
         QCOMPARE(ended.sessionId, idB);
@@ -227,10 +227,8 @@ private Q_SLOTS:
         adapter.setActiveSession(id, makeCtx(QStringLiteral("tt1")));
 
         QSignalSpy spy(&stream, &PlaybackEventStream::eventPublished);
-        QVERIFY(QMetaObject::invokeMethod(&adapter, "onPositionChanged",
-            Q_ARG(double, 42.5)));
-        QVERIFY(QMetaObject::invokeMethod(&adapter, "onDurationChanged",
-            Q_ARG(double, 7200.0)));
+        QVERIFY(QMetaObject::invokeMethod(&adapter, "onPositionChanged", Q_ARG(double, 42.5)));
+        QVERIFY(QMetaObject::invokeMethod(&adapter, "onDurationChanged", Q_ARG(double, 7200.0)));
 
         const auto pos = extractEvent<PositionTicked>(spy);
         QCOMPARE(pos.seconds, 42.5);

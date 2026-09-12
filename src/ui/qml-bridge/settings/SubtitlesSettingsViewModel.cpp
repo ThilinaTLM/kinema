@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ui/qml-bridge/settings/SubtitlesSettingsViewModel.h"
-#include "ui/qml-bridge/settings/SettingsStatus.h"
-#include "api/OpenSubtitlesClient.h"
+
+#include "api/opensubtitles/OpenSubtitlesClient.h"
 #include "config/CacheSettings.h"
 #include "config/SubtitleSettings.h"
 #include "core/io/HttpClient.h"
@@ -14,27 +14,30 @@
 #include "core/util/Language.h"
 #include "domain/Subtitle.h"
 #include "kinema_log_ui.h"
+#include "ui/qml-bridge/settings/SettingsStatus.h"
+
+#include <QFile>
+
 #include <KFormat>
 #include <KLocalizedString>
-#include <QFile>
 
 namespace kinema::ui::qml::settings {
 
 // ============================== Subtitles =================================
 
-SubtitlesSettingsViewModel::SubtitlesSettingsViewModel(
-    core::HttpClient* http, core::TokenStore* tokens,
-    config::SubtitleSettings& subtitleSettings,
-    config::CacheSettings& cacheSettings,
-    core::SubtitleCacheStore* subtitleCache, QObject* parent)
+SubtitlesSettingsViewModel::SubtitlesSettingsViewModel(core::HttpClient* http,
+                                                       core::TokenStore* tokens,
+                                                       config::SubtitleSettings& subtitleSettings,
+                                                       config::CacheSettings& cacheSettings,
+                                                       core::SubtitleCacheStore* subtitleCache,
+                                                       QObject* parent)
     : QObject(parent)
     , m_http(http)
     , m_tokens(tokens)
     , m_subtitleSettings(subtitleSettings)
     , m_cacheSettings(cacheSettings)
     , m_subtitleCache(subtitleCache)
-{
-}
+{ }
 
 QStringList SubtitlesSettingsViewModel::preferredLanguages() const
 {
@@ -65,8 +68,7 @@ QVariantList SubtitlesSettingsViewModel::commonLanguages() const
     return out;
 }
 
-QString SubtitlesSettingsViewModel::languageDisplayName(
-    const QString& code) const
+QString SubtitlesSettingsViewModel::languageDisplayName(const QString& code) const
 {
     return core::language::displayName(code);
 }
@@ -96,8 +98,7 @@ void SubtitlesSettingsViewModel::setPassword(const QString& v)
     Q_EMIT credentialInputChanged();
 }
 
-void SubtitlesSettingsViewModel::setPreferredLanguages(
-    const QStringList& codes)
+void SubtitlesSettingsViewModel::setPreferredLanguages(const QStringList& codes)
 {
     QStringList normalised;
     normalised.reserve(codes.size());
@@ -164,8 +165,7 @@ void SubtitlesSettingsViewModel::removeLanguageAt(int index)
 void SubtitlesSettingsViewModel::moveLanguage(int from, int to)
 {
     auto next = preferredLanguages();
-    if (from < 0 || from >= next.size() || to < 0
-        || to >= next.size() || from == to) {
+    if (from < 0 || from >= next.size() || to < 0 || to >= next.size() || from == to) {
         return;
     }
     next.move(from, to);
@@ -206,9 +206,9 @@ void SubtitlesSettingsViewModel::clearCache()
     }
     m_subtitleCache->clearAll();
     setStatus(i18nc("@info subtitle cache cleared",
-                  "Subtitle cache cleared (%1 file(s)).",
-                  entries.size()),
-        kStatusPositive);
+                    "Subtitle cache cleared (%1 file(s)).",
+                    entries.size()),
+              kStatusPositive);
 }
 
 void SubtitlesSettingsViewModel::setStatus(const QString& message, int kind)
@@ -234,12 +234,12 @@ QCoro::Task<void> SubtitlesSettingsViewModel::loadTask()
 {
     setBusy(true);
     try {
-        const auto apiKey = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesApiKey));
-        const auto username = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesUsername));
-        const auto password = co_await m_tokens->read(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesPassword));
+        const auto apiKey =
+            co_await m_tokens->read(QString::fromLatin1(core::TokenStore::kOpenSubtitlesApiKey));
+        const auto username =
+            co_await m_tokens->read(QString::fromLatin1(core::TokenStore::kOpenSubtitlesUsername));
+        const auto password =
+            co_await m_tokens->read(QString::fromLatin1(core::TokenStore::kOpenSubtitlesPassword));
         if (!apiKey.isEmpty()) {
             m_apiKey = apiKey;
         }
@@ -250,8 +250,7 @@ QCoro::Task<void> SubtitlesSettingsViewModel::loadTask()
             m_password = password;
         }
         Q_EMIT credentialInputChanged();
-        const bool saved = !apiKey.isEmpty() && !username.isEmpty()
-            && !password.isEmpty();
+        const bool saved = !apiKey.isEmpty() && !username.isEmpty() && !password.isEmpty();
         if (saved != m_credentialsSaved) {
             m_credentialsSaved = saved;
             Q_EMIT credentialsSavedChanged();
@@ -259,8 +258,7 @@ QCoro::Task<void> SubtitlesSettingsViewModel::loadTask()
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), kStatusError);
     } catch (const std::exception& e) {
-        setStatus(core::describeError(e, "subtitles settings/load"),
-            kStatusError);
+        setStatus(core::describeError(e, "subtitles settings/load"), kStatusError);
     }
     setBusy(false);
 }
@@ -274,22 +272,21 @@ QCoro::Task<void> SubtitlesSettingsViewModel::testTask()
         co_return;
     }
     setBusy(true);
-    setStatus(i18nc("@info subtitles settings status, in progress",
-        "Testing OpenSubtitles credentials…"), kStatusInfo);
-    api::OpenSubtitlesClient client(m_http, apiKey, username,
-        password);
+    setStatus(
+        i18nc("@info subtitles settings status, in progress", "Testing OpenSubtitles credentials…"),
+        kStatusInfo);
+    api::OpenSubtitlesClient client(m_http, apiKey, username, password);
     try {
         co_await client.ensureLoggedIn();
         domain::SubtitleSearchQuery q;
         q.key.kind = domain::MediaKind::Movie;
         q.key.imdbId = QStringLiteral("tt0133093");
         const auto hits = co_await client.search(q);
-        setStatus(i18nc("@info subtitles connection probe",
-            "Connected · %1 results found.", hits.size()),
+        setStatus(
+            i18nc("@info subtitles connection probe", "Connected · %1 results found.", hits.size()),
             kStatusPositive);
     } catch (const std::exception& e) {
-        setStatus(core::describeError(e, "subtitles settings/test"),
-            kStatusError);
+        setStatus(core::describeError(e, "subtitles settings/test"), kStatusError);
     }
     setBusy(false);
 }
@@ -304,27 +301,23 @@ QCoro::Task<void> SubtitlesSettingsViewModel::saveTask()
     }
     setBusy(true);
     try {
-        co_await m_tokens->write(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesApiKey),
-            apiKey);
-        co_await m_tokens->write(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesUsername),
-            username);
-        co_await m_tokens->write(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesPassword),
-            password);
+        co_await m_tokens->write(QString::fromLatin1(core::TokenStore::kOpenSubtitlesApiKey),
+                                 apiKey);
+        co_await m_tokens->write(QString::fromLatin1(core::TokenStore::kOpenSubtitlesUsername),
+                                 username);
+        co_await m_tokens->write(QString::fromLatin1(core::TokenStore::kOpenSubtitlesPassword),
+                                 password);
         if (!m_credentialsSaved) {
             m_credentialsSaved = true;
             Q_EMIT credentialsSavedChanged();
         }
         Q_EMIT credentialsChanged();
-        setStatus(i18nc("@info subtitles settings status",
-            "Credentials saved to keyring."), kStatusPositive);
+        setStatus(i18nc("@info subtitles settings status", "Credentials saved to keyring."),
+                  kStatusPositive);
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), kStatusError);
     } catch (const std::exception& e) {
-        setStatus(core::describeError(e, "subtitles settings/save"),
-            kStatusError);
+        setStatus(core::describeError(e, "subtitles settings/save"), kStatusError);
     }
     setBusy(false);
 }
@@ -333,12 +326,9 @@ QCoro::Task<void> SubtitlesSettingsViewModel::removeTask()
 {
     setBusy(true);
     try {
-        co_await m_tokens->remove(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesApiKey));
-        co_await m_tokens->remove(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesUsername));
-        co_await m_tokens->remove(
-            QString::fromLatin1(core::TokenStore::kOpenSubtitlesPassword));
+        co_await m_tokens->remove(QString::fromLatin1(core::TokenStore::kOpenSubtitlesApiKey));
+        co_await m_tokens->remove(QString::fromLatin1(core::TokenStore::kOpenSubtitlesUsername));
+        co_await m_tokens->remove(QString::fromLatin1(core::TokenStore::kOpenSubtitlesPassword));
         m_apiKey.clear();
         m_username.clear();
         m_password.clear();
@@ -348,13 +338,12 @@ QCoro::Task<void> SubtitlesSettingsViewModel::removeTask()
             Q_EMIT credentialsSavedChanged();
         }
         Q_EMIT credentialsChanged();
-        setStatus(i18nc("@info subtitles settings status",
-            "Credentials removed from keyring."), kStatusInfo);
+        setStatus(i18nc("@info subtitles settings status", "Credentials removed from keyring."),
+                  kStatusInfo);
     } catch (const core::TokenStoreError& e) {
         setStatus(e.message(), kStatusError);
     } catch (const std::exception& e) {
-        setStatus(core::describeError(e, "subtitles settings/remove"),
-            kStatusError);
+        setStatus(core::describeError(e, "subtitles settings/remove"), kStatusError);
     }
     setBusy(false);
 }

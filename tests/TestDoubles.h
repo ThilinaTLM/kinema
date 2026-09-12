@@ -3,21 +3,15 @@
 
 #pragma once
 
-#include "api/CinemetaClient.h"
-#include "domain/Indexer.h"
-#include "api/IndexerSelector.h"
-#include "api/TmdbClient.h"
-#include "api/TorrentioIndexer.h"
+#include "api/cinemeta/CinemetaClient.h"
+#include "api/indexers/IndexerSelector.h"
+#include "api/indexers/TorrentioIndexer.h"
+#include "api/tmdb/TmdbClient.h"
 #include "config/IndexerSettings.h"
-
-#include <KConfig>
-#include <KSharedConfig>
 #include "core/io/HttpClient.h"
 #include "core/io/HttpError.h"
 #include "core/persistence/TokenStore.h"
-
-#include <QCoro/QCoroSignal>
-#include <QCoro/QCoroTask>
+#include "domain/Indexer.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -26,6 +20,12 @@
 #include <QNetworkRequest>
 #include <QSet>
 #include <QTimer>
+
+#include <KConfig>
+#include <KSharedConfig>
+
+#include <QCoro/QCoroSignal>
+#include <QCoro/QCoroTask>
 
 #include <optional>
 #include <stdexcept>
@@ -51,7 +51,7 @@ inline QCoro::Task<void> nextEventLoopTurn()
 inline QJsonDocument loadJsonFixture(const char* name)
 {
     QFile f(QStringLiteral(KINEMA_TEST_FIXTURES_DIR) + QLatin1Char('/')
-        + QString::fromLatin1(name));
+            + QString::fromLatin1(name));
     if (!f.open(QIODevice::ReadOnly)) {
         throw std::runtime_error("could not open fixture");
     }
@@ -63,7 +63,8 @@ class FakeHttpClient : public core::HttpClient
 public:
     enum class Method { Get, Post, Delete, Head };
 
-    struct Call {
+    struct Call
+    {
         bool json = false;
         bool usedRequest = false;
         QUrl url;
@@ -72,10 +73,7 @@ public:
         QByteArray body;
     };
 
-    explicit FakeHttpClient(QObject* parent = nullptr)
-        : HttpClient(parent)
-    {
-    }
+    explicit FakeHttpClient(QObject* parent = nullptr) : HttpClient(parent) { }
 
     QList<Call> calls;
     QList<QJsonDocument> jsonReplies;
@@ -85,89 +83,83 @@ public:
 
     QCoro::Task<QByteArray> get(QUrl url) override
     {
-        calls.append({ false, false, url, {}, Method::Get, {} });
+        calls.append({false, false, url, {}, Method::Get, {}});
         if (nextError) {
             throw *nextError;
         }
-        co_return byteReplies.isEmpty() ? QByteArray {} : byteReplies.takeFirst();
+        co_return byteReplies.isEmpty() ? QByteArray{} : byteReplies.takeFirst();
     }
 
     QCoro::Task<QJsonDocument> getJson(QUrl url) override
     {
-        calls.append({ true, false, url, {}, Method::Get, {} });
+        calls.append({true, false, url, {}, Method::Get, {}});
         if (nextError) {
             throw *nextError;
         }
-        co_return jsonReplies.isEmpty() ? QJsonDocument {} : jsonReplies.takeFirst();
+        co_return jsonReplies.isEmpty() ? QJsonDocument{} : jsonReplies.takeFirst();
     }
 
     QCoro::Task<QByteArray> get(QNetworkRequest request) override
     {
-        calls.append({ false, true, {}, request, Method::Get, {} });
+        calls.append({false, true, {}, request, Method::Get, {}});
         if (nextError) {
             throw *nextError;
         }
-        co_return byteReplies.isEmpty() ? QByteArray {} : byteReplies.takeFirst();
+        co_return byteReplies.isEmpty() ? QByteArray{} : byteReplies.takeFirst();
     }
 
     QCoro::Task<QJsonDocument> getJson(QNetworkRequest request) override
     {
-        calls.append({ true, true, {}, request, Method::Get, {} });
+        calls.append({true, true, {}, request, Method::Get, {}});
         if (nextError) {
             throw *nextError;
         }
-        co_return jsonReplies.isEmpty() ? QJsonDocument {} : jsonReplies.takeFirst();
+        co_return jsonReplies.isEmpty() ? QJsonDocument{} : jsonReplies.takeFirst();
     }
 
-    QCoro::Task<QByteArray> postJson(QNetworkRequest request,
-        const QByteArray& body) override
+    QCoro::Task<QByteArray> postJson(QNetworkRequest request, const QByteArray& body) override
     {
-        calls.append({ false, true, {}, request, Method::Post, body });
+        calls.append({false, true, {}, request, Method::Post, body});
         if (nextError) {
             throw *nextError;
         }
-        co_return byteReplies.isEmpty() ? QByteArray {} : byteReplies.takeFirst();
+        co_return byteReplies.isEmpty() ? QByteArray{} : byteReplies.takeFirst();
     }
 
     QCoro::Task<QJsonDocument> postJsonForJson(QNetworkRequest request,
-        const QByteArray& body) override
+                                               const QByteArray& body) override
     {
-        calls.append({ true, true, {}, request, Method::Post, body });
+        calls.append({true, true, {}, request, Method::Post, body});
         if (nextError) {
             throw *nextError;
         }
-        co_return jsonReplies.isEmpty() ? QJsonDocument {} : jsonReplies.takeFirst();
+        co_return jsonReplies.isEmpty() ? QJsonDocument{} : jsonReplies.takeFirst();
     }
 
     QCoro::Task<QByteArray> del(QNetworkRequest request) override
     {
-        calls.append({ false, true, {}, request, Method::Delete, {} });
+        calls.append({false, true, {}, request, Method::Delete, {}});
         if (nextError) {
             throw *nextError;
         }
-        co_return byteReplies.isEmpty() ? QByteArray {} : byteReplies.takeFirst();
+        co_return byteReplies.isEmpty() ? QByteArray{} : byteReplies.takeFirst();
     }
 
-    QCoro::Task<QList<QPair<QByteArray, QByteArray>>> head(
-        QNetworkRequest request) override
+    QCoro::Task<QList<QPair<QByteArray, QByteArray>>> head(QNetworkRequest request) override
     {
-        calls.append({ false, true, {}, request, Method::Head, {} });
+        calls.append({false, true, {}, request, Method::Head, {}});
         if (nextError) {
             throw *nextError;
         }
-        co_return headerReplies.isEmpty()
-            ? QList<QPair<QByteArray, QByteArray>> {}
-            : headerReplies.takeFirst();
+        co_return headerReplies.isEmpty() ? QList<QPair<QByteArray, QByteArray>>{}
+                                          : headerReplies.takeFirst();
     }
 };
 
 class FakeTmdbClient : public api::TmdbClient
 {
 public:
-    explicit FakeTmdbClient(QObject* parent = nullptr)
-        : TmdbClient(nullptr, parent)
-    {
-    }
+    explicit FakeTmdbClient(QObject* parent = nullptr) : TmdbClient(nullptr, parent) { }
 
     int movieLookupCalls = 0;
     int seriesLookupCalls = 0;
@@ -207,29 +199,24 @@ public:
 class FakeIndexer : public domain::Indexer
 {
 public:
-    struct ScriptedCall {
+    struct ScriptedCall
+    {
         QList<domain::Stream> streams;
         std::optional<core::HttpError> error;
         bool suspend = false;
 
         ScriptedCall() = default;
         ScriptedCall(QList<domain::Stream> streams,
-            std::optional<core::HttpError> error = std::nullopt,
-            bool suspend = false)
-            : streams(std::move(streams))
-            , error(std::move(error))
-            , suspend(suspend)
-        {
-        }
+                     std::optional<core::HttpError> error = std::nullopt,
+                     bool suspend = false)
+            : streams(std::move(streams)), error(std::move(error)), suspend(suspend)
+        { }
     };
 
-    explicit FakeIndexer(
-        domain::IndexerKind kind = domain::IndexerKind::Torrentio,
-        QObject* parent = nullptr)
-        : Indexer(parent)
-        , m_kind(kind)
-    {
-    }
+    explicit FakeIndexer(domain::IndexerKind kind = domain::IndexerKind::Torrentio,
+                         QObject* parent = nullptr)
+        : Indexer(parent), m_kind(kind)
+    { }
 
     QList<ScriptedCall> scriptedCalls;
     int callCount = 0;
@@ -239,12 +226,10 @@ public:
     domain::IndexerKind kind() const noexcept override { return m_kind; }
     QString displayName() const override
     {
-        return QStringLiteral("FakeIndexer(%1)")
-            .arg(domain::indexerKindToString(m_kind));
+        return QStringLiteral("FakeIndexer(%1)").arg(domain::indexerKindToString(m_kind));
     }
 
-    QCoro::Task<QList<domain::Stream>> streams(domain::MediaKind kind,
-        QString streamId) override
+    QCoro::Task<QList<domain::Stream>> streams(domain::MediaKind kind, QString streamId) override
     {
         ++callCount;
         lastKind = kind;
@@ -278,10 +263,8 @@ private:
 class IndexerHarness
 {
 public:
-    explicit IndexerHarness(
-        domain::IndexerKind kind = domain::IndexerKind::Torrentio)
-        : m_settings(makeScratchConfig())
-        , m_selector(m_settings)
+    explicit IndexerHarness(domain::IndexerKind kind = domain::IndexerKind::Torrentio)
+        : m_settings(makeScratchConfig()), m_selector(m_settings)
     {
         m_settings.setActiveIndexer(kind);
         auto owned = std::make_unique<FakeIndexer>(kind);
@@ -298,57 +281,49 @@ private:
         // Tests usually run with QStandardPaths test mode set, so
         // this opens an isolated in-process config. We don't need
         // disk persistence — the harness lives for the test only.
-        return KSharedConfig::openConfig(
-            QStringLiteral("kinema-test-indexer-harness"),
-            KConfig::SimpleConfig,
-            QStandardPaths::TempLocation);
+        return KSharedConfig::openConfig(QStringLiteral("kinema-test-indexer-harness"),
+                                         KConfig::SimpleConfig,
+                                         QStandardPaths::TempLocation);
     }
 
     KSharedConfigPtr m_config;
     config::IndexerSettings m_settings;
     api::IndexerSelector m_selector;
-    FakeIndexer* m_fake { nullptr };
+    FakeIndexer* m_fake{nullptr};
 };
 
 class FakeCinemetaClient : public api::CinemetaClient
 {
 public:
-    struct MetaScript {
+    struct MetaScript
+    {
         domain::MetaDetail detail;
         std::optional<core::HttpError> error;
         bool suspend = false;
 
         MetaScript() = default;
         MetaScript(domain::MetaDetail detail,
-            std::optional<core::HttpError> error = std::nullopt,
-            bool suspend = false)
-            : detail(std::move(detail))
-            , error(std::move(error))
-            , suspend(suspend)
-        {
-        }
+                   std::optional<core::HttpError> error = std::nullopt,
+                   bool suspend = false)
+            : detail(std::move(detail)), error(std::move(error)), suspend(suspend)
+        { }
     };
 
-    struct SeriesScript {
+    struct SeriesScript
+    {
         domain::SeriesDetail detail;
         std::optional<core::HttpError> error;
         bool suspend = false;
 
         SeriesScript() = default;
         SeriesScript(domain::SeriesDetail detail,
-            std::optional<core::HttpError> error = std::nullopt,
-            bool suspend = false)
-            : detail(std::move(detail))
-            , error(std::move(error))
-            , suspend(suspend)
-        {
-        }
+                     std::optional<core::HttpError> error = std::nullopt,
+                     bool suspend = false)
+            : detail(std::move(detail)), error(std::move(error)), suspend(suspend)
+        { }
     };
 
-    explicit FakeCinemetaClient(QObject* parent = nullptr)
-        : CinemetaClient(nullptr, parent)
-    {
-    }
+    explicit FakeCinemetaClient(QObject* parent = nullptr) : CinemetaClient(nullptr, parent) { }
 
     QList<MetaScript> metaScripts;
     QList<SeriesScript> seriesScripts;
@@ -399,16 +374,13 @@ public:
 class FakeTokenStore : public core::TokenStore
 {
 public:
-    explicit FakeTokenStore(QObject* parent = nullptr)
-        : TokenStore(parent)
-    {
-    }
+    explicit FakeTokenStore(QObject* parent = nullptr) : TokenStore(parent) { }
 
     QHash<QString, QString> values;
     QSet<QString> failingReads;
     QSet<QString> failingWrites;
     QSet<QString> failingRemoves;
-    QString failureMessage { QStringLiteral("token-store failure") };
+    QString failureMessage{QStringLiteral("token-store failure")};
     QStringList readKeys;
     QStringList writtenKeys;
     QStringList removedKeys;

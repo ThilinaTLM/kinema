@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-#include "api/TmdbDiscoverUrl.h"
-#include "domain/Discover.h"
+#include "api/tmdb/TmdbDiscoverUrl.h"
 #include "core/util/DateWindow.h"
+#include "domain/Discover.h"
 
 #include <QDate>
 #include <QTest>
@@ -12,8 +12,8 @@
 using namespace kinema::api;
 using namespace kinema::domain;
 using kinema::core::DateRange;
-using kinema::core::DateWindow;
 using kinema::core::dateRangeFor;
+using kinema::core::DateWindow;
 using kinema::core::dateWindowFromString;
 using kinema::core::dateWindowToString;
 
@@ -67,60 +67,51 @@ private Q_SLOTS:
 
     void dateWindow_roundtrip_through_config_tokens()
     {
-        for (auto w : { DateWindow::PastMonth, DateWindow::Past3Months,
-                        DateWindow::ThisYear, DateWindow::Past3Years,
-                        DateWindow::Any }) {
+        for (auto w : {DateWindow::PastMonth,
+                       DateWindow::Past3Months,
+                       DateWindow::ThisYear,
+                       DateWindow::Past3Years,
+                       DateWindow::Any}) {
             QCOMPARE(dateWindowFromString(dateWindowToString(w)), w);
         }
     }
 
     void dateWindow_unknown_token_falls_back()
     {
-        QCOMPARE(dateWindowFromString(QStringLiteral("garbage")),
-            DateWindow::Past3Years);
-        QCOMPARE(dateWindowFromString(QStringLiteral("garbage"),
-                     DateWindow::Any),
-            DateWindow::Any);
+        QCOMPARE(dateWindowFromString(QStringLiteral("garbage")), DateWindow::Past3Years);
+        QCOMPARE(dateWindowFromString(QStringLiteral("garbage"), DateWindow::Any), DateWindow::Any);
     }
 
     // ---- discoverPath / discoverSortValue --------------------------------
 
     void discoverPath_branches_on_kind()
     {
-        QCOMPARE(tmdb::discoverPath(MediaKind::Movie),
-            QStringLiteral("/discover/movie"));
-        QCOMPARE(tmdb::discoverPath(MediaKind::Series),
-            QStringLiteral("/discover/tv"));
+        QCOMPARE(tmdb::discoverPath(MediaKind::Movie), QStringLiteral("/discover/movie"));
+        QCOMPARE(tmdb::discoverPath(MediaKind::Series), QStringLiteral("/discover/tv"));
     }
 
     void discoverSortValue_popularity_is_kind_independent()
     {
-        QCOMPARE(tmdb::discoverSortValue(MediaKind::Movie,
-                     DiscoverSort::Popularity),
-            QStringLiteral("popularity.desc"));
-        QCOMPARE(tmdb::discoverSortValue(MediaKind::Series,
-                     DiscoverSort::Popularity),
-            QStringLiteral("popularity.desc"));
+        QCOMPARE(tmdb::discoverSortValue(MediaKind::Movie, DiscoverSort::Popularity),
+                 QStringLiteral("popularity.desc"));
+        QCOMPARE(tmdb::discoverSortValue(MediaKind::Series, DiscoverSort::Popularity),
+                 QStringLiteral("popularity.desc"));
     }
 
     void discoverSortValue_releaseDate_switches_field_per_kind()
     {
-        QCOMPARE(tmdb::discoverSortValue(MediaKind::Movie,
-                     DiscoverSort::ReleaseDate),
-            QStringLiteral("primary_release_date.desc"));
-        QCOMPARE(tmdb::discoverSortValue(MediaKind::Series,
-                     DiscoverSort::ReleaseDate),
-            QStringLiteral("first_air_date.desc"));
+        QCOMPARE(tmdb::discoverSortValue(MediaKind::Movie, DiscoverSort::ReleaseDate),
+                 QStringLiteral("primary_release_date.desc"));
+        QCOMPARE(tmdb::discoverSortValue(MediaKind::Series, DiscoverSort::ReleaseDate),
+                 QStringLiteral("first_air_date.desc"));
     }
 
     void discoverSortValue_title_switches_field_per_kind()
     {
-        QCOMPARE(tmdb::discoverSortValue(MediaKind::Movie,
-                     DiscoverSort::TitleAsc),
-            QStringLiteral("original_title.asc"));
-        QCOMPARE(tmdb::discoverSortValue(MediaKind::Series,
-                     DiscoverSort::TitleAsc),
-            QStringLiteral("name.asc"));
+        QCOMPARE(tmdb::discoverSortValue(MediaKind::Movie, DiscoverSort::TitleAsc),
+                 QStringLiteral("original_title.asc"));
+        QCOMPARE(tmdb::discoverSortValue(MediaKind::Series, DiscoverSort::TitleAsc),
+                 QStringLiteral("name.asc"));
     }
 
     // ---- discoverQueryToQuery --------------------------------------------
@@ -130,12 +121,9 @@ private Q_SLOTS:
         DiscoverQuery q;
         q.kind = MediaKind::Movie;
         const auto u = tmdb::discoverQueryToQuery(q);
-        QCOMPARE(u.queryItemValue(QStringLiteral("include_adult")),
-            QStringLiteral("false"));
-        QCOMPARE(u.queryItemValue(QStringLiteral("include_video")),
-            QStringLiteral("false"));
-        QCOMPARE(u.queryItemValue(QStringLiteral("sort_by")),
-            QStringLiteral("popularity.desc"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("include_adult")), QStringLiteral("false"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("include_video")), QStringLiteral("false"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("sort_by")), QStringLiteral("popularity.desc"));
         QVERIFY(!u.hasQueryItem(QStringLiteral("page")));
         QVERIFY(!u.hasQueryItem(QStringLiteral("with_genres")));
         QVERIFY(!u.hasQueryItem(QStringLiteral("vote_count.gte")));
@@ -147,18 +135,16 @@ private Q_SLOTS:
         q.kind = MediaKind::Series;
         const auto u = tmdb::discoverQueryToQuery(q);
         QVERIFY(!u.hasQueryItem(QStringLiteral("include_video")));
-        QCOMPARE(u.queryItemValue(QStringLiteral("include_adult")),
-            QStringLiteral("false"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("include_adult")), QStringLiteral("false"));
     }
 
     void query_genres_joined_with_comma()
     {
         DiscoverQuery q;
         q.kind = MediaKind::Movie;
-        q.withGenreIds = { 28, 12, 35 };
+        q.withGenreIds = {28, 12, 35};
         const auto u = tmdb::discoverQueryToQuery(q);
-        QCOMPARE(u.queryItemValue(QStringLiteral("with_genres")),
-            QStringLiteral("28,12,35"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("with_genres")), QStringLiteral("28,12,35"));
     }
 
     void query_date_range_uses_movie_fields()
@@ -168,12 +154,10 @@ private Q_SLOTS:
         q.releasedGte = QDate(2026, 1, 1);
         q.releasedLte = QDate(2026, 4, 21);
         const auto u = tmdb::discoverQueryToQuery(q);
-        QCOMPARE(u.queryItemValue(
-                     QStringLiteral("primary_release_date.gte")),
-            QStringLiteral("2026-01-01"));
-        QCOMPARE(u.queryItemValue(
-                     QStringLiteral("primary_release_date.lte")),
-            QStringLiteral("2026-04-21"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("primary_release_date.gte")),
+                 QStringLiteral("2026-01-01"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("primary_release_date.lte")),
+                 QStringLiteral("2026-04-21"));
         QVERIFY(!u.hasQueryItem(QStringLiteral("first_air_date.gte")));
     }
 
@@ -184,9 +168,8 @@ private Q_SLOTS:
         q.releasedGte = QDate(2025, 1, 1);
         const auto u = tmdb::discoverQueryToQuery(q);
         QCOMPARE(u.queryItemValue(QStringLiteral("first_air_date.gte")),
-            QStringLiteral("2025-01-01"));
-        QVERIFY(!u.hasQueryItem(
-            QStringLiteral("primary_release_date.gte")));
+                 QStringLiteral("2025-01-01"));
+        QVERIFY(!u.hasQueryItem(QStringLiteral("primary_release_date.gte")));
     }
 
     void query_rating_sort_auto_adds_vote_count_floor()
@@ -195,10 +178,8 @@ private Q_SLOTS:
         q.kind = MediaKind::Movie;
         q.sort = DiscoverSort::Rating;
         const auto u = tmdb::discoverQueryToQuery(q);
-        QCOMPARE(u.queryItemValue(QStringLiteral("sort_by")),
-            QStringLiteral("vote_average.desc"));
-        QCOMPARE(u.queryItemValue(QStringLiteral("vote_count.gte")),
-            QStringLiteral("200"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("sort_by")), QStringLiteral("vote_average.desc"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("vote_count.gte")), QStringLiteral("200"));
     }
 
     void query_rating_sort_keeps_higher_user_floor()
@@ -208,8 +189,7 @@ private Q_SLOTS:
         q.sort = DiscoverSort::Rating;
         q.voteCountGte = 500;
         const auto u = tmdb::discoverQueryToQuery(q);
-        QCOMPARE(u.queryItemValue(QStringLiteral("vote_count.gte")),
-            QStringLiteral("500"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("vote_count.gte")), QStringLiteral("500"));
     }
 
     void query_non_rating_sort_respects_user_floor_only()
@@ -219,8 +199,7 @@ private Q_SLOTS:
         q.sort = DiscoverSort::Popularity;
         q.voteCountGte = 200;
         const auto u = tmdb::discoverQueryToQuery(q);
-        QCOMPARE(u.queryItemValue(QStringLiteral("vote_count.gte")),
-            QStringLiteral("200"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("vote_count.gte")), QStringLiteral("200"));
     }
 
     void query_non_rating_sort_without_floor_omits_it()
@@ -238,8 +217,7 @@ private Q_SLOTS:
         q.kind = MediaKind::Movie;
         q.voteAverageGte = 7.5;
         const auto u = tmdb::discoverQueryToQuery(q);
-        QCOMPARE(u.queryItemValue(QStringLiteral("vote_average.gte")),
-            QStringLiteral("7.5"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("vote_average.gte")), QStringLiteral("7.5"));
     }
 
     void query_page_omitted_when_one()
@@ -255,8 +233,7 @@ private Q_SLOTS:
         DiscoverQuery q;
         q.page = 3;
         const auto u = tmdb::discoverQueryToQuery(q);
-        QCOMPARE(u.queryItemValue(QStringLiteral("page")),
-            QStringLiteral("3"));
+        QCOMPARE(u.queryItemValue(QStringLiteral("page")), QStringLiteral("3"));
     }
 };
 

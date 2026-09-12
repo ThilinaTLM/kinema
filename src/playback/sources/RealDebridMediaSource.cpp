@@ -3,27 +3,23 @@
 
 #include "playback/sources/RealDebridMediaSource.h"
 
-#include "api/RealDebridClient.h"
 #include "playback/sources/DebridResolver.h"
 
 namespace kinema::playback::sources {
 
 RealDebridMediaSource::RealDebridMediaSource(core::HttpClient& http,
-    api::RealDebridClient& rd,
-    DebridResolver& resolver,
-    core::MediaCache& cache,
-    const config::TorrentStreamingSettings& settings)
-    : DebridHttpMediaSource(http, resolver, cache, settings,
-          "RealDebridMediaSource")
-    , m_rd(rd)
-{
-}
+                                             DebridResolver& resolver,
+                                             core::MediaCache& cache,
+                                             const config::TorrentStreamingSettings& settings)
+    : DebridHttpMediaSource(http, resolver, cache, settings, "RealDebridMediaSource")
+    , m_resolver(resolver)
+{ }
 
 RealDebridMediaSource::~RealDebridMediaSource() = default;
 
 bool RealDebridMediaSource::canHandle(const domain::Stream& s) const
 {
-    if (m_rd.token().isEmpty()) {
+    if (!m_resolver.isConfigured()) {
         return false;
     }
     // When RD is configured, route every stream with an actionable

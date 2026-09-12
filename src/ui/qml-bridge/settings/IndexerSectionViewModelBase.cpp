@@ -3,20 +3,19 @@
 
 #include "ui/qml-bridge/settings/IndexerSectionViewModelBase.h"
 
-#include "ui/qml-bridge/settings/SettingsStatus.h"
-#include "api/IndexerSelector.h"
+#include "api/indexers/IndexerSelector.h"
 #include "domain/Indexer.h"
 #include "kinema_log_ui.h"
+#include "ui/qml-bridge/settings/SettingsStatus.h"
+
 #include <KLocalizedString>
 
 namespace kinema::ui::qml::settings {
 
-IndexerSectionViewModelBase::IndexerSectionViewModelBase(
-    api::IndexerSelector* indexers, QObject* parent)
-    : QObject(parent)
-    , m_indexers(indexers)
-{
-}
+IndexerSectionViewModelBase::IndexerSectionViewModelBase(api::IndexerSelector* indexers,
+                                                         QObject* parent)
+    : QObject(parent), m_indexers(indexers)
+{ }
 
 void IndexerSectionViewModelBase::setStatus(const QString& message, int kind)
 {
@@ -45,26 +44,25 @@ void IndexerSectionViewModelBase::testConnection()
 
 QCoro::Task<void> IndexerSectionViewModelBase::testTask()
 {
-    auto* indexer = m_indexers
-        ? m_indexers->find(indexerKind())
-        : nullptr;
+    auto* indexer = m_indexers ? m_indexers->find(indexerKind()) : nullptr;
     const auto name = providerName();
     if (!indexer) {
-        setStatus(i18nc("@info indexer settings status",
-            "%1 is not registered.", name), kStatusError);
+        setStatus(i18nc("@info indexer settings status", "%1 is not registered.", name),
+                  kStatusError);
         co_return;
     }
     setBusy(true);
-    setStatus(i18nc("@info indexer settings status, in progress",
-        "Probing %1…", name), kStatusInfo);
+    setStatus(i18nc("@info indexer settings status, in progress", "Probing %1…", name),
+              kStatusInfo);
     const bool ok = co_await indexer->testConnection();
     if (ok) {
-        setStatus(i18nc("@info indexer settings status",
-            "%1 is reachable.", name), kStatusPositive);
+        setStatus(i18nc("@info indexer settings status", "%1 is reachable.", name),
+                  kStatusPositive);
     } else {
         setStatus(i18nc("@info indexer settings status",
-            "%1 did not respond. Check the base URL or try again later.",
-            name), kStatusError);
+                        "%1 did not respond. Check the base URL or try again later.",
+                        name),
+                  kStatusError);
     }
     setBusy(false);
 }

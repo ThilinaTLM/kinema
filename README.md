@@ -243,8 +243,9 @@ Useful CMake options:
 
 The full per-distro dependency lists, container recipes, and the
 release matrix live in [`packaging/README.md`](packaging/README.md).
-Contributor conventions and module layout are in
-[`AGENTS.md`](AGENTS.md).
+The dependency rules and source layout are documented in
+[`docs/Architecture.md`](docs/Architecture.md); contributor conventions are
+in [`AGENTS.md`](AGENTS.md).
 
 ## Troubleshooting
 

@@ -8,16 +8,15 @@
 #include "domain/PlaybackContext.h"
 #include "playback/events/PlaybackEvent.h"
 
-#include <QCoro/QCoroTask>
-
 #include <QObject>
 #include <QString>
+
+#include <QCoro/QCoroTask>
 
 #include <memory>
 #include <optional>
 
 namespace kinema::playback::adapters {
-class EmbeddedMpvPlayerAdapter;
 class ExternalPlayerAdapter;
 }
 
@@ -26,8 +25,9 @@ class PlaybackEventStream;
 }
 
 namespace kinema::playback::ports {
+class EmbeddedPlayerPort;
 class PlayerPort;
-}
+} // namespace kinema::playback::ports
 
 namespace kinema::playback::resume {
 class ResumeUseCase;
@@ -56,17 +56,17 @@ class PlaybackSessionManager : public QObject
     Q_OBJECT
 public:
     PlaybackSessionManager(events::PlaybackEventStream& eventStream,
-        transfer::TransferUseCase& transfers,
-        adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
-        adapters::ExternalPlayerAdapter* externalAdapter,
-        QObject* parent = nullptr);
+                           transfer::TransferUseCase& transfers,
+                           ports::EmbeddedPlayerPort* embeddedAdapter,
+                           adapters::ExternalPlayerAdapter* externalAdapter,
+                           QObject* parent = nullptr);
     /// Test/command-only constructor. `play()`/`download()` fail with a
     /// status message unless a transfer use-case is supplied by the full
     /// constructor, but transport methods remain usable for projections.
     PlaybackSessionManager(events::PlaybackEventStream& eventStream,
-        adapters::EmbeddedMpvPlayerAdapter* embeddedAdapter,
-        adapters::ExternalPlayerAdapter* externalAdapter,
-        QObject* parent = nullptr);
+                           ports::EmbeddedPlayerPort* embeddedAdapter,
+                           adapters::ExternalPlayerAdapter* externalAdapter,
+                           QObject* parent = nullptr);
     ~PlaybackSessionManager() override;
 
     PlaybackSession* activeSession() const noexcept { return m_session.get(); }
@@ -76,16 +76,14 @@ public:
     void setSeriesSessionService(series::SeriesSessionService* series) noexcept;
 
 public Q_SLOTS:
-    virtual void play(const domain::Stream& stream,
-        const domain::PlaybackContext& ctx);
+    virtual void play(const domain::Stream& stream, const domain::PlaybackContext& ctx);
     void playWithBackend(const domain::Stream& stream,
-        const domain::PlaybackContext& ctx,
-        domain::DownloadBackendKind backend);
-    void download(const domain::Stream& stream,
-        const domain::PlaybackContext& ctx);
+                         const domain::PlaybackContext& ctx,
+                         domain::DownloadBackendKind backend);
+    void download(const domain::Stream& stream, const domain::PlaybackContext& ctx);
     void downloadWithBackend(const domain::Stream& stream,
-        const domain::PlaybackContext& ctx,
-        domain::DownloadBackendKind backend);
+                             const domain::PlaybackContext& ctx,
+                             domain::DownloadBackendKind backend);
 
     virtual void pause();
     virtual void resume();
@@ -98,8 +96,7 @@ public Q_SLOTS:
     virtual void setPlaybackRate(double factor);
     virtual void selectAudioTrack(int id);
     virtual void selectSubtitleTrack(int id);
-    virtual void attachSubtitle(const QString& localPath,
-        const QString& language = {});
+    virtual void attachSubtitle(const QString& localPath, const QString& language = {});
     virtual void playNextEpisode();
     virtual void playPreviousEpisode();
 
@@ -116,24 +113,24 @@ Q_SIGNALS:
 private:
     void supersedeActiveSession();
     domain::PlaybackContext effectiveContext(const domain::Stream& stream,
-        const domain::PlaybackContext& ctx) const;
+                                             const domain::PlaybackContext& ctx) const;
     void startPlay(const domain::Stream& stream,
-        const domain::PlaybackContext& ctx,
-        std::optional<domain::DownloadBackendKind> backendOverride);
+                   const domain::PlaybackContext& ctx,
+                   std::optional<domain::DownloadBackendKind> backendOverride);
     QCoro::Task<void> playTask(PlaybackSessionId sessionId,
-        domain::Stream stream,
-        domain::PlaybackContext ctx,
-        std::optional<domain::DownloadBackendKind> backendOverride);
+                               domain::Stream stream,
+                               domain::PlaybackContext ctx,
+                               std::optional<domain::DownloadBackendKind> backendOverride);
     void stampAdapters(const domain::PlaybackContext& ctx);
     ports::PlayerPort* commandPlayer() const noexcept;
     void onEvent(const events::PlaybackEvent& event);
 
     events::PlaybackEventStream& m_eventStream;
-    transfer::TransferUseCase* m_transfers {};
-    adapters::EmbeddedMpvPlayerAdapter* m_embeddedAdapter;
+    transfer::TransferUseCase* m_transfers{};
+    ports::EmbeddedPlayerPort* m_embeddedAdapter;
     adapters::ExternalPlayerAdapter* m_externalAdapter;
-    resume::ResumeUseCase* m_resume {};
-    series::SeriesSessionService* m_series {};
+    resume::ResumeUseCase* m_resume{};
+    series::SeriesSessionService* m_series{};
     std::unique_ptr<PlaybackSession> m_session;
 };
 

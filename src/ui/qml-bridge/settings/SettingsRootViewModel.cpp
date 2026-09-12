@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ui/qml-bridge/settings/SettingsRootViewModel.h"
-#include "api/IndexerSelector.h"
+
+#include "api/indexers/IndexerSelector.h"
 #include "config/AppSettings.h"
 #include "controllers/DownloadController.h"
 #include "core/io/HttpClient.h"
@@ -17,49 +18,57 @@ namespace kinema::ui::qml::settings {
 // ============================== Root ======================================
 
 SettingsRootViewModel::SettingsRootViewModel(core::HttpClient* http,
-    core::TokenStore* tokens, api::IndexerSelector* indexers,
-    config::AppSettings& settings,
-    core::SubtitleCacheStore* subtitleCache,
-    core::MediaCache* mediaCache,
-    core::TorrentCache* torrentCache,
-    controllers::DownloadController* downloads,
-    kinema::ui::ImageLoader* imageLoader,
-    QObject* parent)
+                                             core::TokenStore* tokens,
+                                             api::IndexerSelector* indexers,
+                                             config::AppSettings& settings,
+                                             core::SubtitleCacheStore* subtitleCache,
+                                             core::MediaCache* mediaCache,
+                                             core::TorrentCache* torrentCache,
+                                             controllers::DownloadController* downloads,
+                                             kinema::ui::ImageLoader* imageLoader,
+                                             QObject* parent)
     : QObject(parent)
 {
     Q_ASSERT(mediaCache);
-    m_general = new GeneralSettingsViewModel(settings.search(),
-        settings.appearance(), this);
+    m_general = new GeneralSettingsViewModel(settings.search(), settings.appearance(), this);
     m_tmdb = new TmdbSettingsViewModel(http, tokens, this);
-    m_debrid = new DebridSettingsViewModel(http, tokens,
-        settings.debrid(), this);
-    m_indexers = new IndexerSettingsViewModel(indexers,
-        settings.indexers(), settings.torrentio(),
-        settings.peerflix(), this);
+    m_debrid = new DebridSettingsViewModel(http, tokens, settings.debrid(), this);
+    m_indexers = new IndexerSettingsViewModel(
+        indexers, settings.indexers(), settings.torrentio(), settings.peerflix(), this);
     m_streams = new StreamsSettingsViewModel(settings.filter(), this);
     m_player = new PlayerSettingsViewModel(settings.player(), this);
-    m_subs = new SubtitlesSettingsViewModel(http, tokens,
-        settings.subtitle(), settings.cache(), subtitleCache, this);
-    m_torrentStreaming = new TorrentStreamingSettingsViewModel(
-        settings.torrentStreaming(), *mediaCache, downloads,
-        torrentCache, subtitleCache, imageLoader, this);
+    m_subs = new SubtitlesSettingsViewModel(
+        http, tokens, settings.subtitle(), settings.cache(), subtitleCache, this);
+    m_torrentStreaming = new TorrentStreamingSettingsViewModel(settings.torrentStreaming(),
+                                                               *mediaCache,
+                                                               downloads,
+                                                               torrentCache,
+                                                               subtitleCache,
+                                                               imageLoader,
+                                                               this);
 
     // Forward token / credential changes through the root so
-    // `MainController` can route them to `TokenController`.
-    connect(m_tmdb, &TmdbSettingsViewModel::tokenChanged, this,
-        &SettingsRootViewModel::tmdbTokenChanged);
+    // `ShellViewModel` can route them to `TokenController`.
+    connect(m_tmdb,
+            &TmdbSettingsViewModel::tokenChanged,
+            this,
+            &SettingsRootViewModel::tmdbTokenChanged);
     connect(m_debrid->realDebrid(),
-        &RealDebridSectionViewModel::credentialChanged, this,
-        &SettingsRootViewModel::realDebridTokenChanged);
+            &RealDebridSectionViewModel::credentialChanged,
+            this,
+            &SettingsRootViewModel::realDebridTokenChanged);
     connect(m_debrid->allDebrid(),
-        &AllDebridSectionViewModel::credentialChanged, this,
-        &SettingsRootViewModel::allDebridApiKeyChanged);
+            &AllDebridSectionViewModel::credentialChanged,
+            this,
+            &SettingsRootViewModel::allDebridApiKeyChanged);
     connect(m_debrid,
-        &DebridSettingsViewModel::activeProviderChanged, this,
-        &SettingsRootViewModel::activeDebridProviderChanged);
+            &DebridSettingsViewModel::activeProviderChanged,
+            this,
+            &SettingsRootViewModel::activeDebridProviderChanged);
     connect(m_subs,
-        &SubtitlesSettingsViewModel::credentialsChanged, this,
-        &SettingsRootViewModel::subtitleCredentialsChanged);
+            &SubtitlesSettingsViewModel::credentialsChanged,
+            this,
+            &SettingsRootViewModel::subtitleCredentialsChanged);
 
     // Initial async loads. Each VM's loadTask is independent and
     // safe to run concurrently — they hit different keyring keys.
