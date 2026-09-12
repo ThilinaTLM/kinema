@@ -54,7 +54,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-              ca-certificates git pkg-config dbus-daemon \
+              ca-certificates git pkg-config \
               cmake ninja-build g++ \
               extra-cmake-modules gettext \
               qt6-base-dev qt6-base-private-dev \
@@ -88,4 +88,4 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Run tests
-        run: dbus-run-session -- ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure
