@@ -38,7 +38,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ env.HEAD_SHA }}
       - name: Check changed C++ lines
-        run: scripts/check-format.sh "$BASE_SHA" "$HEAD_SHA"
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          scripts/check-format.sh "$BASE_SHA" "$HEAD_SHA"
 
   qml-lint-build-test:
     name: QML lint, build, and tests
