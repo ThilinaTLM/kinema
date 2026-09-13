@@ -51,7 +51,6 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       QT_QPA_PLATFORM: offscreen
       QT_QUICK_BACKEND: software
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
       CCACHE_COMPRESS: "true"
     steps:
@@ -81,6 +80,8 @@ jobs:
               qml6-module-org-kde-kirigamiaddons-settings \
               qml6-module-org-kde-desktop
       - uses: actions/checkout@v7
+      - name: Configure compiler cache
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
       - name: Restore compiler cache
         uses: actions/cache@v6
         with:
