@@ -33,7 +33,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates git clang-format
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ env.HEAD_SHA }}
@@ -51,13 +51,16 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       QT_QPA_PLATFORM: offscreen
       QT_QUICK_BACKEND: software
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPRESS: "true"
     steps:
       - name: Install build and runtime dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
               ca-certificates git pkg-config dbus-daemon \
-              cmake ninja-build g++ \
+              cmake ninja-build g++ ccache \
               extra-cmake-modules gettext \
               qt6-base-dev qt6-base-private-dev \
               qt6-declarative-dev qt6-tools-dev qt6-svg-dev \
@@ -77,17 +80,27 @@ jobs:
               qml6-module-org-kde-kirigamiaddons-formcard \
               qml6-module-org-kde-kirigamiaddons-settings \
               qml6-module-org-kde-desktop
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - name: Restore compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-trixie-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            ccache-trixie-${{ runner.arch }}-
       - name: Configure
         run: |
           cmake -B build -S . -G Ninja \
               -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DBUILD_TESTING=ON \
               -DKINEMA_ENABLE_MPV_EMBED=ON \
               -DKINEMA_TMDB_DEFAULT_TOKEN=""
       - name: Lint QML
         run: cmake --build build --target all_qmllint
       - name: Build
-        run: cmake --build build
+        run: |
+          cmake --build build
+          ccache --show-stats
       - name: Run tests
         run: dbus-run-session -- ctest --test-dir build --output-on-failure
