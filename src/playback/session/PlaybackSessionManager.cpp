@@ -41,6 +41,10 @@ PlaybackSessionManager::PlaybackSessionManager(events::PlaybackEventStream& even
             this,
             &PlaybackSessionManager::onEvent);
     if (m_embeddedAdapter) {
+        if (auto* adapterObject = dynamic_cast<QObject*>(m_embeddedAdapter)) {
+            connect(
+                adapterObject, &QObject::destroyed, this, [this] { m_embeddedAdapter = nullptr; });
+        }
         m_embeddedAdapter->setVisibilityHandler(
             [this](bool visible) { Q_EMIT visibilityChanged(visible); });
         m_embeddedAdapter->setStatusHandler(
@@ -62,6 +66,10 @@ PlaybackSessionManager::PlaybackSessionManager(events::PlaybackEventStream& even
             this,
             &PlaybackSessionManager::onEvent);
     if (m_embeddedAdapter) {
+        if (auto* adapterObject = dynamic_cast<QObject*>(m_embeddedAdapter)) {
+            connect(
+                adapterObject, &QObject::destroyed, this, [this] { m_embeddedAdapter = nullptr; });
+        }
         m_embeddedAdapter->setVisibilityHandler(
             [this](bool visible) { Q_EMIT visibilityChanged(visible); });
         m_embeddedAdapter->setStatusHandler(

@@ -3,6 +3,7 @@
 # Kinema
 
 [![Latest release](https://img.shields.io/github/v/release/ThilinaTLM/kinema?sort=semver&display_name=tag&label=release&color=8b5cf6)](https://github.com/ThilinaTLM/kinema/releases/latest)
+[![CI](https://github.com/ThilinaTLM/kinema/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ThilinaTLM/kinema/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/github/license/ThilinaTLM/kinema?color=blue)](LICENSE)
 [![KDE Plasma 6](https://img.shields.io/badge/KDE-Plasma%206-1d99f3?logo=kde&logoColor=white)](https://kde.org/plasma-desktop/)
 
@@ -227,6 +228,19 @@ cmake --build build -j$(nproc)
 ctest --test-dir build --output-on-failure
 ./build/bin/kinema
 ```
+
+Before opening a pull request, run the same quality checks used by CI:
+
+```bash
+./scripts/check-format.sh origin/main HEAD
+cmake --build build --target all_qmllint
+ctest --test-dir build --output-on-failure
+```
+
+The format check covers changed C++ lines so existing formatting debt does not
+block unrelated work. QML lint warnings are currently informational; lint errors
+fail CI. Pull requests and pushes to `main` run these checks plus a clean build
+with embedded-player support enabled.
 
 `./scripts/install.sh` builds and installs into `$HOME/.local` (no
 sudo), refreshes the KDE/XDG caches, and makes Kinema show up in the
