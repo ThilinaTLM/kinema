@@ -242,6 +242,15 @@ block unrelated work. QML lint warnings are currently informational; lint errors
 fail CI. Pull requests and pushes to `main` run these checks plus a clean build
 with embedded-player support enabled.
 
+CI uses an unoptimized Debug build with lightweight debug information
+(`-O0 -g1`) and the `mold` linker; local and release build defaults are unchanged.
+Compiler objects are cached by compiler version and CI profile. Cold runs compile
+all objects; subsequent matching runs can reuse them. Pull-request caches cannot
+seed `main` builds. Per-step timing and memory usage appear in the job logs,
+compiler-cache statistics in the job summary, and `.ninja_log` plus cache statistics
+in the seven-day `ci-build-diagnostics` artifact. QML lint also builds its C++
+dependencies, so its step duration is not just linting time.
+
 `./scripts/install.sh` builds and installs into `$HOME/.local` (no
 sudo), refreshes the KDE/XDG caches, and makes Kinema show up in the
 Plasma launcher. `./scripts/uninstall.sh` removes it. Both accept

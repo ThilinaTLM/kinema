@@ -53,13 +53,14 @@ jobs:
       QT_QUICK_BACKEND: software
       CCACHE_MAXSIZE: 1G
       CCACHE_COMPRESS: "true"
+      CCACHE_COMPILERCHECK: content
     steps:
       - name: Install build and runtime dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
               ca-certificates git pkg-config \
-              cmake ninja-build g++ ccache \
+              cmake ninja-build g++ ccache mold time \
               extra-cmake-modules gettext \
               qt6-base-dev qt6-base-private-dev \
               qt6-declarative-dev qt6-tools-dev qt6-svg-dev \
@@ -81,27 +82,64 @@ jobs:
               qml6-module-org-kde-desktop
       - uses: actions/checkout@v7
       - name: Configure compiler cache
-        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+        id: compiler-cache
+        run: |
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+          echo "compiler-version=$(g++ -dumpfullversion -dumpversion)" >> "$GITHUB_OUTPUT"
       - name: Restore compiler cache
         uses: actions/cache@v6
         with:
           path: .ccache
-          key: ccache-trixie-${{ runner.arch }}-${{ github.sha }}
+          key: ccache-v2-trixie-${{ runner.arch }}-gcc${{ steps.compiler-cache.outputs.compiler-version }}-${{ hashFiles('.github/workflows/ci.yml') }}-${{ github.sha }}
           restore-keys: |
-            ccache-trixie-${{ runner.arch }}-
+            ccache-v2-trixie-${{ runner.arch }}-gcc${{ steps.compiler-cache.outputs.compiler-version }}-${{ hashFiles('.github/workflows/ci.yml') }}-
+      - name: Report build environment
+        run: |
+          echo "Available CPUs: $(nproc)"
+          free -h
+          g++ --version
+          cmake --version
+          ninja --version
+          ccache --version
+          mold --version
+          ccache --show-config
+          ccache --zero-stats
       - name: Configure
         run: |
           cmake -B build -S . -G Ninja \
               -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_CXX_FLAGS_DEBUG="-O0 -g1" \
+              -DCMAKE_LINKER_TYPE=MOLD \
               -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DBUILD_TESTING=ON \
               -DKINEMA_ENABLE_MPV_EMBED=ON \
               -DKINEMA_TMDB_DEFAULT_TOKEN=""
       - name: Lint QML
-        run: cmake --build build --target all_qmllint
+        run: /usr/bin/time -v cmake --build build --target all_qmllint
       - name: Build
-        run: |
-          cmake --build build
-          ccache --show-stats
+        run: /usr/bin/time -v cmake --build build
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+      - name: Report compiler cache statistics
+        if: always() && steps.compiler-cache.outcome == 'success'
+        run: |
+          mkdir -p build
+          ccache --show-stats --verbose > build/ccache-stats.txt
+          cat build/ccache-stats.txt
+          {
+            echo '### Compiler cache statistics (this run)'
+            echo '```text'
+            cat build/ccache-stats.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-build-diagnostics
+          path: |
+            build/.ninja_log
+            build/ccache-stats.txt
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
