@@ -185,14 +185,31 @@ FINAL_APPIMAGE="Kinema-${VERSION}-x86_64.AppImage"
 # wayland-shell-integration plugin dirs.
 export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so"
 
+# linuxdeploy's system-library excludelist omits PipeWire. Debian's libmpv
+# links to it directly, though, so the executable cannot even start on hosts
+# without PipeWire (for example, the AppImage catalog's test image). Force the
+# library into the bundle; linuxdeploy will deploy any non-system dependencies.
+PIPEWIRE_LIBRARY="$(ldconfig -p | awk '$1 == "libpipewire-0.3.so.0" && !found { path = $NF; found = 1 } END { if (found) print path; else exit 1 }')"
+PIPEWIRE_LIBRARY="$(readlink -f "${PIPEWIRE_LIBRARY}")"
+
 log "Running linuxdeploy + qt plugin (deploy only)"
 LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
 "${LINUXDEPLOY}" \
     --appdir "${APPDIR}" \
     --executable "${APPDIR}/usr/bin/kinema" \
+    --library "${PIPEWIRE_LIBRARY}" \
     --desktop-file "${APPDIR}/dev.tlmtech.kinema.desktop" \
     --icon-file "${APPDIR}/dev.tlmtech.kinema.svg" \
     --plugin qt
+
+PIPEWIRE_BUNDLED="${APPDIR}/usr/lib/$(basename "${PIPEWIRE_LIBRARY}")"
+if [[ ! -f "${PIPEWIRE_BUNDLED}" ]]; then
+    echo "build-appimage.sh: linuxdeploy did not bundle ${PIPEWIRE_LIBRARY}" >&2
+    exit 3
+fi
+# --library copies the fully versioned file but does not create its SONAME link.
+ln -sf "$(basename "${PIPEWIRE_BUNDLED}")" \
+    "${APPDIR}/usr/lib/libpipewire-0.3.so.0"
 
 # ---------------------------------------------------------------------------
 # 3b. Manually deploy KF6 platform plugins that linuxdeploy-plugin-qt has
