@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!dependencies.lock.json
+!fetch-source.py
+!build-dependencies.sh
+!Test.Dockerfile
+!install-test-deps.sh

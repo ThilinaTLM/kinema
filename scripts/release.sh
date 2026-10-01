@@ -77,8 +77,17 @@ version, today, path = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path, encoding="utf-8") as f:
     text = f.read()
 
-if f'version="{version}"' in text:
-    print(f"metainfo already has a {version} entry; leaving it untouched.")
+existing = re.search(r'<release\b[^>]*\bversion="' + re.escape(version) + r'"[^>]*>', text)
+if existing:
+    # main may already describe the upcoming development release. Finalize its
+    # type/date rather than inserting a duplicate or retaining an old date.
+    opening = existing.group(0)
+    opening = re.sub(r'\s+(?:type|date)="[^"]*"', '', opening)
+    opening = opening[:-1] + f' type="stable" date="{today}">'
+    text = text[:existing.start()] + opening + text[existing.end():]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    print(f"Finalized existing {version} release notes.")
     sys.exit(0)
 
 entry = (
@@ -99,7 +108,8 @@ grep -q "version=\"${VERSION}\"" "${METAINFO}" \
 
 echo "Release notes for ${VERSION}: edit them now."
 "${EDITOR:-${VISUAL:-vi}}" "${METAINFO}"
-xmllint --noout "${METAINFO}" 2>/dev/null || true
+appstreamcli validate --no-net "${METAINFO}" \
+    || die "AppStream metadata validation failed."
 
 # --- validate ----------------------------------------------------------------
 if [[ "${RUN_TEST}" -eq 1 ]]; then

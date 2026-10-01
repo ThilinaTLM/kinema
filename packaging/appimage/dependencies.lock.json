@@ -1,0 +1,728 @@
+[
+  {
+    "name": "cmake",
+    "version": "3.30.8",
+    "url": "https://codeload.github.com/Kitware/CMake/tar.gz/refs/tags/v3.30.8",
+    "kind": "bootstrap",
+    "args": [],
+    "sha256": "72e17fa405e072d6b0ecf10b595806118a7fcd31f358077675df4877f5a01f6b"
+  },
+  {
+    "name": "meson",
+    "version": "1.6.1",
+    "url": "https://codeload.github.com/mesonbuild/meson/tar.gz/refs/tags/1.6.1",
+    "kind": "meson-tool",
+    "args": [],
+    "sha256": "4889795777b536ea1a351982f3ef7c7b06a786ccb47036daba63cc5757c59edb"
+  },
+  {
+    "name": "wayland",
+    "version": "1.23.1",
+    "url": "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.23.1/downloads/wayland-1.23.1.tar.xz",
+    "kind": "meson",
+    "args": [
+      "-Ddocumentation=false",
+      "-Dtests=false"
+    ],
+    "sha256": "864fb2a8399e2d0ec39d56e9d9b753c093775beadc6022ce81f441929a81e5ed"
+  },
+  {
+    "name": "wayland-protocols",
+    "version": "1.38",
+    "url": "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.38/downloads/wayland-protocols-1.38.tar.xz",
+    "kind": "meson",
+    "args": [
+      "-Dtests=false"
+    ],
+    "sha256": "ff17292c05159d2b20ce6cacfe42d7e31a28198fa1429a769b03af7c38581dbe"
+  },
+  {
+    "name": "qtbase",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qtbase-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF",
+      "-DFEATURE_openssl_linked=ON"
+    ],
+    "sha256": "56001b905601bb9023d399f3ba780d7fa940f3e4861e496a7c490331f49e0b80"
+  },
+  {
+    "name": "qtshadertools",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qtshadertools-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "f6ec88bf42deba84d8f6b5d0914636ceed4749ccb51d1945b2f79b322b7ecf47"
+  },
+  {
+    "name": "qtdeclarative",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qtdeclarative-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "1f03a2b8f5588b4face7da87926e9b2c1372b3a32157c52df07a75067a9db1af"
+  },
+  {
+    "name": "qtsvg",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qtsvg-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "35eb516460f00f264eb504baa253432384351cf23fb9980a5857190e8deef438"
+  },
+  {
+    "name": "qtimageformats",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qtimageformats-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "049bfb99845e4801672aca07c3c4fc4c140f932a3a33faa899419579e33ef1c8"
+  },
+  {
+    "name": "qttools",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qttools-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF",
+      "-DFEATURE_assistant=OFF",
+      "-DFEATURE_designer=OFF",
+      "-DFEATURE_clang=OFF"
+    ],
+    "sha256": "02a4e219248b94f1333df843d25763f35251c1074cdc4fb5bda67d340f8c8b3a"
+  },
+  {
+    "name": "qtwayland",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qtwayland-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "20fe385887d21190165a3180c17dcfc8b9a0e1da4ec76865b6334bdc709994b0"
+  },
+  {
+    "name": "qt5compat",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qt5compat-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "54b9c84bff34b423dd8c472862ce1009753ff505e418b4ef33907416da16b82e"
+  },
+  {
+    "name": "ffmpeg",
+    "version": "7.1.1",
+    "url": "https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz",
+    "kind": "ffmpeg",
+    "args": [],
+    "sha256": "733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1"
+  },
+  {
+    "name": "qtmultimedia",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qtmultimedia-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "32e82307d783172a3b984cc3c47c5e4e8b819cee3cbfc702c7012c47f15f6b01"
+  },
+  {
+    "name": "qtspeech",
+    "version": "6.8.3",
+    "url": "https://qt.mirror.constant.com/archive/qt/6.8/6.8.3/submodules/qtspeech-everywhere-src-6.8.3.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT_BUILD_TESTS=OFF",
+      "-DQT_BUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "b0dd3e3bf993e15dc03d3486ee1b452c2b92f0460a621eb32d261eecc040504b"
+  },
+  {
+    "name": "extra-cmake-modules",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/extra-cmake-modules-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "e54e87365e193c806966e9698320bde81981219574721ff1970a98163c8ed5a0"
+  },
+  {
+    "name": "kcoreaddons",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kcoreaddons-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "7b37e8d4e185bcdd8bfd166c739f7adbcb0730cdf140d64a308f7b96b1845736"
+  },
+  {
+    "name": "kconfig",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kconfig-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "03d1d09054d646c67fcaa9f1fa53157811ad07ef40a38b9f4e0b52ae3173b1bf"
+  },
+  {
+    "name": "ki18n",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/ki18n-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "cd1adbcde1badfb7ac8945c3c0a9afc02b2ed642c769d74e1bcb70a02d070dc5"
+  },
+  {
+    "name": "karchive",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/karchive-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "90a5397d5df3a90486b4d7efaeab29829b63a877b25e23e59f5f12f431f82904"
+  },
+  {
+    "name": "kcodecs",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kcodecs-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "6e5852954a9e83750e346f8603e8146010cdc8d7d544a5e5d5eb46d93c94a911"
+  },
+  {
+    "name": "kwidgetsaddons",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kwidgetsaddons-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "02ce60ac8ba2e717180715f7fb70b024d30c436f82fab6ce1a544696a9f0c1cd"
+  },
+  {
+    "name": "kitemviews",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kitemviews-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "f8d5ff2e4e5234bce8ed56889d8b3d7e94554ec8b40e397d2e9ac2ffc117e3d3"
+  },
+  {
+    "name": "plasma-wayland-protocols",
+    "version": "1.16.0",
+    "url": "https://download.kde.org/stable/plasma-wayland-protocols/plasma-wayland-protocols-1.16.0.tar.xz",
+    "kind": "cmake",
+    "args": [],
+    "sha256": "da3fbbe3fa5603f9dc9aabe948a6fc8c3b451edd1958138628e96c83649c1f16"
+  },
+  {
+    "name": "kwindowsystem",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kwindowsystem-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "6e7f0ea1bd5b1b0f81f785ff0fddeb943222382f1c11b5201f69b6c62763b6f6"
+  },
+  {
+    "name": "kguiaddons",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kguiaddons-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "e394826cade1c5d9491166f3a3f4d0c3d625bf27106352678a06d2ec5364c532"
+  },
+  {
+    "name": "kcolorscheme",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kcolorscheme-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "f4226999c7b9c9da8de9ed9e3174fca49f7864da0da1d0bc9668c4448f667512"
+  },
+  {
+    "name": "kconfigwidgets",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kconfigwidgets-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "66da62c90b6b06e5bec68e691f70c9c302fe4dc5fd4de50035957da7f468d266"
+  },
+  {
+    "name": "breeze-icons",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/breeze-icons-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "1af979a67c0539f27a8fcbff973c91245584bfb260dd64c206bc691575cbb668"
+  },
+  {
+    "name": "kiconthemes",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kiconthemes-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "54b1b5f2839162d980873328716b30cf08f90fd079ad854cc09878ad9b376ecf"
+  },
+  {
+    "name": "kdbusaddons",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kdbusaddons-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "c236c70922b9640a7dfe3ac810b0d743555df4aeb9453675e56a449eec1ec521"
+  },
+  {
+    "name": "kcrash",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kcrash-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "c0b96110d25faa35587ac4af30cd1e3a8012133fcac12276e8b25977cd9b84a4"
+  },
+  {
+    "name": "kglobalaccel",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kglobalaccel-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "1c5e7e4d9b6862eb36a1f6c23fd9fff4b4bcf0b4fad740bae5ca58e15c8407f4"
+  },
+  {
+    "name": "kcompletion",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kcompletion-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "8cd311795b5d15c07b21b36c1124ce4f1aa0a18a3a03fff29608e4cadd091a9c"
+  },
+  {
+    "name": "kauth",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kauth-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "04cf4f1c2d1ecdeb78cfd986e21d48ab531acbe69420f343207dd66da8ff9d93"
+  },
+  {
+    "name": "kservice",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kservice-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "9533b93a9504ddf2f1e8e696bcfada0c3791019ee8e8cfbee04d9d1d14b6b964"
+  },
+  {
+    "name": "knotifications",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/knotifications-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "d2825473bcc4f77423b5266a5b92e818a9a98b1d672b1c29d8f237dd11e99026"
+  },
+  {
+    "name": "kjobwidgets",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kjobwidgets-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "ec3e31498c140b296f5e442e2520823437f26cb62d7186f116137d19bbcb9f12"
+  },
+  {
+    "name": "solid",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/solid-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "4bd96b394723be533a30404804be40be495dfae05a4430c011223d603d7d8666"
+  },
+  {
+    "name": "sonnet",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/sonnet-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "beecca52cb95a04a7a04378029659505eb17a0bd4dff0915d7e5e1c8a3b75cd2"
+  },
+  {
+    "name": "ktextwidgets",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/ktextwidgets-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "698e2be7fc6fd27b4aa4c192a1ab0b0abc08121639775c4ff4f4b4c81d8f041d"
+  },
+  {
+    "name": "kxmlgui",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kxmlgui-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "3c30a44e3d5176de36af56b6c29d86413fd58c6386679c6222aa4d0b46d0d88c"
+  },
+  {
+    "name": "kbookmarks",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kbookmarks-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "1b6edc20a7a797fe2a190d5a78a3b6d0f46d1e7b1b2c81646de3176bf74f8e3a"
+  },
+  {
+    "name": "qca",
+    "version": "2.3.10",
+    "url": "https://download.kde.org/stable/qca/2.3.10/qca-2.3.10.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DQT6=ON",
+      "-DBUILD_TESTS=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "1c5b722da93d559365719226bb121c726ec3c0dc4c67dea34f1e50e4e0d14a02"
+  },
+  {
+    "name": "kwallet",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kwallet-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "d23e7fdbda666490462bbbfd5087924ed451b70dcff6fa4c9ad354db9ed5ad00"
+  },
+  {
+    "name": "kio",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kio-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "1581e4f885750f08a3134fad47b81e953556e3fc94028939b47ffae0ab432eee"
+  },
+  {
+    "name": "kitemmodels",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kitemmodels-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF"
+    ],
+    "sha256": "62688311082b6aca226117810bc3991b0cb95158dec4d4c800d70a99bdcfdfc8"
+  },
+  {
+    "name": "kirigami",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kirigami-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "d177eae18aad36e6f41d307104e45a8fcc68db147dbb333f6ddb178a28464e7c"
+  },
+  {
+    "name": "qqc2-desktop-style",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/qqc2-desktop-style-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "8fb8dacbe68f68f972ddb1cceef15b9d70d7e51ef204a6f25f8329810ca89624"
+  },
+  {
+    "name": "kstatusnotifieritem",
+    "version": "6.12.0",
+    "url": "https://download.kde.org/stable/frameworks/6.12/kstatusnotifieritem-6.12.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF",
+      "-DBUILD_QCH=OFF",
+      "-DBUILD_DOC=OFF",
+      "-DBUILD_EXAMPLES=OFF"
+    ],
+    "sha256": "5b0e7b20492dbd9d5742bbafd6f8577dc682480a615e1965f3c53741e684fc3d"
+  },
+  {
+    "name": "kirigami-addons",
+    "version": "1.7.0",
+    "url": "https://download.kde.org/stable/kirigami-addons/kirigami-addons-1.7.0.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF"
+    ],
+    "sha256": "7d854975185cf740de486d84f1e2ec3e4eadb66ac9fb897214cba9ab8cc492b1"
+  },
+  {
+    "name": "qcoro",
+    "version": "0.11.0",
+    "url": "https://codeload.github.com/danvratil/qcoro/tar.gz/refs/tags/v0.11.0",
+    "kind": "cmake",
+    "args": [
+      "-DUSE_QT_VERSION=6",
+      "-DQCORO_BUILD_TESTING=OFF",
+      "-DQCORO_BUILD_EXAMPLES=OFF",
+      "-DQCORO_WITH_QTWEBSOCKETS=OFF"
+    ],
+    "sha256": "9942c5b4c533192f6c5954dc6d10178b3829075e6a621b67df73f0a4b74d8297"
+  },
+  {
+    "name": "qtkeychain",
+    "version": "0.15.0",
+    "url": "https://codeload.github.com/frankosterfeld/qtkeychain/tar.gz/refs/tags/0.15.0",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_WITH_QT6=ON",
+      "-DBUILD_TEST_APPLICATION=OFF"
+    ],
+    "sha256": "f4254dc8f0933b06d90672d683eab08ef770acd8336e44dfa030ce041dc2ca22"
+  },
+  {
+    "name": "boost",
+    "version": "1.83.0",
+    "url": "https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2",
+    "kind": "boost",
+    "args": [],
+    "sha256": "6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e"
+  },
+  {
+    "name": "libtorrent",
+    "version": "2.0.11",
+    "url": "https://github.com/arvidn/libtorrent/releases/download/v2.0.11/libtorrent-rasterbar-2.0.11.tar.gz",
+    "kind": "cmake",
+    "args": [
+      "-Dbuild_tests=OFF",
+      "-Dbuild_examples=OFF"
+    ],
+    "sha256": "f0db58580f4f29ade6cc40fa4ba80e2c9a70c90265cd77332d3cdec37ecf1e6d"
+  },
+  {
+    "name": "vulkan-headers",
+    "version": "1.3.290",
+    "url": "https://codeload.github.com/KhronosGroup/Vulkan-Headers/tar.gz/refs/tags/v1.3.290",
+    "kind": "cmake",
+    "args": [],
+    "sha256": "f38a653bf93cab7a2a229a53d2d53b1cba9a2819e4c0a7de13c54085bde9bcf5"
+  },
+  {
+    "name": "libplacebo",
+    "version": "7.349.0",
+    "url": "https://code.videolan.org/videolan/libplacebo/-/archive/v7.349.0/libplacebo-v7.349.0.tar.gz",
+    "kind": "meson",
+    "args": [
+      "-Dtests=false",
+      "-Ddemos=false",
+      "-Dshaderc=disabled",
+      "-Dglslang=enabled",
+      "-Dvulkan=enabled"
+    ],
+    "sha256": "79120e685a1836344b51b13b6a5661622486a84e4d4a35f6c8d01679a20fbc86",
+    "sources": [
+      {
+        "name": "glad",
+        "version": "d08b1aa01f8fe57498f04d47b5fa8c48725be877",
+        "url": "https://codeload.github.com/Dav1dde/glad/tar.gz/d08b1aa01f8fe57498f04d47b5fa8c48725be877",
+        "sha256": "7a5fb3299a20e8088a504f3bb2b7247d85c4207706754180a1b4a4840a8728e4",
+        "subdir": "3rdparty/glad"
+      },
+      {
+        "name": "fast-float",
+        "version": "2b2395f9ac836ffca6404424bcc252bff7aa80e4",
+        "url": "https://codeload.github.com/fastfloat/fast_float/tar.gz/2b2395f9ac836ffca6404424bcc252bff7aa80e4",
+        "sha256": "230d20e4e4ac1f6a9df92c4d746c6ec536cdb0c085bc8635d4b88cead5dc22cb",
+        "subdir": "3rdparty/fast_float"
+      },
+      {
+        "name": "placebo-vulkan-headers",
+        "version": "d732b2de303ce505169011d438178191136bfb00",
+        "url": "https://codeload.github.com/KhronosGroup/Vulkan-Headers/tar.gz/d732b2de303ce505169011d438178191136bfb00",
+        "sha256": "570f9ae1e65466dbaf5fcab667abd079dd0a61c4ab86cf535efd492bf70a5b74",
+        "subdir": "3rdparty/Vulkan-Headers"
+      }
+    ]
+  },
+  {
+    "name": "mpv",
+    "version": "0.39.0",
+    "url": "https://codeload.github.com/mpv-player/mpv/tar.gz/refs/tags/v0.39.0",
+    "kind": "meson",
+    "args": [
+      "-Dlibmpv=true",
+      "-Dcplayer=false",
+      "-Dtests=false"
+    ],
+    "sha256": "2ca92437affb62c2b559b4419ea4785c70d023590500e8a52e95ea3ab4554683"
+  },
+  {
+    "name": "mpvqt",
+    "version": "1.0.1",
+    "url": "https://download.kde.org/stable/mpvqt/mpvqt-1.0.1.tar.xz",
+    "kind": "cmake",
+    "args": [
+      "-DBUILD_TESTING=OFF"
+    ],
+    "sha256": "9f37b85f319c27f6244743c4259402b0aa2474ed851f0d833d9bd2a0731c178c"
+  }
+]

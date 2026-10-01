@@ -1,0 +1,157 @@
+# SPDX-License-Identifier: Apache-2.0
+name: AppImage compatibility
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/**'
+      - 'src/**'
+      - 'data/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - '.github/workflows/appimage.yml'
+      - '.github/workflows/release.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packaging/**'
+      - 'src/**'
+      - 'data/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - '.github/workflows/appimage.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Packaging contract tests
+        run: python3 tests/test_appimage_packaging.py
+      - uses: docker/setup-buildx-action@v3
+      - name: Build old-baseline SDK
+        uses: docker/build-push-action@v6
+        with:
+          context: packaging/appimage
+          load: true
+          tags: kinema-appimage-sdk:local
+          build-args: JOBS=4
+          cache-from: type=gha,scope=kinema-appimage-sdk
+          cache-to: type=gha,scope=kinema-appimage-sdk,mode=max
+      - name: Build and audit AppImage
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${REQUESTED_VERSION#v}"
+          if [[ -z "$VERSION" ]]; then VERSION="ci-${GITHUB_SHA:0:12}"; fi
+          [[ "$VERSION" =~ ^[A-Za-z0-9.+-]+$ ]]
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p reports dist
+          set -o pipefail
+          docker run --rm -v "$PWD:/src" -w /src \
+            -e VERSION="$VERSION" -e CMAKE_BUILD_PARALLEL_LEVEL=4 \
+            kinema-appimage-sdk:local bash packaging/appimage/build-appimage.sh \
+            2>&1 | tee reports/build.log
+      - name: Build portable tarball
+        run: |
+          mkdir -p portable
+          tar -xf dist/AppDir.tar -C portable
+          mv portable/AppDir "portable/kinema-${VERSION}-x86_64"
+          cp packaging/appimage/AppRun.sh "portable/kinema-${VERSION}-x86_64/kinema.sh"
+          chmod +x "portable/kinema-${VERSION}-x86_64/kinema.sh"
+          tar czf "dist/kinema-${VERSION}-x86_64.tar.gz" -C portable "kinema-${VERSION}-x86_64"
+          rm dist/AppDir.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage-bundle
+          path: |
+            dist/*.AppImage
+            dist/kinema-*-x86_64.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: appimage-build-reports
+          path: |
+            reports/
+            dist/abi-report.json
+            packaging/appimage/*lock.json
+          if-no-files-found: warn
+
+  compatibility:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:22.04
+            name: ubuntu22.04
+          - image: ubuntu:24.04
+            name: ubuntu24.04
+          - image: debian:trixie
+            name: debian13
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install baseline desktop and test harness
+        run: bash packaging/appimage/install-test-deps.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage-bundle
+          path: dist
+      - name: Test final artifacts without build dependencies
+        run: |
+          chmod +x dist/*.AppImage
+          bash packaging/appimage/smoke-test.sh dist/*.AppImage reports --extract dist/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: appimage-test-${{ matrix.name }}
+          path: reports/
+          if-no-files-found: warn
+
+  fuse:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test harness and FUSE
+        run: |
+          sudo bash packaging/appimage/install-test-deps.sh
+          sudo apt-get install -y libfuse2
+          test -c /dev/fuse
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage-bundle
+          path: dist
+      - name: Test normal runtime mounting
+        run: |
+          chmod +x dist/*.AppImage
+          bash packaging/appimage/smoke-test.sh dist/*.AppImage reports --fuse dist/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: appimage-test-fuse
+          path: reports/
+          if-no-files-found: warn

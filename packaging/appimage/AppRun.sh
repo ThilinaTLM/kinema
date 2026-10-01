@@ -15,13 +15,13 @@ APPDIR="$(dirname "$(readlink -f "$0")")"
 export APPDIR
 
 # Binaries (kinema itself, plus any helper tools linuxdeploy bundles).
-export PATH="${APPDIR}/usr/bin:${PATH}"
+export PATH="${APPDIR}/usr/bin:${APPDIR}/usr/libexec/kf6:${PATH}"
 
 # Bundled shared libraries (Qt6, KF6, qcoro, qtkeychain, libmpv, mpvqt,
 # libtorrent, openssl, plus the entire ffmpeg/libplacebo/libass tail).
 # Host-coupled libs (libGL, libva, X11/Wayland, glibc) intentionally
 # stay on the host via linuxdeploy's excludelist.
-export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # Qt plugin search path. linuxdeploy-plugin-qt stages plugins into
 # usr/plugins/ on some distros and usr/lib/qt6/plugins/ on others; cover
@@ -31,7 +31,13 @@ export QT_PLUGIN_PATH="${APPDIR}/usr/plugins:${APPDIR}/usr/lib/qt6/plugins:${APP
 # QML imports. linuxdeploy-plugin-qt copies the modules listed in
 # QML_SOURCES_PATHS (set by build-appimage.sh) under one of these paths;
 # we point Qt at both.
-export QML2_IMPORT_PATH="${APPDIR}/usr/qml:${APPDIR}/usr/lib/qt6/qml:${APPDIR}/usr/lib/x86_64-linux-gnu/qt6/qml"
+export QML_IMPORT_PATH="${APPDIR}/usr/qml:${APPDIR}/usr/lib/qt6/qml:${APPDIR}/usr/lib/x86_64-linux-gnu/qt6/qml"
+export QML2_IMPORT_PATH="${QML_IMPORT_PATH}"
+
+# Audio backends are dlopened, not linked; never look in the build SDK.
+export PIPEWIRE_MODULE_DIR="${APPDIR}/usr/lib/pipewire-0.3"
+export SPA_PLUGIN_DIR="${APPDIR}/usr/lib/spa-0.2"
+export PIPEWIRE_CONFIG_DIR="${APPDIR}/usr/share/pipewire"
 
 # Ensure our .desktop / appstream / icons / mpv configs are visible to
 # QStandardPaths::GenericDataLocation lookups (kinema reads its mpv
@@ -39,7 +45,7 @@ export QML2_IMPORT_PATH="${APPDIR}/usr/qml:${APPDIR}/usr/lib/qt6/qml:${APPDIR}/u
 export XDG_DATA_DIRS="${APPDIR}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 
 # Kirigami needs a hint for its style on non-Plasma sessions; default
-# to "Default" so GNOME / XFCE users get sensible chrome. Respect a
+# to "org.kde.desktop" so GNOME / XFCE users get sensible chrome. Respect a
 # pre-set QT_QUICK_CONTROLS_STYLE so KDE users still get Breeze.
 export QT_QUICK_CONTROLS_STYLE="${QT_QUICK_CONTROLS_STYLE:-org.kde.desktop}"
 

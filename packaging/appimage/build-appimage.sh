@@ -4,11 +4,9 @@
 #
 # Build a Kinema AppImage from a checked-out repo.
 #
-# Intended to run inside the Debian 13 (trixie) container used by
-# .github/workflows/release.yml. Trixie sets the glibc / libstdc++
-# baseline for the AppImage. Required system packages are installed by
-# the workflow before this script is invoked (see release.yml → appimage
-# job). For local reproduction, install the same `apt-get install` list.
+# Run inside the Ubuntu 22.04 SDK built by packaging/appimage/Dockerfile.
+# The entire payload must target glibc <= 2.35, not only the executable.
+# See packaging/README.md for reproduction and compatibility checks.
 #
 # Outputs:
 #   dist/Kinema-${VERSION}-x86_64.AppImage   — the AppImage itself
@@ -33,7 +31,26 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${REPO_ROOT}"
 
-log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+# Release artifacts must identify the same project version as the tag. CI names
+# are deliberately distinct and never published as releases.
+PROJECT_VERSION="$(sed -n 's/^    VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt)"
+if [[ ! "${VERSION}" =~ ^[A-Za-z0-9.+-]+$ ]] || \
+   [[ "${VERSION}" != ci-* && "${VERSION%%-*}" != "${PROJECT_VERSION}" ]]; then
+    echo "build-appimage.sh: artifact version ${VERSION} does not match project ${PROJECT_VERSION}" >&2
+    exit 2
+fi
+
+log() { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
+
+: "${KINEMA_SDK:?Build inside the locked Ubuntu 22.04 SDK container}"
+export PATH="${KINEMA_SDK}/bin:${PATH}"
+export CMAKE_PREFIX_PATH="${KINEMA_SDK}"
+export PKG_CONFIG_PATH="${KINEMA_SDK}/lib/pkgconfig:${KINEMA_SDK}/share/pkgconfig"
+export LD_LIBRARY_PATH="${KINEMA_SDK}/lib"
+export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
+export QMAKE="${KINEMA_SDK}/bin/qmake"
+export QML_IMPORT_PATH="${KINEMA_SDK}/qml"
+export QML2_IMPORT_PATH="${QML_IMPORT_PATH}"
 
 BUILD_DIR="${REPO_ROOT}/build-appimage"
 APPDIR="${REPO_ROOT}/AppDir"
@@ -51,10 +68,13 @@ cmake -B "${BUILD_DIR}" -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DKINEMA_ENABLE_MPV_EMBED=ON \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DKDE_INSTALL_USE_QT_SYS_PATHS=OFF \
     -DKINEMA_TMDB_DEFAULT_TOKEN=""
 
 log "Building"
-cmake --build "${BUILD_DIR}" -j"$(nproc)"
+cmake --build "${BUILD_DIR}" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL}"
 
 log "Staging to ${APPDIR}/"
 DESTDIR="${APPDIR}" cmake --install "${BUILD_DIR}"
@@ -68,50 +88,31 @@ ln -sf "usr/share/icons/hicolor/scalable/apps/dev.tlmtech.kinema.svg" \
     "${APPDIR}/dev.tlmtech.kinema.svg"
 
 # ---------------------------------------------------------------------------
-# 2. Download linuxdeploy + qt plugin + appimage plugin. Pinned versions
-#    keep the AppImage reproducible-ish across CI runs.
+# 2. Fetch checksummed packaging tools. Extract them explicitly: asking a
+#    runtime for --appimage-version does not test FUSE availability.
 # ---------------------------------------------------------------------------
-LD_VER="continuous"      # linuxdeploy publishes only 'continuous' atm
-LD_BASE="https://github.com/linuxdeploy/linuxdeploy/releases/download/${LD_VER}"
-LDQT_BASE="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${LD_VER}"
-
-fetch() {
-    local url="$1" out="$2"
-    if [[ ! -f "${out}" ]]; then
-        log "Downloading ${url}"
-        wget -q -O "${out}" "${url}"
-        chmod +x "${out}"
-    fi
+RECIPE="${REPO_ROOT}/packaging/appimage"
+fetch_tool() {
+    python3 "${RECIPE}/fetch-source.py" "${RECIPE}/tools.lock.json" "$1" "${TOOLS_DIR}/locked"
 }
-
-fetch "${LD_BASE}/linuxdeploy-x86_64.AppImage" \
-      "${TOOLS_DIR}/linuxdeploy-x86_64.AppImage"
-fetch "${LDQT_BASE}/linuxdeploy-plugin-qt-x86_64.AppImage" \
-      "${TOOLS_DIR}/linuxdeploy-plugin-qt-x86_64.AppImage"
-
-# AppImages need FUSE. In CI we have it; in restricted environments
-# (some Docker setups) we have to extract them and run the AppRun.
-# Detect and fall back automatically.
-extract_if_needed() {
-    local tool="$1"
-    if ! "${tool}" --appimage-version >/dev/null 2>&1; then
-        log "FUSE unavailable, extracting $(basename "${tool}")"
-        local dir
-        dir="${tool}.extracted"
-        rm -rf "${dir}"
-        (cd "$(dirname "${tool}")" && "${tool}" --appimage-extract >/dev/null)
-        mv "$(dirname "${tool}")/squashfs-root" "${dir}"
-        echo "${dir}/AppRun"
-    else
-        echo "${tool}"
-    fi
+extract_tool() {
+    local tool dir
+    tool="$(fetch_tool "$1")"
+    chmod +x "${tool}"
+    dir="${tool}.extracted"
+    rm -rf "${dir}"
+    mkdir -p "${dir}"
+    (cd "${dir}" && "${tool}" --appimage-extract >/dev/null)
+    printf '%s\n' "${dir}/squashfs-root/AppRun"
 }
-
-LINUXDEPLOY="$(extract_if_needed "${TOOLS_DIR}/linuxdeploy-x86_64.AppImage")"
-LINUXDEPLOY_QT="$(extract_if_needed "${TOOLS_DIR}/linuxdeploy-plugin-qt-x86_64.AppImage")"
+LINUXDEPLOY="$(extract_tool linuxdeploy)"
+LINUXDEPLOY_QT="$(extract_tool linuxdeploy-plugin-qt)"
+APPIMAGETOOL="$(extract_tool appimagetool)"
+APPIMAGE_RUNTIME="$(fetch_tool runtime)"
 
 # linuxdeploy locates plugins by PATH lookup of `linuxdeploy-plugin-<name>`.
-export PATH="$(dirname "${LINUXDEPLOY_QT}"):${PATH}"
+PATH="$(dirname "${LINUXDEPLOY_QT}"):${PATH}"
+export PATH
 ln -sf "${LINUXDEPLOY_QT}" \
     "$(dirname "${LINUXDEPLOY_QT}")/linuxdeploy-plugin-qt"
 
@@ -164,6 +165,8 @@ fi
 # the legacy env var still respected by some Qt builds. Set both.
 export QML_IMPORT_PATH="${QML_STUBS_DIR}:${QML_IMPORT_PATH:-}"
 export QML2_IMPORT_PATH="${QML_STUBS_DIR}:${QML2_IMPORT_PATH:-}"
+# linuxdeploy's scanner uses its own explicit -importPath list, not Qt's env.
+export QML_MODULES_PATHS="${QML_STUBS_DIR}:${KINEMA_SDK}/qml"
 
 # Override default AppRun with our custom launcher (sets QML2_IMPORT_PATH
 # and Quick Controls style for non-Plasma sessions).
@@ -189,27 +192,68 @@ export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so"
 # links to it directly, though, so the executable cannot even start on hosts
 # without PipeWire (for example, the AppImage catalog's test image). Force the
 # library into the bundle; linuxdeploy will deploy any non-system dependencies.
-PIPEWIRE_LIBRARY="$(ldconfig -p | awk '$1 == "libpipewire-0.3.so.0" && !found { path = $NF; found = 1 } END { if (found) print path; else exit 1 }')"
-PIPEWIRE_LIBRARY="$(readlink -f "${PIPEWIRE_LIBRARY}")"
+# HarfBuzz/FriBidi are excluded by linuxdeploy but absent on minimal desktop
+# test hosts. Bundle the baseline versions instead of installing them to hide
+# omissions in the clean-host gate.
+FORCED_SONAMES=(libpipewire-0.3.so.0 libharfbuzz.so.0 libfribidi.so.0 libgpg-error.so.0)
+FORCED_LIBRARIES=()
+FORCED_DEPLOY_ARGS=()
+for soname in "${FORCED_SONAMES[@]}"; do
+    library="$(ldconfig -p | awk -v name="${soname}" '$1 == name && !found { path = $NF; found = 1 } END { if (found) print path; else exit 1 }')"
+    library="$(readlink -f "${library}")"
+    FORCED_LIBRARIES+=("${library}")
+    FORCED_DEPLOY_ARGS+=(--library "${library}")
+done
 
 log "Running linuxdeploy + qt plugin (deploy only)"
 LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
 "${LINUXDEPLOY}" \
     --appdir "${APPDIR}" \
     --executable "${APPDIR}/usr/bin/kinema" \
-    --library "${PIPEWIRE_LIBRARY}" \
+    "${FORCED_DEPLOY_ARGS[@]}" \
     --desktop-file "${APPDIR}/dev.tlmtech.kinema.desktop" \
     --icon-file "${APPDIR}/dev.tlmtech.kinema.svg" \
     --plugin qt
 
-PIPEWIRE_BUNDLED="${APPDIR}/usr/lib/$(basename "${PIPEWIRE_LIBRARY}")"
-if [[ ! -f "${PIPEWIRE_BUNDLED}" ]]; then
-    echo "build-appimage.sh: linuxdeploy did not bundle ${PIPEWIRE_LIBRARY}" >&2
+# --library copies fully versioned files but does not create their SONAME links.
+for i in "${!FORCED_LIBRARIES[@]}"; do
+    bundled_name="$(basename "${FORCED_LIBRARIES[$i]}")"
+    if [[ ! -f "${APPDIR}/usr/lib/${bundled_name}" ]]; then
+        echo "build-appimage.sh: linuxdeploy did not bundle ${FORCED_LIBRARIES[$i]}" >&2
+        exit 3
+    fi
+    ln -sf "${bundled_name}" "${APPDIR}/usr/lib/${FORCED_SONAMES[$i]}"
+done
+
+# PipeWire dlopens its backend modules; DT_NEEDED discovery cannot find them.
+# Batch manual dependency deployment: each invocation revisits the entire AppDir.
+MANUAL_DEPLOY_ARGS=()
+# Qt's input plugin deployer does not reliably discover Wayland's dlopened
+# shell/graphics/decoration integrations. A platform .so alone cannot start.
+for plugin_dir in wayland-shell-integration wayland-graphics-integration-client wayland-decoration-client; do
+    mkdir -p "${APPDIR}/usr/plugins/${plugin_dir}"
+    cp -a "${KINEMA_SDK}/plugins/${plugin_dir}/"*.so "${APPDIR}/usr/plugins/${plugin_dir}/"
+    for so in "${APPDIR}/usr/plugins/${plugin_dir}/"*.so; do
+        MANUAL_DEPLOY_ARGS+=(--deploy-deps-only "${so}")
+    done
+done
+for module_dir in pipewire-0.3 spa-0.2; do
+    source_dir="/usr/lib/x86_64-linux-gnu/${module_dir}"
+    [[ -d "${source_dir}" ]] || { echo "Missing ${source_dir}" >&2; exit 3; }
+    cp -a "${source_dir}" "${APPDIR}/usr/lib/"
+    while IFS= read -r -d '' so; do
+        MANUAL_DEPLOY_ARGS+=(--deploy-deps-only "${so}")
+    done < <(find "${APPDIR}/usr/lib/${module_dir}" -type f -name '*.so' -print0)
+done
+if [[ -d /usr/share/pipewire ]]; then
+    cp -a /usr/share/pipewire "${APPDIR}/usr/share/"
+elif [[ -d /etc/pipewire ]]; then
+    # Jammy ships the defaults as conffiles, newer distros use /usr/share.
+    cp -a /etc/pipewire "${APPDIR}/usr/share/"
+else
+    echo "Missing PipeWire client configuration defaults" >&2
     exit 3
 fi
-# --library copies the fully versioned file but does not create its SONAME link.
-ln -sf "$(basename "${PIPEWIRE_BUNDLED}")" \
-    "${APPDIR}/usr/lib/libpipewire-0.3.so.0"
 
 # ---------------------------------------------------------------------------
 # 3b. Manually deploy KF6 platform plugins that linuxdeploy-plugin-qt has
@@ -227,6 +271,8 @@ ln -sf "$(basename "${PIPEWIRE_BUNDLED}")" \
 # ---------------------------------------------------------------------------
 KF6_KIRIGAMI_SRC=""
 for candidate in \
+    "${KINEMA_SDK}/plugins/kf6/kirigami/platform" \
+    "${KINEMA_SDK}/lib/plugins/kf6/kirigami/platform" \
     /usr/lib/x86_64-linux-gnu/qt6/plugins/kf6/kirigami/platform \
     /usr/lib/qt6/plugins/kf6/kirigami/platform; do
     if [[ -d "${candidate}" ]] && compgen -G "${candidate}/*.so" >/dev/null; then
@@ -240,23 +286,39 @@ if [[ -n "${KF6_KIRIGAMI_SRC}" ]]; then
     mkdir -p "${KF6_KIRIGAMI_DST}"
     cp -a "${KF6_KIRIGAMI_SRC}/"*.so "${KF6_KIRIGAMI_DST}/"
     for so in "${KF6_KIRIGAMI_DST}"/*.so; do
-        "${LINUXDEPLOY}" --appdir "${APPDIR}" --deploy-deps-only "${so}"
+        MANUAL_DEPLOY_ARGS+=(--deploy-deps-only "${so}")
     done
 else
-    echo "WARNING: kf6/kirigami/platform/*.so not found on build host;" \
-         "Kirigami will fall back to basic theme in the AppImage." >&2
+    echo "ERROR: required Kirigami platform plugin missing from SDK" >&2
+    exit 3
 fi
+
+# OpenUrlJob also loads KIO workers at runtime (including MIME probing of
+# remote URLs). Thread workers and the process fallback must both be portable.
+mkdir -p "${APPDIR}/usr/plugins/kf6/kio" "${APPDIR}/usr/libexec/kf6"
+cp -a "${KINEMA_SDK}/plugins/kf6/kio/"*.so "${APPDIR}/usr/plugins/kf6/kio/"
+for helper in kioworker kioexec kiod6; do
+    cp "${KINEMA_SDK}/lib/libexec/kf6/${helper}" "${APPDIR}/usr/libexec/kf6/"
+    MANUAL_DEPLOY_ARGS+=(--deploy-deps-only "${APPDIR}/usr/libexec/kf6/${helper}")
+done
+for so in "${APPDIR}/usr/plugins/kf6/kio/"*.so; do
+    MANUAL_DEPLOY_ARGS+=(--deploy-deps-only "${so}")
+done
+
+"${LINUXDEPLOY}" --appdir "${APPDIR}" "${MANUAL_DEPLOY_ARGS[@]}"
 
 # linuxdeploy replaces AppRun with its own wrapper — restore ours.
 cp "${REPO_ROOT}/packaging/appimage/AppRun.sh" "${APPDIR}/AppRun"
 chmod +x "${APPDIR}/AppRun"
 
+# Keep source provenance and third-party notices with both portable formats.
+cp -a "${KINEMA_SDK}/share/kinema-sdk" "${APPDIR}/usr/share/"
+cp "${RECIPE}/tools.lock.json" "${APPDIR}/usr/share/kinema-sdk/"
+ln -sf dev.tlmtech.kinema.svg "${APPDIR}/.DirIcon"
+
 log "Producing the AppImage → ${FINAL_APPIMAGE}"
-OUTPUT="${FINAL_APPIMAGE}" \
-LINUXDEPLOY_OUTPUT_VERSION="${VERSION}" \
-"${LINUXDEPLOY}" \
-    --appdir "${APPDIR}" \
-    --output appimage
+ARCH=x86_64 VERSION="${VERSION}" "${APPIMAGETOOL}" \
+    --runtime-file "${APPIMAGE_RUNTIME}" "${APPDIR}" "${FINAL_APPIMAGE}"
 
 if [[ ! -f "${FINAL_APPIMAGE}" ]]; then
     echo "build-appimage.sh: expected ${FINAL_APPIMAGE} to exist after" \
@@ -266,6 +328,9 @@ if [[ ! -f "${FINAL_APPIMAGE}" ]]; then
 fi
 mv -f "${FINAL_APPIMAGE}" "${DIST_DIR}/${FINAL_APPIMAGE}"
 log "Produced ${DIST_DIR}/${FINAL_APPIMAGE}"
+# The SDK's runtime must not hide newer ABI requirements in nested plugins.
+python3 "${RECIPE}/validate-appimage.py" "${DIST_DIR}/${FINAL_APPIMAGE}" \
+    --report "${DIST_DIR}/abi-report.json"
 
 # ---------------------------------------------------------------------------
 # 4. Capture the AppDir for the portable-tarball job to repackage.
