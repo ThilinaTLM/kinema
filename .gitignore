@@ -12,6 +12,15 @@ compile_commands.json
 .clangd/
 .ccls-cache/
 
+# AppImage staging and downloaded sources/tools
+/AppDir/
+/dist/
+/portable/
+/.appimage-tools/
+/.appimage-qml-stubs/
+/.appimage-runtime-imports/
+__pycache__/
+
 # Build artifacts
 *.o
 *.obj

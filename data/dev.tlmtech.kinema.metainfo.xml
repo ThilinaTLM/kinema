@@ -34,6 +34,7 @@
   <url type="homepage">https://tlmtech.dev/kinema</url>
 
   <launchable type="desktop-id">dev.tlmtech.kinema.desktop</launchable>
+  <icon type="stock">dev.tlmtech.kinema</icon>
 
   <provides>
     <binary>kinema</binary>
@@ -83,7 +84,17 @@
     </screenshot>
   </screenshots>
 
-  <releases>    <release version="0.3.0" date="2026-08-22">
+  <releases>
+    <release version="0.5.0" type="development" date="2026-10-02">
+      <description>
+        <p>Prepare portable Linux bundles for the Ubuntu 22.04 runtime baseline.</p>
+        <ul>
+          <li>Build bundled Qt, KDE and media dependencies on the compatibility baseline.</li>
+          <li>Gate portable releases on metadata, ABI and clean-host startup checks.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.3.0" date="2026-08-22">
       <description>
         <p>Maintenance release.</p>
         <ul>

@@ -6,7 +6,7 @@ fires on tag push (`vX.Y.Z`, `vX.Y.Z-rc1`, …) and produces:
 | Artifact                                          | Built where               | Notes |
 |---------------------------------------------------|---------------------------|-------|
 | `kinema-X.Y.Z.tar.gz`                             | `ubuntu-latest`           | `git archive` of the tag |
-| `Kinema-X.Y.Z-x86_64.AppImage`                    | `debian:trixie` container | bundles Qt6/KF6/qcoro/qtkeychain/libmpv/mpvqt/libtorrent/ssl |
+| `Kinema-X.Y.Z-x86_64.AppImage`                    | Ubuntu 22.04 source SDK  | bundles Qt6/KF6/qcoro/qtkeychain/libmpv/mpvqt/libtorrent/ssl |
 | `kinema-X.Y.Z-x86_64.tar.gz`                      | same as AppImage          | portable: extracted AppDir + launcher script |
 | `kinema_X.Y.Z_amd64-ubuntu25.04.deb`              | `ubuntu:25.04` container  | CPack/`dpkg-shlibdeps` |
 | `kinema_X.Y.Z_amd64-debian13.deb`                 | `debian:trixie` container | CPack/`dpkg-shlibdeps` |
@@ -17,20 +17,22 @@ fires on tag push (`vX.Y.Z`, `vX.Y.Z-rc1`, …) and produces:
 Pre-release tags (containing a hyphen, e.g. `vX.Y.Z-rc1`) produce a **draft**
 release. Final tags publish directly.
 
-## Why no Ubuntu 24.04 LTS
+## Why no native Ubuntu 24.04 LTS package
 
 Kinema requires:
 
 - Qt ≥ 6.6 (Ubuntu 24.04 ships 6.4)
 - KDE Frameworks 6 (Ubuntu 24.04 ships KF5 only)
-- QCoro ≥ 0.10 (Ubuntu 24.04 ships 0.8)
-- libmpv ≥ 0.36 (Ubuntu 24.04 ships 0.35)
+- QCoro ≥ 0.10
+- libmpv ≥ 0.36 plus the Qt 6 MpvQt wrapper
 
 These constraints are checked at `cmake` time (`find_package(... REQUIRED)`),
-so a forced build on 24.04 would fail at configure. Users on 24.04 should run
-the **AppImage** or the **portable tarball**, both of which bundle the full
-Qt6/KF6 stack and only rely on host glibc ≥ 2.41, libGL/libGLX, and Wayland/X11
-client libraries.
+so a build using only 24.04's stock packages fails at configure. The new
+**AppImage** and **portable tarball** pipeline builds modern dependencies
+from source on Ubuntu 22.04, targeting glibc ≥ 2.35 instead. Older trixie-built
+releases remain incompatible with older hosts; extracting them cannot fix ABI
+requirements. The minimums above are application requirements, not a complete
+inventory of each Ubuntu release's packages.
 
 ## TMDB token
 
@@ -94,17 +96,81 @@ docker run --rm -it -v "$PWD":/src -w /src debian:trixie bash -lc '
 ```
 
 ```sh
-# AppImage on Debian trixie (needs --privileged for FUSE)
-docker run --rm -it --privileged -v "$PWD":/src -w /src debian:trixie bash -lc '
-  apt-get update && apt-get install -y --no-install-recommends wget fuse libfuse2t64 \
-      ...  # full list mirrored from .github/workflows/release.yml
-  VERSION=X.Y.Z bash packaging/appimage/build-appimage.sh
+# No FUSE, privileged container, or newer-distro binary dependencies needed.
+docker build -t kinema-appimage-sdk packaging/appimage
+mkdir -p dist
+docker run --rm -v "$PWD":/src -w /src -e VERSION=X.Y.Z \
+    kinema-appimage-sdk bash packaging/appimage/build-appimage.sh
+```
+
+Native apt/dnf lists live in `.github/workflows/release.yml`. AppImage SDK
+packages and source versions live in `appimage/Dockerfile` and
+`appimage/dependencies.lock.json`; do not substitute newer distro binaries.
+The AppImage workflow shows portable-tarball creation from `dist/AppDir.tar`.
+
+## AppImage compatibility
+
+Starting with the upcoming **0.5.0** release, the baseline is
+**Ubuntu 22.04 x86_64 / glibc 2.35**, using GCC 11. The release
+job calls `.github/workflows/appimage.yml` and waits for its complete matrix,
+including normal FUSE launch. A downloaded artifact from a failed build/test
+run is **not** a validated release. The catalog's own acceptance still requires
+a published-release retest: [AppImage catalog PR 7587](https://github.com/AppImage/appimage.github.io/pull/7587).
+
+The SDK locks source archives (including needed submodules) and packaging tools
+by SHA-256; cached downloads are verified too. Qt/KDE/media dependencies are
+built against the old baseline. Neither glibc nor a newer C++ runtime is bundled.
+Docker/BuildKit caches the SDK independently of application source changes.
+Cold builds are expensive; `JOBS` controls SDK build parallelism (default 4).
+Do not use `-march=native` or change the host baseline to speed up a build.
+
+`validate-appimage.py` checks the final image's structure, metadata, every
+nested ELF object's required symbol versions, relocatable search paths, and
+mandatory plugins/QML modules. `baseline-cxx.json` records the version definitions
+exported by Ubuntu 22.04's updated `libstdc++.so.6`, obtained with
+`readelf -W --version-info`; only **definitions**, not required versions, belong
+in that file. Do not raise it to make an incompatible bundle pass.
+
+Clean Ubuntu 22.04/24.04 and Debian 13 containers install only the desktop
+baseline and test harness from `install-test-deps.sh`. In them, validation with
+`--dependencies` also checks `ldd` resolution against `host-libraries.json`.
+This list documents permitted host libraries; adding a library requires proving
+it exists on every supported baseline, not merely on the SDK host. Never install
+Qt/KDE, mpv or PipeWire in a test image to hide bundle omissions.
+
+For an already-built AppImage and portable tarball, reproduce the clean-host test:
+
+```sh
+docker run --rm -v "$PWD":/src -w /src ubuntu:22.04 bash -c '
+  bash packaging/appimage/install-test-deps.sh
+  chmod +x dist/*.AppImage
+  bash packaging/appimage/smoke-test.sh dist/*.AppImage reports --extract dist/*.tar.gz
 '
 ```
 
-The full apt/dnf install lists live in `.github/workflows/release.yml` and
-are the source of truth — keep them in sync with this README when adding
-new dependencies.
+The smoke test uses disposable HOME/XDG directories, private D-Bus/Xvfb, software
+OpenGL, a relocated path containing spaces and an unrelated working directory.
+It requires a visible window and process survival, checks loader/QML errors,
+exercises the real AppImage runtime and portable launcher, and decodes local audio
+through bundled libmpv. Reports include ABI requirements, logs and an XWD screenshot.
+It does not prove real GPU rendering, Wayland integration, or physical audio output.
+
+Before releasing:
+
+1. Review and update locked dependency versions for security fixes; fetch the
+   exact archives, verify upstream provenance/checksums, update SHA-256 pins,
+   and rebuild the SDK from scratch. Never point locks at moving branches.
+2. Run `python3 tests/test_appimage_packaging.py`, the standard CMake/CTest suite,
+   and the complete compatibility workflow. Retain the test reports.
+3. Review bundled third-party licenses/source availability. The bundle contains
+   `usr/share/kinema-sdk/` with locked upstream source URLs/checksums, notices and
+   baseline package provenance; retain/provide corresponding sources as required
+   by each license. Kinema's source tarball alone is not the source for its SDK.
+4. Manually test Wayland and embedded video playback with real graphics/audio
+   hardware. This remains necessary even when headless checks pass.
+5. Publish the newly validated artifact, then comment `/retest` on PR 7587.
+   Inspect its result before claiming catalog compatibility. Local checks do not
+   substitute for the external catalog test.
 
 ## Adding a new distro target
 
@@ -131,5 +197,11 @@ packaging/
 ├── cpack.cmake                 ← included by ../CMakeLists.txt
 └── appimage/
     ├── AppRun.sh               ← AppImage entrypoint / portable-tarball launcher
-    └── build-appimage.sh       ← AppImage build orchestrator
+    ├── Dockerfile             ← Ubuntu 22.04 dependency SDK
+    ├── dependencies.lock.json ← source versions, hashes and build options
+    ├── tools.lock.json        ← pinned deployment tools/runtime
+    ├── build-dependencies.sh  ← source SDK builder
+    ├── build-appimage.sh      ← AppImage build orchestrator
+    ├── validate-appimage.py   ← metadata, structure, ABI and dependency audit
+    └── smoke-test.sh          ← clean-host runtime tests
 ```

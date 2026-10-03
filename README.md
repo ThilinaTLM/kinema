@@ -66,13 +66,14 @@ manifest).
 
 ### System requirements
 
-- 64-bit Linux, glibc ≥ 2.41 (Debian 13 / Ubuntu 25.04 / Fedora 41 /
-  Arch 2025 or newer). Older glibc → use a newer host, build from
-  source, or extract the AppImage on a newer machine.
+- x86_64 Linux. New AppImage/portable builds target Ubuntu 22.04
+  (glibc ≥ 2.35 and its C++ runtime); native packages require their named
+  distro. Earlier trixie-built AppImages do **not** gain this compatibility
+  by extraction—use a release built with the new compatibility pipeline.
 - Wayland or X11 session. KDE Plasma 6 is the primary target; other
   Qt 6 desktops work but get less testing.
-- ~150 MB free disk for the AppImage / portable tarball; native
-  packages are smaller because they reuse system Qt 6 / KF 6 / libmpv.
+- Enough disk space for the downloaded bundle (and its extracted contents
+  for portable use). Native packages reuse system Qt 6 / KF 6 / libmpv.
 
 ### Pick a package
 
@@ -138,8 +139,11 @@ chmod +x "Kinema-${VERSION}-x86_64.AppImage"
 ```
 
 The AppImage bundles Qt 6 / KF 6 / libmpv / mpvqt / libtorrent / SSL,
-so the only host requirements are glibc ≥ 2.41, libGL/libGLX, and the
-Wayland/X11 client libraries.
+with a glibc ≥ 2.35 baseline for new builds. Host display/graphics drivers,
+Wayland/X11 client libraries, and a normal desktop runtime are still required.
+The release gate tests Ubuntu 22.04, Ubuntu 24.04 and Debian 13; this is not a
+promise of support for every Linux distribution. See the
+[compatibility checks](packaging/README.md#appimage-compatibility) for details.
 
 If your distro lacks FUSE (e.g. some immutable spins), run it with
 `--appimage-extract-and-run`, or install `libfuse2` (Ubuntu / Debian) /

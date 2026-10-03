@@ -13,6 +13,11 @@ set(test_defs
     KINEMA_TEST_PROJECT_ROOT="${KINEMA_TEST_PROJECT_ROOT}"
 )
 
+ecm_add_test(tst_appimage_packaging.cpp
+    TEST_NAME tst_appimage_packaging
+    LINK_LIBRARIES Qt6::Test
+)
+
 ecm_add_test(tst_architecture_boundaries.cpp
     TEST_NAME tst_architecture_boundaries
     LINK_LIBRARIES Qt6::Test
@@ -523,7 +528,7 @@ if(KINEMA_ENABLE_MPV_EMBED)
     )
 endif()
 
-foreach(t tst_architecture_boundaries
+foreach(t tst_appimage_packaging tst_architecture_boundaries
          tst_magnet tst_url_redactor tst_torrentio_config tst_torrentio_url
          tst_media_file_selection_policy
          tst_backend_selection_policy tst_resume_policy
