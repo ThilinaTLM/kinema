@@ -85,7 +85,7 @@
   </screenshots>
 
   <releases>
-    <release version="0.5.0" type="development" date="2026-10-02">
+    <release version="0.5.0" type="stable" date="2026-10-03">
       <description>
         <p>Prepare portable Linux bundles for the Ubuntu 22.04 runtime baseline.</p>
         <ul>
