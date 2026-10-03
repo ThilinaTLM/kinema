@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Cut a Kinema release:
-#   scripts/release.sh <version> [--no-test]
+#   scripts/release.sh <version> [--test]
 #
 #   1. Validate the version (X.Y.Z) and repo state (clean tree, on main,
 #      in sync with origin).
 #   2. Bump PROJECT_VERSION in CMakeLists.txt.
-#   3. Insert a <release> entry into data/dev.tlmtech.kinema.metainfo.xml
-#      (dated today) and open $EDITOR so the notes can be adjusted.
-#   4. Build and run the test suite (unless --no-test is given).
+#   3. Finalize or insert a <release> entry into
+#      data/dev.tlmtech.kinema.metainfo.xml (dated today) and validate it.
+#   4. Optionally build and run the test suite (when --test is given).
 #   5. Commit "chore(release): bump version to X.Y.Z", create the signed
 #      annotated tag vX.Y.Z, and push main together with the tag.
 #
@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
-    echo "usage: $0 <version> [--no-test]" >&2
+    echo "usage: $0 <version> [--test]" >&2
     exit 1
 }
 
@@ -35,10 +35,10 @@ die() {
 [[ $# -ge 1 ]] || usage
 VERSION="$1"
 shift
-RUN_TEST=1
+RUN_TEST=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --no-test) RUN_TEST=0 ;;
+        --test) RUN_TEST=1 ;;
         *) usage ;;
     esac
     shift
@@ -106,8 +106,6 @@ EOF
 grep -q "version=\"${VERSION}\"" "${METAINFO}" \
     || die "failed to insert release entry into ${METAINFO}."
 
-echo "Release notes for ${VERSION}: edit them now."
-"${EDITOR:-${VISUAL:-vi}}" "${METAINFO}"
 appstreamcli validate --no-net "${METAINFO}" \
     || die "AppStream metadata validation failed."
 
@@ -118,7 +116,7 @@ if [[ "${RUN_TEST}" -eq 1 ]]; then
     echo ">> Running tests..."
     ctest --test-dir build --output-on-failure
 else
-    echo ">> Skipping build/test (--no-test)."
+    echo ">> Skipping build/test (use --test to enable)."
 fi
 
 # --- commit, tag, push --------------------------------------------------------
