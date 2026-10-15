@@ -1,0 +1,19 @@
+# Historical C++ reference only
+
+These archived conventions apply only within `reference/cpp/`, not to the Rust
+workspace. Run any CMake commands from this directory. Workflows and release
+scripts are historical and are not active release infrastructure; see README.md.
+
+## Original C++ conventions
+
+- Pre-1.0 personal project: prefer clean rewrites over compatibility shims. Do not migrate `~/.config/kinemarc`, `kinema.db`, or keyring entries.
+- Register new sources in `src/CMakeLists.txt`; use the narrowest existing target and keep embedded-player files behind `KINEMA_ENABLE_MPV_EMBED`.
+- `app::ServiceContainer` owns long-lived services and view-models. Keep QML engine wiring in `ui::qml::installQmlContext()` and expose shell state through `ui::qml::ShellViewModel`.
+- Store credentials only through `controllers::TokenController` and `core::TokenStore`; never store them in `KSharedConfig`.
+- Access `KSharedConfig` only from `src/config/`; inject settings instead of introducing global configuration state.
+- Guard asynchronous UI and controller requests with an epoch counter. Convert failures with one `catch (const std::exception&)` using `core::describeError()`.
+- Route clipboard, URL opening, external playback, and stream playback through `services::StreamActions`.
+- Load remote artwork through `image://kinema/<role>?u=<url>`, never directly from an HTTP URL in QML.
+- Keep embedded-player code behind `KINEMA_ENABLE_MPV_EMBED` or `KINEMA_HAVE_LIBMPV`.
+- Add tests with `ecm_add_test(...)` in `tests/CMakeLists.txt` and include each target in the fixture loop.
+- Validate changes with `cmake --build build -j$(nproc)` and `ctest --test-dir build --output-on-failure`.

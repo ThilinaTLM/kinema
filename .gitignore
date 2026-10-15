@@ -1,3 +1,7 @@
+# Rust build output; Cargo.lock is intentionally tracked.
+/target/
+
+# Archived C++ build output and shared local caches.
 build/
 build-*/
 .cache/

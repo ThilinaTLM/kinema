@@ -1,0 +1,16 @@
+[package]
+name = "kinema-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+kinema-core.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

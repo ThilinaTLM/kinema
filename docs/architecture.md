@@ -2,6 +2,11 @@
 
 ## What we are building
 
+**Current state:** an early two-crate Rust scaffold, using official GPUI Kit 0.7.3
+for the desktop shell. The provider, database, acquisition, media-server, and player
+flows below describe the target architecture, not implemented behavior. See
+[development](development.md) for setup and validation.
+
 Kinema Next is a local-first movie and TV-series application written in Rust with GPUI. It targets **Windows, macOS, and Linux from the first release**, without KDE dependencies.
 
 ### Agreed MVP
@@ -60,7 +65,7 @@ Use one application with these boundaries:
 
 Construct dependencies in one place. Keep GPUI, SQL, and provider response formats out of domain rules. Provider adapters should be easy to add or replace; runtime plugin loading is not needed to achieve that.
 
-Start with a small in-memory sync queue, one SQLite worker, and bounded background work. No persisted job system, global event bus, or general plugin framework is needed. Exact crates/libraries remain to be selected.
+Start with a small in-memory sync queue, one SQLite worker, and bounded background work. No persisted job system, global event bus, or general plugin framework is needed. Beyond the pinned GPUI Kit shell and basic logging, subsystem crates/libraries remain to be selected.
 
 ## Responsiveness and lifetime rules
 
@@ -78,7 +83,7 @@ External launch success and HTTP traffic do not establish playing/paused/complet
 
 Use native adapters or maintained cross-platform libraries for application directories, secure credential storage, player discovery/launch, and optional desktop features. Store secrets in the OS secure store, never settings, SQLite, manifests, or logs. Launch players with argument lists, not constructed shell commands.
 
-Test on all three desktops throughout development. Pay particular attention to Unicode paths, file locks/deletion, secure-store errors, player reconnects, and GPUI window/rendering behavior; test Wayland/X11 on Linux. Minimum OS versions, architectures, packaging, and optional integrations remain open. Pin and validate a GPUI revision rather than assuming framework support is sufficient.
+Test on all three desktops throughout development. Pay particular attention to Unicode paths, file locks/deletion, secure-store errors, player reconnects, and GPUI window/rendering behavior; test Wayland/X11 on Linux. Minimum OS versions, architectures, packaging, and optional integrations remain open. The shell pins GPUI Kit 0.7.3 and uses its GPUI reexports; native compilation alone does not establish runtime desktop support.
 
 ## What we learned from the old application
 

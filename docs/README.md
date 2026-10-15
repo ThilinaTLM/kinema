@@ -1,6 +1,6 @@
 # Kinema Next
 
-Design notes for a Rust + GPUI rewrite. The application has not been rewritten yet; the existing C++ source remains a reference, not a template to port line by line.
+Design notes for a Rust + GPUI Kit rewrite. The Rust workspace is an early scaffold, not a complete MVP. The [archived C++ source](../reference/cpp/README.md) remains a reference, not a template to port line by line.
 
 **The goal:** browse movies and series, find sources through Torrentio/Peerflix, acquire media through debrid, and serve it from local storage to external VLC/mpv.
 
@@ -8,6 +8,7 @@ Design notes for a Rust + GPUI rewrite. The application has not been rewritten y
 
 | Document | What it covers |
 | --- | --- |
+| [Development](development.md) | Toolchain, OS prerequisites, running, and validation |
 | [Architecture](architecture.md) | Agreed scope, system diagram, responsibilities, and desktop support |
 | [Catalog and database](catalog-schema.md) | SQLite ER diagram and local-first sync |
 | [Storage and media server](storage-layout.md) | File locations, streaming, cache limits, and recovery |
