@@ -7,21 +7,31 @@ use std::{
     error::Error,
     fmt,
     io::Read,
-    path::{Path, PathBuf},
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use directories::ProjectDirs;
 use kinema_core::{
     MediaKind,
-    catalog::{CatalogTitle, ImdbId, SearchQuery},
+    catalog::{CatalogEpisode, CatalogTitle, ImdbId, SearchQuery, TitleDetails},
+    sources::{IndexerKind, PlaybackTarget, SourceCandidate},
 };
 use reqwest::{Url, blocking::Client, redirect::Policy};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+#[path = "catalog_metadata.rs"]
+mod metadata;
+use metadata::migrate_metadata;
 
 const ENDPOINT: &str = "https://v3-cinemeta.strem.io/";
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 3;
+const MAX_EPISODES: usize = 20_000;
+const MAX_URL_BYTES: usize = 4096;
 const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_RESULTS: usize = 500;
 const MAX_ID_CHARS: usize = 64;
@@ -40,6 +50,12 @@ pub(crate) enum CatalogError {
     InvalidResponse,
     ResponseTooLarge,
     Clock,
+    Indexer,
+    Canceled,
+    Tmdb(crate::tmdb::TmdbError),
+    TmdbMissingCredential,
+    TmdbCredentialUnavailable,
+    TmdbCredentialDenied,
 }
 
 impl fmt::Display for CatalogError {
@@ -54,6 +70,14 @@ impl fmt::Display for CatalogError {
             Self::InvalidResponse => "Cinemeta returned an invalid catalog response.",
             Self::ResponseTooLarge => "Cinemeta returned a catalog response that is too large.",
             Self::Clock => "The system clock cannot timestamp catalog results.",
+            Self::Indexer => "The source indexer could not return valid results.",
+            Self::Canceled => "The metadata request was canceled.",
+            Self::Tmdb(error) => return error.fmt(f),
+            Self::TmdbMissingCredential => {
+                "Configure a TMDB API Read Access Token to fetch TMDB metadata."
+            }
+            Self::TmdbCredentialUnavailable => "TMDB secure credential storage is unavailable.",
+            Self::TmdbCredentialDenied => "Access to the TMDB credential was denied.",
         })
     }
 }
@@ -73,30 +97,44 @@ pub(crate) struct CachedSearch {
     pub fetched_at: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CachedDetails {
+    pub details: TitleDetails,
+    pub fetched_at: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CachedSources {
+    pub candidates: Vec<SourceCandidate>,
+    pub omitted: usize,
+    pub fetched_at: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CachedTmdb {
+    pub data: crate::tmdb::TmdbData,
+    pub fetched_at: u64,
+}
+
 pub(crate) struct CatalogService {
     connection: Connection,
     client: Client,
     endpoint: Url,
+    indexers: Option<crate::sources::IndexerClient>,
+    pub(super) cancellation: Option<Arc<AtomicBool>>,
 }
 
 impl CatalogService {
-    /// `debug_assertions` builds use ./data relative to the process working
-    /// directory (run `cargo run` from the repository root for repo-local data).
-    /// Release builds use ProjectDirs("", "", "kinema").data_local_dir().
-    /// Neither mode falls back to the other or migrates existing data.
-    /// Directory resolution and all filesystem I/O run on the owning worker.
+    pub(super) fn ensure_active(&self) -> Result<(), CatalogError> {
+        check_cancellation(self.cancellation.as_deref())
+    }
+
+    /// Resolve paths and perform all filesystem I/O on the owning worker.
+    /// AppPaths owns development/native routing; no migration or fallback.
     pub(crate) fn open_default() -> Result<Self, CatalogError> {
-        let directory = catalog_directory(
-            cfg!(debug_assertions),
-            || std::env::current_dir().map_err(|_| CatalogError::DataDirectory),
-            || {
-                ProjectDirs::from("", "", "kinema")
-                    .map(|dirs| dirs.data_local_dir().to_path_buf())
-                    .ok_or(CatalogError::DataDirectory)
-            },
-        )?;
-        std::fs::create_dir_all(&directory).map_err(|_| CatalogError::DataDirectory)?;
-        Self::open(&directory.join("catalog.sqlite3"))
+        let paths = crate::paths::AppPaths::resolve().map_err(|_| CatalogError::DataDirectory)?;
+        std::fs::create_dir_all(&paths.data).map_err(|_| CatalogError::DataDirectory)?;
+        Self::open(&paths.data.join("catalog.sqlite3"))
     }
 
     /// The parent directory must exist. Opening errors never reset/delete a DB.
@@ -108,9 +146,24 @@ impl CatalogService {
     // Private endpoint injection is only used by local HTTP tests.
     fn open_at(path: &Path, endpoint: Url) -> Result<Self, CatalogError> {
         let client = Client::builder()
-            .connect_timeout(Duration::from_secs(5))
+            // OS resolution can legitimately spend one 5-second DNS retry on
+            // the catalog redirect host. Include it in a bounded connect budget;
+            // the unchanged total request deadline still caps the entire fetch.
+            .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(15))
-            .redirect(Policy::none())
+            .redirect(Policy::custom(|attempt| {
+                if attempt.previous().len() < 3
+                    && attempt.url().scheme() == "https"
+                    && matches!(
+                        attempt.url().host_str(),
+                        Some("v3-cinemeta.strem.io" | "cinemeta-catalogs.strem.io")
+                    )
+                {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
             .user_agent("Kinema-Next/0.1 catalog")
             .build()
             .map_err(|_| CatalogError::Network)?;
@@ -121,7 +174,7 @@ impl CatalogService {
         if version > SCHEMA_VERSION {
             return Err(CatalogError::NewerDatabase);
         }
-        if version != 0 && version != SCHEMA_VERSION {
+        if version < 0 {
             return Err(CatalogError::InvalidCache);
         }
         if version == 0 {
@@ -166,10 +219,18 @@ impl CatalogService {
             )?;
             tx.commit()?;
         }
+        if version < 2 {
+            migrate_metadata(&mut connection)?;
+        }
+        if version < 3 {
+            metadata::migrate_tmdb(&mut connection)?;
+        }
         Ok(Self {
             connection,
             client,
             endpoint,
+            indexers: None,
+            cancellation: None,
         })
     }
 
@@ -234,31 +295,7 @@ impl CatalogService {
     /// failure leaves the saved snapshot and its timestamp unchanged.
     pub(crate) fn refresh(&mut self, query: &SearchQuery) -> Result<CachedSearch, CatalogError> {
         let url = search_url(&self.endpoint, query)?;
-        let response = self
-            .client
-            .get(url)
-            .header(reqwest::header::ACCEPT, "application/json")
-            .send()
-            .map_err(|_| CatalogError::Network)?;
-        if !response.status().is_success() {
-            return Err(CatalogError::HttpStatus);
-        }
-        if response
-            .content_length()
-            .is_some_and(|n| n > MAX_RESPONSE_BYTES)
-        {
-            return Err(CatalogError::ResponseTooLarge);
-        }
-        let mut bytes = Vec::new();
-        response
-            .take(MAX_RESPONSE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| CatalogError::Network)?;
-        if bytes.len() as u64 > MAX_RESPONSE_BYTES {
-            return Err(CatalogError::ResponseTooLarge);
-        }
-        let payload: SearchResponse =
-            serde_json::from_slice(&bytes).map_err(|_| CatalogError::InvalidResponse)?;
+        let payload: SearchResponse = self.fetch_json(url)?;
         if payload.metas.len() > MAX_RESULTS {
             return Err(CatalogError::InvalidResponse);
         }
@@ -299,7 +336,7 @@ impl CatalogService {
             tx.execute(
                 "INSERT INTO cinemeta_v3_titles(kind, imdb_id, name, overview)
                  VALUES (?1, ?2, ?3, ?4) ON CONFLICT(kind, imdb_id) DO UPDATE SET
-                 name = excluded.name, overview = excluded.overview",
+                 name = excluded.name, overview = COALESCE(excluded.overview, cinemeta_v3_titles.overview)",
                 params![
                     kind_text(title.kind()),
                     title.id().as_str(),
@@ -323,18 +360,11 @@ impl CatalogService {
     }
 }
 
-// Lazy resolvers keep development independent of native/home-directory lookup
-// and release independent of the process working directory. Errors propagate;
-// there is intentionally no fallback location.
-fn catalog_directory(
-    development: bool,
-    current_directory: impl FnOnce() -> Result<PathBuf, CatalogError>,
-    native_directory: impl FnOnce() -> Result<PathBuf, CatalogError>,
-) -> Result<PathBuf, CatalogError> {
-    if development {
-        current_directory().map(|directory| directory.join("data"))
+fn check_cancellation(flag: Option<&AtomicBool>) -> Result<(), CatalogError> {
+    if flag.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        Err(CatalogError::Canceled)
     } else {
-        native_directory()
+        Ok(())
     }
 }
 
@@ -368,6 +398,8 @@ fn validate_title(
 ) -> Result<CatalogTitle, CatalogError> {
     if id.chars().count() > MAX_ID_CHARS
         || name.chars().count() > MAX_NAME_CHARS
+        || name.contains('\0')
+        || overview.as_ref().is_some_and(|text| text.contains('\0'))
         || overview
             .as_ref()
             .is_some_and(|text| text.chars().count() > MAX_OVERVIEW_CHARS)
@@ -380,12 +412,12 @@ fn validate_title(
 
 // No defaults on metas or required fields: a changed API/error object is not a
 // successful empty search. Optional description is absent in current search data.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SearchResponse {
     metas: Vec<SearchMeta>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SearchMeta {
     id: String,
     #[serde(rename = "type")]
@@ -414,11 +446,18 @@ mod tests {
 
     impl Mock {
         fn start(responses: Vec<(u16, String)>) -> Result<Self, Box<dyn Error>> {
+            Self::start_canceling(responses, None)
+        }
+
+        fn start_canceling(
+            responses: Vec<(u16, String)>,
+            cancel: Option<(usize, Arc<AtomicBool>)>,
+        ) -> Result<Self, Box<dyn Error>> {
             let listener = TcpListener::bind("127.0.0.1:0")?;
             let endpoint = Url::parse(&format!("http://{}/", listener.local_addr()?))?;
             let thread = thread::spawn(move || {
                 let mut requests = Vec::new();
-                for (status, body) in responses {
+                for (index, (status, body)) in responses.into_iter().enumerate() {
                     let (mut stream, _) = listener.accept()?;
                     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
                     let mut request = Vec::new();
@@ -431,6 +470,11 @@ mod tests {
                         }
                     }
                     requests.push(String::from_utf8_lossy(&request).into_owned());
+                    if let Some((cancel_index, flag)) = &cancel
+                        && *cancel_index == index
+                    {
+                        flag.store(true, Ordering::Release);
+                    }
                     // A too-large response may be rejected before its body is read.
                     let _ = write!(
                         stream,
@@ -453,70 +497,6 @@ mod tests {
 
     fn ok(body: &str) -> (u16, String) {
         (200, body.to_owned())
-    }
-
-    #[test]
-    fn development_uses_working_directory_without_resolving_native_data() -> TestResult {
-        let temp = tempfile::tempdir()?;
-        let working_directory = temp.path().join("working-directory");
-        let native_called = std::cell::Cell::new(false);
-        let directory = catalog_directory(
-            true,
-            || Ok(working_directory.clone()),
-            || {
-                native_called.set(true);
-                Err(CatalogError::DataDirectory)
-            },
-        )?;
-        assert_eq!(directory, working_directory.join("data"));
-        assert_eq!(
-            directory.join("catalog.sqlite3"),
-            working_directory.join("data/catalog.sqlite3")
-        );
-        assert!(!native_called.get());
-        assert!(!directory.exists());
-        Ok(())
-    }
-
-    #[test]
-    fn release_uses_native_data_without_resolving_working_directory() -> TestResult {
-        let temp = tempfile::tempdir()?;
-        let native_directory = temp.path().join("native-data").join("kinema");
-        let current_called = std::cell::Cell::new(false);
-        let directory = catalog_directory(
-            false,
-            || {
-                current_called.set(true);
-                Err(CatalogError::DataDirectory)
-            },
-            || Ok(native_directory.clone()),
-        )?;
-        assert_eq!(directory, native_directory);
-        assert!(!current_called.get());
-        assert!(!directory.exists());
-        Ok(())
-    }
-
-    #[test]
-    fn directory_resolution_failures_never_fall_back() {
-        for development in [true, false] {
-            let current_called = std::cell::Cell::new(false);
-            let native_called = std::cell::Cell::new(false);
-            let result = catalog_directory(
-                development,
-                || {
-                    current_called.set(true);
-                    Err(CatalogError::DataDirectory)
-                },
-                || {
-                    native_called.set(true);
-                    Err(CatalogError::DataDirectory)
-                },
-            );
-            assert_eq!(result, Err(CatalogError::DataDirectory));
-            assert_eq!(current_called.get(), development);
-            assert_eq!(native_called.get(), !development);
-        }
     }
 
     #[test]
@@ -743,6 +723,778 @@ mod tests {
                 connection.query_row("SELECT value FROM marker", [], |row| row.get(0))?;
             assert_eq!(value, "keep");
         }
+        Ok(())
+    }
+
+    const DETAILS: &str = r#"{"meta":{"id":"tt0903747","type":"series","name":"Breaking Bad","description":"Full overview","poster":"https://images.metahub.space/poster/tt0903747","releaseInfo":"2008–2013","genres":["Drama"],"videos":[{"season":1,"episode":2,"name":"Second","overview":"Episode two","released":"2008-01-28T00:00:00Z"},{"season":1,"episode":1,"name":"Pilot"}]}}"#;
+
+    #[test]
+    fn migration_preserves_version_one_search_cache() -> TestResult {
+        let mock = Mock::start(vec![ok(MOVIE)])?;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let query = SearchQuery::new(MediaKind::Movie, "matrix")?;
+        let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
+        let saved = service.refresh(&query)?;
+        service.connection.execute_batch(
+            "DROP TABLE cinemeta_v3_browse; DROP TABLE cinemeta_v3_details;
+             DROP TABLE indexer_sources_v1; DROP TABLE tmdb_v1_cache; PRAGMA user_version = 1;",
+        )?;
+        drop(service);
+        let mut upgraded = CatalogService::open(&path)?;
+        assert_eq!(upgraded.read(&query)?, Some(saved));
+        assert_eq!(upgraded.read_browse(MediaKind::Movie, 0)?, None);
+        assert_eq!(
+            upgraded
+                .connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            SCHEMA_VERSION
+        );
+        mock.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn migration_failure_rolls_back_all_new_tables_and_version() -> TestResult {
+        let mock = Mock::start(vec![ok(MOVIE)])?;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
+        let query = SearchQuery::new(MediaKind::Movie, "matrix")?;
+        let saved = service.refresh(&query)?;
+        // Simulate a conflicting object at the second migration statement.
+        service.connection.execute_batch(
+            "DROP TABLE cinemeta_v3_browse; DROP TABLE indexer_sources_v1; DROP TABLE tmdb_v1_cache;
+             PRAGMA user_version = 1;",
+        )?;
+        drop(service);
+        assert!(CatalogService::open(&path).is_err());
+        let connection = Connection::open(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            1
+        );
+        let created: i64 = connection.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name IN ('cinemeta_v3_browse', 'indexer_sources_v1')", [], |row| row.get(0),
+        )?;
+        assert_eq!(created, 0);
+        let (timestamp, count): (i64, i64) = connection.query_row(
+            "SELECT fetched_at, result_count FROM cinemeta_v3_searches WHERE kind = 'movie' AND query = 'matrix'", [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(u64::try_from(timestamp)?, saved.fetched_at);
+        assert_eq!(usize::try_from(count)?, saved.titles.len());
+        let name: String =
+            connection.query_row("SELECT name FROM cinemeta_v3_titles", [], |row| row.get(0))?;
+        assert_eq!(name, saved.titles[0].name());
+        mock.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn full_details_and_ordered_episodes_survive_summary_refresh_and_reload() -> TestResult {
+        let summary = r#"{"metas":[{"id":"tt0903747","type":"series","name":"Short title"}]}"#;
+        let mock = Mock::start(vec![ok(DETAILS), ok(summary), ok(summary)])?;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let id = ImdbId::new("tt0903747")?;
+        let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
+        assert_eq!(service.read_details(MediaKind::Series, &id)?, None);
+        let full = service.refresh_details(MediaKind::Series, &id)?;
+        assert_eq!(full.details.episodes[0].number, 1);
+        assert_eq!(
+            full.details.episodes[1].overview.as_deref(),
+            Some("Episode two")
+        );
+        assert_eq!(full.details.title.overview(), Some("Full overview"));
+        service.refresh(&SearchQuery::new(MediaKind::Series, "breaking")?)?;
+        service.refresh_browse(MediaKind::Series, 0)?;
+        assert_eq!(
+            service.read_details(MediaKind::Series, &id)?,
+            Some(full.clone())
+        );
+        drop(service);
+        assert_eq!(
+            CatalogService::open(&path)?.read_details(MediaKind::Series, &id)?,
+            Some(full)
+        );
+        let requests = mock.finish()?;
+        assert!(requests[0].starts_with("GET /meta/series/tt0903747.json "));
+        assert!(requests[2].starts_with("GET /catalog/series/top/skip=0.json "));
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_details_and_failed_sql_refresh_preserve_saved_snapshot() -> TestResult {
+        let invalid = [
+            "{}".to_owned(),
+            DETAILS.replace("tt0903747", "tt0903748"),
+            DETAILS.replace("\"series\"", "\"movie\""),
+            DETAILS.replace("\"episode\":2", "\"episode\":1"),
+            DETAILS.replace("\"episode\":2", "\"episode\":0"),
+            DETAILS.replace("https://images.metahub.space", "file:///private"),
+        ];
+        let mut responses = vec![ok(DETAILS)];
+        responses.extend(invalid.iter().map(|body| ok(body)));
+        responses.push(ok(DETAILS));
+        let mock = Mock::start(responses)?;
+        let dir = tempfile::tempdir()?;
+        let mut service =
+            CatalogService::open_at(&dir.path().join("catalog"), mock.endpoint.clone())?;
+        let id = ImdbId::new("tt0903747")?;
+        service.refresh_details(MediaKind::Series, &id)?;
+        service
+            .connection
+            .execute("UPDATE cinemeta_v3_details SET fetched_at = 123", [])?;
+        let saved = service.read_details(MediaKind::Series, &id)?;
+        for _ in &invalid {
+            assert!(service.refresh_details(MediaKind::Series, &id).is_err());
+            assert_eq!(service.read_details(MediaKind::Series, &id)?, saved);
+        }
+        service.connection.execute_batch(
+            "CREATE TRIGGER fail_details BEFORE UPDATE ON cinemeta_v3_details
+             BEGIN SELECT RAISE(ABORT, 'test'); END;",
+        )?;
+        assert_eq!(
+            service.refresh_details(MediaKind::Series, &id),
+            Err(CatalogError::Storage)
+        );
+        assert_eq!(service.read_details(MediaKind::Series, &id)?, saved);
+        // Remove the fault trigger before testing a corrupt saved payload.
+        service.connection.execute_batch(
+            "DROP TRIGGER fail_details; UPDATE cinemeta_v3_details SET payload = '{}';",
+        )?;
+        assert_eq!(
+            service.read_details(MediaKind::Series, &id),
+            Err(CatalogError::InvalidCache)
+        );
+        mock.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn browse_pages_and_search_are_distinct_and_empty_is_saved() -> TestResult {
+        let mock = Mock::start(vec![
+            ok(MOVIE),
+            ok(r#"{"metas":[]}"#),
+            ok(r#"{"metas":[]}"#),
+        ])?;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
+        let first = service.refresh_browse(MediaKind::Movie, 0)?;
+        let empty = service.refresh_browse(MediaKind::Movie, 100)?;
+        service.refresh(&SearchQuery::new(MediaKind::Movie, "skip=0")?)?;
+        assert!(empty.titles.is_empty());
+        assert_eq!(service.read_browse(MediaKind::Movie, 0)?, Some(first));
+        assert_eq!(
+            service.read_browse(MediaKind::Movie, 100)?,
+            Some(empty.clone())
+        );
+        assert_eq!(service.read_browse(MediaKind::Series, 0)?, None);
+        assert_eq!(service.read_browse(MediaKind::Movie, 200)?, None);
+        drop(service);
+        assert_eq!(
+            CatalogService::open(&path)?.read_browse(MediaKind::Movie, 100)?,
+            Some(empty)
+        );
+        mock.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn failed_browse_refresh_rolls_back_shared_summaries_and_timestamp() -> TestResult {
+        let mock = Mock::start(vec![
+            ok(MOVIE),
+            (503, "offline".into()),
+            ok(&MOVIE.replace("The Matrix", "Changed")),
+        ])?;
+        let dir = tempfile::tempdir()?;
+        let mut service =
+            CatalogService::open_at(&dir.path().join("catalog"), mock.endpoint.clone())?;
+        service.refresh_browse(MediaKind::Movie, 0)?;
+        service.connection.execute_batch(
+            "UPDATE cinemeta_v3_browse SET fetched_at = 123;
+             CREATE TRIGGER fail_browse BEFORE UPDATE ON cinemeta_v3_browse BEGIN SELECT RAISE(ABORT, 'test'); END;",
+        )?;
+        let saved = service.read_browse(MediaKind::Movie, 0)?;
+        assert_eq!(
+            service.refresh_browse(MediaKind::Movie, 0),
+            Err(CatalogError::HttpStatus)
+        );
+        assert_eq!(service.read_browse(MediaKind::Movie, 0)?, saved);
+        assert_eq!(
+            service.refresh_browse(MediaKind::Movie, 0),
+            Err(CatalogError::Storage)
+        );
+        assert_eq!(service.read_browse(MediaKind::Movie, 0)?, saved);
+        let name: String =
+            service
+                .connection
+                .query_row("SELECT name FROM cinemeta_v3_titles", [], |row| row.get(0))?;
+        assert_eq!(name, "The Matrix");
+        service.connection.execute_batch(
+            "DROP TRIGGER fail_browse; UPDATE cinemeta_v3_browse SET payload = '{}';",
+        )?;
+        assert_eq!(
+            service.read_browse(MediaKind::Movie, 0),
+            Err(CatalogError::InvalidCache)
+        );
+        mock.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn source_cache_sanitizes_labels_and_separates_indexers_targets_and_scope() -> TestResult {
+        use kinema_core::sources::{InfoHash, TorrentSource};
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let mut service = CatalogService::open(&path)?;
+        let target = PlaybackTarget::Movie(ImdbId::new("tt0133093")?);
+        let results = crate::sources::SourceResults {
+            omitted: 2,
+            candidates: vec![SourceCandidate {
+                torrent: TorrentSource {
+                    hash: InfoHash::new("0123456789012345678901234567890123456789")?,
+                    file_index: Some(1),
+                    filename: Some("film.mkv https://private.test/?token=secret".into()),
+                },
+                name: "Film 1080p magnet:?xt=private https://example.test/token?secret=x".into(),
+                quality: Some("1080p".into()),
+                size: Some(100),
+                seeders: Some(4),
+            }],
+        };
+        let saved = service.save_sources(IndexerKind::Torrentio, &target, results)?;
+        assert_eq!(saved.omitted, 2);
+        let payload: String =
+            service
+                .connection
+                .query_row("SELECT payload FROM indexer_sources_v1", [], |row| {
+                    row.get(0)
+                })?;
+        for forbidden in ["private.test", "secret", "magnet:", "https://"] {
+            assert!(!payload.contains(forbidden));
+        }
+        assert_eq!(
+            service.read_sources(IndexerKind::Torrentio, &target)?,
+            Some(saved.clone())
+        );
+        assert_eq!(service.read_sources(IndexerKind::Peerflix, &target)?, None);
+        let other = PlaybackTarget::Episode {
+            series: ImdbId::new("tt0133093")?,
+            season: 1,
+            episode: 1,
+        };
+        assert_eq!(service.read_sources(IndexerKind::Torrentio, &other)?, None);
+        drop(service);
+        let mut service = CatalogService::open(&path)?;
+        assert_eq!(
+            service.read_sources(IndexerKind::Torrentio, &target)?,
+            Some(saved)
+        );
+        service.connection.execute(
+            "UPDATE indexer_sources_v1 SET scope = 'different-config'",
+            [],
+        )?;
+        assert_eq!(service.read_sources(IndexerKind::Torrentio, &target)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn source_cache_empty_failure_and_corruption_remain_distinct() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        let target = PlaybackTarget::Movie(ImdbId::new("tt0133093")?);
+        assert_eq!(service.read_sources(IndexerKind::Torrentio, &target)?, None);
+        let empty = || crate::sources::SourceResults {
+            candidates: Vec::new(),
+            omitted: 0,
+        };
+        let saved = service.save_sources(IndexerKind::Torrentio, &target, empty())?;
+        assert!(saved.candidates.is_empty());
+        service.connection.execute_batch("CREATE TRIGGER fail_sources BEFORE UPDATE ON indexer_sources_v1 BEGIN SELECT RAISE(ABORT, 'test'); END;")?;
+        assert_eq!(
+            service.save_sources(IndexerKind::Torrentio, &target, empty()),
+            Err(CatalogError::Storage)
+        );
+        assert_eq!(
+            service.read_sources(IndexerKind::Torrentio, &target)?,
+            Some(saved)
+        );
+        service.connection.execute_batch("DROP TRIGGER fail_sources; UPDATE indexer_sources_v1 SET payload = '{\"candidates\":[],\"omitted\":0,\"url\":\"https://private\"}';")?;
+        assert_eq!(
+            service.read_sources(IndexerKind::Torrentio, &target),
+            Err(CatalogError::InvalidCache)
+        );
+        Ok(())
+    }
+
+    fn tmdb_page(kind: MediaKind, page: u32) -> crate::tmdb::TmdbData {
+        crate::tmdb::TmdbData::Page(crate::tmdb::TmdbPage {
+            titles: vec![crate::tmdb::TmdbTitle {
+                id: 603,
+                kind,
+                name: "Fixture title".into(),
+                overview: Some("Overview".into()),
+                release_info: Some("1999".into()),
+                poster_url: None,
+            }],
+            page,
+            total_pages: 10,
+        })
+    }
+
+    #[test]
+    fn tmdb_cache_keys_bind_provider_locale_kind_text_and_page() -> TestResult {
+        use crate::tmdb::TmdbQuery;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let mut service = CatalogService::open(&path)?;
+        let queries = [
+            (
+                TmdbQuery::Browse {
+                    kind: MediaKind::Movie,
+                    page: 1,
+                },
+                MediaKind::Movie,
+                1,
+            ),
+            (
+                TmdbQuery::Browse {
+                    kind: MediaKind::Series,
+                    page: 1,
+                },
+                MediaKind::Series,
+                1,
+            ),
+            (
+                TmdbQuery::Search {
+                    query: SearchQuery::new(MediaKind::Movie, " Matrix ")?,
+                    page: 1,
+                },
+                MediaKind::Movie,
+                1,
+            ),
+            (
+                TmdbQuery::Search {
+                    query: SearchQuery::new(MediaKind::Movie, "matrix")?,
+                    page: 1,
+                },
+                MediaKind::Movie,
+                1,
+            ),
+            (
+                TmdbQuery::Search {
+                    query: SearchQuery::new(MediaKind::Movie, "Matrix")?,
+                    page: 2,
+                },
+                MediaKind::Movie,
+                2,
+            ),
+            (
+                TmdbQuery::Search {
+                    query: SearchQuery::new(MediaKind::Series, "Matrix")?,
+                    page: 1,
+                },
+                MediaKind::Series,
+                1,
+            ),
+        ];
+        let mut saved = Vec::new();
+        for (query, kind, page) in &queries {
+            assert_eq!(service.read_tmdb(query)?, None);
+            saved.push(service.save_tmdb(query, tmdb_page(*kind, *page))?);
+        }
+        let rows: i64 = service.connection.query_row(
+            "SELECT count(*) FROM tmdb_v1_cache WHERE locale = 'en-US'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(rows, queries.len() as i64);
+        for ((query, _, _), snapshot) in queries.iter().zip(&saved) {
+            assert_eq!(service.read_tmdb(query)?, Some(snapshot.clone()));
+            let key = crate::tmdb::cache_query_identity(query)?;
+            let matches: i64 = service.connection.query_row(
+                "SELECT count(*) FROM tmdb_v1_cache WHERE resource = ?1",
+                [key],
+                |row| row.get(0),
+            )?;
+            assert_eq!(matches, 1);
+        }
+        drop(service);
+        let mut reopened = CatalogService::open(&path)?;
+        for ((query, _, _), snapshot) in queries.iter().zip(saved) {
+            assert_eq!(reopened.read_tmdb(query)?, Some(snapshot));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn tmdb_details_and_seasons_are_bound_to_exact_numeric_identity() -> TestResult {
+        use crate::tmdb::{TmdbData, TmdbDetails, TmdbQuery, TmdbSeason, TmdbTitle};
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        let details_query = TmdbQuery::Details {
+            kind: MediaKind::Movie,
+            id: 603,
+        };
+        let details = TmdbData::Details(TmdbDetails {
+            title: TmdbTitle {
+                id: 603,
+                kind: MediaKind::Movie,
+                name: "Fixture".into(),
+                overview: None,
+                release_info: None,
+                poster_url: None,
+            },
+            imdb: Some(ImdbId::new("tt0133093")?),
+            genres: vec!["Action".into()],
+            seasons: Vec::new(),
+        });
+        let saved_details = service.save_tmdb(&details_query, details.clone())?;
+        assert_eq!(service.read_tmdb(&details_query)?, Some(saved_details));
+        assert!(
+            service
+                .save_tmdb(
+                    &TmdbQuery::Details {
+                        kind: MediaKind::Movie,
+                        id: 604
+                    },
+                    details.clone()
+                )
+                .is_err()
+        );
+        assert!(
+            service
+                .save_tmdb(
+                    &TmdbQuery::Details {
+                        kind: MediaKind::Series,
+                        id: 603
+                    },
+                    details
+                )
+                .is_err()
+        );
+        let season_query = TmdbQuery::Season {
+            series_id: 1399,
+            season: 1,
+        };
+        let season = TmdbData::Season(TmdbSeason {
+            series_id: 1399,
+            season: 1,
+            episodes: vec![CatalogEpisode {
+                season: 1,
+                number: 1,
+                name: Some("Pilot".into()),
+                overview: None,
+                released: None,
+            }],
+        });
+        let saved_season = service.save_tmdb(&season_query, season.clone())?;
+        assert_eq!(service.read_tmdb(&season_query)?, Some(saved_season));
+        assert!(
+            service
+                .save_tmdb(
+                    &TmdbQuery::Season {
+                        series_id: 1400,
+                        season: 1
+                    },
+                    season.clone()
+                )
+                .is_err()
+        );
+        assert!(
+            service
+                .save_tmdb(
+                    &TmdbQuery::Season {
+                        series_id: 1399,
+                        season: 2
+                    },
+                    season
+                )
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tmdb_saved_empty_is_readable_without_credentials_and_credential_errors_are_distinct()
+    -> TestResult {
+        use crate::{
+            credentials::CredentialError,
+            tmdb::{TmdbData, TmdbPage, TmdbQuery},
+        };
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        let query = TmdbQuery::Browse {
+            kind: MediaKind::Movie,
+            page: 1,
+        };
+        let saved = service.save_tmdb(
+            &query,
+            TmdbData::Page(TmdbPage {
+                titles: Vec::new(),
+                page: 1,
+                total_pages: 0,
+            }),
+        )?;
+        assert_eq!(service.read_tmdb(&query)?, Some(saved.clone()));
+        for (credential_error, expected) in [
+            (
+                CredentialError::Missing,
+                CatalogError::TmdbMissingCredential,
+            ),
+            (
+                CredentialError::Unavailable,
+                CatalogError::TmdbCredentialUnavailable,
+            ),
+            (
+                CredentialError::AccessDenied,
+                CatalogError::TmdbCredentialDenied,
+            ),
+        ] {
+            assert_eq!(
+                service.refresh_tmdb_with_credential(&query, || Err(credential_error)),
+                Err(expected)
+            );
+            assert_eq!(service.read_tmdb(&query)?, Some(saved.clone()));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn tmdb_mismatch_corruption_and_sql_failure_preserve_saved_snapshot() -> TestResult {
+        use crate::tmdb::TmdbQuery;
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        let query = TmdbQuery::Browse {
+            kind: MediaKind::Movie,
+            page: 1,
+        };
+        service.save_tmdb(&query, tmdb_page(MediaKind::Movie, 1))?;
+        service.connection.execute_batch(
+            "UPDATE tmdb_v1_cache SET fetched_at = 123;
+             CREATE TRIGGER fail_tmdb BEFORE UPDATE ON tmdb_v1_cache BEGIN SELECT RAISE(ABORT, 'test'); END;",
+        )?;
+        let saved = service.read_tmdb(&query)?;
+        assert!(
+            service
+                .save_tmdb(&query, tmdb_page(MediaKind::Movie, 2))
+                .is_err()
+        );
+        assert_eq!(service.read_tmdb(&query)?, saved);
+        assert_eq!(
+            service.save_tmdb(&query, tmdb_page(MediaKind::Movie, 1)),
+            Err(CatalogError::Storage)
+        );
+        assert_eq!(service.read_tmdb(&query)?, saved);
+        service
+            .connection
+            .execute_batch("DROP TRIGGER fail_tmdb; UPDATE tmdb_v1_cache SET payload = '{}';")?;
+        assert_eq!(service.read_tmdb(&query), Err(CatalogError::InvalidCache));
+        Ok(())
+    }
+
+    #[test]
+    fn schema_three_upgrade_preserves_all_version_two_cache_resources() -> TestResult {
+        let mock = Mock::start(vec![ok(MOVIE), ok(MOVIE), ok(DETAILS)])?;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
+        let query = SearchQuery::new(MediaKind::Movie, "matrix")?;
+        let search = service.refresh(&query)?;
+        let browse = service.refresh_browse(MediaKind::Movie, 0)?;
+        let id = ImdbId::new("tt0903747")?;
+        let details = service.refresh_details(MediaKind::Series, &id)?;
+        let target = PlaybackTarget::Movie(ImdbId::new("tt0133093")?);
+        let sources = service.save_sources(
+            IndexerKind::Torrentio,
+            &target,
+            crate::sources::SourceResults {
+                candidates: Vec::new(),
+                omitted: 0,
+            },
+        )?;
+        service
+            .connection
+            .execute_batch("DROP TABLE tmdb_v1_cache; PRAGMA user_version = 2;")?;
+        drop(service);
+        let mut reopened = CatalogService::open(&path)?;
+        assert_eq!(reopened.read(&query)?, Some(search));
+        assert_eq!(reopened.read_browse(MediaKind::Movie, 0)?, Some(browse));
+        assert_eq!(
+            reopened.read_details(MediaKind::Series, &id)?,
+            Some(details)
+        );
+        assert_eq!(
+            reopened.read_sources(IndexerKind::Torrentio, &target)?,
+            Some(sources)
+        );
+        assert_eq!(
+            reopened.read_tmdb(&crate::tmdb::TmdbQuery::Browse {
+                kind: MediaKind::Movie,
+                page: 1
+            })?,
+            None
+        );
+        assert_eq!(
+            reopened
+                .connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            3
+        );
+        mock.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn failed_schema_three_upgrade_does_not_advance_version_or_touch_existing_cache() -> TestResult
+    {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let service = CatalogService::open(&path)?;
+        // A collision at migration time must be an error, never a reset.
+        service.connection.execute_batch("PRAGMA user_version = 2; INSERT INTO cinemeta_v3_searches(kind, query, fetched_at, result_count) VALUES ('movie', 'keep', 123, 0);")?;
+        drop(service);
+        assert!(matches!(
+            CatalogService::open(&path),
+            Err(CatalogError::Storage)
+        ));
+        let connection = Connection::open(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            2
+        );
+        let timestamp: i64 = connection.query_row(
+            "SELECT fetched_at FROM cinemeta_v3_searches WHERE query = 'keep'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(timestamp, 123);
+        Ok(())
+    }
+
+    #[test]
+    fn canceled_http_reply_is_not_committed_to_browse_cache() -> TestResult {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mock = Mock::start_canceling(
+            vec![
+                ok(MOVIE),
+                ok(&MOVIE.replace("The Matrix", "Canceled title")),
+            ],
+            Some((1, Arc::clone(&flag))),
+        )?;
+        let dir = tempfile::tempdir()?;
+        let mut service =
+            CatalogService::open_at(&dir.path().join("catalog"), mock.endpoint.clone())?;
+        let saved = service.refresh_browse(MediaKind::Movie, 0)?;
+        service.cancellation = Some(flag);
+        assert_eq!(
+            service.refresh_browse(MediaKind::Movie, 0),
+            Err(CatalogError::Canceled)
+        );
+        assert_eq!(service.read_browse(MediaKind::Movie, 0)?, Some(saved));
+        let name: String =
+            service
+                .connection
+                .query_row("SELECT name FROM cinemeta_v3_titles", [], |row| row.get(0))?;
+        assert_eq!(name, "The Matrix");
+        mock.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn canceled_tmdb_and_source_work_neither_reads_credentials_nor_updates_cache() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        let query = crate::tmdb::TmdbQuery::Browse {
+            kind: MediaKind::Movie,
+            page: 1,
+        };
+        let saved = service.save_tmdb(&query, tmdb_page(MediaKind::Movie, 1))?;
+        service.cancellation = Some(Arc::new(AtomicBool::new(true)));
+        let credential_called = std::cell::Cell::new(false);
+        assert_eq!(
+            service.refresh_tmdb_with_credential(&query, || {
+                credential_called.set(true);
+                Err(crate::credentials::CredentialError::Missing)
+            }),
+            Err(CatalogError::Canceled)
+        );
+        assert!(!credential_called.get());
+        assert_eq!(
+            service.save_tmdb(&query, tmdb_page(MediaKind::Movie, 1)),
+            Err(CatalogError::Canceled)
+        );
+        assert_eq!(service.read_tmdb(&query)?, Some(saved));
+        let target = PlaybackTarget::Movie(ImdbId::new("tt0133093")?);
+        assert_eq!(
+            service.save_sources(
+                IndexerKind::Torrentio,
+                &target,
+                crate::sources::SourceResults {
+                    candidates: Vec::new(),
+                    omitted: 0
+                }
+            ),
+            Err(CatalogError::Canceled)
+        );
+        assert_eq!(service.read_sources(IndexerKind::Torrentio, &target)?, None);
+        Ok(())
+    }
+
+    /// Opt-in integration evidence only, not an offline provider-support claim.
+    /// Uses curated public titles and a temporary database, never AppPaths/data.
+    #[test]
+    #[ignore = "requires live public Cinemeta HTTPS access"]
+    fn live_cinemeta_public_metadata_smoke() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("live-catalog.sqlite3"))?;
+        let movie = ImdbId::new("tt0133093")?;
+        let series = ImdbId::new("tt0944947")?;
+        let query = SearchQuery::new(MediaKind::Movie, "The Matrix")?;
+        let operations = [
+            (
+                "browse",
+                service
+                    .refresh_browse(MediaKind::Movie, 0)
+                    .map(|snapshot| snapshot.titles.len()),
+            ),
+            (
+                "search",
+                service
+                    .refresh(&query)
+                    .map(|snapshot| snapshot.titles.len()),
+            ),
+            (
+                "movie details",
+                service
+                    .refresh_details(MediaKind::Movie, &movie)
+                    .map(|snapshot| usize::from(snapshot.details.title.id() == &movie)),
+            ),
+            (
+                "series details",
+                service
+                    .refresh_details(MediaKind::Series, &series)
+                    .map(|snapshot| snapshot.details.episodes.len()),
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (operation, result) in operations {
+            match result {
+                Ok(count) if count > 0 => eprintln!("live {operation}: success ({count} entries)"),
+                Ok(_) => failures.push(format!("live {operation}: unexpectedly empty")),
+                Err(error) => failures.push(format!("live {operation}: {error}")),
+            }
+        }
+        if !failures.is_empty() {
+            return Err(failures.join("; ").into());
+        }
+        assert!(service.read_browse(MediaKind::Movie, 0)?.is_some());
+        assert!(service.read(&query)?.is_some());
+        assert!(service.read_details(MediaKind::Movie, &movie)?.is_some());
+        assert!(service.read_details(MediaKind::Series, &series)?.is_some());
         Ok(())
     }
 

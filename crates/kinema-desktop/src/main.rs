@@ -1,7 +1,24 @@
+mod app;
+mod app_assets;
+mod app_state;
+mod app_tracker;
 mod catalog;
 mod catalog_state;
 mod catalog_worker;
+mod credentials;
+mod media;
+mod metadata_bridge;
+mod paths;
+mod playback_view;
+mod player;
+mod providers;
+mod settings;
+mod settings_view;
 mod shell;
+mod sources;
+mod tmdb;
+mod tmdb_view;
+mod ui;
 
 use std::{cell::Cell, process::ExitCode, rc::Rc};
 
@@ -23,9 +40,11 @@ fn main() -> ExitCode {
     let failed = Rc::clone(&startup_failed);
 
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(app_assets::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            shell::bind_keys(cx);
+            tmdb_view::bind_keys(cx);
             cx.on_window_closed(|cx, _closed_window| {
                 if cx.windows().is_empty() {
                     cx.quit();

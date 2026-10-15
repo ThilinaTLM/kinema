@@ -6,23 +6,10 @@ use kinema_core::{
     catalog::{CatalogTitle, SearchQuery},
 };
 
-use crate::catalog_worker::{Event, Mode, Outcome, Request, Snapshot};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Phase {
-    Idle,
-    /// Reading saved results.
-    Reading,
-    /// Waiting on a remote fetch.
-    Fetching,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Source {
-    None,
-    Saved,
-    Fetched,
-}
+use crate::{
+    app_state::{Origin, Phase},
+    catalog_worker::{Event, Mode, Outcome, Request, Snapshot},
+};
 
 #[derive(Debug)]
 pub(crate) struct ScreenState {
@@ -32,7 +19,7 @@ pub(crate) struct ScreenState {
     active: Option<SearchQuery>,
     pub titles: Vec<CatalogTitle>,
     pub fetched_at: Option<u64>,
-    pub source: Source,
+    pub source: Origin,
     pub phase: Phase,
     pub error: Option<String>,
     pub input_error: Option<String>,
@@ -47,7 +34,7 @@ impl ScreenState {
             active: None,
             titles: Vec::new(),
             fetched_at: None,
-            source: Source::None,
+            source: Origin::None,
             phase: Phase::Idle,
             error: None,
             input_error: None,
@@ -95,7 +82,7 @@ impl ScreenState {
         if self.active.as_ref() != Some(&query) {
             self.titles.clear();
             self.fetched_at = None;
-            self.source = Source::None;
+            self.source = Origin::None;
         }
         self.error = None;
         self.phase = Phase::Reading;
@@ -106,6 +93,18 @@ impl ScreenState {
             query,
             mode,
         }
+    }
+
+    /// Leaves search mode; late results for the abandoned query are rejected.
+    pub(crate) fn clear(&mut self) {
+        self.generation += 1;
+        self.active = None;
+        self.titles.clear();
+        self.fetched_at = None;
+        self.source = Origin::None;
+        self.phase = Phase::Idle;
+        self.error = None;
+        self.input_error = None;
     }
 
     /// The request could not be queued (worker gone); keeps prior results.
@@ -124,7 +123,7 @@ impl ScreenState {
                 snapshot,
                 remote_follows,
             } => {
-                self.store(snapshot, Source::Saved);
+                self.store(snapshot, Origin::Saved);
                 self.phase = if remote_follows {
                     Phase::Fetching
                 } else {
@@ -133,7 +132,7 @@ impl ScreenState {
             }
             Outcome::CacheMiss => self.phase = Phase::Fetching,
             Outcome::Fetched(snapshot) => {
-                self.store(snapshot, Source::Fetched);
+                self.store(snapshot, Origin::Fetched);
                 self.error = None;
                 self.phase = Phase::Idle;
             }
@@ -145,7 +144,7 @@ impl ScreenState {
         true
     }
 
-    fn store(&mut self, snapshot: Snapshot, source: Source) {
+    fn store(&mut self, snapshot: Snapshot, source: Origin) {
         self.titles = snapshot.titles;
         self.fetched_at = Some(snapshot.fetched_at);
         self.source = source;
@@ -234,7 +233,7 @@ mod tests {
                 remote_follows: false,
             },
         ));
-        assert_eq!((s.phase, s.source), (Phase::Idle, Source::Saved));
+        assert_eq!((s.phase, s.source), (Phase::Idle, Origin::Saved));
         let r = s.refresh().expect("refresh");
         assert_eq!(r.mode, Mode::Refresh);
         s.apply(ev(
@@ -249,7 +248,7 @@ mod tests {
         s.apply(ev(r.generation, Outcome::Failed("offline".into())));
         assert_eq!((s.titles.len(), s.fetched_at), (1, Some(10)));
         assert_eq!(s.error.as_deref(), Some("offline"));
-        assert_eq!(s.source, Source::Saved);
+        assert_eq!(s.source, Origin::Saved);
     }
 
     #[test]
@@ -266,6 +265,16 @@ mod tests {
         assert_eq!(s.phase, Phase::Idle);
         assert!(s.titles.is_empty() && s.error.is_none());
         assert_eq!(s.fetched_at, Some(3));
+    }
+
+    #[test]
+    fn clear_leaves_search_and_rejects_late_results() {
+        let mut s = ScreenState::new(MediaKind::Movie);
+        let r = s.search("q").expect("request");
+        s.clear();
+        assert!(s.active().is_none() && !s.busy());
+        assert!(!s.apply(ev(r.generation, Outcome::Fetched(snap(1, &["A"])))));
+        assert!(s.titles.is_empty());
     }
 
     #[test]

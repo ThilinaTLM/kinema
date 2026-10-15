@@ -24,9 +24,32 @@ notices, including Qt, KDE Frameworks, and optional libmpv. These describe the
 archive, not dependencies of the Rust scaffold. The archive's original
 metainfo asset is CC0-1.0; see its source notice.
 
+TMDB attribution asset and API
+------------------------------
+crates/kinema-desktop/assets/tmdb-logo.svg is the unmodified official TMDB
+blue short logo, retrieved from:
+  https://www.themoviedb.org/assets/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg
+SHA-256: 8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c
+
+The TMDB logo, branding, API, and service content are not licensed under this
+project's Apache-2.0 license. TMDB's applicable terms and branding requirements
+apply independently:
+  https://developer.themoviedb.org/docs/faq#what-are-the-attribution-requirements
+  https://www.themoviedb.org/about/logos-attribution
+  https://www.themoviedb.org/api-terms-of-use
+
+Required application notice (in About/Credits, alongside an approved logo):
+This product uses the TMDB API but is not endorsed or certified by TMDB.
+The logo must remain unmodified in color/aspect/orientation and less prominent
+than Kinema branding. Asset inclusion alone does not establish UI compliance.
+TMDB describes API use as free for non-commercial purposes with attribution;
+commercial use requires separate licensing. Users supply their own API access
+token; no project API key is embedded.
+
 External players and services
 -----------------------------
 VLC/mpv and online metadata, indexer, and debrid services are not bundled by
-this scaffold. Planned integrations do not imply implementation, endorsement,
+this application. The TMDB attribution logo above is bundled separately.
+Integrations do not imply implementation, endorsement,
 or a grant of rights to service content or trademarks. Their software licenses
 and service terms apply independently. See docs/architecture.md for scope.
