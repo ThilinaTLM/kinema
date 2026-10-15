@@ -4,6 +4,8 @@
 //! this crate.
 
 pub mod catalog;
+pub mod media;
+pub mod sources;
 
 use std::num::NonZeroU64;
 

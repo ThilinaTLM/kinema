@@ -131,6 +131,27 @@ impl CatalogTitle {
     }
 }
 
+/// One provider-supplied episode; season zero represents specials.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CatalogEpisode {
+    pub season: u32,
+    pub number: u32,
+    pub name: Option<String>,
+    pub overview: Option<String>,
+    pub released: Option<String>,
+}
+
+/// Display details without provider DTOs or transport concerns.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TitleDetails {
+    pub title: CatalogTitle,
+    pub poster_url: Option<String>,
+    pub background_url: Option<String>,
+    pub release_info: Option<String>,
+    pub genres: Vec<String>,
+    pub episodes: Vec<CatalogEpisode>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
