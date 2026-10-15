@@ -1,6 +1,9 @@
-![Kinema — Cinema in motion. Native KDE Plasma 6, open source, Apache-2.0.](docs/banner.webp)
-
 # Kinema
+
+> **Next branch:** architecture planning for a Rust + GPUI redesign is in
+> [docs/README.md](docs/README.md). The source, features, and build/install
+> instructions below still describe the current C++/Qt application, not a
+> completed Rust implementation.
 
 [![Latest release](https://img.shields.io/github/v/release/ThilinaTLM/kinema?sort=semver&display_name=tag&label=release&color=8b5cf6)](https://github.com/ThilinaTLM/kinema/releases/latest)
 [![CI](https://github.com/ThilinaTLM/kinema/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ThilinaTLM/kinema/actions/workflows/ci.yml)
@@ -15,23 +18,6 @@ Stremio-compatible indexers ([Torrentio](https://torrentio.strem.fun/),
 [AllDebrid](https://alldebrid.com/) subscription — streaming the result
 straight into the built-in **mpv** player or handing it off to external
 **mpv** / **VLC**.
-
-## Screenshots
-
-![Discover — trending, popular series, and now-playing rails](docs/screenshots/discover.webp)
-
-| | |
-|:---:|:---:|
-| ![Browse with filters](docs/screenshots/browse.webp) | ![Series detail with seasons and episodes](docs/screenshots/series-detail.webp) |
-| **Browse** — filter by kind, genre, and sort order | **Series detail** — backdrop, metadata, per-season episode list |
-| ![Up Next — ready to watch and airing soon](docs/screenshots/up-next.webp) | ![Library with watched state](docs/screenshots/library.webp) |
-| **Up Next** — ready to watch, airing soon, recently added | **Library** — watched-state and next-episode tracking |
-| ![Stream list with quality, source, and seeder chips](docs/screenshots/streams.webp) | ![Downloads with debrid status chips](docs/screenshots/downloads.webp) |
-| **Streams** — sorted by quality with source / codec / seeder chips | **Downloads** — debrid-backed transfers with per-row status |
-
-![Embedded mpv player with title chrome, codec chips, transport row, and live subtitles](docs/screenshots/player.webp)
-
-*Embedded **mpv** player — episode-aware chrome, live OpenSubtitles overlay, transport / speed / fullscreen controls.*
 
 ## Features
 
@@ -184,9 +170,9 @@ published.
 
 ## First-run setup
 
-See the [configuration guide](docs/Configuration.md) for how TMDB, debrid
-providers, stream indexers, and players fit together, with complete setup and
-troubleshooting steps. The essentials are summarized below.
+The essentials for the current C++ application are summarized below. For the
+redesign's terminology and provider responsibilities, see the
+[architecture overview](docs/architecture.md).
 
 ### TMDB (Discover)
 
@@ -270,9 +256,8 @@ Useful CMake options:
 
 The full per-distro dependency lists, container recipes, and the
 release matrix live in [`packaging/README.md`](packaging/README.md).
-The dependency rules and source layout are documented in
-[`docs/Architecture.md`](docs/Architecture.md); contributor conventions are
-in [`AGENTS.md`](AGENTS.md).
+The Next architecture discussion starts in [`docs/README.md`](docs/README.md);
+contributor conventions for the current code are in [`AGENTS.md`](AGENTS.md).
 
 ## Troubleshooting
 
