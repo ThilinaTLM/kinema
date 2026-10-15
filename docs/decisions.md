@@ -1,6 +1,6 @@
 # Open decisions
 
-The [architecture](architecture.md) is the single summary of agreed scope. The schema, file layout, library choices, and refresh policies are proposals unless stated otherwise. Discuss questions **one at a time**; don't turn this list into an implementation backlog.
+The [architecture](architecture.md) is the single summary of agreed scope. Implementation notes are labeled separately from the proposed fuller schema, file layout, and policies. Discuss questions **one at a time**; don't turn this list into an implementation backlog.
 
 ## Next: who can reach the media server?
 
@@ -15,7 +15,7 @@ No answer has been recorded yet.
 | Area | Still open |
 | --- | --- |
 | Media storage | Default quota, eviction order, unknown-size files, lowering the limit, and a custom cache location |
-| Metadata | Preferred provider/fallback rules, refresh intervals, and additional free providers with suitable terms |
+| Metadata | Global preferred provider/fallback rules, automatic refresh intervals, and additional free providers with suitable terms |
 | Response caches | Exact TTLs, retained-entry limits, and offline use of stale results |
 | Provider integrations | Rollout order for debrid providers, required capabilities, and whether built-in adapters are sufficient |
 | External players | Discovery/configuration, reconnect grace, and app/server shutdown behavior |

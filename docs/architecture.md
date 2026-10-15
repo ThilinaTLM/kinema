@@ -2,10 +2,25 @@
 
 ## What we are building
 
-**Current state:** an early two-crate Rust scaffold, using official GPUI Kit 0.7.3
-for the desktop shell. The provider, database, acquisition, media-server, and player
-flows below describe the target architecture, not implemented behavior. See
+**Current state:** the first bounded catalog increment is implemented in the
+two-crate Rust workspace, using official GPUI Kit 0.7.3. Movies and Series have
+explicit Cinemeta search with SQLite saved exact-query membership, fetch-on-miss,
+and manual Refresh. This is a query-result cache, not offline text search over all
+saved titles, discovery/catalog browsing, or detail/episode sync. The UI distinguishes loading, saved/fetched results, empty results,
+and errors, and displays last-success timestamps as UTC Unix seconds. This is
+source-level status, not test or GUI-runtime verification. See
 [development](development.md) for setup and validation.
+
+`kinema-core` holds validated catalog values and pure rules. `kinema-desktop`
+contains the UI and blocking Cinemeta/SQLite adapter, executed on an owned worker
+thread outside rendering. Each media kind retains independent search state.
+The [actual cache subset](catalog-schema.md#implemented-first-increment) is not the
+full proposed catalog schema. [Current refresh behavior](cache-policy.md#implemented-first-increment)
+does not adopt automatic TTLs or a global provider preference/fallback.
+
+Source discovery, debrid, managed media acquisition/storage, the media server,
+and external VLC/mpv playback remain unimplemented. The flows below describe the
+target architecture, not completed end-to-end behavior.
 
 Kinema Next is a local-first movie and TV-series application written in Rust with GPUI. It targets **Windows, macOS, and Linux from the first release**, without KDE dependencies.
 
@@ -25,7 +40,7 @@ The catalog is not a personalized library. Media downloading is not proof that s
 
 ## How it fits together
 
-This diagram shows responsibilities and data flow, not separate processes.
+This target-architecture diagram shows responsibilities and data flow, not separate processes or a list of implemented subsystems.
 
 ```mermaid
 flowchart TB
@@ -65,9 +80,24 @@ Use one application with these boundaries:
 
 Construct dependencies in one place. Keep GPUI, SQL, and provider response formats out of domain rules. Provider adapters should be easy to add or replace; runtime plugin loading is not needed to achieve that.
 
-Start with a small in-memory sync queue, one SQLite worker, and bounded background work. No persisted job system, global event bus, or general plugin framework is needed. Beyond the pinned GPUI Kit shell and basic logging, subsystem crates/libraries remain to be selected.
+For the fuller sync design, start with a small in-memory queue, one SQLite worker, and bounded background work. No persisted job system, global event bus, or general plugin framework is needed. These are design directions, not additional subsystems required for the first catalog increment.
 
-## Responsiveness and lifetime rules
+## Implemented worker lifetime limits
+
+The catalog worker opens the backend lazily on its first request, not at startup;
+a failed open is retried on the next explicit request. It accepts at most one
+queued request per media kind, served round-robin; newer work replaces obsolete
+queued work, and equivalent queued requests coalesce. The event mailbox is bounded
+to two events per kind. Screen generations reject late results. A disconnected
+worker closes requests and marks busy screens failed. A blocking HTTP call already in flight is **not
+cancelled**: the client has a 5-second connect timeout and 15-second total request
+timeout. Responses are capped at 2 MiB and 500 titles; the UI draws at most 200 rows.
+Dropping the worker closes its mailbox without joining the thread, so the UI does
+not wait for that HTTP timeout; the worker exits after its current call completes.
+This is bounded blocking work, not fully cancellable networking or an orderly
+joined shutdown. Obsolete in-flight work can still finish and save a cache result.
+
+## Target responsiveness and lifetime rules
 
 - Read local data first. Fetch missing data; proposed background refresh keeps stale-but-usable results visible. See [catalog sync](catalog-schema.md) and [cache policies](cache-policy.md).
 - Keep SQL, network waits, image decoding, and blocking file operations outside UI rendering.
@@ -91,7 +121,7 @@ Keep explicit composition, stable content identity, player/source boundaries, pu
 
 The [feature inventory](features.md) links to the reference implementation. These are source-level findings, not measured performance claims.
 
-## First implementation slice
+## Remaining end-to-end MVP slice
 
 Select a movie, find a source, resolve it through one debrid provider, download into managed storage, and launch VLC/mpv with the local URL. Test seeking to missing bytes, repeated local metadata reads, interrupted downloads, refresh failures, and cache exhaustion on all desktop targets. Then cover episodes and both indexers before calling the MVP complete.
 

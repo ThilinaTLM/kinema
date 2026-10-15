@@ -3,6 +3,8 @@
 //! Keep GUI, provider protocols, persistence, and filesystem operations outside
 //! this crate.
 
+pub mod catalog;
+
 use std::num::NonZeroU64;
 
 /// The catalog distinguishes movies from series, not releases or media files.

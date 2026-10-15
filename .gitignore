@@ -1,6 +1,9 @@
 # Rust build output; Cargo.lock is intentionally tracked.
 /target/
 
+# Development application data (relative to the repository-root working directory).
+/data/
+
 # Archived C++ build output and shared local caches.
 build/
 build-*/

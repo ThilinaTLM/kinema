@@ -1,8 +1,36 @@
 # Storage and media server
 
-**Agreed:** media is stored locally and served to external players, including while downloading. The cache has a user-configurable maximum. **Proposed:** the locations and file layout below.
+**Agreed target:** media is stored locally and served to external players,
+including while downloading, with a user-configurable cache maximum. Only the
+catalog location below is implemented; media storage and the broader file layout
+remain proposed.
 
-## Where files live
+## Implemented catalog location
+
+The build's `debug_assertions` setting selects the catalog location:
+
+- **Development (`debug_assertions` enabled):** `./data/catalog.sqlite3`, relative
+  to the process working directory, not the executable or source directory. Run
+  `cargo run -p kinema-desktop --locked` from the repository root to use the
+  gitignored root `data/` directory.
+- **Production (`debug_assertions` disabled):** resolve
+  `ProjectDirs::from("", "", "kinema")` through the `directories` crate and use
+  `data_local_dir()/catalog.sqlite3`. The default release profile selects this
+  behavior: `cargo run -p kinema-desktop --release --locked`. Native directories
+  are resolved at runtime, not constructed from hardcoded HOME/APP_DATA paths.
+
+The default debug and release profiles therefore use separate databases; switching
+modes does not copy or merge their data. A custom profile's `debug_assertions`
+setting, rather than its name, determines the location. Existing files under root
+`data/`, the previous namespace, or historical locations are not migrated, moved,
+or deleted. Resolution/directory/storage failures are reported, not treated as
+permission to use another database or silently reset one.
+
+Only this SQLite file and its SQLite-managed sidecars are part of the implemented
+layout. Settings, artwork/log caches, managed media payloads/manifests, and secure
+credential adapters are not implemented by this increment.
+
+## Proposed broader locations
 
 Use the operating system's directory resolver, not hardcoded home paths. Typical defaults are:
 
@@ -12,11 +40,11 @@ Use the operating system's directory resolver, not hardcoded home paths. Typical
 | Config | `%LOCALAPPDATA%\Kinema\config` | Same as data | `$XDG_CONFIG_HOME/kinema` or `~/.config/kinema` |
 | Cache | `%LOCALAPPDATA%\Kinema\cache` | `~/Library/Caches/Kinema` | `$XDG_CACHE_HOME/kinema` or `~/.cache/kinema` |
 
-These illustrate native locations; resolve actual paths at runtime, including Unicode paths and valid XDG overrides. A user-selectable **media cache location** is proposed, not yet agreed. Other roots stay separate.
+These proposed broader roots illustrate native locations, not the current resolver's exact namespace. Resolve actual paths at runtime, including Unicode paths and valid XDG overrides. A user-selectable **media cache location** is proposed, not yet agreed. Other roots stay separate.
 
 ```text
 DATA/
-  catalog.sqlite
+  catalog.sqlite3               # Actual catalog location follows build mode above
 CONFIG/
   settings.toml                 # Non-secret settings
 CACHE/

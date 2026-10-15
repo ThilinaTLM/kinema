@@ -1,3 +1,6 @@
+mod catalog;
+mod catalog_state;
+mod catalog_worker;
 mod shell;
 
 use std::{cell::Cell, process::ExitCode, rc::Rc};
@@ -37,7 +40,9 @@ fn main() -> ExitCode {
                 }),
                 ..Default::default()
             };
-            match gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| shell::Shell::default())) {
+            match gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| shell::Shell::new(window, cx))
+            }) {
                 Ok(_) => {
                     tracing::info!("Kinema scaffold window opened");
                     cx.activate(true);
