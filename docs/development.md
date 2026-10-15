@@ -74,21 +74,125 @@ Keep shared dependency versions in the root workspace. Update and review
 `Cargo.lock` intentionally when changing dependencies; do not omit `--locked` to
 hide a stale lockfile during validation. There is no Rust release-packaging pipeline yet.
 
-## Current desktop behavior and limits
+## Quickstart and setup
 
-Movies and Series start without a search. Enter a title query and use Search (or
-Enter); use Refresh on the active query to request Cinemeta again. Results show
-names, IMDb IDs, optional overviews, saved/fetched state, and the last-success time
-as UTC Unix seconds. Settings remain a placeholder. No credentials are required
-by this Cinemeta search adapter.
+These steps describe the current source wiring, not a completed GUI acceptance
+test. Final locked root checks passed; complete live UI/provider acceptance remains
+incomplete.
 
-The [query-result cache](catalog-schema.md#implemented-first-increment) only
-reuses saved membership for an exact query, not arbitrary offline search over all
-saved titles. [Refresh policy](cache-policy.md#implemented-first-increment),
-[resolved storage](storage-layout.md#implemented-catalog-location), and
-[worker lifetime limits](architecture.md#implemented-worker-lifetime-limits)
-describe the current source-level behavior. These notes are not a completed
-manual smoke test or a claim that GUI/provider behavior has been verified.
+1. Install a native **mpv or VLC** executable separately; neither is bundled.
+   Start `cargo run -p kinema-desktop --locked` from the repository root.
+2. Open **Settings**. Defaults are Cinemeta, Torrentio, Real-Debrid, mpv, and a
+   **20 GiB** managed-media limit. Select the metadata provider, indexer, debrid
+   provider, and player you intend to use; choose **Save preferences** and wait
+   for confirmation. Custom player selection requires an absolute executable path,
+   not a shell command. The quota field uses GiB.
+3. Configure tokens as described below. Credential **Save token** is separate
+   from **Save preferences**. A presence indicator means a token exists in the
+   keyring, not that the service accepted it. **Test connection** checks the saved
+   token; it ignores unsaved text. Saving clears the input and does not expose the
+   saved value. **Remove token** requires **Confirm remove**; **Keep token** cancels.
+4. Open **Movies** or **Series**, browse or enter a query and press **Search**.
+   Open a title for details; for series, select the season/episode before source
+   lookup. **Refresh** requests the selected provider again; there is no automatic
+   metadata TTL or provider fallback. Saved query/page membership is reusable;
+   this is not arbitrary offline full-text search over every saved title.
+5. Choose **Find sources**, inspect a candidate from the selected indexer, then
+   prepare it through the selected debrid provider. Inspect the returned file list
+   and use **Play selected file**. An ambiguous selection requires a choice; do
+   not assume the largest file is the right episode. Only media you are authorized
+   to access should be used.
+6. Alternatively, **Playback → Open local file…** serves an existing file in place
+   through the same loopback server, without metadata or debrid credentials.
+   Launching a player is not proof that it decoded media or that you watched it.
+7. Release sessions when finished. **Remove unused cached media** performs manual,
+   inactive-only cleanup; it never deletes original local files. Navigation keeps
+   sessions alive. Quit/window close with active work asks confirmation that the
+   server stops; the external player stays open but loses access to its stream.
+   There is no background daemon. See [session lifetime](architecture.md#agreed-session-lifetime-policy).
+
+### Metadata and debrid credentials
+
+- **Cinemeta:** no token is required. It remains the default metadata provider.
+- **TMDB:** use the long **API Read Access Token**, not the short API Key, from
+  [TMDB API settings](https://www.themoviedb.org/settings/api). Save and test it in
+  Settings, then select TMDB and save preferences. Requests use fixed `en-US`.
+  TMDB titles must have an IMDb mapping before source lookup; missing mappings
+  are shown as unavailable, never guessed. No automatic Cinemeta fallback occurs.
+- **Real-Debrid:** obtain your own API token from
+  [Real-Debrid](https://real-debrid.com/apitoken), save it in the Real-Debrid section,
+  and use **Test connection**. Select Real-Debrid for acquisition.
+- **AllDebrid:** obtain your own API key from
+  [AllDebrid API keys](https://alldebrid.com/apikeys/), save it in the AllDebrid
+  section, and use **Test connection**. Select AllDebrid for acquisition.
+
+Torrentio/Peerflix selection is separate from debrid selection. A public source
+result is not proof of account eligibility, debrid readiness, or playback.
+Provider/account requirements and service terms still apply. Neither successful
+credential storage nor a mock test establishes a live paid-provider integration.
+
+### Native secure storage
+
+Tokens are stored through the OS keyring, not `settings.toml`, SQLite, media
+manifests, or `./data/`. Windows requires access to its native credential store;
+macOS requires an accessible/unlocked Keychain. Linux requires a session D-Bus and
+an available, unlocked Secret Service implementation (for example GNOME Keyring);
+no KDE dependency is required. A headless shell or locked/missing store may fail.
+
+Missing credentials, denied access, and unavailable storage are distinct states.
+Restore/unlock the native store rather than placing tokens in ordinary files.
+If initialization failed, restart Kinema after restoring access: the keyring
+library can cache its initialization failure for the process. Do not put tokens
+in command-line arguments, logs, screenshots, or shared issue reports.
+Development/release ordinary-data separation does not imply separate keyring
+accounts; do not assume deleting `./data/` deletes credentials.
+
+## Validation status and limits
+
+This matrix distinguishes source inspection, reported subsystem/live-GUI evidence,
+and passing final root checks from unperformed end-to-end acceptance.
+
+| Area | Evidence / remaining limit |
+| --- | --- |
+| Linux X11 GUI | Popular scrolling/Load more, Ted Lasso details/episodes, Torrentio sorting/filter controls, clear missing-debrid credential error, quota-zero validation and masked unsaved input exercised; full workflow not accepted |
+| Settings, secure tokens, provider selection, quit warning | Source wiring inspected; native keyring actions, TMDB missing-token routing/real flow, chooser, actual quit/OS-close, detail cancellation and theme switching still need live acceptance |
+| Loopback local-file serving | Reported actual `MediaService` HEAD, full-body byte equality, and `206` smoke checks passed; revoked lease returned `404`, temporary files cleaned up |
+| External mpv | Reported actual `player::launch` smoke used isolated no-config mpv, decoded/rendered a synthetic two-second MP4 to EOF and exited successfully; not a debrid stream |
+| External VLC | Intentionally not launched, to avoid disturbing a user's existing instance |
+| Managed media | Reported fixture tests cover recovery, HTTP headers, root aliases, and quota; not proof of live paid acquisition or crash safety on every OS |
+| Torrentio / Peerflix | Reported actual public fetches returned source candidates; not comprehensive availability/terms/playability verification |
+| Cinemeta | Actual desktop-client live smoke passed browse/search/movie details/series episodes after raising connect timeout to 10 seconds for measured slow OS DNS; total timeout remains 15 seconds, no TLS bypass. Linux X11 browse and Ted Lasso details worked. **New title-specific bug:** Spider-Man: Brand New Day details return invalid catalog response while its sources work; HTTP 200 movie payload omits required `videos`, causing Serde failure. Identified next-lead fix: movie-only omission handling with regression coverage, not relaxed series validation or the resolved timeout |
+| TMDB / Real-Debrid / AllDebrid | Adapters and fixtures exist; no live credentials were available, so real authenticated-provider behavior is unverified |
+| TMDB attribution | Original blue-green approved logo and exact notice visually verified in Linux X11 About; not a claim of all-platform rendering |
+| Root validation | Final Rust 1.97.1 root fmt check, strict locked workspace Clippy, locked workspace tests, and diff check all passed; logs at `/tmp/kinema-final-validation.m3MRpY/`. Public-network opt-in tests remain ignored |
+| Full MVP / desktops | Complete UI/provider acceptance and Windows/macOS runtime remain incomplete; passing root checks is not MVP completion |
+
+See [cache/schema](catalog-schema.md), [refresh policy](cache-policy.md), and
+[storage](storage-layout.md) for source behavior and remaining proposals.
+
+## TMDB access and attribution
+
+Both metadata providers are required by the [metadata contract](architecture.md#agreed-metadata-provider-contract).
+TMDB access uses the user's own API Read Access Token (bearer token), stored in
+OS secure storage, never ordinary settings or SQLite. No project API key is
+embedded. Obtain access through [TMDB API settings](https://www.themoviedb.org/settings/api)
+and review the [API terms](https://www.themoviedb.org/api-terms-of-use).
+TMDB describes the API as free for non-commercial use with attribution;
+commercial use requires separate licensing. See the [official FAQ](https://developer.themoviedb.org/docs/faq).
+
+The [attribution requirements](https://developer.themoviedb.org/docs/faq#what-are-the-attribution-requirements)
+require an approved logo and this exact notice in the application's About/Credits:
+
+> This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+The [official branding page](https://www.themoviedb.org/about/logos-attribution)
+provides approved logos. The unmodified blue short SVG is saved at
+`crates/kinema-desktop/assets/tmdb-logo.svg`; its source and checksum are recorded
+in [NOTICE](../NOTICE). Display must preserve its colors/aspect/orientation and be
+less prominent than Kinema branding. The asset is subject to TMDB's branding terms,
+not the project's Apache-2.0 license. The logo and exact About notice were visually
+checked on Linux X11; this does not establish rendering on other platforms or
+live provider/keyring behavior.
 
 ## Historical C++ source
 

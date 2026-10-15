@@ -1,11 +1,18 @@
 # Cache policy and refresh
 
 Catalog and indexer caching, visible update times, and force-refresh are agreed.
-Only the Cinemeta search cache below is implemented. The broader cache coverage
+The section below describes the Cinemeta search-cache baseline; additional cache
+modules now cover browse/details/episodes, indexer snapshots, and TMDB resources
+in source; end-to-end acceptance is still pending. The broader cache coverage
 and freshness policies that follow are targets/proposals; exact TTLs, retained-entry
 limits, and offline fallback rules remain open.
 
 ## Implemented first increment
+
+This section describes the original Cinemeta exact-query flow. Additional saved
+browse/detail/source and TMDB resources are listed in [the actual schema](catalog-schema.md#implemented-first-increment);
+provider-specific UI flows now supplement it. Manual refresh and failure-versus-empty
+semantics remain required; no automatic TTL or fallback has been adopted.
 
 - Search reads the saved Cinemeta query first; only a miss triggers a remote fetch.
   A saved successful empty result is a cache hit, not a miss or service failure.
@@ -18,7 +25,9 @@ limits, and offline fallback rules remain open.
   previous results and reports the error; changing query clears the old display.
 - There is **no automatic TTL, stale-data refresh, provider fallback, or cache
   pruning** yet. Saved queries remain reusable until manually refreshed. Explicit
-  Cinemeta selection for this slice does not settle global provider preference.
+  Cinemeta selection describes the baseline; the new explicit Cinemeta/TMDB
+  selection requirement is recorded in the [metadata contract](architecture.md#agreed-metadata-provider-contract),
+  not claimed verified here.
 - The UI labels saved versus fetched results and shows the last successful fetch
   as UTC Unix seconds, not a localized “Updated … ago” label or freshness deadline.
 

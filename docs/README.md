@@ -1,7 +1,8 @@
 # Kinema Next
 
 Design notes for a Rust + GPUI Kit rewrite. The Rust workspace implements a first
-bounded Cinemeta search increment, not a complete local catalog or MVP. The [archived C++ source](../reference/cpp/README.md) remains a reference, not a template to port line by line.
+bounded catalog foundation with additional MVP source flows now composed; full
+GUI/live-provider acceptance is not complete, although final locked root checks passed. The [archived C++ source](../reference/cpp/README.md) remains a reference, not a template to port line by line.
 
 **The goal:** browse movies and series, find sources through Torrentio/Peerflix, acquire media through debrid, and serve it from local storage to external VLC/mpv.
 
@@ -9,9 +10,10 @@ bounded Cinemeta search increment, not a complete local catalog or MVP. The [arc
 
 | Document | What it covers |
 | --- | --- |
-| [Development](development.md) | Toolchain, OS prerequisites, running, and validation |
+| [Development](development.md) | Quickstart, secure-token setup, prerequisites, and validation matrix |
+| [Next-lead handoff](handoff-next-lead.md) | Frozen-batch scope, code map, evidence, and finalization risks |
 | [Architecture](architecture.md) | Agreed scope, system diagram, responsibilities, and desktop support |
-| [Catalog and database](catalog-schema.md) | Actual three-table search cache versus proposed seven-table catalog/sync |
+| [Catalog and database](catalog-schema.md) | Actual version-3 provider caches versus proposed normalized catalog/sync |
 | [Storage and media server](storage-layout.md) | File locations, streaming, cache limits, and recovery |
 | [Caching](cache-policy.md) | What is cached, expiry, timestamps, and force-refresh |
 | [Existing features](features.md) | Useful behavior and limitations in the C++ application |
@@ -25,9 +27,11 @@ discussion. **Proposed** means an implementation choice still open to change.
 The architecture's MVP scope is agreed; the actual cache/schema and build-mode
 data locations are labeled separately from the fuller proposed schema and file layout.
 
-The current cache reopens saved membership for the exact Cinemeta search query.
-It is not arbitrary offline text search across all cached titles, discovery/browse
-collections, title-detail sync, or episode sync.
+The cache reopens saved exact-query/page membership and normalized detail/episode
+and source snapshots. It is not arbitrary offline full-text search across all
+cached titles or the proposed normalized sync engine. Start with the
+[quickstart](development.md#quickstart-and-setup) and
+[validation matrix](development.md#validation-status-and-limits).
 
 Keep the design small. Add structures when a feature needs them, rather than building a framework for possible future work.
 

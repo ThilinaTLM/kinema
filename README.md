@@ -2,7 +2,8 @@
 
 A pre-1.0 Rust desktop application using [GPUI Kit](https://gpui-kit.com), targeting
 Windows, macOS, and Linux without KDE dependencies. **The first bounded catalog
-increment is implemented in source; this is not the complete MVP.**
+increment has expanded into integrated MVP source flows; full MVP validation
+is not complete.**
 
 The planned MVP combines a local-first movie/series catalog, Torrentio/Peerflix
 source discovery, debrid acquisition, managed local media storage, and a local
@@ -11,18 +12,19 @@ engine are deferred. See the [design docs](docs/README.md) for scope and open de
 
 ## Current increment
 
-Movies and Series offer explicit Cinemeta title search, backed by SQLite saved
-membership for each exact query—not offline text search over all cached titles,
-discovery/browsing, or detail/episode sync. Search reuses saved results for that
-query and fetches on a miss; Refresh
-requests Cinemeta again. Failed refreshes preserve previous results. There is no
-automatic TTL refresh, global metadata-provider preference, or fallback yet.
+Source wiring now covers Cinemeta/TMDB browse, search, details and episodes;
+Torrentio/Peerflix sources; Real-Debrid/AllDebrid adapters; settings with secure
+credentials; managed media and loopback serving to external players. Both metadata
+providers are explicit selections, with no automatic fallback or TTL refresh.
+TMDB requires a user bearer token and IMDb mapping before source lookup.
 
-The UI shows title names, IMDb IDs, optional overviews, loading/errors, and a last
-successful fetch timestamp. This is a source-level status, not a claim of verified
-GUI runtime or comprehensive live-provider support. Sources, debrid, managed media,
-the local media server, and external playback remain unimplemented.
-See [architecture](docs/architecture.md) for boundaries and lifecycle limits.
+Start with the [quickstart and setup](docs/development.md#quickstart-and-setup).
+Local-server/mpv smoke evidence does **not** establish live paid-provider playback,
+complete GUI acceptance or cross-platform runtime support. Final locked root
+checks passed; provider/UI acceptance gaps remain.
+See the [validation matrix](docs/development.md#validation-status-and-limits) and
+[architecture](docs/architecture.md) for current limits. No full-MVP completion
+claim is made.
 
 ## Development
 

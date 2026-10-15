@@ -2,41 +2,57 @@
 
 ## What we are building
 
-**Current state:** the first bounded catalog increment is implemented in the
-two-crate Rust workspace, using official GPUI Kit 0.7.3. Movies and Series have
-explicit Cinemeta search with SQLite saved exact-query membership, fetch-on-miss,
-and manual Refresh. This is a query-result cache, not offline text search over all
-saved titles, discovery/catalog browsing, or detail/episode sync. The UI distinguishes loading, saved/fetched results, empty results,
-and errors, and displays last-success timestamps as UTC Unix seconds. This is
-source-level status, not test or GUI-runtime verification. See
-[development](development.md) for setup and validation.
+**Current state:** MVP source flows are composed in the two-crate Rust workspace,
+using official GPUI Kit 0.7.3. The shell wires Cinemeta/TMDB browse/search/details
+and episodes, source selection, settings/keyring actions, preparation/file choice,
+managed-media sessions, local-file playback, manual cleanup, and quit confirmation.
+SQLite caches exact search/page membership and normalized detail/source snapshots;
+it is not arbitrary offline full-text search over all saved titles. There is no
+automatic provider fallback or TTL refresh.
 
-`kinema-core` holds validated catalog values and pure rules. `kinema-desktop`
-contains the UI and blocking Cinemeta/SQLite adapter, executed on an owned worker
-thread outside rendering. Each media kind retains independent search state.
-The [actual cache subset](catalog-schema.md#implemented-first-increment) is not the
-full proposed catalog schema. [Current refresh behavior](cache-policy.md#implemented-first-increment)
-does not adopt automatic TTLs or a global provider preference/fallback.
+`kinema-core` holds pure validated values and policies; `kinema-desktop` owns UI,
+provider/storage/process adapters, and background work. The current schema remains
+smaller and different from the [proposed seven-table model](catalog-schema.md#proposed-seven-table-schema).
 
-Source discovery, debrid, managed media acquisition/storage, the media server,
-and external VLC/mpv playback remain unimplemented. The flows below describe the
-target architecture, not completed end-to-end behavior.
+**Not complete acceptance:** source wiring and reported subsystem fixtures/local
+server + isolated mpv smoke checks do not establish live authenticated TMDB/debrid
+playback, a successful full GUI workflow, or runtime support on all desktops.
+Final locked root checks passed; complete live UI/provider acceptance remains pending. See the
+[quickstart](development.md#quickstart-and-setup) and
+[validation matrix](development.md#validation-status-and-limits). The diagram
+below remains a responsibility model, not a claim that every target policy is done.
 
 Kinema Next is a local-first movie and TV-series application written in Rust with GPUI. It targets **Windows, macOS, and Linux from the first release**, without KDE dependencies.
 
 ### Agreed MVP
 
-- Browse/search a locally cached movie and episode catalog, using TMDB/Cinemeta metadata.
+- Browse/search a locally cached movie and episode catalog. Both Cinemeta and TMDB are required now; TMDB is not deferred.
 - Find and select sources through Torrentio and Peerflix.
 - Integrate debrid services, targeting Real-Debrid and AllDebrid.
 - Download media into managed local storage and serve it through Kinema's media server while downloading.
-- Open local server URLs in external VLC or standalone mpv. Also serve existing local files.
+- Open local server URLs in external VLC or standalone mpv. Also serve existing local files. The server is loopback-only; LAN access is excluded.
 - Cache metadata and indexer results; show last-update times and provide force-refresh.
-- Enforce a user-configurable media-cache limit. Warn and offer to increase it when one file exceeds the limit.
+- Enforce a user-configurable media-cache limit, defaulting to 20 GiB. Warn and offer to increase it when one file exceeds the limit. See [storage policy](storage-layout.md#limits-and-cleanup) for remaining choices.
 
-**Later:** personalized library membership, watch history/progress and tracked resume, embedded playback, and a built-in torrent engine. Rolling cache eviction is optional, not required for the MVP. Mobile support is only a future possibility.
+**Later:** personalized library membership, watch history/progress and tracked resume, embedded playback, and a built-in torrent engine. Manual inactive-only media cleanup is sufficient for the MVP; active eviction is excluded. Mobile support is only a future possibility.
 
 The catalog is not a personalized library. Media downloading is not proof that someone watched it.
+
+## Agreed metadata-provider contract
+
+Both Cinemeta and TMDB are required. Retain Cinemeta as the default; the metadata
+setting explicitly selects TMDB, whose bearer token belongs in OS secure storage,
+not ordinary settings. Do not automatically fall back between providers.
+
+TMDB titles must map to IMDb before source lookup. Clearly mark source lookup
+unavailable when no mapping exists; never guess from a name or numeric ID. The
+current adapter contract fixes TMDB locale to `en-US`; this does not establish
+multi-locale storage or a broader global fallback policy.
+
+This records the decision and implementation contract, not verified adapter/UI
+behavior. [TMDB access and attribution](development.md#tmdb-access-and-attribution)
+documents token/terms requirements and the official bundled logo; asset inclusion
+does not establish verified adapter or About/Credits integration.
 
 ## How it fits together
 
@@ -63,7 +79,7 @@ flowchart TB
     Local["Existing local files"] --> Server
 ```
 
-Players receive local server URLs, not upstream debrid URLs. The player decodes the video; the server delivers bytes. Transcoding, LAN sharing, and a standalone daemon are not assumed requirements.
+Players receive local server URLs, not upstream debrid URLs. The player decodes the video; the server delivers bytes. LAN sharing is excluded. Transcoding and a standalone daemon are not assumed requirements.
 
 TMDB and Cinemeta supply metadata. IMDb IDs identify titles in much of the source workflow; there is no direct IMDb catalog integration. A title, a particular release/file, and an expiring playback link are different identities.
 
@@ -90,7 +106,7 @@ queued request per media kind, served round-robin; newer work replaces obsolete
 queued work, and equivalent queued requests coalesce. The event mailbox is bounded
 to two events per kind. Screen generations reject late results. A disconnected
 worker closes requests and marks busy screens failed. A blocking HTTP call already in flight is **not
-cancelled**: the client has a 5-second connect timeout and 15-second total request
+cancelled**: the Cinemeta client has a 10-second connect timeout and 15-second total request
 timeout. Responses are capped at 2 MiB and 500 titles; the UI draws at most 200 rows.
 Dropping the worker closes its mailbox without joining the thread, so the UI does
 not wait for that HTTP timeout; the worker exits after its current call completes.
@@ -104,8 +120,17 @@ joined shutdown. Obsolete in-flight work can still finish and save a cache resul
 - Give background tasks an owner. Cancel obsolete work and reject late results using request/session generations; these solve different problems.
 - Screen state belongs to its navigation entry. Closing a page must not stop an external player or remove files it is using.
 - Prioritize interactive work, especially seek requests, over prefetch. Bound queues and buffers.
-- On shutdown, stop accepting work, cancel requests, checkpoint media availability, and close resources in order. External-player/server lifetime needs an explicit policy.
+- On shutdown, stop accepting work, cancel requests, checkpoint media availability, and close resources in order. Follow the agreed session lifetime policy below.
 - Distinguish empty results, unavailable services, missing credentials, and storage failures. Errors must not silently become “no data.”
+
+### Agreed session lifetime policy
+
+Navigation must not stop active sessions. Quitting or closing the window with
+active sessions requires a warning and explicit confirmation that Kinema's server
+will stop. The external player remains open; it is not a child UI session that
+Kinema closes. There is no daemon keeping the server alive after exit. This is an
+agreed requirement. The shell now wires confirmation for tracked active sessions
+and pending playback launch; live UI/OS-close acceptance is still required.
 
 External launch success and HTTP traffic do not establish playing/paused/completed state. Real player telemetry will be needed when watch tracking is introduced.
 

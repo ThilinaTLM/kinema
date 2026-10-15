@@ -2,8 +2,9 @@
 
 **Agreed target:** media is stored locally and served to external players,
 including while downloading, with a user-configurable cache maximum. Only the
-catalog location below is implemented; media storage and the broader file layout
-remain proposed.
+catalog location below originated in the first increment. Settings, managed-media,
+and loopback-server modules are now wired in source; broader artwork/log and
+cleanup policies not explicitly labeled implemented remain proposals.
 
 ## Implemented catalog location
 
@@ -26,13 +27,25 @@ setting, rather than its name, determines the location. Existing files under roo
 or deleted. Resolution/directory/storage failures are reported, not treated as
 permission to use another database or silently reset one.
 
-Only this SQLite file and its SQLite-managed sidecars are part of the implemented
-layout. Settings, artwork/log caches, managed media payloads/manifests, and secure
-credential adapters are not implemented by this increment.
+The current `AppPaths` resolver also selects `config_dir()` and `cache_dir()`
+for production; in development all three roots are the same `./data/` directory.
+The settings store uses `CONFIG/settings.toml`; managed storage uses
+`CACHE/media/` with per-asset `payload` and `manifest.json` files. OS credentials
+remain separate. Source wiring and reported recovery fixtures do not establish
+cross-platform crash safety or end-to-end paid-provider playback.
 
 ## Proposed broader locations
 
-Use the operating system's directory resolver, not hardcoded home paths. Typical defaults are:
+**Agreed development root:** with `debug_assertions` enabled, all ordinary
+application data (including future settings, artwork, logs, and managed media)
+belongs under `./data/` relative to the process working directory. Credentials
+remain in OS secure storage, never this tree. Catalog, settings, and media storage
+use this rule; artwork/log caches in the proposed layout are not a claim of
+implemented caching/rotation.
+
+For production, use native directories in the `kinema` application namespace, not
+hardcoded home paths. The following broader root/layout examples remain proposed,
+not an exact resolver contract:
 
 | Root | Windows | macOS | Linux |
 | --- | --- | --- | --- |
@@ -56,7 +69,7 @@ CACHE/
       manifest.json             # Identity and downloaded ranges
 ```
 
-On macOS, settings sit beside the database because data/config share a root. SQLite manages its own WAL/SHM files. Credentials live in the OS secure store, not this tree.
+In the proposed production layout on macOS, settings sit beside the database because data/config share a root. SQLite manages its own WAL/SHM files. Credentials live in the OS secure store, not this tree.
 
 Keep the catalog in app data so deleting large media caches does not remove identities/settings. Cached catalog/indexer rows can be pruned transactionally; ordinary cleanup must not delete the database. Future personal records must remain separate from disposable data.
 
@@ -83,15 +96,30 @@ The server should:
 - Bound buffers, concurrent requests, and waits. Cancel unnecessary reads when a player disconnects, allowing for later reconnects.
 - Renew expired upstream access without mixing different file versions. Report upstream range/format limitations rather than promising every file can play before completion; some containers require tail metadata.
 
-The server delivers bytes, not decoded/transcoded video. Same-computer-only access is recommended for the MVP, but LAN scope is still [undecided](decisions.md).
+The server delivers bytes, not decoded/transcoded video. **Agreed:** the MVP
+server binds to loopback only and serves players on the same computer. LAN access
+is excluded, avoiding unintended network exposure and additional authentication
+and firewall requirements. This is a requirement, not a claim of an implemented
+server acceptance result; the current source binds loopback, with reported local
+serving smoke evidence summarized in the [validation matrix](development.md#validation-status-and-limits).
 
 ## Limits and cleanup
 
+**Agreed:** the default managed-media quota is **20 GiB** (20 × 1024³ bytes),
+editable by the user. Manual cleanup of inactive managed assets is sufficient for
+the MVP; no active eviction or silent deletion is allowed. These are agreed safety
+policies, not claims of implemented quota controls or cleanup UI:
+
+- Wait or refuse acquisition until the file size is verified; do not admit an
+  unknown-size file against an assumed reservation.
+- Reject lowering the limit below already reserved usage. Explain the conflict;
+  do not delete media silently to make the new limit fit.
+
 The media maximum is separate from artwork, database, and log budgets. Count actual allocated bytes and reserved download capacity conservatively; sparse logical size is not disk usage. Check physical free space too—raising the configured limit does not create space.
 
-If a single file exceeds the limit, explain its size and offer to increase the limit. Rolling eviction of an active file is not required. If active media fills the budget, pause/refuse further acquisition with an explanation, not silent overuse or deletion under readers.
+If a single file exceeds the limit, explain its size and offer to increase the limit. Active files must not be evicted. If active media fills the budget, pause/refuse further acquisition with an explanation, not silent overuse or deletion under readers.
 
-Start with whole-asset cleanup of unused managed files, including abandoned partial downloads. Hold an active-use reference while downloading, serving, or keeping a playback session available; only delete once users of that asset release it. Count files awaiting successful deletion toward usage.
+Manual cleanup removes whole inactive managed assets, including abandoned partial downloads. Hold an active-use reference while downloading, serving, or keeping a playback session available; only delete once users of that asset release it. Count files awaiting successful deletion toward usage.
 
 Never delete original user files. Generated asset directories must stay inside the owned cache root; cleanup must not follow symlinks/junctions outside it. If a custom cache root is added, use a dedicated managed directory rather than claiming unrelated existing files.
 
@@ -101,4 +129,4 @@ Cache loss is recoverable: invalidate missing media/artwork and reacquire it; ke
 
 Test interrupted writes/deletions, disk exhaustion, cache loss, file locks, Unicode paths, and player reconnects on Windows, macOS, and Linux. Do not assume POSIX open-file deletion or atomic-replace behavior everywhere. Serialize writes/cleanup for a media root; a second application instance must not corrupt it.
 
-Default quota, cleanup order, unknown-size files, lowering the limit, and checkpoint intervals remain open. See [decisions](decisions.md); response-cache lifetimes belong in [caching](cache-policy.md).
+A custom cache location and checkpoint intervals remain open. See [decisions](decisions.md); response-cache lifetimes belong in [caching](cache-policy.md).

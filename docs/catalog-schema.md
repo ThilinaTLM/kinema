@@ -1,16 +1,20 @@
 # Catalog and database
 
 **Agreed target:** SQLite holds the local catalog and cached indexer results.
-**Implemented:** the smaller Cinemeta search cache below. **Proposed:** the fuller
-seven-table schema and sync model later in this document; those tables are not
-created by the current adapter.
+**Implemented in source:** the provider-specific cache below, now at SQLite
+`user_version = 3`. **Proposed:** the normalized seven-table model later in this
+document. The current seven provider/cache tables are not that proposed schema.
 
 ## Implemented first increment
+
+The original exact-query cache remains the foundation. Version 2 adds
+Cinemeta browse/details and source snapshots; version 3 adds TMDB resources.
+These source-level migrations are not proof of final end-to-end acceptance.
 
 The desktop adapter stores `catalog.sqlite3` under the build-mode location
 specified in [storage layout](storage-layout.md#implemented-catalog-location):
 development working-directory `./data/` or production native application data.
-Schema version 1 uses SQLite `user_version` and three tables:
+Version 1 introduced these tables, retained in version 3:
 
 | Actual table | Stored data and key |
 | --- | --- |
@@ -18,7 +22,21 @@ Schema version 1 uses SQLite `user_version` and three tables:
 | `cinemeta_v3_titles` | `(kind, imdb_id)` primary key, title name, optional overview |
 | `cinemeta_v3_members` | Ordered membership keyed by `(kind, query, position)`, unique `(kind, query, imdb_id)`, foreign keys to searches and titles |
 
-The table namespace fixes the provider to Cinemeta v3. Query text is trimmed at
+The later source migrations add:
+
+| Actual table | Stored data and key |
+| --- | --- |
+| `cinemeta_v3_browse` | `(kind, offset)`, fetch time and normalized page payload |
+| `cinemeta_v3_details` | `(kind, imdb_id)`, fetch time and normalized detail/episode payload |
+| `indexer_sources_v1` | `(indexer, target, scope)`, fetch time and sanitized source payload |
+| `tmdb_v1_cache` | `(resource, locale)`, fetch time and normalized page/detail/season payload; locale constrained to `en-US` |
+
+TMDB resource keys bind operation, media kind, numeric ID or exact search text,
+and page/season as applicable. Public cached metadata can be read without accessing
+a token; remote requests require the selected provider's credentials. Source
+snapshots contain stable torrent/file identities, not signed media URLs or tokens.
+
+The original three-table namespace fixes the provider to Cinemeta v3. Query text is trimmed at
 the edges, otherwise unchanged and case-sensitive; movie and series queries are
 separate. Titles are shared across saved queries of the same kind, so refreshing
 one query can update a title's display fields in another saved query. Fetch times
@@ -32,9 +50,10 @@ Unknown newer versions and nonempty unversioned databases are rejected, not dele
 or silently reset. WAL is not explicitly enabled, and no pruning/reset UI or legacy
 migration is implemented.
 
-This is an exact-query result cache, not arbitrary offline text search over all
-cached titles or discovery/catalog browsing. There are no episodes, detail-fetch
-tracking, pagination, locale variants, indexer snapshots, or seven-table sync engine yet.
+The original search cache stores exact-query membership, not arbitrary offline
+text search. Browse/detail/episode/source and TMDB resource caches now supplement
+it; they do not implement the normalized sync engine or multilingual storage
+proposed below.
 [Current refresh policy](cache-policy.md#implemented-first-increment) defines cache
 hits, misses, manual refresh, and error preservation.
 
@@ -159,7 +178,11 @@ Caching details alone is insufficient: saved page membership lets the applicatio
 
 ## Proposed provider and language policy
 
-Propose one preferred metadata provider with fallback and one display locale per title/episode row. Record the display provider and completeness instead of building field-by-field merging or multilingual snapshots now.
+The [agreed metadata contract](architecture.md#agreed-metadata-provider-contract)
+requires explicit Cinemeta/TMDB selection without automatic fallback; it supersedes
+the earlier preferred-provider/fallback proposal. The current TMDB adapter contract
+uses fixed `en-US`, not multilingual snapshots. For the fuller proposed schema,
+record display provider and completeness rather than merging fields implicitly.
 
 In this proposed model, a fetch timestamp is usable only when the stored snapshot also matches the requested provider, locale, and completeness. Switching English → French → English requires fetching English again if its snapshot was overwritten, even if an old English timestamp is still fresh.
 
