@@ -6,7 +6,8 @@ artifact**, not Kinema's runtime, a framework choice, or proof of native behavio
 The [Graphite design system](design-system.md) defines the visual/state contract,
 composition, verified pinned Kit mappings, and future performance requirements.
 **Production GPUI visual implementation still requires user review approval.**
-See [UI verification research](ui-verification.md) for the proposed, not implemented, harness.
+See [UI verification research](ui-verification.md) for the strategy and the
+[isolated GPUI probe](ui-probe.md) for implemented checks, commands and current limitations.
 
 Navigation is decided: **permanent 56 px left icon-only rail**, with Browse,
 Transfers, Settings and About. There is no expanded/top navigation choice,

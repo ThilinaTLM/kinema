@@ -1,5 +1,9 @@
 # Native UI verification before Graphite implementation
 
+**Implementation follow-up:** the [isolated GPUI probe](ui-probe.md) now records
+actual spike results and runnable checks. This document preserves the research
+proposal and its evidence; it is not the current harness execution report.
+
 **Research proposal, 2026-10-17. Not an implemented harness or approval to restyle
 production.** Start with a tiny fixture-only feasibility milestone, review its
 evidence, then extend it. Keep official `gpui-kit = 0.7.3`, its reexports, assets,
