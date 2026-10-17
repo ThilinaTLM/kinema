@@ -220,7 +220,12 @@ pub fn run_native() {
                 }
             })
             .detach();
-            launch(Rc::default(), cx);
+            let args: Vec<String> = std::env::args().collect();
+            if args.iter().any(|arg| arg == "--gallery") {
+                launch_gallery(args.iter().any(|arg| arg == "--light"), cx);
+            } else {
+                launch(Rc::default(), cx);
+            }
         });
 }
 
@@ -333,4 +338,241 @@ mod tests {
         })
         .unwrap_or_else(|error| panic!("fixture test: {error}"));
     }
+}
+
+/// Native-only offline gallery: shared production components, synthetic pixels.
+#[cfg(not(target_family = "wasm"))]
+struct Gallery {
+    cards: Vec<crate::design::MediaCardData>,
+    message: SharedString,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl Gallery {
+    fn new() -> Self {
+        use crate::design::MediaCardData;
+        let titles = [
+            "The Last Observatory",
+            "A Very Long Title That Must Stay Inside Its Two Line Footer",
+            "Zero Is a Real Rating",
+            "Unrated / No IMDb Identity",
+            "Across the Blue Hour",
+            "Missing Artwork",
+            "The Quiet Archive",
+            "Signal from Tomorrow",
+            "Northern Lights",
+            "A Place to Return",
+        ];
+        let cards = titles.into_iter().enumerate().map(|(i, title)| {
+            // Deliberately offline: generated once at fixture construction, never in render.
+            let poster = (i != 5).then(|| {
+                let colors = [[28, 65, 101], [89, 43, 73], [40, 83, 80], [85, 67, 38], [48, 48, 91]];
+                let c = colors[i % colors.len()];
+                let pixels = image::RgbaImage::from_fn(240, 360, |x, y| {
+                    let stripe = ((x + y / 2 + i as u32 * 19) / 40) % 2;
+                    let light = if stripe == 0 { 12 } else { 0 };
+                    let horizon = if y > 240 { 20 } else { 0 };
+                    image::Rgba([c[0] + light, c[1] + light, c[2] + horizon, 255])
+                });
+                std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(pixels)]))
+            });
+            MediaCardData {
+                id: format!("gallery-{i}").into(), title: title.into(),
+                kind: if i % 3 == 0 { "Series" } else { "Movie" }.into(),
+                year: (i != 3).then_some(2024),
+                overview: Some("An entirely synthetic story for offline presentation verification. No provider was contacted.".into()),
+                genres: vec!["Drama · Mystery".into()], runtime_minutes: Some(112),
+                season_count: (i % 3 == 0).then_some(2),
+                imdb_score: match i { 2 => Some(0.0), 3 | 5 => None, _ => Some(8.1) },
+                has_imdb_id: i != 3, poster,
+                poster_status: if i == 5 { crate::design::PosterStatus::Failed } else { crate::design::PosterStatus::Missing },
+                ..Default::default()
+            }
+        }).collect();
+        Self {
+            cards,
+            message: "Offline fixture · no providers, database, credentials or media".into(),
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl Render for Gallery {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::design::{self, MediaCard, controls, tokens::metrics};
+        let t = design::tokens(cx);
+        let available = f32::from(window.viewport_size().width) - metrics::RAIL_WIDTH - 40.;
+        let grid = design::GridMetrics::new(available, self.cards.len());
+        let mut rows = div()
+            .id("gallery-scroll")
+            .flex_1()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .gap(px(metrics::CARD_GAP_Y))
+            .p(px(4.));
+        for row in 0..grid.total_rows {
+            rows = rows.child(div().flex().gap(px(metrics::CARD_GAP_X)).children(
+                grid.row_items(row).map(|i| {
+                    MediaCard::new(self.cards[i].clone())
+                        .width(grid.card_width)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.message = format!("Opened fixture card {}", i + 1).into();
+                            cx.notify();
+                        }))
+                        .on_source(cx.listener(move |this, _, _, cx| {
+                            this.message =
+                                format!("Fixture sources for card {} · no playback", i + 1).into();
+                            cx.notify();
+                        }))
+                }),
+            ));
+        }
+        div()
+            .size_full()
+            .flex()
+            .bg(t.canvas)
+            .text_color(t.text)
+            .font_family("IBM Plex Sans")
+            .text_size(px(13.))
+            .child(
+                div()
+                    .w(px(56.))
+                    .h_full()
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(12.))
+                    .py(px(12.))
+                    .bg(t.surface)
+                    .border_r_1()
+                    .border_color(t.border)
+                    .child(div().text_color(t.focus).text_size(px(18.)).child("K"))
+                    .children(
+                        [
+                            ("Browse", gpui_kit::component::IconName::LayoutDashboard),
+                            ("Transfers", gpui_kit::component::IconName::ArrowDown),
+                            ("Settings", gpui_kit::component::IconName::Settings),
+                            ("About", gpui_kit::component::IconName::Info),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, (label, icon))| {
+                            controls::button(
+                                SharedString::from(format!("gallery-rail-{i}")),
+                                "",
+                                controls::Emphasis::Neutral,
+                                controls::Size::Prominent,
+                                false,
+                                cx,
+                            )
+                            .w(px(36.))
+                            .h(px(36.))
+                            .accessibility_label(label)
+                            .tooltip(move |window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx)
+                            })
+                            .child(gpui_kit::component::Icon::new(icon).size(px(18.)))
+                        }),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .p(px(16.))
+                    .gap(px(12.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .h(px(28.))
+                            .child(div().text_size(px(18.)).child("Graphite Gallery"))
+                            .child(
+                                controls::neutral(
+                                    "gallery-mode",
+                                    if design::mode(cx) == design::Mode::Dark {
+                                        "Light mode"
+                                    } else {
+                                        "Dark mode"
+                                    },
+                                    cx,
+                                )
+                                .on_click(cx.listener(
+                                    |_, _, _, cx| {
+                                        let next = if design::mode(cx) == design::Mode::Dark {
+                                            design::Mode::Light
+                                        } else {
+                                            design::Mode::Dark
+                                        };
+                                        design::set_mode(cx, next);
+                                        cx.notify();
+                                    },
+                                )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .h(px(28.))
+                            .child(controls::primary("gallery-browse", "Browse", cx))
+                            .child(controls::neutral("gallery-filter", "All types", cx))
+                            .child(controls::button(
+                                "gallery-disabled",
+                                "Unavailable",
+                                controls::Emphasis::Primary,
+                                controls::Size::Default,
+                                true,
+                                cx,
+                            ))
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(t.secondary)
+                                    .child("10 synthetic titles · IMDb attribution samples"),
+                            ),
+                    )
+                    .child(rows)
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .text_size(px(11.))
+                            .text_color(t.secondary)
+                            .child(self.message.clone()),
+                    ),
+            )
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn launch_gallery(light: bool, cx: &mut App) {
+    initialize(cx);
+    crate::design::init_with_family(cx, Some("IBM Plex Sans"));
+    if light {
+        crate::design::set_mode(cx, crate::design::Mode::Light);
+    }
+    gpui_kit::open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: Point::default(),
+                size: size(px(1000.), px(760.)),
+            })),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Kinema Graphite Gallery — FIXTURE ONLY".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        cx,
+        |_, cx| cx.new(|_| Gallery::new()),
+    )
+    .unwrap_or_else(|error| panic!("gallery window: {error}"));
+    cx.activate(true);
 }

@@ -31,6 +31,7 @@ serde_json.workspace = true
 wasm-bindgen.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+image.workspace = true
 directories.workspace = true
 axum.workspace = true
 tokio.workspace = true

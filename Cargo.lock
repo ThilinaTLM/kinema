@@ -4023,6 +4023,7 @@ dependencies = [
  "directories",
  "fs4",
  "gpui-kit",
+ "image",
  "keyring",
  "kinema-core",
  "percent-encoding",
