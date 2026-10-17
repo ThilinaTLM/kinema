@@ -1,22 +1,22 @@
 # Isolated shared-Rust UI probe
 
-Small raw-input fixture feasibility harness, not full-app acceptance, a full
-Graphite component implementation, or a production UI rewrite. The render-only
-Rust `ui-probe` feature shares a counter, focusable action and disabled action
-between native and browser entry points. Separate `ui-probe-test` adds Kit test
-support for native headless behavior/layout only. Neither path constructs the
-desktop shell, workers, settings, database, credentials, providers or player.
+Isolated fixture feasibility harness, not full-app acceptance. The original
+render-only `ui-probe` counter, focusable action and disabled action remain the
+default native/browser specimen. Native `--gallery` additionally exercises actual
+shared Graphite theme/buttons/badge/cards/grid metrics with synthetic data and art;
+`--light` selects its light palette. It does **not** construct entire workflow
+screens or the desktop shell, workers, settings, database, credentials, providers
+or player. `ui-probe-test` adds Kit headless behavior/layout support, not pixels.
 
 **Browser: UNRUN, stable-WASM build blocked. Native isolated Linux pixels/input:
-verified on this small specimen (details below), not full-app acceptance.**
-
-WASM is not required for the working native feedback loop. See
-[native capture](#linux-native-pixel-feasibility-fallback) and
-[native tests](#native-headless-checks-and-lead-validation). To open the fixture
-yourself (not the real app):
+verified on the counter; final dark/light/hover gallery captures lead-reviewed.**
+See [native implementation status](native-implementation.md) for current code,
+remaining acceptance and evidence separation. WASM is not required for native
+feedback. To open only the fixture (not the real app):
 
 ```sh
 cargo run -p kinema-desktop --bin ui-probe --features ui-probe --locked
+cargo run -p kinema-desktop --bin ui-probe --features ui-probe --locked -- --gallery --light
 ```
 
 ## Browser build and run (currently blocked)
@@ -124,6 +124,11 @@ export KINEMA_UI_PROBE_VULKAN_ICD=/path/to/public/runtime/vk_swiftshader_icd.jso
 node scripts/ui-probe/native-verify.cjs /tmp/kinema-ui-probe-native-feasibility
 # Reviewed fixture coordinates only; not a general semantic native input driver:
 node scripts/ui-probe/native-verify.cjs /tmp/kinema-ui-probe-native-input --input
+# Offline shared-component gallery, not full workflow screens:
+node scripts/ui-probe/native-verify.cjs /tmp/kinema-graphite-review-dark --gallery
+node scripts/ui-probe/native-verify.cjs /tmp/kinema-graphite-review-light --gallery --light
+node scripts/ui-probe/native-verify.cjs /tmp/kinema-graphite-review-hover --gallery --hover 150,200
+node scripts/ui-probe/native-verify.cjs /tmp/kinema-graphite-review-focus --gallery --focus 140,210
 ```
 
 The Linux-only runner starts its own Xvfb with `-displayfd`, rejects display :0,
@@ -147,7 +152,33 @@ and sends Tab/Return. It checks disabled counter-pixel stability, counter-only
 repaint for each activation, repeated-frame equality and a negative control.
 Counter values are image-reviewed, not exported Rust state or OCR.
 
+Gallery `--focus X,Y` clicks a fixture card, gives the owned window focus, then
+moves the pointer outside all cards before capture. The lead inspected
+`/tmp/kinema-graphite-final-focus/native-focused.png`: the outer focus ring and
+bounded disclosure remain visible without pointer hover. This is focused
+appearance evidence, not proof of initial keyboard-only entry.
+
 ## Native headless checks and lead validation
+
+### Final Graphite increment (2026-10-17)
+
+Serialized root fmt, strict locked workspace Clippy/tests and explicit fixture
+Clippy/tests passed: **331 workspace passes / 3 ignored** (core 26, desktop library
+17, desktop binary 288); explicit feature tests **20 passed** (17 overlap + 3
+actual GPUI tests, **not 351 unique**). Node PNG/comparator tests: **5 passed**.
+Logs: `/tmp/kinema-graphite-final-validation/{fmt,clippy,tests,probe-clippy,probe-tests,tool-tests}.log`.
+
+The lead visually inspected final offline `native-first-frame.png` captures in
+`/tmp/kinema-graphite-final-{dark,light,hover}` and `native-hover.png` in the hover
+directory. The obsolete IMDb-identity strip is absent; valid zero/unknown/failed
+art labels and bounded opaque hover facts are visible. Default counter input in
+`/tmp/kinema-graphite-final-counter` passed stable-frame, disabled stability,
+**0 → 1 → 2** repaint and negative-control checks. See
+[final native evidence](native-implementation.md#final-validation-evidence) for
+scope, commits and limits. This is not real-app, private-data, provider, native
+performance or Windows/macOS GUI evidence. Stable WASM remains blocked.
+
+### Commands and historical checkpoint
 
 ```sh
 cargo test -p kinema-desktop --lib --features ui-probe-test --locked
@@ -157,7 +188,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-Lead-reported results (2026-10-17): all checks above passed; workspace tests had
+**Historical pre-Graphite checkpoint** — lead-reported results (2026-10-17): all checks above passed; workspace tests had
 295 passes/3 ignored and the explicit fixture test had 1 pass. Logs:
 `/tmp/kinema-ui-probe-validation-20261017/{fmt,clippy,tests,probe-clippy,probe-tests}.log`.
 Native headless evidence covers geometry, disabled pointer behavior, pointer

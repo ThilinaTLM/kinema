@@ -14,7 +14,8 @@ checks passed. The [archived C++ source](../reference/cpp/README.md) remains a r
 | [Development](development.md) | Quickstart, secure-token setup, prerequisites, and validation matrix |
 | [Next-lead handoff](handoff-next-lead.md) | Frozen-batch scope, code map, evidence, and finalization risks |
 | [Architecture](architecture.md) | Agreed scope, system diagram, responsibilities, and desktop support |
-| [Desktop design system](design/design-system.md) | Authoritative design proposal for the fixed-rail desktop; review pending, not an implemented GPUI theme |
+| [Desktop design system](design/design-system.md) | User-approved fixed-rail Graphite visual/state contract and remaining acceptance targets |
+| [Native Graphite implementation](design/native-implementation.md) | Implemented components, normal-app warning, safe gallery commands and evidence limits |
 | [Catalog and database](catalog-schema.md) | Approved target and reported v4 source implementation, retained legacy data, and conservative backfill limits |
 | [Storage and media server](storage-layout.md) | File locations, streaming, cache limits, and recovery |
 | [Caching](cache-policy.md) | What is cached, expiry, timestamps, and force-refresh |
@@ -30,7 +31,7 @@ The architecture's MVP scope and reviewed normalized catalog target are approved
 the actual cache/schema and build-mode data locations remain labeled separately
 from target behavior and proposed file layout. Backend evidence reports v4 source
 implementation: twelve normalized `STRICT` tables and seven retained legacy tables,
-with canonical metadata/indexer reads and writes. Current post-fix root fmt,
+with canonical metadata/indexer reads and writes. Historical backend post-fix root fmt,
 strict locked workspace Clippy, locked tests (295 passed, 3 ignored), and diff
 checks passed. Post-v4 authenticated-provider/debrid and new GUI acceptance remain
 unverified; earlier user-reported successes remain historical. No user database/credentials were
@@ -38,26 +39,23 @@ accessed; databases upgrade on next open with the new build. Retained legacy row
 have [conservative backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits),
 not a guarantee that every old query/detail/source snapshot is reusable offline.
 
-The user chose a **permanent left icon-only rail**: expanded-sidebar and top-
-navigation modes are superseded, not remaining choices. The six-area UI scope
-stays unchanged. The [design system](design/design-system.md) is the authoritative
-**design proposal**, pending review: professional neutral Graphite with blue
-accents (not amber), compact desktop spacing, a native font stack, polished
-primitive controls and composable GPUI components, visible IMDb ratings on cards,
-hover/focus states, and purposeful motion. Lazy loading and performance are design
-requirements, not verified runtime performance claims.
+The user chose a **permanent left icon-only rail** and explicitly approved
+native Graphite implementation and lead-owned commits. The six-area scope stays
+unchanged. The [design system](design/design-system.md) defines neutral Graphite
+with blue accents, compact controls/native fonts and IMDb card semantics. Shared
+native themes/cards/buttons, shell and provider-view composition, and bounded
+artwork now exist; see [native implementation status](design/native-implementation.md)
+for actual boundaries, runnable commands and remaining gaps. Compilation does not
+establish workflow, live-provider, OS, accessibility or performance acceptance.
 
-The **Graphite v2** [HTML artifact](design/desktop-wireframes.html),
-[design-system proposal](design/design-system.md), and review guide are frozen for
-user review, not production implementation approval. The artifact is review-ready: fixed 56 px rail, native font stack, compact controls, visible IMDb
-ratings (including valid zero and unknown states), bounded hover/focus facts,
-shared card footer, a components gallery, and a 1,000-fixture performance preview.
-See the [review guide](design/README.md) for browser evidence and limitations;
-those checks do not measure or implement native GPUI performance. Next, review the
-[design-system proposal](design/design-system.md), cards, and motion before GPUI
-visual implementation; navigation selection is complete. No GPUI redesign/theme is implemented. Existing GPUI projections remain
-narrow and do not render per-field origins or all rich domain metadata. Existing
-search/detail/sources cancellation wiring was updated; the GPUI layout is unchanged.
+The **Graphite v2** [HTML artifact](design/desktop-wireframes.html) remains a frozen
+design reference, not the native runtime. Its 159 browser checks and simulated
+1,000-fixture performance preview remain HTML-only evidence. Final offline dark/light/hover captures were visually inspected by the lead;
+serialized root checks passed **331 tests / 3 ignored**. Explicit fixture tests
+passed **20** (17 overlap + 3 GPUI tests), and Node tests passed **5**; these are not
+351 unique tests. See [final evidence](design/native-implementation.md#final-validation-evidence).
+The 295-test backend checkpoint remains historical.
+No real-app/private-data or provider probes are part of this documentation pass.
 
 The cache reopens saved exact-query/page membership and normalized detail/episode
 and source snapshots. It is not arbitrary offline full-text search across all

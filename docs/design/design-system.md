@@ -1,17 +1,18 @@
 # Graphite desktop design system v1
 
-**Status: design proposal for user review, not production implementation approval.**
-This document specifies the next review artifact and the intended native design.
-It does not claim that the existing GPUI screens implement these controls,
-accessibility behaviors, image pipeline, or performance targets. The HTML
-[wireframe](desktop-wireframes.html) is a disposable review artifact, not a new
-runtime framework. The production GPUI review gate remains in force.
+**Status: user-approved Graphite direction; native increment implemented, acceptance incomplete.**
+This document is the visual/state contract, not a claim that every control,
+accessibility behavior or performance target is implemented. See
+[native implementation](native-implementation.md) for actual component boundaries,
+artwork constants, commands, evidence status and remaining gaps. The frozen HTML
+[wireframe](desktop-wireframes.html) remains a design-only reference, not a runtime
+framework. Approval to implement native Graphite is no longer an outstanding gate.
 
 The user's navigation decision is final: **a permanent left icon-only rail**.
 Expanded navigation, top navigation, layout switches, and automatic rail expansion
-are not alternatives in this design. Other visual choices and the explicitly
-labelled sizing/performance proposals below remain subject to review. This spec
-supersedes the old navigation-variant and warm-accent design direction, not the
+are not alternatives. Explicitly labelled proposals and acceptance targets below
+remain distinct from implemented behavior. This spec supersedes the old navigation-
+variant and warm-accent direction, not the
 [approved MVP or provider/session contracts](../architecture.md).
 
 ## 1. Design intent and hierarchy
@@ -606,7 +607,8 @@ claims that existing workers already satisfy every cancellation requirement.
    routes. Download/seek and user actions outrank artwork prefetch. A proposed
    starting limit is **4 active artwork fetch/decode jobs total across all routes
    and generations**, including obsolete non-cancellable work, with queued requests
-   bounded by the current visible-plus-overscan set; profile before adoption.
+   bounded by the current visible-plus-overscan set. The increment implements a
+   global four-job cap and a 128-job queue; profile their actual behavior.
 8. **Byte-budgeted image cache.** Track decoded bytes, not just image count, and
    account for compressed responses and GPU texture residency separately. Prefer
    thumbnails appropriate to logical size × device scale. Enforce encoded-byte
@@ -614,18 +616,19 @@ claims that existing workers already satisfy every cancellation requirement.
    total decoded pixels and animated-frame counts **before large allocations or
    decoding**, using checked size arithmetic. Enforce the same limits during
    decoding for malformed/misleading headers; rejecting only after a full decode
-   is insufficient. Numeric caps remain a native profiling/security-review gate,
-   not adopted settings or defaults. Evict least-recently-used unpinned
+   is insufficient. The increment now implements numeric guards and LRU quotas;
+   see [actual constants](native-implementation.md#artwork-bounds-are-implemented-constants-not-ram-measurements).
+   These are not measured process/GPU memory guarantees or user settings. Evict least-recently-used unpinned
    artwork; retain visible/focused references only while needed. If pinned images
    exceed the budget, reduce requested resolution or defer overscan, not silently
    grow memory. Release GPU/image handles when evicted.
 9. **Budget is not the media quota.** A **64 MiB decoded-artwork resident budget**
-   is a profiling starting proposal, **not an adopted default, existing setting,
-   hard total-process cap, or slice of the 20 GiB managed-media quota**. Compressed
+   is now implemented as 48 MiB poster + 16 MiB backdrop LRU accounting,
+   **not a hard total-process cap, user setting, or slice of the 20 GiB media quota**. Compressed
    in-flight buffers, temporary decode allocations and GPU copies need separate
    bounded accounting; exact combined cap/disk-artwork policy remains open. The
    design does not authorize new user settings, automatic media eviction or any
-   new data TTL. Adoption of this memory limit is gated on native profiling; it
+   new data TTL. Acceptance of its runtime memory behavior requires native profiling; it
    is not a measured memory guarantee. Local artwork-cache memory accounting is
    separate from the managed-media quota.
 10. **Stable loading/failure.** Fixed 2:3 placeholders reserve layout. Distinguish
@@ -677,8 +680,8 @@ claim made by the HTML toggle.
 
 ### Review and later native acceptance checklist
 
-- [ ] User reviews Graphite and primitives before production GPUI visual changes;
-  the fixed icon-only rail is honored, with no nav-layout chooser.
+- [x] User approved native Graphite implementation and the fixed icon-only rail;
+  this approval does not complete the remaining native acceptance checks.
 - [ ] Review 900, 1280, and 1600 px window widths in both themes; include 900 × 600,
   busy toolbars, long/localized titles, missing values, source inspector and dialogs.
   No horizontal overlap, clipped actions, or hidden active-session warning.
@@ -712,9 +715,10 @@ claim made by the HTML toggle.
 - [ ] Verify pinned Kit APIs and styling/accessibility before coding; use official
   reexports/components/assets/init/open_window without a replacement UI framework.
 
-**Open decisions:** approve the IMDb label token and review the coordinated
-control-outline addition; minimum
-window and poster-size range; validate native font metrics/Kit hooks; profile the
-proposed artwork concurrency/budget/retry caps and bounded page retention. None of
-these proposals changes application settings, backend behavior, media quota policy,
-or the production review gate merely by being documented here.
+**Remaining implementation/acceptance decisions:** minimum window and poster-size
+controls; native font metrics/Kit hooks; measured artwork memory, concurrency,
+retry policy and bounded page retention. The IMDb label/control palette belongs
+to the approved Graphite direction. Implemented constants are documented
+[separately](native-implementation.md); proposals here do not change application
+settings, backend behavior or media quota policy. No user-approval-to-implement
+gate remains; native workflow, accessibility and performance acceptance does.

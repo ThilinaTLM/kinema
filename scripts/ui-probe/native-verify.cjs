@@ -9,9 +9,25 @@ const { promisify } = require('node:util');
 const assert = require('node:assert/strict');
 const { decode, crop, encode, diff, assertMatch, differenceImage } = require('./pixels.cjs');
 const exec = promisify(execFile);
-const artifacts = path.resolve(process.argv[2] || 'target/ui-probe/native-artifacts');
-const inputProof = process.argv[3] === '--input';
-if (process.argv.length > 4 || (process.argv[3] && !inputProof)) throw new Error('Usage: node native-verify.cjs [ARTIFACTS] [--input]');
+const args = process.argv.slice(2);
+const artifacts = path.resolve(args[0] && !args[0].startsWith('--') ? args.shift() : 'target/ui-probe/native-artifacts');
+let inputProof = false, gallery = false, light = false, hover, focusPoint;
+while (args.length) {
+  const arg = args.shift();
+  if (arg === '--input') inputProof = true;
+  else if (arg === '--gallery') gallery = true;
+  else if (arg === '--light') light = true;
+  else if (arg === '--hover' || arg === '--focus') {
+    const value = args.shift();
+    assert.ok(/^\d+,\d+$/.test(value || ''), `${arg} requires X,Y`);
+    if (arg === '--hover') hover = value.split(',').map(Number);
+    else focusPoint = value.split(',').map(Number);
+  } else throw new Error(`Unknown argument: ${arg}`);
+}
+assert.ok(!inputProof || !gallery, '--input coordinates apply only to the counter specimen');
+assert.ok(!light || gallery, '--light requires --gallery');
+assert.ok(!hover || gallery, '--hover requires --gallery');
+assert.ok(!focusPoint || gallery, '--focus requires --gallery');
 const binary = path.resolve('target/debug/ui-probe');
 // xdotool's legacy WM_NAME search can transliterate the em dash differently
 // from getwindowname's UTF-8 _NET_WM_NAME. Match the ASCII fixture marker.
@@ -60,7 +76,7 @@ async function main() {
   // Do not even pass the personal display to the server or fixture child.
   delete env.DISPLAY; delete env.WAYLAND_DISPLAY; delete env.WAYLAND_SOCKET;
   delete env.XAUTHORITY; delete env.DBUS_SESSION_BUS_ADDRESS; delete env.DBUS_SESSION_BUS_PID;
-  const xvfb = start('Xvfb', ['-displayfd', '3', '-screen', '0', '1024x768x24', '-nolisten', 'tcp', '-ac', '-noreset'], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
+  const xvfb = start('Xvfb', ['-displayfd', '3', '-screen', '0', '1920x1200x24', '-nolisten', 'tcp', '-ac', '-noreset'], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
   report.xvfb = logs(xvfb);
   const displayNumber = await new Promise((resolve, reject) => {
     let text = '';
@@ -83,7 +99,9 @@ async function main() {
     fixtureEnv = { ...env, VK_DRIVER_FILES: icd, VK_ICD_FILENAMES: icd };
     report.vulkanIcdOverride = icd;
   }
-  const app = start(binary, [], { env: fixtureEnv });
+  const appArgs = gallery ? ['--gallery', ...(light ? ['--light'] : [])] : [];
+  report.scenario = gallery ? `gallery-${light ? 'light' : 'dark'}` : 'counter';
+  const app = start(binary, appArgs, { env: fixtureEnv });
   report.fixture = logs(app);
   let windowId;
   const deadline = Date.now() + 15000;
@@ -117,6 +135,9 @@ async function main() {
     throw new Error('No visible fixture window within 15 seconds');
   }
   report.windowId = windowId;
+  report.windowTitle = (await exec('xdotool', ['getwindowname', windowId], { env, timeout: 2000 })).stdout.trim();
+  assert.match(report.windowTitle, /^Kinema.*FIXTURE ONLY$/, 'Unexpected fixture title');
+  if (gallery) assert.ok(report.windowTitle.includes('Graphite Gallery'), 'Binary did not open the requested gallery scenario');
   report.geometry = (await exec('xdotool', ['getwindowgeometry', '--shell', windowId], { env, timeout: 2000 })).stdout;
   // No render-ready adapter exists for native pixels: this is a candidate image only.
   await pause(1500);
@@ -128,6 +149,24 @@ async function main() {
   for (let i = 0; i < image.pixels.length; i += 4) colors.add(image.pixels.readUInt32BE(i));
   report.capture = { path: png, width: image.width, height: image.height, colors: colors.size, renderReadyAcknowledgment: false, needsAgentImageReview: true };
   if (colors.size < 17) throw new Error('Captured candidate has insufficient painted detail');
+  if (hover) {
+    assert.ok(hover[0] < image.width && hover[1] < image.height, 'Hover point outside fixture');
+    await exec('xdotool', ['mousemove', '--window', windowId, ...hover.map(String)], { env, timeout: 2000 });
+    await pause(250);
+    const hoveredPath = path.join(artifacts, 'native-hover.png');
+    await exec('import', ['-silent', '-window', windowId, '-depth', '8', `PNG32:${hoveredPath}`], { env, timeout: 5000 });
+    const hovered = decode(await fs.readFile(hoveredPath));
+    report.hover = { point: hover, path: hoveredPath, diff: diff(image, hovered), needsAgentImageReview: true };
+  }
+  if (focusPoint) {
+    assert.ok(focusPoint[0] < image.width && focusPoint[1] < image.height, 'Focus point outside fixture');
+    await exec('xdotool', ['mousemove', '--window', windowId, ...focusPoint.map(String), 'click', '1'], { env, timeout: 2000 });
+    await exec('xdotool', ['windowfocus', '--sync', windowId, 'mousemove', '--window', windowId, String(image.width - 4), String(image.height - 4)], { env, timeout: 2000 });
+    await pause(250);
+    const focusedPath = path.join(artifacts, 'native-focused.png');
+    await exec('import', ['-silent', '-window', windowId, '-depth', '8', `PNG32:${focusedPath}`], { env, timeout: 5000 });
+    report.focus = { point: focusPoint, pointerOutsideCards: true, path: focusedPath, needsAgentImageReview: true };
+  }
   if (inputProof) {
     assert.equal(image.width, 800); assert.equal(image.height, 600);
     const counterBounds = { x: 32, y: 136, width: 240, height: 40 };

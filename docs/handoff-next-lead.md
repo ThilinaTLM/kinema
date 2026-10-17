@@ -2,31 +2,68 @@
 
 <a id="current-next-action-html-prototype-navigation-review"></a>
 
-## Current next action: design-system, cards, and motion review
+<a id="current-next-action-design-system-cards-and-motion-review"></a>
 
-**Navigation is decided:** permanent **left icon-only rail**; no expanded-sidebar
-or top-navigation mode. Earlier three-layout comparisons are superseded exploration.
-The user also specified a professional neutral Graphite/blue direction (no amber),
-compact desktop spacing and native fonts, polished primitive controls/composable
-GPUI components, visible IMDb card ratings and hover/focus states, purposeful
-motion, and lazy loading/performance requirements within the existing six-area
-scope. These are design requirements, not implemented GPUI styling or measured
-runtime performance.
+<a id="current-next-action-finalize-native-graphite-evidence-and-acceptance"></a>
 
-The [design system](design/design-system.md) is the authoritative **design proposal**,
-pending review. The **Graphite v2** [HTML artifact](design/desktop-wireframes.html)
-is frozen and review-ready, with [review guidance](design/README.md). Its fixed
-rail is 56 px; native fonts/compact controls, IMDb at rest (including zero/unknown),
-bounded hover/focus facts, shared 76 px card footer, components gallery, and a
-1,000-fixture performance preview are design-only. The design-system proposal and
-review guide are frozen after exact color/alias alignment and API peer approval.
-Next review the design system, cards, and motion before GPUI visual implementation
-—not navigation modes.
-No GPUI visual redesign is authorized by this documentation/prototype task.
+<a id="current-next-action-lead-owned-native-commit-and-remaining-acceptance"></a>
 
-The reviewed [catalog specification](catalog-schema.md#target-catalog-schema)
-remains approved and implemented in source with the v4 validation evidence below;
-this design followup changes neither that backend evidence nor schema scope.
+## Current next action: native workflow and performance acceptance
+
+The user **approved native Graphite implementation and lead-owned commits**.
+Navigation remains the permanent 56 px left icon-only rail. Rust **1.97.1** and
+official **gpui-kit =0.7.3** remain mandatory; no second GPUI engine. The backend
+checkpoint is **`f849f9b`**. Parallel native implementation is being integrated;
+see [native implementation status](design/native-implementation.md) for the code
+map, remaining functional gaps, normal-app warning and safe fixture commands.
+
+The [design system](design/design-system.md) is the approved direction/acceptance
+contract. The [frozen HTML](design/desktop-wireframes.html) and
+[review guide](design/README.md) remain design-reference evidence, not the runtime.
+Shared native themes, compact controls, cards and bounded artwork are implemented;
+not every planned workflow/inspector, appearance control or accessibility behavior
+is complete. Approval to implement is **not** an outstanding gate.
+
+**Final evidence frozen:** serialized fmt, strict root/scoped fixture Clippy and
+locked tests passed. Workspace: **331 passed / 3 ignored** (core 26 + desktop
+library 17 + desktop binary 288). Explicit feature: **20 passed**, consisting of
+17 overlapping library tests and 3 actual GPUI tests; **not 351 unique**. Node:
+**5 passed**. The serialized checks passed again after the semantic modal-scrim
+fix (dark 60% / light 40%) and preservation of native Kit monospace defaults
+except the controlled fixture override. Existing card captures remain valid;
+the corrected modal is not pictured. Logs: `/tmp/kinema-graphite-final-validation/{fmt,clippy,tests,probe-clippy,probe-tests,tool-tests}.log`.
+
+The lead visually inspected final `native-first-frame.png` in
+`/tmp/kinema-graphite-final-{dark,light,hover}` and hover `native-hover.png`:
+no old IMDb-identity strip, four rail destinations, genuine zero/unknown/failed-art
+states and opaque runtime/season/genre/summary hover without height growth.
+`/tmp/kinema-graphite-final-counter` default `--input` passed stable frames,
+disabled stability, **0 → 1 → 2** and the negative control. Earlier gallery
+captures are superseded; the **295 passed / 3 ignored** backend checkpoint below
+remains historical. No real-app/private-data/provider, native performance or
+Windows/macOS GUI testing occurred; stable WASM remains blocked.
+
+Commits so far: **`7939f10`** foundation/artwork and **`a0197da`** failed-art retry.
+Production UI/metadata is committed as **`8f620c3`** and modal scrim/mono fixes
+as **`acc6439`**. Gallery tooling and documentation are checkpointed alongside
+these source milestones. Remaining gaps include
+Browse sorting/density, full source inspector, cast and actual native workflow
+acceptance; they are not silently promised by fixture success. Full details:
+[final native evidence](design/native-implementation.md#final-validation-evidence).
+
+The lead has checkpointed the source and documentation in scoped commits.
+Keep subsequent work similarly scoped. Do not inspect user
+databases/keyring/media/token files or run real-app/provider probes. The safe
+native gallery uses actual shared components with synthetic data and no SQL, not
+entire workflow screens. Existing authorized v4 migration occurs on normal user
+app database open; no real user migration is claimed here.
+
+### Historical backend and design checkpoint evidence
+
+The following freeze/results describe earlier checkpoints, not the final native
+Graphite increment. Their former approval-to-implement gate is superseded above.
+The reviewed [catalog specification](catalog-schema.md#target-catalog-schema) and
+approved schema/reconciliation behavior remain unchanged.
 
 ### Graphite v2 HTML freeze evidence (design only)
 
@@ -39,9 +76,9 @@ stress behavior without page errors. The system author froze the spec/guide afte
 **48 color assignments**, **64 CSS aliases**, and API peer approval. Detailed browser
 metrics and limits live in the [review guide](design/README.md); they do not measure
 native GPUI timing, memory, decoding, image caching, or production cancellation.
-No native GPUI performance or theme implementation is claimed. The new fixed-rail
-design package and these four main docs are frozen without a commit; **user review
-is next**. Superseded layout variants are not remaining choices.
+At that HTML checkpoint, no native GPUI performance or theme implementation was
+claimed. Native implementation was subsequently approved as recorded above;
+HTML evidence remains historical. Superseded layout variants are not choices.
 
 The user additionally approved narrow automatic transactional identity
 reconciliation when explicit selected-provider IMDb mapping proves duplicates
@@ -102,12 +139,12 @@ owner also inspected those bounded results. No user database or tokens were
 accessed; no actual user-database migration is claimed. No commits were made.
 
 The source/documentation batch is frozen, not a declaration of complete MVP.
-Search/detail/sources cancellation wiring changed, but GPUI layout did not.
+At that historical checkpoint, search/detail/sources cancellation wiring changed,
+but GPUI layout did not. Native layout work is now tracked separately.
 The three-navigation-mode prototype/browser evidence belonged to the preceding
 design comparison, now **superseded by the permanent left icon-only rail decision**.
-It is not validation of the new Graphite/blue proposal. Review the updated
-[design system](design/design-system.md), cards, and motion before GPUI visual
-implementation. Post-v4 authenticated-provider, debrid, and new GUI acceptance
+It is not validation of the new Graphite/blue proposal. Native Graphite implementation is now approved; use the
+[native record](design/native-implementation.md) for remaining acceptance. Post-v4 authenticated-provider, debrid, and new GUI acceptance
 remain unverified.
 
 ### Preservation and documentation scope
@@ -121,11 +158,9 @@ mappings stay legacy/unmapped. No user database or credentials were accessed; ac
 upgrade occurs only when the user next opens their database with the new build.
 See [backfill details](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
 
-The current design-only alignment owner edits only `README.md`, `architecture.md`,
-`decisions.md`, and `handoff-next-lead.md` under `docs/`. Other assigned owners edit
-the HTML prototype/review guide and new design-system proposal. No Rust/schema or
-backend validation changes are needed for this followup. Preserve existing user
-work and prior evidence; no commits or private-file/database/token access.
+The former design-only alignment assignment is historical. Current native
+documentation/implementation scopes and lead-owned finalization are recorded at
+the top of this handoff. Preserve other agents' work and existing private data.
 
 The agreed direction is provider-agnostic shared movie/series, season, and episode
 metadata with rich descriptions, artwork, external IDs, separate IMDb/TMDB/Rotten
@@ -162,8 +197,8 @@ Known commits:
   settings/keyring, UI and local-playback integration; 45-file feature batch.
 
 The outgoing snapshot sections below describe code revision `107317a` and remain
-historical. Current HEAD is documentation commit `f1beeb9`; the uncommitted
-continuation section records subsequent work separately. Preserve ignored data
+historical. The historical documentation HEAD was `f1beeb9`; subsequent backend/native
+checkpoints are recorded above. The continuation section below is historical. Preserve ignored data
 and require explicit lead assignment for subsequent commits.
 
 ## Confirmed decisions (not all fully accepted in runtime)
@@ -333,8 +368,10 @@ continuation below for reviewed fixes and remaining acceptance.
 
 ## Uncommitted continuation after `f1beeb9`
 
-This continuation does not change the frozen `107317a` evidence above. No new
-commit is authorized. The lead reports the following Rust changes reviewed:
+Historical note: this continuation was originally uncommitted and does not
+change the frozen `107317a` evidence above. The user subsequently authorized
+commits; these changes were checkpointed as **`f849f9b`** before native UI work.
+The lead reported the following Rust changes reviewed:
 
 - Cinemeta movie details may omit `videos`, interpreted as no episodes. Explicit
   null, malformed values, and missing series videos remain rejected. Regression
@@ -455,11 +492,8 @@ seek, interrupted acquisition, account-change safety, other provider/indexer, or
 cross-OS acceptance. The correction remains hypothesis-driven, not proof of the
 original stream's cause. No credentials were accessed by agents. TMDB's separate
 user-reported check/browse success above does not establish media playback.
-The prior documentation update was frozen without a commit. The current phase
-records backend-reported v4 canonical implementation and a frozen HTML prototype
-awaiting user review at that freeze. The current design-only followup supersedes
-its navigation alternatives with the permanent left icon-only rail and prepares
-review of the new Graphite/blue design system, cards, and motion. Current
-post-streaming/quality-fix root checks remain passed as recorded above; historical
-results retain their original scope. No commit is authorized; new GUI and post-v4
-authenticated-provider/debrid acceptance remain unverified.
+The preceding documentation/backend freeze is historical. Native Graphite was
+subsequently approved and implemented as recorded at the top of this handoff;
+its final isolated evidence is frozen separately from these older provider
+reports. The lead owns commits. Actual native workflow and post-v4 authenticated
+provider/debrid acceptance remain unverified by the fixture checks.

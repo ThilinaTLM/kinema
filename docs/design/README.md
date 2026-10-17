@@ -5,7 +5,9 @@ Open [desktop-wireframes.html](desktop-wireframes.html) directly in a browser
 artifact**, not Kinema's runtime, a framework choice, or proof of native behavior.
 The [Graphite design system](design-system.md) defines the visual/state contract,
 composition, verified pinned Kit mappings, and future performance requirements.
-**Production GPUI visual implementation still requires user review approval.**
+**The user approved native Graphite implementation.** See the
+[native implementation status](native-implementation.md) for implemented component
+boundaries, safe gallery commands and remaining native acceptance.
 See [UI verification research](ui-verification.md) for the strategy and the
 [isolated GPUI probe](ui-probe.md) for implemented checks, commands and current limitations.
 
@@ -109,8 +111,9 @@ performance results.
 DOM/job/application-state counters do **not** measure browser resource retention,
 image-cache/GPU memory, process RSS, native GPUI frame timing, real task cancellation
 or production memory bounds. This mock has no real decoded-image cache. The design
-system's proposed native artwork budget/concurrency targets require profiling;
-they are neither measured guarantees nor adopted application settings. Artwork
+system's native artwork limits now have an [implemented bounded pipeline](native-implementation.md#artwork-bounds-are-implemented-constants-not-ram-measurements);
+its constants still require profiling and are not measured RAM/GPU guarantees or
+user-facing application settings. Artwork
 memory is separate from the **20 GiB default managed-media quota**. No new data TTL,
 automatic provider enrichment, or automatic media eviction is adopted.
 
@@ -227,8 +230,9 @@ Verified official Kit 0.7.3 API mappings and unresolved runtime concerns live in
 [the design system](design-system.md#pinned-kit-api-evidence-and-remaining-verification),
 not a duplicate API table here. Use official reexports/components/assets/init/
 open_window only. No Rust, production GPUI layout, backend/database, credential or
-media-cache behavior is changed by these review artifacts. Further native visual
-implementation remains gated on user approval.
+media-cache behavior is changed by these review artifacts. Native implementation
+is now explicitly user-approved and tracked [separately](native-implementation.md);
+the frozen HTML evidence is not native acceptance.
 
 ## TMDB attribution
 

@@ -18,8 +18,9 @@ legacy tables, with atomic schema/backfill/version upgrade. Metadata/indexer pat
 now read and write canonical rows under the
 [approved catalog design](catalog-schema.md#target-catalog-schema). The rich domain
 API exposes artwork, ratings, identifiers, seasons/episodes, and provenance, but
-existing GPUI projections remain narrow and do not render per-field origins.
-The bounded-memory backfill and field-quality corrections passed final root fmt,
+native display projections now retain optional artwork/IMDb/facts through shared
+display DTOs, but do not render a full per-field provenance inspector.
+The historical bounded-memory backfill and field-quality checkpoint passed root fmt,
 strict locked workspace Clippy, locked tests (295 passed, 3 ignored), and diff checks. No user database or credentials were accessed.
 A user's v3 database upgrades only when next opened with the new build. See the
 [conservative backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
@@ -60,22 +61,26 @@ compact desktop spacing and a native font stack; polished primitive controls and
 composable GPUI components; visible IMDb card ratings and hover/focus states;
 purposeful motion; and lazy-loading/performance requirements.
 
-The [design system](design/design-system.md) is the authoritative **design
-proposal**, frozen with the review guide for user review, not implemented GPUI
-styling or measured runtime performance. The
-**Graphite v2** [HTML artifact](design/desktop-wireframes.html) is frozen and
-review-ready with a 56 px rail, compact native-stack controls, IMDb rest/zero/
-unknown states, bounded hover/focus facts, a shared 76 px card footer, components
-gallery, and 1,000-fixture performance preview. Its browser checks are design-
-artifact evidence only: native GPUI performance is neither measured nor implemented
-by this mock. Use the [review guide](design/README.md) for limits. Review the design
-system, cards, and motion before GPUI visual implementation; navigation is settled. Earlier
-three-layout comparisons are superseded design exploration, not supported modes.
-Use the pinned GPUI Kit components/reexports for eventual implementation, not a
-new UI framework or unused component architecture.
+The user **approved native Graphite implementation** and lead-owned commits.
+The [design system](design/design-system.md) is the visual/state contract; the
+[native implementation record](design/native-implementation.md) describes actual
+shared themes/cards/buttons/grid sizing, fixed-rail shell/provider-view composition,
+bounded artwork, safe gallery commands and remaining gaps. Use only pinned
+Kit reexports/components/assets/init/open_window, not a second UI engine.
 
-Existing GPUI layout remains unchanged; search/detail/sources cancellation wiring
-was updated. Prior acceptance evidence remains historical, not new GUI acceptance.
+The **Graphite v2** [HTML artifact](design/desktop-wireframes.html) remains frozen
+as a design-only reference, with its historical browser checks and simulated
+performance preview. See the [review guide](design/README.md) for limits. Earlier
+three-layout comparisons are superseded exploration, not supported modes. Native
+approval is no longer pending. Final offline gallery captures were visually
+inspected by the lead; serialized root checks passed **331 tests / 3 ignored**,
+with **20** explicit feature passes (17 overlap + 3 GPUI tests) and **5** Node
+passes. See [final evidence](design/native-implementation.md#final-validation-evidence).
+Neither these fixtures nor HTML counters prove GPU/RAM bounds, OS support or
+complete workflow acceptance.
+
+Search/detail/sources cancellation and shared display facts are implemented, not
+full rich/provenance UI acceptance. Preserve prior backend evidence as historical.
 Do not expand the six-area scope into later library/history or other deferred work.
 
 ## Agreed metadata-provider contract
