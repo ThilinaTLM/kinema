@@ -67,6 +67,10 @@ impl Fixture {
                     .push((start, end));
                 let call = count.fetch_add(1, Ordering::Relaxed);
                 let mode = behavior.load(Ordering::Relaxed);
+                if mode == 12 {
+                    // Close before sending response headers.
+                    continue;
+                }
                 if mode == 1 && call == 0 || mode == 5 && call % 2 == 0 || mode == 6 {
                     let _ = stream.write_all(
                         b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -252,19 +256,32 @@ fn upstream_failures_are_safe_visible_and_do_not_publish_bytes()
         (2, MediaError::IdentityMismatch),
         (3, MediaError::UnsupportedRange),
         (4, MediaError::IdentityMismatch),
-        (6, MediaError::Upstream),
+        (6, MediaError::RenewalExhausted),
         (7, MediaError::UnsupportedRange),
-        (8, MediaError::Upstream),
+        (8, MediaError::BodyRead),
         (10, MediaError::IdentityMismatch),
+        (12, MediaError::Upstream),
     ] {
         let root = tempfile::tempdir()?;
-        let fixture = Fixture::start(CHUNK as usize, mode)?;
+        let mut fixture = Fixture::start(CHUNK as usize, mode)?;
+        fixture.url.set_path("/signed-path");
+        fixture.url.set_query(Some("token=SECRET_TOKEN"));
         let service = service(root.path(), CHUNK * 3);
         let resolved = fixture.resolved();
         let next = resolved.clone();
         let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
         wait_until(|| !service.session_errors().is_empty());
-        assert_eq!(service.session_errors(), vec![(lease.id.clone(), expected)]);
+        let errors = service.session_errors();
+        assert_eq!(errors, vec![(lease.id.clone(), expected)]);
+        for (_, error) in errors {
+            let rendered = format!("{error} {error:?}");
+            for secret in ["SECRET_TOKEN", "signed-path", "token=", "http://"] {
+                assert!(!rendered.contains(secret));
+            }
+        }
+        if mode == 6 {
+            assert_eq!(fixture.calls.load(Ordering::Relaxed), 3);
+        }
         assert_eq!(service.usage().downloaded_bytes, 0);
         assert!(fixture.calls.load(Ordering::Relaxed) <= 3);
         service.release(&lease.id);

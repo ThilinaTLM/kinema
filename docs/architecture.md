@@ -6,18 +6,31 @@
 using official GPUI Kit 0.7.3. The shell wires Cinemeta/TMDB browse/search/details
 and episodes, source selection, settings/keyring actions, preparation/file choice,
 managed-media sessions, local-file playback, manual cleanup, and quit confirmation.
-SQLite caches exact search/page membership and normalized detail/source snapshots;
+The reported v4 source uses normalized canonical metadata and indexer rows, with
+saved provider-specific search/page membership;
 it is not arbitrary offline full-text search over all saved titles. There is no
 automatic provider fallback or TTL refresh.
 
 `kinema-core` holds pure validated values and policies; `kinema-desktop` owns UI,
-provider/storage/process adapters, and background work. The current schema remains
-smaller and different from the [proposed seven-table model](catalog-schema.md#proposed-seven-table-schema).
+provider/storage/process adapters, and background work. Backend-owner evidence
+reports `SCHEMA_VERSION = 4`: twelve normalized `STRICT` tables plus seven retained
+legacy tables, with atomic schema/backfill/version upgrade. Metadata/indexer paths
+now read and write canonical rows under the
+[approved catalog design](catalog-schema.md#target-catalog-schema). The rich domain
+API exposes artwork, ratings, identifiers, seasons/episodes, and provenance, but
+existing GPUI projections remain narrow and do not render per-field origins.
+The bounded-memory backfill and field-quality corrections passed final root fmt,
+strict locked workspace Clippy, locked tests (295 passed, 3 ignored), and diff checks. No user database or credentials were accessed.
+A user's v3 database upgrades only when next opened with the new build. See the
+[conservative backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
 
 **Not complete acceptance:** source wiring and reported subsystem fixtures/local
 server + isolated mpv smoke checks do not establish live authenticated TMDB/debrid
 playback, a successful full GUI workflow, or runtime support on all desktops.
-Final locked root checks passed; complete live UI/provider acceptance remains pending. See the
+Current post-correction root checks passed. Public Cinemeta checks used a temporary
+v4 database; credential-free TMDB transport reached expected HTTP 401. Post-v4
+authenticated-provider/debrid and new GUI acceptance remain unverified. Historical
+user-reported successes do not establish current-version acceptance. See the
 [quickstart](development.md#quickstart-and-setup) and
 [validation matrix](development.md#validation-status-and-limits). The diagram
 below remains a responsibility model, not a claim that every target policy is done.
@@ -38,6 +51,33 @@ Kinema Next is a local-first movie and TV-series application written in Rust wit
 
 The catalog is not a personalized library. Media downloading is not proof that someone watched it.
 
+## Approved UI direction and current work
+
+The user approved the six-area UI feature scope and decided on a **permanent
+left icon-only rail**, with no expanded-sidebar or top-navigation mode. The new
+direction is a professional neutral Graphite theme with blue accents, not amber;
+compact desktop spacing and a native font stack; polished primitive controls and
+composable GPUI components; visible IMDb card ratings and hover/focus states;
+purposeful motion; and lazy-loading/performance requirements.
+
+The [design system](design/design-system.md) is the authoritative **design
+proposal**, frozen with the review guide for user review, not implemented GPUI
+styling or measured runtime performance. The
+**Graphite v2** [HTML artifact](design/desktop-wireframes.html) is frozen and
+review-ready with a 56 px rail, compact native-stack controls, IMDb rest/zero/
+unknown states, bounded hover/focus facts, a shared 76 px card footer, components
+gallery, and 1,000-fixture performance preview. Its browser checks are design-
+artifact evidence only: native GPUI performance is neither measured nor implemented
+by this mock. Use the [review guide](design/README.md) for limits. Review the design
+system, cards, and motion before GPUI visual implementation; navigation is settled. Earlier
+three-layout comparisons are superseded design exploration, not supported modes.
+Use the pinned GPUI Kit components/reexports for eventual implementation, not a
+new UI framework or unused component architecture.
+
+Existing GPUI layout remains unchanged; search/detail/sources cancellation wiring
+was updated. Prior acceptance evidence remains historical, not new GUI acceptance.
+Do not expand the six-area scope into later library/history or other deferred work.
+
 ## Agreed metadata-provider contract
 
 Both Cinemeta and TMDB are required. Retain Cinemeta as the default; the metadata
@@ -48,6 +88,30 @@ TMDB titles must map to IMDb before source lookup. Clearly mark source lookup
 unavailable when no mapping exists; never guess from a name or numeric ID. The
 current adapter contract fixes TMDB locale to `en-US`; this does not establish
 multi-locale storage or a broader global fallback policy.
+
+The agreed target uses shared movie/series, season, and episode records regardless
+of which selected provider supplies them. Rich descriptions, artwork, external
+IDs, and ratings belong in that local catalog, with source provenance and safe
+identity matching rather than implicit cross-provider merges. Unknown values stay
+nullable; IMDb, TMDB, Rotten Tomatoes critic, and Rotten Tomatoes audience ratings
+remain distinct. The [target specification](catalog-schema.md#target-catalog-schema)
+is the approved authority for the ERD and field/merge rules. Backend implementation
+and current root checks passed; full UI acceptance remains pending.
+
+The user also approved narrow automatic transactional identity reconciliation when
+explicit selected-provider IMDb mapping proves duplicates without contradictory
+external IDs or season/episode coordinates. Preserve metadata and references;
+abort contradictions. This is not name/year matching or cache cleanup. The
+[authoritative reconciliation policy](catalog-schema.md#approved-narrow-identity-reconciliation)
+is approved, with backend-reported graph reconciliation and rollback coverage;
+current root checks passed, while integrated UI acceptance remains pending.
+
+The local catalog is the target primary read model. Owned, bounded background
+work fetches missing/new details on demand from the selected provider only; this
+does not authorize automatic both-provider enrichment, fallback, a full-catalog
+crawler, or an automatic TTL. Current source paths use canonical rows; legacy
+rows remain preserved with deliberately limited backfill, not guaranteed offline
+reuse of every old query/detail/source snapshot.
 
 This records the decision and implementation contract, not verified adapter/UI
 behavior. [TMDB access and attribution](development.md#tmdb-access-and-attribution)
@@ -115,7 +179,7 @@ joined shutdown. Obsolete in-flight work can still finish and save a cache resul
 
 ## Target responsiveness and lifetime rules
 
-- Read local data first. Fetch missing data; proposed background refresh keeps stale-but-usable results visible. See [catalog sync](catalog-schema.md) and [cache policies](cache-policy.md).
+- Read the local catalog first. Fetch missing/new details through owned, bounded, demand-driven work from the selected provider; keep usable data visible during explicit refresh. Automatic refresh timing remains open. See the [target catalog](catalog-schema.md#target-catalog-schema) and [cache policies](cache-policy.md).
 - Keep SQL, network waits, image decoding, and blocking file operations outside UI rendering.
 - Give background tasks an owner. Cancel obsolete work and reject late results using request/session generations; these solve different problems.
 - Screen state belongs to its navigation entry. Closing a page must not stop an external player or remove files it is using.

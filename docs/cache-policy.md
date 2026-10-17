@@ -1,15 +1,30 @@
 # Cache policy and refresh
 
 Catalog and indexer caching, visible update times, and force-refresh are agreed.
-The section below describes the Cinemeta search-cache baseline; additional cache
-modules now cover browse/details/episodes, indexer snapshots, and TMDB resources
-in source; end-to-end acceptance is still pending. The broader cache coverage
-and freshness policies that follow are targets/proposals; exact TTLs, retained-entry
-limits, and offline fallback rules remain open.
+Backend-owner evidence reports v4 canonical metadata/indexer reads and writes,
+with twelve normalized `STRICT` tables and seven retained legacy tables. The
+[approved catalog specification](catalog-schema.md#target-catalog-schema) remains
+the target authority; current post-fix root checks passed (295 tests passed,
+3 ignored), while post-v4 authenticated-provider/debrid and new GUI acceptance
+remain unverified. Existing GPUI projections do not render
+per-field origins or the full rich domain API. The first-increment section below
+is historical baseline evidence, not a claim that live paths still use v3 tables.
+Automatic refresh timing, retained-entry limits, and offline use of stale results
+remain open. No automatic TTL is adopted.
+
+The atomic v3 → v4 source upgrade preserves old tables without promising all old
+entries are reusable offline: nonempty legacy Cinemeta exact-query searches are
+not backfilled because shared title-field provenance is ambiguous, so the first
+canonical query requires refresh/fetch. Known legacy detail fields retain `Detail`
+provenance quality; only fetch-resource completeness stays `Summary` to request
+richer details on demand. Unverified source-target mappings stay unmapped in retained
+legacy rows. See [backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
+No user database/credentials were accessed; actual upgrade occurs on next open
+with the new build.
 
 ## Implemented first increment
 
-This section describes the original Cinemeta exact-query flow. Additional saved
+This section describes the historical v1–v3 Cinemeta exact-query flow. Additional saved
 browse/detail/source and TMDB resources are listed in [the actual schema](catalog-schema.md#implemented-first-increment);
 provider-specific UI flows now supplement it. Manual refresh and failure-versus-empty
 semantics remain required; no automatic TTL or fallback has been adopted.
@@ -37,11 +52,25 @@ bounded blocking and stale-result handling.
 
 ## Target cache coverage
 
-- **Catalog metadata and query results:** keep in SQLite so local results remain available. Freshness depends on the resource, not one global TTL.
+- **Catalog metadata and query results:** SQLite is the target primary read model, with shared movie/series, season, and episode metadata independent of Cinemeta/TMDB. Retain rich descriptions, artwork references, external IDs, distinct rating sources, and provenance under the target schema's merge rules. Unknown is nullable, not zero or an invented empty value. Saved query/page membership remains provider-scoped; normalized titles do not imply provider-independent search results.
 - **Torrentio / Peerflix results:** keep sanitized source snapshots in SQLite, with their last successful fetch time and fresh/stale state.
 - **Debrid status, file lists, and resolved URLs:** use small, bounded in-memory caches, not SQLite tables. These have shorter validity than catalog data.
 - **Media bytes:** keep in managed storage under the [storage layout](storage-layout.md). Their lifetime depends on file identity and media storage policy, not metadata TTLs.
 - **Artwork:** use a separate bounded cache rather than the media budget.
+
+Return usable local catalog data first. Own and bound demand-driven background
+fetches of missing/new details; coalesce duplicate work and reject obsolete results.
+Fetch only from the selected metadata provider, never both automatically and never
+through automatic fallback. Explicit refresh remains available; this is not a
+full-catalog crawler or an adopted periodic/TTL refresh policy. Exact offline and
+retention rules remain open.
+
+Response/page, indexer, and media cache cleanup must not implicitly delete canonical
+catalog title/season/episode identities, ratings, or provenance. Catalog retention
+and deletion are a separate open policy, not response/media eviction. Follow the
+[authoritative target schema](catalog-schema.md#target-catalog-schema) for dependency
+rules, including retaining lightweight page/fetch stubs where provenance references
+require them; pruning a payload must not break provenance.
 
 A provider's status or availability response describes that moment; it does not guarantee later playback. Neither source availability nor debrid readiness establishes watch progress.
 
@@ -56,13 +85,15 @@ Keys must distinguish the exact query, provider/endpoint, non-secret configurati
 Account, credential, or provider changes invalidate affected entries. Local display filters can reuse snapshots; changes to server-side filters need a different key or scope.
 
 Successful empty results can be cached. A failed request is not an empty result: retain the last successful snapshot and report the error.
-Prune old snapshots rather than keeping an indefinite archive. See the [proposed catalog schema](catalog-schema.md#proposed-seven-table-schema) for the tables and locale-aware metadata keys.
+Prune old snapshots rather than keeping an indefinite archive. See the [authoritative target catalog schema](catalog-schema.md#target-catalog-schema) for snapshot keys and metadata provenance/locale rules. Current source uses v4
+canonical rows and passed current root checks; full rich/provenance UI presentation
+and post-v4 authenticated-provider/debrid acceptance remain unverified.
 
 ## Target freshness and refresh policy
 
-- Record the last **successful** remote fetch in UTC; display “Updated … ago” in the user's locale.
-- Track the freshness deadline and show cached/stale, refreshing, and refresh errors where relevant.
-- Never advance “last updated” after a local reread or failed request. Show separate catalog, source, or provider timestamps when one timestamp would mislead.
+- Keep `updated_at` (stored metadata changed) distinct from `fetched_at` (last successful fetch for a provider/resource/locale). A successful unchanged fetch may advance only the latter; a local reread or failed fetch advances neither.
+- Label visible timestamps accurately: metadata update and last successful fetch are not interchangeable. Show separate catalog, source, or provider times when one would mislead; localize display without changing UTC storage.
+- Show saved data, refreshing, and refresh errors where relevant. Freshness deadlines and automatic TTL behavior are not adopted; do not infer expiry merely from elapsed time.
 
 **Refresh** asks the remote service even when cached data is still fresh. Keep existing data visible and replace it only after success; failure must not erase it.
 Equivalent refresh requests may share work, but a stale cache alone cannot satisfy force-refresh. Ignore late results from an older request or account/configuration scope.

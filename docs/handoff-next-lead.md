@@ -1,5 +1,143 @@
 # Next-lead handoff
 
+<a id="current-next-action-html-prototype-navigation-review"></a>
+
+## Current next action: design-system, cards, and motion review
+
+**Navigation is decided:** permanent **left icon-only rail**; no expanded-sidebar
+or top-navigation mode. Earlier three-layout comparisons are superseded exploration.
+The user also specified a professional neutral Graphite/blue direction (no amber),
+compact desktop spacing and native fonts, polished primitive controls/composable
+GPUI components, visible IMDb card ratings and hover/focus states, purposeful
+motion, and lazy loading/performance requirements within the existing six-area
+scope. These are design requirements, not implemented GPUI styling or measured
+runtime performance.
+
+The [design system](design/design-system.md) is the authoritative **design proposal**,
+pending review. The **Graphite v2** [HTML artifact](design/desktop-wireframes.html)
+is frozen and review-ready, with [review guidance](design/README.md). Its fixed
+rail is 56 px; native fonts/compact controls, IMDb at rest (including zero/unknown),
+bounded hover/focus facts, shared 76 px card footer, components gallery, and a
+1,000-fixture performance preview are design-only. The design-system proposal and
+review guide are frozen after exact color/alias alignment and API peer approval.
+Next review the design system, cards, and motion before GPUI visual implementation
+—not navigation modes.
+No GPUI visual redesign is authorized by this documentation/prototype task.
+
+The reviewed [catalog specification](catalog-schema.md#target-catalog-schema)
+remains approved and implemented in source with the v4 validation evidence below;
+this design followup changes neither that backend evidence nor schema scope.
+
+### Graphite v2 HTML freeze evidence (design only)
+
+Reported frozen HTML SHA-256:
+`c686a3f290c40faad42ebbc1402dcea95c295c553dd1d22ff93846e80b875dd7`.
+The HTML owner reports six browser scripts with **159 checks** passing and no
+errors. The lead independently reran an offline Chromium subset on this final
+hash, confirming fixed-rail behavior, card/focus/rating states, and bounded mock
+stress behavior without page errors. The system author froze the spec/guide after
+**48 color assignments**, **64 CSS aliases**, and API peer approval. Detailed browser
+metrics and limits live in the [review guide](design/README.md); they do not measure
+native GPUI timing, memory, decoding, image caching, or production cancellation.
+No native GPUI performance or theme implementation is claimed. The new fixed-rail
+design package and these four main docs are frozen without a commit; **user review
+is next**. Superseded layout variants are not remaining choices.
+
+The user additionally approved narrow automatic transactional identity
+reconciliation when explicit selected-provider IMDb mapping proves duplicates
+without contradictory IDs or season/episode coordinates. Follow the
+[authoritative exception](catalog-schema.md#approved-narrow-identity-reconciliation):
+preserve metadata, page/count/FK/provenance references and abort contradictions.
+This is not name/year merging or cache cleanup. Backend-owner evidence now reports
+graph reconciliation and contradiction rollback coverage; current post-fix root
+checks passed. Post-v4 authenticated-provider/debrid and new GUI acceptance remain
+unverified, regardless of historical user-reported success on earlier versions.
+
+**Current source status (backend-owner evidence): `SCHEMA_VERSION = 4`.** The
+atomic upgrade creates twelve normalized `STRICT` tables, conservatively backfills
+supported data, retains seven legacy tables (nineteen application tables total),
+and advances the version. Metadata/indexer paths read/write canonical rows; the
+rich domain API includes artwork, ratings, IDs, seasons/episodes, and provenance.
+Existing GPUI projections remain narrow and do not render per-field origins;
+normalized source implementation is not full target UI acceptance.
+
+Reported targeted results: catalog/worker **97 passed**, core **3 passed**, TMDB
+**8 passed**, SQL **8 passed**. These are separate reported scopes, not a workspace
+total. Shell search/provider-detail cancellation fixes are done, with **6 shell
+and 10 state tests** plus targeted strict Clippy passing. GUI acceptance is separate.
+
+### Intermediate validation history (superseded by final rerun)
+
+A **pre-streaming-fix** root run passed fmt, strict locked workspace Clippy, and
+locked tests (**291 passed, 3 ignored**: 25 core, 266 desktop). Actual-client
+Cinemeta smoke in a temporary v4 database passed browse (48), search (27), movie
+and Spider-Man movie details, and series (128 episodes); a no-auth TMDB probe
+returned expected HTTP 401 in 5.67 seconds. The lead inspected Clippy/test results
+and live-probe evidence in `/tmp/kinema-final-root-lk7f16/`.
+
+**This run was not final:** the lead then found whole-legacy-table payload
+`Vec` materialization and authorized a bounded-memory streaming-backfill fix.
+The correction is now **frozen**: single-row keyset batches bound legacy-backfill
+memory while preserving TMDB dependency order and savepoint rollback. Four focused
+regressions passed, the catalog scope passed **63 tests, 1 ignored**, and strict
+package Clippy/fmt passed. The lead also compared all twelve ERD entity field sets
+with actual DDL in fresh in-memory SQLite: **zero column mismatches**. No user
+database was accessed. Those intermediate results did not validate later changes;
+the post-correction root rerun below is the final evidence.
+
+### Final current-source evidence and freeze
+
+After bounded streaming backfill and the field-quality fix, root fmt, strict
+locked workspace Clippy, locked workspace tests, and diff checks **all passed**:
+**295 passed, 3 ignored** (25 core, 270 desktop). Actual-client public Cinemeta
+smoke in a temporary v4 database passed browse (48), search (27), Matrix details,
+Spider-Man details without `videos`, and series (128 episodes). The no-auth TMDB
+probe returned expected HTTP 401 in **5.7815 seconds**; this is transport evidence,
+not authenticated-provider acceptance.
+
+Logs: `/tmp/kinema-final-root-rerun-aqcCLD/outcomes.txt` and
+`{fmt,clippy,test,diff,live-cinemeta,live-tmdb}.log` in that directory. The lead
+inspected outcomes, Clippy, test-result lines, and both live logs; the documentation
+owner also inspected those bounded results. No user database or tokens were
+accessed; no actual user-database migration is claimed. No commits were made.
+
+The source/documentation batch is frozen, not a declaration of complete MVP.
+Search/detail/sources cancellation wiring changed, but GPUI layout did not.
+The three-navigation-mode prototype/browser evidence belonged to the preceding
+design comparison, now **superseded by the permanent left icon-only rail decision**.
+It is not validation of the new Graphite/blue proposal. Review the updated
+[design system](design/design-system.md), cards, and motion before GPUI visual
+implementation. Post-v4 authenticated-provider, debrid, and new GUI acceptance
+remain unverified.
+
+### Preservation and documentation scope
+
+Preservation limits: nonempty legacy Cinemeta exact-query searches remain in old
+tables but are not backfilled because shared title-field provenance is ambiguous;
+the first canonical query needs refresh/fetch. Known legacy detail fields retain
+`Detail` provenance quality; only fetch-resource completeness stays `Summary` to
+force richer refetch on demand. Do not label all backfilled values summary-quality. Source targets without verified canonical
+mappings stay legacy/unmapped. No user database or credentials were accessed; actual
+upgrade occurs only when the user next opens their database with the new build.
+See [backfill details](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
+
+The current design-only alignment owner edits only `README.md`, `architecture.md`,
+`decisions.md`, and `handoff-next-lead.md` under `docs/`. Other assigned owners edit
+the HTML prototype/review guide and new design-system proposal. No Rust/schema or
+backend validation changes are needed for this followup. Preserve existing user
+work and prior evidence; no commits or private-file/database/token access.
+
+The agreed direction is provider-agnostic shared movie/series, season, and episode
+metadata with rich descriptions, artwork, external IDs, separate IMDb/TMDB/Rotten
+Tomatoes critic/audience ratings, nullable unknowns, and provenance-safe merging.
+The local catalog becomes the primary read model, with owned, bounded,
+demand-driven selected-provider fetches of missing/new details. Keep metadata
+`updated_at` distinct from successful-resource `fetched_at`. This is not automatic
+both-provider enrichment, fallback, TTL refresh, or a full-catalog crawler. No
+history/library scope is added. ERD approval is complete; the historical
+continuation evidence below remains historical and does not establish completion
+of the newly authorized normalized catalog or the UI prototype.
+
 ## Committed snapshot and continuation scope
 
 The outgoing code batch is frozen, passed final root validation, and is committed
@@ -23,9 +161,10 @@ Known commits:
 - `107317ab15f31e022891987213e50d64e332a7db` (`107317a`): metadata, debrid,
   settings/keyring, UI and local-playback integration; 45-file feature batch.
 
-This handoff describes code revision `107317a`; the separate documentation commit
-need not reference its own hash. Preserve ignored data and require explicit lead
-assignment for subsequent commits.
+The outgoing snapshot sections below describe code revision `107317a` and remain
+historical. Current HEAD is documentation commit `f1beeb9`; the uncommitted
+continuation section records subsequent work separately. Preserve ignored data
+and require explicit lead assignment for subsequent commits.
 
 ## Confirmed decisions (not all fully accepted in runtime)
 
@@ -76,11 +215,13 @@ Use pinned official GPUI Kit/reexports; do not add another UI framework.
 Blocking SQL/network/filesystem/keyring/process work belongs on owned workers,
 not rendering. Request replacement and generation rejection do not cancel an
 already blocking HTTP operation; timeout/lifetime limits still matter.
-The current SQLite version is 3 with provider-specific caches, **not** the
-proposed normalized seven-table catalog model; see [schema](catalog-schema.md).
+Current backend evidence reports SQLite v4 canonical rows under the
+[approved normalized catalog target](catalog-schema.md#target-catalog-schema),
+with all seven legacy tables retained and conservative backfill. Current post-fix
+root checks passed; this does not establish migration of actual user databases.
 No signed access URLs or credentials belong in source snapshots/manifests/logs.
 
-## Setup and evidence
+## Outgoing snapshot: setup and historical evidence
 
 Use the [quickstart](development.md#quickstart-and-setup) for metadata, both debrid
 providers, player/quota, manual cleanup and quit behavior. Install external players
@@ -124,7 +265,7 @@ Evidence reported to this docs owner (not independently rerun here):
   (128 episodes). Catalog and worker fixtures passed; no TLS bypass, tokens or
   user-data changes. Subsequent Linux X11 GUI checks exercised popular-page
   scrolling/Load more and Ted Lasso genres/seasons/episodes.
-- **New high-priority next-lead bug:** `Spider-Man: Brand New Day` movie details
+- **Historical bug at the outgoing snapshot (addressed in the uncommitted continuation below):** `Spider-Man: Brand New Day` movie details
   reproducibly show “Cinemeta returned an invalid catalog response” in the latest
   rebuilt GUI, while Torrentio sources for that title work and the Matrix movie
   smoke passes. This is a title-specific malformed-details/parse investigation,
@@ -162,7 +303,10 @@ finalization or reimplementing already-wired APIs.
 Temporary screenshots/logs above are outside Git and may not survive cleanup or
 transfer; the recorded observations are the handoff evidence, not portable fixtures.
 
-## Next lead: starting priorities
+## Historical outgoing starting priorities
+
+These were the priorities at `107317a`, not the current task list. See the
+continuation below for reviewed fixes and remaining acceptance.
 
 1. Read the committed snapshot, final validator/owner reports, and this handoff;
    distinguish already-wired APIs from genuine remaining implementation gaps.
@@ -186,3 +330,136 @@ transfer; the recorded observations are the handoff evidence, not portable fixtu
 5. Keep architecture/status/setup documentation and the validation matrix tied to
    observed code and evidence. Passing checks or a feature commit alone does not
    establish complete MVP acceptance.
+
+## Uncommitted continuation after `f1beeb9`
+
+This continuation does not change the frozen `107317a` evidence above. No new
+commit is authorized. The lead reports the following Rust changes reviewed:
+
+- Cinemeta movie details may omit `videos`, interpreted as no episodes. Explicit
+  null, malformed values, and missing series videos remain rejected. Regression
+  fixture and roundtrip tests cover the change; the existing opt-in public smoke
+  now includes `tt22084616`. Extending that smoke is not evidence of running it.
+- Shell browse work is cancelled on navigation, search, detail entry, and refresh,
+  preserving cached values and invalidating the generation. Missing pages reload
+  on return. Replaced detail/source work is cancelled. Four targeted shell tests
+  passed; this does not establish live GUI cancellation acceptance.
+
+### Historical continuation validation and acceptance priorities (before catalog ERD approval)
+
+1. Corrected continuation validation is reported passing: root fmt, strict locked
+   workspace Clippy, locked workspace tests **247 passed, 2 ignored** (22 core,
+   225 desktop), and diff check. The lead inspected matching results, Clippy,
+   tests, and live-smoke logs in `/tmp/kinema-validation-corrected.kvGbz0/` and
+   reran root `git diff --check` successfully after the documentation updates. Initial test-only Clippy `unwrap_used` failures were
+   fixed using `?`; initial logs `/tmp/kinema-validation.RohF4U/`. The public
+   `live_cinemeta` actual-client smoke passed (1 test): browse (48), search (27), Matrix,
+   `tt22084616` with no episodes, and series (128 episodes), using a temporary DB.
+   The reported Xvfb/D-Bus GUI smoke used the **old frozen-snapshot binary**,
+   so it cannot establish post-fix GUI acceptance. The outgoing 244-pass result
+   still applies only to `107317a`.
+2. User-assisted post-fix GUI evidence now confirms corrected-title detail
+   rendering: the user launched the updated app using the Cargo run instructions
+   and reported “Looks okay”. The lead inspected
+   `/home/tlm/Projects/nerve/data/storage-4/data/images/image-20261016T172106Z.png`,
+   showing Spider-Man: Brand New Day details with synopsis, 2026, Action/Adventure,
+   green Fetched status, and last successful fetch 2026-10-16 17:20 UTC, without
+   invalid catalog response. The outgoing parse diagnosis is historical, not a
+   current known unfixed bug. This establishes corrected-title GUI detail rendering
+   only: browse cancellation/navigation and return behavior still need acceptance;
+   the user's general report does not establish other provider or GUI flows.
+3. Frozen-snapshot GUI smoke in private Xvfb/D-Bus with temporary cwd verified
+   window/sidebar navigation and Transfers Open local file chooser opening; Cancel
+   returned to unchanged playback screen. The lead viewed the chooser screenshot.
+   Screenshots: `/tmp/kinema-ui-accept.dVHRhJ/{initial,settings,chooser-attempt,chooser-cancelled}.png`.
+   No file selection, player launch, token UI actions, or token disclosure occurred.
+   Isolation used private Xvfb, new D-Bus, redirected HOME/XDG, and temporary cwd,
+   not a sandbox or secure-store interception. The portal chooser initially showed
+   the repository directory, source unknown; underlying secure-store access is not
+   ruled out. Theme toggle was not found, so theme runtime remains unverified. Complete chooser
+   selection/error and cross-OS acceptance, native-keyring Settings, TMDB routing,
+   theme, and quit/OS-close acceptance while preserving users' running applications
+   and private data. This old-binary smoke is not post-fix GUI evidence. The
+   follow-up using a custom no-op player fixture was stopped without a rerun
+   because isolation was not guaranteed. Local-session, quit, and OS-close remain
+   **unverified**; no fixture result is claimed.
+4. With explicit user participation, validate authenticated TMDB/RD/AD flows and
+   paid acquisition/range playback without requesting credentials in chat/logs.
+5. Continue agreed-MVP gaps and integrated Windows/macOS/Linux acceptance. Neither
+   this continuation nor passing checks establishes complete MVP, provider, or
+   cross-OS support. Keep the development validation matrix aligned with evidence.
+
+### Subsequent TMDB timeout correction (validated; GUI retry pending)
+
+The lead inspected the user's TMDB GUI failure screenshot
+`/home/tlm/Projects/nerve/data/storage-4/data/images/image-20261016T172347Z.png`
+and Settings Test connection screenshot
+`/home/tlm/Projects/nerve/data/storage-4/data/images/image-20261016T172847Z.png`.
+Both show network/timeout messages, not credential rejection.
+
+The network agent reproduced system DNS taking 5.016 seconds twice, versus the
+prior production reqwest timeout at 5.002 seconds. With a corrected 10-second
+connect budget, an unauthenticated TMDB request reached HTTP 401 in 5.807 seconds.
+This is transport evidence, not acceptance or rejection of the user's saved token:
+the agent did not access that token, and authenticated TMDB was still unverified
+at that point (see subsequent user-reported success below).
+
+`tmdb.rs` now shares its client builder between production and tests, retaining
+the 15-second total timeout, TLS, and no redirects. A deterministic delayed-DNS
+regression and an ignored no-credential live probe were added. Eight focused tests
+and targeted Clippy passed. Final root fmt, strict locked workspace Clippy, locked
+workspace tests (**248 passed, 3 ignored**: 22 core, 226 desktop), and diff check
+all passed for this correction. The credential-free TMDB live probe reached HTTP
+401 in 5.598 seconds. Logs: `/tmp/kinema-tmdb-validation-BujUJA/`; the lead inspected
+Clippy, test result lines, and the transport log.
+
+The user offered a token file but explicitly prohibited reading it. No agent read,
+accessed, or tested that file; no agent-run authenticated acceptance was performed.
+The user subsequently confirmed “Yes TMDB worked” in response to whether
+post-restart Settings Test connection and Movies browse succeeded. This is
+user-reported authenticated check and browse success only, not acceptance of
+TMDB details/IMDb mapping or universal provider support. No credentials were
+accessed by agents.
+
+### Subsequent user AllDebrid playback failure (investigation pending)
+
+The lead inspected user screenshot `image-20261016T173825Z.png` in the same image
+directory recorded above. AllDebrid preparation file listing is visible with a
+selected 861.5 MiB file; an external player launched for a local session, but the
+UI shows red “Media provider request failed” and 0 B downloaded / 4.4 GiB reserved.
+The reservation is aggregate; this does not establish a size mismatch.
+
+User mpv/ffmpeg console logs report the stream ending at byte 0 rather than
+903319726, retries, then format not recognized. This confirms zero delivered bytes,
+not a codec/file-format root cause. At that point successful paid range playback
+was unverified; the exact original stream failure cause is still not proven. Agents did not
+access tokens, user data, or the live stream. Do not reproduce local capability
+URLs or screenshot filenames of media assets in reports.
+
+Reviewed media fix raises the connect budget from 5 to 10 seconds on this host
+with known roughly 5-second DNS, retaining the 20-second total timeout, TLS, and
+no redirects. Typed redacted errors distinguish `ConnectTimeout`, `RequestTimeout`,
+`BodyRead`, and `RenewalExhausted`, preserving generic `Upstream` elsewhere.
+Deterministic delayed-DNS/failure coverage passed 24 media tests; targeted strict
+Clippy passed. Final root fmt, strict locked workspace Clippy, locked workspace
+tests (**250 passed, 3 ignored**: 22 core, 228 desktop), and diff check all passed
+on the media correction. Logs: `/tmp/kinema-media-validation.Il8jwz/`; the lead
+inspected Clippy and test result lines and separately passed `git diff --check`.
+
+These are bounded delayed-DNS/error fixtures, not live signed-URL or media
+acceptance. On 2026-10-17 the user replied “all good” to the requested post-fix
+restart/reprepare/play retry and whether playback starts/downloaded bytes increase.
+This supersedes the pending basic AllDebrid retry with user-reported playback and
+download progress success only. There is no independently observed byte comparison,
+seek, interrupted acquisition, account-change safety, other provider/indexer, or
+cross-OS acceptance. The correction remains hypothesis-driven, not proof of the
+original stream's cause. No credentials were accessed by agents. TMDB's separate
+user-reported check/browse success above does not establish media playback.
+The prior documentation update was frozen without a commit. The current phase
+records backend-reported v4 canonical implementation and a frozen HTML prototype
+awaiting user review at that freeze. The current design-only followup supersedes
+its navigation alternatives with the permanent left icon-only rail and prepares
+review of the new Graphite/blue design system, cards, and motion. Current
+post-streaming/quality-fix root checks remain passed as recorded above; historical
+results retain their original scope. No commit is authorized; new GUI and post-v4
+authenticated-provider/debrid acceptance remain unverified.

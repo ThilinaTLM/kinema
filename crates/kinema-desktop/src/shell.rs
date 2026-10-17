@@ -144,8 +144,41 @@ struct BrowsePage {
     res: Resource<Vec<CatalogTitle>>,
 }
 
+/// Cancel before invalidating generations so the worker receives the original
+/// request identity. Keep loaded values for navigation back to this screen.
+fn cancel_browse(pages: &mut [BrowsePage], mut forward: impl FnMut(u32, u64)) {
+    for page in pages {
+        if page.res.busy() {
+            forward(page.offset, page.res.generation());
+            page.res.cancel();
+        }
+    }
+}
+
+/// Forward the original identity before cancellation. Resume markers belong to
+/// this exact resource generation, never a later retry or replacement.
+fn suspend_resource<T>(
+    resource: &mut Resource<T>,
+    resume: &mut Option<u64>,
+    forward: impl FnOnce(u64),
+) {
+    if resource.busy() {
+        forward(resource.generation());
+        resource.cancel();
+        *resume = resource.value().is_none().then_some(resource.generation());
+    }
+}
+
+fn take_resource_resume<T>(resource: &Resource<T>, resume: &mut Option<u64>) -> bool {
+    resume.take().is_some_and(|generation| {
+        generation == resource.generation() && !resource.busy() && resource.value().is_none()
+    })
+}
+
 struct CatalogPane {
     screen: ScreenState,
+    detail_resume: Option<u64>,
+    sources_resume: Option<u64>,
     /// Popular titles, one resource per loaded page; shown when no search is active.
     browse: Vec<BrowsePage>,
     input: Entity<InputState>,
@@ -211,6 +244,8 @@ impl Shell {
             CatalogPane {
                 screen: ScreenState::new(kind),
                 browse: Vec::new(),
+                detail_resume: None,
+                sources_resume: None,
                 input,
                 list,
                 detail: None,
@@ -412,9 +447,31 @@ impl Shell {
     // ---- browse -------------------------------------------------------
 
     fn ensure_browse(&mut self, kind: MediaKind, cx: &mut Context<Self>) {
+        if self.pane(kind).detail.is_some() || self.pane(kind).screen.active().is_some() {
+            return;
+        }
         if self.pane(kind).browse.is_empty() {
             self.load_browse_page(kind, 0, false, cx);
+        } else {
+            // A first load cancelled by navigation has no value to restore.
+            let missing: Vec<_> = self
+                .pane(kind)
+                .browse
+                .iter()
+                .filter(|page| !page.res.busy() && page.res.value().is_none())
+                .map(|page| page.offset)
+                .collect();
+            for offset in missing {
+                self.load_browse_page(kind, offset, false, cx);
+            }
         }
+    }
+
+    fn cancel_browse(&mut self, kind: MediaKind) {
+        let worker = &self.worker;
+        cancel_browse(&mut self.panes[index(kind)].browse, |offset, generation| {
+            cancel_meta(worker, true, Ask::Browse { kind, offset }, generation);
+        });
     }
 
     fn load_browse_page(
@@ -449,6 +506,7 @@ impl Shell {
 
     /// Refresh keeps only the first page so paging restarts from fresh data.
     fn refresh_browse(&mut self, kind: MediaKind, cx: &mut Context<Self>) {
+        self.cancel_browse(kind);
         self.pane_mut(kind).browse.truncate(1);
         self.load_browse_page(kind, 0, true, cx);
     }
@@ -470,7 +528,24 @@ impl Shell {
         self.load_browse_page(kind, offset, false, cx);
     }
 
+    fn suspend_search(&mut self, kind: MediaKind) {
+        if let Some(generation) = self.pane(kind).screen.pending_generation() {
+            if let Ok(worker) = &self.worker {
+                worker.cancel_search(kind, generation);
+            }
+            self.pane_mut(kind).screen.suspend();
+        }
+    }
+
+    fn resume_search(&mut self, kind: MediaKind) {
+        if self.pane(kind).detail.is_none() {
+            let request = self.pane_mut(kind).screen.resume();
+            self.dispatch(kind, request);
+        }
+    }
+
     fn clear_search(&mut self, kind: MediaKind, window: &mut Window, cx: &mut Context<Self>) {
+        self.suspend_search(kind);
         self.pane_mut(kind).screen.clear();
         self.pane(kind)
             .input
@@ -533,12 +608,18 @@ impl Shell {
 
     /// Switches page and starts whichever metadata source the page needs.
     fn enter_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+        if let Page::Catalog(kind) = self.page {
+            self.cancel_browse(kind);
+            self.suspend_search(kind);
+        }
         self.page = page;
         match page {
             Page::Catalog(kind) if self.settings_loaded => match self.metadata {
                 MetadataProvider::Cinemeta => {
                     self.tmdb.update(cx, |view, cx| view.deactivate(cx));
                     self.ensure_browse(kind, cx);
+                    self.resume_search(kind);
+                    self.resume_retained_detail(kind, cx);
                 }
                 MetadataProvider::Tmdb if !self.tmdb_token_present => {
                     // No silent fallback to Cinemeta: send the user to setup.
@@ -614,6 +695,9 @@ impl Shell {
         {
             detail.selected = Some((*season, *episode));
         }
+        self.cancel_browse(kind);
+        self.suspend_search(kind);
+        self.cancel_replaced_detail(kind);
         self.pane_mut(kind).detail = Some(detail);
         self.open_sources(kind, window, cx);
     }
@@ -623,6 +707,9 @@ impl Shell {
     fn search(&mut self, kind: MediaKind, cx: &mut Context<Self>) {
         let text = self.pane(kind).input.read(cx).value();
         let request = self.pane_mut(kind).screen.search(&text);
+        if request.is_some() {
+            self.cancel_browse(kind);
+        }
         self.dispatch(kind, request);
         self.sync_titles(cx);
         cx.notify();
@@ -654,10 +741,87 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.cancel_browse(kind);
+        self.suspend_search(kind);
         let detail = self.build_detail(kind, title, window, cx);
+        self.cancel_replaced_detail(kind);
         self.pane_mut(kind).detail = Some(detail);
         self.request_details(kind, false, true, cx);
         cx.notify();
+    }
+
+    /// Provider changes obsolete pending work even in retained hidden panes.
+    fn suspend_retained_detail(&mut self, kind: MediaKind) {
+        let pane = &mut self.panes[index(kind)];
+        let Some(detail) = pane.detail.as_mut() else {
+            return;
+        };
+        let ask = Ask::Details {
+            kind,
+            id: detail.title.id().clone(),
+        };
+        suspend_resource(&mut detail.details, &mut pane.detail_resume, |generation| {
+            cancel_meta(&self.worker, true, ask, generation);
+        });
+        if let Some(sources) = detail.sources.as_mut() {
+            let ask = Ask::Sources {
+                indexer: sources.indexer,
+                target: sources.target.clone(),
+            };
+            suspend_resource(
+                &mut sources.sources,
+                &mut pane.sources_resume,
+                |generation| {
+                    cancel_meta(&self.worker, true, ask, generation);
+                },
+            );
+        }
+    }
+
+    fn resume_retained_detail(&mut self, kind: MediaKind, cx: &mut Context<Self>) {
+        let pane = &mut self.panes[index(kind)];
+        let Some(detail) = pane.detail.as_ref() else {
+            return;
+        };
+        let details =
+            take_resource_resume(&detail.details, &mut pane.detail_resume) && !detail.synthetic;
+        let sources = detail.sources.as_ref().is_some_and(|sources| {
+            take_resource_resume(&sources.sources, &mut pane.sources_resume)
+        });
+        if details {
+            self.request_details(kind, false, false, cx);
+        }
+        if sources {
+            self.request_sources(kind, false, false, cx);
+        }
+    }
+
+    fn cancel_replaced_detail(&mut self, kind: MediaKind) {
+        let Some(detail) = self.panes[index(kind)].detail.as_mut() else {
+            return;
+        };
+        cancel_meta(
+            &self.worker,
+            detail.details.busy(),
+            Ask::Details {
+                kind,
+                id: detail.title.id().clone(),
+            },
+            detail.details.generation(),
+        );
+        detail.details.cancel();
+        if let Some(sources) = detail.sources.as_mut() {
+            cancel_meta(
+                &self.worker,
+                sources.sources.busy(),
+                Ask::Sources {
+                    indexer: sources.indexer,
+                    target: sources.target.clone(),
+                },
+                sources.sources.generation(),
+            );
+            sources.sources.cancel();
+        }
     }
 
     fn build_detail(
@@ -777,6 +941,10 @@ impl Shell {
                 detail.details.cancel();
                 pane.detail = None;
             }
+        }
+        if self.pane(kind).detail.is_none() {
+            self.ensure_browse(kind, cx);
+            self.resume_search(kind);
         }
         cx.notify();
     }
@@ -1310,6 +1478,13 @@ impl Shell {
         let first = !self.settings_loaded;
         let switched = self.metadata != provider;
         self.settings_loaded = true;
+        if switched {
+            for kind in [MediaKind::Movie, MediaKind::Series] {
+                self.suspend_search(kind);
+                self.cancel_browse(kind);
+                self.suspend_retained_detail(kind);
+            }
+        }
         self.metadata = provider;
         self.tmdb_token_present = token_present;
         // Provider selection is persisted state: re-enter the page so the right
@@ -1706,8 +1881,105 @@ impl Render for Shell {
 
 #[cfg(test)]
 mod tests {
-    use super::Page;
+    use super::{BrowsePage, Page, cancel_browse, suspend_resource, take_resource_resume};
+
+    #[test]
+    fn provider_suspension_resumes_only_interrupted_first_loads() {
+        let mut resource = Resource::<Vec<u8>>::with_base(100);
+        let original = resource.begin(false);
+        let mut marker = None;
+        let mut forwarded = None;
+        suspend_resource(&mut resource, &mut marker, |generation| {
+            forwarded = Some(generation)
+        });
+        assert_eq!(forwarded, Some(original));
+        assert!(!resource.fetched(original, vec![1], 1));
+        let mut unexpected_cancel = false;
+        suspend_resource(&mut resource, &mut marker, |_| unexpected_cancel = true);
+        assert!(!unexpected_cancel);
+        assert!(take_resource_resume(&resource, &mut marker));
+        assert!(!take_resource_resume(&resource, &mut marker));
+        resource.begin(false);
+        suspend_resource(&mut resource, &mut marker, |_| {});
+        let retry = resource.begin(false);
+        assert!(!take_resource_resume(&resource, &mut marker));
+        assert!(resource.failed(retry, "offline"));
+        suspend_resource(&mut resource, &mut marker, |_| unexpected_cancel = true);
+        assert!(!unexpected_cancel);
+        assert!(!take_resource_resume(&resource, &mut marker));
+        assert_eq!(resource.error(), Some("offline"));
+    }
+
+    #[test]
+    fn provider_suspension_preserves_loaded_and_successful_empty_values() {
+        for value in [vec![], vec![1_u8]] {
+            let mut resource = Resource::with_base(100);
+            let generation = resource.begin(false);
+            assert!(resource.cache_hit(generation, value.clone(), 7, true));
+            let mut marker = None;
+            suspend_resource(&mut resource, &mut marker, |original| {
+                assert_eq!(original, generation)
+            });
+            assert_eq!(resource.value(), Some(&value));
+            assert_eq!(resource.fetched_at(), Some(7));
+            assert!(!take_resource_resume(&resource, &mut marker));
+            assert!(!resource.fetched(generation, vec![2], 8));
+        }
+    }
+    use crate::app_state::{Resource, Stage};
     use kinema_core::MediaKind;
+
+    #[test]
+    fn leaving_browse_forwards_original_generations_and_rejects_late_results() {
+        let mut pages = vec![
+            BrowsePage {
+                offset: 0,
+                res: Resource::with_base(100),
+            },
+            BrowsePage {
+                offset: 100,
+                res: Resource::with_base(200),
+            },
+            BrowsePage {
+                offset: 200,
+                res: Resource::with_base(300),
+            },
+        ];
+        let first = pages[0].res.begin(false);
+        assert!(pages[0].res.cache_hit(first, Vec::new(), 7, true));
+        let second = pages[1].res.begin(false);
+        let settled = pages[2].res.begin(false);
+        assert!(pages[2].res.fetched(settled, Vec::new(), 8));
+        let mut forwarded = Vec::new();
+        cancel_browse(&mut pages, |offset, generation| {
+            forwarded.push((offset, generation))
+        });
+        assert_eq!(forwarded, vec![(0, first), (100, second)]);
+        assert!(pages.iter().all(|page| !page.res.busy()));
+        assert_eq!(pages[0].res.fetched_at(), Some(7));
+        assert!(pages[0].res.value().is_some());
+        assert!(pages[1].res.value().is_none());
+        assert_eq!(pages[2].res.generation(), settled);
+        assert!(!pages[1].res.apply(
+            second,
+            Stage::Fetched {
+                value: Vec::new(),
+                fetched_at: 9
+            }
+        ));
+        let resumed = pages[1].res.begin(false);
+        assert!(
+            !pages[1]
+                .res
+                .apply(second, Stage::Failed("late failure".to_owned()))
+        );
+        assert!(pages[1].res.fetched(resumed, Vec::new(), 10));
+        forwarded.clear();
+        cancel_browse(&mut pages, |offset, generation| {
+            forwarded.push((offset, generation))
+        });
+        assert!(forwarded.is_empty());
+    }
 
     #[test]
     fn starts_on_movies() {

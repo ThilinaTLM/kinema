@@ -23,8 +23,9 @@ The build's `debug_assertions` setting selects the catalog location:
 The default debug and release profiles therefore use separate databases; switching
 modes does not copy or merge their data. A custom profile's `debug_assertions`
 setting, rather than its name, determines the location. Existing files under root
-`data/`, the previous namespace, or historical locations are not migrated, moved,
-or deleted. Resolution/directory/storage failures are reported, not treated as
+`data/`, the previous namespace, or historical locations are not moved, merged
+across locations, or deleted. This path-preservation rule does not prohibit the
+authorized in-place Rust schema upgrade described below. Resolution/directory/storage failures are reported, not treated as
 permission to use another database or silently reset one.
 
 The current `AppPaths` resolver also selects `config_dir()` and `cache_dir()`
@@ -33,6 +34,31 @@ The settings store uses `CONFIG/settings.toml`; managed storage uses
 `CACHE/media/` with per-asset `payload` and `manifest.json` files. OS credentials
 remain separate. Source wiring and reported recovery fixtures do not establish
 cross-platform crash safety or end-to-end paid-provider playback.
+
+The backend reports an in-place Rust **v3 → v4** schema upgrade: twelve normalized
+`STRICT` tables plus all seven retained legacy tables (nineteen application tables),
+with schema creation, conservative backfill, and version advance atomic. Canonical
+metadata/indexer paths use the new rows under the
+[approved catalog specification](catalog-schema.md#target-catalog-schema). This
+changes neither database paths nor media/settings/credential locations. It is not
+a migration of historical C++ data or permission to reset/move user files.
+
+Preserved legacy data does not guarantee immediate offline reuse: nonempty
+Cinemeta exact-query searches are not backfilled because shared-field provenance
+is ambiguous; first canonical queries need refresh/fetch. Known legacy detail
+fields retain `Detail` provenance quality, while fetch-resource completeness stays
+`Summary` to force richer refetch on demand; source targets lacking verified canonical
+mapping remain unmapped in legacy storage. See [backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
+Current post-fix root fmt, strict locked workspace Clippy, locked tests (295 passed,
+3 ignored), and diff checks passed; full post-v4 UI/provider acceptance remains
+unverified.
+Agents did not access user databases or credentials. A user's database upgrades
+only on next open with the new build, not as part of this documentation update.
+
+Artwork bytes remain a separate cache; media payloads/manifests and credentials
+remain outside the catalog. Cache/media cleanup must preserve canonical identities,
+ratings, provenance, and referenced page/fetch stubs; identity reconciliation is a
+separate proven-ID transaction, not eviction. No history/library tables are added.
 
 ## Proposed broader locations
 

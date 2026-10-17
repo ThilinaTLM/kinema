@@ -6,6 +6,8 @@ mod server;
 mod storage;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transport_tests;
 
 use crate::{paths::AppPaths, providers::ResolvedMedia};
 use kinema_core::{
@@ -40,6 +42,10 @@ pub enum MediaError {
     Storage,
     UnsupportedRange,
     Upstream,
+    ConnectTimeout,
+    RequestTimeout,
+    BodyRead,
+    RenewalExhausted,
     IdentityMismatch,
     Canceled,
     Busy,
@@ -54,6 +60,10 @@ impl fmt::Display for MediaError {
             Self::Storage => "Media storage operation failed",
             Self::UnsupportedRange => "Upstream does not support validated byte ranges",
             Self::Upstream => "Media provider request failed",
+            Self::ConnectTimeout => "Media connection timed out during DNS, TCP, or TLS setup",
+            Self::RequestTimeout => "Media request timed out before response headers arrived",
+            Self::BodyRead => "Media response body could not be read completely (interrupted, timed out, or truncated)",
+            Self::RenewalExhausted => "Media link renewal limit reached without download progress",
             Self::IdentityMismatch => "Renewed media identity changed",
             Self::Canceled => "Media session ended",
             Self::Busy => "Media service capacity reached",
@@ -65,6 +75,26 @@ impl std::error::Error for MediaError {}
 impl From<std::io::Error> for MediaError {
     fn from(_: std::io::Error) -> Self {
         Self::Storage
+    }
+}
+// Keep certificate verification enabled and never follow signed-link redirects.
+fn client_builder() -> reqwest::blocking::ClientBuilder {
+    reqwest::blocking::Client::builder()
+        // System DNS may consume a five-second retry before TCP/TLS can begin.
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+}
+fn request_error(error: reqwest::Error) -> MediaError {
+    // Never retain or format reqwest errors: they can contain signed URLs.
+    if error.is_timeout() {
+        if error.is_connect() {
+            MediaError::ConnectTimeout
+        } else {
+            MediaError::RequestTimeout
+        }
+    } else {
+        MediaError::Upstream
     }
 }
 #[derive(Clone, Debug)]
@@ -147,12 +177,7 @@ impl MediaService {
             }),
             canceled: AtomicBool::new(false),
             _lock: lock,
-            client: reqwest::blocking::Client::builder()
-                .connect_timeout(Duration::from_secs(5))
-                .timeout(Duration::from_secs(20))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|_| MediaError::Upstream)?,
+            client: client_builder().build().map_err(|_| MediaError::Upstream)?,
         });
         let (address, stop) = server::start(shared.clone())?;
         Ok(Self {

@@ -4,6 +4,7 @@
 //! this crate.
 
 pub mod catalog;
+pub mod catalog_normalized;
 pub mod media;
 pub mod sources;
 

@@ -1,0 +1,361 @@
+//! TMDB canonical imports and legacy UI projections.
+use super::*;
+use super::{normalized::*, normalized_pages::*};
+use crate::tmdb::{
+    TmdbData, TmdbDetails, TmdbPage, TmdbQuery, TmdbSeason, TmdbSeasonSummary, TmdbTitle,
+};
+use kinema_core::catalog_normalized::{ExternalIdentifier, FieldValue, Quality, TitleObservation};
+use rusqlite::Transaction;
+
+pub(super) fn observation(title: &TmdbTitle) -> TitleObservation {
+    let mut fields = vec![("name".into(), FieldValue::Text(title.name.clone()))];
+    for (name, value) in [
+        ("overview", title.overview.as_ref()),
+        ("poster_url", title.poster_url.as_ref()),
+    ] {
+        if let Some(value) = value {
+            fields.push((name.into(), FieldValue::Text(value.clone())));
+        }
+    }
+    if let Some(release) = &title.release_info {
+        let prefix = if title.kind == MediaKind::Movie {
+            "release"
+        } else {
+            "first_air"
+        };
+        if kinema_core::catalog_normalized::valid_date(release) {
+            fields.push((format!("{prefix}_date"), FieldValue::Text(release.clone())));
+        }
+        if let Some(year) = release
+            .get(..4)
+            .and_then(|s| s.parse::<i64>().ok())
+            .filter(|y| (1..=9999).contains(y))
+        {
+            fields.push((format!("{prefix}_year"), FieldValue::Integer(year)));
+        }
+    }
+    TitleObservation {
+        kind: title.kind,
+        identifiers: vec![ExternalIdentifier {
+            namespace: "tmdb".into(),
+            external_id: title.id.to_string(),
+        }],
+        fields,
+        ratings: vec![],
+    }
+}
+
+pub(super) fn write(
+    tx: &Transaction<'_>,
+    query: &TmdbQuery,
+    data: &TmdbData,
+    time: i64,
+    complete: bool,
+) -> Result<(), CatalogError> {
+    let resource = crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?;
+    let completeness = if complete {
+        Quality::Detail
+    } else {
+        Quality::Summary
+    };
+    match data {
+        TmdbData::Page(page) => write_page(
+            tx,
+            "tmdb",
+            &resource,
+            page.page,
+            Some(page.total_pages),
+            &page.titles.iter().map(observation).collect::<Vec<_>>(),
+            time,
+        )?,
+        TmdbData::Details(details) => {
+            let mut item = observation(&details.title);
+            if let Some(imdb) = &details.imdb {
+                item.identifiers.push(ExternalIdentifier {
+                    namespace: "imdb".into(),
+                    external_id: imdb.as_str().into(),
+                });
+            }
+            if complete || !details.genres.is_empty() {
+                item.fields.push((
+                    "genres_json".into(),
+                    FieldValue::Labels(details.genres.clone()),
+                ));
+            }
+            let id = resolve_title(tx, &item, time)?;
+            let fetch_id = fetch(
+                tx,
+                Target::Title(id),
+                "tmdb",
+                &resource,
+                completeness,
+                false,
+                time,
+            )?;
+            // Reduced legacy DTOs do not satisfy today's rich detail request,
+            // but the fields they actually retain still came from a detail resource.
+            import_title(tx, id, &item, "tmdb", Quality::Detail, fetch_id, time)?;
+            for summary in &details.seasons {
+                let id = season(tx, id, summary.number, time)?;
+                if let Some(name) = &summary.name {
+                    field(
+                        tx,
+                        Target::Season(id),
+                        ("name", &FieldValue::Text(name.clone())),
+                        "tmdb",
+                        Quality::Summary,
+                        fetch_id,
+                        time,
+                    )?;
+                }
+                field(
+                    tx,
+                    Target::Season(id),
+                    (
+                        "episode_count",
+                        &FieldValue::Integer(i64::from(summary.episode_count)),
+                    ),
+                    "tmdb",
+                    Quality::Summary,
+                    fetch_id,
+                    time,
+                )?;
+            }
+        }
+        TmdbData::Season(data) => {
+            let item = TitleObservation {
+                kind: MediaKind::Series,
+                identifiers: vec![ExternalIdentifier {
+                    namespace: "tmdb".into(),
+                    external_id: data.series_id.to_string(),
+                }],
+                fields: vec![],
+                ratings: vec![],
+            };
+            let series = resolve_title(tx, &item, time)?;
+            let id = season(tx, series, data.season, time)?;
+            let fetch_id = fetch(
+                tx,
+                Target::Season(id),
+                "tmdb",
+                &resource,
+                completeness,
+                data.episodes.is_empty(),
+                time,
+            )?;
+            // A season resource supplies the parent identity and child metadata;
+            // it does not assert title detail success.
+            import_title(tx, series, &item, "tmdb", Quality::Summary, fetch_id, time)?;
+            import_episodes(tx, series, &data.episodes, "tmdb", fetch_id, time)?;
+        }
+    }
+    Ok(())
+}
+fn title(tx: &Transaction<'_>, id: i64, kind: MediaKind) -> Result<TmdbTitle, CatalogError> {
+    let record = CatalogService::title_record(tx, id)?;
+    if record.kind != kind {
+        return Err(CatalogError::InvalidCache);
+    }
+    let external = record
+        .identifiers
+        .iter()
+        .find(|id| id.namespace == "tmdb")
+        .ok_or(CatalogError::InvalidCache)?;
+    let prefix = if kind == MediaKind::Movie {
+        "release"
+    } else {
+        "first_air"
+    };
+    let release_info = record
+        .text(&format!("{prefix}_date"))
+        .map(str::to_owned)
+        .or_else(|| {
+            record
+                .integer(&format!("{prefix}_year"))
+                .map(|y| y.to_string())
+        });
+    Ok(TmdbTitle {
+        id: external
+            .external_id
+            .parse()
+            .map_err(|_| CatalogError::InvalidCache)?,
+        kind,
+        name: record
+            .text("name")
+            .ok_or(CatalogError::InvalidCache)?
+            .into(),
+        overview: record.text("overview").map(str::to_owned),
+        release_info,
+        poster_url: record.text("poster_url").map(str::to_owned),
+    })
+}
+pub(super) fn read(
+    service: &mut CatalogService,
+    query: &TmdbQuery,
+) -> Result<Option<CachedTmdb>, CatalogError> {
+    let resource = crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?;
+    let tx = service.connection.transaction()?;
+    let (data, fetched_at) = match query {
+        TmdbQuery::Browse { kind, page } => {
+            let Some(saved) = read_page(&tx, "tmdb", &resource, *page)? else {
+                return Ok(None);
+            };
+            (
+                TmdbData::Page(TmdbPage {
+                    titles: saved
+                        .ids
+                        .into_iter()
+                        .map(|id| title(&tx, id, *kind))
+                        .collect::<Result<_, _>>()?,
+                    page: *page,
+                    total_pages: saved.total.ok_or(CatalogError::InvalidCache)?,
+                }),
+                saved.fetched_at,
+            )
+        }
+        TmdbQuery::Search { query, page } => {
+            let Some(saved) = read_page(&tx, "tmdb", &resource, *page)? else {
+                return Ok(None);
+            };
+            (
+                TmdbData::Page(TmdbPage {
+                    titles: saved
+                        .ids
+                        .into_iter()
+                        .map(|id| title(&tx, id, query.kind()))
+                        .collect::<Result<_, _>>()?,
+                    page: *page,
+                    total_pages: saved.total.ok_or(CatalogError::InvalidCache)?,
+                }),
+                saved.fetched_at,
+            )
+        }
+        TmdbQuery::Details { kind, id: external } => {
+            let Some(id) = title_id(&tx, *kind, "tmdb", &external.to_string())? else {
+                return Ok(None);
+            };
+            let Some(time) = detail_time(&tx, Target::Title(id), "tmdb", &resource)? else {
+                return Ok(None);
+            };
+            let title = title(&tx, id, *kind)?;
+            let imdb: Option<String> = tx.query_row("SELECT external_id FROM title_identifiers WHERE title_id=?1 AND namespace='imdb'",params![id],|row|row.get(0)).optional()?;
+            let imdb = imdb
+                .map(|s| ImdbId::new(s).map_err(|_| CatalogError::InvalidCache))
+                .transpose()?;
+            let genres: Option<String> = tx.query_row(
+                "SELECT genres_json FROM titles WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )?;
+            let genres = genres
+                .map(|s| serde_json::from_str(&s).map_err(|_| CatalogError::InvalidCache))
+                .transpose()?
+                .unwrap_or_default();
+            let mut seasons = Vec::new();
+            for record in CatalogService::season_records(&tx, id)? {
+                if let Some(count) = record.integer("episode_count") {
+                    seasons.push(TmdbSeasonSummary {
+                        number: record.number,
+                        name: record.text("name").map(str::to_owned),
+                        episode_count: u32::try_from(count)
+                            .map_err(|_| CatalogError::InvalidCache)?,
+                    });
+                }
+            }
+            (
+                TmdbData::Details(TmdbDetails {
+                    title,
+                    imdb,
+                    genres,
+                    seasons,
+                }),
+                time,
+            )
+        }
+        TmdbQuery::Season {
+            series_id,
+            season: number,
+        } => {
+            let Some(series) = title_id(&tx, MediaKind::Series, "tmdb", &series_id.to_string())?
+            else {
+                return Ok(None);
+            };
+            let id: Option<i64> = tx
+                .query_row(
+                    "SELECT id FROM seasons WHERE series_id=?1 AND season_number=?2",
+                    params![series, number],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(id) = id else {
+                return Ok(None);
+            };
+            let Some(time) = detail_time(&tx, Target::Season(id), "tmdb", &resource)? else {
+                return Ok(None);
+            };
+            (
+                TmdbData::Season(TmdbSeason {
+                    series_id: *series_id,
+                    season: *number,
+                    episodes: read_episodes(&tx, series, Some(*number))?,
+                }),
+                time,
+            )
+        }
+    };
+    Ok(Some(CachedTmdb { data, fetched_at }))
+}
+
+pub(super) fn write_rich(
+    tx: &Transaction<'_>,
+    query: &TmdbQuery,
+    rich: &[super::normalized_rich::RichRecord],
+    time: i64,
+) -> Result<(), CatalogError> {
+    if rich.is_empty() {
+        return Ok(());
+    }
+    match query {
+        TmdbQuery::Browse { kind, page } => {
+            return super::normalized_rich::write_page_rich(
+                tx,
+                "tmdb",
+                &crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?,
+                *page,
+                *kind,
+                rich,
+                time,
+            );
+        }
+        TmdbQuery::Search {
+            query: search,
+            page,
+        } => {
+            return super::normalized_rich::write_page_rich(
+                tx,
+                "tmdb",
+                &crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?,
+                *page,
+                search.kind(),
+                rich,
+                time,
+            );
+        }
+        _ => {}
+    }
+    let (kind, external, target) = match query {
+        TmdbQuery::Details { kind, id } => (*kind, *id, None),
+        TmdbQuery::Season { series_id, season } => (MediaKind::Series, *series_id, Some(*season)),
+        _ => return Err(CatalogError::InvalidMetadata),
+    };
+    let id =
+        title_id(tx, kind, "tmdb", &external.to_string())?.ok_or(CatalogError::InvalidMetadata)?;
+    let resource = crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?;
+    let (column, owner) = if let Some(number) = target {
+        ("season_id", season(tx, id, number, time)?)
+    } else {
+        ("title_id", id)
+    };
+    let fetch_id:i64=tx.query_row(&format!("SELECT id FROM metadata_fetches WHERE {column}=?1 AND provider='tmdb' AND resource_key=?2"),params![owner,resource],|row|row.get(0))?;
+    super::normalized_rich::write(tx, id, rich, "tmdb", fetch_id, time)
+}

@@ -6,8 +6,9 @@
 //! coalesce. A round-robin scheduler is fair across search and metadata.
 //!
 //! Limit: a blocking HTTP request already in flight cannot be cancelled. Its
-//! duration is bounded only by the backend client timeout, and its result is
-//! rejected by generation checks in the UI. Dropping [`CatalogWorker`] signals
+//! duration is bounded only by the backend client timeout. Replacement/shutdown
+//! flags prevent stale persistence before transaction entry and commit, in both
+//! search and metadata lanes; UI generation checks additionally reject events. Dropping [`CatalogWorker`] signals
 //! the thread and does not join it, so the UI never waits on that timeout; the
 //! thread exits after the current backend call finishes.
 
@@ -132,9 +133,16 @@ struct MailState {
     slots: [Option<Request>; 2],
     metadata: [Option<MetadataRequest>; METADATA_SLOTS],
     active: [Option<ActiveMetadata>; METADATA_SLOTS],
+    active_search: [Option<ActiveSearch>; 2],
     /// Kind served first next, so one kind cannot starve the other.
     next: usize,
     closed: bool,
+}
+
+struct ActiveSearch {
+    query: SearchQuery,
+    generation: u64,
+    cancel: Arc<AtomicBool>,
 }
 
 struct ActiveMetadata {
@@ -193,6 +201,11 @@ impl Mailbox {
             return Submit::Closed;
         }
         let index = slot(request.query.kind());
+        if let Some(active) = &state.active_search[index]
+            && (active.generation != request.generation || active.query != request.query)
+        {
+            active.cancel.store(true, Ordering::Release);
+        }
         let outcome = match &mut state.slots[index] {
             Some(pending) if pending.query == request.query => {
                 pending.generation = request.generation;
@@ -257,7 +270,14 @@ impl Mailbox {
             for offset in 0..slots {
                 let index = (state.next + offset) % slots;
                 let work = if index < state.slots.len() {
-                    state.slots[index].take().map(Work::Search)
+                    state.slots[index].take().map(|request| {
+                        state.active_search[index] = Some(ActiveSearch {
+                            query: request.query.clone(),
+                            generation: request.generation,
+                            cancel: Arc::new(AtomicBool::new(false)),
+                        });
+                        Work::Search(request)
+                    })
                 } else {
                     let metadata_index = index - state.slots.len();
                     state.metadata[metadata_index].take().map(|request| {
@@ -344,6 +364,22 @@ impl Mailbox {
         }
     }
 
+    fn cancel_search(&self, kind: MediaKind, generation: u64) {
+        let mut state = self.lock();
+        let index = slot(kind);
+        if state.slots[index]
+            .as_ref()
+            .is_some_and(|request| request.generation == generation)
+        {
+            state.slots[index] = None;
+        }
+        if let Some(active) = &state.active_search[index]
+            && active.generation == generation
+        {
+            active.cancel.store(true, Ordering::Release);
+        }
+    }
+
     /// True when a newer request is queued for the kind, or shutdown began.
     fn superseded(&self, kind: MediaKind) -> bool {
         let state = self.lock();
@@ -360,6 +396,9 @@ impl Mailbox {
         state.slots = Default::default();
         state.metadata = Default::default();
         for active in state.active.iter().flatten() {
+            active.cancel.store(true, Ordering::Release);
+        }
+        for active in state.active_search.iter().flatten() {
             active.cancel.store(true, Ordering::Release);
         }
         self.wake.notify_all();
@@ -449,6 +488,13 @@ impl MetadataEventBox {
 pub(crate) trait Backend {
     fn read(&mut self, query: &SearchQuery) -> Result<Option<Snapshot>, String>;
     fn refresh(&mut self, query: &SearchQuery) -> Result<Snapshot, String>;
+    fn refresh_search(
+        &mut self,
+        query: &SearchQuery,
+        _cancel: &Arc<AtomicBool>,
+    ) -> Result<Snapshot, String> {
+        self.refresh(query)
+    }
     fn read_metadata(
         &mut self,
         _action: &MetadataAction,
@@ -482,6 +528,17 @@ impl Backend for CatalogService {
         CatalogService::refresh(self, query)
             .map(snapshot)
             .map_err(|error| error.to_string())
+    }
+
+    fn refresh_search(
+        &mut self,
+        query: &SearchQuery,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<Snapshot, String> {
+        self.cancellation = Some(Arc::clone(cancel));
+        let result = Backend::refresh(self, query);
+        self.cancellation = None;
+        result
     }
 
     fn read_metadata(
@@ -597,6 +654,12 @@ impl CatalogWorker {
         self.mailbox.submit_metadata(request)
     }
 
+    /// Exact-generation cancellation for clear-search/provider-change owners.
+    pub(crate) fn cancel_search(&self, kind: MediaKind, generation: u64) {
+        self.mailbox.cancel_search(kind, generation);
+        self.events.lock()[slot(kind)].retain(|event| event.generation != generation);
+    }
+
     pub(crate) fn cancel_metadata(&self, action: &MetadataAction, generation: u64) {
         self.mailbox.cancel_metadata(action, generation);
         self.metadata_events.cancel(action, generation);
@@ -621,6 +684,25 @@ impl CatalogWorker {
 
 impl Drop for CatalogWorker {
     fn drop(&mut self) {
+        let searches = {
+            let state = self.mailbox.lock();
+            state
+                .slots
+                .iter()
+                .flatten()
+                .map(|request| (request.query.kind(), request.generation))
+                .chain(
+                    state
+                        .active_search
+                        .iter()
+                        .flatten()
+                        .map(|active| (active.query.kind(), active.generation)),
+                )
+                .collect::<Vec<_>>()
+        };
+        for (kind, generation) in searches {
+            self.cancel_search(kind, generation);
+        }
         self.mailbox.close();
     }
 }
@@ -643,13 +725,22 @@ fn run<B: Backend>(
             continue;
         };
         let kind = request.query.kind();
+        let cancel = mailbox.lock().active_search[slot(kind)]
+            .as_ref()
+            .map(|active| Arc::clone(&active.cancel))
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(true)));
+        let _active = SearchInFlight(mailbox, kind);
         let send = |outcome| {
+            let state = mailbox.lock();
+            if state.closed || cancel.load(Ordering::Acquire) {
+                return !state.closed;
+            }
             events.push(Event {
                 kind,
                 generation: request.generation,
                 outcome,
             });
-            !mailbox.is_closed()
+            !state.closed
         };
         if backend.is_none() {
             match open() {
@@ -696,13 +787,20 @@ fn run<B: Backend>(
         if mailbox.superseded(kind) {
             continue;
         }
-        let outcome = match backend.refresh(&request.query) {
+        let outcome = match backend.refresh_search(&request.query, &cancel) {
             Ok(snapshot) => Outcome::Fetched(snapshot),
             Err(message) => Outcome::Failed(message),
         };
         if !send(outcome) {
             return;
         }
+    }
+}
+
+struct SearchInFlight<'a>(&'a Mailbox, MediaKind);
+impl Drop for SearchInFlight<'_> {
+    fn drop(&mut self) {
+        self.0.lock().active_search[slot(self.1)] = None;
     }
 }
 
@@ -1102,6 +1200,42 @@ mod tests {
         let failure = events.pop().expect("auth failure");
         assert!(failure.result.is_err());
         assert!(!failure.saved && !failure.refreshing);
+    }
+
+    #[test]
+    fn search_replacement_exact_cancel_and_shutdown_signal_active_flags() {
+        let mailbox = Mailbox::default();
+        mailbox.submit(req(1, MediaKind::Movie, "old", Mode::Refresh));
+        let _ = mailbox.take_work();
+        let old = Arc::clone(
+            &mailbox.lock().active_search[0]
+                .as_ref()
+                .unwrap_or_else(|| panic!("missing active search"))
+                .cancel,
+        );
+        mailbox.submit(req(2, MediaKind::Movie, "new", Mode::Refresh));
+        assert!(old.load(Ordering::Acquire));
+        let _ = mailbox.take_work();
+        let new = Arc::clone(
+            &mailbox.lock().active_search[0]
+                .as_ref()
+                .unwrap_or_else(|| panic!("missing new search"))
+                .cancel,
+        );
+        mailbox.cancel_search(MediaKind::Movie, 1);
+        assert!(!new.load(Ordering::Acquire));
+        mailbox.cancel_search(MediaKind::Movie, 2);
+        assert!(new.load(Ordering::Acquire));
+        mailbox.submit(req(3, MediaKind::Series, "series", Mode::Load));
+        let _ = mailbox.take_work();
+        let series = Arc::clone(
+            &mailbox.lock().active_search[1]
+                .as_ref()
+                .unwrap_or_else(|| panic!("missing series search"))
+                .cancel,
+        );
+        mailbox.close();
+        assert!(series.load(Ordering::Acquire));
     }
 
     #[test]

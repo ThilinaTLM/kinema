@@ -128,12 +128,7 @@ impl TmdbClient {
         {
             return Err(TmdbError::InvalidCredential);
         }
-        let client = Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(15))
-            // Never forward bearer credentials to redirects, including another host.
-            .redirect(Policy::none())
-            .user_agent("Kinema-Next/0.1 TMDB")
+        let client = Self::client_builder()
             .build()
             .map_err(|_| TmdbError::Network)?;
         Ok(Self {
@@ -141,6 +136,17 @@ impl TmdbClient {
             secret,
             endpoint,
         })
+    }
+    fn client_builder() -> reqwest::blocking::ClientBuilder {
+        Client::builder()
+            // System DNS can spend one 5-second retry before returning valid
+            // addresses. Allow that retry plus TCP/TLS, as for Cinemeta; keep
+            // the total deadline bounded and never retry authenticated requests.
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(15))
+            // Never forward bearer credentials to redirects, including another host.
+            .redirect(Policy::none())
+            .user_agent("Kinema-Next/0.1 TMDB")
     }
     fn get<T: serde::de::DeserializeOwned>(
         &self,
@@ -195,18 +201,29 @@ impl TmdbClient {
             Err(TmdbError::RejectedCredential)
         }
     }
+    #[cfg(test)]
     pub fn fetch(&self, query: &TmdbQuery) -> Result<TmdbData, TmdbError> {
+        self.fetch_normalized(query).map(|(data, _)| data)
+    }
+    pub(crate) fn fetch_normalized(
+        &self,
+        query: &TmdbQuery,
+    ) -> Result<(TmdbData, Vec<crate::catalog::normalized_rich::RichRecord>), TmdbError> {
         validate_query(query)?;
+        let rich;
         let data = match query {
             TmdbQuery::Browse { kind, page } => {
-                let dto: PageDto = self.get(
+                let raw: serde_json::Value = self.get(
                     &format!("{}/popular", kind_path(*kind)),
                     &[("page", page.to_string())],
                 )?;
+                rich = crate::catalog::normalized_rich::tmdb(&raw, query)
+                    .map_err(|_| TmdbError::Malformed)?;
+                let dto: PageDto = serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
                 TmdbData::Page(dto.normalize(*kind)?)
             }
             TmdbQuery::Search { query, page } => {
-                let dto: PageDto = self.get(
+                let raw: serde_json::Value = self.get(
                     &format!("search/{}", kind_path(query.kind())),
                     &[
                         ("query", query.text().to_owned()),
@@ -214,17 +231,35 @@ impl TmdbClient {
                         ("include_adult", "false".into()),
                     ],
                 )?;
+                rich = crate::catalog::normalized_rich::tmdb(
+                    &raw,
+                    &TmdbQuery::Search {
+                        query: query.clone(),
+                        page: *page,
+                    },
+                )
+                .map_err(|_| TmdbError::Malformed)?;
+                let dto: PageDto = serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
                 TmdbData::Page(dto.normalize(query.kind())?)
             }
             TmdbQuery::Details { kind, id } => {
-                let dto: DetailDto = self.get(
+                let raw: serde_json::Value = self.get(
                     &format!("{}/{id}", kind_path(*kind)),
                     &[("append_to_response", "external_ids".into())],
                 )?;
+                rich = crate::catalog::normalized_rich::tmdb(&raw, query)
+                    .map_err(|_| TmdbError::Malformed)?;
+                let dto: DetailDto =
+                    serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
                 TmdbData::Details(dto.normalize(*kind)?)
             }
             TmdbQuery::Season { series_id, season } => {
-                let dto: SeasonDto = self.get(&format!("tv/{series_id}/season/{season}"), &[])?;
+                let raw: serde_json::Value =
+                    self.get(&format!("tv/{series_id}/season/{season}"), &[])?;
+                rich = crate::catalog::normalized_rich::tmdb(&raw, query)
+                    .map_err(|_| TmdbError::Malformed)?;
+                let dto: SeasonDto =
+                    serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
                 TmdbData::Season(TmdbSeason {
                     series_id: *series_id,
                     season: dto.season_number,
@@ -237,7 +272,7 @@ impl TmdbClient {
             }
         };
         validate_data(&data, Some(query))?;
-        Ok(data)
+        Ok((data, rich))
     }
 }
 fn kind_path(kind: MediaKind) -> &'static str {
@@ -442,6 +477,13 @@ fn valid_title(t: &TmdbTitle) -> bool {
         && text(&t.name, 500, true)
         && optional_text(&t.overview, 20_000)
         && optional_text(&t.release_info, 64)
+        && t.release_info.as_ref().is_none_or(|value| {
+            kinema_core::catalog_normalized::valid_date(value)
+                || (value.len() == 4
+                    && value
+                        .parse::<u32>()
+                        .is_ok_and(|year| (1..=9999).contains(&year)))
+        })
         && t.poster_url
             .as_ref()
             .is_none_or(|s| s.strip_prefix(IMAGE_PREFIX).is_some_and(valid_image_path))
@@ -742,6 +784,80 @@ mod tests {
         assert!(!format!("{data:?}").contains(TOKEN));
         assert_eq!(ok(decode(&encoded, query)), *data);
         assert!(decode(&encoded.replace("en-US", "fr-FR"), query).is_err());
+    }
+    #[test]
+    fn connect_budget_allows_one_five_second_dns_retry() {
+        struct SlowDns(std::net::SocketAddr);
+        impl reqwest::dns::Resolve for SlowDns {
+            fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+                let address = self.0;
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(5100)).await;
+                    Ok(Box::new(std::iter::once(address)) as reqwest::dns::Addrs)
+                })
+            }
+        }
+        let listener = ok(TcpListener::bind("127.0.0.1:0"));
+        let address = ok(listener.local_addr());
+        ok(listener.set_nonblocking(true));
+        let server = thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(12);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "no connection after DNS"
+                        );
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("local accept failed: {error}"),
+                }
+            };
+            ok(stream.set_read_timeout(Some(Duration::from_secs(3))));
+            let mut request = [0; 4096];
+            assert!(ok(stream.read(&mut request)) > 0);
+            ok(stream.write_all(
+                b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            ));
+        });
+        let client = ok(TmdbClient::client_builder()
+            .no_proxy()
+            .dns_resolver(std::sync::Arc::new(SlowDns(address)))
+            .build());
+        // A synthetic hostname forces DNS, without public networking or credentials.
+        let response = client
+            .get(format!("http://tmdb.test:{}/3/", address.port()))
+            .send();
+        ok(server.join());
+        assert_eq!(ok(response).status(), reqwest::StatusCode::UNAUTHORIZED);
+    }
+    #[test]
+    #[ignore = "requires live public TMDB HTTPS access; sends no credentials"]
+    fn live_unauthenticated_transport_reaches_tmdb() {
+        let client = ok(TmdbClient::client_builder().build());
+        let started = std::time::Instant::now();
+        // No TmdbClient/SecretString, Authorization header, or API key involved.
+        let response = client
+            .get("https://api.themoviedb.org/3/movie/popular?language=en-US")
+            .send();
+        match response {
+            Ok(response) => {
+                eprintln!(
+                    "TMDB public probe: status={}, elapsed={:?}",
+                    response.status(),
+                    started.elapsed()
+                );
+                assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+            }
+            Err(error) => panic!(
+                "TMDB public probe: transport failure; timeout={}, connect={}, elapsed={:?}",
+                error.is_timeout(),
+                error.is_connect(),
+                started.elapsed()
+            ),
+        }
     }
     #[test]
     fn browse_and_search_are_encoded_with_explicit_locale() {

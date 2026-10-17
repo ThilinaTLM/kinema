@@ -59,8 +59,9 @@ The default release profile disables `debug_assertions` and uses
 `ProjectDirs::from("", "", "kinema").data_local_dir()/catalog.sqlite3`, resolved
 through native directory conventions rather than hardcoded HOME/APP_DATA paths.
 Custom profiles follow their `debug_assertions` setting. Switching modes uses
-separate databases with no migration, moving, or deletion of existing development
-or historical files. See [storage layout](storage-layout.md#implemented-catalog-location)
+separate databases without copying, moving, or deleting existing development or
+historical files. This location separation does not prevent the authorized in-place
+Rust v3 → v4 schema upgrade on next open with the new build. See [storage layout](storage-layout.md#implemented-catalog-location)
 for the authoritative location policy.
 
 For domain-only work without desktop native dependencies:
@@ -77,8 +78,10 @@ hide a stale lockfile during validation. There is no Rust release-packaging pipe
 ## Quickstart and setup
 
 These steps describe the current source wiring, not a completed GUI acceptance
-test. Final locked root checks passed; complete live UI/provider acceptance remains
-incomplete.
+test. Locked root checks passed for frozen snapshot `107317a`; validation of the
+Cinemeta/shell continuation and subsequent TMDB timeout correction passed as
+reported below. Complete live UI/provider acceptance
+remains incomplete.
 
 1. Install a native **mpv or VLC** executable separately; neither is bundled.
    Start `cargo run -p kinema-desktop --locked` from the repository root.
@@ -150,21 +153,104 @@ accounts; do not assume deleting `./data/` deletes credentials.
 ## Validation status and limits
 
 This matrix distinguishes source inspection, reported subsystem/live-GUI evidence,
-and passing final root checks from unperformed end-to-end acceptance.
+and historical passing root checks from unperformed end-to-end acceptance.
+The frozen outgoing snapshot is `107317a`; current HEAD is documentation commit
+`f1beeb9`. Continuation evidence below is reported by the lead, not independently
+rerun by this documentation owner.
+
+### Current normalized catalog batch
+
+Backend-owner evidence reports `catalog.rs` `SCHEMA_VERSION = 4`: twelve normalized
+`STRICT` tables plus seven retained legacy tables (nineteen application tables).
+Schema creation, conservative backfill, and `user_version` advance are atomic.
+Live metadata/indexer paths read and write canonical rows; the rich domain API
+includes artwork, ratings, external IDs, seasons/episodes, and provenance. Verified
+IMDb mapping graph reconciliation and contradiction rollback are reported covered.
+Existing GPUI projections remain narrower and do not render per-field origins;
+this is not full target UI acceptance or an implemented GPUI redesign.
+
+Preservation is not complete offline reuse: nonempty legacy Cinemeta exact-query
+searches stay in legacy tables without backfill due to shared-field provenance
+ambiguity (first canonical query needs refresh/fetch); known legacy detail fields
+retain `Detail` provenance quality, while only fetch-resource completeness stays
+`Summary` to force richer refetch on demand; unverified source-target mappings
+stay legacy/unmapped. See [migration limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
+No user database or credentials were accessed. The upgrade occurs on the user's
+next open with the new build; no actual user-database migration is claimed.
+
+Reported targeted checks: catalog/worker **97 passed**, core **3 passed**, TMDB
+**8 passed**, SQL **8 passed** (separate scopes, not a workspace total). Shell
+search/provider-detail cancellation fixes are done; **6 shell tests**, **10 state
+tests**, and targeted strict Clippy passed, without establishing live GUI acceptance.
+
+#### Intermediate validation history
+
+An intermediate **pre-streaming-fix** root run passed fmt, strict locked workspace
+Clippy, and locked tests: **291 passed, 3 ignored** (25 core, 266 desktop).
+Actual-client Cinemeta smoke with a temporary v4 database passed browse (48),
+search (27), movie and Spider-Man movie details, and series (128 episodes).
+The credential-free TMDB probe returned expected HTTP 401 in 5.67 seconds, not
+authenticated acceptance. Logs: `/tmp/kinema-final-root-lk7f16/`; the lead inspected
+Clippy/test results and live-probe evidence.
+
+**That run was not final:** the lead subsequently found whole-
+legacy-table payload `Vec` materialization and authorized a bounded-memory
+streaming-backfill correction. It is now **frozen**: single-row keyset batches
+bound memory while preserving TMDB dependency order and savepoint rollback.
+Four focused regressions passed; the catalog scope passed **63 tests, 1 ignored**;
+strict package Clippy/fmt passed. The lead's structural check compared twelve ERD
+entity field sets with actual DDL in fresh in-memory SQLite: **zero column
+mismatches**. This is structural evidence, not full policy/UI acceptance, and no
+user database was accessed. Those intermediate results did not validate later
+changes; the final post-correction evidence follows.
+
+#### Final post-correction validation
+
+After bounded-memory streaming backfill and the field-quality fix, root
+`cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets --locked -- -D warnings`,
+`cargo test --workspace --locked`, and `git diff --check` **all passed**.
+Tests: **295 passed, 3 ignored** (25 core, 270 desktop).
+
+The actual-client public Cinemeta smoke used a temporary v4 database and passed
+browse (48), search (27), Matrix details, Spider-Man movie details without
+`videos`, and series (128 episodes). The no-auth TMDB transport probe returned
+expected HTTP 401 in **5.7815 seconds**; no authenticated acceptance follows.
+
+Logs: `/tmp/kinema-final-root-rerun-aqcCLD/outcomes.txt` and
+`{fmt,clippy,test,diff,live-cinemeta,live-tmdb}.log` in that directory. The lead
+inspected outcomes, Clippy, test-result lines, and both live logs; this docs owner
+also inspected those bounded results, without rerunning Rust checks. No user
+database/token access or commits occurred; actual user-database migration is not
+claimed.
+
+Post-v4 authenticated-provider/debrid and new GUI acceptance remain unverified;
+prior user-reported TMDB/AllDebrid success remains evidence for earlier versions
+only. Existing search/detail/sources cancellation wiring was updated, not the
+GPUI layout. The source/documentation batch is frozen. The [HTML prototype](design/desktop-wireframes.html)
+is frozen with expanded-sidebar, rail, and top-navigation variants and awaits
+user review; browser prototype checks do not validate GPUI or backend behavior.
+
+### Prior evidence and remaining acceptance limits
 
 | Area | Evidence / remaining limit |
 | --- | --- |
 | Linux X11 GUI | Popular scrolling/Load more, Ted Lasso details/episodes, Torrentio sorting/filter controls, clear missing-debrid credential error, quota-zero validation and masked unsaved input exercised; full workflow not accepted |
-| Settings, secure tokens, provider selection, quit warning | Source wiring inspected; native keyring actions, TMDB missing-token routing/real flow, chooser, actual quit/OS-close, detail cancellation and theme switching still need live acceptance |
+| Settings, secure tokens, provider selection, quit warning | Source wiring inspected; native keyring actions, TMDB missing-token routing/real flow, actual quit/OS-close, detail cancellation and theme switching still need live acceptance |
+| Native file chooser | Frozen-snapshot binary in private Xvfb/D-Bus with temporary cwd: window/sidebar navigation verified; Transfers Open local file opened the chooser and Cancel returned to unchanged playback screen. Lead viewed chooser screenshot; screenshots `/tmp/kinema-ui-accept.dVHRhJ/{initial,settings,chooser-attempt,chooser-cancelled}.png`. No file selection, player launch, token UI actions, or token disclosure; selection/error handling and cross-OS behavior unverified. Isolation used private Xvfb, new D-Bus, redirected HOME/XDG, and temporary cwd, not a sandbox or secure-store interception. The portal chooser initially showed the repository directory, source unknown; underlying secure-store access is not ruled out. Theme toggle not found, so theme runtime remains unverified |
 | Loopback local-file serving | Reported actual `MediaService` HEAD, full-body byte equality, and `206` smoke checks passed; revoked lease returned `404`, temporary files cleaned up |
 | External mpv | Reported actual `player::launch` smoke used isolated no-config mpv, decoded/rendered a synthetic two-second MP4 to EOF and exited successfully; not a debrid stream |
 | External VLC | Intentionally not launched, to avoid disturbing a user's existing instance |
 | Managed media | Reported fixture tests cover recovery, HTTP headers, root aliases, and quota; not proof of live paid acquisition or crash safety on every OS |
 | Torrentio / Peerflix | Reported actual public fetches returned source candidates; not comprehensive availability/terms/playability verification |
-| Cinemeta | Actual desktop-client live smoke passed browse/search/movie details/series episodes after raising connect timeout to 10 seconds for measured slow OS DNS; total timeout remains 15 seconds, no TLS bypass. Linux X11 browse and Ted Lasso details worked. **New title-specific bug:** Spider-Man: Brand New Day details return invalid catalog response while its sources work; HTTP 200 movie payload omits required `videos`, causing Serde failure. Identified next-lead fix: movie-only omission handling with regression coverage, not relaxed series validation or the resolved timeout |
-| TMDB / Real-Debrid / AllDebrid | Adapters and fixtures exist; no live credentials were available, so real authenticated-provider behavior is unverified |
+| Cinemeta | Historical client/GUI evidence resolved slow-DNS timeout (10-second connect, 15-second total; no TLS bypass). Uncommitted reviewed fix accepts omitted `videos` only for movies; null/malformed values and missing series videos remain rejected, with regression fixture and roundtrip coverage. Continuation actual-client public smoke passed browse (48), search (27), Matrix, `tt22084616` with no episodes, and series (128 episodes), using a temporary database. User launched the updated app using the Cargo run instructions and reported “Looks okay”; lead inspected `/home/tlm/Projects/nerve/data/storage-4/data/images/image-20261016T172106Z.png`: Spider-Man: Brand New Day details rendered with synopsis, 2026, Action/Adventure, green Fetched status, and last successful fetch 2026-10-16 17:20 UTC, without invalid catalog response. This establishes corrected-title GUI detail rendering only, not browse cancellation/navigation or other provider/GUI flows |
+| Shell cancellation | Reviewed continuation cancels browse on navigation/search/detail/refresh while preserving cached values and invalidating generations; missing pages reload on return, replaced detail/source work is cancelled. Four targeted shell tests passed; live GUI behavior remains unverified |
+| TMDB | User GUI failure and Settings Test connection screenshots (`image-20261016T172347Z.png`, `image-20261016T172847Z.png` under `/home/tlm/Projects/nerve/data/storage-4/data/images/`) were inspected by the lead: network/timeout messages, not credential rejection. Network agent reproduced system DNS taking 5.016 seconds twice versus prior production reqwest timeout at 5.002 seconds; corrected 10-second connect budget reached unauthenticated HTTP 401 in 5.807 seconds. Shared production/test `tmdb.rs` client builder retains 15-second total timeout, TLS, and no redirects. Deterministic delayed-DNS regression and ignored no-credential live probe added; 8 focused tests and targeted Clippy passed. Final root checks passed (see below); credential-free live probe reached HTTP 401 in 5.598 seconds. User subsequently confirmed “Yes TMDB worked” when asked whether post-restart Settings Test connection and Movies browse succeeded: user-reported authenticated check and browse success only, not details/IMDb mapping or universal provider support. No agent read, accessed, or tested the offered token file, which the user explicitly prohibited reading; no agent-run authenticated acceptance was performed |
+| Real-Debrid / AllDebrid | Real-Debrid authenticated behavior remains unverified. User AllDebrid failure screenshot `image-20261016T173825Z.png` (same image directory above), inspected by the lead, shows preparation file listing with a selected 861.5 MiB file, an external player launched for a local session, red “Media provider request failed”, and 0 B downloaded / 4.4 GiB reserved. Reservation is aggregate; a mismatch is not established. User mpv/ffmpeg logs report a stream ending at byte 0 rather than 903319726, retries, then format not recognized: zero delivered bytes, not proof of a codec/file-format cause. At that point no successful paid range playback was established; exact original stream failure cause remains unproven. On 2026-10-17 the user replied “all good” to the requested post-fix restart/reprepare/play retry and whether playback starts/downloaded bytes increase: user-reported AllDebrid playback/download progress success only. No independently observed byte comparison, seek, interrupted acquisition, account-change safety, other provider/indexer, or cross-OS acceptance follows. Agents did not access tokens, user data, or the live stream |
+| Media acquisition follow-up | Reviewed fix raises connect timeout to 10 seconds, retaining 20-second total timeout, TLS, and no redirects. Typed redacted errors distinguish `ConnectTimeout`, `RequestTimeout`, `BodyRead`, and `RenewalExhausted`, preserving generic `Upstream` elsewhere. Deterministic delayed-DNS/failure coverage: 24 media tests and targeted strict Clippy passed. Final root checks passed (see below); basic AllDebrid GUI retry subsequently succeeded by user report (see above). Bounded delayed-DNS/error fixtures do not establish live signed-URL or media acceptance. Timeout remains a hypothesis, not a proven cause of the user's stream failure; no credentials accessed |
 | TMDB attribution | Original blue-green approved logo and exact notice visually verified in Linux X11 About; not a claim of all-platform rendering |
-| Root validation | Final Rust 1.97.1 root fmt check, strict locked workspace Clippy, locked workspace tests, and diff check all passed; logs at `/tmp/kinema-final-validation.m3MRpY/`. Public-network opt-in tests remain ignored |
+| Root validation | Historical `107317a`: Rust 1.97.1 fmt, strict locked workspace Clippy, locked tests (244 passed, 2 ignored), and diff check passed; logs `/tmp/kinema-final-validation.m3MRpY/`. Corrected continuation run: root fmt, strict locked workspace Clippy, locked workspace tests (247 passed, 2 ignored: 22 core, 225 desktop), and diff check all passed, as reported by the lead; the lead inspected matching results, Clippy, tests, and live-smoke logs in `/tmp/kinema-validation-corrected.kvGbz0/`. Initial test-only Clippy `unwrap_used` failures were fixed using `?`; initial logs `/tmp/kinema-validation.RohF4U/`. Opt-in public Cinemeta smoke separately passed (1 test). Subsequent TMDB correction: root fmt, strict locked workspace Clippy, locked workspace tests (248 passed, 3 ignored: 22 core, 226 desktop), and diff check all passed. Lead inspected Clippy, test result lines, and transport log in `/tmp/kinema-tmdb-validation-BujUJA/`. Subsequent media correction: root fmt, strict locked workspace Clippy, locked workspace tests (250 passed, 3 ignored: 22 core, 228 desktop), and diff check all passed; logs `/tmp/kinema-media-validation.Il8jwz/`. Lead inspected Clippy and test result lines and separately passed `git diff --check` |
+| Local-session / quit / OS-close smoke | Follow-up stopped without a rerun because isolation was not guaranteed. Local-session, quit, and OS-close acceptance remain unverified; no no-op-player fixture result is claimed |
 | Full MVP / desktops | Complete UI/provider acceptance and Windows/macOS runtime remain incomplete; passing root checks is not MVP completion |
 
 See [cache/schema](catalog-schema.md), [refresh policy](cache-policy.md), and

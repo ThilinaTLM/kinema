@@ -321,7 +321,7 @@ pub(super) fn acquire(
             .header(reqwest::header::RANGE, format!("bytes={start}-{}", end - 1))
             .header(reqwest::header::ACCEPT_ENCODING, "identity")
             .send()
-            .map_err(|_| MediaError::Upstream)?;
+            .map_err(request_error)?;
         if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
         }
@@ -352,9 +352,9 @@ pub(super) fn acquire(
             .by_ref()
             .take(end - start + 1)
             .read_to_end(&mut bytes)
-            .map_err(|_| MediaError::Upstream)?;
+            .map_err(|_| MediaError::BodyRead)?;
         if bytes.len() as u64 != end - start {
-            return Err(MediaError::Upstream);
+            return Err(MediaError::BodyRead);
         }
         if asset.cancel.load(Ordering::Relaxed) || shared.canceled.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
@@ -391,7 +391,7 @@ fn renew_media(
     identity: &MediaIdentity,
 ) -> Result<(), MediaError> {
     if *attempts >= 2 {
-        return Err(MediaError::Upstream);
+        return Err(MediaError::RenewalExhausted);
     }
     *attempts += 1;
     let next = renew()?;

@@ -1,8 +1,50 @@
 # Open decisions
 
-The [architecture](architecture.md) is the single summary of agreed scope. Implementation notes are labeled separately from the proposed fuller schema, file layout, and policies. Discuss questions **one at a time**; don't turn this list into an implementation backlog.
+The [architecture](architecture.md) is the single summary of agreed scope. The
+[catalog schema](catalog-schema.md#target-catalog-schema) is the single authoritative
+approved target specification for the normalized catalog. Backend evidence reports
+v4 source implementation and atomic conservative upgrade: twelve normalized
+`STRICT` tables plus seven retained legacy tables. Current post-fix root checks
+passed (295 tests passed, 3 ignored); no actual user-database upgrade is claimed. Other implementation notes, proposed
+file layout, and open policies remain distinct. Discuss questions **one at a time**;
+don't turn this list into an implementation backlog.
 
-## Next: media storage behavior
+## Current work: design-system, cards, and motion review
+
+The user approved the reviewed catalog ERD/details and authorized implementation.
+Backend implementation and shell search/provider-detail cancellation fixes are
+reported. Current post-backfill/quality-fix root fmt, strict locked workspace
+Clippy, locked tests, and diff checks passed. Run history is in
+[development](development.md#current-normalized-catalog-batch). Preserve the
+[conservative backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
+The user settled navigation: a **permanent left icon-only rail**, with no expanded
+or top-navigation mode. The professional neutral Graphite/blue direction replaces
+amber and calls for compact desktop spacing, native fonts, polished primitive
+controls/composable GPUI components, visible IMDb card ratings, hover/focus states,
+purposeful motion, and lazy loading/performance. These are design requirements,
+not implemented styling or measured performance.
+
+The [design system](design/design-system.md) is the authoritative **design proposal**.
+Review its detailed controls, cards, and motion together with the aligned prototype
+before GPUI visual implementation. Navigation is no longer an open choice; broader
+visual details and full rich/provenance UI presentation are not yet accepted.
+
+The user additionally approved [narrow automatic transactional reconciliation](catalog-schema.md#approved-narrow-identity-reconciliation)
+when explicit selected-provider IMDb mapping proves duplicates with no contradictory
+IDs or season/episode coordinates. Preserve metadata/references and abort conflicts;
+this is identity reconciliation, not cache cleanup. Backend reports graph
+reconciliation and rollback coverage, with current root checks passing. Post-v4
+authenticated-provider/debrid and new GUI acceptance remain unverified.
+
+The **Graphite v2** [HTML artifact](design/desktop-wireframes.html) is frozen and
+review-ready; [review guidance](design/README.md) separates its browser checks
+from unmeasured/unimplemented native GPUI performance. The design-system proposal
+and guide are frozen after token/alias alignment and API peer review. User review
+of the proposal, cards, and motion remains pending, not navigation selection. Selected-provider-only fetching remains
+required: approval does not add both-provider enrichment, automatic fallback,
+automatic TTLs, or a full-catalog crawler.
+
+## Other open media storage behavior
 
 The quota default, manual inactive-only cleanup, unknown-size admission, and
 limit-lowering safety rules are agreed in [storage policy](storage-layout.md#limits-and-cleanup).
@@ -14,8 +56,10 @@ at a time; no additional behavior is resolved here.
 | Area | Still open |
 | --- | --- |
 | Media storage | A custom cache location and checkpoint intervals |
-| Metadata | Automatic refresh intervals, multi-locale behavior, and additional free providers with suitable terms; explicit Cinemeta/TMDB selection with no automatic fallback is [agreed](architecture.md#agreed-metadata-provider-contract) |
-| Response caches | Exact TTLs, retained-entry limits, and offline use of stale results |
+| UI design | Review the new design-system proposal, cards, and motion within the six-area scope before GPUI visual implementation; permanent left icon-only rail is decided, not an open layout mode |
+| Metadata | Automatic refresh intervals, multi-locale behavior, and additional free providers with suitable terms; selected-provider-only fetching with no automatic fallback or both-provider enrichment is [agreed](architecture.md#agreed-metadata-provider-contract) |
+| Catalog retention | Retention/deletion policy is separately open; response/page, indexer, and media eviction must preserve canonical catalog identities, ratings, and provenance under the [cleanup boundary](cache-policy.md#target-cache-coverage) and authoritative schema rules |
+| Response caches | Exact TTLs, retained-entry limits, and offline use of stale results; not authority to delete canonical catalog records |
 | Provider integrations | Rollout order for debrid providers, required capabilities, and whether built-in adapters are sufficient |
 | External players | Discovery/configuration and reconnect grace; quit/close confirmation and server lifetime are [agreed](architecture.md#agreed-session-lifetime-policy) |
 | Desktop releases | Minimum OS versions, architectures, packaging, accessibility, and optional OS integrations |

@@ -27,9 +27,29 @@ use serde::{Deserialize, Serialize};
 #[path = "catalog_metadata.rs"]
 mod metadata;
 use metadata::migrate_metadata;
+#[path = "catalog_normalized.rs"]
+mod normalized;
+#[path = "catalog_normalized_backfill.rs"]
+mod normalized_backfill;
+#[path = "catalog_normalized_fetches.rs"]
+mod normalized_fetches;
+#[path = "catalog_normalized_merge.rs"]
+mod normalized_merge;
+#[path = "catalog_normalized_pages.rs"]
+mod normalized_pages;
+#[path = "catalog_normalized_pairs.rs"]
+mod normalized_pairs;
+#[path = "catalog_normalized_read.rs"]
+mod normalized_read;
+#[path = "catalog_normalized_rich.rs"]
+pub(crate) mod normalized_rich;
+#[path = "catalog_normalized_tmdb.rs"]
+mod normalized_tmdb;
+#[path = "catalog_schema.rs"]
+mod schema;
 
 const ENDPOINT: &str = "https://v3-cinemeta.strem.io/";
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const MAX_EPISODES: usize = 20_000;
 const MAX_URL_BYTES: usize = 4096;
 const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
@@ -48,6 +68,9 @@ pub(crate) enum CatalogError {
     Network,
     HttpStatus,
     InvalidResponse,
+    InvalidMetadata,
+    IdentityConflict,
+    MissingIdentityMapping,
     ResponseTooLarge,
     Clock,
     Indexer,
@@ -68,6 +91,11 @@ impl fmt::Display for CatalogError {
             Self::Network => "Cinemeta could not be reached or the request timed out.",
             Self::HttpStatus => "Cinemeta returned an unsuccessful response.",
             Self::InvalidResponse => "Cinemeta returned an invalid catalog response.",
+            Self::InvalidMetadata => "The provider returned invalid catalog metadata.",
+            Self::MissingIdentityMapping => {
+                "Source lookup requires a verified catalog target and IMDb mapping."
+            }
+            Self::IdentityConflict => "The metadata identifiers conflict with the saved catalog.",
             Self::ResponseTooLarge => "Cinemeta returned a catalog response that is too large.",
             Self::Clock => "The system clock cannot timestamp catalog results.",
             Self::Indexer => "The source indexer could not return valid results.",
@@ -225,6 +253,13 @@ impl CatalogService {
         if version < 3 {
             metadata::migrate_tmdb(&mut connection)?;
         }
+        if version < 4 {
+            let tx = connection.transaction()?;
+            schema::migrate(&tx)?;
+            normalized_backfill::backfill(&tx)?;
+            tx.pragma_update(None, "user_version", 4)?;
+            tx.commit()?;
+        }
         Ok(Self {
             connection,
             client,
@@ -239,63 +274,28 @@ impl CatalogService {
         &mut self,
         query: &SearchQuery,
     ) -> Result<Option<CachedSearch>, CatalogError> {
-        // One read transaction prevents mixing header/members across commits by
-        // another process. Missing/corrupt members must not appear as emptiness.
-        let tx = self.connection.transaction()?;
-        let header: Option<(i64, i64)> = tx
-            .query_row(
-                "SELECT fetched_at, result_count FROM cinemeta_v3_searches
-                 WHERE kind = ?1 AND query = ?2",
-                params![kind_text(query.kind()), query.text()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        let Some((timestamp, count)) = header else {
-            return Ok(None);
-        };
-        let fetched_at = u64::try_from(timestamp).map_err(|_| CatalogError::InvalidCache)?;
-        let count = usize::try_from(count).map_err(|_| CatalogError::InvalidCache)?;
-        if count > MAX_RESULTS {
-            return Err(CatalogError::InvalidCache);
-        }
-        let mut titles = Vec::with_capacity(count);
-        let mut seen = HashSet::new();
-        {
-            let mut statement = tx.prepare(
-                "SELECT m.position, t.imdb_id, t.name, t.overview
-                 FROM cinemeta_v3_members m LEFT JOIN cinemeta_v3_titles t
-                   ON m.kind = t.kind AND m.imdb_id = t.imdb_id
-                 WHERE m.kind = ?1 AND m.query = ?2 ORDER BY m.position LIMIT 501",
-            )?;
-            let mut rows = statement.query(params![kind_text(query.kind()), query.text()])?;
-            while let Some(row) = rows.next()? {
-                let position: i64 = row.get(0)?;
-                if position != titles.len() as i64 || titles.len() >= count {
-                    return Err(CatalogError::InvalidCache);
-                }
-                let id: String = row.get(1).map_err(|_| CatalogError::InvalidCache)?;
-                let name: String = row.get(2).map_err(|_| CatalogError::InvalidCache)?;
-                let overview: Option<String> = row.get(3)?;
-                let title = validate_title(id, query.kind(), name, overview)
-                    .map_err(|_| CatalogError::InvalidCache)?;
-                if !seen.insert(title.id().clone()) {
-                    return Err(CatalogError::InvalidCache);
-                }
-                titles.push(title);
-            }
-        }
-        if titles.len() != count {
-            return Err(CatalogError::InvalidCache);
-        }
-        tx.commit()?;
-        Ok(Some(CachedSearch { titles, fetched_at }))
+        normalized_pages::read_cinemeta_page(
+            self,
+            query.kind(),
+            &normalized_pages::cinemeta_search_key(query),
+        )
     }
 
     /// Always fetch remote data, including when a saved snapshot exists. Every
     /// failure leaves the saved snapshot and its timestamp unchanged.
     pub(crate) fn refresh(&mut self, query: &SearchQuery) -> Result<CachedSearch, CatalogError> {
+        let result = self.refresh_search_inner(query);
+        if let Err(error) = result {
+            normalized_fetches::search(self, query, error);
+        }
+        result
+    }
+    fn refresh_search_inner(&mut self, query: &SearchQuery) -> Result<CachedSearch, CatalogError> {
         let url = search_url(&self.endpoint, query)?;
-        let payload: SearchResponse = self.fetch_json(url)?;
+        let raw: serde_json::Value = self.fetch_json(url)?;
+        let rich = normalized_rich::cinemeta_summaries(&raw)?;
+        let payload: SearchResponse =
+            serde_json::from_value(raw).map_err(|_| CatalogError::InvalidResponse)?;
         if payload.metas.len() > MAX_RESULTS {
             return Err(CatalogError::InvalidResponse);
         }
@@ -316,47 +316,33 @@ impl CatalogService {
             .map_err(|_| CatalogError::Clock)?
             .as_secs();
         let timestamp = i64::try_from(fetched_at).map_err(|_| CatalogError::Clock)?;
+        let cancellation = self.cancellation.clone();
+        check_cancellation(cancellation.as_deref())?;
         let tx = self.connection.transaction()?;
-        tx.execute(
-            "INSERT INTO cinemeta_v3_searches(kind, query, fetched_at, result_count)
-             VALUES (?1, ?2, ?3, ?4) ON CONFLICT(kind, query) DO UPDATE SET
-             fetched_at = excluded.fetched_at, result_count = excluded.result_count",
-            params![
-                kind_text(query.kind()),
-                query.text(),
-                timestamp,
-                titles.len() as i64
-            ],
+        normalized_pages::write_page(
+            &tx,
+            "cinemeta",
+            &normalized_pages::cinemeta_search_key(query),
+            1,
+            None,
+            &titles
+                .iter()
+                .map(normalized::imdb_observation)
+                .collect::<Vec<_>>(),
+            timestamp,
         )?;
-        tx.execute(
-            "DELETE FROM cinemeta_v3_members WHERE kind = ?1 AND query = ?2",
-            params![kind_text(query.kind()), query.text()],
+        normalized_rich::write_page_rich(
+            &tx,
+            "cinemeta",
+            &normalized_pages::cinemeta_search_key(query),
+            1,
+            query.kind(),
+            &rich,
+            timestamp,
         )?;
-        for (position, title) in titles.iter().enumerate() {
-            tx.execute(
-                "INSERT INTO cinemeta_v3_titles(kind, imdb_id, name, overview)
-                 VALUES (?1, ?2, ?3, ?4) ON CONFLICT(kind, imdb_id) DO UPDATE SET
-                 name = excluded.name, overview = COALESCE(excluded.overview, cinemeta_v3_titles.overview)",
-                params![
-                    kind_text(title.kind()),
-                    title.id().as_str(),
-                    title.name(),
-                    title.overview()
-                ],
-            )?;
-            tx.execute(
-                "INSERT INTO cinemeta_v3_members(kind, query, position, imdb_id)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    kind_text(query.kind()),
-                    query.text(),
-                    position as i64,
-                    title.id().as_str()
-                ],
-            )?;
-        }
+        check_cancellation(cancellation.as_deref())?;
         tx.commit()?;
-        Ok(CachedSearch { titles, fetched_at })
+        self.read(query)?.ok_or(CatalogError::InvalidCache)
     }
 }
 
@@ -425,6 +411,16 @@ struct SearchMeta {
     name: String,
     description: Option<String>,
 }
+
+#[cfg(test)]
+#[path = "catalog_normalized_acceptance_tests.rs"]
+mod normalized_acceptance_tests;
+#[cfg(test)]
+#[path = "catalog_normalized_merge_tests.rs"]
+mod normalized_merge_tests;
+#[cfg(test)]
+#[path = "catalog_normalized_tests.rs"]
+mod normalized_tests;
 
 #[cfg(test)]
 mod tests {
@@ -607,7 +603,7 @@ mod tests {
         service.refresh(&query)?;
         service
             .connection
-            .execute("UPDATE cinemeta_v3_searches SET fetched_at = 123", [])?;
+            .execute("UPDATE metadata_fetches SET fetched_at = 123", [])?;
         let saved = service.read(&query)?;
         for _ in 0..failures {
             assert!(service.refresh(&query).is_err());
@@ -631,8 +627,8 @@ mod tests {
         let query = SearchQuery::new(MediaKind::Movie, "matrix")?;
         service.refresh(&query)?;
         service.connection.execute_batch(
-            "UPDATE cinemeta_v3_searches SET fetched_at = 123;
-             CREATE TRIGGER fail_second_member BEFORE INSERT ON cinemeta_v3_members
+            "UPDATE metadata_fetches SET fetched_at = 123;
+             CREATE TRIGGER fail_second_member BEFORE INSERT ON catalog_page_items
              WHEN NEW.position = 1 BEGIN SELECT RAISE(ABORT, 'forced test failure'); END;",
         )?;
         let saved = service.read(&query)?;
@@ -641,9 +637,7 @@ mod tests {
         let title_count: i64 =
             service
                 .connection
-                .query_row("SELECT count(*) FROM cinemeta_v3_titles", [], |row| {
-                    row.get(0)
-                })?;
+                .query_row("SELECT count(*) FROM titles", [], |row| row.get(0))?;
         assert_eq!(title_count, 1);
         drop(service);
         assert_eq!(CatalogService::open(&path)?.read(&query)?, saved);
@@ -654,14 +648,14 @@ mod tests {
     #[test]
     fn corrupt_saved_data_is_an_error_not_empty() -> TestResult {
         let corruptions = [
-            "UPDATE cinemeta_v3_titles SET name = ' '",
-            "UPDATE cinemeta_v3_titles SET name = zeroblob(501)",
-            "UPDATE cinemeta_v3_titles SET overview = replace(hex(zeroblob(20001)), '0', 'x')",
-            "PRAGMA foreign_keys = OFF; UPDATE cinemeta_v3_titles SET imdb_id = 'bad'",
-            "DELETE FROM cinemeta_v3_members",
-            "PRAGMA ignore_check_constraints = ON; UPDATE cinemeta_v3_searches SET fetched_at = -1",
-            "PRAGMA ignore_check_constraints = ON; UPDATE cinemeta_v3_searches SET result_count = 501",
-            "UPDATE cinemeta_v3_members SET position = 1",
+            "PRAGMA ignore_check_constraints = ON; UPDATE titles SET name = ' '",
+            "PRAGMA ignore_check_constraints = ON; UPDATE titles SET name = replace(hex(zeroblob(501)), '0', 'x')",
+            "UPDATE titles SET overview = replace(hex(zeroblob(20001)), '0', 'x')",
+            "PRAGMA foreign_keys = OFF; UPDATE title_identifiers SET external_id = 'bad'",
+            "DELETE FROM catalog_page_items",
+            "PRAGMA ignore_check_constraints = ON; UPDATE metadata_fetches SET fetched_at = -1",
+            "PRAGMA ignore_check_constraints = ON; UPDATE catalog_pages SET result_count = 501",
+            "UPDATE catalog_page_items SET position = 1",
         ];
         let mock = Mock::start(vec![ok(MOVIE); corruptions.len()])?;
         let dir = tempfile::tempdir()?;
@@ -730,64 +724,55 @@ mod tests {
 
     #[test]
     fn migration_preserves_version_one_search_cache() -> TestResult {
-        let mock = Mock::start(vec![ok(MOVIE)])?;
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("catalog");
-        let query = SearchQuery::new(MediaKind::Movie, "matrix")?;
-        let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
-        let saved = service.refresh(&query)?;
-        service.connection.execute_batch(
-            "DROP TABLE cinemeta_v3_browse; DROP TABLE cinemeta_v3_details;
-             DROP TABLE indexer_sources_v1; DROP TABLE tmdb_v1_cache; PRAGMA user_version = 1;",
-        )?;
-        drop(service);
-        let mut upgraded = CatalogService::open(&path)?;
-        assert_eq!(upgraded.read(&query)?, Some(saved));
-        assert_eq!(upgraded.read_browse(MediaKind::Movie, 0)?, None);
+        let connection = legacy_database(&path)?;
+        connection.execute_batch("INSERT INTO cinemeta_v3_searches VALUES ('movie','ambiguous',17,1); INSERT INTO cinemeta_v3_titles VALUES ('movie','tt1234567','Legacy',NULL); INSERT INTO cinemeta_v3_members VALUES ('movie','ambiguous',0,'tt1234567'); DROP TABLE cinemeta_v3_browse; DROP TABLE cinemeta_v3_details; DROP TABLE indexer_sources_v1; DROP TABLE tmdb_v1_cache; PRAGMA user_version=1;")?;
+        drop(connection);
+        let mut service = CatalogService::open(&path)?;
         assert_eq!(
-            upgraded
-                .connection
-                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            SCHEMA_VERSION
+            service.read(&SearchQuery::new(MediaKind::Movie, "ambiguous")?)?,
+            None
         );
-        mock.finish()?;
+        let name: String =
+            service
+                .connection
+                .query_row("SELECT name FROM cinemeta_v3_titles", [], |row| row.get(0))?;
+        assert_eq!(name, "Legacy");
+        assert_eq!(
+            service
+                .connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
+            4
+        );
         Ok(())
     }
 
     #[test]
     fn migration_failure_rolls_back_all_new_tables_and_version() -> TestResult {
-        let mock = Mock::start(vec![ok(MOVIE)])?;
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("catalog");
-        let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
-        let query = SearchQuery::new(MediaKind::Movie, "matrix")?;
-        let saved = service.refresh(&query)?;
-        // Simulate a conflicting object at the second migration statement.
-        service.connection.execute_batch(
-            "DROP TABLE cinemeta_v3_browse; DROP TABLE indexer_sources_v1; DROP TABLE tmdb_v1_cache;
-             PRAGMA user_version = 1;",
-        )?;
-        drop(service);
-        assert!(CatalogService::open(&path).is_err());
+        let connection = legacy_database(&path)?;
+        connection.execute_batch("INSERT INTO cinemeta_v3_browse VALUES ('movie',0,123,'not json'); INSERT INTO cinemeta_v3_titles VALUES ('movie','tt1234567','Keep',NULL);")?;
+        drop(connection);
+        assert!(matches!(
+            CatalogService::open(&path),
+            Err(CatalogError::InvalidCache)
+        ));
         let connection = Connection::open(&path)?;
         assert_eq!(
-            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            1
+            connection.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
+            3
         );
-        let created: i64 = connection.query_row(
-            "SELECT count(*) FROM sqlite_master WHERE name IN ('cinemeta_v3_browse', 'indexer_sources_v1')", [], |row| row.get(0),
+        let count: i64 = connection.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name='titles'",
+            [],
+            |r| r.get(0),
         )?;
-        assert_eq!(created, 0);
-        let (timestamp, count): (i64, i64) = connection.query_row(
-            "SELECT fetched_at, result_count FROM cinemeta_v3_searches WHERE kind = 'movie' AND query = 'matrix'", [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        assert_eq!(u64::try_from(timestamp)?, saved.fetched_at);
-        assert_eq!(usize::try_from(count)?, saved.titles.len());
+        assert_eq!(count, 0);
         let name: String =
-            connection.query_row("SELECT name FROM cinemeta_v3_titles", [], |row| row.get(0))?;
-        assert_eq!(name, saved.titles[0].name());
-        mock.finish()?;
+            connection.query_row("SELECT name FROM cinemeta_v3_titles", [], |r| r.get(0))?;
+        assert_eq!(name, "Keep");
         Ok(())
     }
 
@@ -845,14 +830,14 @@ mod tests {
         service.refresh_details(MediaKind::Series, &id)?;
         service
             .connection
-            .execute("UPDATE cinemeta_v3_details SET fetched_at = 123", [])?;
+            .execute("UPDATE metadata_fetches SET fetched_at = 123", [])?;
         let saved = service.read_details(MediaKind::Series, &id)?;
         for _ in &invalid {
             assert!(service.refresh_details(MediaKind::Series, &id).is_err());
             assert_eq!(service.read_details(MediaKind::Series, &id)?, saved);
         }
         service.connection.execute_batch(
-            "CREATE TRIGGER fail_details BEFORE UPDATE ON cinemeta_v3_details
+            "CREATE TRIGGER fail_details BEFORE UPDATE ON metadata_fetches
              BEGIN SELECT RAISE(ABORT, 'test'); END;",
         )?;
         assert_eq!(
@@ -862,7 +847,7 @@ mod tests {
         assert_eq!(service.read_details(MediaKind::Series, &id)?, saved);
         // Remove the fault trigger before testing a corrupt saved payload.
         service.connection.execute_batch(
-            "DROP TRIGGER fail_details; UPDATE cinemeta_v3_details SET payload = '{}';",
+            "DROP TRIGGER fail_details; PRAGMA ignore_check_constraints=ON; UPDATE titles SET name = '';",
         )?;
         assert_eq!(
             service.read_details(MediaKind::Series, &id),
@@ -914,8 +899,8 @@ mod tests {
             CatalogService::open_at(&dir.path().join("catalog"), mock.endpoint.clone())?;
         service.refresh_browse(MediaKind::Movie, 0)?;
         service.connection.execute_batch(
-            "UPDATE cinemeta_v3_browse SET fetched_at = 123;
-             CREATE TRIGGER fail_browse BEFORE UPDATE ON cinemeta_v3_browse BEGIN SELECT RAISE(ABORT, 'test'); END;",
+            "UPDATE metadata_fetches SET fetched_at = 123;
+             CREATE TRIGGER fail_browse BEFORE UPDATE ON catalog_pages BEGIN SELECT RAISE(ABORT, 'test'); END;",
         )?;
         let saved = service.read_browse(MediaKind::Movie, 0)?;
         assert_eq!(
@@ -928,13 +913,12 @@ mod tests {
             Err(CatalogError::Storage)
         );
         assert_eq!(service.read_browse(MediaKind::Movie, 0)?, saved);
-        let name: String =
-            service
-                .connection
-                .query_row("SELECT name FROM cinemeta_v3_titles", [], |row| row.get(0))?;
+        let name: String = service
+            .connection
+            .query_row("SELECT name FROM titles", [], |row| row.get(0))?;
         assert_eq!(name, "The Matrix");
         service.connection.execute_batch(
-            "DROP TRIGGER fail_browse; UPDATE cinemeta_v3_browse SET payload = '{}';",
+            "DROP TRIGGER fail_browse; UPDATE catalog_pages SET result_count=100;",
         )?;
         assert_eq!(
             service.read_browse(MediaKind::Movie, 0),
@@ -950,6 +934,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("catalog");
         let mut service = CatalogService::open(&path)?;
+        seed_movie(&mut service)?;
         let target = PlaybackTarget::Movie(ImdbId::new("tt0133093")?);
         let results = crate::sources::SourceResults {
             omitted: 2,
@@ -967,12 +952,11 @@ mod tests {
         };
         let saved = service.save_sources(IndexerKind::Torrentio, &target, results)?;
         assert_eq!(saved.omitted, 2);
-        let payload: String =
-            service
-                .connection
-                .query_row("SELECT payload FROM indexer_sources_v1", [], |row| {
-                    row.get(0)
-                })?;
+        let payload: String = service.connection.query_row(
+            "SELECT sources_json FROM indexer_snapshots",
+            [],
+            |row| row.get(0),
+        )?;
         for forbidden in ["private.test", "secret", "magnet:", "https://"] {
             assert!(!payload.contains(forbidden));
         }
@@ -994,7 +978,7 @@ mod tests {
             Some(saved)
         );
         service.connection.execute(
-            "UPDATE indexer_sources_v1 SET scope = 'different-config'",
+            "UPDATE indexer_snapshots SET cache_scope = 'different-config'",
             [],
         )?;
         assert_eq!(service.read_sources(IndexerKind::Torrentio, &target)?, None);
@@ -1005,6 +989,7 @@ mod tests {
     fn source_cache_empty_failure_and_corruption_remain_distinct() -> TestResult {
         let dir = tempfile::tempdir()?;
         let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        seed_movie(&mut service)?;
         let target = PlaybackTarget::Movie(ImdbId::new("tt0133093")?);
         assert_eq!(service.read_sources(IndexerKind::Torrentio, &target)?, None);
         let empty = || crate::sources::SourceResults {
@@ -1013,7 +998,7 @@ mod tests {
         };
         let saved = service.save_sources(IndexerKind::Torrentio, &target, empty())?;
         assert!(saved.candidates.is_empty());
-        service.connection.execute_batch("CREATE TRIGGER fail_sources BEFORE UPDATE ON indexer_sources_v1 BEGIN SELECT RAISE(ABORT, 'test'); END;")?;
+        service.connection.execute_batch("CREATE TRIGGER fail_sources BEFORE UPDATE ON indexer_snapshots BEGIN SELECT RAISE(ABORT, 'test'); END;")?;
         assert_eq!(
             service.save_sources(IndexerKind::Torrentio, &target, empty()),
             Err(CatalogError::Storage)
@@ -1022,11 +1007,176 @@ mod tests {
             service.read_sources(IndexerKind::Torrentio, &target)?,
             Some(saved)
         );
-        service.connection.execute_batch("DROP TRIGGER fail_sources; UPDATE indexer_sources_v1 SET payload = '{\"candidates\":[],\"omitted\":0,\"url\":\"https://private\"}';")?;
+        service.connection.execute_batch("DROP TRIGGER fail_sources; UPDATE indexer_snapshots SET sources_json = '{\"candidates\":[],\"omitted\":0,\"url\":\"https://private\"}';")?;
         assert_eq!(
             service.read_sources(IndexerKind::Torrentio, &target),
             Err(CatalogError::InvalidCache)
         );
+        Ok(())
+    }
+
+    fn legacy_database(path: &Path) -> Result<Connection, Box<dyn Error>> {
+        let service = CatalogService::open(path)?;
+        service.connection.execute_batch("PRAGMA foreign_keys=OFF; DROP TABLE indexer_snapshots; DROP TABLE catalog_page_items; DROP TABLE field_provenance; DROP TABLE ratings; DROP TABLE episode_identifiers; DROP TABLE season_identifiers; DROP TABLE title_identifiers; DROP TABLE metadata_fetches; DROP TABLE catalog_pages; DROP TABLE episodes; DROP TABLE seasons; DROP TABLE titles; PRAGMA user_version=3; PRAGMA foreign_keys=ON;")?;
+        Ok(service.connection)
+    }
+
+    #[test]
+    fn valid_v3_backfill_keeps_legacy_payloads_and_does_not_invent_optional_rich_data() -> TestResult
+    {
+        use crate::tmdb::{TmdbData, TmdbDetails, TmdbPage, TmdbQuery, TmdbTitle};
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let connection = legacy_database(&path)?;
+        let page_query = TmdbQuery::Browse {
+            kind: MediaKind::Movie,
+            page: 1,
+        };
+        let detail_query = TmdbQuery::Details {
+            kind: MediaKind::Movie,
+            id: 11,
+        };
+        let title = TmdbTitle {
+            id: 11,
+            kind: MediaKind::Movie,
+            name: "Reduced TMDB".into(),
+            overview: None,
+            release_info: Some("2025".into()),
+            poster_url: None,
+        };
+        let detail = TmdbData::Details(TmdbDetails {
+            title: title.clone(),
+            imdb: Some(ImdbId::new("tt4000001")?),
+            genres: vec![],
+            seasons: vec![],
+        });
+        let page = TmdbData::Page(TmdbPage {
+            titles: vec![title],
+            page: 1,
+            total_pages: 1,
+        });
+        // Insert page before detail: migration must establish explicit mappings first.
+        for (query, data, time) in [(&page_query, &page, 12), (&detail_query, &detail, 11)] {
+            connection.execute(
+                "INSERT INTO tmdb_v1_cache VALUES (?1,'en-US',?2,?3)",
+                params![
+                    crate::tmdb::cache_query_identity(query)?,
+                    time,
+                    crate::tmdb::encode(data)?
+                ],
+            )?;
+        }
+        let cinemeta = r#"{"id":"tt4000001","type":"movie","name":"Reduced Cinemeta","description":null,"poster":null,"background":null,"releaseInfo":"2025","videos":[]}"#;
+        connection.execute(
+            "INSERT INTO cinemeta_v3_details VALUES ('movie','tt4000001',10,?1)",
+            params![cinemeta],
+        )?;
+        connection.execute("INSERT INTO indexer_sources_v1 VALUES ('torrentio','movie:tt4000001','public-default-v1',13,?1)",params![r#"{"candidates":[],"omitted":0}"#])?;
+        let before: Vec<String> = {
+            let mut stmt =
+                connection.prepare("SELECT payload FROM tmdb_v1_cache ORDER BY resource")?;
+            stmt.query_map([], |r| r.get(0))?
+                .collect::<Result<_, _>>()?
+        };
+        drop(connection);
+        let mut service = CatalogService::open(&path)?;
+        let count: i64 = service
+            .connection
+            .query_row("SELECT count(*) FROM titles", [], |r| r.get(0))?;
+        assert_eq!(count, 1);
+        assert!(service.read_tmdb(&page_query)?.is_some());
+        assert_eq!(service.read_tmdb(&detail_query)?, None);
+        assert_eq!(
+            service.read_details(MediaKind::Movie, &ImdbId::new("tt4000001")?)?,
+            None
+        );
+        let details: String =
+            service
+                .connection
+                .query_row("SELECT payload FROM cinemeta_v3_details", [], |r| r.get(0))?;
+        assert_eq!(details, cinemeta);
+        let after: Vec<String> = {
+            let mut stmt = service
+                .connection
+                .prepare("SELECT payload FROM tmdb_v1_cache ORDER BY resource")?;
+            stmt.query_map([], |r| r.get(0))?
+                .collect::<Result<_, _>>()?
+        };
+        assert_eq!(before, after);
+        for table in ["season_identifiers", "episode_identifiers", "ratings"] {
+            let count: i64 = service.connection.query_row(
+                &format!("SELECT count(*) FROM {table}"),
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(count, 0);
+        }
+        let genres: Option<String> =
+            service
+                .connection
+                .query_row("SELECT genres_json FROM titles", [], |r| r.get(0))?;
+        assert_eq!(genres, None);
+        assert!(
+            service
+                .read_sources(
+                    IndexerKind::Torrentio,
+                    &PlaybackTarget::Movie(ImdbId::new("tt4000001")?)
+                )?
+                .is_some()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_legacy_source_rolls_back_v4_and_preserves_old_snapshot() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let connection = legacy_database(&path)?;
+        connection.execute(
+            "INSERT INTO cinemeta_v3_browse VALUES ('movie',0,1,?1)",
+            params![MOVIE],
+        )?;
+        connection.execute("INSERT INTO indexer_sources_v1 VALUES ('torrentio','movie:tt0133093','public-default-v1',2,?1)",params![r#"{"candidates":[],"omitted":0,"url":"https://unsafe.invalid"}"#])?;
+        drop(connection);
+        assert!(matches!(
+            CatalogService::open(&path),
+            Err(CatalogError::InvalidCache)
+        ));
+        let connection = Connection::open(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
+            3
+        );
+        let count: i64 = connection.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name='titles'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(count, 0);
+        let payload: String =
+            connection.query_row("SELECT payload FROM cinemeta_v3_browse", [], |r| r.get(0))?;
+        assert_eq!(payload, MOVIE);
+        Ok(())
+    }
+
+    fn seed_movie(service: &mut CatalogService) -> TestResult {
+        let title = CatalogTitle::new(
+            ImdbId::new("tt0133093")?,
+            MediaKind::Movie,
+            "Synthetic movie",
+            None,
+        )?;
+        let tx = service.connection.transaction()?;
+        normalized_pages::write_page(
+            &tx,
+            "cinemeta",
+            "synthetic-seed-v1",
+            1,
+            None,
+            &[normalized::imdb_observation(&title)],
+            1,
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1107,7 +1257,7 @@ mod tests {
             saved.push(service.save_tmdb(query, tmdb_page(*kind, *page))?);
         }
         let rows: i64 = service.connection.query_row(
-            "SELECT count(*) FROM tmdb_v1_cache WHERE locale = 'en-US'",
+            "SELECT count(*) FROM catalog_pages WHERE provider = 'tmdb'",
             [],
             |row| row.get(0),
         )?;
@@ -1116,7 +1266,7 @@ mod tests {
             assert_eq!(service.read_tmdb(query)?, Some(snapshot.clone()));
             let key = crate::tmdb::cache_query_identity(query)?;
             let matches: i64 = service.connection.query_row(
-                "SELECT count(*) FROM tmdb_v1_cache WHERE resource = ?1",
+                "SELECT count(*) FROM catalog_pages WHERE query_key = ?1",
                 [key],
                 |row| row.get(0),
             )?;
@@ -1274,8 +1424,8 @@ mod tests {
         };
         service.save_tmdb(&query, tmdb_page(MediaKind::Movie, 1))?;
         service.connection.execute_batch(
-            "UPDATE tmdb_v1_cache SET fetched_at = 123;
-             CREATE TRIGGER fail_tmdb BEFORE UPDATE ON tmdb_v1_cache BEGIN SELECT RAISE(ABORT, 'test'); END;",
+            "UPDATE metadata_fetches SET fetched_at = 123;
+             CREATE TRIGGER fail_tmdb BEFORE UPDATE ON metadata_fetches BEGIN SELECT RAISE(ABORT, 'test'); END;",
         )?;
         let saved = service.read_tmdb(&query)?;
         assert!(
@@ -1289,62 +1439,54 @@ mod tests {
             Err(CatalogError::Storage)
         );
         assert_eq!(service.read_tmdb(&query)?, saved);
-        service
-            .connection
-            .execute_batch("DROP TRIGGER fail_tmdb; UPDATE tmdb_v1_cache SET payload = '{}';")?;
+        service.connection.execute_batch(
+            "DROP TRIGGER fail_tmdb; UPDATE catalog_pages SET result_count = 100;",
+        )?;
         assert_eq!(service.read_tmdb(&query), Err(CatalogError::InvalidCache));
         Ok(())
     }
 
     #[test]
     fn schema_three_upgrade_preserves_all_version_two_cache_resources() -> TestResult {
-        let mock = Mock::start(vec![ok(MOVIE), ok(MOVIE), ok(DETAILS)])?;
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("catalog");
-        let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
-        let query = SearchQuery::new(MediaKind::Movie, "matrix")?;
-        let search = service.refresh(&query)?;
-        let browse = service.refresh_browse(MediaKind::Movie, 0)?;
-        let id = ImdbId::new("tt0903747")?;
-        let details = service.refresh_details(MediaKind::Series, &id)?;
-        let target = PlaybackTarget::Movie(ImdbId::new("tt0133093")?);
-        let sources = service.save_sources(
-            IndexerKind::Torrentio,
-            &target,
-            crate::sources::SourceResults {
-                candidates: Vec::new(),
-                omitted: 0,
-            },
+        let connection = legacy_database(&path)?;
+        connection.execute(
+            "INSERT INTO cinemeta_v3_browse VALUES ('movie',0,12,?1)",
+            params![MOVIE],
         )?;
-        service
-            .connection
-            .execute_batch("DROP TABLE tmdb_v1_cache; PRAGMA user_version = 2;")?;
-        drop(service);
-        let mut reopened = CatalogService::open(&path)?;
-        assert_eq!(reopened.read(&query)?, Some(search));
-        assert_eq!(reopened.read_browse(MediaKind::Movie, 0)?, Some(browse));
+        let response: serde_json::Value = serde_json::from_str(DETAILS)?;
+        connection.execute(
+            "INSERT INTO cinemeta_v3_details VALUES ('series','tt0903747',13,?1)",
+            params![response["meta"].to_string()],
+        )?;
+        connection.execute_batch("DROP TABLE tmdb_v1_cache; PRAGMA user_version=2;")?;
+        drop(connection);
+        let mut service = CatalogService::open(&path)?;
         assert_eq!(
-            reopened.read_details(MediaKind::Series, &id)?,
-            Some(details)
+            service
+                .read_browse(MediaKind::Movie, 0)?
+                .ok_or("missing browse")?
+                .titles[0]
+                .name(),
+            "The Matrix"
         );
+        // Reduced legacy optional fields do not prove today's detail DTO checked them.
         assert_eq!(
-            reopened.read_sources(IndexerKind::Torrentio, &target)?,
-            Some(sources)
-        );
-        assert_eq!(
-            reopened.read_tmdb(&crate::tmdb::TmdbQuery::Browse {
-                kind: MediaKind::Movie,
-                page: 1
-            })?,
+            service.read_details(MediaKind::Series, &ImdbId::new("tt0903747")?)?,
             None
         );
-        assert_eq!(
-            reopened
+        let payload: String =
+            service
                 .connection
-                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            3
+                .query_row("SELECT payload FROM cinemeta_v3_browse", [], |r| r.get(0))?;
+        assert_eq!(payload, MOVIE);
+        assert_eq!(
+            service
+                .connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
+            4
         );
-        mock.finish()?;
         Ok(())
     }
 
@@ -1395,11 +1537,29 @@ mod tests {
             Err(CatalogError::Canceled)
         );
         assert_eq!(service.read_browse(MediaKind::Movie, 0)?, Some(saved));
-        let name: String =
-            service
-                .connection
-                .query_row("SELECT name FROM cinemeta_v3_titles", [], |row| row.get(0))?;
+        let name: String = service
+            .connection
+            .query_row("SELECT name FROM titles", [], |row| row.get(0))?;
         assert_eq!(name, "The Matrix");
+        mock.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn canceled_original_search_reply_never_commits() -> TestResult {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mock = Mock::start_canceling(
+            vec![ok(MOVIE), ok(&MOVIE.replace("The Matrix", "Stale"))],
+            Some((1, Arc::clone(&flag))),
+        )?;
+        let dir = tempfile::tempdir()?;
+        let mut service =
+            CatalogService::open_at(&dir.path().join("catalog"), mock.endpoint.clone())?;
+        let query = SearchQuery::new(MediaKind::Movie, "synthetic")?;
+        let saved = service.refresh(&query)?;
+        service.cancellation = Some(flag);
+        assert_eq!(service.refresh(&query), Err(CatalogError::Canceled));
+        assert_eq!(service.read(&query)?, Some(saved));
         mock.finish()?;
         Ok(())
     }
@@ -1452,6 +1612,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let mut service = CatalogService::open(&dir.path().join("live-catalog.sqlite3"))?;
         let movie = ImdbId::new("tt0133093")?;
+        let movie_without_videos = ImdbId::new("tt22084616")?;
         let series = ImdbId::new("tt0944947")?;
         let query = SearchQuery::new(MediaKind::Movie, "The Matrix")?;
         let operations = [
@@ -1474,6 +1635,17 @@ mod tests {
                     .map(|snapshot| usize::from(snapshot.details.title.id() == &movie)),
             ),
             (
+                "movie details without videos",
+                service
+                    .refresh_details(MediaKind::Movie, &movie_without_videos)
+                    .map(|snapshot| {
+                        usize::from(
+                            snapshot.details.title.id() == &movie_without_videos
+                                && snapshot.details.episodes.is_empty(),
+                        )
+                    }),
+            ),
+            (
                 "series details",
                 service
                     .refresh_details(MediaKind::Series, &series)
@@ -1494,6 +1666,11 @@ mod tests {
         assert!(service.read_browse(MediaKind::Movie, 0)?.is_some());
         assert!(service.read(&query)?.is_some());
         assert!(service.read_details(MediaKind::Movie, &movie)?.is_some());
+        let regression = service
+            .read_details(MediaKind::Movie, &movie_without_videos)?
+            .ok_or("missing saved regression movie")?;
+        assert_eq!(regression.details.title.id(), &movie_without_videos);
+        assert!(regression.details.episodes.is_empty());
         assert!(service.read_details(MediaKind::Series, &series)?.is_some());
         Ok(())
     }
