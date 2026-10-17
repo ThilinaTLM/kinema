@@ -47,6 +47,8 @@ fn cinemeta_then_tmdb_browse_then_details_unifies_canonical_title_and_both_pages
         overview: None,
         release_info: None,
         poster_url: None,
+        display: Default::default(),
+        imdb: None,
     };
     service.save_tmdb(
         &page_query,
@@ -201,6 +203,8 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
         overview: None,
         release_info: None,
         poster_url: None,
+        display: Default::default(),
+        imdb: None,
     };
     service.save_tmdb(
         &TmdbQuery::Details {
@@ -277,6 +281,8 @@ fn contradictory_external_ids_abort_reconciliation_without_mutating_either_graph
             overview: None,
             release_info: None,
             poster_url: None,
+            display: Default::default(),
+            imdb: None,
         });
         let id = resolve_title(&tx, &second, 2)?;
         let f = fetch(
@@ -335,6 +341,8 @@ fn contradictory_same_coordinate_child_identifiers_rollback_before_graph_changes
                     overview: None,
                     release_info: None,
                     poster_url: None,
+                    display: Default::default(),
+                    imdb: None,
                 })
             };
             let id = resolve_title(&tx, &item, 1)?;
@@ -400,6 +408,8 @@ fn duplicate_fetch_resources_and_duplicate_page_members_reconcile_without_orphan
         overview: None,
         release_info: None,
         poster_url: None,
+        display: Default::default(),
+        imdb: None,
     });
     write_page(
         &tx,

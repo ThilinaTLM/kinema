@@ -1,6 +1,6 @@
 //! Validated catalog values, independent of providers, storage, and presentation.
 
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, sync::Arc};
 
 use crate::MediaKind;
 
@@ -84,6 +84,30 @@ impl ImdbId {
     }
 }
 
+/// A genuine IMDb score, rounded to display tenths. Zero is not missing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImdbRating(u8);
+impl ImdbRating {
+    pub fn new(value: f64) -> Option<Self> {
+        (value.is_finite() && (0.0..=10.0).contains(&value))
+            .then(|| Self((value * 10.0).round() as u8))
+    }
+    pub fn value(self) -> f32 {
+        f32::from(self.0) / 10.0
+    }
+}
+
+/// Optional provider-supplied display facts; no inferred ratings or enrichment.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CatalogDisplay {
+    pub year: Option<u16>,
+    pub poster_url: Option<String>,
+    pub imdb_rating: Option<ImdbRating>,
+    pub runtime_minutes: Option<u16>,
+    pub genres: Vec<String>,
+    pub season_count: Option<u32>,
+}
+
 /// A catalog title with a nonempty, trimmed name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CatalogTitle {
@@ -91,6 +115,7 @@ pub struct CatalogTitle {
     kind: MediaKind,
     name: String,
     overview: Option<String>,
+    display: Arc<CatalogDisplay>,
 }
 
 impl CatalogTitle {
@@ -111,7 +136,31 @@ impl CatalogTitle {
             kind,
             name: name.to_owned(),
             overview,
+            display: Arc::default(),
         })
+    }
+
+    pub fn with_display(mut self, display: CatalogDisplay) -> Self {
+        self.display = Arc::new(display);
+        self
+    }
+    pub fn year(&self) -> Option<u16> {
+        self.display.year
+    }
+    pub fn poster_url(&self) -> Option<&str> {
+        self.display.poster_url.as_deref()
+    }
+    pub fn imdb_rating(&self) -> Option<f32> {
+        self.display.imdb_rating.map(ImdbRating::value)
+    }
+    pub fn runtime_minutes(&self) -> Option<u16> {
+        self.display.runtime_minutes
+    }
+    pub fn genres(&self) -> &[String] {
+        &self.display.genres
+    }
+    pub fn season_count(&self) -> Option<u32> {
+        self.display.season_count
     }
 
     pub fn id(&self) -> &ImdbId {
@@ -158,6 +207,15 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn imdb_rating_preserves_zero_and_rejects_non_scores() {
+        assert_eq!(ImdbRating::new(0.0).map(ImdbRating::value), Some(0.0));
+        assert_eq!(ImdbRating::new(8.46).map(ImdbRating::value), Some(8.5));
+        assert_eq!(ImdbRating::new(10.0).map(ImdbRating::value), Some(10.0));
+        for value in [f64::NAN, f64::INFINITY, -0.1, 10.1] {
+            assert_eq!(ImdbRating::new(value), None);
+        }
+    }
     #[test]
     fn query_trims_only_surrounding_whitespace() {
         let query = SearchQuery::new(MediaKind::Movie, "\u{2003} The  MATRIX \n")

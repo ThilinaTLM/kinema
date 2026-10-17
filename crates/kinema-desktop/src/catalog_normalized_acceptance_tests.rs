@@ -308,6 +308,8 @@ fn selected_provider_missing_field_retains_actual_other_supplier_origin_without_
                 overview: None,
                 release_info: None,
                 poster_url: None,
+                display: Default::default(),
+                imdb: None,
             },
             imdb: Some(ImdbId::new("tt2000006")?),
             genres: vec![],

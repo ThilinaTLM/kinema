@@ -160,21 +160,7 @@ pub(super) fn imdb_title(
     if record.kind != kind {
         return Err(CatalogError::InvalidCache);
     }
-    let external = record
-        .identifiers
-        .iter()
-        .find(|id| id.namespace == "imdb")
-        .ok_or(CatalogError::InvalidCache)?;
-    validate_title(
-        external.external_id.clone(),
-        kind,
-        record
-            .text("name")
-            .ok_or(CatalogError::InvalidCache)?
-            .into(),
-        record.text("overview").map(str::to_owned),
-    )
-    .map_err(|_| CatalogError::InvalidCache)
+    CatalogService::display_title(&record)
 }
 pub(super) fn read_cinemeta_page(
     service: &mut CatalogService,

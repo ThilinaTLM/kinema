@@ -1043,6 +1043,8 @@ mod tests {
             overview: None,
             release_info: Some("2025".into()),
             poster_url: None,
+            display: Default::default(),
+            imdb: None,
         };
         let detail = TmdbData::Details(TmdbDetails {
             title: title.clone(),
@@ -1189,6 +1191,8 @@ mod tests {
                 overview: Some("Overview".into()),
                 release_info: Some("1999".into()),
                 poster_url: None,
+                display: Default::default(),
+                imdb: None,
             }],
             page,
             total_pages: 10,
@@ -1297,6 +1301,8 @@ mod tests {
                 overview: None,
                 release_info: None,
                 poster_url: None,
+                display: Default::default(),
+                imdb: None,
             },
             imdb: Some(ImdbId::new("tt0133093")?),
             genres: vec!["Action".into()],

@@ -7,7 +7,7 @@ use std::{collections::HashSet, fmt, io::Read, time::Duration};
 
 use kinema_core::{
     MediaKind,
-    catalog::{CatalogEpisode, ImdbId, SearchQuery},
+    catalog::{CatalogDisplay, CatalogEpisode, ImdbId, SearchQuery},
 };
 use reqwest::{
     Url,
@@ -43,6 +43,34 @@ pub struct TmdbTitle {
     pub overview: Option<String>,
     pub release_info: Option<String>,
     pub poster_url: Option<String>,
+    /// Retained display facts from canonical reads, not automatic enrichment.
+    pub display: std::sync::Arc<CatalogDisplay>,
+    /// Explicit retained identifier mapping, independent from score availability.
+    pub imdb: Option<ImdbId>,
+}
+impl TmdbTitle {
+    pub fn year(&self) -> Option<u16> {
+        self.display
+            .year
+            .or_else(|| self.release_info.as_deref()?.get(..4)?.parse().ok())
+    }
+    pub fn poster_url(&self) -> Option<&str> {
+        self.poster_url.as_deref()
+    }
+    pub fn imdb_rating(&self) -> Option<f32> {
+        self.display
+            .imdb_rating
+            .map(kinema_core::catalog::ImdbRating::value)
+    }
+    pub fn runtime_minutes(&self) -> Option<u16> {
+        self.display.runtime_minutes
+    }
+    pub fn genres(&self) -> &[String] {
+        &self.display.genres
+    }
+    pub fn season_count(&self) -> Option<u32> {
+        self.display.season_count
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TmdbPage {
@@ -340,6 +368,8 @@ impl TitleDto {
             overview: nonempty(self.overview),
             release_info: nonempty(release_info),
             poster_url,
+            display: Default::default(),
+            imdb: None,
         })
     }
 }
@@ -623,6 +653,8 @@ impl SnapshotTitle {
             overview: self.overview,
             release_info: self.release_info,
             poster_url: self.poster_url,
+            display: Default::default(),
+            imdb: None,
         })
     }
 }
@@ -1089,6 +1121,8 @@ mod tests {
             overview: None,
             release_info: None,
             poster_url: None,
+            display: Default::default(),
+            imdb: None,
         };
         let mut page = TmdbPage {
             titles: vec![title.clone()],
@@ -1169,6 +1203,8 @@ mod tests {
                 overview: None,
                 release_info: None,
                 poster_url: None,
+                display: Default::default(),
+                imdb: None,
             }],
             page: 1,
             total_pages: 1,

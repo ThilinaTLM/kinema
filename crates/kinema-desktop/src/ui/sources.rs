@@ -8,12 +8,11 @@ use std::cmp::Ordering;
 use gpui_kit::component::{
     ActiveTheme, IndexPath,
     list::{ListDelegate, ListItem, ListState},
-    tag::Tag,
 };
 use gpui_kit::*;
 use kinema_core::sources::SourceCandidate;
 
-pub(crate) const ROW_HEIGHT: f32 = 64.0;
+pub(crate) const ROW_HEIGHT: f32 = 32.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SortKey {
@@ -174,9 +173,27 @@ pub(crate) fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Fixed columns keep known and unknown facts aligned without inventing values.
+fn source_facts(source: &SourceCandidate) -> [String; 3] {
+    [
+        source
+            .quality
+            .as_deref()
+            .map(str::trim)
+            .filter(|quality| !quality.is_empty())
+            .unwrap_or("Quality —")
+            .to_owned(),
+        source.size.map_or_else(|| "Size —".to_owned(), format_size),
+        source
+            .seeders
+            .map_or_else(|| "Seeds —".to_owned(), |count| format!("{count} ↑")),
+    ]
+}
+
 pub(crate) struct SourceDelegate {
     rows: Vec<SourceCandidate>,
     selected: Option<IndexPath>,
+    empty_message: SharedString,
 }
 
 impl SourceDelegate {
@@ -184,7 +201,14 @@ impl SourceDelegate {
         Self {
             rows: Vec::new(),
             selected: None,
+            empty_message: SharedString::new_static(""),
         }
+    }
+
+    /// Text shown when no row is visible; the pane distinguishes loading,
+    /// service failure, an empty provider result, and filters hiding everything.
+    pub(crate) fn set_empty_message(&mut self, message: impl Into<SharedString>) {
+        self.empty_message = message.into();
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -218,33 +242,35 @@ impl ListDelegate for SourceDelegate {
     ) -> Option<ListItem> {
         let source = self.rows.get(ix.row)?;
         let muted = cx.theme().muted_foreground;
-        let mut facts = div()
+        let [quality, size, seeders] = source_facts(source);
+        let accessible = format!("{} · {quality} · {size} · {seeders}", source.name);
+        let facts = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_3()
+            .text_size(px(11.))
+            .text_color(muted)
+            .child(
+                div()
+                    .w(px(60.))
+                    .truncate()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(quality),
+            )
+            .child(div().w(px(72.)).truncate().child(size))
+            .child(div().w(px(60.)).truncate().child(seeders));
+        let body = div()
+            .w_full()
             .flex()
             .items_center()
-            .gap_2()
-            .text_sm()
-            .text_color(muted);
-        if let Some(quality) = &source.quality {
-            facts = facts.child(Tag::secondary().child(quality.clone()));
-        }
-        facts = facts.child(
-            source
-                .size
-                .map_or_else(|| "Size unknown".to_owned(), format_size),
-        );
-        facts = facts.child(
-            source
-                .seeders
-                .map_or_else(|| "Seeders unknown".to_owned(), |s| format!("{s} seeders")),
-        );
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap_1()
+            .gap_3()
             .overflow_hidden()
             .child(
                 div()
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.))
                     .truncate()
                     .child(source.name.clone()),
             )
@@ -252,9 +278,9 @@ impl ListDelegate for SourceDelegate {
         Some(
             ListItem::new(("source", ix.row))
                 .h(px(ROW_HEIGHT))
-                .px_3()
+                .px_2()
                 .selected(self.selected == Some(ix))
-                .accessibility_label(source.name.clone())
+                .accessibility_label(accessible)
                 .child(body),
         )
     }
@@ -269,8 +295,9 @@ impl ListDelegate for SourceDelegate {
             .flex()
             .items_center()
             .justify_center()
+            .text_size(px(12.))
             .text_color(cx.theme().muted_foreground)
-            .child("No sources match.")
+            .child(self.empty_message.clone())
     }
 
     fn set_selected_index(
@@ -288,8 +315,9 @@ impl ListDelegate for SourceDelegate {
 #[allow(clippy::expect_used)]
 mod tests {
     use kinema_core::sources::{InfoHash, TorrentSource};
+    use std::prelude::v1::test;
 
-    use super::{SortKey, SourceOptions, available_qualities, format_size, visible};
+    use super::{SortKey, SourceOptions, available_qualities, format_size, source_facts, visible};
     use kinema_core::sources::SourceCandidate;
 
     fn cand(
@@ -359,6 +387,22 @@ mod tests {
         options.select_sort(SortKey::Name);
         assert!(!options.descending);
         assert_eq!(names(&visible(&all, &options)), ["src1", "src2"]);
+    }
+
+    #[test]
+    fn source_facts_preserve_zero_and_explicit_unknowns() {
+        assert_eq!(
+            source_facts(&cand(1, None, None, None)),
+            ["Quality —", "Size —", "Seeds —"]
+        );
+        assert_eq!(
+            source_facts(&cand(1, Some(" 1080p "), Some(0), Some(0))),
+            ["1080p", "0 B", "0 ↑"]
+        );
+        assert_eq!(
+            source_facts(&cand(1, Some("  "), None, None))[0],
+            "Quality —"
+        );
     }
 
     #[test]

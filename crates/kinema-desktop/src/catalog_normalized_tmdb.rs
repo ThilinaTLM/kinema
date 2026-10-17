@@ -187,6 +187,13 @@ fn title(tx: &Transaction<'_>, id: i64, kind: MediaKind) -> Result<TmdbTitle, Ca
         overview: record.text("overview").map(str::to_owned),
         release_info,
         poster_url: record.text("poster_url").map(str::to_owned),
+        display: Arc::new(CatalogService::display_facts(&record)),
+        imdb: record
+            .identifiers
+            .iter()
+            .find(|id| id.namespace == "imdb")
+            .map(|id| ImdbId::new(id.external_id.clone()).map_err(|_| CatalogError::InvalidCache))
+            .transpose()?,
     })
 }
 pub(super) fn read(
@@ -358,4 +365,96 @@ pub(super) fn write_rich(
     };
     let fetch_id:i64=tx.query_row(&format!("SELECT id FROM metadata_fetches WHERE {column}=?1 AND provider='tmdb' AND resource_key=?2"),params![owner,resource],|row|row.get(0))?;
     super::normalized_rich::write(tx, id, rich, "tmdb", fetch_id, time)
+}
+
+#[cfg(test)]
+mod display_projection_tests {
+    use super::*;
+    #[test]
+    fn actual_tmdb_read_exposes_retained_facts_and_only_genuine_imdb_scores()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&directory.path().join("catalog"))?;
+        let query = TmdbQuery::Details {
+            kind: MediaKind::Movie,
+            id: 42,
+        };
+        let imdb = ImdbId::new("tt1234567")?;
+        let data = TmdbData::Details(TmdbDetails {
+            title: TmdbTitle {
+                id: 42,
+                kind: MediaKind::Movie,
+                name: "Synthetic".into(),
+                overview: None,
+                release_info: Some("2024-03-12".into()),
+                poster_url: Some("https://image.tmdb.org/t/p/w500/poster.png".into()),
+                display: Default::default(),
+                imdb: None,
+            },
+            imdb: Some(imdb.clone()),
+            genres: vec!["Drama".into()],
+            seasons: vec![],
+        });
+        service.save_tmdb(&query, data)?;
+        let tx = service.connection.transaction()?;
+        let rich = normalized_rich::tmdb(
+            &serde_json::json!({"runtime":93,"vote_average":9.8,"vote_count":12}),
+            &query,
+        )?;
+        write_rich(&tx, &query, &rich, 20)?;
+        tx.commit()?;
+        let saved = service.read_tmdb(&query)?.ok_or("missing TMDB cache")?;
+        let TmdbData::Details(details) = saved.data else {
+            return Err("wrong resource".into());
+        };
+        assert_eq!(details.title.year(), Some(2024));
+        assert_eq!(
+            details.title.poster_url(),
+            Some("https://image.tmdb.org/t/p/w500/poster.png")
+        );
+        assert_eq!(details.title.runtime_minutes(), Some(93));
+        assert_eq!(details.title.genres(), &["Drama"]);
+        assert_eq!(details.title.season_count(), None);
+        assert_eq!(details.title.imdb.as_ref(), Some(&imdb));
+        assert_eq!(details.title.imdb_rating(), None); // TMDB 9.8 is never IMDb.
+        let tx = service.connection.transaction()?;
+        normalized_pages::write_cinemeta_details(
+            &tx,
+            &TitleDetails {
+                title: CatalogTitle::new(imdb, MediaKind::Movie, "Synthetic", None)?,
+                poster_url: None,
+                background_url: None,
+                release_info: None,
+                genres: vec![],
+                episodes: vec![],
+            },
+            30,
+            true,
+        )?;
+        let id = title_id(&tx, MediaKind::Movie, "tmdb", "42")?.ok_or("missing canonical title")?;
+        let fetch_id: i64 = tx.query_row(
+            "SELECT id FROM metadata_fetches WHERE title_id=?1 AND provider='cinemeta'",
+            params![id],
+            |row| row.get(0),
+        )?;
+        let rich =
+            normalized_rich::cinemeta(&serde_json::json!({"type":"movie", "imdbRating":"0.0"}))?;
+        normalized_rich::write(&tx, id, &rich, "cinemeta", fetch_id, 30)?;
+        tx.commit()?;
+        let saved = service.read_tmdb(&query)?.ok_or("missing TMDB cache")?;
+        let TmdbData::Details(details) = saved.data else {
+            return Err("wrong resource".into());
+        };
+        assert_eq!(details.title.imdb_rating(), Some(0.0));
+        // A retained score does not manufacture an external identifier.
+        service.connection.execute(
+            "DELETE FROM title_identifiers WHERE namespace='imdb' AND title_id=?1",
+            params![id],
+        )?;
+        let tx = service.connection.transaction()?;
+        let title = title(&tx, id, MediaKind::Movie)?;
+        assert_eq!(title.imdb, None);
+        assert_eq!(title.imdb_rating(), Some(0.0));
+        Ok(())
+    }
 }

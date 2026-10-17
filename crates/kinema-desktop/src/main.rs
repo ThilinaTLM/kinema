@@ -23,6 +23,7 @@ mod ui;
 use std::{cell::Cell, process::ExitCode, rc::Rc};
 
 use gpui_kit::*;
+pub(crate) use kinema_desktop::{artwork, design};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> ExitCode {
@@ -43,6 +44,7 @@ fn main() -> ExitCode {
         .with_assets(app_assets::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            kinema_desktop::design::init(cx);
             shell::bind_keys(cx);
             tmdb_view::bind_keys(cx);
             cx.on_window_closed(|cx, _closed_window| {
@@ -53,6 +55,7 @@ fn main() -> ExitCode {
             .detach();
 
             let options = WindowOptions {
+                window_min_size: Some(size(px(900.0), px(600.0))),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Kinema Next".into()),
                     ..Default::default()

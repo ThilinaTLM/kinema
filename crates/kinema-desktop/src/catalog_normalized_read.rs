@@ -157,6 +157,65 @@ fn parts(tx: &Transaction<'_>, target: Target) -> Result<Parts, CatalogError> {
     })
 }
 impl CatalogService {
+    /// Project retained facts only. Rating source and metric, not supplier, define IMDb.
+    pub(crate) fn display_title(record: &CanonicalTitle) -> Result<CatalogTitle, CatalogError> {
+        let id = record
+            .identifiers
+            .iter()
+            .find(|id| id.namespace == "imdb")
+            .ok_or(CatalogError::InvalidCache)?;
+        let title = validate_title(
+            id.external_id.clone(),
+            record.kind,
+            record
+                .text("name")
+                .ok_or(CatalogError::InvalidCache)?
+                .into(),
+            record.text("overview").map(str::to_owned),
+        )
+        .map_err(|_| CatalogError::InvalidCache)?;
+        Ok(title.with_display(Self::display_facts(record)))
+    }
+
+    /// Also usable for TMDB titles without an IMDb identifier. Unknown IMDb ID
+    /// and unknown IMDb rating are independent; only explicit IMDb scores project.
+    pub(crate) fn display_facts(record: &CanonicalTitle) -> kinema_core::catalog::CatalogDisplay {
+        use kinema_core::catalog::{CatalogDisplay, ImdbRating};
+        let rating = record
+            .ratings
+            .iter()
+            .filter(|r| {
+                r.observation.source == "imdb"
+                    && r.observation.metric == "score"
+                    && r.observation.value.is_some()
+            })
+            .max_by_key(|r| (r.observed_at, r.updated_at, &r.observation.supplied_by))
+            .and_then(|r| r.observation.value)
+            .and_then(ImdbRating::new);
+        let genres = match record.fields.get("genres_json") {
+            Some(FieldValue::Labels(labels)) => labels.clone(),
+            _ => Vec::new(),
+        };
+        CatalogDisplay {
+            year: record
+                .integer(if record.kind == MediaKind::Movie {
+                    "release_year"
+                } else {
+                    "first_air_year"
+                })
+                .and_then(|v| u16::try_from(v).ok()),
+            poster_url: record.text("poster_url").map(str::to_owned),
+            imdb_rating: rating,
+            runtime_minutes: record
+                .integer("runtime_minutes")
+                .and_then(|v| u16::try_from(v).ok()),
+            genres,
+            season_count: record
+                .integer("season_count")
+                .and_then(|v| u32::try_from(v).ok()),
+        }
+    }
+
     pub(crate) fn title_record(
         tx: &Transaction<'_>,
         id: i64,
@@ -264,5 +323,98 @@ impl CatalogService {
                 ))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+    #[test]
+    fn stored_provider_facts_project_without_tmdb_rating_substitution()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        let title = CatalogTitle::new(
+            ImdbId::new("tt1234567")?,
+            MediaKind::Movie,
+            "Synthetic",
+            None,
+        )?;
+        let details = TitleDetails {
+            title,
+            poster_url: Some("https://example.com/poster.png".into()),
+            background_url: None,
+            release_info: Some("2024".into()),
+            genres: vec!["Drama".into()],
+            episodes: vec![],
+        };
+        let tx = service.connection.transaction()?;
+        normalized_pages::write_cinemeta_details(&tx, &details, 10, true)?;
+        let id = normalized::title_id(&tx, MediaKind::Movie, "imdb", "tt1234567")?
+            .ok_or("missing title")?;
+        let fetch_id: i64 = tx.query_row(
+            "SELECT id FROM metadata_fetches WHERE title_id=?1 AND provider='cinemeta'",
+            params![id],
+            |row| row.get(0),
+        )?;
+        // Synthetic provider document, never a real provider/authentication request.
+        let document = serde_json::json!({"type":"movie", "runtime":"93 min", "released":"2024-03-12", "genres":["Drama"], "imdbRating":"0.0"});
+        let records = normalized_rich::cinemeta(&document)?;
+        normalized_rich::write(&tx, id, &records, "cinemeta", fetch_id, 10)?;
+        let record = CatalogService::title_record(&tx, id)?;
+        let projected = CatalogService::display_title(&record)?;
+        assert_eq!(projected.year(), Some(2024));
+        assert_eq!(projected.runtime_minutes(), Some(93));
+        assert_eq!(
+            projected.poster_url(),
+            Some("https://example.com/poster.png")
+        );
+        assert_eq!(projected.genres(), &["Drama"]);
+        assert_eq!(projected.imdb_rating(), Some(0.0));
+        assert_eq!(projected.season_count(), None);
+        let mut record = record;
+        record.identifiers.clear();
+        assert_eq!(
+            CatalogService::display_facts(&record)
+                .imdb_rating
+                .map(kinema_core::catalog::ImdbRating::value),
+            Some(0.0)
+        );
+        assert!(CatalogService::display_title(&record).is_err());
+        record.identifiers.push(ExternalIdentifier {
+            namespace: "imdb".into(),
+            external_id: "tt1234567".into(),
+        });
+        record.ratings[0].observation.source = "tmdb".into();
+        record.ratings[0].observation.value = Some(9.8);
+        let projected = CatalogService::display_title(&record)?;
+        assert_eq!(projected.imdb_rating(), None);
+        assert_eq!(projected.id().as_str(), "tt1234567");
+        Ok(())
+    }
+    #[test]
+    fn series_year_and_season_count_remain_optional_facts() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let record = CanonicalTitle {
+            id: 1,
+            kind: MediaKind::Series,
+            identifiers: vec![ExternalIdentifier {
+                namespace: "imdb".into(),
+                external_id: "tt1234567".into(),
+            }],
+            fields: BTreeMap::from([
+                ("name".into(), FieldValue::Text("Series".into())),
+                ("first_air_year".into(), FieldValue::Integer(2023)),
+                ("season_count".into(), FieldValue::Integer(0)),
+            ]),
+            provenance: vec![],
+            ratings: vec![],
+            updated_at: 1,
+        };
+        let projected = CatalogService::display_title(&record)?;
+        assert_eq!(projected.year(), Some(2023));
+        assert_eq!(projected.season_count(), Some(0));
+        assert_eq!(projected.imdb_rating(), None);
+        Ok(())
     }
 }

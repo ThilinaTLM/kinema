@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use gpui_kit::base::Disableable as _;
 use gpui_kit::component::{
     ActiveTheme, Sizable as _,
-    alert::Alert,
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
     radio::{Radio, RadioGroup},
@@ -23,6 +22,7 @@ use crate::{
     credentials::SecretString,
     player::{PlayerChoice, validate_choice},
     settings::{MetadataProvider, Settings},
+    ui::strip::{NoticeTone, notice},
 };
 
 const GIB: u64 = 1024 * 1024 * 1024;
@@ -726,15 +726,20 @@ impl SettingsView {
         div()
             .flex()
             .flex_col()
-            .gap_3()
-            .p_4()
+            .gap_2()
+            .p_3()
             .border_1()
             .border_color(cx.theme().border)
-            .rounded_lg()
-            .child(div().text_lg().child(title))
+            .rounded_md()
             .child(
                 div()
-                    .text_sm()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
                     .text_color(cx.theme().muted_foreground)
                     .child(description),
             )
@@ -742,7 +747,7 @@ impl SettingsView {
     }
 
     fn field_label(&self, text: &'static str) -> Div {
-        div().text_sm().child(text)
+        div().text_size(px(12.)).child(text)
     }
 
     fn preferences(&self, cx: &mut Context<Self>) -> Div {
@@ -758,6 +763,8 @@ impl SettingsView {
             .selected_index(indexer_ix)
             .children(INDEXERS.map(|i| {
                 Radio::new(indexer_name(i))
+                    .min_h(px(CONTROL_HEIGHT))
+                    .text_size(px(13.))
                     .label(indexer_name(i))
                     .accessibility_label(format!("Source indexer: {}", indexer_name(i)))
             }))
@@ -772,6 +779,8 @@ impl SettingsView {
             .selected_index(provider_ix)
             .children(PROVIDERS.map(|p| {
                 Radio::new(provider_name(p))
+                    .min_h(px(CONTROL_HEIGHT))
+                    .text_size(px(13.))
                     .label(provider_name(p))
                     .accessibility_label(format!("Debrid provider: {}", provider_name(p)))
             }))
@@ -787,6 +796,8 @@ impl SettingsView {
             .selected_index(metadata_ix)
             .children(METADATA.map(|m| {
                 Radio::new(metadata_name(m))
+                    .min_h(px(CONTROL_HEIGHT))
+                    .text_size(px(13.))
                     .label(metadata_name(m))
                     .accessibility_label(format!("Metadata provider: {}", metadata_name(m)))
             }))
@@ -803,6 +814,8 @@ impl SettingsView {
             .selected_index(player_ix)
             .children(PlayerKind::ALL.map(|p| {
                 Radio::new(p.label())
+                    .min_h(px(CONTROL_HEIGHT))
+                    .text_size(px(13.))
                     .label(p.label())
                     .accessibility_label(format!("External player: {}", p.label()))
             }))
@@ -836,46 +849,41 @@ impl SettingsView {
         let dirty = !matches!(status, SaveStatus::Saved);
         let can_save = matches!(status, SaveStatus::Unsaved) && !busy;
 
-        let mut path_block = div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(self.field_label("Custom player executable"))
-            .child(
-                Input::new(&self.path_input)
-                    .disabled(busy || self.form.player != PlayerKind::Custom),
-            );
-        if let Some(message) = path_error {
-            path_block = path_block.child(div().text_sm().text_color(danger).child(message));
-        } else {
-            path_block = path_block.child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child("Only used with Custom player. mpv and VLC are found automatically."),
-            );
-        }
-        let mut quota_block = div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(self.field_label("Media cache limit (GiB)"))
-            .child(
-                div()
-                    .max_w(px(220.))
-                    .child(Input::new(&self.quota_input).disabled(busy)),
-            );
-        quota_block = match quota_error {
-            Some(message) => quota_block.child(div().text_sm().text_color(danger).child(message)),
-            None => quota_block.child(div().text_sm().text_color(muted).child(
-                "Must be positive. Files larger than the limit cannot be cached; lowering it below the space already reserved is refused.",
-            )),
+        let path_note = match path_error {
+            Some(message) => note_text(message, danger),
+            None => note_text(
+                "Only used with Custom player. mpv and VLC are found automatically.",
+                muted,
+            ),
         };
+        let path_block = self.field_row(
+            "Custom player executable",
+            Input::new(&self.path_input)
+                .h(px(CONTROL_HEIGHT))
+                .disabled(busy || self.form.player != PlayerKind::Custom),
+            path_note,
+        );
+        let quota_note = match quota_error {
+            Some(message) => note_text(message, danger),
+            None => note_text(
+                "Must be positive. Files larger than the limit cannot be cached; lowering it below the space already reserved is refused.",
+                muted,
+            ),
+        };
+        let quota_block = self.field_row(
+            "Media cache limit (GiB)",
+            div().max_w(px(220.)).child(
+                Input::new(&self.quota_input)
+                    .h(px(CONTROL_HEIGHT))
+                    .disabled(busy),
+            ),
+            quota_note,
+        );
 
         let body = div()
             .flex()
             .flex_col()
-            .gap_4()
+            .gap_3()
             .child(self.labeled(
                 "Source indexer",
                 "Where torrent sources are searched.",
@@ -892,9 +900,14 @@ impl SettingsView {
                     muted,
                 );
                 if tmdb_missing {
-                    block = block.child(div().text_sm().text_color(danger).child(
-                        "TMDB is selected but no working token is saved. Save and test a Read \
-                         Access Token below, or choose Cinemeta.",
+                    block = block.child(self.field_row(
+                        "",
+                        note_text(
+                            "TMDB is selected but no working token is saved. Save and test a Read \
+                             Access Token below, or choose Cinemeta.",
+                            danger,
+                        ),
+                        div(),
                     ));
                 }
                 block
@@ -919,9 +932,11 @@ impl SettingsView {
                     .flex_wrap()
                     .items_center()
                     .gap_3()
+                    .ml(px(LABEL_WIDTH + 12.))
                     .child(
                         Button::new("settings-save")
                             .primary()
+                            .h(px(CONTROL_HEIGHT))
                             .label("Save preferences")
                             .disabled(!can_save)
                             .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
@@ -929,11 +944,17 @@ impl SettingsView {
                     .child(
                         Button::new("settings-discard")
                             .outline()
+                            .h(px(CONTROL_HEIGHT))
                             .label("Discard changes")
                             .disabled(!dirty || busy)
                             .on_click(cx.listener(|this, _, _, cx| this.discard(cx))),
                     )
-                    .child(div().text_sm().text_color(status_color).child(status_text)),
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(status_color)
+                            .child(status_text),
+                    ),
             );
         self.section(
             "Preferences",
@@ -943,6 +964,38 @@ impl SettingsView {
         )
     }
 
+    /// Aligned settings row: fixed label column, flexible control, 11px note.
+    fn field_row(
+        &self,
+        title: &'static str,
+        control: impl IntoElement,
+        note: impl IntoElement,
+    ) -> Div {
+        div()
+            .flex()
+            .items_start()
+            .gap_3()
+            .child(
+                div()
+                    .w(px(LABEL_WIDTH))
+                    .flex_none()
+                    .min_h(px(if title.is_empty() { 0. } else { CONTROL_HEIGHT }))
+                    .flex()
+                    .items_center()
+                    .child(self.field_label(title)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(control)
+                    .child(note),
+            )
+    }
+
     fn labeled(
         &self,
         title: &'static str,
@@ -950,13 +1003,7 @@ impl SettingsView {
         control: impl IntoElement,
         muted: Hsla,
     ) -> Div {
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(self.field_label(title))
-            .child(control)
-            .child(div().text_sm().text_color(muted).child(hint))
+        self.field_row(title, control, note_text(hint, muted))
     }
 
     fn credential_section(&self, kind: DebridKind, cx: &mut Context<Self>) -> Div {
@@ -990,6 +1037,8 @@ impl SettingsView {
                 Button::new(SharedString::from(format!("token-save-{key}")))
                     .primary()
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label("Save token")
                     .disabled(busy || !typed)
                     .on_click(
@@ -1000,14 +1049,20 @@ impl SettingsView {
                 Button::new(SharedString::from(format!("token-test-{key}")))
                     .outline()
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label("Test connection")
                     .disabled(busy || !present)
                     .on_click(cx.listener(move |this, _, _, cx| this.test(kind, cx))),
             )
             .child(
                 Button::new(SharedString::from(format!("token-remove-{key}")))
-                    .danger()
+                    .outline()
+                    .text_color(cx.theme().danger)
+                    .border_color(cx.theme().danger)
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label(if removing {
                         "Confirm remove"
                     } else {
@@ -1021,6 +1076,8 @@ impl SettingsView {
                 Button::new(SharedString::from(format!("token-keep-{key}")))
                     .ghost()
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label("Keep token")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.confirm_remove = None;
@@ -1033,21 +1090,38 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap_2()
-            .flex_1()
-            .min_w(px(280.))
-            .child(div().text_base().child(if active {
-                format!("{name} (selected provider)")
-            } else {
-                name.to_owned()
-            }))
-            .child(div().text_sm().text_color(tone_color).child(summary))
-            .child(self.field_label("New token"))
-            .child(Input::new(&input).mask_toggle().disabled(busy))
-            .child(buttons);
+            .w_full()
+            .min_w_0()
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(if active {
+                        format!("{name} (selected provider)")
+                    } else {
+                        name.to_owned()
+                    }),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(tone_color)
+                    .child(summary),
+            )
+            .child(
+                self.field_row(
+                    "New token",
+                    Input::new(&input)
+                        .h(px(CONTROL_HEIGHT))
+                        .mask_toggle()
+                        .disabled(busy),
+                    buttons,
+                ),
+            );
         if typed {
             column = column.child(
                 div()
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(cx.theme().muted_foreground)
                     .child("This text is not saved yet, and Test connection ignores it."),
             );
@@ -1062,7 +1136,7 @@ impl SettingsView {
             .gap_3()
             .child(
                 div()
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(cx.theme().muted_foreground)
                     .child(
                         "Save stores the pasted token in the OS keyring and clears the field. \
@@ -1073,7 +1147,7 @@ impl SettingsView {
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
+                    .flex_col()
                     .gap_4()
                     .child(self.credential_section(DebridKind::RealDebrid, cx))
                     .child(self.credential_section(DebridKind::AllDebrid, cx)),
@@ -1109,6 +1183,8 @@ impl SettingsView {
                 Button::new("tmdb-save")
                     .primary()
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label("Save token")
                     .disabled(busy || !typed)
                     .on_click(cx.listener(|this, _, window, cx| this.save_tmdb(window, cx))),
@@ -1117,14 +1193,20 @@ impl SettingsView {
                 Button::new("tmdb-test")
                     .outline()
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label("Test connection")
                     .disabled(busy || !present)
                     .on_click(cx.listener(|this, _, _, cx| this.test_tmdb(cx))),
             )
             .child(
                 Button::new("tmdb-remove")
-                    .danger()
+                    .outline()
+                    .text_color(cx.theme().danger)
+                    .border_color(cx.theme().danger)
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label(if removing {
                         "Confirm remove"
                     } else {
@@ -1138,6 +1220,8 @@ impl SettingsView {
                 Button::new("tmdb-keep")
                     .ghost()
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label("Keep token")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.confirm_remove_tmdb = false;
@@ -1149,19 +1233,36 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().text_base().child(if selected {
-                "TMDB API Read Access Token (selected provider)"
-            } else {
-                "TMDB API Read Access Token"
-            }))
-            .child(div().text_sm().text_color(tone_color).child(summary))
-            .child(self.field_label("New Read Access Token"))
-            .child(Input::new(&self.tmdb_input).mask_toggle().disabled(busy))
-            .child(buttons);
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(if selected {
+                        "TMDB API Read Access Token (selected provider)"
+                    } else {
+                        "TMDB API Read Access Token"
+                    }),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(tone_color)
+                    .child(summary),
+            )
+            .child(
+                self.field_row(
+                    "New Read Access Token",
+                    Input::new(&self.tmdb_input)
+                        .h(px(CONTROL_HEIGHT))
+                        .mask_toggle()
+                        .disabled(busy),
+                    buttons,
+                ),
+            );
         if typed {
             column = column.child(
                 div()
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(muted)
                     .child("This text is not saved yet, and Test connection ignores it."),
             );
@@ -1170,7 +1271,7 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().text_sm().text_color(muted).child(
+            .child(div().text_size(px(12.)).text_color(muted).child(
                 "Use the long \"API Read Access Token\" from your TMDB account, which is sent as \
                  a bearer token in the Authorization header. Do not paste the short \"API Key\": \
                  it is a different credential and is not used here. Save stores the token in the \
@@ -1186,6 +1287,8 @@ impl SettingsView {
                         Button::new("tmdb-open-settings")
                             .ghost()
                             .small()
+                            .h(px(24.))
+                            .text_size(px(12.))
                             .label("Open TMDB API settings")
                             .on_click(cx.listener(|_, _, _, cx| {
                                 cx.open_url(TMDB_API_SETTINGS_URL);
@@ -1195,13 +1298,20 @@ impl SettingsView {
                         Button::new("tmdb-open-docs")
                             .ghost()
                             .small()
+                            .h(px(24.))
+                            .text_size(px(12.))
                             .label("How TMDB authentication works")
                             .on_click(cx.listener(|_, _, _, cx| {
                                 cx.open_url(TMDB_AUTH_DOCS_URL);
                             })),
                     ),
             )
-            .child(div().text_sm().text_color(muted).child(TMDB_ATTRIBUTION));
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(muted)
+                    .child(TMDB_ATTRIBUTION),
+            );
         self.section(
             "Metadata credentials (TMDB)",
             "Optional. Needed only when TMDB is the selected metadata provider.",
@@ -1213,6 +1323,7 @@ impl SettingsView {
     fn storage(&self, cx: &mut Context<Self>) -> Div {
         let body = div().flex().flex_wrap().items_center().gap_3().child(
             Button::new("settings-cleanup")
+                .h(px(CONTROL_HEIGHT))
                 .outline()
                 .label("Remove unused cached media")
                 .disabled(self.busy.is_some())
@@ -1239,6 +1350,17 @@ fn parse_for_display(form: &SettingsForm) -> Option<&'static str> {
     }
 }
 
+/// Ordinary control height and settings label column width (design system).
+const CONTROL_HEIGHT: f32 = 28.0;
+const LABEL_WIDTH: f32 = 160.0;
+
+fn note_text(text: impl Into<SharedString>, color: Hsla) -> Div {
+    div()
+        .text_size(px(11.))
+        .text_color(color)
+        .child(text.into())
+}
+
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_inputs(window, cx);
@@ -1246,19 +1368,30 @@ impl Render for SettingsView {
             .id("settings-view")
             .flex()
             .flex_col()
-            .gap_4()
+            .gap_3()
             .p_4()
             .size_full()
+            .text_size(px(13.))
             .overflow_y_scroll()
-            .child(div().text_xl().child("Settings"));
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Settings"),
+            );
         if let Some(busy) = self.busy {
-            root = root.child(Alert::info("settings-busy", busy.label()));
+            root = root.child(notice("settings-busy", busy.label(), NoticeTone::Info, cx));
         }
         if let Some((message, is_error)) = &self.feedback {
             root = root.child(if *is_error {
-                Alert::error("settings-feedback", message.clone())
+                notice("settings-feedback", message.clone(), NoticeTone::Error, cx)
             } else {
-                Alert::success("settings-feedback", message.clone())
+                notice(
+                    "settings-feedback",
+                    message.clone(),
+                    NoticeTone::Success,
+                    cx,
+                )
             });
         }
         root.child(self.preferences(cx))

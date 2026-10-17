@@ -305,6 +305,8 @@ mod tests {
                 overview: Some(overview.clone()),
                 release_info: None,
                 poster_url: None,
+                display: Default::default(),
+                imdb: None,
             };
             let series = TmdbTitle {
                 id: u64::from(5_000 + i),
@@ -313,6 +315,8 @@ mod tests {
                 overview: Some(overview.clone()),
                 release_info: None,
                 poster_url: None,
+                display: Default::default(),
+                imdb: None,
             };
             // Physical insertion order deliberately opposes dependency order.
             save_tmdb(
@@ -432,6 +436,8 @@ mod tests {
             overview: None,
             release_info: None,
             poster_url: None,
+            display: Default::default(),
+            imdb: None,
         };
         save_tmdb(
             &tx,
@@ -535,6 +541,8 @@ mod tests {
             overview: None,
             release_info: None,
             poster_url: Some(old_tmdb_poster.into()),
+            display: Default::default(),
+            imdb: None,
         };
         let season_query = TmdbQuery::Season {
             series_id: 8001,

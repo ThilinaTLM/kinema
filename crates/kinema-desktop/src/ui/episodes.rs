@@ -7,7 +7,8 @@ use gpui_kit::component::{
 use gpui_kit::*;
 use kinema_core::catalog::CatalogEpisode;
 
-pub(crate) const ROW_HEIGHT: f32 = 68.0;
+/// Compact one-line row (Graphite design system: episode rows are 32 px).
+pub(crate) const ROW_HEIGHT: f32 = 32.0;
 
 /// Distinct season numbers in ascending order (season 0 is specials).
 pub(crate) fn seasons(episodes: &[CatalogEpisode]) -> Vec<u32> {
@@ -57,6 +58,34 @@ pub(crate) fn season_label(season: u32) -> String {
     }
 }
 
+/// "3 seasons" / "2 seasons + specials". `None` while no season is known, so an
+/// unknown count is never shown as zero.
+pub(crate) fn seasons_label(seasons: &[u32]) -> Option<String> {
+    let regular = seasons.iter().filter(|s| **s > 0).count();
+    let specials = seasons.contains(&0);
+    match (regular, specials) {
+        (0, false) => None,
+        (0, true) => Some("Specials".to_owned()),
+        (n, specials) => {
+            let mut text = format!("{n} season{}", if n == 1 { "" } else { "s" });
+            if specials {
+                text.push_str(" + specials");
+            }
+            Some(text)
+        }
+    }
+}
+
+/// Episode count for the visible season: the loaded rows win over a count the
+/// provider reported; a reported zero means "not reported", not "empty".
+pub(crate) fn episode_count_label(loaded: Option<usize>, reported: Option<u32>) -> Option<String> {
+    let count = loaded.or_else(|| reported.filter(|n| *n > 0).map(|n| n as usize))?;
+    Some(format!(
+        "{count} episode{}",
+        if count == 1 { "" } else { "s" }
+    ))
+}
+
 pub(crate) struct EpisodeDelegate {
     rows: Vec<CatalogEpisode>,
     selected: Option<IndexPath>,
@@ -96,47 +125,56 @@ impl ListDelegate for EpisodeDelegate {
         cx: &mut Context<ListState<Self>>,
     ) -> Option<ListItem> {
         let episode = self.rows.get(ix.row)?;
-        let muted = cx.theme().muted_foreground;
-        let heading = match &episode.name {
-            Some(name) => format!("{}. {name}", episode.number),
+        let theme = cx.theme();
+        let (muted, accent) = (theme.muted_foreground, theme.primary);
+        let selected = self.selected == Some(ix);
+        let number = div()
+            .w(px(28.0))
+            .flex_none()
+            .text_color(muted)
+            .child(episode.number.to_string());
+        let title = match &episode.name {
+            Some(name) => name.clone(),
             None => format!("Episode {}", episode.number),
         };
-        let mut body = div().flex().flex_col().gap_1().overflow_hidden().child(
-            div()
-                .flex()
-                .gap_2()
-                .child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .truncate()
-                        .child(heading),
-                )
-                .children(episode.released.as_ref().map(|date| {
-                    div()
-                        .text_sm()
-                        .text_color(muted)
-                        .child(release_date(date).to_owned())
-                })),
-        );
-        if let Some(overview) = &episode.overview {
-            body = body.child(
+        let row = div()
+            .size_full()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(13.0))
+            .child(
+                // Selection marker: visible without relying on colour alone.
                 div()
-                    .text_sm()
+                    .w(px(2.0))
+                    .h(px(16.0))
+                    .flex_none()
+                    .rounded_full()
+                    .bg(if selected {
+                        accent
+                    } else {
+                        gpui_kit::transparent_black()
+                    }),
+            )
+            .child(number)
+            .child(div().flex_1().min_w_0().truncate().child(title))
+            .children(episode.released.as_ref().map(|date| {
+                div()
+                    .flex_none()
+                    .text_size(px(11.0))
                     .text_color(muted)
-                    .line_clamp(2)
-                    .child(overview.clone()),
-            );
-        }
+                    .child(release_date(date).to_owned())
+            }));
         Some(
             ListItem::new(("episode", ix.row))
                 .h(px(ROW_HEIGHT))
-                .px_3()
-                .selected(self.selected == Some(ix))
+                .px_2()
+                .selected(selected)
                 .accessibility_label(format!(
                     "Season {} episode {}",
                     episode.season, episode.number
                 ))
-                .child(body),
+                .child(row),
         )
     }
 
@@ -150,6 +188,7 @@ impl ListDelegate for EpisodeDelegate {
             .flex()
             .items_center()
             .justify_center()
+            .text_size(px(13.0))
             .text_color(cx.theme().muted_foreground)
             .child("No episodes in this season.")
     }
@@ -167,7 +206,10 @@ impl ListDelegate for EpisodeDelegate {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_season, release_date, season_episodes, season_label, seasons};
+    use super::{
+        default_season, episode_count_label, release_date, season_episodes, season_label, seasons,
+        seasons_label,
+    };
     use kinema_core::catalog::CatalogEpisode;
 
     fn ep(season: u32, number: u32) -> CatalogEpisode {
@@ -193,5 +235,31 @@ mod tests {
         assert_eq!(release_date("Aug 2020"), "Aug 2020");
         assert_eq!(season_label(0), "Specials");
         assert_eq!(season_label(3), "Season 3");
+    }
+
+    #[test]
+    fn counts_are_never_fabricated() {
+        assert_eq!(seasons_label(&[]), None);
+        assert_eq!(seasons_label(&[0]).as_deref(), Some("Specials"));
+        assert_eq!(seasons_label(&[1]).as_deref(), Some("1 season"));
+        assert_eq!(
+            seasons_label(&[0, 1, 2]).as_deref(),
+            Some("2 seasons + specials")
+        );
+        assert_eq!(episode_count_label(None, None), None);
+        assert_eq!(episode_count_label(None, Some(0)), None);
+        assert_eq!(
+            episode_count_label(None, Some(1)).as_deref(),
+            Some("1 episode")
+        );
+        // Loaded rows win; a genuinely empty loaded season is a real zero.
+        assert_eq!(
+            episode_count_label(Some(0), Some(8)).as_deref(),
+            Some("0 episodes")
+        );
+        assert_eq!(
+            episode_count_label(Some(10), Some(8)).as_deref(),
+            Some("10 episodes")
+        );
     }
 }

@@ -1,9 +1,40 @@
 //! One loading / error / freshness strip reused by every remote-backed view.
 
-use gpui_kit::component::{ActiveTheme, alert::Alert, spinner::Spinner, tag::Tag};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, alert::Alert, spinner::Spinner};
 use gpui_kit::*;
 
 use crate::app_state::{Origin, Phase};
+
+/// Status icons carry semantic ink; explanations stay on a neutral surface.
+#[derive(Clone, Copy)]
+pub(crate) enum NoticeTone {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+pub(crate) fn notice(
+    id: &'static str,
+    message: impl Into<SharedString>,
+    tone: NoticeTone,
+    cx: &App,
+) -> Alert {
+    let (icon, ink) = match tone {
+        NoticeTone::Info => (IconName::Info, cx.theme().info),
+        NoticeTone::Success => (IconName::CircleCheck, cx.theme().success),
+        NoticeTone::Warning => (IconName::TriangleAlert, cx.theme().warning),
+        NoticeTone::Error => (IconName::CircleX, cx.theme().danger),
+    };
+    Alert::new(id, message.into())
+        .icon(Icon::new(icon).text_color(ink))
+        .bg(cx.theme().muted)
+        .border_color(cx.theme().border)
+        .text_color(cx.theme().foreground)
+        .text_size(px(13.))
+        .px(px(12.))
+        .py(px(8.))
+}
 
 /// Everything the strip needs; built from a `Resource` or `ScreenState`.
 pub(crate) struct StripModel<'a> {
@@ -40,7 +71,7 @@ pub(crate) fn format_utc(epoch_seconds: u64) -> String {
 
 pub(crate) fn status_strip(id: &'static str, model: &StripModel<'_>, cx: &App) -> Div {
     let muted = cx.theme().muted_foreground;
-    let mut strip = div().flex().flex_col().gap_2();
+    let mut strip = div().flex().flex_col().gap_1().text_size(px(12.));
 
     let busy_label = match model.phase {
         Phase::Reading => Some("Loading…".to_owned()),
@@ -59,27 +90,30 @@ pub(crate) fn status_strip(id: &'static str, model: &StripModel<'_>, cx: &App) -
         );
     }
     if let Some(message) = model.error {
-        let alert = Alert::error(id, message.to_owned()).title(if model.has_data {
-            "Could not refresh — showing previous results"
-        } else {
-            "Could not load"
-        });
+        let alert =
+            notice(id, message.to_owned(), NoticeTone::Error, cx).title(if model.has_data {
+                "Could not refresh — showing previous results"
+            } else {
+                "Could not load"
+            });
         strip = strip.child(alert);
     }
     if let (Some(at), Origin::Saved | Origin::Fetched) = (model.fetched_at, model.origin) {
-        let (tag, label) = match model.origin {
-            Origin::Saved => (Tag::secondary(), "Saved"),
-            _ => (Tag::success(), "Fetched"),
+        let label = match model.origin {
+            Origin::Saved => "Saved",
+            _ => "Fetched",
         };
         strip = strip.child(
             div()
                 .flex()
                 .items_center()
                 .gap_2()
-                .text_sm()
+                .text_size(px(11.))
                 .text_color(muted)
-                .child(tag.child(label))
-                .child(format!("Last successful fetch {}", format_utc(at))),
+                .child(format!(
+                    "{label} · Last successful fetch {}",
+                    format_utc(at)
+                )),
         );
     }
     strip
@@ -88,6 +122,7 @@ pub(crate) fn status_strip(id: &'static str, model: &StripModel<'_>, cx: &App) -
 #[cfg(test)]
 mod tests {
     use super::format_utc;
+    use std::prelude::v1::test;
 
     #[test]
     fn formats_utc_epoch_values() {

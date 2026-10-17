@@ -2,14 +2,13 @@ use std::{path::PathBuf, time::Duration};
 
 use gpui_kit::base::Disableable as _;
 use gpui_kit::component::{
-    ActiveTheme, IconName, WindowExt as _,
+    ActiveTheme, Icon, IconName, Selectable as _, Sizable as _, WindowExt as _,
     alert::Alert,
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
     list::{List, ListEvent, ListState},
-    sidebar::{Sidebar, SidebarCollapsible, SidebarGroup, SidebarMenu, SidebarMenuItem},
-    status_bar::StatusBar,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use kinema_core::{
     MediaKind,
@@ -31,7 +30,7 @@ use crate::{
     settings_view::{SettingsIntent, SettingsView},
     tmdb_view::{TmdbIntent, TmdbView},
     ui::{
-        catalog_view::TitleDelegate,
+        catalog_view::{self, GridMetrics, GridState, Nav, TitleDelegate, ViewMode},
         detail_view::{self, DetailPane},
         episodes::EpisodeDelegate,
         source_picker::{self, SourcesPane},
@@ -42,8 +41,14 @@ use crate::{
 
 actions!(kinema, [FocusSearch, GoBack]);
 
-/// Below this window width the sidebar collapses to icons.
-const COMPACT_WIDTH: f32 = 900.0;
+use kinema_desktop::design::tokens::metrics::{
+    RAIL_WIDTH, TOOLBAR_HEIGHT, WORKSPACE_GAP, WORKSPACE_PADDING as WORKSPACE_PAD,
+};
+
+fn grid_metrics(window: &Window, items: usize) -> GridMetrics {
+    let width = f32::from(window.viewport_size().width);
+    GridMetrics::new(width - RAIL_WIDTH - 2.0 * WORKSPACE_PAD, items)
+}
 
 pub(crate) fn bind_keys(cx: &mut App) {
     let find = if cfg!(target_os = "macos") {
@@ -183,12 +188,19 @@ struct CatalogPane {
     browse: Vec<BrowsePage>,
     input: Entity<InputState>,
     list: Entity<ListState<TitleDelegate>>,
+    grid: GridState,
     detail: Option<DetailPane>,
     _subscriptions: Vec<Subscription>,
 }
 
 pub(crate) struct Shell {
     page: Page,
+    /// Movies/series filter inside the Browse destination.
+    browse_kind: MediaKind,
+    view_mode: ViewMode,
+    /// Last rendered grid geometry, shared with the virtualized rows.
+    grid_metrics: GridMetrics,
+    restore_grid_focus: bool,
     next_base: u64,
     panes: [CatalogPane; 2],
     /// `Err` holds why the worker thread could not start.
@@ -248,6 +260,7 @@ impl Shell {
                 sources_resume: None,
                 input,
                 list,
+                grid: GridState::new(kind, cx),
                 detail: None,
                 _subscriptions: subscriptions,
             }
@@ -298,6 +311,10 @@ impl Shell {
         });
         let mut shell = Self {
             page: Page::default(),
+            browse_kind: MediaKind::Movie,
+            view_mode: ViewMode::default(),
+            grid_metrics: GridMetrics::new(900.0, 0),
+            restore_grid_focus: false,
             next_base: 0,
             panes,
             worker,
@@ -411,9 +428,9 @@ impl Shell {
 
     /// Pushes search or browse rows into the virtualized lists.
     fn sync_titles(&mut self, cx: &mut Context<Self>) {
-        for pane in &self.panes {
+        for pane in &mut self.panes {
             let screen = &pane.screen;
-            let (titles, empty): (Vec<CatalogTitle>, Option<SharedString>) =
+            let (mut titles, empty): (Vec<CatalogTitle>, Option<SharedString>) =
                 if screen.active().is_some() {
                     let empty = (!screen.busy() && screen.fetched_at.is_some())
                         .then(|| SharedString::from("No titles found."));
@@ -435,10 +452,14 @@ impl Shell {
                         .then(|| SharedString::from("The catalog returned no titles."));
                     (titles, empty)
                 };
+            // Adjacent provider pages can overlap; one mounted element per identity.
+            let mut seen = std::collections::HashSet::new();
+            titles.retain(|title| seen.insert((title.kind(), title.id().clone())));
+            let grid_changed = pane.grid.set(&titles, empty.clone(), cx);
             let changed = pane
                 .list
                 .update(cx, |list, _| list.delegate_mut().set(&titles, empty));
-            if changed {
+            if changed || grid_changed {
                 pane.list.update(cx, |_, cx| cx.notify());
             }
         }
@@ -507,6 +528,7 @@ impl Shell {
     /// Refresh keeps only the first page so paging restarts from fresh data.
     fn refresh_browse(&mut self, kind: MediaKind, cx: &mut Context<Self>) {
         self.cancel_browse(kind);
+        self.pane_mut(kind).grid.invalidate_artwork(cx);
         self.pane_mut(kind).browse.truncate(1);
         self.load_browse_page(kind, 0, true, cx);
     }
@@ -546,6 +568,7 @@ impl Shell {
 
     fn clear_search(&mut self, kind: MediaKind, window: &mut Window, cx: &mut Context<Self>) {
         self.suspend_search(kind);
+        self.pane_mut(kind).grid.invalidate_artwork(cx);
         self.pane_mut(kind).screen.clear();
         self.pane(kind)
             .input
@@ -611,8 +634,12 @@ impl Shell {
         if let Page::Catalog(kind) = self.page {
             self.cancel_browse(kind);
             self.suspend_search(kind);
+            self.pane_mut(kind).grid.invalidate_artwork(cx);
         }
         self.page = page;
+        if let Page::Catalog(kind) = page {
+            self.browse_kind = kind;
+        }
         match page {
             Page::Catalog(kind) if self.settings_loaded => match self.metadata {
                 MetadataProvider::Cinemeta => {
@@ -709,6 +736,7 @@ impl Shell {
         let request = self.pane_mut(kind).screen.search(&text);
         if request.is_some() {
             self.cancel_browse(kind);
+            self.pane_mut(kind).grid.invalidate_artwork(cx);
         }
         self.dispatch(kind, request);
         self.sync_titles(cx);
@@ -716,6 +744,7 @@ impl Shell {
     }
 
     fn refresh_search(&mut self, kind: MediaKind, cx: &mut Context<Self>) {
+        self.pane_mut(kind).grid.invalidate_artwork(cx);
         let request = self.pane_mut(kind).screen.refresh();
         self.dispatch(kind, request);
         self.sync_titles(cx);
@@ -743,6 +772,7 @@ impl Shell {
     ) {
         self.cancel_browse(kind);
         self.suspend_search(kind);
+        self.pane_mut(kind).grid.invalidate_artwork(cx);
         let detail = self.build_detail(kind, title, window, cx);
         self.cancel_replaced_detail(kind);
         self.pane_mut(kind).detail = Some(detail);
@@ -943,6 +973,7 @@ impl Shell {
             }
         }
         if self.pane(kind).detail.is_none() {
+            self.restore_grid_focus = true;
             self.ensure_browse(kind, cx);
             self.resume_search(kind);
         }
@@ -1483,6 +1514,7 @@ impl Shell {
                 self.suspend_search(kind);
                 self.cancel_browse(kind);
                 self.suspend_retained_detail(kind);
+                self.pane_mut(kind).grid.invalidate_artwork(cx);
             }
         }
         self.metadata = provider;
@@ -1589,50 +1621,82 @@ impl Shell {
 
     // ---- rendering ----------------------------------------------------
 
-    fn render_list_page(&self, kind: MediaKind, cx: &mut Context<Self>) -> Div {
+    fn grid_key(
+        &mut self,
+        kind: MediaKind,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = event.keystroke.key.as_str();
+        let grid = &mut self.pane_mut(kind).grid;
+        if key == "enter" {
+            if let Some(title) = grid
+                .selected()
+                .and_then(|ix| grid.titles().get(ix))
+                .cloned()
+            {
+                self.open_title(kind, title, window, cx);
+            }
+            cx.stop_propagation();
+            return;
+        }
+        let Some(nav) = Nav::from_key(key) else {
+            return;
+        };
+        let metrics = grid_metrics(window, grid.titles().len());
+        let next = catalog_view::step(
+            grid.focused_selection(window, cx),
+            nav,
+            metrics.columns,
+            grid.titles().len(),
+        );
+        grid.select(next);
+        grid.focus_selected(window, cx);
+        if let Some(ix) = next {
+            grid.scroll
+                .scroll_to_item(ix / metrics.columns, ScrollStrategy::Nearest);
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn click_card(
+        &mut self,
+        kind: MediaKind,
+        id: &kinema_core::catalog::ImdbId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.page != Page::Catalog(kind)
+            || self.metadata != MetadataProvider::Cinemeta
+            || self.pane(kind).detail.is_some()
+        {
+            return false;
+        }
+        let grid = &mut self.pane_mut(kind).grid;
+        let Some(ix) = catalog_view::title_index(grid.titles(), kind, id) else {
+            return false;
+        };
+        let title = grid.titles()[ix].clone();
+        grid.select(Some(ix));
+        grid.focus_selected(window, cx);
+        self.open_title(kind, title, window, cx);
+        true
+    }
+
+    fn render_catalog(&self, kind: MediaKind, cx: &mut Context<Self>) -> Div {
         let pane = self.pane(kind);
         let screen = &pane.screen;
         let muted = cx.theme().muted_foreground;
         let searching = screen.active().is_some();
         let browse_busy = pane.browse.iter().any(|p| p.res.busy());
-        let busy = if searching {
-            screen.busy()
-        } else {
-            browse_busy
-        };
 
-        let controls = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(div().flex_1().child(Input::new(&pane.input)))
-            .child(
-                Button::new("search")
-                    .icon(IconName::Search)
-                    .label("Search")
-                    .primary()
-                    .on_click(cx.listener(move |this, _, _, cx| this.search(kind, cx))),
-            )
-            .child(
-                Button::new("refresh")
-                    .icon(IconName::RefreshCw)
-                    .label("Refresh")
-                    .outline()
-                    .disabled(busy)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.pane(kind).screen.active().is_some() {
-                            this.refresh_search(kind, cx);
-                        } else {
-                            this.refresh_browse(kind, cx);
-                        }
-                    })),
-            );
-
-        let mut status = div().flex().flex_col().gap_2();
+        let mut status = div().flex().flex_col().gap(px(WORKSPACE_GAP));
         if let Some(message) = &screen.input_error {
             status = status.child(div().text_color(cx.theme().danger).child(message.clone()));
         }
-        let heading = if let Some(query) = screen.active() {
+        if let Some(query) = screen.active() {
             status = status.child(
                 div()
                     .flex()
@@ -1643,6 +1707,7 @@ impl Shell {
                             .icon(IconName::Close)
                             .label("Clear search")
                             .ghost()
+                            .small()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.clear_search(kind, window, cx);
                             })),
@@ -1665,7 +1730,6 @@ impl Shell {
                 },
                 cx,
             ));
-            Page::Catalog(kind).title().to_owned()
         } else {
             let first = pane.browse.first().map(|p| &p.res);
             let last = pane.browse.last().map(|p| &p.res);
@@ -1683,18 +1747,99 @@ impl Shell {
                 },
                 cx,
             ));
-            format!("Popular {}", Page::Catalog(kind).title().to_lowercase())
-        };
+        }
 
-        let mut body = div().flex_1().min_h_0().flex().flex_col().gap_2().child(
+        let items = if pane.grid.titles().is_empty() {
             div()
-                .flex_1()
-                .min_h_0()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(muted)
+                .children(pane.grid.empty().cloned())
+                .into_any_element()
+        } else if self.view_mode == ViewMode::List {
+            div()
+                .size_full()
                 .border_1()
                 .border_color(cx.theme().border)
                 .rounded_md()
-                .child(List::new(&pane.list)),
-        );
+                .child(List::new(&pane.list))
+                .into_any_element()
+        } else {
+            let metrics = self.grid_metrics;
+            let rows = metrics.total_rows;
+            uniform_list(
+                ("catalog-grid", index(kind)),
+                rows,
+                cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
+                    let grid = &this.pane(kind).grid;
+                    range
+                        .map(|row| {
+                            let cards: Vec<_> = metrics
+                                .row_items(row)
+                                .map(|ix| {
+                                    let mut data = grid.card(ix);
+                                    if let Some(url) = &data.poster_url {
+                                        use kinema_desktop::{
+                                            artwork::ArtworkState, design::PosterStatus,
+                                        };
+                                        match kinema_desktop::artwork::lookup_or_request(
+                                            grid.artwork_owner,
+                                            grid.artwork_generation,
+                                            url,
+                                            cx,
+                                        ) {
+                                            ArtworkState::Ready(image) => data.poster = Some(image),
+                                            ArtworkState::Loading => {
+                                                data.poster_status = PosterStatus::Loading;
+                                            }
+                                            ArtworkState::Failed => {
+                                                data.poster_status = PosterStatus::Failed;
+                                            }
+                                        }
+                                    }
+                                    let id = grid.titles()[ix].id().clone();
+                                    let source_id = id.clone();
+                                    kinema_desktop::design::MediaCard::new(data)
+                                        .width(metrics.card_width)
+                                        .track_focus(grid.card_focus(ix))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.click_card(kind, &id, window, cx);
+                                        }))
+                                        .on_source(cx.listener(move |this, _, window, cx| {
+                                            if this.click_card(kind, &source_id, window, cx)
+                                                && kind == MediaKind::Movie
+                                            {
+                                                this.open_sources(kind, window, cx);
+                                            }
+                                        }))
+                                })
+                                .collect();
+                            div()
+                                .h(px(metrics.row_height))
+                                .flex()
+                                .gap(px(kinema_desktop::design::tokens::metrics::CARD_GAP_X))
+                                .children(cards)
+                        })
+                        .collect::<Vec<_>>()
+                }),
+            )
+            .track_scroll(&pane.grid.scroll)
+            .size_full()
+            .into_any_element()
+        };
+        let mut body = div()
+            .id(("catalog-body", index(kind)))
+            .flex_1()
+            .min_h_0()
+            .track_focus(&pane.grid.focus)
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if this.view_mode == ViewMode::Grid {
+                    this.grid_key(kind, event, window, cx);
+                }
+            }))
+            .child(items);
         let can_load_more = !searching
             && !browse_busy
             && pane
@@ -1702,76 +1847,291 @@ impl Shell {
                 .last()
                 .and_then(|p| p.res.value())
                 .is_some_and(|titles| !titles.is_empty());
-        if can_load_more {
-            body = body.child(
-                div().flex().justify_center().child(
-                    Button::new("load-more")
-                        .icon(IconName::ArrowDown)
-                        .label("Load more")
-                        .outline()
-                        .on_click(cx.listener(move |this, _, _, cx| this.load_more(kind, cx))),
-                ),
-            );
-        }
-
+        let footer = can_load_more.then(|| {
+            div().flex().justify_center().child(
+                Button::new("load-more")
+                    .icon(IconName::ArrowDown)
+                    .label("Load more")
+                    .outline()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| this.load_more(kind, cx))),
+            )
+        });
+        body = body.flex().flex_col();
         div()
             .flex_1()
             .min_h_0()
             .flex()
             .flex_col()
-            .gap_3()
-            .child(div().text_2xl().child(heading))
-            .child(
-                div()
-                    .text_color(muted)
-                    .child(Page::Catalog(kind).description()),
-            )
-            .child(controls)
+            .gap(px(WORKSPACE_GAP))
             .child(status)
             .child(body)
+            .children(footer)
     }
 
-    fn render_sidebar(&self, compact: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Fixed rail: four destinations, never expands.
+    fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let sessions = self.tracker.active_sessions();
         let entries = [
-            ("Movies", IconName::Frame, Page::Catalog(MediaKind::Movie)),
             (
-                "Series",
-                IconName::GalleryVerticalEnd,
-                Page::Catalog(MediaKind::Series),
+                "Browse",
+                IconName::Frame,
+                Page::Catalog(self.browse_kind),
+                matches!(self.page, Page::Catalog(_)),
             ),
-            ("Transfers", IconName::HardDrive, Page::Transfers),
-            ("Settings", IconName::Settings, Page::Settings),
-            ("About", IconName::Info, Page::Help),
+            (
+                "Transfers",
+                IconName::HardDrive,
+                Page::Transfers,
+                self.page == Page::Transfers,
+            ),
+            (
+                "Settings",
+                IconName::Settings,
+                Page::Settings,
+                self.page == Page::Settings,
+            ),
+            ("About", IconName::Info, Page::Help, self.page == Page::Help),
         ];
-        let items: Vec<SidebarMenuItem> = entries
+        let theme = cx.theme();
+        let (marker, border, bg) = (theme.ring, theme.border, theme.sidebar);
+        let items: Vec<_> = entries
             .into_iter()
-            .map(|(label, icon, page)| {
-                SidebarMenuItem::new(label)
-                    .icon(icon)
-                    .active(self.page == page)
-                    .accessibility_label(label)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.enter_page(page, window, cx);
-                    }))
+            .map(|(label, icon, page, active)| {
+                let badge = (page == Page::Transfers && sessions > 0).then(|| {
+                    div()
+                        .absolute()
+                        .top(px(2.0))
+                        .right(px(6.0))
+                        .px_1()
+                        .rounded_full()
+                        .bg(cx.theme().primary)
+                        .text_color(cx.theme().primary_foreground)
+                        .text_size(px(10.0))
+                        .child(sessions.to_string())
+                });
+                div()
+                    .relative()
+                    .w(px(RAIL_WIDTH))
+                    .h(px(36.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(active, |item| {
+                        item.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top(px(8.0))
+                                .w(px(3.0))
+                                .h(px(20.0))
+                                .bg(marker),
+                        )
+                    })
+                    .child(
+                        Button::new(label)
+                            .ghost()
+                            .icon(Icon::new(icon).size_5())
+                            .w(px(36.0))
+                            .h(px(36.0))
+                            .selected(active)
+                            .tooltip(label)
+                            .accessibility_label(label)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if !(active && matches!(page, Page::Catalog(_))) {
+                                    this.enter_page(page, window, cx);
+                                }
+                            })),
+                    )
+                    .children(badge)
             })
             .collect();
-        Sidebar::<SidebarGroup<SidebarMenu>>::new("navigation")
-            .collapsible(SidebarCollapsible::Icon)
-            .collapsed(compact)
-            .header(
-                div()
-                    .px_2()
-                    .py_1()
-                    .font_weight(FontWeight::BOLD)
-                    .child(if compact { "K" } else { "Kinema Next" }),
+        div()
+            .w(px(RAIL_WIDTH))
+            .h_full()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .pt_2()
+            .bg(bg)
+            .border_r_1()
+            .border_color(border)
+            .children(items)
+    }
+
+    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let sessions = self.tracker.active_sessions();
+        let mut bar = div()
+            .h(px(TOOLBAR_HEIGHT))
+            .flex_none()
+            .px(px(WORKSPACE_PAD))
+            .flex()
+            .items_center()
+            .gap(px(WORKSPACE_GAP))
+            .border_b_1()
+            .border_color(cx.theme().border);
+        let title = match self.page {
+            Page::Catalog(_) => "Browse",
+            other => other.title(),
+        };
+        if let Page::Catalog(kind) = self.page {
+            let pane = self.pane(kind);
+            let can_go_back = pane.detail.is_some() || pane.screen.active().is_some();
+            if can_go_back {
+                bar = bar.child(
+                    Button::new("back")
+                        .icon(IconName::ArrowLeft)
+                        .ghost()
+                        .h(px(28.0))
+                        .tooltip("Back")
+                        .accessibility_label("Back")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if this.pane(kind).detail.is_some() {
+                                this.close_top(kind, cx);
+                            } else {
+                                this.clear_search(kind, window, cx);
+                            }
+                        })),
+                );
+            }
+        }
+        bar = bar.child(
+            div()
+                .text_size(px(13.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(title),
+        );
+        if let Page::Catalog(kind) = self.page {
+            for (label, k) in [("Movies", MediaKind::Movie), ("Series", MediaKind::Series)] {
+                bar = bar.child(
+                    Button::new(label)
+                        .label(label)
+                        .ghost()
+                        .h(px(28.0))
+                        .selected(kind == k)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if this.page != Page::Catalog(k) {
+                                this.enter_page(Page::Catalog(k), window, cx);
+                            }
+                        })),
+                );
+            }
+            let searchable = self.settings_loaded
+                && self.metadata == MetadataProvider::Cinemeta
+                && self.pane(kind).detail.is_none();
+            if searchable {
+                let pane = self.pane(kind);
+                let busy = if pane.screen.active().is_some() {
+                    pane.screen.busy()
+                } else {
+                    pane.browse.iter().any(|p| p.res.busy())
+                };
+                bar = bar
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(160.0))
+                            .max_w(px(420.0))
+                            .child(Input::new(&pane.input).h(px(28.0))),
+                    )
+                    .child(
+                        Button::new("search")
+                            .icon(IconName::Search)
+                            .label("Search")
+                            .primary()
+                            .h(px(28.0))
+                            .on_click(cx.listener(move |this, _, _, cx| this.search(kind, cx))),
+                    )
+                    .child(
+                        Button::new("refresh")
+                            .icon(IconName::RefreshCw)
+                            .ghost()
+                            .h(px(28.0))
+                            .tooltip("Refresh")
+                            .accessibility_label("Refresh")
+                            .disabled(busy)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if this.pane(kind).screen.active().is_some() {
+                                    this.refresh_search(kind, cx);
+                                } else {
+                                    this.refresh_browse(kind, cx);
+                                }
+                            })),
+                    )
+                    .child(
+                        Button::new("view-mode")
+                            .icon(match self.view_mode {
+                                ViewMode::Grid => IconName::Menu,
+                                ViewMode::List => IconName::LayoutDashboard,
+                            })
+                            .ghost()
+                            .h(px(28.0))
+                            .tooltip(match self.view_mode {
+                                ViewMode::Grid => "Show as list",
+                                ViewMode::List => "Show as grid",
+                            })
+                            .accessibility_label("Toggle grid or list")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.view_mode = match this.view_mode {
+                                    ViewMode::Grid => ViewMode::List,
+                                    ViewMode::List => ViewMode::Grid,
+                                };
+                                cx.notify();
+                            })),
+                    );
+            }
+        }
+        let session_text = match sessions {
+            0 => "No active sessions".to_owned(),
+            1 => "1 session active".to_owned(),
+            n => format!("{n} sessions active"),
+        };
+        bar.child(div().flex_1())
+            .child(
+                Button::new("sessions")
+                    .label(session_text)
+                    .ghost()
+                    .h(px(28.0))
+                    .tooltip("Open Transfers")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if this.page != Page::Transfers {
+                            this.enter_page(Page::Transfers, window, cx);
+                        }
+                    })),
             )
-            .child(SidebarGroup::new("Browse").child(SidebarMenu::new().children(items)))
+            .child(
+                Button::new("quit")
+                    .label("Quit")
+                    .ghost()
+                    .h(px(28.0))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if this.may_close(window, cx) {
+                            cx.quit();
+                        }
+                    })),
+            )
     }
 }
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let compact = window.viewport_size().width < px(COMPACT_WIDTH);
+        let metrics = grid_metrics(window, self.pane(self.browse_kind).grid.titles().len());
+        if metrics.columns != self.grid_metrics.columns {
+            let grid = &self.pane(self.browse_kind).grid;
+            if let Some(selected) = grid.focused_selection(window, cx) {
+                grid.scroll
+                    .scroll_to_item(metrics.row_of(selected), ScrollStrategy::Nearest);
+            }
+        }
+        self.grid_metrics = metrics;
+        if std::mem::take(&mut self.restore_grid_focus)
+            && self.metadata == MetadataProvider::Cinemeta
+            && matches!(self.page, Page::Catalog(_))
+        {
+            self.pane(self.browse_kind).grid.focus_selected(window, cx);
+        }
         let content = match self.page {
             Page::Catalog(kind) => match &self.pane(kind).detail {
                 Some(DetailPane {
@@ -1787,7 +2147,7 @@ impl Render for Shell {
                     div().flex_1().min_h_0().child(self.tmdb.clone())
                 }
                 Some(detail) => detail_view::render(detail, kind, cx),
-                None => self.render_list_page(kind, cx),
+                None => self.render_catalog(kind, cx),
             },
             Page::Transfers => div().flex_1().min_h_0().child(self.playback_view.clone()),
             Page::Settings => div().flex_1().min_h_0().child(self.settings_view.clone()),
@@ -1844,36 +2204,32 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &GoBack, _, cx| this.on_go_back(cx)))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .text_size(px(13.0))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .child(self.render_sidebar(compact, cx))
+                    .child(self.render_rail(cx))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .p_4()
-                            .overflow_hidden()
-                            .children(notice)
-                            .child(content),
-                    ),
-            )
-            .child(
-                StatusBar::new()
-                    .left("Loopback media server only · external VLC/mpv playback · needs your debrid account")
-                    .right(
-                        Button::new("quit")
-                            .label("Quit")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if this.may_close(window, cx) {
-                                    cx.quit();
-                                }
-                            })),
+                            .child(self.render_toolbar(cx))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .flex()
+                                    .flex_col()
+                                    .p(px(WORKSPACE_PAD))
+                                    .gap(px(WORKSPACE_GAP))
+                                    .overflow_hidden()
+                                    .children(notice)
+                                    .child(content),
+                            ),
                     ),
             )
     }

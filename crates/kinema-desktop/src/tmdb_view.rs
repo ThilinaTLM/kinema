@@ -14,7 +14,7 @@ use gpui_kit::component::{
     ActiveTheme, IconName, IndexPath, Sizable as _,
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
-    list::{List, ListDelegate, ListEvent, ListItem, ListState},
+    list::{List, ListEvent, ListState},
     tab::TabBar,
     tag::Tag,
 };
@@ -35,6 +35,78 @@ use crate::{
     },
 };
 
+/// Pure keyboard navigation; geometry comes from the shared grid metrics.
+mod tmdb_grid {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(super) enum Step {
+        Left,
+        Right,
+        Up,
+        Down,
+    }
+
+    pub(super) fn row_of(index: usize, columns: usize) -> usize {
+        index / columns.max(1)
+    }
+
+    pub(super) fn at_last_row(focus: Option<usize>, columns: usize, len: usize) -> bool {
+        focus.is_some_and(|at| {
+            len > 0 && at < len && row_of(at, columns) + 1 >= len.div_ceil(columns.max(1))
+        })
+    }
+
+    pub(super) fn step(
+        focus: Option<usize>,
+        step: Step,
+        columns: usize,
+        len: usize,
+    ) -> Option<usize> {
+        if len == 0 {
+            return None;
+        }
+        let columns = columns.max(1);
+        let Some(at) = focus.filter(|at| *at < len) else {
+            return Some(0);
+        };
+        Some(match step {
+            Step::Left => at.saturating_sub(1),
+            Step::Right => (at + 1).min(len - 1),
+            Step::Up if at >= columns => at - columns,
+            Step::Up => at,
+            Step::Down => (at + columns).min(len - 1),
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use core::prelude::v1::test;
+
+        #[test]
+        fn focus_moves_clamp_and_stay_inside() {
+            assert_eq!(step(None, Step::Down, 3, 7), Some(0));
+            assert_eq!(step(None, Step::Left, 3, 0), None);
+            assert_eq!(step(Some(0), Step::Left, 3, 7), Some(0));
+            assert_eq!(step(Some(6), Step::Right, 3, 7), Some(6));
+            assert_eq!(step(Some(1), Step::Up, 3, 7), Some(1));
+            assert_eq!(step(Some(4), Step::Up, 3, 7), Some(1));
+            assert_eq!(step(Some(5), Step::Down, 3, 7), Some(6));
+            assert_eq!(step(Some(6), Step::Down, 3, 7), Some(6));
+            assert_eq!(step(Some(40), Step::Right, 3, 7), Some(0));
+        }
+
+        #[test]
+        fn last_row_detection_drives_load_more() {
+            assert!(!at_last_row(None, 3, 7));
+            assert!(!at_last_row(Some(2), 3, 7));
+            assert!(at_last_row(Some(3), 3, 6));
+            assert!(at_last_row(Some(6), 3, 7));
+            assert!(!at_last_row(Some(0), 3, 0));
+            assert!(!at_last_row(Some(40), 3, 7));
+        }
+    }
+}
+
 /// TMDB's numeric title ID. Positive; it is not an IMDb ID.
 type TmdbId = u64;
 
@@ -47,12 +119,22 @@ const TMDB_API_DOCS: &str = "https://developer.themoviedb.org/docs";
 const MAX_PAGES: u32 = 500;
 /// Below this window width the detail page stacks instead of splitting.
 const COMPACT_WIDTH: f32 = 1100.0;
-const ROW_HEIGHT: f32 = 72.0;
 /// Generations of one view live in `[base, base + 2^48)`; views of different
 /// kinds never share a range, and the counter never goes backwards.
 const GENERATION_BASE: u64 = 1 << 56;
 
-actions!(kinema_tmdb, [TmdbBack, TmdbFocusSearch]);
+actions!(
+    kinema_tmdb,
+    [
+        TmdbBack,
+        TmdbFocusSearch,
+        TmdbLeft,
+        TmdbRight,
+        TmdbUp,
+        TmdbDown,
+        TmdbOpen
+    ]
+);
 
 /// Registers the view's keys; call once next to the shell's own bindings.
 pub(crate) fn bind_keys(cx: &mut App) {
@@ -65,6 +147,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(find, TmdbFocusSearch, Some("TmdbView")),
         KeyBinding::new("escape", TmdbBack, Some("TmdbView")),
         KeyBinding::new("alt-left", TmdbBack, Some("TmdbView")),
+        KeyBinding::new("left", TmdbLeft, Some("TmdbView")),
+        KeyBinding::new("right", TmdbRight, Some("TmdbView")),
+        KeyBinding::new("up", TmdbUp, Some("TmdbView")),
+        KeyBinding::new("down", TmdbDown, Some("TmdbView")),
+        KeyBinding::new("enter", TmdbOpen, Some("TmdbView")),
     ]);
 }
 
@@ -94,6 +181,9 @@ pub(crate) struct Row {
     pub name: String,
     pub year: Option<String>,
     pub overview: Option<String>,
+    pub poster_url: Option<String>,
+    pub display: kinema_core::catalog::CatalogDisplay,
+    pub imdb: Option<ImdbId>,
 }
 
 impl Row {
@@ -101,15 +191,29 @@ impl Row {
         Self {
             id: title.id,
             name: title.name.clone(),
-            year: title
-                .release_info
-                .as_deref()
-                .and_then(year_of)
-                .map(str::to_owned),
+            year: title.display.year.map(|year| year.to_string()).or_else(|| {
+                title
+                    .release_info
+                    .as_deref()
+                    .and_then(year_of)
+                    .map(str::to_owned)
+            }),
             overview: title
                 .overview
                 .clone()
                 .filter(|text| !text.trim().is_empty()),
+            poster_url: title.poster_url().map(str::to_owned),
+            display: kinema_core::catalog::CatalogDisplay {
+                year: title.year(),
+                poster_url: title.poster_url().map(str::to_owned),
+                imdb_rating: title
+                    .imdb_rating()
+                    .and_then(|score| kinema_core::catalog::ImdbRating::new(f64::from(score))),
+                runtime_minutes: title.runtime_minutes(),
+                genres: title.genres().to_vec(),
+                season_count: title.season_count(),
+            },
+            imdb: title.imdb.clone(),
         }
     }
 }
@@ -126,6 +230,24 @@ pub(crate) fn year_of(date: &str) -> Option<&str> {
 struct PageRows {
     rows: Vec<Row>,
     total_pages: u32,
+}
+
+/// Resolve a painted card against the current route and listing identity.
+fn current_card_index(
+    rows: &[Row],
+    active_listing: bool,
+    current_kind: MediaKind,
+    painted_kind: MediaKind,
+    id: TmdbId,
+) -> Option<usize> {
+    (active_listing && current_kind == painted_kind)
+        .then(|| rows.iter().position(|row| row.id == id))
+        .flatten()
+}
+
+fn retained_focus(old: &[Row], new: &[Row], focused: Option<usize>) -> Option<usize> {
+    let id = old.get(focused?)?.id;
+    new.iter().position(|row| row.id == id)
 }
 
 fn page_rows(page: &TmdbPage) -> PageRows {
@@ -773,99 +895,24 @@ impl TmdbState {
     }
 }
 
-// ---- list rows ----------------------------------------------------------
-
-struct RowDelegate {
-    rows: Vec<Row>,
-    selected: Option<IndexPath>,
-    empty: Option<SharedString>,
-}
-
-impl RowDelegate {
-    fn set(&mut self, rows: Vec<Row>, empty: Option<SharedString>) {
-        if self.rows != rows {
-            self.rows = rows;
-            self.selected = None;
-        }
-        self.empty = empty;
-    }
-}
-
-impl ListDelegate for RowDelegate {
-    type Item = ListItem;
-
-    fn items_count(&self, _: usize, _: &App) -> usize {
-        self.rows.len()
-    }
-
-    fn render_item(
-        &mut self,
-        ix: IndexPath,
-        _: &mut Window,
-        cx: &mut Context<ListState<Self>>,
-    ) -> Option<ListItem> {
-        let row = self.rows.get(ix.row)?;
-        let muted = cx.theme().muted_foreground;
-        let heading = match &row.year {
-            Some(year) => format!("{} ({year})", row.name),
-            None => row.name.clone(),
-        };
-        let mut body = div().flex().flex_col().gap_1().overflow_hidden().child(
-            div()
-                .font_weight(FontWeight::SEMIBOLD)
-                .truncate()
-                .child(heading.clone()),
-        );
-        if let Some(overview) = &row.overview {
-            body = body.child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .line_clamp(2)
-                    .child(overview.clone()),
-            );
-        }
-        Some(
-            ListItem::new(("tmdb-title", ix.row))
-                .h(px(ROW_HEIGHT))
-                .px_3()
-                .selected(self.selected == Some(ix))
-                .accessibility_label(heading)
-                .child(body),
-        )
-    }
-
-    fn render_empty(
-        &mut self,
-        _: &mut Window,
-        cx: &mut Context<ListState<Self>>,
-    ) -> impl IntoElement {
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(cx.theme().muted_foreground)
-            .children(self.empty.clone())
-    }
-
-    fn set_selected_index(
-        &mut self,
-        ix: Option<IndexPath>,
-        _: &mut Window,
-        cx: &mut Context<ListState<Self>>,
-    ) {
-        self.selected = ix;
-        cx.notify();
-    }
-}
-
 // ---- view ---------------------------------------------------------------
 
 pub(crate) struct TmdbView {
+    active: bool,
     state: TmdbState,
     input: Entity<InputState>,
-    list: Entity<ListState<RowDelegate>>,
+    /// Rows of every loaded page; cloned cheaply into the grid closure.
+    rows: std::sync::Arc<Vec<Row>>,
+    /// Shown instead of the grid once a page loaded with no titles.
+    empty: Option<SharedString>,
+    grid_scroll: UniformListScrollHandle,
+    artwork_owner: String,
+    artwork_generation: u64,
+    card_focus: HashMap<TmdbId, FocusHandle>,
+    /// Keyboard-focused card (index into `rows`).
+    focused: Option<usize>,
+    /// Columns of the last render, used by keyboard movement.
+    columns: usize,
     episode_list: Entity<ListState<EpisodeDelegate>>,
     input_error: Option<String>,
     /// Outcome of the last action, e.g. why sources are unavailable.
@@ -884,30 +931,13 @@ impl TmdbView {
                 MediaKind::Series => "Search TMDB series",
             };
             let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
-            let list = cx.new(|cx| {
-                ListState::new(
-                    RowDelegate {
-                        rows: Vec::new(),
-                        selected: None,
-                        empty: None,
-                    },
-                    window,
-                    cx,
-                )
-            });
             let episode_list = cx.new(|cx| ListState::new(EpisodeDelegate::new(), window, cx));
             let subscriptions = vec![
-                cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| {
+                cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
                     if matches!(event, InputEvent::PressEnter { .. }) {
                         this.search(cx);
-                    }
-                }),
-                cx.subscribe_in(&list, window, |this, list, event: &ListEvent, _, cx| {
-                    if let ListEvent::Confirm(ix) = event {
-                        let row = list.read(cx).delegate().rows.get(ix.row).cloned();
-                        if let Some(row) = row {
-                            this.open(row, cx);
-                        }
+                        // Hand the keyboard to the grid once results are coming.
+                        this.focus.focus(window, cx);
                     }
                 }),
                 cx.subscribe_in(
@@ -937,10 +967,20 @@ impl TmdbView {
                     },
                 ),
             ];
+            let artwork_owner = format!("tmdb-view:{:?}:{kind:?}", cx.entity_id());
+            let artwork_generation = crate::artwork::begin_generation(&artwork_owner, cx);
             Self {
+                active: false,
                 state: TmdbState::new(kind),
+                artwork_owner,
+                artwork_generation,
+                card_focus: HashMap::new(),
                 input,
-                list,
+                rows: std::sync::Arc::new(Vec::new()),
+                empty: None,
+                grid_scroll: UniformListScrollHandle::new(),
+                focused: None,
+                columns: 1,
                 episode_list,
                 input_error: None,
                 notice: None,
@@ -957,7 +997,12 @@ impl TmdbView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.active = true;
         if kind != self.state.kind() {
+            // Invalidate the departing kind before registering its successor.
+            crate::artwork::begin_generation(&self.artwork_owner, cx);
+            self.artwork_owner = format!("tmdb-view:{:?}:{kind:?}", cx.entity_id());
+            self.artwork_generation = crate::artwork::begin_generation(&self.artwork_owner, cx);
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.input_error = None;
@@ -972,7 +1017,9 @@ impl TmdbView {
 
     /// Leaves the page: cancels in-flight work; late results are rejected.
     pub(crate) fn deactivate(&mut self, cx: &mut Context<Self>) {
+        self.active = false;
         self.state.cancel_all();
+        self.artwork_generation = crate::artwork::begin_generation(&self.artwork_owner, cx);
         self.flush_cancels(cx);
         cx.notify();
     }
@@ -996,7 +1043,9 @@ impl TmdbView {
     /// Esc / Back: closes details, then a search. False if nothing was open.
     pub(crate) fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.state.detail_open() {
+            self.artwork_generation = crate::artwork::begin_generation(&self.artwork_owner, cx);
             self.state.close_detail();
+            self.focus.focus(window, cx);
             self.notice = None;
             self.sync(cx);
             true
@@ -1010,6 +1059,16 @@ impl TmdbView {
 
     /// Forwards pending cancellations; always call before emitting a request.
     fn emit_request(&mut self, request: MetadataRequest, cx: &mut Context<Self>) {
+        if matches!(
+            &request.action,
+            MetadataAction::Tmdb(
+                TmdbQuery::Details { .. }
+                    | TmdbQuery::Browse { page: 1, .. }
+                    | TmdbQuery::Search { page: 1, .. }
+            )
+        ) {
+            self.artwork_generation = crate::artwork::begin_generation(&self.artwork_owner, cx);
+        }
         self.flush_cancels(cx);
         cx.emit(TmdbIntent::Request(request));
     }
@@ -1052,6 +1111,32 @@ impl TmdbView {
         self.sync(cx);
     }
 
+    fn card_index(&self, kind: MediaKind, id: TmdbId) -> Option<usize> {
+        current_card_index(
+            &self.rows,
+            self.active && !self.state.detail_open(),
+            self.state.kind(),
+            kind,
+            id,
+        )
+    }
+
+    fn open_card(
+        &mut self,
+        kind: MediaKind,
+        id: TmdbId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(at) = self.card_index(kind, id) else {
+            return;
+        };
+        let row = self.rows[at].clone();
+        self.focus.focus(window, cx);
+        self.focused = Some(at);
+        self.open(row, cx);
+    }
+
     fn open(&mut self, row: Row, cx: &mut Context<Self>) {
         self.notice = None;
         let request = self.state.open(row);
@@ -1075,6 +1160,59 @@ impl TmdbView {
         let request = self.state.select_season(season);
         self.emit_all(request, cx);
         self.sync(cx);
+    }
+
+    fn move_focus(
+        &mut self,
+        direction: tmdb_grid::Step,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.detail_open() {
+            cx.propagate();
+            return;
+        }
+        self.sync_keyboard_focus(window);
+        let len = self.rows.len();
+        if direction == tmdb_grid::Step::Down
+            && tmdb_grid::at_last_row(self.focused, self.columns, len)
+        {
+            self.load_more(cx);
+        }
+        self.focused = tmdb_grid::step(self.focused, direction, self.columns, len);
+        if let Some(at) = self.focused {
+            if let Some(row) = self.rows.get(at) {
+                self.card_focus
+                    .entry(row.id)
+                    .or_insert_with(|| cx.focus_handle())
+                    .focus(window, cx);
+            }
+            self.grid_scroll
+                .scroll_to_item(tmdb_grid::row_of(at, self.columns), ScrollStrategy::Nearest);
+        }
+        cx.notify();
+    }
+
+    fn sync_keyboard_focus(&mut self, window: &Window) {
+        if let Some(at) = self.rows.iter().position(|row| {
+            self.card_focus
+                .get(&row.id)
+                .is_some_and(|focus| focus.is_focused(window))
+        }) {
+            self.focused = Some(at);
+        }
+    }
+
+    fn open_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.detail_open() {
+            cx.propagate();
+            return;
+        }
+        self.sync_keyboard_focus(window);
+        if let Some(row) = self.focused.and_then(|at| self.rows.get(at)).cloned() {
+            self.focus.focus(window, cx);
+            self.open(row, cx);
+        }
     }
 
     fn find_sources(&mut self, cx: &mut Context<Self>) {
@@ -1102,10 +1240,15 @@ impl TmdbView {
             Some(SharedString::from("TMDB returned no titles."))
         };
         let rows = self.state.rows();
-        self.list.update(cx, |list, cx| {
-            list.delegate_mut().set(rows, empty);
-            cx.notify();
-        });
+        if *self.rows != rows {
+            // Refreshes can reorder a listing. Keep selection on its typed
+            // source identity, never silently move it to the old index's title.
+            self.focused = retained_focus(&self.rows, &rows, self.focused);
+            let ids: std::collections::HashSet<_> = rows.iter().map(|row| row.id).collect();
+            self.card_focus.retain(|id, _| ids.contains(id));
+            self.rows = std::sync::Arc::new(rows);
+        }
+        self.empty = empty;
         let episodes = self
             .state
             .detail
@@ -1166,7 +1309,7 @@ impl TmdbView {
             )
     }
 
-    fn render_listing(&mut self, cx: &mut Context<Self>) -> Div {
+    fn render_listing(&mut self, width: f32, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         let busy = self.state.busy();
         let kind_label = match self.state.kind() {
@@ -1193,6 +1336,7 @@ impl TmdbView {
                     .icon(IconName::Search)
                     .label("Search")
                     .primary()
+                    .small()
                     .on_click(cx.listener(|this, _, _, cx| this.search(cx))),
             )
             .child(
@@ -1200,6 +1344,7 @@ impl TmdbView {
                     .icon(IconName::RefreshCw)
                     .label("Refresh")
                     .outline()
+                    .small()
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
             );
@@ -1214,6 +1359,7 @@ impl TmdbView {
                         .icon(IconName::Close)
                         .label("Clear search")
                         .ghost()
+                        .small()
                         .on_click(cx.listener(|this, _, window, cx| this.clear_search(window, cx))),
                 ),
             );
@@ -1238,15 +1384,158 @@ impl TmdbView {
         }
         status = status.children(self.error_hint(error.as_deref(), cx));
 
-        let mut body = div().flex_1().min_h_0().flex().flex_col().gap_2().child(
+        let len = self.rows.len();
+        let metrics = crate::design::GridMetrics::new(width, len);
+        let columns = metrics.columns;
+        self.columns = columns;
+        let grid = if len == 0 {
             div()
                 .flex_1()
                 .min_h_0()
-                .border_1()
-                .border_color(cx.theme().border)
-                .rounded_md()
-                .child(List::new(&self.list)),
-        );
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(13.0))
+                .text_color(muted)
+                .children(self.empty.clone())
+                .into_any_element()
+        } else {
+            uniform_list(
+                "tmdb-grid",
+                metrics.total_rows,
+                cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                    range
+                        .map(|row| {
+                            div()
+                                .h(px(metrics.row_height))
+                                .flex()
+                                .gap(px(crate::design::tokens::metrics::CARD_GAP_X))
+                                .children(metrics.row_items(row).filter_map(|at| {
+                                    let title = this.rows.get(at)?.clone();
+                                    // Only mounted virtual rows enqueue artwork; all I/O
+                                    // and decoding happen in the app-owned worker.
+                                    let (poster, poster_status) = match title.poster_url.as_deref()
+                                    {
+                                        Some(url) => match crate::artwork::lookup_or_request(
+                                            &this.artwork_owner,
+                                            this.artwork_generation,
+                                            url,
+                                            cx,
+                                        ) {
+                                            crate::artwork::ArtworkState::Ready(image) => {
+                                                (Some(image), crate::design::PosterStatus::Missing)
+                                            }
+                                            crate::artwork::ArtworkState::Loading => {
+                                                (None, crate::design::PosterStatus::Loading)
+                                            }
+                                            crate::artwork::ArtworkState::Failed => {
+                                                (None, crate::design::PosterStatus::Failed)
+                                            }
+                                        },
+                                        None => (None, crate::design::PosterStatus::Missing),
+                                    };
+                                    let data = crate::design::MediaCardData {
+                                        id: format!("tmdb:{:?}:{}", this.state.kind(), title.id)
+                                            .into(),
+                                        title: title.name.clone().into(),
+                                        kind: match this.state.kind() {
+                                            MediaKind::Movie => "Movie".into(),
+                                            MediaKind::Series => "Series".into(),
+                                        },
+                                        year: title
+                                            .year
+                                            .as_deref()
+                                            .and_then(|year| year.parse().ok()),
+                                        overview: title.overview.clone().map(Into::into),
+                                        poster_url: title.poster_url.clone().map(Into::into),
+                                        poster,
+                                        poster_status,
+                                        imdb_score: title
+                                            .display
+                                            .imdb_rating
+                                            .map(kinema_core::catalog::ImdbRating::value),
+                                        has_imdb_id: title.imdb.is_some(),
+                                        runtime_minutes: title.display.runtime_minutes,
+                                        season_count: title.display.season_count,
+                                        genres: title
+                                            .display
+                                            .genres
+                                            .iter()
+                                            .cloned()
+                                            .map(Into::into)
+                                            .collect(),
+                                    };
+                                    let focus = this
+                                        .card_focus
+                                        .entry(title.id)
+                                        .or_insert_with(|| cx.focus_handle())
+                                        .clone();
+                                    let painted_kind = this.state.kind();
+                                    let painted_id = title.id;
+                                    let mut card = crate::design::MediaCard::new(data)
+                                        .width(metrics.card_width)
+                                        .track_focus(&focus)
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.open_card(painted_kind, painted_id, window, cx);
+                                        }));
+                                    // Episodes opens metadata even without an IMDb mapping;
+                                    // source lookup still requires an explicit mapped episode.
+                                    if this.state.kind() == MediaKind::Series {
+                                        card = card.on_source(cx.listener(
+                                            move |this, _, window, cx| {
+                                                this.open_card(
+                                                    painted_kind,
+                                                    painted_id,
+                                                    window,
+                                                    cx,
+                                                );
+                                            },
+                                        ));
+                                    } else if let Ok(target) =
+                                        source_target(this.state.kind(), title.imdb.as_ref(), None)
+                                    {
+                                        card =
+                                            card.on_source(cx.listener(move |this, _, _, cx| {
+                                                let Some(at) =
+                                                    this.card_index(painted_kind, painted_id)
+                                                else {
+                                                    return;
+                                                };
+                                                // A refreshed mapping must still identify the painted target.
+                                                if source_target(
+                                                    painted_kind,
+                                                    this.rows[at].imdb.as_ref(),
+                                                    None,
+                                                )
+                                                .ok()
+                                                .as_ref()
+                                                    != Some(&target)
+                                                {
+                                                    return;
+                                                }
+                                                cx.emit(TmdbIntent::FindSources {
+                                                    target: target.clone(),
+                                                });
+                                            }));
+                                    }
+                                    Some(card)
+                                }))
+                        })
+                        .collect::<Vec<_>>()
+                }),
+            )
+            .track_scroll(&self.grid_scroll)
+            .flex_1()
+            .min_h_0()
+            .into_any_element()
+        };
+        let mut body = div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(grid);
         if self.state.next_page().is_some() {
             body = body.child(
                 div().flex().justify_center().child(
@@ -1254,6 +1543,7 @@ impl TmdbView {
                         .icon(IconName::ArrowDown)
                         .label("Load more")
                         .outline()
+                        .small()
                         .on_click(cx.listener(|this, _, _, cx| this.load_more(cx))),
                 ),
             );
@@ -1264,8 +1554,13 @@ impl TmdbView {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_2xl().child(heading))
-            .child(div().text_color(muted).child(
+            .child(
+                div()
+                    .text_size(px(20.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(heading),
+            )
+            .child(div().text_size(px(13.0)).text_color(muted).child(
                 "Discovery from TMDB. Sources are offered only for titles TMDB maps to an IMDb ID.",
             ))
             .child(controls)
@@ -1283,38 +1578,80 @@ impl TmdbView {
         let imdb = detail.imdb().cloned();
         let busy = self.state.busy();
 
-        let mut head = div().flex().flex_col().gap_2().child(
-            div()
-                .flex()
-                .items_center()
-                .gap_3()
-                .child(
-                    Button::new("tmdb-back")
-                        .icon(IconName::ArrowLeft)
-                        .label("Back")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.go_back(window, cx);
-                        })),
-                )
-                .child(div().text_2xl().truncate().child(detail.row.name.clone())),
-        );
+        // Compact header: no hero, 20 px title, back + refresh on one line.
+        let header = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                Button::new("tmdb-back")
+                    .icon(IconName::ArrowLeft)
+                    .ghost()
+                    .small()
+                    .tooltip("Back")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.go_back(window, cx);
+                    })),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(20.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(detail.row.name.clone()),
+            )
+            .child(
+                Button::new("tmdb-refresh-detail")
+                    .icon(IconName::RefreshCw)
+                    .label("Refresh")
+                    .outline()
+                    .small()
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+            );
+        let mut head = div().flex().flex_col().gap_2();
         let mut meta = div()
             .flex()
             .flex_wrap()
             .items_center()
             .gap_2()
+            .text_size(px(13.0))
             .text_color(muted);
-        if let Some(year) = &detail.row.year {
-            meta = meta.child(year.clone());
+        // Only attributable IMDb metadata feeds this badge, never TMDB votes.
+        let display = details.map_or(&detail.row.display, |details| &details.title.display);
+        meta = meta.child(crate::design::ImdbBadge::new(
+            display
+                .imdb_rating
+                .map(kinema_core::catalog::ImdbRating::value),
+        ));
+        if let Some(minutes) = display.runtime_minutes {
+            meta = meta.child(format!("{minutes} min"));
         }
-        if let Some(details) = details {
-            for genre in &details.genres {
-                meta = meta.child(Tag::secondary().child(genre.clone()));
-            }
+        if let Some(count) = display.season_count {
+            meta = meta.child(format!(
+                "{count} season{}",
+                if count == 1 { "" } else { "s" }
+            ));
+        }
+        let year = details
+            .and_then(|details| details.title.year())
+            .map(|year| year.to_string())
+            .or_else(|| detail.row.year.clone());
+        if let Some(year) = year {
+            meta = meta.child(year);
+        }
+        let genres = details
+            .filter(|details| !details.genres.is_empty())
+            .map_or(display.genres.as_slice(), |details| {
+                details.genres.as_slice()
+            });
+        for genre in genres {
+            meta = meta.child(Tag::secondary().child(genre.clone()));
         }
         meta = match (&imdb, details) {
-            (Some(id), _) => meta.child(Tag::success().child(format!("IMDb {}", id.as_str()))),
+            (Some(id), _) => meta.child(Tag::secondary().child(format!("IMDb ID {}", id.as_str()))),
             (None, Some(_)) => meta.child(Tag::secondary().child("No IMDb mapping")),
             (None, None) => meta,
         };
@@ -1327,8 +1664,9 @@ impl TmdbView {
             head = head.child(
                 div()
                     .id("tmdb-overview")
-                    .max_h(px(160.0))
+                    .max_h(px(112.0))
                     .overflow_y_scroll()
+                    .text_size(px(13.0))
                     .text_color(muted)
                     .child(overview),
             );
@@ -1341,14 +1679,7 @@ impl TmdbView {
         ));
         strip = strip.children(self.error_hint(detail.load.error.as_deref(), cx));
 
-        let mut actions = div().flex().flex_wrap().items_center().gap_2().child(
-            Button::new("tmdb-refresh-detail")
-                .icon(IconName::RefreshCw)
-                .label("Refresh")
-                .outline()
-                .disabled(busy)
-                .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-        );
+        let mut actions = div().flex().flex_wrap().items_center().gap_2();
         // Sources only exist behind an IMDb mapping; never a name guess.
         let mut hint = None;
         match (details.is_some(), imdb.is_some(), kind) {
@@ -1358,6 +1689,7 @@ impl TmdbView {
                         .icon(IconName::Search)
                         .label("Find sources")
                         .primary()
+                        .small()
                         .on_click(cx.listener(|this, _, _, cx| this.find_sources(cx))),
                 );
             }
@@ -1365,11 +1697,9 @@ impl TmdbView {
                 actions = actions.child(
                     Button::new("tmdb-sources")
                         .icon(IconName::Search)
-                        .label(match detail.selected {
-                            Some((s, e)) => format!("Find sources for S{s:02}E{e:02}"),
-                            None => "Select an episode to find sources".to_owned(),
-                        })
+                        .label(crate::ui::detail_view::source_label(detail.selected))
                         .primary()
+                        .small()
                         .disabled(detail.selected.is_none())
                         .on_click(cx.listener(|this, _, _, cx| this.find_sources(cx))),
                 );
@@ -1387,11 +1717,22 @@ impl TmdbView {
             .child(head)
             .child(strip)
             .child(actions);
+        // A missing IMDb mapping is its own message, apart from service errors.
         if let Some(text) = hint.or_else(|| self.notice.clone()) {
-            left = left.child(div().text_sm().text_color(muted).child(text));
+            left = left.child(div().text_size(px(13.0)).text_color(muted).child(text));
         }
 
         let mut root = div().flex_1().min_h_0().flex().gap_4();
+        let page = |body: Div| {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(header)
+                .child(body)
+        };
         root = if compact {
             root.flex_col()
         } else {
@@ -1400,15 +1741,15 @@ impl TmdbView {
         if kind == MediaKind::Series {
             let seasons = self.render_seasons(cx);
             if compact {
-                root = root.child(left).child(seasons);
+                root = root.flex_col().child(left).child(seasons);
             } else {
                 root = root
                     .child(div().w(px(380.0)).flex_none().child(left))
                     .child(seasons);
             }
-            root
+            page(root)
         } else {
-            root.child(left)
+            page(root.child(left))
         }
     }
 
@@ -1430,7 +1771,7 @@ impl TmdbView {
                 (None, true) => "Loading seasons…",
                 (None, false) => "Seasons are unavailable until details load.",
             };
-            return column.child(div().text_color(muted).child(text));
+            return column.child(div().text_size(px(13.0)).text_color(muted).child(text));
         }
         let selected = detail
             .season
@@ -1448,7 +1789,45 @@ impl TmdbView {
                 }
             }))
             .children(labels);
-        let mut column = column.child(div().overflow_x_hidden().child(tabs));
+        // Counts: loaded rows, else TMDB's reported count; unknown stays blank.
+        let current = detail.season.and_then(|s| detail.seasons.get(&s));
+        let reported = detail.season.and_then(|s| {
+            detail
+                .load
+                .value
+                .as_ref()?
+                .seasons
+                .iter()
+                .find(|x| x.number == s)
+                .map(|x| x.episode_count)
+        });
+        let summary = [
+            episodes::seasons_label(&numbers),
+            episodes::episode_count_label(
+                current
+                    .and_then(|l| l.value.as_ref())
+                    .map(|v| v.episodes.len()),
+                reported,
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let mut column = column.child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(div().flex_1().min_w_0().overflow_x_hidden().child(tabs))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(12.0))
+                        .text_color(muted)
+                        .child(summary),
+                ),
+        );
         if let Some(load) = detail.season.and_then(|s| detail.seasons.get(&s)) {
             column = column.child(status_strip("tmdb-season-status", &load.strip("TMDB"), cx));
             column = column.children(self.error_hint(load.error.as_deref(), cx));
@@ -1468,10 +1847,11 @@ impl TmdbView {
 impl Render for TmdbView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let compact = window.viewport_size().width < px(COMPACT_WIDTH);
+        let width = (f32::from(window.viewport_size().width) - 56.0 - 48.0).max(0.0);
         let content = if self.state.detail_open() {
             self.render_detail(compact, cx)
         } else {
-            self.render_listing(cx)
+            self.render_listing(width, cx)
         };
         let footer = self.footer(cx);
         div()
@@ -1483,6 +1863,19 @@ impl Render for TmdbView {
                     cx.propagate();
                 }
             }))
+            .on_action(cx.listener(|this, _: &TmdbLeft, window, cx| {
+                this.move_focus(tmdb_grid::Step::Left, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &TmdbRight, window, cx| {
+                this.move_focus(tmdb_grid::Step::Right, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &TmdbUp, window, cx| {
+                this.move_focus(tmdb_grid::Step::Up, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &TmdbDown, window, cx| {
+                this.move_focus(tmdb_grid::Step::Down, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &TmdbOpen, window, cx| this.open_focused(window, cx)))
             .on_action(cx.listener(|this, _: &TmdbFocusSearch, window, cx| {
                 if !this.state.detail_open() {
                     this.input.update(cx, |input, cx| input.focus(window, cx));
@@ -1517,6 +1910,8 @@ mod tests {
             overview: None,
             release_info: Some("1999-03-31".into()),
             poster_url: None,
+            display: Default::default(),
+            imdb: None,
         }
     }
 
@@ -1723,6 +2118,9 @@ mod tests {
             name: "Show".into(),
             year: None,
             overview: None,
+            poster_url: None,
+            display: Default::default(),
+            imdb: None,
         };
         let request = state.open(row);
         let applied = state.apply(
@@ -1807,6 +2205,9 @@ mod tests {
             name: "S".into(),
             year: None,
             overview: None,
+            poster_url: None,
+            display: Default::default(),
+            imdb: None,
         };
         let request = state.open(row);
         state.close_detail();
@@ -2000,6 +2401,9 @@ mod tests {
             name: "S".into(),
             year: None,
             overview: None,
+            poster_url: None,
+            display: Default::default(),
+            imdb: None,
         };
         let details_request = state.open(row);
         let q = query_of(&details_request);
@@ -2051,6 +2455,62 @@ mod tests {
                     fetched(page(&[1], 1, 1))
                 )
                 .consumed
+        );
+    }
+
+    #[test]
+    fn card_rows_preserve_artwork_and_typed_focus_identity() {
+        let mut metadata = title(7, MediaKind::Movie);
+        metadata.poster_url = Some("https://image.tmdb.org/t/p/w500/fixture.jpg".into());
+        metadata.overview = Some("   ".into());
+        std::sync::Arc::make_mut(&mut metadata.display).imdb_rating =
+            kinema_core::catalog::ImdbRating::new(0.0);
+        std::sync::Arc::make_mut(&mut metadata.display).runtime_minutes = Some(98);
+        metadata.imdb = Some(ImdbId::new("tt0000007").expect("IMDb ID"));
+        let row = Row::from_title(&metadata);
+        assert_eq!(
+            row.display
+                .imdb_rating
+                .map(kinema_core::catalog::ImdbRating::value),
+            Some(0.0)
+        );
+        assert_eq!(row.display.runtime_minutes, Some(98));
+        assert_eq!(row.imdb, metadata.imdb);
+        assert_eq!(row.poster_url, metadata.poster_url);
+        assert_eq!(row.year.as_deref(), Some("1999"));
+        assert_eq!(row.overview, None);
+        let other = Row::from_title(&title(8, MediaKind::Movie));
+        let old = [row.clone(), other.clone()];
+        assert_eq!(
+            retained_focus(&old, &[other.clone(), row.clone()], Some(0)),
+            Some(1)
+        );
+        assert_eq!(retained_focus(&old, &[other], Some(0)), None);
+        assert_eq!(retained_focus(&old, &[row], Some(40)), None);
+    }
+
+    #[test]
+    fn painted_card_identity_resolves_current_order_and_rejects_departed_routes() {
+        let rows = [
+            Row::from_title(&title(8, MediaKind::Movie)),
+            Row::from_title(&title(7, MediaKind::Movie)),
+        ];
+        // Title 7 was previously at index zero: a queued click must follow its ID.
+        assert_eq!(
+            current_card_index(&rows, true, MediaKind::Movie, MediaKind::Movie, 7),
+            Some(1)
+        );
+        assert_eq!(
+            current_card_index(&rows, true, MediaKind::Movie, MediaKind::Movie, 99),
+            None
+        );
+        assert_eq!(
+            current_card_index(&rows, false, MediaKind::Movie, MediaKind::Movie, 7),
+            None
+        );
+        assert_eq!(
+            current_card_index(&rows, true, MediaKind::Series, MediaKind::Movie, 7),
+            None
         );
     }
 

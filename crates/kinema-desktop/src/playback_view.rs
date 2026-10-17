@@ -8,7 +8,6 @@
 use gpui_kit::base::Disableable as _;
 use gpui_kit::component::{
     ActiveTheme, Sizable as _,
-    alert::Alert,
     button::{Button, ButtonVariants},
     progress::Progress,
     radio::{Radio, RadioGroup},
@@ -19,6 +18,7 @@ use kinema_core::sources::{DebridKind, FileSelection, PlaybackTarget, RemoteFile
 use crate::{
     media::{PlaybackSession, UsageSnapshot},
     providers::PreparedTorrent,
+    ui::strip::{NoticeTone, notice},
 };
 
 /// Requests for the application worker.
@@ -562,6 +562,8 @@ impl PlaybackView {
         for &i in &visible {
             radios.push(
                 Radio::new(("file", i))
+                    .min_h(px(32.))
+                    .text_size(px(13.))
                     .label(picker.row_label(i))
                     .accessibility_label(picker.row_label(i)),
             );
@@ -583,6 +585,7 @@ impl PlaybackView {
         let mut actions = div().flex().flex_wrap().items_center().gap_2().child(
             Button::new("playback-play")
                 .primary()
+                .h(px(28.))
                 .label("Play selected file")
                 .disabled(busy || picker.confirm().is_none())
                 .on_click(cx.listener(|this, _, _, cx| this.play(cx))),
@@ -591,6 +594,7 @@ impl PlaybackView {
             let show_all = picker.show_all();
             actions = actions.child(
                 Button::new("playback-show-all")
+                    .h(px(28.))
                     .outline()
                     .label(if show_all {
                         "Show suggested files only".to_owned()
@@ -608,17 +612,18 @@ impl PlaybackView {
         div()
             .flex()
             .flex_col()
-            .gap_3()
-            .p_4()
+            .gap_2()
+            .p_3()
             .border_1()
             .border_color(cx.theme().border)
-            .rounded_lg()
+            .rounded_md()
             .child(
                 div()
-                    .text_lg()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
                     .child(format!("Choose a file · {}", picker.target_label)),
             )
-            .child(div().text_sm().text_color(muted).child(format!(
+            .child(div().text_size(px(12.)).text_color(muted).child(format!(
                 "Provider: {}. {guidance}",
                 provider_label(picker.provider)
             )))
@@ -640,6 +645,8 @@ impl PlaybackView {
                 Button::new("playback-copy-url")
                     .outline()
                     .small()
+                    .h(px(24.))
+                    .text_size(px(12.))
                     .label("Copy local address")
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
@@ -650,6 +657,8 @@ impl PlaybackView {
             Button::new("playback-release")
                 .outline()
                 .small()
+                .h(px(24.))
+                .text_size(px(12.))
                 .label(if session.releasing {
                     "Releasing…"
                 } else {
@@ -667,13 +676,18 @@ impl PlaybackView {
             .flex()
             .flex_col()
             .gap_2()
-            .p_4()
+            .p_3()
             .border_1()
             .border_color(cx.theme().border)
-            .rounded_lg()
-            .child(div().text_lg().child("External player launched"))
+            .rounded_md()
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("External player launched"),
+            )
             .child(div().truncate().child(session.file_name.clone()))
-            .child(div().text_sm().text_color(muted).child(
+            .child(div().text_size(px(12.)).text_color(muted).child(
                 "The player was started. This app does not track whether it is playing. \
                  Release the session when you are done to free its cache lease. \
                  It is removed here only once the release is confirmed.",
@@ -681,7 +695,7 @@ impl PlaybackView {
         if let Some(url) = &session.local_url {
             panel = panel.child(
                 div()
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(muted)
                     .child(format!("Local address: {url}")),
             );
@@ -695,11 +709,16 @@ impl PlaybackView {
             .flex()
             .flex_col()
             .gap_2()
-            .p_4()
+            .p_3()
             .border_1()
             .border_color(cx.theme().border)
-            .rounded_lg()
-            .child(div().text_lg().child("Cache"));
+            .rounded_md()
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Cache"),
+            );
         if let Some(fraction) = line.fraction {
             panel = panel.child(
                 Progress::new("playback-acquired")
@@ -709,12 +728,12 @@ impl PlaybackView {
         }
         panel = panel.child(
             div()
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(cx.theme().muted_foreground)
                 .child(line.text),
         );
         if line.over_limit {
-            panel = panel.child(div().text_sm().text_color(cx.theme().danger).child(
+            panel = panel.child(div().text_size(px(12.)).text_color(cx.theme().danger).child(
                 "Reserved space exceeds the limit. Clean up or raise the limit in Settings.",
             ));
         }
@@ -728,17 +747,23 @@ impl Render for PlaybackView {
             .id("playback-view")
             .flex()
             .flex_col()
-            .gap_4()
+            .gap_3()
             .p_4()
             .size_full()
+            .text_size(px(13.))
             .overflow_y_scroll()
-            .child(div().text_xl().child("Playback"));
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Playback"),
+            );
 
         if let Some(message) = self.model.busy.clone() {
-            root = root.child(Alert::info("playback-busy", message));
+            root = root.child(notice("playback-busy", message, NoticeTone::Info, cx));
         }
         if let Some(message) = self.model.error.clone() {
-            root = root.child(Alert::error("playback-error", message));
+            root = root.child(notice("playback-error", message, NoticeTone::Error, cx));
         }
         match self.model.notice.clone() {
             Some(CacheNotice::LimitNeeded { size, limit }) => {
@@ -747,7 +772,7 @@ impl Render for PlaybackView {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(Alert::warning(
+                        .child(notice(
                             "playback-limit",
                             format!(
                                 "This file needs {} but the cache limit is {}. \
@@ -755,11 +780,14 @@ impl Render for PlaybackView {
                                 format_bytes(size),
                                 format_bytes(limit)
                             ),
+                            NoticeTone::Warning,
+                            cx,
                         ))
                         .child(
                             div().child(
                                 Button::new("playback-open-settings")
                                     .primary()
+                                    .h(px(28.))
                                     .label("Open Settings to raise the limit")
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(PlaybackIntent::OpenSettings)
@@ -774,18 +802,21 @@ impl Render for PlaybackView {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(Alert::warning(
+                        .child(notice(
                             "playback-cache-full",
                             format!(
                                 "{message} Remove unused cached media, or release sessions you no longer need. \
                                  Cleanup is manual and never touches files in use."
                             ),
+                            NoticeTone::Warning,
+                            cx,
                         ))
                         .child(
                             div().child(
                                 Button::new("playback-cleanup-full")
                                     .outline()
-                                    .label("Remove unused cached media")
+                                    .h(px(28.))
+.label("Remove unused cached media")
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(PlaybackIntent::CleanupUnused)
                                     })),
@@ -819,6 +850,7 @@ impl Render for PlaybackView {
                 .child(
                     Button::new("playback-open-local")
                         .outline()
+                        .h(px(28.))
                         .label("Open local file…")
                         .on_click(
                             cx.listener(|_, _, _, cx| cx.emit(PlaybackIntent::OpenLocalFile)),
@@ -827,6 +859,7 @@ impl Render for PlaybackView {
                 .child(
                     Button::new("playback-cleanup")
                         .outline()
+                        .h(px(28.))
                         .label("Remove unused cached media")
                         .on_click(
                             cx.listener(|_, _, _, cx| cx.emit(PlaybackIntent::CleanupUnused)),
