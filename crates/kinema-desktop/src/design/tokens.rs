@@ -16,6 +16,8 @@ pub enum Mode {
 pub struct Tokens {
     pub mode: Mode,
     pub canvas: Hsla,
+    /// Translucent modal scrim; never substitutes for an opaque surface.
+    pub overlay: Hsla,
     pub surface: Hsla,
     pub raised: Hsla,
     /// `surface.hover`, also the active rail fill.
@@ -58,6 +60,7 @@ impl Tokens {
         Self {
             mode: Mode::Dark,
             canvas: rgb(0x17191D).into(),
+            overlay: rgba(0x08090B99).into(),
             surface: rgb(0x202227).into(),
             raised: rgb(0x292C33).into(),
             hover: rgb(0x31353D).into(),
@@ -89,6 +92,7 @@ impl Tokens {
         Self {
             mode: Mode::Light,
             canvas: rgb(0xF3F4F6).into(),
+            overlay: rgba(0x141A2266).into(),
             surface: rgb(0xFFFFFF).into(),
             raised: rgb(0xE9ECF1).into(),
             hover: rgb(0xDEE3EA).into(),
@@ -167,6 +171,12 @@ mod tests {
     fn contrast(a: Hsla, b: Hsla) -> f32 {
         let (x, y) = (luminance(a), luminance(b));
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn modal_scrims_preserve_underlying_page_visibility() {
+        assert!((Tokens::dark().overlay.a - 0.60).abs() < 0.001);
+        assert!((Tokens::light().overlay.a - 0.40).abs() < 0.001);
     }
 
     #[test]

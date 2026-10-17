@@ -7,6 +7,7 @@ use super::tokens::{Mode, Tokens, metrics};
 struct Active {
     tokens: Tokens,
     family: Option<SharedString>,
+    fixture_mono_family: Option<SharedString>,
 }
 
 impl Global for Active {}
@@ -19,12 +20,16 @@ pub fn init(cx: &mut App) {
 
 /// Like [`init`], with an explicit already-registered family (offline fixtures).
 pub fn init_with_family(cx: &mut App, family: Option<&str>) {
+    // Production retains Kit's monospace default; controlled fixtures explicitly
+    // register a single family and may use it for both roles.
+    let fixture_mono_family = family.map(|name| SharedString::from(name.to_owned()));
     let family = family
         .map(|name| SharedString::from(name.to_owned()))
         .or_else(|| resolve_family(cx));
     cx.set_global(Active {
         tokens: Tokens::dark(),
         family,
+        fixture_mono_family,
     });
     apply(cx);
 }
@@ -68,6 +73,7 @@ fn pick_family(preferred: &[&str], installed: &[String]) -> Option<String> {
 fn apply(cx: &mut App) {
     let t = tokens(cx);
     let family = cx.global::<Active>().family.clone();
+    let fixture_mono_family = cx.global::<Active>().fixture_mono_family.clone();
     // Loads the built-in config for the mode first; colours are edited after it.
     Theme::change(
         match t.mode {
@@ -79,7 +85,9 @@ fn apply(cx: &mut App) {
     );
     Theme::update(cx, |theme| {
         if let Some(family) = family {
-            theme.font_family = family.clone();
+            theme.font_family = family;
+        }
+        if let Some(family) = fixture_mono_family {
             theme.mono_font_family = family;
         }
         theme.font_size = px(metrics::FONT_BODY);
@@ -104,7 +112,7 @@ fn apply(cx: &mut App) {
         c.muted_foreground = t.muted;
         c.popover = t.surface;
         c.popover_foreground = t.text;
-        c.overlay = t.canvas;
+        c.overlay = t.overlay;
         c.skeleton = t.raised;
         c.list = t.surface;
         c.list_hover = t.hover;
