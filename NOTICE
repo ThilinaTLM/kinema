@@ -53,3 +53,24 @@ this application. The TMDB attribution logo above is bundled separately.
 Integrations do not imply implementation, endorsement,
 or a grant of rights to service content or trademarks. Their software licenses
 and service terms apply independently. See docs/architecture.md for scope.
+
+Bundled desktop v3 fonts and icons
+---------------------------------
+Inter 4.1, Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter),
+is distributed under SIL Open Font License 1.1. Bundled static faces are Regular,
+Medium, SemiBold and Bold; see crates/kinema-desktop/assets/fonts/OFL-Inter.txt.
+
+JetBrains Mono 2.304, Copyright 2020 The JetBrains Mono Project Authors
+(https://github.com/JetBrains/JetBrainsMono), is distributed under SIL Open Font
+License 1.1. Only Regular is bundled; see
+crates/kinema-desktop/assets/fonts/OFL-JetBrainsMono.txt.
+
+Lucide icons 0.468.0 (https://github.com/lucide-icons/lucide) are distributed under
+ISC. Copyright for portions is held by Cole Bemis 2013-2022 as part of Feather
+(MIT); other copyright is held by Lucide Contributors 2022. SVG stroke widths
+are locally changed from 2 to 1.5 for Kinema's visual language. See
+crates/kinema-desktop/assets/icons/LICENSE-lucide.txt for the full license.
+
+Pinned download sources and shipped-asset SHA-256 checksums are recorded in
+crates/kinema-desktop/assets/README.md. These bundled-asset credits must also be
+presented in the v3 About window when that screen is implemented.

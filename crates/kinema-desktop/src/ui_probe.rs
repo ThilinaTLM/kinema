@@ -211,6 +211,10 @@ fn launch(snapshot: Snapshot, cx: &mut App) {
 
 #[cfg(not(target_family = "wasm"))]
 pub fn run_native() {
+    if std::env::args().any(|arg| arg == "--lab") {
+        crate::design_lab::run_native();
+        return;
+    }
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx| {

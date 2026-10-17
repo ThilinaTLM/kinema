@@ -11,12 +11,17 @@ const { decode, crop, encode, diff, assertMatch, differenceImage } = require('./
 const exec = promisify(execFile);
 const args = process.argv.slice(2);
 const artifacts = path.resolve(args[0] && !args[0].startsWith('--') ? args.shift() : 'target/ui-probe/native-artifacts');
-let inputProof = false, gallery = false, light = false, hover, focusPoint;
+let inputProof = false, gallery = false, light = false, lab = false, scene, reduceMotion = false, hover, focusPoint;
 while (args.length) {
   const arg = args.shift();
   if (arg === '--input') inputProof = true;
   else if (arg === '--gallery') gallery = true;
-  else if (arg === '--light') light = true;
+  else if (arg === '--lab') lab = true;
+  else if (arg === '--reduce-motion') reduceMotion = true;
+  else if (arg === '--scene') {
+    scene = args.shift();
+    assert.ok(['components', 'browse', 'menus', 'sheet', 'sheet-ready', 'detail', 'series', 'series-streams', 'states'].includes(scene), '--scene requires a lab scene name');
+  } else if (arg === '--light') light = true;
   else if (arg === '--hover' || arg === '--focus') {
     const value = args.shift();
     assert.ok(/^\d+,\d+$/.test(value || ''), `${arg} requires X,Y`);
@@ -24,10 +29,13 @@ while (args.length) {
     else focusPoint = value.split(',').map(Number);
   } else throw new Error(`Unknown argument: ${arg}`);
 }
-assert.ok(!inputProof || !gallery, '--input coordinates apply only to the counter specimen');
-assert.ok(!light || gallery, '--light requires --gallery');
-assert.ok(!hover || gallery, '--hover requires --gallery');
-assert.ok(!focusPoint || gallery, '--focus requires --gallery');
+assert.ok(!(lab && gallery), '--lab and --gallery are mutually exclusive');
+assert.ok(!scene || lab, '--scene requires --lab');
+assert.ok(!reduceMotion || lab, '--reduce-motion requires --lab');
+assert.ok(!inputProof || !(gallery || lab), '--input coordinates apply only to the counter specimen');
+assert.ok(!light || gallery || lab, '--light requires --gallery or --lab');
+assert.ok(!hover || gallery || lab, '--hover requires --gallery or --lab');
+assert.ok(!focusPoint || gallery || lab, '--focus requires --gallery or --lab');
 const binary = path.resolve('target/debug/ui-probe');
 // xdotool's legacy WM_NAME search can transliterate the em dash differently
 // from getwindowname's UTF-8 _NET_WM_NAME. Match the ASCII fixture marker.
@@ -99,8 +107,8 @@ async function main() {
     fixtureEnv = { ...env, VK_DRIVER_FILES: icd, VK_ICD_FILENAMES: icd };
     report.vulkanIcdOverride = icd;
   }
-  const appArgs = gallery ? ['--gallery', ...(light ? ['--light'] : [])] : [];
-  report.scenario = gallery ? `gallery-${light ? 'light' : 'dark'}` : 'counter';
+  const appArgs = lab ? ['--lab', ...(scene ? ['--scene', scene] : []), ...(light ? ['--light'] : []), ...(reduceMotion ? ['--reduce-motion'] : [])] : gallery ? ['--gallery', ...(light ? ['--light'] : [])] : [];
+  report.scenario = lab ? `lab-${scene || 'components'}-${light ? 'light' : 'dark'}` : gallery ? `gallery-${light ? 'light' : 'dark'}` : 'counter';
   const app = start(binary, appArgs, { env: fixtureEnv });
   report.fixture = logs(app);
   let windowId;
@@ -137,8 +145,13 @@ async function main() {
   report.windowId = windowId;
   report.windowTitle = (await exec('xdotool', ['getwindowname', windowId], { env, timeout: 2000 })).stdout.trim();
   assert.match(report.windowTitle, /^Kinema.*FIXTURE ONLY$/, 'Unexpected fixture title');
+  if (lab) assert.ok(report.windowTitle.includes('Design Lab'), 'Binary did not open requested lab');
   if (gallery) assert.ok(report.windowTitle.includes('Graphite Gallery'), 'Binary did not open the requested gallery scenario');
   report.geometry = (await exec('xdotool', ['getwindowgeometry', '--shell', windowId], { env, timeout: 2000 })).stdout;
+  if (lab) {
+    // Xvfb starts its pointer at screen center, which otherwise discloses a card.
+    await exec('xdotool', ['mousemove', '--window', windowId, '4', '796'], { env, timeout: 2000 });
+  }
   // No render-ready adapter exists for native pixels: this is a candidate image only.
   await pause(1500);
   if (report.fixture.exit) throw new Error(`Fixture exited before capture: ${JSON.stringify(report.fixture.exit)}`);
@@ -152,20 +165,37 @@ async function main() {
   if (hover) {
     assert.ok(hover[0] < image.width && hover[1] < image.height, 'Hover point outside fixture');
     await exec('xdotool', ['mousemove', '--window', windowId, ...hover.map(String)], { env, timeout: 2000 });
-    await pause(250);
+    if (lab) {
+      await pause(80);
+      const midPath = path.join(artifacts, 'native-hover-mid.png');
+      await exec('import', ['-silent', '-window', windowId, '-depth', '8', `PNG32:${midPath}`], { env, timeout: 5000 });
+      report.hoverMid = { path: midPath, nominalDelayMs: 80, needsAgentImageReview: true };
+      await pause(220);
+    } else await pause(250);
     const hoveredPath = path.join(artifacts, 'native-hover.png');
     await exec('import', ['-silent', '-window', windowId, '-depth', '8', `PNG32:${hoveredPath}`], { env, timeout: 5000 });
     const hovered = decode(await fs.readFile(hoveredPath));
-    report.hover = { point: hover, path: hoveredPath, diff: diff(image, hovered), needsAgentImageReview: true };
+    report.hover = { point: hover, path: hoveredPath, diff: diff(image, hovered), minimumDelayMs: lab ? 300 : 250, needsAgentImageReview: true };
+    if (lab && scene === 'browse' && hover[0] >= 20 && hover[0] < 217 && hover[1] >= 68 && hover[1] < 363) {
+      // First-card artwork only: no chips, disclosure panel or focus ring in this ROI.
+      const artworkBounds = { x: 44, y: 112, width: 144, height: 64 };
+      report.hover.artwork = { bounds: artworkBounds, diff: diff(crop(image, artworkBounds), crop(hovered, artworkBounds)) };
+      assert.ok(report.hover.artwork.diff.changedPixels > 0, 'Hover did not visibly zoom first-card artwork');
+    }
   }
   if (focusPoint) {
     assert.ok(focusPoint[0] < image.width && focusPoint[1] < image.height, 'Focus point outside fixture');
-    await exec('xdotool', ['mousemove', '--window', windowId, ...focusPoint.map(String), 'click', '1'], { env, timeout: 2000 });
-    await exec('xdotool', ['windowfocus', '--sync', windowId, 'mousemove', '--window', windowId, String(image.width - 4), String(image.height - 4)], { env, timeout: 2000 });
+    if (lab) {
+      assert.equal(scene || 'components', 'browse', 'Lab keyboard-focus capture is defined only for browse');
+      await exec('xdotool', ['windowfocus', '--sync', windowId, 'mousemove', '--window', windowId, String(image.width - 4), String(image.height - 4), 'key', '--clearmodifiers', ...Array(8).fill('Tab')], { env, timeout: 3000 });
+    } else {
+      await exec('xdotool', ['mousemove', '--window', windowId, ...focusPoint.map(String), 'click', '1'], { env, timeout: 2000 });
+    }
+    if (!lab) await exec('xdotool', ['windowfocus', '--sync', windowId, 'mousemove', '--window', windowId, String(image.width - 4), String(image.height - 4)], { env, timeout: 2000 });
     await pause(250);
     const focusedPath = path.join(artifacts, 'native-focused.png');
     await exec('import', ['-silent', '-window', windowId, '-depth', '8', `PNG32:${focusedPath}`], { env, timeout: 5000 });
-    report.focus = { point: focusPoint, pointerOutsideCards: true, path: focusedPath, needsAgentImageReview: true };
+    report.focus = { point: focusPoint, keyboardOnly: lab, pointerOutsideCards: true, path: focusedPath, needsAgentImageReview: true };
   }
   if (inputProof) {
     assert.equal(image.width, 800); assert.equal(image.height, 600);

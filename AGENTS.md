@@ -11,9 +11,10 @@ These rules apply to the Rust workspace. Historical C++ rules apply only under
   root workspace; commit intentional lockfile updates, and use `--locked` for checks.
 - Keep domain types and pure policies in `kinema-core`; keep GPUI and platform
   presentation in `kinema-desktop`. Do not add unused framework layers or subsystems.
-- Use official `gpui-kit` (=0.7.3), its reexports (`gpui_kit::*`), components,
-  assets, `init`, and `open_window` wrapper. Do not add a separate GPUI dependency
-  or gpui-fast. Consult https://gpui-kit.com for the pinned API.
+- Use direct `gpui` (package `gpui-pre =0.3.9`) and `gpui_platform`, with in-house
+  components under `kinema-desktop/src/widgets` per `docs/design/desktop-v3.md`.
+  `gpui-kit` remains transitionally for legacy screens until removal in P5;
+  do not add new `gpui-kit` usage.
 - Target Windows, macOS, and Linux without KDE dependencies. Avoid platform path,
   shell, and file-lifetime assumptions; launch external players with argument lists.
 - Keep blocking I/O, SQL, network waits, and decoding outside UI rendering. Own

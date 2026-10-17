@@ -15,7 +15,7 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 ui-probe = []
-ui-probe-test = ["ui-probe", "gpui-kit/test-support"]
+ui-probe-test = ["ui-probe", "gpui-kit/test-support", "gpui/test-support"]
 
 [[bin]]
 name = "ui-probe"
@@ -23,7 +23,10 @@ path = "src/bin/ui-probe.rs"
 required-features = ["ui-probe"]
 
 [dependencies]
+unicode-segmentation.workspace = true
 gpui-kit.workspace = true
+gpui.workspace = true
+gpui_platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
