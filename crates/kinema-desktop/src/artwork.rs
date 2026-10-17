@@ -118,6 +118,9 @@ pub fn init(cx: &mut App) {
 }
 /// Invalidate queued work for one view. Running work retains its global slot until
 /// completion; its obsolete result is rejected, not detached/cancelled and replaced.
+/// Explicit route/refresh boundaries also clear negative cache entries globally,
+/// allowing transient failures to retry. Ready artwork remains cached; no timers
+/// or automatic retries are introduced.
 /// Use stable view identifiers, not per-title/query strings. At most 64 owners and
 /// 128-byte owner names are accepted; zero denotes a rejected registration.
 pub fn begin_generation(owner: &str, cx: &mut App) -> u64 {
@@ -183,6 +186,7 @@ impl ArtworkStore {
         let generation = self.generations.entry(owner.into()).or_default();
         *generation = generation.wrapping_add(1);
         self.queue.retain(|job| job.owner != owner);
+        self.cache.retain(|entry| entry.result.is_ok());
         *generation
     }
 
@@ -535,6 +539,48 @@ mod tests {
         }
         store.trim_images();
         assert_eq!(store.cache.len(), ENTRIES);
+    }
+    #[::core::prelude::v1::test]
+    fn explicit_generation_retries_failures_but_keeps_ready_images_and_active_slots() {
+        let mut store = ArtworkStore::default();
+        let generation = store.advance_generation("browse");
+        let key = |name| {
+            ArtworkKey::new(
+                ArtworkKind::Poster,
+                &format!("https://example.com/{name}.png"),
+            )
+            .unwrap_or_else(|| panic!("fixture URL"))
+        };
+        let failed = key("failed");
+        let ready = key("ready");
+        store.enqueue("browse", generation, failed.clone());
+        let job = store.start_next().unwrap_or_else(|| panic!("failed job"));
+        assert!(store.complete(&job, Err(ArtworkError::Transport)));
+        store.enqueue("browse", generation, failed.clone());
+        assert!(store.queue.is_empty()); // No automatic retries within an epoch.
+        store.enqueue("browse", generation, ready.clone());
+        let job = store.start_next().unwrap_or_else(|| panic!("ready job"));
+        let image = Arc::new(RenderImage::new(vec![image::Frame::new(
+            image::RgbaImage::new(1, 1),
+        )]));
+        assert!(store.complete(&job, Ok(image.clone())));
+        store.enqueue("browse", generation, key("active"));
+        let active = store.start_next().unwrap_or_else(|| panic!("active job"));
+        let next = store.advance_generation("browse");
+        assert_eq!(store.active.len(), 1);
+        assert!(store.active.contains_key(&active.id));
+        assert_eq!(store.cache.len(), 1);
+        assert!(
+            store
+                .lookup(&ready)
+                .is_some_and(|cached| Arc::ptr_eq(&cached, &image))
+        );
+        store.enqueue("browse", next, failed.clone());
+        assert_eq!(store.queue.len(), 1);
+        let retry = store.start_next().unwrap_or_else(|| panic!("retry job"));
+        assert_eq!(retry.key, failed);
+        assert_eq!(retry.generation, next);
+        assert_eq!(store.active.len(), 2); // Obsolete active work still owns its slot.
     }
     #[::core::prelude::v1::test]
     fn unsafe_urls_are_rejected() {
