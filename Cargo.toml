@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 kinema-core = { path = "crates/kinema-core" }
 gpui-kit = "=0.7.3"
+wasm-bindgen = "=0.2.129"
 directories = "6.0.0"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "1.52", features = ["rt-multi-thread", "net", "sync", "time"] }

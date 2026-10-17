@@ -49,3 +49,7 @@ jobs:
       - run: cargo +1.97.1 check --workspace --all-targets --locked
       - run: cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo +1.97.1 test --workspace --locked
+      - name: Check isolated GPUI fixture (no production services)
+        run: cargo +1.97.1 clippy -p kinema-desktop --lib --bin ui-probe --features ui-probe-test --locked -- -D warnings
+      - name: Test GPUI interaction and layout (not pixels)
+        run: cargo +1.97.1 test -p kinema-desktop --lib --features ui-probe-test --locked
