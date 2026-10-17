@@ -413,21 +413,17 @@ impl Render for Browse {
                         }
                     }
                     if range.len() > 1 {
-                        for cell in this
-                            .cells
-                            .iter()
-                            .skip(range.start.saturating_sub(2) * cols)
-                            .take((range.len() + 4) * cols)
-                        {
-                            if let Some(url) = cell.title.poster_url() {
-                                let _ = artwork::lookup_or_request(
-                                    "v3-browse",
-                                    this.artwork_generation,
-                                    url,
-                                    cx,
-                                );
-                            }
-                        }
+                        let keys = (range.start..range.end)
+                            .chain(range.end..range.end.saturating_add(2).min(rows))
+                            .chain(range.start.saturating_sub(2)..range.start)
+                            .flat_map(|row| row * cols..(row + 1) * cols)
+                            .filter_map(|index| this.cells.get(index))
+                            .filter_map(|cell| cell.title.poster_url())
+                            .filter_map(|url| {
+                                artwork::ArtworkKey::new(artwork::ArtworkKind::Poster, url)
+                            })
+                            .collect();
+                        artwork::request_window("v3-browse", this.artwork_generation, keys, cx);
                     }
                     if count > 0 && range.end.saturating_add(2) >= rows {
                         this.coordinator.update(cx, |c, cx| c.next_page(cx));

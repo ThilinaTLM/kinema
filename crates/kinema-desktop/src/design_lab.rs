@@ -1,4 +1,5 @@
 //! Offline v3 native design lab. No application services or legacy presentation.
+use crate::screens::settings_window;
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{prelude::*, *};
@@ -27,7 +28,17 @@ use crate::widgets::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 12] = [
+const SCENES: [&str; 22] = [
+    "detail-live-movie",
+    "detail-live-series",
+    "detail-live-series-streams",
+    "play-live-preparing",
+    "play-live-choose-file",
+    "play-live-ready",
+    "play-live-failure",
+    "play-live-missing-creds",
+    "transfers-live",
+    "quit-live",
     "browse-live",
     "browse-live-empty",
     "browse-live-failure",
@@ -50,7 +61,7 @@ pub fn run_native() {
         .position(|a| a == "--scene")
         .map(|i| {
             args.get(i + 1)
-                .filter(|s| SCENES.contains(&s.as_str()))
+                .filter(|s| SCENES.contains(&s.as_str()) || SETTINGS_SCENES.contains(&s.as_str()))
                 .unwrap_or_else(|| panic!("--scene requires one of {}", SCENES.join(", ")))
                 .clone()
         })
@@ -87,7 +98,17 @@ pub fn run_native() {
                 }),
                 ..Default::default()
             };
-            if scene.starts_with("browse-live") {
+            // P4: production Settings scenes (registration lives in the appended block).
+            if SETTINGS_SCENES.contains(&scene.as_str()) {
+                open_settings_fixture(&scene, options, light, reduce, cx);
+                return;
+            }
+            if scene.contains("-live") && !scene.starts_with("browse-live") {
+                cx.open_window(options, |window, cx| {
+                    cx.new(|cx| ProductionScene::new(&scene, window, cx))
+                })
+                .unwrap_or_else(|error| panic!("production fixture window: {error}"));
+            } else if scene.starts_with("browse-live") {
                 cx.open_window(options, |window, cx| {
                     cx.new(|cx| {
                         let coordinator = cx.new(|cx| {
@@ -1486,6 +1507,196 @@ impl Render for Lab {
             .type_style(t::BODY)
             .child(content)
             .when(self.sheet, |el| el.child(self.play_sheet(cx)))
+    }
+}
+
+// ── P4 Settings: append-only production fixture scene registrations ──────────
+const SETTINGS_SCENES: [&str; 6] = [
+    "settings-general",
+    "settings-accounts",
+    "settings-playback",
+    "settings-storage",
+    "settings-appearance",
+    "settings-about",
+];
+fn open_settings_fixture(
+    scene: &str,
+    mut options: WindowOptions,
+    light: bool,
+    reduce: bool,
+    cx: &mut App,
+) {
+    use crate::{
+        screens::coordinator::AppCoordinator,
+        settings::{MotionChoice, Settings, ThemeChoice},
+    };
+    use settings_window::{Section, SettingsWindow};
+    let section = match scene {
+        "settings-accounts" => Section::Accounts,
+        "settings-playback" => Section::Playback,
+        "settings-storage" => Section::Storage,
+        "settings-appearance" => Section::Appearance,
+        "settings-about" => Section::About,
+        _ => Section::General,
+    };
+    options.window_bounds = Some(WindowBounds::Windowed(Bounds {
+        origin: point(px(0.), px(0.)),
+        size: size(px(860.), px(600.)),
+    }));
+    if let Err(error) = cx.open_window(options, |window, cx| {
+        let coordinator = cx.new(|cx| {
+            let mut state = AppCoordinator::fixture(Vec::new(), None, cx);
+            state.settings = Some(Settings {
+                theme: if light {
+                    ThemeChoice::Light
+                } else {
+                    ThemeChoice::Dark
+                },
+                reduce_motion: if reduce {
+                    MotionChoice::Always
+                } else {
+                    MotionChoice::System
+                },
+                ..Default::default()
+            });
+            state.usage = Some(crate::media::UsageSnapshot {
+                reserved_bytes: 8 * 1024 * 1024 * 1024,
+                downloaded_bytes: 6 * 1024 * 1024 * 1024,
+                limit_bytes: 20 * 1024 * 1024 * 1024,
+            });
+            state
+        });
+        cx.new(|cx| SettingsWindow::fixture(coordinator, section, window, cx))
+    }) {
+        eprintln!("Could not open production settings fixture: {error}");
+        cx.quit();
+    }
+}
+// ── End P4 Settings registrations ───────────────────────────────────────────
+
+/// Offline fixture host: mounts production entities with no workers or services.
+struct ProductionScene {
+    content: AnyView,
+    coordinator: Entity<crate::screens::coordinator::AppCoordinator>,
+    quit: bool,
+    transfers: bool,
+    _startup: Option<Task<()>>,
+    focus: FocusHandle,
+}
+impl ProductionScene {
+    fn new(scene: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        use crate::screens::{
+            coordinator::{AppCoordinator, BrowseTitle},
+            detail::Detail,
+            play_sheet::PlaySheet,
+            transfers::Transfers,
+        };
+        use kinema_core::{
+            MediaKind,
+            catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
+        };
+        let series = scene.contains("series");
+        let title=BrowseTitle::Cinemeta(CatalogTitle::new(ImdbId::new("tt1234567").unwrap_or_else(|e|panic!("fixture: {e}")),if series {MediaKind::Series}else{MediaKind::Movie},if series {"North Harbor"} else {"The Quiet Orbit"},Some("A drifting station's last engineer follows a mysterious signal across the silent ocean of space. A synthetic story, made only for this offline design fixture.".into())).unwrap_or_else(|e|panic!("fixture: {e}")).with_display(CatalogDisplay{year:Some(2024),imdb_rating:ImdbRating::new(8.1),runtime_minutes:Some(118),genres:vec!["Drama".into(),"Sci-fi".into()],..Default::default()}));
+        let coordinator = cx.new(|cx| {
+            let mut c = AppCoordinator::fixture(vec![title.clone()], None, cx);
+            c.fixture_art.insert(title.key(), art(0, 240, 360));
+            c.fixture_art
+                .insert(format!("{}:backdrop", title.key()), art(0, 1024, 576));
+            c
+        });
+        let content: AnyView = if scene.starts_with("play-live") {
+            cx.new(|cx| PlaySheet::fixture(coordinator.clone(), scene, cx))
+                .into()
+        } else if scene == "transfers-live" {
+            coordinator.update(cx, |c, _| {
+                c.sessions
+                    .push(crate::screens::coordinator::SessionSnapshot {
+                        session: crate::media::PlaybackSession {
+                            id: "offline-session".into(),
+                            url: "http://127.0.0.1:1234/offline".into(),
+                        },
+                        file_name: "Quiet.Orbit.mkv".into(),
+                    });
+                c.usage = Some(crate::media::UsageSnapshot {
+                    reserved_bytes: 8_100_000_000,
+                    downloaded_bytes: 1_400_000_000,
+                    limit_bytes: 20_000_000_000,
+                });
+            });
+            cx.new(|cx| Transfers::new(coordinator.clone(), cx)).into()
+        } else {
+            cx.new(|cx| Detail::fixture(coordinator.clone(), title, scene.ends_with("streams"), cx))
+                .into()
+        };
+        let focus = cx.focus_handle().tab_stop(true);
+        let startup = if scene == "transfers-live" {
+            let focus = focus.clone();
+            Some(cx.spawn_in(window, async move |_, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(300))
+                    .await;
+                let _ = cx.update(|window, cx| {
+                    focus.focus(window, cx);
+                    window.focus_next(cx);
+                    window.dispatch_keystroke(
+                        Keystroke::parse("enter").unwrap_or_else(|e| panic!("fixture key: {e}")),
+                        cx,
+                    );
+                });
+            }))
+        } else {
+            None
+        };
+        Self {
+            content,
+            coordinator,
+            quit: scene == "quit-live",
+            focus,
+            transfers: scene == "transfers-live",
+            _startup: startup,
+        }
+    }
+}
+impl Render for ProductionScene {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = *tokens::palette(cx);
+        div()
+            .size_full()
+            .relative()
+            .bg(p.bg_canvas)
+            .text_color(p.text_primary)
+            .type_style(t::BODY)
+            .when(!self.transfers, |el| el.child(self.content.clone()))
+            .when(self.transfers, |el| {
+                el.child(
+                    div()
+                        .h(s::TOOLBAR_HEIGHT)
+                        .w_full()
+                        .flex()
+                        .justify_end()
+                        .items_center()
+                        .px(s::S20)
+                        .bg(p.bg_surface)
+                        .child(
+                            Popover::new("fixture-transfers")
+                                .trigger(
+                                    IconButton::new(
+                                        "fixture-transfers-trigger",
+                                        IconName::Transfers,
+                                        "Transfers",
+                                    )
+                                    .badge(1),
+                                )
+                                .content(self.content.clone()),
+                        ),
+                )
+            })
+            .when(self.quit, |el| {
+                el.child(crate::screens::quit::confirmation(
+                    self.coordinator.clone(),
+                    self.focus.clone(),
+                ))
+            })
     }
 }
 

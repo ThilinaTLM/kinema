@@ -1,8 +1,7 @@
-//! Temporary opt-in main window. Detail and settings destinations are explicit
-//! placeholders until their owners integrate; no fake provider collections.
+//! V3 composition root: persistent Browse, route-local Detail, and shared sessions.
 use super::{
     browse::{Browse, OpenTitle, Sort, menu_item},
-    coordinator::{AppCoordinator, BrowseTitle},
+    coordinator::{AppCoordinator, CoordinatorEvent},
 };
 use crate::widgets::{
     button::Button,
@@ -49,14 +48,16 @@ pub fn bind_keys(cx: &mut App) {
 }
 pub(crate) enum Route {
     Browse,
-    Detail(BrowseTitle),
+    Detail(Entity<super::detail::Detail>),
 }
 pub struct MainWindow {
     pub(crate) coordinator: Entity<AppCoordinator>,
     browse: Entity<Browse>,
+    transfers: Entity<super::transfers::Transfers>,
     search: Entity<SearchField>,
     sort: Entity<Select<Sort>>,
     pub(crate) route: Route,
+    launch_pulse: u64,
     menu: Option<Entity<Menu>>,
     menu_subscription: Option<Subscription>,
     chooser: Option<Task<()>>,
@@ -68,6 +69,7 @@ pub struct MainWindow {
 impl MainWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let coordinator = cx.new(AppCoordinator::new);
+        super::settings_window::install(&coordinator, cx);
         Self::with_coordinator(coordinator, window, cx)
     }
     pub(crate) fn with_coordinator(
@@ -75,6 +77,7 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let transfers = cx.new(|cx| super::transfers::Transfers::new(coordinator.clone(), cx));
         let browse = cx.new(|cx| Browse::new(coordinator.clone(), cx));
         let search = cx.new(|cx| {
             let mut s = SearchField::new(window, cx);
@@ -84,6 +87,18 @@ impl MainWindow {
         let sort = cx.new(|cx| Select::new(Sort::Provider, Sort::options(), cx));
         let editor = search.read(cx).input();
         let subscriptions = vec![
+            cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
+                if matches!(
+                    event,
+                    CoordinatorEvent::App(crate::app::AppEvent {
+                        outcome: crate::app::AppOutcome::PlaybackStarted { .. },
+                        ..
+                    })
+                ) {
+                    this.launch_pulse += 1;
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(
                 &editor,
                 window,
@@ -119,9 +134,10 @@ impl MainWindow {
                 });
             }),
             cx.subscribe_in(&browse, window, |this, _, event: &OpenTitle, window, cx| {
-                this.coordinator
-                    .update(cx, |c, cx| c.title_details(&event.0, false, cx));
-                this.route = Route::Detail(event.0.clone());
+                let coordinator = this.coordinator.clone();
+                this.route = Route::Detail(
+                    cx.new(|cx| super::detail::Detail::new(coordinator, event.0.clone(), cx)),
+                );
                 this.focus.focus(window, cx);
                 cx.notify();
             }),
@@ -137,9 +153,11 @@ impl MainWindow {
             observed_query: String::new(),
             coordinator,
             browse,
+            transfers,
             search,
             sort,
             route: Route::Browse,
+            launch_pulse: 0,
             menu: None,
             menu_subscription: None,
             chooser: None,
@@ -182,14 +200,14 @@ impl MainWindow {
         }
         let weak = cx.entity().downgrade();
         let local = weak.clone();
-        let refresh = self.coordinator.clone();
+        let refresh = cx.entity().downgrade();
         let quit = self.coordinator.clone();
         let items = vec![
             menu_item("Open local file…", move |w, cx| {
                 let _ = local.update(cx, |s, cx| s.open_local(w, cx));
             }),
             menu_item("Refresh", move |_, cx| {
-                refresh.update(cx, |c, cx| c.load(c.kind, c.query.clone(), true, cx))
+                let _ = refresh.update(cx, |s, cx| s.refresh(cx));
             }),
             menu_item("About Kinema", move |_, cx| {
                 let _ = weak.update(cx, |s, cx| {
@@ -211,8 +229,19 @@ impl MainWindow {
         self.menu = Some(menu);
         cx.notify();
     }
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        match &self.route {
+            Route::Browse => self
+                .coordinator
+                .update(cx, |c, cx| c.load(c.kind, c.query.clone(), true, cx)),
+            Route::Detail(detail) => detail.update(cx, |d, cx| d.refresh(cx)),
+        }
+    }
     fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.route = Route::Browse;
+        crate::artwork::begin_generation("v3-detail", cx);
+        self.coordinator
+            .update(cx, |c, cx| c.cancel_title_requests(cx));
         self.browse.update(cx, |b, cx| b.restore_focus(window, cx));
         cx.notify();
     }
@@ -223,6 +252,26 @@ impl Render for MainWindow {
         let kind = self.coordinator.read(cx).kind;
         let count = self.coordinator.read(cx).active_sessions();
         let change = cx.entity().downgrade();
+        let in_detail = matches!(self.route, Route::Detail(_));
+        let transfer_trigger = div().child(
+            IconButton::new("transfers-trigger", IconName::Transfers, "Transfers").badge(count),
+        );
+        let pulse = crate::widgets::motion::duration(crate::widgets::motion::Motion::Feedback, cx);
+        let transfer_trigger = if self.launch_pulse > 0 && !pulse.is_zero() {
+            transfer_trigger
+                .with_animation(
+                    ("transfer-launch", self.launch_pulse),
+                    Animation::new(pulse * 2),
+                    |el, t| el.opacity(0.5 + 0.5 * t),
+                )
+                .into_any_element()
+        } else {
+            transfer_trigger.into_any_element()
+        };
+        let toolbar_title = match &self.route {
+            Route::Browse => "Kinema".to_owned(),
+            Route::Detail(detail) => detail.read(cx).name().to_owned(),
+        };
         let toolbar = div()
             .h(s::TOOLBAR_HEIGHT)
             .flex_none()
@@ -233,61 +282,62 @@ impl Render for MainWindow {
             .bg(p.bg_surface)
             .border_b_1()
             .border_color(p.line_hairline)
+            .when(in_detail, |el| {
+                el.child(
+                    Button::new("detail-back", "← Back")
+                        .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
+                )
+            })
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(s::S6)
                     .child(Icon::new(IconName::Film))
-                    .child("Kinema"),
+                    .child(toolbar_title),
             )
-            .child(
-                Segmented::new(
-                    "kind",
-                    [
-                        (MediaKind::Movie, "Movies".into()),
-                        (MediaKind::Series, "Series".into()),
-                    ],
-                    kind,
-                )
-                .on_change(move |kind, _, cx| {
-                    let _ = change.update(cx, |this, cx| {
-                        let query = this.search.read(cx).text(cx).to_owned();
-                        this.coordinator
-                            .update(cx, |c, cx| c.load(*kind, query, false, cx));
-                        this.search.update(cx, |s, cx| {
-                            s.set_placeholder(
-                                if *kind == MediaKind::Movie {
-                                    "Search movies…"
-                                } else {
-                                    "Search series…"
-                                },
-                                cx,
-                            )
+            .when(!in_detail, |el| {
+                el.child(
+                    Segmented::new(
+                        "kind",
+                        [
+                            (MediaKind::Movie, "Movies".into()),
+                            (MediaKind::Series, "Series".into()),
+                        ],
+                        kind,
+                    )
+                    .on_change(move |kind, _, cx| {
+                        let _ = change.update(cx, |this, cx| {
+                            let query = this.search.read(cx).text(cx).to_owned();
+                            this.coordinator
+                                .update(cx, |c, cx| c.load(*kind, query, false, cx));
+                            this.search.update(cx, |s, cx| {
+                                s.set_placeholder(
+                                    if *kind == MediaKind::Movie {
+                                        "Search movies…"
+                                    } else {
+                                        "Search series…"
+                                    },
+                                    cx,
+                                )
+                            });
                         });
-                    });
-                }),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(240.))
-                    .max_w(px(480.))
-                    .child(self.search.clone()),
-            )
-            .child(self.sort.clone())
+                    }),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(240.))
+                        .max_w(px(480.))
+                        .child(self.search.clone()),
+                )
+                .child(self.sort.clone())
+            })
             .child(div().flex_1())
             .child(
                 Popover::new("transfers")
-                    .trigger(
-                        IconButton::new("transfers-trigger", IconName::Transfers, "Transfers")
-                            .badge(count),
-                    )
-                    .content(div().w(px(380.)).p(s::S16).child(if count == 0 {
-                        "Nothing playing or downloading"
-                    } else {
-                        "Active sessions · transfer controls pending P2"
-                    })),
+                    .trigger(transfer_trigger)
+                    .content(self.transfers.clone()),
             )
             .child(
                 IconButton::new("settings", IconName::Settings, "Settings").on_click({
@@ -301,19 +351,7 @@ impl Render for MainWindow {
             );
         let body = match &self.route {
             Route::Browse => self.browse.clone().into_any_element(),
-            Route::Detail(title) => div()
-                .flex_1()
-                .p(s::S20)
-                .flex()
-                .flex_col()
-                .gap(s::S16)
-                .child(
-                    Button::new("back", "Back")
-                        .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
-                )
-                .child(div().type_style(t::TITLE).child(title.name().to_owned()))
-                .child("Detail integration pending P2")
-                .into_any_element(),
+            Route::Detail(detail) => detail.clone().into_any_element(),
         };
         let confirmation = self.coordinator.read(cx).quit_requested
             && self.coordinator.read(cx).needs_quit_confirmation();
@@ -321,21 +359,55 @@ impl Render for MainWindow {
             .id("v3-main")
             .track_focus(&self.focus)
             .key_context("KinemaMain")
-            .on_action(cx.listener(|this, _: &V3Search,window,cx| { this.search.update(cx,|s,cx| s.focus(window,cx)); }))
-            .on_action(cx.listener(|this, _: &V3Refresh,_,cx| { this.coordinator.update(cx,|c,cx| c.load(c.kind,c.query.clone(),true,cx)); }))
-            .on_action(cx.listener(|this, _: &V3Local,window,cx| this.open_local(window,cx)))
-            .on_action(cx.listener(|this, _: &V3Back,window,cx| { if !matches!(this.route,Route::Browse) { this.back(window,cx); } }))
-            .on_action(cx.listener(|this, _: &V3Settings,_,cx| this.coordinator.update(cx,|c,cx| c.open_settings(cx))))
-            .on_action(cx.listener(|this, _: &V3Quit,_,cx| { let may_quit = this.coordinator.update(cx,|c,cx| c.request_quit(cx)); if may_quit { cx.quit(); } }))
-            .on_action(|_: &V3NextFocus,window,cx| window.focus_next(cx))
-            .on_action(|_: &V3PreviousFocus,window,cx| window.focus_prev(cx))
-            .on_key_down(cx.listener(|this,event: &KeyDownEvent,window,cx| {
+            .on_action(cx.listener(|this, _: &V3Search, window, cx| {
+                if !matches!(this.route, Route::Browse) {
+                    this.back(window, cx);
+                }
+                this.search.update(cx, |s, cx| s.focus(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &V3Refresh, _, cx| {
+                this.refresh(cx);
+            }))
+            .on_action(cx.listener(|this, _: &V3Local, window, cx| this.open_local(window, cx)))
+            .on_action(cx.listener(|this, _: &V3Back, window, cx| {
+                if !matches!(this.route, Route::Browse) {
+                    this.back(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &V3Settings, _, cx| {
+                this.coordinator.update(cx, |c, cx| c.open_settings(cx))
+            }))
+            .on_action(cx.listener(|this, _: &V3Quit, _, cx| {
+                let may_quit = this.coordinator.update(cx, |c, cx| c.request_quit(cx));
+                if may_quit {
+                    cx.quit();
+                }
+            }))
+            .on_action(|_: &V3NextFocus, window, cx| window.focus_next(cx))
+            .on_action(|_: &V3PreviousFocus, window, cx| window.focus_prev(cx))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let modifiers = event.keystroke.modifiers;
-                if matches!(this.route,Route::Browse) && !modifiers.control && !modifiers.platform && !modifiers.alt
-                    && !this.search.read(cx).focus_handle(cx).contains_focused(window,cx)
-                    && let Some(text) = event.keystroke.key_char.as_ref().filter(|text| !text.chars().any(char::is_control)) {
-                    let query = format!("{}{text}",this.search.read(cx).text(cx));
-                    this.search.update(cx,|s,cx| { s.set_text(query,cx); s.focus(window,cx); }); cx.stop_propagation();
+                if matches!(this.route, Route::Browse)
+                    && !modifiers.control
+                    && !modifiers.platform
+                    && !modifiers.alt
+                    && !this
+                        .search
+                        .read(cx)
+                        .focus_handle(cx)
+                        .contains_focused(window, cx)
+                    && let Some(text) = event
+                        .keystroke
+                        .key_char
+                        .as_ref()
+                        .filter(|text| !text.chars().any(char::is_control))
+                {
+                    let query = format!("{}{text}", this.search.read(cx).text(cx));
+                    this.search.update(cx, |s, cx| {
+                        s.set_text(query, cx);
+                        s.focus(window, cx);
+                    });
+                    cx.stop_propagation();
                 }
             }))
             .size_full()
@@ -359,20 +431,20 @@ impl Render for MainWindow {
                     deferred(
                         anchored()
                             .anchor(Anchor::TopRight)
-                            .position(point(window.viewport_size().width-s::S20, s::TOOLBAR_HEIGHT))
+                            .position(point(
+                                window.viewport_size().width - s::S20,
+                                s::TOOLBAR_HEIGHT,
+                            ))
                             .child(menu),
                     )
                     .with_priority(10),
                 )
             })
             .when(confirmation, |el| {
-                let cancel = self.coordinator.clone(); let dismiss = cancel.clone();
-                el.child(crate::widgets::sheet::Sheet::new("quit-sheet","Quit Kinema?")
-                    .body("Sessions are active or launches are pending. Quitting stops downloads and the local server; your player may lose media.")
-                    .initial_focus(self.cancel_focus.clone())
-                    .on_dismiss(move |_,cx| dismiss.update(cx,|c,cx| { c.quit_requested = false; cx.notify(); }))
-                    .footer(Button::new("cancel-quit","Cancel").focus_handle(self.cancel_focus.clone()).on_click(move |_,_,cx| cancel.update(cx,|c,cx| { c.quit_requested = false; cx.notify(); })))
-                    .footer(Button::new("confirm-quit","Quit").on_click(|_,_,cx| cx.quit())))
+                el.child(super::quit::confirmation(
+                    self.coordinator.clone(),
+                    self.cancel_focus.clone(),
+                ))
             })
     }
 }

@@ -840,6 +840,15 @@ impl AppCoordinator {
     pub fn needs_quit_confirmation(&self) -> bool {
         self.tracker.needs_quit_confirmation()
     }
+    /// Route teardown: cancel title-owned metadata/source work, not playback.
+    pub fn cancel_title_requests(&mut self, cx: &mut Context<Self>) {
+        self.cancel_details();
+        if let (Ok(worker), Some((ask, generation))) = (&self.worker, self.source_request.take()) {
+            metadata_bridge::cancel(worker, ask, generation);
+        }
+        self.sources.cancel();
+        cx.notify();
+    }
 }
 
 /// Shared production policy, independently testable without creating workers.

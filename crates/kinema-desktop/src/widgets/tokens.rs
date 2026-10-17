@@ -252,9 +252,86 @@ pub fn set_reduce_motion(reduce: bool, cx: &mut App) {
     cx.refresh_windows();
 }
 
+/// Resolve System against GPUI's current native window appearance.
+pub fn resolve_mode(
+    choice: crate::settings::ThemeChoice,
+    appearance: gpui::WindowAppearance,
+) -> Mode {
+    use crate::settings::ThemeChoice;
+    match choice {
+        ThemeChoice::Dark => Mode::Dark,
+        ThemeChoice::Light => Mode::Light,
+        ThemeChoice::System => match appearance {
+            gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark => Mode::Dark,
+            _ => Mode::Light,
+        },
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AppearancePreference(crate::settings::ThemeChoice);
+impl Global for AppearancePreference {}
+
+/// gpui-pre 0.3.9 exposes no OS reduced-motion preference. System therefore
+/// resolves to false; Always still settles running widget animations instantly.
+pub fn apply_preferences(
+    theme: crate::settings::ThemeChoice,
+    motion: crate::settings::MotionChoice,
+    cx: &mut App,
+) {
+    cx.set_global(AppearancePreference(theme));
+    let mode = resolve_mode(theme, cx.window_appearance());
+    if cx
+        .try_global::<Theme>()
+        .is_none_or(|current| current.mode != mode)
+    {
+        set_mode(mode, cx);
+    }
+    let reduce = motion == crate::settings::MotionChoice::Always;
+    if cx
+        .try_global::<Theme>()
+        .is_none_or(|current| current.reduce_motion != reduce)
+    {
+        set_reduce_motion(reduce, cx);
+    }
+}
+
+/// Keep this subscription for the lifetime of a native window. Register on the
+/// main window as well, so System continues following the OS with Settings closed.
+pub fn observe_appearance(window: &gpui::Window) -> gpui::Subscription {
+    window.observe_window_appearance(|_, cx| {
+        if let Some(preference) = cx.try_global::<AppearancePreference>() {
+            let mode = resolve_mode(preference.0, cx.window_appearance());
+            set_mode(mode, cx);
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_appearance_and_explicit_override() {
+        use crate::settings::ThemeChoice;
+        use gpui::WindowAppearance;
+        assert_eq!(
+            resolve_mode(ThemeChoice::System, WindowAppearance::VibrantDark),
+            Mode::Dark
+        );
+        assert_eq!(
+            resolve_mode(ThemeChoice::System, WindowAppearance::Light),
+            Mode::Light
+        );
+        assert_eq!(
+            resolve_mode(ThemeChoice::Dark, WindowAppearance::Light),
+            Mode::Dark
+        );
+        assert_eq!(
+            resolve_mode(ThemeChoice::Light, WindowAppearance::Dark),
+            Mode::Light
+        );
+    }
 
     #[test]
     fn dark_is_default_and_palettes_differ() {

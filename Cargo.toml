@@ -49,3 +49,7 @@ expect_used = "warn"
 
 [profile.dev]
 debug = 1
+
+# Optimize codecs/transport while keeping workspace development builds cheap.
+[profile.dev.package."*"]
+opt-level = 2

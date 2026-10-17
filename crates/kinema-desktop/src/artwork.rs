@@ -6,17 +6,22 @@ use image::{ImageFormat, ImageReader};
 use reqwest::{Url, blocking::Client, redirect::Policy};
 use std::{
     collections::{HashMap, VecDeque},
-    io::{Cursor, Read},
-    sync::Arc,
-    time::Duration,
+    fs,
+    io::{Cursor, Read, Write},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, Instant, SystemTime},
 };
 
-const ACTIVE: usize = 4;
+const ACTIVE: usize = 8;
 const QUEUED: usize = 128;
 const ENCODED: u64 = 4 * 1024 * 1024;
 const PIXELS: u64 = 8 * 1024 * 1024;
 const EDGE: u32 = 8192;
-const ENTRIES: usize = 128;
+// Policy budgets, not total CPU/GPU RAM guarantees.
+const ENTRIES: usize = 256;
+const POSTER_BYTES: usize = 192 * 1024 * 1024;
+const DISK_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ArtworkKind {
@@ -32,7 +37,7 @@ impl ArtworkKind {
     }
     fn quota(self) -> usize {
         match self {
-            Self::Poster => 48 * 1024 * 1024,
+            Self::Poster => POSTER_BYTES,
             Self::Backdrop => 16 * 1024 * 1024,
         }
     }
@@ -145,6 +150,15 @@ pub fn request(owner: &str, generation: u64, key: ArtworkKey, cx: &mut App) {
     cx.update_global::<ArtworkStore, _>(|store, _| store.enqueue(owner, generation, key));
     pump(cx);
 }
+/// Replace this owner's queued window in priority order, then start work. Active
+/// work retains its slot; repeated viewport passes promote newly visible posters.
+pub fn request_window(owner: &str, generation: u64, keys: Vec<ArtworkKey>, cx: &mut App) {
+    init(cx);
+    cx.update_global::<ArtworkStore, _>(|store, _| {
+        store.replace_window(owner, generation, keys);
+    });
+    pump(cx);
+}
 fn pump(cx: &mut App) {
     loop {
         let job = cx.update_global::<ArtworkStore, _>(|store, _| store.start_next());
@@ -209,6 +223,19 @@ impl ArtworkStore {
             generation,
             key,
         });
+    }
+    fn replace_window(&mut self, owner: &str, generation: u64, keys: Vec<ArtworkKey>) {
+        if self.generations.get(owner).copied() != Some(generation) {
+            return;
+        }
+        self.queue.retain(|job| job.owner != owner);
+        // Put the current window before stale prefetch from other owners too.
+        let others = std::mem::take(&mut self.queue);
+        for key in keys.into_iter().take(QUEUED) {
+            self.enqueue(owner, generation, key);
+        }
+        self.queue
+            .extend(others.into_iter().take(QUEUED - self.queue.len()));
     }
     fn start_next(&mut self) -> Option<Job> {
         if self.active.len() >= ACTIVE {
@@ -282,16 +309,41 @@ impl ArtworkStore {
     }
 }
 
-fn fetch(url: &str, kind: ArtworkKind) -> Result<Arc<RenderImage>, ArtworkError> {
-    // No redirects: credential-bearing or non-HTTP redirect targets cannot bypass
-    // key validation. No OS proxy credentials, cookies or provider token is used.
-    let client = Client::builder()
+fn client_builder() -> reqwest::blocking::ClientBuilder {
+    // Some current Metahub posters redirect to live.metahub.space. Every hop
+    // must pass key validation and stay HTTPS; never forward a Referer, proxy,
+    // cookie or provider credential. HTTP/1 pooling needs neither http2 nor gzip.
+    Client::builder()
         .no_proxy()
-        .redirect(Policy::none())
+        .referer(false)
+        .redirect(Policy::custom(|attempt| {
+            if valid_redirect(attempt.url(), attempt.previous()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(ACTIVE)
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(15))
+}
+fn valid_redirect(url: &Url, previous: &[Url]) -> bool {
+    previous.len() <= 3
+        && previous.iter().all(|url| url.scheme() == "https")
+        && url.scheme() == "https"
+        && ArtworkKey::new(ArtworkKind::Poster, url.as_str()).is_some()
+}
+fn build_client() -> Result<Client, ArtworkError> {
+    client_builder()
         .build()
-        .map_err(|_| ArtworkError::Transport)?;
+        .map_err(|_| ArtworkError::Transport)
+}
+fn shared_client() -> Result<&'static Client, ArtworkError> {
+    static CLIENT: OnceLock<Result<Client, ArtworkError>> = OnceLock::new();
+    CLIENT.get_or_init(build_client).as_ref().map_err(|e| *e)
+}
+fn download(client: &Client, url: &str) -> Result<Vec<u8>, ArtworkError> {
     let response = client
         .get(url)
         .send()
@@ -307,7 +359,146 @@ fn fetch(url: &str, kind: ArtworkKind) -> Result<Arc<RenderImage>, ArtworkError>
         .take(ENCODED + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| ArtworkError::Transport)?;
-    decode(&bytes, kind)
+    if bytes.len() as u64 > ENCODED {
+        return Err(ArtworkError::TooLarge);
+    }
+    Ok(bytes)
+}
+// Serialize this process's cache maintenance, not network/decode work. All callers
+// run on background workers. Cache failures are best-effort misses, never UI errors.
+static DISK_LOCK: Mutex<()> = Mutex::new(());
+struct DiskCache {
+    root: PathBuf,
+    budget: u64,
+}
+impl DiskCache {
+    fn path(&self, url: &str) -> PathBuf {
+        use sha2::{Digest, Sha256};
+        self.root
+            .join(format!("{:x}.img", Sha256::digest(url.as_bytes())))
+    }
+    fn read(&self, url: &str, kind: ArtworkKind) -> Option<Arc<RenderImage>> {
+        let _guard = DISK_LOCK.lock().ok()?;
+        if !fs::symlink_metadata(&self.root).ok()?.is_dir() {
+            return None;
+        }
+        let path = self.path(url);
+        let result = (|| {
+            if !fs::symlink_metadata(&path).ok()?.is_file() {
+                return None;
+            }
+            let file = fs::File::open(&path).ok()?;
+            if !file.metadata().ok()?.is_file() {
+                return None;
+            }
+            let mut bytes = Vec::new();
+            file.take(ENCODED + 1).read_to_end(&mut bytes).ok()?;
+            Some(bytes)
+        })();
+        drop(_guard);
+        let result = result.and_then(|bytes| decode(&bytes, kind).ok());
+        let _guard = DISK_LOCK.lock().ok()?;
+        if result.is_some() {
+            // Best-effort last-access approximation; no automatic TTL.
+            if let Ok(file) = fs::OpenOptions::new().write(true).open(&path) {
+                let _ = file.set_modified(SystemTime::now());
+            }
+        } else {
+            let _ = fs::remove_file(path);
+        }
+        result
+    }
+    fn write(&self, url: &str, bytes: &[u8]) {
+        let Ok(_guard) = DISK_LOCK.lock() else {
+            return;
+        };
+        if bytes.len() as u64 > ENCODED || bytes.len() as u64 > self.budget {
+            return;
+        }
+        let _ = (|| -> std::io::Result<()> {
+            fs::create_dir_all(&self.root)?;
+            if !fs::symlink_metadata(&self.root)?.is_dir() {
+                return Ok(());
+            }
+            let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
+            file.write_all(bytes)?;
+            file.persist(self.path(url)).map_err(|e| e.error)?;
+            self.trim()
+        })();
+    }
+    fn trim(&self) -> std::io::Result<()> {
+        let mut files = Vec::new();
+        for entry in fs::read_dir(&self.root)?.flatten() {
+            let path = entry.path();
+            if !owned_cache_file(&path) || !entry.file_type()?.is_file() {
+                continue;
+            }
+            let metadata = entry.metadata()?;
+            files.push((
+                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                path,
+                metadata.len(),
+            ));
+        }
+        files.sort_by_key(|entry| entry.0);
+        let mut total: u64 = files.iter().map(|entry| entry.2).sum();
+        for (_, path, size) in files {
+            if total <= self.budget {
+                break;
+            }
+            if fs::remove_file(path).is_ok() {
+                total -= size;
+            }
+        }
+        Ok(())
+    }
+}
+fn owned_cache_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.len() == 68
+                && name.ends_with(".img")
+                && name.as_bytes()[..64].iter().all(u8::is_ascii_hexdigit)
+        })
+}
+fn fetch(url: &str, kind: ArtworkKind) -> Result<Arc<RenderImage>, ArtworkError> {
+    let start = Instant::now();
+    // Pipeline tests must not read, write or evict real application cache files.
+    // Disk behavior is tested separately with isolated temporary directories.
+    let disk = if cfg!(test) {
+        None
+    } else {
+        crate::paths::AppPaths::resolve()
+            .ok()
+            .map(|paths| DiskCache {
+                root: paths.cache.join("artwork"),
+                budget: DISK_BYTES,
+            })
+    };
+    if let Some(image) = disk.as_ref().and_then(|cache| cache.read(url, kind)) {
+        tracing::debug!(
+            cache = "disk",
+            decode_ms = start.elapsed().as_millis(),
+            "artwork ready"
+        );
+        return Ok(image);
+    }
+    let bytes = download(shared_client()?, url)?;
+    let fetched = start.elapsed();
+    let decode_start = Instant::now();
+    let image = decode(&bytes, kind)?;
+    tracing::debug!(
+        cache = "network",
+        fetch_ms = fetched.as_millis(),
+        decode_ms = decode_start.elapsed().as_millis(),
+        "artwork ready"
+    );
+    // Only successful, validated static image responses are persisted.
+    if let Some(disk) = disk {
+        disk.write(url, &bytes);
+    }
+    Ok(image)
 }
 fn decode(bytes: &[u8], kind: ArtworkKind) -> Result<Arc<RenderImage>, ArtworkError> {
     if bytes.len() as u64 > ENCODED {
@@ -411,6 +602,207 @@ fn animated(bytes: &[u8], format: ImageFormat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn redirects_require_valid_https_urls_and_have_a_hop_limit() {
+        let parse = |url| Url::parse(url).unwrap_or_else(|e| panic!("{e}"));
+        let origin = parse("https://images.metahub.space/poster/a/img");
+        let target = parse("https://live.metahub.space/poster/a/img");
+        assert!(valid_redirect(&target, std::slice::from_ref(&origin)));
+        for url in [
+            "http://example.com/a",
+            "file:///tmp/a",
+            "https://user:pass@example.com/a",
+            "https://example.com/a?token=secret",
+            "https://example.com/a#fragment",
+        ] {
+            assert!(!valid_redirect(&parse(url), std::slice::from_ref(&origin)));
+        }
+        assert!(!valid_redirect(&target, &[parse("http://example.com/a")]));
+        assert!(!valid_redirect(
+            &target,
+            &[origin.clone(), origin.clone(), origin.clone(), origin]
+        ));
+    }
+    #[test]
+    fn window_priority_reorders_and_prunes_without_replacing_active_work() {
+        let mut store = ArtworkStore::default();
+        let generation = store.advance_generation("browse");
+        let key = |i| {
+            ArtworkKey::new(ArtworkKind::Poster, &format!("https://example.com/{i}.jpg"))
+                .unwrap_or_else(|| panic!("key"))
+        };
+        store.replace_window("browse", generation, vec![key(1), key(2), key(3)]);
+        let active = store.start_next().unwrap_or_else(|| panic!("job"));
+        store.replace_window("browse", generation, vec![key(3), key(4), key(1)]);
+        assert_eq!(
+            store
+                .queue
+                .iter()
+                .map(|j| j.key.clone())
+                .collect::<Vec<_>>(),
+            vec![key(3), key(4)]
+        );
+        assert_eq!(store.start_next().map(|j| j.key), Some(key(3)));
+        assert!(store.active.contains_key(&active.id));
+        store.replace_window("browse", generation + 1, vec![]);
+        assert_eq!(store.queue.len(), 1);
+        store.replace_window("browse", generation, vec![]);
+        assert!(store.queue.is_empty());
+    }
+    #[test]
+    fn disk_cache_hit_miss_eviction_and_corruption() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let mut bytes = Vec::new();
+        image::DynamicImage::new_rgb8(2, 3)
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let cache = DiskCache {
+            root: dir.path().join("artwork"),
+            budget: bytes.len() as u64,
+        };
+        assert!(cache.read("a", ArtworkKind::Poster).is_none());
+        cache.write("a", &bytes);
+        assert!(cache.read("a", ArtworkKind::Poster).is_some());
+        fs::File::options()
+            .write(true)
+            .open(cache.path("a"))
+            .and_then(|file| file.set_modified(SystemTime::UNIX_EPOCH))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let unrelated = cache.root.join("unrelated.txt");
+        fs::write(&unrelated, b"preserve").unwrap_or_else(|e| panic!("{e}"));
+        cache.write("b", &bytes);
+        assert!(unrelated.exists());
+        assert!(cache.read("a", ArtworkKind::Poster).is_none());
+        assert!(cache.read("b", ArtworkKind::Poster).is_some());
+        fs::write(cache.path("b"), b"corrupt").unwrap_or_else(|e| panic!("{e}"));
+        assert!(cache.read("b", ArtworkKind::Poster).is_none());
+        assert!(!cache.path("b").exists());
+        fs::write(cache.path("b"), vec![0; ENCODED as usize + 1]).unwrap_or_else(|e| panic!("{e}"));
+        assert!(cache.read("b", ArtworkKind::Poster).is_none());
+        assert!(!cache.path("b").exists());
+        cache.write("large", &vec![0; ENCODED as usize + 1]);
+        assert!(!cache.path("large").exists());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn disk_cache_does_not_follow_symlinked_root() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let target = dir.path().join("target");
+        fs::create_dir(&target).unwrap_or_else(|e| panic!("{e}"));
+        let root = dir.path().join("artwork");
+        std::os::unix::fs::symlink(&target, &root).unwrap_or_else(|e| panic!("{e}"));
+        let cache = DiskCache {
+            root,
+            budget: DISK_BYTES,
+        };
+        fs::write(cache.path("a"), b"preserve").unwrap_or_else(|e| panic!("{e}"));
+        assert!(cache.read("a", ArtworkKind::Poster).is_none());
+        cache.write("a", b"replacement");
+        assert_eq!(
+            fs::read(cache.path("a")).unwrap_or_else(|e| panic!("{e}")),
+            b"preserve"
+        );
+    }
+    /// Run explicitly with --ignored --nocapture; uses public posters only,
+    /// bypasses disk cache, and does not log URLs or touch application data.
+    #[test]
+    #[ignore = "live Cinemeta poster timing; network-dependent"]
+    fn live_poster_timing() {
+        // Optional diagnostic: resolve outside the timed requests on hosts whose
+        // system DNS exceeds the production five-second connection timeout.
+        let resolved = if std::env::var_os("KINEMA_ARTWORK_BENCH_RESOLVE").is_some() {
+            use std::net::ToSocketAddrs;
+            [
+                "cinemeta-catalogs.strem.io",
+                "images.metahub.space",
+                "live.metahub.space",
+                "image.tmdb.org",
+            ]
+            .into_iter()
+            .map(|host| {
+                (
+                    host,
+                    (host, 443)
+                        .to_socket_addrs()
+                        .unwrap_or_else(|e| panic!("DNS: {e}"))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let bench_client = || {
+            let mut builder = client_builder();
+            for (host, addresses) in &resolved {
+                builder = builder.resolve_to_addrs(host, addresses);
+            }
+            builder.build().unwrap_or_else(|e| panic!("{e:?}"))
+        };
+        let client = bench_client();
+        let catalog_bytes = if let Some(path) = std::env::var_os("KINEMA_ARTWORK_BENCH_CATALOG") {
+            fs::read(path).unwrap_or_else(|e| panic!("{e}"))
+        } else {
+            client
+                // The public v3-cinemeta catalog endpoint currently returns 307
+                // to this catalog host; avoid counting its redirect in setup.
+                .get("https://cinemeta-catalogs.strem.io/top/catalog/movie/top.json")
+                .send()
+                .and_then(|r| r.bytes())
+                .unwrap_or_else(|e| panic!("{e:?}"))
+                .to_vec()
+        };
+        let catalog: serde_json::Value =
+            serde_json::from_slice(&catalog_bytes).unwrap_or_else(|e| panic!("{e}"));
+        let urls: Vec<String> = catalog["metas"]
+            .as_array()
+            .unwrap_or_else(|| panic!("metas"))
+            .iter()
+            .filter_map(|meta| meta["poster"].as_str())
+            .filter(|url| ArtworkKey::new(ArtworkKind::Poster, url).is_some())
+            .take(30)
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(urls.len(), 30);
+        let run = |url: &str, client: &Client| {
+            let start = Instant::now();
+            let bytes = download(client, url).unwrap_or_else(|e| panic!("fetch: {e:?}"));
+            let fetch_ms = start.elapsed().as_millis();
+            let start = Instant::now();
+            let _ = decode(&bytes, ArtworkKind::Poster).unwrap_or_else(|e| panic!("decode: {e:?}"));
+            (fetch_ms, start.elapsed().as_millis())
+        };
+        let start = Instant::now();
+        let old: Vec<_> = urls.iter().map(|url| run(url, &bench_client())).collect();
+        eprintln!(
+            "old sequential fresh-client: wall={:?}, fetch_sum={}ms decode_sum={}ms",
+            start.elapsed(),
+            old.iter().map(|x| x.0).sum::<u128>(),
+            old.iter().map(|x| x.1).sum::<u128>()
+        );
+        let start = Instant::now();
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = urls
+                .chunks(urls.len().div_ceil(ACTIVE))
+                .map(|chunk| {
+                    let client = &client;
+                    let run = &run;
+                    scope
+                        .spawn(move || chunk.iter().map(|url| run(url, client)).collect::<Vec<_>>())
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap_or_else(|_| panic!("worker")))
+                .collect::<Vec<_>>()
+        });
+        eprintln!(
+            "new pooled concurrent: wall={:?}, fetch_sum={}ms decode_sum={}ms",
+            start.elapsed(),
+            results.iter().map(|x| x.0).sum::<u128>(),
+            results.iter().map(|x| x.1).sum::<u128>()
+        );
+    }
     #[::core::prelude::v1::test]
     fn global_slots_survive_obsolete_generations_and_queue_is_bounded() {
         let mut store = ArtworkStore::default();
@@ -431,7 +823,7 @@ mod tests {
         assert_eq!(store.advance_generation("browse"), 2);
         let key = ArtworkKey::new(ArtworkKind::Poster, "https://example.com/new.png")
             .unwrap_or_else(|| panic!("fixture URL"));
-        // Obsolete active work still occupies all four slots, even after queued
+        // Obsolete active work still occupies all slots, even after queued
         // obsolete work is discarded for the new route epoch.
         assert!(store.queue.is_empty());
         store.enqueue("browse", 2, key);
@@ -530,7 +922,7 @@ mod tests {
         assert!(!store.cache.iter().any(|e| e.key == second));
         assert!(store.cache.iter().any(|e| e.key == first));
         assert!(store.cache.iter().any(|e| e.key == backdrop));
-        for index in 5..205 {
+        for index in 5..ENTRIES + 5 {
             store.cache.push_back(Cached {
                 key: key(ArtworkKind::Poster, index),
                 result: Err(ArtworkError::Transport),

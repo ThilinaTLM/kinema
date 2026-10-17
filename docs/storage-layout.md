@@ -55,6 +55,13 @@ unverified.
 Agents did not access user databases or credentials. A user's database upgrades
 only on next open with the new build, not as part of this documentation update.
 
+Artwork encoded bytes now use `AppPaths.cache/artwork/<sha256-of-url>.img`:
+`./data/artwork/` in development and native `cache_dir()/artwork/` in production.
+The independent 256 MiB best-effort disk budget, atomic writes, validation and
+mtime-based eviction are described in [cache policy](cache-policy.md#implemented-artwork-cache).
+This disposable cache is not part of the managed-media quota or catalog and holds
+no URL index, provider credentials or error responses.
+
 Artwork bytes remain a separate cache; media payloads/manifests and credentials
 remain outside the catalog. Cache/media cleanup must preserve canonical identities,
 ratings, provenance, and referenced page/fetch stubs; identity reconciliation is a
@@ -66,8 +73,8 @@ separate proven-ID transaction, not eviction. No history/library tables are adde
 application data (including future settings, artwork, logs, and managed media)
 belongs under `./data/` relative to the process working directory. Credentials
 remain in OS secure storage, never this tree. Catalog, settings, and media storage
-use this rule; artwork/log caches in the proposed layout are not a claim of
-implemented caching/rotation.
+use this rule; artwork is implemented as documented above, while log caching/
+rotation in the proposed layout is not a claim of implemented behavior.
 
 For production, use native directories in the `kinema` application namespace, not
 hardcoded home paths. The following broader root/layout examples remain proposed,

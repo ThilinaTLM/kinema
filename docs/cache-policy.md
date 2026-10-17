@@ -50,6 +50,63 @@ See [the actual schema](catalog-schema.md#implemented-first-increment) for keys 
 [worker lifetime limits](architecture.md#implemented-worker-lifetime-limits) for
 bounded blocking and stale-result handling.
 
+## Implemented artwork cache
+
+Artwork transport uses one lazily initialized HTTP client with connection pooling,
+no proxies/credentials, 5-second connect and 15-second total timeouts. Current
+Metahub posters can redirect to `live.metahub.space`: at most three redirects
+are followed, only HTTPS-to-HTTPS and only when every target passes `ArtworkKey`
+validation (no userinfo, query, fragment or non-HTTP schemes). Referer forwarding
+is disabled; invalid redirects fail rather than bypass validation.
+Up to eight background jobs run; browse replaces its queued window on each viewport
+pass: visible rows in visual order, then two rows below, then two above. Obsolete
+queued prefetch is dropped; already-running work retains its slot.
+
+Decoded posters have a 192 MiB byte budget; backdrops retain 16 MiB, with a shared
+256-entry ceiling (including failures). These constants bound accounted decoded
+pixels, not total process/GPU memory or references held by mounted cards.
+
+Validated static JPEG/PNG/WebP encoded bytes are also cached under
+`AppPaths.cache/artwork/<sha256-of-exact-url>.img`, independently of managed media,
+with a 256 MiB encoded-file budget. Background workers read/decode and atomically
+publish via same-directory temporary files; process-local maintenance is serialized.
+Last-use mtime is touched on successful reads and oldest mtimes are evicted first.
+Only owned hash-named regular files are pruned; missing, oversized or corrupt files
+are misses and reacquired. Error responses/invalid images are never persisted.
+Disk failures degrade to network use; eviction is best effort on unwritable/locked
+files, not a reservation guarantee across multiple processes. Crash-left temporary
+files are not counted or automatically removed. Encoded responses remain limited
+to 4 MiB and images to 8 megapixels/8192 pixels per edge before thumbnail decoding.
+No TTL or automatic artwork refresh is introduced: a changed URL changes the key;
+cache loss is recoverable, not guaranteed offline storage. No URLs are logged by
+artwork timing events (`tracing::debug` fetch/decode milliseconds).
+
+Reproduce the opt-in 30-poster network/decode comparison with
+`cargo test -p kinema-desktop --lib --locked live_poster_timing -- --ignored --nocapture`
+(and add `--release` for release). It compares fresh-client sequential requests
+with eight pooled workers, bypassing application disk storage. Both arms use the
+current profile; development dependencies are optimized while workspace crates
+remain unoptimized. Sequential runs precede pooled runs, so CDN/network warming
+can influence results; this is a smoke measurement, not a controlled benchmark.
+If local system DNS exceeds the five-second connection timeout, set
+`KINEMA_ARTWORK_BENCH_RESOLVE=1` to resolve the public hosts once before timing
+(both arms then exclude DNS latency; TLS validation is unchanged). An optional
+`KINEMA_ARTWORK_BENCH_CATALOG=/path/to/catalog.json` can use a catalog previously
+retrieved from the public endpoint. Neither option affects application transport.
+
+Local smoke measurement (2026-10-18, 30 current Cinemeta poster URLs, disk bypassed,
+`KINEMA_ARTWORK_BENCH_RESOLVE=1` because local DNS took about 5.015 seconds):
+
+| Profile | Fresh-client sequential wall | Pooled eight-worker wall | Decode sum, sequential / pooled |
+| --- | ---: | ---: | ---: |
+| Dev (optimized dependencies) | 22.074 s | 3.174 s | 251 / 252 ms |
+| Release | 21.007 s | 1.842 s | 42 / 55 ms |
+
+Both arms use the current validated redirect and decode policies; this compares
+connection/scheduling strategies, not historical versus current complete UI builds.
+Fetch-time sums were 21,716 / 20,605 ms (dev) and 20,862 / 10,959 ms (release).
+No GUI scroll latency or cross-platform performance claim follows from these runs.
+
 ## Target cache coverage
 
 - **Catalog metadata and query results:** SQLite is the target primary read model, with shared movie/series, season, and episode metadata independent of Cinemeta/TMDB. Retain rich descriptions, artwork references, external IDs, distinct rating sources, and provenance under the target schema's merge rules. Unknown is nullable, not zero or an invented empty value. Saved query/page membership remains provider-scoped; normalized titles do not imply provider-independent search results.
