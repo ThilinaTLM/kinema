@@ -204,10 +204,10 @@ fn remote_background_progress_seek_and_durable_restart() -> Result<(), Box<dyn s
     );
     wait_until(|| service.usage().downloaded_bytes == fixture.bytes.len() as u64);
     assert!(service.session_errors().is_empty());
-    assert_eq!(service.cleanup_unused()?, 0);
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 0);
     let requested = fixture.requests.lock().map_err(|_| "poison")?.clone();
     assert!(requested.iter().any(|&(s, _)| s == CHUNK * 4 + 100));
-    service.release(&lease.id);
+    service.release(&lease.id)?;
     wait_until(|| {
         service.shared.state.lock().is_ok_and(|s| {
             s.assets
@@ -219,7 +219,10 @@ fn remote_background_progress_seek_and_durable_restart() -> Result<(), Box<dyn s
     // The service thread owns the root lock until it has really stopped.
     let service = reopen(root.path(), CHUNK * 10)?;
     assert_eq!(service.usage().downloaded_bytes, fixture.bytes.len() as u64);
-    assert_eq!(service.cleanup_unused()?, fixture.bytes.len() as u64);
+    assert_eq!(
+        service.cleanup_unused()?.freed_bytes,
+        fixture.bytes.len() as u64
+    );
     Ok(())
 }
 #[test]
@@ -246,7 +249,7 @@ fn expired_and_rejected_access_renew_without_discarding_bytes()
     assert!(service.session_errors().is_empty());
     assert!(count.load(Ordering::Relaxed) >= 4);
     assert!(fixture.calls.load(Ordering::Relaxed) >= 8);
-    service.release(&lease.id);
+    service.release(&lease.id)?;
     Ok(())
 }
 #[test]
@@ -284,7 +287,7 @@ fn upstream_failures_are_safe_visible_and_do_not_publish_bytes()
         }
         assert_eq!(service.usage().downloaded_bytes, 0);
         assert!(fixture.calls.load(Ordering::Relaxed) <= 3);
-        service.release(&lease.id);
+        service.release(&lease.id)?;
     }
     Ok(())
 }
@@ -302,7 +305,7 @@ fn renewal_identity_change_preserves_prior_checkpoint() -> Result<(), Box<dyn st
     wait_until(|| !service.session_errors().is_empty());
     assert_eq!(service.session_errors()[0].1, MediaError::IdentityMismatch);
     assert!(service.usage().downloaded_bytes >= CHUNK);
-    service.release(&lease.id);
+    service.release(&lease.id)?;
     Ok(())
 }
 #[test]
@@ -362,7 +365,7 @@ fn actual_interruption_restarts_only_missing_durable_ranges()
     let next = resolved.clone();
     let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
     wait_until(|| service.usage().downloaded_bytes >= CHUNK);
-    service.release(&lease.id);
+    service.release(&lease.id)?;
     wait_until(|| {
         service.shared.state.lock().is_ok_and(|s| {
             s.assets
@@ -389,7 +392,7 @@ fn actual_interruption_restarts_only_missing_durable_ranges()
             .iter()
             .all(|&(start, _)| start >= downloaded)
     );
-    service.release(&lease.id);
+    service.release(&lease.id)?;
     Ok(())
 }
 #[test]
@@ -450,7 +453,7 @@ fn failed_creation_artifacts_remain_reserved_until_successful_cleanup()
     let tombstone = service.shared.root.join(format!(".delete-{key}"));
     assert_eq!(std::fs::read(tombstone.join("unrecognized"))?, b"preserve");
     std::fs::remove_file(tombstone.join("unrecognized"))?;
-    assert_eq!(service.cleanup_unused()?, CHUNK);
+    assert_eq!(service.cleanup_unused()?.freed_bytes, CHUNK);
     Ok(())
 }
 
@@ -474,6 +477,6 @@ fn remote_identity_filename_sets_get_and_head_mime_not_display_filename()
     assert_eq!(response.status(), 200);
     assert_eq!(response.headers()["content-type"], "video/x-matroska");
     assert_eq!(response.bytes()?.as_ref(), fixture.bytes.as_slice());
-    service.release(&lease.id);
+    service.release(&lease.id)?;
     Ok(())
 }

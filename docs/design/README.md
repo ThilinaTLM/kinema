@@ -1,4 +1,16 @@
-# Graphite v2 desktop review guide
+# Desktop design index
+
+- [Desktop v3](desktop-v3.md) is the sole approved/default native UI direction.
+  Production uses direct GPUI and in-house widgets; Kit and version switches are removed.
+- [Native v3 lab](ui-probe.md) documents offline captures and validation limits.
+- The v2 guide below, [design system](design-system.md),
+  [native implementation report](native-implementation.md), and
+  [verification research](ui-verification.md) are **historical evidence**, not active
+  implementation guides. The frozen HTML remains unchanged.
+
+---
+
+# Historical Graphite v2 desktop review guide
 
 Open [desktop-wireframes.html](desktop-wireframes.html) directly in a browser
 (`file://`). This self-contained HTML is a **design-only, not-connected review

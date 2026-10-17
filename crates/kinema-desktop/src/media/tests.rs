@@ -58,9 +58,9 @@ fn local_ranges_head_release_and_never_delete_original() -> Result<(), Box<dyn s
         assert_eq!(response.status(), 416);
         assert_eq!(response.headers()["content-range"], "bytes */10");
     }
-    assert_eq!(service.cleanup_unused()?, 0);
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 0);
     assert_eq!(service.usage().reserved_bytes, 0);
-    service.release(&lease.id);
+    service.release(&lease.id)?;
     assert_eq!(client.get(&lease.url).send()?.status(), 404);
     assert_eq!(std::fs::read(original)?, b"0123456789");
     Ok(())
@@ -154,15 +154,15 @@ fn durable_ranges_recovery_quota_cleanup_and_lock() -> Result<(), Box<dyn std::e
     ));
     drop(state);
     let lease = service.lease(Source::Remote(asset.clone()))?;
-    assert_eq!(service.cleanup_unused()?, 0);
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 0);
     let mut file = File::open(asset.dir.join("payload"))?;
     file.seek(SeekFrom::Start(20))?;
     let mut content = [0u8; 13];
     file.read_exact(&mut content)?;
     assert_eq!(&content, b"durable bytes");
     drop(asset);
-    service.release(&lease.id);
-    assert_eq!(service.cleanup_unused()?, 100);
+    service.release(&lease.id)?;
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 100);
     assert_eq!(service.usage().reserved_bytes, 0);
     Ok(())
 }
@@ -238,7 +238,7 @@ fn creation_deletion_crash_phases_and_checkpoint_leftovers_recover()
     }
     let service = service(root.path());
     assert_eq!(service.usage().reserved_bytes, 100);
-    assert_eq!(service.cleanup_unused()?, 100);
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 100);
     assert_eq!(std::fs::read(managed.join("unrelated-user-file"))?, b"keep");
     Ok(())
 }
@@ -269,8 +269,8 @@ fn failed_cleanup_remains_counted_and_released_http_reader_pins_payload()
         .ok_or("missing lease")?;
     let dir = asset.dir.clone();
     drop(asset);
-    service.release(&lease.id);
-    assert_eq!(service.cleanup_unused()?, 0);
+    service.release(&lease.id)?;
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 0);
     drop(reader);
     std::fs::write(dir.join("unknown-user-file"), b"keep")?;
     assert_eq!(service.cleanup_unused().err(), Some(MediaError::Storage));
@@ -281,7 +281,7 @@ fn failed_cleanup_remains_counted_and_released_http_reader_pins_payload()
     ));
     assert_eq!(std::fs::read(tombstone.join("unknown-user-file"))?, b"keep");
     std::fs::remove_file(tombstone.join("unknown-user-file"))?;
-    assert_eq!(service.cleanup_unused()?, 100);
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 100);
     assert_eq!(service.usage().reserved_bytes, 0);
     Ok(())
 }
@@ -400,8 +400,8 @@ fn native_alias_parent_is_allowed_but_owned_root_and_asset_symlinks_are_rejected
         reqwest::blocking::get(&lease.url)?.bytes()?.as_ref(),
         b"external bytes"
     );
-    service.release(&lease.id);
-    assert_eq!(service.cleanup_unused()?, 0);
+    service.release(&lease.id)?;
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 0);
     assert_eq!(std::fs::read(&original)?, b"external bytes");
     // Existing owned-root symlink rejection is also covered by symlinks_are_not_followed_or_cleaned.
     let root = tempfile::tempdir()?;
@@ -457,7 +457,7 @@ fn partial_managed_payload_cannot_be_registered_as_complete_local_media()
             .is_empty()
     );
     drop(asset);
-    assert_eq!(service.cleanup_unused()?, 100);
+    assert_eq!(service.cleanup_unused()?.freed_bytes, 100);
     Ok(())
 }
 #[cfg(unix)]
@@ -480,5 +480,93 @@ fn managed_payload_symlink_is_rejected_without_touching_external_file()
         Err(MediaError::Storage)
     ));
     assert_eq!(std::fs::read(external)?, b"keep");
+    Ok(())
+}
+
+#[test]
+fn session_telemetry_is_per_asset_and_cleanup_counts_protected_payloads_once()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let service = service(root.path());
+    let identity = identity(100);
+    let key = storage::key(&identity);
+    let asset = storage::create(&service.shared.root, &key, identity)?;
+    asset
+        .state
+        .lock()
+        .map_err(|_| "asset lock")?
+        .ranges
+        .insert(ByteRange::new(0, 25).ok_or("range")?);
+    service
+        .shared
+        .state
+        .lock()
+        .map_err(|_| "state lock")?
+        .assets
+        .insert(key, asset.clone());
+    let first = service.lease(Source::Remote(asset.clone()))?;
+    let second = service.lease(Source::Remote(asset.clone()))?;
+    drop(asset);
+    let updates = service.session_updates();
+    assert_eq!(updates.len(), 2);
+    assert!(updates.iter().all(|u| {
+        u.origin == SessionOrigin::Remote
+            && u.progress
+                .as_ref()
+                .is_some_and(|p| p.downloaded_bytes == 25 && p.total_bytes == 100)
+    }));
+    assert!(service.reveal_path(&first.id)?.is_file());
+    assert_eq!(
+        service.cleanup_unused()?,
+        CleanupReport {
+            freed_bytes: 0,
+            protected_files: 1
+        }
+    );
+    service.release(&first.id)?;
+    assert_eq!(service.session(&first.id).err(), Some(MediaError::Canceled));
+    service.release(&second.id)?;
+    assert_eq!(
+        service.cleanup_unused()?,
+        CleanupReport {
+            freed_bytes: 100,
+            protected_files: 0
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn local_reveal_retains_canonical_location_and_reports_deleted_file()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let file = root.path().join("literal ; film.mkv");
+    std::fs::write(&file, b"fixture")?;
+    let service = service(root.path());
+    let session = service.register_local(&file)?;
+    assert_eq!(service.reveal_path(&session.id)?, file.canonicalize()?);
+    let updates = service.session_updates();
+    assert_eq!(updates[0].origin, SessionOrigin::Local);
+    assert!(updates[0].progress.is_none());
+    std::fs::remove_file(&file)?;
+    assert_eq!(
+        service.reveal_path(&session.id).err(),
+        Some(MediaError::InvalidLocalFile)
+    );
+    Ok(())
+}
+
+#[test]
+fn stop_reports_service_failure_instead_of_claiming_release()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let service = service(root.path());
+    let shared = service.shared.clone();
+    let poisoned = std::thread::spawn(move || {
+        let _guard = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        panic!("fixture: poison the lease state");
+    });
+    assert!(poisoned.join().is_err());
+    assert_eq!(service.release("session").err(), Some(MediaError::Storage));
     Ok(())
 }

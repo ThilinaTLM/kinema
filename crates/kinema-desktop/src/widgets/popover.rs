@@ -223,23 +223,26 @@ mod interaction_tests {
             crate::widgets::tokens::set_reduce_motion(true, cx);
         });
         let window = cx.add_window(|_, _| Fixture);
-        let previous = cx
-            .update_window(window.into(), |_, window, cx| {
-                window.draw(cx).clear(cx);
-                window.focus_next(cx);
-                window.focused(cx).expect("trigger focus")
-            })
-            .expect("draw trigger");
+        let Ok(previous) = cx.update_window(window.into(), |_, window, cx| {
+            window.draw(cx).clear(cx);
+            window.focus_next(cx);
+            let Some(previous) = window.focused(cx) else {
+                panic!("trigger did not receive focus");
+            };
+            previous
+        }) else {
+            panic!("could not draw trigger");
+        };
         cx.simulate_keystrokes(window.into(), "space");
-        cx.update_window(window.into(), |_, window, cx| {
+        let drawn = cx.update_window(window.into(), |_, window, cx| {
             window.draw(cx).clear(cx);
             assert!(!previous.is_focused(window));
-        })
-        .expect("draw panel");
+        });
+        assert!(drawn.is_ok(), "could not draw panel: {drawn:?}");
         cx.simulate_keystrokes(window.into(), "escape");
-        cx.update_window(window.into(), |_, window, _| {
+        let returned = cx.update_window(window.into(), |_, window, _| {
             assert!(previous.is_focused(window))
-        })
-        .expect("focus returned");
+        });
+        assert!(returned.is_ok(), "focus return update failed: {returned:?}");
     }
 }

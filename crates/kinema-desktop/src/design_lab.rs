@@ -28,7 +28,12 @@ use crate::widgets::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 22] = [
+const SCENES: [&str; 28] = [
+    "detail-live-tmdb-movie",
+    "detail-live-tmdb-series",
+    "detail-live-tmdb-series-streams",
+    "detail-live-no-art",
+    "browse-live-pending",
     "detail-live-movie",
     "detail-live-series",
     "detail-live-series-streams",
@@ -38,6 +43,7 @@ const SCENES: [&str; 22] = [
     "play-live-failure",
     "play-live-missing-creds",
     "transfers-live",
+    "transfers-live-menu",
     "quit-live",
     "browse-live",
     "browse-live-empty",
@@ -117,8 +123,13 @@ pub fn run_native() {
                                 MediaKind,
                                 catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
                             };
-                            let titles = if scene == "browse-live" {
-                                (0..60)
+                            let titles = if scene == "browse-live" || scene == "browse-live-pending"
+                            {
+                                (0..if scene == "browse-live-pending" {
+                                    12
+                                } else {
+                                    60
+                                })
                                     .filter_map(|i| {
                                         let names = [
                                             "The Quiet Orbit",
@@ -166,6 +177,9 @@ pub fn run_native() {
                                         .fixture_art
                                         .insert(title.key(), art(i, 240, 360));
                                 }
+                            }
+                            if scene == "browse-live-pending" {
+                                coordinator.fixture_pending_append(cx);
                             }
                             coordinator
                         });
@@ -1597,6 +1611,31 @@ impl ProductionScene {
         };
         let series = scene.contains("series");
         let title=BrowseTitle::Cinemeta(CatalogTitle::new(ImdbId::new("tt1234567").unwrap_or_else(|e|panic!("fixture: {e}")),if series {MediaKind::Series}else{MediaKind::Movie},if series {"North Harbor"} else {"The Quiet Orbit"},Some("A drifting station's last engineer follows a mysterious signal across the silent ocean of space. A synthetic story, made only for this offline design fixture.".into())).unwrap_or_else(|e|panic!("fixture: {e}")).with_display(CatalogDisplay{year:Some(2024),imdb_rating:ImdbRating::new(8.1),runtime_minutes:Some(118),genres:vec!["Drama".into(),"Sci-fi".into()],..Default::default()}));
+        let title = if scene.contains("tmdb") {
+            BrowseTitle::Tmdb(crate::tmdb::TmdbTitle {
+                id: 91,
+                kind: if series {
+                    MediaKind::Series
+                } else {
+                    MediaKind::Movie
+                },
+                name: title.name().into(),
+                overview: title.overview().map(str::to_owned),
+                release_info: Some("2024".into()),
+                poster_url: Some("https://image.tmdb.org/t/p/w500/show-poster.jpg".into()),
+                display: std::sync::Arc::new(CatalogDisplay {
+                    year: Some(2024),
+                    imdb_rating: ImdbRating::new(8.1),
+                    runtime_minutes: (!series).then_some(118),
+                    season_count: series.then_some(3),
+                    genres: vec!["Drama".into(), "Mystery".into()],
+                    ..Default::default()
+                }),
+                imdb: ImdbId::new("tt1234567").ok(),
+            })
+        } else {
+            title
+        };
         let coordinator = cx.new(|cx| {
             let mut c = AppCoordinator::fixture(vec![title.clone()], None, cx);
             c.fixture_art.insert(title.key(), art(0, 240, 360));
@@ -1607,7 +1646,7 @@ impl ProductionScene {
         let content: AnyView = if scene.starts_with("play-live") {
             cx.new(|cx| PlaySheet::fixture(coordinator.clone(), scene, cx))
                 .into()
-        } else if scene == "transfers-live" {
+        } else if scene.starts_with("transfers-live") {
             coordinator.update(cx, |c, _| {
                 c.sessions
                     .push(crate::screens::coordinator::SessionSnapshot {
@@ -1616,6 +1655,37 @@ impl ProductionScene {
                             url: "http://127.0.0.1:1234/offline".into(),
                         },
                         file_name: "Quiet.Orbit.mkv".into(),
+                        title: Some("The Quiet Orbit".into()),
+                        target: None,
+                        origin: crate::media::SessionOrigin::Remote,
+                        progress: Some(crate::media::SessionProgress {
+                            downloaded_bytes: 1_400_000_000,
+                            total_bytes: 4_200_000_000,
+                        }),
+                        error: Some(
+                            "Media connection timed out. Replay keeps this session's local URL."
+                                .into(),
+                        ),
+                        can_reveal: true,
+                    });
+                c.sessions
+                    .push(crate::screens::coordinator::SessionSnapshot {
+                        session: crate::media::PlaybackSession {
+                            id: "offline-local".into(),
+                            url: "http://127.0.0.1:1234/media/offline-local".into(),
+                        },
+                        file_name: "Harbor.S01E02.mkv".into(),
+                        title: Some("North Harbor".into()),
+                        target: Some(kinema_core::sources::PlaybackTarget::Episode {
+                            series: ImdbId::new("tt1234568")
+                                .unwrap_or_else(|e| panic!("fixture: {e}")),
+                            season: 1,
+                            episode: 2,
+                        }),
+                        origin: crate::media::SessionOrigin::Local,
+                        progress: None,
+                        error: None,
+                        can_reveal: true,
                     });
                 c.usage = Some(crate::media::UsageSnapshot {
                     reserved_bytes: 8_100_000_000,
@@ -1625,12 +1695,51 @@ impl ProductionScene {
             });
             cx.new(|cx| Transfers::new(coordinator.clone(), cx)).into()
         } else {
-            cx.new(|cx| Detail::fixture(coordinator.clone(), title, scene.ends_with("streams"), cx))
-                .into()
+            let palette =
+                (scene != "detail-live-no-art").then_some(crate::artwork::ArtworkPalette {
+                    primary: [27, 73, 102],
+                    secondary: [62, 47, 113],
+                });
+            let detail = cx.new(|cx| {
+                Detail::fixture(
+                    coordinator.clone(),
+                    title,
+                    scene.ends_with("streams"),
+                    palette,
+                    cx,
+                )
+            });
+            coordinator.update(cx, |c, _| {
+                let mut urls = Vec::new();
+                if let Some(d) = c.details.value() {
+                    urls.extend(d.background_url.iter().cloned());
+                    urls.extend(d.poster_url.iter().cloned());
+                    urls.extend(d.episodes.iter().filter_map(|e| e.still_url.clone()));
+                }
+                if let Some(d) = c.tmdb_details.value() {
+                    urls.extend(d.backdrop_url.iter().cloned());
+                    urls.extend(d.title.poster_url.iter().cloned());
+                }
+                for season in c.fixture_seasons.values() {
+                    urls.extend(season.poster_url.iter().cloned());
+                    urls.extend(season.episodes.iter().filter_map(|e| e.still_url.clone()));
+                }
+                for page in c.fixture_similar.values() {
+                    urls.extend(page.titles.iter().filter_map(|t| t.poster_url.clone()));
+                }
+                for (i, url) in urls.into_iter().enumerate() {
+                    c.fixture_art.insert(url, art(i, 320, 180));
+                }
+                if scene == "detail-live-no-art" {
+                    c.fixture_art.clear();
+                }
+            });
+            detail.into()
         };
         let focus = cx.focus_handle().tab_stop(true);
-        let startup = if scene == "transfers-live" {
+        let startup = if scene.starts_with("transfers-live") {
             let focus = focus.clone();
+            let menu = scene.ends_with("-menu");
             Some(cx.spawn_in(window, async move |_, cx| {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(300))
@@ -1643,6 +1752,19 @@ impl ProductionScene {
                         cx,
                     );
                 });
+                if menu {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(150))
+                        .await;
+                    let _ = cx.update(|window, cx| {
+                        window.focus_next(cx);
+                        window.dispatch_keystroke(
+                            Keystroke::parse("shift-f10")
+                                .unwrap_or_else(|e| panic!("fixture key: {e}")),
+                            cx,
+                        );
+                    });
+                }
             }))
         } else {
             None
@@ -1652,7 +1774,7 @@ impl ProductionScene {
             coordinator,
             quit: scene == "quit-live",
             focus,
-            transfers: scene == "transfers-live",
+            transfers: scene.starts_with("transfers-live"),
             _startup: startup,
         }
     }
@@ -1685,7 +1807,7 @@ impl Render for ProductionScene {
                                         IconName::Transfers,
                                         "Transfers",
                                     )
-                                    .badge(1),
+                                    .badge(self.coordinator.read(cx).sessions.len()),
                                 )
                                 .content(self.content.clone()),
                         ),

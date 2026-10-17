@@ -4,6 +4,7 @@
 //! no drop shadows, tokens from [`tokens`], motion from [`motion`].
 //! Code here must use `gpui::*` directly, never `gpui_kit`.
 
+pub mod ambient_background;
 pub mod motion;
 pub mod text;
 pub mod tokens;
@@ -38,3 +39,4 @@ pub use text::TypeExt;
 pub use tokens::{Mode, Palette, Theme, palette, theme};
 
 pub mod poster_card;
+pub mod skeleton_card;

@@ -409,7 +409,7 @@ pub(super) fn discard(root: &Path, asset: &Asset) -> Result<(), MediaError> {
     }
     remove_owned(&tombstone)
 }
-pub(super) fn cleanup(shared: &Shared) -> Result<u64, MediaError> {
+pub(super) fn cleanup(shared: &Shared) -> Result<super::CleanupReport, MediaError> {
     let mut state = shared.state.lock().map_err(|_| MediaError::Storage)?;
     // Each HTTP reader and acquisition owner holds an Arc independently of session leases.
     let keys: Vec<_> = state
@@ -418,6 +418,7 @@ pub(super) fn cleanup(shared: &Shared) -> Result<u64, MediaError> {
         .filter(|(_, asset)| Arc::strong_count(asset) == 1)
         .map(|(k, _)| k.clone())
         .collect();
+    let protected_files = state.assets.len() - keys.len();
     let mut freed = 0u64;
     for key in keys {
         let asset = &state.assets[&key];
@@ -427,5 +428,8 @@ pub(super) fn cleanup(shared: &Shared) -> Result<u64, MediaError> {
             .ok_or(MediaError::Storage)?;
         state.assets.remove(&key);
     }
-    Ok(freed)
+    Ok(super::CleanupReport {
+        freed_bytes: freed,
+        protected_files,
+    })
 }

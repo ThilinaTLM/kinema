@@ -3,7 +3,8 @@
 ## What we are building
 
 **Current state:** MVP source flows are composed in the two-crate Rust workspace,
-using official GPUI Kit 0.7.3. The shell wires Cinemeta/TMDB browse/search/details
+using direct GPUI (`gpui-pre =0.3.9`) and `gpui_platform`. V3 is the sole/default
+UI, with in-house widgets and no version switch or Kit dependency. It wires Cinemeta/TMDB browse/search/details
 and episodes, source selection, settings/keyring actions, preparation/file choice,
 managed-media sessions, local-file playback, manual cleanup, and quit confirmation.
 The reported v4 source uses normalized canonical metadata and indexer rows, with
@@ -207,7 +208,7 @@ External launch success and HTTP traffic do not establish playing/paused/complet
 
 Use native adapters or maintained cross-platform libraries for application directories, secure credential storage, player discovery/launch, and optional desktop features. Store secrets in the OS secure store, never settings, SQLite, manifests, or logs. Launch players with argument lists, not constructed shell commands.
 
-Test on all three desktops throughout development. Pay particular attention to Unicode paths, file locks/deletion, secure-store errors, player reconnects, and GPUI window/rendering behavior; test Wayland/X11 on Linux. Minimum OS versions, architectures, packaging, and optional integrations remain open. The shell pins GPUI Kit 0.7.3 and uses its GPUI reexports; native compilation alone does not establish runtime desktop support.
+Test on all three desktops throughout development. Pay particular attention to Unicode paths, file locks/deletion, secure-store errors, player reconnects, and GPUI window/rendering behavior; test Wayland/X11 on Linux. Minimum OS versions, architectures, packaging, and optional integrations remain open. The desktop pins direct GPUI 0.3.9; native compilation alone does not establish runtime desktop support.
 
 ## What we learned from the old application
 

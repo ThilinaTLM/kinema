@@ -70,6 +70,10 @@ pub(super) fn write(
         )?,
         TmdbData::Details(details) => {
             let mut item = observation(&details.title);
+            if let Some(url) = &details.backdrop_url {
+                item.fields
+                    .push(("backdrop_url".into(), FieldValue::Text(url.clone())));
+            }
             if let Some(imdb) = &details.imdb {
                 item.identifiers.push(ExternalIdentifier {
                     namespace: "imdb".into(),
@@ -143,6 +147,17 @@ pub(super) fn write(
                 data.episodes.is_empty(),
                 time,
             )?;
+            if let Some(url) = &data.poster_url {
+                field(
+                    tx,
+                    Target::Season(id),
+                    ("poster_url", &FieldValue::Text(url.clone())),
+                    "tmdb",
+                    Quality::Detail,
+                    fetch_id,
+                    time,
+                )?;
+            }
             // A season resource supplies the parent identity and child metadata;
             // it does not assert title detail success.
             import_title(tx, series, &item, "tmdb", Quality::Summary, fetch_id, time)?;
@@ -203,6 +218,23 @@ pub(super) fn read(
     let resource = crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?;
     let tx = service.connection.transaction()?;
     let (data, fetched_at) = match query {
+        TmdbQuery::Similar { page, .. } => {
+            let Some(saved) = read_page(&tx, "tmdb", &resource, *page)? else {
+                return Ok(None);
+            };
+            (
+                TmdbData::Page(TmdbPage {
+                    titles: saved
+                        .ids
+                        .into_iter()
+                        .map(|id| title(&tx, id, MediaKind::Movie))
+                        .collect::<Result<_, _>>()?,
+                    page: *page,
+                    total_pages: saved.total.ok_or(CatalogError::InvalidCache)?,
+                }),
+                saved.fetched_at,
+            )
+        }
         TmdbQuery::Browse { kind, page } => {
             let Some(saved) = read_page(&tx, "tmdb", &resource, *page)? else {
                 return Ok(None);
@@ -269,8 +301,12 @@ pub(super) fn read(
                     });
                 }
             }
+            let backdrop_url = CatalogService::title_record(&tx, id)?
+                .text("backdrop_url")
+                .map(str::to_owned);
             (
                 TmdbData::Details(TmdbDetails {
+                    backdrop_url,
                     title,
                     imdb,
                     genres,
@@ -302,6 +338,10 @@ pub(super) fn read(
             };
             (
                 TmdbData::Season(TmdbSeason {
+                    poster_url: CatalogService::season_records(&tx, series)?
+                        .into_iter()
+                        .find(|r| r.number == *number)
+                        .and_then(|r| r.text("poster_url").map(str::to_owned)),
                     series_id: *series_id,
                     season: *number,
                     episodes: read_episodes(&tx, series, Some(*number))?,
@@ -323,6 +363,17 @@ pub(super) fn write_rich(
         return Ok(());
     }
     match query {
+        TmdbQuery::Similar { page, .. } => {
+            return super::normalized_rich::write_page_rich(
+                tx,
+                "tmdb",
+                &crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?,
+                *page,
+                MediaKind::Movie,
+                rich,
+                time,
+            );
+        }
         TmdbQuery::Browse { kind, page } => {
             return super::normalized_rich::write_page_rich(
                 tx,
@@ -381,6 +432,7 @@ mod display_projection_tests {
         };
         let imdb = ImdbId::new("tt1234567")?;
         let data = TmdbData::Details(TmdbDetails {
+            backdrop_url: None,
             title: TmdbTitle {
                 id: 42,
                 kind: MediaKind::Movie,

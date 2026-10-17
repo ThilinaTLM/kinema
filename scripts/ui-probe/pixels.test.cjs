@@ -73,20 +73,6 @@ test('CLI rejects negative control without rewriting baseline', () => {
     assert.deepEqual(fs.readFileSync(file), original);
   } finally { fs.rmSync(dir, { recursive: true }); }
 });
-test('browser baseline cannot be overwritten by artifact capture, even on acceptance', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kinema-ui-probe-baseline-test-'));
-  try {
-    const file = path.join(dir, 'first-frame.png');
-    fs.writeFileSync(file, 'baseline sentinel');
-    for (const extra of [[], ['--accept-baseline']]) {
-      const result = spawnSync(process.execPath, [path.join(__dirname, 'verify.cjs'), '--artifacts', dir, '--baseline', file, ...extra]);
-      assert.equal(result.status, 1);
-      assert.match(result.stderr.toString(), /Baseline must be outside/);
-      assert.equal(fs.readFileSync(file, 'utf8'), 'baseline sentinel');
-      assert.deepEqual(fs.readdirSync(dir), ['first-frame.png']);
-    }
-  } finally { fs.rmSync(dir, { recursive: true }); }
-});
 test('RGB decode and PNG row filters', () => {
   assert.deepEqual([...decode(png([1, 10,20,30, 1,2,3], 2)).pixels], [10,20,30,255,11,22,33,255]);
   for (const filter of [0,2,3,4]) {

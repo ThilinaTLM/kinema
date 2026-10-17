@@ -1,3 +1,7 @@
+> **Historical v2 evidence — superseded.** Use [desktop v3](desktop-v3.md)
+> and the [native lab](ui-probe.md). Kit APIs and old probe commands below are
+> retained only as historical evidence; they are no longer supported.
+
 # Native UI verification before Graphite implementation
 
 **Implementation follow-up:** the [isolated GPUI probe](ui-probe.md) now records

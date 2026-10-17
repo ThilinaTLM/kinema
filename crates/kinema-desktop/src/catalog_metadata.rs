@@ -341,6 +341,7 @@ struct DetailsDocument {
 
 #[derive(Deserialize, Serialize)]
 struct EpisodeDocument {
+    thumbnail: Option<String>,
     season: u32,
     episode: u32,
     name: Option<String>,
@@ -392,6 +393,8 @@ impl DetailsDocument {
             check_text(video.overview.as_deref(), MAX_OVERVIEW_CHARS)?;
             check_text(video.released.as_deref(), 100)?;
             episodes.push(CatalogEpisode {
+                still_url: validate_image(video.thumbnail)?,
+                runtime_minutes: None,
                 season: video.season,
                 number: video.episode,
                 name: video.name,
@@ -426,6 +429,7 @@ impl DetailsDocument {
                     .episodes
                     .iter()
                     .map(|episode| EpisodeDocument {
+                        thumbnail: episode.still_url.clone(),
                         season: episode.season,
                         episode: episode.number,
                         name: episode.name.clone(),
@@ -852,6 +856,19 @@ impl CatalogService {
         tx.commit()?;
         self.read_tmdb(query)?.ok_or(CatalogError::InvalidCache)
     }
+}
+
+/// Offline production-screen fixtures use the same response decoder/validation
+/// as the transport path, without constructing SQL/network services.
+#[cfg(feature = "ui-probe")]
+pub(super) fn decode_fixture_details(
+    kind: MediaKind,
+    id: &ImdbId,
+    payload: &str,
+) -> Result<TitleDetails, CatalogError> {
+    let response: DetailsResponse =
+        serde_json::from_str(payload).map_err(|_| CatalogError::InvalidResponse)?;
+    response.meta.validate(kind, id)
 }
 
 #[cfg(test)]

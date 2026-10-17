@@ -150,7 +150,9 @@ pub(super) fn tmdb(service: &mut CatalogService, query: &TmdbQuery, error: Catal
         return;
     };
     let target = match query {
-        TmdbQuery::Browse { page, .. } | TmdbQuery::Search { page, .. } => RequestTarget::Page {
+        TmdbQuery::Browse { page, .. }
+        | TmdbQuery::Search { page, .. }
+        | TmdbQuery::Similar { page, .. } => RequestTarget::Page {
             provider: "tmdb",
             key,
             number: *page,

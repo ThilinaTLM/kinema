@@ -1,4 +1,4 @@
-//! Direct-GPUI production screens; temporarily selected with KINEMA_UI=v3.
+//! Direct-GPUI v3 production screens: the sole/default UI, with no version switch.
 pub(crate) mod browse;
 pub mod coordinator;
 pub mod main_window;

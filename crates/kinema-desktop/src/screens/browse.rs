@@ -1,5 +1,5 @@
-//! Virtualized production browse. The minimal legacy Nav policy is duplicated
-//! here to keep the kit-bound catalog view untouched during the transition.
+//! Virtualized poster browse with stable loaded cards and static loading rows.
+mod layout;
 use super::coordinator::{AppCoordinator, BrowseTitle};
 use crate::{
     artwork::{self, ArtworkState},
@@ -8,12 +8,14 @@ use crate::{
         menu::MenuItem,
         notice::{Notice, NoticeKind},
         poster_card::{CardOpened, PosterCard},
+        skeleton_card::SkeletonCard,
         text::TypeExt,
         tokens::{self, space as s, typeface as t},
     },
 };
 use gpui::{prelude::*, *};
 use kinema_core::MediaKind;
+use layout::LoadingLayout;
 use std::{cmp::Ordering, rc::Rc};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -119,6 +121,7 @@ pub(crate) struct Browse {
     focus: FocusHandle,
     selected: Option<String>,
     cols: usize,
+    page_request_generation: Option<u64>,
     subject: (MediaKind, String),
     artwork_generation: u64,
     _observation: Subscription,
@@ -134,6 +137,7 @@ impl Browse {
             focus: cx.focus_handle(),
             selected: None,
             cols: 2,
+            page_request_generation: None,
             subject: (MediaKind::Movie, String::new()),
             artwork_generation: artwork::begin_generation("v3-browse", cx),
             _observation: observation,
@@ -325,6 +329,8 @@ impl Render for Browse {
         let row_height = width * 1.5 + f32::from(s::GRID_GAP);
         let state = self.coordinator.read(cx);
         let busy = state.collection.busy();
+        let append_in_flight = state.append_in_flight();
+        let generation = state.collection.generation();
         let error = state.collection.error().map(str::to_owned);
         let query = state.query.clone();
         let missing = state
@@ -396,11 +402,15 @@ impl Render for Browse {
                 )
                 .into_any_element()
         } else {
-            let rows = if count == 0 {
-                (f32::from(window.viewport_size().height) / row_height).ceil() as usize + 2
-            } else {
-                count.div_ceil(cols)
-            };
+            let layout = LoadingLayout::new(
+                count,
+                cols,
+                (f32::from(window.viewport_size().height) / row_height).ceil() as usize + 2,
+                busy,
+                append_in_flight,
+            );
+            let rows = layout.rows();
+            let failed = error.is_some();
             uniform_list(
                 "v3-poster-grid",
                 rows,
@@ -425,27 +435,35 @@ impl Render for Browse {
                             .collect();
                         artwork::request_window("v3-browse", this.artwork_generation, keys, cx);
                     }
-                    if count > 0 && range.end.saturating_add(2) >= rows {
-                        this.coordinator.update(cx, |c, cx| c.next_page(cx));
+                    if layout.should_request(
+                        &range,
+                        busy,
+                        failed,
+                        generation,
+                        this.page_request_generation,
+                    ) {
+                        // Renderers also run during measurement. Defer mutation until
+                        // after layout, and admit at most one request per generation.
+                        this.page_request_generation = Some(generation);
+                        let coordinator = this.coordinator.clone();
+                        cx.defer(move |cx| {
+                            coordinator.update(cx, |c, cx| {
+                                if c.collection.generation() == generation {
+                                    c.next_page(cx);
+                                }
+                            });
+                        });
                     }
                     range
                         .map(|row| {
                             let mut cards = Vec::new();
-                            for index in row * cols..((row + 1) * cols).min(if count == 0 {
-                                cols * rows
-                            } else {
-                                count
-                            }) {
-                                if count == 0 {
-                                    cards.push(
-                                        div()
-                                            .w(px(width))
-                                            .h(px(width * 1.5))
-                                            .bg(p.bg_placeholder)
-                                            .into_any_element(),
-                                    );
-                                    continue;
-                                }
+                            if row >= layout.title_rows {
+                                return div().h(px(row_height)).flex().gap(s::GRID_GAP).children(
+                                    (0..layout.skeleton_count().min(cols))
+                                        .map(|_| SkeletonCard::new(width).into_any_element()),
+                                );
+                            }
+                            for index in row * cols..((row + 1) * cols).min(count) {
                                 let cell = &this.cells[index];
                                 let image = cell.title.poster_url().and_then(|url| {
                                     match artwork::lookup_or_request(

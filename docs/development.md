@@ -1,15 +1,16 @@
 # Development
 
-The Rust workspace implements a first bounded Cinemeta search/query-cache
-increment, not the full [MVP](architecture.md).
+The Rust workspace composes metadata, preparation and playback services with
+the native v3 UI; it is not a fully accepted [MVP](architecture.md).
 Run commands from the repository root. Rustup selects **Rust 1.97.1** via
 `rust-toolchain.toml`; install rustfmt and Clippy for that toolchain.
 
 ## Native prerequisites
 
-Consult the official [GPUI Kit installation guide](https://gpui-kit.com/docs/installation)
-for current platform setup and troubleshooting. The scaffold pins GPUI Kit **0.7.3**,
-using its GPUI reexports, components, and default assets rather than a second GPUI dependency.
+The desktop uses direct `gpui` (package `gpui-pre =0.3.9`) and
+`gpui_platform`, with in-house widgets. V3 is the only/default UI; no environment
+selector is needed. Consult the [upstream GPUI repository](https://github.com/zed-industries/zed/tree/main/crates/gpui)
+for platform setup and troubleshooting.
 
 - **macOS:** upstream currently requires macOS 15+ and Xcode Command Line Tools.
 - **Windows:** Windows 10+, MSVC Rust, Visual Studio C++ build tools with a Windows
@@ -42,6 +43,9 @@ cargo run -p kinema-desktop --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+cargo check --workspace --locked
+cargo clippy -p kinema-desktop --all-targets --features ui-probe-test --locked -- -D warnings
+cargo test -p kinema-desktop --features ui-probe-test --locked
 ```
 
 Run the desktop from the repository root: with `debug_assertions` enabled
@@ -77,57 +81,53 @@ hide a stale lockfile during validation. There is no Rust release-packaging pipe
 
 ## Quickstart and setup
 
-These steps describe the current source wiring, not a completed GUI acceptance
-test. Locked root checks passed for frozen snapshot `107317a`; validation of the
-Cinemeta/shell continuation and subsequent TMDB timeout correction passed as
-reported below. Complete live UI/provider acceptance
-remains incomplete.
+V3 is the sole/default UI. These steps describe current source wiring, not a
+completed end-to-end GUI acceptance test. Historical validation totals below
+predate the v3 cleanup and do not establish current provider/playback acceptance.
 
 1. Install a native **mpv or VLC** executable separately; neither is bundled.
    Start `cargo run -p kinema-desktop --locked` from the repository root.
-2. Open **Settings**. Defaults are Cinemeta, Torrentio, Real-Debrid, mpv, and a
-   **20 GiB** managed-media limit. Select the metadata provider, indexer, debrid
-   provider, and player you intend to use; choose **Save preferences** and wait
-   for confirmation. Custom player selection requires an absolute executable path,
-   not a shell command. The quota field uses GiB.
-3. Configure tokens as described below. Credential **Save token** is separate
-   from **Save preferences**. A presence indicator means a token exists in the
-   keyring, not that the service accepted it. **Test connection** checks the saved
-   token; it ignores unsaved text. Saving clears the input and does not expose the
-   saved value. **Remove token** requires **Confirm remove**; **Keep token** cancels.
-4. Open **Movies** or **Series**, browse or enter a query and press **Search**.
-   Open a title for details; for series, select the season/episode before source
-   lookup. **Refresh** requests the selected provider again; there is no automatic
-   metadata TTL or provider fallback. Saved query/page membership is reusable;
-   this is not arbitrary offline full-text search over every saved title.
-5. Choose **Find sources**, inspect a candidate from the selected indexer, then
-   prepare it through the selected debrid provider. Inspect the returned file list
-   and use **Play selected file**. An ambiguous selection requires a choice; do
-   not assume the largest file is the right episode. Only media you are authorized
-   to access should be used.
-6. Alternatively, **Playback → Open local file…** serves an existing file in place
-   through the same loopback server, without metadata or debrid credentials.
-   Launching a player is not proof that it decoded media or that you watched it.
-7. Release sessions when finished. **Remove unused cached media** performs manual,
-   inactive-only cleanup; it never deletes original local files. Navigation keeps
-   sessions alive. Quit/window close with active work asks confirmation that the
-   server stops; the external player stays open but loses access to its stream.
-   There is no background daemon. See [session lifetime](architecture.md#agreed-session-lifetime-policy).
+2. Open the separate **Settings** window. Defaults are Cinemeta, Torrentio,
+   Real-Debrid, mpv, and a **20 GiB** managed-media limit. Preferences apply
+   immediately; wait for the save status and inspect errors. There is no legacy
+   Save/Revert bar. Custom player selection requires an absolute executable path,
+   not a shell command.
+3. Configure account tokens as described below. Credential save/remove/test
+   actions are separate from preference changes. Presence means stored, not
+   accepted by the service. Test uses the saved token, not unsaved text. Do not
+   enter credentials in fixtures or include them in reports/screenshots.
+4. Use the **Movies / Series** toolbar and search, then open a poster for details.
+   Select season/episode for series before requesting episode streams. Refresh
+   explicitly requests the selected provider; there is no automatic metadata TTL
+   or fallback. Saved query/page membership is not arbitrary offline full-text search.
+5. Inspect a stream from the selected indexer, prepare through the selected debrid
+   provider, inspect returned files and explicitly choose when ambiguous. Do not
+   assume the largest file is the right episode. Use only authorized media.
+6. The main-window overflow menu exposes **Open local file…**; the service can
+   serve an existing file in place without metadata/debrid credentials. The removed
+   Playback tab is not a navigation route. Player launch does not prove decoding
+   or viewing; native chooser/player acceptance remains platform-dependent.
+7. Inspect active sessions through the toolbar transfers indicator. Settings
+   cleanup is manual and inactive-only; it never deletes original local files.
+   Navigation keeps sessions alive. Quit/window close with active work asks for
+   confirmation: Kinema's server stops, while the external player is not killed
+   and loses access to its stream. There is no background daemon. See
+   [session lifetime](architecture.md#agreed-session-lifetime-policy).
 
 ### Metadata and debrid credentials
 
 - **Cinemeta:** no token is required. It remains the default metadata provider.
 - **TMDB:** use the long **API Read Access Token**, not the short API Key, from
   [TMDB API settings](https://www.themoviedb.org/settings/api). Save and test it in
-  Settings, then select TMDB and save preferences. Requests use fixed `en-US`.
+  Settings, then select TMDB and wait for the preference-save status. Requests use fixed `en-US`.
   TMDB titles must have an IMDb mapping before source lookup; missing mappings
   are shown as unavailable, never guessed. No automatic Cinemeta fallback occurs.
 - **Real-Debrid:** obtain your own API token from
   [Real-Debrid](https://real-debrid.com/apitoken), save it in the Real-Debrid section,
-  and use **Test connection**. Select Real-Debrid for acquisition.
+  and use the account **Test** action. Select Real-Debrid for acquisition.
 - **AllDebrid:** obtain your own API key from
   [AllDebrid API keys](https://alldebrid.com/apikeys/), save it in the AllDebrid
-  section, and use **Test connection**. Select AllDebrid for acquisition.
+  section, and use the account **Test** action. Select AllDebrid for acquisition.
 
 Torrentio/Peerflix selection is separate from debrid selection. A public source
 result is not proof of account eligibility, debrid readiness, or playback.
@@ -288,3 +288,9 @@ must run with `reference/cpp` as the source/working directory, not the Rust root
 Old release automation assumes the former repository layout and is not maintained
 as runnable release infrastructure. Generated user files left at the root are not
 part of the Rust workspace and are not moved or cleaned by this migration.
+
+## Native v3 lab
+
+The Kit counter/gallery and browser probe have been removed. The offline native
+lab remains; see [lab commands and evidence limits](design/ui-probe.md). Old
+validation counts above are historical, not acceptance of the current v3 UI.

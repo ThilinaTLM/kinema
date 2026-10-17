@@ -13,8 +13,8 @@ These rules apply to the Rust workspace. Historical C++ rules apply only under
   presentation in `kinema-desktop`. Do not add unused framework layers or subsystems.
 - Use direct `gpui` (package `gpui-pre =0.3.9`) and `gpui_platform`, with in-house
   components under `kinema-desktop/src/widgets` per `docs/design/desktop-v3.md`.
-  `gpui-kit` remains transitionally for legacy screens until removal in P5;
-  do not add new `gpui-kit` usage.
+  V3 is the sole/default UI; do not restore legacy UI, version switches, or
+  `gpui-kit`.
 - Target Windows, macOS, and Linux without KDE dependencies. Avoid platform path,
   shell, and file-lifetime assumptions; launch external players with argument lists.
 - Keep blocking I/O, SQL, network waits, and decoding outside UI rendering. Own

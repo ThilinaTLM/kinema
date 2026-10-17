@@ -7,10 +7,22 @@ belong on the application service worker. No GPUI dependencies are used here.
 - `MediaService::start(&AppPaths, CacheBudget) -> Result<Self, MediaError>`
 - `register_remote(ResolvedMedia, Arc<dyn Fn() -> Result<ResolvedMedia, MediaError> + Send + Sync>) -> Result<PlaybackSession, MediaError>`
 - `register_local(&Path) -> Result<PlaybackSession, MediaError>`
-- `release(&str)`; `set_limit(CacheBudget) -> Result<(), MediaError>`
-- `usage() -> UsageSnapshot`; `cleanup_unused() -> Result<u64, MediaError>`
+- `release(&str) -> Result<(), MediaError>` (idempotent, reports lease-state failures); `set_limit(CacheBudget) -> Result<(), MediaError>`
+- `usage() -> UsageSnapshot`; `cleanup_unused() -> Result<CleanupReport, MediaError>`
 - `session_errors() -> Vec<(String, MediaError)>` contains asynchronous acquisition
   errors for currently leased sessions, never provider URLs or credentials.
+- `session_updates() -> Vec<SessionUpdate>` reports local/remote origin, per-asset
+  downloaded/total bytes for remote leases, and reveal capability. Shared-asset
+  leases share progress, not quota reservations.
+- `session(&str) -> Result<PlaybackSession, MediaError>` validates an existing
+  lease for replay; it never creates another lease.
+- `reveal_path(&str) -> Result<PathBuf, MediaError>` resolves an active lease's
+  canonical local file or validated managed payload. Only the worker passes it to
+  the platform file-manager adapter; the UI never submits arbitrary reveal paths.
+
+`CleanupReport { freed_bytes, protected_files }` counts protected cached payloads,
+not duplicate leases or original local files. Freed bytes are released cache
+reservations, not a measurement of physical filesystem blocks.
 
 `PlaybackSession { id, url }` contains only a random local capability URL.
 Retain its lease while an external player needs access; release invalidates new

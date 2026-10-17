@@ -342,6 +342,7 @@ mod tests {
                     season: 0,
                 },
                 &TmdbData::Season(TmdbSeason {
+                    poster_url: None,
                     series_id: series.id,
                     season: 0,
                     episodes: vec![],
@@ -355,6 +356,7 @@ mod tests {
                     id: movie.id,
                 },
                 &TmdbData::Details(TmdbDetails {
+                    backdrop_url: None,
                     title: movie,
                     imdb: Some(ImdbId::new(imdb)?),
                     genres: vec![],
@@ -369,6 +371,7 @@ mod tests {
                     id: series.id,
                 },
                 &TmdbData::Details(TmdbDetails {
+                    backdrop_url: None,
                     title: series,
                     imdb: Some(ImdbId::new(format!("tt{}", 8_000_000 + i))?),
                     genres: vec![],
@@ -446,6 +449,7 @@ mod tests {
                 id: 9_999,
             },
             &TmdbData::Details(TmdbDetails {
+                backdrop_url: None,
                 title: contradictory,
                 imdb: Some(ImdbId::new("tt7000000")?),
                 genres: vec![],
@@ -553,6 +557,7 @@ mod tests {
             &tx,
             &detail_query,
             &TmdbData::Details(TmdbDetails {
+                backdrop_url: None,
                 title: tmdb_title.clone(),
                 imdb: None,
                 genres: vec!["Drama".into()],
@@ -564,9 +569,12 @@ mod tests {
             &tx,
             &season_query,
             &TmdbData::Season(TmdbSeason {
+                poster_url: None,
                 series_id: 8001,
                 season: 0,
                 episodes: vec![CatalogEpisode {
+                    still_url: None,
+                    runtime_minutes: None,
                     season: 0,
                     number: 1,
                     name: Some("Known legacy episode".into()),

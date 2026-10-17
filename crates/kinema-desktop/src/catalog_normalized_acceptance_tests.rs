@@ -301,6 +301,7 @@ fn selected_provider_missing_field_retains_actual_other_supplier_origin_without_
     service.save_tmdb(
         &query,
         TmdbData::Details(TmdbDetails {
+            backdrop_url: None,
             title: TmdbTitle {
                 id: 99,
                 kind: MediaKind::Movie,

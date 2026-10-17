@@ -214,6 +214,9 @@ pub(crate) fn tmdb(
                 records.push(child(dto, *season, Some(number))?);
             }
         }
+        TmdbQuery::Similar { .. } => {
+            records = tmdb_summaries(value, MediaKind::Movie)?;
+        }
         TmdbQuery::Browse { kind, .. } => {
             records = tmdb_summaries(value, *kind)?;
         }

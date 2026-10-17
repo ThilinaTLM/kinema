@@ -1,11 +1,8 @@
 //! Shared presentation primitives and isolated opt-in verification fixtures.
 #[cfg(not(target_family = "wasm"))]
 pub mod artwork;
-pub mod design;
 #[cfg(all(feature = "ui-probe", not(target_family = "wasm")))]
 pub mod design_lab;
-#[cfg(feature = "ui-probe")]
-pub mod ui_probe;
 pub mod widgets;
 
 // Shared service registration lets the offline probe mount production screens.
@@ -14,7 +11,7 @@ pub mod app;
 #[cfg(not(target_family = "wasm"))]
 #[allow(
     dead_code,
-    reason = "shared legacy Resource policies; remaining v3 consumers land in P2"
+    reason = "Resource policy variants shared across presentation workflows"
 )]
 mod app_state;
 #[cfg(not(target_family = "wasm"))]

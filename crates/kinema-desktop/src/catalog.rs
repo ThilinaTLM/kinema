@@ -422,6 +422,15 @@ mod normalized_merge_tests;
 #[path = "catalog_normalized_tests.rs"]
 mod normalized_tests;
 
+#[cfg(feature = "ui-probe")]
+pub(crate) fn decode_fixture_details(
+    kind: MediaKind,
+    id: &ImdbId,
+    payload: &str,
+) -> Result<TitleDetails, CatalogError> {
+    metadata::decode_fixture_details(kind, id, payload)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1047,6 +1056,7 @@ mod tests {
             imdb: None,
         };
         let detail = TmdbData::Details(TmdbDetails {
+            backdrop_url: None,
             title: title.clone(),
             imdb: Some(ImdbId::new("tt4000001")?),
             genres: vec![],
@@ -1294,6 +1304,7 @@ mod tests {
             id: 603,
         };
         let details = TmdbData::Details(TmdbDetails {
+            backdrop_url: None,
             title: TmdbTitle {
                 id: 603,
                 kind: MediaKind::Movie,
@@ -1337,9 +1348,12 @@ mod tests {
             season: 1,
         };
         let season = TmdbData::Season(TmdbSeason {
+            poster_url: None,
             series_id: 1399,
             season: 1,
             episodes: vec![CatalogEpisode {
+                still_url: None,
+                runtime_minutes: None,
                 season: 1,
                 number: 1,
                 name: Some("Pilot".into()),

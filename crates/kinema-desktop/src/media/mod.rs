@@ -3,6 +3,8 @@
 #[cfg(test)]
 mod remote_tests;
 mod server;
+mod sessions;
+pub use sessions::{SessionOrigin, SessionProgress, SessionUpdate};
 mod storage;
 #[cfg(test)]
 mod tests;
@@ -102,6 +104,11 @@ pub struct PlaybackSession {
     pub id: String,
     pub url: String,
 }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CleanupReport {
+    pub freed_bytes: u64,
+    pub protected_files: usize,
+}
 #[derive(Clone, Debug)]
 pub struct UsageSnapshot {
     pub reserved_bytes: u64,
@@ -131,12 +138,14 @@ enum Source {
 struct Lease {
     source: Source,
     active: Arc<AtomicBool>,
+    path: Option<PathBuf>,
 }
 impl Lease {
     fn new(source: Source) -> Self {
         Self {
             source,
             active: Arc::new(AtomicBool::new(true)),
+            path: None,
         }
     }
 }
@@ -191,16 +200,27 @@ impl MediaService {
         if canonical.starts_with(&self.shared.root) {
             return Err(MediaError::InvalidLocalFile);
         }
-        let file = File::open(canonical)?;
+        let file = File::open(&canonical)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() {
             return Err(MediaError::InvalidLocalFile);
         }
-        self.lease(Source::Local(
+        let session = self.lease(Source::Local(
             Arc::new(file),
             metadata.len(),
             content_type(path),
-        ))
+        ))?;
+        if let Some(lease) = self
+            .shared
+            .state
+            .lock()
+            .map_err(|_| MediaError::Storage)?
+            .sessions
+            .get_mut(&session.id)
+        {
+            lease.path = Some(canonical);
+        }
+        Ok(session)
     }
     pub fn register_remote(
         &self,
@@ -342,10 +362,9 @@ impl MediaService {
             id,
         })
     }
-    pub fn release(&self, id: &str) {
-        if let Ok(mut state) = self.shared.state.lock()
-            && let Some(lease) = state.sessions.remove(id)
-        {
+    pub fn release(&self, id: &str) -> Result<(), MediaError> {
+        let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
+        if let Some(lease) = state.sessions.remove(id) {
             lease.active.store(false, Ordering::Release);
             if let Source::Remote(asset) = lease.source
                 && !state
@@ -357,6 +376,7 @@ impl MediaService {
                 asset.changed.notify_all();
             }
         }
+        Ok(())
     }
     pub fn set_limit(&self, limit: CacheBudget) -> Result<(), MediaError> {
         let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
@@ -393,7 +413,7 @@ impl MediaService {
             })
             .collect()
     }
-    pub fn cleanup_unused(&self) -> Result<u64, MediaError> {
+    pub fn cleanup_unused(&self) -> Result<CleanupReport, MediaError> {
         storage::cleanup(&self.shared)
     }
 }

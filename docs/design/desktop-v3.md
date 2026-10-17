@@ -1,10 +1,10 @@
 # Desktop v3 — native media UI redesign
 
-**Status: approved direction, implementation pending.** Sections marked *approved*
-record user decisions. Token values, dimensions and component contracts are the
-lead design specification for P0–P5; they are not implemented behavior until the
-corresponding phase lands and is verified. `AGENTS.md` and older design documents
-still describe Kit/v2 until P0/P5 reconcile them.
+**Status: approved sole/default UI; native implementation in progress.** The user
+approved complete removal of the old UI, version switches and gpui-kit. Production
+now bootstraps direct GPUI v3 only. The native lab remains available for offline
+captures. Specification and phase checklists below are targets, not proof of full
+workflow, provider, playback or cross-platform acceptance.
 
 References: [architecture](../architecture.md), [historical feature inventory](../features.md),
 [v2 review guide](README.md), [v2 design system](design-system.md),
@@ -141,9 +141,14 @@ Rules:
 
 Layers are separated by tone and a hairline, not blur or drop shadow:
 canvas < surface < raised. Every raised layer (menu, popover, dialog, tooltip) has
-a 1 px `line.hairline` border. The only permitted gradients are **functional
-scrims** over artwork (card hover panel, detail backdrop fade into canvas); no
-gradient chrome, glow, glass or blur. Window shadows remain OS-native.
+a 1 px `line.hairline` border. **Functional scrims** over artwork preserve
+contrast (card hover panel, detail backdrop fade into canvas). The user also
+approves restrained **artwork-derived ambient gradients on Detail** and subtle
+grid styling. Keep these content-led, low-contrast and theme-token controlled,
+with neutral fallbacks for absent/failed artwork; they must not obscure text or
+loading/focus states. Decorative gradient chrome, glow, glass and blur remain
+out of scope. Window shadows remain OS-native. This is approval, not a claim
+that ambient extraction or all grid styling is implemented.
 
 ### 2.3 Typography
 
@@ -222,6 +227,13 @@ progress value in state).
 
 Build only what screens use. All share states: rest, hover, pressed, focus-visible,
 disabled, busy where relevant. Focus and selection are independent.
+
+Keep widgets clean, composable and reusable, with explicit inputs/events and
+low coupling to application services or individual screens. Use shared theme
+tokens rather than ad-hoc colors, spacing and typography. Compose workflows in
+focused screen submodules; keep rendering, presentation state and service
+coordination separated without unused framework layers. Domain policies remain
+in `kinema-core`; widgets must not own provider, storage or playback policy.
 
 | Component | Contract |
 | --- | --- |
@@ -304,6 +316,17 @@ it in P1 (integrated client-side titlebar is a later, optional refinement).
 
 Freshness is quiet: no "Updated 12:40" in the toolbar. Stale or failed refresh
 shows a one-line `Notice` strip under the toolbar only while relevant.
+
+#### Incremental loading
+
+First-load skeleton poster cards already exist. **Follow-up required:** while
+loading the next page, retain existing cards and append skeleton poster cards in
+the upcoming rows, using the same dimensions, gaps and column geometry. Reserve
+their footprint so completion does not jump the layout or reset scroll/focus.
+Skeletons are noninteractive and static with reduced motion; no whole-grid
+replacement or shimmer is required. Empty/failure handling must preserve loaded
+cards and distinguish a failed next-page request from a successful empty page.
+This incremental skeleton requirement is approved, not yet implemented.
 
 ### 4.2 Poster card
 
@@ -593,7 +616,8 @@ immediately; animations never delay input.
 
 ## 8. Superseded directions
 
-Recorded here; older documents are reconciled in P5 (P0 updates `AGENTS.md`):
+Older v2 documents are retained and marked historical; `AGENTS.md` and the design
+index now identify v3 as the sole/default UI:
 
 - Permanent 56 px left rail → toolbar-only main window.
 - Footer labels at rest → poster-only cards with chips; facts on hover/focus.
@@ -608,14 +632,14 @@ Recorded here; older documents are reconciled in P5 (P0 updates `AGENTS.md`):
 
 | Phase | Deliverable / gate |
 | --- | --- |
-| **P0** | Add `gpui-pre =0.3.9` as the direct engine (same crate Kit re-exports, so types are shared during migration); own assets (Inter, JetBrains Mono, Lucide icons, TMDB logo), tokens, motion module and primitives (Button, IconButton, Segmented, TextInput, SearchField, Menu/ContextMenu, Select, Popover, Tooltip, Chip, Progress, Notice, ScrollArea, Sheet) in `src/widgets/`; `AGENTS.md` updated; design lab gallery screenshots. Old screens keep compiling on Kit until replaced. |
+| **P0** | Use `gpui-pre =0.3.9` as the direct engine; own assets (Inter, JetBrains Mono, Lucide icons, TMDB logo), tokens, motion module and primitives (Button, IconButton, Segmented, TextInput, SearchField, Menu/ContextMenu, Select, Popover, Tooltip, Chip, Progress, Notice, ScrollArea, Sheet) in `src/widgets/`; `AGENTS.md` updated; design lab gallery screenshots. The transitional Kit path has been removed. |
 | **P1** | Toolbar + virtualized poster grid + PosterCard (hover/focus/context menu), collection states, keyboard model, S/M/L. |
 | **P2** | Detail hero + action column (movie streams, series seasons/episodes → streams), Play sheet, transfers popover, local file, quit sheet. |
 | **P3** | Shared poster flight with reverse, fallbacks, cancellation and reduced motion; start/mid/end captures. |
 | **P4** | Settings window (single instance, sections, immediate apply, accounts states). |
 | **P5** | Remove gpui-kit and all obsolete screens/assets, own bootstrap (`application`/window opening), reconcile docs, full validation and screenshots review. |
 
-The design lab extends the existing ui-probe (fixture-only: no network, database,
+The native design lab is the sole remaining ui-probe (fixture-only: no network, database,
 keyring, media or player access). Every phase runs from the repository root:
 `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets --locked -- -D warnings`,

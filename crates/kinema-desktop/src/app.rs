@@ -60,6 +60,12 @@ pub enum AppAction {
     },
     ReleaseSession(String),
     CleanupUnused,
+    ReplaySession {
+        session_id: String,
+    },
+    RevealSession {
+        session_id: String,
+    },
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CredentialState {
@@ -120,8 +126,16 @@ pub enum AppOutcome {
     },
     Cleaned {
         bytes: u64,
+        protected_files: usize,
     },
     Usage(UsageSnapshot),
+    SessionUpdates(Vec<crate::media::SessionUpdate>),
+    SessionRelaunched {
+        session_id: String,
+    },
+    RevealRequested {
+        session_id: String,
+    },
     Failed {
         message: String,
     },
@@ -145,6 +159,8 @@ struct Mailbox {
     account: Arc<AtomicBool>,
     active: Option<Arc<AtomicBool>>,
     active_generation: Option<u64>,
+    discarded_preparations: Vec<u64>,
+    prepared_generation: Option<u64>,
     // Identity belongs to `account`, not to a potentially unfinished settings
     // save. Publish identity + fresh flag together under this mailbox lock.
     scope_provider: Option<DebridKind>,
@@ -172,6 +188,8 @@ fn new_shared() -> Arc<Shared> {
             account: Arc::new(AtomicBool::new(false)),
             active: None,
             active_generation: None,
+            discarded_preparations: Vec::new(),
+            prepared_generation: None,
             scope_provider: None,
             account_epoch: 0,
             credential_revisions: [0; 2],
@@ -186,7 +204,7 @@ fn new_shared() -> Arc<Shared> {
 fn consumes_budget(outcome: &AppOutcome) -> bool {
     !matches!(
         outcome,
-        AppOutcome::Usage(_) | AppOutcome::Invalidated { .. }
+        AppOutcome::Usage(_) | AppOutcome::SessionUpdates(_) | AppOutcome::Invalidated { .. }
     )
 }
 fn emit_invalidation(shared: &Shared, released: Vec<String>) {
@@ -313,6 +331,41 @@ impl AppWorker {
             credential_revisions,
         });
         mail.outstanding += 1;
+        self.shared.wake.notify_one();
+        true
+    }
+    /// Nonblocking cancellation. A launch already handed to the OS is never killed.
+    pub fn cancel_request(&self, generation: u64) -> bool {
+        let Ok(mut mail) = self.shared.mailbox.lock() else {
+            return false;
+        };
+        if mail.stopped {
+            return false;
+        }
+        // At most the bounded queue, one active command, and one retained preparation
+        // may own cancellation controls. Unknown generations never allocate controls.
+        if mail.active_generation != Some(generation)
+            && mail.prepared_generation != Some(generation)
+            && !mail
+                .requests
+                .iter()
+                .any(|request| request.command.generation == generation)
+        {
+            return false;
+        }
+        if mail.active_generation == Some(generation)
+            && let Some(flag) = &mail.active
+        {
+            flag.store(true, Ordering::Release);
+        }
+        for request in &mail.requests {
+            if request.command.generation == generation {
+                request.cancel.store(true, Ordering::Release);
+            }
+        }
+        if !mail.discarded_preparations.contains(&generation) {
+            mail.discarded_preparations.push(generation);
+        }
         self.shared.wake.notify_one();
         true
     }
@@ -566,7 +619,7 @@ impl Application {
         release_remote(&mut self.sessions, |id| {
             released.push(id.to_owned());
             if let Some(media) = &self.media {
-                media.release(id);
+                let _ = media.release(id);
             }
         });
         released
@@ -780,17 +833,48 @@ impl Application {
             }
             AppAction::ReleaseSession(id) => {
                 if let Some(media) = &self.media {
-                    media.release(&id);
+                    media.release(&id).map_err(|e| e.to_string())?;
                 }
                 self.sessions.retain(|existing| existing.id != id);
                 Ok(AppOutcome::Released { id })
             }
-            AppAction::CleanupUnused => Ok(AppOutcome::Cleaned {
-                bytes: self
+            AppAction::ReplaySession { session_id } => {
+                let session = self
+                    .media
+                    .as_ref()
+                    .ok_or("Media session ended")?
+                    .session(&session_id)
+                    .map_err(|e| e.to_string())?;
+                check(&cancel)?;
+                let settings = self.settings()?;
+                check(&cancel)?;
+                if let Some(child) =
+                    (self.io.launch)(&settings.player, &session.url).map_err(|e| e.to_string())?
+                {
+                    self.children.push(child);
+                }
+                Ok(AppOutcome::SessionRelaunched { session_id })
+            }
+            AppAction::RevealSession { session_id } => {
+                let path = self
+                    .media
+                    .as_ref()
+                    .ok_or("Media session ended")?
+                    .reveal_path(&session_id)
+                    .map_err(|e| e.to_string())?;
+                player::reveal_file(&path)?;
+                Ok(AppOutcome::RevealRequested { session_id })
+            }
+            AppAction::CleanupUnused => {
+                let report = self
                     .media()?
                     .cleanup_unused()
-                    .map_err(|e| media_message(&e))?,
-            }),
+                    .map_err(|e| media_message(&e))?;
+                Ok(AppOutcome::Cleaned {
+                    bytes: report.freed_bytes,
+                    protected_files: report.protected_files,
+                })
+            }
         }
     }
     fn launch(
@@ -812,7 +896,7 @@ impl Application {
         })();
         finish_launch(result, &session.id, |id| {
             if let Some(media) = &self.media {
-                media.release(id);
+                let _ = media.release(id);
             }
         })?;
         if let Some(child) = child {
@@ -983,6 +1067,12 @@ fn run_application(shared: Arc<Shared>, mut app: Application) {
             if mail.stopped {
                 return;
             }
+            for generation in mail.discarded_preparations.drain(..) {
+                if app.prepared.as_ref().is_some_and(|p| p.id == generation) {
+                    app.prepared = None;
+                }
+            }
+            mail.prepared_generation = app.prepared.as_ref().map(|preparation| preparation.id);
             let request = mail.requests.pop_front();
             mail.active = request.as_ref().map(|r| r.cancel.clone());
             mail.active_generation = request.as_ref().map(|r| r.command.generation);
@@ -1063,6 +1153,7 @@ fn run_application(shared: Arc<Shared>, mut app: Application) {
                 }
                 mail.active = None;
                 mail.active_generation = None;
+                mail.prepared_generation = app.prepared.as_ref().map(|preparation| preparation.id);
                 mail.pipeline
                     .retain(|flag| !Arc::ptr_eq(flag, &request.cancel));
                 mail.metadata_pipeline
@@ -1082,17 +1173,26 @@ fn run_application(shared: Arc<Shared>, mut app: Application) {
             if let Some(media) = &app.media {
                 let usage = media.usage();
                 let errors = media.session_errors();
+                let updates = media.session_updates();
                 if let Ok(mut mail) = shared.mailbox.lock() {
                     if mail.stopped {
                         return;
                     }
                     queue_media_errors(&mut app.sessions, &mut mail, errors);
                     // One lossy telemetry slot; terminal outcomes never evicted.
-                    mail.events
-                        .retain(|e| !matches!(e.outcome, AppOutcome::Usage(_)));
+                    mail.events.retain(|e| {
+                        !matches!(
+                            e.outcome,
+                            AppOutcome::Usage(_) | AppOutcome::SessionUpdates(_)
+                        )
+                    });
                     mail.events.push_back(AppEvent {
                         generation: 0,
                         outcome: AppOutcome::Usage(usage),
+                    });
+                    mail.events.push_back(AppEvent {
+                        generation: 0,
+                        outcome: AppOutcome::SessionUpdates(updates),
                     });
                 }
             }
@@ -2175,4 +2275,5 @@ mod tests {
         );
         Ok(())
     }
+    mod sessions;
 }

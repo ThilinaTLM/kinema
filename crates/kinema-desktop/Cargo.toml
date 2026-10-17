@@ -10,12 +10,9 @@ default-run = "kinema-desktop"
 [lints]
 workspace = true
 
-[lib]
-crate-type = ["rlib", "cdylib"]
-
 [features]
 ui-probe = []
-ui-probe-test = ["ui-probe", "gpui-kit/test-support", "gpui/test-support"]
+ui-probe-test = ["ui-probe", "gpui/test-support"]
 
 [[bin]]
 name = "ui-probe"
@@ -24,14 +21,16 @@ required-features = ["ui-probe"]
 
 [dependencies]
 unicode-segmentation.workspace = true
-gpui-kit.workspace = true
 gpui.workspace = true
-gpui_platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-[target.'cfg(target_family = "wasm")'.dependencies]
-wasm-bindgen.workspace = true
+# gpui_platform defaults do not enable native Linux windowing backends.
+[target.'cfg(target_os = "linux")'.dependencies]
+gpui_platform = { workspace = true, features = ["x11", "wayland"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+gpui_platform.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 image.workspace = true

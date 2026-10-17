@@ -68,6 +68,7 @@ fn cinemeta_then_tmdb_browse_then_details_unifies_canonical_title_and_both_pages
             id: 71,
         },
         TmdbData::Details(TmdbDetails {
+            backdrop_url: None,
             title,
             imdb: Some(imdb),
             genres: vec![],
@@ -108,9 +109,12 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
             &tx,
             &query,
             &TmdbData::Season(TmdbSeason {
+                poster_url: None,
                 series_id: 81,
                 season: 0,
                 episodes: vec![CatalogEpisode {
+                    still_url: None,
+                    runtime_minutes: None,
                     season: 0,
                     number: 1,
                     name: Some("TMDB episode".into()),
@@ -131,6 +135,8 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
             genres: vec!["Drama".into()],
             episodes: vec![
                 CatalogEpisode {
+                    still_url: None,
+                    runtime_minutes: None,
                     season: 0,
                     number: 1,
                     name: Some("IMDb episode".into()),
@@ -138,6 +144,8 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
                     released: None,
                 },
                 CatalogEpisode {
+                    still_url: None,
+                    runtime_minutes: None,
                     season: 1,
                     number: 1,
                     name: None,
@@ -212,6 +220,7 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
             id: 81,
         },
         TmdbData::Details(TmdbDetails {
+            backdrop_url: None,
             title,
             imdb: Some(ImdbId::new("tt3000002")?),
             genres: vec![],

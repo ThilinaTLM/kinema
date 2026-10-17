@@ -468,7 +468,20 @@ pub(super) fn import_episodes(
     for item in episodes {
         let season_id = season(tx, series, item.season, time)?;
         let id = episode(tx, season_id, item.number, time)?;
+        if let Some(runtime) = item.runtime_minutes {
+            field(
+                tx,
+                Target::Episode(id),
+                ("runtime_minutes", &FieldValue::Integer(i64::from(runtime))),
+                provider,
+                Quality::Detail,
+                fetch_id,
+                time,
+            )?;
+        }
+
         for (name, value) in [
+            ("still_url", item.still_url.as_deref()),
             ("name", item.name.as_deref()),
             ("overview", item.overview.as_deref()),
             (
@@ -503,6 +516,10 @@ pub(super) fn read_episodes(
     Ok(CatalogService::episode_records(tx, series, only_season)?
         .into_iter()
         .map(|(season, record)| CatalogEpisode {
+            still_url: record.text("still_url").map(str::to_owned),
+            runtime_minutes: record
+                .integer("runtime_minutes")
+                .and_then(|n| u32::try_from(n).ok()),
             season,
             number: record.number,
             name: record.text("name").map(str::to_owned),

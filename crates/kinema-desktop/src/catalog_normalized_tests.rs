@@ -14,6 +14,7 @@ fn movie(id: &str, name: &str) -> Result<CatalogTitle, Box<dyn Error>> {
 }
 fn tmdb_details(id: u64, imdb: Option<&str>) -> Result<TmdbData, Box<dyn Error>> {
     Ok(TmdbData::Details(TmdbDetails {
+        backdrop_url: None,
         title: TmdbTitle {
             id,
             kind: MediaKind::Movie,
@@ -47,6 +48,8 @@ fn canonical_titles_and_episodes_are_primary_not_legacy_json() -> TestResult {
         release_info: None,
         genres: vec![],
         episodes: vec![CatalogEpisode {
+            still_url: None,
+            runtime_minutes: None,
             season: 0,
             number: 1,
             name: Some("Original episode".into()),
@@ -395,9 +398,12 @@ fn rich_tmdb_dtos_supply_real_child_ids_artwork_and_distinct_rating_sources() ->
     let raw = serde_json::json!({"id":91,"season_number":0,"name":"Specials","poster_path":"/season.jpg","episodes":[{"id":101,"season_number":0,"episode_number":1,"name":"Special","runtime":44,"still_path":"/episode.jpg","vote_average":0,"vote_count":0}]});
     let rich = normalized_rich::tmdb(&raw, &query)?;
     let data = TmdbData::Season(crate::tmdb::TmdbSeason {
+        poster_url: None,
         series_id: 81,
         season: 0,
         episodes: vec![CatalogEpisode {
+            still_url: None,
+            runtime_minutes: None,
             season: 0,
             number: 1,
             name: Some("Special".into()),
@@ -420,5 +426,187 @@ fn rich_tmdb_dtos_supply_real_child_ids_artwork_and_distinct_rating_sources() ->
         ("91", "101", "tmdb", 0.0, 0)
     );
     assert!(still.ends_with("/episode.jpg"));
+    tx.commit()?;
+    let saved = normalized_tmdb::read(&mut service, &query)?.ok_or("missing projected season")?;
+    let TmdbData::Season(saved) = saved.data else {
+        return Err("wrong projection".into());
+    };
+    assert!(
+        saved
+            .poster_url
+            .as_deref()
+            .is_some_and(|u| u.ends_with("/season.jpg"))
+    );
+    assert!(
+        saved.episodes[0]
+            .still_url
+            .as_deref()
+            .is_some_and(|u| u.ends_with("/episode.jpg"))
+    );
+    assert_eq!(saved.episodes[0].runtime_minutes, Some(44));
+    Ok(())
+}
+
+#[test]
+fn episode_art_and_season_art_are_projected_and_not_erased_by_reduced_updates() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+    let query = TmdbQuery::Details {
+        kind: MediaKind::Series,
+        id: 91,
+    };
+    let details = TmdbData::Details(TmdbDetails {
+        backdrop_url: Some("https://image.tmdb.org/t/p/w500/backdrop.jpg".into()),
+        title: TmdbTitle {
+            id: 91,
+            kind: MediaKind::Series,
+            name: "Series".into(),
+            overview: None,
+            release_info: None,
+            poster_url: None,
+            display: Default::default(),
+            imdb: None,
+        },
+        imdb: None,
+        genres: vec![],
+        seasons: vec![],
+    });
+    let season_query = TmdbQuery::Season {
+        series_id: 91,
+        season: 2,
+    };
+    let mut season = crate::tmdb::TmdbSeason {
+        poster_url: Some("https://image.tmdb.org/t/p/w500/season.jpg".into()),
+        series_id: 91,
+        season: 2,
+        episodes: vec![CatalogEpisode {
+            season: 2,
+            number: 1,
+            name: Some("Episode".into()),
+            overview: None,
+            released: None,
+            still_url: Some("https://image.tmdb.org/t/p/w500/still.jpg".into()),
+            runtime_minutes: Some(48),
+        }],
+    };
+    let tx = service.connection.transaction()?;
+    super::normalized_tmdb::write(&tx, &query, &details, 1, true)?;
+    super::normalized_tmdb::write(
+        &tx,
+        &season_query,
+        &TmdbData::Season(season.clone()),
+        1,
+        true,
+    )?;
+    tx.commit()?;
+    season.poster_url = None;
+    season.episodes[0].still_url = None;
+    season.episodes[0].runtime_minutes = None;
+    let tx = service.connection.transaction()?;
+    super::normalized_tmdb::write(&tx, &season_query, &TmdbData::Season(season), 2, true)?;
+    tx.commit()?;
+    let saved = super::normalized_tmdb::read(&mut service, &query)?.ok_or("details")?;
+    let TmdbData::Details(saved) = saved.data else {
+        return Err("details type".into());
+    };
+    assert!(saved.backdrop_url.is_some());
+    let saved = super::normalized_tmdb::read(&mut service, &season_query)?.ok_or("season")?;
+    let TmdbData::Season(saved) = saved.data else {
+        return Err("season type".into());
+    };
+    assert!(saved.poster_url.is_some());
+    assert!(saved.episodes[0].still_url.is_some());
+    assert_eq!(saved.episodes[0].runtime_minutes, Some(48));
+    Ok(())
+}
+
+#[test]
+fn similar_pages_are_isolated_from_browse_and_other_titles() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+    for (query, id) in [
+        (TmdbQuery::Similar { id: 91, page: 1 }, 201),
+        (TmdbQuery::Similar { id: 92, page: 1 }, 202),
+        (
+            TmdbQuery::Browse {
+                kind: MediaKind::Movie,
+                page: 1,
+            },
+            203,
+        ),
+    ] {
+        let data = TmdbData::Page(TmdbPage {
+            page: 1,
+            total_pages: 2,
+            titles: vec![TmdbTitle {
+                id,
+                kind: MediaKind::Movie,
+                name: format!("Film {id}"),
+                overview: None,
+                release_info: None,
+                poster_url: None,
+                display: Default::default(),
+                imdb: None,
+            }],
+        });
+        let tx = service.connection.transaction()?;
+        super::normalized_tmdb::write(&tx, &query, &data, 1, true)?;
+        tx.commit()?;
+    }
+    for (query, id) in [
+        (TmdbQuery::Similar { id: 91, page: 1 }, 201),
+        (TmdbQuery::Similar { id: 92, page: 1 }, 202),
+        (
+            TmdbQuery::Browse {
+                kind: MediaKind::Movie,
+                page: 1,
+            },
+            203,
+        ),
+    ] {
+        let saved = super::normalized_tmdb::read(&mut service, &query)?.ok_or("page")?;
+        let TmdbData::Page(page) = saved.data else {
+            return Err("page type".into());
+        };
+        assert_eq!(page.titles[0].id, id);
+    }
+    Ok(())
+}
+
+#[test]
+fn cinemeta_thumbnail_survives_reduced_episode_updates() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+    let title = CatalogTitle::new(ImdbId::new("tt1234567")?, MediaKind::Series, "Series", None)?;
+    let mut details = TitleDetails {
+        title,
+        poster_url: None,
+        background_url: Some("https://images.example.test/show.jpg".into()),
+        release_info: None,
+        genres: vec![],
+        episodes: vec![CatalogEpisode {
+            season: 1,
+            number: 1,
+            name: Some("Pilot".into()),
+            overview: None,
+            released: None,
+            still_url: Some("https://images.example.test/still.jpg".into()),
+            runtime_minutes: None,
+        }],
+    };
+    let tx = service.connection.transaction()?;
+    write_cinemeta_details(&tx, &details, 1, true)?;
+    tx.commit()?;
+    details.episodes[0].still_url = None;
+    let tx = service.connection.transaction()?;
+    write_cinemeta_details(&tx, &details, 2, true)?;
+    tx.commit()?;
+    let saved = service
+        .read_details(MediaKind::Series, details.title.id())?
+        .ok_or("details")?;
+    assert_eq!(
+        saved.details.episodes[0].still_url.as_deref(),
+        Some("https://images.example.test/still.jpg")
+    );
     Ok(())
 }

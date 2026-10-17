@@ -885,12 +885,12 @@ mod interaction_tests {
                 next: cx.focus_handle().tab_stop(true),
             }
         });
-        let (target, next) = handle
-            .update(cx, |fixture, _, _| {
-                (fixture.target.clone(), fixture.next.clone())
-            })
-            .expect("fixture handles");
-        cx.update_window(handle.into(), |_, window, cx| {
+        let Ok((target, next)) = handle.update(cx, |fixture, _, _| {
+            (fixture.target.clone(), fixture.next.clone())
+        }) else {
+            panic!("fixture handles unavailable");
+        };
+        let navigation = cx.update_window(handle.into(), |_, window, cx| {
             window.draw(cx).clear(cx);
             window.focus_next(cx);
             assert!(
@@ -904,10 +904,10 @@ mod interaction_tests {
             );
             window.focus_prev(cx);
             assert!(target.is_focused(window));
-        })
-        .expect("tab navigation");
+        });
+        assert!(navigation.is_ok(), "tab navigation failed: {navigation:?}");
         cx.simulate_keystrokes(handle.into(), "shift-f10");
-        cx.update_window(handle.into(), |_, window, cx| {
+        let opened = cx.update_window(handle.into(), |_, window, cx| {
             window.draw(cx).clear(cx);
             assert!(!target.is_focused(window));
             assert!(
@@ -916,13 +916,13 @@ mod interaction_tests {
                     .contains_key(&window.window_handle().window_id()),
                 "Focused descendant must inherit the context binding"
             );
-        })
-        .expect("context menu opened");
+        });
+        assert!(opened.is_ok(), "context menu update failed: {opened:?}");
         cx.simulate_keystrokes(handle.into(), "escape");
-        cx.update_window(handle.into(), |_, window, _| {
+        let returned = cx.update_window(handle.into(), |_, window, _| {
             assert!(target.is_focused(window))
-        })
-        .expect("return to child");
+        });
+        assert!(returned.is_ok(), "return to child failed: {returned:?}");
     }
 
     #[gpui::test]
@@ -935,9 +935,8 @@ mod interaction_tests {
         cx.run_until_parked();
         cx.simulate_window_resize(handle.into(), size(px(640.), px(480.)));
         cx.run_until_parked();
-        handle
-            .update(cx, |menu, _, _| assert!(menu.closing))
-            .expect("menu dismissed");
+        let dismissed = handle.update(cx, |menu, _, _| assert!(menu.closing));
+        assert!(dismissed.is_ok(), "menu update failed: {dismissed:?}");
     }
 
     #[gpui::test]
@@ -973,19 +972,20 @@ mod interaction_tests {
         let dismissed = Rc::new(Cell::new(0));
         let subscription = cx.update(|cx| {
             let count = dismissed.clone();
-            let menu = handle.root(cx).expect("menu root");
+            let Ok(menu) = handle.root(cx) else {
+                panic!("menu root unavailable");
+            };
             cx.subscribe(&menu, move |_, _: &DismissEvent, _| {
                 count.set(count.get() + 1)
             })
         });
-        handle
-            .update(cx, |menu, window, cx| {
-                assert!(menu.focus.is_focused(window));
-                menu.dismiss(window, cx);
-                assert!(menu.previous.as_ref().is_some_and(|f| f.is_focused(window)));
-                menu.dismiss(window, cx);
-            })
-            .expect("window update");
+        let updated = handle.update(cx, |menu, window, cx| {
+            assert!(menu.focus.is_focused(window));
+            menu.dismiss(window, cx);
+            assert!(menu.previous.as_ref().is_some_and(|f| f.is_focused(window)));
+            menu.dismiss(window, cx);
+        });
+        assert!(updated.is_ok(), "window update failed: {updated:?}");
         cx.run_until_parked();
         assert_eq!(dismissed.get(), 1);
         drop(subscription);

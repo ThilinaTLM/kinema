@@ -183,6 +183,9 @@ impl CatalogTitle {
 /// One provider-supplied episode; season zero represents specials.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CatalogEpisode {
+    /// Provider-supplied episode still; never inferred from positional file data.
+    pub still_url: Option<String>,
+    pub runtime_minutes: Option<u32>,
     pub season: u32,
     pub number: u32,
     pub name: Option<String>,

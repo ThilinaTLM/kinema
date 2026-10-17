@@ -1,5 +1,4 @@
-//! Isolated fixture entry point; never imports the production executable's modules.
-//! `--lab --scene <name>` uses direct GPUI widgets; see docs/design/ui-probe.md.
+//! Offline native v3 lab; see docs/design/ui-probe.md.
 fn main() {
-    kinema_desktop::ui_probe::run_native();
+    kinema_desktop::design_lab::run_native();
 }

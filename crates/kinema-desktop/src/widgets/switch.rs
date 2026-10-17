@@ -14,6 +14,8 @@ pub struct Checkbox {
     disabled: bool,
     handler: Option<ToggleHandler>,
     role: Role,
+    // ── sessions: file-row typography ──
+    typography: super::tokens::TypeStyle,
 }
 impl Checkbox {
     pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>, checked: bool) -> Self {
@@ -24,6 +26,7 @@ impl Checkbox {
             disabled: false,
             handler: None,
             role: Role::CheckBox,
+            typography: typeface::BODY,
         }
     }
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -109,7 +112,7 @@ impl RenderOnce for Checkbox {
             .child(indicator)
             .child(
                 div()
-                    .type_style(typeface::BODY)
+                    .type_style(self.typography)
                     .text_color(ink)
                     .child(self.label),
             )
@@ -297,5 +300,13 @@ mod interaction_tests {
                 "radio={radio}, checked={checked}, disabled={disabled}"
             );
         }
+    }
+}
+
+// ── sessions: optional mono typography for explicit file choices ──
+impl Radio {
+    pub fn typography(mut self, style: super::tokens::TypeStyle) -> Self {
+        self.0.typography = style;
+        self
     }
 }

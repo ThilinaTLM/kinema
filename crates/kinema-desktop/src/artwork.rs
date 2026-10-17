@@ -1,7 +1,7 @@
 //! App-owned bounded artwork. Call `request` from event handlers (or rendering: it
 //! only queues work); all transport and decoding runs on the background executor.
 //! UI elements should use returned RenderImages directly, not a RetainAll cache.
-use gpui_kit::{App, BorrowAppContext, Global, RenderImage, Task};
+use gpui::{App, BorrowAppContext, Global, RenderImage, Task};
 use image::{ImageFormat, ImageReader};
 use reqwest::{Url, blocking::Client, redirect::Policy};
 use std::{
@@ -64,6 +64,87 @@ impl ArtworkKey {
         })
     }
 }
+/// Muted sRGB colors, computed once on the decode worker (never during render).
+/// Byte channels keep every public palette finite, including caller-built values.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ArtworkPalette {
+    pub primary: [u8; 3],
+    pub secondary: [u8; 3],
+}
+impl ArtworkPalette {
+    pub const NEUTRAL: Self = Self {
+        primary: [96, 100, 108],
+        secondary: [84, 88, 96],
+    };
+}
+
+// A fixed 24×24 midpoint sample and 3-bit/channel histogram bound decode work
+// independently of source size. Iteration order resolves frequency ties stably.
+fn extract_palette(image: &image::RgbaImage) -> ArtworkPalette {
+    if image.width() == 0 || image.height() == 0 {
+        return ArtworkPalette::NEUTRAL;
+    }
+    let mut bins = [(0u32, [0u32; 3]); 512];
+    for y in 0..24u64 {
+        for x in 0..24u64 {
+            let pixel = image
+                .get_pixel(
+                    (((2 * x + 1) * u64::from(image.width())) / 48) as u32,
+                    (((2 * y + 1) * u64::from(image.height())) / 48) as u32,
+                )
+                .0;
+            let [r, g, b, a] = pixel;
+            let max = r.max(g).max(b);
+            let min = r.min(g).min(b);
+            if a < 192 || max < 24 || min > 232 || max - min < 16 {
+                continue;
+            }
+            let index = ((r as usize >> 5) << 6) | ((g as usize >> 5) << 3) | (b as usize >> 5);
+            let (count, sums) = &mut bins[index];
+            *count += 1;
+            for (sum, channel) in sums.iter_mut().zip([r, g, b]) {
+                *sum += u32::from(channel);
+            }
+        }
+    }
+    let mut ranked: Vec<_> = bins
+        .iter()
+        .enumerate()
+        .filter(|(_, bin)| bin.0 > 0)
+        .collect();
+    ranked.sort_by_key(|(index, bin)| (std::cmp::Reverse(bin.0), *index));
+    let Some((_, first)) = ranked.first() else {
+        return ArtworkPalette::NEUTRAL;
+    };
+    let average = |bin: &(u32, [u32; 3])| bin.1.map(|sum| sum as f32 / bin.0 as f32 / 255.0);
+    let primary = average(first);
+    let secondary = ranked
+        .iter()
+        .skip(1)
+        .map(|(_, bin)| average(bin))
+        .find(|color| {
+            color
+                .iter()
+                .zip(primary)
+                .map(|(a, b)| (a - b).abs())
+                .sum::<f32>()
+                > 0.35
+        })
+        .unwrap_or(primary);
+    ArtworkPalette {
+        primary: mute_color(primary),
+        secondary: mute_color(secondary),
+    }
+}
+fn mute_color(color: [f32; 3]) -> [u8; 3] {
+    let max = color.into_iter().fold(0.0f32, f32::max);
+    let min = color.into_iter().fold(1.0f32, f32::min);
+    // HSV saturation <= 0.32, value in 0.32..=0.58. No bright/neon wash.
+    let mix = (0.32 * max / (max - min).max(0.001)).min(1.0);
+    let value = max.clamp(0.32, 0.58);
+    color.map(|channel| (((max + (channel - max) * mix) / max) * value * 255.0).round() as u8)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArtworkError {
     Transport,
@@ -101,9 +182,14 @@ struct Job {
     generation: u64,
     key: ArtworkKey,
 }
+#[derive(Clone)]
+struct DecodedArtwork {
+    image: Arc<RenderImage>,
+    palette: ArtworkPalette,
+}
 struct Cached {
     key: ArtworkKey,
-    result: Result<Arc<RenderImage>, ArtworkError>,
+    result: Result<DecodedArtwork, ArtworkError>,
     bytes: usize,
 }
 #[derive(Default)]
@@ -137,6 +223,11 @@ pub fn begin_generation(owner: &str, cx: &mut App) -> u64 {
 pub fn get(key: &ArtworkKey, cx: &mut App) -> Option<Arc<RenderImage>> {
     init(cx);
     cx.update_global::<ArtworkStore, _>(|store, _| store.lookup(key))
+}
+/// Palette for the exact cached decoded image. No sampling, I/O or LRU mutation.
+/// Missing, failed and evicted artwork has no palette.
+pub fn ambient(key: &ArtworkKey, cx: &App) -> Option<ArtworkPalette> {
+    cx.try_global::<ArtworkStore>()?.ambient(key)
 }
 pub fn status(key: &ArtworkKey, cx: &App) -> Option<Result<(), ArtworkError>> {
     cx.try_global::<ArtworkStore>()?
@@ -191,6 +282,15 @@ fn pump(cx: &mut App) {
     }
 }
 impl ArtworkStore {
+    fn ambient(&self, key: &ArtworkKey) -> Option<ArtworkPalette> {
+        self.cache
+            .iter()
+            .find(|entry| &entry.key == key)?
+            .result
+            .as_ref()
+            .ok()
+            .map(|decoded| decoded.palette)
+    }
     fn advance_generation(&mut self, owner: &str) -> u64 {
         if owner.len() > 128
             || (!self.generations.contains_key(owner) && self.generations.len() >= 64)
@@ -254,7 +354,7 @@ impl ArtworkStore {
         Some(job)
     }
 
-    fn complete(&mut self, job: &Job, result: Result<Arc<RenderImage>, ArtworkError>) -> bool {
+    fn complete(&mut self, job: &Job, result: Result<DecodedArtwork, ArtworkError>) -> bool {
         self.active.remove(&job.id);
         self.tasks.remove(&job.id);
         if self.generations.get(&job.owner).copied() != Some(job.generation) {
@@ -262,7 +362,7 @@ impl ArtworkStore {
         }
         let bytes = result
             .as_ref()
-            .map_or(0, |image| image.as_bytes(0).map_or(0, <[u8]>::len));
+            .map_or(0, |image| image.image.as_bytes(0).map_or(0, <[u8]>::len));
         self.cache.push_back(Cached {
             key: job.key.clone(),
             result,
@@ -273,7 +373,11 @@ impl ArtworkStore {
     fn lookup(&mut self, key: &ArtworkKey) -> Option<Arc<RenderImage>> {
         let index = self.cache.iter().position(|entry| &entry.key == key)?;
         let entry = self.cache.remove(index)?;
-        let result = entry.result.clone().ok();
+        let result = entry
+            .result
+            .as_ref()
+            .ok()
+            .map(|decoded| decoded.image.clone());
         self.cache.push_back(entry);
         result
     }
@@ -293,7 +397,7 @@ impl ArtworkStore {
                         result: Ok(image), ..
                     }) = self.cache.remove(index)
                 {
-                    evicted.push(image);
+                    evicted.push(image.image);
                 }
             }
         }
@@ -302,7 +406,7 @@ impl ArtworkStore {
                 result: Ok(image), ..
             }) = self.cache.pop_front()
             {
-                evicted.push(image);
+                evicted.push(image.image);
             }
         }
         evicted
@@ -377,7 +481,7 @@ impl DiskCache {
         self.root
             .join(format!("{:x}.img", Sha256::digest(url.as_bytes())))
     }
-    fn read(&self, url: &str, kind: ArtworkKind) -> Option<Arc<RenderImage>> {
+    fn read(&self, url: &str, kind: ArtworkKind) -> Option<DecodedArtwork> {
         let _guard = DISK_LOCK.lock().ok()?;
         if !fs::symlink_metadata(&self.root).ok()?.is_dir() {
             return None;
@@ -462,7 +566,7 @@ fn owned_cache_file(path: &Path) -> bool {
                 && name.as_bytes()[..64].iter().all(u8::is_ascii_hexdigit)
         })
 }
-fn fetch(url: &str, kind: ArtworkKind) -> Result<Arc<RenderImage>, ArtworkError> {
+fn fetch(url: &str, kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
     let start = Instant::now();
     // Pipeline tests must not read, write or evict real application cache files.
     // Disk behavior is tested separately with isolated temporary directories.
@@ -500,7 +604,7 @@ fn fetch(url: &str, kind: ArtworkKind) -> Result<Arc<RenderImage>, ArtworkError>
     }
     Ok(image)
 }
-fn decode(bytes: &[u8], kind: ArtworkKind) -> Result<Arc<RenderImage>, ArtworkError> {
+fn decode(bytes: &[u8], kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
     if bytes.len() as u64 > ENCODED {
         return Err(ArtworkError::TooLarge);
     }
@@ -543,11 +647,15 @@ fn decode(bytes: &[u8], kind: ArtworkKind) -> Result<Arc<RenderImage>, ArtworkEr
         decoded
     };
     let mut rgba = thumbnail.into_rgba8();
+    let palette = extract_palette(&rgba);
     // GPUI's renderer expects BGRA (same convention as its built-in image loader).
     for pixel in rgba.pixels_mut() {
         pixel.0.swap(0, 2);
     }
-    Ok(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])))
+    Ok(DecodedArtwork {
+        image: Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])),
+        palette,
+    })
 }
 fn animated(bytes: &[u8], format: ImageFormat) -> bool {
     let (mut offset, png) = match format {
@@ -602,6 +710,92 @@ fn animated(bytes: &[u8], format: ImageFormat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn palette_samples_are_deterministic_muted_and_ignore_transparency_and_extremes() {
+        let colorful = image::RgbaImage::from_fn(48, 48, |x, _| {
+            image::Rgba(if x < 32 {
+                [240, 30, 20, 255]
+            } else {
+                [20, 60, 220, 255]
+            })
+        });
+        let palette = extract_palette(&colorful);
+        assert_eq!(palette, extract_palette(&colorful));
+        assert_ne!(palette, ArtworkPalette::NEUTRAL);
+        assert!(palette.primary[0] > palette.primary[2]);
+        assert!(palette.secondary[2] > palette.secondary[0]);
+        for color in [palette.primary, palette.secondary] {
+            let max = *color.iter().max().unwrap_or(&0) as f32;
+            let min = *color.iter().min().unwrap_or(&0) as f32;
+            assert!((81.0..=148.0).contains(&max));
+            assert!((max - min) / max <= 0.33);
+        }
+        for pixel in [
+            [100, 100, 100, 255],
+            [240, 20, 10, 0],
+            [2, 3, 4, 255],
+            [250, 248, 245, 255],
+        ] {
+            assert_eq!(
+                extract_palette(&image::RgbaImage::from_pixel(8, 8, image::Rgba(pixel))),
+                ArtworkPalette::NEUTRAL
+            );
+        }
+    }
+    #[test]
+    fn decoded_palette_matches_rgb_before_bgra_swap_and_cache_lifetime() {
+        let mut bytes = Vec::new();
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([220, 40, 20, 255]))
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .unwrap_or_else(|e| panic!("fixture: {e}"));
+        let decoded =
+            decode(&bytes, ArtworkKind::Poster).unwrap_or_else(|e| panic!("decode: {e:?}"));
+        assert!(decoded.palette.primary[0] > decoded.palette.primary[2]);
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let disk = DiskCache {
+            root: dir.path().join("artwork"),
+            budget: ENCODED,
+        };
+        disk.write("palette", &bytes);
+        assert_eq!(fs::read(disk.path("palette")).ok(), Some(bytes));
+        let disk_decoded = disk
+            .read("palette", ArtworkKind::Poster)
+            .unwrap_or_else(|| panic!("disk decode"));
+        assert_eq!(disk_decoded.palette, decoded.palette);
+        assert_eq!(
+            decoded.image.as_bytes(0).map(|bytes| &bytes[..4]),
+            Some([20, 40, 220, 255].as_slice())
+        );
+        let mut store = ArtworkStore::default();
+        let generation = store.advance_generation("detail");
+        let key = ArtworkKey::new(ArtworkKind::Poster, "https://example.com/palette.png")
+            .unwrap_or_else(|| panic!("key"));
+        store.enqueue("detail", generation, key.clone());
+        let job = store.start_next().unwrap_or_else(|| panic!("job"));
+        let palette = decoded.palette;
+        assert!(store.complete(&job, Ok(decoded)));
+        assert_eq!(store.ambient(&key), Some(palette));
+        let other_kind =
+            ArtworkKey::new(ArtworkKind::Backdrop, &key.url).unwrap_or_else(|| panic!("key"));
+        let other_url = ArtworkKey::new(ArtworkKind::Poster, "https://example.com/changed.png")
+            .unwrap_or_else(|| panic!("key"));
+        assert_eq!(store.ambient(&other_kind), None);
+        assert_eq!(store.ambient(&other_url), None);
+        store.advance_generation("detail");
+        assert_eq!(store.ambient(&key), Some(palette));
+        // Simulate memory pressure: palette leaves with its decoded image.
+        store
+            .cache
+            .front_mut()
+            .unwrap_or_else(|| panic!("cache"))
+            .bytes = POSTER_BYTES + 1;
+        assert_eq!(store.trim_images().len(), 1);
+        assert_eq!(store.ambient(&key), None);
+        store.enqueue("detail", generation + 1, key.clone());
+        let job = store.start_next().unwrap_or_else(|| panic!("job"));
+        assert!(store.complete(&job, Err(ArtworkError::InvalidImage)));
+        assert_eq!(store.ambient(&key), None);
+    }
     #[test]
     fn redirects_require_valid_https_urls_and_have_a_hop_limit() {
         let parse = |url| Url::parse(url).unwrap_or_else(|e| panic!("{e}"));
@@ -875,9 +1069,12 @@ mod tests {
         store.enqueue("browse", 1, old.clone());
         let job = store.start_next().unwrap_or_else(|| panic!("job"));
         assert_eq!(store.advance_generation("browse"), 2);
-        let image = Arc::new(RenderImage::new(vec![image::Frame::new(
-            image::RgbaImage::new(1, 1),
-        )]));
+        let image = DecodedArtwork {
+            image: Arc::new(RenderImage::new(vec![image::Frame::new(
+                image::RgbaImage::new(1, 1),
+            )])),
+            palette: ArtworkPalette::NEUTRAL,
+        };
         assert!(!store.complete(&job, Ok(image.clone())));
         assert!(store.cache.is_empty());
         assert!(store.active.is_empty());
@@ -890,9 +1087,12 @@ mod tests {
     #[::core::prelude::v1::test]
     fn decoded_lru_has_independent_media_quotas_and_bounded_failures() {
         let mut store = ArtworkStore::default();
-        let image = Arc::new(RenderImage::new(vec![image::Frame::new(
-            image::RgbaImage::new(1, 1),
-        )]));
+        let image = DecodedArtwork {
+            image: Arc::new(RenderImage::new(vec![image::Frame::new(
+                image::RgbaImage::new(1, 1),
+            )])),
+            palette: ArtworkPalette::NEUTRAL,
+        };
         let key = |kind, index| {
             ArtworkKey::new(kind, &format!("https://example.com/{index}.png"))
                 .unwrap_or_else(|| panic!("fixture URL"))
@@ -952,9 +1152,12 @@ mod tests {
         assert!(store.queue.is_empty()); // No automatic retries within an epoch.
         store.enqueue("browse", generation, ready.clone());
         let job = store.start_next().unwrap_or_else(|| panic!("ready job"));
-        let image = Arc::new(RenderImage::new(vec![image::Frame::new(
-            image::RgbaImage::new(1, 1),
-        )]));
+        let image = DecodedArtwork {
+            image: Arc::new(RenderImage::new(vec![image::Frame::new(
+                image::RgbaImage::new(1, 1),
+            )])),
+            palette: ArtworkPalette::NEUTRAL,
+        };
         assert!(store.complete(&job, Ok(image.clone())));
         store.enqueue("browse", generation, key("active"));
         let active = store.start_next().unwrap_or_else(|| panic!("active job"));
@@ -965,7 +1168,7 @@ mod tests {
         assert!(
             store
                 .lookup(&ready)
-                .is_some_and(|cached| Arc::ptr_eq(&cached, &image))
+                .is_some_and(|cached| Arc::ptr_eq(&cached, &image.image))
         );
         store.enqueue("browse", next, failed.clone());
         assert_eq!(store.queue.len(), 1);
@@ -988,9 +1191,9 @@ mod tests {
         assert!(ArtworkKey::new(ArtworkKind::Poster, "https://example.com/a.png").is_some());
     }
     #[cfg(feature = "ui-probe-test")]
-    #[gpui_kit::test]
+    #[gpui::test]
     fn app_pipeline_fetches_local_fixture_and_rejects_obsolete_completion(
-        cx: &mut gpui_kit::TestAppContext,
+        cx: &mut gpui::TestAppContext,
     ) {
         use std::{io::Write, net::TcpListener, thread, time::Instant};
         let mut bytes = Vec::new();
@@ -1046,7 +1249,10 @@ mod tests {
             assert!(matches!(
                 lookup_or_request("integration", generation, &first, app),
                 ArtworkState::Ready(_)
-            ))
+            ));
+            let key = ArtworkKey::new(ArtworkKind::Poster, &first)
+                .unwrap_or_else(|| panic!("fixture URL"));
+            assert_eq!(ambient(&key, app), Some(ArtworkPalette::NEUTRAL));
         });
         cx.update(|app| {
             assert!(matches!(
@@ -1061,6 +1267,7 @@ mod tests {
             let key = ArtworkKey::new(ArtworkKind::Poster, &obsolete)
                 .unwrap_or_else(|| panic!("fixture URL"));
             assert_eq!(status(&key, app), None);
+            assert_eq!(ambient(&key, app), None);
             assert!(app.global::<ArtworkStore>().active.is_empty());
             assert!(app.global::<ArtworkStore>().tasks.is_empty());
         });
@@ -1080,10 +1287,10 @@ mod tests {
                 .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
                 .unwrap_or_else(|e| panic!("fixture: {e}"));
             let image = decode(&bytes, kind).unwrap_or_else(|e| panic!("decode: {e:?}"));
-            let size = image.size(0);
+            let size = image.image.size(0);
             assert_eq!((size.width.0, size.height.0), expected);
             assert_eq!(
-                image.as_bytes(0).map(<[u8]>::len),
+                image.image.as_bytes(0).map(<[u8]>::len),
                 Some((expected.0 * expected.1 * 4) as usize)
             );
             assert!(
@@ -1152,7 +1359,7 @@ mod tests {
             .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
             .unwrap_or_else(|e| panic!("fixture: {e}"));
         let image = decode(&bytes, ArtworkKind::Poster).unwrap_or_else(|e| panic!("decode: {e:?}"));
-        assert_eq!(image.as_bytes(0).map(<[u8]>::len), Some(24));
+        assert_eq!(image.image.as_bytes(0).map(<[u8]>::len), Some(24));
         let mut animated_png = bytes[..8].to_vec();
         animated_png.extend_from_slice(&[0, 0, 0, 8]);
         animated_png.extend_from_slice(b"acTL");

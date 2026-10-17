@@ -1,5 +1,5 @@
 //! Explicit-file playback workflow. Subscribe before issuing any command.
-use super::coordinator::{AppCoordinator, CoordinatorEvent};
+use super::coordinator::{AppCoordinator, CoordinatorEvent, SettingsDestination};
 use crate::{
     app::{AppAction, AppOutcome, CredentialState},
     widgets::{
@@ -20,6 +20,7 @@ use kinema_core::sources::{PlaybackTarget, RemoteFile, SourceCandidate};
 pub(crate) struct PlaySheet {
     coordinator: Entity<AppCoordinator>,
     title: String,
+    provider: kinema_core::sources::DebridKind,
     player: Entity<Select<PlayerChoice>>,
     _player_subscription: Subscription,
     release: String,
@@ -35,174 +36,13 @@ pub(crate) struct PlaySheet {
     _subscription: Subscription,
 }
 impl EventEmitter<DismissEvent> for PlaySheet {}
+#[cfg(feature = "ui-probe")]
+mod fixtures;
+#[cfg(test)]
+mod tests;
+mod workflow;
 fn can_play(chosen: Option<&str>, files: &[RemoteFile], pending: bool) -> bool {
     !pending && chosen.is_some_and(|id| files.iter().any(|f| f.id == id))
-}
-impl PlaySheet {
-    pub(crate) fn new(
-        coordinator: Entity<AppCoordinator>,
-        title: String,
-        target: PlaybackTarget,
-        candidate: SourceCandidate,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let choice = coordinator
-            .read(cx)
-            .settings
-            .as_ref()
-            .map(|s| s.player.clone())
-            .unwrap_or(PlayerChoice::Mpv);
-        let mut options = vec![
-            (PlayerChoice::Mpv, "mpv".into()),
-            (PlayerChoice::Vlc, "VLC".into()),
-        ];
-        if let PlayerChoice::Custom(_) = &choice {
-            options.push((choice.clone(), "Custom player".into()));
-        }
-        let player = cx.new(|cx| Select::new(choice, options, cx));
-        let player_coordinator = coordinator.clone();
-        let player_subscription = cx.subscribe(
-            &player,
-            move |this, _, event: &SelectEvent<PlayerChoice>, cx| {
-                let SelectEvent::Changed(choice) = event;
-                let settings = player_coordinator.read(cx).settings.clone();
-                if let Some(mut settings) = settings {
-                    settings.player = choice.clone();
-                    this.player_pending = player_coordinator
-                        .update(cx, |c, cx| c.command(AppAction::SaveSettings(settings), cx));
-                    if this.player_pending.is_none() {
-                        this.error = Some("Player preference could not be saved. Retry.".into());
-                    }
-                    cx.notify();
-                }
-            },
-        );
-        let subscription = cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
-            let CoordinatorEvent::App(event) = event else { return };
-            if Some(event.generation)==this.player_pending {
-                this.player_pending=None;
-                if !matches!(event.outcome,AppOutcome::Settings{..}|AppOutcome::SettingsWarning{..}) {
-                    this.error=Some(match &event.outcome{AppOutcome::Failed{message}=>message.clone(),_=>"Player preference could not be saved.".into()});
-                    if let Some(choice)=this.coordinator.read(cx).settings.as_ref().map(|s|s.player.clone()){this.player.update(cx,|p,cx|p.set_value(choice,cx));}
-                }
-                cx.notify();return;
-            }
-            if Some(event.generation) != this.pending { return; }
-            this.pending = None;
-            match &event.outcome {
-                AppOutcome::Prepared { prepared, .. } => { this.preparation = Some(event.generation); this.files = prepared.files.clone(); }
-                AppOutcome::PlaybackStarted { .. } => cx.emit(DismissEvent),
-                AppOutcome::Failed { message } | AppOutcome::CacheFull { message } => this.error = Some(message.clone()),
-                AppOutcome::CacheLimitNeeded { size, limit } => this.error = Some(format!("File is {size} bytes; cache limit is {limit} bytes. Open Storage settings to increase it.")),
-                AppOutcome::Busy { label } => this.error = Some(label.clone()),
-                _ => {}
-            }
-            cx.notify();
-        });
-        let c = coordinator.read(cx);
-        let provider = c
-            .settings
-            .as_ref()
-            .map(|s| s.debrid)
-            .unwrap_or(kinema_core::sources::DebridKind::RealDebrid);
-        let state = c
-            .credentials
-            .iter()
-            .find(|(p, _)| *p == provider)
-            .map(|(_, s)| s);
-        let credential_notice = match state {
-            Some(CredentialState::Present) => String::new(),
-            Some(CredentialState::Missing) => {
-                format!("No {provider:?} credential is saved. Preparation has not started.")
-            }
-            Some(CredentialState::Unavailable(message)) => {
-                format!("Secure storage unavailable: {message}. Preparation has not started.")
-            }
-            None => "Account status unavailable. Close and retry after settings load.".into(),
-        };
-        let missing = !credential_notice.is_empty();
-        let release = candidate.name.clone();
-        let pending = if missing {
-            None
-        } else {
-            coordinator.update(cx, |c, cx| {
-                c.command(AppAction::Prepare { target, candidate }, cx)
-            })
-        };
-        Self {
-            coordinator,
-            title,
-            player,
-            _player_subscription: player_subscription,
-            release,
-            preparation: None,
-            pending,
-            player_pending: None,
-            files: vec![],
-            chosen: None,
-            error: if !missing && pending.is_none() {
-                Some("Application service unavailable or busy. Close and retry.".into())
-            } else {
-                None
-            },
-            missing,
-            credential_notice,
-            cancel: cx.focus_handle().tab_stop(true),
-            _subscription: subscription,
-        }
-    }
-    #[cfg(feature = "ui-probe")]
-    pub(crate) fn fixture(
-        coordinator: Entity<AppCoordinator>,
-        state: &str,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        use kinema_core::{
-            catalog::ImdbId,
-            sources::{InfoHash, TorrentSource},
-        };
-        let target = PlaybackTarget::Movie(
-            ImdbId::new("tt1234567").unwrap_or_else(|e| panic!("fixture id: {e}")),
-        );
-        let candidate = SourceCandidate {
-            name: "Quiet.Orbit.1080p.WEB.mkv".into(),
-            quality: Some("1080p".into()),
-            size: Some(4_200_000_000),
-            seeders: Some(412),
-            torrent: TorrentSource {
-                hash: InfoHash::new("a".repeat(40)).unwrap_or_else(|e| panic!("fixture hash: {e}")),
-                file_index: None,
-                filename: None,
-            },
-        };
-        let mut this = Self::new(coordinator, "The Quiet Orbit".into(), target, candidate, cx);
-        this.missing = state == "play-live-missing-creds";
-        this.credential_notice =
-            "No Real-Debrid credential is saved. Preparation has not started.".into();
-        this.pending = (state == "play-live-preparing").then_some(100);
-        this.error = (state == "play-live-failure").then(|| {
-            "Player launch failed: executable not found. Your file choice is preserved.".into()
-        });
-        if !this.missing && this.pending.is_none() {
-            this.files = vec![
-                RemoteFile {
-                    id: "feature".into(),
-                    path: "Quiet.Orbit.mkv".into(),
-                    size: 4_200_000_000,
-                },
-                RemoteFile {
-                    id: "extra".into(),
-                    path: "Extras/Interview.mkv".into(),
-                    size: 400_000_000,
-                },
-            ];
-            this.preparation = Some(99);
-            if matches!(state, "play-live-ready" | "play-live-failure") {
-                this.chosen = Some("feature".into());
-            }
-        }
-        this
-    }
 }
 impl Render for PlaySheet {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -215,9 +55,16 @@ impl Render for PlaySheet {
             .flex()
             .flex_col()
             .gap(s::S12)
-            .child(div().type_style(t::MONO).child(self.release.clone()));
+            .child(div().type_style(t::MONO).child(self.release.clone()))
+            .child(
+                div()
+                    .type_style(t::SMALL)
+                    .text_color(p.text_secondary)
+                    .child(format!("via {}", provider_name(self.provider))),
+            );
         if self.missing {
             let coordinator = self.coordinator.clone();
+            let destination = SettingsDestination::Account(self.provider);
             body = body
                 .child(
                     div()
@@ -228,15 +75,15 @@ impl Render for PlaySheet {
                 )
                 .child(
                     Button::new("play-settings", "Open Settings…").on_click(move |_, _, cx| {
-                        coordinator.update(cx, |c, cx| c.open_settings(cx))
+                        coordinator.update(cx, |c, cx| c.open_settings_at(destination, cx))
                     }),
                 );
         } else if self.pending.is_some() {
             body = body
                 .child(if self.preparation.is_some() {
-                    "Requesting player launch…"
+                    "Requesting player launch…".to_owned()
                 } else {
-                    "Preparing with debrid service…"
+                    format!("Preparing with {}…", provider_name(self.provider))
                 })
                 .child(crate::widgets::progress::Progress::indeterminate(
                     "prepare-progress",
@@ -251,9 +98,10 @@ impl Render for PlaySheet {
             body = body.child(
                 Radio::new(
                     ("play-file", index),
-                    format!("{} · {} bytes", file.path, file.size),
+                    format!("{} · {}", file.path, format_bytes(file.size)),
                     self.chosen.as_ref() == Some(&file.id),
                 )
+                .typography(t::MONO)
                 .on_select(move |_, cx| {
                     let _ = weak.update(cx, |s, cx| {
                         s.chosen = Some(id.clone());
@@ -281,11 +129,13 @@ impl Render for PlaySheet {
                     crate::widgets::notice::NoticeKind::Warning,
                     "File exceeds the cache limit",
                 )
-                .action(
-                    Button::new("play-storage", "Storage settings…").on_click(move |_, _, cx| {
-                        coordinator.update(cx, |c, cx| c.open_settings(cx))
-                    }),
-                ),
+                .action(Button::new("play-storage", "Storage settings…").on_click(
+                    move |_, _, cx| {
+                        coordinator.update(cx, |c, cx| {
+                            c.open_settings_at(SettingsDestination::Storage, cx)
+                        })
+                    },
+                )),
             );
         }
         if let Some(error) = &self.error {
@@ -298,27 +148,36 @@ impl Render for PlaySheet {
                 .child("Player: ")
                 .child(self.player.clone())
         } else {
-            div().child(format!("Player: {:?}", self.player.read(cx).value()))
+            let label = match self.player.read(cx).value() {
+                PlayerChoice::Mpv => "mpv",
+                PlayerChoice::Vlc => "VLC",
+                PlayerChoice::Custom(_) => "Custom player",
+            };
+            div().child(format!("Player: {label}"))
         });
         // Give the modal's scroll body a definite measure; nested flex content
         // otherwise contributes only its first line to GPUI's intrinsic size.
-        let body_height = (110.
-            + self.files.len() as f32 * 40.
-            + if self.missing { 110. } else { 0. }
-            + if self.error.is_some() { 54. } else { 0. })
-        .min(420.);
-        let body = body.id("play-body").h(px(body_height)).overflow_y_scroll();
+        let body_height = (s::S48 * 3.
+            + s::S48 * self.files.len() as f32
+            + if self.missing { s::S48 * 2. } else { px(0.) }
+            + if self.error.is_some() {
+                s::S48 + s::S8
+            } else {
+                px(0.)
+            })
+        .min(s::S48 * 9.);
+        let body = body.id("play-body").h(body_height).overflow_y_scroll();
         Sheet::new("play-sheet", format!("Play · {}", self.title))
             .initial_focus(self.cancel.clone())
             .body(body)
             .on_dismiss(move |_, cx| {
-                let _ = dismiss.update(cx, |_, cx| cx.emit(DismissEvent));
+                let _ = dismiss.update(cx, |this, cx| this.dismiss(cx));
             })
             .footer(
                 Button::new("play-cancel", "Cancel")
                     .focus_handle(self.cancel.clone())
                     .on_click(move |_, _, cx| {
-                        let _ = cancel.update(cx, |_, cx| cx.emit(DismissEvent));
+                        let _ = cancel.update(cx, |this, cx| this.dismiss(cx));
                     }),
             )
             .footer(
@@ -353,20 +212,20 @@ impl Render for PlaySheet {
             )
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::can_play;
-    use kinema_core::sources::RemoteFile;
-    #[test]
-    fn explicit_choice_even_for_one_file() {
-        let files = vec![RemoteFile {
-            id: "a".into(),
-            path: "movie.mkv".into(),
-            size: 1,
-        }];
-        assert!(!can_play(None, &files, false));
-        assert!(can_play(Some("a"), &files, false));
-        assert!(!can_play(Some("a"), &files, true));
-        assert!(!can_play(Some("stale"), &files, false));
+pub(crate) fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.1} GiB", bytes as f64 / 1_073_741_824.)
+    } else if bytes >= 1_048_576 {
+        format!("{:.1} MiB", bytes as f64 / 1_048_576.)
+    } else if bytes >= 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.)
+    } else {
+        format!("{bytes} B")
+    }
+}
+fn provider_name(provider: kinema_core::sources::DebridKind) -> &'static str {
+    match provider {
+        kinema_core::sources::DebridKind::RealDebrid => "Real-Debrid",
+        kinema_core::sources::DebridKind::AllDebrid => "AllDebrid",
     }
 }

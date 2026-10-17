@@ -84,6 +84,7 @@ pub fn install(coordinator: &Entity<AppCoordinator>, cx: &mut App) {
     bind_keys(cx);
     cx.subscribe(coordinator, |coordinator, event, cx| match event {
         CoordinatorEvent::OpenSettings => open(coordinator, Section::General, cx),
+        CoordinatorEvent::OpenSettingsAt(destination) => open_at(coordinator, *destination, cx),
         CoordinatorEvent::About => open(coordinator, Section::About, cx),
         CoordinatorEvent::App(event) => {
             if cx.global::<SettingsWindows>().pending_save == Some(event.generation) {
@@ -137,6 +138,34 @@ fn open_decision(existing_window_is_live: bool) -> OpenDecision {
         OpenDecision::Activate
     } else {
         OpenDecision::Create
+    }
+}
+
+pub fn open_at(
+    coordinator: Entity<AppCoordinator>,
+    destination: super::coordinator::SettingsDestination,
+    cx: &mut App,
+) {
+    use super::coordinator::SettingsDestination;
+    let section = match destination {
+        SettingsDestination::General => Section::General,
+        SettingsDestination::Account(_) => Section::Accounts,
+        SettingsDestination::Storage => Section::Storage,
+    };
+    open(coordinator, section, cx);
+    if let SettingsDestination::Account(provider) = destination {
+        let account = match provider {
+            DebridKind::RealDebrid => Account::RealDebrid,
+            DebridKind::AllDebrid => Account::AllDebrid,
+        };
+        if let Some(handle) = cx.global::<SettingsWindows>().window {
+            let _ = handle.update(cx, |view, window, cx| {
+                if let Some(focus) = view.account_focus.get(&account) {
+                    focus.focus(window, cx);
+                }
+                cx.notify();
+            });
+        }
     }
 }
 
@@ -293,6 +322,7 @@ pub struct SettingsWindow {
     coordinator: Entity<AppCoordinator>,
     section: Section,
     sidebar: FocusHandle,
+    account_focus: HashMap<Account, FocusHandle>,
     settings: Settings,
     settings_loaded: bool,
     metadata: Entity<Select<MetadataProvider>>,
@@ -433,6 +463,10 @@ impl SettingsWindow {
             coordinator,
             section,
             sidebar: cx.focus_handle().tab_stop(true),
+            account_focus: Account::ALL
+                .into_iter()
+                .map(|account| (account, cx.focus_handle().tab_stop(true)))
+                .collect(),
             settings,
             settings_loaded,
             metadata,
@@ -713,7 +747,7 @@ impl SettingsWindow {
                 self.status.insert(account, status);
             }
             Pending::Cleanup => {
-                self.errors.insert("Cleanup", failure.unwrap_or_else(|| match &event.outcome { AppOutcome::Cleaned { bytes } => format!("Freed {}. Active/protected files were kept; original local files are never removed.", bytes_label(*bytes)), _ => "Cleanup completed.".into() }));
+                self.errors.insert("Cleanup", failure.unwrap_or_else(|| match &event.outcome { AppOutcome::Cleaned { bytes, .. } => format!("Freed {}. Active/protected files were kept; original local files are never removed.", bytes_label(*bytes)), _ => "Cleanup completed.".into() }));
             }
         }
         cx.notify();
@@ -774,6 +808,7 @@ impl SettingsWindow {
                             },
                         )
                         .disabled(pending)
+                        .focus_handle(self.account_focus[&account].clone())
                         .on_click(move |_, window, cx| {
                             let _ = weak.update(cx, |this, cx| {
                                 this.editing = Some(account);

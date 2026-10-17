@@ -159,8 +159,8 @@ fn slot(kind: MediaKind) -> usize {
 }
 
 // Separate kind/indexer operation slots avoid one page starving another while
-// keeping pending metadata bounded to fifteen operations, regardless of IDs/pages.
-const METADATA_SLOTS: usize = 15;
+// keeping pending metadata bounded to sixteen operations, regardless of IDs/pages.
+const METADATA_SLOTS: usize = 16;
 
 fn metadata_slot(action: &MetadataAction) -> usize {
     match action {
@@ -179,6 +179,7 @@ fn metadata_slot(action: &MetadataAction) -> usize {
                 TmdbQuery::Search { query, .. } => 2 + slot(query.kind()),
                 TmdbQuery::Details { kind, .. } => 4 + slot(*kind),
                 TmdbQuery::Season { .. } => 6,
+                TmdbQuery::Similar { .. } => 7,
             }
         }
     }

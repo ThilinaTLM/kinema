@@ -1,7 +1,8 @@
 # Kinema Next
 
-A pre-1.0 Rust desktop application using [GPUI Kit](https://gpui-kit.com), targeting
-Windows, macOS, and Linux without KDE dependencies. **The first bounded catalog
+A pre-1.0 Rust desktop application using direct GPUI (`gpui-pre =0.3.9`) and
+`gpui_platform`, targeting Windows, macOS, and Linux without KDE dependencies.
+V3 is the sole/default UI, with in-house widgets and no UI version switch. **The first bounded catalog
 increment has expanded into integrated MVP source flows; full MVP validation
 is not complete.**
 
@@ -20,8 +21,9 @@ TMDB requires a user bearer token and IMDb mapping before source lookup.
 
 Start with the [quickstart and setup](docs/development.md#quickstart-and-setup).
 Local-server/mpv smoke evidence does **not** establish live paid-provider playback,
-complete GUI acceptance or cross-platform runtime support. Final locked root
-checks passed; provider/UI acceptance gaps remain.
+complete GUI acceptance or cross-platform runtime support. Historical locked root
+checks predate the v3 cleanup; current validation and provider/UI acceptance gaps
+are tracked separately.
 See the [validation matrix](docs/development.md#validation-status-and-limits) and
 [architecture](docs/architecture.md) for current limits. No full-MVP completion
 claim is made.
@@ -47,7 +49,7 @@ uses separate databases; existing data is not migrated, moved, or deleted.
 See [storage locations](docs/storage-layout.md#implemented-catalog-location).
 
 The workspace contains `kinema-core` (UI-independent domain code) and
-`kinema-desktop` (GPUI Kit UI and background catalog adapters). See [development](docs/development.md) for
+`kinema-desktop` (direct-GPUI v3 UI and background catalog adapters). See [development](docs/development.md) for
 core-only checks and OS setup. Release packaging is not yet provided.
 
 ## C++ reference

@@ -16,6 +16,8 @@ pub(crate) enum Pending {
         remote: bool,
     },
     Release,
+    Replay,
+    Reveal,
     Cleanup,
 }
 
@@ -62,9 +64,26 @@ impl Tracker {
     }
 
     pub(crate) fn issue_release(&mut self, id: String) -> u64 {
-        let generation = self.issue(Pending::Release);
+        self.issue_session(Pending::Release, id)
+    }
+
+    pub(crate) fn issue_session(&mut self, pending: Pending, id: String) -> u64 {
+        let generation = self.issue(pending);
         self.releases.insert(generation, id);
         generation
+    }
+
+    pub(crate) fn cancel(&mut self, generation: u64) {
+        if self.latest_prepare == generation {
+            self.latest_prepare = 0;
+        }
+        if self.latest_play == generation {
+            self.latest_play = 0;
+        }
+    }
+
+    pub(crate) fn is_pending(&self, generation: u64) -> bool {
+        self.pending.contains_key(&generation)
     }
 
     /// The worker refused the command (backpressure); it will never answer.
@@ -118,7 +137,7 @@ impl Tracker {
     pub(crate) fn pending_plays(&self) -> usize {
         self.pending
             .values()
-            .filter(|p| matches!(p, Pending::Play { .. }))
+            .filter(|p| matches!(p, Pending::Play { .. } | Pending::Replay))
             .count()
     }
 
@@ -217,5 +236,31 @@ mod tests {
         let g = t.issue(Pending::Cleanup);
         t.withdraw(g);
         assert_eq!(t.pending_count(), 0);
+    }
+    #[test]
+    fn dismissed_launch_rejects_late_ui_result_without_forgetting_lease() {
+        let mut tracker = Tracker::default();
+        let prepare = tracker.issue(Pending::Prepare);
+        let play = tracker.issue(Pending::Play { remote: true });
+        tracker.cancel(prepare);
+        tracker.cancel(play);
+        assert!(tracker.needs_quit_confirmation());
+        assert!(!tracker.resolve(prepare).current);
+        assert!(!tracker.resolve(play).current);
+        tracker.session_started("late-session".into(), true);
+        assert!(tracker.needs_quit_confirmation());
+        tracker.session_released("late-session");
+        assert!(!tracker.needs_quit_confirmation());
+    }
+    #[test]
+    fn replay_is_pending_launch_work_and_failure_keeps_existing_lease() {
+        let mut tracker = Tracker::default();
+        tracker.session_started("existing".into(), false);
+        let replay = tracker.issue_session(Pending::Replay, "existing".into());
+        assert_eq!(tracker.pending_plays(), 1);
+        let result = tracker.resolve(replay);
+        assert_eq!(result.release.as_deref(), Some("existing"));
+        assert_eq!(tracker.active_sessions(), 1);
+        assert_eq!(tracker.pending_plays(), 0);
     }
 }

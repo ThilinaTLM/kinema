@@ -1,4 +1,6 @@
 //! Blocking process discovery/spawn. Invoke only from an owned background worker.
+mod reveal;
+pub use reveal::reveal_file;
 use std::{
     ffi::OsString,
     fmt,
