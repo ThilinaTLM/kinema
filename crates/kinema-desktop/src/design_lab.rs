@@ -1,5 +1,5 @@
 //! Offline v3 native design lab. No application services or legacy presentation.
-use std::{cell::Cell, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use gpui::{prelude::*, *};
 
@@ -10,9 +10,9 @@ use crate::widgets::{
     icon::{Icon, IconName},
     icon_button::IconButton,
     menu::{ContextMenuExt, Menu, MenuItem, Select},
-    motion::{self, Motion},
     notice::{Notice, NoticeKind},
     popover::Popover,
+    poster_card::{CardOpened, PosterCard},
     progress::Progress,
     scroll_area::ScrollArea,
     search_field::SearchField,
@@ -27,7 +27,10 @@ use crate::widgets::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 9] = [
+const SCENES: [&str; 12] = [
+    "browse-live",
+    "browse-live-empty",
+    "browse-live-failure",
     "components",
     "browse",
     "menus",
@@ -60,6 +63,7 @@ pub fn run_native() {
             widgets::assets::init(cx);
             widgets::text_input::bind_keys(cx);
             widgets::menu::bind_keys(cx);
+            crate::screens::main_window::bind_keys(cx);
             cx.bind_keys([
                 KeyBinding::new("tab", NextFocus, Some("KinemaLab")),
                 KeyBinding::new("shift-tab", PreviousFocus, Some("KinemaLab")),
@@ -72,27 +76,94 @@ pub fn run_native() {
                 }
             })
             .detach();
-            cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(Bounds {
-                        origin: point(px(0.), px(0.)),
-                        size: size(px(1280.), px(800.)),
-                    })),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some(format!("Kinema Design Lab / {scene} — FIXTURE ONLY").into()),
-                        ..Default::default()
-                    }),
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds {
+                    origin: point(px(0.), px(0.)),
+                    size: size(px(1280.), px(800.)),
+                })),
+                titlebar: Some(TitlebarOptions {
+                    title: Some(format!("Kinema Design Lab / {scene} — FIXTURE ONLY").into()),
                     ..Default::default()
-                },
-                |window, cx| cx.new(|cx| Lab::new(scene, window, cx)),
-            )
-            .unwrap_or_else(|error| panic!("lab window: {error}"));
+                }),
+                ..Default::default()
+            };
+            if scene.starts_with("browse-live") {
+                cx.open_window(options, |window, cx| {
+                    cx.new(|cx| {
+                        let coordinator = cx.new(|cx| {
+                            use crate::screens::coordinator::{AppCoordinator, BrowseTitle};
+                            use kinema_core::{
+                                MediaKind,
+                                catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
+                            };
+                            let titles = if scene == "browse-live" {
+                                (0..60)
+                                    .filter_map(|i| {
+                                        let names = [
+                                            "The Quiet Orbit",
+                                            "North Harbor",
+                                            "Last Light",
+                                            "Signal",
+                                            "The Visitor",
+                                            "Winter Sea",
+                                        ];
+                                        let id = ImdbId::new(format!("tt{:07}", i + 1)).ok()?;
+                                        let title = CatalogTitle::new(
+                                            id,
+                                            MediaKind::Movie,
+                                            format!("{} {}", names[i % 6], i + 1),
+                                            Some(
+                                                "A visitor uncovers a secret by the distant shore."
+                                                    .into(),
+                                            ),
+                                        )
+                                        .ok()?
+                                        .with_display(CatalogDisplay {
+                                            year: Some(2024),
+                                            imdb_rating: if i % 6 == 1 {
+                                                None
+                                            } else {
+                                                ImdbRating::new(if i % 6 == 5 { 0. } else { 8.1 })
+                                            },
+                                            runtime_minutes: Some(118),
+                                            genres: vec!["Drama".into(), "Mystery".into()],
+                                            ..Default::default()
+                                        });
+                                        Some(BrowseTitle::Cinemeta(title))
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+                            let error = (scene == "browse-live-failure").then(|| {
+                                "Couldn't reach Cinemeta — timed out (offline fixture).".into()
+                            });
+                            let mut coordinator = AppCoordinator::fixture(titles, error, cx);
+                            for (i, title) in coordinator.titles.iter().enumerate() {
+                                if i % 9 != 8 {
+                                    coordinator
+                                        .fixture_art
+                                        .insert(title.key(), art(i, 240, 360));
+                                }
+                            }
+                            coordinator
+                        });
+                        crate::screens::main_window::MainWindow::with_coordinator(
+                            coordinator,
+                            window,
+                            cx,
+                        )
+                    })
+                })
+                .unwrap_or_else(|error| panic!("browse-live window: {error}"));
+            } else {
+                cx.open_window(options, |window, cx| {
+                    cx.new(|cx| Lab::new(scene, window, cx))
+                })
+                .unwrap_or_else(|error| panic!("lab window: {error}"));
+            }
             cx.activate(true);
         });
-}
-
-fn focus_is_visible(focus: &FocusHandle, window: &Window) -> bool {
-    window.last_input_was_keyboard() && focus.is_focused(window)
 }
 
 fn row() -> Div {
@@ -162,256 +233,6 @@ fn grid(width: f32) -> (usize, f32) {
         columns,
         (available - (columns - 1) as f32 * gap) / columns as f32,
     )
-}
-
-struct PosterCard {
-    index: usize,
-    title: SharedString,
-    image: Option<Arc<RenderImage>>,
-    rating: Option<f32>,
-    focus: FocusHandle,
-    hovered: bool,
-    disclosed: bool,
-    generation: usize,
-    progress: Rc<Cell<f32>>,
-    from: f32,
-    width: f32,
-}
-struct CardOpened;
-impl EventEmitter<CardOpened> for PosterCard {}
-
-impl PosterCard {
-    fn new(index: usize, title: &'static str, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let focus = cx.focus_handle().tab_stop(true);
-        let entity_id = cx.entity_id();
-        window
-            .on_focus_in(&focus, cx, move |_, cx| cx.notify(entity_id))
-            .detach();
-        window
-            .on_focus_out(&focus, cx, move |_, _, cx| cx.notify(entity_id))
-            .detach();
-        Self {
-            index,
-            title: title.into(),
-            image: (index != 8).then(|| art(index, 240, 360)),
-            rating: match index {
-                1 | 8 => None,
-                5 => Some(0.),
-                _ => Some(8.1 - (index % 4) as f32 * 0.3),
-            },
-            focus,
-            hovered: false,
-            disclosed: false,
-            generation: 0,
-            progress: Rc::new(Cell::new(0.)),
-            from: 0.,
-            width: 190.,
-        }
-    }
-}
-impl Render for PosterCard {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = *tokens::palette(cx);
-        let dark = Palette::dark();
-        let focus = self.focus.clone();
-        let target = self.hovered || focus.is_focused(window);
-        if target != self.disclosed {
-            self.disclosed = target;
-            self.from = self.progress.get();
-            self.generation += 1;
-        }
-        let duration = motion::duration(Motion::Disclose, cx);
-        let from = self.from;
-        let progress = self.progress.clone();
-        let w = self.width;
-        let h = w * 1.5;
-        let artwork = if let Some(image) = &self.image {
-            img(image.clone())
-                .object_fit(ObjectFit::Cover)
-                .size_full()
-                .into_any_element()
-        } else {
-            col()
-                .size_full()
-                .justify_center()
-                .items_center()
-                .p(s::S12)
-                .bg(p.bg_placeholder)
-                .child(
-                    div()
-                        .type_style(t::HEADING)
-                        .text_center()
-                        .line_clamp(3)
-                        .child(self.title.clone()),
-                )
-                .child(div().text_color(p.text_muted).child("2024"))
-                .into_any_element()
-        };
-        let image = div().absolute().inset_0().child(artwork);
-        let panel = col()
-            .gap_0()
-            .absolute()
-            .bottom_0()
-            .left_0()
-            .w_full()
-            .text_color(dark.text_primary)
-            .child(div().h(s::S48).flex_none().bg(linear_gradient(
-                180.,
-                linear_color_stop(dark.scrim_max.opacity(0.), 0.),
-                linear_color_stop(dark.scrim_max, 1.),
-            )))
-            .child(
-                col()
-                    .flex_none()
-                    .gap(s::S4)
-                    .p(s::S12)
-                    .bg(dark.scrim_max)
-                    .child(
-                        div()
-                            .type_style(t::HEADING)
-                            .line_clamp(2)
-                            .child(self.title.clone()),
-                    )
-                    .child(
-                        div()
-                            .type_style(t::SMALL)
-                            .text_color(dark.text_secondary)
-                            .child(if self.index.is_multiple_of(3) {
-                                "2024 · 3 seasons"
-                            } else {
-                                "2024 · 118 min"
-                            }),
-                    )
-                    .child(
-                        div()
-                            .type_style(t::SMALL)
-                            .text_color(dark.text_secondary)
-                            .child("Drama · Mystery"),
-                    )
-                    .when(self.rating.is_none(), |el| {
-                        el.child(div().type_style(t::SMALL).child("IMDb —"))
-                    })
-                    .when(w >= 172., |el| {
-                        el.child(
-                            div()
-                                .type_style(t::BODY)
-                                .line_clamp(2)
-                                .overflow_hidden()
-                                .child("A visitor uncovers a secret by the distant shore."),
-                        )
-                    }),
-            );
-        let end = if target { 1. } else { 0. };
-        let style_image = move |el: Div, value: f32| {
-            el.w(px(w * (1. + value * 0.05)))
-                .h(px(h * (1. + value * 0.05)))
-                .left(px(-w * value * 0.025))
-                .top(px(-h * value * 0.025))
-        };
-        let style_panel =
-            move |el: Div, value: f32| el.opacity(value).bottom(px(-8. * (1. - value)));
-        let (image, panel) = if duration.is_zero() {
-            progress.set(end);
-            (
-                style_image(image, end).into_any_element(),
-                style_panel(panel, end).into_any_element(),
-            )
-        } else {
-            (
-                image
-                    .with_animation(
-                        ("zoom", self.generation),
-                        Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        move |el, t| style_image(el, from + (end - from) * t),
-                    )
-                    .into_any_element(),
-                panel
-                    .with_animation(
-                        ("disclose", self.generation),
-                        Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        move |el, t| {
-                            let value = from + (end - from) * t;
-                            progress.set(value);
-                            style_panel(el, value)
-                        },
-                    )
-                    .into_any_element(),
-            )
-        };
-        let visual = div()
-            .size_full()
-            .relative()
-            .overflow_hidden()
-            .child(image)
-            .child(panel);
-        let card = div()
-            .id(("poster", self.index))
-            .track_focus(&focus)
-            .tab_stop(true)
-            .role(Role::Button)
-            .aria_label(format!(
-                "{}, 2024, {}, IMDb {}",
-                self.title,
-                if self.index.is_multiple_of(3) {
-                    "Series"
-                } else {
-                    "Movie"
-                },
-                self.rating
-                    .map(|score| format!("{score:.1}"))
-                    .unwrap_or_else(|| "unknown".into())
-            ))
-            .w(px(w))
-            .h(px(h))
-            .flex_none()
-            .relative()
-            .overflow_hidden()
-            .bg(p.bg_placeholder)
-            .on_hover(cx.listener(|this, hovered, _, cx| {
-                this.hovered = *hovered;
-                cx.notify();
-            }))
-            .on_click(cx.listener(move |_, _, window, cx| {
-                focus.focus(window, cx);
-                cx.emit(CardOpened);
-            }))
-            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "enter" {
-                    cx.emit(CardOpened);
-                    cx.stop_propagation();
-                }
-            }))
-            .child(visual)
-            .child(
-                row()
-                    .absolute()
-                    .top(s::S8)
-                    .left(s::S8)
-                    .right(s::S8)
-                    .justify_between()
-                    .child(Chip::rating(self.rating).over_art(true))
-                    .when(self.index.is_multiple_of(3), |el| {
-                        el.child(Chip::series().over_art(true))
-                    }),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .border_1()
-                    .border_color(p.poster_edge),
-            )
-            .when(focus_is_visible(&self.focus, window), |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .border(s::FOCUS_RING)
-                        .border_color(p.focus_ring),
-                )
-            });
-        card.context_menu(("poster-menu", self.index), |_, _| card_menu())
-    }
 }
 
 fn action_column(window: &Window) -> Pixels {
@@ -539,7 +360,29 @@ impl Lab {
         let cards: Vec<_> = titles
             .into_iter()
             .enumerate()
-            .map(|(i, title)| cx.new(|cx| PosterCard::new(i, title, window, cx)))
+            .map(|(i, title)| {
+                cx.new(|cx| {
+                    let mut card = PosterCard::new(i, title, window, cx);
+                    card.set_art((i != 8).then(|| art(i, 240, 360)));
+                    card.set_rating(match i {
+                        1 | 8 => None,
+                        5 => Some(0.),
+                        _ => Some(8.1 - (i % 4) as f32 * 0.3),
+                    });
+                    card.year = "2024".into();
+                    card.series = i.is_multiple_of(3);
+                    card.facts = if card.series {
+                        "2024 · 3 seasons"
+                    } else {
+                        "2024 · 118 min"
+                    }
+                    .into();
+                    card.genres = "Drama · Mystery".into();
+                    card.synopsis = "A visitor uncovers a secret by the distant shore.".into();
+                    card.menu = card_menu();
+                    card
+                })
+            })
             .collect();
         for card in &cards {
             cx.subscribe(card, |this, _, _: &CardOpened, cx| {

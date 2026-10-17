@@ -15,6 +15,46 @@ pub enum MetadataProvider {
     Tmdb,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeChoice {
+    #[default]
+    Dark,
+    Light,
+    System,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PosterSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+impl PosterSize {
+    /// Preferred poster width in logical pixels; the grid may stretch cards to fit.
+    #[allow(
+        dead_code,
+        reason = "appearance model groundwork; consumed by the v3 grid"
+    )]
+    pub fn preferred_width(self) -> f32 {
+        match self {
+            Self::Small => 140.0,
+            Self::Medium => 172.0,
+            Self::Large => 212.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MotionChoice {
+    #[default]
+    System,
+    Always,
+}
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub metadata: MetadataProvider,
@@ -22,6 +62,9 @@ pub struct Settings {
     pub debrid: DebridKind,
     pub media_limit_bytes: u64,
     pub player: PlayerChoice,
+    pub theme: ThemeChoice,
+    pub poster_size: PosterSize,
+    pub reduce_motion: MotionChoice,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -31,6 +74,9 @@ impl Default for Settings {
             debrid: DebridKind::RealDebrid,
             media_limit_bytes: 20 * 1024 * 1024 * 1024,
             player: PlayerChoice::Mpv,
+            theme: ThemeChoice::default(),
+            poster_size: PosterSize::default(),
+            reduce_motion: MotionChoice::default(),
         }
     }
 }
@@ -140,6 +186,12 @@ struct Document {
     version: u32,
     #[serde(default)]
     metadata: Option<MetadataProvider>,
+    #[serde(default)]
+    theme: ThemeChoice,
+    #[serde(default)]
+    poster_size: PosterSize,
+    #[serde(default)]
+    reduce_motion: MotionChoice,
     indexer: String,
     debrid: String,
     media_limit_bytes: u64,
@@ -164,6 +216,9 @@ impl Document {
         Ok(Self {
             version: 1,
             metadata: Some(settings.metadata),
+            theme: settings.theme,
+            poster_size: settings.poster_size,
+            reduce_motion: settings.reduce_motion,
             indexer: match settings.indexer {
                 IndexerKind::Torrentio => "torrentio",
                 IndexerKind::Peerflix => "peerflix",
@@ -185,6 +240,9 @@ impl Document {
         }
         let settings = Settings {
             metadata: self.metadata.unwrap_or_default(),
+            theme: self.theme,
+            poster_size: self.poster_size,
+            reduce_motion: self.reduce_motion,
             indexer: match self.indexer.as_str() {
                 "torrentio" => IndexerKind::Torrentio,
                 "peerflix" => IndexerKind::Peerflix,
@@ -218,6 +276,131 @@ mod tests {
             cache: root.into(),
         }
     }
+    #[test]
+    fn appearance_defaults_and_widths() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        for settings in [Settings::default(), store.load()?] {
+            assert_eq!(settings.theme, ThemeChoice::Dark);
+            assert_eq!(settings.poster_size, PosterSize::Medium);
+            assert_eq!(settings.reduce_motion, MotionChoice::System);
+        }
+        assert_eq!(PosterSize::Small.preferred_width(), 140.0);
+        assert_eq!(PosterSize::Medium.preferred_width(), 172.0);
+        assert_eq!(PosterSize::Large.preferred_width(), 212.0);
+        Ok(())
+    }
+
+    #[test]
+    fn appearance_choices_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        for theme in [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::System] {
+            for poster_size in [PosterSize::Small, PosterSize::Medium, PosterSize::Large] {
+                for reduce_motion in [MotionChoice::System, MotionChoice::Always] {
+                    let settings = Settings {
+                        theme,
+                        poster_size,
+                        reduce_motion,
+                        ..Settings::default()
+                    };
+                    store.save(&settings)?;
+                    let loaded = store.load()?;
+                    assert_eq!(loaded.theme, theme);
+                    assert_eq!(loaded.poster_size, poster_size);
+                    assert_eq!(loaded.reduce_motion, reduce_motion);
+                    let document: toml::Value =
+                        toml::from_str(&std::fs::read_to_string(&store.path)?)?;
+                    assert_eq!(document["version"].as_integer(), Some(1));
+                    assert_eq!(
+                        document["theme"].as_str(),
+                        Some(match theme {
+                            ThemeChoice::Dark => "dark",
+                            ThemeChoice::Light => "light",
+                            ThemeChoice::System => "system",
+                        })
+                    );
+                    assert_eq!(
+                        document["poster_size"].as_str(),
+                        Some(match poster_size {
+                            PosterSize::Small => "small",
+                            PosterSize::Medium => "medium",
+                            PosterSize::Large => "large",
+                        })
+                    );
+                    assert_eq!(
+                        document["reduce_motion"].as_str(),
+                        Some(match reduce_motion {
+                            MotionChoice::System => "system",
+                            MotionChoice::Always => "always",
+                        })
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn missing_appearance_fields_default_independently() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        let old = "version = 1\nindexer = \"torrentio\"\ndebrid = \"real-debrid\"\nmedia_limit_bytes = 1234\nplayer = \"mpv\"\n";
+        for (extra, theme, poster_size, reduce_motion) in [
+            (
+                "",
+                ThemeChoice::Dark,
+                PosterSize::Medium,
+                MotionChoice::System,
+            ),
+            (
+                "theme = \"light\"\n",
+                ThemeChoice::Light,
+                PosterSize::Medium,
+                MotionChoice::System,
+            ),
+            (
+                "poster_size = \"large\"\n",
+                ThemeChoice::Dark,
+                PosterSize::Large,
+                MotionChoice::System,
+            ),
+            (
+                "reduce_motion = \"always\"\n",
+                ThemeChoice::Dark,
+                PosterSize::Medium,
+                MotionChoice::Always,
+            ),
+        ] {
+            std::fs::write(&store.path, format!("{old}{extra}"))?;
+            let settings = store.load()?;
+            assert_eq!(settings.theme, theme);
+            assert_eq!(settings.poster_size, poster_size);
+            assert_eq!(settings.reduce_motion, reduce_motion);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_appearance_values_preserve_file() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        let old = "version = 1\nindexer = \"torrentio\"\ndebrid = \"real-debrid\"\nmedia_limit_bytes = 1234\nplayer = \"mpv\"\n";
+        for field in ["theme", "poster_size", "reduce_motion"] {
+            for value in ["\"unknown\"", "\"Dark\"", "42", "true"] {
+                let invalid = format!("{old}{field} = {value}\n");
+                std::fs::write(&store.path, &invalid)?;
+                assert!(matches!(store.load(), Err(SettingsError::Invalid)));
+                assert_eq!(
+                    store.save(&Settings::default()),
+                    Err(SettingsError::Invalid)
+                );
+                assert_eq!(std::fs::read_to_string(&store.path)?, invalid);
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn old_v1_defaults_metadata_and_explicit_selection_roundtrips()
     -> Result<(), Box<dyn std::error::Error>> {

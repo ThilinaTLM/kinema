@@ -630,3 +630,8 @@ Linux fixture pixels do not prove Windows/macOS support or real provider/playbac
    until after P2.
 3. **Episode stills** in episode rows if the metadata model supplies them; rows
    are text-only until then.
+4. **Provider collections:** the catalog worker currently browses by kind and
+   offset only (`metadata_bridge::Ask::Browse { kind, offset }`). Until a
+   collection request exists, the toolbar menu lists named sorts over loaded
+   results only (labelled as such); collection entries are added with backend
+   support, never faked.

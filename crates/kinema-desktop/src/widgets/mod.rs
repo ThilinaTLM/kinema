@@ -36,3 +36,5 @@ pub use icon::{Icon, IconName};
 pub use motion::Motion;
 pub use text::TypeExt;
 pub use tokens::{Mode, Palette, Theme, palette, theme};
+
+pub mod poster_card;

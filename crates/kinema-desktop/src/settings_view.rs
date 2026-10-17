@@ -181,6 +181,7 @@ pub struct SettingsForm {
     pub custom_path: String,
     baseline_quota_text: String,
     baseline_quota_bytes: u64,
+    loaded: Settings,
 }
 
 impl SettingsForm {
@@ -200,6 +201,7 @@ impl SettingsForm {
             quota_text,
             player,
             custom_path,
+            loaded: settings.clone(),
         }
     }
 
@@ -230,6 +232,7 @@ impl SettingsForm {
             metadata: self.metadata,
             media_limit_bytes,
             player,
+            ..self.loaded.clone()
         })
     }
 
@@ -1457,6 +1460,31 @@ mod tests {
             player,
             ..Settings::default()
         }
+    }
+
+    #[test]
+    fn editing_legacy_fields_preserves_loaded_appearance() -> Result<(), FormError> {
+        use crate::settings::{MotionChoice, PosterSize, ThemeChoice};
+
+        let saved = Settings {
+            theme: ThemeChoice::Light,
+            poster_size: PosterSize::Large,
+            reduce_motion: MotionChoice::Always,
+            ..Settings::default()
+        };
+        let mut form = SettingsForm::from_settings(&saved);
+        assert!(!form.is_dirty(&saved));
+        form.metadata = MetadataProvider::Tmdb;
+        form.quota_text = "5".into();
+        form.player = PlayerKind::Vlc;
+        let built = form.build()?;
+        assert_eq!(built.metadata, MetadataProvider::Tmdb);
+        assert_eq!(built.media_limit_bytes, 5 * GIB);
+        assert_eq!(built.player, PlayerChoice::Vlc);
+        assert_eq!(built.theme, saved.theme);
+        assert_eq!(built.poster_size, saved.poster_size);
+        assert_eq!(built.reduce_motion, saved.reduce_motion);
+        Ok(())
     }
 
     #[test]
