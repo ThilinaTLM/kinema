@@ -94,7 +94,8 @@ impl PosterCard {
         self.image = image;
     }
     pub fn set_rating(&mut self, rating: Option<f32>) {
-        self.rating = rating;
+        // IMDb scores start at 1.0; a zero is an unrated placeholder, not a score.
+        self.rating = rating.filter(|score| *score > 0.0);
     }
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         self.focus.focus(window, cx);
@@ -149,20 +150,32 @@ impl Render for PosterCard {
             let image = img(image.clone())
                 .object_fit(ObjectFit::Cover)
                 .rounded(radius::MD)
-                .absolute()
-                .inset_0();
+                .size_full();
+            // `img` measures to its natural size even when absolutely positioned,
+            // so pin it with a fixed-bounds wrapper instead of insets on the image.
+            let frame = |child: AnyElement| {
+                div()
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .overflow_hidden()
+                    .child(child)
+                    .into_any_element()
+            };
             if fade.is_zero() {
                 self.art_from = 1.;
-                image.into_any_element()
+                frame(image.into_any_element())
             } else {
                 let art_from = self.art_from;
-                image
-                    .with_animation(
-                        ("art-fade", self.art_generation),
-                        Animation::new(fade).with_easing(motion::ease_out_cubic),
-                        move |el, t| el.opacity(art_from + (1. - art_from) * t),
-                    )
-                    .into_any_element()
+                frame(
+                    image
+                        .with_animation(
+                            ("art-fade", self.art_generation),
+                            Animation::new(fade).with_easing(motion::ease_out_cubic),
+                            move |el, t| el.opacity(art_from + (1. - art_from) * t),
+                        )
+                        .into_any_element(),
+                )
             }
         });
         let meta = {
