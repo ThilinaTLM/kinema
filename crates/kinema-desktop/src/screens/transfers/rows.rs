@@ -1,25 +1,8 @@
 //! Session identity, telemetry and per-lease context actions.
 use super::*;
+use crate::widgets::patterns::{Badge, BadgeTone, ListRow};
 
 impl Transfers {
-    pub(super) fn session_row_height(
-        &self,
-        session: &crate::screens::coordinator::SessionSnapshot,
-    ) -> Pixels {
-        s::S48 * 2.
-            + s::S16
-            + if session.progress.is_some() {
-                s::S32
-            } else {
-                px(0.)
-            }
-            + if session.error.is_some() {
-                s::S48
-            } else {
-                px(0.)
-            }
-    }
-
     pub(super) fn session_row(
         &self,
         session: &crate::screens::coordinator::SessionSnapshot,
@@ -44,28 +27,25 @@ impl Transfers {
         {
             identity.push_str(&format!(" · S{season:02}E{episode:02}"));
         }
-        let origin = match session.origin {
-            crate::media::SessionOrigin::Local => "Local file",
-            crate::media::SessionOrigin::Remote => "Managed remote",
+        let (origin, tone) = match session.origin {
+            crate::media::SessionOrigin::Local => ("Local file", BadgeTone::Neutral),
+            crate::media::SessionOrigin::Remote => ("Online", BadgeTone::Info),
         };
         let progress = session.progress.clone();
         let error = session.error.clone();
         let can_reveal = session.can_reveal;
         let row = div()
-            .h(self.session_row_height(session))
-            .flex_none()
+            .w_full()
             .flex()
             .flex_col()
             .gap(s::S4)
-            .border_b_1()
-            .border_color(p.line_hairline)
             .pb(s::S8)
-            .child(div().type_style(t::BODY_STRONG).child(identity))
-            .child(div().type_style(t::MONO).child(session.file_name.clone()))
+            .border_b_1()
+            .border_color(p.line_subtle)
             .child(
-                div()
-                    .text_color(p.text_secondary)
-                    .child(format!("{origin} · serving")),
+                ListRow::new(("session-row", i), identity)
+                    .subtitle(session.file_name.clone())
+                    .trailing(Badge::new(origin).tone(tone)),
             )
             .when_some(progress, |row, progress| {
                 let value = if progress.total_bytes == 0 {
@@ -73,27 +53,37 @@ impl Transfers {
                 } else {
                     progress.downloaded_bytes as f32 / progress.total_bytes as f32
                 };
-                row.child(crate::widgets::progress::Progress::new(
-                    ("session-progress", i),
-                    value,
-                ))
-                .child(div().type_style(t::MONO).child(format!(
+                row.child(
+                    div()
+                        .px(s::S12)
+                        .child(crate::widgets::progress::Progress::new(
+                            ("session-progress", i),
+                            value,
+                        )),
+                )
+                .child(div().px(s::S12).type_style(t::MONO).child(format!(
                     "{} / {}",
                     crate::screens::play_sheet::format_bytes(progress.downloaded_bytes),
                     crate::screens::play_sheet::format_bytes(progress.total_bytes)
                 )))
             })
             .when_some(error, |row, error| {
-                row.child(div().text_color(p.status_error).child(error))
+                row.child(
+                    div()
+                        .px(s::S12)
+                        .type_style(t::SMALL)
+                        .text_color(p.status_error)
+                        .child(error),
+                )
             })
-            .child(
+            .child(div().px(s::S12).flex().justify_end().child(
                 Button::new(("stop-session", i), "Stop…").on_click(cx.listener(
                     move |this, _, _, cx| {
                         this.stop = Some(id.clone());
                         cx.notify();
                     },
                 )),
-            )
+            ))
             .context_menu(("transfer-menu", i), move |_, _| {
                 let mut items = vec![
                     crate::screens::browse::menu_item("Open in player again", {

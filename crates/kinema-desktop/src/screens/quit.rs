@@ -3,7 +3,10 @@ use super::{
     coordinator::AppCoordinator,
     main_window::{V3About, V3Quit, V3Settings},
 };
-use crate::widgets::{button::Button, sheet::Sheet};
+use crate::widgets::{
+    button::{Button, ButtonVariant},
+    sheet::Sheet,
+};
 use gpui::*;
 
 /// Install once for the application's main window, using its shared coordinator.
@@ -79,7 +82,7 @@ pub(crate) fn confirmation(
     let cancel = coordinator.clone();
     let dismiss = coordinator;
     Sheet::new("quit-sheet", "Quit Kinema?")
-        .body("Sessions are active or launches are pending. Quitting stops downloads and the local server; your player may lose media.")
+        .body("Playback or downloads are still in progress. Quitting stops them and your player may lose access to the media.")
         .initial_focus(cancel_focus.clone())
         .on_dismiss(move |_, cx| {
             dismiss.update(cx, |c, cx| {
@@ -97,7 +100,9 @@ pub(crate) fn confirmation(
                     });
                 }),
         )
-        .footer(Button::new("confirm-quit", "Quit").on_click(|_, _, cx| exit(cx)))
+        .footer(Button::new("confirm-quit", "Quit")
+                .variant(ButtonVariant::Danger)
+                .on_click(|_, _, cx| exit(cx)))
 }
 
 #[cfg(all(test, feature = "ui-probe-test"))]

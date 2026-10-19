@@ -5,8 +5,7 @@ use super::{
     detail::{Detail, OpenDetailTitle},
 };
 use crate::widgets::{
-    button::Button,
-    icon::{Icon, IconName},
+    icon::IconName,
     icon_button::IconButton,
     menu::{Menu, Select, SelectEvent},
     popover::Popover,
@@ -36,6 +35,7 @@ actions!(
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-f", V3Search, Some("KinemaMain")),
+        KeyBinding::new("secondary-k", V3Search, Some("KinemaMain")),
         KeyBinding::new("f5", V3Refresh, Some("KinemaMain")),
         KeyBinding::new("secondary-r", V3Refresh, Some("KinemaMain")),
         KeyBinding::new("secondary-o", V3Local, Some("KinemaMain")),
@@ -48,6 +48,16 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-tab", V3PreviousFocus, Some("KinemaMain")),
     ]);
 }
+/// Search shortcut hint shown in the field; matches the `secondary-k` binding.
+const SEARCH_HINT: &str = if cfg!(target_os = "macos") {
+    "⌘K"
+} else {
+    "Ctrl K"
+};
+/// Preferred search width; it yields space to the side groups when narrow.
+const SEARCH_WIDTH: Pixels = px(420.);
+const SEARCH_MIN_WIDTH: Pixels = px(180.);
+
 pub(crate) enum Route {
     Browse,
     Detail(Entity<super::detail::Detail>),
@@ -89,7 +99,7 @@ impl MainWindow {
         let transfers = cx.new(|cx| super::transfers::Transfers::new(coordinator.clone(), cx));
         let browse = cx.new(|cx| Browse::new(coordinator.clone(), cx));
         let search = cx.new(|cx| {
-            let mut s = SearchField::new(window, cx);
+            let mut s = SearchField::new(window, cx).shortcut_hint(SEARCH_HINT);
             s.set_placeholder("Search movies…", cx);
             s
         });
@@ -301,9 +311,57 @@ impl Render for MainWindow {
             transfer_trigger.into_any_element()
         };
         let toolbar_title = match &self.route {
-            Route::Browse => "Kinema".to_owned(),
+            Route::Browse => String::new(),
             Route::Detail(detail) => detail.read(cx).name().to_owned(),
         };
+        let leading = if in_detail {
+            div()
+                .flex()
+                .items_center()
+                .gap(s::S8)
+                .min_w_0()
+                .child(
+                    IconButton::new("detail-back", IconName::ArrowLeft, "Back")
+                        .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
+                )
+                .child(
+                    div()
+                        .type_style(t::HEADING)
+                        .min_w_0()
+                        .truncate()
+                        .child(toolbar_title),
+                )
+                .into_any_element()
+        } else {
+            Segmented::new(
+                "kind",
+                [
+                    (MediaKind::Movie, "Movies".into()),
+                    (MediaKind::Series, "Series".into()),
+                ],
+                kind,
+            )
+            .on_change(move |kind, _, cx| {
+                let _ = change.update(cx, |this, cx| {
+                    let query = this.search.read(cx).text(cx).to_owned();
+                    this.coordinator
+                        .update(cx, |c, cx| c.load(*kind, query, false, cx));
+                    this.search.update(cx, |s, cx| {
+                        s.set_placeholder(
+                            if *kind == MediaKind::Movie {
+                                "Search movies…"
+                            } else {
+                                "Search series…"
+                            },
+                            cx,
+                        )
+                    });
+                });
+            })
+            .into_any_element()
+        };
+        // Left and right groups share the free space equally, so the search
+        // field stays centered regardless of what each side holds.
         let toolbar = div()
             .h(s::TOOLBAR_HEIGHT)
             .flex_none()
@@ -313,73 +371,61 @@ impl Render for MainWindow {
             .px(s::S20)
             .bg(p.bg_surface)
             .border_b_1()
-            .border_color(p.line_hairline)
-            .when(in_detail, |el| {
+            .border_color(p.line_subtle)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .child(leading),
+            )
+            .when(!in_detail, |el| {
                 el.child(
-                    Button::new("detail-back", "← Back")
-                        .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
+                    div()
+                        .w(SEARCH_WIDTH)
+                        .min_w(SEARCH_MIN_WIDTH)
+                        .child(self.search.clone()),
                 )
             })
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .flex()
                     .items_center()
-                    .gap(s::S6)
-                    .child(Icon::new(IconName::Film))
-                    .child(toolbar_title),
-            )
-            .when(!in_detail, |el| {
-                el.child(
-                    Segmented::new(
-                        "kind",
-                        [
-                            (MediaKind::Movie, "Movies".into()),
-                            (MediaKind::Series, "Series".into()),
-                        ],
-                        kind,
-                    )
-                    .on_change(move |kind, _, cx| {
-                        let _ = change.update(cx, |this, cx| {
-                            let query = this.search.read(cx).text(cx).to_owned();
-                            this.coordinator
-                                .update(cx, |c, cx| c.load(*kind, query, false, cx));
-                            this.search.update(cx, |s, cx| {
-                                s.set_placeholder(
-                                    if *kind == MediaKind::Movie {
-                                        "Search movies…"
-                                    } else {
-                                        "Search series…"
-                                    },
-                                    cx,
+                    .justify_end()
+                    .gap(s::S8)
+                    .when(!in_detail, |el| {
+                        el.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(s::S6)
+                                .child(
+                                    div()
+                                        .type_style(t::SMALL)
+                                        .text_color(p.text_secondary)
+                                        .child("Sort"),
                                 )
-                            });
-                        });
-                    }),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(240.))
-                        .max_w(px(480.))
-                        .child(self.search.clone()),
-                )
-                .child(self.sort.clone())
-            })
-            .child(div().flex_1())
-            .child(
-                Popover::new("transfers")
-                    .trigger(transfer_trigger)
-                    .content(self.transfers.clone()),
-            )
-            .child(
-                IconButton::new("settings", IconName::Settings, "Settings").on_click({
-                    let coordinator = self.coordinator.clone();
-                    move |_, _, cx| coordinator.update(cx, |c, cx| c.open_settings(cx))
-                }),
-            )
-            .child(
-                IconButton::new("overflow", IconName::MoreHorizontal, "App menu")
-                    .on_click(cx.listener(|this, _, window, cx| this.overflow(window, cx))),
+                                .child(self.sort.clone()),
+                        )
+                    })
+                    .child(
+                        Popover::new("transfers")
+                            .trigger(transfer_trigger)
+                            .content(self.transfers.clone()),
+                    )
+                    .child(
+                        IconButton::new("settings", IconName::Settings, "Settings").on_click({
+                            let coordinator = self.coordinator.clone();
+                            move |_, _, cx| coordinator.update(cx, |c, cx| c.open_settings(cx))
+                        }),
+                    )
+                    .child(
+                        IconButton::new("overflow", IconName::MoreHorizontal, "App menu")
+                            .on_click(cx.listener(|this, _, window, cx| this.overflow(window, cx))),
+                    ),
             );
         let body = match &self.route {
             Route::Browse => self.browse.clone().into_any_element(),

@@ -3,14 +3,21 @@ use super::coordinator::{AppCoordinator, CoordinatorEvent};
 use crate::{
     app::{AppAction, AppOutcome},
     widgets::{
-        button::Button,
+        button::{Button, ButtonVariant},
+        icon::IconName,
         menu::ContextMenuExt,
+        notice::{Notice, NoticeKind},
+        patterns::{Badge, BadgeTone, StateView, ViewState},
         text::TypeExt,
         tokens::{self, space as s, typeface as t},
     },
 };
 use gpui::{prelude::*, *};
 mod rows;
+
+const PANEL_WIDTH: Pixels = px(352.);
+/// Session list scrolls beyond this height instead of growing the popover.
+const LIST_MAX_HEIGHT: Pixels = px(336.);
 pub(crate) struct Transfers {
     coordinator: Entity<AppCoordinator>,
     stop: Option<String>,
@@ -54,66 +61,60 @@ impl Transfers {
 }
 impl Render for Transfers {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = *tokens::palette(cx);
         let c = self.coordinator.read(cx);
         let sessions = c.sessions.clone();
         let usage = c.usage.clone();
-        let rows_height = sessions
-            .iter()
-            .fold(px(0.), |height, row| {
-                height + self.session_row_height(row) + s::S12
-            })
-            .min(s::S48 * 7.);
-        let content_height = rows_height
-            + s::S48 * 4.
-            + if self.stop.is_some() {
-                s::S48 * 2.
-            } else {
-                px(0.)
-            }
-            + if self.result.is_some() {
-                s::S48
-            } else {
-                px(0.)
-            };
         let mut content = div()
-            .w(s::S48 * 7. + s::S16)
-            .h(content_height)
+            .w(PANEL_WIDTH)
             .flex_none()
             .type_style(t::BODY)
             .p(s::S16)
             .flex()
             .flex_col()
             .gap(s::S12)
-            .child(div().type_style(t::HEADING).child("Transfers"));
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().type_style(t::HEADING).child("Transfers"))
+                    .when(!sessions.is_empty(), |el| {
+                        el.child(
+                            Badge::new(format!("{} active", sessions.len()))
+                                .tone(BadgeTone::Accent),
+                        )
+                    }),
+            );
         if sessions.is_empty() {
-            content = content.child("Nothing playing or downloading");
-        }
-        if !sessions.is_empty() {
+            content = content.child(StateView::new("transfers-empty", ViewState::Empty).empty(
+                IconName::Transfers,
+                "Nothing playing or downloading",
+                Some("Sessions you start from a title appear here.".into()),
+            ));
+        } else {
             let mut rows = div()
                 .id("transfer-sessions")
-                .h(rows_height)
-                .flex_none()
+                .max_h(LIST_MAX_HEIGHT)
                 .overflow_y_scroll()
                 .flex()
                 .flex_col()
-                .gap(s::S12);
+                .gap(s::S8);
             for (i, session) in sessions.iter().enumerate() {
-                rows = rows.child(
-                    div()
-                        .h(self.session_row_height(session))
-                        .flex_none()
-                        .w_full()
-                        .child(self.session_row(session, i, cx)),
-                );
+                rows = rows.child(self.session_row(session, i, cx));
             }
             content = content.child(rows);
         }
         if let Some(id) = self.stop.clone() {
             content = content
-                .child("Stop serving? Your player may lose access.")
+                .child(
+                    Notice::new(NoticeKind::Warning, "Stop serving?")
+                        .body("Your player may lose access to this media."),
+                )
                 .child(
                     div()
                         .flex()
+                        .justify_end()
                         .gap(s::S8)
                         .child(Button::new("stop-cancel", "Cancel").on_click(cx.listener(
                             |this, _, _, cx| {
@@ -121,47 +122,56 @@ impl Render for Transfers {
                                 cx.notify();
                             },
                         )))
-                        .child(Button::new("stop-confirm", "Stop").on_click(cx.listener(
-                            move |this, _, _, cx| {
-                                this.coordinator.update(cx, |c, cx| {
-                                    c.command(AppAction::ReleaseSession(id.clone()), cx)
-                                });
-                                this.stop = None;
-                                cx.notify();
-                            },
-                        ))),
+                        .child(
+                            Button::new("stop-confirm", "Stop")
+                                .variant(ButtonVariant::Danger)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.coordinator.update(cx, |c, cx| {
+                                        c.command(AppAction::ReleaseSession(id.clone()), cx)
+                                    });
+                                    this.stop = None;
+                                    cx.notify();
+                                })),
+                        ),
                 );
         }
-        if let Some(usage) = usage {
-            content = content.child(format!(
+        let muted = |text: String| {
+            div()
+                .type_style(t::SMALL)
+                .text_color(p.text_secondary)
+                .child(text)
+        };
+        content = content.child(match usage {
+            Some(usage) => muted(format!(
                 "Cache {} of {} · {} downloaded",
                 super::play_sheet::format_bytes(usage.reserved_bytes),
                 super::play_sheet::format_bytes(usage.limit_bytes),
                 super::play_sheet::format_bytes(usage.downloaded_bytes)
-            ));
-        }
-        if self.coordinator.read(cx).usage.is_none() {
-            content = content.child("Cache usage unavailable");
-        }
+            )),
+            None => muted("Cache usage unavailable".into()),
+        });
         if let Some(result) = &self.result {
-            content = content.child(result.clone());
+            content = content.child(Notice::new(NoticeKind::Info, result.clone()));
         }
         content.child(
-            Button::new("clean-unused", "Clean unused")
-                .disabled(self.cleanup.is_some())
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if this.cleanup.is_some() {
-                        return;
-                    }
-                    this.cleanup = this
-                        .coordinator
-                        .update(cx, |c, cx| c.command(AppAction::CleanupUnused, cx));
-                    if this.cleanup.is_none() {
-                        this.result =
-                            Some("Application service unavailable or busy. Retry.".into());
-                    }
-                    cx.notify();
-                })),
+            div().flex().justify_end().child(
+                Button::new("clean-unused", "Clean unused")
+                    .busy(self.cleanup.is_some())
+                    .disabled(self.cleanup.is_some())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.cleanup.is_some() {
+                            return;
+                        }
+                        this.cleanup = this
+                            .coordinator
+                            .update(cx, |c, cx| c.command(AppAction::CleanupUnused, cx));
+                        if this.cleanup.is_none() {
+                            this.result =
+                                Some("Application service unavailable or busy. Retry.".into());
+                        }
+                        cx.notify();
+                    })),
+            ),
         )
     }
 }
