@@ -1,76 +1,99 @@
 //! Provider-scoped recommendation pages; never consult TMDB for Cinemeta.
 use super::*;
+use crate::widgets::{
+    patterns::{ViewState, focus_ring},
+    tokens::elevation,
+};
+
+/// Vertical rhythm around the similar-titles strip.
+const STRIP_PADDING: Pixels = s::S20;
+
 impl Detail {
-    pub(super) fn recommendations(&self, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
-        let mut strip = div()
-            .flex_none()
-            .px(s::S32)
-            .py(s::S20)
-            .flex()
-            .flex_col()
-            .gap(s::S12);
+    /// Similar movies. Cinemeta has no such feed, so its titles simply show no
+    /// strip rather than a permanent apology.
+    pub(super) fn recommendations(&self, cx: &mut Context<Self>) -> AnyElement {
         let BrowseTitle::Tmdb(current) = &self.title else {
-            return strip.child(
-                div()
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
-                    .child("Similar movies aren’t available from Cinemeta."),
-            );
+            return div().into_any_element();
         };
-        let c = self.coordinator.read(cx);
-        let page = c.similar.value().cloned();
-        let busy = c.similar.busy();
-        let error = c.similar.error().map(str::to_owned);
-        strip = strip.child(div().type_style(t::HEADING).child("Similar movies"));
-        if busy {
-            strip = strip.child("Loading similar movies…");
+        let id = current.id;
+        let (page, busy, error) = {
+            let c = self.coordinator.read(cx);
+            (
+                c.similar.value().cloned(),
+                c.similar.busy(),
+                c.similar.error().map(str::to_owned),
+            )
+        };
+        let sel = selection(
+            page.is_some(),
+            page.as_ref().is_some_and(|p| p.titles.is_empty()),
+            error.is_some(),
+            busy,
+        );
+        let weak = cx.entity().downgrade();
+        let mut view = state_view("similar", sel)
+            .skeleton(
+                Carousel::new("similar-skeleton")
+                    .title("Similar movies")
+                    .paging(false)
+                    .items(
+                        (0..geometry::SIMILAR_SKELETON_CARDS)
+                            .map(|_| SkeletonCard::new(geometry::SIMILAR_WIDTH).into_any_element()),
+                    ),
+            )
+            .message("Couldn’t load similar movies")
+            .empty(
+                IconName::Film,
+                "No similar movies",
+                Some("TMDB has no recommendations for this title yet.".into()),
+            )
+            .on_retry(move |_, cx| {
+                let _ = weak.update(cx, |s, cx| s.retry_similar(cx));
+            });
+        if let Some(error) = &error {
+            view = view.hint(error.clone());
         }
-        if let Some(error) = error {
-            let id = current.id;
-            strip = strip
-                .child(
-                    div()
-                        .text_color(p.status_error)
-                        .child(format!("Similar movies could not be loaded: {error}")),
-                )
-                .child(
-                    div()
-                        .id("similar-retry")
-                        .focusable()
-                        .tab_stop(true)
-                        .cursor_pointer()
-                        .child("Retry")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.coordinator
-                                .update(cx, |c, cx| c.load_similar(id, 1, true, cx))
-                        })),
-                );
+        if let (ViewState::Content, Some(page)) = (sel.state, page) {
+            view = view.content(self.similar_strip(id, page, cx));
         }
-        if let Some(page) = page {
-            if page.titles.is_empty() && !busy {
-                strip = strip.child(
-                    div()
-                        .text_color(p.text_muted)
-                        .child("No similar movies returned by TMDB."),
-                );
-            }
-            let mut posters = div().flex().gap(s::S12);
-            for title in page.titles {
-                let mut poster = div()
+        div()
+            .w_full()
+            .py(STRIP_PADDING)
+            .child(view)
+            .into_any_element()
+    }
+
+    fn similar_strip(
+        &self,
+        id: u64,
+        page: crate::tmdb::TmdbPage,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = *tokens::palette(cx);
+        let tiles: Vec<AnyElement> = page
+            .titles
+            .iter()
+            .map(|title| {
+                let mut tile = div()
                     .id(("similar-title", title.id))
-                    .w(geometry::RECOMMENDATION_WIDTH)
-                    .h(geometry::RECOMMENDATION_HEIGHT)
-                    .flex_none()
+                    .debug_selector(|| format!("similar-title-{}", title.id))
+                    .w(px(geometry::SIMILAR_WIDTH))
+                    .h(px(geometry::SIMILAR_HEIGHT))
                     .relative()
                     .overflow_hidden()
+                    .rounded(radius::MD)
                     .bg(p.bg_placeholder)
+                    .border(s::HAIRLINE)
+                    .border_color(p.poster_edge)
+                    .shadow(elevation::raised(&p))
                     .focusable()
                     .tab_stop(true)
                     .cursor_pointer()
-                    .border(s::HAIRLINE)
-                    .border_color(p.line_hairline)
-                    .focus_visible(move |el| el.border(s::FOCUS_RING).border_color(p.focus_ring))
+                    .hover(move |el| {
+                        el.shadow(elevation::card_hover(&p))
+                            .border_color(p.line_control)
+                    })
+                    .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
                     .tooltip(tooltip(title.name.clone()));
                 if let Some(image) = self.image(
                     title.poster_url(),
@@ -78,77 +101,65 @@ impl Detail {
                     &format!("similar:{}", title.id),
                     cx,
                 ) {
-                    poster = poster.child(img(image).size_full().object_fit(ObjectFit::Cover));
+                    tile = tile.child(img(image).size_full().object_fit(ObjectFit::Cover));
                 } else {
-                    poster = poster.child(
+                    tile = tile.child(
                         div()
                             .p(s::S8)
                             .type_style(t::SMALL)
+                            .text_color(p.text_secondary)
                             .child(title.name.clone()),
                     );
                 }
                 let click = title.clone();
-                poster = poster
+                let enter = title.clone();
+                tile.on_click(
+                    cx.listener(move |this, _, _, cx| this.open_recommendation(click.clone(), cx)),
+                )
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if event.keystroke.key == "enter" {
+                        this.open_recommendation(enter.clone(), cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .into_any_element()
+            })
+            .collect();
+        let mut strip = div().w_full().flex().flex_col().gap(s::S4).child(
+            Carousel::new("similar-carousel")
+                .title("Similar movies")
+                .items(tiles),
+        );
+        if page.total_pages > 1 {
+            let nav = |label: &'static str, target: Option<u32>, cx: &mut Context<Self>| {
+                Button::new(label, label)
+                    .variant(ButtonVariant::Ghost)
+                    .disabled(target.is_none())
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_recommendation(click.clone(), cx)
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if event.keystroke.key == "enter" {
-                            this.open_recommendation(title.clone(), cx);
-                            cx.stop_propagation();
+                        if let Some(next) = target {
+                            this.coordinator
+                                .update(cx, |c, cx| c.load_similar(id, next, false, cx));
                         }
-                    }));
-                posters = posters.child(poster);
-            }
+                    }))
+            };
+            let previous = page.page.checked_sub(1).filter(|p| *p > 0);
+            let next = (page.page < page.total_pages && page.page < 500).then_some(page.page + 1);
             strip = strip.child(
                 div()
-                    .id("similar-scroll")
-                    .w_full()
-                    .h(geometry::RECOMMENDATION_HEIGHT)
-                    .overflow_x_scroll()
-                    .child(posters),
-            );
-            let id = current.id;
-            let mut paging = div()
-                .flex()
-                .items_center()
-                .gap(s::S12)
-                .type_style(t::SMALL)
-                .text_color(p.text_secondary)
-                .child(format!("Page {} of {} · TMDB", page.page, page.total_pages));
-            for (label, next) in [
-                ("Previous", page.page.checked_sub(1).filter(|p| *p > 0)),
-                (
-                    "Next",
-                    (page.page < page.total_pages && page.page < 500).then_some(page.page + 1),
-                ),
-            ] {
-                if let Some(next) = next {
-                    paging = paging.child(
+                    .px(s::GRID_INSET)
+                    .flex()
+                    .items_center()
+                    .gap(s::S12)
+                    .child(nav("Previous page", previous, cx))
+                    .child(
                         div()
-                            .id(label)
-                            .focusable()
-                            .tab_stop(true)
-                            .cursor_pointer()
-                            .px(s::S8)
-                            .h(s::CONTROL_HEIGHT)
-                            .child(label)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.coordinator
-                                    .update(cx, |c, cx| c.load_similar(id, next, false, cx))
-                            }))
-                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                                if event.keystroke.key == "enter" {
-                                    this.coordinator
-                                        .update(cx, |c, cx| c.load_similar(id, next, false, cx));
-                                    cx.stop_propagation();
-                                }
-                            })),
-                    );
-                }
-            }
-            strip = strip.child(paging);
+                            .type_style(t::SMALL)
+                            .text_color(p.text_muted)
+                            .child(format!("Page {} of {}", page.page, page.total_pages)),
+                    )
+                    .child(nav("Next page", next, cx)),
+            );
         }
-        strip
+        strip.into_any_element()
     }
 }

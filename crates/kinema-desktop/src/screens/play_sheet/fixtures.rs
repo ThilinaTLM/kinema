@@ -25,7 +25,23 @@ impl PlaySheet {
                 filename: None,
             },
         };
-        let mut this = Self::new(coordinator, "The Quiet Orbit".into(), target, candidate, cx);
+        let poster = coordinator
+            .read(cx)
+            .fixture_art
+            .get("Movie:tt1234567")
+            .cloned();
+        let context = PlayContext {
+            episode: None,
+            poster,
+        };
+        let mut this = Self::new(
+            coordinator,
+            "The Quiet Orbit".into(),
+            context,
+            target,
+            candidate,
+            cx,
+        );
         this.missing = state == "play-live-missing-creds";
         this.credential_notice =
             "No Real-Debrid credential is saved. Preparation has not started.".into();

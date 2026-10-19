@@ -517,9 +517,10 @@ impl Render for MainWindow {
                 )
             })
             .when(confirmation, |el| {
-                el.child(super::quit::confirmation(
+                el.child(super::quit::confirmation_for(
                     self.coordinator.clone(),
                     self.cancel_focus.clone(),
+                    count,
                 ))
             })
     }
@@ -623,9 +624,13 @@ mod interaction_tests {
         cx.run_until_parked();
         cx.update_window(main.into(), |_, window, cx| window.draw(cx).clear(cx))
             .unwrap();
-        // First poster in Similar movies (32 px inset, 120×180), below
-        // the 60%-height hero band and compact metadata/notice rows.
-        visual.simulate_click(point(px(92.), px(1120.)), Modifiers::default());
+        // Locate the Similar poster from its laid-out bounds, so the test does
+        // not depend on the hero height or carousel placement. Detail must tag
+        // each tile with `.debug_selector(|| format!("similar-title-{id}"))`.
+        let bounds = visual.debug_bounds("similar-title-2").unwrap_or_else(|| {
+            panic!("Detail's Similar tile needs debug_selector `similar-title-<id>`")
+        });
+        visual.simulate_click(bounds.center(), Modifiers::default());
         cx.run_until_parked();
         let current = mounted_detail(main, cx);
         assert_eq!(
@@ -642,9 +647,24 @@ mod interaction_tests {
         });
         let retired = current.downgrade();
         drop(current);
-        // Main is focused after replacement. With no IMDb mapping or paging
-        // controls, reverse Tab reaches the last tabbable item: Similar's poster.
-        cx.simulate_keystrokes(main.into(), "shift-tab enter");
+        // Keyboard path without assuming the tile is the last tab stop (Detail
+        // may keep a Streams Retry stop after it). Mouse-down alone focuses the
+        // tile without activating it; shift-tab then tab must come back to the
+        // same stop, and only then does Enter open the recommendation.
+        cx.run_until_parked();
+        cx.update_window(main.into(), |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+        let tile = visual.debug_bounds("similar-title-3").unwrap_or_else(|| {
+            panic!("Detail's Similar tile needs debug_selector `similar-title-<id>`")
+        });
+        visual.simulate_mouse_down(tile.center(), MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(
+            mounted_detail(main, cx).read_with(cx, |d, _| d.name().to_owned()),
+            "Movie two",
+            "mouse-down must focus, not open"
+        );
+        cx.simulate_keystrokes(main.into(), "shift-tab tab enter");
         cx.run_until_parked();
         let current = mounted_detail(main, cx);
         assert_eq!(

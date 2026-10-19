@@ -1,19 +1,24 @@
 //! Production title detail. Route-local selection; the shared coordinator owns I/O.
 use super::{
-    browse::menu_item,
     coordinator::{AppCoordinator, BrowseTitle},
-    play_sheet::PlaySheet,
+    play_sheet::{PlayContext, PlaySheet, format_bytes},
 };
 use crate::{
-    artwork::{self, ArtworkKey, ArtworkKind},
+    artwork::{self, ArtworkKey, ArtworkKind, ArtworkState},
     widgets::{
-        chip::Chip,
+        button::{Button, ButtonSize, ButtonVariant},
         icon::{Icon, IconName},
-        menu::{ContextMenuExt, Select, SelectEvent},
+        icon_button::IconButton,
+        menu::{ContextMenuExt, MenuItem, Select, SelectEvent},
         motion::{self, Motion},
+        patterns::{
+            Badge, BadgeTone, Carousel, ListRow, Section, Skeleton, SkeletonText, StateView,
+            ViewSelection, menu_item, select_view,
+        },
         segmented::Segmented,
+        skeleton_card::SkeletonCard,
         text::TypeExt,
-        tokens::{self, space as s, typeface as t},
+        tokens::{self, radius, space as s, typeface as t},
         tooltip::tooltip,
     },
 };
@@ -35,24 +40,45 @@ mod streams;
 mod tests;
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
-// Detail-specific geometry tokens. Shared spacing, row, typography and chrome
-// dimensions remain in widgets::tokens; these follow §4.5's hero/breakpoints.
+// Detail-specific geometry. Shared spacing, row, typography and chrome
+// dimensions remain in widgets::tokens.
 mod geometry {
     use gpui::{Pixels, px};
-    pub const POSTER_WIDTH: Pixels = px(220.);
-    pub const POSTER_HEIGHT: Pixels = px(330.);
-    pub const SYNOPSIS_MEASURE: Pixels = px(640.);
     pub const NARROW_COLUMN: Pixels = px(340.);
     pub const MAX_COLUMN: Pixels = px(520.);
     pub const MIN_HERO: Pixels = px(620.);
-    pub const EPISODE_ART_WIDTH: Pixels = px(64.);
-    pub const EPISODE_ART_HEIGHT: Pixels = px(36.);
-    pub const RECOMMENDATION_WIDTH: Pixels = px(120.);
-    pub const RECOMMENDATION_HEIGHT: Pixels = px(180.);
     pub const NARROW_AT: Pixels = px(1100.);
     pub const STACK_AT: Pixels = px(960.);
-    pub const HERO_FRACTION: f32 = 0.60;
-    pub const FADE_FRACTION: f32 = 0.40;
+    /// Share of the viewport width taken by the action column.
+    pub const COLUMN_FRACTION: f32 = 0.375;
+    /// Share of the viewport height given to the action column when stacked.
+    pub const STACKED_COLUMN_FRACTION: f32 = 0.60;
+    /// Fixed width of the resolution/HDR/codec badge stack in a stream row.
+    pub const BADGE_STACK_WIDTH: Pixels = px(84.);
+    /// Episode thumbnails are 16:9.
+    pub const EPISODE_ART_WIDTH: Pixels = px(96.);
+    pub const EPISODE_ART_HEIGHT: Pixels = px(54.);
+    pub const SIMILAR_WIDTH: f32 = 132.;
+    pub const SIMILAR_HEIGHT: f32 = 198.;
+    pub const OVERVIEW_SKELETON_WIDTH: Pixels = px(480.);
+    pub const OVERVIEW_MAX_WIDTH: Pixels = px(640.);
+    /// The hero reaches at least this share of the viewport height; it grows
+    /// further when nothing else fills the column.
+    pub const HERO_MIN_FRACTION: f32 = 0.62;
+    pub const STACKED_HERO_MIN_FRACTION: f32 = 0.5;
+    pub const HERO_MIN_HEIGHT: Pixels = px(380.);
+    /// Estimated heights of the sections under the hero (see `below_hero_height`).
+    pub const INLINE_FACTS_HEIGHT: Pixels = px(84.);
+    pub const DETAILS_PANEL_HEIGHT: Pixels = px(220.);
+    pub const SIMILAR_STRIP_HEIGHT: Pixels = px(340.);
+    pub const DETAILS_MAX_WIDTH: Pixels = px(720.);
+    pub const DETAIL_LABEL_WIDTH: Pixels = px(120.);
+    /// Up to this many seasons get "Season N" tabs; more use compact numbers.
+    pub const FULL_SEASON_LABELS_MAX: usize = 4;
+    /// Skeleton row counts, roughly one screenful.
+    pub const STREAM_SKELETON_ROWS: usize = 6;
+    pub const EPISODE_SKELETON_ROWS: usize = 5;
+    pub const SIMILAR_SKELETON_CARDS: usize = 6;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +88,17 @@ pub(crate) enum Quality {
     Hd,
     Sd,
     Other,
+}
+impl Quality {
+    fn label(self) -> &'static str {
+        match self {
+            Quality::All => "All",
+            Quality::Uhd => "4K",
+            Quality::Hd => "1080p",
+            Quality::Sd => "720p",
+            Quality::Other => "Other",
+        }
+    }
 }
 fn quality(name: &str) -> Quality {
     let name = name.to_ascii_lowercase();
@@ -83,34 +120,98 @@ fn source_quality(c: &SourceCandidate) -> Quality {
         c.name
     ))
 }
-/// Only resolution/dynamic-range/codec are uppercase chips. Byte sizes and seed
-/// counts are ordinary mono metadata; they must not pass through Chip::quality.
-fn release_hints(c: &SourceCandidate) -> Vec<&'static str> {
+/// Technical badges for one stream row: resolution, dynamic range, codec.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct StreamBadges {
+    pub(super) resolution: Option<&'static str>,
+    pub(super) dynamic_range: Option<&'static str>,
+    pub(super) codec: Option<&'static str>,
+}
+/// Only resolution, dynamic range and codec become badges. Sizes and seed
+/// counts are ordinary facts in the row title.
+pub(super) fn stream_badges(c: &SourceCandidate) -> StreamBadges {
     let text = format!("{} {}", c.name, c.quality.as_deref().unwrap_or("")).to_ascii_lowercase();
     let tokens: Vec<_> = text.split(|c: char| !c.is_ascii_alphanumeric()).collect();
-    let mut hints = Vec::new();
-    match source_quality(c) {
-        Quality::Uhd => hints.push("2160P"),
-        Quality::Hd => hints.push("1080P"),
-        Quality::Sd => hints.push("720P"),
-        _ => {}
-    }
-    if tokens.contains(&"dv") {
-        hints.push("DV");
-    } else if tokens.contains(&"hdr") {
-        hints.push("HDR");
-    }
-    if tokens
+    let resolution = match source_quality(c) {
+        Quality::Uhd => Some("4K"),
+        Quality::Hd => Some("1080p"),
+        Quality::Sd => Some("720p"),
+        _ => None,
+    };
+    let dynamic_range = if tokens.contains(&"dv") {
+        Some("DV")
+    } else if tokens.contains(&"hdr") || tokens.contains(&"hdr10") {
+        Some("HDR")
+    } else {
+        None
+    };
+    let codec = if tokens
         .iter()
         .any(|t| matches!(*t, "hevc" | "x265" | "h265"))
     {
-        hints.push("HEVC");
+        Some("HEVC")
     } else if tokens.iter().any(|t| matches!(*t, "x264" | "h264")) {
-        hints.push("H.264");
+        Some("H.264")
     } else if tokens.contains(&"av1") {
-        hints.push("AV1");
+        Some("AV1")
+    } else {
+        None
+    };
+    StreamBadges {
+        resolution,
+        dynamic_range,
+        codec,
     }
-    hints
+}
+/// Human one-line summary: size · seeders · source. Missing facts are skipped.
+pub(super) fn stream_summary(c: &SourceCandidate, source: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(size) = c.size {
+        parts.push(format_bytes(size));
+    }
+    if let Some(seeds) = c.seeders {
+        parts.push(if seeds == 1 {
+            "1 seeder".to_owned()
+        } else {
+            format!("{seeds} seeders")
+        });
+    }
+    parts.push(source.to_owned());
+    parts.join(" · ")
+}
+/// Index of the first (best-ranked) candidate inside the quality filter.
+fn first_in_filter(candidates: &[SourceCandidate], filter: Quality) -> Option<usize> {
+    candidates
+        .iter()
+        .position(|c| filter == Quality::All || source_quality(c) == filter)
+}
+fn indexer_name(indexer: IndexerKind) -> &'static str {
+    match indexer {
+        IndexerKind::Torrentio => "Torrentio",
+        IndexerKind::Peerflix => "Peerflix",
+    }
+}
+fn episode_marker(ep: &CatalogEpisode) -> String {
+    format!("S{:02}E{:02}", ep.season, ep.number)
+}
+/// `2024-03-02T00:00:00Z` -> `2024-03-02`; unparseable values are not shown.
+fn air_date(released: &str) -> Option<&str> {
+    released
+        .get(..10)
+        .filter(|d| kinema_core::catalog_normalized::valid_date(d))
+}
+/// Coarse "N h ago" label for a Unix-second timestamp.
+fn age_label(now: u64, at: u64) -> String {
+    let secs = now.saturating_sub(at);
+    match secs {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{} min ago", secs / 60),
+        3600..=86_399 => format!("{} h ago", secs / 3600),
+        _ => format!("{} d ago", secs / 86_400),
+    }
+}
+fn rating_label(score: f32) -> Option<String> {
+    (score.is_finite() && score >= 0.).then(|| format!("{:.1}", score.min(10.)))
 }
 #[cfg(test)]
 fn default_season(episodes: &[CatalogEpisode]) -> Option<u32> {
@@ -142,22 +243,6 @@ fn choose_season(current: Option<u32>, options: &[(u32, u32)]) -> Option<u32> {
                 .min()
         })
 }
-fn title_facts(title: &BrowseTitle) -> String {
-    let mut facts = Vec::new();
-    if let Some(year) = title.year() {
-        facts.push(year.to_string());
-    }
-    if title.kind() == MediaKind::Series {
-        if let Some(n) = title.seasons() {
-            facts.push(format!("{n} seasons"));
-        }
-    } else if let Some(n) = title.runtime() {
-        facts.push(format!("{n} min"));
-    }
-    facts.extend(title.genres().iter().cloned());
-    facts.join(" · ")
-}
-
 /// Parent window subscribes before navigation; recommendations never construct a
 /// second coordinator or mutate Browse's saved collection context.
 #[derive(Clone)]
@@ -175,9 +260,8 @@ pub(crate) struct Detail {
     target: Option<PlaybackTarget>,
     filter: Quality,
     expanded: bool,
-    more: bool,
+    overview_open: bool,
     selected: Option<usize>,
-    hovered: Option<usize>,
     stream_focus: Vec<FocusHandle>,
     episode_focus: HashMap<(u32, u32), FocusHandle>,
     inline: Option<usize>,
@@ -256,9 +340,8 @@ impl Detail {
             target,
             filter: Quality::All,
             expanded: false,
-            more: false,
+            overview_open: false,
             selected: None,
-            hovered: None,
             stream_focus: Vec::new(),
             episode_focus: HashMap::new(),
             inline: None,
@@ -309,6 +392,36 @@ impl Detail {
         artwork::request("v3-detail", self.art_generation, key, cx);
         None
     }
+    /// Cinematic backdrop for the hero: the backdrop image when the provider has
+    /// one, otherwise the poster. Only `Ready` is drawn; the request is queued
+    /// under this screen's artwork generation.
+    fn backdrop_state(
+        &self,
+        backdrop_url: Option<&str>,
+        poster_url: Option<&str>,
+        cx: &mut App,
+    ) -> ArtworkState {
+        #[cfg(feature = "ui-probe")]
+        if self.coordinator.read(cx).detail_is_fixture() {
+            let c = self.coordinator.read(cx);
+            return backdrop_url
+                .and_then(|u| c.fixture_art.get(u))
+                .or_else(|| c.fixture_art.get(&format!("{}:backdrop", self.title.key())))
+                .cloned()
+                .map_or(ArtworkState::Failed, ArtworkState::Ready);
+        }
+        let key = backdrop_url
+            .and_then(|url| ArtworkKey::new(ArtworkKind::Backdrop, url))
+            .or_else(|| poster_url.and_then(|url| ArtworkKey::new(ArtworkKind::Poster, url)));
+        match key {
+            Some(key) => artwork::backdrop_or_request("v3-detail", self.art_generation, &key, cx),
+            None => ArtworkState::Failed,
+        }
+    }
+    /// Theme palette with this title's artwork wash applied to the surfaces.
+    fn tinted_palette(&self, cx: &App) -> tokens::Palette {
+        tokens::palette(cx).tinted(self.ambient_palette(cx), tokens::theme(cx).mode)
+    }
     fn ambient_palette(&self, cx: &App) -> Option<artwork::ArtworkPalette> {
         #[cfg(feature = "ui-probe")]
         if self.coordinator.read(cx).detail_is_fixture() {
@@ -354,7 +467,6 @@ impl Detail {
     fn reset_stream_selection(&mut self) {
         self.filter = Quality::All;
         self.selected = None;
-        self.hovered = None;
         self.inline = None;
     }
     fn reconcile_metadata(&mut self, cx: &mut Context<Self>) {
@@ -546,7 +658,23 @@ impl Detail {
         if let (Some(target), Some(candidate)) = (self.target.clone(), candidate) {
             let coordinator = self.coordinator.clone();
             let title = self.display_title(cx).name().to_owned();
-            let sheet = cx.new(|cx| PlaySheet::new(coordinator, title, target, candidate, cx));
+            let context = PlayContext {
+                episode: self.episode.as_ref().map(|ep| match ep.name.as_deref() {
+                    Some(name) if !name.trim().is_empty() => {
+                        format!("{} · {name}", episode_marker(ep))
+                    }
+                    _ => episode_marker(ep),
+                }),
+                poster: self
+                    .display_title(cx)
+                    .poster_url()
+                    .map(str::to_owned)
+                    .and_then(|url| {
+                        self.image(Some(&url), ArtworkKind::Poster, &self.title.key(), cx)
+                    }),
+            };
+            let sheet =
+                cx.new(|cx| PlaySheet::new(coordinator, title, context, target, candidate, cx));
             self.play_subscription = Some(cx.subscribe(&sheet, |this, _, _: &DismissEvent, cx| {
                 this.play = None;
                 cx.notify();
@@ -557,44 +685,162 @@ impl Detail {
         }
     }
 }
-impl Render for Detail {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = *tokens::palette(cx);
-        let title = self.display_title(cx);
-        let stacked = window.viewport_size().width < geometry::STACK_AT;
-        let hero = self.hero(window, cx);
-        let mut body = if title.kind() == MediaKind::Series && self.episode.is_none() {
+/// What the hero's primary button does and whether it is available.
+enum PrimaryAction {
+    /// Open the play sheet for this candidate index.
+    Play(usize),
+    /// Move to the episodes column.
+    Episodes,
+    /// Unavailable, with the reason shown as a tooltip.
+    Blocked(&'static str),
+}
+
+impl Detail {
+    fn is_series(&self) -> bool {
+        self.title.kind() == MediaKind::Series
+    }
+    /// Loading / failure / emptiness of the title metadata resource in use.
+    fn meta_status(&self, cx: &App) -> MetaStatus {
+        let c = self.coordinator.read(cx);
+        if matches!(self.title, BrowseTitle::Tmdb(_)) {
+            MetaStatus {
+                loaded: c.tmdb_details.value().is_some(),
+                busy: c.tmdb_details.busy(),
+                error: c.tmdb_details.error().map(str::to_owned),
+                origin: c.tmdb_details.origin(),
+                fetched_at: c.tmdb_details.fetched_at(),
+            }
+        } else {
+            MetaStatus {
+                loaded: c.details.value().is_some(),
+                busy: c.details.busy(),
+                error: c.details.error().map(str::to_owned),
+                origin: c.details.origin(),
+                fetched_at: c.details.fetched_at(),
+            }
+        }
+    }
+    fn primary_action(&self, cx: &App) -> PrimaryAction {
+        if self.is_series() && self.episode.is_none() {
+            return PrimaryAction::Episodes;
+        }
+        if self.target.is_none() {
+            return PrimaryAction::Blocked(if self.meta_status(cx).busy {
+                "Looking for streams…"
+            } else {
+                "Streams aren’t available for this title"
+            });
+        }
+        let sources = &self.coordinator.read(cx).sources;
+        match sources.value() {
+            Some(set) if !set.candidates.is_empty() => {
+                match first_in_filter(&set.candidates, self.filter) {
+                    Some(index) => PrimaryAction::Play(index),
+                    None => PrimaryAction::Blocked("No streams match the selected quality"),
+                }
+            }
+            Some(_) if !sources.busy() => PrimaryAction::Blocked("No streams found"),
+            _ if sources.error().is_some() => {
+                PrimaryAction::Blocked("Streams couldn’t be loaded — try again")
+            }
+            _ => PrimaryAction::Blocked("Looking for streams…"),
+        }
+    }
+    fn run_primary(&mut self, cx: &mut Context<Self>) {
+        match self.primary_action(cx) {
+            PrimaryAction::Play(index) => self.open_stream(index, cx),
+            PrimaryAction::Episodes => self.focus_episodes(cx),
+            PrimaryAction::Blocked(_) => {}
+        }
+    }
+    /// Ask the next render to focus the first (or last visited) episode.
+    fn focus_episodes(&mut self, cx: &mut Context<Self>) {
+        if self.episode.is_some() {
+            self.back_to_episodes(cx);
+        } else {
+            self.pending_column_focus = true;
+            cx.notify();
+        }
+    }
+    fn retry_metadata(&mut self, cx: &mut Context<Self>) {
+        self.coordinator
+            .update(cx, |c, cx| c.title_details(&self.title, true, cx));
+        self.ensure_season(true, cx);
+    }
+    fn retry_streams(&mut self, cx: &mut Context<Self>) {
+        if let Some(target) = self.target.clone() {
+            let indexer = *self.indexer.read(cx).value();
+            self.coordinator
+                .update(cx, |c, cx| c.refresh_sources(indexer, target, cx));
+        } else {
+            self.retry_metadata(cx);
+        }
+    }
+    fn retry_similar(&mut self, cx: &mut Context<Self>) {
+        if let BrowseTitle::Tmdb(t) = &self.title {
+            let id = t.id;
+            self.coordinator
+                .update(cx, |c, cx| c.load_similar(id, 1, true, cx));
+        }
+    }
+
+    /// Body of the action column: episodes, streams, or the unmapped state.
+    fn action_body(&mut self, title: &BrowseTitle, cx: &mut Context<Self>) -> Div {
+        if title.kind() == MediaKind::Series && self.episode.is_none() {
             self.episode_column(cx)
+        } else if title.imdb().is_none() {
+            self.unmapped_column(cx)
         } else {
             self.stream_column(cx)
-        };
-        if title.imdb().is_none() {
-            let c = self.coordinator.read(cx);
-            let busy = if matches!(self.title, BrowseTitle::Tmdb(_)) {
-                c.tmdb_details.busy()
-            } else {
-                c.details.busy()
-            };
-            let failed = if matches!(self.title, BrowseTitle::Tmdb(_)) {
-                c.tmdb_details.error().is_some()
-            } else {
-                c.details.error().is_some()
-            };
-            // Episodes remain browsable without an IMDb mapping. Only stream
-            // lookup is unavailable; don't hide the series season controls.
-            let notice = if busy {
-                "Looking up IMDb mapping…"
-            } else if failed {
-                "IMDb mapping could not be loaded. Refresh to retry."
-            } else {
-                "Streams unavailable — no IMDb ID for this title."
-            };
-            body = div()
-                .flex()
-                .flex_col()
-                .child(div().p(s::S12).child(notice))
-                .when(title.kind() == MediaKind::Series, |el| el.child(body));
         }
+    }
+}
+
+/// Snapshot of the title-metadata resource, whichever provider backs it.
+struct MetaStatus {
+    loaded: bool,
+    busy: bool,
+    error: Option<String>,
+    origin: crate::app_state::Origin,
+    fetched_at: Option<u64>,
+}
+
+/// Selection policy shared by the async regions of this screen.
+fn selection(has_value: bool, empty: bool, error: bool, busy: bool) -> ViewSelection {
+    select_view(has_value, empty, error, busy)
+}
+/// A `StateView` positioned by `selection`; callers add skeleton/content/etc.
+fn state_view(id: &'static str, sel: ViewSelection) -> StateView {
+    StateView::new(id, sel.state)
+        .refreshing(sel.refreshing)
+        .stale_error(sel.stale_error)
+}
+
+impl Render for Detail {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let ambient = self.ambient_palette(cx);
+        let mode = tokens::theme(cx).mode;
+        // Surfaces that belong to this screen follow the artwork wash; shared
+        // widgets keep the theme palette so ink contrast is unchanged.
+        let p = self.tinted_palette(cx);
+        let title = self.display_title(cx);
+        let viewport = window.viewport_size();
+        let stacked = viewport.width < geometry::STACK_AT;
+        let share = viewport.height
+            * if stacked {
+                geometry::STACKED_HERO_MIN_FRACTION
+            } else {
+                geometry::HERO_MIN_FRACTION
+            };
+        // Wide layouts let the hero soak up whatever the column would leave empty.
+        let fill = if stacked {
+            Pixels::ZERO
+        } else {
+            viewport.height - s::TOOLBAR_HEIGHT - self.below_hero_height()
+        };
+        let hero_min = share.max(fill).max(geometry::HERO_MIN_HEIGHT);
+        let hero = self.hero(hero_min, cx);
+        let body = self.action_body(&title, cx);
         if self.pending_column_focus {
             let target = if self.episode.is_none() && title.kind() == MediaKind::Series {
                 self.episode_return_focus
@@ -648,12 +894,12 @@ impl Render for Detail {
         let column = div()
             .id("detail-actions")
             .flex_none()
-            .w(if window.viewport_size().width < geometry::NARROW_AT {
+            .w(if viewport.width < geometry::NARROW_AT {
                 geometry::NARROW_COLUMN
             } else {
-                (window.viewport_size().width * 0.375)
+                (viewport.width * geometry::COLUMN_FRACTION)
                     .min(geometry::MAX_COLUMN)
-                    .min(window.viewport_size().width - geometry::MIN_HERO)
+                    .min(viewport.width - geometry::MIN_HERO)
             })
             .h_full()
             .bg(p.bg_surface)
@@ -662,25 +908,27 @@ impl Render for Detail {
             .overflow_y_scroll()
             .when(stacked, |el| {
                 el.w_full()
-                    .h(window.viewport_size().height * geometry::HERO_FRACTION)
+                    .h(viewport.height * geometry::STACKED_COLUMN_FRACTION)
             })
             .child(body);
+        // The hero sizes to its content; there is no fixed-height band.
+        let left = div()
+            .id("detail-main")
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .bg(p.bg_canvas)
+            .when(!stacked, |el| el.h_full().overflow_y_scroll())
+            .when(stacked, |el| el.flex_none())
+            .child(hero);
         let content = div()
             .id("detail-content")
             .relative()
             .size_full()
             .flex()
             .when(stacked, |el| el.flex_col().overflow_y_scroll())
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .when(stacked, |el| {
-                        el.flex_none().h(window.viewport_size().height)
-                    })
-                    .child(hero),
-            )
+            .child(left)
             .child(column);
         let duration = motion::duration(Motion::Content, cx);
         let content = if duration.is_zero() {
@@ -694,11 +942,7 @@ impl Render for Detail {
                 )
                 .into_any_element()
         };
-        crate::widgets::ambient_background::AmbientBackground::new(
-            self.ambient_palette(cx),
-            tokens::theme(cx).mode,
-        )
-        .child(
+        crate::widgets::ambient_background::AmbientBackground::new(ambient, mode).child(
             div()
                 .relative()
                 .size_full()

@@ -5,6 +5,7 @@ impl PlaySheet {
     pub(crate) fn new(
         coordinator: Entity<AppCoordinator>,
         title: String,
+        context: PlayContext,
         target: PlaybackTarget,
         candidate: SourceCandidate,
         cx: &mut Context<Self>,
@@ -81,7 +82,7 @@ impl PlaySheet {
             None => "Account status unavailable. Close and retry after settings load.".into(),
         };
         let missing = !credential_notice.is_empty();
-        let release = candidate.name.clone();
+        let shown = candidate.clone();
         let pending = if missing {
             None
         } else {
@@ -90,10 +91,11 @@ impl PlaySheet {
         Self {
             coordinator,
             title,
+            context,
+            candidate: shown,
             provider,
             player,
             _player_subscription: player_subscription,
-            release,
             preparation: None,
             pending,
             player_pending: None,
@@ -160,6 +162,7 @@ impl PlaySheet {
             AppOutcome::Prepared { prepared, .. } => {
                 self.preparation = Some(event.generation);
                 self.files = prepared.files.clone();
+                self.chosen = auto_choice(&self.files);
             }
             AppOutcome::PlaybackStarted { .. } => {
                 if let Some(preparation) = self.preparation.take() {

@@ -75,14 +75,29 @@ fn exit(cx: &mut App) {
     cx.quit();
 }
 
+/// Confirmation for a pending launch without active sessions (lab fixture).
+#[cfg_attr(not(feature = "ui-probe"), allow(dead_code))]
 pub(crate) fn confirmation(
     coordinator: Entity<AppCoordinator>,
     cancel_focus: FocusHandle,
 ) -> Sheet {
+    confirmation_for(coordinator, cancel_focus, 0)
+}
+
+pub(crate) fn confirmation_for(
+    coordinator: Entity<AppCoordinator>,
+    cancel_focus: FocusHandle,
+    active_sessions: usize,
+) -> Sheet {
+    let body = match active_sessions {
+        0 => "A launch is still pending. Quitting cancels it and your player may lose access to the media.".to_owned(),
+        1 => "1 playback or download is still in progress. Quitting stops it and your player may lose access to the media.".to_owned(),
+        n => format!("{n} playbacks or downloads are still in progress. Quitting stops them and your player may lose access to the media."),
+    };
     let cancel = coordinator.clone();
     let dismiss = coordinator;
     Sheet::new("quit-sheet", "Quit Kinema?")
-        .body("Playback or downloads are still in progress. Quitting stops them and your player may lose access to the media.")
+        .body(body)
         .initial_focus(cancel_focus.clone())
         .on_dismiss(move |_, cx| {
             dismiss.update(cx, |c, cx| {
@@ -100,9 +115,11 @@ pub(crate) fn confirmation(
                     });
                 }),
         )
-        .footer(Button::new("confirm-quit", "Quit")
+        .footer(
+            Button::new("confirm-quit", "Quit")
                 .variant(ButtonVariant::Danger)
-                .on_click(|_, _, cx| exit(cx)))
+                .on_click(|_, _, cx| exit(cx)),
+        )
 }
 
 #[cfg(all(test, feature = "ui-probe-test"))]

@@ -1,7 +1,7 @@
-use super::can_play;
+use super::{auto_choice, can_play, split_path};
 use kinema_core::sources::RemoteFile;
 #[test]
-fn explicit_choice_even_for_one_file() {
+fn play_needs_a_valid_choice_and_no_pending_work() {
     let files = vec![RemoteFile {
         id: "a".into(),
         path: "movie.mkv".into(),
@@ -44,4 +44,25 @@ fn account_invalidation_clears_obsolete_file_choices() {
         assert!(sheet.pending.is_none());
         assert!(sheet.missing);
     });
+}
+#[test]
+fn a_single_file_is_chosen_automatically_but_several_are_not() {
+    let file = |id: &str| RemoteFile {
+        id: id.into(),
+        path: format!("{id}.mkv"),
+        size: 1,
+    };
+    assert_eq!(auto_choice(&[]), None);
+    assert_eq!(auto_choice(&[file("a")]).as_deref(), Some("a"));
+    assert_eq!(auto_choice(&[file("a"), file("b")]), None);
+}
+#[test]
+fn file_paths_split_into_name_and_folder() {
+    assert_eq!(split_path("movie.mkv"), ("movie.mkv", None));
+    assert_eq!(
+        split_path("Extras/Interview.mkv"),
+        ("Interview.mkv", Some("Extras"))
+    );
+    assert_eq!(split_path("a\\b\\c.mkv"), ("c.mkv", Some("a\\b")));
+    assert_eq!(split_path("dir/"), ("dir/", None));
 }
