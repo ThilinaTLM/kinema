@@ -12,6 +12,10 @@ use super::tokens::theme;
 pub enum Motion {
     /// Hover/pressed fills and borders.
     Feedback,
+    /// Card lift/scale on hover or keyboard focus.
+    Hover,
+    /// Backdrop changes and placeholder-to-content transitions.
+    Crossfade,
     /// Card hover panel, artwork zoom, artwork fade-in.
     Disclose,
     /// Shared poster flight (both directions).
@@ -33,13 +37,15 @@ impl Motion {
     pub const fn nominal(self) -> Duration {
         Duration::from_millis(match self {
             Motion::Feedback => 80,
+            Motion::Hover => 140,
+            Motion::Crossfade => 240,
             Motion::Disclose => 160,
             Motion::Flight => 320,
             Motion::Content => 160,
             Motion::Column => 200,
-            Motion::PopupIn => 100,
+            Motion::PopupIn => 180,
             Motion::PopupOut => 70,
-            Motion::Sheet => 160,
+            Motion::Sheet => 280,
         })
     }
 
@@ -56,6 +62,7 @@ impl Motion {
         match self {
             Motion::Feedback => t.clamp(0.0, 1.0),
             Motion::Flight => ease_in_out_cubic(t),
+            // Includes Sheet/PopupIn: gentle spring-like settle without overshoot.
             _ => ease_out_cubic(t),
         }
     }
@@ -63,7 +70,11 @@ impl Motion {
 
 /// Effective duration: zero when reduced motion is active.
 pub fn duration(motion: Motion, cx: &App) -> Duration {
-    if reduced(cx) {
+    effective_duration(motion, reduced(cx))
+}
+
+fn effective_duration(motion: Motion, reduce_motion: bool) -> Duration {
+    if reduce_motion {
         Duration::ZERO
     } else {
         motion.nominal()
@@ -109,7 +120,43 @@ mod tests {
     }
 
     #[test]
+    fn sheet_and_popup_settle_without_overshoot() {
+        for motion in [Motion::Sheet, Motion::PopupIn] {
+            let mut previous = 0.0;
+            for step in 0..=100 {
+                let value = motion.ease(step as f32 / 100.0);
+                assert!((previous..=1.0).contains(&value));
+                previous = value;
+            }
+            assert_eq!(previous, 1.0);
+        }
+    }
+
+    #[test]
+    fn reduced_motion_zeroes_every_duration() {
+        for motion in [
+            Motion::Feedback,
+            Motion::Hover,
+            Motion::Crossfade,
+            Motion::Disclose,
+            Motion::Flight,
+            Motion::Content,
+            Motion::Column,
+            Motion::PopupIn,
+            Motion::PopupOut,
+            Motion::Sheet,
+        ] {
+            assert_eq!(effective_duration(motion, true), Duration::ZERO);
+            assert_eq!(effective_duration(motion, false), motion.nominal());
+        }
+    }
+
+    #[test]
     fn durations_match_spec() {
+        assert_eq!(Motion::Hover.nominal(), Duration::from_millis(140));
+        assert_eq!(Motion::Crossfade.nominal(), Duration::from_millis(240));
+        assert_eq!(Motion::Sheet.nominal(), Duration::from_millis(280));
+        assert_eq!(Motion::PopupIn.nominal(), Duration::from_millis(180));
         assert_eq!(Motion::Disclose.nominal(), Duration::from_millis(160));
         assert_eq!(Motion::Flight.nominal(), Duration::from_millis(320));
         assert_eq!(Motion::Content.delay(), Duration::from_millis(40));

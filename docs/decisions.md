@@ -9,7 +9,26 @@ passed (295 tests passed, 3 ignored); no actual user-database upgrade is claimed
 file layout, and open policies remain distinct. Discuss questions **one at a time**;
 don't turn this list into an implementation backlog.
 
-## Current work: design-system, cards, and motion review
+## 2026-10-20 — desktop v3 visual-language revision (approved)
+
+The user supersedes v3's violet accent, zero-radius geometry, flat/no-shadow
+rule and Detail-only backdrop restriction with the [v3 visual language](design/desktop-v3.md#2-visual-language):
+warm amber/coral brand (`#FF7A45` Dark, AA-safe darker Light), artwork-derived
+Detail washes/secondary accents without recoloring brand focus or primary actions,
+4/6/8/12 px radii, subtle borders and soft shadows only for raised layers.
+Compact desktop density stays. Smooth hover lift, crossfades and overshoot-free
+sheet/popup settle must honor reduced motion. Browse targets a blurred, darkened
+title-responsive crossfading backdrop; Detail targets a full-bleed hero.
+
+The token/motion foundation and contrast tests are implemented in `widgets`;
+backdrop blur/crossfade integration and the broader widget/screen reskin are in
+progress, not a claim of accepted rendering, OS support or measured performance.
+GPUI currently lacks an OS reduced-motion signal; Settings Always remains the
+implemented instant-motion path. This decision changes presentation only, not
+provider/session policy. Older Graphite/v2 notes below are historical and are
+not current navigation or visual-language authority; v3 is the sole/default UI.
+
+## Historical Graphite/v2 review (superseded by desktop v3)
 
 The user approved the reviewed catalog ERD/details and authorized implementation.
 Backend implementation and shell search/provider-detail cancellation fixes are
@@ -56,7 +75,7 @@ at a time; no additional behavior is resolved here.
 | Area | Still open |
 | --- | --- |
 | Media storage | A custom cache location and checkpoint intervals |
-| UI design | Review the new design-system proposal, cards, and motion within the six-area scope before GPUI visual implementation; permanent left icon-only rail is decided, not an open layout mode |
+| UI design | Implement and visually validate the approved desktop v3 revision; backdrop pipeline and screen redesign remain in progress |
 | Metadata | Automatic refresh intervals, multi-locale behavior, and additional free providers with suitable terms; selected-provider-only fetching with no automatic fallback or both-provider enrichment is [agreed](architecture.md#agreed-metadata-provider-contract) |
 | Catalog retention | Retention/deletion policy is separately open; response/page, indexer, and media eviction must preserve canonical catalog identities, ratings, and provenance under the [cleanup boundary](cache-policy.md#target-cache-coverage) and authoritative schema rules |
 | Response caches | Exact TTLs, retained-entry limits, and offline use of stale results; not authority to delete canonical catalog records |

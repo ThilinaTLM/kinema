@@ -15,7 +15,8 @@ References: [architecture](../architecture.md), [historical feature inventory](.
 Kinema is a **media browser**, not a dashboard. The posters and backdrops are the
 interface; chrome recedes. Reference points are Stremio, Apple TV and Infuse for
 the cinematic dark canvas and poster-first browsing, combined with desktop-tool
-discipline: dense, keyboard-complete, square, flat, no web-style cards or pills.
+discipline: dense, keyboard-complete, restrained rounding and subtle elevation,
+not oversized web-style cards or pills.
 
 Design principles, in priority order:
 
@@ -23,7 +24,7 @@ Design principles, in priority order:
 2. **One screen, one job.** Browse grid → title Detail → pick a stream → play.
    No dashboards, no tab bars, no left rail.
 3. **Strong defaults, few knobs.** Every setting must earn its place.
-4. **Desktop native.** Square geometry, 1 px hairlines, hover + right-click +
+4. **Desktop native.** Compact rounded geometry, 1 px hairlines, hover + right-click +
    keyboard everywhere, compact density, separate Settings window.
 5. **Motion explains space.** Animations show where things come from and go;
    never decorative loops. Reduced motion is honored instantly.
@@ -43,9 +44,12 @@ Design principles, in priority order:
   (right-click, Menu key, Shift+F10).
 - Text wireframes first (this document), then a **native GPUI design lab** with
   fixtures and screenshots through the ui-probe Xvfb pipeline. **No HTML.**
-- Motion: hover **160 ms**, grid → Detail **320 ms shared poster flight** then
+- Motion: hover lift **140 ms**, crossfades **240 ms**, grid → Detail
+  **320 ms shared poster flight** then
   content fade; Back reverses; reduced motion is instant.
-- Flat, **0-radius**, 1 px hairlines, no drop shadows, one accent.
+- Warm amber/coral brand accent; artwork-derived secondary accents on Detail.
+- Radius **4 / 6 / 8 / 12 px**, low-alpha borders and soft shadows only on
+  raised surfaces; compact desktop density remains unchanged.
 
 ### Lead decisions (user may override)
 
@@ -60,7 +64,7 @@ Design principles, in priority order:
   catalog/collection and sort within the active provider.
 - **Detail uses a right-hand action column** (sources for movies; seasons →
   episodes → sources for series). Preparation and file choice run in a modal sheet.
-- **Unknown rating hides the chip at rest**; the hover panel states `IMDb —`.
+- **Unknown rating hides the chip and hover rating**; no `IMDb —` placeholder.
   Known `0.0` is shown. Never substitute a TMDB score for IMDb.
 
 ### MVP flow preservation map
@@ -87,21 +91,28 @@ credential set/delete/test (incl. TMDB), `Prepare`, `PlayFile` (explicit file),
 
 ## 2. Visual language
 
-All sizes are logical px. One semantic token module in `kinema-desktop/src/design`
-is the only source of color, type, spacing and motion; screens never use raw values.
+All sizes are logical px. `kinema-desktop/src/widgets/tokens.rs` and
+`widgets/motion.rs` are the sources of color, type, geometry, elevation and motion;
+screens never use raw values. This foundation is implemented; application to all
+widgets/screens and the blurred-backdrop pipeline are in progress, not accepted
+end-to-end rendering behavior.
 
 ### 2.1 Color — "Cinema" dark (default)
 
-Neutral near-black with a faint cool bias, so poster color is never tinted by
-chrome. Accent is an electric indigo-violet: distinctive for a media app, clearly
-separate from IMDb gold (ratings), amber (warning) and red (error).
-All text pairs below were contrast-checked (WCAG 2.x ratio in brackets).
+Neutral near-black chrome with layered depth. The brand accent is warm
+amber/coral (`#FF7A45` in Dark), with a darker AA-safe Light variant. Artwork
+colors provide secondary accents, never replace brand focus or primary actions.
+Ratings and status still require explicit glyphs/labels, not color alone.
+Ratios use WCAG 2.x relative luminance, without rounding to pass thresholds.
 
 | Token | Dark | Light | Use |
 | --- | --- | --- | --- |
 | `bg.canvas` | `#0B0C0E` | `#F3F3F5` | Window background, grid, detail body |
 | `bg.surface` | `#131418` | `#FFFFFF` | Toolbar, action column, settings sidebar |
-| `bg.raised` | `#1B1D22` | `#FFFFFF` | Menus, popovers, dialogs, tooltips (+ hairline) |
+| `bg.raised` | `#1B1D22` | `#FFFFFF` | Raised neutral surface |
+| `bg.overlay` | `#202228` | `#FFFFFF` | Menus, popovers, sheets |
+| `line.subtle` | white @ 8 % | `#111215` @ 10 % | Decorative raised-surface border |
+| `shadow` | black @ 32 % | `#111215` @ 14 % | Soft raised-layer shadow |
 | `bg.placeholder` | `#1B1D22` | `#E4E5EA` | Poster placeholder / missing art |
 | `ctl.rest` | `#24272D` | `#EAEAEE` | Secondary button, input fill |
 | `ctl.hover` | `#2D3037` | `#E1E2E7` | Hover fill (rows, buttons, menu items) |
@@ -111,17 +122,42 @@ All text pairs below were contrast-checked (WCAG 2.x ratio in brackets).
 | `text.primary` | `#F2F3F5` [16.6] | `#111215` [18.7] | Titles, body |
 | `text.secondary` | `#B3B8C1` [9.2] | `#4B505A` [7.3] | Facts, metadata |
 | `text.muted` | `#8C929D` [5.4 on raised] | `#5E646F` [5.0] | Hints, captions, disabled labels |
-| `accent` | `#6B4EF0` (white 5.3) | `#5B3FE0` (white 6.5) | Primary buttons, selection marker |
-| `accent.hover` / `.pressed` | `#5D41E2` / `#4F34CF` | `#4F34CF` / `#4429BB` | Primary states |
-| `accent.text` | `#A996FF` [7.4] | `#5B3FE0` [5.9] | Links, selected labels, active segment ink |
-| `accent.tint` | `#6B4EF0` @ 16 % | `#5B3FE0` @ 10 % | Selected row / segment fill |
-| `focus.ring` | `#B4A6FF` [8.6] | `#5B3FE0` [6.5] | 2 px focus ring |
+| `accent` | `#FF7A45` | `#B54118` | Primary actions, selected tabs/markers |
+| `accent.hover` / `.pressed` | `#FF915F` / `#F06A35` | `#9D3512` / `#852B0D` | Primary states |
+| `on.accent` | `#21130D` | `#FFFFFF` | Primary button/solid-selection ink |
+| `accent.text` | `#FF9B72` | `#A83B12` | Links, selected labels, active segment ink |
+| `accent.tint` | `#FF7A45` @ 16 % | `#B54118` @ 10 % | Subtle selection fill; artwork-secondary wash in tinted palettes |
+| `focus.ring` | `#FF9B72` | `#B54118` | Brand 2 px focus ring, never artwork-derived |
+| `art.tint` | defaults to `accent.text` | defaults to `accent.text` | Secondary artwork-derived ink |
+| `backdrop.scrim` | `#0B0C0E` @ 72 % | `#0B0C0E` @ 60 % | Darkening over blurred backdrops, not sufficient text backing |
 | `rating` | `#F5C451` [11.3] | `#8A5D00` [5.2] | Star glyph + score in chips |
-| `status.ok` | `#46C98A` | `#1E7A4C` | Ready, cached, serving |
+| `status.ok` | `#46C98A` | `#1B7045` | Ready, cached, serving |
 | `status.warn` | `#F2A33A` | `#9A5400` | Quota, stale, partial |
-| `status.error` | `#FF6B6B` | `#C02B2B` | Failures, danger outline |
+| `status.error` | `#FF6B6B` | `#B32626` | Failures, danger outline |
 | `scrim.max` | `#0B0C0E` @ 92 % | `#0B0C0E` @ 92 % | Text-bearing scrim over artwork (both themes) |
 | `dialog.scrim` | `#000000` @ 60 % | `#0B0C0E` @ 40 % | Modal backdrop |
+
+Contrast evidence (opaque, untinted surfaces):
+
+| Pair | Dark ratio | Light ratio |
+| --- | --- | --- |
+| Primary text on canvas / surface / raised / overlay | 17.62 / 16.58 / 15.19 / 14.32 | 16.90 / 18.73 / 18.73 / 18.73 |
+| Secondary text on canvas / surface / raised / overlay | 9.82 / 9.24 / 8.47 / 7.98 | 7.30 / 8.09 / 8.09 / 8.09 |
+| `on.accent` on accent / hover / pressed | 6.98 / 8.14 / 5.86 | 5.62 / 7.11 / 8.94 |
+| Accent text (minimum across these surfaces) | 7.71 | 5.74 |
+| Focus ring (minimum across these surfaces) | 7.71 | 5.07 |
+| Success ink on canvas / surface / raised | 9.30 / 8.75 / 8.02 | 5.49 / 6.09 / 6.09 |
+| Warning ink on canvas / surface / raised | 9.39 / 8.83 / 8.09 | 5.20 / 5.77 / 5.77 |
+| Error ink on canvas / surface / raised | 7.05 / 6.63 / 6.08 | 5.88 / 6.52 / 6.52 |
+
+Unit tests also check primary/secondary text on placeholder surfaces, all primary
+states, radius ordering, and sampled extreme/intermediate artwork colors. Status
+success/warning/error inks must each meet 4.5:1 on canvas, surface, raised and
+overlay backgrounds, including artwork-tinted palettes. Tests also cover status
+ink on a 10 % ink wash over the untinted canvas/surface/raised/overlay, matching
+status-badge backings. The Light success green was darkened from `#1E7A4C` to
+`#1B7045`, and error red from `#C02B2B` to `#B32626`, to preserve caption AA
+with those washes. Warning and all Dark status values are unchanged.
 
 Rules:
 
@@ -132,23 +168,41 @@ Rules:
   contrast. Checked: `text.primary` on 92 % scrim over pure white = 14.8:1.
 - Artwork overlays keep the dark scrim in Light theme too (cinema convention);
   chrome around them follows the theme.
-- Selection = `accent.tint` fill **plus** a 2 px accent marker (left edge on rows,
-  bottom edge on segments), never color alone.
+- Selection generally uses `accent.tint` fill **plus** a 2 px accent marker
+  (left edge on list rows, bottom edge on segments), never color alone. Menus
+  instead use an inset `radius::SM` accent-tint selected pill with no left bar;
+  preserve keyboard focus and semantic selection independently.
 - Disabled: `text.muted` on unchanged fill, no whole-control opacity fade.
 - Semantic inks are local cues (icon + text), never panel floods.
 
-### 2.2 Elevation without shadows
+### 2.2 Subtle elevation and artwork tint
 
-Layers are separated by tone and a hairline, not blur or drop shadow:
-canvas < surface < raised. Every raised layer (menu, popover, dialog, tooltip) has
-a 1 px `line.hairline` border. **Functional scrims** over artwork preserve
-contrast (card hover panel, detail backdrop fade into canvas). The user also
-approves restrained **artwork-derived ambient gradients on Detail** and subtle
-grid styling. Keep these content-led, low-contrast and theme-token controlled,
-with neutral fallbacks for absent/failed artwork; they must not obscure text or
-loading/focus states. Decorative gradient chrome, glow, glass and blur remain
-out of scope. Window shadows remain OS-native. This is approval, not a claim
-that ambient extraction or all grid styling is implemented.
+Layers are separated first by tone: canvas < surface < raised < overlay.
+Use a 1 px low-alpha `line.subtle` edge on raised surfaces; essential control
+boundaries still use `line.control`. Soft shadows belong only on raised things:
+`elevation::raised` (0/2 px, 8 px blur), `overlay` (0/6, 20 blur), `sheet`
+(0/12, 36 blur), and `card_hover` (0/4, 14 blur). All have zero spread and use
+`Palette::shadow`; do not shadow every row or resting card. OS window shadows
+remain native. No decorative glow or glass chrome.
+
+Detail uses `Palette::tinted(Option<ArtworkPalette>, Mode)` for low-strength
+artwork-primary washes on canvas/surface/raised/overlay (14 % Dark, 7 % Light).
+Clamp HSL lightness to at most 0.13 in Dark and at least 0.94 in Light. Secondary
+artwork ink uses saturation at most 0.65 and lightness 0.76 Dark / 0.24 Light;
+`art_tint` and the low-alpha `accent_tint` wash derive from it. Primary/secondary
+text remains AA-safe. `accent`, hover/pressed, `on_accent`, `accent_text`, and
+`focus_ring` stay brand-colored. Pass the matching palette mode; `None` returns
+the original palette unchanged. Missing/failed extraction stays neutral.
+This pure token API and the existing ambient gradient are implemented; screen
+adoption and backdrop blur/crossfade are in progress.
+
+Blurred artwork is a content backdrop, not glass UI. Browse targets a blurred,
+darkened full-canvas backdrop that crossfades with the hovered/keyboard-focused
+or selected title (selected title is the fallback). Detail targets a full-bleed
+hero backdrop with a fade into the tinted body. Keep decoding, downsampling and
+blur off the render/UI path, own/cancel requests and reject stale generations.
+Never depend on arbitrary pixels or `backdrop_scrim` alone for readable text:
+retain contrast-safe local scrims/opaque surfaces and neutral failure fallbacks.
 
 ### 2.3 Typography
 
@@ -181,7 +235,10 @@ truncate with tooltip, or scroll.
 | Token | Value |
 | --- | --- |
 | Spacing scale | 2, 4, 6, 8, 12, 16, 20, 24, 32, 48 |
-| Radius | **0 everywhere** (cards, chips, controls, menus, dialogs, focus ring) |
+| `radius::XS` | **4**: chips, badges |
+| `radius::SM` | **6**: controls, inputs, menu items, list-row hover |
+| `radius::MD` | **8**: cards, posters |
+| `radius::LG` | **12**: sheets, popovers, menus; focus rings follow their host |
 | Toolbar height | 48 (single row) |
 | Control height | 28 (compact), 32 (primary sheet actions) |
 | Icon size / icon hit target | 16 / 28 × 28 |
@@ -195,29 +252,38 @@ via the app asset source), 1.5 px stroke, `text.secondary` at rest and
 
 ### 2.5 Imagery
 
-- Posters 2:3, `ObjectFit::Cover`, clipped square. A 1 px inner hairline at
+- Posters 2:3, `ObjectFit::Cover`, clipped to `radius::MD`. A 1 px inner hairline at
   `#FFFFFF` 6 % keeps dark posters from dissolving into the canvas (dark theme).
 - Missing/failed art: `bg.placeholder` with the title (`type.heading`, centered,
   up to 3 lines) and year in `text.muted`. Because cards have no labels, the
   placeholder **must** identify the title.
-- Loaded art fades in over 160 ms (instant in reduced motion). Placeholders are
-  static: no shimmer.
-- Backdrops render only in Detail; failure leaves the canvas plain.
+- Loaded art fades in with `Motion::Crossfade` (240 ms; instant in reduced
+  motion). Skeletons pulse on an approximately 1.6 s loop, static under reduced
+  motion; no moving shimmer.
+- Browse targets blurred/darkened, title-responsive backdrops; Detail targets a
+  full-bleed hero. This pipeline and screen redesign are in progress. Failure
+  leaves a neutral theme canvas, not a fabricated successful image.
 
 ### 2.6 Motion tokens
 
 | Token | Duration / easing | Purpose |
 | --- | --- | --- |
 | `motion.feedback` | 80 ms, linear | Hover/pressed fills, borders |
-| `motion.disclose` | **160 ms**, ease-out cubic | Card hover panel, artwork zoom, art fade-in |
+| `motion.hover` | **140 ms**, ease-out cubic | Card lifts 3 px without scaling artwork or shifting layout |
+| `motion.crossfade` | **240 ms**, ease-out cubic | Backdrop changes, skeleton/placeholder → content |
+| `motion.disclose` | **160 ms**, ease-out cubic | Existing hover panel disclosure |
 | `motion.flight` | **320 ms**, ease-in-out cubic (spring optional) | Shared poster flight, both directions |
 | `motion.content` | 160 ms, ease-out, 40 ms delay after landing | Detail content fade + 8 px rise |
 | `motion.column` | 200 ms, ease-out | Action column slide episodes ↔ streams |
-| `motion.popup` | 100 ms in / 70 ms out, ease-out | Menus, context menus, popovers: opacity + 4 px travel |
-| `motion.sheet` | 160 ms, ease-out | Modal sheet opacity + 12 px rise; scrim fade |
+| `motion.popup` | 180 ms in / 70 ms out, ease-out cubic | Menus, context menus, popovers: opacity + 4 px travel |
+| `motion.sheet` | 280 ms, ease-out cubic (overshoot-free spring-like settle) | Modal sheet opacity + 12 px rise; scrim fade |
 | `motion.reduce` | 0 ms | Everything instant; progress still updates |
 
-Honor OS reduced motion **or** the Settings override, whichever requests reduce;
+Popup entry uses the same overshoot-free cubic settle as Sheet; no bounce on
+text. Honor reduced motion: every token duration becomes zero. The target is OS
+reduced motion **or** the Settings override, whichever requests reduce;
+GPUI 0.3.9 currently exposes no OS reduced-motion preference, so System resolves
+to false and Always is the implemented reduction path. In either case,
 switching mid-animation settles immediately. Use `with_animation` keyed by stable
 element IDs; interruptible transitions (hover in/out, flight reversal) must start
 from the current interpolated value, not jump (use `with_spring` or store the
@@ -250,8 +316,8 @@ in `kinema-core`; widgets must not own provider, storage or playback policy.
 | `Chip` | Rating (`★ 8.1`), `SERIES`, quality (`2160P`, `HDR`), status; non-interactive |
 | `Progress` / `Spinner` | Determinate 2 px bar; indeterminate bar sweep (static in reduce) |
 | `Notice` | Inline info/warn/error/empty with icon, text and one action |
-| `ScrollArea` | Overlay 6 px scrollbar, widens to 10 px on hover; keyboard scrolling |
-| `Sheet` (modal dialog) | Centered 560 px, `bg.raised`, title + body + footer actions; focus trap/return |
+| `ScrollArea` | Overlay thumb 4 px → 6 px on hover; fades to 35 % after 600 ms idle; always visible under reduced motion; keyboard scrolling |
+| `Sheet` (modal dialog) | Centered 560 px, `bg.overlay`, `radius::LG`, sheet elevation, title + body + footer actions; focus trap/return |
 | `SidebarNav` | Settings window section list only |
 | `PosterCard` | §4.2 |
 
@@ -260,8 +326,9 @@ in `kinema-core`; widgets must not own provider, storage or playback policy.
 Right-click, the Menu key and Shift+F10 open the context menu for the focused or
 pointed element. Right-clicking an unfocused card focuses it first. Menus render
 in-app (`deferred` + `anchored` at the pointer, flipped to stay within the
-window), `bg.raised`, hairline border, 32 px rows, label left, shortcut right in
+window), `bg.overlay`, `radius::LG`, `line.subtle` border + overlay elevation, 32 px rows, label left, shortcut right in
 `text.muted`, separators as hairlines, disabled items muted with a reason tooltip.
+The selected item uses an inset `radius::SM` accent-tint pill, not a left bar.
 Keyboard: arrows, Home/End, type-ahead, Enter, Esc closes and returns focus;
 Right/Left opens/closes a submenu. One menu open at a time; opening another
 closes the first. Actions run through the same commands as buttons; the menu
@@ -323,9 +390,9 @@ First-load skeleton poster cards already exist. **Follow-up required:** while
 loading the next page, retain existing cards and append skeleton poster cards in
 the upcoming rows, using the same dimensions, gaps and column geometry. Reserve
 their footprint so completion does not jump the layout or reset scroll/focus.
-Skeletons are noninteractive and static with reduced motion; no whole-grid
-replacement or shimmer is required. Empty/failure handling must preserve loaded
-cards and distinguish a failed next-page request from a successful empty page.
+Skeletons are noninteractive, pulse on an approximately 1.6 s loop, and remain
+static with reduced motion; no whole-grid replacement or moving shimmer is
+required. Empty/failure handling must preserve loaded cards and distinguish a failed next-page request from a successful empty page.
 This incremental skeleton requirement is approved, not yet implemented.
 
 ### 4.2 Poster card
@@ -334,11 +401,11 @@ This incremental skeleton requirement is approved, not yet implemented.
 REST (series)                     HOVER / FOCUS (same footprint)
 ┌──────────────────────┐         ┏━━━━━━━━━━━━━━━━━━━━━━┓  ← 2 px focus ring (focus only)
 │▐★ 8.1▌      ▐SERIES▌ │         ┃▐★ 8.1▌      ▐SERIES▌ ┃
-│                      │         ┃                      ┃  artwork zooms 1.00 → 1.05
-│                      │         ┃        POSTER        ┃  (clipped, no reflow)
+│                      │         ┃                      ┃  whole card lifts 3 px; no artwork zoom
+│                      │         ┃        POSTER        ┃  (rounded image, no reflow)
 │        POSTER        │         ┃░░░░░░░░░░░░░░░░░░░░░░┃  scrim: transparent → 92 %
 │                      │         ┃▓ North Harbor        ┃  type.heading, ≤2 lines
-│                      │         ┃▓ 2024 · 3 seasons    ┃  type.small secondary
+│                      │         ┃▓ 2024 · ★ 8.1        ┃  facts | year · rating; type.small
 │                      │         ┃▓ Drama · Mystery     ┃
 │                      │         ┃▓ A visitor uncovers  ┃  ≤2 lines synopsis
 │                      │         ┃▓ a secret by the…    ┃  (dropped first when small)
@@ -348,11 +415,19 @@ REST (series)                     HOVER / FOCUS (same footprint)
 - Chips: 20 px high, 6 px horizontal padding, `type.caption`, background
   `#0B0C0E` @ 80 %, 8 px from the poster edges. Rating chip: amber `★` + score
   (`text.primary`). `SERIES` chip: `text.secondary`. Movies have no type chip.
-  Unknown rating: no chip at rest; hover shows `IMDb —`.
-- Hover panel: bottom-anchored; a 40 px transparent→scrim gradient, then a solid
-  `scrim.max` text block with 12 px padding. Panel content rises 8 px and fades
-  in (160 ms). Movies show runtime instead of season count; unknown facts omitted.
-- Hover does not move neighboring cards, lift the card, or trigger requests.
+  Unknown rating: no chip or hover rating; no `IMDb —` placeholder.
+- Hover panel: bottom-anchored, bottom-rounded to `radius::MD`; a
+  transparent→scrim gradient info panel slides up and fades in. Content is title,
+  metadata (`facts | year · ★ rating`), genres and synopsis. Movies show runtime
+  instead of season count; unknown facts and ratings are omitted. Preserve
+  contrast-safe `scrim.max` backing under text.
+- Hover/focus lifts the card 3 px with `Motion::Hover` and
+  `elevation::card_hover`; neighboring cards do not move and hover triggers no
+  requests. Artwork does not zoom: GPUI clips containers only as rectangles, so
+  the image itself uses `img().rounded(radius::MD)` rather than relying on a
+  rounded parent to clip an enlarged image.
+- Artwork fades in with `Motion::Crossfade`; skeletons pulse on an approximately
+  1.6 s loop and are static under reduced motion.
 - Pressed: artwork brightness unchanged, panel stays; activation on mouse-up.
 - Selected/return target after Back: focus ring only while focus-visible.
 
@@ -362,7 +437,7 @@ The grid area hosts one centered state block (max 420 px wide) when there are no
 cards; with cards, problems use the notice strip under the toolbar.
 
 ```text
-Loading (first)   static placeholders fill the grid; no text
+Loading (first)   pulsing skeletons fill the grid; static under reduced motion
 Empty (success)   ⌕  No titles match "harbor".             [Clear search]
 Failure           ⚠  Couldn't reach Cinemeta — timed out.   [Retry]
 Missing creds     🔑 TMDB needs an API token.               [Open Settings…]
@@ -559,11 +634,23 @@ Cancel has initial focus; Esc cancels. Covers main-window close and app Quit
 
 ### 6.1 Card hover / focus
 
-On enter: artwork bounds grow from 100 % to 105 % around the center inside the
-clipped card (animated `left/top/width/height` of the image; GPUI transforms are
-SVG-only), and the panel rises 8 px while fading 0 → 1, both 160 ms ease-out. On
-leave: reverse from the current progress (no snap). Chips stay put. Focus-visible
-adds the ring immediately (no animation on the ring).
+Implemented PosterCard hover/focus lifts the whole card 3 px with
+`Motion::Hover` (140 ms) and `elevation::card_hover`, without changing the grid
+footprint. The bottom-rounded gradient info panel slides up and fades in,
+showing title, metadata (`facts | year · ★ rating`), genres and synopsis; omit
+unknown facts/ratings rather than showing `IMDb —`.
+
+There is no 1.05 artwork zoom. GPUI container clipping is rectangular, so the
+image itself uses `img().rounded(radius::MD)` to retain rounded poster corners.
+On leave, reverse from the current progress without snapping. Chips stay anchored
+to the card. Focus-visible adds the ring immediately (no ring animation).
+Artwork fades in with `Motion::Crossfade` (240 ms). Skeleton pulse loops at
+approximately 1.6 s; reduced motion makes the pulse static and transitions instant.
+
+Scroll thumbs widen from 4 px to 6 px on hover and fade to 35 % after 600 ms idle;
+under reduced motion they remain always visible. Menus use `bg_overlay`,
+`radius::LG`, `line_subtle` and `elevation::overlay`, with an inset `radius::SM`
+accent-tint selected pill and no left selection bar.
 
 ### 6.2 Shared poster flight (grid ⇄ Detail)
 
@@ -588,7 +675,7 @@ sequenceDiagram
 
 - Backdrop fades in independently when it arrives; the flight never waits for
   network. Detail data loading starts at `open`, not after landing.
-- Fallbacks → plain 160 ms cross-fade: artwork not loaded, source cell not
+- Fallbacks → plain 240 ms cross-fade: artwork not loaded, source cell not
   measurable after restoring the anchor, or reduced motion (instant).
 - Resize, a second navigation, or stale bounds settle immediately to the target
   route and release the overlay. One overlay, one transition generation.
@@ -596,8 +683,8 @@ sequenceDiagram
 ### 6.3 Other transitions
 
 Action column episodes ⇄ streams: 200 ms horizontal slide with fade, the leaving
-pane moving 24 px and fading out. Menus/popovers: 100 ms fade + 4 px travel from
-their anchor; close 70 ms. Sheets: scrim fade + 12 px rise (160 ms). Focus moves
+pane moving 24 px and fading out. Menus/popovers: 180 ms fade + 4 px travel from
+their anchor; close 70 ms. Sheets: scrim fade + 12 px rise (280 ms). Focus moves
 immediately; animations never delay input.
 
 ## 7. Accessibility and interaction

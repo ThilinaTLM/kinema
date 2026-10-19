@@ -1,6 +1,10 @@
 > **Historical v2 evidence — superseded.** Use [desktop v3](desktop-v3.md)
 > and the [native lab](ui-probe.md). Kit APIs and old probe commands below are
 > retained only as historical evidence; they are no longer supported.
+> The 2026-10-20 v3 revision replaces historical flat/blue styling with warm
+> amber/coral, 4/6/8/12 px radii, raised-layer shadows, artwork-derived secondary
+> tint and cinematic backdrops. Repeated old visual rules below are archival,
+> not constraints on the current implementation.
 
 # Graphite desktop design system v1
 
