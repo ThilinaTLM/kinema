@@ -32,6 +32,11 @@ impl IconButton {
         self.button.toggled = toggled;
         self
     }
+    /// Dark-surface ink for dark artwork banners regardless of theme.
+    pub fn over_art(mut self, over_art: bool) -> Self {
+        self.button.over_art = over_art;
+        self
+    }
     pub fn badge(mut self, count: usize) -> Self {
         self.badge = (count > 0).then_some(count);
         self

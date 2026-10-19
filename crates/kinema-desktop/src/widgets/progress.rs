@@ -1,4 +1,4 @@
-//! Thin progress bars and a deliberately quiet busy indicator.
+//! Thin rounded progress bars and a deliberately quiet busy indicator.
 use super::{
     motion::{self, Motion},
     tokens::{palette, space},
@@ -35,7 +35,7 @@ impl Progress {
 impl RenderOnce for Progress {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
-        let fill = div().absolute().h_full().bg(p.accent);
+        let fill = div().absolute().h_full().rounded_full().bg(p.accent);
         let fill = match self.value {
             Some(value) => fill.w(relative(value)).into_any_element(),
             None => {
@@ -57,7 +57,8 @@ impl RenderOnce for Progress {
             .id(self.id)
             .relative()
             .w_full()
-            .h(space::S2)
+            .h(space::S4)
+            .rounded_full()
             .overflow_hidden()
             .bg(p.ctl_rest)
             .child(fill)

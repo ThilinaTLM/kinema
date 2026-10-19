@@ -1,8 +1,9 @@
 //! Search editor with cancellable, generation-checked live queries.
 use super::{
+    TypeExt,
     icon::{Icon, IconName},
     text_input::{TextInput, TextInputEvent},
-    tokens::{palette, space},
+    tokens::{palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 use std::time::Duration;
@@ -20,11 +21,16 @@ pub struct SearchField {
     clear_focus: FocusHandle,
     generation: u64,
     debounce: Option<Task<()>>,
+    shortcut_hint: Option<SharedString>,
     _subscription: Subscription,
 }
 impl SearchField {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| TextInput::new(window, cx));
+        let input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx);
+            input.set_chromeless(true, cx);
+            input
+        });
         let subscription =
             cx.subscribe_in(&input, window, |this, _, event, window, cx| match event {
                 TextInputEvent::Changed => {
@@ -57,8 +63,18 @@ impl SearchField {
             clear_focus: cx.focus_handle().tab_stop(true),
             generation: 0,
             debounce: None,
+            shortcut_hint: None,
             _subscription: subscription,
         }
+    }
+    /// Trailing key hint (e.g. "Ctrl K"), shown only while the field is empty.
+    pub fn shortcut_hint(mut self, hint: impl Into<SharedString>) -> Self {
+        self.shortcut_hint = Some(hint.into());
+        self
+    }
+    pub fn set_shortcut_hint(&mut self, hint: Option<SharedString>, cx: &mut Context<Self>) {
+        self.shortcut_hint = hint;
+        cx.notify();
     }
     fn cancel_debounce(&mut self) {
         self.generation = self.generation.wrapping_add(1);
@@ -87,9 +103,15 @@ impl Focusable for SearchField {
     }
 }
 impl Render for SearchField {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let nonempty = !self.text(cx).is_empty();
+        let focus = self.input.read(cx).focus_handle(cx);
+        let focused = focus.is_focused(window);
+        let ring = focused && window.last_input_was_keyboard();
+        let gap_ring = |color: Hsla, spread: Pixels| {
+            BoxShadow::new(px(0.), px(0.), color).spread_radius(spread)
+        };
         div()
             .id("kinema-search-field")
             .flex()
@@ -97,13 +119,46 @@ impl Render for SearchField {
             .gap(space::S4)
             .h(space::CONTROL_HEIGHT)
             .w_full()
+            .pl(space::S8)
+            .pr(space::S2)
+            .rounded(radius::SM)
+            .bg(p.ctl_rest)
+            .border(space::HAIRLINE)
+            .border_color(if focused { p.accent } else { p.line_control })
+            // Keyboard focus ring follows the host radius: 2 px gap, then 2 px ring.
+            .when(ring, |el| {
+                el.shadow(vec![
+                    gap_ring(p.bg_canvas, space::FOCUS_RING),
+                    gap_ring(p.focus_ring, space::FOCUS_RING * 2.),
+                ])
+            })
             .child(Icon::new(IconName::Search).color(p.text_secondary))
             .child(div().flex_1().min_w(px(0.)).child(self.input.clone()))
+            .when_some(
+                self.shortcut_hint.clone().filter(|_| !nonempty),
+                |s, hint| {
+                    s.child(
+                        div()
+                            .flex_none()
+                            .mr(space::S6)
+                            .px(space::S6)
+                            .h(space::CHIP_HEIGHT)
+                            .flex()
+                            .items_center()
+                            .rounded(radius::XS)
+                            .bg(p.ctl_hover)
+                            .type_style(typeface::CAPTION)
+                            .text_color(p.text_muted)
+                            .child(hint),
+                    )
+                },
+            )
             .when(nonempty, |s| {
                 s.child(
                     div()
                         .id("clear-search")
                         .track_focus(&self.clear_focus)
+                        .rounded(radius::XS)
                         .focus_visible(|s| s.border_2().border_color(p.focus_ring))
                         .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                             if event.keystroke.key == "enter" || event.keystroke.key == "space" {
@@ -112,7 +167,7 @@ impl Render for SearchField {
                                 cx.stop_propagation();
                             }
                         }))
-                        .size(space::ICON_TARGET)
+                        .size(space::ICON_TARGET - space::S4)
                         .flex()
                         .items_center()
                         .justify_center()

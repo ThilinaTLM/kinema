@@ -2,7 +2,7 @@
 use super::{
     Icon, IconName, TypeExt,
     button::Button,
-    tokens::{palette, space, typeface},
+    tokens::{palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +44,14 @@ impl Notice {
         self
     }
 }
+/// Status-tinted fill and edge for a notice; neutral kinds stay untinted.
+fn tint(kind: NoticeKind, ink: Hsla, surface: Hsla, subtle: Hsla) -> (Hsla, Hsla) {
+    match kind {
+        NoticeKind::Info | NoticeKind::Empty => (surface, subtle),
+        _ => (surface.blend(ink.opacity(0.10)), ink.opacity(0.28)),
+    }
+}
+
 impl RenderOnce for Notice {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
@@ -54,15 +62,17 @@ impl RenderOnce for Notice {
             NoticeKind::Error => (IconName::Error, p.status_error),
             NoticeKind::Empty => (IconName::Search, p.text_muted),
         };
+        let (fill, edge) = tint(self.kind, ink, p.bg_surface, p.line_subtle);
         div()
             .flex()
             .items_center()
+            .rounded(radius::SM)
             .gap(space::S12)
             .px(space::S12)
             .py(if self.strip { space::S4 } else { space::S12 })
-            .bg(p.bg_surface)
+            .bg(fill)
             .border(space::HAIRLINE)
-            .border_color(p.line_hairline)
+            .border_color(edge)
             .child(Icon::new(icon).color(ink))
             .child(
                 div()
@@ -91,5 +101,27 @@ impl RenderOnce for Notice {
                     }),
             )
             .when_some(self.action, |el, action| el.child(action))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NoticeKind, tint};
+    use crate::widgets::tokens::Palette;
+
+    #[test]
+    fn neutral_kinds_are_untinted_and_status_kinds_tint() {
+        let p = Palette::dark();
+        for kind in [NoticeKind::Info, NoticeKind::Empty] {
+            assert_eq!(
+                tint(kind, p.status_ok, p.bg_surface, p.line_subtle),
+                (p.bg_surface, p.line_subtle)
+            );
+        }
+        for kind in [NoticeKind::Success, NoticeKind::Warning, NoticeKind::Error] {
+            let (fill, edge) = tint(kind, p.status_error, p.bg_surface, p.line_subtle);
+            assert_ne!(fill, p.bg_surface);
+            assert!(edge.a < 0.5);
+        }
     }
 }

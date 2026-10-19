@@ -1,7 +1,7 @@
-//! Controlled square boolean controls. Switch is for immediate settings only.
+//! Controlled rounded boolean controls. Switch is for immediate settings only.
 use super::{
     Icon, IconName, TypeExt, motion,
-    tokens::{palette, space, typeface},
+    tokens::{palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -50,10 +50,15 @@ impl RenderOnce for Checkbox {
                     .flex()
                     .items_center()
                     .justify_center()
+                    .rounded_full()
                     .border(space::HAIRLINE)
-                    .border_color(p.line_control)
+                    .border_color(if self.checked && !self.disabled {
+                        p.accent
+                    } else {
+                        p.line_control
+                    })
                     .when(self.checked, |el| {
-                        el.child(div().size(space::S6).bg(if self.disabled {
+                        el.child(div().size(space::S6).rounded_full().bg(if self.disabled {
                             p.text_muted
                         } else {
                             p.accent
@@ -63,8 +68,13 @@ impl RenderOnce for Checkbox {
                 _ => div()
                     .size(space::ICON)
                     .flex_none()
+                    .rounded(radius::XS)
                     .border(space::HAIRLINE)
-                    .border_color(p.line_control)
+                    .border_color(if self.checked && !self.disabled {
+                        p.accent
+                    } else {
+                        p.line_control
+                    })
                     .bg(if self.checked {
                         p.accent_tint
                     } else {
@@ -96,6 +106,7 @@ impl RenderOnce for Checkbox {
             .border_color(transparent_black())
             .p(space::S2)
             .m(-space::S4)
+            .rounded(radius::SM + space::S4)
             .role(self.role)
             .aria_label(self.label.clone())
             .aria_toggled(if self.checked {
@@ -126,13 +137,17 @@ impl RenderOnce for Checkbox {
 fn switch_indicator(checked: bool, disabled: bool, cx: &App) -> AnyElement {
     let p = *palette(cx);
     let duration = motion::duration(motion::Motion::Feedback, cx);
-    let knob = div().relative().size(space::S12).bg(if disabled {
-        p.text_muted
-    } else if checked {
-        p.on_accent
-    } else {
-        p.text_secondary
-    });
+    let knob = div()
+        .relative()
+        .size(space::S12)
+        .rounded_full()
+        .bg(if disabled {
+            p.text_muted
+        } else if checked {
+            p.on_accent
+        } else {
+            p.text_secondary
+        });
     let target = if checked { 1.0_f32 } else { 0.0 };
     let knob = if duration.is_zero() {
         knob.left(space::HAIRLINE + space::S12 * target)
@@ -158,14 +173,23 @@ fn switch_indicator(checked: bool, disabled: bool, cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .flex_none()
+        .rounded_full()
         .border(space::HAIRLINE)
-        .border_color(p.line_control)
-        .bg(if checked { p.accent } else { p.ctl_rest })
+        .border_color(if checked && !disabled {
+            p.accent
+        } else {
+            p.line_control
+        })
+        .bg(if checked && !disabled {
+            p.accent
+        } else {
+            p.ctl_rest
+        })
         .child(knob)
         .into_any_element()
 }
 
-/// Immediate boolean setting with a square sliding knob.
+/// Immediate boolean setting with a round sliding knob.
 #[derive(IntoElement)]
 pub struct Switch(Checkbox);
 impl Switch {

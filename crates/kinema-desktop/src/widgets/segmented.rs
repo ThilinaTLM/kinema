@@ -1,7 +1,7 @@
 //! Controlled segmented selection, with wraparound arrow-key navigation.
 use super::{
-    TypeExt,
-    tokens::{palette, space, typeface},
+    TypeExt, motion,
+    tokens::{elevation, palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -54,6 +54,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
             .iter()
             .position(|(value, _)| value == &self.selected)
             .unwrap_or(0);
+        let duration = motion::duration(motion::Motion::Feedback, cx);
         let options = self.options.clone();
         let keyboard_handler = self.on_change.clone();
         div()
@@ -63,6 +64,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
             .border_color(transparent_black())
             .p(space::S2)
             .m(-space::S4)
+            .rounded(radius::SM + space::S4)
             .focusable()
             .tab_stop(true)
             .role(Role::TabList)
@@ -79,44 +81,74 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                 div()
                     .flex()
                     .h(space::CONTROL_HEIGHT)
+                    .p(space::S2)
+                    .rounded(radius::SM)
+                    .bg(p.ctl_rest)
                     .border(space::HAIRLINE)
-                    .border_color(p.line_hairline)
+                    .border_color(p.line_subtle)
                     .children(self.options.into_iter().enumerate().map(
                         |(index, (value, label))| {
                             let active = value == self.selected;
                             let handler = self.on_change.clone();
-                            div()
-                                .id(("segment", index))
-                                .relative()
-                                .h_full()
+                            let inactive_ink = p.text_secondary;
+                            let active_ink = p.accent_text;
+                            let pill = p.bg_raised;
+                            let face = div()
+                                .absolute()
+                                .size_full()
                                 .px(space::S12)
                                 .flex()
                                 .items_center()
                                 .justify_center()
+                                .rounded(radius::XS)
+                                .type_style(typeface::SMALL_MEDIUM)
+                                .when(active, |el| el.shadow(elevation::raised(&p)))
+                                .child(label.clone());
+                            // Selected state is a raised pill that cross-fades, not an underline.
+                            let face = if duration.is_zero() {
+                                face.bg(if active { pill } else { transparent_black() })
+                                    .text_color(if active { active_ink } else { inactive_ink })
+                                    .into_any_element()
+                            } else {
+                                face.with_spring(
+                                    "segment-pill",
+                                    SpringAnimation::new(SpringConfig::new(
+                                        (6.0 / duration.as_secs_f32()).powi(2),
+                                        12.0 / duration.as_secs_f32(),
+                                        1.0,
+                                    ))
+                                    .to(if active {
+                                        1.0_f32
+                                    } else {
+                                        0.0
+                                    }),
+                                    move |el, t| {
+                                        let t = t.clamp(0.0, 1.0);
+                                        el.bg(pill.opacity(t))
+                                            .text_color(inactive_ink.blend(active_ink.opacity(t)))
+                                    },
+                                )
+                                .into_any_element()
+                            };
+                            div()
+                                .id(("segment", index))
+                                .relative()
+                                .h_full()
+                                .min_w(space::S32)
+                                // Width comes from an invisible copy of the label plus padding.
+                                .px(space::S12)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(radius::XS)
                                 .type_style(typeface::SMALL_MEDIUM)
                                 .role(Role::Tab)
                                 .aria_label(label.clone())
                                 .aria_selected(active)
-                                .text_color(if active {
-                                    p.accent_text
-                                } else {
-                                    p.text_secondary
-                                })
-                                .when(active, |el| {
-                                    el.bg(p.accent_tint).child(
-                                        div()
-                                            .absolute()
-                                            .bottom_0()
-                                            .left_0()
-                                            .right_0()
-                                            .h(space::S2)
-                                            .bg(p.accent),
-                                    )
-                                })
-                                .hover(move |s| {
-                                    s.bg(if active { p.accent_tint } else { p.ctl_hover })
-                                })
-                                .child(label)
+                                .cursor_pointer()
+                                .when(!active, |el| el.hover(move |s| s.bg(p.ctl_hover)))
+                                .child(div().invisible().child(label))
+                                .child(face)
                                 .on_click(move |_, window, cx| {
                                     if let Some(handler) = &handler {
                                         handler(&value, window, cx);

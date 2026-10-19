@@ -1,11 +1,11 @@
-//! Square, keyboard-activatable buttons. GPUI generates Enter/Space clicks.
+//! Rounded, keyboard-activatable buttons. GPUI generates Enter/Space clicks.
 use std::rc::Rc;
 
 use gpui::{prelude::*, *};
 
 use super::{
     Icon, IconName, TypeExt, motion,
-    tokens::{Palette, palette, space, typeface},
+    tokens::{Palette, palette, radius, space, typeface},
 };
 
 pub type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -40,6 +40,7 @@ pub struct Button {
     pub(crate) square: bool,
     pub(crate) badge: Option<usize>,
     pub(crate) toggled: bool,
+    pub(crate) over_art: bool,
     pub(crate) tooltip: Option<SharedString>,
 }
 impl Button {
@@ -57,6 +58,7 @@ impl Button {
             square: false,
             badge: None,
             toggled: false,
+            over_art: false,
             tooltip: None,
         }
     }
@@ -76,6 +78,11 @@ impl Button {
         self.disabled = disabled;
         self
     }
+    /// Dark-surface ink and fills regardless of theme, for dark artwork banners.
+    pub fn over_art(mut self, over_art: bool) -> Self {
+        self.over_art = over_art;
+        self
+    }
     pub fn busy(mut self, busy: bool) -> Self {
         self.busy = busy;
         self
@@ -93,6 +100,17 @@ impl Button {
     }
 }
 
+/// Palette used by a button: the dark palette when over artwork, else the theme's.
+fn surface_palette(over_art: bool, themed: Palette) -> Palette {
+    if over_art {
+        let mut dark = Palette::dark();
+        dark.ctl_rest = dark.chip_over_art;
+        dark
+    } else {
+        themed
+    }
+}
+
 /// Disabled styling takes precedence over the variant and toggled state.
 fn disabled_colors(variant: ButtonVariant, p: &Palette) -> (Hsla, Hsla, Hsla) {
     let fill = match variant {
@@ -101,7 +119,7 @@ fn disabled_colors(variant: ButtonVariant, p: &Palette) -> (Hsla, Hsla, Hsla) {
     };
     let border = match variant {
         ButtonVariant::Ghost => transparent_black(),
-        _ => p.line_hairline,
+        _ => p.line_subtle,
     };
     (fill, p.text_muted, border)
 }
@@ -134,7 +152,7 @@ fn busy_bar(ink: Hsla, cx: &App) -> AnyElement {
 
 impl RenderOnce for Button {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let p = *palette(cx);
+        let p = surface_palette(self.over_art, *palette(cx));
         let blocked = self.disabled || self.busy;
         let (rest, hover, pressed, ink, border) = match self.variant {
             ButtonVariant::Primary => (
@@ -142,14 +160,14 @@ impl RenderOnce for Button {
                 p.accent_hover,
                 p.accent_pressed,
                 p.on_accent,
-                p.accent,
+                transparent_black(),
             ),
             ButtonVariant::Secondary => (
                 p.ctl_rest,
                 p.ctl_hover,
                 p.ctl_pressed,
                 p.text_primary,
-                p.line_control,
+                p.line_subtle,
             ),
             ButtonVariant::Ghost => (
                 if self.toggled {
@@ -171,7 +189,7 @@ impl RenderOnce for Button {
                 p.ctl_hover,
                 p.ctl_pressed,
                 p.status_error,
-                p.status_error,
+                p.status_error.opacity(0.4),
             ),
         };
         let (rest, ink, border) = if self.disabled {
@@ -196,6 +214,7 @@ impl RenderOnce for Button {
                 ButtonSize::Large => space::CONTROL_HEIGHT_LARGE,
             })
             .px(space::S12)
+            .rounded(radius::SM)
             .border(space::HAIRLINE)
             .border_color(border)
             .bg(rest)
@@ -257,6 +276,8 @@ impl RenderOnce for Button {
             .border_color(transparent_black())
             .p(space::S2)
             .m(-space::S4)
+            // Ring follows the host radius: face radius + gap + ring width.
+            .rounded(radius::SM + space::S4)
             .role(Role::Button)
             .aria_label(self.tooltip.clone().unwrap_or(self.label.clone()))
             .when(!blocked, |el| {
@@ -286,8 +307,20 @@ impl RenderOnce for Button {
 
 #[cfg(test)]
 mod tests {
-    use super::{ButtonVariant, disabled_colors};
+    use super::{ButtonVariant, disabled_colors, surface_palette};
     use crate::widgets::tokens::Palette;
+
+    #[test]
+    fn over_art_uses_dark_surface_in_any_theme() {
+        let dark = Palette::dark();
+        let p = surface_palette(true, Palette::light());
+        assert_eq!(p.text_primary, dark.text_primary);
+        assert_eq!(p.ctl_rest, dark.chip_over_art);
+        assert_eq!(
+            surface_palette(false, Palette::light()).text_primary,
+            Palette::light().text_primary
+        );
+    }
 
     #[test]
     fn disabled_palette_overrides_every_variant_in_both_themes() {
@@ -314,7 +347,7 @@ mod tests {
                     if variant == ButtonVariant::Ghost {
                         gpui::transparent_black()
                     } else {
-                        p.line_hairline
+                        p.line_subtle
                     },
                     "{variant:?}"
                 );

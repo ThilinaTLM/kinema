@@ -1,9 +1,9 @@
-//! Square single-line native input. Text is deliberately absent from Debug output.
+//! Rounded single-line native input. Text is deliberately absent from Debug output.
 // Element painting and IME integration adapted from gpui-pre 0.3.9 examples/input.rs
 // (Zed Industries contributors, Apache-2.0).
 use super::{
     text::TypeExt,
-    tokens::{palette, space, typeface},
+    tokens::{palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 use std::ops::Range;
@@ -207,6 +207,7 @@ pub struct TextInput {
     disabled: bool,
     read_only: bool,
     invalid: bool,
+    chromeless: bool,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
@@ -235,6 +236,7 @@ impl TextInput {
             disabled: false,
             read_only: false,
             invalid: false,
+            chromeless: false,
             last_layout: None,
             last_bounds: None,
             is_selecting: false,
@@ -277,6 +279,11 @@ impl TextInput {
     }
     pub fn set_invalid(&mut self, value: bool, cx: &mut Context<Self>) {
         self.invalid = value;
+        cx.notify();
+    }
+    /// Drop the fill, edge and focus ring so a host (e.g. a search field) can draw them.
+    pub fn set_chromeless(&mut self, value: bool, cx: &mut Context<Self>) {
+        self.chromeless = value;
         cx.notify();
     }
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -753,10 +760,12 @@ impl Focusable for TextInput {
     }
 }
 impl Render for TextInput {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = *palette(cx);
         let focus = self.focus_handle.clone();
         let disabled = self.disabled;
+        let chromeless = self.chromeless;
+        let focused = !disabled && focus.is_focused(window);
         div()
             .id("kinema-text-input")
             .relative()
@@ -768,12 +777,17 @@ impl Render for TextInput {
             .px(space::S6)
             .flex()
             .items_center()
-            .bg(p.ctl_rest)
-            .border_1()
-            .border_color(if self.invalid {
-                p.status_error
-            } else {
-                p.line_control
+            .when(!chromeless, |el| {
+                el.rounded(radius::SM)
+                    .bg(p.ctl_rest)
+                    .border_1()
+                    .border_color(if self.invalid {
+                        p.status_error
+                    } else if focused {
+                        p.accent
+                    } else {
+                        p.line_control
+                    })
             })
             .type_style(typeface::BODY)
             .text_color(if self.disabled {
@@ -879,7 +893,10 @@ impl Render for TextInput {
                 canvas(
                     |_, _, _| (),
                     move |bounds, _, window, _| {
-                        if !disabled && focus.is_focused(window) && window.last_input_was_keyboard()
+                        if !disabled
+                            && !chromeless
+                            && focus.is_focused(window)
+                            && window.last_input_was_keyboard()
                         {
                             window.paint_quad(
                                 outline(
@@ -887,6 +904,7 @@ impl Render for TextInput {
                                     p.focus_ring,
                                     BorderStyle::Solid,
                                 )
+                                .corner_radii(radius::SM + space::FOCUS_RING * 2.)
                                 .border_widths(space::FOCUS_RING),
                             );
                         }

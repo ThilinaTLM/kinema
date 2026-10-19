@@ -1,7 +1,7 @@
 //! Non-interactive metadata chips; absent ratings produce no element.
 use super::{
     Icon, IconName, TypeExt,
-    tokens::{Palette, palette, space, typeface},
+    tokens::{Palette, palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +94,7 @@ impl RenderOnce for Chip {
         };
         div()
             .h(space::CHIP_HEIGHT)
+            .rounded(radius::XS)
             .px(space::S6)
             .flex()
             .items_center()
