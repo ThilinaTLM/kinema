@@ -1,11 +1,11 @@
 //! Poster-only production card. Hosts supply metadata, artwork and truthful commands.
 //! Subscribe to `CardOpened` for the mouse-up / Enter open handler.
 use super::{
-    chip::Chip,
+    chip::{self, Chip},
     menu::{ContextMenuExt, MenuItem},
     motion::{self, Motion},
     text::TypeExt,
-    tokens::{self, Palette, space as s, typeface as t},
+    tokens::{self, Palette, radius, space as s, typeface as t},
 };
 use gpui::{prelude::*, *};
 use std::{cell::Cell, rc::Rc, sync::Arc};
@@ -114,35 +114,27 @@ impl Render for PosterCard {
         let duration = if cx.reduce_motion() {
             std::time::Duration::ZERO
         } else {
-            motion::duration(Motion::Disclose, cx)
+            motion::duration(Motion::Hover, cx)
+        };
+        let fade = if cx.reduce_motion() {
+            std::time::Duration::ZERO
+        } else {
+            motion::duration(Motion::Crossfade, cx)
         };
         let from = self.from;
         let progress = self.progress.clone();
         let w = self.width;
         let h = w * 1.5;
-        let artwork = if let Some(image) = &self.image {
-            let image = img(image.clone()).object_fit(ObjectFit::Cover).size_full();
-            if duration.is_zero() {
-                self.art_from = 1.;
-                image.into_any_element()
-            } else {
-                let art_from = self.art_from;
-                image
-                    .with_animation(
-                        ("art-fade", self.art_generation),
-                        Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        move |el, t| el.opacity(art_from + (1. - art_from) * t),
-                    )
-                    .into_any_element()
-            }
-        } else {
-            col()
-                .size_full()
-                .justify_center()
-                .items_center()
-                .p(s::S12)
-                .bg(p.bg_placeholder)
-                .child(
+        let placeholder = col()
+            .absolute()
+            .inset_0()
+            .justify_center()
+            .items_center()
+            .p(s::S12)
+            .rounded(radius::MD)
+            .bg(p.bg_placeholder)
+            .when(self.image.is_none(), |el| {
+                el.child(
                     div()
                         .type_style(t::HEADING)
                         .text_center()
@@ -152,106 +144,169 @@ impl Render for PosterCard {
                 .when(!self.year.is_empty(), |el| {
                     el.child(div().text_color(p.text_muted).child(self.year.clone()))
                 })
-                .into_any_element()
+            });
+        let artwork = self.image.as_ref().map(|image| {
+            let image = img(image.clone())
+                .object_fit(ObjectFit::Cover)
+                .rounded(radius::MD)
+                .absolute()
+                .inset_0();
+            if fade.is_zero() {
+                self.art_from = 1.;
+                image.into_any_element()
+            } else {
+                let art_from = self.art_from;
+                image
+                    .with_animation(
+                        ("art-fade", self.art_generation),
+                        Animation::new(fade).with_easing(motion::ease_out_cubic),
+                        move |el, t| el.opacity(art_from + (1. - art_from) * t),
+                    )
+                    .into_any_element()
+            }
+        });
+        let meta = {
+            let base = if self.facts.is_empty() {
+                self.year.to_string()
+            } else {
+                self.facts.to_string()
+            };
+            let score = chip::format_rating(self.rating).map(|r| format!("\u{2605} {r}"));
+            match (base.is_empty(), score) {
+                (false, Some(r)) => format!("{base} \u{b7} {r}"),
+                (false, None) => base,
+                (true, Some(r)) => r,
+                (true, None) => String::new(),
+            }
         };
-        let image = div().absolute().inset_0().child(artwork);
         let panel = col()
-            .gap_0()
+            .gap(s::S4)
             .absolute()
             .bottom_0()
             .left_0()
             .w_full()
+            .px(s::S12)
+            .pb(s::S12)
+            .pt(s::S32)
+            .rounded_b(radius::MD)
             .text_color(dark.text_primary)
-            .child(div().h(s::S48).flex_none().bg(linear_gradient(
+            .bg(linear_gradient(
                 180.,
                 linear_color_stop(dark.scrim_max.opacity(0.), 0.),
-                linear_color_stop(dark.scrim_max, 1.),
-            )))
+                linear_color_stop(dark.scrim_max.opacity(0.92), 0.55),
+            ))
             .child(
-                col()
-                    .flex_none()
-                    .gap(s::S4)
-                    .p(s::S12)
-                    .bg(dark.scrim_max)
-                    .child(
-                        div()
-                            .type_style(t::HEADING)
-                            .line_clamp(2)
-                            .child(self.title.clone()),
-                    )
-                    .when(!self.facts.is_empty(), |el| {
-                        el.child(
-                            div()
-                                .type_style(t::SMALL)
-                                .text_color(dark.text_secondary)
-                                .child(self.facts.clone()),
-                        )
-                    })
-                    .when(!self.genres.is_empty(), |el| {
-                        el.child(
-                            div()
-                                .type_style(t::SMALL)
-                                .text_color(dark.text_secondary)
-                                .child(self.genres.clone()),
-                        )
-                    })
-                    .when(self.rating.is_none(), |el| {
-                        el.child(div().type_style(t::SMALL).child("IMDb —"))
-                    })
-                    .when(w >= 172. && !self.synopsis.is_empty(), |el| {
-                        el.child(
-                            div()
-                                .type_style(t::BODY)
-                                .line_clamp(2)
-                                .overflow_hidden()
-                                .child(self.synopsis.clone()),
-                        )
-                    }),
-            );
+                div()
+                    .type_style(t::HEADING)
+                    .line_clamp(2)
+                    .child(self.title.clone()),
+            )
+            .when(!meta.is_empty(), |el| {
+                el.child(
+                    div()
+                        .type_style(t::SMALL)
+                        .text_color(dark.text_secondary)
+                        .child(meta),
+                )
+            })
+            .when(!self.genres.is_empty(), |el| {
+                el.child(
+                    div()
+                        .type_style(t::SMALL)
+                        .text_color(dark.text_secondary)
+                        .child(self.genres.clone()),
+                )
+            })
+            .when(w >= 172. && !self.synopsis.is_empty(), |el| {
+                el.child(
+                    div()
+                        .type_style(t::BODY)
+                        .line_clamp(2)
+                        .overflow_hidden()
+                        .child(self.synopsis.clone()),
+                )
+            });
         let end = if target { 1. } else { 0. };
-        let style_image = move |el: Div, value: f32| {
-            el.w(px(w * (1. + value * 0.05)))
-                .h(px(h * (1. + value * 0.05)))
-                .left(px(-w * value * 0.025))
-                .top(px(-h * value * 0.025))
-        };
+        let shadow = tokens::elevation::card_hover(&p);
         let style_panel =
             move |el: Div, value: f32| el.opacity(value).bottom(px(-8. * (1. - value)));
-        let (image, panel) = if duration.is_zero() {
+        let style_lift = {
+            let shadow = shadow.clone();
+            move |el: Div, value: f32| {
+                el.top(px(-3. * value)).shadow(
+                    shadow
+                        .iter()
+                        .map(|s| {
+                            let mut s = s.clone();
+                            s.color = s.color.opacity(s.color.a * value);
+                            s
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            }
+        };
+        let panel = if duration.is_zero() {
             self.from = end;
             progress.set(end);
-            (
-                style_image(image, end).into_any_element(),
-                style_panel(panel, end).into_any_element(),
-            )
+            style_panel(panel, end).into_any_element()
         } else {
-            (
-                image
-                    .with_animation(
-                        ("zoom", self.generation),
-                        Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        move |el, t| style_image(el, from + (end - from) * t),
-                    )
-                    .into_any_element(),
-                panel
-                    .with_animation(
-                        ("disclose", self.generation),
-                        Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        move |el, t| {
-                            let value = from + (end - from) * t;
-                            progress.set(value);
-                            style_panel(el, value)
-                        },
-                    )
-                    .into_any_element(),
-            )
+            panel
+                .with_animation(
+                    ("disclose", self.generation),
+                    Animation::new(duration).with_easing(motion::ease_out_cubic),
+                    move |el, t| {
+                        let value = from + (end - from) * t;
+                        progress.set(value);
+                        style_panel(el, value)
+                    },
+                )
+                .into_any_element()
         };
-        let visual = div()
+        let lift = div()
             .size_full()
             .relative()
-            .overflow_hidden()
-            .child(image)
-            .child(panel);
+            .rounded(radius::MD)
+            .child(placeholder)
+            .children(artwork)
+            .child(panel)
+            .child(
+                row()
+                    .absolute()
+                    .top(s::S8)
+                    .left(s::S8)
+                    .right(s::S8)
+                    .justify_between()
+                    .child(Chip::rating(self.rating).over_art(true))
+                    .when(self.series, |el| el.child(Chip::series().over_art(true))),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded(radius::MD)
+                    .border_1()
+                    .border_color(p.poster_edge),
+            )
+            .when(focus_is_visible(&self.focus, window), |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(radius::MD)
+                        .border(s::FOCUS_RING)
+                        .border_color(p.focus_ring),
+                )
+            });
+        let lift = if duration.is_zero() {
+            style_lift(lift, end).into_any_element()
+        } else {
+            lift.with_animation(
+                ("lift", self.generation),
+                Animation::new(duration).with_easing(motion::ease_out_cubic),
+                move |el, t| style_lift(el, from + (end - from) * t),
+            )
+            .into_any_element()
+        };
         let card = div()
             .id(("poster", self.index))
             .track_focus(&focus)
@@ -270,8 +325,6 @@ impl Render for PosterCard {
             .h(px(h))
             .flex_none()
             .relative()
-            .overflow_hidden()
-            .bg(p.bg_placeholder)
             .on_hover(cx.listener(|this, hovered, _, cx| {
                 this.hovered = *hovered;
                 cx.notify();
@@ -286,33 +339,7 @@ impl Render for PosterCard {
                     cx.stop_propagation();
                 }
             }))
-            .child(visual)
-            .child(
-                row()
-                    .absolute()
-                    .top(s::S8)
-                    .left(s::S8)
-                    .right(s::S8)
-                    .justify_between()
-                    .child(Chip::rating(self.rating).over_art(true))
-                    .when(self.series, |el| el.child(Chip::series().over_art(true))),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .border_1()
-                    .border_color(p.poster_edge),
-            )
-            .when(focus_is_visible(&self.focus, window), |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .border(s::FOCUS_RING)
-                        .border_color(p.focus_ring),
-                )
-            });
+            .child(lift);
         let items = self.menu.clone();
         let target_focus = self.focus.clone();
         card.context_menu(("poster-menu", self.index), move |window, cx| {

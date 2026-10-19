@@ -1,6 +1,13 @@
 //! Vertical scrolling with an overlay scrollbar and keyboard paging.
-use super::tokens::{palette, space};
+use super::{
+    motion::{self, Motion},
+    tokens::{palette, space},
+};
 use gpui::{prelude::*, *};
+use std::{cell::Cell, rc::Rc, time::Instant};
+
+/// Idle thumb opacity; the thumb rises to 1.0 while scrolling or hovered.
+const IDLE_ALPHA: f32 = 0.35;
 
 fn thumb_height(handle: &ScrollHandle) -> Pixels {
     let viewport = handle.bounds().size.height;
@@ -52,6 +59,15 @@ impl RenderOnce for ScrollArea {
         let release_drag = drag.clone();
         let release_outside = drag.clone();
         let drag_handle = self.handle.clone();
+        let activity = window
+            .use_keyed_state((self.id.clone(), "activity"), cx, |_, _| {
+                Rc::new(Cell::new((px(0.0), Instant::now())))
+            })
+            .read(cx)
+            .clone();
+        let fade_drag = drag.clone();
+        let fade = motion::duration(Motion::Crossfade, cx);
+        let reduced = motion::reduced(cx);
         div()
             .id(self.id)
             .relative()
@@ -143,13 +159,49 @@ impl RenderOnce for ScrollArea {
                                     .min(bounds.size.height);
                                 let progress = (-paint_handle.offset().y / max).clamp(0.0, 1.0);
                                 let top = bounds.top() + (bounds.size.height - height) * progress;
-                                window.paint_quad(fill(
-                                    Bounds::new(
-                                        point(bounds.left(), top),
-                                        size(bounds.size.width, height),
-                                    ),
-                                    p.line_control,
-                                ));
+                                // Fade: full while scrolling/dragging/hovered, then ease to idle.
+                                let offset = paint_handle.offset().y;
+                                let (last, _) = activity.get();
+                                if (last - offset).abs() > px(0.5) {
+                                    activity.set((offset, Instant::now()));
+                                }
+                                let active = fade_drag.get().is_some()
+                                    || bounds.contains(&window.mouse_position());
+                                let alpha = if reduced || active {
+                                    1.0
+                                } else {
+                                    let hold = std::time::Duration::from_millis(600);
+                                    let elapsed = activity.get().1.elapsed();
+                                    let t = if elapsed <= hold {
+                                        window.request_animation_frame();
+                                        0.0
+                                    } else if fade.is_zero() {
+                                        1.0
+                                    } else {
+                                        let t = ((elapsed - hold).as_secs_f32()
+                                            / (fade.as_secs_f32() * 2.0))
+                                            .min(1.0);
+                                        if t < 1.0 {
+                                            window.request_animation_frame();
+                                        }
+                                        motion::ease_out_cubic(t)
+                                    };
+                                    1.0 - t * (1.0 - IDLE_ALPHA)
+                                };
+                                // Slim rounded thumb inset from the edge; widens on hover.
+                                let width = if active {
+                                    bounds.size.width.min(px(6.0))
+                                } else {
+                                    bounds.size.width.min(px(4.0))
+                                };
+                                let left = bounds.right() - width - px(2.0);
+                                window.paint_quad(
+                                    fill(
+                                        Bounds::new(point(left, top), size(width, height)),
+                                        p.line_control.opacity(p.line_control.a * alpha),
+                                    )
+                                    .corner_radii(width / 2.0),
+                                );
                             },
                         )
                         .size_full(),

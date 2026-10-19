@@ -1,7 +1,7 @@
 //! Anchored, nonmodal, focus-returning panels built directly on GPUI.
 use super::{
     motion::{self, Motion},
-    tokens::{palette, space},
+    tokens::{elevation, palette, radius, space},
 };
 use gpui::{prelude::*, *};
 use std::{cell::Cell, rc::Rc};
@@ -107,6 +107,7 @@ impl RenderOnce for Popover {
                 .id("popover-trigger")
                 .track_focus(&state.read(cx).trigger)
                 .tab_stop(true)
+                .rounded(radius::SM)
                 .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
                 .on_click(move |_, window, cx| {
                     click_state.update(cx, |this, cx| {
@@ -135,9 +136,11 @@ impl RenderOnce for Popover {
                 .track_focus(&state.read(cx).focus)
                 .occlude()
                 .max_w(window.viewport_size().width - space::S16)
-                .bg(p.bg_raised)
+                .bg(p.bg_overlay)
+                .rounded(radius::LG)
                 .border_1()
-                .border_color(p.line_hairline)
+                .border_color(p.line_subtle)
+                .shadow(elevation::overlay(&p))
                 .text_color(p.text_primary)
                 .max_h((window.viewport_size().height - space::S16).max(space::ROW))
                 .overflow_y_scroll()

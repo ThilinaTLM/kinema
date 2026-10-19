@@ -1,7 +1,7 @@
 //! Text-only native GPUI tooltips. The interaction owner controls lifetime.
 use super::{
     text::TypeExt,
-    tokens::{palette, space, typeface},
+    tokens::{elevation, palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 
@@ -12,9 +12,11 @@ impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         div()
-            .bg(p.bg_raised)
+            .bg(p.bg_overlay)
+            .rounded(radius::SM)
             .border_1()
-            .border_color(p.line_hairline)
+            .border_color(p.line_subtle)
+            .shadow(elevation::raised(p))
             .px(space::S8)
             .py(space::S4)
             .type_style(typeface::SMALL)

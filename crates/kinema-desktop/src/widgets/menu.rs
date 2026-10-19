@@ -1,4 +1,4 @@
-//! Square native menus and context-menu/select adapters.
+//! Rounded native menus and context-menu/select adapters.
 //!
 //! A window-keyed registry owns only a weak reference: opening a context menu
 //! dismisses the previous one without keeping an unmounted trigger alive.
@@ -6,7 +6,7 @@ use super::{
     icon::{Icon, IconName},
     motion::{self, Motion},
     text::TypeExt,
-    tokens::{palette, space, typeface},
+    tokens::{elevation, palette, radius, space, typeface},
     tooltip::tooltip,
 };
 use gpui::{prelude::*, *};
@@ -328,14 +328,23 @@ impl Menu {
                 &self.scroll
             })
             .occlude()
-            .bg(p.bg_raised)
+            .bg(p.bg_overlay)
+            .rounded(radius::LG)
             .border_1()
-            .border_color(p.line_hairline)
+            .border_color(p.line_subtle)
+            .shadow(elevation::overlay(&p))
+            .p(space::S4)
             .type_style(typeface::BODY)
             .text_color(p.text_primary);
         for (i, item) in items.iter().enumerate() {
             if matches!(item, MenuItem::Separator) {
-                panel = panel.child(div().h(space::HAIRLINE).bg(p.line_hairline));
+                panel = panel.child(
+                    div()
+                        .h(space::HAIRLINE)
+                        .mx(space::S8)
+                        .my(space::S4)
+                        .bg(p.line_subtle),
+                );
                 continue;
             }
             let enabled = item.enabled();
@@ -357,8 +366,7 @@ impl Menu {
                 .items_center()
                 .gap(space::S8)
                 .px(space::S8)
-                .border_l(space::FOCUS_RING)
-                .border_color(if selected { p.accent } else { p.bg_raised })
+                .rounded(radius::SM)
                 .text_color(if enabled {
                     p.text_primary
                 } else {
@@ -431,9 +439,9 @@ impl Menu {
                 MenuItem::Separator => unreachable!(),
             }
             let rest = if selected {
-                p.bg_raised.blend(p.accent_tint)
+                p.bg_overlay.blend(p.accent_tint)
             } else {
-                p.bg_raised
+                p.bg_overlay
             };
             let duration = motion::duration(Motion::Feedback, cx);
             let row = if duration.is_zero() {
@@ -748,9 +756,11 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
             .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
             .tab_stop(true)
             .relative()
+            .rounded(radius::SM)
             .child(
                 div()
                     .h(space::CONTROL_HEIGHT)
+                    .rounded(radius::SM)
                     .flex()
                     .items_center()
                     .gap(space::S8)

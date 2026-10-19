@@ -2,7 +2,7 @@
 use super::{
     TypeExt,
     motion::{self, Motion},
-    tokens::{palette, space, typeface},
+    tokens::{elevation, palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -88,9 +88,11 @@ impl RenderOnce for Sheet {
             .relative()
             .w(space::SHEET_WIDTH)
             .max_w_full()
-            .bg(p.bg_raised)
+            .bg(p.bg_overlay)
+            .rounded(radius::LG)
             .border(space::HAIRLINE)
-            .border_color(p.line_hairline)
+            .border_color(p.line_subtle)
+            .shadow(elevation::sheet(&p))
             .p(space::S24)
             .flex()
             .flex_col()
@@ -134,7 +136,7 @@ impl RenderOnce for Sheet {
                     .with_animation(
                         "sheet-open",
                         Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        |el, t| el.opacity(t).top(space::S12 * (1.0 - t)),
+                        |el, t| el.opacity(t).top(space::S24 * (1.0 - t)),
                     )
                     .into_any_element(),
                 scrim
