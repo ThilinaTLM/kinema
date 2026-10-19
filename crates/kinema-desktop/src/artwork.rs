@@ -21,6 +21,7 @@ const EDGE: u32 = 8192;
 // Policy budgets, not total CPU/GPU RAM guarantees.
 const ENTRIES: usize = 256;
 const POSTER_BYTES: usize = 192 * 1024 * 1024;
+const BACKDROP_BYTES: usize = 16 * 1024 * 1024;
 const DISK_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -47,6 +48,7 @@ impl ArtworkKind {
 pub struct ArtworkKey {
     pub kind: ArtworkKind,
     url: String,
+    blurred: bool,
 }
 impl ArtworkKey {
     pub fn new(kind: ArtworkKind, url: &str) -> Option<Self> {
@@ -61,9 +63,61 @@ impl ArtworkKey {
         .then(|| Self {
             kind,
             url: parsed.to_string(),
+            blurred: false,
         })
     }
 }
+impl ArtworkKey {
+    fn source(&self) -> Self {
+        Self {
+            blurred: false,
+            ..self.clone()
+        }
+    }
+    fn blurred(&self) -> Self {
+        Self {
+            blurred: true,
+            ..self.clone()
+        }
+    }
+}
+
+/// Cinematic variant of either a poster or fanart key. Uses the same owner epoch,
+/// negative-cache/retry policy and worker slots as ordinary artwork. Cached source
+/// pixels are reused; downscaling, blur and grading run only on the worker.
+/// Begin the owner's generation outside render, as for `lookup_or_request`.
+pub fn backdrop_or_request(
+    owner: &str,
+    generation: u64,
+    key: &ArtworkKey,
+    cx: &mut App,
+) -> ArtworkState {
+    if generation == 0 {
+        return ArtworkState::Failed;
+    }
+    let key = key.blurred();
+    if let Some(image) = get(&key, cx) {
+        return ArtworkState::Ready(image);
+    }
+    if matches!(status(&key, cx), Some(Err(_))) {
+        return ArtworkState::Failed;
+    }
+    request(owner, generation, key, cx);
+    ArtworkState::Loading
+}
+/// Read a cached cinematic variant without queuing work or touching the LRU.
+/// Use `backdrop_or_request` to distinguish failure from missing/pending work.
+pub fn backdrop(key: &ArtworkKey, cx: &App) -> Option<Arc<RenderImage>> {
+    cx.try_global::<ArtworkStore>()?
+        .cache
+        .iter()
+        .find(|entry| entry.key == key.blurred())?
+        .result
+        .as_ref()
+        .ok()
+        .map(|decoded| decoded.image.clone())
+}
+
 /// Muted sRGB colors, computed once on the decode worker (never during render).
 /// Byte channels keep every public palette finite, including caller-built values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -257,12 +311,25 @@ fn pump(cx: &mut App) {
             break;
         };
         let id = job.id;
+        // Clone only an Arc on the UI thread, never image bytes. A negative source
+        // cache hit also propagates without a second download.
+        let source = cx.update_global::<ArtworkStore, _>(|store, _| {
+            job.key.blurred.then(|| store.source(&job.key)).flatten()
+        });
         let task = cx.spawn(async move |cx| {
             let url = job.key.url.clone();
             let kind = job.key.kind;
+            let blurred = job.key.blurred;
             let result = cx
                 .background_executor()
-                .spawn(async move { fetch(&url, kind) })
+                .spawn(async move {
+                    let decoded = source.unwrap_or_else(|| fetch(&url, kind))?;
+                    if blurred {
+                        derive_backdrop(&decoded)
+                    } else {
+                        Ok(decoded)
+                    }
+                })
                 .await;
             cx.update(|cx| {
                 cx.update_global::<ArtworkStore, _>(|store, cx| {
@@ -282,6 +349,14 @@ fn pump(cx: &mut App) {
     }
 }
 impl ArtworkStore {
+    fn source(&mut self, key: &ArtworkKey) -> Option<Result<DecodedArtwork, ArtworkError>> {
+        let source = key.source();
+        let index = self.cache.iter().position(|entry| entry.key == source)?;
+        let entry = self.cache.remove(index)?;
+        let result = entry.result.clone();
+        self.cache.push_back(entry);
+        Some(result)
+    }
     fn ambient(&self, key: &ArtworkKey) -> Option<ArtworkPalette> {
         self.cache
             .iter()
@@ -345,10 +420,12 @@ impl ArtworkStore {
             self.generations.get(&job.owner).copied() == Some(job.generation)
                 && !self.cache.iter().any(|e| e.key == job.key)
         });
-        let index = self
-            .queue
-            .iter()
-            .position(|j| !self.active.values().any(|active| active.key == j.key))?;
+        let index = self.queue.iter().position(|j| {
+            !self
+                .active
+                .values()
+                .any(|active| active.key.source() == j.key.source())
+        })?;
         let job = self.queue.remove(index)?;
         self.active.insert(job.id, job.clone());
         Some(job)
@@ -383,16 +460,27 @@ impl ArtworkStore {
     }
     fn trim_images(&mut self) -> Vec<Arc<RenderImage>> {
         let mut evicted = Vec::new();
-        for kind in [ArtworkKind::Poster, ArtworkKind::Backdrop] {
+        for (kind, blurred) in [
+            (ArtworkKind::Poster, false),
+            (ArtworkKind::Backdrop, false),
+            (ArtworkKind::Poster, true),
+        ] {
+            let matches =
+                |key: &ArtworkKey| key.blurred == blurred && (blurred || key.kind == kind);
+            let quota = if blurred {
+                BACKDROP_BYTES
+            } else {
+                kind.quota()
+            };
             while self
                 .cache
                 .iter()
-                .filter(|e| e.key.kind == kind)
+                .filter(|e| matches(&e.key))
                 .map(|e| e.bytes)
                 .sum::<usize>()
-                > kind.quota()
+                > quota
             {
-                if let Some(index) = self.cache.iter().position(|e| e.key.kind == kind)
+                if let Some(index) = self.cache.iter().position(|e| matches(&e.key))
                     && let Some(Cached {
                         result: Ok(image), ..
                     }) = self.cache.remove(index)
@@ -657,6 +745,46 @@ fn decode(bytes: &[u8], kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkErro
         palette,
     })
 }
+// Input/output are BGRA, matching RenderImage. Blur and the symmetric RGB
+// grade commute with that channel order; no extra full-image channel swap needed.
+fn derive_backdrop(source: &DecodedArtwork) -> Result<DecodedArtwork, ArtworkError> {
+    let size = source.image.size(0);
+    let pixels = source.image.as_bytes(0).ok_or(ArtworkError::InvalidImage)?;
+    let image = image::RgbaImage::from_raw(size.width.into(), size.height.into(), pixels.to_vec())
+        .ok_or(ArtworkError::InvalidImage)?;
+    let blurred = backdrop_pixels(image)?;
+    Ok(DecodedArtwork {
+        image: Arc::new(RenderImage::new(vec![image::Frame::new(blurred)])),
+        palette: source.palette,
+    })
+}
+
+fn backdrop_pixels(image: image::RgbaImage) -> Result<image::RgbaImage, ArtworkError> {
+    if image.width() == 0 || image.height() == 0 {
+        return Err(ArtworkError::InvalidImage);
+    }
+    let small = if image.width() > 480 || image.height() > 480 {
+        image::DynamicImage::ImageRgba8(image)
+            .thumbnail(480, 480)
+            .into_rgba8()
+    } else {
+        image
+    };
+    let mut blurred = image::imageops::fast_blur(&small, 24.0);
+    for pixel in blurred.pixels_mut() {
+        let [b, g, r, a] = pixel.0;
+        let gray = (u32::from(b) + u32::from(g) + u32::from(r)) / 3;
+        // Retain 80% chroma, darken to 55%, and composite transparency onto
+        // black so transparent artwork cannot expose bright ungraded RGB.
+        for channel in &mut pixel.0[..3] {
+            *channel =
+                (((u32::from(*channel) * 4 + gray) * 55 * u32::from(a)) / (5 * 100 * 255)) as u8;
+        }
+        pixel.0[3] = 255;
+    }
+    Ok(blurred)
+}
+
 fn animated(bytes: &[u8], format: ImageFormat) -> bool {
     let (mut offset, png) = match format {
         ImageFormat::Png => (8usize, true),
@@ -710,6 +838,181 @@ fn animated(bytes: &[u8], format: ImageFormat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backdrop_dimensions_blur_and_grade_are_bounded() {
+        for (width, height, expected) in [
+            (1024, 576, (480, 270)),
+            (384, 576, (320, 480)),
+            (3, 2, (3, 2)),
+            (1, 8192, (1, 480)),
+        ] {
+            let input = image::RgbaImage::from_pixel(width, height, image::Rgba([255; 4]));
+            let output = backdrop_pixels(input).unwrap_or_else(|e| panic!("backdrop: {e:?}"));
+            assert_eq!(output.dimensions(), expected);
+            assert!(output.pixels().all(|pixel| pixel.0 == [140, 140, 140, 255]));
+        }
+        let output = backdrop_pixels(image::RgbaImage::from_fn(120, 60, |x, _| {
+            image::Rgba(if x < 60 {
+                [0, 0, 255, 255]
+            } else {
+                [0, 0, 0, 255]
+            })
+        }))
+        .unwrap_or_else(|e| panic!("backdrop: {e:?}"));
+        let edge = output.get_pixel(60, 30).0;
+        assert!(edge[2] > 0 && edge[2] < 120, "blur spreads the hard edge");
+        assert!(edge[0] > 0 && edge[0] < edge[2], "slightly desaturated");
+        assert!(
+            output
+                .pixels()
+                .all(|pixel| pixel.0[..3].iter().all(|c| *c <= 140))
+        );
+        let transparent = backdrop_pixels(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([255, 0, 80, 0]),
+        ))
+        .unwrap_or_else(|e| panic!("backdrop: {e:?}"));
+        assert_eq!(transparent.get_pixel(0, 0).0, [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn backdrop_reuses_source_and_rejects_obsolete_generations() {
+        let mut bytes = Vec::new();
+        image::RgbaImage::from_pixel(12, 8, image::Rgba([240, 20, 10, 255]))
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .unwrap_or_else(|e| panic!("fixture: {e}"));
+        let decoded =
+            decode(&bytes, ArtworkKind::Poster).unwrap_or_else(|e| panic!("decode: {e:?}"));
+        let mut store = ArtworkStore::default();
+        let generation = store.advance_generation("browse");
+        let key = ArtworkKey::new(ArtworkKind::Poster, "https://example.com/backdrop.png")
+            .unwrap_or_else(|| panic!("key"));
+        store.enqueue("browse", generation, key.clone());
+        let source_job = store.start_next().unwrap_or_else(|| panic!("source job"));
+        store.enqueue("browse", generation, key.blurred());
+        assert!(store.start_next().is_none(), "wait for in-flight source");
+        assert!(store.complete(&source_job, Ok(decoded.clone())));
+        let source = store
+            .source(&key.blurred())
+            .unwrap_or_else(|| panic!("source"))
+            .unwrap_or_else(|e| panic!("source: {e:?}"));
+        assert!(Arc::ptr_eq(&source.image, &decoded.image));
+        let derived = derive_backdrop(&source).unwrap_or_else(|e| panic!("derive: {e:?}"));
+        assert_eq!(derived.palette, decoded.palette);
+        // Renderer byte order stays BGRA.
+        let pixels = derived
+            .image
+            .as_bytes(0)
+            .unwrap_or_else(|| panic!("pixels"));
+        assert!(pixels[2] > pixels[0]);
+        let job = store.start_next().unwrap_or_else(|| panic!("derived job"));
+        store.advance_generation("browse");
+        assert!(!store.complete(&job, Ok(derived)));
+        assert!(store.lookup(&key.blurred()).is_none());
+        assert!(store.lookup(&key).is_some());
+    }
+
+    #[test]
+    fn backdrop_failure_is_negative_cached_and_retryable() {
+        assert!(matches!(
+            backdrop_pixels(image::RgbaImage::new(0, 0)),
+            Err(ArtworkError::InvalidImage)
+        ));
+        let empty = DecodedArtwork {
+            image: Arc::new(RenderImage::new(Vec::<image::Frame>::new())),
+            palette: ArtworkPalette::NEUTRAL,
+        };
+        assert!(matches!(
+            derive_backdrop(&empty),
+            Err(ArtworkError::InvalidImage)
+        ));
+        let mut store = ArtworkStore::default();
+        let generation = store.advance_generation("detail");
+        let key = ArtworkKey::new(ArtworkKind::Backdrop, "https://example.com/missing.png")
+            .unwrap_or_else(|| panic!("key"));
+        store.enqueue("detail", generation, key.clone());
+        let job = store.start_next().unwrap_or_else(|| panic!("source job"));
+        assert!(store.complete(&job, Err(ArtworkError::Transport)));
+        store.enqueue("detail", generation, key.blurred());
+        let job = store.start_next().unwrap_or_else(|| panic!("derived job"));
+        let failure = store
+            .source(&key)
+            .unwrap_or_else(|| panic!("negative cache"));
+        assert!(matches!(failure, Err(ArtworkError::Transport)));
+        assert!(store.complete(&job, failure));
+        store.enqueue("detail", generation, key.blurred());
+        assert!(
+            store.start_next().is_none(),
+            "failure must not spin/retry during render"
+        );
+        let generation = store.advance_generation("detail");
+        store.enqueue("detail", generation, key.blurred());
+        assert!(store.start_next().is_some());
+    }
+
+    #[test]
+    fn backdrop_cache_has_independent_byte_and_shared_count_bounds() {
+        let mut store = ArtworkStore::default();
+        let generation = store.advance_generation("browse");
+        let key = ArtworkKey::new(ArtworkKind::Poster, "https://example.com/source.png")
+            .unwrap_or_else(|| panic!("key"));
+        let image = DecodedArtwork {
+            image: Arc::new(RenderImage::new(vec![image::Frame::new(
+                image::RgbaImage::new(480, 480),
+            )])),
+            palette: ArtworkPalette::NEUTRAL,
+        };
+        store.enqueue("browse", generation, key.clone());
+        let job = store.start_next().unwrap_or_else(|| panic!("source job"));
+        assert!(store.complete(&job, Ok(image.clone())));
+        for index in 0..ENTRIES + 10 {
+            let key = ArtworkKey::new(
+                if index % 2 == 0 {
+                    ArtworkKind::Poster
+                } else {
+                    ArtworkKind::Backdrop
+                },
+                &format!("https://example.com/{index}.png"),
+            )
+            .unwrap_or_else(|| panic!("key"))
+            .blurred();
+            store.enqueue("browse", generation, key);
+            let job = store.start_next().unwrap_or_else(|| panic!("derived job"));
+            assert!(store.complete(&job, Ok(image.clone())));
+            store.trim_images();
+            assert!(
+                store
+                    .cache
+                    .iter()
+                    .filter(|e| e.key.blurred)
+                    .map(|e| e.bytes)
+                    .sum::<usize>()
+                    <= BACKDROP_BYTES
+            );
+            assert!(store.cache.len() <= ENTRIES);
+        }
+        assert!(
+            store.lookup(&key).is_some(),
+            "derived variants must not consume source quota"
+        );
+        for index in 0..ENTRIES + 10 {
+            store.cache.push_back(Cached {
+                key: ArtworkKey::new(
+                    ArtworkKind::Poster,
+                    &format!("https://example.com/fail{index}.png"),
+                )
+                .unwrap_or_else(|| panic!("key"))
+                .blurred(),
+                result: Err(ArtworkError::InvalidImage),
+                bytes: 0,
+            });
+        }
+        store.trim_images();
+        assert_eq!(store.cache.len(), ENTRIES);
+    }
+
     #[test]
     fn palette_samples_are_deterministic_muted_and_ignore_transparency_and_extremes() {
         let colorful = image::RgbaImage::from_fn(48, 48, |x, _| {
@@ -1253,6 +1556,49 @@ mod tests {
             let key = ArtworkKey::new(ArtworkKind::Poster, &first)
                 .unwrap_or_else(|| panic!("fixture URL"));
             assert_eq!(ambient(&key, app), Some(ArtworkPalette::NEUTRAL));
+            assert!(backdrop(&key, app).is_none());
+            assert!(matches!(
+                backdrop_or_request("integration", generation, &key, app),
+                ArtworkState::Loading
+            ));
+        });
+        cx.run_until_parked();
+        cx.update(|app| {
+            let key = ArtworkKey::new(ArtworkKind::Poster, &first)
+                .unwrap_or_else(|| panic!("fixture URL"));
+            assert!(backdrop(&key, app).is_some());
+            assert!(matches!(
+                backdrop_or_request("integration", generation, &key, app),
+                ArtworkState::Ready(_)
+            ));
+            // A source negative-cache hit must surface as Failed for the derived
+            // variant too, without consuming the server's next response.
+            let failed = ArtworkKey::new(
+                ArtworkKind::Backdrop,
+                &format!("http://{address}/failed.png"),
+            )
+            .unwrap_or_else(|| panic!("fixture URL"));
+            app.update_global::<ArtworkStore, _>(|store, _| {
+                store.enqueue("integration", generation, failed.clone());
+                let job = store.start_next().unwrap_or_else(|| panic!("negative job"));
+                assert!(store.complete(&job, Err(ArtworkError::Transport)));
+            });
+            assert!(matches!(
+                backdrop_or_request("integration", generation, &failed, app),
+                ArtworkState::Loading
+            ));
+        });
+        cx.run_until_parked();
+        cx.update(|app| {
+            let failed = ArtworkKey::new(
+                ArtworkKind::Backdrop,
+                &format!("http://{address}/failed.png"),
+            )
+            .unwrap_or_else(|| panic!("fixture URL"));
+            assert!(matches!(
+                backdrop_or_request("integration", generation, &failed, app),
+                ArtworkState::Failed
+            ));
         });
         cx.update(|app| {
             assert!(matches!(
