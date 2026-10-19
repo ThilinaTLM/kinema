@@ -1,5 +1,5 @@
 //! Offline v3 native design lab. No application services or legacy presentation.
-use crate::screens::settings_window;
+use crate::{app_state::Resource, screens::settings_window};
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{prelude::*, *};
@@ -12,6 +12,10 @@ use crate::widgets::{
     icon_button::IconButton,
     menu::{ContextMenuExt, Menu, MenuItem, Select},
     notice::{Notice, NoticeKind},
+    patterns::{
+        Badge, BadgeTone, Card, Carousel, ListRow, MediaHero, ResourceView, Section, Skeleton,
+        SkeletonText, StateView, ViewState,
+    },
     popover::Popover,
     poster_card::{CardOpened, PosterCard},
     progress::Progress,
@@ -28,7 +32,9 @@ use crate::widgets::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 28] = [
+const SCENES: [&str; 30] = [
+    "patterns",
+    "patterns-states",
     "detail-live-tmdb-movie",
     "detail-live-tmdb-series",
     "detail-live-tmdb-series-streams",
@@ -306,7 +312,12 @@ struct Lab {
     select: Entity<Select<usize>>,
     cards: Vec<Entity<PosterCard>>,
     backdrop: Arc<RenderImage>,
+    /// Second fixture backdrop for the hero crossfade specimen.
+    backdrop_alt: Arc<RenderImage>,
+    backdrop_swapped: bool,
     poster: Arc<RenderImage>,
+    /// Pre-rendered pattern-carousel artwork (never generated during render).
+    thumbs: Vec<Arc<RenderImage>>,
     sheet: bool,
     selected_file: Option<usize>,
     player: Entity<Select<usize>>,
@@ -474,7 +485,10 @@ impl Lab {
             select,
             cards,
             backdrop: art(2, 960, 540),
+            backdrop_alt: art(4, 960, 540),
+            backdrop_swapped: false,
             poster: art(0, 240, 360),
+            thumbs: (0..6).map(|i| art(i, 112, 168)).collect(),
             kind: 0,
             checked: true,
             scroll: ScrollHandle::new(),
@@ -657,7 +671,7 @@ impl Lab {
                 });
             })
     }
-    fn components(&self, cx: &mut Context<Self>) -> Div {
+    fn components(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = *tokens::palette(cx);
         let weak = cx.entity().downgrade();
         let mut buttons = col().child(heading("Buttons · rest / disabled / busy"));
@@ -904,6 +918,7 @@ impl Lab {
                     .child(div().flex_1().min_w_0().child(editors))
                     .child(div().flex_1().min_w_0().child(typography)),
             )
+            .child(self.patterns(window, cx))
     }
     fn menus(&self, cx: &mut Context<Self>) -> Div {
         let p = *tokens::palette(cx);
@@ -1488,11 +1503,329 @@ impl Lab {
             }
             specimens = specimens.child(cells);
         }
+        col().size_full().gap_0().child(self.toolbar(cx)).child(
+            div()
+                .id("states-scroll")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(col().child(specimens).child(self.pattern_states(cx))),
+        )
+    }
+
+    /// Skeleton, badge, row, card, carousel and hero specimens (pattern layer).
+    fn patterns(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let p = *tokens::palette(cx);
+        let label = |text: &'static str| {
+            div()
+                .type_style(t::SMALL)
+                .text_color(p.text_muted)
+                .child(text)
+        };
+        let tones = [
+            ("Neutral", BadgeTone::Neutral),
+            ("Accent", BadgeTone::Accent),
+            ("Info", BadgeTone::Info),
+            ("Success", BadgeTone::Success),
+            ("Warn", BadgeTone::Warn),
+        ];
+        let badges = col()
+            .child(label("Badge · tones"))
+            .child(
+                row().flex_wrap().children(
+                    tones
+                        .iter()
+                        .map(|&(name, tone)| Badge::new(name).tone(tone)),
+                ),
+            )
+            .child(
+                row().flex_wrap().children([
+                    Badge::new("4k").tone(BadgeTone::Accent).uppercase(true),
+                    Badge::new("hdr10").tone(BadgeTone::Info).uppercase(true),
+                    Badge::new("Dolby Vision").tone(BadgeTone::Info),
+                    Badge::new("HEVC").uppercase(true),
+                    Badge::new("Cached")
+                        .tone(BadgeTone::Success)
+                        .icon(IconName::Check),
+                    Badge::new("Low seeds")
+                        .tone(BadgeTone::Warn)
+                        .icon(IconName::Warning),
+                ]),
+            );
+        let skeletons = col()
+            .child(label(
+                "Skeleton · block / line / circle / text (static when reduced)",
+            ))
+            .child(
+                row()
+                    .items_start()
+                    .gap(s::S12)
+                    .child(Skeleton::block().w(px(84.)).h(px(126.)))
+                    .child(Skeleton::circle())
+                    .child(
+                        col()
+                            .flex_1()
+                            .child(Skeleton::line().w(relative(0.5)))
+                            .child(SkeletonText::new(3)),
+                    ),
+            );
+        let rows = col()
+            .child(label("ListRow · rest / two-line / selected / focusable"))
+            .child(
+                Card::new()
+                    .raised(true)
+                    .py(s::S4)
+                    .child(ListRow::new("pat-row-1", "Arrival").on_click(|_, _, _| {}))
+                    .child(
+                        ListRow::new("pat-row-2", "The Signal")
+                            .subtitle("51 min · 2024-03-09")
+                            .leading(
+                                img(self.poster.clone())
+                                    .w(s::S32)
+                                    .h(s::S32)
+                                    .rounded(tokens::radius::SM)
+                                    .object_fit(ObjectFit::Cover),
+                            )
+                            .trailing(Badge::new("1080p").uppercase(true))
+                            .on_click(|_, _, _| {}),
+                    )
+                    .child(
+                        ListRow::new("pat-row-3", "Low Tide")
+                            .subtitle("49 min · selected")
+                            .selected(true)
+                            .on_click(|_, _, _| {}),
+                    )
+                    .child(ListRow::new("pat-row-4", "Breakwater (not interactive)")),
+            );
+        let cards = col()
+            .child(label("Card · flat / raised / hover lift"))
+            .child(
+                row()
+                    .items_start()
+                    .child(Card::new().w(px(120.)).h(px(72.)).p(s::S12).child("Flat"))
+                    .child(
+                        Card::new()
+                            .raised(true)
+                            .w(px(120.))
+                            .h(px(72.))
+                            .p(s::S12)
+                            .child("Raised"),
+                    )
+                    .child(
+                        Card::new()
+                            .raised(true)
+                            .hover_lift(true)
+                            .on_click("pat-card-lift", |_, _, _| {})
+                            .w(px(120.))
+                            .h(px(72.))
+                            .p(s::S12)
+                            .child("Lift"),
+                    ),
+            );
+        let hero = MediaHero::new("pat-hero", "North Harbor")
+            .backdrop(Some(if self.backdrop_swapped {
+                self.backdrop_alt.clone()
+            } else {
+                self.backdrop.clone()
+            }))
+            .poster(
+                img(self.poster.clone())
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
+            )
+            .metas([
+                Chip::rating(Some(8.1)).over_art(true).into_any_element(),
+                div().child("2024").into_any_element(),
+                div().child("118 min").into_any_element(),
+            ])
+            .meta_badge(Badge::new("4k").tone(BadgeTone::Accent).uppercase(true))
+            .meta_badge(Badge::new("hdr10").tone(BadgeTone::Info).uppercase(true))
+            .overview(
+                "A visitor uncovers a secret by the distant shore, and the harbor town that \
+                 has kept it for generations is not ready to let it go. Across one long \
+                 winter, old debts, borrowed names and a missing lighthouse keeper pull the \
+                 stranger deeper into a story that was never meant to be told.",
+            )
+            .primary(
+                Button::new("pat-play", "Play")
+                    .variant(ButtonVariant::Primary)
+                    .icon(IconName::Play)
+                    .over_art(true),
+            )
+            .secondary(Button::new("pat-trailer", "Trailer").over_art(true))
+            .secondary(
+                IconButton::new("pat-more", IconName::MoreHorizontal, "More actions")
+                    .over_art(true),
+            );
+        let _ = window;
         col()
-            .size_full()
-            .gap_0()
-            .child(self.toolbar(cx))
-            .child(specimens)
+            .gap(s::S16)
+            .child(hero)
+            .child(
+                row().px(s::S20).child(
+                    Button::new("pat-swap-backdrop", "Swap hero backdrop (crossfade)").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.backdrop_swapped = !this.backdrop_swapped;
+                            cx.notify();
+                        }),
+                    ),
+                ),
+            )
+            .child(
+                col()
+                    .px(s::S20)
+                    .gap(s::S16)
+                    .child(
+                        row()
+                            .items_start()
+                            .gap(s::S24)
+                            .child(div().flex_1().min_w_0().child(badges.gap(s::S8)))
+                            .child(div().flex_1().min_w_0().child(skeletons)),
+                    )
+                    .child(
+                        row()
+                            .items_start()
+                            .gap(s::S24)
+                            .child(div().flex_1().min_w_0().child(rows))
+                            .child(div().flex_1().min_w_0().child(cards)),
+                    )
+                    .child(
+                        Section::new("Section")
+                            .count(10)
+                            .trailing(Button::new("pat-section-action", "Sort").variant(ButtonVariant::Ghost))
+                            .child(div().type_style(t::BODY).text_color(p.text_secondary).child(
+                                "Body content sits below a heading row with count and trailing action.",
+                            )),
+                    ),
+            )
+            .child(self.pattern_carousel())
+    }
+
+    fn pattern_carousel(&self) -> Carousel {
+        Carousel::new("pat-carousel")
+            .title("More like this")
+            .count(10)
+            .trailing(Button::new("pat-see-all", "See all").variant(ButtonVariant::Ghost))
+            .items((0..10).map(|i| {
+                Card::new().w(px(112.)).h(px(168.)).child(
+                    img(self.thumbs[i % self.thumbs.len()].clone())
+                        .size_full()
+                        .object_fit(ObjectFit::Cover),
+                )
+            }))
+    }
+
+    /// Loading, error, empty, refreshing and stale-failure specimens driven by
+    /// real `Resource` values through `ResourceView`, plus an enum-driven `StateView`.
+    fn pattern_states(&self, cx: &mut Context<Self>) -> Div {
+        let p = *tokens::palette(cx);
+        let titles = || {
+            vec![
+                "North Harbor",
+                "The Last Observatory",
+                "Across the Blue Hour",
+            ]
+        };
+        let mut loading = Resource::<Vec<&'static str>>::default();
+        loading.begin(true);
+        let mut error = Resource::<Vec<&'static str>>::default();
+        let g = error.begin(true);
+        error.failed(g, "Couldn't reach Cinemeta — timed out.");
+        let mut empty = Resource::<Vec<&'static str>>::default();
+        let g = empty.begin(true);
+        empty.fetched(g, Vec::new(), 1);
+        let mut refreshing = Resource::<Vec<&'static str>>::default();
+        let g = refreshing.begin(true);
+        refreshing.fetched(g, titles(), 1);
+        refreshing.begin(false);
+        let mut stale = Resource::<Vec<&'static str>>::default();
+        let g = stale.begin(true);
+        stale.fetched(g, titles(), 1);
+        let g = stale.begin(false);
+        stale.failed(g, "Cinemeta returned 503.");
+
+        let skeleton = || {
+            col().p(s::S8).gap(s::S8).child(SkeletonText::new(3)).child(
+                row()
+                    .child(Skeleton::block().w(px(60.)).h(px(90.)))
+                    .child(Skeleton::block().w(px(60.)).h(px(90.))),
+            )
+        };
+        let list = |items: &Vec<&'static str>| {
+            let mut rows = col().gap_0().py(s::S4);
+            for (i, title) in items.iter().enumerate() {
+                rows = rows.child(
+                    ListRow::new(("pat-state-row", i), *title)
+                        .subtitle("2024 · 118 min")
+                        .on_click(|_, _, _| {}),
+                );
+            }
+            rows.into_any_element()
+        };
+        let retry = |_: &mut Window, _: &mut App| {};
+        let cell = |name: &'static str, body: AnyElement| {
+            col()
+                .flex_1()
+                .min_w_0()
+                .p(s::S12)
+                .gap(s::S8)
+                .bg(p.bg_surface)
+                .border_1()
+                .border_color(p.line_subtle)
+                .rounded(tokens::radius::MD)
+                .child(
+                    div()
+                        .type_style(t::SMALL)
+                        .text_color(p.text_muted)
+                        .child(name),
+                )
+                .child(body)
+        };
+        let view = |id: &'static str, resource: &Resource<Vec<&'static str>>| {
+            ResourceView::new(id, resource)
+                .skeleton(skeleton())
+                .empty_when(|v| v.is_empty())
+                .empty(
+                    IconName::Search,
+                    "No titles match “harbor”.",
+                    Some("Try another title or clear the search.".into()),
+                )
+                .on_retry(retry)
+                .content(|v| list(v))
+                .into_any_element()
+        };
+        col()
+            .p(s::GRID_INSET)
+            .gap(s::GRID_GAP)
+            .child(
+                div()
+                    .type_style(t::HEADING)
+                    .child("Pattern states · ResourceView / StateView"),
+            )
+            .child(
+                row()
+                    .items_start()
+                    .gap(s::GRID_GAP)
+                    .child(cell("Loading · skeleton", view("pat-rv-loading", &loading)))
+                    .child(cell("Error · Retry", view("pat-rv-error", &error)))
+                    .child(cell("Empty · successful", view("pat-rv-empty", &empty))),
+            )
+            .child(
+                row()
+                    .items_start()
+                    .gap(s::GRID_GAP)
+                    .child(cell(
+                        "Refreshing · stale stays",
+                        view("pat-rv-refresh", &refreshing),
+                    ))
+                    .child(cell("Stale · refresh failed", view("pat-rv-stale", &stale)))
+                    .child(cell(
+                        "StateView · enum-driven",
+                        StateView::new("pat-sv-empty", ViewState::Empty)
+                            .empty(IconName::Film, "Nothing queued.", None)
+                            .into_any_element(),
+                    )),
+            )
     }
 }
 
@@ -1504,8 +1837,18 @@ impl Render for Lab {
             "menus" => self.menus(cx).into_any_element(),
             "detail" | "series" | "series-streams" => self.detail(window, cx).into_any_element(),
             "states" => self.states(window, cx).into_any_element(),
+            "patterns" => ScrollArea::new("patterns-scroll", self.scroll.clone())
+                .child(self.patterns(window, cx))
+                .into_any_element(),
+            "patterns-states" => ScrollArea::new("patterns-scroll", self.scroll.clone())
+                .child(
+                    col()
+                        .child(self.pattern_carousel())
+                        .child(self.pattern_states(cx)),
+                )
+                .into_any_element(),
             _ => ScrollArea::new("components-scroll", self.scroll.clone())
-                .child(self.components(cx))
+                .child(self.components(window, cx))
                 .into_any_element(),
         };
         div()

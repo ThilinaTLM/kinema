@@ -1,11 +1,16 @@
 //! Desktop v3 in-house component set built directly on GPUI (`gpui-pre`).
 //!
-//! Spec: `docs/design/desktop-v3.md`. Square geometry (no radius), hairlines,
-//! no drop shadows, tokens from [`tokens`], motion from [`motion`].
+//! Spec: `docs/design/desktop-v3.md`. Warm amber accent, subtle roundness
+//! (`tokens::radius` XS/SM/MD/LG), soft shadows only on raised surfaces
+//! (`tokens::elevation`), hairlines for structure, smooth motion from
+//! [`motion`] (reduced motion honored), cinematic artwork backdrops, compact
+//! desktop density. Tokens come from [`tokens`]; reusable compositions live in
+//! [`patterns`].
 //! Code here must use `gpui::*` directly, never `gpui_kit`.
 
 pub mod ambient_background;
 pub mod motion;
+pub mod patterns;
 pub mod text;
 pub mod tokens;
 

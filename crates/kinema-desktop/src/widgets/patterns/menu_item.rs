@@ -1,0 +1,20 @@
+//! Plain action menu entry used by context menus and overflow menus.
+use std::rc::Rc;
+
+use gpui::{App, Window};
+
+use crate::widgets::menu::MenuItem;
+
+pub fn menu_item(
+    label: &'static str,
+    handler: impl Fn(&mut Window, &mut App) + 'static,
+) -> MenuItem {
+    MenuItem::Action {
+        label: label.into(),
+        shortcut: None,
+        icon: None,
+        disabled_reason: None,
+        checked: false,
+        handler: Rc::new(handler),
+    }
+}
