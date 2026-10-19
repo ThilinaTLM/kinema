@@ -1,15 +1,16 @@
 //! Cinematic detail header: blurred backdrop fading into the canvas, poster,
 //! title, meta chips, clamped overview and action slots.
 //!
-//! With a backdrop the hero is a dark banner in either theme. Its own meta
-//! [`Badge`]s and More toggle switch to over-art styling automatically; callers
-//! should pass `.over_art(true)` to `Button`/`IconButton`/`Badge` slots
-//! (`primary`, `secondary`, `meta`) whenever a backdrop is present.
+//! The art melts into the canvas through one long gradient (stacked twice in
+//! light mode so dark ink always sits on a mostly-canvas surface). Dark art
+//! stays behind the controls only in dark mode, so over-art styling follows
+//! [`uses_over_art`]: the hero applies it to its own badges and More toggle;
+//! callers pass the same value to `Button`/`IconButton`/`Badge` slots.
 use std::{sync::Arc, time::Instant};
 
 use gpui::{prelude::*, *};
 
-use super::Badge;
+use super::{Badge, SkeletonText};
 
 use crate::{
     artwork::ArtworkState,
@@ -17,23 +18,37 @@ use crate::{
         IconName, TypeExt,
         button::{Button, ButtonVariant},
         motion::{self, Motion},
-        tokens::{Mode, Palette, elevation, palette, radius, space, theme, typeface},
+        tokens::{Mode, elevation, palette, radius, space, theme, typeface},
     },
 };
 
 /// Minimum hero height; content grows it when taller.
 const MIN_HEIGHT: Pixels = px(340.0);
+/// Footprint of the overview placeholder shown while the text loads.
+const OVERVIEW_SKELETON_WIDTH: Pixels = px(480.0);
 /// Poster frame width; screens that draw their own poster share this geometry.
 pub const POSTER_WIDTH: Pixels = px(168.0);
 /// Poster height / width (2:3).
 pub const POSTER_ASPECT: f32 = 1.5;
-const TEXT_MAX_WIDTH: Pixels = px(720.0);
+const TEXT_MAX_WIDTH: Pixels = px(640.0);
 /// Overview lines shown before expansion.
 const OVERVIEW_LINES: usize = 3;
 /// Overviews at most this long never need an expand toggle.
 const OVERVIEW_COLLAPSE_CHARS: usize = 220;
-/// Share of the hero (from the bottom) that fades into the canvas.
-const FADE_HEIGHT: f32 = 0.95;
+/// Share of the hero height over which the art melts into the canvas.
+const FADE_HEIGHT: f32 = 0.7;
+/// Default strength of the even veil over the backdrop (times `backdrop_scrim`).
+const DEFAULT_VEIL: f32 = 0.5;
+/// Default opacity of the leading-edge scrim that keeps the title legible.
+const DEFAULT_SIDE_SCRIM: f32 = 0.55;
+/// Where the leading-edge scrim has fully faded out.
+const SIDE_SCRIM_REACH: f32 = 0.7;
+
+/// Whether controls over a backdrop should use dark over-art styling: only
+/// when dark art really sits behind them (dark mode with a backdrop).
+pub fn uses_over_art(has_backdrop: bool, mode: Mode) -> bool {
+    has_backdrop && mode == Mode::Dark
+}
 
 enum MetaItem {
     Element(AnyElement),
@@ -59,6 +74,12 @@ pub struct MediaHero {
     overview: Option<SharedString>,
     primary: Option<AnyElement>,
     secondary: Vec<AnyElement>,
+    min_height: Pixels,
+    fill: bool,
+    fade_into: Option<Hsla>,
+    veil: f32,
+    side_scrim: f32,
+    overview_loading: bool,
 }
 
 impl MediaHero {
@@ -73,6 +94,12 @@ impl MediaHero {
             overview: None,
             primary: None,
             secondary: Vec::new(),
+            min_height: MIN_HEIGHT,
+            fill: false,
+            fade_into: None,
+            veil: DEFAULT_VEIL,
+            side_scrim: DEFAULT_SIDE_SCRIM,
+            overview_loading: false,
         }
     }
     /// Blurred, darkened image from `artwork::backdrop*`.
@@ -109,6 +136,35 @@ impl MediaHero {
     /// A badge in the meta line; it gets over-art styling when a backdrop is set.
     pub fn meta_badge(mut self, badge: Badge) -> Self {
         self.meta.push(MetaItem::Badge(badge));
+        self
+    }
+    /// Minimum hero height (default 340 px); content grows it when taller.
+    pub fn min_height(mut self, min_height: Pixels) -> Self {
+        self.min_height = min_height;
+        self
+    }
+    /// Grow into spare space of a flex-column parent (with `min_height` as the
+    /// floor), so the hero absorbs whatever the siblings leave empty.
+    pub fn fill(mut self, fill: bool) -> Self {
+        self.fill = fill;
+        self
+    }
+    /// Canvas color the art melts into (default: theme canvas); pass the
+    /// artwork-tinted canvas so the seam is invisible.
+    pub fn fade_into(mut self, canvas: Hsla) -> Self {
+        self.fade_into = Some(canvas);
+        self
+    }
+    /// Veil strength over the backdrop (0 = none, 1 = full `backdrop_scrim`)
+    /// and opacity of the leading-edge scrim behind the text.
+    pub fn scrims(mut self, veil: f32, side: f32) -> Self {
+        self.veil = veil.clamp(0.0, 1.0);
+        self.side_scrim = side.clamp(0.0, 1.0);
+        self
+    }
+    /// Show an overview-shaped skeleton while the text is still loading.
+    pub fn overview_loading(mut self, loading: bool) -> Self {
+        self.overview_loading = loading;
         self
     }
     pub fn overview(mut self, overview: impl Into<SharedString>) -> Self {
@@ -187,13 +243,22 @@ impl RenderOnce for MediaHero {
                 .collect::<Vec<_>>()
         });
         let has_backdrop = backdrop.is_some();
-        // A light canvas under a dark backdrop would leave dark ink over dark
-        // art mid-fade, so light mode keeps a dark banner with light ink instead.
-        let banner = has_backdrop && theme(cx).mode == Mode::Light;
-        let (ink, fade_to) = if banner {
-            (Palette::dark(), p.scrim_max)
-        } else {
-            (p, p.bg_canvas)
+        let mode = theme(cx).mode;
+        let over_art = uses_over_art(has_backdrop, mode);
+        let canvas = self.fade_into.unwrap_or(p.bg_canvas);
+        let ink = p;
+        let ramp = |fraction: f32| {
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .h(relative(fraction))
+                .bg(linear_gradient(
+                    180.,
+                    linear_color_stop(canvas.opacity(0.0), 0.),
+                    linear_color_stop(canvas, 1.),
+                ))
         };
 
         let poster = self.poster.map(|poster| {
@@ -210,6 +275,7 @@ impl RenderOnce for MediaHero {
                 .child(div().size_full().child(poster))
         });
 
+        let loading = self.overview_loading && self.overview.is_none();
         let overview = self.overview.map(|text| {
             let collapsible = overview_collapsible(&text);
             let toggle = collapsible.then(|| {
@@ -222,7 +288,7 @@ impl RenderOnce for MediaHero {
                 Button::new((self.id.clone(), "overview-toggle"), label)
                     .variant(ButtonVariant::Ghost)
                     .icon(icon)
-                    .over_art(has_backdrop)
+                    .over_art(over_art)
                     .on_click(move |_, _, cx| {
                         expanded.update(cx, |state, cx| {
                             *state = !*state;
@@ -248,34 +314,46 @@ impl RenderOnce for MediaHero {
                 .children(toggle.map(|toggle| div().flex().child(toggle)))
         });
 
+        let overview = overview.or_else(|| {
+            loading.then(|| {
+                div()
+                    .w(OVERVIEW_SKELETON_WIDTH)
+                    .max_w_full()
+                    .child(SkeletonText::new(OVERVIEW_LINES))
+            })
+        });
         let has_actions = self.primary.is_some() || !self.secondary.is_empty();
         div()
             .id(self.id)
             .relative()
             .w_full()
-            .min_h(MIN_HEIGHT)
+            .min_h(self.min_height)
+            .when(self.fill, |el| el.flex_grow_1().flex_shrink_0())
             .flex()
             .flex_col()
             .justify_end()
             .overflow_hidden()
-            .bg(p.bg_canvas)
+            .bg(canvas)
             .children(backdrop.into_iter().flatten())
+            // Even veil keeps the art readable but present; the side scrim
+            // protects the title.
             .when(has_backdrop, |el| {
-                el.child(div().absolute().inset_0().bg(p.backdrop_scrim))
+                el.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(p.backdrop_scrim.opacity(self.veil)),
+                )
+                .child(div().absolute().inset_0().bg(linear_gradient(
+                    90.,
+                    linear_color_stop(canvas.opacity(self.side_scrim), 0.),
+                    linear_color_stop(canvas.opacity(0.0), SIDE_SCRIM_REACH),
+                )))
+                .child(ramp(FADE_HEIGHT))
             })
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .h(relative(FADE_HEIGHT))
-                    .bg(linear_gradient(
-                        180.,
-                        linear_color_stop(fade_to.opacity(0.0), 0.),
-                        linear_color_stop(fade_to, 1.),
-                    )),
-            )
+            .when(has_backdrop && mode == Mode::Light, |el| {
+                el.child(ramp(FADE_HEIGHT))
+            })
             .child(
                 div()
                     .relative()
@@ -284,7 +362,7 @@ impl RenderOnce for MediaHero {
                     .gap(space::S24)
                     .px(space::GRID_INSET)
                     .pt(space::S48)
-                    .pb(space::S20)
+                    .pb(space::S24)
                     .children(poster)
                     .child(
                         div()
@@ -312,7 +390,7 @@ impl RenderOnce for MediaHero {
                                         .children(self.meta.into_iter().map(|item| match item {
                                             MetaItem::Element(el) => el,
                                             MetaItem::Badge(badge) => {
-                                                badge.over_art(has_backdrop).into_any_element()
+                                                badge.over_art(over_art).into_any_element()
                                             }
                                         })),
                                 )
@@ -337,7 +415,15 @@ impl RenderOnce for MediaHero {
 
 #[cfg(test)]
 mod tests {
-    use super::{OVERVIEW_COLLAPSE_CHARS, overview_collapsible};
+    use super::{OVERVIEW_COLLAPSE_CHARS, overview_collapsible, uses_over_art};
+    use crate::widgets::tokens::Mode;
+
+    #[test]
+    fn over_art_only_for_dark_mode_with_a_backdrop() {
+        assert!(uses_over_art(true, Mode::Dark));
+        assert!(!uses_over_art(true, Mode::Light));
+        assert!(!uses_over_art(false, Mode::Dark));
+    }
 
     #[test]
     fn only_long_overviews_get_a_toggle() {

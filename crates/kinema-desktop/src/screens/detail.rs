@@ -12,8 +12,8 @@ use crate::{
         menu::{ContextMenuExt, MenuItem, Select, SelectEvent},
         motion::{self, Motion},
         patterns::{
-            Badge, BadgeTone, Carousel, ListRow, Section, Skeleton, SkeletonText, StateView,
-            ViewSelection, menu_item, select_view,
+            Badge, BadgeTone, Carousel, ListRow, Section, Skeleton, StateView, ViewSelection,
+            menu_item, select_view,
         },
         segmented::Segmented,
         skeleton_card::SkeletonCard,
@@ -60,8 +60,6 @@ mod geometry {
     pub const EPISODE_ART_HEIGHT: Pixels = px(54.);
     pub const SIMILAR_WIDTH: f32 = 132.;
     pub const SIMILAR_HEIGHT: f32 = 198.;
-    pub const OVERVIEW_SKELETON_WIDTH: Pixels = px(480.);
-    pub const OVERVIEW_MAX_WIDTH: Pixels = px(640.);
     /// The hero reaches at least this share of the viewport height; it grows
     /// further when nothing else fills the column.
     pub const HERO_MIN_FRACTION: f32 = 0.62;
@@ -260,7 +258,6 @@ pub(crate) struct Detail {
     target: Option<PlaybackTarget>,
     filter: Quality,
     expanded: bool,
-    overview_open: bool,
     selected: Option<usize>,
     stream_focus: Vec<FocusHandle>,
     episode_focus: HashMap<(u32, u32), FocusHandle>,
@@ -340,7 +337,6 @@ impl Detail {
             target,
             filter: Quality::All,
             expanded: false,
-            overview_open: false,
             selected: None,
             stream_focus: Vec::new(),
             episode_focus: HashMap::new(),

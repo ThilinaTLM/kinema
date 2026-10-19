@@ -19,7 +19,7 @@ pub use badge::{Badge, BadgeTone};
 pub use card::Card;
 pub use carousel::Carousel;
 pub use list_row::ListRow;
-pub use media_hero::{MediaHero, POSTER_ASPECT, POSTER_WIDTH};
+pub use media_hero::{MediaHero, POSTER_ASPECT, POSTER_WIDTH, uses_over_art};
 pub use menu_item::menu_item;
 #[cfg_attr(not(feature = "ui-probe"), allow(unused_imports))]
 pub(crate) use resource_view::ResourceView;
