@@ -1,18 +1,15 @@
 use std::{cell::Cell, process::ExitCode, rc::Rc};
 
 use kinema_desktop::screens;
-use tracing_subscriber::EnvFilter;
 
 fn main() -> ExitCode {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    if let Err(error) = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .try_init()
-    {
-        eprintln!("Kinema could not initialize logging: {error}");
-        return ExitCode::FAILURE;
-    }
+    let _logging_guard = match kinema_desktop::logging::init() {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("Kinema could not initialize logging: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     run_desktop()
 }

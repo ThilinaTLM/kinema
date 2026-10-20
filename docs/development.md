@@ -79,6 +79,48 @@ Keep shared dependency versions in the root workspace. Update and review
 `Cargo.lock` intentionally when changing dependencies; do not omit `--locked` to
 hide a stale lockfile during validation. There is no Rust release-packaging pipeline yet.
 
+## Logging
+
+Desktop startup installs human-readable stderr diagnostics and non-ANSI daily
+files named `kinema.YYYY-MM-DD` under `AppPaths.cache/logs`: `./data/logs/`
+relative to the working directory in development, native `cache_dir()/logs/`
+in production. At most **7 matching log files** are retained (not a byte quota).
+A bounded non-blocking writer keeps file writes off the UI thread; under overload
+it may drop messages. Its guard flushes on normal exit; aborts or forced termination
+can lose queued messages. Directory/file setup failure warns and leaves stderr
+logging enabled; it never prevents startup. Panics are logged and then passed to
+the previous panic hook. Panic messages must also be free of secrets.
+
+`RUST_LOG` overrides the default filter (missing/invalid values use the default):
+
+```text
+info,kinema_desktop=info,kinema_core=info,wgpu_hal=warn,naga=warn,zbus=warn,reqwest=warn,hyper=warn,hyper_util=warn
+```
+
+```sh
+RUST_LOG=kinema_desktop=debug cargo run -p kinema-desktop --locked
+RUST_LOG=info,kinema_desktop=debug,kinema_core=debug cargo run -p kinema-desktop --locked
+```
+
+A target-only filter enables that target and suppresses unmatched dependencies.
+There is no `KINEMA_LOG` setting. Startup records version, OS/architecture, build
+mode (`debug_assertions`), and the log directory. This foundation does not yet
+instrument every service failure.
+
+Never log credentials, bearer tokens, debrid/signed URLs, magnet links, full query
+strings, or raw reqwest errors/sources. Use `logging::safe_url` for host-only URL
+diagnostics; `safe_url_with_path` is only for paths known to be public and free of
+tokens/personal data. Use `http_error_kind` instead of displaying HTTP errors;
+DNS/TLS failures are not distinguished from connect/request without stable typed
+predicates. IDs (IMDb/TMDB), durations, status codes, counts, sizes and categories
+are appropriate. Helpers do not sanitize arbitrary log fields or dependency logs;
+review verbose dependency filters and logs before sharing them.
+
+Levels: **error** for bugs/unrecoverable failures, **warn** for failed operations
+seen by the user, **info** for lifecycle (startup, worker/session start/stop,
+settings saved), **debug** for per-request timing/outcomes, **trace** for noisy
+detail. See `crates/kinema-desktop/src/logging.rs` for the helper contract.
+
 ## Quickstart and setup
 
 V3 is the sole/default UI. These steps describe current source wiring, not a

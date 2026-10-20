@@ -3,8 +3,9 @@
 **Agreed target:** media is stored locally and served to external players,
 including while downloading, with a user-configurable cache maximum. Only the
 catalog location below originated in the first increment. Settings, managed-media,
-and loopback-server modules are now wired in source; broader artwork/log and
-cleanup policies not explicitly labeled implemented remain proposals.
+and loopback-server modules are now wired in source; artwork and logging are
+implemented as described below. Cleanup policies not explicitly labeled implemented
+remain proposals.
 
 ## Implemented catalog location
 
@@ -72,9 +73,12 @@ separate proven-ID transaction, not eviction. No history/library tables are adde
 **Agreed development root:** with `debug_assertions` enabled, all ordinary
 application data (including future settings, artwork, logs, and managed media)
 belongs under `./data/` relative to the process working directory. Credentials
-remain in OS secure storage, never this tree. Catalog, settings, and media storage
-use this rule; artwork is implemented as documented above, while log caching/
-rotation in the proposed layout is not a claim of implemented behavior.
+remain in OS secure storage, never this tree. Catalog, settings, media, artwork, and logs use this rule. **Implemented logs:**
+`AppPaths.cache/logs/` (`./data/logs/` in development, native `cache_dir()/logs/`
+in production), daily rotation with prefix `kinema`, retaining at most **7 matching
+files**. Non-blocking file output has no ANSI colors; file setup failure leaves
+stderr enabled. Retention is a file-count limit, not a byte quota. See
+[Logging](development.md#logging) for filters and the redaction policy.
 
 For production, use native directories in the `kinema` application namespace, not
 hardcoded home paths. The following broader root/layout examples remain proposed,
@@ -95,7 +99,7 @@ CONFIG/
   settings.toml                 # Non-secret settings
 CACHE/
   artwork/
-  logs/                         # Bounded, rotated diagnostics
+  logs/                         # Implemented: daily kinema.YYYY-MM-DD, max 7 files
   media/
     <opaque-asset-id>/
       payload                   # One file, partial or complete

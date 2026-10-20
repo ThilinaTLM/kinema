@@ -23,6 +23,8 @@ mod catalog_worker;
 #[cfg(not(target_family = "wasm"))]
 pub mod credentials;
 #[cfg(not(target_family = "wasm"))]
+pub mod logging;
+#[cfg(not(target_family = "wasm"))]
 pub mod media;
 #[cfg(not(target_family = "wasm"))]
 mod metadata_bridge;
