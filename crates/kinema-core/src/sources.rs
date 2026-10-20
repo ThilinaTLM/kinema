@@ -109,6 +109,147 @@ pub enum FileSelection {
     NotFound,
 }
 
+/// Indexer-provided identity, never a ranking by file size or list position.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FileHint {
+    pub file_index: Option<u32>,
+    pub filename: Option<String>,
+}
+
+impl From<&TorrentSource> for FileHint {
+    fn from(source: &TorrentSource) -> Self {
+        Self {
+            file_index: source.file_index,
+            filename: source.filename.clone(),
+        }
+    }
+}
+
+impl FileSelection {
+    /// Non-unique preparations must show this error, never a file picker.
+    pub fn error_message(&self) -> Option<&'static str> {
+        match self {
+            Self::Unique(_) => None,
+            Self::Ambiguous(_) | Self::NotFound => {
+                Some("Couldn't identify the file in this torrent — try another stream.")
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileSelectionMethod {
+    Filename,
+    FileIndex,
+    Heuristic,
+    None,
+}
+
+impl FileSelectionMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Filename => "filename",
+            Self::FileIndex => "file_index",
+            Self::Heuristic => "heuristic",
+            Self::None => "none",
+        }
+    }
+}
+
+/// Select by exact basename, then reliable torrent index, then strict policy.
+/// Torrentio/Peerflix indices are zero-based torrent indices. Real-Debrid keeps
+/// one-based torrent indices in file IDs (not array positions). AllDebrid IDs in
+/// our adapter are synthetic depth-first tree positions: never use them here.
+/// Duplicate basenames need an agreeing reliable index, otherwise are ambiguous.
+/// Size is deliberately not a tiebreaker: candidate sizes can describe a pack.
+pub fn select_file_with_hint(
+    target: &PlaybackTarget,
+    files: &[RemoteFile],
+    provider: DebridKind,
+    hint: Option<&FileHint>,
+) -> (FileSelection, FileSelectionMethod) {
+    let indexed = hint.and_then(|hint| {
+        let id = u64::from(hint.file_index?) + 1;
+        if provider != DebridKind::RealDebrid {
+            return None;
+        }
+        let matches: Vec<_> = files
+            .iter()
+            .enumerate()
+            .filter(|(_, file)| {
+                file.id.parse::<u64>().ok() == Some(id) && eligible_hint_path(&file.path, target)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        match matches.as_slice() {
+            [index] => Some(*index),
+            _ => None,
+        }
+    });
+    if let Some(filename) = hint.and_then(|hint| hint.filename.as_deref()) {
+        let basename = basename(filename).to_lowercase();
+        let matches: Vec<_> = files
+            .iter()
+            .enumerate()
+            .filter(|(_, file)| {
+                basename == self::basename(&file.path).to_lowercase()
+                    && eligible_hint_path(&file.path, target)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        match matches.as_slice() {
+            [] => {}
+            [index] => return (FileSelection::Unique(*index), FileSelectionMethod::Filename),
+            _ => {
+                let selection = match indexed.filter(|i| matches.contains(i)) {
+                    Some(index) => FileSelection::Unique(index),
+                    None => FileSelection::Ambiguous(matches),
+                };
+                return (selection, FileSelectionMethod::Filename);
+            }
+        }
+    }
+    if let Some(index) = indexed {
+        return (FileSelection::Unique(index), FileSelectionMethod::FileIndex);
+    }
+    let selection = select_file(target, files);
+    let method = if matches!(selection, FileSelection::Unique(_)) {
+        FileSelectionMethod::Heuristic
+    } else {
+        FileSelectionMethod::None
+    };
+    (selection, method)
+}
+
+fn basename(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or("")
+}
+
+// Explicit identity permits unnumbered episode names, but not contradictory,
+// malformed, or multi-episode markers. Strict fallback still requires a marker.
+fn eligible_hint_path(path: &str, target: &PlaybackTarget) -> bool {
+    let lower = path.to_lowercase();
+    let Some(stem) = eligible_video_stem(&lower) else {
+        return false;
+    };
+    let PlaybackTarget::Episode {
+        season, episode, ..
+    } = target
+    else {
+        return true;
+    };
+    if let Some(pair) = episode_marker(stem) {
+        return pair == (*season, *episode);
+    }
+    // Detect even embedded/malformed SxxExx and NxNN markers, rather than
+    // mistaking a rejected range or marker for an unnumbered filename.
+    let bytes = stem.as_bytes();
+    !bytes.iter().enumerate().any(|(i, byte)| {
+        (*byte == b's' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit))
+            || (*byte == b'x' && i > 0 && bytes[i - 1].is_ascii_digit())
+    })
+}
+
 /// Returns original input indices, never ranks by size, ID, or input order.
 /// Paths are provider paths, not host filesystem paths. Both slash styles work.
 /// Movies admit any non-extra video; episodes require an exact, standalone
@@ -130,16 +271,27 @@ pub fn select_file(target: &PlaybackTarget, files: &[RemoteFile]) -> FileSelecti
 
 fn eligible_path(path: &str, target: &PlaybackTarget) -> bool {
     let lower = path.to_lowercase();
+    let Some(stem) = eligible_video_stem(&lower) else {
+        return false;
+    };
+    match target {
+        PlaybackTarget::Movie(_) => true,
+        PlaybackTarget::Episode {
+            season, episode, ..
+        } => episode_marker(stem) == Some((*season, *episode)),
+    }
+}
+
+// Receives a lowercase provider path and returns an eligible video basename stem.
+fn eligible_video_stem(lower: &str) -> Option<&str> {
     if lower
         .split(|c: char| !c.is_alphanumeric())
         .any(|token| matches!(token, "sample" | "samples" | "trailer" | "trailers"))
     {
-        return false;
+        return None;
     }
     let basename = lower.rsplit(['/', '\\']).next().unwrap_or("");
-    let Some((stem, extension)) = basename.rsplit_once('.') else {
-        return false;
-    };
+    let (stem, extension) = basename.rsplit_once('.')?;
     if !matches!(
         extension,
         "mkv"
@@ -156,14 +308,9 @@ fn eligible_path(path: &str, target: &PlaybackTarget) -> bool {
             | "flv"
             | "ogv"
     ) {
-        return false;
+        return None;
     }
-    match target {
-        PlaybackTarget::Movie(_) => true,
-        PlaybackTarget::Episode {
-            season, episode, ..
-        } => episode_marker(stem) == Some((*season, *episode)),
-    }
+    Some(stem)
 }
 
 // Tokenization is intentionally strict: concatenated/multi-episode markers such
@@ -200,7 +347,7 @@ fn episode_marker(stem: &str) -> Option<(u32, u32)> {
             return None;
         }
         // A following bare number or E-number is potentially a multi-episode
-        // range; prefer an explicit picker over guessing from release metadata.
+        // range; reject the file rather than guessing from release metadata.
         if let Some(next) = tokens.get(index + 1) {
             let number = next.strip_prefix('e').unwrap_or(next);
             if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) {
@@ -238,6 +385,189 @@ mod tests {
                 size: (i as u64 + 1) * 100,
             })
             .collect()
+    }
+
+    fn hinted(
+        target: &PlaybackTarget,
+        files: &[RemoteFile],
+        provider: DebridKind,
+        index: Option<u32>,
+        name: Option<&str>,
+    ) -> (FileSelection, FileSelectionMethod) {
+        select_file_with_hint(
+            target,
+            files,
+            provider,
+            Some(&FileHint {
+                file_index: index,
+                filename: name.map(str::to_owned),
+            }),
+        )
+    }
+
+    #[test]
+    fn filename_hint_wins_over_pack_ambiguity_and_index() {
+        let pack = files(&["a/First.mkv", "b/Second.MKV"]);
+        assert_eq!(
+            hinted(
+                &movie(),
+                &pack,
+                DebridKind::RealDebrid,
+                Some(0),
+                Some("C:\\release\\SECOND.mkv")
+            ),
+            (FileSelection::Unique(1), FileSelectionMethod::Filename)
+        );
+        assert_eq!(
+            hinted(
+                &episode(1, 2),
+                &files(&["01.mkv", "02.mkv"]),
+                DebridKind::AllDebrid,
+                None,
+                Some("02.mkv")
+            )
+            .0,
+            FileSelection::Unique(1)
+        );
+    }
+
+    #[test]
+    fn duplicate_basenames_require_agreeing_reliable_index() {
+        let pack = files(&["a/Movie.mkv", "b/Movie.mkv"]);
+        assert_eq!(
+            hinted(
+                &movie(),
+                &pack,
+                DebridKind::RealDebrid,
+                Some(0),
+                Some("movie.mkv")
+            )
+            .0,
+            FileSelection::Unique(1)
+        ); // ID 1, not position 0
+        for provider in [DebridKind::RealDebrid, DebridKind::AllDebrid] {
+            assert_eq!(
+                hinted(&movie(), &pack, provider, None, Some("movie.mkv")).0,
+                FileSelection::Ambiguous(vec![0, 1])
+            );
+        }
+        assert_eq!(
+            hinted(
+                &movie(),
+                &pack,
+                DebridKind::AllDebrid,
+                Some(0),
+                Some("movie.mkv")
+            )
+            .0,
+            FileSelection::Ambiguous(vec![0, 1])
+        );
+    }
+
+    #[test]
+    fn hints_never_admit_extras_nonvideo_or_conflicting_episode_markers() {
+        for name in [
+            "sample.mkv",
+            "trailers/Movie.mp4",
+            "movie.txt",
+            "Show.S01E03.mkv",
+            "Show.S01E02E03.mkv",
+            "Show.S01E02-03.mkv",
+            "ShowS01E03.mkv",
+        ] {
+            let mut pack = files(&[name]);
+            pack[0].id = "1".into();
+            assert_eq!(
+                hinted(
+                    &episode(1, 2),
+                    &pack,
+                    DebridKind::RealDebrid,
+                    Some(0),
+                    Some(name)
+                )
+                .0,
+                FileSelection::NotFound,
+                "{name}"
+            );
+        }
+        // Invalid hints may still fall back to a different, strictly matched file.
+        assert_eq!(
+            hinted(
+                &episode(1, 2),
+                &files(&["sample.mkv", "Show.S01E02.mkv"]),
+                DebridKind::RealDebrid,
+                None,
+                Some("sample.mkv")
+            ),
+            (FileSelection::Unique(1), FileSelectionMethod::Heuristic)
+        );
+    }
+
+    #[test]
+    fn real_debrid_index_uses_one_based_id_not_array_position() {
+        let mut pack = files(&["third.mkv", "first.mkv", "second.mkv"]);
+        for (file, id) in pack.iter_mut().zip(["3", "1", "2"]) {
+            file.id = id.into();
+        }
+        for (hint, expected) in [(0, 1), (1, 2), (2, 0)] {
+            assert_eq!(
+                hinted(&movie(), &pack, DebridKind::RealDebrid, Some(hint), None),
+                (
+                    FileSelection::Unique(expected),
+                    FileSelectionMethod::FileIndex
+                )
+            );
+        }
+        for index in [3, u32::MAX] {
+            assert_eq!(
+                hinted(&movie(), &pack, DebridKind::RealDebrid, Some(index), None).0,
+                FileSelection::Ambiguous(vec![0, 1, 2])
+            );
+        }
+    }
+
+    #[test]
+    fn alldebrid_tree_positions_are_not_torrent_indices() {
+        let pack = files(&["folder/a.mkv", "b.mkv"]);
+        assert_eq!(
+            hinted(&movie(), &pack, DebridKind::AllDebrid, Some(0), None),
+            (
+                FileSelection::Ambiguous(vec![0, 1]),
+                FileSelectionMethod::None
+            )
+        );
+        assert_eq!(
+            hinted(
+                &movie(),
+                &pack,
+                DebridKind::AllDebrid,
+                Some(0),
+                Some("b.mkv")
+            )
+            .0,
+            FileSelection::Unique(1)
+        );
+    }
+
+    #[test]
+    fn missing_hints_preserve_strict_selection_and_errors() {
+        for target in [movie(), episode(1, 2)] {
+            let pack = files(&["Show.S01E02.mkv", "Show.S01E03.mkv"]);
+            assert_eq!(
+                select_file_with_hint(&target, &pack, DebridKind::RealDebrid, None).0,
+                select_file(&target, &pack)
+            );
+        }
+        assert_eq!(FileSelection::Unique(0).error_message(), None);
+        for selection in [
+            FileSelection::NotFound,
+            FileSelection::Ambiguous(vec![0, 1]),
+        ] {
+            assert_eq!(
+                selection.error_message(),
+                Some("Couldn't identify the file in this torrent — try another stream.")
+            );
+        }
     }
 
     #[test]

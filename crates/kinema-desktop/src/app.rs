@@ -11,7 +11,9 @@ use crate::{
 };
 use kinema_core::{
     CacheBudget,
-    sources::{DebridKind, FileSelection, PlaybackTarget, SourceCandidate, select_file},
+    sources::{
+        DebridKind, FileHint, FileSelection, PlaybackTarget, SourceCandidate, select_file_with_hint,
+    },
 };
 use std::{
     collections::VecDeque,
@@ -91,6 +93,8 @@ pub enum AppOutcome {
         credentials: Vec<(DebridKind, CredentialState)>,
         tmdb_credential: CredentialState,
     },
+    /// Auto-play only `Unique(index)`; otherwise show `selection.error_message()`.
+    /// Non-unique preparations cannot be used by `PlayFile`.
     Prepared {
         prepared: PreparedTorrent,
         target: PlaybackTarget,
@@ -557,6 +561,7 @@ impl Default for PlaybackIo {
 
 struct Preparation {
     id: u64,
+    selected_file_id: String,
     prepared: PreparedTorrent,
     client: Arc<dyn DebridApi>,
 }
@@ -751,12 +756,28 @@ impl Application {
                 check(&cancel)?;
                 check(&account)?;
                 validate(settings.debrid)?;
-                let selection = select_file(&target, &prepared.files);
-                self.prepared = Some(Preparation {
-                    id: command.generation,
-                    prepared: prepared.clone(),
-                    client,
-                });
+                let hint = FileHint::from(&candidate.torrent);
+                let (selection, method) =
+                    select_file_with_hint(&target, &prepared.files, prepared.provider, Some(&hint));
+                tracing::debug!(
+                    method = method.as_str(),
+                    file_count = prepared.files.len(),
+                    match_count = match &selection {
+                        FileSelection::Unique(_) => 1,
+                        FileSelection::Ambiguous(indices) => indices.len(),
+                        FileSelection::NotFound => 0,
+                    },
+                    unique = matches!(selection, FileSelection::Unique(_)),
+                    "Torrent file selection completed"
+                );
+                if let FileSelection::Unique(index) = &selection {
+                    self.prepared = Some(Preparation {
+                        id: command.generation,
+                        selected_file_id: prepared.files[*index].id.clone(),
+                        prepared: prepared.clone(),
+                        client,
+                    });
+                }
                 Ok(AppOutcome::Prepared {
                     prepared,
                     target,
@@ -772,6 +793,12 @@ impl Application {
                     .as_ref()
                     .filter(|p| p.id == preparation)
                     .ok_or("Preparation is obsolete; prepare the source again")?;
+                if current.selected_file_id != file_id {
+                    return Err(
+                        "Couldn't identify the file in this torrent — try another stream.".into(),
+                    );
+                }
+                tracing::debug!("Playing policy-selected torrent file");
                 validate(current.prepared.provider)?;
                 let prepared = current.prepared.clone();
                 let client = current.client.clone();
@@ -2084,6 +2111,116 @@ mod tests {
         }
         Err("fixture worker timed out".into())
     }
+    #[test]
+    fn composition_nonunique_preparation_reports_error_and_cannot_play()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let upstream = HttpFixture::start()?;
+        let root = tempfile::tempdir()?;
+        let trace = Arc::new(PlaybackTrace::default());
+        let worker = composed_worker(
+            root.path(),
+            upstream.url.clone(),
+            trace.clone(),
+            false,
+            false,
+        )?;
+        for (generation, target, ambiguous) in [
+            (
+                1,
+                PlaybackTarget::Movie(episode(1)?.imdb_id().clone()),
+                true,
+            ),
+            (3, episode(99)?, false),
+        ] {
+            let outcome = command_result(
+                &worker,
+                generation,
+                AppAction::Prepare {
+                    target,
+                    candidate: fixture_candidate()?,
+                },
+            )?;
+            let AppOutcome::Prepared { selection, .. } = outcome else {
+                return Err("expected preparation outcome".into());
+            };
+            assert_eq!(matches!(selection, FileSelection::Ambiguous(_)), ambiguous);
+            assert_eq!(
+                selection.error_message(),
+                Some("Couldn't identify the file in this torrent — try another stream.")
+            );
+            assert!(matches!(
+                command_result(
+                    &worker,
+                    generation + 1,
+                    AppAction::PlayFile {
+                        preparation: generation,
+                        file_id: "episode-2".into(),
+                    }
+                )?,
+                AppOutcome::Failed { .. }
+            ));
+        }
+        assert!(
+            trace
+                .resolved
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(
+            trace
+                .launched
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn composition_filename_hint_selects_pack_file_and_rejects_other_file()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let upstream = HttpFixture::start()?;
+        let root = tempfile::tempdir()?;
+        let trace = Arc::new(PlaybackTrace::default());
+        let worker = composed_worker(
+            root.path(),
+            upstream.url.clone(),
+            trace.clone(),
+            false,
+            false,
+        )?;
+        let mut candidate = fixture_candidate()?;
+        candidate.torrent.filename = Some("release/Show.S01E02.mkv".into());
+        let outcome = command_result(
+            &worker,
+            1,
+            AppAction::Prepare {
+                target: PlaybackTarget::Movie(episode(1)?.imdb_id().clone()),
+                candidate,
+            },
+        )?;
+        assert!(matches!(
+            outcome,
+            AppOutcome::Prepared {
+                selection: FileSelection::Unique(1),
+                ..
+            }
+        ));
+        assert!(matches!(command_result(&worker, 2, AppAction::PlayFile {
+            preparation: 1, file_id: "episode-1".into(),
+        })?, AppOutcome::Failed { message }
+            if message == "Couldn't identify the file in this torrent — try another stream."));
+        assert!(
+            trace
+                .resolved
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        Ok(())
+    }
+
     #[test]
     fn composition_explicit_episode_plays_only_loopback_and_survives_new_navigation()
     -> Result<(), Box<dyn std::error::Error>> {
