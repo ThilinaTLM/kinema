@@ -1,5 +1,5 @@
 //! App-owned bounded artwork. Call `request` from event handlers (or rendering: it
-//! only queues work); all transport and decoding runs on the background executor.
+//! only queues work); all transport and decoding runs on an owned, bounded thread pool.
 //! UI elements should use returned RenderImages directly, not a RetainAll cache.
 use gpui::{App, BorrowAppContext, Global, RenderImage, Task};
 use image::{ImageFormat, ImageReader};
@@ -9,12 +9,14 @@ use std::{
     fs,
     io::{Cursor, Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, mpsc},
+    thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime},
 };
 
 const ACTIVE: usize = 8;
 const QUEUED: usize = 128;
+const INTERACTIVE_RESERVED: usize = 2;
 const ENCODED: u64 = 4 * 1024 * 1024;
 const PIXELS: u64 = 8 * 1024 * 1024;
 const EDGE: u32 = 8192;
@@ -235,6 +237,7 @@ struct Job {
     owner: String,
     generation: u64,
     key: ArtworkKey,
+    interactive: bool,
 }
 #[derive(Clone)]
 struct DecodedArtwork {
@@ -254,6 +257,8 @@ struct ArtworkStore {
     tasks: HashMap<u64, Task<()>>,
     cache: VecDeque<Cached>,
     next: u64,
+    newest_owner: Option<String>,
+    workers: Option<ArtworkWorkers>,
 }
 impl Global for ArtworkStore {}
 pub fn init(cx: &mut App) {
@@ -295,8 +300,9 @@ pub fn request(owner: &str, generation: u64, key: ArtworkKey, cx: &mut App) {
     cx.update_global::<ArtworkStore, _>(|store, _| store.enqueue(owner, generation, key));
     pump(cx);
 }
-/// Replace this owner's queued window in priority order, then start work. Active
-/// work retains its slot; repeated viewport passes promote newly visible posters.
+/// Replace this owner's queued prefetch window, preserving explicit requests.
+/// Active work retains its slot. Explicit/visible requests outrank all prefetch;
+/// within each class the most recently activated owner is served first.
 pub fn request_window(owner: &str, generation: u64, keys: Vec<ArtworkKey>, cx: &mut App) {
     init(cx);
     cx.update_global::<ArtworkStore, _>(|store, _| {
@@ -316,21 +322,12 @@ fn pump(cx: &mut App) {
         let source = cx.update_global::<ArtworkStore, _>(|store, _| {
             job.key.blurred.then(|| store.source(&job.key)).flatten()
         });
+        let receiver = cx.update_global::<ArtworkStore, _>(|store, _| {
+            let workers = store.workers.get_or_insert_with(ArtworkWorkers::new);
+            workers.submit(job.key.clone(), source)
+        });
         let task = cx.spawn(async move |cx| {
-            let url = job.key.url.clone();
-            let kind = job.key.kind;
-            let blurred = job.key.blurred;
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    let decoded = source.unwrap_or_else(|| fetch(&url, kind))?;
-                    if blurred {
-                        derive_backdrop(&decoded)
-                    } else {
-                        Ok(decoded)
-                    }
-                })
-                .await;
+            let result = receiver.await.unwrap_or(Err(ArtworkError::Transport));
             cx.update(|cx| {
                 cx.update_global::<ArtworkStore, _>(|store, cx| {
                     if store.complete(&job, result) {
@@ -346,6 +343,68 @@ fn pump(cx: &mut App) {
         cx.update_global::<ArtworkStore, _>(|store, _| {
             store.tasks.insert(id, task);
         });
+    }
+}
+// Only ACTIVE jobs can be submitted by pump. Dropping the store closes the
+// channel: idle threads exit, in-flight blocking calls finish under HTTP timeouts.
+// Never join these threads on the UI thread. No blocking work uses GPUI's executor.
+type ArtworkResult = Result<DecodedArtwork, ArtworkError>;
+struct ArtworkWork {
+    key: ArtworkKey,
+    source: Option<ArtworkResult>,
+    reply: tokio::sync::oneshot::Sender<ArtworkResult>,
+}
+struct ArtworkWorkers {
+    sender: mpsc::SyncSender<ArtworkWork>,
+    threads: Vec<JoinHandle<()>>,
+}
+impl ArtworkWorkers {
+    fn new() -> Self {
+        let (sender, receiver) = mpsc::sync_channel::<ArtworkWork>(ACTIVE);
+        let receiver = Arc::new(Mutex::new(receiver));
+        let mut threads = Vec::new();
+        for index in 0..ACTIVE {
+            let receiver = receiver.clone();
+            if let Ok(handle) = thread::Builder::new()
+                .name(format!("kinema-art-{index}"))
+                .spawn(move || {
+                    loop {
+                        let work = {
+                            let Ok(receiver) = receiver.lock() else { break };
+                            receiver.recv()
+                        };
+                        let Ok(work) = work else { break };
+                        let result = work
+                            .source
+                            .unwrap_or_else(|| fetch(&work.key.url, work.key.kind))
+                            .and_then(|decoded| {
+                                if work.key.blurred {
+                                    derive_backdrop(&decoded)
+                                } else {
+                                    Ok(decoded)
+                                }
+                            });
+                        let _ = work.reply.send(result);
+                    }
+                })
+            {
+                threads.push(handle);
+            }
+        }
+        Self { sender, threads }
+    }
+    fn submit(
+        &self,
+        key: ArtworkKey,
+        source: Option<ArtworkResult>,
+    ) -> tokio::sync::oneshot::Receiver<ArtworkResult> {
+        let (reply, receiver) = tokio::sync::oneshot::channel();
+        // A failed spawn or disconnected/full queue becomes a retryable failure,
+        // never a blocking send on the UI thread.
+        if !self.threads.is_empty() {
+            let _ = self.sender.try_send(ArtworkWork { key, source, reply });
+        }
+        receiver
     }
 }
 impl ArtworkStore {
@@ -376,20 +435,51 @@ impl ArtworkStore {
         *generation = generation.wrapping_add(1);
         self.queue.retain(|job| job.owner != owner);
         self.cache.retain(|entry| entry.result.is_ok());
+        self.newest_owner = Some(owner.into());
         *generation
     }
 
     fn enqueue(&mut self, owner: &str, generation: u64, key: ArtworkKey) {
+        self.enqueue_with_priority(owner, generation, key, true);
+    }
+    fn enqueue_with_priority(
+        &mut self,
+        owner: &str,
+        generation: u64,
+        key: ArtworkKey,
+        interactive: bool,
+    ) {
         if self.generations.get(owner).copied() != Some(generation)
             || self.cache.iter().any(|e| e.key == key)
             || self
-                .queue
-                .iter()
-                .chain(self.active.values())
+                .active
+                .values()
                 .any(|j| j.key == key && j.owner == owner && j.generation == generation)
-            || self.queue.len() >= QUEUED
         {
             return;
+        }
+        if let Some(job) = self
+            .queue
+            .iter_mut()
+            .find(|j| j.key == key && j.owner == owner && j.generation == generation)
+        {
+            job.interactive |= interactive;
+            return;
+        }
+        if self.queue.len() >= QUEUED {
+            let victim = self.queue.iter().position(|job| {
+                !job.interactive
+                    && (interactive
+                        || self.newest_owner.as_deref() == Some(owner) && job.owner != owner)
+            });
+            if let Some(index) = victim {
+                self.queue.remove(index);
+            } else if interactive {
+                // Even an all-interactive backlog must admit new visible work.
+                self.queue.pop_front();
+            } else {
+                return;
+            }
         }
         self.next = self.next.wrapping_add(1);
         self.queue.push_back(Job {
@@ -397,20 +487,18 @@ impl ArtworkStore {
             owner: owner.into(),
             generation,
             key,
+            interactive,
         });
     }
     fn replace_window(&mut self, owner: &str, generation: u64, keys: Vec<ArtworkKey>) {
         if self.generations.get(owner).copied() != Some(generation) {
             return;
         }
-        self.queue.retain(|job| job.owner != owner);
-        // Put the current window before stale prefetch from other owners too.
-        let others = std::mem::take(&mut self.queue);
-        for key in keys.into_iter().take(QUEUED) {
-            self.enqueue(owner, generation, key);
-        }
         self.queue
-            .extend(others.into_iter().take(QUEUED - self.queue.len()));
+            .retain(|job| job.owner != owner || job.interactive);
+        for key in keys.into_iter().take(QUEUED) {
+            self.enqueue_with_priority(owner, generation, key, false);
+        }
     }
     fn start_next(&mut self) -> Option<Job> {
         if self.active.len() >= ACTIVE {
@@ -420,12 +508,31 @@ impl ArtworkStore {
             self.generations.get(&job.owner).copied() == Some(job.generation)
                 && !self.cache.iter().any(|e| e.key == job.key)
         });
-        let index = self.queue.iter().position(|j| {
-            !self
-                .active
-                .values()
-                .any(|active| active.key.source() == j.key.source())
-        })?;
+        // Keep two physical workers available for newly visible work even when
+        // all six prefetch calls are blocked on transport. In-flight work is not
+        // preempted; its slot remains accounted for across generation changes.
+        let prefetch_full = self.active.values().filter(|job| !job.interactive).count()
+            >= ACTIVE - INTERACTIVE_RESERVED;
+        let index = self
+            .queue
+            .iter()
+            .enumerate()
+            .filter(|(_, job)| {
+                (job.interactive || !prefetch_full)
+                    && !self
+                        .active
+                        .values()
+                        .any(|active| active.key.source() == job.key.source())
+            })
+            .max_by_key(|(index, job)| {
+                (
+                    job.interactive,
+                    self.newest_owner.as_deref() == Some(job.owner.as_str()),
+                    job.key.blurred || job.key.kind == ArtworkKind::Backdrop,
+                    std::cmp::Reverse(*index),
+                )
+            })
+            .map(|(index, _)| index)?;
         let job = self.queue.remove(index)?;
         self.active.insert(job.id, job.clone());
         Some(job)
@@ -562,8 +669,38 @@ static DISK_LOCK: Mutex<()> = Mutex::new(());
 struct DiskCache {
     root: PathBuf,
     budget: u64,
+    maintenance: Mutex<TrimState>,
+}
+#[derive(Default)]
+struct TrimState {
+    bytes: Option<u64>,
+    writes: usize,
+    last_trim: Option<Instant>,
+}
+impl TrimState {
+    fn record_write(&mut self, bytes: u64, budget: u64, now: Instant) -> bool {
+        self.writes += 1;
+        self.bytes = self.bytes.map(|total| total.saturating_add(bytes));
+        self.bytes.is_none_or(|total| total > budget)
+            || self.writes >= 64
+            || self
+                .last_trim
+                .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(60))
+    }
+    fn trimmed(&mut self, bytes: u64, now: Instant) {
+        self.bytes = Some(bytes);
+        self.writes = 0;
+        self.last_trim = Some(now);
+    }
 }
 impl DiskCache {
+    fn new(root: PathBuf, budget: u64) -> Self {
+        Self {
+            root,
+            budget,
+            maintenance: Mutex::new(TrimState::default()),
+        }
+    }
     fn path(&self, url: &str) -> PathBuf {
         use sha2::{Digest, Sha256};
         self.root
@@ -615,10 +752,19 @@ impl DiskCache {
             let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
             file.write_all(bytes)?;
             file.persist(self.path(url)).map_err(|e| e.error)?;
-            self.trim()
+            if let Ok(mut state) = self.maintenance.lock() {
+                let now = Instant::now();
+                // Conservative accounting (overwrites count twice) never hides
+                // budget growth. Scan once initially, then only on budget/count/
+                // time thresholds. Failures retain the need to retry maintenance.
+                if state.record_write(bytes.len() as u64, self.budget, now) {
+                    state.trimmed(self.trim()?, now);
+                }
+            }
+            Ok(())
         })();
     }
-    fn trim(&self) -> std::io::Result<()> {
+    fn trim(&self) -> std::io::Result<u64> {
         let mut files = Vec::new();
         for entry in fs::read_dir(&self.root)?.flatten() {
             let path = entry.path();
@@ -642,7 +788,7 @@ impl DiskCache {
                 total -= size;
             }
         }
-        Ok(())
+        Ok(total)
     }
 }
 fn owned_cache_file(path: &Path) -> bool {
@@ -658,17 +804,19 @@ fn fetch(url: &str, kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
     let start = Instant::now();
     // Pipeline tests must not read, write or evict real application cache files.
     // Disk behavior is tested separately with isolated temporary directories.
-    let disk = if cfg!(test) {
-        None
-    } else {
-        crate::paths::AppPaths::resolve()
-            .ok()
-            .map(|paths| DiskCache {
-                root: paths.cache.join("artwork"),
-                budget: DISK_BYTES,
-            })
-    };
-    if let Some(image) = disk.as_ref().and_then(|cache| cache.read(url, kind)) {
+    static DISK: OnceLock<Option<DiskCache>> = OnceLock::new();
+    let disk = DISK
+        .get_or_init(|| {
+            if cfg!(test) {
+                None
+            } else {
+                crate::paths::AppPaths::resolve()
+                    .ok()
+                    .map(|paths| DiskCache::new(paths.cache.join("artwork"), DISK_BYTES))
+            }
+        })
+        .as_ref();
+    if let Some(image) = disk.and_then(|cache| cache.read(url, kind)) {
         tracing::debug!(
             cache = "disk",
             decode_ms = start.elapsed().as_millis(),
@@ -838,6 +986,160 @@ fn animated(bytes: &[u8], format: ImageFormat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_key(index: usize) -> ArtworkKey {
+        ArtworkKey::new(
+            ArtworkKind::Poster,
+            &format!("https://example.com/{index}.png"),
+        )
+        .unwrap_or_else(|| panic!("fixture URL"))
+    }
+
+    #[test]
+    fn newest_owner_interactive_hero_precedes_full_background_prefetch() {
+        let mut store = ArtworkStore::default();
+        let browse = store.advance_generation("browse");
+        store.replace_window("browse", browse, (0..QUEUED).map(test_key).collect());
+        assert_eq!(store.queue.len(), QUEUED);
+        let detail = store.advance_generation("detail");
+        store.enqueue("detail", detail, test_key(1000));
+        let hero = test_key(1001).blurred();
+        store.enqueue("detail", detail, hero.clone());
+        assert_eq!(store.queue.len(), QUEUED);
+        // Background viewport churn must neither evict nor outrank the hero.
+        store.replace_window(
+            "browse",
+            browse,
+            (2000..2000 + QUEUED).map(test_key).collect(),
+        );
+        assert_eq!(store.start_next().map(|job| job.key), Some(hero));
+        assert_eq!(store.start_next().map(|job| job.key), Some(test_key(1000)));
+    }
+
+    #[test]
+    fn newest_owner_wins_within_each_priority_and_prefetch_promotes_in_place() {
+        let mut store = ArtworkStore::default();
+        let browse = store.advance_generation("browse");
+        store.enqueue("browse", browse, test_key(0));
+        let detail = store.advance_generation("detail");
+        store.replace_window("detail", detail, vec![test_key(1), test_key(2)]);
+        store.enqueue("detail", detail, test_key(1));
+        assert_eq!(store.queue.len(), 3);
+        assert_eq!(store.start_next().map(|job| job.key), Some(test_key(1)));
+        assert_eq!(store.start_next().map(|job| job.key), Some(test_key(0)));
+        store.replace_window("browse", browse, vec![test_key(3)]);
+        assert_eq!(store.start_next().map(|job| job.key), Some(test_key(2)));
+    }
+
+    #[test]
+    fn full_interactive_queue_still_admits_new_visible_request() {
+        let mut store = ArtworkStore::default();
+        let generation = store.advance_generation("detail");
+        for index in 0..QUEUED {
+            store.enqueue("detail", generation, test_key(index));
+        }
+        store.enqueue("detail", generation, test_key(QUEUED));
+        assert_eq!(store.queue.len(), QUEUED);
+        assert!(!store.queue.iter().any(|job| job.key == test_key(0)));
+        assert!(store.queue.iter().any(|job| job.key == test_key(QUEUED)));
+    }
+
+    #[test]
+    fn prefetch_reserves_two_slots_even_across_obsolete_generations() {
+        let mut store = ArtworkStore::default();
+        let browse = store.advance_generation("browse");
+        store.replace_window("browse", browse, (0..QUEUED).map(test_key).collect());
+        for _ in 0..ACTIVE - INTERACTIVE_RESERVED {
+            assert!(store.start_next().is_some());
+        }
+        assert!(store.start_next().is_none());
+        store.advance_generation("browse");
+        let detail = store.advance_generation("detail");
+        store.enqueue("detail", detail, test_key(1000).blurred());
+        store.enqueue("detail", detail, test_key(1001));
+        for _ in 0..INTERACTIVE_RESERVED {
+            assert!(store.start_next().is_some_and(|job| job.interactive));
+        }
+        assert_eq!(store.active.len(), ACTIVE);
+        store.enqueue("detail", detail, test_key(1002));
+        assert!(store.start_next().is_none());
+        let finished = store
+            .active
+            .values()
+            .find(|job| !job.interactive)
+            .cloned()
+            .unwrap_or_else(|| panic!("active prefetch"));
+        assert!(!store.complete(&finished, Err(ArtworkError::Transport)));
+        assert_eq!(store.start_next().map(|job| job.key), Some(test_key(1002)));
+    }
+
+    #[test]
+    fn disk_trim_is_throttled_but_budget_count_and_interval_trigger_scans() {
+        let now = Instant::now();
+        let mut state = TrimState::default();
+        assert!(state.record_write(10, DISK_BYTES, now));
+        state.trimmed(10, now);
+        for _ in 0..63 {
+            assert!(!state.record_write(10, DISK_BYTES, now));
+        }
+        assert!(state.record_write(10, DISK_BYTES, now));
+        state.trimmed(DISK_BYTES - 10, now);
+        assert!(!state.record_write(10, DISK_BYTES, now));
+        assert!(state.record_write(1, DISK_BYTES, now));
+        state.trimmed(0, now);
+        assert!(state.record_write(1, DISK_BYTES, now + Duration::from_secs(60)));
+
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+        let cache = DiskCache::new(dir.path().join("artwork"), DISK_BYTES);
+        cache.write("first", b"one");
+        cache.write("second", b"two");
+        let state = cache
+            .maintenance
+            .lock()
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(state.bytes, Some(6));
+        assert_eq!(state.writes, 1, "second write did not scan");
+    }
+
+    #[test]
+    fn shared_transport_client_is_reused() {
+        let first = shared_client().unwrap_or_else(|error| panic!("{error:?}"));
+        let second = shared_client().unwrap_or_else(|error| panic!("{error:?}"));
+        assert!(std::ptr::eq(first, second));
+    }
+
+    #[test]
+    fn owned_workers_derive_and_return_failures_without_gpui_executor() {
+        let workers = ArtworkWorkers::new();
+        assert_eq!(workers.threads.len(), ACTIVE);
+        assert!(workers.threads.iter().all(|worker| {
+            worker
+                .thread()
+                .name()
+                .is_some_and(|name| name.starts_with("kinema-art-"))
+        }));
+        let decoded = DecodedArtwork {
+            image: Arc::new(RenderImage::new(vec![image::Frame::new(
+                image::RgbaImage::from_pixel(2, 2, image::Rgba([255; 4])),
+            )])),
+            palette: ArtworkPalette::NEUTRAL,
+        };
+        let result = workers
+            .submit(test_key(0).blurred(), Some(Ok(decoded)))
+            .blocking_recv()
+            .unwrap_or_else(|error| panic!("{error}"))
+            .unwrap_or_else(|error| panic!("{error:?}"));
+        assert_eq!(
+            result.image.as_bytes(0).map(|bytes| &bytes[..4]),
+            Some([140, 140, 140, 255].as_slice())
+        );
+        assert!(matches!(
+            workers
+                .submit(test_key(1), Some(Err(ArtworkError::Transport)))
+                .blocking_recv(),
+            Ok(Err(ArtworkError::Transport))
+        ));
+    }
 
     #[test]
     fn backdrop_dimensions_blur_and_grade_are_bounded() {
@@ -1055,10 +1357,7 @@ mod tests {
             decode(&bytes, ArtworkKind::Poster).unwrap_or_else(|e| panic!("decode: {e:?}"));
         assert!(decoded.palette.primary[0] > decoded.palette.primary[2]);
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
-        let disk = DiskCache {
-            root: dir.path().join("artwork"),
-            budget: ENCODED,
-        };
+        let disk = DiskCache::new(dir.path().join("artwork"), ENCODED);
         disk.write("palette", &bytes);
         assert_eq!(fs::read(disk.path("palette")).ok(), Some(bytes));
         let disk_decoded = disk
@@ -1153,10 +1452,7 @@ mod tests {
         image::DynamicImage::new_rgb8(2, 3)
             .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
             .unwrap_or_else(|e| panic!("{e}"));
-        let cache = DiskCache {
-            root: dir.path().join("artwork"),
-            budget: bytes.len() as u64,
-        };
+        let cache = DiskCache::new(dir.path().join("artwork"), bytes.len() as u64);
         assert!(cache.read("a", ArtworkKind::Poster).is_none());
         cache.write("a", &bytes);
         assert!(cache.read("a", ArtworkKind::Poster).is_some());
@@ -1188,10 +1484,7 @@ mod tests {
         fs::create_dir(&target).unwrap_or_else(|e| panic!("{e}"));
         let root = dir.path().join("artwork");
         std::os::unix::fs::symlink(&target, &root).unwrap_or_else(|e| panic!("{e}"));
-        let cache = DiskCache {
-            root,
-            budget: DISK_BYTES,
-        };
+        let cache = DiskCache::new(root, DISK_BYTES);
         fs::write(cache.path("a"), b"preserve").unwrap_or_else(|e| panic!("{e}"));
         assert!(cache.read("a", ArtworkKind::Poster).is_none());
         cache.write("a", b"replacement");
@@ -1494,11 +1787,30 @@ mod tests {
         assert!(ArtworkKey::new(ArtworkKind::Poster, "https://example.com/a.png").is_some());
     }
     #[cfg(feature = "ui-probe-test")]
+    fn settle_artwork(cx: &mut gpui::TestAppContext) {
+        // GPUI's deterministic executor does not own the std worker threads.
+        // Drain UI completions until the real workers finish, with a wall-clock
+        // bound so failures cannot hang the suite.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            cx.run_until_parked();
+            if cx.update(|app| app.global::<ArtworkStore>().active.is_empty()) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "artwork workers timed out");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[cfg(feature = "ui-probe-test")]
     #[gpui::test]
     fn app_pipeline_fetches_local_fixture_and_rejects_obsolete_completion(
         cx: &mut gpui::TestAppContext,
     ) {
         use std::{io::Write, net::TcpListener, thread, time::Instant};
+        // This integration test uses real sockets and owned std workers, whose
+        // channel wakeups intentionally originate outside GPUI's test thread.
+        cx.executor().allow_parking();
         let mut bytes = Vec::new();
         image::DynamicImage::new_rgb8(20, 30)
             .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
@@ -1547,7 +1859,7 @@ mod tests {
                 ArtworkState::Loading
             ))
         });
-        cx.run_until_parked();
+        settle_artwork(cx);
         cx.update(|app| {
             assert!(matches!(
                 lookup_or_request("integration", generation, &first, app),
@@ -1562,7 +1874,7 @@ mod tests {
                 ArtworkState::Loading
             ));
         });
-        cx.run_until_parked();
+        settle_artwork(cx);
         cx.update(|app| {
             let key = ArtworkKey::new(ArtworkKind::Poster, &first)
                 .unwrap_or_else(|| panic!("fixture URL"));
@@ -1588,7 +1900,7 @@ mod tests {
                 ArtworkState::Loading
             ));
         });
-        cx.run_until_parked();
+        settle_artwork(cx);
         cx.update(|app| {
             let failed = ArtworkKey::new(
                 ArtworkKind::Backdrop,
@@ -1608,7 +1920,7 @@ mod tests {
             begin_generation("integration", app);
             assert_eq!(app.global::<ArtworkStore>().active.len(), 1);
         });
-        cx.run_until_parked();
+        settle_artwork(cx);
         cx.update(|app| {
             let key = ArtworkKey::new(ArtworkKind::Poster, &obsolete)
                 .unwrap_or_else(|| panic!("fixture URL"));
