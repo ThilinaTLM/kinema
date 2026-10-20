@@ -242,3 +242,22 @@ fn facts_block_shows_ratings_votes_and_provider_facts(cx: &mut TestAppContext) {
             .unwrap_or_else(|e| panic!("facts:{e}"));
     }
 }
+#[gpui::test]
+fn column_counts_follow_the_window_width_on_every_resize(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
+    let title = tmdb_movie();
+    let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+    let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
+    // The count is derived from the viewport inside the same render pass, so a
+    // single draw after each resize already shows the new count (no stale frame).
+    for (width, cols) in [(520., 3), (1280., 6), (1920., 9), (2560., 9), (960., 5)] {
+        cx.simulate_window_resize(window.into(), size(px(width), px(900.)));
+        draw(window, cx);
+        window
+            .read_with(cx, |view, _| assert_eq!(view.similar_cols, cols, "{width}"))
+            .unwrap_or_else(|e| panic!("window:{e}"));
+    }
+}
