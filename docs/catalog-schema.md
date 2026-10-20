@@ -9,7 +9,7 @@ runtime behavior. This replaces the former seven-table proposal; it does not
 supplement it with a second competing target.
 
 **Current source status (backend-owner evidence):** `catalog.rs` sets
-`SCHEMA_VERSION = 4`. The upgrade transaction creates twelve normalized `STRICT`
+`SCHEMA_VERSION = 5` (v4 foundation plus the [detail facts payload](#detail-facts-payload-schema-v5)). The v4 upgrade transaction creates twelve normalized `STRICT`
 tables, conservatively backfills supported legacy metadata, and advances
 `user_version` atomically, retaining all seven legacy tables (nineteen application
 tables total). Live metadata/indexer paths read and write canonical rows. Legacy
@@ -259,6 +259,7 @@ erDiagram
         integer fetched_at "? last committed success"
         text success_kind "? data or empty"
         text completeness "? summary or detail"
+        text facts_json "? v5 bounded normalized detail facts"
         integer last_attempt_at "?"
         text last_error_code "? sanitized"
     }
@@ -754,3 +755,23 @@ page/fetch-stub preservation, prohibition of canonical deletion by cache cleanup
 migration rollback, and preservation of existing data. Consider
 one SQLite worker and WAL where supported only as implementation choices to test,
 not implied claims about the current adapter's operating mode.
+
+## Detail facts payload (schema v5)
+
+The v5 source upgrade adds nullable `metadata_fetches.facts_json`, a bounded,
+validated normalized detail projection scoped to the provider/resource/locale
+fetch row, not a raw provider response. It retains distinct TMDB score/votes and
+IMDb score, runtime, dates/status, US certification, language, credits, studios,
+networks and tagline where supplied. Cinemeta also retains its supplied writers,
+countries and release-info text. Cast is limited to ten; unknown character names
+remain null. Canonical scalar fields and ratings continue using existing rich
+imports/provenance; the payload supplies detail-only collections and the selected
+provider's facts without implicit cross-provider enrichment.
+
+The atomic v4 → v5 upgrade preserves existing rows and timestamps; NULL facts
+load as empty facts. Existing reduced snapshots omit the new optional payload
+and also decode empty. The next successful selected-provider remote detail fetch
+replaces facts, including clearing facts now unknown. This introduces no TTL,
+automatic fallback or credential storage. The adapter locale is currently fixed
+to en-US, hence certification preference is US; user locale selection is not yet
+implemented. Offline fixture tests do not establish real-provider/GUI acceptance.

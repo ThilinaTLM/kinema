@@ -97,6 +97,85 @@ impl ImdbRating {
     }
 }
 
+/// A credited performer; character is unknown when the provider supplies only names.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CastMember {
+    pub name: String,
+    pub character: Option<String>,
+}
+
+/// Optional detail facts. Rating values use the validated tenths score container;
+/// `tmdb_rating` is never an IMDb score despite sharing its value representation.
+#[derive(Default, Clone, Debug, Eq, PartialEq)]
+pub struct TitleFacts {
+    pub tmdb_rating: Option<ImdbRating>,
+    pub tmdb_vote_count: Option<u64>,
+    pub imdb_rating: Option<ImdbRating>,
+    pub runtime_minutes: Option<u32>,
+    pub status: Option<String>,
+    pub release_date: Option<String>,
+    pub first_air_date: Option<String>,
+    pub last_air_date: Option<String>,
+    pub certification: Option<String>,
+    pub original_language: Option<String>,
+    pub directors: Vec<String>,
+    pub creators: Vec<String>,
+    pub cast: Vec<CastMember>,
+    pub studios: Vec<String>,
+    pub networks: Vec<String>,
+    pub tagline: Option<String>,
+    pub writers: Vec<String>,
+    pub countries: Vec<String>,
+    pub release_info: Option<String>,
+}
+impl TitleFacts {
+    /// Pure bounded validation, also applied when reconstructing cache payloads.
+    pub fn is_valid(&self) -> bool {
+        fn text(s: &str, max: usize) -> bool {
+            !s.trim().is_empty() && s.chars().count() <= max && !s.chars().any(char::is_control)
+        }
+        let strings = [
+            &self.status,
+            &self.certification,
+            &self.original_language,
+            &self.release_info,
+        ];
+        strings
+            .into_iter()
+            .all(|s| s.as_deref().is_none_or(|s| text(s, 200)))
+            && self.tagline.as_deref().is_none_or(|s| text(s, 1000))
+            && [
+                &self.release_date,
+                &self.first_air_date,
+                &self.last_air_date,
+            ]
+            .into_iter()
+            .all(|s| {
+                s.as_deref()
+                    .is_none_or(crate::catalog_normalized::valid_date)
+            })
+            && self
+                .runtime_minutes
+                .is_none_or(|n| (1..=10000).contains(&n))
+            && self.tmdb_vote_count.is_none_or(|n| n <= i64::MAX as u64)
+            && [
+                &self.directors,
+                &self.creators,
+                &self.studios,
+                &self.networks,
+                &self.writers,
+                &self.countries,
+            ]
+            .into_iter()
+            .all(|v| v.len() <= 32 && v.iter().all(|s| text(s, 200)))
+            && self.cast.len() <= 10
+            && self
+                .cast
+                .iter()
+                .all(|c| text(&c.name, 200) && c.character.as_deref().is_none_or(|s| text(s, 200)))
+    }
+}
+
 /// Optional provider-supplied display facts; no inferred ratings or enrichment.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CatalogDisplay {
@@ -196,6 +275,7 @@ pub struct CatalogEpisode {
 /// Display details without provider DTOs or transport concerns.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TitleDetails {
+    pub facts: TitleFacts,
     pub title: CatalogTitle,
     pub poster_url: Option<String>,
     pub background_url: Option<String>,
@@ -210,6 +290,25 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn title_facts_validate_optional_bounded_values() {
+        let mut facts = TitleFacts::default();
+        assert!(facts.is_valid());
+        facts.runtime_minutes = Some(0);
+        assert!(!facts.is_valid());
+        facts.runtime_minutes = Some(45);
+        facts.release_date = Some("2024-02-30".into());
+        assert!(!facts.is_valid());
+        facts.release_date = Some("2024-02-29".into());
+        assert!(facts.is_valid());
+        facts.cast = (0..11)
+            .map(|_| CastMember {
+                name: "Actor".into(),
+                character: None,
+            })
+            .collect();
+        assert!(!facts.is_valid());
+    }
     #[test]
     fn imdb_rating_preserves_zero_and_rejects_non_scores() {
         assert_eq!(ImdbRating::new(0.0).map(ImdbRating::value), Some(0.0));

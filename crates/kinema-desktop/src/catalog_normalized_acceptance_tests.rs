@@ -283,6 +283,7 @@ fn selected_provider_missing_field_retains_actual_other_supplier_origin_without_
     {
         let tx = service.connection.transaction()?;
         let details = TitleDetails {
+            facts: Default::default(),
             title,
             poster_url: Some("https://images.example.test/retained.jpg".into()),
             background_url: None,
@@ -301,6 +302,7 @@ fn selected_provider_missing_field_retains_actual_other_supplier_origin_without_
     service.save_tmdb(
         &query,
         TmdbData::Details(TmdbDetails {
+            facts: Default::default(),
             backdrop_url: None,
             title: TmdbTitle {
                 id: 99,

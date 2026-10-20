@@ -68,6 +68,7 @@ fn cinemeta_then_tmdb_browse_then_details_unifies_canonical_title_and_both_pages
             id: 71,
         },
         TmdbData::Details(TmdbDetails {
+            facts: Default::default(),
             backdrop_url: None,
             title,
             imdb: Some(imdb),
@@ -128,6 +129,7 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
         let raw = serde_json::json!({"id":91,"season_number":0,"poster_path":"/season.jpg","episodes":[{"id":101,"season_number":0,"episode_number":1,"name":"TMDB episode","still_path":"/still.jpg","vote_average":8,"vote_count":0}]});
         normalized_tmdb::write_rich(&tx, &query, &normalized_rich::tmdb(&raw, &query)?, 1)?;
         let details = TitleDetails {
+            facts: Default::default(),
             title: series("tt3000002")?,
             poster_url: Some("https://images.example.test/poster.jpg".into()),
             background_url: None,
@@ -220,6 +222,7 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
             id: 81,
         },
         TmdbData::Details(TmdbDetails {
+            facts: Default::default(),
             backdrop_url: None,
             title,
             imdb: Some(ImdbId::new("tt3000002")?),

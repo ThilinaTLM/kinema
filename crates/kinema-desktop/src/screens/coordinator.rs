@@ -1681,6 +1681,7 @@ mod detail_request_tests {
             c.details.fetched(
                 g,
                 TitleDetails {
+                    facts: Default::default(),
                     title,
                     poster_url: None,
                     background_url: None,

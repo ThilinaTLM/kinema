@@ -126,7 +126,15 @@ impl CatalogService {
         kind: MediaKind,
         id: &ImdbId,
     ) -> Result<CachedDetails, CatalogError> {
+        let started = std::time::Instant::now();
         let result = self.refresh_details_inner(kind, id);
+        tracing::debug!(
+            provider = "cinemeta",
+            request_kind = "details",
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            outcome = if result.is_ok() { "success" } else { "failure" },
+            "metadata request completed"
+        );
         if let Err(error) = result {
             normalized_fetches::details(self, kind, id, error);
         }
@@ -311,6 +319,8 @@ struct DetailsResponse {
 
 #[derive(Deserialize, Serialize)]
 struct DetailsDocument {
+    #[serde(default)]
+    facts: crate::tmdb::FactsPayload,
     id: String,
     #[serde(rename = "type")]
     kind: String,
@@ -391,6 +401,10 @@ impl DetailsDocument {
         }
         episodes.sort_by_key(|episode| (episode.season, episode.number));
         Ok(TitleDetails {
+            facts: self
+                .facts
+                .normalize()
+                .map_err(|_| CatalogError::InvalidResponse)?,
             title,
             poster_url,
             background_url,
@@ -403,6 +417,7 @@ impl DetailsDocument {
     #[cfg(test)]
     fn from_details(details: &TitleDetails) -> Self {
         Self {
+            facts: crate::tmdb::FactsPayload::from(&details.facts),
             id: details.title.id().as_str().to_owned(),
             kind: kind_text(details.title.kind()).into(),
             name: details.title.name().into(),
@@ -892,9 +907,8 @@ pub(super) fn decode_fixture_details(
     id: &ImdbId,
     payload: &str,
 ) -> Result<TitleDetails, CatalogError> {
-    let response: DetailsResponse =
-        serde_json::from_str(payload).map_err(|_| CatalogError::InvalidResponse)?;
-    response.meta.validate(kind, id)
+    let raw = serde_json::from_str(payload).map_err(|_| CatalogError::InvalidResponse)?;
+    parse_details(raw, kind, id).map(|(details, _)| details)
 }
 
 fn parse_details(
@@ -903,9 +917,11 @@ fn parse_details(
     id: &ImdbId,
 ) -> Result<(TitleDetails, Vec<normalized_rich::RichRecord>), CatalogError> {
     let rich = normalized_rich::cinemeta(raw.get("meta").ok_or(CatalogError::InvalidResponse)?)?;
+    let facts = cinemeta_facts(raw.get("meta").ok_or(CatalogError::InvalidResponse)?, kind)?;
     let response: DetailsResponse =
         serde_json::from_value(raw).map_err(|_| CatalogError::InvalidResponse)?;
-    let details = response.meta.validate(kind, id)?;
+    let mut details = response.meta.validate(kind, id)?;
+    details.facts = facts;
     Ok((details, rich))
 }
 
@@ -1014,9 +1030,14 @@ impl CatalogService {
                         .push(&format!("{}.json", id.as_str()));
                     let client = self.client.clone();
                     Box::new(move || {
-                        let raw = fetch_json(&client, url, &cancel)?;
-                        let (details, rich) = parse_details(raw, kind, &id)?;
-                        Ok(RemoteData::Details(details, rich))
+                        let started = std::time::Instant::now();
+                        let result = (|| {
+                            let raw = fetch_json(&client, url, &cancel)?;
+                            let (details, rich) = parse_details(raw, kind, &id)?;
+                            Ok(RemoteData::Details(details, rich))
+                        })();
+                        tracing::debug!(provider="cinemeta", request_kind="details", elapsed_ms=started.elapsed().as_millis() as u64, outcome=?result.as_ref().map(|_| "success").map_err(|e| *e), "metadata request completed");
+                        result
                     })
                 }
                 A::Sources { indexer, target } => {
@@ -1273,6 +1294,200 @@ mod cinemeta_details_tests {
         malformed["meta"]["poster"] = serde_json::json!("file:///private/poster");
         let response: DetailsResponse = serde_json::from_value(malformed)?;
         assert!(response.meta.validate(MediaKind::Movie, &id).is_err());
+        Ok(())
+    }
+}
+
+fn cinemeta_facts(
+    raw: &serde_json::Value,
+    kind: MediaKind,
+) -> Result<kinema_core::catalog::TitleFacts, CatalogError> {
+    let mut payload = serde_json::Map::new();
+    if let Some(value) = raw
+        .get("imdbRating")
+        .filter(|v| !v.is_null() && v.as_str() != Some(""))
+    {
+        let value = value
+            .as_f64()
+            .or_else(|| value.as_str()?.parse().ok())
+            .ok_or(CatalogError::InvalidResponse)?;
+        payload.insert("imdb_rating".into(), serde_json::json!(value));
+    }
+    if let Some(runtime) = raw
+        .get("runtime")
+        .filter(|v| !v.is_null() && v.as_str() != Some(""))
+    {
+        let minutes = runtime
+            .as_u64()
+            .or_else(|| {
+                runtime
+                    .as_str()?
+                    .trim()
+                    .strip_suffix("min")
+                    .unwrap_or(runtime.as_str()?)
+                    .trim()
+                    .parse()
+                    .ok()
+            })
+            .ok_or(CatalogError::InvalidResponse)?;
+        payload.insert("runtime_minutes".into(), minutes.into());
+    }
+    for (source, target) in [
+        ("director", "directors"),
+        ("writer", "writers"),
+        ("country", "countries"),
+    ] {
+        if let Some(v) = raw.get(source).filter(|v| !v.is_null()) {
+            let values = if let Some(s) = v.as_str() {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| serde_json::Value::from(s.to_owned()))
+                    .collect()
+            } else {
+                v.as_array().ok_or(CatalogError::InvalidResponse)?.clone()
+            };
+            payload.insert(target.into(), serde_json::Value::Array(values));
+        }
+    }
+    if let Some(cast) = raw.get("cast").filter(|v| !v.is_null()) {
+        let cast = cast
+            .as_array()
+            .ok_or(CatalogError::InvalidResponse)?
+            .iter()
+            .take(10)
+            .map(|v| {
+                v.as_str()
+                    .map(|s| (s, Option::<String>::None))
+                    .ok_or(CatalogError::InvalidResponse)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        payload.insert("cast".into(), serde_json::json!(cast));
+    }
+    if let Some(info) = raw
+        .get("releaseInfo")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        payload.insert("release_info".into(), info.into());
+        if kinema_core::catalog_normalized::valid_date(info) {
+            payload.insert(
+                if kind == MediaKind::Movie {
+                    "release_date"
+                } else {
+                    "first_air_date"
+                }
+                .into(),
+                info.into(),
+            );
+        }
+    }
+    if let Some(released) = raw
+        .get("released")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        let date = released
+            .get(..10)
+            .filter(|s| kinema_core::catalog_normalized::valid_date(s))
+            .ok_or(CatalogError::InvalidResponse)?;
+        payload.insert(
+            if kind == MediaKind::Movie {
+                "release_date"
+            } else {
+                "first_air_date"
+            }
+            .into(),
+            date.into(),
+        );
+    }
+    serde_json::from_value::<crate::tmdb::FactsPayload>(payload.into())
+        .map_err(|_| CatalogError::InvalidResponse)?
+        .normalize()
+        .map_err(|_| CatalogError::InvalidResponse)
+}
+
+#[cfg(test)]
+mod facts_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn cinemeta_facts_mapping_and_normalized_cache_round_trip() -> Result<(), Box<dyn Error>> {
+        let raw = json!({"meta": {"id": "tt1234567", "type": "movie", "name": "Movie", "imdbRating": "8.1", "runtime": "123 min", "director": ["Director"], "writer": ["Writer"], "cast": ["Actor"], "country": "US, Canada", "releaseInfo": "2020-01-02"}});
+        let id = ImdbId::new("tt1234567")?;
+        let (details, _) = parse_details(raw, MediaKind::Movie, &id)?;
+        assert_eq!(details.facts.runtime_minutes, Some(123));
+        assert_eq!(
+            details
+                .facts
+                .imdb_rating
+                .map(kinema_core::catalog::ImdbRating::value),
+            Some(8.1)
+        );
+        assert_eq!(details.facts.directors, ["Director"]);
+        assert_eq!(details.facts.countries, ["US", "Canada"]);
+        assert_eq!(details.facts.cast[0].character, None);
+        let mut service = CatalogService::open(std::path::Path::new(":memory:"))?;
+        let tx = service.connection.transaction()?;
+        normalized_pages::write_cinemeta_details(&tx, &details, 1, true)?;
+        tx.commit()?;
+        let saved = service
+            .read_details(MediaKind::Movie, &id)?
+            .ok_or("missing cache")?;
+        assert_eq!(saved.details.facts, details.facts);
+        service
+            .connection
+            .execute("UPDATE metadata_fetches SET facts_json=NULL", [])?;
+        let old = service
+            .read_details(MediaKind::Movie, &id)?
+            .ok_or("missing old cache")?;
+        assert_eq!(old.details.facts, Default::default());
+        service.connection.execute(
+            "UPDATE metadata_fetches SET facts_json=?1",
+            params![r#"{"imdb_rating":11}"#],
+        )?;
+        assert_eq!(
+            service.read_details(MediaKind::Movie, &id),
+            Err(CatalogError::InvalidCache)
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod facts_migration_tests {
+    use super::*;
+    #[test]
+    fn v4_upgrade_preserves_detail_rows_with_empty_facts() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog.sqlite3");
+        let mut service = CatalogService::open(&path)?;
+        let id = ImdbId::new("tt1234567")?;
+        let (details, _) = parse_details(
+            serde_json::json!({"meta": {"id": "tt1234567", "type": "movie", "name": "Preserved"}}),
+            MediaKind::Movie,
+            &id,
+        )?;
+        let tx = service.connection.transaction()?;
+        normalized_pages::write_cinemeta_details(&tx, &details, 123, true)?;
+        tx.commit()?;
+        service.connection.execute_batch(
+            "ALTER TABLE metadata_fetches DROP COLUMN facts_json; PRAGMA user_version=4;",
+        )?;
+        drop(service);
+        let mut upgraded = CatalogService::open(&path)?;
+        let saved = upgraded
+            .read_details(MediaKind::Movie, &id)?
+            .ok_or("missing details")?;
+        assert_eq!(saved.details.title.name(), "Preserved");
+        assert_eq!(saved.fetched_at, 123);
+        assert_eq!(saved.details.facts, Default::default());
+        assert_eq!(
+            upgraded
+                .connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
+            5
+        );
         Ok(())
     }
 }

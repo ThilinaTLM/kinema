@@ -89,6 +89,7 @@ CREATE TABLE catalog_pages (
     CHECK(membership_available = 0 OR result_count IS NOT NULL)
 ) STRICT;
 CREATE TABLE metadata_fetches (
+    facts_json TEXT,
     id INTEGER PRIMARY KEY,
     title_id INTEGER REFERENCES titles(id) ON DELETE RESTRICT,
     season_id INTEGER REFERENCES seasons(id) ON DELETE RESTRICT,

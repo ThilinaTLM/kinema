@@ -14,6 +14,7 @@ fn movie(id: &str, name: &str) -> Result<CatalogTitle, Box<dyn Error>> {
 }
 fn tmdb_details(id: u64, imdb: Option<&str>) -> Result<TmdbData, Box<dyn Error>> {
     Ok(TmdbData::Details(TmdbDetails {
+        facts: Default::default(),
         backdrop_url: None,
         title: TmdbTitle {
             id,
@@ -42,6 +43,7 @@ fn canonical_titles_and_episodes_are_primary_not_legacy_json() -> TestResult {
         None,
     )?;
     let details = TitleDetails {
+        facts: Default::default(),
         title,
         poster_url: None,
         background_url: None,
@@ -456,6 +458,7 @@ fn episode_art_and_season_art_are_projected_and_not_erased_by_reduced_updates() 
         id: 91,
     };
     let details = TmdbData::Details(TmdbDetails {
+        facts: Default::default(),
         backdrop_url: Some("https://image.tmdb.org/t/p/w500/backdrop.jpg".into()),
         title: TmdbTitle {
             id: 91,
@@ -579,6 +582,7 @@ fn cinemeta_thumbnail_survives_reduced_episode_updates() -> TestResult {
     let mut service = CatalogService::open(&dir.path().join("catalog"))?;
     let title = CatalogTitle::new(ImdbId::new("tt1234567")?, MediaKind::Series, "Series", None)?;
     let mut details = TitleDetails {
+        facts: Default::default(),
         title,
         poster_url: None,
         background_url: Some("https://images.example.test/show.jpg".into()),

@@ -40,6 +40,10 @@ pub(crate) enum Ask {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Single owned routing event; screen resources consume Stage<TitleDetails> directly"
+)]
 pub(crate) enum MetaEvent {
     Browse {
         kind: MediaKind,

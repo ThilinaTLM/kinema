@@ -356,6 +356,7 @@ mod tests {
                     id: movie.id,
                 },
                 &TmdbData::Details(TmdbDetails {
+                    facts: Default::default(),
                     backdrop_url: None,
                     title: movie,
                     imdb: Some(ImdbId::new(imdb)?),
@@ -371,6 +372,7 @@ mod tests {
                     id: series.id,
                 },
                 &TmdbData::Details(TmdbDetails {
+                    facts: Default::default(),
                     backdrop_url: None,
                     title: series,
                     imdb: Some(ImdbId::new(format!("tt{}", 8_000_000 + i))?),
@@ -419,7 +421,7 @@ mod tests {
         }
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            4
+            5
         );
         assert_eq!(count(db, "pragma_foreign_key_check")?, 0);
         Ok(())
@@ -449,6 +451,7 @@ mod tests {
                 id: 9_999,
             },
             &TmdbData::Details(TmdbDetails {
+                facts: Default::default(),
                 backdrop_url: None,
                 title: contradictory,
                 imdb: Some(ImdbId::new("tt7000000")?),
@@ -557,6 +560,7 @@ mod tests {
             &tx,
             &detail_query,
             &TmdbData::Details(TmdbDetails {
+                facts: Default::default(),
                 backdrop_url: None,
                 title: tmdb_title.clone(),
                 imdb: None,

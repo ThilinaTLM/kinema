@@ -341,6 +341,7 @@ mod display_tests {
             None,
         )?;
         let details = TitleDetails {
+            facts: Default::default(),
             title,
             poster_url: Some("https://example.com/poster.png".into()),
             background_url: None,

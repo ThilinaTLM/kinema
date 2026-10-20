@@ -7,7 +7,9 @@ use std::{collections::HashSet, fmt, io::Read, time::Duration};
 
 use kinema_core::{
     MediaKind,
-    catalog::{CatalogDisplay, CatalogEpisode, ImdbId, SearchQuery},
+    catalog::{
+        CastMember, CatalogDisplay, CatalogEpisode, ImdbId, ImdbRating, SearchQuery, TitleFacts,
+    },
 };
 use reqwest::{
     Url,
@@ -87,6 +89,7 @@ pub struct TmdbSeasonSummary {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TmdbDetails {
+    pub facts: TitleFacts,
     pub backdrop_url: Option<String>,
     pub title: TmdbTitle,
     pub imdb: Option<ImdbId>,
@@ -101,6 +104,10 @@ pub struct TmdbSeason {
     pub episodes: Vec<CatalogEpisode>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Single owned worker result; detail resources use the unboxed TmdbDetails interface"
+)]
 pub enum TmdbData {
     Page(TmdbPage),
     Details(TmdbDetails),
@@ -263,6 +270,22 @@ impl TmdbClient {
         &self,
         query: &TmdbQuery,
     ) -> Result<(TmdbData, Vec<crate::catalog::normalized_rich::RichRecord>), TmdbError> {
+        let started = std::time::Instant::now();
+        let result = self.fetch_normalized_inner(query);
+        let request_kind = match query {
+            TmdbQuery::Browse { .. } => "browse",
+            TmdbQuery::Search { .. } => "search",
+            TmdbQuery::Details { .. } => "details",
+            TmdbQuery::Similar { .. } => "similar",
+            TmdbQuery::Season { .. } => "season",
+        };
+        tracing::debug!(provider="tmdb", request_kind, elapsed_ms=started.elapsed().as_millis() as u64, outcome=?result.as_ref().map(|_| "success").map_err(|e| *e), "metadata request completed");
+        result
+    }
+    fn fetch_normalized_inner(
+        &self,
+        query: &TmdbQuery,
+    ) -> Result<(TmdbData, Vec<crate::catalog::normalized_rich::RichRecord>), TmdbError> {
         validate_query(query)?;
         let rich;
         let data = match query {
@@ -309,13 +332,25 @@ impl TmdbClient {
             TmdbQuery::Details { kind, id } => {
                 let raw: serde_json::Value = self.get(
                     &format!("{}/{id}", kind_path(*kind)),
-                    &[("append_to_response", "external_ids".into())],
+                    &[(
+                        "append_to_response",
+                        match kind {
+                            MediaKind::Movie => "external_ids,credits,release_dates",
+                            MediaKind::Series => "external_ids,aggregate_credits,content_ratings",
+                        }
+                        .into(),
+                    )],
                 )?;
                 rich = crate::catalog::normalized_rich::tmdb(&raw, query)
                     .map_err(|_| TmdbError::Malformed)?;
+                let facts = tmdb_facts(&raw, *kind)?;
                 let dto: DetailDto =
                     serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
-                TmdbData::Details(dto.normalize(*kind)?)
+                {
+                    let mut details = dto.normalize(*kind)?;
+                    details.facts = facts;
+                    TmdbData::Details(details)
+                }
             }
             TmdbQuery::Season { series_id, season } => {
                 let raw: serde_json::Value =
@@ -490,6 +525,7 @@ impl DetailDto {
             })
             .transpose()?;
         Ok(TmdbDetails {
+            facts: TitleFacts::default(),
             backdrop_url: image_url(self.backdrop_path)?,
             title: self.title.normalize(kind)?,
             imdb,
@@ -600,6 +636,9 @@ fn validate_data(data: &TmdbData, query: Option<&TmdbQuery>) -> Result<(), TmdbE
                 && p.titles.iter().all(|t| valid_title(t) && ids.insert(t.id))
         }
         TmdbData::Details(d) => {
+            if !d.facts.is_valid() {
+                return Err(TmdbError::Malformed);
+            }
             let mut seasons = HashSet::new();
             valid_title(&d.title)
                 && valid_optional_image(&d.backdrop_url)
@@ -681,6 +720,8 @@ enum SnapshotData {
     },
     Details {
         #[serde(default)]
+        facts: Box<FactsPayload>,
+        #[serde(default)]
         backdrop_url: Option<String>,
         title: SnapshotTitle,
         imdb: Option<String>,
@@ -745,6 +786,7 @@ pub fn encode(data: &TmdbData) -> Result<String, TmdbError> {
             total_pages: p.total_pages,
         },
         TmdbData::Details(d) => SnapshotData::Details {
+            facts: Box::new(FactsPayload::from(&d.facts)),
             backdrop_url: d.backdrop_url.clone(),
             title: (&d.title).into(),
             imdb: d.imdb.as_ref().map(|i| i.as_str().to_owned()),
@@ -815,12 +857,14 @@ pub fn decode(encoded: &str, query: &TmdbQuery) -> Result<TmdbData, TmdbError> {
             total_pages,
         }),
         SnapshotData::Details {
+            facts,
             backdrop_url,
             title,
             imdb,
             genres,
             seasons,
         } => TmdbData::Details(TmdbDetails {
+            facts: facts.normalize()?,
             backdrop_url,
             title: title.normalize()?,
             imdb: imdb
@@ -865,11 +909,14 @@ pub(crate) fn decode_fixture_response(
     validate_query(query)?;
     let raw: serde_json::Value = serde_json::from_str(payload).map_err(|_| TmdbError::Malformed)?;
     let data = match query {
-        TmdbQuery::Details { kind, .. } => TmdbData::Details(
-            serde_json::from_value::<DetailDto>(raw)
+        TmdbQuery::Details { kind, .. } => {
+            let facts = tmdb_facts(&raw, *kind)?;
+            let mut details = serde_json::from_value::<DetailDto>(raw)
                 .map_err(|_| TmdbError::Malformed)?
-                .normalize(*kind)?,
-        ),
+                .normalize(*kind)?;
+            details.facts = facts;
+            TmdbData::Details(details)
+        }
         TmdbQuery::Season { series_id, .. } => {
             let dto: SeasonDto = serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
             TmdbData::Season(TmdbSeason {
@@ -1177,16 +1224,19 @@ mod tests {
         };
         let (data, request) = local(
             200,
-            r#"{"id":12,"title":"Film","imdb_id":null,"external_ids":{"imdb_id":null},"genres":[]}"#,
+            r#"{"id":12,"title":"Film","imdb_id":null,"external_ids":{"imdb_id":null},"genres":[],"credits":{"crew":[{"name":"Director","job":"Director"}],"cast":[{"name":"Actor","character":"Hero"}]},"release_dates":{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"PG"}]}]}}"#,
             |c| ok(c.fetch(&movie)),
         );
         assert!(
-            request.starts_with("GET /3/movie/12?language=en-US&append_to_response=external_ids ")
+            request.starts_with("GET /3/movie/12?language=en-US&append_to_response=external_ids%2Ccredits%2Crelease_dates ")
         );
         let TmdbData::Details(details) = &data else {
             panic!("expected details")
         };
         assert_eq!(details.imdb, None);
+        assert_eq!(details.facts.directors, ["Director"]);
+        assert_eq!(details.facts.cast[0].character.as_deref(), Some("Hero"));
+        assert_eq!(details.facts.certification.as_deref(), Some("PG"));
         roundtrip(&data, &movie);
         let series = TmdbQuery::Details {
             kind: MediaKind::Series,
@@ -1194,10 +1244,18 @@ mod tests {
         };
         let (data, request) = local(
             200,
-            r#"{"id":33,"name":"Series","first_air_date":"2020-01-01","external_ids":{"imdb_id":"tt1234567"},"genres":[{"id":1,"name":"Drama"}],"seasons":[{"id":8,"season_number":0,"name":"Specials","episode_count":2}]}"#,
+            r#"{"id":33,"name":"Series","first_air_date":"2020-01-01","external_ids":{"imdb_id":"tt1234567"},"aggregate_credits":{"cast":[{"name":"Actor","roles":[{"character":"Lead"}]}]},"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-14"}]},"genres":[{"id":1,"name":"Drama"}],"seasons":[{"id":8,"season_number":0,"name":"Specials","episode_count":2}]}"#,
             |c| ok(c.fetch(&series)),
         );
-        assert!(request.starts_with("GET /3/tv/33?"));
+        assert!(request.starts_with("GET /3/tv/33?language=en-US&append_to_response=external_ids%2Caggregate_credits%2Ccontent_ratings "));
+        let TmdbData::Details(series_details) = &data else {
+            panic!("expected details")
+        };
+        assert_eq!(
+            series_details.facts.cast[0].character.as_deref(),
+            Some("Lead")
+        );
+        assert_eq!(series_details.facts.certification.as_deref(), Some("TV-14"));
         let TmdbData::Details(details) = &data else {
             panic!("expected details")
         };
@@ -1437,5 +1495,293 @@ mod tests {
         );
         assert!(decode(&encoded.replace("\"id\":1", "\"id\":0"), &c).is_err());
         assert!(decode(&encoded.replace("normalized-v1", "normalized-v2"), &c).is_err());
+    }
+}
+
+/// Bounded normalized facts payload, not a provider response.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct FactsPayload {
+    tmdb_rating: Option<f64>,
+    tmdb_vote_count: Option<u64>,
+    imdb_rating: Option<f64>,
+    runtime_minutes: Option<u32>,
+    status: Option<String>,
+    release_date: Option<String>,
+    first_air_date: Option<String>,
+    last_air_date: Option<String>,
+    certification: Option<String>,
+    original_language: Option<String>,
+    tagline: Option<String>,
+    release_info: Option<String>,
+    directors: Vec<String>,
+    creators: Vec<String>,
+    studios: Vec<String>,
+    networks: Vec<String>,
+    writers: Vec<String>,
+    countries: Vec<String>,
+    cast: Vec<(String, Option<String>)>,
+}
+impl From<&TitleFacts> for FactsPayload {
+    fn from(f: &TitleFacts) -> Self {
+        Self {
+            tmdb_rating: f.tmdb_rating.map(|v| f64::from(v.value())),
+            tmdb_vote_count: f.tmdb_vote_count,
+            imdb_rating: f.imdb_rating.map(|v| f64::from(v.value())),
+            runtime_minutes: f.runtime_minutes,
+            status: f.status.clone(),
+            release_date: f.release_date.clone(),
+            first_air_date: f.first_air_date.clone(),
+            last_air_date: f.last_air_date.clone(),
+            certification: f.certification.clone(),
+            original_language: f.original_language.clone(),
+            tagline: f.tagline.clone(),
+            release_info: f.release_info.clone(),
+            directors: f.directors.clone(),
+            creators: f.creators.clone(),
+            studios: f.studios.clone(),
+            networks: f.networks.clone(),
+            writers: f.writers.clone(),
+            countries: f.countries.clone(),
+            cast: f
+                .cast
+                .iter()
+                .map(|c| (c.name.clone(), c.character.clone()))
+                .collect(),
+        }
+    }
+}
+impl FactsPayload {
+    pub(crate) fn normalize(self) -> Result<TitleFacts, TmdbError> {
+        let tmdb_rating = self
+            .tmdb_rating
+            .map(|v| ImdbRating::new(v).ok_or(TmdbError::Malformed))
+            .transpose()?;
+        let imdb_rating = self
+            .imdb_rating
+            .map(|v| ImdbRating::new(v).ok_or(TmdbError::Malformed))
+            .transpose()?;
+        let facts = TitleFacts {
+            tmdb_rating,
+            tmdb_vote_count: self.tmdb_vote_count,
+            imdb_rating,
+            runtime_minutes: self.runtime_minutes,
+            status: self.status,
+            release_date: self.release_date,
+            first_air_date: self.first_air_date,
+            last_air_date: self.last_air_date,
+            certification: self.certification,
+            original_language: self.original_language,
+            tagline: self.tagline,
+            release_info: self.release_info,
+            directors: self.directors,
+            creators: self.creators,
+            studios: self.studios,
+            networks: self.networks,
+            writers: self.writers,
+            countries: self.countries,
+            cast: self
+                .cast
+                .into_iter()
+                .map(|(name, character)| CastMember { name, character })
+                .collect(),
+        };
+        if !facts.is_valid() {
+            return Err(TmdbError::Malformed);
+        }
+        Ok(facts)
+    }
+}
+
+fn tmdb_facts(raw: &serde_json::Value, kind: MediaKind) -> Result<TitleFacts, TmdbError> {
+    let mut payload = serde_json::Map::new();
+    for (source, target) in [
+        ("vote_average", "tmdb_rating"),
+        ("vote_count", "tmdb_vote_count"),
+        ("runtime", "runtime_minutes"),
+        ("status", "status"),
+        ("release_date", "release_date"),
+        ("first_air_date", "first_air_date"),
+        ("last_air_date", "last_air_date"),
+        ("original_language", "original_language"),
+        ("tagline", "tagline"),
+    ] {
+        if let Some(v) = raw.get(source).filter(|v| {
+            !v.is_null()
+                && v.as_str() != Some("")
+                && !(source == "runtime" && v.as_u64() == Some(0))
+        }) {
+            payload.insert(target.into(), v.clone());
+        }
+    }
+    if kind == MediaKind::Series {
+        payload.remove("runtime_minutes");
+        if let Some(v) = raw
+            .get("episode_run_time")
+            .and_then(|v| v.as_array())
+            .and_then(|v| v.iter().find(|n| n.as_u64().is_some_and(|n| n > 0)))
+        {
+            payload.insert("runtime_minutes".into(), v.clone());
+        }
+    }
+    let names = |key: &str| -> Vec<String> {
+        raw.get(key)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.get("name").and_then(|v| v.as_str()).map(str::to_owned))
+            .collect()
+    };
+    payload.insert(
+        "studios".into(),
+        serde_json::json!(names("production_companies")),
+    );
+    payload.insert("networks".into(), serde_json::json!(names("networks")));
+    payload.insert("creators".into(), serde_json::json!(names("created_by")));
+    let credits = raw.get(if kind == MediaKind::Movie {
+        "credits"
+    } else {
+        "aggregate_credits"
+    });
+    let directors: Vec<&str> = credits
+        .and_then(|v| v.get("crew"))
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|v| v.get("job").and_then(|v| v.as_str()) == Some("Director"))
+        .filter_map(|v| v.get("name").and_then(|v| v.as_str()))
+        .collect();
+    payload.insert("directors".into(), serde_json::json!(directors));
+    let cast: Vec<_> = credits
+        .and_then(|v| v.get("cast"))
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .take(10)
+        .filter_map(|v| {
+            let name = v.get("name")?.as_str()?;
+            let character = v
+                .get("character")
+                .and_then(|v| v.as_str())
+                .or_else(|| {
+                    v.get("roles")?
+                        .as_array()?
+                        .first()?
+                        .get("character")?
+                        .as_str()
+                })
+                .filter(|s| !s.is_empty());
+            Some((name, character))
+        })
+        .collect();
+    payload.insert("cast".into(), serde_json::json!(cast));
+    let ratings = raw
+        .get(if kind == MediaKind::Movie {
+            "release_dates"
+        } else {
+            "content_ratings"
+        })
+        .and_then(|v| v.get("results"))
+        .and_then(|v| v.as_array());
+    let region = ratings
+        .into_iter()
+        .flatten()
+        .find(|v| v.get("iso_3166_1").and_then(|v| v.as_str()) == Some("US"));
+    let certification = region.and_then(|v| {
+        if kind == MediaKind::Movie {
+            v.get("release_dates")?
+                .as_array()?
+                .iter()
+                .filter_map(|v| v.get("certification")?.as_str())
+                .find(|s| !s.is_empty())
+        } else {
+            v.get("rating")?.as_str().filter(|s| !s.is_empty())
+        }
+    });
+    if let Some(v) = certification {
+        payload.insert("certification".into(), v.into());
+    }
+    serde_json::from_value::<FactsPayload>(payload.into())
+        .map_err(|_| TmdbError::Malformed)?
+        .normalize()
+}
+
+#[cfg(test)]
+mod facts_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn movie_and_series_facts_decode_with_credits_and_us_certification() -> Result<(), TmdbError> {
+        let movie = tmdb_facts(
+            &json!({"vote_average": 8.4, "vote_count": 42, "runtime": 120, "status": "Released", "release_date": "2024-01-01", "original_language": "en", "tagline": "A story", "credits": {"crew": [{"name": "Director", "job": "Director"}], "cast": [{"name": "Actor", "character": "Hero"}]}, "production_companies": [{"name": "Studio"}], "release_dates": {"results": [{"iso_3166_1": "GB", "release_dates": [{"certification": "15"}]}, {"iso_3166_1": "US", "release_dates": [{"certification": ""}, {"certification": "PG-13"}]}]}}),
+            MediaKind::Movie,
+        )?;
+        assert_eq!(movie.tmdb_rating.map(ImdbRating::value), Some(8.4));
+        assert_eq!(movie.imdb_rating, None);
+        assert_eq!(movie.directors, ["Director"]);
+        assert_eq!(movie.cast[0].character.as_deref(), Some("Hero"));
+        assert_eq!(movie.certification.as_deref(), Some("PG-13"));
+        assert_eq!(movie.runtime_minutes, Some(120));
+        let series = tmdb_facts(
+            &json!({"episode_run_time": [0, 45], "created_by": [{"name": "Creator"}], "networks": [{"name": "Network"}], "aggregate_credits": {"cast": [{"name": "Actor", "roles": [{"character": "Lead"}]}]}, "content_ratings": {"results": [{"iso_3166_1": "US", "rating": "TV-14"}]}}),
+            MediaKind::Series,
+        )?;
+        assert_eq!(series.runtime_minutes, Some(45));
+        assert_eq!(series.creators, ["Creator"]);
+        assert_eq!(series.cast[0].character.as_deref(), Some("Lead"));
+        assert_eq!(series.certification.as_deref(), Some("TV-14"));
+        Ok(())
+    }
+    #[test]
+    fn facts_payload_rejects_invalid_scores_and_bounds() -> Result<(), serde_json::Error> {
+        for score in [-1.0, 10.1] {
+            assert!(
+                serde_json::from_value::<FactsPayload>(json!({"tmdb_rating": score}))?
+                    .normalize()
+                    .is_err()
+            );
+        }
+        assert!(
+            serde_json::from_value::<FactsPayload>(json!({"status": "x".repeat(201)}))?
+                .normalize()
+                .is_err()
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod facts_snapshot_tests {
+    use super::*;
+    #[test]
+    fn snapshots_preserve_facts_and_old_missing_facts_load_empty() -> Result<(), TmdbError> {
+        let mut details = serde_json::from_value::<DetailDto>(
+            serde_json::json!({"id": 12, "title": "Movie", "genres": []}),
+        )
+        .map_err(|_| TmdbError::Malformed)?
+        .normalize(MediaKind::Movie)?;
+        details.facts = tmdb_facts(
+            &serde_json::json!({"vote_average": 0.0, "vote_count": 0, "status": "Released"}),
+            MediaKind::Movie,
+        )?;
+        let query = TmdbQuery::Details {
+            kind: MediaKind::Movie,
+            id: 12,
+        };
+        let data = TmdbData::Details(details);
+        let encoded = encode(&data)?;
+        assert_eq!(decode(&encoded, &query)?, data);
+        let mut old: serde_json::Value =
+            serde_json::from_str(&encoded).map_err(|_| TmdbError::Malformed)?;
+        old["data"]
+            .as_object_mut()
+            .ok_or(TmdbError::Malformed)?
+            .remove("facts");
+        let TmdbData::Details(old) = decode(&old.to_string(), &query)? else {
+            return Err(TmdbError::Malformed);
+        };
+        assert_eq!(old.facts, TitleFacts::default());
+        Ok(())
     }
 }

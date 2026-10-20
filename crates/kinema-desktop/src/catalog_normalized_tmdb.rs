@@ -96,6 +96,7 @@ pub(super) fn write(
                 false,
                 time,
             )?;
+            write_facts(tx, fetch_id, &details.facts)?;
             // Reduced legacy DTOs do not satisfy today's rich detail request,
             // but the fields they actually retain still came from a detail resource.
             import_title(tx, id, &item, "tmdb", Quality::Detail, fetch_id, time)?;
@@ -306,6 +307,7 @@ pub(super) fn read(
                 .map(str::to_owned);
             (
                 TmdbData::Details(TmdbDetails {
+                    facts: read_facts(&tx, id, "tmdb", &resource)?,
                     backdrop_url,
                     title,
                     imdb,
@@ -432,6 +434,10 @@ mod display_projection_tests {
         };
         let imdb = ImdbId::new("tt1234567")?;
         let data = TmdbData::Details(TmdbDetails {
+            facts: kinema_core::catalog::TitleFacts {
+                tagline: Some("Retained facts".into()),
+                ..Default::default()
+            },
             backdrop_url: None,
             title: TmdbTitle {
                 id: 42,
@@ -459,6 +465,7 @@ mod display_projection_tests {
         let TmdbData::Details(details) = saved.data else {
             return Err("wrong resource".into());
         };
+        assert_eq!(details.facts.tagline.as_deref(), Some("Retained facts"));
         assert_eq!(details.title.year(), Some(2024));
         assert_eq!(
             details.title.poster_url(),
@@ -473,6 +480,7 @@ mod display_projection_tests {
         normalized_pages::write_cinemeta_details(
             &tx,
             &TitleDetails {
+                facts: Default::default(),
                 title: CatalogTitle::new(imdb, MediaKind::Movie, "Synthetic", None)?,
                 poster_url: None,
                 background_url: None,

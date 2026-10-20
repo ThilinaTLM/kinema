@@ -382,7 +382,7 @@ fn merge_fetches(tx: &Transaction<'_>, target: Target, other: i64) -> Result<(),
         let old:Option<i64>=tx.query_row(&format!("SELECT id FROM metadata_fetches WHERE {column}=?1 AND provider=?2 AND resource_key=?3 AND locale=?4"),params![id,provider,key,locale],|r|r.get(0)).optional()?;
         if let Some(old) = old {
             // Success and last attempt advance independently; failure never wipes success.
-            tx.execute("UPDATE metadata_fetches SET fetched_at=(SELECT fetched_at FROM metadata_fetches WHERE id=?2),success_kind=(SELECT success_kind FROM metadata_fetches WHERE id=?2),completeness=(SELECT completeness FROM metadata_fetches WHERE id=?2) WHERE id=?1 AND COALESCE(fetched_at,-1)<COALESCE((SELECT fetched_at FROM metadata_fetches WHERE id=?2),-1)",params![old,fetch])?;
+            tx.execute("UPDATE metadata_fetches SET facts_json=(SELECT facts_json FROM metadata_fetches WHERE id=?2),fetched_at=(SELECT fetched_at FROM metadata_fetches WHERE id=?2),success_kind=(SELECT success_kind FROM metadata_fetches WHERE id=?2),completeness=(SELECT completeness FROM metadata_fetches WHERE id=?2) WHERE id=?1 AND COALESCE(fetched_at,-1)<COALESCE((SELECT fetched_at FROM metadata_fetches WHERE id=?2),-1)",params![old,fetch])?;
             tx.execute("UPDATE metadata_fetches SET last_attempt_at=(SELECT last_attempt_at FROM metadata_fetches WHERE id=?2),last_error_code=(SELECT last_error_code FROM metadata_fetches WHERE id=?2) WHERE id=?1 AND COALESCE(last_attempt_at,-1)<COALESCE((SELECT last_attempt_at FROM metadata_fetches WHERE id=?2),-1)",params![old,fetch])?;
             for table in [
                 "title_identifiers",

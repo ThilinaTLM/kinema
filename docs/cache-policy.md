@@ -166,3 +166,23 @@ Check access before fetching missing ranges. Expired status or URLs do not inval
 ## Checks
 
 Cover expired and unknown-expiry URLs, scope changes, empty results versus failures, failed force-refresh, and late responses. Start with one persistent source-snapshot table and small in-memory debrid caches; no general cache framework is needed.
+
+## Detail facts payload (schema v5)
+
+The v5 source upgrade adds nullable `metadata_fetches.facts_json`, a bounded,
+validated normalized detail projection scoped to the provider/resource/locale
+fetch row, not a raw provider response. It retains distinct TMDB score/votes and
+IMDb score, runtime, dates/status, US certification, language, credits, studios,
+networks and tagline where supplied. Cinemeta also retains its supplied writers,
+countries and release-info text. Cast is limited to ten; unknown character names
+remain null. Canonical scalar fields and ratings continue using existing rich
+imports/provenance; the payload supplies detail-only collections and the selected
+provider's facts without implicit cross-provider enrichment.
+
+The atomic v4 → v5 upgrade preserves existing rows and timestamps; NULL facts
+load as empty facts. Existing reduced snapshots omit the new optional payload
+and also decode empty. The next successful selected-provider remote detail fetch
+replaces facts, including clearing facts now unknown. This introduces no TTL,
+automatic fallback or credential storage. The adapter locale is currently fixed
+to en-US, hence certification preference is US; user locale selection is not yet
+implemented. Offline fixture tests do not establish real-provider/GUI acceptance.

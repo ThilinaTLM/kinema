@@ -225,6 +225,7 @@ pub(super) fn read_cinemeta_details(
     let episodes = read_episodes(&tx, id, None)?;
     Ok(Some(CachedDetails {
         details: TitleDetails {
+            facts: read_facts(&tx, id, "cinemeta", &cinemeta_detail_key(kind, external))?,
             title,
             poster_url,
             background_url,
@@ -319,6 +320,7 @@ pub(super) fn write_cinemeta_details(
         fetch_id,
         time,
     )?;
+    write_facts(tx, fetch_id, &details.facts)?;
     import_episodes(tx, id, &details.episodes, "cinemeta", fetch_id, time)?;
     Ok(())
 }
@@ -347,4 +349,42 @@ pub(super) fn cinemeta_years(text: &str) -> Option<(i64, Option<i64>)> {
         return None;
     }
     Some((first, last))
+}
+
+pub(super) fn write_facts(
+    tx: &Transaction<'_>,
+    fetch_id: i64,
+    facts: &kinema_core::catalog::TitleFacts,
+) -> Result<(), CatalogError> {
+    if !facts.is_valid() {
+        return Err(CatalogError::InvalidMetadata);
+    }
+    let payload = serde_json::to_string(&crate::tmdb::FactsPayload::from(facts))
+        .map_err(|_| CatalogError::InvalidMetadata)?;
+    if payload.len() > 64000 {
+        return Err(CatalogError::InvalidMetadata);
+    }
+    tx.execute(
+        "UPDATE metadata_fetches SET facts_json=?2 WHERE id=?1",
+        params![fetch_id, payload],
+    )?;
+    Ok(())
+}
+pub(super) fn read_facts(
+    tx: &Transaction<'_>,
+    title: i64,
+    provider: &str,
+    resource: &str,
+) -> Result<kinema_core::catalog::TitleFacts, CatalogError> {
+    let payload: Option<String> = tx.query_row("SELECT facts_json FROM metadata_fetches WHERE title_id=?1 AND provider=?2 AND resource_key=?3 AND locale='en-US'", params![title,provider,resource], |r| r.get(0))?;
+    let Some(payload) = payload else {
+        return Ok(Default::default());
+    };
+    if payload.len() > 64000 {
+        return Err(CatalogError::InvalidCache);
+    }
+    serde_json::from_str::<crate::tmdb::FactsPayload>(&payload)
+        .map_err(|_| CatalogError::InvalidCache)?
+        .normalize()
+        .map_err(|_| CatalogError::InvalidCache)
 }

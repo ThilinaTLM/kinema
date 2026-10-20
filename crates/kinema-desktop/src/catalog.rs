@@ -49,7 +49,7 @@ mod normalized_tmdb;
 mod schema;
 
 const ENDPOINT: &str = "https://v3-cinemeta.strem.io/";
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 const MAX_EPISODES: usize = 20_000;
 const MAX_URL_BYTES: usize = 4096;
 const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
@@ -259,7 +259,13 @@ impl CatalogService {
             let tx = connection.transaction()?;
             schema::migrate(&tx)?;
             normalized_backfill::backfill(&tx)?;
-            tx.pragma_update(None, "user_version", 4)?;
+            tx.pragma_update(None, "user_version", 5)?;
+            tx.commit()?;
+        }
+        if version == 4 {
+            let tx = connection.transaction()?;
+            tx.execute_batch("ALTER TABLE metadata_fetches ADD COLUMN facts_json TEXT;")?;
+            tx.pragma_update(None, "user_version", 5)?;
             tx.commit()?;
         }
         Ok(Self {
@@ -773,7 +779,7 @@ mod tests {
             service
                 .connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-            4
+            5
         );
         Ok(())
     }
@@ -1077,6 +1083,7 @@ mod tests {
             imdb: None,
         };
         let detail = TmdbData::Details(TmdbDetails {
+            facts: Default::default(),
             backdrop_url: None,
             title: title.clone(),
             imdb: Some(ImdbId::new("tt4000001")?),
@@ -1325,6 +1332,7 @@ mod tests {
             id: 603,
         };
         let details = TmdbData::Details(TmdbDetails {
+            facts: Default::default(),
             backdrop_url: None,
             title: TmdbTitle {
                 id: 603,
@@ -1526,7 +1534,7 @@ mod tests {
             service
                 .connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-            4
+            5
         );
         Ok(())
     }
