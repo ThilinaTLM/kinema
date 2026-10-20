@@ -461,3 +461,55 @@ fn duplicate_fetch_resources_and_duplicate_page_members_reconcile_without_orphan
     assert_eq!(record.provenance[0].observed_at, 3);
     Ok(())
 }
+
+#[test]
+fn tied_fetch_merge_keeps_acquired_facts_over_unacquired_payload() -> TestResult {
+    use kinema_core::catalog::{ImdbRating, TitleFacts};
+    let dir = tempfile::tempdir()?;
+    let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+    let tx = service.connection.transaction()?;
+    let first = imdb_observation(&CatalogTitle::new(
+        ImdbId::new("tt3000006")?,
+        MediaKind::Movie,
+        "First",
+        None,
+    )?);
+    let second = normalized_tmdb::observation(&TmdbTitle {
+        id: 501,
+        kind: MediaKind::Movie,
+        name: "Second".into(),
+        overview: None,
+        release_info: None,
+        poster_url: None,
+        display: Default::default(),
+        imdb: None,
+    });
+    let facts = TitleFacts {
+        tmdb_rating: ImdbRating::new(8.1),
+        ..Default::default()
+    };
+    for (item, acquired) in [(&first, false), (&second, true)] {
+        let id = resolve_title(&tx, item, 2)?;
+        let f = fetch(
+            &tx,
+            Target::Title(id),
+            "tmdb",
+            "same-fixture-resource-v1",
+            Quality::Detail,
+            false,
+            2,
+        )?;
+        import_title(&tx, id, item, "tmdb", Quality::Detail, f, 2)?;
+        if acquired {
+            write_facts(&tx, f, &facts)?;
+        }
+    }
+    let mut incoming = first;
+    incoming.identifiers.extend(second.identifiers);
+    let id = resolve_title(&tx, &incoming, 3)?;
+    assert_eq!(
+        read_facts(&tx, id, "tmdb", "same-fixture-resource-v1")?,
+        facts
+    );
+    Ok(())
+}

@@ -769,7 +769,12 @@ imports/provenance; the payload supplies detail-only collections and the selecte
 provider's facts without implicit cross-provider enrichment.
 
 The atomic v4 → v5 upgrade preserves existing rows and timestamps; NULL facts
-load as empty facts. Existing reduced snapshots omit the new optional payload
+load as empty facts and remain explicitly unacquired. The non-NULL payload itself
+is the acquisition marker, independent of whether it contains any known facts;
+no schema bump, migration rewrite or user-data reset is needed. The detail-only
+`CatalogService::metadata_needs_refresh` predicate exposes this distinction for
+worker cache-hit-then-remote routing. Load consumes this only after a successful
+metadata cache hit; predicate failures preserve the cache hit without refreshing. Existing reduced snapshots omit the new optional payload
 and also decode empty. The next successful selected-provider remote detail fetch
 replaces facts, including clearing facts now unknown. This introduces no TTL,
 automatic fallback or credential storage. The adapter locale is currently fixed

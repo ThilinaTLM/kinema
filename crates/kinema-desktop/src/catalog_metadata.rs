@@ -750,6 +750,41 @@ impl CatalogService {
         normalized_tmdb::read(self, query)
     }
 
+    /// Acquisition completeness, not an age/TTL or nonempty-facts check. A NULL
+    /// payload identifies details cached before facts were fetched; a validated
+    /// non-NULL payload (even all unknown values) records a successful attempt.
+    /// Call only after a successful metadata cache hit: misses and corrupt cache
+    /// payloads keep their existing worker semantics. The worker must use this
+    /// result to show the saved copy with `refreshing=true` and then fetch.
+    pub(crate) fn metadata_needs_refresh(
+        &self,
+        action: &crate::catalog_worker::MetadataAction,
+    ) -> Result<bool, CatalogError> {
+        use crate::{catalog_worker::MetadataAction, tmdb::TmdbQuery};
+        let (kind, namespace, external, provider, resource) = match action {
+            MetadataAction::Details { kind, id } => (
+                *kind,
+                "imdb",
+                id.as_str().to_owned(),
+                "cinemeta",
+                normalized_pages::cinemeta_detail_key(*kind, id),
+            ),
+            MetadataAction::Tmdb(query @ TmdbQuery::Details { kind, id }) => (
+                *kind,
+                "tmdb",
+                id.to_string(),
+                "tmdb",
+                crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?,
+            ),
+            _ => return Ok(false),
+        };
+        self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM metadata_fetches f JOIN title_identifiers i ON i.title_id=f.title_id WHERE i.media_kind=?1 AND i.namespace=?2 AND i.external_id=?3 AND f.provider=?4 AND f.resource_key=?5 AND f.locale='en-US' AND f.completeness='detail' AND f.facts_json IS NULL)",
+            params![kind_text(kind), namespace, external, provider, resource],
+            |row| row.get(0),
+        ).map_err(|_| CatalogError::Storage)
+    }
+
     pub(crate) fn refresh_tmdb(
         &mut self,
         query: &crate::tmdb::TmdbQuery,
@@ -1525,6 +1560,12 @@ mod facts_migration_tests {
         let saved = upgraded
             .read_details(MediaKind::Movie, &id)?
             .ok_or("missing details")?;
+        assert!(upgraded.metadata_needs_refresh(
+            &crate::catalog_worker::MetadataAction::Details {
+                kind: MediaKind::Movie,
+                id: id.clone()
+            }
+        )?);
         assert_eq!(saved.details.title.name(), "Preserved");
         assert_eq!(saved.fetched_at, 123);
         assert_eq!(saved.details.facts, Default::default());

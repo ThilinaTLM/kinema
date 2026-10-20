@@ -596,6 +596,432 @@ mod tests {
     }
 
     #[test]
+    fn tmdb_movie_and_series_remote_refresh_fill_unacquired_facts_end_to_end() -> TestResult {
+        use crate::{
+            catalog_worker::MetadataAction,
+            credentials::{CredentialError, SecretString},
+            tmdb::{TmdbClient, TmdbData, TmdbDetails, TmdbQuery, TmdbTitle},
+        };
+        let _guard = crate::credentials::METADATA_TEST_LOCK
+            .lock()
+            .map_err(|_| "metadata test lock")?;
+        for (kind, id, response, append, certification, credit) in [
+            (
+                MediaKind::Movie,
+                42,
+                r#"{"id":42,"title":"Fixture movie","genres":[],"vote_average":8.4,"vote_count":1234,"runtime":121,"credits":{"crew":[{"name":"Fixture director","job":"Director"}],"cast":[{"name":"Fixture actor","character":"Hero"}]},"release_dates":{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"PG-13"}]}]}}"#,
+                "external_ids,credits,release_dates",
+                "PG-13",
+                "Hero",
+            ),
+            (
+                MediaKind::Series,
+                43,
+                r#"{"id":43,"name":"Fixture series","genres":[],"vote_average":8.7,"vote_count":987,"episode_run_time":[45],"created_by":[{"name":"Fixture creator"}],"aggregate_credits":{"cast":[{"name":"Fixture actor","roles":[{"character":"Detective"}]}]},"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-14"}]}}"#,
+                "external_ids,aggregate_credits,content_ratings",
+                "TV-14",
+                "Detective",
+            ),
+        ] {
+            let dir = tempfile::tempdir()?;
+            let path = dir.path().join("catalog");
+            let mut service = CatalogService::open(&path)?;
+            let query = TmdbQuery::Details { kind, id };
+            let action = MetadataAction::Tmdb(query.clone());
+            service.save_tmdb(
+                &query,
+                TmdbData::Details(TmdbDetails {
+                    facts: Default::default(),
+                    backdrop_url: None,
+                    title: TmdbTitle {
+                        id,
+                        kind,
+                        name: "Old detail".into(),
+                        overview: None,
+                        release_info: None,
+                        poster_url: None,
+                        display: Default::default(),
+                        imdb: None,
+                    },
+                    imdb: None,
+                    genres: vec![],
+                    seasons: vec![],
+                }),
+            )?;
+            // Exactly the state left by the v4 -> v5 migration: valid details,
+            // original success timestamp/completeness, but no facts acquisition.
+            service
+                .connection
+                .execute("UPDATE metadata_fetches SET facts_json=NULL", [])?;
+            assert!(service.metadata_needs_refresh(&action)?);
+            let saved = service.read_tmdb(&query)?.ok_or("old detail missing")?;
+            let TmdbData::Details(saved) = saved.data else {
+                return Err("wrong old resource".into());
+            };
+            assert_eq!(saved.facts, Default::default());
+            let mock = Mock::start(vec![ok(response)])?;
+            service.tmdb = Some((
+                crate::credentials::metadata_generation(),
+                Arc::new(TmdbClient::at(
+                    SecretString::new("fixture-only".into()),
+                    mock.endpoint.clone(),
+                )?),
+            ));
+            let refreshed =
+                service.refresh_tmdb_with_credential(&query, || Err(CredentialError::Missing))?;
+            let TmdbData::Details(refreshed) = refreshed.data else {
+                return Err("wrong refreshed resource".into());
+            };
+            let score = refreshed.facts.tmdb_rating.ok_or("rating missing")?.value();
+            assert_eq!(score, if kind == MediaKind::Movie { 8.4 } else { 8.7 });
+            assert!(refreshed.facts.tmdb_vote_count.is_some_and(|n| n > 0));
+            assert_eq!(
+                refreshed.facts.certification.as_deref(),
+                Some(certification)
+            );
+            assert_eq!(refreshed.facts.cast[0].name, "Fixture actor");
+            assert_eq!(refreshed.facts.cast[0].character.as_deref(), Some(credit));
+            assert_eq!(refreshed.facts.imdb_rating, None);
+            if kind == MediaKind::Movie {
+                assert_eq!(refreshed.facts.directors, ["Fixture director"]);
+            } else {
+                assert_eq!(refreshed.facts.creators, ["Fixture creator"]);
+            }
+            assert!(!service.metadata_needs_refresh(&action)?);
+            drop(service);
+            let mut service = CatalogService::open(&path)?;
+            let reloaded = service
+                .read_tmdb(&query)?
+                .ok_or("refreshed cache missing")?;
+            let TmdbData::Details(reloaded) = reloaded.data else {
+                return Err("wrong reloaded resource".into());
+            };
+            assert_eq!(reloaded.facts, refreshed.facts);
+            assert!(!service.metadata_needs_refresh(&action)?);
+            let requests = mock.finish()?;
+            assert_eq!(requests.len(), 1);
+            let target = requests[0]
+                .split_whitespace()
+                .nth(1)
+                .ok_or("request target missing")?;
+            let url = Url::parse(&format!("http://fixture.invalid{target}"))?;
+            assert!(
+                url.query_pairs()
+                    .any(|(k, v)| k == "append_to_response" && v == append)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn tmdb_remote_legitimately_empty_facts_records_acquisition() -> TestResult {
+        use crate::{
+            catalog_worker::MetadataAction,
+            credentials::{CredentialError, SecretString},
+            tmdb::{TmdbClient, TmdbData, TmdbQuery},
+        };
+        let _guard = crate::credentials::METADATA_TEST_LOCK
+            .lock()
+            .map_err(|_| "metadata test lock")?;
+        let mock = Mock::start(vec![ok(r#"{"id":44,"title":"Unknown facts","genres":[]}"#)])?;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("catalog");
+        let mut service = CatalogService::open(&path)?;
+        let query = TmdbQuery::Details {
+            kind: MediaKind::Movie,
+            id: 44,
+        };
+        let action = MetadataAction::Tmdb(query.clone());
+        service.tmdb = Some((
+            crate::credentials::metadata_generation(),
+            Arc::new(TmdbClient::at(
+                SecretString::new("fixture-only".into()),
+                mock.endpoint.clone(),
+            )?),
+        ));
+        let fetched =
+            service.refresh_tmdb_with_credential(&query, || Err(CredentialError::Missing))?;
+        let TmdbData::Details(fetched) = fetched.data else {
+            return Err("wrong refreshed resource".into());
+        };
+        assert_eq!(fetched.facts, Default::default());
+        assert!(!service.metadata_needs_refresh(&action)?);
+        drop(service);
+        let mut service = CatalogService::open(&path)?;
+        for _ in 0..2 {
+            assert!(service.read_tmdb(&query)?.is_some());
+            assert!(!service.metadata_needs_refresh(&action)?);
+        }
+        assert_eq!(mock.finish()?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn cinemeta_remote_refresh_fills_imdb_rating_and_keeps_empty_acquisition_complete() -> TestResult
+    {
+        use crate::catalog_worker::MetadataAction;
+        for response in [
+            r#"{"meta":{"id":"tt1234567","type":"movie","name":"Rated","imdbRating":"8.1","runtime":"123 min","cast":["Fixture actor"]}}"#,
+            r#"{"meta":{"id":"tt1234567","type":"movie","name":"Unknown facts"}}"#,
+        ] {
+            let mock = Mock::start(vec![ok(response)])?;
+            let dir = tempfile::tempdir()?;
+            let path = dir.path().join("catalog");
+            let mut service = CatalogService::open_at(&path, mock.endpoint.clone())?;
+            let id = ImdbId::new("tt1234567")?;
+            let action = MetadataAction::Details {
+                kind: MediaKind::Movie,
+                id: id.clone(),
+            };
+            let old = TitleDetails {
+                facts: Default::default(),
+                title: CatalogTitle::new(id.clone(), MediaKind::Movie, "Old detail", None)?,
+                poster_url: None,
+                background_url: None,
+                release_info: None,
+                genres: vec![],
+                episodes: vec![],
+            };
+            let tx = service.connection.transaction()?;
+            normalized_pages::write_cinemeta_details(&tx, &old, 1, true)?;
+            tx.execute("UPDATE metadata_fetches SET facts_json=NULL", [])?;
+            tx.commit()?;
+            assert!(service.metadata_needs_refresh(&action)?);
+            assert_eq!(
+                service
+                    .read_details(MediaKind::Movie, &id)?
+                    .ok_or("old cache missing")?
+                    .details
+                    .facts,
+                Default::default()
+            );
+            let refreshed = service.refresh_details(MediaKind::Movie, &id)?;
+            if response.contains("imdbRating") {
+                assert_eq!(
+                    refreshed
+                        .details
+                        .facts
+                        .imdb_rating
+                        .map(kinema_core::catalog::ImdbRating::value),
+                    Some(8.1)
+                );
+                assert_eq!(refreshed.details.facts.cast[0].name, "Fixture actor");
+            } else {
+                assert_eq!(refreshed.details.facts, Default::default());
+            }
+            assert!(!service.metadata_needs_refresh(&action)?);
+            drop(service);
+            let mut service = CatalogService::open(&path)?;
+            assert_eq!(
+                service
+                    .read_details(MediaKind::Movie, &id)?
+                    .ok_or("new cache missing")?
+                    .details
+                    .facts,
+                refreshed.details.facts
+            );
+            assert!(!service.metadata_needs_refresh(&action)?);
+            assert_eq!(mock.finish()?.len(), 1);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn worker_load_refreshes_null_facts_then_reuses_acquired_rated_or_empty_details() -> TestResult
+    {
+        use crate::{
+            catalog_worker::{
+                CatalogWorker, MetadataAction, MetadataEvent, MetadataRequest, MetadataSnapshot,
+                Mode, Submit,
+            },
+            credentials::SecretString,
+            tmdb::{TmdbClient, TmdbData, TmdbDetails, TmdbQuery, TmdbTitle},
+        };
+        use kinema_core::catalog::TitleFacts;
+        fn event(worker: &CatalogWorker) -> Result<MetadataEvent, Box<dyn Error>> {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(event) = worker.poll_metadata() {
+                    return Ok(event);
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err("timed out waiting for metadata event".into());
+                }
+                thread::sleep(Duration::from_millis(2));
+            }
+        }
+        fn facts(snapshot: &MetadataSnapshot) -> Result<&TitleFacts, Box<dyn Error>> {
+            match snapshot {
+                MetadataSnapshot::Details(saved) => Ok(&saved.details.facts),
+                MetadataSnapshot::Tmdb(CachedTmdb {
+                    data: TmdbData::Details(details),
+                    ..
+                }) => Ok(&details.facts),
+                _ => Err("unexpected snapshot resource".into()),
+            }
+        }
+        let _guard = crate::credentials::METADATA_TEST_LOCK
+            .lock()
+            .map_err(|_| "metadata test lock")?;
+        for (tmdb, kind, response, has_rating) in [
+            (
+                true,
+                MediaKind::Movie,
+                r#"{"id":42,"title":"Rated movie","genres":[],"vote_average":8.4,"vote_count":120,"credits":{"cast":[{"name":"Actor","character":"Hero"}]},"release_dates":{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"PG"}]}]}}"#,
+                true,
+            ),
+            (
+                true,
+                MediaKind::Series,
+                r#"{"id":42,"name":"Rated series","genres":[],"vote_average":8.4,"vote_count":120,"aggregate_credits":{"cast":[{"name":"Actor","roles":[{"character":"Hero"}]}]},"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-14"}]}}"#,
+                true,
+            ),
+            (
+                false,
+                MediaKind::Movie,
+                r#"{"meta":{"id":"tt1234567","type":"movie","name":"Rated movie","imdbRating":"8.4","cast":["Actor"]}}"#,
+                true,
+            ),
+            (
+                true,
+                MediaKind::Movie,
+                r#"{"id":42,"title":"Unknown facts","genres":[]}"#,
+                false,
+            ),
+            (
+                false,
+                MediaKind::Movie,
+                r#"{"meta":{"id":"tt1234567","type":"movie","name":"Unknown facts"}}"#,
+                false,
+            ),
+        ] {
+            let mock = Mock::start(vec![ok(response)])?;
+            let endpoint = mock.endpoint.clone();
+            let action = if tmdb {
+                MetadataAction::Tmdb(TmdbQuery::Details { kind, id: 42 })
+            } else {
+                MetadataAction::Details {
+                    kind,
+                    id: ImdbId::new("tt1234567")?,
+                }
+            };
+            let seed_action = action.clone();
+            let worker = CatalogWorker::spawn(move || {
+                // In-memory SQLite prevents any file-lifetime/cleanup dependency
+                // on the worker's intentionally asynchronous shutdown.
+                let mut service = CatalogService::open_at(Path::new(":memory:"), endpoint.clone())
+                    .map_err(|e| e.to_string())?;
+                if let MetadataAction::Tmdb(query) = &seed_action {
+                    service
+                        .save_tmdb(
+                            query,
+                            TmdbData::Details(TmdbDetails {
+                                facts: Default::default(),
+                                backdrop_url: None,
+                                title: TmdbTitle {
+                                    id: 42,
+                                    kind,
+                                    name: "Old detail".into(),
+                                    overview: None,
+                                    release_info: None,
+                                    poster_url: None,
+                                    display: Default::default(),
+                                    imdb: None,
+                                },
+                                imdb: None,
+                                genres: vec![],
+                                seasons: vec![],
+                            }),
+                        )
+                        .map_err(|e| e.to_string())?;
+                    let client =
+                        TmdbClient::at(SecretString::new("fixture-only".into()), endpoint.clone())
+                            .map_err(|e| e.to_string())?;
+                    service.tmdb =
+                        Some((crate::credentials::metadata_generation(), Arc::new(client)));
+                } else {
+                    let id = ImdbId::new("tt1234567").map_err(|e| e.to_string())?;
+                    let old = TitleDetails {
+                        facts: Default::default(),
+                        title: CatalogTitle::new(id, kind, "Old detail", None)
+                            .map_err(|e| e.to_string())?,
+                        poster_url: None,
+                        background_url: None,
+                        release_info: None,
+                        genres: vec![],
+                        episodes: vec![],
+                    };
+                    let tx = service
+                        .connection
+                        .transaction()
+                        .map_err(|_| "fixture transaction failed")?;
+                    normalized_pages::write_cinemeta_details(&tx, &old, 1, true)
+                        .map_err(|e| e.to_string())?;
+                    tx.commit().map_err(|_| "fixture commit failed")?;
+                }
+                service
+                    .connection
+                    .execute("UPDATE metadata_fetches SET facts_json=NULL", [])
+                    .map_err(|_| "fixture NULL seed failed")?;
+                Ok(service)
+            })?;
+            assert_eq!(
+                worker.submit_metadata(MetadataRequest {
+                    generation: 7,
+                    action: action.clone(),
+                    mode: Mode::Load
+                }),
+                Submit::Queued
+            );
+            let saved = event(&worker)?;
+            assert!(saved.saved && saved.refreshing);
+            assert_eq!(saved.generation, 7);
+            assert_eq!(saved.action, action);
+            assert_eq!(facts(&saved.result?)?, &TitleFacts::default());
+            let fetched = event(&worker)?;
+            assert!(!fetched.saved && !fetched.refreshing);
+            assert_eq!(fetched.generation, 7);
+            let snapshot = fetched.result?;
+            let refreshed = facts(&snapshot)?;
+            if has_rating {
+                assert_eq!(
+                    if tmdb {
+                        refreshed.tmdb_rating
+                    } else {
+                        refreshed.imdb_rating
+                    }
+                    .map(kinema_core::catalog::ImdbRating::value),
+                    Some(8.4)
+                );
+                assert_eq!(refreshed.cast[0].name, "Actor");
+                if tmdb {
+                    assert!(refreshed.certification.is_some());
+                }
+            } else {
+                assert_eq!(refreshed, &TitleFacts::default());
+            }
+            // Both an acquired rich record and an acquired all-unknown record
+            // must be terminal cache hits on later Load requests.
+            assert_eq!(
+                worker.submit_metadata(MetadataRequest {
+                    generation: 8,
+                    action: action.clone(),
+                    mode: Mode::Load
+                }),
+                Submit::Queued
+            );
+            let reused = event(&worker)?;
+            assert!(reused.saved && !reused.refreshing);
+            assert_eq!(reused.generation, 8);
+            assert_eq!(reused.result?, snapshot);
+            assert!(worker.poll_metadata().is_none());
+            drop(worker);
+            assert_eq!(mock.finish()?.len(), 1);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn saved_order_and_summaries_survive_reopen() -> TestResult {
         let mock = Mock::start(vec![ok(
             r#"{"metas":[{"id":"tt0234215","type":"movie","name":"Reloaded","description":"Summary"},{"id":"tt0133093","type":"movie","name":"The Matrix"}]}"#,

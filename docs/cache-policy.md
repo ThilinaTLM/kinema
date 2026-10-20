@@ -181,8 +181,28 @@ provider's facts without implicit cross-provider enrichment.
 
 The atomic v4 → v5 upgrade preserves existing rows and timestamps; NULL facts
 load as empty facts. Existing reduced snapshots omit the new optional payload
-and also decode empty. The next successful selected-provider remote detail fetch
-replaces facts, including clearing facts now unknown. This introduces no TTL,
-automatic fallback or credential storage. The adapter locale is currently fixed
+and also decode empty. On a complete detail fetch row, NULL means facts have
+**not been acquired**, whereas a validated non-NULL payload records acquisition
+even if every fact is unknown. Legacy summary-completeness backfill rows already
+miss the complete-detail read and do not gain completeness from their payload.
+Never use `TitleFacts::default()` equality to decide freshness: genuinely empty
+provider metadata must not cause an endless refresh loop.
+
+On a successful detail cache hit, Load must show the saved copy and fetch remotely
+when `CatalogService::metadata_needs_refresh` returns true. This applies only to
+the selected provider's unacquired detail resource, not browse/search/season/source
+resources and not an age-based TTL. Emit the saved event with `refreshing=true`,
+then the usual fetched/failed event. A failed request must retain the saved facts
+and acquisition marker; a successful detail fetch writes a non-NULL facts payload
+in the existing save transaction, clearing unknown values and the need to retry.
+Explicit Refresh still always fetches. A missing or corrupt cache retains its
+existing miss/error behavior. If the optional acquisition predicate itself fails,
+keep the successful saved result and treat it as cache-only; log only a safe debug
+category, never the backend error string. Worker cache routing now consumes this
+predicate in Load mode and logs `refresh_reason="facts_unacquired"`. Fixture tests
+cover the saved→fetched sequence, later cache-only loads (including legitimately
+empty facts), and cancellation/generation replacement during the predicate.
+
+This introduces no automatic fallback or credential storage. The adapter locale is currently fixed
 to en-US, hence certification preference is US; user locale selection is not yet
 implemented. Offline fixture tests do not establish real-provider/GUI acceptance.

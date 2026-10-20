@@ -33,7 +33,7 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Mode {
-    /// Show saved results; fetch remotely only on a cache miss.
+    /// Show saved results; fetch on a miss or unacquired detail facts.
     Load,
     /// Show saved results first, then always fetch remotely.
     Refresh,
@@ -708,6 +708,11 @@ pub(crate) trait Backend: Sized + 'static {
     ) -> Result<Option<MetadataSnapshot>, String> {
         Err("Metadata is unavailable from this backend.".into())
     }
+    /// Called only after a successful Load-mode metadata cache hit. Unknown
+    /// facts are not necessarily unacquired; storage owns that distinction.
+    fn metadata_needs_refresh(&mut self, _action: &MetadataAction) -> Result<bool, String> {
+        Ok(false)
+    }
     fn refresh_metadata(
         &mut self,
         _action: &MetadataAction,
@@ -780,6 +785,13 @@ impl Backend for CatalogService {
                 .map(|value| value.map(MetadataSnapshot::Tmdb)),
         }
         .map_err(crate::catalog::diagnostic_error)
+    }
+
+    fn metadata_needs_refresh(&mut self, action: &MetadataAction) -> Result<bool, String> {
+        CatalogService::metadata_needs_refresh(self, action).map_err(|error| {
+            tracing::debug!(category = ?error, "Detail facts acquisition check failed");
+            error.to_string()
+        })
     }
 
     fn refresh_metadata(
@@ -1212,6 +1224,29 @@ fn send_terminal(
     }
 }
 
+/// A failed optional acquisition probe must never turn usable cached details
+/// into an error. Do not log the backend's String: only categories are safe.
+fn metadata_refresh_required<B: Backend>(backend: &mut B, action: &MetadataAction) -> bool {
+    match backend.metadata_needs_refresh(action) {
+        Ok(true) => {
+            tracing::debug!(
+                refresh_reason = "facts_unacquired",
+                "Saved metadata needs remote detail facts"
+            );
+            true
+        }
+        Ok(false) => false,
+        Err(_) => {
+            tracing::debug!(
+                category = "facts_acquisition_check_failed",
+                outcome = "cache_only",
+                "Keeping saved metadata after acquisition check failed"
+            );
+            false
+        }
+    }
+}
+
 fn read_before_fetch<B: Backend>(
     mailbox: &Mailbox,
     events: &EventBox,
@@ -1220,7 +1255,7 @@ fn read_before_fetch<B: Backend>(
     work: &Work,
     cancel: &AtomicBool,
 ) -> bool {
-    let refreshing = match work {
+    let mut refreshing = match work {
         Work::Search(r) => r.mode,
         Work::Metadata(r) => r.mode,
     } == Mode::Refresh;
@@ -1230,6 +1265,12 @@ fn read_before_fetch<B: Backend>(
             .read_metadata(&r.action)
             .map(|s| s.map(Refreshed::metadata)),
     };
+    if !refreshing
+        && let Work::Metadata(request) = work
+        && matches!(&result, Ok(Some(Refreshed::Metadata(_))))
+    {
+        refreshing = metadata_refresh_required(backend, &request.action);
+    }
     let state = mailbox.lock();
     if state.closed || cancel.load(Ordering::Acquire) {
         tracing::debug!(outcome = "cancelled", "Catalog cache result discarded");
@@ -1307,7 +1348,7 @@ fn process_metadata<B: Backend>(
     if cancellation.load(Ordering::Acquire) {
         return;
     }
-    let refreshing = request.mode == Mode::Refresh;
+    let mut refreshing = request.mode == Mode::Refresh;
     let send = |result, saved, refreshing| {
         // Serialize the final cancellation check with cancel/close. UI cancel
         // then purges already queued events, so none can be inserted behind it.
@@ -1339,6 +1380,9 @@ fn process_metadata<B: Backend>(
     }
     match backend.read_metadata(&request.action) {
         Ok(Some(snapshot)) => {
+            if !refreshing {
+                refreshing = metadata_refresh_required(backend, &request.action);
+            }
             send(Ok(snapshot), true, refreshing);
             if !refreshing {
                 return;
@@ -2530,5 +2574,294 @@ mod tests {
         mailbox.submit(req(3, MediaKind::Movie, "m2", Mode::Load));
         assert_eq!(mailbox.take().expect("second").generation, 1);
         assert_eq!(mailbox.take().expect("third").generation, 3);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod facts_refresh_tests {
+    use super::*;
+    use kinema_core::catalog::{ImdbRating, TitleDetails, TitleFacts};
+
+    struct Fixture {
+        saved: Option<MetadataSnapshot>,
+        remote: Result<MetadataSnapshot, String>,
+        needs_refresh: Result<bool, String>,
+        probes: usize,
+        refreshes: usize,
+        on_probe: Option<Box<dyn FnOnce()>>,
+    }
+    impl Backend for Fixture {
+        fn read(&mut self, _: &SearchQuery) -> Result<Option<Snapshot>, String> {
+            Ok(None)
+        }
+        fn refresh(&mut self, _: &SearchQuery) -> Result<Snapshot, String> {
+            Err("not search".into())
+        }
+        fn read_metadata(
+            &mut self,
+            _: &MetadataAction,
+        ) -> Result<Option<MetadataSnapshot>, String> {
+            Ok(self.saved.clone())
+        }
+        fn metadata_needs_refresh(&mut self, _: &MetadataAction) -> Result<bool, String> {
+            self.probes += 1;
+            if let Some(callback) = self.on_probe.take() {
+                callback();
+            }
+            self.needs_refresh.clone()
+        }
+        fn refresh_metadata(
+            &mut self,
+            _: &MetadataAction,
+            _: &Arc<AtomicBool>,
+        ) -> Result<MetadataSnapshot, String> {
+            self.refreshes += 1;
+            let result = self.remote.clone();
+            if let Ok(snapshot) = &result {
+                self.saved = Some(snapshot.clone());
+                self.needs_refresh = Ok(false);
+            }
+            result
+        }
+    }
+    fn details(rating: Option<ImdbRating>, fetched_at: u64) -> MetadataSnapshot {
+        MetadataSnapshot::Details(CachedDetails {
+            details: TitleDetails {
+                facts: TitleFacts {
+                    imdb_rating: rating,
+                    ..Default::default()
+                },
+                title: CatalogTitle::new(
+                    ImdbId::new("tt1234567").expect("id"),
+                    MediaKind::Movie,
+                    "Fixture",
+                    None,
+                )
+                .expect("title"),
+                poster_url: None,
+                background_url: None,
+                release_info: None,
+                genres: vec![],
+                episodes: vec![],
+            },
+            fetched_at,
+        })
+    }
+    fn request(generation: u64, mode: Mode) -> MetadataRequest {
+        MetadataRequest {
+            generation,
+            action: MetadataAction::Details {
+                kind: MediaKind::Movie,
+                id: ImdbId::new("tt1234567").expect("id"),
+            },
+            mode,
+        }
+    }
+    fn fixture(rating: Option<ImdbRating>) -> Fixture {
+        Fixture {
+            saved: Some(details(None, 1)),
+            remote: Ok(details(rating, 2)),
+            needs_refresh: Ok(true),
+            probes: 0,
+            refreshes: 0,
+            on_probe: None,
+        }
+    }
+
+    #[test]
+    fn load_facts_cache_hit_then_fetch_then_cache_only_even_when_facts_are_empty() {
+        for rating in [None, ImdbRating::new(8.1)] {
+            let mailbox = Mailbox::default();
+            let events = MetadataEventBox::default();
+            let mut backend = Some(fixture(rating));
+            process_metadata(
+                &mailbox,
+                &events,
+                &mut backend,
+                &mut || Err("already open".into()),
+                request(7, Mode::Load),
+            );
+            let saved = events.pop().expect("saved");
+            assert!(saved.saved && saved.refreshing);
+            assert_eq!(saved.generation, 7);
+            assert_eq!(saved.result, Ok(details(None, 1)));
+            let fetched = events.pop().expect("fetched");
+            assert!(!fetched.saved && !fetched.refreshing);
+            assert_eq!(fetched.generation, 7);
+            assert_eq!(fetched.result, Ok(details(rating, 2)));
+            assert!(events.pop().is_none());
+            process_metadata(
+                &mailbox,
+                &events,
+                &mut backend,
+                &mut || Err("already open".into()),
+                request(8, Mode::Load),
+            );
+            let saved = events.pop().expect("acquired cache");
+            assert!(saved.saved && !saved.refreshing);
+            assert_eq!(saved.generation, 8);
+            assert_eq!(saved.result, Ok(details(rating, 2)));
+            assert!(events.pop().is_none());
+            assert_eq!(backend.as_ref().expect("backend").refreshes, 1);
+        }
+    }
+
+    #[test]
+    fn production_cache_read_requests_remote_only_for_successful_load_hit_with_unacquired_facts() {
+        for (mode, saved, needs_refresh, expected_fetch, expected_probes) in [
+            (Mode::Load, Some(details(None, 1)), Ok(true), true, 1),
+            (Mode::Load, Some(details(None, 1)), Ok(false), false, 1),
+            (
+                Mode::Load,
+                Some(details(None, 1)),
+                Err("predicate failed".into()),
+                false,
+                1,
+            ),
+            (Mode::Load, None, Ok(true), true, 0),
+            (Mode::Refresh, Some(details(None, 1)), Ok(false), true, 0),
+        ] {
+            let mailbox = Mailbox::default();
+            let events = MetadataEventBox::default();
+            let req = request(7, mode);
+            let cancel = mailbox.metadata_cancellation(&req);
+            let mut backend = fixture(None);
+            backend.saved = saved.clone();
+            backend.needs_refresh = needs_refresh;
+            assert_eq!(
+                read_before_fetch(
+                    &mailbox,
+                    &EventBox::default(),
+                    &events,
+                    &mut backend,
+                    &Work::Metadata(req),
+                    &cancel
+                ),
+                expected_fetch
+            );
+            assert_eq!(backend.probes, expected_probes);
+            if saved.is_some() {
+                let cached = events.pop().expect("cache event");
+                assert!(cached.saved);
+                assert_eq!(cached.refreshing, expected_fetch);
+                assert_eq!(cached.result, Ok(details(None, 1)));
+            }
+            assert!(events.pop().is_none());
+        }
+    }
+
+    #[test]
+    fn failed_predicate_is_cache_only_and_failed_remote_keeps_saved_acquisition_pending() {
+        for predicate_failure in [true, false] {
+            let mailbox = Mailbox::default();
+            let events = MetadataEventBox::default();
+            let mut value = fixture(None);
+            if predicate_failure {
+                value.needs_refresh = Err("predicate failed".into());
+            }
+            value.remote = Err("offline".into());
+            let mut backend = Some(value);
+            process_metadata(
+                &mailbox,
+                &events,
+                &mut backend,
+                &mut || Err("already open".into()),
+                request(7, Mode::Load),
+            );
+            let saved = events.pop().expect("saved");
+            assert!(saved.saved);
+            assert_eq!(saved.refreshing, !predicate_failure);
+            assert_eq!(saved.result, Ok(details(None, 1)));
+            if !predicate_failure {
+                assert_eq!(
+                    events.pop().expect("remote failure").result,
+                    Err("offline".into())
+                );
+            }
+            assert!(events.pop().is_none());
+            let value = backend.as_ref().expect("backend");
+            assert_eq!(value.refreshes, usize::from(!predicate_failure));
+            assert_eq!(value.saved, Some(details(None, 1)));
+            assert_eq!(
+                value.needs_refresh,
+                if predicate_failure {
+                    Err("predicate failed".into())
+                } else {
+                    Ok(true)
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn cancellation_or_generation_replacement_during_probe_rejects_saved_and_remote() {
+        for production in [true, false] {
+            for replace in [true, false] {
+                let mailbox = Arc::new(Mailbox::default());
+                let events = MetadataEventBox::default();
+                let req = request(7, Mode::Load);
+                let cancel = mailbox.metadata_cancellation(&req);
+                let owner = Arc::clone(&mailbox);
+                let mut backend = fixture(None);
+                backend.on_probe = Some(Box::new(move || {
+                    if replace {
+                        owner.submit_metadata(request(8, Mode::Load));
+                    } else {
+                        let old = request(7, Mode::Load);
+                        owner.cancel_metadata(&old.action, old.generation);
+                    }
+                }));
+                if production {
+                    assert!(!read_before_fetch(
+                        &mailbox,
+                        &EventBox::default(),
+                        &events,
+                        &mut backend,
+                        &Work::Metadata(req),
+                        &cancel
+                    ));
+                    assert_eq!(backend.refreshes, 0);
+                } else {
+                    let mut backend = Some(backend);
+                    process_metadata(
+                        &mailbox,
+                        &events,
+                        &mut backend,
+                        &mut || Err("already open".into()),
+                        req,
+                    );
+                    assert_eq!(backend.as_ref().expect("backend").refreshes, 0);
+                }
+                assert!(cancel.load(Ordering::Acquire));
+                assert!(events.pop().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn acquisition_probe_logs_reason_but_never_backend_error_text() {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "acquisition_probe_logs_reason_but_never_backend_error_text",
+        ) {
+            return;
+        }
+        use crate::providers::test_logging::{capture, excludes};
+        let mut backend = fixture(None);
+        let (_, output) = capture(|| {
+            assert!(metadata_refresh_required(
+                &mut backend,
+                &request(1, Mode::Load).action
+            ));
+            backend.needs_refresh = Err("https://secret.invalid/?token=error-secret".into());
+            assert!(!metadata_refresh_required(
+                &mut backend,
+                &request(1, Mode::Load).action
+            ));
+        });
+        assert!(output.contains("facts_unacquired"));
+        assert!(output.contains("facts_acquisition_check_failed"));
+        excludes(&output, &["secret.invalid", "error-secret", "token="]);
     }
 }
