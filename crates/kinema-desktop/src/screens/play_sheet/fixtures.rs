@@ -47,25 +47,14 @@ impl PlaySheet {
             "No Real-Debrid credential is saved. Preparation has not started.".into();
         this.pending = (state == "play-live-preparing").then_some(100);
         this.error = (state == "play-live-failure").then(|| {
-            "Player launch failed: executable not found. Your file choice is preserved.".into()
+            "Player launch failed: executable not found. Try again or pick another stream.".into()
         });
         if !this.missing && this.pending.is_none() {
-            this.files = vec![
-                RemoteFile {
-                    id: "feature".into(),
-                    path: "Quiet.Orbit.mkv".into(),
-                    size: 4_200_000_000,
-                },
-                RemoteFile {
-                    id: "extra".into(),
-                    path: "Extras/Interview.mkv".into(),
-                    size: 400_000_000,
-                },
-            ];
             this.preparation = Some(99);
-            if matches!(state, "play-live-ready" | "play-live-failure") {
-                this.chosen = Some("feature".into());
-            }
+        }
+        // Ready: playback was submitted for the auto-selected file.
+        if state == "play-live-ready" {
+            this.pending = Some(101);
         }
         this
     }

@@ -3,13 +3,13 @@ use super::{
     coordinator::{AppCoordinator, CoordinatorEvent, SettingsDestination},
     detail::{StreamBadges, stream_badges, stream_summary},
 };
+use crate::player::PlayerChoice;
 use crate::{
     app::{AppAction, AppOutcome, CredentialState},
     widgets::{
-        button::{Button, ButtonSize, ButtonVariant},
-        icon::{Icon, IconName},
+        button::{Button, ButtonSize},
         notice::{Notice, NoticeKind},
-        patterns::{Badge, BadgeTone, ListRow, Skeleton, StateView, ViewState},
+        patterns::{Badge, BadgeTone},
         progress::Progress,
         sheet::Sheet,
         text::TypeExt,
@@ -17,20 +17,13 @@ use crate::{
         tooltip::tooltip,
     },
 };
-use crate::{
-    player::PlayerChoice,
-    widgets::menu::{Select, SelectEvent},
-};
 use gpui::{prelude::*, *};
-use kinema_core::sources::{PlaybackTarget, RemoteFile, SourceCandidate};
+use kinema_core::sources::{FileSelection, PlaybackTarget, RemoteFile, SourceCandidate};
 use std::sync::Arc;
 
 // Play-sheet geometry; shared spacing lives in widgets::tokens.
 const POSTER_WIDTH: Pixels = px(44.);
 const POSTER_HEIGHT: Pixels = px(66.);
-/// Visible file rows before the list scrolls.
-const FILE_ROWS_VISIBLE: f32 = 4.;
-const FILE_SIZE_WIDTH: Pixels = px(72.);
 
 /// Presentation context captured when the sheet opens.
 pub(crate) struct PlayContext {
@@ -45,13 +38,10 @@ pub(crate) struct PlaySheet {
     context: PlayContext,
     candidate: SourceCandidate,
     provider: kinema_core::sources::DebridKind,
-    player: Entity<Select<PlayerChoice>>,
-    _player_subscription: Subscription,
     preparation: Option<u64>,
     pending: Option<u64>,
-    player_pending: Option<u64>,
-    files: Vec<RemoteFile>,
-    chosen: Option<String>,
+    /// Set when the prepared file is larger than the cache limit.
+    limit_exceeded: Option<u64>,
     error: Option<String>,
     missing: bool,
     credential_notice: String,
@@ -64,21 +54,22 @@ mod fixtures;
 #[cfg(test)]
 mod tests;
 mod workflow;
-fn can_play(chosen: Option<&str>, files: &[RemoteFile], pending: bool) -> bool {
-    !pending && chosen.is_some_and(|id| files.iter().any(|f| f.id == id))
+/// What to do once the debrid service has prepared the torrent.
+#[derive(Debug, PartialEq, Eq)]
+enum AfterPrepare {
+    /// Play this remote file immediately; there is no file picker.
+    Play(String),
+    /// Selection was not unique: tell the user to try another stream.
+    Message(String),
 }
-/// A lone file needs no decision; several must be chosen explicitly.
-fn auto_choice(files: &[RemoteFile]) -> Option<String> {
-    match files {
-        [only] => Some(only.id.clone()),
-        _ => None,
-    }
-}
-/// `Extras/Interview.mkv` -> (`Interview.mkv`, Some(`Extras`)).
-fn split_path(path: &str) -> (&str, Option<&str>) {
-    match path.rsplit_once(['/', '\\']) {
-        Some((dir, name)) if !name.is_empty() => (name, Some(dir).filter(|d| !d.is_empty())),
-        _ => (path, None),
+fn after_prepare(selection: &FileSelection, files: &[RemoteFile]) -> AfterPrepare {
+    const FALLBACK: &str = "Couldn't identify the file in this torrent — try another stream.";
+    match selection {
+        FileSelection::Unique(index) => match files.get(*index) {
+            Some(file) => AfterPrepare::Play(file.id.clone()),
+            None => AfterPrepare::Message(FALLBACK.into()),
+        },
+        other => AfterPrepare::Message(other.error_message().unwrap_or(FALLBACK).into()),
     }
 }
 
@@ -177,87 +168,6 @@ impl PlaySheet {
                     .child(self.candidate.name.clone()),
             )
     }
-
-    /// Placeholder while the debrid service resolves the files.
-    fn preparing_skeleton(&self) -> AnyElement {
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(s::S8)
-            .child(
-                div()
-                    .type_style(t::SMALL)
-                    .child(format!("Preparing with {}…", provider_name(self.provider))),
-            )
-            .child(Progress::indeterminate("prepare-progress"))
-            .child(Skeleton::block().h(s::ROW_TWO_LINE))
-            .into_any_element()
-    }
-
-    /// File choice; only when there is something to choose between.
-    fn file_list(&self, cx: &mut Context<Self>) -> AnyElement {
-        let p = *tokens::palette(cx);
-        let locked = self.pending.is_some() || self.player_pending.is_some();
-        let rows = self.files.iter().enumerate().map(|(index, file)| {
-            let chosen = self.chosen.as_ref() == Some(&file.id);
-            let (name, dir) = split_path(&file.path);
-            let id = file.id.clone();
-            let weak = cx.entity().downgrade();
-            let mut row = ListRow::new(("play-file", index), name.to_owned())
-                .leading(
-                    Icon::new(if chosen {
-                        IconName::CircleDot
-                    } else {
-                        IconName::Circle
-                    })
-                    .color(if chosen { p.accent } else { p.text_muted }),
-                )
-                .trailing(
-                    div()
-                        .w(FILE_SIZE_WIDTH)
-                        .text_right()
-                        .type_style(t::SMALL)
-                        .text_color(p.text_secondary)
-                        .child(format_bytes(file.size)),
-                )
-                .selected(chosen);
-            if let Some(dir) = dir {
-                row = row.subtitle(dir.to_owned());
-            }
-            if !locked {
-                row = row.on_click(move |_, _, cx| {
-                    let _ = weak.update(cx, |s, cx| {
-                        s.chosen = Some(id.clone());
-                        cx.notify();
-                    });
-                });
-            }
-            row.into_any_element()
-        });
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(s::S4)
-            .child(
-                div()
-                    .type_style(t::SMALL_MEDIUM)
-                    .text_color(p.text_secondary)
-                    .child("Choose a file"),
-            )
-            .child(
-                div()
-                    .id("play-files")
-                    .w_full()
-                    .max_h(s::ROW_TWO_LINE * FILE_ROWS_VISIBLE)
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .children(rows),
-            )
-            .into_any_element()
-    }
 }
 
 impl Render for PlaySheet {
@@ -265,8 +175,7 @@ impl Render for PlaySheet {
         let p = *tokens::palette(cx);
         let dismiss = cx.entity().downgrade();
         let cancel = cx.entity().downgrade();
-        let preparing = self.pending.is_some() && self.preparation.is_none();
-        let launching = self.pending.is_some() && self.preparation.is_some();
+        let busy = self.pending.is_some();
         let mut body = div()
             .w_full()
             .flex_none()
@@ -287,57 +196,27 @@ impl Render for PlaySheet {
                         },
                     )),
             );
-        } else {
-            // Preparing shows the shape of the file list; once files exist a
-            // lone file is chosen for the user and only real choices are listed.
-            let state = if preparing {
-                ViewState::Loading
+        } else if busy {
+            // One inline progress state: preparing, then starting playback.
+            let label = if self.preparation.is_none() {
+                format!("Preparing with {}…", provider_name(self.provider))
             } else {
-                ViewState::Content
-            };
-            let content = if self.files.len() > 1 {
-                self.file_list(cx)
-            } else {
-                div().into_any_element()
+                "Starting playback…".to_owned()
             };
             body = body.child(
-                StateView::new("play-files-state", state)
-                    .skeleton(self.preparing_skeleton())
-                    .content(content),
-            );
-            if launching {
-                body = body
+                div()
+                    .id("play-progress")
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(s::S8)
                     .child(
                         div()
                             .type_style(t::SMALL)
                             .text_color(p.text_secondary)
-                            .child("Requesting player launch…"),
+                            .child(label),
                     )
-                    .child(Progress::indeterminate("launch-progress"));
-            }
-        }
-        let limit = self
-            .coordinator
-            .read(cx)
-            .settings
-            .as_ref()
-            .map(|s| s.media_limit_bytes);
-        if let Some(limit) = limit
-            && self
-                .chosen
-                .as_ref()
-                .and_then(|id| self.files.iter().find(|f| &f.id == id))
-                .is_some_and(|f| f.size > limit)
-        {
-            let coordinator = self.coordinator.clone();
-            body = body.child(
-                Notice::new(NoticeKind::Warning, "File exceeds the cache limit").action(
-                    Button::new("play-storage", "Storage settings…").on_click(move |_, _, cx| {
-                        coordinator.update(cx, |c, cx| {
-                            c.open_settings_at(SettingsDestination::Storage, cx)
-                        })
-                    }),
-                ),
+                    .child(Progress::indeterminate("prepare-progress")),
             );
         }
         if let Some(error) = &self.error {
@@ -345,33 +224,40 @@ impl Render for PlaySheet {
                 Notice::new(NoticeKind::Error, "Couldn’t play this stream").body(error.clone()),
             );
         }
-        let player = if self.pending.is_none() && self.player_pending.is_none() {
-            div().child(self.player.clone()).into_any_element()
-        } else {
-            let label = match self.player.read(cx).value() {
+        if let Some(limit) = self.limit_exceeded {
+            let coordinator = self.coordinator.clone();
+            body = body.child(
+                Notice::new(
+                    NoticeKind::Warning,
+                    format!("File exceeds the cache limit ({})", format_bytes(limit)),
+                )
+                .action(Button::new("play-storage", "Storage settings…").on_click(
+                    move |_, _, cx| {
+                        coordinator.update(cx, |c, cx| {
+                            c.open_settings_at(SettingsDestination::Storage, cx)
+                        })
+                    },
+                )),
+            );
+        }
+        let player = self
+            .coordinator
+            .read(cx)
+            .settings
+            .as_ref()
+            .map(|s| match &s.player {
                 PlayerChoice::Mpv => "mpv",
                 PlayerChoice::Vlc => "VLC",
                 PlayerChoice::Custom(_) => "Custom player",
-            };
-            div()
-                .type_style(t::BODY)
-                .text_color(p.text_secondary)
-                .child(label)
-                .into_any_element()
-        };
-        body = body.child(
-            div()
-                .flex()
-                .items_center()
-                .gap(s::S12)
-                .child(
-                    div()
-                        .type_style(t::SMALL_MEDIUM)
-                        .text_color(p.text_secondary)
-                        .child("Player"),
-                )
-                .child(player),
-        );
+            });
+        if let Some(player) = player {
+            body = body.child(
+                div()
+                    .type_style(t::SMALL)
+                    .text_color(p.text_muted)
+                    .child(format!("Opens in {player}")),
+            );
+        }
         Sheet::new("play-sheet", "Play")
             .initial_focus(self.cancel.clone())
             .body(body)
@@ -379,45 +265,12 @@ impl Render for PlaySheet {
                 let _ = dismiss.update(cx, |this, cx| this.dismiss(cx));
             })
             .footer(
-                Button::new("play-cancel", "Cancel")
+                Button::new("play-cancel", if busy { "Cancel" } else { "Close" })
                     .size(ButtonSize::Large)
                     .focus_handle(self.cancel.clone())
                     .on_click(move |_, _, cx| {
                         let _ = cancel.update(cx, |this, cx| this.dismiss(cx));
                     }),
-            )
-            .footer(
-                Button::new("play-launch", "Play")
-                    .variant(ButtonVariant::Primary)
-                    .size(ButtonSize::Large)
-                    .icon(IconName::Play)
-                    .busy(launching)
-                    .disabled(!can_play(
-                        self.chosen.as_deref(),
-                        &self.files,
-                        self.pending.is_some() || self.player_pending.is_some(),
-                    ))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let (Some(preparation), Some(file_id)) =
-                            (this.preparation, this.chosen.clone())
-                        {
-                            this.error = None;
-                            this.pending = this.coordinator.update(cx, |c, cx| {
-                                c.command(
-                                    AppAction::PlayFile {
-                                        preparation,
-                                        file_id,
-                                    },
-                                    cx,
-                                )
-                            });
-                            if this.pending.is_none() {
-                                this.error =
-                                    Some("Application service unavailable or busy. Retry.".into());
-                            }
-                            cx.notify();
-                        }
-                    })),
             )
     }
 }

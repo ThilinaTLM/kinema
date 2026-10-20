@@ -1,15 +1,19 @@
-//! Detail hero presentation: backdrop, poster, meta badges, actions and the
-//! "Details" disclosure.
+//! Detail page: compact hero (backdrop, poster, chips, actions) and the
+//! scrolling page body that hosts the other sections.
 use super::*;
 use crate::widgets::menu::OpenContextMenu;
 use crate::widgets::patterns::{MediaHero, uses_over_art};
-use kinema_core::catalog::ImdbId;
-use std::time::{SystemTime, UNIX_EPOCH};
+use kinema_core::catalog::{ImdbId, TitleFacts};
 
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+/// Centres a page section and caps its width on wide windows.
+pub(super) fn body_shell(child: impl IntoElement) -> Div {
+    div().w_full().flex().justify_center().child(
+        div()
+            .w_full()
+            .max_w(geometry::PAGE_MAX_WIDTH)
+            .px(s::GRID_INSET)
+            .child(child),
+    )
 }
 
 /// Overflow menu shared by the More button and right-click on the hero.
@@ -92,7 +96,7 @@ impl Detail {
     }
 
     /// Year, runtime/seasons, genres and rating as badges.
-    fn meta_badges(title: &BrowseTitle) -> Vec<Badge> {
+    fn meta_badges(title: &BrowseTitle, facts: &TitleFacts) -> Vec<Badge> {
         let mut badges = Vec::new();
         if title.kind() == MediaKind::Series {
             badges.push(
@@ -112,8 +116,15 @@ impl Detail {
                     format!("{n} seasons")
                 }));
             }
-        } else if let Some(n) = title.runtime() {
+        } else if let Some(n) = facts.runtime_minutes.or(title.runtime().map(u32::from)) {
             badges.push(Badge::new(format!("{n} min")));
+        }
+        if let Some(cert) = facts
+            .certification
+            .as_deref()
+            .filter(|c| !c.trim().is_empty())
+        {
+            badges.push(Badge::new(cert.trim().to_owned()));
         }
         badges.extend(title.genres().iter().take(3).map(|g| Badge::new(g.clone())));
         if let Some(rating) = title.rating().and_then(rating_label) {
@@ -128,15 +139,9 @@ impl Detail {
 
     fn primary_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let action = self.primary_action(cx);
-        let label: SharedString = match (&action, &self.episode) {
-            (PrimaryAction::Episodes, _) => "Episodes".into(),
-            (_, Some(ep)) => format!("Play {}", episode_marker(ep)).into(),
-            _ => "Play".into(),
-        };
-        let icon = if matches!(action, PrimaryAction::Episodes) {
-            IconName::Tv
-        } else {
-            IconName::Play
+        let (label, icon): (SharedString, _) = match &action {
+            PrimaryAction::Episodes => ("Episodes".into(), IconName::Tv),
+            _ => ("Play".into(), IconName::Play),
         };
         let blocked = match &action {
             PrimaryAction::Blocked(reason) => Some(*reason),
@@ -146,6 +151,7 @@ impl Detail {
             .variant(ButtonVariant::Primary)
             .size(ButtonSize::Large)
             .icon(icon)
+            .focus_handle(self.primary_focus.clone())
             .disabled(blocked.is_some())
             .on_click(cx.listener(|this, _, _, cx| this.run_primary(cx)));
         match blocked {
@@ -159,11 +165,14 @@ impl Detail {
         }
     }
 
-    /// Left column: a cinematic hero that grows to fill spare height, then the
-    /// inline facts, optional provenance panel and similar titles.
-    pub(super) fn hero(&self, min_height: Pixels, cx: &mut Context<Self>) -> AnyElement {
-        let title = self.display_title(cx);
-        let status = self.meta_status(cx);
+    /// Compact hero: ambient backdrop behind poster, title, chips, overview and
+    /// actions, followed by a metadata-failure notice when there is one.
+    pub(super) fn hero(
+        &self,
+        title: &BrowseTitle,
+        status: &MetaStatus,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = self.tinted_palette(cx);
         let (poster_url, backdrop_url) = {
             let c = self.coordinator.read(cx);
@@ -182,186 +191,96 @@ impl Detail {
             };
             (poster, backdrop)
         };
-        let backdrop = self.backdrop_state(backdrop_url.as_deref(), poster_url.as_deref(), cx);
-        let backdrop = match backdrop {
+        let backdrop = match self.backdrop_state(backdrop_url.as_deref(), poster_url.as_deref(), cx)
+        {
             ArtworkState::Ready(image) => Some(image),
             _ => None,
         };
         let over_art = uses_over_art(backdrop.is_some(), tokens::theme(cx).mode);
-        let poster = self.poster_face(&title, poster_url.as_deref(), cx);
+        let poster = self.poster_face(title, poster_url.as_deref(), cx);
 
         let mut banner = MediaHero::new("detail-hero", title.name().to_owned())
             .backdrop(backdrop)
             .poster(poster)
             .fade_into(p.bg_canvas)
-            .min_height(min_height)
-            .fill(true)
+            .min_height(px(0.))
             .overview_loading(status.busy && !status.loaded)
             .primary(self.primary_button(cx));
-        for badge in Self::meta_badges(&title) {
+        let facts = self.title_facts(cx);
+        for badge in Self::meta_badges(title, &facts) {
             banner = banner.meta_badge(badge);
         }
         if let Some(text) = title.overview().filter(|o| !o.trim().is_empty()) {
             banner = banner.overview(text.to_owned());
         }
-        if self.is_series() && self.episode.is_some() {
-            banner = banner.secondary(
-                Button::new("detail-all-episodes", "All episodes")
-                    .icon(IconName::Tv)
-                    .over_art(over_art)
-                    .on_click(cx.listener(|this, _, _, cx| this.focus_episodes(cx))),
-            );
-        }
-        banner = banner
-            .secondary(
-                Button::new(
-                    "detail-provenance",
-                    if self.expanded {
-                        "Hide details"
-                    } else {
-                        "Details"
-                    },
-                )
-                .icon(if self.expanded {
-                    IconName::ChevronDown
-                } else {
-                    IconName::Info
-                })
-                .over_art(over_art)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.expanded = !this.expanded;
-                    cx.notify();
-                })),
-            )
-            .secondary(self.more_button(&title, over_art, cx));
+        banner = banner.secondary(self.more_button(title, over_art, cx));
 
-        let mut sections: Vec<AnyElement> = vec![
-            banner.into_any_element(),
-            self.inline_facts(&title, cx).into_any_element(),
-        ];
-        if self.expanded {
-            sections.push(self.details_panel(&title, &status, cx));
-        } else if let Some(error) = status.error.clone() {
-            let retry = cx.listener(|this, _, _, cx| this.retry_metadata(cx));
-            sections.push(
-                div()
-                    .w_full()
-                    .px(s::GRID_INSET)
-                    .pt(s::S12)
-                    .child(
-                        crate::widgets::notice::Notice::new(
-                            crate::widgets::notice::NoticeKind::Warning,
-                            if status.loaded {
-                                "Couldn’t refresh title details"
-                            } else {
-                                "Couldn’t load title details"
-                            },
-                        )
-                        .body(error)
-                        .action(Button::new("detail-meta-retry", "Retry").on_click(retry)),
-                    )
-                    .into_any_element(),
-            );
-        }
-        if title.kind() == MediaKind::Movie {
-            sections.push(self.recommendations(cx));
-        }
         let weak = cx.entity().downgrade();
         let name = title.name().to_owned();
         let imdb = title.imdb().cloned();
-        div()
+        let mut section = div()
             .id("detail-hero-body")
             .w_full()
-            .flex_grow_1()
-            .flex_shrink_0()
             .flex()
             .flex_col()
-            .bg(p.bg_canvas)
-            .children(sections)
-            .context_menu("detail-backdrop-menu", move |_, _| {
-                more_items(weak.clone(), name.clone(), imdb.clone())
-            })
-            // The menu wrapper joins the column's flex chain so the hero can fill.
-            .w_full()
-            .flex()
-            .flex_col()
-            .flex_grow_1()
-            .flex_shrink_0()
-            .into_any_element()
+            .child(
+                div()
+                    .w_full()
+                    .child(banner)
+                    .context_menu("detail-backdrop-menu", move |_, _| {
+                        more_items(weak.clone(), name.clone(), imdb.clone())
+                    }),
+            );
+        if let Some(error) = status.error.clone() {
+            let retry = cx.listener(|this, _, _, cx| this.retry_metadata(cx));
+            section = section.child(
+                div().w_full().px(s::GRID_INSET).pt(s::S12).child(
+                    crate::widgets::notice::Notice::new(
+                        crate::widgets::notice::NoticeKind::Warning,
+                        if status.loaded {
+                            "Couldn’t refresh title details"
+                        } else {
+                            "Couldn’t load title details"
+                        },
+                    )
+                    .body(error)
+                    .action(Button::new("detail-meta-retry", "Retry").on_click(retry)),
+                ),
+            );
+        }
+        section.into_any_element()
     }
 
-    /// Always-visible facts under the hero: released, genres, episodes, source.
-    fn inline_facts(&self, title: &BrowseTitle, cx: &App) -> Div {
+    /// The detail page: compact hero, then one scrolling body of facts,
+    /// episodes (series) or similar titles (movies), and provenance.
+    pub(super) fn overview_page(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title = self.display_title(cx);
+        let status = self.meta_status(cx);
         let p = self.tinted_palette(cx);
-        let mut facts = Vec::new();
-        let release = {
-            let c = self.coordinator.read(cx);
-            c.details
-                .value()
-                .filter(|_| matches!(self.title, BrowseTitle::Cinemeta(_)))
-                .and_then(|d| d.release_info.clone())
-                .or_else(|| match title {
-                    BrowseTitle::Tmdb(t) => t.release_info.clone(),
-                    _ => None,
-                })
+        let width = content_width(window.viewport_size().width);
+        let hero = self.hero(&title, &status, cx);
+        let facts = self.facts_section(&title, &status, cx);
+        let middle = if self.is_series() {
+            self.episodes_section(width, cx)
+        } else {
+            self.recommendations(width, cx)
         };
-        if let Some(release) = release.filter(|r| !r.is_empty()) {
-            facts.push(("Released", release));
-        }
-        if !title.genres().is_empty() {
-            facts.push(("Genres", title.genres().join(", ")));
-        }
-        if title.kind() == MediaKind::Series {
-            let c = self.coordinator.read(cx);
-            let known = match &self.title {
-                BrowseTitle::Cinemeta(_) => c.details.value().map(|d| d.episodes.len() as u64),
-                BrowseTitle::Tmdb(_) => c.tmdb_details.value().map(|d| {
-                    d.seasons
-                        .iter()
-                        .map(|s| u64::from(s.episode_count))
-                        .sum::<u64>()
-                }),
-            };
-            if let Some(n) = known.filter(|n| *n > 0) {
-                facts.push(("Episodes", n.to_string()));
-            }
-        }
-        facts.push((
-            "Source",
-            if matches!(self.title, BrowseTitle::Tmdb(_)) {
-                "TMDB"
-            } else {
-                "Cinemeta"
-            }
-            .to_owned(),
-        ));
+        let footer = self.metadata_footer(&title, &status, cx);
         div()
-            .w_full()
-            .flex_none()
-            .flex()
-            .flex_wrap()
-            .gap_x(s::S32)
-            .gap_y(s::S12)
-            .px(s::GRID_INSET)
-            .py(s::S16)
-            .children(facts.into_iter().map(|(label, value)| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(s::S2)
-                    .child(
-                        div()
-                            .type_style(t::CAPTION)
-                            .text_color(p.text_muted)
-                            .child(label),
-                    )
-                    .child(
-                        div()
-                            .type_style(t::BODY)
-                            .text_color(p.text_secondary)
-                            .child(value),
-                    )
-            }))
+            .size_full()
+            .bg(p.bg_canvas)
+            .child(
+                ScrollArea::new("detail-scroll", self.scroll.clone())
+                    .child(hero)
+                    .child(body_shell(facts))
+                    .child(body_shell(middle))
+                    .child(body_shell(footer)),
+            )
+            .into_any_element()
     }
 
     /// Icon button that opens the same menu as right-click, anchored to itself.
@@ -391,104 +310,5 @@ impl Detail {
             .context_menu("detail-more-menu", move |_, _| {
                 more_items(weak.clone(), name.clone(), imdb.clone())
             })
-    }
-
-    /// "Details" disclosure: where the metadata came from and how fresh it is.
-    fn details_panel(
-        &self,
-        title: &BrowseTitle,
-        status: &MetaStatus,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let p = *tokens::palette(cx);
-        let rows = self.fact_rows(title, status, cx);
-        let skeleton = div()
-            .flex()
-            .flex_col()
-            .gap(s::S12)
-            .children((0..4).map(|_| Skeleton::line().w(relative(0.5)).into_any_element()));
-        let facts = div()
-            .flex()
-            .flex_col()
-            .gap(s::S8)
-            .children(rows.into_iter().map(|(label, value)| {
-                div()
-                    .flex()
-                    .gap(s::S12)
-                    .child(
-                        div()
-                            .w(geometry::DETAIL_LABEL_WIDTH)
-                            .flex_none()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
-                            .child(label),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_secondary)
-                            .child(value),
-                    )
-            }));
-        let sel = selection(status.loaded, false, status.error.is_some(), status.busy);
-        let weak = cx.entity().downgrade();
-        let view = state_view("detail-facts", sel)
-            .skeleton(skeleton)
-            .content(facts)
-            .on_retry(move |_, cx| {
-                let _ = weak.update(cx, |s, cx| s.retry_metadata(cx));
-            });
-        let view = match &status.error {
-            Some(error) => view.message(error.clone()),
-            None => view,
-        };
-        div()
-            .w_full()
-            .px(s::GRID_INSET)
-            .pt(s::S16)
-            .child(
-                crate::widgets::patterns::Card::new()
-                    .max_w(geometry::DETAILS_MAX_WIDTH)
-                    .child(div().p(s::S16).child(view)),
-            )
-            .into_any_element()
-    }
-
-    fn fact_rows(
-        &self,
-        title: &BrowseTitle,
-        status: &MetaStatus,
-        _cx: &App,
-    ) -> Vec<(&'static str, String)> {
-        let mut rows = Vec::new();
-        if title.rating().is_some() {
-            rows.push(("Rating", "IMDb".into()));
-        }
-        let provider = if matches!(self.title, BrowseTitle::Tmdb(_)) {
-            "TMDB"
-        } else {
-            "Cinemeta"
-        };
-        let freshness = match (status.origin, status.fetched_at) {
-            (crate::app_state::Origin::Saved, Some(at)) => {
-                format!("{provider} · saved copy from {}", age_label(now_unix(), at))
-            }
-            (crate::app_state::Origin::Fetched, Some(at)) => {
-                format!("{provider} · updated {}", age_label(now_unix(), at))
-            }
-            _ => format!("{provider} · not loaded yet"),
-        };
-        rows.push(("Metadata", freshness));
-        let ids = match title {
-            BrowseTitle::Cinemeta(t) => format!("IMDb {}", t.id().as_str()),
-            BrowseTitle::Tmdb(t) => match t.imdb.as_ref() {
-                Some(imdb) => format!("TMDB {} · IMDb {}", t.id, imdb.as_str()),
-                None => format!("TMDB {}", t.id),
-            },
-        };
-        rows.push(("Identifiers", ids));
-        rows
     }
 }

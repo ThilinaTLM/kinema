@@ -1,6 +1,6 @@
 //! Offline production-screen interaction coverage.
 
-use super::{BrowseTitle, Detail};
+use super::{BrowseTitle, Detail, Page};
 use crate::{screens::coordinator::AppCoordinator, tmdb::TmdbTitle, widgets::tokens};
 use ::core::prelude::v1::test;
 use gpui::{prelude::*, *};
@@ -33,33 +33,75 @@ fn title(tmdb: bool) -> BrowseTitle {
         )
     }
 }
+fn tmdb_movie() -> BrowseTitle {
+    BrowseTitle::Tmdb(TmdbTitle {
+        id: 7,
+        kind: MediaKind::Movie,
+        name: "Movie".into(),
+        overview: None,
+        release_info: None,
+        poster_url: None,
+        display: Default::default(),
+        imdb: ImdbId::new("tt1234567").ok(),
+    })
+}
+fn draw(window: WindowHandle<Detail>, cx: &mut TestAppContext) {
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+    })
+    .unwrap_or_else(|e| panic!("draw:{e}"));
+}
 #[gpui::test]
-fn cinemeta_and_tmdb_decode_real_shapes_and_switch_seasons(cx: &mut TestAppContext) {
-    cx.update(tokens::init);
+fn episode_click_opens_streams_for_that_episode_and_back_restores_the_detail(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
     for tmdb in [false, true] {
         let title = title(tmdb);
         let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
         let window =
             cx.add_window(|_, cx| Detail::fixture(coordinator.clone(), title, false, None, cx));
-        cx.run_until_parked();
-        window.update(cx,|view,_,cx|{
-                assert_eq!(view.season,Some(if tmdb{2}else{1}));assert_eq!(view.episodes(cx).len(),8);
-                let episodes=view.episodes(cx);view.choose_episode(episodes[1].clone(),cx);
-                assert!(matches!(view.target,Some(PlaybackTarget::Episode{season,episode:2,..}) if season==if tmdb{2}else{1}));
+        draw(window, cx);
+        let season = if tmdb { 2 } else { 1 };
+        window
+            .update(cx, |view, _, cx| {
+                assert_eq!(view.page(), Page::Overview);
+                assert_eq!(view.season, Some(season));
+                assert_eq!(view.episodes(cx).len(), 8);
+                let episodes = view.episodes(cx);
+                view.open_episode(episodes[1].clone(), cx);
+                assert_eq!(view.page(), Page::Streams);
+                assert!(matches!(
+                    view.target,
+                    Some(PlaybackTarget::Episode { season: s, episode: 2, .. }) if s == season
+                ));
                 assert!(view.coordinator.read(cx).sources.error().is_none());
-                view.back_to_episodes(cx);assert!(view.episode.is_none());
-                view.select_season(if tmdb{3}else{2},cx);assert_eq!(view.episodes(cx).len(),3);
+            })
+            .unwrap_or_else(|e| panic!("window:{e}"));
+        draw(window, cx);
+        window
+            .update(cx, |view, _, cx| {
+                // Back pops the page and keeps season and episode focus memory.
+                assert!(view.go_back(cx));
+                assert_eq!(view.page(), Page::Overview);
+                assert!(view.episode.is_none() && view.target.is_none());
+                assert_eq!(view.season, Some(season));
+                assert_eq!(view.episode_return_focus, Some((season, 2)));
+                assert!(!view.go_back(cx), "Overview is the root of the route");
+                view.select_season(season + 1, cx);
+                assert_eq!(view.episodes(cx).len(), 3);
                 assert!(view.episodes(cx)[0].still_url.is_some());
-            }).unwrap_or_else(|e|panic!("window:{e}"));
-        cx.run_until_parked();
-        cx.update_window(window.into(), |_, window, cx| {
-            window.draw(cx).clear(cx);
-        })
-        .unwrap_or_else(|e| panic!("draw:{e}"));
+            })
+            .unwrap_or_else(|e| panic!("window:{e}"));
+        draw(window, cx);
     }
 }
 #[gpui::test]
-fn stream_keyboard_context_details_and_enter_use_same_row(cx: &mut TestAppContext) {
+fn play_opens_the_streams_page_and_enter_prepares_a_stream(cx: &mut TestAppContext) {
     cx.update(|cx| {
         tokens::init(cx);
         tokens::set_reduce_motion(true, cx);
@@ -77,13 +119,19 @@ fn stream_keyboard_context_details_and_enter_use_same_row(cx: &mut TestAppContex
     let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
     let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
     cx.simulate_window_resize(window.into(), size(px(1280.), px(800.)));
-    cx.run_until_parked();
-    cx.update_window(window.into(), |_, window, cx| {
-        window.draw(cx).clear(cx);
-    })
-    .unwrap_or_else(|e| panic!("draw:{e}"));
+    draw(window, cx);
+    window
+        .update(cx, |view, _, cx| {
+            assert_eq!(view.page(), Page::Overview);
+            assert!(view.coordinator.read(cx).sources.value().is_none());
+            view.run_primary(cx);
+            assert_eq!(view.page(), Page::Streams);
+        })
+        .unwrap_or_else(|e| panic!("play:{e}"));
+    draw(window, cx);
     window
         .update(cx, |view, window, cx| {
+            assert!(view.coordinator.read(cx).sources.value().is_some());
             view.stream_focus[0].focus(window, cx)
         })
         .unwrap_or_else(|e| panic!("focus:{e}"));
@@ -102,9 +150,48 @@ fn stream_keyboard_context_details_and_enter_use_same_row(cx: &mut TestAppContex
     cx.simulate_keystrokes(window.into(), "enter");
     cx.run_until_parked();
     window
-        .read_with(cx, |view, _| {
+        .update(cx, |view, _, cx| {
             assert!(view.play.is_some());
             assert_eq!(view.selected, Some(0));
+            // Back leaves the page and drops the in-flight sheet with it.
+            assert!(view.go_back(cx));
+            assert!(view.play.is_none());
+            assert_eq!(view.page(), Page::Overview);
         })
         .unwrap_or_else(|e| panic!("read:{e}"));
+}
+#[gpui::test]
+fn similar_grid_shows_two_rows_and_show_more_pages_in_titles(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
+    let title = tmdb_movie();
+    let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+    let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
+    // Narrow enough that two rows (3 columns) hide some of the first page.
+    cx.simulate_window_resize(window.into(), size(px(520.), px(1400.)));
+    draw(window, cx);
+    window
+        .update(cx, |view, _, _| {
+            let cols = view.similar_cols;
+            assert_eq!(cols, 3);
+            assert_eq!(view.similar.loaded(), 6);
+            assert_eq!(view.similar.visible(cols).len(), 6.min(cols * 2));
+        })
+        .unwrap_or_else(|e| panic!("window:{e}"));
+    window
+        .update(cx, |view, _, cx| {
+            // Four rows (12 slots) outgrow the six loaded titles: page 2 loads.
+            view.show_more_similar(cx);
+            view.show_more_similar(cx);
+        })
+        .unwrap_or_else(|e| panic!("window:{e}"));
+    draw(window, cx);
+    window
+        .read_with(cx, |view, _| {
+            assert_eq!(view.similar.loaded(), 12, "page 2 was merged");
+            assert_eq!(view.similar.visible(3).len(), 12);
+        })
+        .unwrap_or_else(|e| panic!("window:{e}"));
 }

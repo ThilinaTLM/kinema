@@ -13,45 +13,6 @@ impl PlaySheet {
         // Navigation/window teardown can drop the view without a Sheet dismiss event.
         cx.on_release(|this, cx| this.cancel_owned_work(cx))
             .detach();
-        let choice = coordinator
-            .read(cx)
-            .settings
-            .as_ref()
-            .map(|s| s.player.clone())
-            .unwrap_or(PlayerChoice::Mpv);
-        let mut options = vec![
-            (PlayerChoice::Mpv, "mpv".into()),
-            (PlayerChoice::Vlc, "VLC".into()),
-        ];
-        if let PlayerChoice::Custom(_) = &choice {
-            options.push((choice.clone(), "Custom player".into()));
-        }
-        let player = cx.new(|cx| Select::new(choice, options, cx));
-        let player_coordinator = coordinator.clone();
-        let player_subscription = cx.subscribe(
-            &player,
-            move |this, _, event: &SelectEvent<PlayerChoice>, cx| {
-                let SelectEvent::Changed(choice) = event;
-                let settings = player_coordinator.read(cx).settings.clone();
-                if let Some(mut settings) = settings {
-                    settings.player = choice.clone();
-                    this.player_pending = player_coordinator
-                        .update(cx, |c, cx| c.command(AppAction::SaveSettings(settings), cx));
-                    if this.player_pending.is_none() {
-                        this.error = Some("Player preference could not be saved. Retry.".into());
-                        if let Some(choice) = player_coordinator
-                            .read(cx)
-                            .settings
-                            .as_ref()
-                            .map(|s| s.player.clone())
-                        {
-                            this.player.update(cx, |p, cx| p.set_value(choice, cx));
-                        }
-                    }
-                    cx.notify();
-                }
-            },
-        );
         let subscription = cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
             if let CoordinatorEvent::App(event) = event {
                 this.apply_event(event, cx);
@@ -94,13 +55,9 @@ impl PlaySheet {
             context,
             candidate: shown,
             provider,
-            player,
-            _player_subscription: player_subscription,
             preparation: None,
             pending,
-            player_pending: None,
-            files: vec![],
-            chosen: None,
+            limit_exceeded: None,
             error: if !missing && pending.is_none() {
                 Some("Application service unavailable or busy. Close and retry.".into())
             } else {
@@ -119,8 +76,6 @@ impl PlaySheet {
             self.provider = settings.debrid;
         }
         if matches!(event.outcome, AppOutcome::Invalidated { .. }) {
-            self.files.clear();
-            self.chosen = None;
             self.preparation = None;
             self.pending = None;
             self.error = None;
@@ -130,39 +85,21 @@ impl PlaySheet {
             cx.notify();
             return;
         }
-        if Some(event.generation) == self.player_pending {
-            self.player_pending = None;
-            if !matches!(
-                event.outcome,
-                AppOutcome::Settings { .. } | AppOutcome::SettingsWarning { .. }
-            ) {
-                self.error = Some(match &event.outcome {
-                    AppOutcome::Failed { message } => message.clone(),
-                    _ => "Player preference could not be saved.".into(),
-                });
-                if let Some(choice) = self
-                    .coordinator
-                    .read(cx)
-                    .settings
-                    .as_ref()
-                    .map(|settings| settings.player.clone())
-                {
-                    self.player
-                        .update(cx, |player, cx| player.set_value(choice, cx));
-                }
-            }
-            cx.notify();
-            return;
-        }
         if Some(event.generation) != self.pending {
             return;
         }
         self.pending = None;
         match &event.outcome {
-            AppOutcome::Prepared { prepared, .. } => {
+            AppOutcome::Prepared {
+                prepared,
+                selection,
+                ..
+            } => {
                 self.preparation = Some(event.generation);
-                self.files = prepared.files.clone();
-                self.chosen = auto_choice(&self.files);
+                match after_prepare(selection, &prepared.files) {
+                    AfterPrepare::Play(file_id) => self.play_file(event.generation, file_id, cx),
+                    AfterPrepare::Message(message) => self.error = Some(message),
+                }
             }
             AppOutcome::PlaybackStarted { .. } => {
                 if let Some(preparation) = self.preparation.take() {
@@ -176,6 +113,7 @@ impl PlaySheet {
                 self.error = Some(message.clone())
             }
             AppOutcome::CacheLimitNeeded { size, limit } => {
+                self.limit_exceeded = Some(*limit);
                 self.error = Some(format!(
                     "File is {}; cache limit is {}. Open Storage settings to increase it.",
                     format_bytes(*size),
@@ -200,8 +138,22 @@ impl PlaySheet {
         });
         self.pending = None;
         self.preparation = None;
-        self.files.clear();
-        self.chosen = None;
+    }
+    /// Submit the auto-selected file; the sheet stays open until playback starts.
+    fn play_file(&mut self, preparation: u64, file_id: String, cx: &mut Context<Self>) {
+        self.error = None;
+        self.pending = self.coordinator.update(cx, |c, cx| {
+            c.command(
+                AppAction::PlayFile {
+                    preparation,
+                    file_id,
+                },
+                cx,
+            )
+        });
+        if self.pending.is_none() {
+            self.error = Some("Application service unavailable or busy. Retry.".into());
+        }
     }
     pub(super) fn dismiss(&mut self, cx: &mut Context<Self>) {
         self.cancel_owned_work(cx);

@@ -186,6 +186,12 @@ fn overview_collapsible(text: &str) -> bool {
     text.chars().count() > OVERVIEW_COLLAPSE_CHARS
 }
 
+/// Lines the overview is clamped to; `None` shows (and wraps) all of it.
+/// Short overviews never clamp; long ones clamp until expanded.
+fn overview_clamp(collapsible: bool, expanded: bool) -> Option<usize> {
+    (!(collapsible && expanded)).then_some(OVERVIEW_LINES)
+}
+
 impl RenderOnce for MediaHero {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
@@ -303,11 +309,24 @@ impl RenderOnce for MediaHero {
                 .w_full()
                 .max_w(TEXT_MAX_WIDTH)
                 .child(
+                    // Clamped and full text keep separate element state: a text
+                    // layout cached under a line clamp keeps its single
+                    // unwrapped tail line when the clamp is lifted.
                     div()
+                        .id((
+                            self.id.clone(),
+                            if overview_clamp(collapsible, is_expanded).is_some() {
+                                "overview-clamped"
+                            } else {
+                                "overview-full"
+                            },
+                        ))
+                        .w_full()
+                        .min_w_0()
                         .type_style(typeface::BODY_LONG)
                         .text_color(ink.text_secondary)
-                        .when(!(collapsible && is_expanded), |el| {
-                            el.line_clamp(OVERVIEW_LINES)
+                        .when_some(overview_clamp(collapsible, is_expanded), |el, lines| {
+                            el.line_clamp(lines)
                         })
                         .child(text),
                 )
@@ -361,7 +380,7 @@ impl RenderOnce for MediaHero {
                     .items_end()
                     .gap(space::S24)
                     .px(space::GRID_INSET)
-                    .pt(space::S48)
+                    .pt(space::S24)
                     .pb(space::S24)
                     .children(poster)
                     .child(
@@ -415,7 +434,10 @@ impl RenderOnce for MediaHero {
 
 #[cfg(test)]
 mod tests {
-    use super::{OVERVIEW_COLLAPSE_CHARS, overview_collapsible, uses_over_art};
+    use super::{
+        OVERVIEW_COLLAPSE_CHARS, OVERVIEW_LINES, overview_clamp, overview_collapsible,
+        uses_over_art,
+    };
     use crate::widgets::tokens::Mode;
 
     #[test]
@@ -434,5 +456,13 @@ mod tests {
         ));
         // Counts characters, not bytes.
         assert!(!overview_collapsible(&"é".repeat(OVERVIEW_COLLAPSE_CHARS)));
+    }
+
+    #[test]
+    fn expanding_lifts_the_clamp_only_for_collapsible_overviews() {
+        assert_eq!(overview_clamp(true, false), Some(OVERVIEW_LINES));
+        assert_eq!(overview_clamp(true, true), None);
+        assert_eq!(overview_clamp(false, true), Some(OVERVIEW_LINES));
+        assert_eq!(overview_clamp(false, false), Some(OVERVIEW_LINES));
     }
 }

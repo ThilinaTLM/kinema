@@ -62,8 +62,12 @@ Design principles, in priority order:
 - **Bundled fonts** (Inter + JetBrains Mono) for identical rendering on all OSes.
 - **Provider choice (Cinemeta/TMDB) moves to Settings**; the toolbar only picks a
   catalog/collection and sort within the active provider.
-- **Detail uses a right-hand action column** (sources for movies; seasons →
-  episodes → sources for series). Preparation and file choice run in a modal sheet.
+- **Detail is a scrolling page; streams get their own page.** The detail page holds
+  a compact hero, facts, episodes (series) or similar titles (movies) and
+  provenance. Play (movies) or an episode card (series) navigates to a full-width
+  Streams page; Back returns to the detail page unchanged. There are no side
+  panels. Clicking a stream prepares it in a modal progress sheet and plays the
+  file chosen by the selection policy; there is no file picker.
 - **Unknown rating hides the chip and hover rating**; no `IMDb —` placeholder.
   Known `0.0` is shown. Never substitute a TMDB score for IMDb.
 
@@ -74,9 +78,9 @@ Design principles, in priority order:
 | Cinemeta/TMDB browse + search | Toolbar + grid; provider selected in Settings; no automatic fallback |
 | Movie/series filter; sort | Toolbar segmented control + collection/sort menu; preserved on Back |
 | Title details; refresh | In-place Detail hero; Refresh in context menu / F5; freshness in provenance |
-| Series seasons/episodes | Detail action column: season selector + episode list |
-| Torrentio/Peerflix sources | Action column stream list, **one active indexer**, explicit switch |
-| Debrid preparation + file selection | Modal *Play* sheet: prepare → explicit file choice → launch |
+| Series seasons/episodes | Detail page body: season tabs + responsive episode card grid |
+| Torrentio/Peerflix sources | Streams page list, **one active indexer**, explicit switch |
+| Debrid preparation + playback | Modal *Play* sheet: prepare → auto-play the file the selection policy identifies, or "Couldn't identify the file…" |
 | Managed download/serve + player | Session coordinator outlives routes; transfers popover |
 | Local file open | App menu / toolbar overflow `Open local file…` (Ctrl/Cmd+O) |
 | Cache quota + cleanup | Popover summary + Settings › Storage; 20 GiB default, inactive-only cleanup |
@@ -274,7 +278,7 @@ via the app asset source), 1.5 px stroke, `text.secondary` at rest and
 | `motion.disclose` | **160 ms**, ease-out cubic | Existing hover panel disclosure |
 | `motion.flight` | **320 ms**, ease-in-out cubic (spring optional) | Shared poster flight, both directions |
 | `motion.content` | 160 ms, ease-out, 40 ms delay after landing | Detail content fade + 8 px rise |
-| `motion.column` | 200 ms, ease-out | Action column slide episodes ↔ streams |
+| `motion.column` | 200 ms, ease-out | Detail ⇄ Streams page slide |
 | `motion.popup` | 180 ms in / 70 ms out, ease-out cubic | Menus, context menus, popovers: opacity + 4 px travel |
 | `motion.sheet` | 280 ms, ease-out cubic (overshoot-free spring-like settle) | Modal sheet opacity + 12 px rise; scrim fade |
 | `motion.reduce` | 0 ms | Everything instant; progress still updates |
@@ -337,8 +341,8 @@ never offers something the screen cannot do.
 | Target | Items |
 | --- | --- |
 | Poster card | Open details · Find streams (movie) · Copy title · Copy IMDb ID · Open on IMDb (external browser) · Refresh metadata |
-| Episode row | Find streams · Copy episode title · Copy `SxxEyy` |
-| Stream row | Play… (opens sheet) · Show details · Copy release name |
+| Episode card | Find streams · Copy episode title · Copy `SxxEyy` |
+| Stream row | Play… (prepares and plays) · Show details · Copy release name |
 | Transfer row | Open in player again · Copy local URL · Show file in folder · Stop serving… |
 | Detail backdrop | Refresh · Copy title · Open on IMDb |
 | Text input | Undo · Redo · Cut · Copy · Paste · Delete · Select all |
@@ -471,97 +475,95 @@ requested" is the truth; never "Playing". Stop releases the session and warns th
 player may lose access; it does not kill the player. Cleanup reports freed bytes
 and protected files, never deletes original local files. Rows have context menus.
 
-### 4.5 Detail — movie
+### 4.5 Detail page (movie and series)
+
+Implemented in `screens/detail*`. One scrolling page (`ScrollArea`); content is
+capped at 1280 px and centred.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ [←]  The Quiet Orbit                                            ⇅2  ⚙ ⋯      │ toolbar
-├─────────────────────────────────────────────────────┬────────────────────────┤
-│ BACKDROP (full bleed behind left area, fades to     │ Streams   Torrentio ▾  │
-│ canvas at bottom and left via functional scrim)     │ [All │ 4K │ 1080p │ 720p]│
-│                                                     ├────────────────────────┤
-│  ┌──────────┐                                       │ Quiet.Orbit.2160p.HDR… │ mono
-│  │          │  The Quiet Orbit                      │ 2160P HDR · 18.2 GiB   │ chips
-│  │   HERO   │  2024 · 118 min · Drama · Sci-fi      │ ▸ 412 seeds            │
-│  │  POSTER  │  ★ IMDb 8.1                           ├────────────────────────┤
-│  │ 220×330  │                                       │▌Quiet.Orbit.1080p.Web… │ selected
-│  │          │  A drifting station's last engineer…  │ 1080P · 4.2 GiB        │
-│  └──────────┘  (synopsis, 4 lines, "More" expands)  ├────────────────────────┤
-│                                                     │ Quiet.Orbit.720p…      │
-│                Details & provenance ▾               │ 720P · 2.1 GiB         │
-│                                                     │  …                     │
-│                                                     │                        │
-└─────────────────────────────────────────────────────┴────────────────────────┘
-                                                        action column 400 px, bg.surface
+├──────────────────────────────────────────────────────────────────────────────┤
+│ compact hero: backdrop as ambient art fading into the canvas                 │
+│ ┌────────┐  The Quiet Orbit                                                  │
+│ │ POSTER │  2024 · 118 min · Drama · ★ 8.1                                   │
+│ │168×252 │  synopsis (3 lines; "More" wraps within a 640 px measure)         │
+│ └────────┘  [▶ Play] [⋯]            (series: [Episodes] scrolls to the grid) │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ★ 8.1 /10      Released · Runtime/Seasons · Episodes · Genres   (facts grid)  │
+│ Cast row (rendered when the provider supplies cast)                          │
+│ Episodes (series): [Season 1│Season 2…]  card grid: still, E02, title,       │
+│   runtime · air date, 2-line overview — click/Enter opens Streams            │
+│ Similar movies (movies): wrapping poster grid, two rows, [Show more]         │
+│ Metadata · Identifiers (muted footer)                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- Hero: poster 220 × 330 at 32 px from the left/bottom of the hero band; title
-  `type.display`; facts `type.small` secondary; synopsis `type.body` 14/21,
-  max 640 px measure. Provenance (IDs, rating origin, provider, freshness)
-  expands inline.
-- Streams load automatically when Detail opens and an IMDb mapping exists (one
-  selected indexer). No mapping: column shows "Streams unavailable — no IMDb ID
-  for this title." Browsing still works.
-- Stream rows: release name (mono, 1 line, full name in tooltip), chips from
-  parsed hints (resolution, HDR/DV, codec, size, seeds) — hints, not verified
-  facts; unknowns omitted. Quality filter shows only buckets present in results.
-  Indexer switch (`Torrentio ▾`) replaces the list and rejects stale replies.
-- Click / Enter on a stream opens the **Play sheet** (§4.7). "Show details"
-  (context menu or `▸`) expands the row inline: full name, source identity, files
-  count where known.
-- Width < 1100: action column becomes 340 px; < 960 it moves below the hero.
+- The hero sizes to its content; there is no fixed-height band. Overview text
+  clamps to 3 lines; "More" lifts the clamp and the text wraps inside the same
+  measure (clamped and full text keep separate element state so a clamped layout
+  is never reused).
+- Streams load only when the Streams page opens, for the selected indexer.
+  Without an IMDb mapping the Play button is disabled with a reason tooltip.
+- **Series:** season default = first non-special season with episodes (or the last
+  selected). Season change cancels obsolete requests. The episode grid is
+  responsive (cards ≥ 260 px). Episode cards offer Find streams / Copy episode
+  title / Copy `SxxEyy` in a context menu.
+- **Similar movies (TMDB only):** a wrapping grid of 140 × 210 posters limited to
+  two rows at the current width. "Show more" reveals two more rows and, when the
+  loaded titles run out, requests the next catalog page (pages accumulate;
+  refresh restarts at page 1).
+- The facts block is built from fields the providers expose today (rating,
+  release, runtime/seasons, episodes, genres). Votes, certification, creators,
+  studios and cast are *not yet wired*; the cast row and ratings tiles are laid
+  out and render once data is supplied.
 
-### 4.6 Detail — series
+### 4.6 Streams page
+
+Reached from Play (movie) or an episode card (series). Same route as Detail:
+Esc / Back / toolbar arrow return to the detail page, which keeps its scroll
+position, season and focus (the episode card is refocused).
 
 ```text
-├─────────────────────────────────────────────────────┬────────────────────────┤
-│                                                     │ Season [ 1 ▾ ]   12 ep │
-│  (same hero as movie: poster, title, facts,         ├────────────────────────┤
-│   2024 · 3 seasons · Drama, synopsis)               │ 01  Arrival     48 min │
-│                                                     │     Aired 2024-03-02   │
-│                                                     │▌02  The Signal  51 min │
-│                                                     │ 03  Low Tide           │
-│                                                     │  …                     │
-├─────────────────────────────────────────────────────┴────────────────────────┤
-
-after selecting an episode, the column slides left (motion.column):
-
-│                                                     │ ← S01E02 · The Signal  │
-│                                                     │ Streams   Torrentio ▾  │
-│                                                     │ [All │ 1080p │ 720p]   │
-│                                                     │ rows …                 │
+│ [← Back]                                                                     │
+│ [poster] The Quiet Orbit                                                     │
+│          S01E02 · The Signal                    (episodes only)              │
+│ Streams  12                                     [Torrentio ▾] [⟳]            │
+│ [All │ 4K │ 1080p │ 720p]                                                    │
+│ 1080p HDR  4.2 GiB · 412 seeders · Torrentio                                 │
+│ HEVC       Quiet.Orbit.1080p.WEB…                                            │
 ```
 
-Season defaults to the first non-special season with episodes (or the last
-selected in this session). Season change cancels obsolete episode requests.
-Selected episode identity is carried into the Play sheet; episode packs never use
-largest/positional file guesses. No watched/progress/auto-next claims.
+- Max width 960 px, roomier rows than the old side panel; stream-row styling,
+  badges, quality filter, indexer select, counts, refresh and the row context menu
+  (Play… · Show details · Copy release name) are unchanged.
+- Loading, empty, error (with retry) and "hidden by provider limit" states are
+  kept; quality tabs show only buckets present.
+- Click / Enter on a stream opens the Play sheet (§4.7). Episode packs never use
+  largest/positional file guesses. No watched/progress/auto-next claims.
 
 ### 4.7 Play sheet (modal, 560 wide)
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
 │ Play · The Quiet Orbit                                   │
-│ Quiet.Orbit.1080p.WEB…  ·  via Real-Debrid ▾             │
+│ Quiet.Orbit.1080p.WEB…  ·  via Real-Debrid               │
 ├──────────────────────────────────────────────────────────┤
-│ ① Preparing with Real-Debrid…            ▬▬▬▬▬▬──────    │
-│                                                          │
-│ ② Choose a file                                          │
-│   ○ Quiet.Orbit.mkv                          4.2 GiB     │ mono
-│   ○ Extras/Interview.mkv                     0.4 GiB     │
-│                                                          │
-│ ⚠ File exceeds the 20 GiB cache limit. [Storage settings]│
-├──────────────────────────────────────────────────────────┤
-│ Player: mpv ▾                         [Cancel] [▶ Play]  │
+│ Preparing with Real-Debrid…               ▬▬▬▬▬▬──────   │  then "Starting playback…"
+│ ⚠ Couldn't identify the file in this torrent — try       │  (non-unique selection)
+│   another stream.                                        │
+│ Opens in mpv                                  [Cancel]   │
 └──────────────────────────────────────────────────────────┘
 ```
 
-Steps reveal progressively; the file must be chosen explicitly even with one
-candidate (Play disabled until chosen). Missing debrid credentials show a notice
-with "Open Settings…" to that account. On launch the sheet closes and the
-transfers indicator pulses once (static in reduce). Launch failure keeps the sheet
-open with the reason and the file choice intact. Players receive local server
-URLs only, launched as executable + argument list.
+There is no file picker. When preparation finishes with `FileSelection::Unique(i)`
+the sheet submits `PlayFile` for `prepared.files[i]` immediately; any other
+selection shows `FileSelection::error_message()` and the sheet offers Close.
+Missing debrid credentials show a notice with "Open Settings…" to that account.
+On launch the sheet closes and the transfers indicator pulses once (static in
+reduce). Failures keep the sheet open with the reason. The player is chosen in
+Settings (shown read-only here). Players receive local server URLs only, launched
+as executable + argument list.
 
 ### 4.8 Settings window (single instance, ~860 × 600)
 
@@ -682,7 +684,7 @@ sequenceDiagram
 
 ### 6.3 Other transitions
 
-Action column episodes ⇄ streams: 200 ms horizontal slide with fade, the leaving
+Detail ⇄ Streams page: 200 ms horizontal slide with fade, the leaving
 pane moving 24 px and fading out. Menus/popovers: 180 ms fade + 4 px travel from
 their anchor; close 70 ms. Sheets: scrim fade + 12 px rise (280 ms). Focus moves
 immediately; animations never delay input.

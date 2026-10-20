@@ -278,7 +278,16 @@ impl MainWindow {
             Route::Detail(detail) => detail.update(cx, |d, cx| d.refresh(cx)),
         }
     }
+    /// Back one step: Streams page -> detail page -> Browse.
     fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Route::Detail(detail) = &self.route
+            && detail.clone().update(cx, |d, cx| d.go_back(cx))
+        {
+            return;
+        }
+        self.leave_detail(window, cx);
+    }
+    fn leave_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.detail_subscription = None;
         self.route = Route::Browse;
         crate::artwork::begin_generation("v3-detail", cx);
@@ -439,7 +448,7 @@ impl Render for MainWindow {
             .key_context("KinemaMain")
             .on_action(cx.listener(|this, _: &V3Search, window, cx| {
                 if !matches!(this.route, Route::Browse) {
-                    this.back(window, cx);
+                    this.leave_detail(window, cx);
                 }
                 this.search.update(cx, |s, cx| s.focus(window, cx));
             }))
@@ -732,5 +741,56 @@ mod interaction_tests {
             main.update(cx, |view, _, _| assert_eq!(view.launch_pulse, expected))
                 .unwrap();
         }
+    }
+
+    #[gpui::test]
+    fn back_pops_streams_to_the_detail_page_then_to_browse(cx: &mut TestAppContext) {
+        use super::super::detail::Page;
+        cx.update(|cx| {
+            tokens::init(cx);
+            tokens::set_reduce_motion(true, cx);
+            bind_keys(cx);
+        });
+        let mut title = movie(1, "Movie one");
+        title.imdb = kinema_core::catalog::ImdbId::new("tt1234567").ok();
+        let coordinator = cx.new(|cx| {
+            let mut c = AppCoordinator::fixture(vec![BrowseTitle::Tmdb(title.clone())], None, cx);
+            c.fixture_similar.insert(
+                (1, 1),
+                crate::tmdb::TmdbPage {
+                    titles: vec![],
+                    page: 1,
+                    total_pages: 1,
+                },
+            );
+            c
+        });
+        let main = cx
+            .add_window(|window, cx| MainWindow::with_coordinator(coordinator.clone(), window, cx));
+        let mut visual = VisualTestContext::from_window(main.into(), cx);
+        main.update(cx, |view, window, cx| {
+            view.open_title(BrowseTitle::Tmdb(title.clone()), window, cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let detail = mounted_detail(main, cx);
+        detail.update(cx, |d, cx| d.run_primary_for_test(cx));
+        cx.run_until_parked();
+        assert_eq!(detail.read_with(cx, |d, _| d.page()), Page::Streams);
+        visual.dispatch_action(V3Back);
+        cx.run_until_parked();
+        // Same Detail entity, now on its overview page: state intact.
+        assert_eq!(detail.read_with(cx, |d, _| d.page()), Page::Overview);
+        assert!(matches!(
+            main.read_with(
+                cx,
+                |v, _| matches!(&v.route, Route::Detail(d) if *d == detail)
+            ),
+            Ok(true)
+        ));
+        visual.dispatch_action(V3Back);
+        cx.run_until_parked();
+        main.read_with(cx, |v, _| assert!(matches!(v.route, Route::Browse)))
+            .unwrap();
     }
 }

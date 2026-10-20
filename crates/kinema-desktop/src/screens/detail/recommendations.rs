@@ -1,44 +1,135 @@
-//! Provider-scoped recommendation pages; never consult TMDB for Cinemeta.
+//! Provider-scoped recommendations as a wrapping grid, two rows at a time;
+//! never consult TMDB for Cinemeta.
 use super::*;
-use crate::widgets::{
-    patterns::{ViewState, focus_ring},
-    tokens::elevation,
+use crate::{
+    tmdb::{TmdbPage, TmdbTitle},
+    widgets::{
+        patterns::{ViewState, focus_ring},
+        tokens::elevation,
+    },
 };
 
-/// Vertical rhythm around the similar-titles strip.
-const STRIP_PADDING: Pixels = s::S20;
+/// Rows shown before "Show more", and rows added by each click.
+const INITIAL_ROWS: usize = 2;
+const ROWS_STEP: usize = 2;
+/// TMDB serves no pages beyond this.
+const LAST_PAGE: u32 = 500;
+
+/// Similar titles accumulated across catalog pages, plus how many grid rows
+/// are revealed. Pure state: the coordinator holds only one page at a time.
+#[derive(Debug)]
+pub(super) struct SimilarGrid {
+    titles: Vec<TmdbTitle>,
+    loaded_page: u32,
+    total_pages: u32,
+    rows: usize,
+}
+impl Default for SimilarGrid {
+    fn default() -> Self {
+        Self {
+            titles: Vec::new(),
+            loaded_page: 0,
+            total_pages: 0,
+            rows: INITIAL_ROWS,
+        }
+    }
+}
+impl SimilarGrid {
+    /// Forget loaded titles (refresh); the revealed row count is kept.
+    pub(super) fn reset(&mut self) {
+        self.titles.clear();
+        self.loaded_page = 0;
+        self.total_pages = 0;
+    }
+    /// Fold in a page: page 1 replaces, the page after the last loaded one
+    /// appends (deduplicated); stale or repeated pages are ignored.
+    pub(super) fn merge(&mut self, page: &TmdbPage) {
+        if page.page == 1 {
+            self.titles = page.titles.clone();
+            self.loaded_page = 1;
+        } else if self.loaded_page > 0 && page.page == self.loaded_page + 1 {
+            for title in &page.titles {
+                if !self.titles.iter().any(|t| t.id == title.id) {
+                    self.titles.push(title.clone());
+                }
+            }
+            self.loaded_page = page.page;
+        } else {
+            return;
+        }
+        self.total_pages = page.total_pages;
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(super) fn loaded(&self) -> usize {
+        self.titles.len()
+    }
+    pub(super) fn is_empty(&self) -> bool {
+        self.titles.is_empty()
+    }
+    pub(super) fn next_page(&self) -> Option<u32> {
+        (self.loaded_page > 0 && self.loaded_page < self.total_pages.min(LAST_PAGE))
+            .then_some(self.loaded_page + 1)
+    }
+    pub(super) fn visible(&self, cols: usize) -> &[TmdbTitle] {
+        &self.titles[..self.titles.len().min(self.rows * cols.max(1))]
+    }
+    /// Something is still hidden or can still be fetched.
+    pub(super) fn has_more(&self, cols: usize) -> bool {
+        self.titles.len() > self.rows * cols.max(1) || self.next_page().is_some()
+    }
+    /// Reveal two more rows; returns the page to load when the loaded titles
+    /// do not fill them.
+    pub(super) fn show_more(&mut self, cols: usize) -> Option<u32> {
+        self.rows += ROWS_STEP;
+        (self.titles.len() < self.rows * cols.max(1))
+            .then(|| self.next_page())
+            .flatten()
+    }
+}
 
 impl Detail {
     /// Similar movies. Cinemeta has no such feed, so its titles simply show no
-    /// strip rather than a permanent apology.
-    pub(super) fn recommendations(&self, cx: &mut Context<Self>) -> AnyElement {
-        let BrowseTitle::Tmdb(current) = &self.title else {
+    /// section rather than a permanent apology.
+    pub(super) fn recommendations(&mut self, width: Pixels, cx: &mut Context<Self>) -> AnyElement {
+        let BrowseTitle::Tmdb(_) = &self.title else {
             return div().into_any_element();
         };
-        let id = current.id;
-        let (page, busy, error) = {
+        let (busy, error) = {
             let c = self.coordinator.read(cx);
-            (
-                c.similar.value().cloned(),
-                c.similar.busy(),
-                c.similar.error().map(str::to_owned),
-            )
+            (c.similar.busy(), c.similar.error().map(str::to_owned))
         };
+        let cols = grid_columns(
+            width,
+            px(geometry::SIMILAR_WIDTH),
+            px(geometry::SIMILAR_GAP),
+        );
+        self.similar_cols = cols;
         let sel = selection(
-            page.is_some(),
-            page.as_ref().is_some_and(|p| p.titles.is_empty()),
-            error.is_some(),
+            !self.similar.is_empty(),
+            false,
+            error.is_some() && self.similar.is_empty(),
             busy,
         );
         let weak = cx.entity().downgrade();
         let mut view = state_view("similar", sel)
             .skeleton(
-                Carousel::new("similar-skeleton")
-                    .title("Similar movies")
-                    .paging(false)
-                    .items(
-                        (0..geometry::SIMILAR_SKELETON_CARDS)
-                            .map(|_| SkeletonCard::new(geometry::SIMILAR_WIDTH).into_any_element()),
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(geometry::SIMILAR_GAP))
+                    .children(
+                        (0..geometry::SIMILAR_SKELETON_CARDS.min(cols * 2)).map(|_| {
+                            div()
+                                .w(px(geometry::SIMILAR_WIDTH))
+                                .h(px(geometry::SIMILAR_HEIGHT))
+                                .child(
+                                    Skeleton::block()
+                                        .w(px(geometry::SIMILAR_WIDTH))
+                                        .h(px(geometry::SIMILAR_HEIGHT))
+                                        .rounded(radius::MD),
+                                )
+                        }),
                     ),
             )
             .message("Couldn’t load similar movies")
@@ -53,113 +144,186 @@ impl Detail {
         if let Some(error) = &error {
             view = view.hint(error.clone());
         }
-        if let (ViewState::Content, Some(page)) = (sel.state, page) {
-            view = view.content(self.similar_strip(id, page, cx));
+        if sel.state == ViewState::Content {
+            view = view.content(self.similar_grid(cols, busy, error, cx));
         }
         div()
+            .id("detail-similar")
             .w_full()
-            .py(STRIP_PADDING)
+            .py(s::S16)
+            .flex()
+            .flex_col()
+            .gap(s::S12)
+            .child(Section::new("Similar movies"))
             .child(view)
             .into_any_element()
     }
 
-    fn similar_strip(
+    fn similar_tile(&self, title: &TmdbTitle, cx: &mut Context<Self>) -> AnyElement {
+        let p = *tokens::palette(cx);
+        let mut tile = div()
+            .id(("similar-title", title.id))
+            .debug_selector(|| format!("similar-title-{}", title.id))
+            .w(px(geometry::SIMILAR_WIDTH))
+            .h(px(geometry::SIMILAR_HEIGHT))
+            .flex_none()
+            .relative()
+            .overflow_hidden()
+            .rounded(radius::MD)
+            .bg(p.bg_placeholder)
+            .border(s::HAIRLINE)
+            .border_color(p.poster_edge)
+            .shadow(elevation::raised(&p))
+            .focusable()
+            .tab_stop(true)
+            .cursor_pointer()
+            .hover(move |el| {
+                el.shadow(elevation::card_hover(&p))
+                    .border_color(p.line_control)
+            })
+            .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
+            .tooltip(tooltip(title.name.clone()));
+        if let Some(image) = self.image(
+            title.poster_url(),
+            ArtworkKind::Poster,
+            &format!("similar:{}", title.id),
+            cx,
+        ) {
+            tile = tile.child(img(image).size_full().object_fit(ObjectFit::Cover));
+        } else {
+            tile = tile.child(
+                div()
+                    .p(s::S8)
+                    .type_style(t::SMALL)
+                    .text_color(p.text_secondary)
+                    .child(title.name.clone()),
+            );
+        }
+        let click = title.clone();
+        let enter = title.clone();
+        tile.on_click(
+            cx.listener(move |this, _, _, cx| this.open_recommendation(click.clone(), cx)),
+        )
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            if event.keystroke.key == "enter" {
+                this.open_recommendation(enter.clone(), cx);
+                cx.stop_propagation();
+            }
+        }))
+        .into_any_element()
+    }
+
+    fn similar_grid(
         &self,
-        id: u64,
-        page: crate::tmdb::TmdbPage,
+        cols: usize,
+        busy: bool,
+        error: Option<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = *tokens::palette(cx);
-        let tiles: Vec<AnyElement> = page
-            .titles
+        let tiles: Vec<AnyElement> = self
+            .similar
+            .visible(cols)
             .iter()
-            .map(|title| {
-                let mut tile = div()
-                    .id(("similar-title", title.id))
-                    .debug_selector(|| format!("similar-title-{}", title.id))
-                    .w(px(geometry::SIMILAR_WIDTH))
-                    .h(px(geometry::SIMILAR_HEIGHT))
-                    .relative()
-                    .overflow_hidden()
-                    .rounded(radius::MD)
-                    .bg(p.bg_placeholder)
-                    .border(s::HAIRLINE)
-                    .border_color(p.poster_edge)
-                    .shadow(elevation::raised(&p))
-                    .focusable()
-                    .tab_stop(true)
-                    .cursor_pointer()
-                    .hover(move |el| {
-                        el.shadow(elevation::card_hover(&p))
-                            .border_color(p.line_control)
-                    })
-                    .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
-                    .tooltip(tooltip(title.name.clone()));
-                if let Some(image) = self.image(
-                    title.poster_url(),
-                    ArtworkKind::Poster,
-                    &format!("similar:{}", title.id),
-                    cx,
-                ) {
-                    tile = tile.child(img(image).size_full().object_fit(ObjectFit::Cover));
-                } else {
-                    tile = tile.child(
-                        div()
-                            .p(s::S8)
-                            .type_style(t::SMALL)
-                            .text_color(p.text_secondary)
-                            .child(title.name.clone()),
-                    );
-                }
-                let click = title.clone();
-                let enter = title.clone();
-                tile.on_click(
-                    cx.listener(move |this, _, _, cx| this.open_recommendation(click.clone(), cx)),
-                )
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                    if event.keystroke.key == "enter" {
-                        this.open_recommendation(enter.clone(), cx);
-                        cx.stop_propagation();
-                    }
-                }))
-                .into_any_element()
-            })
+            .map(|title| self.similar_tile(title, cx))
             .collect();
-        let mut strip = div().w_full().flex().flex_col().gap(s::S4).child(
-            Carousel::new("similar-carousel")
-                .title("Similar movies")
-                .items(tiles),
+        let mut grid = div().w_full().flex().flex_col().gap(s::S12).child(
+            div()
+                .id("similar-grid")
+                .w_full()
+                .flex()
+                .flex_wrap()
+                .gap(px(geometry::SIMILAR_GAP))
+                .children(tiles),
         );
-        if page.total_pages > 1 {
-            let nav = |label: &'static str, target: Option<u32>, cx: &mut Context<Self>| {
-                Button::new(label, label)
-                    .variant(ButtonVariant::Ghost)
-                    .disabled(target.is_none())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(next) = target {
-                            this.coordinator
-                                .update(cx, |c, cx| c.load_similar(id, next, false, cx));
-                        }
-                    }))
-            };
-            let previous = page.page.checked_sub(1).filter(|p| *p > 0);
-            let next = (page.page < page.total_pages && page.page < 500).then_some(page.page + 1);
-            strip = strip.child(
+        if let Some(error) = error {
+            grid = grid.child(
                 div()
-                    .px(s::GRID_INSET)
-                    .flex()
-                    .items_center()
-                    .gap(s::S12)
-                    .child(nav("Previous page", previous, cx))
-                    .child(
-                        div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
-                            .child(format!("Page {} of {}", page.page, page.total_pages)),
-                    )
-                    .child(nav("Next page", next, cx)),
+                    .type_style(t::SMALL)
+                    .text_color(p.text_muted)
+                    .child(format!("Couldn’t load more: {error}")),
             );
         }
-        strip.into_any_element()
+        if self.similar.has_more(cols) {
+            grid = grid.child(
+                div().flex().child(
+                    Button::new("similar-more", "Show more")
+                        .icon(IconName::ChevronDown)
+                        .busy(busy)
+                        .on_click(cx.listener(|this, _, _, cx| this.show_more_similar(cx))),
+                ),
+            );
+        }
+        grid.into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ::core::prelude::v1::test;
+    use kinema_core::MediaKind;
+
+    fn title(id: u64) -> TmdbTitle {
+        TmdbTitle {
+            id,
+            kind: MediaKind::Movie,
+            name: format!("Film {id}"),
+            overview: None,
+            release_info: None,
+            poster_url: None,
+            display: Default::default(),
+            imdb: None,
+        }
+    }
+    fn page(n: u32, total: u32, ids: std::ops::Range<u64>) -> TmdbPage {
+        TmdbPage {
+            titles: ids.map(title).collect(),
+            page: n,
+            total_pages: total,
+        }
+    }
+
+    #[test]
+    fn shows_two_rows_then_reveals_and_pages() {
+        let mut grid = SimilarGrid::default();
+        grid.merge(&page(1, 3, 0..20));
+        // 6 columns: 12 of the 20 titles are visible.
+        assert_eq!(grid.visible(6).len(), 12);
+        assert!(grid.has_more(6));
+        // Four rows need 24 titles but 20 are loaded: page 2 is requested.
+        assert_eq!(grid.show_more(6), Some(2));
+        grid.merge(&page(2, 3, 20..40));
+        assert_eq!(grid.visible(6).len(), 24);
+        // Six rows (36) fit the 40 loaded titles: no fetch.
+        assert_eq!(grid.show_more(6), None);
+        assert_eq!(grid.visible(6).len(), 36);
+        assert_eq!(grid.next_page(), Some(3));
+    }
+
+    #[test]
+    fn pages_merge_in_order_without_duplicates() {
+        let mut grid = SimilarGrid::default();
+        grid.merge(&page(2, 3, 0..5));
+        assert!(grid.is_empty(), "page 2 before page 1 is ignored");
+        grid.merge(&page(1, 2, 0..5));
+        grid.merge(&page(1, 2, 0..5));
+        assert_eq!(grid.titles.len(), 5);
+        grid.merge(&page(2, 2, 3..8));
+        assert_eq!(grid.titles.len(), 8);
+        grid.merge(&page(2, 2, 3..8));
+        assert_eq!(grid.titles.len(), 8);
+        assert_eq!(grid.next_page(), None);
+        assert!(!grid.has_more(6));
+    }
+
+    #[test]
+    fn reset_keeps_revealed_rows() {
+        let mut grid = SimilarGrid::default();
+        grid.merge(&page(1, 1, 0..30));
+        grid.show_more(6);
+        grid.reset();
+        assert!(grid.is_empty());
+        assert_eq!(grid.rows, INITIAL_ROWS + ROWS_STEP);
     }
 }

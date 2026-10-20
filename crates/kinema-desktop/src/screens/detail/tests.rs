@@ -1,8 +1,8 @@
 //! Pure presentation policies.
 
 use super::{
-    Quality, StreamBadges, age_label, air_date, choose_season, default_season, first_in_filter,
-    quality, rating_label, stream_badges, stream_summary,
+    Quality, StreamBadges, age_label, air_date, choose_season, default_season, quality,
+    rating_label, stream_badges, stream_summary,
 };
 use kinema_core::{
     catalog::CatalogEpisode,
@@ -87,18 +87,6 @@ fn summary_skips_missing_facts_and_never_shows_the_raw_name() {
         stream_summary(&candidate("x", None, None, Some(412)), "Peerflix"),
         "412 seeders · Peerflix"
     );
-}
-#[test]
-fn primary_stream_is_first_in_the_active_quality_filter() {
-    let list = vec![
-        candidate("a.2160p", None, None, None),
-        candidate("b.1080p", None, None, None),
-        candidate("c.1080p", None, None, None),
-    ];
-    assert_eq!(first_in_filter(&list, Quality::All), Some(0));
-    assert_eq!(first_in_filter(&list, Quality::Hd), Some(1));
-    assert_eq!(first_in_filter(&list, Quality::Sd), None);
-    assert_eq!(first_in_filter(&[], Quality::All), None);
 }
 #[test]
 fn dates_ages_and_ratings_are_humane() {

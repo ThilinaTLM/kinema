@@ -12,11 +12,11 @@ use crate::{
         menu::{ContextMenuExt, MenuItem, Select, SelectEvent},
         motion::{self, Motion},
         patterns::{
-            Badge, BadgeTone, Carousel, ListRow, Section, Skeleton, StateView, ViewSelection,
-            menu_item, select_view,
+            Badge, BadgeTone, ListRow, Section, Skeleton, StateView, ViewSelection, menu_item,
+            select_view,
         },
+        scroll_area::ScrollArea,
         segmented::Segmented,
-        skeleton_card::SkeletonCard,
         text::TypeExt,
         tokens::{self, radius, space as s, typeface as t},
         tooltip::tooltip,
@@ -29,6 +29,7 @@ use kinema_core::{
     sources::{IndexerKind, PlaybackTarget, SourceCandidate},
 };
 mod episodes;
+mod facts;
 #[cfg(feature = "ui-probe")]
 mod fixtures;
 mod hero;
@@ -36,6 +37,7 @@ mod hero;
 mod interaction_tests;
 mod recommendations;
 mod streams;
+mod streams_page;
 #[cfg(test)]
 mod tests;
 use std::{cell::Cell, collections::HashMap, rc::Rc};
@@ -44,35 +46,26 @@ use std::{cell::Cell, collections::HashMap, rc::Rc};
 // dimensions remain in widgets::tokens.
 mod geometry {
     use gpui::{Pixels, px};
-    pub const NARROW_COLUMN: Pixels = px(340.);
-    pub const MAX_COLUMN: Pixels = px(520.);
-    pub const MIN_HERO: Pixels = px(620.);
-    pub const NARROW_AT: Pixels = px(1100.);
-    pub const STACK_AT: Pixels = px(960.);
-    /// Share of the viewport width taken by the action column.
-    pub const COLUMN_FRACTION: f32 = 0.375;
-    /// Share of the viewport height given to the action column when stacked.
-    pub const STACKED_COLUMN_FRACTION: f32 = 0.60;
+    /// Page bodies never grow wider than this; on wide windows they centre.
+    pub const PAGE_MAX_WIDTH: Pixels = px(1280.);
+    /// The streams list stays a readable list rather than a wall of text.
+    pub const STREAMS_MAX_WIDTH: Pixels = px(960.);
     /// Fixed width of the resolution/HDR/codec badge stack in a stream row.
     pub const BADGE_STACK_WIDTH: Pixels = px(84.);
-    /// Episode thumbnails are 16:9.
-    pub const EPISODE_ART_WIDTH: Pixels = px(96.);
-    pub const EPISODE_ART_HEIGHT: Pixels = px(54.);
-    pub const SIMILAR_WIDTH: f32 = 132.;
-    pub const SIMILAR_HEIGHT: f32 = 198.;
-    /// The hero reaches at least this share of the viewport height; it grows
-    /// further when nothing else fills the column.
-    pub const HERO_MIN_FRACTION: f32 = 0.62;
-    pub const STACKED_HERO_MIN_FRACTION: f32 = 0.5;
-    pub const HERO_MIN_HEIGHT: Pixels = px(380.);
-    pub const DETAILS_MAX_WIDTH: Pixels = px(720.);
-    pub const DETAIL_LABEL_WIDTH: Pixels = px(120.);
+    /// Narrowest an episode card gets before the grid drops a column.
+    pub const EPISODE_CARD_MIN_WIDTH: Pixels = px(260.);
+    pub const EPISODE_GRID_GAP: Pixels = px(16.);
+    pub const SIMILAR_WIDTH: f32 = 140.;
+    pub const SIMILAR_HEIGHT: f32 = 210.;
+    pub const SIMILAR_GAP: f32 = 12.;
+    pub const FACT_LABEL_WIDTH: Pixels = px(120.);
+    pub const CAST_WIDTH: Pixels = px(112.);
     /// Up to this many seasons get "Season N" tabs; more use compact numbers.
     pub const FULL_SEASON_LABELS_MAX: usize = 4;
     /// Skeleton row counts, roughly one screenful.
     pub const STREAM_SKELETON_ROWS: usize = 6;
-    pub const EPISODE_SKELETON_ROWS: usize = 5;
-    pub const SIMILAR_SKELETON_CARDS: usize = 6;
+    pub const EPISODE_SKELETON_CARDS: usize = 4;
+    pub const SIMILAR_SKELETON_CARDS: usize = 8;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,12 +166,6 @@ pub(super) fn stream_summary(c: &SourceCandidate, source: &str) -> String {
     parts.push(source.to_owned());
     parts.join(" · ")
 }
-/// Index of the first (best-ranked) candidate inside the quality filter.
-fn first_in_filter(candidates: &[SourceCandidate], filter: Quality) -> Option<usize> {
-    candidates
-        .iter()
-        .position(|c| filter == Quality::All || source_quality(c) == filter)
-}
 fn indexer_name(indexer: IndexerKind) -> &'static str {
     match indexer {
         IndexerKind::Torrentio => "Torrentio",
@@ -243,6 +230,27 @@ fn choose_season(current: Option<u32>, options: &[(u32, u32)]) -> Option<u32> {
 pub(crate) struct OpenDetailTitle(pub BrowseTitle);
 impl EventEmitter<OpenDetailTitle> for Detail {}
 
+/// Which full-width page the detail route is showing. Streams is a real
+/// navigation step: Back returns to `Overview` with everything intact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Page {
+    Overview,
+    Streams,
+}
+
+/// Columns of equal tiles that fit `available`; always at least one.
+fn grid_columns(available: Pixels, min_tile: Pixels, gap: Pixels) -> usize {
+    let (a, m, g) = (f32::from(available), f32::from(min_tile), f32::from(gap));
+    if m + g <= 0. || a <= m {
+        return 1;
+    }
+    (((a + g) / (m + g)).floor() as usize).max(1)
+}
+/// Width available to page content inside a viewport of `viewport` pixels.
+fn content_width(viewport: Pixels) -> Pixels {
+    viewport.min(geometry::PAGE_MAX_WIDTH) - s::GRID_INSET * 2.
+}
+
 pub(crate) struct Detail {
     coordinator: Entity<AppCoordinator>,
     title: BrowseTitle,
@@ -252,8 +260,8 @@ pub(crate) struct Detail {
     requested_season: Option<(u64, u32)>,
     episode: Option<CatalogEpisode>,
     target: Option<PlaybackTarget>,
+    page: Page,
     filter: Quality,
-    expanded: bool,
     selected: Option<usize>,
     stream_focus: Vec<FocusHandle>,
     episode_focus: HashMap<(u32, u32), FocusHandle>,
@@ -262,11 +270,17 @@ pub(crate) struct Detail {
     play_subscription: Option<Subscription>,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     art_generation: u64,
-    column_generation: u64,
-    column_direction: f32,
-    pending_column_focus: bool,
+    page_generation: u64,
+    page_direction: f32,
+    pending_stream_focus: bool,
+    pending_return_focus: bool,
     episode_return_focus: Option<(u32, u32)>,
-    back_focus: FocusHandle,
+    page_focus: FocusHandle,
+    primary_focus: FocusHandle,
+    scroll: ScrollHandle,
+    streams_scroll: ScrollHandle,
+    similar: recommendations::SimilarGrid,
+    similar_cols: usize,
     #[cfg(feature = "ui-probe")]
     fixture_ambient: Option<artwork::ArtworkPalette>,
     _subscriptions: Vec<Subscription>,
@@ -296,12 +310,14 @@ impl Detail {
         let subscriptions = vec![
             cx.observe(&coordinator, |this, _, cx| {
                 this.reconcile_metadata(cx);
+                this.reconcile_similar(cx);
                 cx.notify();
             }),
             cx.subscribe(&indexer, |this, _, event: &SelectEvent<IndexerKind>, cx| {
                 let SelectEvent::Changed(indexer) = event;
                 this.reset_stream_selection();
-                if let Some(target) = this.target.clone() {
+                this.pending_stream_focus = true;
+                if let (Page::Streams, Some(target)) = (this.page, this.target.clone()) {
                     this.coordinator
                         .update(cx, |c, cx| c.sources(*indexer, target, cx));
                 }
@@ -309,20 +325,18 @@ impl Detail {
             }),
         ];
         coordinator.update(cx, |c, cx| c.title_details(&title, false, cx));
+        // Streams are only requested once the Streams page opens.
         let target = if title.kind() == MediaKind::Movie {
             title.imdb().cloned().map(PlaybackTarget::Movie)
         } else {
             None
         };
-        if let Some(target) = target.clone() {
-            coordinator.update(cx, |c, cx| c.sources(active, target, cx));
-        }
         if let BrowseTitle::Tmdb(t) = &title
             && t.kind == MediaKind::Movie
         {
             coordinator.update(cx, |c, cx| c.load_similar(t.id, 1, false, cx));
         }
-        Self {
+        let mut this = Self {
             coordinator,
             title,
             indexer,
@@ -331,8 +345,8 @@ impl Detail {
             requested_season: None,
             episode: None,
             target,
+            page: Page::Overview,
             filter: Quality::All,
-            expanded: false,
             selected: None,
             stream_focus: Vec::new(),
             episode_focus: HashMap::new(),
@@ -341,23 +355,45 @@ impl Detail {
             play_subscription: None,
             bounds: Rc::new(Cell::new(None)),
             art_generation: artwork::begin_generation("v3-detail", cx),
-            column_generation: 0,
-            column_direction: 1.,
-            pending_column_focus: false,
+            page_generation: 0,
+            page_direction: 1.,
+            pending_stream_focus: false,
+            pending_return_focus: false,
             episode_return_focus: None,
-            back_focus: cx.focus_handle().tab_stop(true),
+            page_focus: cx.focus_handle().tab_stop(true),
+            primary_focus: cx.focus_handle().tab_stop(true),
+            scroll: ScrollHandle::new(),
+            streams_scroll: ScrollHandle::new(),
+            similar: Default::default(),
+            similar_cols: 6,
             #[cfg(feature = "ui-probe")]
             fixture_ambient: None,
             _subscriptions: subscriptions,
-        }
+        };
+        this.reconcile_similar(cx);
+        this
     }
     pub(crate) fn name(&self) -> &str {
         self.title.name()
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn page(&self) -> Page {
+        self.page
     }
     #[allow(dead_code, reason = "P3 reads the stable hero slot after layout")]
     pub(crate) fn hero_slot_bounds(&self) -> Option<Bounds<Pixels>> {
         self.bounds.get()
     }
+    /// Back from the Streams page to the detail page; false on the detail page
+    /// itself so the route can leave Detail instead.
+    pub(crate) fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.page != Page::Streams {
+            return false;
+        }
+        self.close_streams(cx);
+        true
+    }
+
     /// Artwork lookup only queues bounded work; no decoding or palette sampling
     /// happens in the screen. Offline scenes never enqueue transport jobs.
     fn image(
@@ -461,17 +497,28 @@ impl Detail {
         self.selected = None;
         self.inline = None;
     }
+    /// Drop the chosen episode and, with it, any streams page for it.
+    fn clear_episode(&mut self, cx: &mut Context<Self>) {
+        self.episode = None;
+        if self.is_series() {
+            self.target = None;
+        }
+        if self.page == Page::Streams {
+            self.page = Page::Overview;
+            self.page_generation += 1;
+            self.page_direction = -1.;
+            self.play = None;
+        }
+        self.coordinator
+            .update(cx, |c, cx| c.cancel_detail_sources(cx));
+    }
     fn reconcile_metadata(&mut self, cx: &mut Context<Self>) {
         let title = self.display_title(cx);
         if title.kind() == MediaKind::Movie {
             if self.target.is_none()
                 && let Some(id) = title.imdb().cloned()
             {
-                let target = PlaybackTarget::Movie(id);
-                self.target = Some(target.clone());
-                let indexer = *self.indexer.read(cx).value();
-                self.coordinator
-                    .update(cx, |c, cx| c.sources(indexer, target, cx));
+                self.target = Some(PlaybackTarget::Movie(id));
             }
             return;
         }
@@ -506,8 +553,7 @@ impl Detail {
                 }
             });
             self.season = chosen;
-            self.episode = None;
-            self.target = None;
+            self.clear_episode(cx);
             self.reset_stream_selection();
             self.requested_season = None;
         }
@@ -520,11 +566,14 @@ impl Detail {
                 .any(|e| e.season == ep.season && e.number == ep.number)
                 && !self.coordinator.read(cx).tmdb_season.busy()
             {
-                self.episode = None;
-                self.target = None;
-                self.coordinator
-                    .update(cx, |c, cx| c.cancel_detail_sources(cx));
+                self.clear_episode(cx);
             }
+        }
+    }
+    /// Fold the coordinator's current similar-titles page into the grid.
+    fn reconcile_similar(&mut self, cx: &mut Context<Self>) {
+        if let Some(page) = self.coordinator.read(cx).similar.value().cloned() {
+            self.similar.merge(&page);
         }
     }
     fn ensure_season(&mut self, refresh: bool, cx: &mut Context<Self>) {
@@ -542,16 +591,10 @@ impl Detail {
         if self.season == Some(n) {
             return;
         }
-        self.coordinator
-            .update(cx, |c, cx| c.cancel_detail_sources(cx));
         self.season = Some(n);
-        self.pending_column_focus = false;
-        self.episode = None;
-        self.target = None;
+        self.clear_episode(cx);
         self.reset_stream_selection();
         self.requested_season = None;
-        self.column_generation += 1;
-        self.column_direction = -1.;
         self.ensure_season(false, cx);
         cx.notify();
     }
@@ -582,52 +625,63 @@ impl Detail {
         if let BrowseTitle::Tmdb(t) = &self.title
             && t.kind == MediaKind::Movie
         {
-            let page = self
-                .coordinator
-                .read(cx)
-                .similar
-                .value()
-                .map(|p| p.page)
-                .unwrap_or(1);
+            self.similar.reset();
             self.coordinator
-                .update(cx, |c, cx| c.load_similar(t.id, page, true, cx));
+                .update(cx, |c, cx| c.load_similar(t.id, 1, true, cx));
         }
-        if let Some(target) = self.target.clone() {
+        if let (Page::Streams, Some(target)) = (self.page, self.target.clone()) {
             let indexer = *self.indexer.read(cx).value();
             self.coordinator
                 .update(cx, |c, cx| c.refresh_sources(indexer, target, cx));
         }
     }
-    fn choose_episode(&mut self, episode: CatalogEpisode, cx: &mut Context<Self>) {
+    /// Movies: open the Streams page for the movie.
+    fn open_streams(&mut self, cx: &mut Context<Self>) {
+        let Some(target) = self.target.clone() else {
+            return;
+        };
+        self.go_to_streams(target, cx);
+    }
+    /// Series: clicking an episode opens the Streams page for it.
+    fn open_episode(&mut self, episode: CatalogEpisode, cx: &mut Context<Self>) {
         if let Some(series) = self.display_title(cx).imdb().cloned() {
             let target = PlaybackTarget::Episode {
                 series,
                 season: episode.season,
                 episode: episode.number,
             };
-            self.target = Some(target.clone());
             self.episode_return_focus = Some((episode.season, episode.number));
-            self.pending_column_focus = true;
             self.episode = Some(episode);
-            self.reset_stream_selection();
-            self.column_generation += 1;
-            self.column_direction = 1.;
-            let indexer = *self.indexer.read(cx).value();
-            self.coordinator
-                .update(cx, |c, cx| c.sources(indexer, target, cx));
-            cx.notify();
+            self.go_to_streams(target, cx);
         }
     }
-    fn back_to_episodes(&mut self, cx: &mut Context<Self>) {
-        self.pending_column_focus = true;
+    fn go_to_streams(&mut self, target: PlaybackTarget, cx: &mut Context<Self>) {
+        self.target = Some(target.clone());
+        self.page = Page::Streams;
+        self.reset_stream_selection();
+        self.pending_stream_focus = true;
+        self.page_generation += 1;
+        self.page_direction = 1.;
+        let indexer = *self.indexer.read(cx).value();
+        self.coordinator
+            .update(cx, |c, cx| c.sources(indexer, target, cx));
+        cx.notify();
+    }
+    fn close_streams(&mut self, cx: &mut Context<Self>) {
+        self.page = Page::Overview;
+        self.play = None;
+        self.reset_stream_selection();
         self.episode = None;
-        self.target = None;
-        self.column_generation += 1;
-        self.column_direction = -1.;
+        if self.is_series() {
+            self.target = None;
+        }
+        self.pending_return_focus = true;
+        self.page_generation += 1;
+        self.page_direction = -1.;
         self.coordinator
             .update(cx, |c, cx| c.cancel_detail_sources(cx));
-        // Loaded season data is retained by cancellation. A still-loading season
-        // must be reissued, without accepting its obsolete completion.
+        // A season still loading when the page opened must be reissued,
+        // without accepting its obsolete completion.
         self.requested_season = None;
         self.ensure_season(false, cx);
         cx.notify();
@@ -637,6 +691,28 @@ impl Detail {
         // Preserve provider scope even for externally injected fixture results.
         if matches!(&intent.0,BrowseTitle::Tmdb(t) if t.kind==MediaKind::Movie) {
             cx.emit(intent);
+        }
+    }
+    /// "Show more" on the similar grid: reveal more rows, paging in more titles
+    /// when the loaded ones run out.
+    fn show_more_similar(&mut self, cx: &mut Context<Self>) {
+        let cols = self.similar_cols;
+        if let (Some(page), BrowseTitle::Tmdb(t)) = (self.similar.show_more(cols), &self.title) {
+            let id = t.id;
+            self.coordinator
+                .update(cx, |c, cx| c.load_similar(id, page, false, cx));
+        }
+        cx.notify();
+    }
+    /// Context for the play sheet header: episode caption and poster.
+    fn play_context(&self, cx: &mut Context<Self>) -> PlayContext {
+        PlayContext {
+            episode: self.episode.as_ref().map(episode_caption),
+            poster: self
+                .display_title(cx)
+                .poster_url()
+                .map(str::to_owned)
+                .and_then(|url| self.image(Some(&url), ArtworkKind::Poster, &self.title.key(), cx)),
         }
     }
     fn open_stream(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -650,21 +726,7 @@ impl Detail {
         if let (Some(target), Some(candidate)) = (self.target.clone(), candidate) {
             let coordinator = self.coordinator.clone();
             let title = self.display_title(cx).name().to_owned();
-            let context = PlayContext {
-                episode: self.episode.as_ref().map(|ep| match ep.name.as_deref() {
-                    Some(name) if !name.trim().is_empty() => {
-                        format!("{} · {name}", episode_marker(ep))
-                    }
-                    _ => episode_marker(ep),
-                }),
-                poster: self
-                    .display_title(cx)
-                    .poster_url()
-                    .map(str::to_owned)
-                    .and_then(|url| {
-                        self.image(Some(&url), ArtworkKind::Poster, &self.title.key(), cx)
-                    }),
-            };
+            let context = self.play_context(cx);
             let sheet =
                 cx.new(|cx| PlaySheet::new(coordinator, title, context, target, candidate, cx));
             self.play_subscription = Some(cx.subscribe(&sheet, |this, _, _: &DismissEvent, cx| {
@@ -677,11 +739,19 @@ impl Detail {
         }
     }
 }
+/// `S01E02 · The Signal`, or just the marker for unnamed episodes.
+fn episode_caption(ep: &CatalogEpisode) -> String {
+    match ep.name.as_deref() {
+        Some(name) if !name.trim().is_empty() => format!("{} · {name}", episode_marker(ep)),
+        _ => episode_marker(ep),
+    }
+}
+
 /// What the hero's primary button does and whether it is available.
 enum PrimaryAction {
-    /// Open the play sheet for this candidate index.
-    Play(usize),
-    /// Move to the episodes column.
+    /// Open the Streams page (movies).
+    Streams,
+    /// Scroll to the episodes (series).
     Episodes,
     /// Unavailable, with the reason shown as a tooltip.
     Blocked(&'static str),
@@ -713,7 +783,7 @@ impl Detail {
         }
     }
     fn primary_action(&self, cx: &App) -> PrimaryAction {
-        if self.is_series() && self.episode.is_none() {
+        if self.is_series() {
             return PrimaryAction::Episodes;
         }
         if self.target.is_none() {
@@ -723,36 +793,24 @@ impl Detail {
                 "Streams aren’t available for this title"
             });
         }
-        let sources = &self.coordinator.read(cx).sources;
-        match sources.value() {
-            Some(set) if !set.candidates.is_empty() => {
-                match first_in_filter(&set.candidates, self.filter) {
-                    Some(index) => PrimaryAction::Play(index),
-                    None => PrimaryAction::Blocked("No streams match the selected quality"),
-                }
-            }
-            Some(_) if !sources.busy() => PrimaryAction::Blocked("No streams found"),
-            _ if sources.error().is_some() => {
-                PrimaryAction::Blocked("Streams couldn’t be loaded — try again")
-            }
-            _ => PrimaryAction::Blocked("Looking for streams…"),
-        }
+        PrimaryAction::Streams
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn run_primary_for_test(&mut self, cx: &mut Context<Self>) {
+        self.run_primary(cx)
     }
     fn run_primary(&mut self, cx: &mut Context<Self>) {
         match self.primary_action(cx) {
-            PrimaryAction::Play(index) => self.open_stream(index, cx),
+            PrimaryAction::Streams => self.open_streams(cx),
             PrimaryAction::Episodes => self.focus_episodes(cx),
             PrimaryAction::Blocked(_) => {}
         }
     }
-    /// Ask the next render to focus the first (or last visited) episode.
+    /// Scroll the page to the episodes section and focus its first card.
     fn focus_episodes(&mut self, cx: &mut Context<Self>) {
-        if self.episode.is_some() {
-            self.back_to_episodes(cx);
-        } else {
-            self.pending_column_focus = true;
-            cx.notify();
-        }
+        self.scroll.scroll_to_top_of_item(EPISODES_ITEM);
+        self.pending_return_focus = true;
+        cx.notify();
     }
     fn retry_metadata(&mut self, cx: &mut Context<Self>) {
         self.coordinator
@@ -771,22 +829,16 @@ impl Detail {
     fn retry_similar(&mut self, cx: &mut Context<Self>) {
         if let BrowseTitle::Tmdb(t) = &self.title {
             let id = t.id;
+            let page = self.similar.next_page().unwrap_or(1);
             self.coordinator
-                .update(cx, |c, cx| c.load_similar(id, 1, true, cx));
-        }
-    }
-
-    /// Body of the action column: episodes, streams, or the unmapped state.
-    fn action_body(&mut self, title: &BrowseTitle, cx: &mut Context<Self>) -> Div {
-        if title.kind() == MediaKind::Series && self.episode.is_none() {
-            self.episode_column(cx)
-        } else if title.imdb().is_none() {
-            self.unmapped_column(cx)
-        } else {
-            self.stream_column(cx)
+                .update(cx, |c, cx| c.load_similar(id, page, true, cx));
         }
     }
 }
+
+/// Index of the episodes section among the scroll area's children
+/// (hero, facts, episodes, …).
+const EPISODES_ITEM: usize = 2;
 
 /// Snapshot of the title-metadata resource, whichever provider backs it.
 struct MetaStatus {
@@ -808,114 +860,79 @@ fn state_view(id: &'static str, sel: ViewSelection) -> StateView {
         .stale_error(sel.stale_error)
 }
 
+impl Detail {
+    /// Move keyboard focus after a page change, once the target exists.
+    fn apply_pending_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let target = if self.page == Page::Streams {
+            if !self.pending_stream_focus || self.coordinator.read(cx).sources.busy() {
+                None
+            } else if self
+                .coordinator
+                .read(cx)
+                .sources
+                .value()
+                .is_some_and(|s| !s.candidates.is_empty())
+            {
+                self.stream_focus.first().cloned()
+            } else {
+                Some(self.page_focus.clone())
+            }
+        } else if !self.pending_return_focus {
+            None
+        } else if self.is_series() {
+            self.episode_return_focus
+                .and_then(|key| self.episode_focus.get(&key).cloned())
+                .or_else(|| {
+                    self.episodes(cx)
+                        .first()
+                        .and_then(|e| self.episode_focus.get(&(e.season, e.number)).cloned())
+                })
+        } else {
+            Some(self.primary_focus.clone())
+        };
+        if let Some(target) = target {
+            self.pending_stream_focus = false;
+            self.pending_return_focus = false;
+            let weak = cx.entity().downgrade();
+            let generation = self.page_generation;
+            window.defer(cx, move |window, cx| {
+                let _ = weak.update(cx, |s, cx| {
+                    if s.page_generation == generation {
+                        target.focus(window, cx);
+                    }
+                });
+            });
+        }
+    }
+}
+
 impl Render for Detail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ambient = self.ambient_palette(cx);
         let mode = tokens::theme(cx).mode;
-        // Surfaces that belong to this screen follow the artwork wash; shared
-        // widgets keep the theme palette so ink contrast is unchanged.
-        let p = self.tinted_palette(cx);
-        let title = self.display_title(cx);
-        let viewport = window.viewport_size();
-        let stacked = viewport.width < geometry::STACK_AT;
-        let share = viewport.height
-            * if stacked {
-                geometry::STACKED_HERO_MIN_FRACTION
-            } else {
-                geometry::HERO_MIN_FRACTION
-            };
-        let hero_min = share.max(geometry::HERO_MIN_HEIGHT);
-        let hero = self.hero(hero_min, cx);
-        let body = self.action_body(&title, cx);
-        if self.pending_column_focus {
-            let target = if self.episode.is_none() && title.kind() == MediaKind::Series {
-                self.episode_return_focus
-                    .and_then(|key| self.episode_focus.get(&key).cloned())
-                    .or_else(|| {
-                        self.episodes(cx)
-                            .first()
-                            .and_then(|e| self.episode_focus.get(&(e.season, e.number)).cloned())
-                    })
-            } else if !self.coordinator.read(cx).sources.busy() {
-                if self
-                    .coordinator
-                    .read(cx)
-                    .sources
-                    .value()
-                    .is_some_and(|s| !s.candidates.is_empty())
-                {
-                    self.stream_focus.first().cloned()
-                } else {
-                    Some(self.back_focus.clone())
-                }
-            } else {
-                None
-            };
-            if let Some(target) = target {
-                self.pending_column_focus = false;
-                let weak = cx.entity().downgrade();
-                let generation = self.column_generation;
-                window.defer(cx, move |window, cx| {
-                    let _ = weak.update(cx, |s, cx| {
-                        if s.column_generation == generation {
-                            target.focus(window, cx);
-                        }
-                    });
-                });
-            }
-        }
-        let duration = motion::duration(Motion::Column, cx);
-        let direction = self.column_direction;
-        let body = if self.column_generation > 0 && !duration.is_zero() {
-            body.relative()
-                .with_animation(
-                    ("column-navigation", self.column_generation),
-                    Animation::new(duration).with_easing(motion::ease_out_cubic),
-                    move |el, t| el.left(s::S24 * direction * (1. - t)).opacity(t),
-                )
-                .into_any_element()
-        } else {
-            body.into_any_element()
+        let page = match self.page {
+            Page::Overview => self.overview_page(window, cx),
+            Page::Streams => self.streams_page(window, cx),
         };
-        let column = div()
-            .id("detail-actions")
-            .flex_none()
-            .w(if viewport.width < geometry::NARROW_AT {
-                geometry::NARROW_COLUMN
-            } else {
-                (viewport.width * geometry::COLUMN_FRACTION)
-                    .min(geometry::MAX_COLUMN)
-                    .min(viewport.width - geometry::MIN_HERO)
-            })
-            .h_full()
-            .bg(p.bg_surface)
-            .border_l_1()
-            .border_color(p.line_hairline)
-            .overflow_y_scroll()
-            .when(stacked, |el| {
-                el.w_full()
-                    .h(viewport.height * geometry::STACKED_COLUMN_FRACTION)
-            })
-            .child(body);
-        // The hero sizes to its content; there is no fixed-height band.
-        let left = div()
-            .id("detail-main")
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .bg(p.bg_canvas)
-            .when(!stacked, |el| el.h_full().overflow_y_scroll())
-            .when(stacked, |el| el.flex_none())
-            .child(hero);
+        self.apply_pending_focus(window, cx);
+        let duration = motion::duration(Motion::Column, cx);
+        let direction = self.page_direction;
+        let page = div().relative().size_full().child(page);
+        let page = if self.page_generation > 0 && !duration.is_zero() {
+            page.with_animation(
+                ("detail-page", self.page_generation),
+                Animation::new(duration).with_easing(motion::ease_out_cubic),
+                move |el, t| el.left(s::S24 * direction * (1. - t)).opacity(t),
+            )
+            .into_any_element()
+        } else {
+            page.into_any_element()
+        };
         let content = div()
             .id("detail-content")
             .relative()
             .size_full()
-            .flex()
-            .when(stacked, |el| el.flex_col().overflow_y_scroll())
-            .child(left)
-            .child(column);
+            .child(page);
         let duration = motion::duration(Motion::Content, cx);
         let content = if duration.is_zero() {
             content.into_any_element()

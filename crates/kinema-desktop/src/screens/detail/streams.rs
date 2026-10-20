@@ -1,23 +1,10 @@
-//! Detail streams presentation.
+//! Stream rows, skeleton and quality options used by the Streams page.
 use super::*;
 use crate::metadata_bridge::SourceSet;
 use crate::widgets::patterns::{ViewState, focus_ring};
 
-/// Padding of the action column body.
-const COLUMN_PADDING: Pixels = s::S12;
-/// Back control plus its one-line episode caption.
-const BACK_BLOCK_HEIGHT: Pixels = px(52.);
 /// Label gutter of the inline stream details.
 const INLINE_LABEL_WIDTH: Pixels = px(64.);
-
-fn column_shell() -> Div {
-    div()
-        .w_full()
-        .p(COLUMN_PADDING)
-        .flex()
-        .flex_col()
-        .gap(s::S8)
-}
 
 /// Placeholder shaped like the loaded list: quality tabs, then two-line rows
 /// with a badge stack on the left.
@@ -62,164 +49,8 @@ pub(super) fn stream_skeleton() -> AnyElement {
 }
 
 impl Detail {
-    /// Streams header: title, optional count and the provider select.
-    fn streams_section(&self, count: Option<usize>, with_provider: bool) -> Section {
-        let section = Section::new("Streams");
-        // The provider choice is meaningless until the title maps to a source.
-        let section = if with_provider {
-            section.trailing(self.indexer.clone())
-        } else {
-            section
-        };
-        match count {
-            Some(count) => section.count(count),
-            None => section,
-        }
-    }
-
-    /// Movies whose IMDb mapping is unknown (loading, failed, or absent).
-    pub(super) fn unmapped_column(&mut self, cx: &mut Context<Self>) -> Div {
-        let status = self.meta_status(cx);
-        let state = if status.busy {
-            ViewState::Loading
-        } else if status.error.is_some() {
-            ViewState::Error
-        } else {
-            ViewState::Empty
-        };
-        let weak = cx.entity().downgrade();
-        let view = StateView::new("streams-unmapped", state)
-            .skeleton(stream_skeleton())
-            .message("Streams couldn’t be looked up")
-            .hint("Check your connection and try again.")
-            .empty(
-                IconName::Film,
-                "Streams aren’t available",
-                Some("This title can’t be matched to a stream source.".into()),
-            )
-            .on_retry(move |_, cx| {
-                let _ = weak.update(cx, |s, cx| s.retry_metadata(cx));
-            });
-        column_shell()
-            .child(self.streams_section(None, false))
-            .child(view)
-    }
-
-    pub(super) fn stream_column(&mut self, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
-        let (sources, busy, error) = {
-            let c = self.coordinator.read(cx);
-            (
-                c.sources.value().cloned(),
-                c.sources.busy(),
-                c.sources.error().map(str::to_owned),
-            )
-        };
-        let indexer = *self.indexer.read(cx).value();
-        let sel = selection(
-            sources.is_some(),
-            sources.as_ref().is_some_and(|s| s.candidates.is_empty()),
-            error.is_some(),
-            busy,
-        );
-        let mut column = column_shell();
-        if let Some(ep) = &self.episode {
-            column = column.child(
-                div()
-                    .flex_none()
-                    .h(BACK_BLOCK_HEIGHT)
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap(s::S4)
-                    .child(
-                        div()
-                            .id("episodes-back")
-                            .track_focus(&self.back_focus)
-                            .tab_stop(true)
-                            .h(s::CONTROL_HEIGHT)
-                            .px(s::S8)
-                            .flex()
-                            .items_center()
-                            .gap(s::S6)
-                            .rounded(radius::SM)
-                            .type_style(t::BODY_STRONG)
-                            .text_color(p.text_secondary)
-                            .cursor_pointer()
-                            .hover(move |el| el.bg(p.ctl_hover).text_color(p.text_primary))
-                            .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
-                            .child(Icon::new(IconName::ArrowLeft).color(p.text_secondary))
-                            .child("Episodes")
-                            .on_click(cx.listener(|this, _, _, cx| this.back_to_episodes(cx)))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.back_to_episodes(cx);
-                                    cx.stop_propagation();
-                                }
-                            })),
-                    )
-                    .child(
-                        div()
-                            .px(s::S4)
-                            .type_style(t::SMALL)
-                            .text_color(p.text_secondary)
-                            .child(format!(
-                                "{} · {}",
-                                episode_marker(ep),
-                                ep.name.as_deref().unwrap_or("Episode")
-                            )),
-                    ),
-            );
-        }
-        let filters = sources
-            .as_ref()
-            .map(|sources| self.quality_options(sources))
-            .unwrap_or_default();
-        if !filters.iter().any(|(q, _)| *q == self.filter) {
-            self.filter = Quality::All;
-        }
-        let visible = sources.as_ref().map(|sources| {
-            sources
-                .candidates
-                .iter()
-                .filter(|c| self.filter == Quality::All || source_quality(c) == self.filter)
-                .count()
-        });
-        column = column.child(self.streams_section(
-            if sel.state == ViewState::Content {
-                visible
-            } else {
-                None
-            },
-            true,
-        ));
-
-        let provider = indexer_name(indexer);
-        let weak = cx.entity().downgrade();
-        let mut view = state_view("streams", sel)
-            .skeleton(stream_skeleton())
-            .message(format!("Couldn’t load streams from {provider}"))
-            .empty(
-                IconName::Search,
-                "No streams found",
-                Some(
-                    format!("{provider} has nothing for this title. Try another provider.").into(),
-                ),
-            )
-            .on_retry(move |_, cx| {
-                let _ = weak.update(cx, |s, cx| s.retry_streams(cx));
-            });
-        if let Some(error) = &error {
-            view = view.hint(error.clone());
-        }
-        if let (ViewState::Content, Some(sources)) = (sel.state, sources) {
-            view = view.content(self.stream_list(&sources, filters, provider, cx));
-        }
-        column.child(view)
-    }
-
     /// "All" plus the qualities that actually occur.
-    fn quality_options(&self, sources: &SourceSet) -> Vec<(Quality, SharedString)> {
+    pub(super) fn quality_options(&self, sources: &SourceSet) -> Vec<(Quality, SharedString)> {
         let mut filters = vec![(Quality::All, Quality::All.label().into())];
         for q in [Quality::Uhd, Quality::Hd, Quality::Sd, Quality::Other] {
             if sources.candidates.iter().any(|c| source_quality(c) == q) {
@@ -229,28 +60,14 @@ impl Detail {
         filters
     }
 
-    fn stream_list(
+    pub(super) fn stream_list(
         &mut self,
         sources: &SourceSet,
-        filters: Vec<(Quality, SharedString)>,
         provider: &'static str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = *tokens::palette(cx);
-        let weak = cx.entity().downgrade();
-        let mut list = div().w_full().flex().flex_col().gap(s::S8).child(
-            // Wrapped so the control's negative focus margin has room to draw.
-            div()
-                .px(s::S4)
-                .child(Segmented::new("quality", filters, self.filter).on_change(
-                    move |q, _, cx| {
-                        let _ = weak.update(cx, |s, cx| {
-                            s.filter = *q;
-                            cx.notify();
-                        });
-                    },
-                )),
-        );
+        let mut list = div().w_full().flex().flex_col().gap(s::S4);
         while self.stream_focus.len() < sources.candidates.len() {
             self.stream_focus.push(cx.focus_handle().tab_stop(true));
         }
@@ -359,7 +176,8 @@ impl Detail {
             }))
             .child(row);
 
-        let mut item = div().flex_none().flex().flex_col();
+        // Roomier than the old side panel: extra air above and below each row.
+        let mut item = div().flex_none().flex().flex_col().py(s::S2);
         let play = cx.entity().downgrade();
         let info = play.clone();
         let name = candidate.name.clone();

@@ -50,15 +50,16 @@ impl Detail {
             && !series
         {
             coordinator.update(cx, |c, cx| c.load_similar(t.id, 1, true, cx));
+            this.reconcile_similar(cx);
         }
-        if !series && let Some(target) = this.target.clone() {
-            let indexer = *this.indexer.read(cx).value();
-            coordinator.update(cx, |c, cx| c.sources(indexer, target, cx));
-        }
-        if streams && series {
-            let episodes = this.episodes(cx);
-            if let Some(ep) = episodes.iter().find(|e| e.number == 2).cloned() {
-                this.choose_episode(ep, cx);
+        if streams {
+            if series {
+                let episodes = this.episodes(cx);
+                if let Some(ep) = episodes.iter().find(|e| e.number == 2).cloned() {
+                    this.open_episode(ep, cx);
+                }
+            } else {
+                this.open_streams(cx);
             }
         }
         this
