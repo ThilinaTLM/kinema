@@ -33,6 +33,14 @@ impl Transfers {
             if let CoordinatorEvent::App(event) = event
                 && Some(event.generation) == this.cleanup
             {
+                tracing::debug!(
+                    generation = event.generation,
+                    outcome = "applied",
+                    "UI cleanup result received"
+                );
+                if let AppOutcome::Failed { message } = &event.outcome {
+                    tracing::warn!(message, "UI cleanup failure displayed");
+                }
                 this.cleanup = None;
                 this.result = Some(match &event.outcome {
                     AppOutcome::Cleaned {

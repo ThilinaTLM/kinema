@@ -101,6 +101,50 @@ impl BrowseTitle {
         }
     }
 }
+// Only normalized public quality buckets may be logged, never a provider label.
+pub(crate) fn diagnostic_quality(value: Option<&str>) -> &'static str {
+    match value {
+        Some("2160p") => "2160p",
+        Some("1080p") => "1080p",
+        Some("720p") => "720p",
+        Some("480p") => "480p",
+        _ => "unknown",
+    }
+}
+fn apply_stage<T>(
+    name: &'static str,
+    resource: &mut Resource<T>,
+    generation: u64,
+    stage: Stage<T>,
+) -> bool {
+    let stage_name = match &stage {
+        Stage::CacheHit { .. } => "cache_hit",
+        Stage::Fetched { .. } => "fetched",
+        Stage::Failed(_) => "failed",
+    };
+    let current_generation = resource.generation();
+    let applied = resource.apply(generation, stage);
+    tracing::debug!(
+        resource = name,
+        generation,
+        current_generation,
+        stage = stage_name,
+        outcome = if applied { "applied" } else { "rejected_stale" },
+        "UI resource result received"
+    );
+    if applied && let Some(message) = resource.error() {
+        // Resource errors originate from user-safe domain enums/static UI notices.
+        tracing::warn!(resource = name, message, "UI resource failure displayed");
+    }
+    applied
+}
+impl BrowseTitle {
+    pub(crate) fn log_navigation(&self, route: &'static str) {
+        // key() is built only from a validated IMDb ID or a numeric TMDB ID.
+        tracing::debug!(route, kind = ?self.kind(), id = self.key(), "UI title navigation");
+    }
+}
+
 #[derive(Clone)]
 pub enum CoordinatorEvent {
     App(AppEvent),
@@ -153,6 +197,7 @@ pub struct AppCoordinator {
     fixture_failure: Option<String>,
     #[cfg(feature = "ui-probe")]
     pub(crate) fixture_art: std::collections::HashMap<String, std::sync::Arc<RenderImage>>,
+    worker_disconnect_reported: [bool; 2],
     _poll: Task<()>,
     // ── detail: provider-native season resource and offline response injection ──
     pub(crate) tmdb_season: Resource<crate::tmdb::TmdbSeason>,
@@ -182,8 +227,8 @@ impl AppCoordinator {
             }
         });
         let mut this = Self {
-            worker: CatalogWorker::spawn_default().map_err(|e| e.to_string()),
-            app: AppWorker::spawn().map_err(|e| e.to_string()),
+            worker: CatalogWorker::spawn_default().map_err(|error| { tracing::error!(worker = "catalog", io_kind = ?error.kind(), "UI worker could not start"); error.to_string() }),
+            app: AppWorker::spawn().map_err(|error| { tracing::error!(worker = "application", io_kind = ?error.kind(), "UI worker could not start"); error.to_string() }),
             tracker: Tracker::default(),
             // ── sessions ──
             session_identity: Default::default(),
@@ -213,6 +258,7 @@ impl AppCoordinator {
             fixture_failure: None,
             #[cfg(feature = "ui-probe")]
             fixture_art: Default::default(),
+            worker_disconnect_reported: [false; 2],
             _poll: poll,
             // ── detail ──
             similar: Resource::default(),
@@ -276,6 +322,7 @@ impl AppCoordinator {
             fixture: Some(titles),
             fixture_failure: failure,
             fixture_art: Default::default(),
+            worker_disconnect_reported: [false; 2],
             _poll: cx.spawn(async |_, _| {}),
             // ── detail ──
             similar: Resource::default(),
@@ -289,6 +336,12 @@ impl AppCoordinator {
         }
     }
     pub fn load(&mut self, kind: MediaKind, query: String, refresh: bool, cx: &mut Context<Self>) {
+        tracing::debug!(
+            ?kind,
+            refresh,
+            searching = !query.trim().is_empty(),
+            "UI collection load requested"
+        );
         if let Some(source) = &self.fixture {
             self.kind = kind;
             self.query = query;
@@ -301,7 +354,12 @@ impl AppCoordinator {
                 .collect();
             let generation = self.collection.begin(true);
             if let Some(error) = &self.fixture_failure {
-                self.collection.failed(generation, error);
+                apply_stage(
+                    "collection",
+                    &mut self.collection,
+                    generation,
+                    Stage::Failed(error.to_string()),
+                );
             } else {
                 self.collection.fetched(generation, self.titles.clone(), 0);
             }
@@ -410,7 +468,12 @@ impl AppCoordinator {
             Ok::<_, String>(())
         })();
         if let Err(e) = result {
-            self.collection.failed(generation, e);
+            apply_stage(
+                "collection",
+                &mut self.collection,
+                generation,
+                Stage::Failed(e.to_string()),
+            );
         }
         cx.notify();
     }
@@ -470,6 +533,8 @@ impl AppCoordinator {
                     Outcome::CacheMiss => continue,
                 };
                 self.apply_page(event.generation, stage);
+            } else {
+                tracing::debug!(generation = event.generation, kind = ?event.kind, outcome = "rejected_stale", "UI search result belongs to an inactive media kind");
             }
         }
         for event in metadata {
@@ -501,12 +566,12 @@ impl AppCoordinator {
                 Polled::Cinemeta(MetaEvent::Details {
                     generation, stage, ..
                 }) => {
-                    self.details.apply(generation, stage);
+                    apply_stage("details", &mut self.details, generation, stage);
                 }
                 Polled::Cinemeta(MetaEvent::Sources {
                     generation, stage, ..
                 }) => {
-                    self.sources.apply(generation, stage);
+                    apply_stage("sources", &mut self.sources, generation, stage);
                 }
                 // ── detail: recommendations cannot consume the browse/season slot ──
                 Polled::Tmdb(event)
@@ -550,7 +615,12 @@ impl AppCoordinator {
                         Err(error) => Stage::Failed(error),
                         _ => continue,
                     };
-                    self.tmdb_details.apply(event.generation, stage);
+                    apply_stage(
+                        "tmdb_details",
+                        &mut self.tmdb_details,
+                        event.generation,
+                        stage,
+                    );
                 }
                 Polled::Tmdb(event)
                     if Some(&event.action)
@@ -589,10 +659,17 @@ impl AppCoordinator {
                         self.exhausted = true;
                     }
                 }
-                _ => {}
+                _ => tracing::debug!(
+                    outcome = "rejected_stale",
+                    "UI metadata result no longer matches the active route"
+                ),
             }
         }
         if stopped {
+            if !self.worker_disconnect_reported[0] {
+                tracing::error!(worker = "catalog", "UI worker disconnected");
+                self.worker_disconnect_reported[0] = true;
+            }
             let g = self.similar.generation();
             changed |= self
                 .similar
@@ -619,8 +696,15 @@ impl AppCoordinator {
                 .failed(g, "Catalog worker stopped. Restart Kinema.");
         }
         if self.app.as_ref().is_ok_and(|a| a.is_stopped()) {
+            if !self.worker_disconnect_reported[1] {
+                tracing::error!(worker = "application", "UI worker disconnected");
+                self.worker_disconnect_reported[1] = true;
+            }
             let message = "Application worker stopped. Restart Kinema.";
             changed |= self.notice.as_deref() != Some(message);
+            if self.notice.as_deref() != Some(message) {
+                tracing::warn!(message, "UI notice displayed");
+            }
             self.notice = Some(message.into());
         }
         let events: Vec<_> = self
@@ -722,7 +806,19 @@ impl AppCoordinator {
             self.session_identity.remove(&event.generation);
         }
         if resolved.as_ref().is_some_and(|r| !r.current) {
+            tracing::debug!(
+                generation = event.generation,
+                outcome = "rejected_stale",
+                "UI application result not applied to current view; session bookkeeping retained"
+            );
             return;
+        }
+        if !unsolicited {
+            tracing::debug!(
+                generation = event.generation,
+                outcome = "applied",
+                "UI application result applied"
+            );
         }
         match &event.outcome {
             AppOutcome::Settings {
@@ -755,18 +851,25 @@ impl AppCoordinator {
                 self.tmdb_credential = Some(status.clone());
             }
             AppOutcome::Failed { message } => {
+                tracing::warn!(message, "UI notice displayed");
                 self.notice = Some(message.clone());
                 if resolved
                     .as_ref()
                     .is_some_and(|r| r.pending == Some(Pending::Load))
                 {
                     let g = self.collection.generation();
-                    self.collection.failed(g, message);
+                    apply_stage(
+                        "collection",
+                        &mut self.collection,
+                        g,
+                        Stage::Failed(message.to_string()),
+                    );
                 }
             }
             _ => {}
         }
         if let AppOutcome::SettingsWarning { message, .. } = &event.outcome {
+            tracing::warn!(message, "UI notice displayed");
             self.notice = Some(message.clone());
         }
         cx.emit(CoordinatorEvent::App(event));
@@ -774,6 +877,7 @@ impl AppCoordinator {
     /// Typed application intent gateway. Returns its command generation, or None
     /// on backpressure/start failure. P2/P4 should subscribe before submitting.
     pub fn command(&mut self, action: AppAction, cx: &mut Context<Self>) -> Option<u64> {
+        tracing::debug!(operation = action.operation(), "UI user action requested");
         let pending = match &action {
             AppAction::LoadSettings => Pending::Load,
             AppAction::SaveSettings(_) => Pending::Settings,
@@ -820,10 +924,18 @@ impl AppCoordinator {
                 self.session_error(&id, "Application service unavailable or busy. Retry.");
             }
             let message = "Application service unavailable or busy. Retry.";
+            if self.notice.as_deref() != Some(message) {
+                tracing::warn!(message, "UI notice displayed");
+            }
             self.notice = Some(message.into());
             if pending == Pending::Load {
                 let g = self.collection.generation();
-                self.collection.failed(g, message);
+                apply_stage(
+                    "collection",
+                    &mut self.collection,
+                    g,
+                    Stage::Failed(message.to_string()),
+                );
             }
             cx.notify();
             None
@@ -865,7 +977,12 @@ impl AppCoordinator {
                 metadata_bridge::request(worker, Ask::Details { kind, id }, generation, false)
             });
         if let Err(error) = result {
-            self.details.failed(generation, error);
+            apply_stage(
+                "details",
+                &mut self.details,
+                generation,
+                Stage::Failed(error.to_string()),
+            );
         }
         cx.notify();
     }
@@ -926,7 +1043,7 @@ fn merge_page(
     stage: Stage<Vec<BrowseTitle>>,
 ) -> Option<bool> {
     let failure = matches!(&stage, Stage::Failed(_));
-    if !resource.apply(generation, stage) || failure {
+    if !apply_stage("collection", resource, generation, stage) || failure {
         return None;
     }
     let page = resource.value()?;
@@ -955,6 +1072,69 @@ mod tests {
                 .unwrap_or_else(|e| panic!("fixture title: {e}")),
         )
     }
+    #[test]
+    fn ui_diagnostics_redact_title_values_and_reject_stale_errors() {
+        use crate::providers::test_logging::{capture, excludes, isolated};
+        if !isolated(
+            module_path!(),
+            "ui_diagnostics_redact_title_values_and_reject_stale_errors",
+        ) {
+            return;
+        }
+        let mut resource = Resource::<String>::default();
+        let old = resource.begin(true);
+        let current = resource.begin(true);
+        let (_, output) = capture(|| {
+            title(
+                "tt0000001",
+                "https://private.invalid/?signature=title-secret",
+            )
+            .log_navigation("detail");
+            tracing::debug!(
+                quality = super::diagnostic_quality(Some(
+                    "https://private.invalid/?token=quality-secret"
+                )),
+                "UI stream fixture"
+            );
+            assert!(!super::apply_stage(
+                "fixture",
+                &mut resource,
+                old,
+                Stage::Failed("https://private.invalid/?token=stale-error-secret".into())
+            ));
+            assert!(super::apply_stage(
+                "fixture",
+                &mut resource,
+                current,
+                Stage::Fetched {
+                    value: "https://cdn.invalid/?token=value-secret".into(),
+                    fetched_at: 1
+                }
+            ));
+            let generation = resource.begin(false);
+            assert!(super::apply_stage(
+                "fixture",
+                &mut resource,
+                generation,
+                Stage::Failed("Catalog worker unavailable".into())
+            ));
+        });
+        assert!(output.contains("rejected_stale"));
+        assert!(output.contains("applied"));
+        assert!(output.contains("Catalog worker unavailable"));
+        excludes(
+            &output,
+            &[
+                "title-secret",
+                "quality-secret",
+                "stale-error-secret",
+                "value-secret",
+                "signature=",
+                "token=",
+            ],
+        );
+    }
+
     #[test]
     fn refreshed_page_replaces_membership_and_failure_keeps_loaded_titles() {
         let mut resource = Resource::<Vec<BrowseTitle>>::default();
@@ -1072,6 +1252,8 @@ mod tests {
 // ── detail: title/source refresh and provider-native lazy seasons ──
 impl AppCoordinator {
     fn load_title_details(&mut self, title: &BrowseTitle, refresh: bool, cx: &mut Context<Self>) {
+        title.log_navigation("details_request");
+        tracing::debug!(refresh, "UI title details requested");
         let action = match title {
             BrowseTitle::Cinemeta(t) => MetadataAction::Details {
                 kind: t.kind(),
@@ -1114,10 +1296,20 @@ impl AppCoordinator {
         if let Err(error) = result {
             match title {
                 BrowseTitle::Cinemeta(_) => {
-                    self.details.failed(generation, error);
+                    apply_stage(
+                        "details",
+                        &mut self.details,
+                        generation,
+                        Stage::Failed(error.to_string()),
+                    );
                 }
                 BrowseTitle::Tmdb(_) => {
-                    self.tmdb_details.failed(generation, error);
+                    apply_stage(
+                        "tmdb_details",
+                        &mut self.tmdb_details,
+                        generation,
+                        Stage::Failed(error.to_string()),
+                    );
                 }
             }
         }
@@ -1173,7 +1365,12 @@ impl AppCoordinator {
             .map_err(Clone::clone)
             .and_then(|worker| metadata_bridge::request(worker, ask, generation, refresh));
         if let Err(error) = result {
-            self.sources.failed(generation, error);
+            apply_stage(
+                "sources",
+                &mut self.sources,
+                generation,
+                Stage::Failed(error.to_string()),
+            );
         }
         cx.notify();
     }
@@ -1227,7 +1424,12 @@ impl AppCoordinator {
                 }
             });
         if let Err(error) = result {
-            self.tmdb_season.failed(generation, error);
+            apply_stage(
+                "tmdb_season",
+                &mut self.tmdb_season,
+                generation,
+                Stage::Failed(error.to_string()),
+            );
         }
         cx.notify();
     }
@@ -1245,9 +1447,21 @@ impl AppCoordinator {
 
     fn apply_detail_season(&mut self, event: crate::catalog_worker::MetadataEvent) -> bool {
         let Some((query, generation)) = &self.season_request else {
+            tracing::debug!(
+                generation = event.generation,
+                outcome = "rejected_stale",
+                resource = "apply_detail_season",
+                "UI metadata result rejected by identity or generation"
+            );
             return false;
         };
         if event.action != MetadataAction::Tmdb(query.clone()) || event.generation != *generation {
+            tracing::debug!(
+                generation = event.generation,
+                outcome = "rejected_stale",
+                resource = "apply_detail_season",
+                "UI metadata result rejected by identity or generation"
+            );
             return false;
         }
         let stage = match event.result {
@@ -1277,7 +1491,12 @@ impl AppCoordinator {
             Err(error) => Stage::Failed(error),
             _ => Stage::Failed("Catalog returned an unexpected season response.".into()),
         };
-        self.tmdb_season.apply(event.generation, stage)
+        apply_stage(
+            "tmdb_season",
+            &mut self.tmdb_season,
+            event.generation,
+            stage,
+        )
     }
 }
 
@@ -1296,6 +1515,11 @@ impl AppCoordinator {
         candidate: kinema_core::sources::SourceCandidate,
         cx: &mut Context<Self>,
     ) -> Option<u64> {
+        tracing::debug!(
+            ?target,
+            quality = diagnostic_quality(candidate.quality.as_deref()),
+            "UI preparation requested"
+        );
         let identity = (title, target.clone());
         let generation = self.command(AppAction::Prepare { target, candidate }, cx)?;
         // An admitted preparation supersedes the worker's retained preparation.
@@ -1329,6 +1553,7 @@ impl AppCoordinator {
         cx.emit(CoordinatorEvent::OpenSettingsAt(destination));
     }
     fn session_error(&mut self, id: &str, message: &str) {
+        tracing::warn!(message, "UI session error displayed");
         if let Some(row) = self.sessions.iter_mut().find(|s| s.session.id == id) {
             row.error = Some(message.into());
         }
@@ -1490,7 +1715,12 @@ impl AppCoordinator {
             }
         });
         if let Err(error) = result {
-            self.similar.failed(generation, error);
+            apply_stage(
+                "similar",
+                &mut self.similar,
+                generation,
+                Stage::Failed(error.to_string()),
+            );
         }
         cx.notify();
     }
@@ -1506,9 +1736,21 @@ impl AppCoordinator {
     }
     fn apply_detail_similar(&mut self, event: crate::catalog_worker::MetadataEvent) -> bool {
         let Some((query, generation)) = &self.similar_request else {
+            tracing::debug!(
+                generation = event.generation,
+                outcome = "rejected_stale",
+                resource = "apply_detail_similar",
+                "UI metadata result rejected by identity or generation"
+            );
             return false;
         };
         if event.generation != *generation || event.action != MetadataAction::Tmdb(query.clone()) {
+            tracing::debug!(
+                generation = event.generation,
+                outcome = "rejected_stale",
+                resource = "apply_detail_similar",
+                "UI metadata result rejected by identity or generation"
+            );
             return false;
         }
         let stage = match event.result {
@@ -1535,7 +1777,7 @@ impl AppCoordinator {
             Err(e) => Stage::Failed(e),
             _ => Stage::Failed("Catalog returned an unexpected similar-title response.".into()),
         };
-        self.similar.apply(event.generation, stage)
+        apply_stage("similar", &mut self.similar, event.generation, stage)
     }
 }
 

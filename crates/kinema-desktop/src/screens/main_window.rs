@@ -187,6 +187,7 @@ impl MainWindow {
         }
     }
     fn open_title(&mut self, title: BrowseTitle, window: &mut Window, cx: &mut Context<Self>) {
+        title.log_navigation("detail");
         // Retire the old view/subscription before its shared resources change.
         // Browse stays mounted as an entity, preserving its selection and scroll.
         self.detail_subscription = None;
@@ -210,6 +211,7 @@ impl MainWindow {
     }
 
     fn open_local(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        tracing::debug!("UI local file chooser requested");
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -229,6 +231,10 @@ impl MainWindow {
                 Ok(Ok(None)) => {}
                 _ => {
                     coordinator.update(cx, |c, cx| {
+                        tracing::warn!(
+                            category = "file_chooser",
+                            "The local file chooser could not be opened"
+                        );
                         c.notice = Some("The local file chooser could not be opened.".into());
                         cx.notify();
                     });
@@ -280,6 +286,7 @@ impl MainWindow {
     }
     /// Back one step: Streams page -> detail page -> Browse.
     fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        tracing::debug!("UI back requested");
         if let Route::Detail(detail) = &self.route
             && detail.clone().update(cx, |d, cx| d.go_back(cx))
         {
@@ -288,6 +295,7 @@ impl MainWindow {
         self.leave_detail(window, cx);
     }
     fn leave_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        tracing::debug!(route = "browse", "UI route changed");
         self.detail_subscription = None;
         self.route = Route::Browse;
         crate::artwork::begin_generation("v3-detail", cx);

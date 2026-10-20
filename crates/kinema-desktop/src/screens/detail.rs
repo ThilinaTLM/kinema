@@ -618,6 +618,7 @@ impl Detail {
         episodes
     }
     pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.title.log_navigation("detail_refresh");
         self.art_generation = artwork::begin_generation("v3-detail", cx);
         self.coordinator
             .update(cx, |c, cx| c.title_details(&self.title, true, cx));
@@ -656,6 +657,7 @@ impl Detail {
         }
     }
     fn go_to_streams(&mut self, target: PlaybackTarget, cx: &mut Context<Self>) {
+        tracing::debug!(route = "streams", ?target, "UI route changed");
         self.target = Some(target.clone());
         self.page = Page::Streams;
         self.reset_stream_selection();
@@ -668,6 +670,7 @@ impl Detail {
         cx.notify();
     }
     fn close_streams(&mut self, cx: &mut Context<Self>) {
+        tracing::debug!(route = "detail", "UI route changed");
         self.page = Page::Overview;
         self.play = None;
         self.reset_stream_selection();
@@ -724,6 +727,7 @@ impl Detail {
             .and_then(|s| s.candidates.get(index))
             .cloned();
         if let (Some(target), Some(candidate)) = (self.target.clone(), candidate) {
+            tracing::debug!(indexer = ?self.indexer.read(cx).value(), quality = super::coordinator::diagnostic_quality(candidate.quality.as_deref()), ?target, "UI stream chosen");
             let coordinator = self.coordinator.clone();
             let title = self.display_title(cx).name().to_owned();
             let context = self.play_context(cx);

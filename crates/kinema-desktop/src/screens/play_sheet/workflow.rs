@@ -42,7 +42,14 @@ impl PlaySheet {
             }
             None => "Account status unavailable. Close and retry after settings load.".into(),
         };
+        tracing::debug!(?provider, ?target, "UI prepare/play sheet opened");
         let missing = !credential_notice.is_empty();
+        if missing {
+            tracing::warn!(
+                message = credential_notice,
+                "UI preparation blocked by account state"
+            );
+        }
         let shown = candidate.clone();
         let pending = if missing {
             None
@@ -86,8 +93,20 @@ impl PlaySheet {
             return;
         }
         if Some(event.generation) != self.pending {
+            if event.generation != 0 {
+                tracing::debug!(
+                    generation = event.generation,
+                    outcome = "rejected_stale",
+                    "UI play-sheet result ignored"
+                );
+            }
             return;
         }
+        tracing::debug!(
+            generation = event.generation,
+            outcome = "applied",
+            "UI play-sheet result applied"
+        );
         self.pending = None;
         match &event.outcome {
             AppOutcome::Prepared {
@@ -123,6 +142,9 @@ impl PlaySheet {
             AppOutcome::Busy { label } => self.error = Some(label.clone()),
             _ => {}
         }
+        if let Some(message) = &self.error {
+            tracing::warn!(message, "UI preparation/playback error displayed");
+        }
         cx.notify();
     }
     fn cancel_owned_work(&mut self, cx: &mut App) {
@@ -141,6 +163,7 @@ impl PlaySheet {
     }
     /// Submit the auto-selected file; the sheet stays open until playback starts.
     fn play_file(&mut self, preparation: u64, file_id: String, cx: &mut Context<Self>) {
+        tracing::debug!(preparation, provider = ?self.provider, "UI selected-file play requested");
         self.error = None;
         self.pending = self.coordinator.update(cx, |c, cx| {
             c.command(
@@ -152,6 +175,10 @@ impl PlaySheet {
             )
         });
         if self.pending.is_none() {
+            tracing::warn!(
+                category = "worker_backpressure",
+                "UI selected-file play could not be queued"
+            );
             self.error = Some("Application service unavailable or busy. Retry.".into());
         }
     }

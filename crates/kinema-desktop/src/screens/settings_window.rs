@@ -170,6 +170,7 @@ pub fn open_at(
 }
 
 pub fn open(coordinator: Entity<AppCoordinator>, section: Section, cx: &mut App) {
+    tracing::debug!(section = section.label(), "UI settings window requested");
     if !cx.has_global::<SettingsWindows>() {
         cx.set_global(SettingsWindows::default());
     }
@@ -546,14 +547,19 @@ impl SettingsWindow {
                 .update(cx, |select, cx| select.set_value(self.settings.debrid, cx));
         }
     }
+    fn show_error(&mut self, field: &'static str, message: String) -> Option<String> {
+        tracing::warn!(field, message, "UI settings error displayed");
+        self.errors.insert(field, message)
+    }
     fn change(&mut self, field: &'static str, change: SettingChange, cx: &mut Context<Self>) {
         apply_change(&mut self.settings, change);
         self.save(field, cx);
     }
     fn save(&mut self, field: &'static str, cx: &mut Context<Self>) {
+        tracing::debug!(field, "UI settings save requested");
         self.errors.remove(field);
         if !self.settings_loaded && !self.fixture {
-            self.errors.insert(
+            self.show_error(
                 field,
                 "Settings are still loading or unavailable; no settings were saved.".into(),
             );
@@ -580,7 +586,7 @@ impl SettingsWindow {
                 cx.global_mut::<SettingsWindows>().pending_save = Some(g);
             }
         } else {
-            self.errors.insert(
+            self.show_error(
                 field,
                 "Application service unavailable or busy. Retry this change.".into(),
             );
@@ -594,7 +600,7 @@ impl SettingsWindow {
             PlayerKind::Custom => PlayerChoice::Custom(PathBuf::from(self.path.read(cx).text())),
         };
         if let Err(error) = crate::player::validate_choice(&choice) {
-            self.errors.insert("Player", error.to_string());
+            self.show_error("Player", error.to_string());
             cx.notify();
             return;
         }
@@ -616,7 +622,7 @@ impl SettingsWindow {
             .and_then(|v| v.checked_mul(1024 * 1024 * 1024))
             .filter(|v| *v > 0);
         let Some(bytes) = bytes else {
-            self.errors.insert(
+            self.show_error(
                 "Cache limit",
                 "Enter a positive whole number of GiB.".into(),
             );
@@ -638,6 +644,15 @@ impl SettingsWindow {
         value: Option<SecretString>,
         cx: &mut Context<Self>,
     ) {
+        tracing::debug!(
+            account = account.label(),
+            operation = match operation {
+                CredentialOperation::Save => "save",
+                CredentialOperation::Remove => "remove",
+                CredentialOperation::Test => "test",
+            },
+            "UI credential action requested"
+        );
         if self.fixture {
             self.status.insert(
                 account,
@@ -674,7 +689,7 @@ impl SettingsWindow {
                 .insert(g, Pending::Credential(account, operation));
             self.latest_account.insert(account, g);
         } else {
-            self.errors.insert(
+            self.show_error(
                 account.label(),
                 "Application service unavailable or busy. Retry.".into(),
             );
@@ -687,8 +702,7 @@ impl SettingsWindow {
         };
         let value = self.secret.update(cx, take_secret);
         if value.expose().trim().is_empty() {
-            self.errors
-                .insert(account.label(), "Token cannot be empty.".into());
+            self.show_error(account.label(), "Token cannot be empty.".into());
             cx.notify();
             return;
         }
@@ -698,6 +712,7 @@ impl SettingsWindow {
         let Some(pending) = self.pending.remove(&event.generation) else {
             return;
         };
+        tracing::debug!(generation = event.generation, "UI settings result received");
         let failure = match &event.outcome {
             AppOutcome::Failed { message } | AppOutcome::SettingsWarning { message, .. } => {
                 Some(message.clone())
@@ -709,7 +724,7 @@ impl SettingsWindow {
             Pending::Save(field) => {
                 self.save_pending = false;
                 if let Some(message) = failure {
-                    self.errors.insert(field, message);
+                    self.show_error(field, message);
                 }
                 // Reconcile the preview with the accepted snapshot. Durability
                 // warnings carry the newly replaced settings and are not rolled
@@ -719,6 +734,11 @@ impl SettingsWindow {
             }
             Pending::Credential(account, operation) => {
                 if self.latest_account.get(&account) != Some(&event.generation) {
+                    tracing::debug!(
+                        generation = event.generation,
+                        outcome = "rejected_stale",
+                        "UI credential result ignored"
+                    );
                     return;
                 }
                 self.latest_account.remove(&account);
@@ -735,7 +755,7 @@ impl SettingsWindow {
                 self.snapshots.insert(account, snapshot);
                 let status = if let Some(message) = failure {
                     let status = AccountStatus::failure(&message);
-                    self.errors.insert(account.label(), message);
+                    self.show_error(account.label(), message);
                     status
                 } else {
                     match operation {
@@ -747,7 +767,19 @@ impl SettingsWindow {
                 self.status.insert(account, status);
             }
             Pending::Cleanup => {
-                self.errors.insert("Cleanup", failure.unwrap_or_else(|| match &event.outcome { AppOutcome::Cleaned { bytes, .. } => format!("Freed {}. Active/protected files were kept; original local files are never removed.", bytes_label(*bytes)), _ => "Cleanup completed.".into() }));
+                if let Some(message) = failure {
+                    self.show_error("Cleanup", message);
+                } else {
+                    tracing::debug!("UI settings cleanup completed");
+                    let message = match &event.outcome {
+                        AppOutcome::Cleaned { bytes, .. } => format!(
+                            "Freed {}. Active/protected files were kept; original local files are never removed.",
+                            bytes_label(*bytes)
+                        ),
+                        _ => "Cleanup completed.".into(),
+                    };
+                    self.errors.insert("Cleanup", message);
+                }
             }
         }
         cx.notify();
