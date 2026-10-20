@@ -75,7 +75,8 @@ impl fmt::Display for MediaError {
 }
 impl std::error::Error for MediaError {}
 impl From<std::io::Error> for MediaError {
-    fn from(_: std::io::Error) -> Self {
+    fn from(error: std::io::Error) -> Self {
+        tracing::warn!(io_kind = ?error.kind(), "Media I/O failed");
         Self::Storage
     }
 }
@@ -88,6 +89,10 @@ fn client_builder() -> reqwest::blocking::ClientBuilder {
         .redirect(reqwest::redirect::Policy::none())
 }
 fn request_error(error: reqwest::Error) -> MediaError {
+    tracing::warn!(
+        kind = crate::logging::http_error_kind(&error),
+        "Media transport failed"
+    );
     // Never retain or format reqwest errors: they can contain signed URLs.
     if error.is_timeout() {
         if error.is_connect() {
@@ -168,227 +173,387 @@ pub struct MediaService {
 }
 impl MediaService {
     pub fn start(paths: &AppPaths, limit: CacheBudget) -> Result<Self, MediaError> {
-        let root = storage::resolve_root(&paths.cache)?;
-        let (lock, assets) = storage::open(&root)?;
-        let reserved = assets
-            .values()
-            .try_fold(0u64, |sum, a| sum.checked_add(a.identity.size))
-            .ok_or(MediaError::Storage)?;
-        if reserved > limit.bytes() {
-            return Err(MediaError::CacheFull);
+        let _span = tracing::info_span!("media", operation = "start").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            let root = storage::resolve_root(&paths.cache)?;
+            let (lock, assets) = storage::open(&root)?;
+            let reserved = assets
+                .values()
+                .try_fold(0u64, |sum, a| sum.checked_add(a.identity.size))
+                .ok_or(MediaError::Storage)?;
+            if reserved > limit.bytes() {
+                return Err(MediaError::CacheFull);
+            }
+            let shared = Arc::new(Shared {
+                root,
+                state: Mutex::new(State {
+                    sessions: HashMap::new(),
+                    assets,
+                    limit: limit.bytes(),
+                }),
+                canceled: AtomicBool::new(false),
+                _lock: lock,
+                client: client_builder().build().map_err(request_error)?,
+            });
+            let (address, stop) = server::start(shared.clone())?;
+            tracing::info!(port = address.port(), "Media server started");
+            Ok(Self {
+                shared,
+                address,
+                stop: Some(stop),
+            })
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "media operation completed"
+            ),
+            Err(category) => {
+                if *category == MediaError::Canceled {
+                    tracing::debug!("media operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "media operation failed"
+                    );
+                }
+            }
         }
-        let shared = Arc::new(Shared {
-            root,
-            state: Mutex::new(State {
-                sessions: HashMap::new(),
-                assets,
-                limit: limit.bytes(),
-            }),
-            canceled: AtomicBool::new(false),
-            _lock: lock,
-            client: client_builder().build().map_err(|_| MediaError::Upstream)?,
-        });
-        let (address, stop) = server::start(shared.clone())?;
-        Ok(Self {
-            shared,
-            address,
-            stop: Some(stop),
-        })
+        result
     }
     pub fn register_local(&self, path: &Path) -> Result<PlaybackSession, MediaError> {
-        let canonical = path.canonicalize()?;
-        if canonical.starts_with(&self.shared.root) {
-            return Err(MediaError::InvalidLocalFile);
+        let _span = tracing::info_span!("media", operation = "register_local").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            let canonical = path.canonicalize()?;
+            if canonical.starts_with(&self.shared.root) {
+                return Err(MediaError::InvalidLocalFile);
+            }
+            let file = File::open(&canonical)?;
+            let metadata = file.metadata()?;
+            if !metadata.is_file() {
+                return Err(MediaError::InvalidLocalFile);
+            }
+            let session = self.lease(Source::Local(
+                Arc::new(file),
+                metadata.len(),
+                content_type(path),
+            ))?;
+            if let Some(lease) = self
+                .shared
+                .state
+                .lock()
+                .map_err(|_| MediaError::Storage)?
+                .sessions
+                .get_mut(&session.id)
+            {
+                lease.path = Some(canonical);
+            }
+            Ok(session)
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "media operation completed"
+            ),
+            Err(category) => {
+                if *category == MediaError::Canceled {
+                    tracing::debug!("media operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "media operation failed"
+                    );
+                }
+            }
         }
-        let file = File::open(&canonical)?;
-        let metadata = file.metadata()?;
-        if !metadata.is_file() {
-            return Err(MediaError::InvalidLocalFile);
-        }
-        let session = self.lease(Source::Local(
-            Arc::new(file),
-            metadata.len(),
-            content_type(path),
-        ))?;
-        if let Some(lease) = self
-            .shared
-            .state
-            .lock()
-            .map_err(|_| MediaError::Storage)?
-            .sessions
-            .get_mut(&session.id)
-        {
-            lease.path = Some(canonical);
-        }
-        Ok(session)
+        result
     }
     pub fn register_remote(
         &self,
         resolved: ResolvedMedia,
         renew: Renew,
     ) -> Result<PlaybackSession, MediaError> {
-        if resolved.identity.size == 0 {
-            return Err(MediaError::UnknownSize);
-        }
-        let key = storage::key(&resolved.identity);
-        let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
-        if self.shared.canceled.load(Ordering::Relaxed) {
-            return Err(MediaError::Canceled);
-        }
-        if state.sessions.len() >= MAX_SESSIONS {
-            return Err(MediaError::Busy);
-        }
-        let created = !state.assets.contains_key(&key);
-        if created
-            && state
-                .assets
-                .values()
-                .filter(|a| a.running.load(Ordering::Acquire))
-                .count()
-                >= MAX_ASSETS
-        {
-            return Err(MediaError::Busy);
-        }
-        let asset = if let Some(asset) = state.assets.get(&key) {
-            if asset.dir != self.shared.root.join(&key)
-                || !asset.dir.symlink_metadata()?.file_type().is_dir()
-            {
-                return Err(MediaError::Storage);
+        let _span = tracing::info_span!("media", operation = "register_remote").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            if resolved.identity.size == 0 {
+                return Err(MediaError::UnknownSize);
             }
-            let (reserved, downloaded) = totals(&state)?;
-            admission(
-                0,
-                state.limit,
-                reserved,
-                downloaded,
-                fs4::available_space(&self.shared.root)?,
-            )?;
-            asset.clone()
-        } else {
-            let size = resolved.identity.size;
-            if size > state.limit {
-                return Err(MediaError::FileExceedsLimit {
-                    size,
-                    limit: state.limit,
-                });
+            let key = storage::key(&resolved.identity);
+            let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
+            if self.shared.canceled.load(Ordering::Relaxed) {
+                return Err(MediaError::Canceled);
             }
-            let (reserved, downloaded) = totals(&state)?;
-            admission(
-                size,
-                state.limit,
-                reserved,
-                downloaded,
-                fs4::available_space(&self.shared.root)?,
-            )?;
-            let asset = match storage::create(&self.shared.root, &key, resolved.identity.clone()) {
-                Ok(asset) => asset,
-                Err(error) => {
-                    // Even failed creation/deletion remains reserved if any owned artifact survived.
-                    if let Some(asset) =
-                        storage::failed_asset(&self.shared.root, &key, resolved.identity.clone())
-                    {
-                        state.assets.insert(key.clone(), asset);
-                    }
-                    return Err(error);
-                }
-            };
-            state.assets.insert(key.clone(), asset.clone());
-            asset
-        };
-        // A single acquisition owner per active asset; a released asset can restart from its checkpoint.
-        let active = state
-            .sessions
-            .values()
-            .any(|s| matches!(&s.source, Source::Remote(a) if Arc::ptr_eq(a, &asset)));
-        if !active && asset.running.load(Ordering::Acquire) {
-            return Err(MediaError::Busy);
-        }
-        if !active {
-            if state
-                .assets
-                .values()
-                .filter(|a| a.running.load(Ordering::Acquire))
-                .count()
-                >= MAX_ASSETS
+            if state.sessions.len() >= MAX_SESSIONS {
+                return Err(MediaError::Busy);
+            }
+            let created = !state.assets.contains_key(&key);
+            if created
+                && state
+                    .assets
+                    .values()
+                    .filter(|a| a.running.load(Ordering::Acquire))
+                    .count()
+                    >= MAX_ASSETS
             {
                 return Err(MediaError::Busy);
             }
-            asset.running.store(true, Ordering::Release);
-            asset.cancel.store(false, Ordering::Relaxed);
-            asset.state.lock().map_err(|_| MediaError::Storage)?.error = None;
-            let shared = self.shared.clone();
-            let acquired = asset.clone();
-            let spawned = std::thread::Builder::new()
-                .name("media-acquire".into())
-                .spawn(move || {
-                    let result = storage::acquire(&shared, &acquired, resolved, renew);
-                    if let Err(error) = result
-                        && let Ok(mut s) = acquired.state.lock()
-                    {
-                        s.error = Some(error);
-                    }
-                    acquired.running.store(false, Ordering::Release);
-                    acquired.changed.notify_all();
-                });
-            if spawned.is_err() {
-                asset.running.store(false, Ordering::Release);
-                if created && storage::discard(&self.shared.root, &asset).is_ok() {
-                    state.assets.remove(&key);
+            let asset = if let Some(asset) = state.assets.get(&key) {
+                if asset.dir != self.shared.root.join(&key)
+                    || !asset.dir.symlink_metadata()?.file_type().is_dir()
+                {
+                    return Err(MediaError::Storage);
                 }
-                return Err(MediaError::Storage);
+                let (reserved, downloaded) = totals(&state)?;
+                admission(
+                    0,
+                    state.limit,
+                    reserved,
+                    downloaded,
+                    fs4::available_space(&self.shared.root)?,
+                )?;
+                asset.clone()
+            } else {
+                let size = resolved.identity.size;
+                if size > state.limit {
+                    return Err(MediaError::FileExceedsLimit {
+                        size,
+                        limit: state.limit,
+                    });
+                }
+                let (reserved, downloaded) = totals(&state)?;
+                admission(
+                    size,
+                    state.limit,
+                    reserved,
+                    downloaded,
+                    fs4::available_space(&self.shared.root)?,
+                )?;
+                let asset =
+                    match storage::create(&self.shared.root, &key, resolved.identity.clone()) {
+                        Ok(asset) => asset,
+                        Err(error) => {
+                            // Even failed creation/deletion remains reserved if any owned artifact survived.
+                            if let Some(asset) = storage::failed_asset(
+                                &self.shared.root,
+                                &key,
+                                resolved.identity.clone(),
+                            ) {
+                                state.assets.insert(key.clone(), asset);
+                            }
+                            return Err(error);
+                        }
+                    };
+                state.assets.insert(key.clone(), asset.clone());
+                asset
+            };
+            // A single acquisition owner per active asset; a released asset can restart from its checkpoint.
+            let active = state
+                .sessions
+                .values()
+                .any(|s| matches!(&s.source, Source::Remote(a) if Arc::ptr_eq(a, &asset)));
+            if !active && asset.running.load(Ordering::Acquire) {
+                return Err(MediaError::Busy);
+            }
+            if !active {
+                if state
+                    .assets
+                    .values()
+                    .filter(|a| a.running.load(Ordering::Acquire))
+                    .count()
+                    >= MAX_ASSETS
+                {
+                    return Err(MediaError::Busy);
+                }
+                asset.running.store(true, Ordering::Release);
+                asset.cancel.store(false, Ordering::Relaxed);
+                asset.state.lock().map_err(|_| MediaError::Storage)?.error = None;
+                let shared = self.shared.clone();
+                let acquired = asset.clone();
+                let spawned = std::thread::Builder::new()
+                    .name("media-acquire".into())
+                    .spawn(move || {
+                        tracing::info!(size = acquired.identity.size, "Media acquisition started");
+                        let result = storage::acquire(&shared, &acquired, resolved, renew);
+                        match &result {
+                            Ok(()) => tracing::info!(
+                                size = acquired.identity.size,
+                                "Media asset complete"
+                            ),
+                            Err(MediaError::Canceled) => {
+                                tracing::debug!("Media acquisition canceled")
+                            }
+                            Err(category) => tracing::warn!(?category, "Media acquisition failed"),
+                        }
+                        if let Err(error) = result
+                            && let Ok(mut s) = acquired.state.lock()
+                        {
+                            s.error = Some(error);
+                        }
+                        acquired.running.store(false, Ordering::Release);
+                        acquired.changed.notify_all();
+                    });
+                if let Err(error) = spawned {
+                    tracing::warn!(io_kind = ?error.kind(), "Media acquisition worker spawn failed");
+                    asset.running.store(false, Ordering::Release);
+                    if created && storage::discard(&self.shared.root, &asset).is_ok() {
+                        state.assets.remove(&key);
+                    }
+                    return Err(MediaError::Storage);
+                }
+            }
+            tracing::info!("Media session created");
+            let id = token();
+            state
+                .sessions
+                .insert(id.clone(), Lease::new(Source::Remote(asset)));
+            Ok(PlaybackSession {
+                url: format!("http://{}/media/{id}", self.address),
+                id,
+            })
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "media operation completed"
+            ),
+            Err(category) => {
+                if *category == MediaError::Canceled {
+                    tracing::debug!("media operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "media operation failed"
+                    );
+                }
             }
         }
-        let id = token();
-        state
-            .sessions
-            .insert(id.clone(), Lease::new(Source::Remote(asset)));
-        Ok(PlaybackSession {
-            url: format!("http://{}/media/{id}", self.address),
-            id,
-        })
+        result
     }
     fn lease(&self, source: Source) -> Result<PlaybackSession, MediaError> {
-        let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
-        if self.shared.canceled.load(Ordering::Relaxed) {
-            return Err(MediaError::Canceled);
-        }
-        if state.sessions.len() >= MAX_SESSIONS {
-            return Err(MediaError::Busy);
-        }
-        let id = token();
-        state.sessions.insert(id.clone(), Lease::new(source));
-        Ok(PlaybackSession {
-            url: format!("http://{}/media/{id}", self.address),
-            id,
-        })
-    }
-    pub fn release(&self, id: &str) -> Result<(), MediaError> {
-        let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
-        if let Some(lease) = state.sessions.remove(id) {
-            lease.active.store(false, Ordering::Release);
-            if let Source::Remote(asset) = lease.source
-                && !state
-                    .sessions
-                    .values()
-                    .any(|s| matches!(&s.source, Source::Remote(a) if Arc::ptr_eq(a, &asset)))
-            {
-                asset.cancel.store(true, Ordering::Relaxed);
-                asset.changed.notify_all();
+        let _span = tracing::info_span!("media", operation = "lease").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
+            if self.shared.canceled.load(Ordering::Relaxed) {
+                return Err(MediaError::Canceled);
+            }
+            if state.sessions.len() >= MAX_SESSIONS {
+                return Err(MediaError::Busy);
+            }
+            tracing::info!("Media session created");
+            let id = token();
+            state.sessions.insert(id.clone(), Lease::new(source));
+            Ok(PlaybackSession {
+                url: format!("http://{}/media/{id}", self.address),
+                id,
+            })
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "media operation completed"
+            ),
+            Err(category) => {
+                if *category == MediaError::Canceled {
+                    tracing::debug!("media operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "media operation failed"
+                    );
+                }
             }
         }
-        Ok(())
+        result
+    }
+    pub fn release(&self, id: &str) -> Result<(), MediaError> {
+        let _span = tracing::info_span!("media", operation = "release").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
+            if let Some(lease) = state.sessions.remove(id) {
+                tracing::info!("Media session released");
+                lease.active.store(false, Ordering::Release);
+                if let Source::Remote(asset) = lease.source
+                    && !state
+                        .sessions
+                        .values()
+                        .any(|s| matches!(&s.source, Source::Remote(a) if Arc::ptr_eq(a, &asset)))
+                {
+                    asset.cancel.store(true, Ordering::Relaxed);
+                    asset.changed.notify_all();
+                }
+            }
+            Ok(())
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "media operation completed"
+            ),
+            Err(category) => {
+                if *category == MediaError::Canceled {
+                    tracing::debug!("media operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "media operation failed"
+                    );
+                }
+            }
+        }
+        result
     }
     pub fn set_limit(&self, limit: CacheBudget) -> Result<(), MediaError> {
-        let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
-        if totals(&state)?.0 > limit.bytes() {
-            return Err(MediaError::CacheFull);
+        let _span = tracing::info_span!("media", operation = "set_limit").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            let mut state = self.shared.state.lock().map_err(|_| MediaError::Storage)?;
+            if totals(&state)?.0 > limit.bytes() {
+                return Err(MediaError::CacheFull);
+            }
+            state.limit = limit.bytes();
+            Ok(())
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "media operation completed"
+            ),
+            Err(category) => {
+                if *category == MediaError::Canceled {
+                    tracing::debug!("media operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "media operation failed"
+                    );
+                }
+            }
         }
-        state.limit = limit.bytes();
-        Ok(())
+        result
     }
     pub fn usage(&self) -> UsageSnapshot {
-        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
-        let (reserved_bytes, downloaded_bytes) = totals(&state).unwrap_or((u64::MAX, 0));
+        let state = self.shared.state.lock().unwrap_or_else(|error| {
+            tracing::error!(
+                category = "poisoned_lock",
+                "Media snapshot recovered poisoned state"
+            );
+            error.into_inner()
+        });
+        let (reserved_bytes, downloaded_bytes) = totals(&state).unwrap_or_else(|category| {
+            tracing::warn!(?category, "Media usage unavailable");
+            (u64::MAX, 0)
+        });
         UsageSnapshot {
             reserved_bytes,
             limit_bytes: state.limit,
@@ -397,7 +562,13 @@ impl MediaService {
     }
     /// Safe, URL-free asynchronous acquisition errors for currently leased sessions.
     pub fn session_errors(&self) -> Vec<(String, MediaError)> {
-        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        let state = self.shared.state.lock().unwrap_or_else(|error| {
+            tracing::error!(
+                category = "poisoned_lock",
+                "Media snapshot recovered poisoned state"
+            );
+            error.into_inner()
+        });
         state
             .sessions
             .iter()
@@ -405,7 +576,13 @@ impl MediaService {
                 Source::Remote(asset) => asset
                     .state
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(|error| {
+                        tracing::error!(
+                            category = "poisoned_lock",
+                            "Media snapshot recovered poisoned state"
+                        );
+                        error.into_inner()
+                    })
                     .error
                     .clone()
                     .map(|error| (id.clone(), error)),
@@ -414,14 +591,37 @@ impl MediaService {
             .collect()
     }
     pub fn cleanup_unused(&self) -> Result<CleanupReport, MediaError> {
-        storage::cleanup(&self.shared)
+        let _span = tracing::info_span!("media", operation = "cleanup_unused").entered();
+        let started = std::time::Instant::now();
+        let result = storage::cleanup(&self.shared);
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "media operation completed"
+            ),
+            Err(category) => {
+                if *category == MediaError::Canceled {
+                    tracing::debug!("media operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "media operation failed"
+                    );
+                }
+            }
+        }
+        result
     }
 }
 impl Drop for MediaService {
     fn drop(&mut self) {
+        tracing::info!(port = self.address.port(), "Media server stop requested");
         self.shared.canceled.store(true, Ordering::Relaxed);
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
+        if let Some(stop) = self.stop.take()
+            && stop.send(()).is_err()
+        {
+            tracing::debug!("Media server shutdown receiver already closed");
         }
     }
 }

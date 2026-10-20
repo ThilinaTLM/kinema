@@ -26,6 +26,10 @@ pub(super) fn key(identity: &MediaIdentity) -> String {
 }
 fn regular(path: &Path) -> Result<(), MediaError> {
     if !path.symlink_metadata()?.file_type().is_file() {
+        tracing::warn!(
+            category = "not_regular_file",
+            "Media storage validation failed"
+        );
         return Err(MediaError::Storage);
     }
     Ok(())
@@ -33,6 +37,10 @@ fn regular(path: &Path) -> Result<(), MediaError> {
 // Only these exact names belong to us. Never recurse or delete an unknown entry.
 fn remove_owned(dir: &Path) -> Result<(), MediaError> {
     if !dir.symlink_metadata()?.file_type().is_dir() {
+        tracing::warn!(
+            category = "not_directory",
+            "Media storage validation failed"
+        );
         return Err(MediaError::Storage);
     }
     for entry in std::fs::read_dir(dir)? {
@@ -43,6 +51,10 @@ fn remove_owned(dir: &Path) -> Result<(), MediaError> {
                 Some("payload" | "manifest.json" | "manifest.next")
             )
         {
+            tracing::warn!(
+                category = "unexpected_owned_entry",
+                "Media cleanup refused unsafe entry"
+            );
             return Err(MediaError::Storage);
         }
     }
@@ -51,7 +63,7 @@ fn remove_owned(dir: &Path) -> Result<(), MediaError> {
         match std::fs::remove_file(dir.join(name)) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(MediaError::Storage),
+            Err(error) => return Err(error.into()),
         }
     }
     std::fs::remove_dir(dir)?;
@@ -76,139 +88,217 @@ pub(super) fn resolve_root(cache: &Path) -> Result<PathBuf, MediaError> {
 fn ensure_root(root: &Path) -> Result<(), MediaError> {
     match root.symlink_metadata() {
         Ok(metadata) if metadata.file_type().is_dir() => Ok(()),
-        Ok(_) => Err(MediaError::Storage),
+        Ok(_) => {
+            tracing::warn!(
+                category = "root_type",
+                "Media storage root validation failed"
+            );
+            Err(MediaError::Storage)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             std::fs::create_dir_all(root)?;
             Ok(())
         }
-        Err(_) => Err(MediaError::Storage),
+        Err(error) => Err(error.into()),
     }
 }
 pub(super) fn open(root: &Path) -> Result<(File, HashMap<String, Arc<Asset>>), MediaError> {
-    ensure_root(root)?;
-    let lock_path = root.join(".lock");
-    if lock_path.symlink_metadata().is_ok() {
-        regular(&lock_path)?;
-    }
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(lock_path)?;
-    lock.try_lock().map_err(|_| MediaError::Storage)?;
-    let mut assets = HashMap::new();
-    let mut reserved = 0u64;
-    for entry in std::fs::read_dir(root)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if let Some(key) = name
-            .strip_prefix(".create-")
-            .or_else(|| name.strip_prefix(".delete-"))
-            && valid_key(key)
-        {
-            remove_owned(&entry.path())?;
-            continue;
+    let _span = tracing::info_span!("media_storage", operation = "open").entered();
+    let started = std::time::Instant::now();
+    let result = (|| {
+        ensure_root(root)?;
+        let lock_path = root.join(".lock");
+        if lock_path.symlink_metadata().is_ok() {
+            regular(&lock_path)?;
         }
-        // Preserve unrelated entries. Only known opaque asset directories are interpreted.
-        if !valid_key(&name) {
-            continue;
-        }
-        if !entry.file_type()?.is_dir() {
-            return Err(MediaError::Storage);
-        }
-        let dir = entry.path();
-        regular(&dir.join("manifest.json"))?;
-        regular(&dir.join("payload"))?;
-        let pending = dir.join("manifest.next");
-        if pending.symlink_metadata().is_ok() {
-            regular(&pending)?;
-            std::fs::remove_file(pending)?;
-        }
-        let file = File::open(dir.join("manifest.json"))?;
-        if file.metadata()?.len() > 1024 * 1024 {
-            return Err(MediaError::Storage);
-        }
-        let m: Manifest = serde_json::from_reader(file).map_err(|_| MediaError::Storage)?;
-        let identity = MediaIdentity {
-            torrent: kinema_core::sources::InfoHash::new(m.torrent)
-                .map_err(|_| MediaError::Storage)?,
-            file_path: m.file_path,
-            size: m.size,
-        };
-        if m.version != 1
-            || identity.size == 0
-            || key(&identity) != name
-            || File::open(dir.join("payload"))?.metadata()?.len() != identity.size
-        {
-            return Err(MediaError::Storage);
-        }
-        reserved = reserved
-            .checked_add(identity.size)
-            .ok_or(MediaError::Storage)?;
-        let mut last = 0;
-        let mut ranges = RangeSet::new();
-        for (start, end) in m.ranges {
-            if start < last || end > identity.size {
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path)?;
+        lock.try_lock().map_err(|_| {
+            tracing::warn!(category = "lock_unavailable", "Media storage lock failed");
+            MediaError::Storage
+        })?;
+        let mut assets = HashMap::new();
+        let mut reserved = 0u64;
+        for entry in std::fs::read_dir(root)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(key) = name
+                .strip_prefix(".create-")
+                .or_else(|| name.strip_prefix(".delete-"))
+                && valid_key(key)
+            {
+                remove_owned(&entry.path())?;
+                continue;
+            }
+            // Preserve unrelated entries. Only known opaque asset directories are interpreted.
+            if !valid_key(&name) {
+                continue;
+            }
+            if !entry.file_type()?.is_dir() {
                 return Err(MediaError::Storage);
             }
-            ranges.insert(ByteRange::new(start, end).ok_or(MediaError::Storage)?);
-            last = end;
-        }
-        assets.insert(
-            name,
-            Arc::new(Asset {
-                dir,
-                identity,
-                state: Mutex::new(AssetState {
-                    ranges,
-                    priority: None,
-                    error: None,
+            let dir = entry.path();
+            regular(&dir.join("manifest.json"))?;
+            regular(&dir.join("payload"))?;
+            let pending = dir.join("manifest.next");
+            if pending.symlink_metadata().is_ok() {
+                regular(&pending)?;
+                std::fs::remove_file(pending)?;
+            }
+            let file = File::open(dir.join("manifest.json"))?;
+            if file.metadata()?.len() > 1024 * 1024 {
+                return Err(MediaError::Storage);
+            }
+            let m: Manifest = serde_json::from_reader(file).map_err(|_| {
+                tracing::warn!(category = "manifest_json", "Media manifest decode failed");
+                MediaError::Storage
+            })?;
+            let identity = MediaIdentity {
+                torrent: kinema_core::sources::InfoHash::new(m.torrent).map_err(|_| {
+                    tracing::warn!(
+                        category = "manifest_hash",
+                        "Media manifest validation failed"
+                    );
+                    MediaError::Storage
+                })?,
+                file_path: m.file_path,
+                size: m.size,
+            };
+            if m.version != 1
+                || identity.size == 0
+                || key(&identity) != name
+                || File::open(dir.join("payload"))?.metadata()?.len() != identity.size
+            {
+                tracing::warn!(
+                    category = "manifest_identity_or_size",
+                    "Media manifest validation failed"
+                );
+                return Err(MediaError::Storage);
+            }
+            reserved = reserved
+                .checked_add(identity.size)
+                .ok_or(MediaError::Storage)?;
+            let mut last = 0;
+            let mut ranges = RangeSet::new();
+            for (start, end) in m.ranges {
+                if start < last || end > identity.size {
+                    tracing::warn!(
+                        category = "manifest_ranges",
+                        "Media manifest validation failed"
+                    );
+                    return Err(MediaError::Storage);
+                }
+                ranges.insert(ByteRange::new(start, end).ok_or(MediaError::Storage)?);
+                last = end;
+            }
+            assets.insert(
+                name,
+                Arc::new(Asset {
+                    dir,
+                    identity,
+                    state: Mutex::new(AssetState {
+                        ranges,
+                        priority: None,
+                        error: None,
+                    }),
+                    changed: Condvar::new(),
+                    cancel: AtomicBool::new(true),
+                    running: AtomicBool::new(false),
                 }),
-                changed: Condvar::new(),
-                cancel: AtomicBool::new(true),
-                running: AtomicBool::new(false),
-            }),
+            );
+        }
+        tracing::info!(
+            assets = assets.len(),
+            reserved_bytes = reserved,
+            "Managed media recovered"
         );
+        Ok((lock, assets))
+    })();
+    match &result {
+        Ok(_) => tracing::debug!(
+            duration_ms = started.elapsed().as_millis() as u64,
+            "media_storage operation completed"
+        ),
+        Err(category) => {
+            if *category == MediaError::Canceled {
+                tracing::debug!("media_storage operation canceled");
+            } else {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "media_storage operation failed"
+                );
+            }
+        }
     }
-    Ok((lock, assets))
+    result
 }
 pub(super) fn create(
     root: &Path,
     key: &str,
     identity: MediaIdentity,
 ) -> Result<Arc<Asset>, MediaError> {
-    let staged = root.join(format!(".create-{key}"));
-    std::fs::create_dir(&staged)?;
+    let _span = tracing::info_span!("media_storage", operation = "create").entered();
+    let started = std::time::Instant::now();
     let result = (|| {
-        let file = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(staged.join("payload"))?;
-        file.set_len(identity.size)?;
-        file.sync_all()?;
-        let asset = Asset {
-            dir: staged.clone(),
-            identity: identity.clone(),
-            state: Mutex::new(AssetState {
-                ranges: RangeSet::new(),
-                priority: None,
-                error: None,
-            }),
-            changed: Condvar::new(),
-            cancel: AtomicBool::new(false),
-            running: AtomicBool::new(false),
-        };
-        checkpoint(&asset, &[])?;
-        std::fs::rename(&staged, root.join(key))?;
-        sync_directory(root)?;
-        Ok(Arc::new(Asset {
-            dir: root.join(key),
-            ..asset
-        }))
+        let staged = root.join(format!(".create-{key}"));
+        std::fs::create_dir(&staged)?;
+        let result = (|| {
+            let file = std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(staged.join("payload"))?;
+            file.set_len(identity.size)?;
+            file.sync_all()?;
+            let asset = Asset {
+                dir: staged.clone(),
+                identity: identity.clone(),
+                state: Mutex::new(AssetState {
+                    ranges: RangeSet::new(),
+                    priority: None,
+                    error: None,
+                }),
+                changed: Condvar::new(),
+                cancel: AtomicBool::new(false),
+                running: AtomicBool::new(false),
+            };
+            checkpoint(&asset, &[])?;
+            std::fs::rename(&staged, root.join(key))?;
+            sync_directory(root)?;
+            tracing::info!(size = identity.size, "Media asset created");
+            Ok(Arc::new(Asset {
+                dir: root.join(key),
+                ..asset
+            }))
+        })();
+        if result.is_err()
+            && staged.exists()
+            && let Err(category) = remove_owned(&staged)
+        {
+            tracing::warn!(?category, "Media staging cleanup failed");
+        }
+        result
     })();
-    if result.is_err() && staged.exists() {
-        let _ = remove_owned(&staged);
+    match &result {
+        Ok(_) => tracing::debug!(
+            duration_ms = started.elapsed().as_millis() as u64,
+            "media_storage operation completed"
+        ),
+        Err(category) => {
+            if *category == MediaError::Canceled {
+                tracing::debug!("media_storage operation canceled");
+            } else {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "media_storage operation failed"
+                );
+            }
+        }
     }
     result
 }
@@ -236,31 +326,59 @@ pub(super) fn failed_asset(root: &Path, key: &str, identity: MediaIdentity) -> O
     }))
 }
 pub(super) fn checkpoint(asset: &Asset, ranges: &[(u64, u64)]) -> Result<(), MediaError> {
-    let m = Manifest {
-        version: 1,
-        torrent: asset.identity.torrent.as_str().into(),
-        file_path: asset.identity.file_path.clone(),
-        size: asset.identity.size,
-        ranges: ranges.to_vec(),
-    };
-    let tmp = asset.dir.join("manifest.next");
-    if tmp.symlink_metadata().is_ok() {
-        regular(&tmp)?;
-        std::fs::remove_file(&tmp)?;
+    let _span = tracing::info_span!("media_storage", operation = "checkpoint").entered();
+    let started = std::time::Instant::now();
+    let result = (|| {
+        let m = Manifest {
+            version: 1,
+            torrent: asset.identity.torrent.as_str().into(),
+            file_path: asset.identity.file_path.clone(),
+            size: asset.identity.size,
+            ranges: ranges.to_vec(),
+        };
+        let tmp = asset.dir.join("manifest.next");
+        if tmp.symlink_metadata().is_ok() {
+            regular(&tmp)?;
+            std::fs::remove_file(&tmp)?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp)?;
+        serde_json::to_writer(&mut file, &m).map_err(|_| {
+            tracing::warn!(
+                category = "manifest_encoding",
+                "Media manifest encode failed"
+            );
+            MediaError::Storage
+        })?;
+        file.flush()?;
+        file.sync_all()?;
+        let temporary =
+            tempfile::NamedTempFile::from_parts(file, tempfile::TempPath::try_from_path(tmp)?);
+        temporary
+            .persist(asset.dir.join("manifest.json"))
+            .map_err(|error| MediaError::from(error.error))?;
+        sync_directory(&asset.dir)
+    })();
+    match &result {
+        Ok(_) => tracing::trace!(
+            duration_ms = started.elapsed().as_millis() as u64,
+            "media_storage operation completed"
+        ),
+        Err(category) => {
+            if *category == MediaError::Canceled {
+                tracing::debug!("media_storage operation canceled");
+            } else {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "media_storage operation failed"
+                );
+            }
+        }
     }
-    let mut file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&tmp)?;
-    serde_json::to_writer(&mut file, &m).map_err(|_| MediaError::Storage)?;
-    file.flush()?;
-    file.sync_all()?;
-    let temporary =
-        tempfile::NamedTempFile::from_parts(file, tempfile::TempPath::try_from_path(tmp)?);
-    temporary
-        .persist(asset.dir.join("manifest.json"))
-        .map_err(|_| MediaError::Storage)?;
-    sync_directory(&asset.dir)
+    result
 }
 pub(super) fn available(ranges: &RangeSet, start: u64, end: u64) -> bool {
     ByteRange::new(start, end).is_some_and(|range| ranges.contains(range))
@@ -306,6 +424,12 @@ pub(super) fn acquire(
         };
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| {
+                tracing::warn!(
+                    category = "clock_before_epoch",
+                    "Media expiry clock unavailable"
+                )
+            })
             .ok()
             .map(|now| now.as_secs());
         if needs_renewal(resolved.expires_at, link_age.elapsed(), now) {
@@ -315,13 +439,34 @@ pub(super) fn acquire(
         if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
         }
+        let request_started = std::time::Instant::now();
         let mut response = shared
             .client
             .get(resolved.url.as_url().clone())
             .header(reqwest::header::RANGE, format!("bytes={start}-{}", end - 1))
             .header(reqwest::header::ACCEPT_ENCODING, "identity")
             .send()
-            .map_err(request_error)?;
+            .map_err(|error| {
+                tracing::warn!(
+                    kind = crate::logging::http_error_kind(&error),
+                    duration_ms = request_started.elapsed().as_millis() as u64,
+                    "Media range transport failed"
+                );
+                request_error(error)
+            })?;
+        tracing::trace!(
+            status = response.status().as_u16(),
+            bytes = end - start,
+            duration_ms = request_started.elapsed().as_millis() as u64,
+            "Media upstream range headers"
+        );
+        if !response.status().is_success() {
+            tracing::warn!(
+                status = response.status().as_u16(),
+                duration_ms = request_started.elapsed().as_millis() as u64,
+                "Media upstream range rejected"
+            );
+        }
         if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
         }
@@ -331,6 +476,11 @@ pub(super) fn acquire(
             continue;
         }
         if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            tracing::warn!(
+                status = response.status().as_u16(),
+                category = "range_status",
+                "Media upstream validation failed"
+            );
             return Err(MediaError::UnsupportedRange);
         }
         let expected = format!("bytes {start}-{}/{}", end - 1, asset.identity.size);
@@ -345,6 +495,7 @@ pub(super) fn acquire(
                 .get(reqwest::header::CONTENT_ENCODING)
                 .is_some_and(|v| v != "identity")
         {
+            tracing::warn!(category = "identity_mismatch", "Media validation failed");
             return Err(MediaError::IdentityMismatch);
         }
         let mut bytes = Vec::with_capacity((end - start) as usize);
@@ -352,8 +503,14 @@ pub(super) fn acquire(
             .by_ref()
             .take(end - start + 1)
             .read_to_end(&mut bytes)
-            .map_err(|_| MediaError::BodyRead)?;
+            .map_err(|error| { tracing::warn!(io_kind = ?error.kind(), duration_ms = request_started.elapsed().as_millis() as u64, "Media upstream body read failed"); MediaError::BodyRead })?;
         if bytes.len() as u64 != end - start {
+            tracing::warn!(
+                category = "body_length",
+                expected_bytes = end - start,
+                actual_bytes = bytes.len(),
+                "Media upstream validation failed"
+            );
             return Err(MediaError::BodyRead);
         }
         if asset.cancel.load(Ordering::Relaxed) || shared.canceled.load(Ordering::Relaxed) {
@@ -390,46 +547,120 @@ fn renew_media(
     attempts: &mut u32,
     identity: &MediaIdentity,
 ) -> Result<(), MediaError> {
-    if *attempts >= 2 {
-        return Err(MediaError::RenewalExhausted);
+    let _span = tracing::info_span!("media_storage", operation = "renew_media").entered();
+    let started = std::time::Instant::now();
+    let result = (|| {
+        if *attempts >= 2 {
+            return Err(MediaError::RenewalExhausted);
+        }
+        *attempts += 1;
+        let next = renew()?;
+        if &next.identity != identity {
+            tracing::warn!(category = "identity_mismatch", "Media validation failed");
+            return Err(MediaError::IdentityMismatch);
+        }
+        *resolved = next;
+        Ok(())
+    })();
+    match &result {
+        Ok(_) => tracing::debug!(
+            duration_ms = started.elapsed().as_millis() as u64,
+            "media_storage operation completed"
+        ),
+        Err(category) => {
+            if *category == MediaError::Canceled {
+                tracing::debug!("media_storage operation canceled");
+            } else {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "media_storage operation failed"
+                );
+            }
+        }
     }
-    *attempts += 1;
-    let next = renew()?;
-    if &next.identity != identity {
-        return Err(MediaError::IdentityMismatch);
-    }
-    *resolved = next;
-    Ok(())
+    result
 }
 pub(super) fn discard(root: &Path, asset: &Asset) -> Result<(), MediaError> {
-    let tombstone = root.join(format!(".delete-{}", key(&asset.identity)));
-    if asset.dir.exists() {
-        std::fs::rename(&asset.dir, &tombstone)?;
-        sync_directory(root)?;
+    let _span = tracing::info_span!("media_storage", operation = "discard").entered();
+    let started = std::time::Instant::now();
+    let result = (|| {
+        let tombstone = root.join(format!(".delete-{}", key(&asset.identity)));
+        if asset.dir.exists() {
+            std::fs::rename(&asset.dir, &tombstone)?;
+            sync_directory(root)?;
+        }
+        remove_owned(&tombstone)?;
+        tracing::info!(size = asset.identity.size, "Media asset removed");
+        Ok(())
+    })();
+    match &result {
+        Ok(_) => tracing::debug!(
+            duration_ms = started.elapsed().as_millis() as u64,
+            "media_storage operation completed"
+        ),
+        Err(category) => {
+            if *category == MediaError::Canceled {
+                tracing::debug!("media_storage operation canceled");
+            } else {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "media_storage operation failed"
+                );
+            }
+        }
     }
-    remove_owned(&tombstone)
+    result
 }
 pub(super) fn cleanup(shared: &Shared) -> Result<super::CleanupReport, MediaError> {
-    let mut state = shared.state.lock().map_err(|_| MediaError::Storage)?;
-    // Each HTTP reader and acquisition owner holds an Arc independently of session leases.
-    let keys: Vec<_> = state
-        .assets
-        .iter()
-        .filter(|(_, asset)| Arc::strong_count(asset) == 1)
-        .map(|(k, _)| k.clone())
-        .collect();
-    let protected_files = state.assets.len() - keys.len();
-    let mut freed = 0u64;
-    for key in keys {
-        let asset = &state.assets[&key];
-        discard(&shared.root, asset)?;
-        freed = freed
-            .checked_add(asset.identity.size)
-            .ok_or(MediaError::Storage)?;
-        state.assets.remove(&key);
+    let _span = tracing::info_span!("media_storage", operation = "cleanup").entered();
+    let started = std::time::Instant::now();
+    let result = (|| {
+        let mut state = shared.state.lock().map_err(|_| MediaError::Storage)?;
+        // Each HTTP reader and acquisition owner holds an Arc independently of session leases.
+        let keys: Vec<_> = state
+            .assets
+            .iter()
+            .filter(|(_, asset)| Arc::strong_count(asset) == 1)
+            .map(|(k, _)| k.clone())
+            .collect();
+        let protected_files = state.assets.len() - keys.len();
+        let mut freed = 0u64;
+        for key in keys {
+            let asset = &state.assets[&key];
+            discard(&shared.root, asset)?;
+            freed = freed
+                .checked_add(asset.identity.size)
+                .ok_or(MediaError::Storage)?;
+            state.assets.remove(&key);
+        }
+        tracing::info!(
+            freed_bytes = freed,
+            protected_files,
+            "Media cleanup completed"
+        );
+        Ok(super::CleanupReport {
+            freed_bytes: freed,
+            protected_files,
+        })
+    })();
+    match &result {
+        Ok(_) => tracing::debug!(
+            duration_ms = started.elapsed().as_millis() as u64,
+            "media_storage operation completed"
+        ),
+        Err(category) => {
+            if *category == MediaError::Canceled {
+                tracing::debug!("media_storage operation canceled");
+            } else {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "media_storage operation failed"
+                );
+            }
+        }
     }
-    Ok(super::CleanupReport {
-        freed_bytes: freed,
-        protected_files,
-    })
+    result
 }

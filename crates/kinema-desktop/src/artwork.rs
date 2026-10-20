@@ -365,15 +365,24 @@ impl ArtworkWorkers {
         let mut threads = Vec::new();
         for index in 0..ACTIVE {
             let receiver = receiver.clone();
-            if let Ok(handle) = thread::Builder::new()
+            let spawned = thread::Builder::new()
                 .name(format!("kinema-art-{index}"))
                 .spawn(move || {
                     loop {
                         let work = {
-                            let Ok(receiver) = receiver.lock() else { break };
+                            let Ok(receiver) = receiver.lock() else {
+                                tracing::error!(
+                                    category = "poisoned_lock",
+                                    "Artwork worker receiver failed"
+                                );
+                                break;
+                            };
                             receiver.recv()
                         };
                         let Ok(work) = work else { break };
+                        if work.source.is_some() {
+                            tracing::debug!(cache = "memory", "Artwork source reused");
+                        }
                         let result = work
                             .source
                             .unwrap_or_else(|| fetch(&work.key.url, work.key.kind))
@@ -384,11 +393,19 @@ impl ArtworkWorkers {
                                     Ok(decoded)
                                 }
                             });
-                        let _ = work.reply.send(result);
+                        if let Err(category) = &result {
+                            tracing::warn!(?category, "Artwork work failed");
+                        }
+                        if work.reply.send(result).is_err() {
+                            tracing::debug!("Artwork result receiver closed");
+                        }
                     }
-                })
-            {
-                threads.push(handle);
+                });
+            match spawned {
+                Ok(handle) => threads.push(handle),
+                Err(error) => {
+                    tracing::warn!(io_kind = ?error.kind(), "Artwork worker could not start")
+                }
             }
         }
         Self { sender, threads }
@@ -401,8 +418,13 @@ impl ArtworkWorkers {
         let (reply, receiver) = tokio::sync::oneshot::channel();
         // A failed spawn or disconnected/full queue becomes a retryable failure,
         // never a blocking send on the UI thread.
-        if !self.threads.is_empty() {
-            let _ = self.sender.try_send(ArtworkWork { key, source, reply });
+        if !self.threads.is_empty()
+            && self
+                .sender
+                .try_send(ArtworkWork { key, source, reply })
+                .is_err()
+        {
+            tracing::warn!(category = "queue_unavailable", "Artwork work not admitted");
         }
         receiver
     }
@@ -634,38 +656,71 @@ fn valid_redirect(url: &Url, previous: &[Url]) -> bool {
         && ArtworkKey::new(ArtworkKind::Poster, url.as_str()).is_some()
 }
 fn build_client() -> Result<Client, ArtworkError> {
-    client_builder()
-        .build()
-        .map_err(|_| ArtworkError::Transport)
+    client_builder().build().map_err(|error| {
+        tracing::warn!(
+            kind = crate::logging::http_error_kind(&error),
+            operation = "build_client",
+            "Artwork client initialization failed"
+        );
+        ArtworkError::Transport
+    })
 }
 fn shared_client() -> Result<&'static Client, ArtworkError> {
     static CLIENT: OnceLock<Result<Client, ArtworkError>> = OnceLock::new();
     CLIENT.get_or_init(build_client).as_ref().map_err(|e| *e)
 }
 fn download(client: &Client, url: &str) -> Result<Vec<u8>, ArtworkError> {
-    let response = client
-        .get(url)
-        .send()
-        .map_err(|_| ArtworkError::Transport)?;
+    let started = Instant::now();
+    let response = client.get(url).send().map_err(|error| {
+        tracing::warn!(
+            kind = crate::logging::http_error_kind(&error),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "Artwork transport failed"
+        );
+        ArtworkError::Transport
+    })?;
     if !response.status().is_success() {
+        tracing::warn!(
+            status = response.status().as_u16(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "Artwork HTTP request failed"
+        );
         return Err(ArtworkError::Transport);
     }
     if response.content_length().is_some_and(|n| n > ENCODED) {
+        tracing::warn!(category = "encoded_size", "Artwork exceeds size limit");
         return Err(ArtworkError::TooLarge);
     }
     let mut bytes = Vec::new();
     response
         .take(ENCODED + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| ArtworkError::Transport)?;
+        .map_err(|error| { tracing::warn!(io_kind = ?error.kind(), duration_ms = started.elapsed().as_millis() as u64, "Artwork body read failed"); ArtworkError::Transport })?;
     if bytes.len() as u64 > ENCODED {
+        tracing::warn!(category = "encoded_size", "Artwork exceeds size limit");
         return Err(ArtworkError::TooLarge);
     }
+    tracing::debug!(
+        bytes = bytes.len(),
+        duration_ms = started.elapsed().as_millis() as u64,
+        "Artwork downloaded"
+    );
     Ok(bytes)
 }
 // Serialize this process's cache maintenance, not network/decode work. All callers
 // run on background workers. Cache failures are best-effort misses, never UI errors.
 static DISK_LOCK: Mutex<()> = Mutex::new(());
+fn cache_result<T>(result: std::io::Result<T>, operation: &'static str) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(error) => {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                tracing::debug!(operation, io_kind = ?error.kind(), "Artwork disk cache operation failed");
+            }
+            None
+        }
+    }
+}
 struct DiskCache {
     root: PathBuf,
     budget: u64,
@@ -707,33 +762,45 @@ impl DiskCache {
             .join(format!("{:x}.img", Sha256::digest(url.as_bytes())))
     }
     fn read(&self, url: &str, kind: ArtworkKind) -> Option<DecodedArtwork> {
-        let _guard = DISK_LOCK.lock().ok()?;
-        if !fs::symlink_metadata(&self.root).ok()?.is_dir() {
+        let _guard = DISK_LOCK
+            .lock()
+            .map_err(|_| {
+                tracing::warn!(category = "poisoned_lock", "Artwork disk cache unavailable")
+            })
+            .ok()?;
+        if !cache_result(fs::symlink_metadata(&self.root), "root_metadata")?.is_dir() {
             return None;
         }
         let path = self.path(url);
         let result = (|| {
-            if !fs::symlink_metadata(&path).ok()?.is_file() {
+            if !cache_result(fs::symlink_metadata(&path), "entry_metadata")?.is_file() {
                 return None;
             }
-            let file = fs::File::open(&path).ok()?;
-            if !file.metadata().ok()?.is_file() {
+            let file = cache_result(fs::File::open(&path), "open")?;
+            if !cache_result(file.metadata(), "file_metadata")?.is_file() {
                 return None;
             }
             let mut bytes = Vec::new();
-            file.take(ENCODED + 1).read_to_end(&mut bytes).ok()?;
+            cache_result(file.take(ENCODED + 1).read_to_end(&mut bytes), "read")?;
             Some(bytes)
         })();
         drop(_guard);
         let result = result.and_then(|bytes| decode(&bytes, kind).ok());
-        let _guard = DISK_LOCK.lock().ok()?;
+        let _guard = DISK_LOCK
+            .lock()
+            .map_err(|_| {
+                tracing::warn!(category = "poisoned_lock", "Artwork disk cache unavailable")
+            })
+            .ok()?;
         if result.is_some() {
             // Best-effort last-access approximation; no automatic TTL.
-            if let Ok(file) = fs::OpenOptions::new().write(true).open(&path) {
-                let _ = file.set_modified(SystemTime::now());
+            if let Some(file) =
+                cache_result(fs::OpenOptions::new().write(true).open(&path), "touch_open")
+            {
+                cache_result(file.set_modified(SystemTime::now()), "touch");
             }
         } else {
-            let _ = fs::remove_file(path);
+            cache_result(fs::remove_file(path), "remove_invalid");
         }
         result
     }
@@ -744,9 +811,13 @@ impl DiskCache {
         if bytes.len() as u64 > ENCODED || bytes.len() as u64 > self.budget {
             return;
         }
-        let _ = (|| -> std::io::Result<()> {
+        let result = (|| -> std::io::Result<()> {
             fs::create_dir_all(&self.root)?;
             if !fs::symlink_metadata(&self.root)?.is_dir() {
+                tracing::warn!(
+                    category = "cache_root_type",
+                    "Artwork cache root is not a directory"
+                );
                 return Ok(());
             }
             let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
@@ -763,17 +834,22 @@ impl DiskCache {
             }
             Ok(())
         })();
+        cache_result(result, "write_or_trim");
     }
     fn trim(&self) -> std::io::Result<u64> {
         let mut files = Vec::new();
-        for entry in fs::read_dir(&self.root)?.flatten() {
+        for entry in fs::read_dir(&self.root)? {
+            let Some(entry) = cache_result(entry, "scan_entry") else {
+                continue;
+            };
             let path = entry.path();
             if !owned_cache_file(&path) || !entry.file_type()?.is_file() {
                 continue;
             }
             let metadata = entry.metadata()?;
             files.push((
-                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                cache_result(metadata.modified(), "modified_time")
+                    .unwrap_or(SystemTime::UNIX_EPOCH),
                 path,
                 metadata.len(),
             ));
@@ -784,7 +860,7 @@ impl DiskCache {
             if total <= self.budget {
                 break;
             }
-            if fs::remove_file(path).is_ok() {
+            if cache_result(fs::remove_file(path), "evict").is_some() {
                 total -= size;
             }
         }
@@ -811,6 +887,7 @@ fn fetch(url: &str, kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
                 None
             } else {
                 crate::paths::AppPaths::resolve()
+                    .map_err(|_| tracing::warn!("Artwork cache paths unavailable"))
                     .ok()
                     .map(|paths| DiskCache::new(paths.cache.join("artwork"), DISK_BYTES))
             }
@@ -829,6 +906,7 @@ fn fetch(url: &str, kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
     let decode_start = Instant::now();
     let image = decode(&bytes, kind)?;
     tracing::debug!(
+        bytes = bytes.len(),
         cache = "network",
         fetch_ms = fetched.as_millis(),
         decode_ms = decode_start.elapsed().as_millis(),
@@ -841,57 +919,69 @@ fn fetch(url: &str, kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
     Ok(image)
 }
 fn decode(bytes: &[u8], kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
-    if bytes.len() as u64 > ENCODED {
-        return Err(ArtworkError::TooLarge);
+    let started = Instant::now();
+    let result = (|| {
+        if bytes.len() as u64 > ENCODED {
+            tracing::warn!(category = "encoded_size", "Artwork exceeds size limit");
+            return Err(ArtworkError::TooLarge);
+        }
+        let format = image::guess_format(bytes).map_err(|_| ArtworkError::InvalidImage)?;
+        // Static JPEG, PNG and WebP only. Reject animated PNG/WebP before decoder
+        // construction; GIF and other multi-frame formats are never enabled.
+        if !matches!(
+            format,
+            ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP
+        ) || animated(bytes, format)
+        {
+            return Err(ArtworkError::InvalidImage);
+        }
+        let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(EDGE);
+        limits.max_image_height = Some(EDGE);
+        limits.max_alloc = Some(PIXELS * 8);
+        reader.limits(limits.clone());
+        let (width, height) = reader
+            .into_dimensions()
+            .map_err(|_| ArtworkError::InvalidImage)?;
+        if width == 0
+            || height == 0
+            || width > EDGE
+            || height > EDGE
+            || u64::from(width) * u64::from(height) > PIXELS
+        {
+            return Err(ArtworkError::TooLarge);
+        }
+        let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
+        reader.limits(limits);
+        let decoded = reader.decode().map_err(|_| ArtworkError::InvalidImage)?;
+        let (max_width, max_height) = kind.thumbnail_bounds();
+        // Source limits above apply before full decoding. Only the bounded display
+        // bucket enters the LRU/GPU; never upscale small source artwork.
+        let thumbnail = if width > max_width || height > max_height {
+            decoded.thumbnail(max_width, max_height)
+        } else {
+            decoded
+        };
+        let mut rgba = thumbnail.into_rgba8();
+        let palette = extract_palette(&rgba);
+        // GPUI's renderer expects BGRA (same convention as its built-in image loader).
+        for pixel in rgba.pixels_mut() {
+            pixel.0.swap(0, 2);
+        }
+        Ok(DecodedArtwork {
+            image: Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])),
+            palette,
+        })
+    })();
+    if let Err(category) = &result {
+        tracing::warn!(
+            ?category,
+            decode_ms = started.elapsed().as_millis() as u64,
+            "Artwork decode failed"
+        );
     }
-    let format = image::guess_format(bytes).map_err(|_| ArtworkError::InvalidImage)?;
-    // Static JPEG, PNG and WebP only. Reject animated PNG/WebP before decoder
-    // construction; GIF and other multi-frame formats are never enabled.
-    if !matches!(
-        format,
-        ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP
-    ) || animated(bytes, format)
-    {
-        return Err(ArtworkError::InvalidImage);
-    }
-    let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(EDGE);
-    limits.max_image_height = Some(EDGE);
-    limits.max_alloc = Some(PIXELS * 8);
-    reader.limits(limits.clone());
-    let (width, height) = reader
-        .into_dimensions()
-        .map_err(|_| ArtworkError::InvalidImage)?;
-    if width == 0
-        || height == 0
-        || width > EDGE
-        || height > EDGE
-        || u64::from(width) * u64::from(height) > PIXELS
-    {
-        return Err(ArtworkError::TooLarge);
-    }
-    let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
-    reader.limits(limits);
-    let decoded = reader.decode().map_err(|_| ArtworkError::InvalidImage)?;
-    let (max_width, max_height) = kind.thumbnail_bounds();
-    // Source limits above apply before full decoding. Only the bounded display
-    // bucket enters the LRU/GPU; never upscale small source artwork.
-    let thumbnail = if width > max_width || height > max_height {
-        decoded.thumbnail(max_width, max_height)
-    } else {
-        decoded
-    };
-    let mut rgba = thumbnail.into_rgba8();
-    let palette = extract_palette(&rgba);
-    // GPUI's renderer expects BGRA (same convention as its built-in image loader).
-    for pixel in rgba.pixels_mut() {
-        pixel.0.swap(0, 2);
-    }
-    Ok(DecodedArtwork {
-        image: Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])),
-        palette,
-    })
+    result
 }
 // Input/output are BGRA, matching RenderImage. Blur and the symmetric RGB
 // grade commute with that channel order; no extra full-image channel swap needed.
@@ -2022,5 +2112,51 @@ mod tests {
         animated_png.extend_from_slice(&[0, 0, 0, 8]);
         animated_png.extend_from_slice(b"acTL");
         assert!(animated(&animated_png, ImageFormat::Png));
+    }
+}
+
+#[cfg(test)]
+mod logging_tests {
+    use super::*;
+    use crate::providers::{
+        test_logging::{capture, excludes},
+        tests::fixture,
+    };
+
+    #[test]
+    fn diagnostics_exclude_sensitive_urls_bytes_and_cache_paths()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (mut url, server) =
+            fixture(vec![(403, serde_json::json!({"error":"payload-secret"}))])?;
+        url.set_path("/opaque-secret");
+        url.set_query(Some("signature=query-secret"));
+        let client = build_client().map_err(|_| "client init failed")?;
+        let root = tempfile::tempdir()?;
+        let file = root.path().join("cache-path-secret");
+        fs::write(&file, b"not a directory")?;
+        let cache = DiskCache::new(file, DISK_BYTES);
+        let (result, output) = capture(|| {
+            let result = download(&client, url.as_str());
+            assert!(decode(b"image-bytes-secret", ArtworkKind::Poster).is_err());
+            cache.write(url.as_str(), b"cache-bytes-secret");
+            result
+        });
+        assert_eq!(result, Err(ArtworkError::Transport));
+        assert!(output.contains("403"));
+        assert!(output.contains("disk cache operation failed"));
+        excludes(
+            &output,
+            &[
+                "opaque-secret",
+                "query-secret",
+                "signature=",
+                "payload-secret",
+                "cache-path-secret",
+                "image-bytes-secret",
+                "cache-bytes-secret",
+            ],
+        );
+        server.join().map_err(|_| "fixture panicked")?;
+        Ok(())
     }
 }

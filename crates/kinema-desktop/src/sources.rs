@@ -56,40 +56,70 @@ impl IndexerClient {
         target: &PlaybackTarget,
         cancel: &AtomicBool,
     ) -> Result<SourceResults, SourceError> {
-        check_cancel(cancel)?;
-        let mut url = match indexer {
-            IndexerKind::Torrentio => self.torrentio.clone(),
-            IndexerKind::Peerflix => self.peerflix.clone(),
-        };
-        let kind = match target.kind() {
-            MediaKind::Movie => "movie",
-            MediaKind::Series => "series",
-        };
-        let id = match target {
-            PlaybackTarget::Movie(id) => id.as_str().to_owned(),
-            PlaybackTarget::Episode {
-                series,
-                season,
-                episode,
-            } => format!("{}:{season}:{episode}", series.as_str()),
-        };
-        url.path_segments_mut()
-            .map_err(|_| SourceError::Malformed)?
-            .pop_if_empty()
-            .extend(["stream", kind, &format!("{id}.json")]);
-        let response = http::json(self.client.get(url), cancel);
-        check_cancel(cancel)?;
-        let value = response.map_err(|error| match error {
-            crate::providers::DebridError::Transport => SourceError::Transport,
-            crate::providers::DebridError::Malformed => SourceError::Malformed,
-            crate::providers::DebridError::TooLarge => SourceError::TooLarge,
-            crate::providers::DebridError::RateLimited => SourceError::RateLimited,
-            crate::providers::DebridError::Canceled => SourceError::Canceled,
-            _ => SourceError::Service,
-        })?;
-        check_cancel(cancel)?;
-        let result = parse(&value);
-        check_cancel(cancel)?;
+        let _span =
+            tracing::info_span!("indexer", operation = "fetch", provider = ?indexer).entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            check_cancel(cancel)?;
+            let mut url = match indexer {
+                IndexerKind::Torrentio => self.torrentio.clone(),
+                IndexerKind::Peerflix => self.peerflix.clone(),
+            };
+            let kind = match target.kind() {
+                MediaKind::Movie => "movie",
+                MediaKind::Series => "series",
+            };
+            let id = match target {
+                PlaybackTarget::Movie(id) => id.as_str().to_owned(),
+                PlaybackTarget::Episode {
+                    series,
+                    season,
+                    episode,
+                } => format!("{}:{season}:{episode}", series.as_str()),
+            };
+            url.path_segments_mut()
+                .map_err(|_| SourceError::Malformed)?
+                .pop_if_empty()
+                .extend(["stream", kind, &format!("{id}.json")]);
+            let response = http::json(self.client.get(url), cancel);
+            check_cancel(cancel)?;
+            let value = response.map_err(|error| match error {
+                crate::providers::DebridError::Transport => SourceError::Transport,
+                crate::providers::DebridError::Malformed => SourceError::Malformed,
+                crate::providers::DebridError::TooLarge => SourceError::TooLarge,
+                crate::providers::DebridError::RateLimited => SourceError::RateLimited,
+                crate::providers::DebridError::Canceled => SourceError::Canceled,
+                _ => SourceError::Service,
+            })?;
+            check_cancel(cancel)?;
+            let result = parse(&value);
+            check_cancel(cancel)?;
+            result
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "indexer operation completed"
+            ),
+            Err(category) => {
+                if *category == SourceError::Canceled {
+                    tracing::debug!("indexer operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "indexer operation failed"
+                    );
+                }
+            }
+        }
+        if let Ok(results) = &result {
+            tracing::debug!(
+                count = results.candidates.len(),
+                omitted = results.omitted,
+                "Indexer results validated"
+            );
+        }
         result
     }
 }

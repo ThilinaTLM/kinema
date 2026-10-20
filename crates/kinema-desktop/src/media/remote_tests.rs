@@ -480,3 +480,57 @@ fn remote_identity_filename_sets_get_and_head_mime_not_display_filename()
     service.release(&lease.id)?;
     Ok(())
 }
+
+#[test]
+fn media_diagnostics_exclude_signed_urls_identities_and_session_tokens()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::providers::test_logging::{capture, excludes};
+    let root = tempfile::tempdir()?;
+    let fixture = Fixture::start(1024, 3)?; // HTTP 200 instead of required 206
+    let service = service(root.path(), 4096);
+    let mut resolved = fixture.resolved();
+    let mut url = resolved.url.as_url().clone();
+    url.set_path("/opaque-media-secret");
+    url.set_query(Some("signature=signed-query-secret"));
+    resolved.url = SensitiveUrl::for_test(url.clone());
+    resolved.identity.file_path = "filename-secret.mp4".into();
+    let key = storage::key(&resolved.identity);
+    let asset = storage::create(&service.shared.root, &key, resolved.identity.clone())?;
+    let renewal = resolved.clone();
+    let (result, output) = capture(|| {
+        let error = reqwest::blocking::Client::new()
+            .get("invalid-url")
+            .build()
+            .err()
+            .ok_or("expected request error")?
+            .with_url(url);
+        assert_eq!(request_error(error), MediaError::Upstream);
+        let result = storage::acquire(
+            &service.shared,
+            &asset,
+            resolved,
+            Arc::new(move || Ok(renewal.clone())),
+        );
+        let original = root.path().join("local-filename-secret.mp4");
+        std::fs::write(&original, b"fixture")?;
+        let session = service.register_local(&original)?;
+        service.release(&session.id)?;
+        Ok::<_, Box<dyn std::error::Error>>((result, session.id))
+    });
+    let (result, token) = result?;
+    assert_eq!(result, Err(MediaError::UnsupportedRange));
+    assert!(output.contains("range_status"));
+    assert!(output.contains("Media session created"));
+    excludes(
+        &output,
+        &[
+            "opaque-media-secret",
+            "signed-query-secret",
+            "signature=",
+            "filename-secret",
+            "local-filename-secret",
+            &token,
+        ],
+    );
+    Ok(())
+}

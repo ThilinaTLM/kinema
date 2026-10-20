@@ -106,15 +106,7 @@ fn select(
     request: reqwest::blocking::RequestBuilder,
     cancel: &AtomicBool,
 ) -> Result<(), DebridError> {
-    http::check(cancel)?;
-    let response = request.send().map_err(|_| DebridError::Transport)?;
-    http::check(cancel)?;
-    match response.status().as_u16() {
-        200..=299 => Ok(()),
-        401 | 403 => Err(DebridError::CredentialRejected),
-        429 => Err(DebridError::RateLimited),
-        _ => Err(DebridError::Service),
-    }
+    http::send(request, cancel).map(|_| ())
 }
 fn selected_link<'a>(value: &'a Value, file: &RemoteFile) -> Result<&'a str, DebridError> {
     let rows = value

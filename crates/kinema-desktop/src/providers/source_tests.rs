@@ -271,3 +271,54 @@ fn indexer_canceled_during_http_does_not_parse_returned_body() -> TestResult {
     }
     Ok(())
 }
+
+#[test]
+fn indexer_diagnostics_exclude_magnets_signed_links_and_query() -> TestResult {
+    use crate::providers::test_logging::{capture, excludes};
+    let (mut base, server) = fixture(vec![
+        (
+            200,
+            json!({"streams":[
+                {"url":format!("magnet:?xt=urn:btih:{HASH}&dn=magnet-secret"), "name":"label-secret"},
+                {"url":"https://cdn.invalid/path-secret?signature=signed-secret"}
+            ]}),
+        ),
+        (
+            200,
+            json!({"streams":[{"url":"magnet:?xt=urn:btih:invalid-hash-secret"}]}),
+        ),
+    ])?;
+    base.set_query(Some("token=query-secret"));
+    let mut client = IndexerClient::new()?;
+    client.torrentio = base;
+    let target = PlaybackTarget::Movie(kinema_core::catalog::ImdbId::new("tt0133093")?);
+    let (result, output) = capture(|| {
+        let result = client.fetch(IndexerKind::Torrentio, &target, &AtomicBool::new(false));
+        assert_eq!(
+            client.fetch(IndexerKind::Torrentio, &target, &AtomicBool::new(false)),
+            Err(SourceError::Malformed)
+        );
+        result
+    });
+    let result = result?;
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(result.omitted, 1);
+    assert!(output.contains("Indexer results validated"));
+    assert!(output.contains("indexer operation failed"));
+    excludes(
+        &output,
+        &[
+            HASH,
+            "magnet:",
+            "magnet-secret",
+            "invalid-hash-secret",
+            "label-secret",
+            "path-secret",
+            "signed-secret",
+            "query-secret",
+            "token=",
+        ],
+    );
+    server.join().map_err(|_| "fixture panicked")?;
+    Ok(())
+}

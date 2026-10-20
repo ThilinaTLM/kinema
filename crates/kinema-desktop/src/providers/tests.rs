@@ -535,3 +535,47 @@ fn local_http_url_constructor_is_test_only() -> TestResult {
     assert_eq!(SensitiveUrl::for_test(url.clone()).as_url(), &url);
     Ok(())
 }
+
+#[test]
+fn diagnostics_redact_credentials_magnets_and_provider_payloads() -> TestResult {
+    use super::test_logging::{capture, excludes};
+    for kind in [DebridKind::RealDebrid, DebridKind::AllDebrid] {
+        let (mut base, server) = fixture(vec![(
+            403,
+            json!({"error":"provider-secret", "url":"https://cdn.invalid/opaque?signature=signed-secret"}),
+        )])?;
+        base.set_query(Some("apikey=query-secret"));
+        let client = client(kind, base)?;
+        let source = source()?;
+        let (result, output) = capture(|| client.prepare(&source, &AtomicBool::new(false)));
+        assert_eq!(result, Err(DebridError::CredentialRejected));
+        assert!(output.contains("403"));
+        assert!(output.contains("prepare"));
+        excludes(
+            &output,
+            &[
+                "private-token",
+                "provider-secret",
+                "signed-secret",
+                "query-secret",
+                source.hash.as_str(),
+                "magnet:",
+                "apikey=",
+            ],
+        );
+        let requests = server.join().map_err(|_| "fixture panicked")?;
+        assert!(requests[0].contains("private-token")); // secret really was near the logged request
+    }
+    let (result, output) = capture(|| {
+        http::json(
+            Client::new()
+                .get("invalid-url-transport-secret")
+                .bearer_auth("bearer-secret"),
+            &AtomicBool::new(false),
+        )
+    });
+    assert_eq!(result, Err(DebridError::Transport));
+    assert!(output.contains("transport failed"));
+    excludes(&output, &["transport-secret", "bearer-secret"]);
+    Ok(())
+}

@@ -112,21 +112,66 @@ pub struct SettingsStore {
 impl SettingsStore {
     /// Creates the config directory, but never replaces an existing settings file.
     pub fn open(paths: &AppPaths) -> Result<Self, SettingsError> {
-        std::fs::create_dir_all(&paths.config).map_err(|_| SettingsError::Io)?;
-        Ok(Self {
-            path: paths.config.join("settings.toml"),
-        })
+        let _span = tracing::info_span!("settings", operation = "open").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            std::fs::create_dir_all(&paths.config).map_err(|error| {
+                tracing::warn!(io_kind = ?error.kind(), "Settings I/O failed");
+                SettingsError::Io
+            })?;
+            Ok(Self {
+                path: paths.config.join("settings.toml"),
+            })
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "settings operation completed"
+            ),
+            Err(category) => {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "settings operation failed"
+                );
+            }
+        }
+        result
     }
     pub fn load(&self) -> Result<Settings, SettingsError> {
-        let text = match std::fs::read_to_string(&self.path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Settings::default());
+        let _span = tracing::info_span!("settings", operation = "load").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            let text = match std::fs::read_to_string(&self.path) {
+                Ok(text) => text,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    tracing::info!(source = "defaults", "Settings loaded");
+                    return Ok(Settings::default());
+                }
+                Err(error) => {
+                    tracing::warn!(io_kind = ?error.kind(), "Settings read failed");
+                    return Err(SettingsError::Io);
+                }
+            };
+            let document: Document = toml::from_str(&text).map_err(|_| SettingsError::Invalid)?;
+            let settings = document.into_settings()?;
+            tracing::info!(source = "disk", "Settings loaded");
+            Ok(settings)
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "settings operation completed"
+            ),
+            Err(category) => {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "settings operation failed"
+                );
             }
-            Err(_) => return Err(SettingsError::Io),
-        };
-        let document: Document = toml::from_str(&text).map_err(|_| SettingsError::Invalid)?;
-        document.into_settings()
+        }
+        result
     }
     /// A durability error occurs after replacement: the new settings remain visible.
     /// Never reset or roll back the file in response to that error.
@@ -139,26 +184,52 @@ impl SettingsStore {
         settings: &Settings,
         sync: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
     ) -> Result<(), SettingsError> {
-        validate(settings)?;
-        // Refuse to overwrite unknown/corrupt formats, even on an explicit save.
-        self.load()?;
-        let text = toml::to_string(&Document::from_settings(settings)?)
-            .map_err(|_| SettingsError::Invalid)?;
-        let parent = self.path.parent().ok_or(SettingsError::Io)?;
-        let mut temporary =
-            tempfile::NamedTempFile::new_in(parent).map_err(|_| SettingsError::Io)?;
-        temporary
-            .write_all(text.as_bytes())
-            .map_err(|_| SettingsError::Io)?;
-        temporary
-            .as_file()
-            .sync_all()
-            .map_err(|_| SettingsError::Io)?;
-        temporary
-            .persist(&self.path)
-            .map_err(|_| SettingsError::Io)?;
-        sync(parent).map_err(|_| SettingsError::DurabilityUncertain)?;
-        Ok(())
+        let _span = tracing::info_span!("settings", operation = "save_with_parent_sync").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            validate(settings)?;
+            // Refuse to overwrite unknown/corrupt formats, even on an explicit save.
+            self.load()?;
+            let text = toml::to_string(&Document::from_settings(settings)?)
+                .map_err(|_| SettingsError::Invalid)?;
+            let parent = self.path.parent().ok_or(SettingsError::Io)?;
+            let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|error| {
+                tracing::warn!(io_kind = ?error.kind(), "Settings I/O failed");
+                SettingsError::Io
+            })?;
+            temporary.write_all(text.as_bytes()).map_err(|error| {
+                tracing::warn!(io_kind = ?error.kind(), "Settings I/O failed");
+                SettingsError::Io
+            })?;
+            temporary.as_file().sync_all().map_err(|error| {
+                tracing::warn!(io_kind = ?error.kind(), "Settings I/O failed");
+                SettingsError::Io
+            })?;
+            temporary.persist(&self.path).map_err(|error| {
+                tracing::warn!(io_kind = ?error.error.kind(), "Settings replacement failed");
+                SettingsError::Io
+            })?;
+            sync(parent).map_err(|error| {
+                tracing::warn!(io_kind = ?error.kind(), "Settings durability uncertain");
+                SettingsError::DurabilityUncertain
+            })?;
+            tracing::info!("Settings saved");
+            Ok(())
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "settings operation completed"
+            ),
+            Err(category) => {
+                tracing::warn!(
+                    ?category,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "settings operation failed"
+                );
+            }
+        }
+        result
     }
 }
 
@@ -517,6 +588,49 @@ mod tests {
         };
         assert_eq!(store.save(&Settings::default()), Err(SettingsError::Io));
         assert!(!store.path.exists());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod logging_tests {
+    use super::*;
+    use crate::providers::test_logging::{capture, excludes};
+
+    #[test]
+    fn settings_diagnostics_exclude_values_and_malformed_input()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let paths = AppPaths {
+            data: root.path().into(),
+            config: root.path().into(),
+            cache: root.path().into(),
+        };
+        let store = SettingsStore::open(&paths)?;
+        let settings = Settings {
+            player: PlayerChoice::Custom(root.path().join("player-path-secret.exe")),
+            ..Settings::default()
+        };
+        let (result, output) = capture(|| {
+            store.save(&settings)?;
+            std::fs::write(&store.path, "token = 'bearer-secret'\nurl = 'https://cdn.invalid/path?signature=query-secret'\ninvalid toml")
+                .map_err(|_| SettingsError::Io)?;
+            assert!(matches!(store.load(), Err(SettingsError::Invalid)));
+            Ok::<_, SettingsError>(())
+        });
+        result?;
+        assert!(output.contains("Settings saved"));
+        assert!(output.contains("settings operation failed"));
+        excludes(
+            &output,
+            &[
+                "player-path-secret",
+                "bearer-secret",
+                "query-secret",
+                "signature=",
+                "invalid toml",
+            ],
+        );
         Ok(())
     }
 }

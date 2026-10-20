@@ -2,6 +2,8 @@
 mod all_debrid;
 pub(crate) mod http;
 mod real_debrid;
+#[cfg(test)]
+pub(crate) mod test_logging;
 
 use crate::credentials::SecretString;
 use kinema_core::sources::{DebridKind, MediaIdentity, RemoteFile, TorrentSource};
@@ -55,6 +57,10 @@ impl SensitiveUrl {
             || url.password().is_some()
             || url.fragment().is_some()
         {
+            tracing::warn!(
+                category = "invalid_media_url",
+                "Provider media URL validation failed"
+            );
             return Err(DebridError::InvalidUrl);
         }
         Ok(Self(url))
@@ -116,7 +122,12 @@ pub struct DebridClient {
 }
 impl DebridClient {
     pub fn new(kind: DebridKind, secret: SecretString) -> Result<Self, DebridError> {
+        let _span = tracing::info_span!("debrid", operation = "new", provider = ?kind).entered();
         if secret.expose().trim().is_empty() {
+            tracing::warn!(
+                category = "empty_credential",
+                "Debrid client initialization rejected"
+            );
             return Err(DebridError::CredentialRejected);
         }
         let base = match kind {
@@ -134,22 +145,72 @@ impl DebridClient {
     /// Verifies authentication only, not premium entitlement or playback readiness.
     /// Account details are validated and discarded. Call from an owned background worker.
     pub fn check_account(&self, cancel: &AtomicBool) -> Result<(), DebridError> {
-        http::check(cancel)?;
-        match self.kind {
-            DebridKind::RealDebrid => real_debrid::check_account(self, cancel),
-            DebridKind::AllDebrid => all_debrid::check_account(self, cancel),
+        let _span =
+            tracing::info_span!("debrid", operation = "check_account", provider = ?self.kind)
+                .entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            http::check(cancel)?;
+            match self.kind {
+                DebridKind::RealDebrid => real_debrid::check_account(self, cancel),
+                DebridKind::AllDebrid => all_debrid::check_account(self, cancel),
+            }
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "debrid operation completed"
+            ),
+            Err(category) => {
+                if *category == DebridError::Canceled {
+                    tracing::debug!("debrid operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "debrid operation failed"
+                    );
+                }
+            }
         }
+        result
     }
     pub fn prepare(
         &self,
         source: &TorrentSource,
         cancel: &AtomicBool,
     ) -> Result<PreparedTorrent, DebridError> {
-        http::check(cancel)?;
-        match self.kind {
-            DebridKind::RealDebrid => real_debrid::prepare(self, source, cancel),
-            DebridKind::AllDebrid => all_debrid::prepare(self, source, cancel),
+        let _span =
+            tracing::info_span!("debrid", operation = "prepare", provider = ?self.kind).entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            http::check(cancel)?;
+            match self.kind {
+                DebridKind::RealDebrid => real_debrid::prepare(self, source, cancel),
+                DebridKind::AllDebrid => all_debrid::prepare(self, source, cancel),
+            }
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "debrid operation completed"
+            ),
+            Err(category) => {
+                if *category == DebridError::Canceled {
+                    tracing::debug!("debrid operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "debrid operation failed"
+                    );
+                }
+            }
         }
+        if let Ok(prepared) = &result {
+            tracing::debug!(files = prepared.files.len(), "Debrid files prepared");
+        }
+        result
     }
     pub fn resolve_file(
         &self,
@@ -157,22 +218,46 @@ impl DebridClient {
         file_id: &str,
         cancel: &AtomicBool,
     ) -> Result<ResolvedMedia, DebridError> {
-        http::check(cancel)?;
-        if prepared.provider != self.kind {
-            return Err(DebridError::ProviderMismatch);
+        let _span =
+            tracing::info_span!("debrid", operation = "resolve_file", provider = ?self.kind)
+                .entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            http::check(cancel)?;
+            if prepared.provider != self.kind {
+                return Err(DebridError::ProviderMismatch);
+            }
+            let file = prepared
+                .files
+                .iter()
+                .find(|file| file.id == file_id)
+                .ok_or(DebridError::FileNotFound)?;
+            if file.size == 0 {
+                return Err(DebridError::UnknownSize);
+            }
+            match self.kind {
+                DebridKind::RealDebrid => real_debrid::resolve(self, prepared, file, cancel),
+                DebridKind::AllDebrid => all_debrid::resolve(self, prepared, file, cancel),
+            }
+        })();
+        match &result {
+            Ok(_) => tracing::debug!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "debrid operation completed"
+            ),
+            Err(category) => {
+                if *category == DebridError::Canceled {
+                    tracing::debug!("debrid operation canceled");
+                } else {
+                    tracing::warn!(
+                        ?category,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "debrid operation failed"
+                    );
+                }
+            }
         }
-        let file = prepared
-            .files
-            .iter()
-            .find(|file| file.id == file_id)
-            .ok_or(DebridError::FileNotFound)?;
-        if file.size == 0 {
-            return Err(DebridError::UnknownSize);
-        }
-        match self.kind {
-            DebridKind::RealDebrid => real_debrid::resolve(self, prepared, file, cancel),
-            DebridKind::AllDebrid => all_debrid::resolve(self, prepared, file, cancel),
-        }
+        result
     }
     fn form(
         &self,

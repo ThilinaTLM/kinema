@@ -1,11 +1,15 @@
 //! Bounded blocking HTTP. Call only from an owned background worker.
 use super::DebridError;
-use reqwest::{Url, blocking::Client};
+use crate::logging::{http_error_kind, safe_url};
+use reqwest::{
+    Url,
+    blocking::{Client, Response},
+};
 use serde_json::Value;
 use std::{
     io::Read,
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub(crate) const MAX_BODY: u64 = 4 * 1024 * 1024;
@@ -20,7 +24,14 @@ pub(crate) fn client() -> Result<Client, DebridError> {
         .redirect(reqwest::redirect::Policy::none())
         .user_agent("Kinema/0.1")
         .build()
-        .map_err(|_| DebridError::Transport)
+        .map_err(|error| {
+            tracing::warn!(
+                operation = "build_client",
+                kind = http_error_kind(&error),
+                "HTTP client initialization failed"
+            );
+            DebridError::Transport
+        })
 }
 pub(crate) fn check(cancel: &AtomicBool) -> Result<(), DebridError> {
     if cancel.load(Ordering::Relaxed) {
@@ -36,32 +47,91 @@ pub(crate) fn pause(cancel: &AtomicBool) -> Result<(), DebridError> {
     }
     check(cancel)
 }
+// The enclosing provider/indexer span supplies a static operation and provider.
+// Never inspect request bodies, headers, paths, or response/error text.
+pub(super) fn send(
+    request: reqwest::blocking::RequestBuilder,
+    cancel: &AtomicBool,
+) -> Result<Response, DebridError> {
+    check(cancel)?;
+    let start = Instant::now();
+    let response = request.send().map_err(|error| {
+        tracing::warn!(
+            kind = http_error_kind(&error),
+            duration_ms = start.elapsed().as_millis() as u64,
+            "HTTP transport failed"
+        );
+        DebridError::Transport
+    })?;
+    check(cancel)?;
+    let status = response.status().as_u16();
+    let host = safe_url(response.url());
+    tracing::debug!(
+        status,
+        host,
+        duration_ms = start.elapsed().as_millis() as u64,
+        "HTTP headers received"
+    );
+    let error = match status {
+        401 | 403 => Some(DebridError::CredentialRejected),
+        429 => Some(DebridError::RateLimited),
+        200..=299 => None,
+        _ => Some(DebridError::Service),
+    };
+    if let Some(category) = error {
+        tracing::warn!(
+            status,
+            host,
+            ?category,
+            duration_ms = start.elapsed().as_millis() as u64,
+            "HTTP service rejected request"
+        );
+        return Err(category);
+    }
+    Ok(response)
+}
 pub(crate) fn json(
     request: reqwest::blocking::RequestBuilder,
     cancel: &AtomicBool,
 ) -> Result<Value, DebridError> {
-    check(cancel)?;
-    let response = request.send().map_err(|_| DebridError::Transport)?;
-    check(cancel)?;
-    match response.status().as_u16() {
-        401 | 403 => return Err(DebridError::CredentialRejected),
-        429 => return Err(DebridError::RateLimited),
-        200..=299 => {}
-        _ => return Err(DebridError::Service),
+    let start = Instant::now();
+    let result = (|| {
+        let response = send(request, cancel)?;
+        if response.content_length().is_some_and(|n| n > MAX_BODY) {
+            return Err(DebridError::TooLarge);
+        }
+        let mut bytes = Vec::new();
+        response
+            .take(MAX_BODY + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| {
+                tracing::warn!(io_kind = ?error.kind(), "HTTP body read failed");
+                DebridError::Transport
+            })?;
+        check(cancel)?;
+        if bytes.len() as u64 > MAX_BODY {
+            return Err(DebridError::TooLarge);
+        }
+        let value = serde_json::from_slice(&bytes).map_err(|_| DebridError::Malformed)?;
+        tracing::debug!(
+            bytes = bytes.len(),
+            duration_ms = start.elapsed().as_millis() as u64,
+            "HTTP JSON decoded"
+        );
+        Ok(value)
+    })();
+    if let Err(category) = &result {
+        if *category == DebridError::Canceled {
+            tracing::debug!("HTTP operation canceled");
+        } else {
+            tracing::warn!(
+                ?category,
+                duration_ms = start.elapsed().as_millis() as u64,
+                "HTTP JSON operation failed"
+            );
+        }
     }
-    if response.content_length().is_some_and(|n| n > MAX_BODY) {
-        return Err(DebridError::TooLarge);
-    }
-    let mut bytes = Vec::new();
-    response
-        .take(MAX_BODY + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| DebridError::Transport)?;
-    check(cancel)?;
-    if bytes.len() as u64 > MAX_BODY {
-        return Err(DebridError::TooLarge);
-    }
-    serde_json::from_slice(&bytes).map_err(|_| DebridError::Malformed)
+    result
 }
 pub(crate) fn text<'a>(v: &'a Value, key: &str) -> Result<&'a str, DebridError> {
     v.get(key)

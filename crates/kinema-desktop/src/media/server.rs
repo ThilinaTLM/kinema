@@ -32,9 +32,14 @@ pub(super) fn start(
         .spawn(move || {
             let owner = shared.clone();
             runtime.block_on(async move {
-                let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
-                    return;
+                let listener = match tokio::net::TcpListener::from_std(listener) {
+                    Ok(listener) => listener,
+                    Err(error) => {
+                        tracing::warn!(io_kind = ?error.kind(), "Media listener adoption failed");
+                        return;
+                    }
                 };
+                tracing::info!(port = address.port(), "Media loopback listener running");
                 let router = Router::new()
                     .route("/media/{id}", get(serve))
                     .with_state(Server {
@@ -45,11 +50,17 @@ pub(super) fn start(
                     listener,
                     slots: Arc::new(tokio::sync::Semaphore::new(32)),
                 };
-                let _ = axum::serve(listener, router)
+                let result = axum::serve(listener, router)
                     .with_graceful_shutdown(async {
-                        let _ = stopped.await;
+                        if stopped.await.is_err() {
+                            tracing::debug!("Media shutdown sender closed");
+                        }
                     })
                     .await;
+                if let Err(error) = result {
+                    tracing::warn!(io_kind = ?error.kind(), "Media loopback server failed");
+                }
+                tracing::info!(port = address.port(), "Media loopback listener stopped");
             });
             runtime.shutdown_timeout(Duration::from_secs(2));
             drop(owner);
@@ -57,6 +68,11 @@ pub(super) fn start(
     Ok((address, stop))
 }
 fn response(status: StatusCode, size: Option<u64>) -> Response {
+    if status.is_server_error() {
+        tracing::warn!(status = status.as_u16(), "Media loopback request failed");
+    } else if status.is_client_error() {
+        tracing::debug!(status = status.as_u16(), "Media loopback request rejected");
+    }
     let mut response = Response::new(Body::empty());
     *response.status_mut() = status;
     if let Some(size) = size
@@ -83,10 +99,12 @@ async fn serve(
         lookup
             .state
             .lock()
+            .map_err(|_| tracing::error!(category = "poisoned_lock", "Media session lookup failed"))
             .ok()
             .and_then(|state| state.sessions.get(&id).cloned())
     })
     .await
+    .map_err(|_| tracing::error!(category = "join_failed", "Media lookup worker failed"))
     .ok()
     .flatten();
     let Some(source) = source else {
@@ -115,6 +133,12 @@ async fn serve(
     } else {
         (0, size, false)
     };
+    tracing::trace!(
+        bytes = end - start,
+        partial,
+        head = method == Method::HEAD,
+        "Media range requested"
+    );
     let mut result = Response::new(Body::empty());
     *result.status_mut() = if partial {
         StatusCode::PARTIAL_CONTENT
@@ -155,8 +179,18 @@ async fn serve(
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let result = stream(&server.shared, source, start, end, &sender);
-        if result.is_err() {
-            let _ = sender.try_send(Err(std::io::Error::other("Media read interrupted")));
+        if let Err(category) = result {
+            if category == MediaError::Canceled {
+                tracing::debug!("Media stream reader canceled or disconnected");
+            } else {
+                tracing::warn!(?category, "Media stream read failed");
+            }
+            if sender
+                .try_send(Err(std::io::Error::other("Media read interrupted")))
+                .is_err()
+            {
+                tracing::debug!("Media stream error delivery unavailable");
+            }
         }
     });
     *result.body_mut() = Body::from_stream(ReceiverStream::new(receiver));
@@ -284,7 +318,10 @@ impl axum::serve::Listener for LimitedListener {
                         address,
                     );
                 }
-                Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                Err(error) => {
+                    tracing::debug!(io_kind = ?error.kind(), "Media connection accept failed; retrying");
+                    tokio::time::sleep(Duration::from_millis(100)).await
+                }
             }
         }
     }

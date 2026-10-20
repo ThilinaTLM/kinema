@@ -95,12 +95,40 @@ fn encoded_control(value: &str) -> bool {
 }
 
 pub fn launch(choice: &PlayerChoice, local_url: &str) -> Result<Child, PlayerError> {
-    validate_choice(choice)?;
-    let args = arguments(local_url)?;
-    let executable = discover(choice)?;
-    command(&executable, args)
-        .spawn()
-        .map_err(|_| PlayerError::SpawnFailed)
+    let _span = tracing::info_span!(
+        "player",
+        operation = "launch",
+        player = match choice {
+            PlayerChoice::Mpv => "mpv",
+            PlayerChoice::Vlc => "vlc",
+            PlayerChoice::Custom(_) => "custom",
+        }
+    )
+    .entered();
+    let started = std::time::Instant::now();
+    let result = (|| {
+        validate_choice(choice)?;
+        let args = arguments(local_url)?;
+        let executable = discover(choice)?;
+        command(&executable, args).spawn().map_err(|error| {
+            tracing::warn!(io_kind = ?error.kind(), "Player spawn failed");
+            PlayerError::SpawnFailed
+        })
+    })();
+    match &result {
+        Ok(_) => tracing::info!(
+            duration_ms = started.elapsed().as_millis() as u64,
+            "Player launched"
+        ),
+        Err(category) => {
+            tracing::warn!(
+                ?category,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "player operation failed"
+            );
+        }
+    }
+    result
 }
 
 fn command(executable: &Path, args: Vec<OsString>) -> Command {
@@ -161,8 +189,12 @@ fn discover(choice: &PlayerChoice) -> Result<PathBuf, PlayerError> {
 }
 
 fn executable(path: &Path) -> bool {
-    let Ok(metadata) = path.metadata() else {
-        return false;
+    let metadata = match path.metadata() {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            tracing::debug!(io_kind = ?error.kind(), "Player candidate unavailable");
+            return false;
+        }
     };
     if !metadata.is_file() {
         return false;
@@ -281,5 +313,44 @@ mod tests {
             PlayerChoice::Custom(path.clone()),
             PlayerChoice::Custom(path)
         );
+    }
+}
+
+#[cfg(test)]
+mod logging_tests {
+    use super::*;
+    use crate::providers::test_logging::{capture, excludes};
+
+    #[test]
+    fn launch_diagnostics_exclude_tokens_magnets_and_custom_paths()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let choice = PlayerChoice::Custom(root.path().join("missing-player-secret.exe"));
+        let (_, output) = capture(|| {
+            assert!(matches!(
+                launch(&choice, "magnet:?xt=urn:btih:magnet-secret"),
+                Err(PlayerError::InvalidUrl)
+            ));
+            assert!(matches!(
+                launch(
+                    &choice,
+                    "http://127.0.0.1:3210/media/lease-secret?token=query-secret"
+                ),
+                Err(PlayerError::NotFound)
+            ));
+        });
+        assert!(output.contains("player operation failed"));
+        excludes(
+            &output,
+            &[
+                "missing-player-secret",
+                "magnet:",
+                "magnet-secret",
+                "lease-secret",
+                "query-secret",
+                "token=",
+            ],
+        );
+        Ok(())
     }
 }
