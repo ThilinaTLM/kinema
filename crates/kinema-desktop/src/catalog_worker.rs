@@ -1,18 +1,15 @@
-//! Single owned catalog worker thread and its bounded request mailbox.
+//! One SQLite owner with a bounded, four-thread blocking HTTP fetch pool.
 //!
-//! The backend is constructed and used only on the worker thread. The mailbox
-//! holds two search slots and fifteen metadata operation/kind/indexer slots.
-//! A newer request for a slot replaces queued obsolete work; identical actions
-//! coalesce. A round-robin scheduler is fair across search and metadata.
-//!
-//! Limit: a blocking HTTP request already in flight cannot be cancelled. Its
-//! duration is bounded only by the backend client timeout. Replacement/shutdown
-//! flags prevent stale persistence before transaction entry and commit, in both
-//! search and metadata lanes; UI generation checks additionally reject events. Dropping [`CatalogWorker`] signals
-//! the thread and does not join it, so the UI never waits on that timeout; the
-//! thread exits after the current backend call finishes.
+//! Two search slots and sixteen metadata slots coalesce/replace queued work.
+//! Preparation and persistence run only on `kinema-catalog`; Send network/parse
+//! jobs run on `kinema-fetch-N`. Completed jobs are persisted before new work is
+//! prepared. At most four jobs (including unpersisted completions) are admitted.
+//! Replacement cancels the old result, not its blocking HTTP call. Another free
+//! fetch thread can start the replacement immediately; saturation still waits
+//! for a bounded HTTP timeout. Drop closes mailboxes without joining threads.
 
 use std::{
+    any::Any,
     collections::VecDeque,
     io,
     sync::{
@@ -90,7 +87,7 @@ pub(crate) struct MetadataEvent {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum Work {
+pub(crate) enum Work {
     Search(Request),
     Metadata(MetadataRequest),
 }
@@ -137,6 +134,7 @@ struct MailState {
     /// Kind served first next, so one kind cannot starve the other.
     next: usize,
     closed: bool,
+    completed: VecDeque<Box<dyn Any + Send>>,
 }
 
 struct ActiveSearch {
@@ -261,6 +259,7 @@ impl Mailbox {
     }
 
     /// Blocks until work is available; `None` once closed.
+    #[cfg(test)]
     fn take_work(&self) -> Option<Work> {
         let mut state = self.lock();
         loop {
@@ -302,6 +301,55 @@ impl Mailbox {
         }
     }
 
+    fn next<B: Backend>(&self, capacity: bool) -> Option<Ready<B>> {
+        let mut state = self.lock();
+        loop {
+            if state.closed {
+                return None;
+            }
+            if let Some(completed) = state.completed.pop_front() {
+                return completed
+                    .downcast::<Completed<B>>()
+                    .ok()
+                    .map(|value| Ready::Completed(*value));
+            }
+            if capacity {
+                let slots = state.slots.len() + state.metadata.len();
+                for offset in 0..slots {
+                    let index = (state.next + offset) % slots;
+                    let work = if index < state.slots.len() {
+                        state.slots[index].take().map(|request| {
+                            state.active_search[index] = Some(ActiveSearch {
+                                query: request.query.clone(),
+                                generation: request.generation,
+                                cancel: Arc::new(AtomicBool::new(false)),
+                            });
+                            Work::Search(request)
+                        })
+                    } else {
+                        let metadata_index = index - state.slots.len();
+                        state.metadata[metadata_index].take().map(|request| {
+                            state.active[metadata_index] = Some(ActiveMetadata {
+                                action: request.action.clone(),
+                                generation: request.generation,
+                                cancel: Arc::new(AtomicBool::new(false)),
+                            });
+                            Work::Metadata(request)
+                        })
+                    };
+                    if let Some(work) = work {
+                        state.next = (index + 1) % slots;
+                        return Some(Ready::Work(work));
+                    }
+                }
+            }
+            state = self
+                .wake
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
     #[cfg(test)]
     fn take(&self) -> Option<Request> {
         match self.take_work()? {
@@ -310,6 +358,7 @@ impl Mailbox {
         }
     }
 
+    #[cfg(test)]
     fn metadata_superseded(&self, action: &MetadataAction) -> bool {
         let state = self.lock();
         let index = metadata_slot(action);
@@ -338,6 +387,7 @@ impl Mailbox {
         cancel
     }
 
+    #[cfg(test)]
     fn finish_metadata(&self, request: &MetadataRequest) {
         let mut state = self.lock();
         let index = metadata_slot(&request.action);
@@ -381,12 +431,6 @@ impl Mailbox {
         }
     }
 
-    /// True when a newer request is queued for the kind, or shutdown began.
-    fn superseded(&self, kind: MediaKind) -> bool {
-        let state = self.lock();
-        state.closed || state.slots[slot(kind)].is_some()
-    }
-
     fn is_closed(&self) -> bool {
         self.lock().closed
     }
@@ -396,6 +440,7 @@ impl Mailbox {
         state.closed = true;
         state.slots = Default::default();
         state.metadata = Default::default();
+        state.completed.clear();
         for active in state.active.iter().flatten() {
             active.cancel.store(true, Ordering::Release);
         }
@@ -485,8 +530,29 @@ impl MetadataEventBox {
     }
 }
 
+pub(crate) enum Refreshed {
+    Search(Snapshot),
+    Metadata(Box<MetadataSnapshot>),
+}
+impl Refreshed {
+    pub(crate) fn metadata(snapshot: MetadataSnapshot) -> Self {
+        Self::Metadata(Box::new(snapshot))
+    }
+}
+pub(crate) type Persist<B> = Box<dyn FnOnce(&mut B) -> Result<Refreshed, String> + Send>;
+pub(crate) type Fetch<B> = Box<dyn FnOnce() -> Persist<B> + Send>;
+
 /// Blocking catalog operations; errors are already user-safe messages.
-pub(crate) trait Backend {
+pub(crate) trait Backend: Sized + 'static {
+    fn prepare(
+        &mut self,
+        _work: &Work,
+        _cancel: &Arc<AtomicBool>,
+    ) -> Option<Result<Fetch<Self>, String>> {
+        None
+    }
+    fn set_cancellation(&mut self, _cancel: Option<Arc<AtomicBool>>) {}
+
     fn read(&mut self, query: &SearchQuery) -> Result<Option<Snapshot>, String>;
     fn refresh(&mut self, query: &SearchQuery) -> Result<Snapshot, String>;
     fn refresh_search(
@@ -511,7 +577,7 @@ pub(crate) trait Backend {
     }
 }
 
-fn snapshot(search: CachedSearch) -> Snapshot {
+pub(crate) fn snapshot(search: CachedSearch) -> Snapshot {
     Snapshot {
         titles: search.titles,
         fetched_at: search.fetched_at,
@@ -519,6 +585,19 @@ fn snapshot(search: CachedSearch) -> Snapshot {
 }
 
 impl Backend for CatalogService {
+    fn prepare(
+        &mut self,
+        work: &Work,
+        cancel: &Arc<AtomicBool>,
+    ) -> Option<Result<Fetch<Self>, String>> {
+        Some(
+            self.prepare_remote(work.clone(), Arc::clone(cancel))
+                .map_err(|e| e.to_string()),
+        )
+    }
+    fn set_cancellation(&mut self, cancel: Option<Arc<AtomicBool>>) {
+        self.cancellation = cancel;
+    }
     fn read(&mut self, query: &SearchQuery) -> Result<Option<Snapshot>, String> {
         CatalogService::read(self, query)
             .map(|found| found.map(snapshot))
@@ -710,108 +789,299 @@ impl Drop for CatalogWorker {
 
 /// `open` is retried on the next request after a failure, so a transient
 /// storage or client error recovers without restarting the application.
+const FETCH_THREADS: usize = 4;
+struct Completed<B> {
+    work: Work,
+    cancel: Arc<AtomicBool>,
+    persist: Persist<B>,
+}
+enum Ready<B> {
+    Work(Work),
+    Completed(Completed<B>),
+}
+type FetchJob = Box<dyn FnOnce() + Send>;
+
 fn run<B: Backend>(
-    mailbox: &Mailbox,
+    mailbox: &Arc<Mailbox>,
     events: &EventBox,
     metadata_events: &MetadataEventBox,
     mut open: impl FnMut() -> Result<B, String>,
 ) {
-    let mut backend: Option<B> = None;
-    while let Some(work) = mailbox.take_work() {
-        if let Work::Metadata(request) = work {
-            process_metadata(mailbox, metadata_events, &mut backend, &mut open, request);
-            continue;
+    // At most four submitted jobs, including completed-but-not-persisted jobs.
+    // The SQLite owner never waits for a busy fetch thread or joins on shutdown.
+    let (jobs, receiver) = std::sync::mpsc::sync_channel::<FetchJob>(FETCH_THREADS);
+    let receiver = Arc::new(Mutex::new(receiver));
+    for index in 0..FETCH_THREADS {
+        let receiver = Arc::clone(&receiver);
+        let close = Arc::clone(mailbox);
+        if std::thread::Builder::new()
+            .name(format!("kinema-fetch-{index}"))
+            .spawn(move || {
+                loop {
+                    let job = receiver
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .recv();
+                    let Ok(job) = job else {
+                        break;
+                    };
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err() {
+                        close.close();
+                        break;
+                    }
+                }
+            })
+            .is_err()
+        {
+            return;
         }
-        let Work::Search(request) = work else {
-            continue;
-        };
-        let kind = request.query.kind();
-        let cancel = mailbox.lock().active_search[slot(kind)]
-            .as_ref()
-            .map(|active| Arc::clone(&active.cancel))
-            .unwrap_or_else(|| Arc::new(AtomicBool::new(true)));
-        let _active = SearchInFlight(mailbox, kind);
-        let send = |outcome| {
-            let state = mailbox.lock();
-            if state.closed || cancel.load(Ordering::Acquire) {
-                return !state.closed;
+    }
+    let mut backend: Option<B> = None;
+    let mut in_flight = 0;
+    while let Some(ready) = mailbox.next::<B>(in_flight < FETCH_THREADS) {
+        match ready {
+            Ready::Completed(completed) => {
+                in_flight -= 1;
+                let Completed {
+                    work,
+                    cancel,
+                    persist,
+                } = completed;
+                if !cancel.load(Ordering::Acquire)
+                    && !mailbox.is_closed()
+                    && let Some(backend) = backend.as_mut()
+                {
+                    backend.set_cancellation(Some(Arc::clone(&cancel)));
+                    let result = persist(backend);
+                    backend.set_cancellation(None);
+                    send_terminal(mailbox, events, metadata_events, &work, &cancel, result);
+                }
+                finish_work(mailbox, &work, &cancel);
             }
+            Ready::Work(work) => {
+                let cancel = match &work {
+                    Work::Search(request) => mailbox.lock().active_search
+                        [slot(request.query.kind())]
+                    .as_ref()
+                    .map(|active| Arc::clone(&active.cancel))
+                    .unwrap_or_else(|| Arc::new(AtomicBool::new(true))),
+                    Work::Metadata(request) => mailbox.metadata_cancellation(request),
+                };
+                if backend.is_none() {
+                    match open() {
+                        Ok(opened) => backend = Some(opened),
+                        Err(message) => {
+                            send_terminal(
+                                mailbox,
+                                events,
+                                metadata_events,
+                                &work,
+                                &cancel,
+                                Err(message),
+                            );
+                            finish_work(mailbox, &work, &cancel);
+                            continue;
+                        }
+                    }
+                }
+                let Some(backend) = backend.as_mut() else {
+                    continue;
+                };
+                if !read_before_fetch(mailbox, events, metadata_events, backend, &work, &cancel) {
+                    finish_work(mailbox, &work, &cancel);
+                    continue;
+                }
+                backend.set_cancellation(Some(Arc::clone(&cancel)));
+                let prepared = backend.prepare(&work, &cancel);
+                backend.set_cancellation(None);
+                let fetch = match prepared {
+                    Some(Ok(fetch)) => fetch,
+                    Some(Err(message)) => {
+                        send_terminal(
+                            mailbox,
+                            events,
+                            metadata_events,
+                            &work,
+                            &cancel,
+                            Err(message),
+                        );
+                        finish_work(mailbox, &work, &cancel);
+                        continue;
+                    }
+                    None => {
+                        // Small synchronous test backends can retain the old interface.
+                        let result = match &work {
+                            Work::Search(request) => backend
+                                .refresh_search(&request.query, &cancel)
+                                .map(Refreshed::Search),
+                            Work::Metadata(request) => backend
+                                .refresh_metadata(&request.action, &cancel)
+                                .map(Refreshed::metadata),
+                        };
+                        send_terminal(mailbox, events, metadata_events, &work, &cancel, result);
+                        finish_work(mailbox, &work, &cancel);
+                        continue;
+                    }
+                };
+                let mailbox = Arc::clone(mailbox);
+                in_flight += 1;
+                if jobs
+                    .send(Box::new(move || {
+                        let persist = fetch();
+                        let mut state = mailbox.lock();
+                        if !state.closed {
+                            state.completed.push_back(Box::new(Completed {
+                                work,
+                                cancel,
+                                persist,
+                            }));
+                            mailbox.wake.notify_one();
+                        }
+                    }))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn finish_work(mailbox: &Mailbox, work: &Work, cancel: &Arc<AtomicBool>) {
+    match work {
+        Work::Metadata(request) => {
+            let mut state = mailbox.lock();
+            let active = &mut state.active[metadata_slot(&request.action)];
+            if active
+                .as_ref()
+                .is_some_and(|active| Arc::ptr_eq(&active.cancel, cancel))
+            {
+                *active = None;
+            }
+        }
+        Work::Search(request) => {
+            let mut state = mailbox.lock();
+            let active = &mut state.active_search[slot(request.query.kind())];
+            if active
+                .as_ref()
+                .is_some_and(|active| Arc::ptr_eq(&active.cancel, cancel))
+            {
+                *active = None;
+            }
+        }
+    }
+}
+
+fn send_terminal(
+    mailbox: &Mailbox,
+    events: &EventBox,
+    metadata_events: &MetadataEventBox,
+    work: &Work,
+    cancel: &AtomicBool,
+    result: Result<Refreshed, String>,
+) {
+    let state = mailbox.lock();
+    if state.closed || cancel.load(Ordering::Acquire) {
+        return;
+    }
+    match work {
+        Work::Search(request) => {
+            let outcome = match result {
+                Ok(Refreshed::Search(snapshot)) => Outcome::Fetched(snapshot),
+                Err(message) => Outcome::Failed(message),
+                _ => return,
+            };
             events.push(Event {
-                kind,
+                kind: request.query.kind(),
                 generation: request.generation,
                 outcome,
             });
-            !state.closed
-        };
-        if backend.is_none() {
-            match open() {
-                Ok(opened) => backend = Some(opened),
-                Err(message) => {
-                    if !send(Outcome::Failed(message)) {
-                        return;
-                    }
-                    continue;
-                }
-            }
         }
-        let Some(backend) = backend.as_mut() else {
-            continue;
-        };
-        let refreshing = request.mode == Mode::Refresh;
-        let sent = match backend.read(&request.query) {
-            // Load: a failed read is terminal.
-            Err(message) if !refreshing => {
-                if !send(Outcome::Failed(message)) {
-                    return;
-                }
-                continue;
-            }
-            // Refresh must still fetch remotely; the UI keeps its results.
-            Err(_) | Ok(None) => send(Outcome::CacheMiss),
-            Ok(Some(snapshot)) => {
-                let sent = send(Outcome::CacheHit {
-                    snapshot,
-                    remote_follows: refreshing,
-                });
-                if !refreshing {
-                    if !sent {
-                        return;
-                    }
-                    continue;
-                }
-                sent
-            }
-        };
-        if !sent {
-            return;
-        }
-        if mailbox.superseded(kind) {
-            continue;
-        }
-        let outcome = match backend.refresh_search(&request.query, &cancel) {
-            Ok(snapshot) => Outcome::Fetched(snapshot),
-            Err(message) => Outcome::Failed(message),
-        };
-        if !send(outcome) {
-            return;
+        Work::Metadata(request) => {
+            let result = match result {
+                Ok(Refreshed::Metadata(snapshot)) => Ok(*snapshot),
+                Err(message) => Err(message),
+                _ => return,
+            };
+            metadata_events.push(MetadataEvent {
+                generation: request.generation,
+                action: request.action.clone(),
+                result,
+                saved: false,
+                refreshing: false,
+            });
         }
     }
 }
 
-struct SearchInFlight<'a>(&'a Mailbox, MediaKind);
-impl Drop for SearchInFlight<'_> {
-    fn drop(&mut self) {
-        self.0.lock().active_search[slot(self.1)] = None;
+fn read_before_fetch<B: Backend>(
+    mailbox: &Mailbox,
+    events: &EventBox,
+    metadata_events: &MetadataEventBox,
+    backend: &mut B,
+    work: &Work,
+    cancel: &AtomicBool,
+) -> bool {
+    let refreshing = match work {
+        Work::Search(r) => r.mode,
+        Work::Metadata(r) => r.mode,
+    } == Mode::Refresh;
+    let result = match work {
+        Work::Search(r) => backend.read(&r.query).map(|s| s.map(Refreshed::Search)),
+        Work::Metadata(r) => backend
+            .read_metadata(&r.action)
+            .map(|s| s.map(Refreshed::metadata)),
+    };
+    let state = mailbox.lock();
+    if state.closed || cancel.load(Ordering::Acquire) {
+        return false;
     }
+    match (work, result) {
+        (Work::Search(r), Ok(Some(Refreshed::Search(snapshot)))) => events.push(Event {
+            kind: r.query.kind(),
+            generation: r.generation,
+            outcome: Outcome::CacheHit {
+                snapshot,
+                remote_follows: refreshing,
+            },
+        }),
+        (Work::Metadata(r), Ok(Some(Refreshed::Metadata(snapshot)))) => {
+            metadata_events.push(MetadataEvent {
+                generation: r.generation,
+                action: r.action.clone(),
+                result: Ok(*snapshot),
+                saved: true,
+                refreshing,
+            })
+        }
+        (_, Err(message)) if !refreshing => {
+            drop(state);
+            send_terminal(mailbox, events, metadata_events, work, cancel, Err(message));
+            return false;
+        }
+        (Work::Search(r), _) => {
+            events.push(Event {
+                kind: r.query.kind(),
+                generation: r.generation,
+                outcome: Outcome::CacheMiss,
+            });
+            return true;
+        }
+        _ => return true,
+    }
+    refreshing
 }
 
+#[cfg(test)]
 struct MetadataInFlight<'a>(&'a Mailbox, &'a MetadataRequest);
+#[cfg(test)]
 impl Drop for MetadataInFlight<'_> {
     fn drop(&mut self) {
         self.0.finish_metadata(self.1);
     }
 }
 
+#[cfg(test)]
 fn process_metadata<B: Backend>(
     mailbox: &Mailbox,
     events: &MetadataEventBox,
@@ -879,6 +1149,240 @@ fn process_metadata<B: Backend>(
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
+    struct CompletionProbe(u64, mpsc::Sender<u64>);
+    impl Drop for CompletionProbe {
+        fn drop(&mut self) {
+            let _ = self.1.send(self.0);
+        }
+    }
+    struct ConcurrentBackend {
+        started: mpsc::Sender<u64>,
+        retired: mpsc::Sender<u64>,
+        release: Arc<(Mutex<bool>, Condvar)>,
+        persisted: Arc<Mutex<Vec<u64>>>,
+    }
+    impl Backend for ConcurrentBackend {
+        fn read(&mut self, _: &SearchQuery) -> Result<Option<Snapshot>, String> {
+            Ok(None)
+        }
+        fn refresh(&mut self, _: &SearchQuery) -> Result<Snapshot, String> {
+            panic!("network must use fetch pool")
+        }
+        fn prepare(
+            &mut self,
+            work: &Work,
+            _: &Arc<AtomicBool>,
+        ) -> Option<Result<Fetch<Self>, String>> {
+            let Work::Search(request) = work else {
+                return None;
+            };
+            let generation = request.generation;
+            let started = self.started.clone();
+            let probe = CompletionProbe(generation, self.retired.clone());
+            let release = Arc::clone(&self.release);
+            let persisted = Arc::clone(&self.persisted);
+            Some(Ok(Box::new(move || {
+                assert!(
+                    std::thread::current()
+                        .name()
+                        .is_some_and(|name| name.starts_with("kinema-fetch-"))
+                );
+                started.send(generation).expect("started receiver");
+                if generation == 1 {
+                    let (lock, wake) = &*release;
+                    let guard = lock.lock().expect("gate lock");
+                    let _ = wake
+                        .wait_timeout_while(guard, Duration::from_secs(5), |open| !*open)
+                        .expect("gate wait");
+                }
+                Box::new(move |_: &mut Self| {
+                    let _probe = probe;
+                    assert_eq!(std::thread::current().name(), Some("kinema-catalog"));
+                    persisted.lock().expect("persisted lock").push(generation);
+                    Ok(Refreshed::Search(Snapshot {
+                        titles: vec![],
+                        fetched_at: generation,
+                    }))
+                })
+            })))
+        }
+    }
+
+    type ConcurrentFixture = (
+        CatalogWorker,
+        mpsc::Receiver<u64>,
+        mpsc::Receiver<u64>,
+        Arc<(Mutex<bool>, Condvar)>,
+        Arc<Mutex<Vec<u64>>>,
+    );
+    fn concurrent_worker() -> ConcurrentFixture {
+        let (started, receiver) = mpsc::channel();
+        let (retired, completions) = mpsc::channel();
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let persisted = Arc::new(Mutex::new(vec![]));
+        let gate = Arc::clone(&release);
+        let saved = Arc::clone(&persisted);
+        let worker = CatalogWorker::spawn(move || {
+            Ok(ConcurrentBackend {
+                started: started.clone(),
+                retired: retired.clone(),
+                release: Arc::clone(&gate),
+                persisted: Arc::clone(&saved),
+            })
+        })
+        .expect("spawn");
+        (worker, receiver, completions, release, persisted)
+    }
+    fn release_fetch(gate: &Arc<(Mutex<bool>, Condvar)>) {
+        *gate.0.lock().expect("gate lock") = true;
+        gate.1.notify_all();
+    }
+    fn wait_fetched(worker: &CatalogWorker, generation: u64) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Poll::Event(Event {
+                generation: actual,
+                outcome: Outcome::Fetched(_),
+                ..
+            }) = worker.poll()
+                && actual == generation
+            {
+                return;
+            }
+            assert!(Instant::now() < deadline, "fetch did not finish");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    fn concurrent_request(kind: MediaKind, generation: u64) -> Request {
+        Request {
+            generation,
+            query: SearchQuery::new(kind, format!("title {generation}")).expect("query"),
+            mode: Mode::Refresh,
+        }
+    }
+
+    #[test]
+    fn completed_fetch_is_served_before_queued_preparation() {
+        let mailbox = Mailbox::default();
+        let request = concurrent_request(MediaKind::Movie, 2);
+        mailbox.submit(request.clone());
+        mailbox
+            .lock()
+            .completed
+            .push_back(Box::new(Completed::<ConcurrentBackend> {
+                work: Work::Search(concurrent_request(MediaKind::Series, 1)),
+                cancel: Arc::new(AtomicBool::new(false)),
+                persist: Box::new(|_| {
+                    Ok(Refreshed::Search(Snapshot {
+                        titles: vec![],
+                        fetched_at: 1,
+                    }))
+                }),
+            }));
+        assert!(matches!(
+            mailbox.next::<ConcurrentBackend>(true),
+            Some(Ready::Completed(_))
+        ));
+        assert!(
+            matches!(mailbox.next::<ConcurrentBackend>(true), Some(Ready::Work(Work::Search(actual))) if actual == request)
+        );
+    }
+
+    #[test]
+    fn fetches_in_two_slots_overlap() {
+        let (worker, started, _retired, gate, persisted) = concurrent_worker();
+        worker.submit(concurrent_request(MediaKind::Movie, 1));
+        assert_eq!(
+            started
+                .recv_timeout(Duration::from_secs(2))
+                .expect("first start"),
+            1
+        );
+        worker.submit(concurrent_request(MediaKind::Series, 2));
+        assert_eq!(
+            started
+                .recv_timeout(Duration::from_secs(2))
+                .expect("second start before release"),
+            2
+        );
+        wait_fetched(&worker, 2);
+        assert_eq!(*persisted.lock().expect("persisted"), vec![2]);
+        release_fetch(&gate);
+        wait_fetched(&worker, 1);
+        assert_eq!(*persisted.lock().expect("persisted"), vec![2, 1]);
+    }
+
+    #[test]
+    fn replacement_fetch_starts_before_obsolete_fetch_finishes_and_never_persists_it() {
+        let (worker, started, retired, gate, persisted) = concurrent_worker();
+        worker.submit(concurrent_request(MediaKind::Movie, 1));
+        assert_eq!(
+            started
+                .recv_timeout(Duration::from_secs(2))
+                .expect("first start"),
+            1
+        );
+        worker.submit(concurrent_request(MediaKind::Movie, 2));
+        assert_eq!(
+            started
+                .recv_timeout(Duration::from_secs(2))
+                .expect("replacement before release"),
+            2
+        );
+        wait_fetched(&worker, 2);
+        release_fetch(&gate);
+        while retired
+            .recv_timeout(Duration::from_secs(2))
+            .expect("completion dropped")
+            != 1
+        {}
+        // The obsolete persist closure has been dropped, never executed.
+        worker.submit(concurrent_request(MediaKind::Movie, 3));
+        wait_fetched(&worker, 3);
+        assert_eq!(*persisted.lock().expect("persisted"), vec![2, 3]);
+    }
+
+    #[test]
+    fn shutdown_does_not_wait_for_fetch_pool() {
+        let (worker, started, retired, gate, persisted) = concurrent_worker();
+        worker.submit(concurrent_request(MediaKind::Movie, 1));
+        started
+            .recv_timeout(Duration::from_secs(2))
+            .expect("started");
+        let start = Instant::now();
+        drop(worker);
+        assert!(start.elapsed() < Duration::from_millis(100));
+        release_fetch(&gate);
+        assert_eq!(
+            retired
+                .recv_timeout(Duration::from_secs(2))
+                .expect("discarded after shutdown"),
+            1
+        );
+        assert!(persisted.lock().expect("persisted").is_empty());
+    }
+
+    #[test]
+    fn exact_cancellation_discards_fetch_without_persisting() {
+        let (worker, started, retired, gate, persisted) = concurrent_worker();
+        worker.submit(concurrent_request(MediaKind::Movie, 1));
+        started
+            .recv_timeout(Duration::from_secs(2))
+            .expect("started");
+        worker.cancel_search(MediaKind::Movie, 1);
+        release_fetch(&gate);
+        assert_eq!(
+            retired
+                .recv_timeout(Duration::from_secs(2))
+                .expect("discarded completion"),
+            1
+        );
+        assert!(persisted.lock().expect("persisted").is_empty());
+        worker.submit(concurrent_request(MediaKind::Movie, 2));
+        wait_fetched(&worker, 2);
+        assert_eq!(*persisted.lock().expect("persisted"), vec![2]);
+    }
+
     use std::{
         sync::{Mutex, mpsc},
         time::{Duration, Instant},

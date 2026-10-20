@@ -171,17 +171,43 @@ For the fuller sync design, start with a small in-memory queue, one SQLite worke
 ## Implemented worker lifetime limits
 
 The catalog worker opens the backend lazily on its first request, not at startup;
-a failed open is retried on the next explicit request. It accepts at most one
-queued request per media kind, served round-robin; newer work replaces obsolete
-queued work, and equivalent queued requests coalesce. The event mailbox is bounded
-to two events per kind. Screen generations reject late results. A disconnected
-worker closes requests and marks busy screens failed. A blocking HTTP call already in flight is **not
-cancelled**: the Cinemeta client has a 10-second connect timeout and 15-second total request
-timeout. Responses are capped at 2 MiB and 500 titles; the UI draws at most 200 rows.
-Dropping the worker closes its mailbox without joining the thread, so the UI does
-not wait for that HTTP timeout; the worker exits after its current call completes.
-This is bounded blocking work, not fully cancellable networking or an orderly
-joined shutdown. Obsolete in-flight work can still finish and save a cache result.
+a failed open is retried on the next explicit request. `kinema-catalog` is the sole
+SQLite connection owner: it reads caches and validates identities before dispatch,
+then persists validated fetch results and emits events. Four `kinema-fetch-N`
+threads perform blocking HTTP and response parsing concurrently. Completed fetches
+are served before new preparation. At most four jobs, including completions
+awaiting persistence, are admitted; there is no unbounded fetch queue.
+
+There are two search slots and sixteen metadata operation/kind/indexer slots,
+served round-robin. Each holds at most one queued request; equivalent queued
+requests coalesce and newer requests cancel obsolete work in the same slot.
+Different slots can fetch concurrently. A replacement may start while its obsolete
+fetch is still in flight when pool capacity is available. If all four threads are
+busy, requests still wait for capacity (potentially the HTTP timeout). Cancellation
+is exact-generation; cancelled results are discarded without persistence. Existing
+transaction cancellation checks also guard entry/commit. The bounded event mailbox
+holds at most two events per slot; screen generations additionally reject late
+results. Cache-hit-then-refresh and successful empty results remain distinct from
+service, credential, and storage failures.
+
+Cinemeta and indexer HTTP clients are reused. TMDB retains one HTTP transport and
+connection pool for the backend lifetime, independently of credential changes. Its
+credential-bearing wrapper is shared across requests and retains a zeroizing secret.
+Successful credential set/delete increments a process-wide generation; the next
+preparation drops a stale cached credential/client and re-reads secure storage.
+Authentication rejection also invalidates the cached client, including when an
+obsolete fetch's result is discarded. Missing, denied, and unavailable credential
+lookups remain distinct errors, not successful cached credentials. Redirects never
+receive the TMDB bearer token (TMDB redirects are disabled).
+
+An in-flight blocking HTTP call is **not cancelled**; only its result is discarded.
+Cinemeta and TMDB have 10-second connect and 15-second total request timeouts;
+responses are capped at 2 MiB and 500 page titles. Dropping the worker closes its
+mailbox and cancels active work without joining either the SQLite thread or fetch
+threads. The SQLite owner can exit without waiting for in-flight HTTP; fetch
+threads exit after their current calls finish. A disconnected worker closes
+requests and marks busy screens failed. This remains bounded blocking work, not
+fully cancellable networking or an orderly joined shutdown.
 
 ## Target responsiveness and lifetime rules
 

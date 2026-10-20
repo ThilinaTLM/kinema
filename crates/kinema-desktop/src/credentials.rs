@@ -4,7 +4,18 @@
 //! If initialization failed, make secure storage available and restart Kinema
 //! before retrying. Surface Unavailable; never fall back to ordinary files.
 use kinema_core::sources::DebridKind;
-use std::fmt;
+use std::{
+    fmt,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+#[cfg(test)]
+pub(crate) static METADATA_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+static METADATA_GENERATION: AtomicU64 = AtomicU64::new(0);
+pub(crate) fn metadata_generation() -> u64 {
+    METADATA_GENERATION.load(Ordering::Acquire)
+}
 use zeroize::Zeroizing;
 
 pub struct SecretString(Zeroizing<String>);
@@ -97,10 +108,14 @@ impl MetadataCredentialStore {
         self.vault.get("tmdb")
     }
     pub fn set(&self, secret: SecretString) -> Result<(), CredentialError> {
-        self.vault.set("tmdb", secret)
+        self.vault.set("tmdb", secret)?;
+        METADATA_GENERATION.fetch_add(1, Ordering::AcqRel);
+        Ok(())
     }
     pub fn delete(&self) -> Result<(), CredentialError> {
-        self.vault.delete("tmdb")
+        self.vault.delete("tmdb")?;
+        METADATA_GENERATION.fetch_add(1, Ordering::AcqRel);
+        Ok(())
     }
     pub fn status(&self) -> Result<bool, CredentialError> {
         match self.get() {
@@ -150,6 +165,13 @@ impl Vault for OsVault {
 }
 
 #[cfg(test)]
+pub(crate) fn test_metadata_store() -> MetadataCredentialStore {
+    MetadataCredentialStore {
+        vault: Box::<tests::FakeVault>::default(),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{
@@ -157,7 +179,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
     #[derive(Clone, Default)]
-    struct FakeVault(Arc<Mutex<HashMap<&'static str, SecretString>>>);
+    pub(super) struct FakeVault(Arc<Mutex<HashMap<&'static str, SecretString>>>);
     impl Vault for FakeVault {
         fn get(&self, account: &'static str) -> Result<SecretString, CredentialError> {
             self.0
@@ -202,6 +224,9 @@ mod tests {
     }
     #[test]
     fn metadata_bearer_stays_in_vault_not_settings() -> Result<(), Box<dyn std::error::Error>> {
+        let _guard = METADATA_TEST_LOCK
+            .lock()
+            .map_err(|_| "metadata test lock")?;
         use crate::{
             paths::AppPaths,
             settings::{MetadataProvider, Settings, SettingsStore},
@@ -215,7 +240,9 @@ mod tests {
         };
         assert!(!metadata.status()?);
         let token = "tmdb-private-bearer-fixture";
+        let before = metadata_generation();
         metadata.set(SecretString::new(token.into()))?;
+        assert_eq!(metadata_generation(), before + 1);
         assert_eq!(metadata.get()?.expose(), token);
         assert!(metadata.status()?);
         assert!(!debrid.status(DebridKind::RealDebrid)?);
@@ -239,9 +266,12 @@ mod tests {
         assert!(!text.contains(token));
         assert!(!text.contains("bearer"));
         assert!(!format!("{:?}", metadata.get()?).contains(token));
+        let before = metadata_generation();
         metadata.delete()?;
+        assert_eq!(metadata_generation(), before + 1);
         assert!(!metadata.status()?);
         assert_eq!(metadata.delete(), Err(CredentialError::Missing));
+        assert_eq!(metadata_generation(), before + 1);
         assert!(debrid.status(DebridKind::RealDebrid)?);
         Ok(())
     }

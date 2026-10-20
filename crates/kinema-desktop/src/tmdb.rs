@@ -136,6 +136,7 @@ impl fmt::Display for TmdbError {
 impl std::error::Error for TmdbError {}
 
 pub struct TmdbClient {
+    rejected: std::sync::atomic::AtomicBool,
     client: Client,
     secret: SecretString,
     endpoint: Url,
@@ -147,26 +148,44 @@ impl fmt::Debug for TmdbClient {
 }
 impl TmdbClient {
     pub fn new(secret: SecretString) -> Result<Self, TmdbError> {
-        Self::at(
+        Self::with_transport(secret, Self::transport()?)
+    }
+    pub(crate) fn transport() -> Result<Client, TmdbError> {
+        Self::client_builder()
+            .build()
+            .map_err(|_| TmdbError::Network)
+    }
+    pub(crate) fn with_transport(secret: SecretString, client: Client) -> Result<Self, TmdbError> {
+        Self::at_with_transport(
             secret,
             Url::parse(ENDPOINT).map_err(|_| TmdbError::Network)?,
+            client,
         )
     }
-    fn at(secret: SecretString, endpoint: Url) -> Result<Self, TmdbError> {
+    #[cfg(test)]
+    pub(crate) fn at(secret: SecretString, endpoint: Url) -> Result<Self, TmdbError> {
+        Self::at_with_transport(secret, endpoint, Self::transport()?)
+    }
+    fn at_with_transport(
+        secret: SecretString,
+        endpoint: Url,
+        client: Client,
+    ) -> Result<Self, TmdbError> {
         if secret.expose().is_empty()
             || secret.expose().len() > 4096
             || !secret.expose().bytes().all(|b| b.is_ascii_graphic())
         {
             return Err(TmdbError::InvalidCredential);
         }
-        let client = Self::client_builder()
-            .build()
-            .map_err(|_| TmdbError::Network)?;
         Ok(Self {
+            rejected: std::sync::atomic::AtomicBool::new(false),
             client,
             secret,
             endpoint,
         })
+    }
+    pub(crate) fn credential_rejected(&self) -> bool {
+        self.rejected.load(std::sync::atomic::Ordering::Acquire)
     }
     fn client_builder() -> reqwest::blocking::ClientBuilder {
         Client::builder()
@@ -201,7 +220,11 @@ impl TmdbClient {
             .send()
             .map_err(|_| TmdbError::Network)?;
         match response.status().as_u16() {
-            401 | 403 => return Err(TmdbError::RejectedCredential),
+            401 | 403 => {
+                self.rejected
+                    .store(true, std::sync::atomic::Ordering::Release);
+                return Err(TmdbError::RejectedCredential);
+            }
             429 => return Err(TmdbError::RateLimited),
             200..=299 => (),
             _ => return Err(TmdbError::HttpStatus),

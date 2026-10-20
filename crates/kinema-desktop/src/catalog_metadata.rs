@@ -70,10 +70,17 @@ impl CatalogService {
             .extend(["catalog", kind_text(kind), "top"])
             .push(&format!("skip={offset}.json"));
         let raw: serde_json::Value = self.fetch_json(url)?;
-        let rich = normalized_rich::cinemeta_summaries(&raw)?;
-        let document: SearchResponse =
-            serde_json::from_value(raw).map_err(|_| CatalogError::InvalidResponse)?;
-        let titles = validate_search(document, kind)?;
+        let (titles, rich) = parse_search(raw, kind)?;
+        self.save_browse(kind, offset, titles, rich)
+    }
+
+    fn save_browse(
+        &mut self,
+        kind: MediaKind,
+        offset: u32,
+        titles: Vec<CatalogTitle>,
+        rich: Vec<normalized_rich::RichRecord>,
+    ) -> Result<CachedSearch, CatalogError> {
         let (_, timestamp) = timestamp_now()?;
         let cancellation = self.cancellation.clone();
         check_cancellation(cancellation.as_deref())?;
@@ -138,11 +145,17 @@ impl CatalogService {
             .extend(["meta", kind_text(kind)])
             .push(&format!("{}.json", id.as_str()));
         let raw: serde_json::Value = self.fetch_json(url)?;
-        let rich =
-            normalized_rich::cinemeta(raw.get("meta").ok_or(CatalogError::InvalidResponse)?)?;
-        let response: DetailsResponse =
-            serde_json::from_value(raw).map_err(|_| CatalogError::InvalidResponse)?;
-        let details = response.meta.validate(kind, id)?;
+        let (details, rich) = parse_details(raw, kind, id)?;
+        self.save_details(kind, id, details, rich)
+    }
+
+    fn save_details(
+        &mut self,
+        kind: MediaKind,
+        id: &ImdbId,
+        details: TitleDetails,
+        rich: Vec<normalized_rich::RichRecord>,
+    ) -> Result<CachedDetails, CatalogError> {
         let (_, timestamp) = timestamp_now()?;
         let cancellation = self.cancellation.clone();
         check_cancellation(cancellation.as_deref())?;
@@ -162,38 +175,12 @@ impl CatalogService {
         &self,
         url: Url,
     ) -> Result<T, CatalogError> {
-        self.ensure_active()?;
-        let response = self
-            .client
-            .get(url)
-            .header(reqwest::header::ACCEPT, "application/json")
-            .send()
-            .map_err(|error| {
-                #[cfg(test)]
-                transport_diagnostics(&error);
-                drop(error);
-                CatalogError::Network
-            })?;
-        self.ensure_active()?;
-        if !response.status().is_success() {
-            return Err(CatalogError::HttpStatus);
-        }
-        if response
-            .content_length()
-            .is_some_and(|n| n > MAX_RESPONSE_BYTES)
-        {
-            return Err(CatalogError::ResponseTooLarge);
-        }
-        let mut bytes = Vec::new();
-        response
-            .take(MAX_RESPONSE_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| CatalogError::Network)?;
-        self.ensure_active()?;
-        if bytes.len() as u64 > MAX_RESPONSE_BYTES {
-            return Err(CatalogError::ResponseTooLarge);
-        }
-        serde_json::from_slice(&bytes).map_err(|_| CatalogError::InvalidResponse)
+        let never_cancel = AtomicBool::new(false);
+        fetch_json(
+            &self.client,
+            url,
+            self.cancellation.as_deref().unwrap_or(&never_cancel),
+        )
     }
 }
 
@@ -509,8 +496,9 @@ impl CatalogService {
         normalized_source_target(&self.connection, target)?
             .ok_or(CatalogError::MissingIdentityMapping)?;
         if self.indexers.is_none() {
-            self.indexers =
-                Some(crate::sources::IndexerClient::new().map_err(|_| CatalogError::Indexer)?);
+            self.indexers = Some(Arc::new(
+                crate::sources::IndexerClient::new().map_err(|_| CatalogError::Indexer)?,
+            ));
         }
         let client = self.indexers.as_ref().ok_or(CatalogError::Indexer)?;
         let never_cancel = AtomicBool::new(false);
@@ -813,6 +801,35 @@ impl CatalogService {
     ) -> Result<CachedTmdb, CatalogError> {
         self.ensure_active()?;
         crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?;
+        let client = self.tmdb_client(credential)?;
+        self.ensure_active()?;
+        let result = client.fetch_normalized(query);
+        if matches!(result, Err(crate::tmdb::TmdbError::RejectedCredential)) {
+            self.tmdb = None;
+        }
+        let (data, rich) = result.map_err(CatalogError::Tmdb)?;
+        self.ensure_active()?;
+        self.save_tmdb_rich(query, data, &rich)
+    }
+
+    pub(super) fn tmdb_client(
+        &mut self,
+        credential: impl FnOnce() -> Result<
+            crate::credentials::SecretString,
+            crate::credentials::CredentialError,
+        >,
+    ) -> Result<Arc<crate::tmdb::TmdbClient>, CatalogError> {
+        let generation = crate::credentials::metadata_generation();
+        if self
+            .tmdb
+            .as_ref()
+            .is_some_and(|(saved, client)| *saved != generation || client.credential_rejected())
+        {
+            self.tmdb = None;
+        }
+        if let Some((_, client)) = &self.tmdb {
+            return Ok(Arc::clone(client));
+        }
         let secret = credential().map_err(|error| match error {
             crate::credentials::CredentialError::Missing => CatalogError::TmdbMissingCredential,
             crate::credentials::CredentialError::Unavailable => {
@@ -820,11 +837,20 @@ impl CatalogService {
             }
             crate::credentials::CredentialError::AccessDenied => CatalogError::TmdbCredentialDenied,
         })?;
-        let client = crate::tmdb::TmdbClient::new(secret).map_err(CatalogError::Tmdb)?;
-        self.ensure_active()?;
-        let (data, rich) = client.fetch_normalized(query).map_err(CatalogError::Tmdb)?;
-        self.ensure_active()?;
-        self.save_tmdb_rich(query, data, &rich)
+        let transport = match &self.tmdb_transport {
+            Some(client) => client.clone(),
+            None => {
+                let client = crate::tmdb::TmdbClient::transport().map_err(CatalogError::Tmdb)?;
+                self.tmdb_transport = Some(client.clone());
+                client
+            }
+        };
+        let client = Arc::new(
+            crate::tmdb::TmdbClient::with_transport(secret, transport)
+                .map_err(CatalogError::Tmdb)?,
+        );
+        self.tmdb = Some((generation, Arc::clone(&client)));
+        Ok(client)
     }
 
     #[cfg(test)]
@@ -871,9 +897,319 @@ pub(super) fn decode_fixture_details(
     response.meta.validate(kind, id)
 }
 
+fn parse_details(
+    raw: serde_json::Value,
+    kind: MediaKind,
+    id: &ImdbId,
+) -> Result<(TitleDetails, Vec<normalized_rich::RichRecord>), CatalogError> {
+    let rich = normalized_rich::cinemeta(raw.get("meta").ok_or(CatalogError::InvalidResponse)?)?;
+    let response: DetailsResponse =
+        serde_json::from_value(raw).map_err(|_| CatalogError::InvalidResponse)?;
+    let details = response.meta.validate(kind, id)?;
+    Ok((details, rich))
+}
+
+fn fetch_json<T: serde::de::DeserializeOwned>(
+    client: &Client,
+    url: Url,
+    cancel: &AtomicBool,
+) -> Result<T, CatalogError> {
+    check_cancellation(Some(cancel))?;
+    let response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .map_err(|error| {
+            #[cfg(test)]
+            transport_diagnostics(&error);
+            drop(error);
+            CatalogError::Network
+        })?;
+    check_cancellation(Some(cancel))?;
+    if !response.status().is_success() {
+        return Err(CatalogError::HttpStatus);
+    }
+    if response
+        .content_length()
+        .is_some_and(|n| n > MAX_RESPONSE_BYTES)
+    {
+        return Err(CatalogError::ResponseTooLarge);
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| CatalogError::Network)?;
+    check_cancellation(Some(cancel))?;
+    if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(CatalogError::ResponseTooLarge);
+    }
+    serde_json::from_slice(&bytes).map_err(|_| CatalogError::InvalidResponse)
+}
+
+// Only these validated values cross back from the fetch pool. SQLite never does.
+enum RemoteData {
+    Page(Vec<CatalogTitle>, Vec<normalized_rich::RichRecord>),
+    Details(TitleDetails, Vec<normalized_rich::RichRecord>),
+    Sources(crate::sources::SourceResults),
+    Tmdb(crate::tmdb::TmdbData, Vec<normalized_rich::RichRecord>),
+}
+
+impl CatalogService {
+    pub(crate) fn prepare_remote(
+        &mut self,
+        work: crate::catalog_worker::Work,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<crate::catalog_worker::Fetch<Self>, CatalogError> {
+        let result = self.prepare_remote_inner(work.clone(), cancel);
+        if let Err(error) = result {
+            self.record_remote_failure(&work, error);
+        }
+        result
+    }
+
+    fn prepare_remote_inner(
+        &mut self,
+        work: crate::catalog_worker::Work,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<crate::catalog_worker::Fetch<Self>, CatalogError> {
+        use crate::catalog_worker::{
+            MetadataAction as A, MetadataSnapshot as S, Refreshed as R, Work,
+        };
+        let network: Box<dyn FnOnce() -> Result<RemoteData, CatalogError> + Send> = match &work {
+            Work::Search(request) => {
+                let url = search_url(&self.endpoint, &request.query)?;
+                let kind = request.query.kind();
+                let client = self.client.clone();
+                Box::new(move || {
+                    let raw = fetch_json(&client, url, &cancel)?;
+                    let (titles, rich) = parse_search(raw, kind)?;
+                    Ok(RemoteData::Page(titles, rich))
+                })
+            }
+            Work::Metadata(request) => match &request.action {
+                A::Browse { kind, offset } => {
+                    let kind = *kind;
+                    let mut url = self.endpoint.clone();
+                    url.path_segments_mut()
+                        .map_err(|_| CatalogError::Network)?
+                        .pop_if_empty()
+                        .extend(["catalog", kind_text(kind), "top"])
+                        .push(&format!("skip={offset}.json"));
+                    let client = self.client.clone();
+                    Box::new(move || {
+                        let raw = fetch_json(&client, url, &cancel)?;
+                        let (titles, rich) = parse_search(raw, kind)?;
+                        Ok(RemoteData::Page(titles, rich))
+                    })
+                }
+                A::Details { kind, id } => {
+                    check_id(id)?;
+                    let (kind, id) = (*kind, id.clone());
+                    let mut url = self.endpoint.clone();
+                    url.path_segments_mut()
+                        .map_err(|_| CatalogError::Network)?
+                        .pop_if_empty()
+                        .extend(["meta", kind_text(kind)])
+                        .push(&format!("{}.json", id.as_str()));
+                    let client = self.client.clone();
+                    Box::new(move || {
+                        let raw = fetch_json(&client, url, &cancel)?;
+                        let (details, rich) = parse_details(raw, kind, &id)?;
+                        Ok(RemoteData::Details(details, rich))
+                    })
+                }
+                A::Sources { indexer, target } => {
+                    target_key(target)?;
+                    normalized_source_target(&self.connection, target)?
+                        .ok_or(CatalogError::MissingIdentityMapping)?;
+                    if self.indexers.is_none() {
+                        self.indexers = Some(Arc::new(
+                            crate::sources::IndexerClient::new()
+                                .map_err(|_| CatalogError::Indexer)?,
+                        ));
+                    }
+                    let client = Arc::clone(self.indexers.as_ref().ok_or(CatalogError::Indexer)?);
+                    let (indexer, target) = (*indexer, target.clone());
+                    Box::new(move || {
+                        client
+                            .fetch(indexer, &target, &cancel)
+                            .map(RemoteData::Sources)
+                            .map_err(|_| {
+                                if cancel.load(Ordering::Acquire) {
+                                    CatalogError::Canceled
+                                } else {
+                                    CatalogError::Indexer
+                                }
+                            })
+                    })
+                }
+                A::Tmdb(query) => {
+                    crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?;
+                    let client = self
+                        .tmdb_client(|| crate::credentials::MetadataCredentialStore::new().get())?;
+                    let query = query.clone();
+                    Box::new(move || {
+                        check_cancellation(Some(&cancel))?;
+                        let (data, rich) = client
+                            .fetch_normalized(&query)
+                            .map_err(CatalogError::Tmdb)?;
+                        Ok(RemoteData::Tmdb(data, rich))
+                    })
+                }
+            },
+        };
+        Ok(Box::new(move || {
+            let result = network();
+            Box::new(move |service: &mut Self| {
+                let result = match (result, &work) {
+                    (Ok(RemoteData::Page(titles, rich)), Work::Search(request)) => service
+                        .save_search(&request.query, titles, rich)
+                        .map(|s| R::Search(crate::catalog_worker::snapshot(s))),
+                    (Ok(RemoteData::Page(titles, rich)), Work::Metadata(request)) => {
+                        match &request.action {
+                            A::Browse { kind, offset } => service
+                                .save_browse(*kind, *offset, titles, rich)
+                                .map(|s| R::metadata(S::Browse(s))),
+                            _ => Err(CatalogError::InvalidResponse),
+                        }
+                    }
+                    (Ok(RemoteData::Details(details, rich)), Work::Metadata(request)) => {
+                        match &request.action {
+                            A::Details { kind, id } => service
+                                .save_details(*kind, id, details, rich)
+                                .map(|s| R::metadata(S::Details(s))),
+                            _ => Err(CatalogError::InvalidResponse),
+                        }
+                    }
+                    (Ok(RemoteData::Sources(results)), Work::Metadata(request)) => {
+                        match &request.action {
+                            A::Sources { indexer, target } => service
+                                .save_sources(*indexer, target, results)
+                                .map(|s| R::metadata(S::Sources(s))),
+                            _ => Err(CatalogError::InvalidResponse),
+                        }
+                    }
+                    (Ok(RemoteData::Tmdb(data, rich)), Work::Metadata(request)) => {
+                        match &request.action {
+                            A::Tmdb(query) => service
+                                .save_tmdb_rich(query, data, &rich)
+                                .map(|s| R::metadata(S::Tmdb(s))),
+                            _ => Err(CatalogError::InvalidResponse),
+                        }
+                    }
+                    (Err(error), _) => Err(error),
+                    _ => Err(CatalogError::InvalidResponse),
+                };
+                if let Err(error) = result {
+                    service.record_remote_failure(&work, error);
+                }
+                result.map_err(|e| e.to_string())
+            })
+        }))
+    }
+
+    fn record_remote_failure(&mut self, work: &crate::catalog_worker::Work, error: CatalogError) {
+        use crate::catalog_worker::{MetadataAction as A, Work};
+        if self.ensure_active().is_err() {
+            return;
+        }
+        if error == CatalogError::Tmdb(crate::tmdb::TmdbError::RejectedCredential) {
+            self.tmdb = None;
+        }
+        match work {
+            Work::Search(request) => normalized_fetches::search(self, &request.query, error),
+            Work::Metadata(request) => match &request.action {
+                A::Browse { kind, offset } => {
+                    normalized_fetches::browse(self, *kind, *offset, error)
+                }
+                A::Details { kind, id } => normalized_fetches::details(self, *kind, id, error),
+                A::Tmdb(query) => normalized_fetches::tmdb(self, query, error),
+                A::Sources { .. } => (),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod cinemeta_details_tests {
     use super::*;
+
+    #[test]
+    fn tmdb_client_caches_secret_and_reloads_on_store_changes_and_401() -> Result<(), Box<dyn Error>>
+    {
+        let _guard = crate::credentials::METADATA_TEST_LOCK
+            .lock()
+            .map_err(|_| "metadata test lock")?;
+        use crate::credentials::{CredentialError, SecretString};
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+        };
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        let store = crate::credentials::test_metadata_store();
+        assert!(matches!(
+            service.tmdb_client(|| store.get()),
+            Err(CatalogError::TmdbMissingCredential)
+        ));
+        store.set(SecretString::new("first-token".into()))?;
+        let first = service.tmdb_client(|| store.get())?;
+        let cached = service.tmdb_client(|| Err(CredentialError::AccessDenied))?;
+        assert!(
+            Arc::ptr_eq(&first, &cached),
+            "cached client must avoid secure storage"
+        );
+        store.set(SecretString::new("second-token".into()))?;
+        let second = service.tmdb_client(|| store.get())?;
+        assert!(!Arc::ptr_eq(&first, &second));
+        store.delete()?;
+        assert!(matches!(
+            service.tmdb_client(|| store.get()),
+            Err(CatalogError::TmdbMissingCredential)
+        ));
+        assert!(matches!(
+            service.tmdb_client(|| Err(CredentialError::AccessDenied)),
+            Err(CatalogError::TmdbCredentialDenied)
+        ));
+        assert!(matches!(
+            service.tmdb_client(|| Err(CredentialError::Unavailable)),
+            Err(CatalogError::TmdbCredentialUnavailable)
+        ));
+        // Inject only a loopback transport; no OS credential store or real provider.
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let client = Arc::new(crate::tmdb::TmdbClient::at(
+            SecretString::new("rejected-token".into()),
+            Url::parse(&format!("http://{}/3/", listener.local_addr()?))?,
+        )?);
+        service.tmdb = Some((
+            crate::credentials::metadata_generation(),
+            Arc::clone(&client),
+        ));
+        let server = std::thread::spawn(move || -> std::io::Result<()> {
+            let (mut stream, _) = listener.accept()?;
+            let mut request = [0; 4096];
+            stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+            let count = stream.read(&mut request)?;
+            assert!(count > 0);
+            stream.write_all(
+                b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            )
+        });
+        assert!(matches!(
+            client.check_account(),
+            Err(crate::tmdb::TmdbError::RejectedCredential)
+        ));
+        server.join().map_err(|_| "server panic")??;
+        assert!(client.credential_rejected());
+        let next = service.tmdb_client(|| Ok(SecretString::new("fresh-token".into())))?;
+        assert!(!Arc::ptr_eq(&client, &next));
+        assert!(Arc::ptr_eq(
+            &next,
+            &service.tmdb_client(|| Err(CredentialError::AccessDenied))?
+        ));
+        Ok(())
+    }
 
     const MOVIE: &str =
         include_str!("../tests/fixtures/cinemeta_movie_tt22084616_without_videos.json");

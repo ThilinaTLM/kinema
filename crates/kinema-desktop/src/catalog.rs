@@ -148,7 +148,9 @@ pub(crate) struct CatalogService {
     connection: Connection,
     client: Client,
     endpoint: Url,
-    indexers: Option<crate::sources::IndexerClient>,
+    indexers: Option<Arc<crate::sources::IndexerClient>>,
+    tmdb: Option<(u64, Arc<crate::tmdb::TmdbClient>)>,
+    tmdb_transport: Option<Client>,
     pub(super) cancellation: Option<Arc<AtomicBool>>,
 }
 
@@ -265,6 +267,8 @@ impl CatalogService {
             client,
             endpoint,
             indexers: None,
+            tmdb: None,
+            tmdb_transport: None,
             cancellation: None,
         })
     }
@@ -293,24 +297,16 @@ impl CatalogService {
     fn refresh_search_inner(&mut self, query: &SearchQuery) -> Result<CachedSearch, CatalogError> {
         let url = search_url(&self.endpoint, query)?;
         let raw: serde_json::Value = self.fetch_json(url)?;
-        let rich = normalized_rich::cinemeta_summaries(&raw)?;
-        let payload: SearchResponse =
-            serde_json::from_value(raw).map_err(|_| CatalogError::InvalidResponse)?;
-        if payload.metas.len() > MAX_RESULTS {
-            return Err(CatalogError::InvalidResponse);
-        }
-        let mut titles = Vec::with_capacity(payload.metas.len());
-        let mut seen = HashSet::new();
-        for meta in payload.metas {
-            if meta.kind != kind_text(query.kind()) {
-                return Err(CatalogError::InvalidResponse);
-            }
-            let title = validate_title(meta.id, query.kind(), meta.name, meta.description)?;
-            if !seen.insert(title.id().clone()) {
-                return Err(CatalogError::InvalidResponse);
-            }
-            titles.push(title);
-        }
+        let (titles, rich) = parse_search(raw, query.kind())?;
+        self.save_search(query, titles, rich)
+    }
+
+    fn save_search(
+        &mut self,
+        query: &SearchQuery,
+        titles: Vec<CatalogTitle>,
+        rich: Vec<normalized_rich::RichRecord>,
+    ) -> Result<CachedSearch, CatalogError> {
         let fetched_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| CatalogError::Clock)?
@@ -429,6 +425,31 @@ pub(crate) fn decode_fixture_details(
     payload: &str,
 ) -> Result<TitleDetails, CatalogError> {
     metadata::decode_fixture_details(kind, id, payload)
+}
+
+fn parse_search(
+    raw: serde_json::Value,
+    kind: MediaKind,
+) -> Result<(Vec<CatalogTitle>, Vec<normalized_rich::RichRecord>), CatalogError> {
+    let rich = normalized_rich::cinemeta_summaries(&raw)?;
+    let payload: SearchResponse =
+        serde_json::from_value(raw).map_err(|_| CatalogError::InvalidResponse)?;
+    if payload.metas.len() > MAX_RESULTS {
+        return Err(CatalogError::InvalidResponse);
+    }
+    let mut titles = Vec::with_capacity(payload.metas.len());
+    let mut seen = HashSet::new();
+    for meta in payload.metas {
+        if meta.kind != kind_text(kind) {
+            return Err(CatalogError::InvalidResponse);
+        }
+        let title = validate_title(meta.id, kind, meta.name, meta.description)?;
+        if !seen.insert(title.id().clone()) {
+            return Err(CatalogError::InvalidResponse);
+        }
+        titles.push(title);
+    }
+    Ok((titles, rich))
 }
 
 #[cfg(test)]
