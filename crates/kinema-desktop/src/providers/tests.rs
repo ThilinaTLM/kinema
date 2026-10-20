@@ -538,6 +538,13 @@ fn local_http_url_constructor_is_test_only() -> TestResult {
 
 #[test]
 fn diagnostics_redact_credentials_magnets_and_provider_payloads() -> TestResult {
+    if !crate::providers::test_logging::isolated(
+        module_path!(),
+        "diagnostics_redact_credentials_magnets_and_provider_payloads",
+    ) {
+        return Ok(());
+    }
+
     use super::test_logging::{capture, excludes};
     for kind in [DebridKind::RealDebrid, DebridKind::AllDebrid] {
         let (mut base, server) = fixture(vec![(

@@ -324,6 +324,13 @@ mod logging_tests {
     #[test]
     fn launch_diagnostics_exclude_tokens_magnets_and_custom_paths()
     -> Result<(), Box<dyn std::error::Error>> {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "launch_diagnostics_exclude_tokens_magnets_and_custom_paths",
+        ) {
+            return Ok(());
+        }
+
         let root = tempfile::tempdir()?;
         let choice = PlayerChoice::Custom(root.path().join("missing-player-secret.exe"));
         let (_, output) = capture(|| {

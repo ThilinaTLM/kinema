@@ -56,6 +56,27 @@ trait Vault: Send + Sync {
     fn delete(&self, account: &'static str) -> Result<(), CredentialError>;
 }
 
+fn diagnose<T>(
+    account: &'static str,
+    operation: &'static str,
+    result: Result<T, CredentialError>,
+) -> Result<T, CredentialError> {
+    match &result {
+        Ok(_) => tracing::debug!(
+            provider = account,
+            operation,
+            "Secure credential operation completed"
+        ),
+        Err(category) => tracing::warn!(
+            provider = account,
+            operation,
+            ?category,
+            "Secure credential operation failed"
+        ),
+    }
+    result
+}
+
 pub struct CredentialStore {
     vault: Box<dyn Vault>,
 }
@@ -72,13 +93,25 @@ impl CredentialStore {
         }
     }
     pub fn get(&self, kind: DebridKind) -> Result<SecretString, CredentialError> {
-        self.vault.get(debrid_account(kind))
+        diagnose(
+            debrid_account(kind),
+            "get",
+            self.vault.get(debrid_account(kind)),
+        )
     }
     pub fn set(&self, kind: DebridKind, secret: SecretString) -> Result<(), CredentialError> {
-        self.vault.set(debrid_account(kind), secret)
+        diagnose(
+            debrid_account(kind),
+            "set",
+            self.vault.set(debrid_account(kind), secret),
+        )
     }
     pub fn delete(&self, kind: DebridKind) -> Result<(), CredentialError> {
-        self.vault.delete(debrid_account(kind))
+        diagnose(
+            debrid_account(kind),
+            "delete",
+            self.vault.delete(debrid_account(kind)),
+        )
     }
     /// Checks presence without exposing a token to the UI; any temporary is zeroized.
     pub fn status(&self, kind: DebridKind) -> Result<bool, CredentialError> {
@@ -105,16 +138,26 @@ impl MetadataCredentialStore {
         }
     }
     pub fn get(&self) -> Result<SecretString, CredentialError> {
-        self.vault.get("tmdb")
+        diagnose("tmdb", "get", self.vault.get("tmdb"))
     }
     pub fn set(&self, secret: SecretString) -> Result<(), CredentialError> {
-        self.vault.set("tmdb", secret)?;
+        diagnose("tmdb", "set", self.vault.set("tmdb", secret))?;
         METADATA_GENERATION.fetch_add(1, Ordering::AcqRel);
+        tracing::debug!(
+            provider = "tmdb",
+            reason = "credential_mutation",
+            "Metadata credential generation advanced"
+        );
         Ok(())
     }
     pub fn delete(&self) -> Result<(), CredentialError> {
-        self.vault.delete("tmdb")?;
+        diagnose("tmdb", "delete", self.vault.delete("tmdb"))?;
         METADATA_GENERATION.fetch_add(1, Ordering::AcqRel);
+        tracing::debug!(
+            provider = "tmdb",
+            reason = "credential_mutation",
+            "Metadata credential generation advanced"
+        );
         Ok(())
     }
     pub fn status(&self) -> Result<bool, CredentialError> {
@@ -205,6 +248,42 @@ mod tests {
                 .ok_or(CredentialError::Missing)
         }
     }
+    #[test]
+    fn credentials_diagnostics_never_format_tokens_or_backend_payloads()
+    -> Result<(), CredentialError> {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "credentials_diagnostics_never_format_tokens_or_backend_payloads",
+        ) {
+            return Ok(());
+        }
+
+        use crate::providers::test_logging::{capture, excludes};
+        let store = CredentialStore {
+            vault: Box::<FakeVault>::default(),
+        };
+        let (result, output) = capture(|| {
+            store.set(
+                DebridKind::RealDebrid,
+                SecretString::new("debrid-token-secret".into()),
+            )?;
+            let _secret = store.get(DebridKind::RealDebrid)?;
+            let category = safe_error(keyring::Error::BadEncoding(
+                b"backend-token-secret".to_vec(),
+            ));
+            assert_eq!(
+                diagnose::<()>("tmdb", "get", Err(category)),
+                Err(CredentialError::Unavailable)
+            );
+            store.delete(DebridKind::RealDebrid)?;
+            Ok(())
+        });
+        result?;
+        assert!(output.contains("Unavailable"));
+        excludes(&output, &["debrid-token-secret", "backend-token-secret"]);
+        Ok(())
+    }
+
     #[test]
     fn fake_roundtrip_and_status() -> Result<(), CredentialError> {
         let store = CredentialStore {

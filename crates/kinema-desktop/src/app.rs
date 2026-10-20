@@ -69,6 +69,72 @@ pub enum AppAction {
         session_id: String,
     },
 }
+impl AppAction {
+    pub(crate) fn operation(&self) -> &'static str {
+        match self {
+            Self::LoadSettings => "load_settings",
+            Self::SaveSettings(_) => "save_settings",
+            Self::SetCredential { .. } => "set_credential",
+            Self::DeleteCredential(_) => "delete_credential",
+            Self::TestCredential(_) => "test_credential",
+            Self::SetTmdbCredential { .. } => "set_tmdb_credential",
+            Self::DeleteTmdbCredential => "delete_tmdb_credential",
+            Self::TestTmdbCredential => "test_tmdb_credential",
+            Self::Prepare { .. } => "prepare",
+            Self::PlayFile { .. } => "play_file",
+            Self::PlayLocal { .. } => "play_local",
+            Self::ReleaseSession(_) => "release_session",
+            Self::CleanupUnused => "cleanup_unused",
+            Self::ReplaySession { .. } => "replay_session",
+            Self::RevealSession { .. } => "reveal_session",
+        }
+    }
+}
+// Never format AppAction/AppOutcome: they contain URLs, filenames and tokens.
+fn log_operation_result(result: &Result<AppOutcome, String>, canceled: bool, started: Instant) {
+    let duration_ms = started.elapsed().as_millis() as u64;
+    match result {
+        Err(_) if canceled => tracing::debug!(
+            duration_ms,
+            outcome = "cancelled",
+            "Application operation discarded"
+        ),
+        Err(_) => tracing::warn!(
+            duration_ms,
+            category = "operation_failed",
+            "Application operation failed"
+        ),
+        Ok(
+            AppOutcome::Failed { .. }
+            | AppOutcome::CacheFull { .. }
+            | AppOutcome::CacheLimitNeeded { .. }
+            | AppOutcome::Busy { .. }
+            | AppOutcome::SettingsWarning { .. },
+        ) => tracing::warn!(
+            duration_ms,
+            category = "user_visible_failure",
+            "Application operation needs user attention"
+        ),
+        Ok(AppOutcome::Prepared { prepared, .. }) => {
+            tracing::info!(duration_ms, provider = ?prepared.provider, files = prepared.files.len(), "Application preparation completed")
+        }
+        Ok(AppOutcome::PlaybackStarted { .. } | AppOutcome::SessionRelaunched { .. }) => {
+            tracing::info!(duration_ms, "Application player launch completed")
+        }
+        Ok(AppOutcome::CredentialChecked { provider }) => {
+            tracing::info!(duration_ms, ?provider, "Credential check succeeded")
+        }
+        Ok(AppOutcome::TmdbCredentialChecked) => {
+            tracing::info!(duration_ms, provider = "tmdb", "Credential check succeeded")
+        }
+        Ok(_) => tracing::debug!(
+            duration_ms,
+            outcome = "completed",
+            "Application operation completed"
+        ),
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CredentialState {
     Present,
@@ -223,6 +289,7 @@ fn emit_invalidation(shared: &Shared, released: Vec<String>) {
 struct CloseOnExit(Arc<Shared>);
 impl Drop for CloseOnExit {
     fn drop(&mut self) {
+        tracing::info!("Application worker stopped");
         let mut mail = self.0.mailbox.lock().unwrap_or_else(|e| e.into_inner());
         mail.stopped = true;
         mail.account.store(true, Ordering::Release);
@@ -671,238 +738,283 @@ impl Application {
         account: Arc<AtomicBool>,
         validate: impl Fn(DebridKind) -> Result<(), String>,
     ) -> Result<AppOutcome, String> {
-        check(&cancel)?;
-        match command.action {
-            AppAction::LoadSettings => {
-                self.settings = None;
-                self.snapshot()
+        let span = tracing::info_span!(
+            "application_operation",
+            operation = command.action.operation(),
+            generation = command.generation,
+            provider = tracing::field::Empty
+        );
+        match &command.action {
+            AppAction::SetCredential { provider, .. }
+            | AppAction::DeleteCredential(provider)
+            | AppAction::TestCredential(provider) => {
+                span.record("provider", tracing::field::debug(provider));
             }
-            AppAction::SaveSettings(settings) => {
-                // Open the durable cache even before first playback, so persisted
-                // reservations participate in quota validation after restart.
-                let previous = self.settings()?;
-                let limit = budget(settings.media_limit_bytes)?;
-                validate_quota(
-                    settings.media_limit_bytes,
-                    self.media()?.usage().reserved_bytes,
-                )?;
-                self.media()?.set_limit(limit).map_err(|e| e.to_string())?;
-                let result = self
-                    .store
-                    .as_ref()
-                    .ok_or("Settings unavailable")?
-                    .save(&settings);
-                let warning = apply_save_result(result, settings, &mut self.settings, || {
-                    if let (Some(media), Some(limit)) =
-                        (&self.media, CacheBudget::new(previous.media_limit_bytes))
-                    {
-                        let _ = media.set_limit(limit);
-                    }
-                })?;
-                self.snapshot_warning(warning)
+            AppAction::SetTmdbCredential { .. }
+            | AppAction::DeleteTmdbCredential
+            | AppAction::TestTmdbCredential => {
+                span.record("provider", "tmdb");
             }
-            AppAction::SetCredential { provider, value } => {
-                CredentialStore::new()
-                    .set(provider, value)
-                    .map_err(|e| e.to_string())?;
-                self.snapshot()
-            }
-            AppAction::DeleteCredential(provider) => {
-                match CredentialStore::new().delete(provider) {
-                    Ok(()) | Err(CredentialError::Missing) => {}
-                    Err(e) => return Err(e.to_string()),
-                }
-                self.snapshot()
-            }
-            AppAction::SetTmdbCredential { value } => {
-                update_metadata_credential(|| MetadataCredentialStore::new().set(value), false)
-            }
-            AppAction::DeleteTmdbCredential => {
-                update_metadata_credential(|| MetadataCredentialStore::new().delete(), true)
-            }
-            AppAction::TestTmdbCredential => {
-                test_credential(
-                    || MetadataCredentialStore::new().get(),
-                    |token| TmdbClient::new(token)?.check_account(),
-                    &cancel,
-                )?;
-                Ok(AppOutcome::TmdbCredentialChecked)
-            }
-            AppAction::TestCredential(provider) => {
-                validate(provider)?;
-                test_credential(
-                    || (self.io.credential)(provider),
-                    |token| {
-                        let client = (self.io.client)(provider, token)?;
-                        client.check_account(&cancel)
-                    },
-                    &cancel,
-                )?;
-                check(&cancel)?;
-                validate(provider)?;
-                Ok(AppOutcome::CredentialChecked { provider })
-            }
-            AppAction::Prepare { target, candidate } => {
-                self.prepared = None;
-                let settings = self.settings()?;
-                validate(settings.debrid)?;
-                let token = (self.io.credential)(settings.debrid).map_err(|e| e.to_string())?;
-                check(&cancel)?;
-                check(&account)?;
-                let client = (self.io.client)(settings.debrid, token).map_err(|e| e.to_string())?;
-                let prepared = client
-                    .prepare(&candidate.torrent, &cancel)
-                    .map_err(|e| e.to_string())?;
-                check(&cancel)?;
-                check(&account)?;
-                validate(settings.debrid)?;
-                let hint = FileHint::from(&candidate.torrent);
-                let (selection, method) =
-                    select_file_with_hint(&target, &prepared.files, prepared.provider, Some(&hint));
-                tracing::debug!(
-                    method = method.as_str(),
-                    file_count = prepared.files.len(),
-                    match_count = match &selection {
-                        FileSelection::Unique(_) => 1,
-                        FileSelection::Ambiguous(indices) => indices.len(),
-                        FileSelection::NotFound => 0,
-                    },
-                    unique = matches!(selection, FileSelection::Unique(_)),
-                    "Torrent file selection completed"
-                );
-                if let FileSelection::Unique(index) = &selection {
-                    self.prepared = Some(Preparation {
-                        id: command.generation,
-                        selected_file_id: prepared.files[*index].id.clone(),
-                        prepared: prepared.clone(),
-                        client,
-                    });
-                }
-                Ok(AppOutcome::Prepared {
-                    prepared,
-                    target,
-                    selection,
-                })
-            }
-            AppAction::PlayFile {
-                preparation,
-                file_id,
-            } => {
-                let current = self
-                    .prepared
-                    .as_ref()
-                    .filter(|p| p.id == preparation)
-                    .ok_or("Preparation is obsolete; prepare the source again")?;
-                if current.selected_file_id != file_id {
-                    return Err(
-                        "Couldn't identify the file in this torrent — try another stream.".into(),
-                    );
-                }
-                tracing::debug!("Playing policy-selected torrent file");
-                validate(current.prepared.provider)?;
-                let prepared = current.prepared.clone();
-                let client = current.client.clone();
-                let file = prepared
-                    .files
-                    .iter()
-                    .find(|f| f.id == file_id)
-                    .cloned()
-                    .ok_or("File no longer exists")?;
-                check(&account)?;
-                let resolved = client
-                    .resolve_file(&prepared, &file_id, &cancel)
-                    .map_err(|e| e.to_string())?;
-                check(&cancel)?;
-                check(&account)?;
-                validate(prepared.provider)?;
-                let file_name = resolved.file_name.clone();
-                let renew = Arc::new(move || {
-                    if account.load(Ordering::Acquire) {
-                        return Err(MediaError::Canceled);
-                    }
-                    match client.resolve_file(&prepared, &file.id, &account) {
-                        Ok(resolved) => Ok(resolved),
-                        Err(DebridError::FileNotFound | DebridError::Failed) => {
-                            let refreshed = client
-                                .prepare(&prepared.source, &account)
-                                .map_err(|_| MediaError::Upstream)?;
-                            let matches: Vec<_> = refreshed
-                                .files
-                                .iter()
-                                .filter(|f| f.path == file.path && f.size == file.size)
-                                .collect();
-                            if matches.len() != 1 {
-                                return Err(MediaError::IdentityMismatch);
-                            }
-                            client
-                                .resolve_file(&refreshed, &matches[0].id, &account)
-                                .map_err(|_| MediaError::Upstream)
-                        }
-                        Err(_) => Err(MediaError::Upstream),
-                    }
-                });
-                let session = match self.media()?.register_remote(resolved, renew) {
-                    Ok(session) => session,
-                    Err(error) => return Ok(media_outcome(error)),
-                };
-                self.launch(session, file_name, &cancel, true)
-            }
-            AppAction::PlayLocal { path } => {
-                let name = path
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "Local media".into());
-                let session = self
-                    .media()?
-                    .register_local(&path)
-                    .map_err(|e| e.to_string())?;
-                self.launch(session, name, &cancel, false)
-            }
-            AppAction::ReleaseSession(id) => {
-                if let Some(media) = &self.media {
-                    media.release(&id).map_err(|e| e.to_string())?;
-                }
-                self.sessions.retain(|existing| existing.id != id);
-                Ok(AppOutcome::Released { id })
-            }
-            AppAction::ReplaySession { session_id } => {
-                let session = self
-                    .media
-                    .as_ref()
-                    .ok_or("Media session ended")?
-                    .session(&session_id)
-                    .map_err(|e| e.to_string())?;
-                check(&cancel)?;
-                let settings = self.settings()?;
-                check(&cancel)?;
-                if let Some(child) =
-                    (self.io.launch)(&settings.player, &session.url).map_err(|e| e.to_string())?
-                {
-                    self.children.push(child);
-                }
-                Ok(AppOutcome::SessionRelaunched { session_id })
-            }
-            AppAction::RevealSession { session_id } => {
-                let path = self
-                    .media
-                    .as_ref()
-                    .ok_or("Media session ended")?
-                    .reveal_path(&session_id)
-                    .map_err(|e| e.to_string())?;
-                player::reveal_file(&path)?;
-                Ok(AppOutcome::RevealRequested { session_id })
-            }
-            AppAction::CleanupUnused => {
-                let report = self
-                    .media()?
-                    .cleanup_unused()
-                    .map_err(|e| media_message(&e))?;
-                Ok(AppOutcome::Cleaned {
-                    bytes: report.freed_bytes,
-                    protected_files: report.protected_files,
-                })
-            }
+            _ => {}
         }
+        let _span = span.entered();
+        let started = Instant::now();
+        if matches!(
+            command.action,
+            AppAction::Prepare { .. }
+                | AppAction::PlayFile { .. }
+                | AppAction::PlayLocal { .. }
+                | AppAction::ReplaySession { .. }
+        ) {
+            tracing::info!("Application preparation or player launch requested");
+        }
+        let result = (|| {
+            check(&cancel)?;
+            match command.action {
+                AppAction::LoadSettings => {
+                    self.settings = None;
+                    self.snapshot()
+                }
+                AppAction::SaveSettings(settings) => {
+                    // Open the durable cache even before first playback, so persisted
+                    // reservations participate in quota validation after restart.
+                    let previous = self.settings()?;
+                    let limit = budget(settings.media_limit_bytes)?;
+                    validate_quota(
+                        settings.media_limit_bytes,
+                        self.media()?.usage().reserved_bytes,
+                    )?;
+                    self.media()?.set_limit(limit).map_err(|e| e.to_string())?;
+                    let result = self
+                        .store
+                        .as_ref()
+                        .ok_or("Settings unavailable")?
+                        .save(&settings);
+                    let warning = apply_save_result(result, settings, &mut self.settings, || {
+                        if let (Some(media), Some(limit)) =
+                            (&self.media, CacheBudget::new(previous.media_limit_bytes))
+                            && let Err(category) = media.set_limit(limit)
+                        {
+                            tracing::warn!(?category, "Media quota rollback failed");
+                        }
+                    })?;
+                    self.snapshot_warning(warning)
+                }
+                AppAction::SetCredential { provider, value } => {
+                    CredentialStore::new()
+                        .set(provider, value)
+                        .map_err(|e| e.to_string())?;
+                    self.snapshot()
+                }
+                AppAction::DeleteCredential(provider) => {
+                    match CredentialStore::new().delete(provider) {
+                        Ok(()) | Err(CredentialError::Missing) => {}
+                        Err(e) => return Err(e.to_string()),
+                    }
+                    self.snapshot()
+                }
+                AppAction::SetTmdbCredential { value } => {
+                    update_metadata_credential(|| MetadataCredentialStore::new().set(value), false)
+                }
+                AppAction::DeleteTmdbCredential => {
+                    update_metadata_credential(|| MetadataCredentialStore::new().delete(), true)
+                }
+                AppAction::TestTmdbCredential => {
+                    test_credential(
+                        || MetadataCredentialStore::new().get(),
+                        |token| TmdbClient::new(token)?.check_account(),
+                        &cancel,
+                    )?;
+                    Ok(AppOutcome::TmdbCredentialChecked)
+                }
+                AppAction::TestCredential(provider) => {
+                    validate(provider)?;
+                    test_credential(
+                        || (self.io.credential)(provider),
+                        |token| {
+                            let client = (self.io.client)(provider, token)?;
+                            client.check_account(&cancel)
+                        },
+                        &cancel,
+                    )?;
+                    check(&cancel)?;
+                    validate(provider)?;
+                    Ok(AppOutcome::CredentialChecked { provider })
+                }
+                AppAction::Prepare { target, candidate } => {
+                    self.prepared = None;
+                    let settings = self.settings()?;
+                    tracing::Span::current()
+                        .record("provider", tracing::field::debug(settings.debrid));
+                    validate(settings.debrid)?;
+                    let token = (self.io.credential)(settings.debrid).map_err(|e| e.to_string())?;
+                    check(&cancel)?;
+                    check(&account)?;
+                    let client =
+                        (self.io.client)(settings.debrid, token).map_err(|e| e.to_string())?;
+                    let prepared = client
+                        .prepare(&candidate.torrent, &cancel)
+                        .map_err(|e| e.to_string())?;
+                    check(&cancel)?;
+                    check(&account)?;
+                    validate(settings.debrid)?;
+                    let hint = FileHint::from(&candidate.torrent);
+                    let (selection, method) = select_file_with_hint(
+                        &target,
+                        &prepared.files,
+                        prepared.provider,
+                        Some(&hint),
+                    );
+                    tracing::debug!(
+                        method = method.as_str(),
+                        file_count = prepared.files.len(),
+                        match_count = match &selection {
+                            FileSelection::Unique(_) => 1,
+                            FileSelection::Ambiguous(indices) => indices.len(),
+                            FileSelection::NotFound => 0,
+                        },
+                        unique = matches!(selection, FileSelection::Unique(_)),
+                        "Torrent file selection completed"
+                    );
+                    if let FileSelection::Unique(index) = &selection {
+                        self.prepared = Some(Preparation {
+                            id: command.generation,
+                            selected_file_id: prepared.files[*index].id.clone(),
+                            prepared: prepared.clone(),
+                            client,
+                        });
+                    }
+                    Ok(AppOutcome::Prepared {
+                        prepared,
+                        target,
+                        selection,
+                    })
+                }
+                AppAction::PlayFile {
+                    preparation,
+                    file_id,
+                } => {
+                    let current = self
+                        .prepared
+                        .as_ref()
+                        .filter(|p| p.id == preparation)
+                        .ok_or("Preparation is obsolete; prepare the source again")?;
+                    if current.selected_file_id != file_id {
+                        return Err(
+                            "Couldn't identify the file in this torrent — try another stream."
+                                .into(),
+                        );
+                    }
+                    tracing::debug!("Playing policy-selected torrent file");
+                    tracing::Span::current()
+                        .record("provider", tracing::field::debug(current.prepared.provider));
+                    validate(current.prepared.provider)?;
+                    let prepared = current.prepared.clone();
+                    let client = current.client.clone();
+                    let file = prepared
+                        .files
+                        .iter()
+                        .find(|f| f.id == file_id)
+                        .cloned()
+                        .ok_or("File no longer exists")?;
+                    check(&account)?;
+                    let resolved = client
+                        .resolve_file(&prepared, &file_id, &cancel)
+                        .map_err(|e| e.to_string())?;
+                    check(&cancel)?;
+                    check(&account)?;
+                    validate(prepared.provider)?;
+                    let file_name = resolved.file_name.clone();
+                    let renew = Arc::new(move || {
+                        if account.load(Ordering::Acquire) {
+                            return Err(MediaError::Canceled);
+                        }
+                        match client.resolve_file(&prepared, &file.id, &account) {
+                            Ok(resolved) => Ok(resolved),
+                            Err(DebridError::FileNotFound | DebridError::Failed) => {
+                                let refreshed = client
+                                    .prepare(&prepared.source, &account)
+                                    .map_err(|_| MediaError::Upstream)?;
+                                let matches: Vec<_> = refreshed
+                                    .files
+                                    .iter()
+                                    .filter(|f| f.path == file.path && f.size == file.size)
+                                    .collect();
+                                if matches.len() != 1 {
+                                    return Err(MediaError::IdentityMismatch);
+                                }
+                                client
+                                    .resolve_file(&refreshed, &matches[0].id, &account)
+                                    .map_err(|_| MediaError::Upstream)
+                            }
+                            Err(_) => Err(MediaError::Upstream),
+                        }
+                    });
+                    let session = match self.media()?.register_remote(resolved, renew) {
+                        Ok(session) => session,
+                        Err(error) => return Ok(media_outcome(error)),
+                    };
+                    self.launch(session, file_name, &cancel, true)
+                }
+                AppAction::PlayLocal { path } => {
+                    let name = path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "Local media".into());
+                    let session = self
+                        .media()?
+                        .register_local(&path)
+                        .map_err(|e| e.to_string())?;
+                    self.launch(session, name, &cancel, false)
+                }
+                AppAction::ReleaseSession(id) => {
+                    if let Some(media) = &self.media {
+                        media.release(&id).map_err(|e| e.to_string())?;
+                    }
+                    self.sessions.retain(|existing| existing.id != id);
+                    Ok(AppOutcome::Released { id })
+                }
+                AppAction::ReplaySession { session_id } => {
+                    let session = self
+                        .media
+                        .as_ref()
+                        .ok_or("Media session ended")?
+                        .session(&session_id)
+                        .map_err(|e| e.to_string())?;
+                    check(&cancel)?;
+                    let settings = self.settings()?;
+                    check(&cancel)?;
+                    if let Some(child) = (self.io.launch)(&settings.player, &session.url)
+                        .map_err(|e| e.to_string())?
+                    {
+                        self.children.push(child);
+                    }
+                    Ok(AppOutcome::SessionRelaunched { session_id })
+                }
+                AppAction::RevealSession { session_id } => {
+                    let path = self
+                        .media
+                        .as_ref()
+                        .ok_or("Media session ended")?
+                        .reveal_path(&session_id)
+                        .map_err(|e| e.to_string())?;
+                    player::reveal_file(&path)?;
+                    Ok(AppOutcome::RevealRequested { session_id })
+                }
+                AppAction::CleanupUnused => {
+                    let report = self
+                        .media()?
+                        .cleanup_unused()
+                        .map_err(|e| media_message(&e))?;
+                    Ok(AppOutcome::Cleaned {
+                        bytes: report.freed_bytes,
+                        protected_files: report.protected_files,
+                    })
+                }
+            }
+        })();
+        log_operation_result(&result, cancel.load(Ordering::Acquire), started);
+        result
     }
     fn launch(
         &mut self,
@@ -985,9 +1097,24 @@ fn test_credential<E: std::fmt::Display>(
     cancel: &AtomicBool,
 ) -> Result<(), String> {
     check(cancel)?;
-    let token = get().map_err(|e| e.to_string())?;
+    let started = Instant::now();
+    let token = get().map_err(|category| {
+        tracing::warn!(?category, "Credential check could not read secure storage");
+        category.to_string()
+    })?;
     check(cancel)?;
-    verify(token).map_err(|e| e.to_string())?;
+    verify(token).map_err(|error| {
+        tracing::warn!(
+            category = "verification_failed",
+            duration_ms = started.elapsed().as_millis() as u64,
+            "Credential check failed"
+        );
+        error.to_string()
+    })?;
+    tracing::debug!(
+        duration_ms = started.elapsed().as_millis() as u64,
+        "Credential verification completed"
+    );
     check(cancel)
 }
 fn validate_quota(bytes: u64, reserved: u64) -> Result<(), String> {
@@ -1076,6 +1203,7 @@ fn run(shared: Arc<Shared>) {
     run_application(shared, Application::default());
 }
 fn run_application(shared: Arc<Shared>, mut app: Application) {
+    tracing::info!("Application worker started");
     let mut last_tick = Instant::now();
     loop {
         let (request, account, invalidate) = {
@@ -1172,6 +1300,11 @@ fn run_application(shared: Arc<Shared>, mut app: Application) {
                 && request.cancel.load(Ordering::Acquire)
             {
                 app.prepared = None;
+                tracing::debug!(
+                    generation,
+                    outcome = "superseded",
+                    "Application preparation discarded"
+                );
                 outcome = failed("Preparation superseded");
             }
             if let Ok(mut mail) = shared.mailbox.lock() {
@@ -1196,7 +1329,11 @@ fn run_application(shared: Arc<Shared>, mut app: Application) {
             // Reap exited children without translating OS process status into
             // claims about media playing or completion. Never kill a player.
             app.children
-                .retain_mut(|child| matches!(child.try_wait(), Ok(None)));
+                .retain_mut(|child| match child.try_wait() {
+                    Ok(None) => true,
+                    Ok(Some(status)) => { tracing::debug!(success = status.success(), "External player process exited"); false }
+                    Err(error) => { tracing::warn!(io_kind = ?error.kind(), "External player process status unavailable"); false }
+                });
             if let Some(media) = &app.media {
                 let usage = media.usage();
                 let errors = media.session_errors();
@@ -1230,6 +1367,68 @@ fn run_application(shared: Arc<Shared>, mut app: Application) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn app_diagnostics_exclude_debrid_tokens_and_playback_urls() {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "app_diagnostics_exclude_debrid_tokens_and_playback_urls",
+        ) {
+            return;
+        }
+
+        use crate::providers::test_logging::{capture, excludes};
+        let mut app = Application::default();
+        app.io.credential = Box::new(|_| Ok(SecretString::new("app-debrid-secret".into())));
+        app.io.client = Box::new(|_, token| {
+            assert_eq!(token.expose(), "app-debrid-secret");
+            Err(DebridError::CredentialRejected)
+        });
+        let (result, output) = capture(|| {
+            let result = app.execute(
+                AppCommand {
+                    generation: 1,
+                    action: AppAction::TestCredential(DebridKind::RealDebrid),
+                },
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+            );
+            log_operation_result(
+                &Ok(AppOutcome::PlaybackStarted {
+                    session: PlaybackSession {
+                        id: "lease-secret".into(),
+                        url: "http://127.0.0.1/media/lease-secret?token=playback-secret".into(),
+                    },
+                    file_name: "filename-secret".into(),
+                }),
+                false,
+                Instant::now(),
+            );
+            assert!(
+                test_credential(
+                    || Ok(SecretString::new("verifier-token-secret".into())),
+                    |_| Err("https://cdn.invalid/?signature=error-secret"),
+                    &AtomicBool::new(false)
+                )
+                .is_err()
+            );
+            result
+        });
+        assert!(result.is_err());
+        assert!(output.contains("Credential check failed"));
+        excludes(
+            &output,
+            &[
+                "app-debrid-secret",
+                "lease-secret",
+                "playback-secret",
+                "filename-secret",
+                "verifier-token-secret",
+                "error-secret",
+                "signature=",
+            ],
+        );
+    }
+
     #[test]
     fn credential_failures_are_not_missing() {
         assert_eq!(

@@ -38,6 +38,50 @@ pub enum TmdbQuery {
     Similar { id: u64, page: u32 },
     Season { series_id: u64, season: u32 },
 }
+impl TmdbQuery {
+    pub(crate) fn operation(&self) -> &'static str {
+        match self {
+            Self::Browse { .. } => "browse",
+            Self::Search { .. } => "search",
+            Self::Details { .. } => "details",
+            Self::Similar { .. } => "similar",
+            Self::Season { .. } => "season",
+        }
+    }
+    // No Debug of the query: search text can contain private text or URLs.
+    pub(crate) fn record_diagnostics(&self, span: &tracing::Span) {
+        match self {
+            Self::Browse { kind, page } => {
+                span.record("media_kind", tracing::field::debug(kind));
+                span.record("page", page);
+            }
+            Self::Search { query, page } => {
+                span.record("media_kind", tracing::field::debug(query.kind()));
+                span.record("page", page);
+            }
+            Self::Details { kind, id } => {
+                span.record("media_kind", tracing::field::debug(kind));
+                span.record("tmdb_id", id);
+            }
+            Self::Similar { id, page } => {
+                span.record("tmdb_id", id);
+                span.record("page", page);
+            }
+            Self::Season { series_id, season } => {
+                span.record("tmdb_id", series_id);
+                span.record("season", season);
+            }
+        }
+    }
+}
+pub(crate) fn data_count(data: &TmdbData) -> usize {
+    match data {
+        TmdbData::Page(p) => p.titles.len(),
+        TmdbData::Details(_) => 1,
+        TmdbData::Season(s) => s.episodes.len(),
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TmdbTitle {
     pub id: u64,
@@ -158,9 +202,15 @@ impl TmdbClient {
         Self::with_transport(secret, Self::transport()?)
     }
     pub(crate) fn transport() -> Result<Client, TmdbError> {
-        Self::client_builder()
-            .build()
-            .map_err(|_| TmdbError::Network)
+        Self::client_builder().build().map_err(|error| {
+            tracing::warn!(
+                provider = "tmdb",
+                operation = "build_client",
+                kind = crate::logging::http_error_kind(&error),
+                "TMDB transport initialization failed"
+            );
+            TmdbError::Network
+        })
     }
     pub(crate) fn with_transport(secret: SecretString, client: Client) -> Result<Self, TmdbError> {
         Self::at_with_transport(
@@ -182,6 +232,11 @@ impl TmdbClient {
             || secret.expose().len() > 4096
             || !secret.expose().bytes().all(|b| b.is_ascii_graphic())
         {
+            tracing::warn!(
+                provider = "tmdb",
+                category = "invalid_credential",
+                "TMDB credential validation failed"
+            );
             return Err(TmdbError::InvalidCredential);
         }
         Ok(Self {
@@ -210,47 +265,99 @@ impl TmdbClient {
         path: &str,
         params: &[(&str, String)],
     ) -> Result<T, TmdbError> {
-        let mut url = self
-            .endpoint
-            .join(path)
-            .map_err(|_| TmdbError::InvalidQuery)?;
-        url.query_pairs_mut()
-            .append_pair("language", LANGUAGE)
-            .extend_pairs(params.iter().map(|(k, v)| (*k, v.as_str())));
-        let mut authorization = HeaderValue::from_str(&format!("Bearer {}", self.secret.expose()))
-            .map_err(|_| TmdbError::InvalidCredential)?;
-        authorization.set_sensitive(true);
-        let response = self
-            .client
-            .get(url)
-            .header(AUTHORIZATION, authorization)
-            .send()
-            .map_err(|_| TmdbError::Network)?;
-        match response.status().as_u16() {
-            401 | 403 => {
-                self.rejected
-                    .store(true, std::sync::atomic::Ordering::Release);
-                return Err(TmdbError::RejectedCredential);
+        let _span = tracing::info_span!("tmdb_http", provider = "tmdb").entered();
+        let started = std::time::Instant::now();
+        let result = (|| {
+            let mut url = self
+                .endpoint
+                .join(path)
+                .map_err(|_| TmdbError::InvalidQuery)?;
+            url.query_pairs_mut()
+                .append_pair("language", LANGUAGE)
+                .extend_pairs(params.iter().map(|(k, v)| (*k, v.as_str())));
+            let mut authorization =
+                HeaderValue::from_str(&format!("Bearer {}", self.secret.expose()))
+                    .map_err(|_| TmdbError::InvalidCredential)?;
+            authorization.set_sensitive(true);
+            let response = self
+                .client
+                .get(url)
+                .header(AUTHORIZATION, authorization)
+                .send()
+                .map_err(|error| {
+                    tracing::warn!(
+                        kind = crate::logging::http_error_kind(&error),
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "TMDB HTTP transport failed"
+                    );
+                    TmdbError::Network
+                })?;
+            let status = response.status().as_u16();
+            tracing::debug!(
+                status,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "TMDB HTTP headers received"
+            );
+            if !response.status().is_success() {
+                tracing::warn!(
+                    status,
+                    category = match status {
+                        401 | 403 => "credential_rejected",
+                        429 => "rate_limited",
+                        _ => "http_status",
+                    },
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "TMDB HTTP request failed"
+                );
             }
-            429 => return Err(TmdbError::RateLimited),
-            200..=299 => (),
-            _ => return Err(TmdbError::HttpStatus),
+            match status {
+                401 | 403 => {
+                    self.rejected
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    return Err(TmdbError::RejectedCredential);
+                }
+                429 => return Err(TmdbError::RateLimited),
+                200..=299 => (),
+                _ => return Err(TmdbError::HttpStatus),
+            }
+            if response.content_length().is_some_and(|n| n > MAX_BYTES) {
+                return Err(TmdbError::TooLarge);
+            }
+            let mut bytes = Vec::new();
+            response
+                .take(MAX_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|error| {
+                    tracing::warn!(io_kind = ?error.kind(), "TMDB HTTP body read failed");
+                    TmdbError::Network
+                })?;
+            if bytes.len() as u64 > MAX_BYTES {
+                return Err(TmdbError::TooLarge);
+            }
+            tracing::debug!(
+                bytes = bytes.len(),
+                duration_ms = started.elapsed().as_millis() as u64,
+                "TMDB HTTP body received"
+            );
+            serde_json::from_slice(&bytes).map_err(|_| TmdbError::Malformed)
+        })();
+        if let Err(category) = &result {
+            tracing::warn!(
+                ?category,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "TMDB HTTP operation failed"
+            );
         }
-        if response.content_length().is_some_and(|n| n > MAX_BYTES) {
-            return Err(TmdbError::TooLarge);
-        }
-        let mut bytes = Vec::new();
-        response
-            .take(MAX_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| TmdbError::Network)?;
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err(TmdbError::TooLarge);
-        }
-        serde_json::from_slice(&bytes).map_err(|_| TmdbError::Malformed)
+        result
     }
     /// Official v3 validation endpoint; no account profile is requested or returned.
     pub fn check_account(&self) -> Result<(), TmdbError> {
+        let _span = tracing::info_span!(
+            "tmdb_account",
+            provider = "tmdb",
+            operation = "check_account"
+        )
+        .entered();
         #[derive(Deserialize)]
         struct Authentication {
             success: bool,
@@ -270,6 +377,17 @@ impl TmdbClient {
         &self,
         query: &TmdbQuery,
     ) -> Result<(TmdbData, Vec<crate::catalog::normalized_rich::RichRecord>), TmdbError> {
+        let span = tracing::info_span!(
+            "tmdb_request",
+            provider = "tmdb",
+            operation = query.operation(),
+            media_kind = tracing::field::Empty,
+            tmdb_id = tracing::field::Empty,
+            page = tracing::field::Empty,
+            season = tracing::field::Empty
+        );
+        query.record_diagnostics(&span);
+        let _span = span.entered();
         let started = std::time::Instant::now();
         let result = self.fetch_normalized_inner(query);
         let request_kind = match query {
@@ -279,7 +397,21 @@ impl TmdbClient {
             TmdbQuery::Similar { .. } => "similar",
             TmdbQuery::Season { .. } => "season",
         };
-        tracing::debug!(provider="tmdb", request_kind, elapsed_ms=started.elapsed().as_millis() as u64, outcome=?result.as_ref().map(|_| "success").map_err(|e| *e), "metadata request completed");
+        match &result {
+            Ok((data, _)) => tracing::debug!(
+                provider = "tmdb",
+                request_kind,
+                duration_ms = started.elapsed().as_millis() as u64,
+                count = data_count(data),
+                empty = data_count(data) == 0,
+                "TMDB metadata request completed"
+            ),
+            Err(category) => tracing::warn!(
+                ?category,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "TMDB metadata validation or fetch failed"
+            ),
+        }
         result
     }
     fn fetch_normalized_inner(
@@ -1005,6 +1137,49 @@ mod tests {
         assert_eq!(ok(decode(&encoded, query)), *data);
         assert!(decode(&encoded.replace("en-US", "fr-FR"), query).is_err());
     }
+    #[test]
+    fn tmdb_diagnostics_redact_bearer_search_and_error_payloads() {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "tmdb_diagnostics_redact_bearer_search_and_error_payloads",
+        ) {
+            return;
+        }
+
+        use crate::providers::test_logging::{capture, excludes};
+        let query = TmdbQuery::Search {
+            query: ok(SearchQuery::new(
+                MediaKind::Movie,
+                "https://private.invalid/path?token=search-secret",
+            )),
+            page: 1,
+        };
+        for status in [401, 429] {
+            let ((result, output), request) = local(
+                status,
+                r#"{"error":"payload-secret","url":"https://cdn.invalid/?signature=signed-secret"}"#,
+                |client| capture(|| client.fetch(&query)),
+            );
+            assert!(matches!(
+                result,
+                Err(TmdbError::RejectedCredential | TmdbError::RateLimited)
+            ));
+            assert!(request.contains(TOKEN));
+            assert!(output.contains(&status.to_string()));
+            excludes(
+                &output,
+                &[
+                    TOKEN,
+                    "search-secret",
+                    "payload-secret",
+                    "signed-secret",
+                    "token=",
+                    "signature=",
+                ],
+            );
+        }
+    }
+
     #[test]
     fn similar_uses_movie_scoped_endpoint_and_distinct_cache_identity() {
         let query = TmdbQuery::Similar { id: 91, page: 2 };

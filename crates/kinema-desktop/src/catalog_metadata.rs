@@ -192,37 +192,6 @@ impl CatalogService {
     }
 }
 
-/// Test diagnostics must never display errors/sources: they may contain URLs.
-#[cfg(test)]
-fn transport_diagnostics(error: &reqwest::Error) {
-    let mut tls = false;
-    let mut dns = false;
-    let mut io_kind = None;
-    let mut cause: Option<&(dyn Error + 'static)> = Some(error);
-    while let Some(source) = cause {
-        let text = source.to_string().to_ascii_lowercase();
-        tls |= text.contains("tls") || text.contains("certificate");
-        dns |= text.contains("dns") || text.contains("resolv");
-        if let Some(error) = source.downcast_ref::<std::io::Error>() {
-            io_kind = Some(error.kind());
-        }
-        cause = source.source();
-    }
-    let catalog_host = error
-        .url()
-        .is_some_and(|url| url.host_str() == Some("cinemeta-catalogs.strem.io"));
-    let primary_host = error
-        .url()
-        .is_some_and(|url| url.host_str() == Some("v3-cinemeta.strem.io"));
-    eprintln!(
-        "metadata HTTP failure categories: connect={} timeout={} request={} body={} tls_or_certificate={tls} dns_or_resolver={dns} io_kind={io_kind:?} primary_host={primary_host} catalog_host={catalog_host}",
-        error.is_connect(),
-        error.is_timeout(),
-        error.is_request(),
-        error.is_body()
-    );
-}
-
 fn decode_saved<T: serde::de::DeserializeOwned>(payload: &str) -> Result<T, CatalogError> {
     if payload.len() as u64 > MAX_RESPONSE_BYTES {
         return Err(CatalogError::InvalidCache);
@@ -820,6 +789,11 @@ impl CatalogService {
         self.ensure_active()?;
         let result = client.fetch_normalized(query);
         if matches!(result, Err(crate::tmdb::TmdbError::RejectedCredential)) {
+            tracing::debug!(
+                provider = "tmdb",
+                reason = "credential_rejection",
+                "TMDB credential cache invalidated"
+            );
             self.tmdb = None;
         }
         let (data, rich) = result.map_err(CatalogError::Tmdb)?;
@@ -835,22 +809,47 @@ impl CatalogService {
         >,
     ) -> Result<Arc<crate::tmdb::TmdbClient>, CatalogError> {
         let generation = crate::credentials::metadata_generation();
-        if self
-            .tmdb
-            .as_ref()
-            .is_some_and(|(saved, client)| *saved != generation || client.credential_rejected())
-        {
-            self.tmdb = None;
+        if let Some((saved, client)) = &self.tmdb {
+            let reason = if *saved != generation {
+                Some("generation_change")
+            } else if client.credential_rejected() {
+                Some("credential_rejection")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                tracing::debug!(
+                    provider = "tmdb",
+                    reason,
+                    "TMDB credential cache invalidated"
+                );
+                self.tmdb = None;
+            }
         }
         if let Some((_, client)) = &self.tmdb {
+            tracing::debug!(
+                provider = "tmdb",
+                cache = "hit",
+                "TMDB credential client reused"
+            );
             return Ok(Arc::clone(client));
         }
-        let secret = credential().map_err(|error| match error {
-            crate::credentials::CredentialError::Missing => CatalogError::TmdbMissingCredential,
-            crate::credentials::CredentialError::Unavailable => {
-                CatalogError::TmdbCredentialUnavailable
+        tracing::debug!(
+            provider = "tmdb",
+            reason = "cache_miss",
+            "TMDB credential reloading from secure storage"
+        );
+        let secret = credential().map_err(|error| {
+            tracing::warn!(provider = "tmdb", category = ?error, "TMDB credential reload failed");
+            match error {
+                crate::credentials::CredentialError::Missing => CatalogError::TmdbMissingCredential,
+                crate::credentials::CredentialError::Unavailable => {
+                    CatalogError::TmdbCredentialUnavailable
+                }
+                crate::credentials::CredentialError::AccessDenied => {
+                    CatalogError::TmdbCredentialDenied
+                }
             }
-            crate::credentials::CredentialError::AccessDenied => CatalogError::TmdbCredentialDenied,
         })?;
         let transport = match &self.tmdb_transport {
             Some(client) => client.clone(),
@@ -930,19 +929,35 @@ fn fetch_json<T: serde::de::DeserializeOwned>(
     url: Url,
     cancel: &AtomicBool,
 ) -> Result<T, CatalogError> {
+    let started = std::time::Instant::now();
     check_cancellation(Some(cancel))?;
     let response = client
         .get(url)
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .map_err(|error| {
-            #[cfg(test)]
-            transport_diagnostics(&error);
-            drop(error);
+            tracing::warn!(
+                provider = "cinemeta",
+                kind = crate::logging::http_error_kind(&error),
+                duration_ms = started.elapsed().as_millis() as u64,
+                "Cinemeta HTTP transport failed"
+            );
             CatalogError::Network
         })?;
     check_cancellation(Some(cancel))?;
+    let status = response.status().as_u16();
+    tracing::debug!(
+        provider = "cinemeta",
+        status,
+        duration_ms = started.elapsed().as_millis() as u64,
+        "Cinemeta HTTP headers received"
+    );
     if !response.status().is_success() {
+        tracing::warn!(
+            provider = "cinemeta",
+            status,
+            "Cinemeta HTTP request failed"
+        );
         return Err(CatalogError::HttpStatus);
     }
     if response
@@ -955,12 +970,25 @@ fn fetch_json<T: serde::de::DeserializeOwned>(
     response
         .take(MAX_RESPONSE_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| CatalogError::Network)?;
+        .map_err(|error| { tracing::warn!(provider = "cinemeta", io_kind = ?error.kind(), "Cinemeta body read failed"); CatalogError::Network })?;
     check_cancellation(Some(cancel))?;
     if bytes.len() as u64 > MAX_RESPONSE_BYTES {
         return Err(CatalogError::ResponseTooLarge);
     }
-    serde_json::from_slice(&bytes).map_err(|_| CatalogError::InvalidResponse)
+    tracing::debug!(
+        provider = "cinemeta",
+        bytes = bytes.len(),
+        duration_ms = started.elapsed().as_millis() as u64,
+        "Cinemeta HTTP body received"
+    );
+    serde_json::from_slice(&bytes).map_err(|_| {
+        tracing::warn!(
+            provider = "cinemeta",
+            category = "json_decode",
+            "Cinemeta response decode failed"
+        );
+        CatalogError::InvalidResponse
+    })
 }
 
 // Only these validated values cross back from the fetch pool. SQLite never does.
@@ -979,6 +1007,10 @@ impl CatalogService {
     ) -> Result<crate::catalog_worker::Fetch<Self>, CatalogError> {
         let result = self.prepare_remote_inner(work.clone(), cancel);
         if let Err(error) = result {
+            let _span = work.diagnostic_span().entered();
+            if error != CatalogError::Canceled {
+                tracing::warn!(category = ?error, "Catalog fetch preparation failed");
+            }
             self.record_remote_failure(&work, error);
         }
         result
@@ -1081,8 +1113,17 @@ impl CatalogService {
             },
         };
         Ok(Box::new(move || {
+            let _span = work.diagnostic_span().entered();
             let result = network();
+            if let Err(category) = &result {
+                if *category == CatalogError::Canceled {
+                    tracing::debug!(?category, "Catalog network work canceled");
+                } else {
+                    tracing::warn!(?category, "Catalog network or validation failed");
+                }
+            }
             Box::new(move |service: &mut Self| {
+                let _span = work.diagnostic_span().entered();
                 let result = match (result, &work) {
                     (Ok(RemoteData::Page(titles, rich)), Work::Search(request)) => service
                         .save_search(&request.query, titles, rich)
@@ -1125,7 +1166,7 @@ impl CatalogService {
                 if let Err(error) = result {
                     service.record_remote_failure(&work, error);
                 }
-                result.map_err(|e| e.to_string())
+                result.map_err(super::diagnostic_error)
             })
         }))
     }
@@ -1136,6 +1177,11 @@ impl CatalogService {
             return;
         }
         if error == CatalogError::Tmdb(crate::tmdb::TmdbError::RejectedCredential) {
+            tracing::debug!(
+                provider = "tmdb",
+                reason = "credential_rejection",
+                "TMDB credential cache invalidated"
+            );
             self.tmdb = None;
         }
         match work {

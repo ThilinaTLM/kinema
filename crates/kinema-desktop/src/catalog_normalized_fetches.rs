@@ -47,8 +47,13 @@ fn failed(
     error: CatalogError,
 ) -> Result<(), CatalogError> {
     if error == CatalogError::Canceled {
+        tracing::debug!("Canceled catalog attempt not persisted");
         return Ok(());
     }
+    tracing::warn!(
+        category = error_code(error),
+        "Catalog failed attempt; preserving saved results"
+    );
     service.ensure_active()?;
     let (_, time) = super::metadata::timestamp_now()?;
     let cancellation = service.cancellation.clone();
@@ -109,7 +114,10 @@ pub(super) fn search(service: &mut CatalogService, query: &SearchQuery, error: C
             number: 1,
         },
         error,
-    );
+    )
+    .inspect_err(|category| {
+        tracing::debug!(?category, "Catalog failed-attempt persistence failed")
+    });
 }
 pub(super) fn browse(
     service: &mut CatalogService,
@@ -125,7 +133,10 @@ pub(super) fn browse(
             number: 1,
         },
         error,
-    );
+    )
+    .inspect_err(|category| {
+        tracing::debug!(?category, "Catalog failed-attempt persistence failed")
+    });
 }
 pub(super) fn details(
     service: &mut CatalogService,
@@ -143,7 +154,10 @@ pub(super) fn details(
             external: id.as_str().into(),
         },
         error,
-    );
+    )
+    .inspect_err(|category| {
+        tracing::debug!(?category, "Catalog failed-attempt persistence failed")
+    });
 }
 pub(super) fn tmdb(service: &mut CatalogService, query: &TmdbQuery, error: CatalogError) {
     let Ok(key) = crate::tmdb::cache_query_identity(query) else {
@@ -170,5 +184,7 @@ pub(super) fn tmdb(service: &mut CatalogService, query: &TmdbQuery, error: Catal
             number: *season,
         },
     };
-    let _ = failed(service, target, error);
+    let _ = failed(service, target, error).inspect_err(|category| {
+        tracing::debug!(?category, "Catalog failed-attempt persistence failed")
+    });
 }

@@ -600,6 +600,13 @@ mod logging_tests {
     #[test]
     fn settings_diagnostics_exclude_values_and_malformed_input()
     -> Result<(), Box<dyn std::error::Error>> {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "settings_diagnostics_exclude_values_and_malformed_input",
+        ) {
+            return Ok(());
+        }
+
         let root = tempfile::tempdir()?;
         let paths = AppPaths {
             data: root.path().into(),

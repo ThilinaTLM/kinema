@@ -2126,6 +2126,13 @@ mod logging_tests {
     #[test]
     fn diagnostics_exclude_sensitive_urls_bytes_and_cache_paths()
     -> Result<(), Box<dyn std::error::Error>> {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "diagnostics_exclude_sensitive_urls_bytes_and_cache_paths",
+        ) {
+            return Ok(());
+        }
+
         let (mut url, server) =
             fixture(vec![(403, serde_json::json!({"error":"payload-secret"}))])?;
         url.set_path("/opaque-secret");
@@ -2143,6 +2150,7 @@ mod logging_tests {
         });
         assert_eq!(result, Err(ArtworkError::Transport));
         assert!(output.contains("403"));
+        assert!(output.contains("Artwork decode failed"));
         assert!(output.contains("disk cache operation failed"));
         excludes(
             &output,

@@ -113,9 +113,20 @@ impl fmt::Display for CatalogError {
 impl Error for CatalogError {}
 
 impl From<rusqlite::Error> for CatalogError {
-    fn from(_: rusqlite::Error) -> Self {
+    fn from(error: rusqlite::Error) -> Self {
+        tracing::warn!(category = "sqlite", sqlite_code = ?error.sqlite_error_code(), "Catalog SQL operation failed");
         Self::Storage
     }
+}
+
+// Never log SQL/error Display or raw cache keys; they can contain user input.
+pub(crate) fn diagnostic_error(error: CatalogError) -> String {
+    if error == CatalogError::Canceled {
+        tracing::debug!(category = ?error, "Catalog operation canceled");
+    } else {
+        tracing::warn!(category = ?error, "Catalog operation failed");
+    }
+    error.to_string()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -163,7 +174,10 @@ impl CatalogService {
     /// AppPaths owns development/native routing; no migration or fallback.
     pub(crate) fn open_default() -> Result<Self, CatalogError> {
         let paths = crate::paths::AppPaths::resolve().map_err(|_| CatalogError::DataDirectory)?;
-        std::fs::create_dir_all(&paths.data).map_err(|_| CatalogError::DataDirectory)?;
+        std::fs::create_dir_all(&paths.data).map_err(|error| {
+            tracing::warn!(io_kind = ?error.kind(), "Catalog data directory unavailable");
+            CatalogError::DataDirectory
+        })?;
         Self::open(&paths.data.join("catalog.sqlite3"))
     }
 
@@ -196,7 +210,13 @@ impl CatalogService {
             }))
             .user_agent("Kinema-Next/0.1 catalog")
             .build()
-            .map_err(|_| CatalogError::Network)?;
+            .map_err(|error| {
+                tracing::warn!(
+                    kind = crate::logging::http_error_kind(&error),
+                    "Catalog HTTP client initialization failed"
+                );
+                CatalogError::Network
+            })?;
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(2))?;
         connection.pragma_update(None, "foreign_keys", true)?;
@@ -206,6 +226,14 @@ impl CatalogService {
         }
         if version < 0 {
             return Err(CatalogError::InvalidCache);
+        }
+        let migration_started = std::time::Instant::now();
+        if version < SCHEMA_VERSION {
+            tracing::info!(
+                from_version = version,
+                to_version = SCHEMA_VERSION,
+                "Catalog schema migration started"
+            );
         }
         if version == 0 {
             let objects: i64 = connection.query_row(
@@ -267,6 +295,14 @@ impl CatalogService {
             tx.execute_batch("ALTER TABLE metadata_fetches ADD COLUMN facts_json TEXT;")?;
             tx.pragma_update(None, "user_version", 5)?;
             tx.commit()?;
+        }
+        if version < SCHEMA_VERSION {
+            tracing::info!(
+                from_version = version,
+                to_version = SCHEMA_VERSION,
+                duration_ms = migration_started.elapsed().as_millis() as u64,
+                "Catalog schema migration completed"
+            );
         }
         Ok(Self {
             connection,
@@ -469,6 +505,34 @@ mod tests {
     use super::*;
 
     type TestResult = Result<(), Box<dyn Error>>;
+    #[test]
+    fn catalog_migration_and_sql_diagnostics_are_sanitized() -> TestResult {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "catalog_migration_and_sql_diagnostics_are_sanitized",
+        ) {
+            return Ok(());
+        }
+
+        use crate::providers::test_logging::{capture, excludes};
+        let root = tempfile::tempdir()?;
+        let (result, output) = capture(|| {
+            let result = CatalogService::open(&root.path().join("path-secret.sqlite3"));
+            let _category = CatalogError::from(rusqlite::Error::InvalidParameterName(
+                "sql-parameter-secret".into(),
+            ));
+            result
+        });
+        result?;
+        assert!(
+            output.contains("schema migration started"),
+            "captured: {output}"
+        );
+        assert!(output.contains("schema migration completed"));
+        excludes(&output, &["path-secret", "sql-parameter-secret"]);
+        Ok(())
+    }
+
     const MOVIE: &str = r#"{"metas":[{"id":"tt0133093","type":"movie","name":"The Matrix"}]}"#;
 
     struct Mock {

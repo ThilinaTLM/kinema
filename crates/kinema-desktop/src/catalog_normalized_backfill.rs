@@ -19,6 +19,10 @@ fn attempt(
     match import() {
         Ok(()) => tx.execute_batch("RELEASE legacy_snapshot")?,
         Err(CatalogError::IdentityConflict) => {
+            tracing::warn!(
+                category = "identity_conflict",
+                "Legacy snapshot skipped without changing its existing rows"
+            );
             tx.execute_batch("ROLLBACK TO legacy_snapshot; RELEASE legacy_snapshot")?
         }
         Err(error) => {
@@ -41,6 +45,8 @@ fn scan<T>(
     mut decode: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
     mut import: impl FnMut(T) -> Result<(), CatalogError>,
 ) -> Result<(), CatalogError> {
+    let started = std::time::Instant::now();
+    let mut rows = 0u64;
     let mut last: Option<i64> = None;
     loop {
         let next = {
@@ -66,8 +72,16 @@ fn scan<T>(
             break;
         };
         last = Some(rowid);
+        rows += 1;
         attempt(tx, || import(value))?;
     }
+    // `table` is a static migration table name, never a query/cache key.
+    tracing::debug!(
+        table,
+        rows,
+        duration_ms = started.elapsed().as_millis() as u64,
+        "Legacy snapshot scan completed"
+    );
     Ok(())
 }
 

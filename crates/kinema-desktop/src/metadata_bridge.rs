@@ -90,7 +90,13 @@ pub(crate) fn request(
         action,
         mode,
     }) {
-        Submit::Closed => Err("The catalog worker is not running.".to_owned()),
+        Submit::Closed => {
+            tracing::error!(
+                worker = "catalog",
+                "UI metadata request rejected by a closed worker"
+            );
+            Err("The catalog worker is not running.".to_owned())
+        }
         Submit::Queued | Submit::Replaced | Submit::Coalesced => Ok(()),
     }
 }
@@ -138,7 +144,13 @@ pub(crate) fn translate(event: MetadataEvent) -> Option<MetaEvent> {
         MetadataAction::Browse { kind, offset } => {
             let result = result.and_then(|snapshot| match snapshot {
                 MetadataSnapshot::Browse(found) => Ok((found.titles, found.fetched_at)),
-                _ => Err("The catalog returned an unexpected result.".to_owned()),
+                _ => {
+                    tracing::error!(
+                        category = "snapshot_kind_mismatch",
+                        "Catalog metadata response violated its routing contract"
+                    );
+                    Err("The catalog returned an unexpected result.".to_owned())
+                }
             });
             Some(MetaEvent::Browse {
                 kind,
@@ -150,7 +162,13 @@ pub(crate) fn translate(event: MetadataEvent) -> Option<MetaEvent> {
         MetadataAction::Details { kind, .. } => {
             let result = result.and_then(|snapshot| match snapshot {
                 MetadataSnapshot::Details(found) => Ok((found.details, found.fetched_at)),
-                _ => Err("The catalog returned an unexpected result.".to_owned()),
+                _ => {
+                    tracing::error!(
+                        category = "snapshot_kind_mismatch",
+                        "Catalog metadata response violated its routing contract"
+                    );
+                    Err("The catalog returned an unexpected result.".to_owned())
+                }
             });
             Some(MetaEvent::Details {
                 kind,
@@ -167,7 +185,13 @@ pub(crate) fn translate(event: MetadataEvent) -> Option<MetaEvent> {
                     },
                     found.fetched_at,
                 )),
-                _ => Err("The catalog returned an unexpected result.".to_owned()),
+                _ => {
+                    tracing::error!(
+                        category = "snapshot_kind_mismatch",
+                        "Catalog metadata response violated its routing contract"
+                    );
+                    Err("The catalog returned an unexpected result.".to_owned())
+                }
             });
             Some(MetaEvent::Sources {
                 kind: target.kind(),

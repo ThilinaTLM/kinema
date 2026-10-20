@@ -17,6 +17,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::JoinHandle,
+    time::{Duration, Instant},
 };
 
 use kinema_core::{
@@ -92,6 +93,95 @@ pub(crate) enum Work {
     Metadata(MetadataRequest),
 }
 
+// Never Debug a Work/MetadataAction: searches may contain private text or URLs.
+impl Work {
+    pub(crate) fn diagnostic_span(&self) -> tracing::Span {
+        let (generation, mode) = match self {
+            Self::Search(r) => (r.generation, r.mode),
+            Self::Metadata(r) => (r.generation, r.mode),
+        };
+        let operation = match self {
+            Self::Search(_) => "search",
+            Self::Metadata(r) => match &r.action {
+                MetadataAction::Browse { .. } => "browse",
+                MetadataAction::Details { .. } => "details",
+                MetadataAction::Sources { .. } => "sources",
+                MetadataAction::Tmdb(q) => q.operation(),
+            },
+        };
+        let provider = match self {
+            Self::Metadata(MetadataRequest {
+                action: MetadataAction::Tmdb(_),
+                ..
+            }) => "tmdb",
+            Self::Metadata(MetadataRequest {
+                action: MetadataAction::Sources { indexer, .. },
+                ..
+            }) => match indexer {
+                IndexerKind::Torrentio => "torrentio",
+                IndexerKind::Peerflix => "peerflix",
+            },
+            _ => "cinemeta",
+        };
+        let span = tracing::info_span!(
+            "catalog_request",
+            operation,
+            generation,
+            ?mode,
+            provider,
+            media_kind = tracing::field::Empty,
+            imdb_id = tracing::field::Empty,
+            tmdb_id = tracing::field::Empty,
+            page = tracing::field::Empty,
+            season = tracing::field::Empty,
+            episode = tracing::field::Empty,
+            offset = tracing::field::Empty
+        );
+        match self {
+            Self::Search(r) => {
+                span.record("media_kind", tracing::field::debug(r.query.kind()));
+            }
+            Self::Metadata(r) => match &r.action {
+                MetadataAction::Browse { kind, offset } => {
+                    span.record("media_kind", tracing::field::debug(kind));
+                    span.record("offset", offset);
+                }
+                MetadataAction::Details { kind, id } => {
+                    span.record("media_kind", tracing::field::debug(kind));
+                    span.record("imdb_id", id.as_str());
+                }
+                MetadataAction::Sources { target, .. } => {
+                    span.record("media_kind", tracing::field::debug(target.kind()));
+                    span.record("imdb_id", target.imdb_id().as_str());
+                    if let PlaybackTarget::Episode {
+                        season, episode, ..
+                    } = target
+                    {
+                        span.record("season", season);
+                        span.record("episode", episode);
+                    }
+                }
+                MetadataAction::Tmdb(q) => {
+                    q.record_diagnostics(&span);
+                }
+            },
+        }
+        span
+    }
+}
+
+fn refreshed_count(value: &Refreshed) -> usize {
+    match value {
+        Refreshed::Search(s) => s.titles.len(),
+        Refreshed::Metadata(s) => match s.as_ref() {
+            MetadataSnapshot::Browse(s) => s.titles.len(),
+            MetadataSnapshot::Details(_) => 1,
+            MetadataSnapshot::Sources(s) => s.candidates.len(),
+            MetadataSnapshot::Tmdb(s) => crate::tmdb::data_count(&s.data),
+        },
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Snapshot {
     pub titles: Vec<CatalogTitle>,
@@ -128,6 +218,8 @@ pub(crate) enum Submit {
 #[derive(Default)]
 struct MailState {
     slots: [Option<Request>; 2],
+    search_enqueued: [Option<Instant>; 2],
+    metadata_enqueued: [Option<Instant>; METADATA_SLOTS],
     metadata: [Option<MetadataRequest>; METADATA_SLOTS],
     active: [Option<ActiveMetadata>; METADATA_SLOTS],
     active_search: [Option<ActiveSearch>; 2],
@@ -199,10 +291,16 @@ impl Mailbox {
         if state.closed {
             return Submit::Closed;
         }
+        let _span = Work::Search(request.clone()).diagnostic_span().entered();
         let index = slot(request.query.kind());
+        state.search_enqueued[index] = Some(Instant::now());
         if let Some(active) = &state.active_search[index]
             && (active.generation != request.generation || active.query != request.query)
         {
+            tracing::debug!(
+                outcome = "superseded",
+                "Active catalog request canceled by replacement"
+            );
             active.cancel.store(true, Ordering::Release);
         }
         let outcome = match &mut state.slots[index] {
@@ -222,6 +320,7 @@ impl Mailbox {
                 Submit::Queued
             }
         };
+        tracing::debug!(outcome = ?outcome, "Catalog request submitted");
         self.wake.notify_one();
         outcome
     }
@@ -231,10 +330,16 @@ impl Mailbox {
         if state.closed {
             return Submit::Closed;
         }
+        let _span = Work::Metadata(request.clone()).diagnostic_span().entered();
         let index = metadata_slot(&request.action);
+        state.metadata_enqueued[index] = Some(Instant::now());
         if let Some(active) = &state.active[index]
             && (active.generation != request.generation || active.action != request.action)
         {
+            tracing::debug!(
+                outcome = "superseded",
+                "Active catalog request canceled by replacement"
+            );
             active.cancel.store(true, Ordering::Release);
         }
         let result = match &mut state.metadata[index] {
@@ -254,6 +359,7 @@ impl Mailbox {
                 Submit::Queued
             }
         };
+        tracing::debug!(outcome = ?result, "Catalog request submitted");
         self.wake.notify_one();
         result
     }
@@ -301,7 +407,7 @@ impl Mailbox {
         }
     }
 
-    fn next<B: Backend>(&self, capacity: bool) -> Option<Ready<B>> {
+    fn next<B: Backend>(&self, in_flight: usize) -> Option<Ready<B>> {
         let mut state = self.lock();
         loop {
             if state.closed {
@@ -313,7 +419,7 @@ impl Mailbox {
                     .ok()
                     .map(|value| Ready::Completed(*value));
             }
-            if capacity {
+            if in_flight < FETCH_THREADS {
                 let slots = state.slots.len() + state.metadata.len();
                 for offset in 0..slots {
                     let index = (state.next + offset) % slots;
@@ -339,9 +445,27 @@ impl Mailbox {
                     };
                     if let Some(work) = work {
                         state.next = (index + 1) % slots;
-                        return Some(Ready::Work(work));
+                        let enqueued = if index < state.slots.len() {
+                            state.search_enqueued[index].take()
+                        } else {
+                            let metadata_index = index - state.slots.len();
+                            state.metadata_enqueued[metadata_index].take()
+                        };
+                        return Some(Ready::Work(
+                            work,
+                            enqueued.map_or(Duration::ZERO, |time| time.elapsed()),
+                        ));
                     }
                 }
+            }
+            let queued =
+                state.slots.iter().flatten().count() + state.metadata.iter().flatten().count();
+            if in_flight >= FETCH_THREADS && queued > 0 {
+                tracing::debug!(
+                    in_flight,
+                    queued,
+                    "Catalog fetch pool saturated; queued work waiting"
+                );
             }
             state = self
                 .wake
@@ -399,6 +523,12 @@ impl Mailbox {
     }
 
     fn cancel_metadata(&self, action: &MetadataAction, generation: u64) {
+        tracing::debug!(
+            slot = metadata_slot(action),
+            generation,
+            outcome = "cancelled",
+            "Catalog metadata cancellation requested"
+        );
         let mut state = self.lock();
         let index = metadata_slot(action);
         if state.metadata[index]
@@ -416,6 +546,12 @@ impl Mailbox {
     }
 
     fn cancel_search(&self, kind: MediaKind, generation: u64) {
+        tracing::debug!(
+            ?kind,
+            generation,
+            outcome = "cancelled",
+            "Catalog search cancellation requested"
+        );
         let mut state = self.lock();
         let index = slot(kind);
         if state.slots[index]
@@ -592,7 +728,7 @@ impl Backend for CatalogService {
     ) -> Option<Result<Fetch<Self>, String>> {
         Some(
             self.prepare_remote(work.clone(), Arc::clone(cancel))
-                .map_err(|e| e.to_string()),
+                .map_err(crate::catalog::diagnostic_error),
         )
     }
     fn set_cancellation(&mut self, cancel: Option<Arc<AtomicBool>>) {
@@ -601,13 +737,13 @@ impl Backend for CatalogService {
     fn read(&mut self, query: &SearchQuery) -> Result<Option<Snapshot>, String> {
         CatalogService::read(self, query)
             .map(|found| found.map(snapshot))
-            .map_err(|error| error.to_string())
+            .map_err(crate::catalog::diagnostic_error)
     }
 
     fn refresh(&mut self, query: &SearchQuery) -> Result<Snapshot, String> {
         CatalogService::refresh(self, query)
             .map(snapshot)
-            .map_err(|error| error.to_string())
+            .map_err(crate::catalog::diagnostic_error)
     }
 
     fn refresh_search(
@@ -639,7 +775,7 @@ impl Backend for CatalogService {
                 .read_tmdb(query)
                 .map(|value| value.map(MetadataSnapshot::Tmdb)),
         }
-        .map_err(|error| error.to_string())
+        .map_err(crate::catalog::diagnostic_error)
     }
 
     fn refresh_metadata(
@@ -661,7 +797,7 @@ impl Backend for CatalogService {
             MetadataAction::Tmdb(query) => self.refresh_tmdb(query).map(MetadataSnapshot::Tmdb),
         };
         self.cancellation = None;
-        result.map_err(|error| error.to_string())
+        result.map_err(crate::catalog::diagnostic_error)
     }
 }
 
@@ -680,6 +816,7 @@ struct CloseOnExit(Arc<Mailbox>);
 
 impl Drop for CloseOnExit {
     fn drop(&mut self) {
+        tracing::info!("Catalog worker stopped");
         self.0.close();
     }
 }
@@ -695,7 +832,7 @@ pub(crate) struct CatalogWorker {
 impl CatalogWorker {
     /// Starts the production worker; the service is opened on the worker.
     pub(crate) fn spawn_default() -> io::Result<Self> {
-        Self::spawn(|| CatalogService::open_default().map_err(|error| error.to_string()))
+        Self::spawn(|| CatalogService::open_default().map_err(crate::catalog::diagnostic_error))
     }
 
     pub(crate) fn spawn<B: Backend + 'static>(
@@ -783,6 +920,7 @@ impl Drop for CatalogWorker {
         for (kind, generation) in searches {
             self.cancel_search(kind, generation);
         }
+        tracing::debug!("Catalog worker stop requested");
         self.mailbox.close();
     }
 }
@@ -796,7 +934,7 @@ struct Completed<B> {
     persist: Persist<B>,
 }
 enum Ready<B> {
-    Work(Work),
+    Work(Work, Duration),
     Completed(Completed<B>),
 }
 type FetchJob = Box<dyn FnOnce() + Send>;
@@ -807,6 +945,7 @@ fn run<B: Backend>(
     metadata_events: &MetadataEventBox,
     mut open: impl FnMut() -> Result<B, String>,
 ) {
+    tracing::info!(fetch_threads = FETCH_THREADS, "Catalog worker started");
     // At most four submitted jobs, including completed-but-not-persisted jobs.
     // The SQLite owner never waits for a busy fetch thread or joins on shutdown.
     let (jobs, receiver) = std::sync::mpsc::sync_channel::<FetchJob>(FETCH_THREADS);
@@ -826,11 +965,13 @@ fn run<B: Backend>(
                         break;
                     };
                     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err() {
+                        tracing::error!(category = "fetch_panic", "Catalog fetch worker panicked");
                         close.close();
                         break;
                     }
                 }
             })
+            .inspect_err(|error| tracing::error!(io_kind = ?error.kind(), "Catalog fetch worker spawn failed"))
             .is_err()
         {
             return;
@@ -838,7 +979,7 @@ fn run<B: Backend>(
     }
     let mut backend: Option<B> = None;
     let mut in_flight = 0;
-    while let Some(ready) = mailbox.next::<B>(in_flight < FETCH_THREADS) {
+    while let Some(ready) = mailbox.next::<B>(in_flight) {
         match ready {
             Ready::Completed(completed) => {
                 in_flight -= 1;
@@ -847,18 +988,35 @@ fn run<B: Backend>(
                     cancel,
                     persist,
                 } = completed;
+                let _span = work.diagnostic_span().entered();
                 if !cancel.load(Ordering::Acquire)
                     && !mailbox.is_closed()
                     && let Some(backend) = backend.as_mut()
                 {
                     backend.set_cancellation(Some(Arc::clone(&cancel)));
+                    let started = Instant::now();
                     let result = persist(backend);
+                    tracing::debug!(
+                        persist_ms = started.elapsed().as_millis() as u64,
+                        "Catalog persistence completed"
+                    );
                     backend.set_cancellation(None);
                     send_terminal(mailbox, events, metadata_events, &work, &cancel, result);
+                } else {
+                    tracing::debug!(
+                        outcome = "discarded_stale",
+                        "Catalog completion discarded before persistence"
+                    );
                 }
                 finish_work(mailbox, &work, &cancel);
             }
-            Ready::Work(work) => {
+            Ready::Work(work, queue_wait) => {
+                let _span = work.diagnostic_span().entered();
+                tracing::debug!(
+                    queue_wait_ms = queue_wait.as_millis() as u64,
+                    in_flight,
+                    "Catalog request dequeued"
+                );
                 let cancel = match &work {
                     Work::Search(request) => mailbox.lock().active_search
                         [slot(request.query.kind())]
@@ -869,8 +1027,15 @@ fn run<B: Backend>(
                 };
                 if backend.is_none() {
                     match open() {
-                        Ok(opened) => backend = Some(opened),
+                        Ok(opened) => {
+                            tracing::info!("Catalog backend opened");
+                            backend = Some(opened);
+                        }
                         Err(message) => {
+                            tracing::warn!(
+                                category = "open_failed",
+                                "Catalog worker could not open backend; next request may retry"
+                            );
                             send_terminal(
                                 mailbox,
                                 events,
@@ -927,7 +1092,13 @@ fn run<B: Backend>(
                 in_flight += 1;
                 if jobs
                     .send(Box::new(move || {
+                        let _span = work.diagnostic_span().entered();
+                        let started = Instant::now();
                         let persist = fetch();
+                        tracing::debug!(
+                            fetch_ms = started.elapsed().as_millis() as u64,
+                            "Catalog fetch completed"
+                        );
                         let mut state = mailbox.lock();
                         if !state.closed {
                             state.completed.push_back(Box::new(Completed {
@@ -936,10 +1107,19 @@ fn run<B: Backend>(
                                 persist,
                             }));
                             mailbox.wake.notify_one();
+                        } else {
+                            tracing::debug!(
+                                outcome = "discarded_stale",
+                                "Catalog fetch finished after shutdown"
+                            );
                         }
                     }))
                     .is_err()
                 {
+                    tracing::error!(
+                        category = "fetch_queue_closed",
+                        "Catalog fetch pool disconnected"
+                    );
                     return;
                 }
             }
@@ -981,8 +1161,22 @@ fn send_terminal(
     result: Result<Refreshed, String>,
 ) {
     let state = mailbox.lock();
+    let _span = work.diagnostic_span().entered();
     if state.closed || cancel.load(Ordering::Acquire) {
+        tracing::debug!(
+            outcome = "discarded_stale",
+            "Catalog terminal result discarded"
+        );
         return;
+    }
+    match &result {
+        Ok(value) => tracing::debug!(
+            outcome = "fetched",
+            count = refreshed_count(value),
+            empty = refreshed_count(value) == 0,
+            "Catalog request finished"
+        ),
+        Err(_) => tracing::warn!(category = "backend_failed", "Catalog request failed"),
     }
     match work {
         Work::Search(request) => {
@@ -1034,7 +1228,22 @@ fn read_before_fetch<B: Backend>(
     };
     let state = mailbox.lock();
     if state.closed || cancel.load(Ordering::Acquire) {
+        tracing::debug!(outcome = "cancelled", "Catalog cache result discarded");
         return false;
+    }
+    match &result {
+        Ok(Some(value)) => tracing::debug!(
+            cache = if refreshing { "stale" } else { "hit" },
+            count = refreshed_count(value),
+            refreshing,
+            "Catalog cache read completed"
+        ),
+        Ok(None) => tracing::debug!(cache = "miss", "Catalog cache read completed"),
+        Err(_) => tracing::warn!(
+            category = "cache_read_failed",
+            refreshing,
+            "Catalog cache read failed"
+        ),
     }
     match (work, result) {
         (Work::Search(r), Ok(Some(Refreshed::Search(snapshot)))) => events.push(Event {
@@ -1262,6 +1471,61 @@ mod tests {
     }
 
     #[test]
+    fn catalog_diagnostics_omit_raw_search_and_measure_queue_wait() {
+        if !crate::providers::test_logging::isolated(
+            module_path!(),
+            "catalog_diagnostics_omit_raw_search_and_measure_queue_wait",
+        ) {
+            return;
+        }
+
+        use crate::providers::test_logging::{capture, excludes};
+        let mailbox = Mailbox::default();
+        let request = Request {
+            generation: 44,
+            query: SearchQuery::new(
+                MediaKind::Movie,
+                "https://private.invalid/?token=search-secret",
+            )
+            .unwrap_or_else(|_| panic!("fixture query")),
+            mode: Mode::Refresh,
+        };
+        let (_, output) = capture(|| {
+            mailbox.submit(request);
+            std::thread::sleep(Duration::from_millis(2));
+            let Some(Ready::Work(work, waited)) = mailbox.next::<ConcurrentBackend>(0) else {
+                panic!("queued work expected")
+            };
+            assert!(waited >= Duration::from_millis(1));
+            let _span = work.diagnostic_span().entered();
+            tracing::debug!(
+                queue_wait_ms = waited.as_millis() as u64,
+                "Catalog diagnostic fixture"
+            );
+            send_terminal(
+                &mailbox,
+                &EventBox::default(),
+                &MetadataEventBox::default(),
+                &work,
+                &AtomicBool::new(false),
+                Err("backend-url-secret?token=error-secret".into()),
+            );
+        });
+        assert!(output.contains("search"));
+        assert!(output.contains("queue_wait_ms"));
+        excludes(
+            &output,
+            &[
+                "private.invalid",
+                "search-secret",
+                "backend-url-secret",
+                "error-secret",
+                "token=",
+            ],
+        );
+    }
+
+    #[test]
     fn completed_fetch_is_served_before_queued_preparation() {
         let mailbox = Mailbox::default();
         let request = concurrent_request(MediaKind::Movie, 2);
@@ -1280,11 +1544,11 @@ mod tests {
                 }),
             }));
         assert!(matches!(
-            mailbox.next::<ConcurrentBackend>(true),
+            mailbox.next::<ConcurrentBackend>(0),
             Some(Ready::Completed(_))
         ));
         assert!(
-            matches!(mailbox.next::<ConcurrentBackend>(true), Some(Ready::Work(Work::Search(actual))) if actual == request)
+            matches!(mailbox.next::<ConcurrentBackend>(0), Some(Ready::Work(Work::Search(actual), _)) if actual == request)
         );
     }
 

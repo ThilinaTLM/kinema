@@ -274,6 +274,13 @@ fn indexer_canceled_during_http_does_not_parse_returned_body() -> TestResult {
 
 #[test]
 fn indexer_diagnostics_exclude_magnets_signed_links_and_query() -> TestResult {
+    if !crate::providers::test_logging::isolated(
+        module_path!(),
+        "indexer_diagnostics_exclude_magnets_signed_links_and_query",
+    ) {
+        return Ok(());
+    }
+
     use crate::providers::test_logging::{capture, excludes};
     let (mut base, server) = fixture(vec![
         (
