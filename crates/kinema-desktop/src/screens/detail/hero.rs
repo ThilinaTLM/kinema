@@ -269,9 +269,6 @@ impl Detail {
         let weak = cx.entity().downgrade();
         let name = title.name().to_owned();
         let imdb = title.imdb().cloned();
-        // The context menu root wraps its element in a plain block, so a flex
-        // fill through it is not possible: the hero's floor is estimated instead
-        // (`fill_min_height`).
         div()
             .id("detail-hero-body")
             .w_full()
@@ -284,22 +281,13 @@ impl Detail {
             .context_menu("detail-backdrop-menu", move |_, _| {
                 more_items(weak.clone(), name.clone(), imdb.clone())
             })
+            // The menu wrapper joins the column's flex chain so the hero can fill.
+            .w_full()
+            .flex()
+            .flex_col()
+            .flex_grow_1()
+            .flex_shrink_0()
             .into_any_element()
-    }
-
-    /// Estimated height of everything the left column shows under the hero.
-    /// These sections are laid out by their own widgets, so the numbers are
-    /// named estimates (see `geometry`), used only to let the hero grow into
-    /// otherwise empty space.
-    pub(super) fn below_hero_height(&self) -> Pixels {
-        let mut height = geometry::INLINE_FACTS_HEIGHT;
-        if self.expanded {
-            height += geometry::DETAILS_PANEL_HEIGHT;
-        }
-        if self.title.kind() == MediaKind::Movie && matches!(self.title, BrowseTitle::Tmdb(_)) {
-            height += geometry::SIMILAR_STRIP_HEIGHT;
-        }
-        height
     }
 
     /// Always-visible facts under the hero: released, genres, episodes, source.

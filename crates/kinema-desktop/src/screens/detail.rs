@@ -65,10 +65,6 @@ mod geometry {
     pub const HERO_MIN_FRACTION: f32 = 0.62;
     pub const STACKED_HERO_MIN_FRACTION: f32 = 0.5;
     pub const HERO_MIN_HEIGHT: Pixels = px(380.);
-    /// Estimated heights of the sections under the hero (see `below_hero_height`).
-    pub const INLINE_FACTS_HEIGHT: Pixels = px(84.);
-    pub const DETAILS_PANEL_HEIGHT: Pixels = px(220.);
-    pub const SIMILAR_STRIP_HEIGHT: Pixels = px(340.);
     pub const DETAILS_MAX_WIDTH: Pixels = px(720.);
     pub const DETAIL_LABEL_WIDTH: Pixels = px(120.);
     /// Up to this many seasons get "Season N" tabs; more use compact numbers.
@@ -828,13 +824,7 @@ impl Render for Detail {
             } else {
                 geometry::HERO_MIN_FRACTION
             };
-        // Wide layouts let the hero soak up whatever the column would leave empty.
-        let fill = if stacked {
-            Pixels::ZERO
-        } else {
-            viewport.height - s::TOOLBAR_HEIGHT - self.below_hero_height()
-        };
-        let hero_min = share.max(fill).max(geometry::HERO_MIN_HEIGHT);
+        let hero_min = share.max(geometry::HERO_MIN_HEIGHT);
         let hero = self.hero(hero_min, cx);
         let body = self.action_body(&title, cx);
         if self.pending_column_focus {

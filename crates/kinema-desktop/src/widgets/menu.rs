@@ -553,6 +553,7 @@ pub trait ContextMenuExt: InteractiveElement + IntoElement + Sized + 'static {
             element: self,
             id: id.into(),
             builder: Rc::new(builder),
+            style: StyleRefinement::default(),
         }
     }
 }
@@ -563,6 +564,14 @@ pub struct ContextMenu<E: InteractiveElement + IntoElement + 'static> {
     element: E,
     id: ElementId,
     builder: MenuBuilder,
+    /// Layout/appearance of the wrapper element, so a context menu never has
+    /// to break the flex chain it sits in.
+    style: StyleRefinement,
+}
+impl<E: InteractiveElement + IntoElement + 'static> Styled for ContextMenu<E> {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
 }
 impl<E: InteractiveElement + IntoElement + 'static> RenderOnce for ContextMenu<E> {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -652,6 +661,7 @@ impl<E: InteractiveElement + IntoElement + 'static> RenderOnce for ContextMenu<E
                 .absolute()
                 .size_full(),
             );
+        root.style().refine(&self.style);
         let state = state.read(cx);
         if let Some(menu) = &state.menu {
             root = root.child(
