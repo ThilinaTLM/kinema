@@ -123,7 +123,11 @@ impl Work {
             },
             _ => "cinemeta",
         };
+        // Worker, fetch, persistence and terminal paths may establish this
+        // context independently. Each is a request root: inheriting an already
+        // entered catalog_request would render the same identity twice.
         let span = tracing::info_span!(
+            parent: None,
             "catalog_request",
             operation,
             generation,
