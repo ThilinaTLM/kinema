@@ -139,7 +139,7 @@ impl Render for PosterCard {
                     div()
                         .type_style(t::HEADING)
                         .text_center()
-                        .line_clamp(3)
+                        .clamp_lines(3)
                         .child(self.title.clone()),
                 )
                 .when(!self.year.is_empty(), |el| {
@@ -211,7 +211,7 @@ impl Render for PosterCard {
             .child(
                 div()
                     .type_style(t::HEADING)
-                    .line_clamp(2)
+                    .clamp_lines(2)
                     .child(self.title.clone()),
             )
             .when(!meta.is_empty(), |el| {
@@ -234,7 +234,7 @@ impl Render for PosterCard {
                 el.child(
                     div()
                         .type_style(t::BODY)
-                        .line_clamp(2)
+                        .clamp_lines(2)
                         .overflow_hidden()
                         .child(self.synopsis.clone()),
                 )

@@ -32,10 +32,11 @@ use crate::widgets::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 30] = [
+const SCENES: [&str; 31] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
+    "detail-live-tmdb-movie-streams",
     "detail-live-tmdb-series",
     "detail-live-tmdb-series-streams",
     "detail-live-no-art",
@@ -80,6 +81,19 @@ pub fn run_native() {
         .unwrap_or_else(|| "components".into());
     let light = args.iter().any(|a| a == "--light");
     let reduce = args.iter().any(|a| a == "--reduce-motion");
+    // `--size WxH` opens the lab window at that logical size (default 1280x800).
+    let window_size = args
+        .iter()
+        .position(|a| a == "--size")
+        .map(|i| {
+            let value = args.get(i + 1).map(String::as_str).unwrap_or_default();
+            value
+                .split_once('x')
+                .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
+                .filter(|(w, h)| *w >= 320. && *h >= 240.)
+                .unwrap_or_else(|| panic!("--size requires WxH, e.g. 1280x800"))
+        })
+        .unwrap_or((1280., 800.));
     gpui_platform::application()
         .with_assets(widgets::assets::Assets)
         .run(move |cx| {
@@ -102,7 +116,7 @@ pub fn run_native() {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds {
                     origin: point(px(0.), px(0.)),
-                    size: size(px(1280.), px(800.)),
+                    size: size(px(window_size.0), px(window_size.1)),
                 })),
                 titlebar: Some(TitlebarOptions {
                     title: Some(format!("Kinema Design Lab / {scene} — FIXTURE ONLY").into()),
@@ -1953,7 +1967,7 @@ impl ProductionScene {
             catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
         };
         let series = scene.contains("series");
-        let title=BrowseTitle::Cinemeta(CatalogTitle::new(ImdbId::new("tt1234567").unwrap_or_else(|e|panic!("fixture: {e}")),if series {MediaKind::Series}else{MediaKind::Movie},if series {"North Harbor"} else {"The Quiet Orbit"},Some("A drifting station's last engineer follows a mysterious signal across the silent ocean of space. A synthetic story, made only for this offline design fixture.".into())).unwrap_or_else(|e|panic!("fixture: {e}")).with_display(CatalogDisplay{year:Some(2024),imdb_rating:ImdbRating::new(8.1),runtime_minutes:Some(118),genres:vec!["Drama".into(),"Sci-fi".into()],..Default::default()}));
+        let title=BrowseTitle::Cinemeta(CatalogTitle::new(ImdbId::new("tt1234567").unwrap_or_else(|e|panic!("fixture: {e}")),if series {MediaKind::Series}else{MediaKind::Movie},if series {"North Harbor"} else {"The Quiet Orbit"},Some("A drifting station's last engineer follows a mysterious signal across the silent ocean of space. A synthetic story, made only for this offline design fixture. Nothing here is real: the people, the station and the signal exist only so that long overviews wrap, clamp and expand the way they would for a real title with a generous synopsis.".into())).unwrap_or_else(|e|panic!("fixture: {e}")).with_display(CatalogDisplay{year:Some(2024),imdb_rating:ImdbRating::new(8.1),runtime_minutes:Some(118),genres:vec!["Drama".into(),"Sci-fi".into()],..Default::default()}));
         let title = if scene.contains("tmdb") {
             BrowseTitle::Tmdb(crate::tmdb::TmdbTitle {
                 id: 91,

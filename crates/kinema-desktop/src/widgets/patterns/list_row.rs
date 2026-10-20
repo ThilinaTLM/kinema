@@ -22,6 +22,7 @@ pub struct ListRow {
     leading: Option<AnyElement>,
     title: SharedString,
     subtitle: Option<SharedString>,
+    subtitle_lines: usize,
     trailing: Option<AnyElement>,
     selected: bool,
     on_click: Option<ClickHandler>,
@@ -35,6 +36,7 @@ impl ListRow {
             leading: None,
             title: title.into(),
             subtitle: None,
+            subtitle_lines: 1,
             trailing: None,
             selected: false,
             on_click: None,
@@ -47,6 +49,12 @@ impl ListRow {
     }
     pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
         self.subtitle = Some(subtitle.into());
+        self
+    }
+    /// Let the subtitle wrap to this many lines (default 1, truncated with an
+    /// ellipsis) before it is cut.
+    pub fn subtitle_lines(mut self, lines: usize) -> Self {
+        self.subtitle_lines = lines.max(1);
         self
     }
     /// Badges, duration, overflow button…
@@ -85,6 +93,7 @@ impl RenderOnce for ListRow {
         } else {
             space::ROW
         };
+        let lines = self.subtitle_lines;
         let face = div()
             .id(self.id.clone())
             .relative()
@@ -145,7 +154,8 @@ impl RenderOnce for ListRow {
                             div()
                                 .type_style(typeface::SMALL)
                                 .text_color(p.text_secondary)
-                                .truncate()
+                                .when(lines <= 1, |el| el.truncate())
+                                .when(lines > 1, |el| el.clamp_lines(lines))
                                 .child(subtitle),
                         )
                     }),

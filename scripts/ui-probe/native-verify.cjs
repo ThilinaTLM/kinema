@@ -11,7 +11,7 @@ const { decode, crop, diff } = require('./pixels.cjs');
 const exec = promisify(execFile);
 const args = process.argv.slice(2);
 const artifacts = path.resolve(args[0] && !args[0].startsWith('--') ? args.shift() : 'target/ui-probe/native-artifacts');
-let light = false, scene, reduceMotion = false, hover, focusPoint;
+let light = false, size, scene, reduceMotion = false, hover, focusPoint;
 while (args.length) {
   const arg = args.shift();
   if (arg === '--lab') { /* Explicitly select the sole native fixture. */ }
@@ -20,6 +20,10 @@ while (args.length) {
     scene = args.shift();
     assert.ok(typeof scene === 'string' && /^[a-z0-9-]+$/.test(scene), '--scene requires a lowercase alphanumeric/hyphen scene name');
   } else if (arg === '--light') light = true;
+  else if (arg === '--size') {
+    size = args.shift();
+    assert.ok(/^\d+x\d+$/.test(size || ''), '--size requires WxH');
+  }
   else if (arg === '--hover' || arg === '--focus') {
     const value = args.shift();
     assert.ok(/^\d+,\d+$/.test(value || ''), `${arg} requires X,Y`);
@@ -75,7 +79,7 @@ async function main() {
   // Do not even pass the personal display to the server or fixture child.
   delete env.DISPLAY; delete env.WAYLAND_DISPLAY; delete env.WAYLAND_SOCKET;
   delete env.XAUTHORITY; delete env.DBUS_SESSION_BUS_ADDRESS; delete env.DBUS_SESSION_BUS_PID;
-  const xvfb = start('Xvfb', ['-displayfd', '3', '-screen', '0', '1920x1200x24', '-nolisten', 'tcp', '-ac', '-noreset'], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
+  const xvfb = start('Xvfb', ['-displayfd', '3', '-screen', '0', '2560x2400x24', '-nolisten', 'tcp', '-ac', '-noreset'], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
   report.xvfb = logs(xvfb);
   const displayNumber = await new Promise((resolve, reject) => {
     let text = '';
@@ -98,7 +102,7 @@ async function main() {
     fixtureEnv = { ...env, VK_DRIVER_FILES: icd, VK_ICD_FILENAMES: icd };
     report.vulkanIcdOverride = icd;
   }
-  const appArgs = [...(scene ? ['--scene', scene] : []), ...(light ? ['--light'] : []), ...(reduceMotion ? ['--reduce-motion'] : [])];
+  const appArgs = [...(scene ? ['--scene', scene] : []), ...(light ? ['--light'] : []), ...(size ? ['--size', size] : []), ...(reduceMotion ? ['--reduce-motion'] : [])];
   report.scenario = `lab-${scene || 'components'}-${light ? 'light' : 'dark'}`;
   const app = start(binary, appArgs, { env: fixtureEnv });
   report.fixture = logs(app);

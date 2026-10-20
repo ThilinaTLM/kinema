@@ -6,8 +6,8 @@ use crate::widgets::{
 };
 
 /// Placeholder shaped like the episode grid: 16:9 still and two text lines.
-fn episode_skeleton(width: Pixels, cols: usize) -> AnyElement {
-    let tile = tile_width(width, cols);
+fn episode_skeleton(fit: GridFit) -> AnyElement {
+    let (tile, cols) = (fit.tile, fit.cols);
     div()
         .w_full()
         .flex()
@@ -32,12 +32,6 @@ fn episode_skeleton(width: Pixels, cols: usize) -> AnyElement {
         .into_any_element()
 }
 
-/// Width of one card when `cols` cards share `width` with the grid gap.
-fn tile_width(width: Pixels, cols: usize) -> Pixels {
-    let cols = cols.max(1) as f32;
-    ((width - geometry::EPISODE_GRID_GAP * (cols - 1.)) / cols).floor()
-}
-
 /// `The Signal`, or a stand-in for unnamed episodes.
 fn episode_name(ep: &CatalogEpisode) -> String {
     ep.name
@@ -49,7 +43,7 @@ fn episode_name(ep: &CatalogEpisode) -> String {
 }
 
 /// `48 min · 2024-03-02` — absent parts skipped.
-fn episode_meta(ep: &CatalogEpisode) -> Option<String> {
+pub(super) fn episode_meta(ep: &CatalogEpisode) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(n) = ep.runtime_minutes {
         parts.push(format!("{n} min"));
@@ -60,7 +54,7 @@ fn episode_meta(ep: &CatalogEpisode) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-fn episode_overview(ep: &CatalogEpisode) -> Option<String> {
+pub(super) fn episode_overview(ep: &CatalogEpisode) -> Option<String> {
     ep.overview
         .as_deref()
         .map(str::trim)
@@ -170,9 +164,10 @@ impl Detail {
     /// Episodes below the details: season tabs and a responsive card grid.
     /// Clicking a card opens the Streams page for that episode.
     pub(super) fn episodes_section(&mut self, width: Pixels, cx: &mut Context<Self>) -> AnyElement {
-        let cols = grid_columns(
+        let fit = fit_grid(
             width,
             geometry::EPISODE_CARD_MIN_WIDTH,
+            geometry::EPISODE_CARD_MAX_WIDTH,
             geometry::EPISODE_GRID_GAP,
         );
         let episodes = self.episodes(cx);
@@ -222,7 +217,7 @@ impl Detail {
         }
         let weak = cx.entity().downgrade();
         let mut view = state_view("episodes", sel)
-            .skeleton(episode_skeleton(width, cols))
+            .skeleton(episode_skeleton(fit))
             .message("Couldn’t load episodes")
             .empty(
                 IconName::Tv,
@@ -236,7 +231,7 @@ impl Detail {
             view = view.hint(error.clone());
         }
         if sel.state == ViewState::Content {
-            let tile = tile_width(width, cols);
+            let tile = fit.tile;
             let cards: Vec<_> = episodes
                 .into_iter()
                 .map(|ep| self.episode_card(ep, tile, cx))
@@ -324,7 +319,7 @@ impl Detail {
                         div()
                             .type_style(t::SMALL)
                             .text_color(p.text_secondary)
-                            .line_clamp(2)
+                            .clamp_lines(2)
                             .child(text)
                     })),
             )
@@ -386,25 +381,30 @@ mod tests {
     }
 
     #[test]
-    fn cards_share_the_width_exactly() {
-        let w = px(1000.);
-        assert_eq!(
-            grid_columns(
-                w,
+    fn cards_fill_the_width_within_their_bounds() {
+        let fit = |w| {
+            fit_grid(
+                px(w),
                 geometry::EPISODE_CARD_MIN_WIDTH,
-                geometry::EPISODE_GRID_GAP
-            ),
-            3
-        );
-        assert_eq!(
-            grid_columns(
-                px(200.),
-                geometry::EPISODE_CARD_MIN_WIDTH,
-                geometry::EPISODE_GRID_GAP
-            ),
-            1
-        );
-        let tile = tile_width(w, 3);
-        assert!(tile * 3. + geometry::EPISODE_GRID_GAP * 2. <= w);
+                geometry::EPISODE_CARD_MAX_WIDTH,
+                geometry::EPISODE_GRID_GAP,
+            )
+        };
+        for (width, cols) in [(300., 1), (920., 3), (1224., 4), (1680., 5), (2400., 7)] {
+            let f = fit(width);
+            assert_eq!(f.cols, cols, "{width}");
+            let used = f.tile * f.cols as f32 + geometry::EPISODE_GRID_GAP * (f.cols as f32 - 1.);
+            assert!(
+                used <= px(width) && used > px(width - f.cols as f32),
+                "{width}"
+            );
+            if width >= 520. {
+                assert!(f.tile >= geometry::EPISODE_CARD_MIN_WIDTH, "{width}");
+                assert!(
+                    f.tile <= geometry::EPISODE_CARD_MAX_WIDTH + px(1.),
+                    "{width}"
+                );
+            }
+        }
     }
 }

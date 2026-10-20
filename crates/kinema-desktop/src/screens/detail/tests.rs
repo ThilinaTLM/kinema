@@ -1,8 +1,9 @@
 //! Pure presentation policies.
 
 use super::{
-    Quality, StreamBadges, age_label, air_date, choose_season, default_season, quality,
-    rating_label, stream_badges, stream_summary,
+    GridFit, Quality, StreamBadges, age_label, air_date, choose_season, content_width,
+    default_season, fit_grid, gutter, hero_sizing, quality, rating_label, stream_badges,
+    stream_summary,
 };
 use kinema_core::{
     catalog::CatalogEpisode,
@@ -99,4 +100,32 @@ fn dates_ages_and_ratings_are_humane() {
     assert_eq!(age_label(10, 100), "just now");
     assert_eq!(rating_label(8.14).as_deref(), Some("8.1"));
     assert_eq!(rating_label(f32::NAN), None);
+}
+
+#[test]
+fn grids_fill_the_width_with_bounded_tiles() {
+    use gpui::px;
+    let fit = |w: f32| fit_grid(px(w), px(140.), px(200.), px(14.));
+    // 960x600: 920-wide frame; 1280: 1224; 1920: 1680 (+gutters); 2560: capped.
+    for (w, cols) in [(496., 3), (920., 5), (1224., 6), (1680., 8)] {
+        let GridFit { cols: c, tile } = fit(w);
+        assert_eq!(c, cols, "{w}");
+        assert!(tile >= px(140.) && tile <= px(200.), "{w}: {tile:?}");
+        let used = tile * c as f32 + px(14.) * (c as f32 - 1.);
+        assert!(used <= px(w) && used > px(w - c as f32), "{w}");
+    }
+    // Tiles never drop below the minimum even when the max cannot be met.
+    assert_eq!(fit(100.).cols, 1);
+}
+#[test]
+fn hero_and_body_share_one_frame() {
+    use gpui::px;
+    for w in [960., 1280., 1920., 2560., 3840.] {
+        let v = px(w);
+        let content = content_width(v);
+        assert!(content + gutter(v) * 2. <= v.max(px(1.)));
+        assert!(content <= px(1800.) - gutter(v) * 2.);
+        assert!(hero_sizing(v).0 >= px(140.));
+    }
+    assert!(gutter(px(960.)) < gutter(px(1920.)));
 }

@@ -12,7 +12,12 @@ Production-screen fixtures inject offline state; they do not prove live workflow
 screens). Scenes: `components` (default), `browse`, `menus`, `sheet`, `sheet-ready`,
 `detail`, `series`, `series-streams`, `states`.
 All content is synthetic/in-memory; buttons never start services or players.
-`--light` and `--reduce-motion` select lab theme/motion preferences.
+`--light` and `--reduce-motion` select lab theme/motion preferences. `--size WxH`
+(logical pixels, default 1280x800; also accepted by `native-verify.cjs`, whose Xvfb
+screen is 2560x2400) opens the window at a given size for responsive review.
+Production detail fixtures: `detail-live-tmdb-movie`, `detail-live-tmdb-movie-streams`,
+`detail-live-tmdb-series`, `detail-live-tmdb-series-streams` (full `TitleFacts`,
+long overview, 20 similar titles per page, long release names).
 
 ```sh
 cargo build -p kinema-desktop --bin ui-probe --features ui-probe --locked
@@ -104,3 +109,14 @@ not accepted baselines, native performance or cross-platform acceptance.
 The lab also includes production-screen fixtures (`browse-live`, detail-live,
 play-live, transfers-live, quit-live and settings scenes); consult the scene list
 in `src/design_lab.rs` for exact names. These retain synthetic/offline data.
+
+### Detail responsive review (breakpoints)
+
+```sh
+for sz in 960x600 1280x800 1920x1080 2560x1440; do
+  node scripts/ui-probe/native-verify.cjs target/ui-probe/shots/movie-$sz --lab --scene detail-live-tmdb-movie --size $sz
+done   # likewise ...-movie-streams, ...-series, ...-series-streams
+```
+
+Use a tall size such as `1920x2000` to see the page below the fold. Captures are
+candidates for image review, not baselines.

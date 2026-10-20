@@ -3,6 +3,7 @@
 use super::*;
 use crate::{
     tmdb::{TmdbPage, TmdbTitle},
+    widgets::patterns::POSTER_ASPECT,
     widgets::{
         patterns::{ViewState, focus_ring},
         tokens::elevation,
@@ -98,11 +99,13 @@ impl Detail {
             let c = self.coordinator.read(cx);
             (c.similar.busy(), c.similar.error().map(str::to_owned))
         };
-        let cols = grid_columns(
+        let fit = fit_grid(
             width,
-            px(geometry::SIMILAR_WIDTH),
-            px(geometry::SIMILAR_GAP),
+            geometry::SIMILAR_MIN_WIDTH,
+            geometry::SIMILAR_MAX_WIDTH,
+            geometry::SIMILAR_GAP,
         );
+        let cols = fit.cols;
         self.similar_cols = cols;
         let sel = selection(
             !self.similar.is_empty(),
@@ -117,20 +120,13 @@ impl Detail {
                     .w_full()
                     .flex()
                     .flex_wrap()
-                    .gap(px(geometry::SIMILAR_GAP))
-                    .children(
-                        (0..geometry::SIMILAR_SKELETON_CARDS.min(cols * 2)).map(|_| {
-                            div()
-                                .w(px(geometry::SIMILAR_WIDTH))
-                                .h(px(geometry::SIMILAR_HEIGHT))
-                                .child(
-                                    Skeleton::block()
-                                        .w(px(geometry::SIMILAR_WIDTH))
-                                        .h(px(geometry::SIMILAR_HEIGHT))
-                                        .rounded(radius::MD),
-                                )
-                        }),
-                    ),
+                    .gap(geometry::SIMILAR_GAP)
+                    .children((0..cols * 2).map(|_| {
+                        Skeleton::block()
+                            .w(fit.tile)
+                            .h(fit.tile * POSTER_ASPECT)
+                            .rounded(radius::MD)
+                    })),
             )
             .message("Couldn’t load similar movies")
             .empty(
@@ -145,7 +141,7 @@ impl Detail {
             view = view.hint(error.clone());
         }
         if sel.state == ViewState::Content {
-            view = view.content(self.similar_grid(cols, busy, error, cx));
+            view = view.content(self.similar_grid(fit, busy, error, cx));
         }
         div()
             .id("detail-similar")
@@ -159,13 +155,18 @@ impl Detail {
             .into_any_element()
     }
 
-    fn similar_tile(&self, title: &TmdbTitle, cx: &mut Context<Self>) -> AnyElement {
+    fn similar_tile(
+        &self,
+        title: &TmdbTitle,
+        tile_width: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = *tokens::palette(cx);
         let mut tile = div()
             .id(("similar-title", title.id))
             .debug_selector(|| format!("similar-title-{}", title.id))
-            .w(px(geometry::SIMILAR_WIDTH))
-            .h(px(geometry::SIMILAR_HEIGHT))
+            .w(tile_width)
+            .h(tile_width * POSTER_ASPECT)
             .flex_none()
             .relative()
             .overflow_hidden()
@@ -215,17 +216,18 @@ impl Detail {
 
     fn similar_grid(
         &self,
-        cols: usize,
+        fit: GridFit,
         busy: bool,
         error: Option<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = *tokens::palette(cx);
+        let cols = fit.cols;
         let tiles: Vec<AnyElement> = self
             .similar
             .visible(cols)
             .iter()
-            .map(|title| self.similar_tile(title, cx))
+            .map(|title| self.similar_tile(title, fit.tile, cx))
             .collect();
         let mut grid = div().w_full().flex().flex_col().gap(s::S12).child(
             div()
@@ -233,7 +235,7 @@ impl Detail {
                 .w_full()
                 .flex()
                 .flex_wrap()
-                .gap(px(geometry::SIMILAR_GAP))
+                .gap(geometry::SIMILAR_GAP)
                 .children(tiles),
         );
         if let Some(error) = error {

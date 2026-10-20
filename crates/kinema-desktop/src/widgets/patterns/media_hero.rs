@@ -80,6 +80,10 @@ pub struct MediaHero {
     veil: f32,
     side_scrim: f32,
     overview_loading: bool,
+    gutter: Pixels,
+    max_width: Option<Pixels>,
+    poster_width: Pixels,
+    text_max_width: Pixels,
 }
 
 impl MediaHero {
@@ -100,6 +104,10 @@ impl MediaHero {
             veil: DEFAULT_VEIL,
             side_scrim: DEFAULT_SIDE_SCRIM,
             overview_loading: false,
+            gutter: space::GRID_INSET,
+            max_width: None,
+            poster_width: POSTER_WIDTH,
+            text_max_width: TEXT_MAX_WIDTH,
         }
     }
     /// Blurred, darkened image from `artwork::backdrop*`.
@@ -165,6 +173,20 @@ impl MediaHero {
     /// Show an overview-shaped skeleton while the text is still loading.
     pub fn overview_loading(mut self, loading: bool) -> Self {
         self.overview_loading = loading;
+        self
+    }
+    /// Align the content with a page frame: side gutter and a maximum content
+    /// width (the backdrop itself stays full-bleed).
+    pub fn frame(mut self, gutter: Pixels, max_width: Pixels) -> Self {
+        self.gutter = gutter;
+        self.max_width = Some(max_width);
+        self
+    }
+    /// Poster frame width and overview measure, scaled by the caller per
+    /// window size.
+    pub fn sizing(mut self, poster_width: Pixels, text_max_width: Pixels) -> Self {
+        self.poster_width = poster_width;
+        self.text_max_width = text_max_width;
         self
     }
     pub fn overview(mut self, overview: impl Into<SharedString>) -> Self {
@@ -270,8 +292,8 @@ impl RenderOnce for MediaHero {
         let poster = self.poster.map(|poster| {
             div()
                 .flex_none()
-                .w(POSTER_WIDTH)
-                .h(POSTER_WIDTH * POSTER_ASPECT)
+                .w(self.poster_width)
+                .h(self.poster_width * POSTER_ASPECT)
                 .rounded(radius::MD)
                 .overflow_hidden()
                 .bg(p.bg_placeholder)
@@ -307,7 +329,7 @@ impl RenderOnce for MediaHero {
                 .flex_col()
                 .gap(space::S4)
                 .w_full()
-                .max_w(TEXT_MAX_WIDTH)
+                .max_w(self.text_max_width)
                 .child(
                     // Clamped and full text keep separate element state: a text
                     // layout cached under a line clamp keeps its single
@@ -326,7 +348,7 @@ impl RenderOnce for MediaHero {
                         .type_style(typeface::BODY_LONG)
                         .text_color(ink.text_secondary)
                         .when_some(overview_clamp(collapsible, is_expanded), |el, lines| {
-                            el.line_clamp(lines)
+                            el.clamp_lines(lines)
                         })
                         .child(text),
                 )
@@ -374,60 +396,66 @@ impl RenderOnce for MediaHero {
                 el.child(ramp(FADE_HEIGHT))
             })
             .child(
-                div()
-                    .relative()
-                    .flex()
-                    .items_end()
-                    .gap(space::S24)
-                    .px(space::GRID_INSET)
-                    .pt(space::S24)
-                    .pb(space::S24)
-                    .children(poster)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(space::S8)
-                            .child(
-                                div()
-                                    .type_style(typeface::DISPLAY)
-                                    .text_color(ink.text_primary)
-                                    .line_clamp(2)
-                                    .child(self.title),
-                            )
-                            .when(!self.meta.is_empty(), |el| {
-                                el.child(
+                div().relative().w_full().flex().justify_center().child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .when_some(self.max_width, |el, w| el.max_w(w))
+                        .flex()
+                        .items_end()
+                        .gap(space::S24)
+                        .px(self.gutter)
+                        .pt(space::S24)
+                        .pb(space::S24)
+                        .children(poster)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(space::S8)
+                                .child(
                                     div()
-                                        .flex()
-                                        .flex_wrap()
-                                        .items_center()
-                                        .gap(space::S8)
-                                        .text_color(ink.text_secondary)
-                                        .type_style(typeface::SMALL_MEDIUM)
-                                        .children(self.meta.into_iter().map(|item| match item {
-                                            MetaItem::Element(el) => el,
-                                            MetaItem::Badge(badge) => {
-                                                badge.over_art(over_art).into_any_element()
-                                            }
-                                        })),
+                                        .type_style(typeface::DISPLAY)
+                                        .text_color(ink.text_primary)
+                                        .clamp_lines(2)
+                                        .child(self.title),
                                 )
-                            })
-                            .children(overview)
-                            .when(has_actions, |el| {
-                                el.child(
-                                    div()
-                                        .flex()
-                                        .flex_wrap()
-                                        .items_center()
-                                        .gap(space::S8)
-                                        .pt(space::S4)
-                                        .children(self.primary)
-                                        .children(self.secondary),
-                                )
-                            }),
-                    ),
+                                .when(!self.meta.is_empty(), |el| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .flex_wrap()
+                                            .items_center()
+                                            .gap(space::S8)
+                                            .text_color(ink.text_secondary)
+                                            .type_style(typeface::SMALL_MEDIUM)
+                                            .children(self.meta.into_iter().map(
+                                                |item| match item {
+                                                    MetaItem::Element(el) => el,
+                                                    MetaItem::Badge(badge) => {
+                                                        badge.over_art(over_art).into_any_element()
+                                                    }
+                                                },
+                                            )),
+                                    )
+                                })
+                                .children(overview)
+                                .when(has_actions, |el| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .flex_wrap()
+                                            .items_center()
+                                            .gap(space::S8)
+                                            .pt(space::S4)
+                                            .children(self.primary)
+                                            .children(self.secondary),
+                                    )
+                                }),
+                        ),
+                ),
             )
     }
 }

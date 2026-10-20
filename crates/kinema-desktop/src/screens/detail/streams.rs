@@ -151,6 +151,7 @@ impl Detail {
         let row = ListRow::new(("stream-row", i), stream_summary(candidate, provider))
             .leading(leading)
             .subtitle(candidate.name.clone())
+            .subtitle_lines(2)
             .trailing(play)
             .selected(selected);
         let row = div()

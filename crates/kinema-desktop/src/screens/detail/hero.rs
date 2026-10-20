@@ -5,18 +5,18 @@ use crate::widgets::menu::OpenContextMenu;
 use crate::widgets::patterns::{MediaHero, uses_over_art};
 use kinema_core::catalog::{ImdbId, TitleFacts};
 
-/// Centres a page section and caps its width on wide windows.
-pub(super) fn body_shell(child: impl IntoElement) -> Div {
+/// Wraps a page section in the shared frame: the same side gutters and
+/// maximum width as the hero content, centred only beyond that width.
+pub(super) fn body_shell(viewport: Pixels, child: impl IntoElement) -> Div {
     div().w_full().flex().justify_center().child(
         div()
             .w_full()
             .max_w(geometry::PAGE_MAX_WIDTH)
-            .px(s::GRID_INSET)
+            .px(gutter(viewport))
             .child(child),
     )
 }
 
-/// Overflow menu shared by the More button and right-click on the hero.
 fn more_items(weak: WeakEntity<Detail>, name: String, imdb: Option<ImdbId>) -> Vec<MenuItem> {
     let mut items = vec![
         menu_item("Refresh", {
@@ -96,7 +96,7 @@ impl Detail {
     }
 
     /// Year, runtime/seasons, genres and rating as badges.
-    fn meta_badges(title: &BrowseTitle, facts: &TitleFacts) -> Vec<Badge> {
+    pub(super) fn meta_badges(title: &BrowseTitle, facts: &TitleFacts) -> Vec<Badge> {
         let mut badges = Vec::new();
         if title.kind() == MediaKind::Series {
             badges.push(
@@ -171,6 +171,7 @@ impl Detail {
         &self,
         title: &BrowseTitle,
         status: &MetaStatus,
+        viewport: Pixels,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = self.tinted_palette(cx);
@@ -204,6 +205,8 @@ impl Detail {
             .poster(poster)
             .fade_into(p.bg_canvas)
             .min_height(px(0.))
+            .frame(gutter(viewport), geometry::PAGE_MAX_WIDTH)
+            .sizing(hero_sizing(viewport).0, hero_sizing(viewport).1)
             .overview_loading(status.busy && !status.loaded)
             .primary(self.primary_button(cx));
         let facts = self.title_facts(cx);
@@ -233,8 +236,9 @@ impl Detail {
             );
         if let Some(error) = status.error.clone() {
             let retry = cx.listener(|this, _, _, cx| this.retry_metadata(cx));
-            section = section.child(
-                div().w_full().px(s::GRID_INSET).pt(s::S12).child(
+            section = section.child(body_shell(
+                viewport,
+                div().w_full().pt(s::S12).child(
                     crate::widgets::notice::Notice::new(
                         crate::widgets::notice::NoticeKind::Warning,
                         if status.loaded {
@@ -246,7 +250,7 @@ impl Detail {
                     .body(error)
                     .action(Button::new("detail-meta-retry", "Retry").on_click(retry)),
                 ),
-            );
+            ));
         }
         section.into_any_element()
     }
@@ -261,9 +265,10 @@ impl Detail {
         let title = self.display_title(cx);
         let status = self.meta_status(cx);
         let p = self.tinted_palette(cx);
-        let width = content_width(window.viewport_size().width);
-        let hero = self.hero(&title, &status, cx);
-        let facts = self.facts_section(&title, &status, cx);
+        let viewport = window.viewport_size().width;
+        let width = content_width(viewport);
+        let hero = self.hero(&title, &status, viewport, cx);
+        let facts = self.facts_section(&title, &status, width, cx);
         let middle = if self.is_series() {
             self.episodes_section(width, cx)
         } else {
@@ -276,9 +281,9 @@ impl Detail {
             .child(
                 ScrollArea::new("detail-scroll", self.scroll.clone())
                     .child(hero)
-                    .child(body_shell(facts))
-                    .child(body_shell(middle))
-                    .child(body_shell(footer)),
+                    .child(body_shell(viewport, facts))
+                    .child(body_shell(viewport, middle))
+                    .child(body_shell(viewport, footer)),
             )
             .into_any_element()
     }

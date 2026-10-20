@@ -46,26 +46,30 @@ use std::{cell::Cell, collections::HashMap, rc::Rc};
 // dimensions remain in widgets::tokens.
 mod geometry {
     use gpui::{Pixels, px};
-    /// Page bodies never grow wider than this; on wide windows they centre.
-    pub const PAGE_MAX_WIDTH: Pixels = px(1280.);
-    /// The streams list stays a readable list rather than a wall of text.
-    pub const STREAMS_MAX_WIDTH: Pixels = px(960.);
+    /// Hero and body share one frame; it only centres beyond this width.
+    pub const PAGE_MAX_WIDTH: Pixels = px(1800.);
+    /// Below this frame width the Streams page is one column.
+    pub const STREAMS_TWO_PANE_AT: Pixels = px(1040.);
+    pub const STREAMS_SIDEBAR_MIN: Pixels = px(300.);
+    pub const STREAMS_SIDEBAR_MAX: Pixels = px(400.);
     /// Fixed width of the resolution/HDR/codec badge stack in a stream row.
     pub const BADGE_STACK_WIDTH: Pixels = px(84.);
-    /// Narrowest an episode card gets before the grid drops a column.
     pub const EPISODE_CARD_MIN_WIDTH: Pixels = px(260.);
+    pub const EPISODE_CARD_MAX_WIDTH: Pixels = px(360.);
     pub const EPISODE_GRID_GAP: Pixels = px(16.);
-    pub const SIMILAR_WIDTH: f32 = 140.;
-    pub const SIMILAR_HEIGHT: f32 = 210.;
-    pub const SIMILAR_GAP: f32 = 12.;
+    pub const SIMILAR_MIN_WIDTH: Pixels = px(140.);
+    pub const SIMILAR_MAX_WIDTH: Pixels = px(200.);
+    pub const SIMILAR_GAP: Pixels = px(14.);
+    pub const FACT_MIN_WIDTH: Pixels = px(200.);
+    pub const FACT_MAX_WIDTH: Pixels = px(300.);
+    pub const CAST_MIN_WIDTH: Pixels = px(104.);
+    pub const CAST_MAX_WIDTH: Pixels = px(136.);
     pub const FACT_LABEL_WIDTH: Pixels = px(120.);
-    pub const CAST_WIDTH: Pixels = px(112.);
     /// Up to this many seasons get "Season N" tabs; more use compact numbers.
     pub const FULL_SEASON_LABELS_MAX: usize = 4;
     /// Skeleton row counts, roughly one screenful.
     pub const STREAM_SKELETON_ROWS: usize = 6;
     pub const EPISODE_SKELETON_CARDS: usize = 4;
-    pub const SIMILAR_SKELETON_CARDS: usize = 8;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -238,17 +242,55 @@ pub(crate) enum Page {
     Streams,
 }
 
-/// Columns of equal tiles that fit `available`; always at least one.
-fn grid_columns(available: Pixels, min_tile: Pixels, gap: Pixels) -> usize {
-    let (a, m, g) = (f32::from(available), f32::from(min_tile), f32::from(gap));
-    if m + g <= 0. || a <= m {
-        return 1;
-    }
-    (((a + g) / (m + g)).floor() as usize).max(1)
+/// Columns and tile width of a grid whose rows fill the available width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GridFit {
+    cols: usize,
+    tile: Pixels,
 }
-/// Width available to page content inside a viewport of `viewport` pixels.
+/// Fewest columns whose tiles are no wider than `max`, but never so many that
+/// they get narrower than `min` (the `min` bound wins when the two conflict).
+/// Tiles then share `available` exactly, minus the gaps.
+fn fit_grid(available: Pixels, min: Pixels, max: Pixels, gap: Pixels) -> GridFit {
+    let (a, lo, hi, g) = (
+        f32::from(available),
+        f32::from(min),
+        f32::from(max),
+        f32::from(gap),
+    );
+    let most = (((a + g) / (lo + g)).floor() as usize).max(1);
+    let fewest = (((a + g) / (hi + g)).ceil() as usize).max(1);
+    let cols = fewest.min(most);
+    let tile = ((a - g * (cols as f32 - 1.)) / cols as f32).floor().max(1.);
+    GridFit {
+        cols,
+        tile: px(tile),
+    }
+}
+/// Side gutter of the page frame by window width.
+fn gutter(viewport: Pixels) -> Pixels {
+    let w = f32::from(viewport);
+    px(match w {
+        w if w < 720. => 12.,
+        w if w < 1100. => 20.,
+        w if w < 1500. => 28.,
+        w if w < 2100. => 40.,
+        _ => 48.,
+    })
+}
+/// Width of page content inside the shared frame for a window of `viewport`.
 fn content_width(viewport: Pixels) -> Pixels {
-    viewport.min(geometry::PAGE_MAX_WIDTH) - s::GRID_INSET * 2.
+    viewport.min(geometry::PAGE_MAX_WIDTH) - gutter(viewport) * 2.
+}
+/// Overview measure and poster width scale with the window.
+fn hero_sizing(viewport: Pixels) -> (Pixels, Pixels) {
+    let w = f32::from(viewport);
+    match w {
+        w if w < 1100. => (px(140.), px(560.)),
+        w if w < 1500. => (px(168.), px(680.)),
+        w if w < 2100. => (px(200.), px(820.)),
+        _ => (px(232.), px(920.)),
+    }
 }
 
 pub(crate) struct Detail {

@@ -104,7 +104,7 @@ impl Detail {
             view.ratings.push(RatingTile {
                 label: "IMDb",
                 value: score,
-                detail: Some("/ 10".into()),
+                detail: None,
             });
         }
         if let Some(score) = facts.tmdb_rating.map(|r| r.value()).and_then(rating_label) {
@@ -207,12 +207,19 @@ impl Detail {
         view
     }
 
+    /// A prominent score card: star, large value, source and optional votes.
     fn rating_tile(&self, tile: &RatingTile, cx: &App) -> Div {
         let p = self.tinted_palette(cx);
         div()
             .flex()
             .items_center()
-            .gap(s::S8)
+            .gap(s::S12)
+            .px(s::S16)
+            .py(s::S12)
+            .rounded(radius::MD)
+            .bg(p.bg_surface)
+            .border(s::HAIRLINE)
+            .border_color(p.line_subtle)
             .child(Icon::new(IconName::StarFilled).color(p.accent_text))
             .child(
                 div()
@@ -225,31 +232,43 @@ impl Detail {
                             .gap(s::S4)
                             .child(
                                 div()
-                                    .type_style(t::TITLE)
+                                    .type_style(t::DISPLAY)
                                     .text_color(p.text_primary)
                                     .child(tile.value.clone()),
                             )
-                            .children(tile.detail.clone().map(|d| {
-                                div().type_style(t::SMALL).text_color(p.text_muted).child(d)
-                            })),
+                            .child(
+                                div()
+                                    .type_style(t::SMALL)
+                                    .text_color(p.text_muted)
+                                    .child("/ 10"),
+                            ),
                     )
                     .child(
                         div()
-                            .type_style(t::CAPTION)
-                            .text_color(p.text_muted)
-                            .child(tile.label),
+                            .type_style(t::SMALL_MEDIUM)
+                            .text_color(p.text_secondary)
+                            .child(match &tile.detail {
+                                Some(votes) => format!("{} · {votes}", tile.label),
+                                None => tile.label.to_owned(),
+                            }),
                     ),
             )
     }
 
-    fn cast_row(&self, cast: &[CastEntry], cx: &App) -> Stateful<Div> {
+    fn cast_row(&self, cast: &[CastEntry], width: Pixels, cx: &App) -> Stateful<Div> {
         let p = self.tinted_palette(cx);
+        let fit = fit_grid(
+            width,
+            geometry::CAST_MIN_WIDTH,
+            geometry::CAST_MAX_WIDTH,
+            s::S12,
+        );
         div()
             .id("detail-cast")
             .w_full()
             .flex()
             .flex_col()
-            .gap(s::S8)
+            .gap(s::S12)
             .child(
                 div()
                     .type_style(t::HEADING)
@@ -260,11 +279,10 @@ impl Detail {
                 div()
                     .flex()
                     .flex_wrap()
-                    .gap_x(s::S16)
-                    .gap_y(s::S12)
-                    .children(cast.iter().map(|member| {
+                    .gap(s::S12)
+                    .children(cast.iter().take(fit.cols).map(|member| {
                         div()
-                            .w(geometry::CAST_WIDTH)
+                            .w(fit.tile)
                             .flex()
                             .flex_col()
                             .items_center()
@@ -287,7 +305,7 @@ impl Detail {
                                     .type_style(t::SMALL_MEDIUM)
                                     .text_color(p.text_primary)
                                     .text_center()
-                                    .line_clamp(2)
+                                    .clamp_lines(2)
                                     .child(member.name.clone()),
                             )
                             .children(member.role.clone().map(|role| {
@@ -296,18 +314,19 @@ impl Detail {
                                     .type_style(t::CAPTION)
                                     .text_color(p.text_muted)
                                     .text_center()
-                                    .line_clamp(1)
+                                    .clamp_lines(2)
                                     .child(role)
                             }))
                     })),
             )
     }
 
-    /// Ratings, facts grid and cast, directly under the hero.
+    /// Ratings, tagline, a responsive facts grid and cast, under the hero.
     pub(super) fn facts_section(
         &self,
         title: &BrowseTitle,
         status: &MetaStatus,
+        width: Pixels,
         cx: &App,
     ) -> AnyElement {
         let p = self.tinted_palette(cx);
@@ -315,7 +334,7 @@ impl Detail {
         let mut section = div()
             .id("detail-facts")
             .w_full()
-            .py(s::S16)
+            .py(s::S20)
             .flex()
             .flex_col()
             .gap(s::S20);
@@ -337,8 +356,8 @@ impl Detail {
             section = section.child(
                 div()
                     .id("detail-tagline")
-                    .max_w(px(720.))
-                    .type_style(t::BODY_LONG)
+                    .max_w(px(900.))
+                    .type_style(t::TITLE)
                     .italic()
                     .text_color(p.text_secondary)
                     .child(tagline),
@@ -347,23 +366,31 @@ impl Detail {
         if !view.ratings.is_empty() {
             section = section.child(
                 div()
+                    .id("detail-ratings")
                     .flex()
                     .flex_wrap()
-                    .gap_x(s::S32)
-                    .gap_y(s::S12)
+                    .gap(s::S12)
                     .children(view.ratings.iter().map(|tile| self.rating_tile(tile, cx))),
             );
         }
         if !view.rows.is_empty() {
+            let fit = fit_grid(
+                width,
+                geometry::FACT_MIN_WIDTH,
+                geometry::FACT_MAX_WIDTH,
+                s::S24,
+            );
             section = section.child(
                 div()
+                    .id("detail-facts-grid")
+                    .w_full()
                     .flex()
                     .flex_wrap()
-                    .gap_x(s::S32)
-                    .gap_y(s::S12)
+                    .gap_x(s::S24)
+                    .gap_y(s::S16)
                     .children(view.rows.into_iter().map(|(label, value)| {
                         div()
-                            .max_w(px(420.))
+                            .w(fit.tile)
                             .flex()
                             .flex_col()
                             .gap(s::S2)
@@ -383,7 +410,7 @@ impl Detail {
             );
         }
         if !view.cast.is_empty() {
-            section = section.child(self.cast_row(&view.cast, cx));
+            section = section.child(self.cast_row(&view.cast, width, cx));
         }
         section.into_any_element()
     }

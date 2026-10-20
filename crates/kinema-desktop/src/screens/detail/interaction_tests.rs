@@ -175,23 +175,70 @@ fn similar_grid_shows_two_rows_and_show_more_pages_in_titles(cx: &mut TestAppCon
     window
         .update(cx, |view, _, _| {
             let cols = view.similar_cols;
-            assert_eq!(cols, 3);
-            assert_eq!(view.similar.loaded(), 6);
-            assert_eq!(view.similar.visible(cols).len(), 6.min(cols * 2));
+            assert_eq!(cols, 3, "140-200 px posters in a 496 px frame");
+            assert_eq!(view.similar.loaded(), 20);
+            assert_eq!(view.similar.visible(cols).len(), 2 * cols, "two rows");
         })
         .unwrap_or_else(|e| panic!("window:{e}"));
     window
         .update(cx, |view, _, cx| {
-            // Four rows (12 slots) outgrow the six loaded titles: page 2 loads.
+            // Rows 4 and 6 still fit the 20 loaded titles; the third click
+            // (8 rows = 24 slots) outgrows them and loads page 2.
             view.show_more_similar(cx);
+            view.show_more_similar(cx);
+            assert_eq!(view.similar.loaded(), 20);
             view.show_more_similar(cx);
         })
         .unwrap_or_else(|e| panic!("window:{e}"));
     draw(window, cx);
     window
         .read_with(cx, |view, _| {
-            assert_eq!(view.similar.loaded(), 12, "page 2 was merged");
-            assert_eq!(view.similar.visible(3).len(), 12);
+            assert_eq!(view.similar.loaded(), 40, "page 2 was merged");
+            assert_eq!(view.similar.visible(3).len(), 24);
         })
         .unwrap_or_else(|e| panic!("window:{e}"));
+}
+#[gpui::test]
+fn facts_block_shows_ratings_votes_and_provider_facts(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
+    for title in [tmdb_movie(), title(true)] {
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+        let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
+        cx.simulate_window_resize(window.into(), size(px(1280.), px(800.)));
+        draw(window, cx);
+        window
+            .read_with(cx, |view, cx| {
+                let facts = view.facts_view(&view.display_title(cx), cx);
+                let ratings: Vec<_> = facts
+                    .ratings
+                    .iter()
+                    .map(|r| (r.label, r.value.as_str(), r.detail.as_deref()))
+                    .collect();
+                assert_eq!(
+                    ratings,
+                    [("IMDb", "8.1", None), ("TMDB", "7.8", Some("12,345 votes"))]
+                );
+                assert_eq!(
+                    facts.tagline.as_deref(),
+                    Some("The signal was never meant to be answered.")
+                );
+                let labels: Vec<_> = facts.rows.iter().map(|r| r.0).collect();
+                for want in [
+                    "Status",
+                    "Certification",
+                    "Language",
+                    "Writers",
+                    "Studios",
+                    "Countries",
+                ] {
+                    assert!(labels.contains(&want), "{want} in {labels:?}");
+                }
+                assert_eq!(facts.cast.len(), 10);
+                assert_eq!(facts.cast[0].role.as_deref(), Some("Role 1"));
+            })
+            .unwrap_or_else(|e| panic!("facts:{e}"));
+    }
 }

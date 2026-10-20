@@ -477,8 +477,11 @@ and protected files, never deletes original local files. Rows have context menus
 
 ### 4.5 Detail page (movie and series)
 
-Implemented in `screens/detail*`. One scrolling page (`ScrollArea`); content is
-capped at 1280 px and centred.
+Implemented in `screens/detail*`. One scrolling page (`ScrollArea`). The hero and
+every body section share **one frame**: responsive side gutters (12 / 20 / 28 / 40 /
+48 px below 720 / 1100 / 1500 / 2100 / wider) and a 1800 px maximum content width,
+centred only beyond it, so everything has the same left edge. Poster width and
+overview measure scale with the window (140–232 px, 560–920 px).
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -500,17 +503,23 @@ capped at 1280 px and centred.
 ```
 
 - The hero sizes to its content; there is no fixed-height band. Overview text
-  clamps to 3 lines; "More" lifts the clamp and the text wraps inside the same
-  measure (clamped and full text keep separate element state so a clamped layout
-  is never reused).
+  clamps to 3 lines with an ellipsis (`clamp_lines`); "More" lifts the clamp and
+  the text wraps inside the same measure. A bare `line_clamp` without an ellipsis
+  leaves the remainder of the text unwrapped on the last line, which the container
+  then clips mid-word.
 - Streams load only when the Streams page opens, for the selected indexer.
   Without an IMDb mapping the Play button is disabled with a reason tooltip.
 - **Series:** season default = first non-special season with episodes (or the last
   selected). Season change cancels obsolete requests. The episode grid is
   responsive (cards ≥ 260 px). Episode cards offer Find streams / Copy episode
   title / Copy `SxxEyy` in a context menu.
-- **Similar movies (TMDB only):** a wrapping grid of 140 × 210 posters limited to
-  two rows at the current width. "Show more" reveals two more rows and, when the
+- **Grids fill the width.** Column count comes from the available width and each
+  item's min/max width (`fit_grid`): posters 140–200 px (2:3), episode cards
+  260–360 px (16:9 still), facts cells 200–300 px, cast 104–136 px (one row).
+  The facts block leads with prominent rating tiles (IMDb, TMDB + votes), then the
+  tagline and a multi-column facts grid.
+- **Similar movies (TMDB only):** a wrapping poster grid limited to
+  two rows at the computed column count. "Show more" reveals two more rows and, when the
   loaded titles run out, requests the next catalog page (pages accumulate;
   refresh restarts at page 1).
 - The facts block is built from fields the providers expose today (rating,
@@ -534,7 +543,11 @@ position, season and focus (the episode card is refocused).
 │ HEVC       Quiet.Orbit.1080p.WEB…                                            │
 ```
 
-- Max width 960 px, roomier rows than the old side panel; stream-row styling,
+- At frame width ≥ 1040 px the page has two panes: a fixed sidebar (27 %, 300–400 px:
+  Back, poster, title / `SxxExx`, chips and overview, indexer + refresh, quality
+  filter) and the stream list filling the rest. Narrower windows stack the same
+  pieces in one column. Release names wrap to two lines before truncating.
+- Roomier rows than the old side panel; stream-row styling,
   badges, quality filter, indexer select, counts, refresh and the row context menu
   (Play… · Show details · Copy release name) are unchanged.
 - Loading, empty, error (with retry) and "hidden by provider limit" states are

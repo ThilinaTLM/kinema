@@ -99,7 +99,7 @@ impl PlaySheet {
                     div()
                         .type_style(t::HEADING)
                         .text_color(p.text_primary)
-                        .line_clamp(2)
+                        .clamp_lines(2)
                         .child(self.title.clone()),
                 )
                 .when_some(self.context.episode.clone(), |el, episode| {
