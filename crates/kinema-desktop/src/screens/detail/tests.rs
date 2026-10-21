@@ -2,8 +2,8 @@
 
 use super::{
     GridFit, Quality, StreamBadges, age_label, air_date, choose_season, content_width,
-    default_season, fit_grid, gutter, hero_sizing, quality, rating_label, stream_badges,
-    stream_summary,
+    default_season, fit_grid, gutter, hero_sizing, page_inset, quality, rating_label,
+    stream_badges, stream_summary,
 };
 use kinema_core::{
     catalog::CatalogEpisode,
@@ -120,11 +120,12 @@ fn grids_fill_the_width_with_bounded_tiles() {
 #[test]
 fn hero_and_body_share_one_frame() {
     use gpui::px;
-    for w in [960., 1280., 1920., 2560., 3840.] {
+    for w in [640., 960., 1280., 1530., 1920., 2560., 3840.] {
         let v = px(w);
         let content = content_width(v);
         assert!(content + gutter(v) * 2. <= v.max(px(1.)));
         assert!(content <= px(1800.) - gutter(v) * 2.);
+        assert_eq!(page_inset(v), (v - content) / 2.);
         assert!(hero_sizing(v).0 >= px(140.));
     }
     assert!(gutter(px(960.)) < gutter(px(1920.)));

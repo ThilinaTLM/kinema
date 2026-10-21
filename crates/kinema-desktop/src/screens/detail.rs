@@ -278,6 +278,10 @@ fn gutter(viewport: Pixels) -> Pixels {
         _ => 48.,
     })
 }
+/// Left edge shared by the detail content and its floating toolbar.
+pub(super) fn page_inset(viewport: Pixels) -> Pixels {
+    (viewport - viewport.min(geometry::PAGE_MAX_WIDTH)) / 2. + gutter(viewport)
+}
 /// Width of page content inside the shared frame for a window of `viewport`.
 fn content_width(viewport: Pixels) -> Pixels {
     viewport.min(geometry::PAGE_MAX_WIDTH) - gutter(viewport) * 2.

@@ -13,7 +13,7 @@ use crate::widgets::{
     segmented::Segmented,
     text::TypeExt,
     text_input::TextInputEvent,
-    tokens::{self, space as s, typeface as t},
+    tokens::{self, radius, space as s, typeface as t},
 };
 use gpui::{prelude::*, *};
 use kinema_core::MediaKind;
@@ -402,14 +402,14 @@ impl Render for MainWindow {
             a: PILL_ALPHA,
             ..p.bg_overlay
         };
-        // Translucent capsule sized from its content: every control sits in an
+        // Compact translucent control group: every control sits in an
         // equal icon-target cell, centered on both axes.
         let pill = move |el: Div| {
             el.flex_none()
                 .flex()
                 .items_center()
                 .gap(s::S2)
-                .rounded_full()
+                .rounded(radius::SM)
                 .bg(pill_bg)
                 .border_1()
                 .border_color(p.line_subtle)
@@ -441,7 +441,7 @@ impl Render for MainWindow {
             _ => "Back to browse",
         };
         let leading = if in_detail {
-            // One left-aligned capsule: back | divider | app actions.
+            // One left-aligned control group: back | divider | app actions.
             pill(div())
                 .child(icon_cell(
                     IconButton::new("detail-back", IconName::ArrowLeft, back_label)
@@ -498,7 +498,11 @@ impl Render for MainWindow {
             .flex()
             .items_center()
             .gap(s::S12)
-            .px(s::S20)
+            .px(if in_detail {
+                super::detail::page_inset(window.viewport_size().width)
+            } else {
+                s::S20
+            })
             .child(
                 div()
                     .flex_1()
