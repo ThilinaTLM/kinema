@@ -308,7 +308,7 @@ mod tests {
             .map_err(|_| "metadata test lock")?;
         use crate::{
             paths::AppPaths,
-            settings::{MetadataProvider, Settings, SettingsStore},
+            settings::{Settings, SettingsStore},
         };
         let vault = FakeVault::default();
         let metadata = MetadataCredentialStore {
@@ -337,11 +337,13 @@ mod tests {
         };
         let store = SettingsStore::open(&paths)?;
         store.save(&Settings {
-            metadata: MetadataProvider::Tmdb,
+            metadata_priority: kinema_core::provider::ProviderPriority::new([
+                kinema_core::provider::ProviderId::Tmdb,
+            ]),
             ..Settings::default()
         })?;
         let text = std::fs::read_to_string(root.path().join("settings.toml"))?;
-        assert!(text.contains("metadata = \"tmdb\""));
+        assert!(text.contains("metadata_providers = [\"tmdb\", \"cinemeta\"]"));
         assert!(!text.contains(token));
         assert!(!text.contains("bearer"));
         assert!(!format!("{:?}", metadata.get()?).contains(token));

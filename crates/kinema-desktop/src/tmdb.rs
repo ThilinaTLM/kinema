@@ -1,5 +1,5 @@
 //! Blocking TMDB v3 adapter; call only on an owned background worker.
-//! No Cinemeta fallback or name-based IMDb matching. Sources require `details.imdb`.
+//! No name-based IMDb matching. Sources require explicit external identifiers.
 //! Snapshots contain normalized public metadata only. The cache owner must bind them
 //! to `cache_query_identity`: a page alone cannot encode its search/browse identity.
 
@@ -245,6 +245,18 @@ impl TmdbClient {
             secret,
             endpoint,
         })
+    }
+    /// Official external-ID lookup; never falls back to name/year matching.
+    pub(crate) fn find_by_imdb(
+        &self,
+        kind: MediaKind,
+        imdb: &ImdbId,
+    ) -> Result<Option<u64>, TmdbError> {
+        let raw: serde_json::Value = self.get(
+            &format!("find/{}", imdb.as_str()),
+            &[("external_source", "imdb_id".into())],
+        )?;
+        parse_imdb_find(raw, kind)
     }
     pub(crate) fn credential_rejected(&self) -> bool {
         self.rejected.load(std::sync::atomic::Ordering::Acquire)
@@ -1958,5 +1970,43 @@ mod facts_snapshot_tests {
         };
         assert_eq!(old.facts, TitleFacts::default());
         Ok(())
+    }
+}
+
+fn parse_imdb_find(raw: serde_json::Value, kind: MediaKind) -> Result<Option<u64>, TmdbError> {
+    let key = match kind {
+        MediaKind::Movie => "movie_results",
+        MediaKind::Series => "tv_results",
+    };
+    let results = raw
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .ok_or(TmdbError::Malformed)?;
+    // Ambiguous results are not evidence for joining identities.
+    if results.len() > 1 {
+        return Err(TmdbError::Malformed);
+    }
+    results
+        .first()
+        .map(|r| {
+            r.get("id")
+                .and_then(serde_json::Value::as_u64)
+                .filter(|id| *id > 0)
+                .ok_or(TmdbError::Malformed)
+        })
+        .transpose()
+}
+#[cfg(test)]
+mod imdb_find_tests {
+    use super::*;
+    #[test]
+    fn explicit_kind_and_not_found() {
+        let raw = serde_json::json!({"movie_results":[{"id":42}],"tv_results":[]});
+        assert_eq!(parse_imdb_find(raw.clone(), MediaKind::Movie), Ok(Some(42)));
+        assert_eq!(parse_imdb_find(raw, MediaKind::Series), Ok(None));
+        assert_eq!(
+            parse_imdb_find(serde_json::json!({}), MediaKind::Movie),
+            Err(TmdbError::Malformed)
+        );
     }
 }

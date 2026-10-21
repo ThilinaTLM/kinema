@@ -401,7 +401,7 @@ known zero remains a numeric value, not an unknown.
 
 | State | Card presentation | Interaction/announcement |
 | --- | --- | --- |
-| Known IMDb rating | `IMDb 8.1/10` at rest, including while not hovered | Accessible reading: title, year/type, IMDb rating 8.1 out of 10; details expose supplying provider/origin. |
+| Known IMDb rating | `IMDb 8.1/10` at rest, including while not hovered | Accessible reading: title, year/type, IMDb rating 8.1 out of 10; details attribute contributing providers in the footer. |
 | Missing IMDb rating | Stable rating row: `IMDb —` with “IMDb rating unavailable” accessible text | Do not substitute TMDB/another rating, infer 0, or collapse the layout. A valid IMDb mapping still enables sources. Other known ratings belong in labelled details. |
 | Poster pending | Fixed 2:3 placeholder, neutral static skeleton | Bounded image work; title remains available. No layout shift or shimmer requirement. |
 | Poster failed/missing | Same slot, quiet poster icon and `No artwork` | Title/details remain usable; bounded retry/backoff, not repeated render-triggered requests. |
@@ -410,7 +410,7 @@ known zero remains a numeric value, not an unknown.
 | Selected | Persistent selection marker + outline on neutral card | Remains selected outside hover/focus; selected ID is not the recycled cell index. |
 | Loading metadata | Fixed skeleton geometry; no invented rating or stale title under a different identity | Initial fetch differs from refresh: keep existing content on refresh and indicate refreshing separately. Coalesce live announcements. |
 | Disabled action | Card details remain usable; unavailable action visually disabled with nearby reason | Disable only the invalid action, not all catalog exploration. Never make a silent dead card. |
-| Missing IMDb mapping | Rating independent of mapping; show `Source lookup unavailable — no IMDb mapping` | `Find sources` disabled with explanation; no title/year guess, numeric-ID substitution, or automatic other-provider request. |
+| Missing IMDb mapping | Rating independent of mapping; show `Source lookup unavailable — no IMDb mapping` | `Find sources` disabled with explanation; no title/year guess or numeric-ID substitution; enrichment may obtain an explicit mapping. |
 | Cached + refresh failed | Keep known title/art/rating and freshness/source notice | Inline retry on explicit request; never replace usable content with successful-empty copy. |
 
 Do not put controls inside a semantic button. Use a focusable card/selection region
@@ -420,14 +420,19 @@ by Enter or a labelled action; pointer double-click is not the only route. Keep
 focus disclosure open while focus is inside its actions. Screen readers receive
 names/state, not a repeated announcement of every decorative poster and icon.
 
-Secondary metadata, external identifiers, rating origins, release/file facts and
-refresh timestamps belong in **Details & provenance** or the source inspector.
+Secondary metadata, external identifiers, rating sources, release/file facts and
+refresh timestamps belong in Details or the source inspector. Details attribute
+only actual contributors in a footer: “Data from TMDB and Cinemeta” (or “Data from
+Cinemeta”); per-field provenance stays in the catalog, not the UI. TMDB's required
+About attribution notice stays.
 Safe progressive disclosure must not hide warnings, credentials needed for the
 current step, file-choice ambiguity, quota failure, or what the next action does.
 No source lookup, provider switch, preparation, deletion, or player launch on hover.
 Hover/focus also must not trigger network, SQL or metadata fetches: use the current
 semantic projection, with missing facts left absent. Opening Details is a separate
-explicit intent and follows the existing selected-provider loading contract.
+explicit intent: show the primary result, then fully enrich asynchronously from
+all enabled, active enrichment providers, with quiet non-fatal failures. The
+approved priority/enrichment revision is in progress, not live-provider verification.
 
 Keep the source sequence explicit: chosen indexer → chosen release → prepare
 through chosen debrid service → explicit file choice → download/serve → external
@@ -435,10 +440,14 @@ player launch when readiness policy allows. A design fixture's readiness percent
 is not a universal policy. Do not silently choose the largest file. Keep manual
 inactive-only cleanup and in-use-file protection; never delete original local files.
 
-Settings retain provider/account status, selected metadata provider/indexer/debrid,
+Settings retain provider/account status, an ordered metadata-provider priority
+list (default Cinemeta, TMDB), selected indexer/debrid,
 external player/executable, media quota, and appearance. Tokens belong in OS secure
 storage, never ordinary settings/logs/HTML fixtures; presence is not connectivity
-validation. **Launch requested**, **Serving**, download bytes, and session count
+validation. Replace/reset the old single metadata setting without migration.
+The first enabled, active provider handles search/browse; others enrich. Missing
+required credentials show inactive/skipped providers, not errors.
+**Launch requested**, **Serving**, download bytes, and session count
 are truthful; “Playing”, “Watched”, and “Resume” are not established by launch or
 HTTP traffic. Navigation does not stop sessions. Quit/window-close confirmation
 explains that Kinema's server stops and the external player stays open; no daemon.
@@ -584,16 +593,19 @@ claims that existing workers already satisfy every cancellation requirement.
    mounts it and restores its action/collection focus. If filtering/removal makes
    it unavailable, focus a predictable surviving neighbor or results heading and
    announce the change; never drop focus to the window or a destroyed widget.
-3. **Demand-driven paging.** Read local selected-provider query/page membership,
+3. **Demand-driven paging.** Read local primary-provider query/page membership,
    then request missing pages only near the viewport/end. One page request in
    flight per current query is the proposed UI limit; coalesce equivalent demand,
    bound retained pages and queue length, stop at known end. Exact retained-page
    cap needs measurement; existing backend response/row caps are not expanded by
    this design. Do not requeue failed pages every frame: explicit retry with reason.
-4. **No implicit provider expansion.** No TTL refresh, automatic both-provider
-   requests, fallback, catalog crawler, or rating-only enrichment. User-selected
-   provider owns the request. Show last-update/origin and explicit refresh; keep
-   valid cached content during refresh failure. Unknown score/ID stays unknown.
+4. **Bounded provider enrichment.** Enrich only visible cards, only missing
+   poster, year, rating, runtime, or genres; skip titles already enriched in the
+   catalog. Bound concurrency, cancel on scroll/query changes, and reject stale
+   generations. Details enrich fully after showing the primary result. Keep
+   usable content during quiet, non-fatal enrichment failures. This is not a
+   catalog crawler or automatic TTL. Unknown scores/IDs stay unknown unless
+   explicitly supplied; TMDB scores are never labelled IMDb.
 5. **No blocking render work.** SQL, network/file waits, poster decoding, image
    transforms, and secure-store/player work run outside UI rendering. Render uses
    prepared row models and ready/pending image handles. Do not decode the same
@@ -707,7 +719,7 @@ claim made by the HTML toggle.
   with unknown rating, missing IMDb mapping, poster pending/failure, metadata
   loading, selected, disabled and cached-error fixtures preserve meaning, spacing
   and correct action availability. IMDb-labelled sorting uses IMDb values with
-  unknowns last in either direction, without substituting another provider's score.
+  unknowns last in either direction, without substituting a non-IMDb score.
   Hover and focus-within show identical bounded facts plus actions inside the poster
   footprint, with missing facts omitted, no interaction-triggered I/O, no grid
   growth/layout shift, and title/year/IMDb footer always visible; Enter opens Details.

@@ -60,8 +60,10 @@ Design principles, in priority order:
 - **Dark is the default theme**, regardless of OS appearance; Light is available.
   Media browsing is a dark-room activity and posters read best on near-black.
 - **Bundled fonts** (Inter + JetBrains Mono) for identical rendering on all OSes.
-- **Provider choice (Cinemeta/TMDB) moves to Settings**; the toolbar only picks a
-  catalog/collection and sort within the active provider.
+- **Provider priority (default Cinemeta, TMDB) lives in Settings** as an ordered
+  list. The first enabled, active provider is primary; others enrich. Missing
+  required credentials show an inactive provider that is skipped, not an error.
+  The toolbar picks a catalog/collection and sort within the primary provider.
 - **Detail is a scrolling page; streams get their own page.** The detail page holds
   a compact hero, facts, episodes (series) or similar titles (movies) and
   provenance. Play (movies) or an episode card (series) navigates to a full-width
@@ -75,9 +77,9 @@ Design principles, in priority order:
 
 | Current capability | v3 home |
 | --- | --- |
-| Cinemeta/TMDB browse + search | Toolbar + grid; provider selected in Settings; no automatic fallback |
+| Cinemeta/TMDB browse + search | Toolbar + grid use the primary provider from Settings priority; visible cards receive bounded missing-field enrichment |
 | Movie/series filter; sort | Toolbar segmented control + collection/sort menu; preserved on Back |
-| Title details; refresh | In-place Detail hero; Refresh in context menu / F5; freshness in provenance |
+| Title details; refresh | In-place Detail hero; inline Refresh icon button / F5; freshness in provenance |
 | Series seasons/episodes | Detail page body: season tabs + responsive episode card grid |
 | Torrentio/Peerflix sources | Streams page list, **one active indexer**, explicit switch |
 | Debrid preparation + playback | Modal *Play* sheet: prepare → auto-play the file the selection policy identifies, or "Couldn't identify the file…" |
@@ -106,6 +108,13 @@ end-to-end rendering behavior.
 Neutral near-black chrome with layered depth. The brand accent is warm
 amber/coral (`#FF7A45` in Dark), with a darker AA-safe Light variant. Artwork
 colors provide secondary accents, never replace brand focus or primary actions.
+Desktop brand assets use an `#FF7A45` tile and white K/play glyph; the player
+variant uses warm dark accents and the symbolic variant remains monochrome.
+Editable SVGs and generated PNG/ICO/ICNS files live in
+`crates/kinema-desktop/assets/brand/`; root `packaging/` owns generation and Linux
+integration (see [packaging notes](../../packaging/README.md)). The application
+ID remains `dev.tlmtech.kinema`; Windows EXE resources and macOS bundles are not
+implemented by these assets.
 Ratings and status still require explicit glyphs/labels, not color alone.
 Ratios use WCAG 2.x relative luminance, without rounding to pass thresholds.
 
@@ -344,7 +353,6 @@ never offers something the screen cannot do.
 | Episode card | Find streams · Copy episode title · Copy `SxxEyy` |
 | Stream row | Play… (prepares and plays) · Show details · Copy release name |
 | Transfer row | Open in player again · Copy local URL · Show file in folder · Stop serving… |
-| Detail backdrop | Refresh · Copy title · Open on IMDb |
 | Text input | Undo · Redo · Cut · Copy · Paste · Delete · Select all |
 
 Copied values never include credentials, debrid URLs or authorized links. "Show
@@ -375,6 +383,12 @@ Fixture data only. Primary review size 1280 × 800; minimum 960 × 600.
 │  │   …    │ │   …    │ │ Orbit  │ │   …    │ │   …    │ │   …    │  ← missing art shows title
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+The toolbar is a transparent overlay: no bar fill or bottom border; it floats
+over the page (grid, or the detail hero art). Pages inset their content by the
+48 px toolbar height so nothing hides under it at scroll top; once content
+scrolls beneath, a canvas-colored top scrim (≈92 % → 0, fades in over 24 px of
+scroll) keeps the controls legible in both themes.
 
 Toolbar, left to right: app mark; Movies/Series segmented; search (flexible,
 240–480 px, placeholder follows the active kind); collection menu (`Popular ▾`
@@ -502,11 +516,13 @@ overview measure scale with the window (140–232 px, 560–920 px).
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- The hero sizes to its content; there is no fixed-height band. Overview text
-  clamps to 3 lines with an ellipsis (`clamp_lines`); "More" lifts the clamp and
-  the text wraps inside the same measure. A bare `line_clamp` without an ellipsis
-  leaves the remainder of the text unwrapped on the last line, which the container
-  then clips mid-word.
+- The hero sizes to its content; there is no fixed-height band. The overview
+  shows in full (typically 3–5 lines; no More/Less toggle) with a safety clamp of
+  8 lines and an ellipsis (`clamp_lines`; a bare `line_clamp` leaves the tail
+  unwrapped and clipped mid-word). There is no overflow menu: an icon-only
+  Copy title button sits beside the title (turns into a check / "Copied" briefly),
+  and icon-only Refresh and Open on IMDb (only with an IMDb id) buttons follow
+  the Play button, each with a tooltip and accessible label.
 - Streams load only when the Streams page opens, for the selected indexer.
   Without an IMDb mapping the Play button is disabled with a reason tooltip.
 - **Series:** season default = first non-special season with episodes (or the last
@@ -527,6 +543,13 @@ overview measure scale with the window (140–232 px, 560–920 px).
   studios and cast are *not yet wired*; the cast row and ratings tiles are laid
   out and render once data is supplied.
 
+Details show the primary result first, then asynchronously enrich fully from all
+active enrichment providers. Failures stay quiet and non-fatal; obsolete work is
+cancelled and generation-checked. A footer lists only actual contributors:
+“Data from TMDB and Cinemeta” or “Data from Cinemeta”. No per-field provenance UI;
+TMDB scores remain labelled TMDB, never IMDb. TMDB's required About notice stays.
+This approved provider revision is in progress, not live-provider verification.
+
 ### 4.6 Streams page
 
 Reached from Play (movie) or an episode card (series). Same route as Detail:
@@ -544,12 +567,16 @@ position, season and focus (the episode card is refocused).
 ```
 
 - At frame width ≥ 1040 px the page has two panes: a fixed sidebar (27 %, 300–400 px:
-  Back, poster, title / `SxxExx`, chips and overview, indexer + refresh, quality
-  filter) and the stream list filling the rest. Narrower windows stack the same
+  Back, small poster, title / `SxxExx`, a *Streams controls* panel, then chips and
+  overview) and the stream list filling the rest. Narrower windows stack the same
   pieces in one column. Release names wrap to two lines before truncating.
-- Roomier rows than the old side panel; stream-row styling,
-  badges, quality filter, indexer select, counts, refresh and the row context menu
-  (Play… · Show details · Copy release name) are unchanged.
+- Streams controls panel (`widgets/choice_card.rs`): heading + "N streams" count
+  (or "N of M" when filtered) + labelled Refresh button; **Provider** radio-style
+  `ChoiceCard`s (Torrentio / Peerflix, selected card shows its status line) that
+  switch through the same indexer `Select` state/event as before; **Quality**
+  `ChoiceChip`s with per-quality counts (only buckets present).
+- Roomier rows than the old side panel; stream-row styling, badges and the row
+  context menu (Play… · Show details · Copy release name) are unchanged.
 - Loading, empty, error (with retry) and "hidden by provider limit" states are
   kept; quality tabs show only buckets present.
 - Click / Enter on a stream opens the Play sheet (§4.7). Episode packs never use
@@ -595,7 +622,10 @@ OS frame: Kinema Settings
 ```
 
 - **General:** startup collection, search scope note. Kept minimal.
-- **Accounts:** provider selections and credentials. Missing, saved, verified,
+- **Accounts:** ordered metadata-provider priority (default Cinemeta, TMDB),
+  enablement, indexer/debrid choices and credentials. Replace/reset the old single
+  metadata choice without migration; skip inactive providers lacking credentials.
+  Missing, saved, verified,
   rejected, service failure and secure-store unavailable are distinct states.
 - **Playback:** external player (mpv/VLC/custom path) with argument preview.
 - **Storage:** cache used/limit (20 GiB default), Clean unused, location.
@@ -605,7 +635,7 @@ OS frame: Kinema Settings
   GPUI) and TMDB logo + "This product uses the TMDB API but is not endorsed or
   certified by TMDB."
 
-Settings apply **immediately** (appearance, poster size, provider/indexer
+Settings apply **immediately** (appearance, poster size, provider priority/indexer
 selection) with field-level error display — no Save/Revert bar, matching desktop
 preference-window conventions. Credentials are separate secure-store operations
 with their own outcomes; never in settings files, fixtures, logs or SQLite.
@@ -725,7 +755,7 @@ index now identify v3 as the sole/default UI:
 - Footer labels at rest → poster-only cards with chips; facts on hover/focus.
 - In-app Settings/About pages, Save/Revert bar → separate window, immediate apply.
 - v2 Graphite blue-gray palette and system font stack → Cinema palette, Inter.
-- Provider picker in browse chrome → Settings › Accounts.
+- Provider picker in browse chrome → ordered priority list in Settings › Accounts.
 - Release inspector pane, inline prepare panel → stream rows + Play sheet.
 - `desktop-wireframes.html` → this document + native design lab.
 - gpui-kit facade/components → direct `gpui-pre` + in-house components.

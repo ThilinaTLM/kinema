@@ -81,7 +81,7 @@ claimed. Native implementation was subsequently approved as recorded above;
 HTML evidence remains historical. Superseded layout variants are not choices.
 
 The user additionally approved narrow automatic transactional identity
-reconciliation when explicit selected-provider IMDb mapping proves duplicates
+reconciliation when explicit provider-supplied IMDb mapping proves duplicates
 without contradictory IDs or season/episode coordinates. Follow the
 [authoritative exception](catalog-schema.md#approved-narrow-identity-reconciliation):
 preserve metadata, page/count/FK/provenance references and abort contradictions.
@@ -166,10 +166,12 @@ The agreed direction is provider-agnostic shared movie/series, season, and episo
 metadata with rich descriptions, artwork, external IDs, separate IMDb/TMDB/Rotten
 Tomatoes critic/audience ratings, nullable unknowns, and provenance-safe merging.
 The local catalog becomes the primary read model, with owned, bounded,
-demand-driven selected-provider fetches of missing/new details. Keep metadata
-`updated_at` distinct from successful-resource `fetched_at`. This is not automatic
-both-provider enrichment, fallback, TTL refresh, or a full-catalog crawler. No
-history/library scope is added. ERD approval is complete; the historical
+demand-driven fetching under the [2026-10-21 provider-priority/enrichment decision](architecture.md#agreed-metadata-provider-contract).
+Details enrich fully after the primary result; visible cards enrich only missing
+card fields, with cancellation/generation checks and catalog-based skipping.
+Keep metadata `updated_at` distinct from successful-resource `fetched_at`.
+Implementation is in progress, not live-provider verification; no TTL refresh,
+full-catalog crawler, or history/library scope is added. ERD approval is complete; the historical
 continuation evidence below remains historical and does not establish completion
 of the newly authorized normalized catalog or the UI prototype.
 
@@ -203,10 +205,15 @@ and require explicit lead assignment for subsequent commits.
 
 ## Confirmed decisions (not all fully accepted in runtime)
 
-- Both **Cinemeta and TMDB** are required now. Default Cinemeta; explicit metadata
-  selection, no automatic provider fallback. TMDB bearer token is user-supplied,
-  stored securely; fixed adapter locale `en-US`. Map TMDB titles to IMDb before
-  source lookup; missing mapping means clearly unavailable, never guessed.
+- Both **Cinemeta and TMDB** are required now. Ordered priority defaults to
+  Cinemeta, TMDB, replacing/resetting the single setting without migration.
+  First enabled, active provider handles search/browse; others enrich. Missing
+  required credentials mean inactive/skipped, not errors. Per-field priority wins,
+  lower providers fill gaps; details attribute only actual contributors in a
+  “Data from TMDB and Cinemeta” footer, without per-field provenance UI.
+  TMDB bearer token is user-supplied, stored securely; fixed adapter locale
+  `en-US`. Explicit external IDs alone match identities; missing IMDb mapping
+  means source lookup unavailable, never guessed. Revision implementation is in progress.
 - Both **Torrentio/Peerflix** and **Real-Debrid/AllDebrid** are required adapters.
   Indexer and debrid selection are separate; source availability is not playback.
 - Media server is **loopback only**, no LAN or daemon. External VLC/mpv decode

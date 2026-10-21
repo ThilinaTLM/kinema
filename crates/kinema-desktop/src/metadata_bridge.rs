@@ -107,10 +107,15 @@ pub(crate) enum Polled {
     /// TMDB results go to the TMDB screen untranslated.
     Tmdb(MetadataEvent),
     Cinemeta(MetaEvent),
+    /// Quiet optional enrichment; never turn this into a primary-view failure.
+    Enrichment(MetadataEvent),
 }
 
 pub(crate) fn poll(worker: &CatalogWorker) -> Option<Polled> {
     let event = worker.poll_metadata()?;
+    if matches!(event.action, MetadataAction::Enrich { .. }) {
+        return Some(Polled::Enrichment(event));
+    }
     if matches!(event.action, MetadataAction::Tmdb(_)) {
         return Some(Polled::Tmdb(event));
     }
@@ -140,7 +145,7 @@ pub(crate) fn translate(event: MetadataEvent) -> Option<MetaEvent> {
     } = event;
     match action {
         // Routed by `poll`; never translated to Cinemeta stages.
-        MetadataAction::Tmdb(_) => None,
+        MetadataAction::Tmdb(_) | MetadataAction::Enrich { .. } => None,
         MetadataAction::Browse { kind, offset } => {
             let result = result.and_then(|snapshot| match snapshot {
                 MetadataSnapshot::Browse(found) => Ok((found.titles, found.fetched_at)),

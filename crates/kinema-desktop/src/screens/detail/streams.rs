@@ -6,15 +6,14 @@ use crate::widgets::patterns::{ViewState, focus_ring};
 /// Label gutter of the inline stream details.
 const INLINE_LABEL_WIDTH: Pixels = px(64.);
 
-/// Placeholder shaped like the loaded list: quality tabs, then two-line rows
-/// with a badge stack on the left.
+/// Placeholder shaped like the loaded list: two-line rows with a badge stack
+/// on the left.
 pub(super) fn stream_skeleton() -> AnyElement {
     div()
         .w_full()
         .flex()
         .flex_col()
         .gap(s::S8)
-        .child(Skeleton::block().w(relative(0.6)).h(s::CONTROL_HEIGHT))
         .children((0..geometry::STREAM_SKELETON_ROWS).map(|_| {
             div()
                 .w_full()

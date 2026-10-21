@@ -7,7 +7,7 @@ use crate::tmdb::{
 use kinema_core::catalog_normalized::{ExternalIdentifier, FieldValue, Quality, TitleObservation};
 use rusqlite::Transaction;
 
-pub(super) fn observation(title: &TmdbTitle) -> TitleObservation {
+pub(crate) fn observation(title: &TmdbTitle) -> TitleObservation {
     let mut fields = vec![("name".into(), FieldValue::Text(title.name.clone()))];
     for (name, value) in [
         ("overview", title.overview.as_ref()),
@@ -51,6 +51,7 @@ pub(super) fn write(
     data: &TmdbData,
     time: i64,
     complete: bool,
+    priority: &kinema_core::provider::ProviderPriority,
 ) -> Result<(), CatalogError> {
     let resource = crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?;
     let completeness = if complete {
@@ -67,6 +68,7 @@ pub(super) fn write(
             Some(page.total_pages),
             &page.titles.iter().map(observation).collect::<Vec<_>>(),
             time,
+            priority,
         )?,
         TmdbData::Details(details) => {
             let mut item = observation(&details.title);
@@ -86,7 +88,7 @@ pub(super) fn write(
                     FieldValue::Labels(details.genres.clone()),
                 ));
             }
-            let id = resolve_title(tx, &item, time)?;
+            let id = resolve_title(tx, &item, time, priority)?;
             let fetch_id = fetch(
                 tx,
                 Target::Title(id),
@@ -99,7 +101,16 @@ pub(super) fn write(
             write_facts(tx, fetch_id, &details.facts)?;
             // Reduced legacy DTOs do not satisfy today's rich detail request,
             // but the fields they actually retain still came from a detail resource.
-            import_title(tx, id, &item, "tmdb", Quality::Detail, fetch_id, time)?;
+            import_title(
+                tx,
+                id,
+                &item,
+                "tmdb",
+                Quality::Detail,
+                fetch_id,
+                time,
+                priority,
+            )?;
             for summary in &details.seasons {
                 let id = season(tx, id, summary.number, time)?;
                 if let Some(name) = &summary.name {
@@ -111,6 +122,7 @@ pub(super) fn write(
                         Quality::Summary,
                         fetch_id,
                         time,
+                        priority,
                     )?;
                 }
                 field(
@@ -124,6 +136,7 @@ pub(super) fn write(
                     Quality::Summary,
                     fetch_id,
                     time,
+                    priority,
                 )?;
             }
         }
@@ -137,7 +150,7 @@ pub(super) fn write(
                 fields: vec![],
                 ratings: vec![],
             };
-            let series = resolve_title(tx, &item, time)?;
+            let series = resolve_title(tx, &item, time, priority)?;
             let id = season(tx, series, data.season, time)?;
             let fetch_id = fetch(
                 tx,
@@ -157,12 +170,22 @@ pub(super) fn write(
                     Quality::Detail,
                     fetch_id,
                     time,
+                    priority,
                 )?;
             }
             // A season resource supplies the parent identity and child metadata;
             // it does not assert title detail success.
-            import_title(tx, series, &item, "tmdb", Quality::Summary, fetch_id, time)?;
-            import_episodes(tx, series, &data.episodes, "tmdb", fetch_id, time)?;
+            import_title(
+                tx,
+                series,
+                &item,
+                "tmdb",
+                Quality::Summary,
+                fetch_id,
+                time,
+                priority,
+            )?;
+            import_episodes(tx, series, &data.episodes, "tmdb", fetch_id, time, priority)?;
         }
     }
     Ok(())
@@ -360,6 +383,7 @@ pub(super) fn write_rich(
     query: &TmdbQuery,
     rich: &[super::normalized_rich::RichRecord],
     time: i64,
+    priority: &kinema_core::provider::ProviderPriority,
 ) -> Result<(), CatalogError> {
     if rich.is_empty() {
         return Ok(());
@@ -374,6 +398,7 @@ pub(super) fn write_rich(
                 MediaKind::Movie,
                 rich,
                 time,
+                priority,
             );
         }
         TmdbQuery::Browse { kind, page } => {
@@ -385,6 +410,7 @@ pub(super) fn write_rich(
                 *kind,
                 rich,
                 time,
+                priority,
             );
         }
         TmdbQuery::Search {
@@ -399,6 +425,7 @@ pub(super) fn write_rich(
                 search.kind(),
                 rich,
                 time,
+                priority,
             );
         }
         _ => {}
@@ -417,7 +444,7 @@ pub(super) fn write_rich(
         ("title_id", id)
     };
     let fetch_id:i64=tx.query_row(&format!("SELECT id FROM metadata_fetches WHERE {column}=?1 AND provider='tmdb' AND resource_key=?2"),params![owner,resource],|row|row.get(0))?;
-    super::normalized_rich::write(tx, id, rich, "tmdb", fetch_id, time)
+    super::normalized_rich::write(tx, id, rich, "tmdb", fetch_id, time, priority)
 }
 
 #[cfg(test)]
@@ -459,7 +486,7 @@ mod display_projection_tests {
             &serde_json::json!({"runtime":93,"vote_average":9.8,"vote_count":12}),
             &query,
         )?;
-        write_rich(&tx, &query, &rich, 20)?;
+        write_rich(&tx, &query, &rich, 20, &Default::default())?;
         tx.commit()?;
         let saved = service.read_tmdb(&query)?.ok_or("missing TMDB cache")?;
         let TmdbData::Details(details) = saved.data else {
@@ -490,6 +517,7 @@ mod display_projection_tests {
             },
             30,
             true,
+            &Default::default(),
         )?;
         let id = title_id(&tx, MediaKind::Movie, "tmdb", "42")?.ok_or("missing canonical title")?;
         let fetch_id: i64 = tx.query_row(
@@ -499,7 +527,15 @@ mod display_projection_tests {
         )?;
         let rich =
             normalized_rich::cinemeta(&serde_json::json!({"type":"movie", "imdbRating":"0.0"}))?;
-        normalized_rich::write(&tx, id, &rich, "cinemeta", fetch_id, 30)?;
+        normalized_rich::write(
+            &tx,
+            id,
+            &rich,
+            "cinemeta",
+            fetch_id,
+            30,
+            &Default::default(),
+        )?;
         tx.commit()?;
         let saved = service.read_tmdb(&query)?.ok_or("missing TMDB cache")?;
         let TmdbData::Details(details) = saved.data else {

@@ -2,10 +2,66 @@
 //! never the source for current screens after migration.
 use super::*;
 use kinema_core::catalog_normalized::{
-    ExternalIdentifier, FieldValue, Quality, RatingObservation, TitleObservation, accepts_field,
-    valid_date,
+    ExternalIdentifier, FieldState, FieldValue, Quality, RatingObservation, TitleObservation,
+    accepts_ranked_field, valid_date,
 };
+use kinema_core::provider::{ProviderId, ProviderPriority};
 use rusqlite::Transaction;
+
+impl CatalogService {
+    /// Applies to subsequent normalized writes; retained values are not refetched.
+    pub(crate) fn set_provider_priority(&mut self, priority: ProviderPriority) {
+        self.provider_priority = priority;
+    }
+}
+
+/// Unknown historical suppliers rank below every supported provider. Two unknown
+/// suppliers retain the quality/time rule rather than inventing an identity.
+pub(super) fn accepts_supplier_field(
+    current: Option<(String, String, i64)>,
+    supplier: &str,
+    quality: Quality,
+    observed_at: i64,
+    priority: &ProviderPriority,
+) -> bool {
+    let Some(incoming_supplier) = ProviderId::parse(supplier) else {
+        return current.is_none_or(|(old_supplier, old_quality, old_time)| {
+            ProviderId::parse(&old_supplier).is_none()
+                && kinema_core::catalog_normalized::accepts_field(
+                    Some((
+                        if old_quality == "detail" {
+                            Quality::Detail
+                        } else {
+                            Quality::Summary
+                        },
+                        old_time,
+                    )),
+                    quality,
+                    observed_at,
+                )
+        });
+    };
+    let current = current.and_then(|(supplier, quality, observed_at)| {
+        ProviderId::parse(&supplier).map(|supplier| FieldState {
+            supplier,
+            quality: if quality == "detail" {
+                Quality::Detail
+            } else {
+                Quality::Summary
+            },
+            observed_at,
+        })
+    });
+    accepts_ranked_field(
+        current,
+        FieldState {
+            supplier: incoming_supplier,
+            quality,
+            observed_at,
+        },
+        priority,
+    )
+}
 
 pub(super) const TITLE_FIELDS: &[&str] = &[
     "name",
@@ -108,6 +164,7 @@ pub(super) fn resolve_title(
     tx: &Transaction<'_>,
     observation: &TitleObservation,
     time: i64,
+    priority: &ProviderPriority,
 ) -> Result<i64, CatalogError> {
     if observation.identifiers.is_empty() {
         return Err(CatalogError::InvalidMetadata);
@@ -143,7 +200,7 @@ pub(super) fn resolve_title(
         {
             return Err(CatalogError::IdentityConflict);
         }
-        return super::normalized_merge::reconcile(tx, owners[0], owners[1], time);
+        return super::normalized_merge::reconcile(tx, owners[0], owners[1], time, priority);
     }
     if let Some(id) = owners.first() {
         return Ok(*id);
@@ -249,6 +306,7 @@ pub(super) fn identifier(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn field(
     tx: &Transaction<'_>,
     target: Target,
@@ -257,6 +315,7 @@ pub(super) fn field(
     quality: Quality,
     fetch_id: i64,
     time: i64,
+    priority: &ProviderPriority,
 ) -> Result<(), CatalogError> {
     let (name, value) = field_value;
     let allowed = match target {
@@ -314,27 +373,17 @@ pub(super) fn field(
             )
         }
     };
-    let current: Option<(String, i64)> = tx
+    let current: Option<(String, String, i64)> = tx
         .query_row(
             &format!(
-                "SELECT quality,observed_at FROM field_provenance WHERE {}=?1 AND field_name=?2",
+                "SELECT supplied_by,quality,observed_at FROM field_provenance WHERE {}=?1 AND field_name=?2",
                 target.column()
             ),
             params![target.id(), name],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
-    let current = current.map(|(q, t)| {
-        (
-            if q == "detail" {
-                Quality::Detail
-            } else {
-                Quality::Summary
-            },
-            t,
-        )
-    });
-    if !accepts_field(current, quality, time) {
+    if !accepts_supplier_field(current, provider, quality, time, priority) {
         return Ok(());
     }
     tx.execute(&format!("UPDATE {} SET {name}=?1,updated_at=CASE WHEN {name} IS NOT ?1 THEN ?2 ELSE updated_at END WHERE id=?3",target.table()),params![value,time,target.id()])?;
@@ -377,6 +426,7 @@ pub(super) fn rating(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn import_title(
     tx: &Transaction<'_>,
     id: i64,
@@ -385,6 +435,7 @@ pub(super) fn import_title(
     quality: Quality,
     fetch_id: i64,
     time: i64,
+    priority: &ProviderPriority,
 ) -> Result<(), CatalogError> {
     for ident in &observation.identifiers {
         identifier(
@@ -404,6 +455,7 @@ pub(super) fn import_title(
         quality,
         fetch_id,
         time,
+        priority,
     )?;
     for observation in &observation.ratings {
         rating(tx, Target::Title(id), observation, provider, fetch_id, time)?;
@@ -464,6 +516,7 @@ pub(super) fn import_episodes(
     provider: &str,
     fetch_id: i64,
     time: i64,
+    priority: &ProviderPriority,
 ) -> Result<(), CatalogError> {
     for item in episodes {
         let season_id = season(tx, series, item.season, time)?;
@@ -477,6 +530,7 @@ pub(super) fn import_episodes(
                 Quality::Detail,
                 fetch_id,
                 time,
+                priority,
             )?;
         }
 
@@ -501,6 +555,7 @@ pub(super) fn import_episodes(
                     Quality::Detail,
                     fetch_id,
                     time,
+                    priority,
                 )?;
             }
         }

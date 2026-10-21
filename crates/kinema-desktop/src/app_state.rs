@@ -74,6 +74,12 @@ impl<T> Resource<T> {
         self.value.as_ref()
     }
 
+    /// In-place refinement (optional enrichment) that keeps freshness, origin
+    /// and phase untouched; callers must have matched the current generation.
+    pub(crate) fn value_mut(&mut self) -> Option<&mut T> {
+        self.value.as_mut()
+    }
+
     pub(crate) fn fetched_at(&self) -> Option<u64> {
         self.fetched_at
     }

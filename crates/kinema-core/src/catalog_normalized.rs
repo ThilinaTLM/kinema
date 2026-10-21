@@ -1,5 +1,6 @@
 //! Provider-independent current-value catalog rules. No transport or storage types.
 use crate::MediaKind;
+use crate::provider::{ProviderId, ProviderPriority};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Quality {
@@ -21,6 +22,34 @@ pub fn accepts_field(current: Option<(Quality, i64)>, incoming: Quality, observe
     current.is_none_or(|(quality, time)| {
         (incoming == Quality::Detail && quality == Quality::Summary)
             || (incoming == quality && observed_at >= time)
+    })
+}
+
+/// Supplier and quality of one retained descriptive field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FieldState {
+    pub supplier: ProviderId,
+    pub quality: Quality,
+    pub observed_at: i64,
+}
+
+/// Across suppliers, configured priority wins regardless of quality or age.
+/// Within one supplier, retain the existing quality/time policy.
+pub fn accepts_ranked_field(
+    current: Option<FieldState>,
+    incoming: FieldState,
+    priority: &ProviderPriority,
+) -> bool {
+    current.is_none_or(|current| {
+        if current.supplier != incoming.supplier {
+            priority.rank(incoming.supplier) < priority.rank(current.supplier)
+        } else {
+            accepts_field(
+                Some((current.quality, current.observed_at)),
+                incoming.quality,
+                incoming.observed_at,
+            )
+        }
     })
 }
 
@@ -197,6 +226,54 @@ pub fn valid_date(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ranked_fields_prioritize_supplier_before_quality_and_time() {
+        let priority = ProviderPriority::default();
+        let high = FieldState {
+            supplier: ProviderId::Cinemeta,
+            quality: Quality::Summary,
+            observed_at: 1,
+        };
+        let low = FieldState {
+            supplier: ProviderId::Tmdb,
+            quality: Quality::Detail,
+            observed_at: 100,
+        };
+        assert!(accepts_ranked_field(None, low, &priority));
+        assert!(accepts_ranked_field(Some(low), high, &priority));
+        assert!(!accepts_ranked_field(Some(high), low, &priority));
+        let reversed = ProviderPriority::new([ProviderId::Tmdb]);
+        assert!(accepts_ranked_field(Some(high), low, &reversed));
+        assert!(!accepts_ranked_field(Some(low), high, &reversed));
+    }
+
+    #[test]
+    fn ranked_fields_preserve_same_supplier_quality_and_time_rules() {
+        let priority = ProviderPriority::default();
+        for current_quality in [Quality::Summary, Quality::Detail] {
+            for incoming_quality in [Quality::Summary, Quality::Detail] {
+                for time in [9, 10, 11] {
+                    assert_eq!(
+                        accepts_ranked_field(
+                            Some(FieldState {
+                                supplier: ProviderId::Tmdb,
+                                quality: current_quality,
+                                observed_at: 10
+                            }),
+                            FieldState {
+                                supplier: ProviderId::Tmdb,
+                                quality: incoming_quality,
+                                observed_at: time
+                            },
+                            &priority,
+                        ),
+                        accepts_field(Some((current_quality, 10)), incoming_quality, time)
+                    );
+                }
+            }
+        }
+    }
     #[test]
     fn merge_quality_and_time() {
         assert!(!accepts_field(

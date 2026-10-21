@@ -27,6 +27,8 @@ use serde::{Deserialize, Serialize};
 #[path = "catalog_metadata.rs"]
 mod metadata;
 use metadata::migrate_metadata;
+pub(crate) use metadata::provider_cinemeta;
+pub(crate) use normalized_tmdb::observation as provider_tmdb_observation;
 #[path = "catalog_normalized.rs"]
 mod normalized;
 #[path = "catalog_normalized_backfill.rs"]
@@ -67,6 +69,7 @@ pub(crate) enum CatalogError {
     InvalidCache,
     Network,
     HttpStatus,
+    NotFound,
     InvalidResponse,
     InvalidMetadata,
     IdentityConflict,
@@ -89,6 +92,7 @@ impl fmt::Display for CatalogError {
             Self::NewerDatabase => "This catalog was created by a newer version of Kinema Next.",
             Self::InvalidCache => "The saved catalog contains invalid data.",
             Self::Network => "Cinemeta could not be reached or the request timed out.",
+            Self::NotFound => "The provider has no matching title.",
             Self::HttpStatus => "Cinemeta returned an unsuccessful response.",
             Self::InvalidResponse => "Cinemeta returned an invalid catalog response.",
             Self::InvalidMetadata => "The provider returned invalid catalog metadata.",
@@ -157,6 +161,7 @@ pub(crate) struct CachedTmdb {
 
 pub(crate) struct CatalogService {
     connection: Connection,
+    provider_priority: kinema_core::provider::ProviderPriority,
     client: Client,
     endpoint: Url,
     indexers: Option<Arc<crate::sources::IndexerClient>>,
@@ -312,6 +317,7 @@ impl CatalogService {
             tmdb: None,
             tmdb_transport: None,
             cancellation: None,
+            provider_priority: Default::default(),
         })
     }
 
@@ -368,6 +374,7 @@ impl CatalogService {
                 .map(normalized::imdb_observation)
                 .collect::<Vec<_>>(),
             timestamp,
+            &self.provider_priority,
         )?;
         normalized_rich::write_page_rich(
             &tx,
@@ -377,6 +384,7 @@ impl CatalogService {
             query.kind(),
             &rich,
             timestamp,
+            &self.provider_priority,
         )?;
         check_cancellation(cancellation.as_deref())?;
         tx.commit()?;
@@ -503,6 +511,196 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn enrichment_adapters_distinguish_not_found_from_failure() -> TestResult {
+        use crate::metadata_providers::{MetadataSource, ProviderError};
+        let mock = Mock::start(vec![
+            ok(r#"{"meta":null}"#),
+            (404, "{}".into()),
+            (503, "{}".into()),
+        ])?;
+        let root = tempfile::tempdir()?;
+        let service = CatalogService::open_at(&root.path().join("catalog"), mock.endpoint.clone())?;
+        let source = crate::metadata_providers::cinemeta::Cinemeta {
+            client: service.client.clone(),
+            endpoint: mock.endpoint.clone(),
+        };
+        let id = ImdbId::new("tt0133093")?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        assert!(
+            source
+                .details_by_imdb(MediaKind::Movie, &id, &cancel)
+                .map_err(|_| "unexpected provider error")?
+                .is_none()
+        );
+        assert!(
+            source
+                .details_by_imdb(MediaKind::Movie, &id, &cancel)
+                .map_err(|_| "unexpected provider error")?
+                .is_none()
+        );
+        assert!(matches!(
+            source.details_by_imdb(MediaKind::Movie, &id, &cancel),
+            Err(ProviderError::Failed(CatalogError::HttpStatus))
+        ));
+        assert_eq!(mock.finish()?.len(), 3);
+        let tmdb = Mock::start(vec![ok(r#"{"movie_results":[],"tv_results":[]}"#)])?;
+        let source = crate::metadata_providers::tmdb::Tmdb {
+            client: Some(Arc::new(crate::tmdb::TmdbClient::at(
+                crate::credentials::SecretString::new("fixture-token".into()),
+                tmdb.endpoint.clone(),
+            )?)),
+        };
+        assert!(
+            source
+                .details_by_imdb(MediaKind::Movie, &id, &cancel)
+                .map_err(|_| "unexpected provider error")?
+                .is_none()
+        );
+        assert_eq!(tmdb.finish()?.len(), 1);
+        Ok(())
+    }
+
+    fn enrich_request(
+        ids: Vec<ImdbId>,
+        providers: Vec<kinema_core::provider::ProviderId>,
+        mode: crate::catalog_worker::EnrichMode,
+    ) -> crate::catalog_worker::Work {
+        use crate::catalog_worker::*;
+        Work::Metadata(MetadataRequest {
+            generation: 1,
+            mode: Mode::Refresh,
+            action: MetadataAction::Enrich {
+                kind: MediaKind::Movie,
+                imdb: ids,
+                providers,
+                priority: kinema_core::provider::ProviderId::ALL.to_vec(),
+                mode,
+            },
+        })
+    }
+
+    #[test]
+    fn enrichment_lower_priority_fills_and_find_is_explicit() -> TestResult {
+        let _guard = crate::credentials::METADATA_TEST_LOCK
+            .lock()
+            .map_err(|_| "metadata test lock")?;
+        use crate::{
+            catalog_worker::{EnrichMode, MetadataSnapshot, Refreshed},
+            credentials::SecretString,
+        };
+        use kinema_core::provider::ProviderId;
+        let cinemeta = Mock::start(vec![ok(
+            r#"{"meta":{"id":"tt0133093","type":"movie","name":"Primary name"}}"#,
+        )])?;
+        let tmdb = Mock::start(vec![
+            ok(r#"{"movie_results":[{"id":603}],"tv_results":[]}"#),
+            ok(
+                r#"{"id":603,"title":"Secondary name","imdb_id":"tt0133093","poster_path":"/poster.jpg","release_date":"1999-03-31","runtime":136,"genres":[{"id":1,"name":"Science Fiction"}],"vote_average":8.2,"vote_count":100}"#,
+            ),
+        ])?;
+        let root = tempfile::tempdir()?;
+        let mut service =
+            CatalogService::open_at(&root.path().join("catalog"), cinemeta.endpoint.clone())?;
+        let id = ImdbId::new("tt0133093")?;
+        service.refresh_details(MediaKind::Movie, &id)?;
+        service.tmdb = Some((
+            crate::credentials::metadata_generation(),
+            Arc::new(crate::tmdb::TmdbClient::at(
+                SecretString::new("fixture-token".into()),
+                tmdb.endpoint.clone(),
+            )?),
+        ));
+        let work = enrich_request(
+            vec![id.clone()],
+            vec![ProviderId::Tmdb],
+            EnrichMode::Details,
+        );
+        let persist = service.prepare_remote(work, Arc::new(AtomicBool::new(false)))?();
+        let Refreshed::Metadata(snapshot) = persist(&mut service)? else {
+            return Err("wrong result".into());
+        };
+        let MetadataSnapshot::Enrichment(snapshot) = *snapshot else {
+            return Err("wrong snapshot".into());
+        };
+        assert!(snapshot.failed.is_empty());
+        assert_eq!(snapshot.titles[0].title.name(), "Primary name");
+        assert!(snapshot.titles[0].title.poster_url().is_some());
+        assert_eq!(snapshot.titles[0].title.runtime_minutes(), Some(136));
+        assert_eq!(
+            snapshot.titles[0].contributors,
+            vec![ProviderId::Cinemeta, ProviderId::Tmdb]
+        );
+        let requests = tmdb.finish()?;
+        assert!(requests[0].starts_with("GET /find/tt0133093?"));
+        assert!(requests[0].contains("external_source=imdb_id"));
+        assert!(requests[1].starts_with("GET /movie/603?"));
+        cinemeta.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn enrichment_failure_is_quiet_and_canceled_import_is_rejected() -> TestResult {
+        use crate::catalog_worker::{EnrichMode, MetadataSnapshot, Refreshed};
+        use kinema_core::provider::ProviderId;
+        let mock = Mock::start(vec![
+            ok(r#"{"meta":{"id":"tt0133093","type":"movie","name":"Saved"}}"#),
+            (503, "{}".into()),
+        ])?;
+        let root = tempfile::tempdir()?;
+        let mut service =
+            CatalogService::open_at(&root.path().join("catalog"), mock.endpoint.clone())?;
+        let id = ImdbId::new("tt0133093")?;
+        service.refresh_details(MediaKind::Movie, &id)?;
+        let work = enrich_request(
+            vec![id.clone()],
+            vec![ProviderId::Cinemeta],
+            EnrichMode::Details,
+        );
+        let persist = service.prepare_remote(work.clone(), Arc::new(AtomicBool::new(false)))?();
+        let Refreshed::Metadata(snapshot) = persist(&mut service)? else {
+            return Err("wrong result".into());
+        };
+        let MetadataSnapshot::Enrichment(snapshot) = *snapshot else {
+            return Err("wrong snapshot".into());
+        };
+        assert_eq!(snapshot.failed, vec![ProviderId::Cinemeta]);
+        assert_eq!(snapshot.titles[0].title.name(), "Saved");
+        mock.finish()?;
+        let cancel = Arc::new(AtomicBool::new(true));
+        let persist = service.prepare_remote(work, cancel.clone())?();
+        service.cancellation = Some(cancel);
+        assert!(persist(&mut service).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn enrichment_batch_skips_complete_cards() -> TestResult {
+        use crate::catalog_worker::{EnrichMode, MetadataSnapshot, Refreshed};
+        use kinema_core::provider::ProviderId;
+        let mock = Mock::start(vec![ok(
+            r#"{"meta":{"id":"tt0133093","type":"movie","name":"Complete","poster":"https://example.com/p.jpg","releaseInfo":"1999","runtime":"136 min","genres":["Action"],"imdbRating":"8.1"}}"#,
+        )])?;
+        let root = tempfile::tempdir()?;
+        let mut service =
+            CatalogService::open_at(&root.path().join("catalog"), mock.endpoint.clone())?;
+        let id = ImdbId::new("tt0133093")?;
+        service.refresh_details(MediaKind::Movie, &id)?;
+        // Shut down the server: any accidental enrichment HTTP call fails.
+        assert_eq!(mock.finish()?.len(), 1);
+        let work = enrich_request(vec![id], vec![ProviderId::Cinemeta], EnrichMode::CardFields);
+        let persist = service.prepare_remote(work, Arc::new(AtomicBool::new(false)))?();
+        let Refreshed::Metadata(snapshot) = persist(&mut service)? else {
+            return Err("wrong result".into());
+        };
+        let MetadataSnapshot::Enrichment(snapshot) = *snapshot else {
+            return Err("wrong snapshot".into());
+        };
+        assert!(snapshot.failed.is_empty());
+        assert_eq!(snapshot.titles.len(), 1);
+        Ok(())
+    }
 
     type TestResult = Result<(), Box<dyn Error>>;
     #[test]
@@ -783,7 +981,7 @@ mod tests {
                 episodes: vec![],
             };
             let tx = service.connection.transaction()?;
-            normalized_pages::write_cinemeta_details(&tx, &old, 1, true)?;
+            normalized_pages::write_cinemeta_details(&tx, &old, 1, true, &Default::default())?;
             tx.execute("UPDATE metadata_fetches SET facts_json=NULL", [])?;
             tx.commit()?;
             assert!(service.metadata_needs_refresh(&action)?);
@@ -955,8 +1153,14 @@ mod tests {
                         .connection
                         .transaction()
                         .map_err(|_| "fixture transaction failed")?;
-                    normalized_pages::write_cinemeta_details(&tx, &old, 1, true)
-                        .map_err(|e| e.to_string())?;
+                    normalized_pages::write_cinemeta_details(
+                        &tx,
+                        &old,
+                        1,
+                        true,
+                        &Default::default(),
+                    )
+                    .map_err(|e| e.to_string())?;
                     tx.commit().map_err(|_| "fixture commit failed")?;
                 }
                 service
@@ -1705,6 +1909,7 @@ mod tests {
             None,
             &[normalized::imdb_observation(&title)],
             1,
+            &Default::default(),
         )?;
         tx.commit()?;
         Ok(())

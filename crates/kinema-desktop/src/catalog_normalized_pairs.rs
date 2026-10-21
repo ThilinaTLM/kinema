@@ -1,9 +1,11 @@
 //! Atomic date/year pairs, retaining independent per-field merge eligibility.
-use super::normalized::{Target, field};
+use super::normalized::{Target, accepts_supplier_field, field};
 use super::*;
-use kinema_core::catalog_normalized::{FieldValue, Quality, accepts_field, valid_date};
+use kinema_core::catalog_normalized::{FieldValue, Quality, valid_date};
+use kinema_core::provider::ProviderPriority;
 use rusqlite::Transaction;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn fields(
     tx: &Transaction<'_>,
     target: Target,
@@ -12,6 +14,7 @@ pub(super) fn fields(
     quality: Quality,
     fetch_id: i64,
     time: i64,
+    priority: &ProviderPriority,
 ) -> Result<(), CatalogError> {
     let (table, column, id, pairs): (&str, &str, i64, &[(&str, &str)]) = match target {
         Target::Title(id) => (
@@ -27,7 +30,16 @@ pub(super) fn fields(
         Target::Season(id) => ("seasons", "season_id", id, &[("air_date", "air_year")]),
         _ => {
             for (name, value) in values {
-                field(tx, target, (name, value), provider, quality, fetch_id, time)?;
+                field(
+                    tx,
+                    target,
+                    (name, value),
+                    provider,
+                    quality,
+                    fetch_id,
+                    time,
+                    priority,
+                )?;
             }
             return Ok(());
         }
@@ -39,20 +51,9 @@ pub(super) fn fields(
             continue;
         }
         let accepted = |name: &str| -> Result<bool, CatalogError> {
-            let old:Option<(String,i64)>=tx.query_row(&format!("SELECT quality,observed_at FROM field_provenance WHERE {column}=?1 AND field_name=?2"),params![id,name],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
-            Ok(accepts_field(
-                old.map(|(q, t)| {
-                    (
-                        if q == "detail" {
-                            Quality::Detail
-                        } else {
-                            Quality::Summary
-                        },
-                        t,
-                    )
-                }),
-                quality,
-                time,
+            let old:Option<(String,String,i64)>=tx.query_row(&format!("SELECT supplied_by,quality,observed_at FROM field_provenance WHERE {column}=?1 AND field_name=?2"),params![id,name],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+            Ok(accepts_supplier_field(
+                old, provider, quality, time, priority,
             ))
         };
         let (mut final_date, mut final_year): (Option<String>, Option<i64>) = tx.query_row(
@@ -94,7 +95,16 @@ pub(super) fn fields(
         tx.execute(&format!("UPDATE {table} SET {date_name}=?1,{year_name}=?2,updated_at=CASE WHEN {date_name} IS NOT ?1 OR {year_name} IS NOT ?2 THEN ?3 ELSE updated_at END WHERE id=?4"),params![final_date,final_year,time,id])?;
     }
     for (name, value) in values {
-        field(tx, target, (name, value), provider, quality, fetch_id, time)?;
+        field(
+            tx,
+            target,
+            (name, value),
+            provider,
+            quality,
+            fetch_id,
+            time,
+            priority,
+        )?;
     }
     Ok(())
 }

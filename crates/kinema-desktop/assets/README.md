@@ -19,7 +19,7 @@ Pinned sources (downloaded 2026-10-18):
   retained as `icons/LICENSE-lucide.txt` (ISC; includes Feather attribution).
 - **TMDB logo**: existing, unchanged; source URL and terms are in root `NOTICE`.
 
-Verification: `file` identified all five fonts as TrueType and all 28 icons as SVG;
+Verification: `file` identified all five fonts as TrueType and all 29 icons as SVG;
 SVGs were also parsed as XML. SHA-256 below covers the shipped bytes (including
 the documented Lucide stroke and fill changes), not a claim of upstream signed provenance.
 
@@ -40,6 +40,7 @@ a2008e4d15d478da745edb2f45a9d4753d5cad824ff82fb563402009ec0f2962  icons/check.sv
 2bf4104082f10ba647c8dba1b186a2450171cf9a50f52043e83e8b28a124e998  icons/chevron-down.svg
 fc7e8134bb0e3ead3e1bfecb26949615c715fcd993489307dfdfa1719752b2bb  icons/chevron-left.svg
 63abe3521141698f0be3b2298a2fc2eea2342d5acd8becf86dcf989a18bdeab9  icons/chevron-right.svg
+1d2b0ec45e5523b020e0a83697b4cb78476fc23d9fd79d823662dfeef9d26792  icons/chevron-up.svg
 fde5e37d65d5b947446dfcdf1cfa88ec204f442b028482dea7320ed551e809c7  icons/circle-alert.svg
 387846214b75fe4b181ef9f29b3206cc277152bf4258af3b382cae7f2ad1031f  icons/circle-dot.svg
 e30fd15078567d0126b7797ace92dc921bb78178c4d7ee63e0eeb8ad02062f90  icons/circle.svg

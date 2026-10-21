@@ -38,11 +38,23 @@ captures below; the first-state “IMDb linked” strip was removed before those
 | `kinema-core/src/catalog.rs` | Pure `CatalogDisplay` facts shared through `Arc`; validated optional IMDb rating, including valid `0.0`. No GUI/provider DTO dependency. |
 | `kinema-desktop/src/design/` | Dark/light semantic tokens mapped into Kit's theme, one installed native font family (or Kit fallback), compact Kit button presets, IMDb badge, fixed-geometry `MediaCard`, pure grid sizing. Modal scrims use semantic `Tokens.overlay` (dark 60%, light 40%); native Kit monospace defaults are retained except for a controlled fixture override. |
 | `shell.rs`, `ui/catalog_view.rs` | Permanent 56 px icon rail (Browse, Transfers, Settings, About), compact toolbar/session indicator, Cinemeta grid/list and detail/source composition; row-virtualized grid with collection-owned navigation. |
-| `tmdb_view.rs` | Selected-provider discovery/search/detail/episodes, shared cards/grid, retained optional display facts and explicit IMDb-identity gating for source lookup. TMDB vote average is never substituted for IMDb rating. |
+| `tmdb_view.rs` | Historical selected-provider discovery/search/detail/episodes, shared cards/grid, retained optional display facts and explicit IMDb-identity gating for source lookup. TMDB vote average is never substituted for IMDb rating. The approved priority/enrichment revision below is in progress. |
 | `ui/detail_view.rs`, `ui/episodes.rs`, `ui/source_picker.rs`, `ui/sources.rs`, `ui/strip.rs` | Compact detail/episode/source views and truthful loading, cached/error, missing-mapping and empty states; source filtering/sorting and prepare intents. |
 | `settings_view.rs`, `playback_view.rs` | Kit-themed forms and task panels retain settings/keyring, preparation, explicit file choice, local-file entry, sessions and manual cleanup behavior. Styling is not new provider/player acceptance. |
 | `artwork.rs` | Application-owned bounded fetch/decode tasks, generations, decoded LRU and renderer image-drop requests; no SQL or provider credentials. |
 | `ui_probe.rs` | Native offline gallery using the actual shared theme/buttons/badge/cards/grid metrics, synthetic titles and generated art; separate original counter specimen. Not a second app shell or complete workflow-screen harness. |
+
+**Provider-policy update (2026-10-21):** Settings target an ordered provider list
+(default Cinemeta, TMDB), replacing/resetting the single choice without migration.
+The first enabled, active provider handles search/browse; others enrich. Missing
+required credentials make providers inactive and skipped, not errors. Details
+show the primary result before full asynchronous enrichment; visible cards enrich
+only missing card fields, with bounded concurrency, cancellation/generation checks,
+and catalog-based skipping. Failures are quiet and non-fatal. Details target a
+“Data from TMDB and Cinemeta” footer listing only actual contributors (one:
+“Data from Cinemeta”), not per-field provenance UI. TMDB's required About notice
+stays. This is [approved work in progress](../architecture.md#agreed-metadata-provider-contract),
+not native or live-provider verification.
 
 Cards keep a 2:3 poster and fixed footer with title, year/type and IMDb score at
 rest. Unknown score is `—`, not zero; rating availability and IMDb mapping are

@@ -9,6 +9,24 @@ passed (295 tests passed, 3 ignored); no actual user-database upgrade is claimed
 file layout, and open policies remain distinct. Discuss questions **one at a time**;
 don't turn this list into an implementation backlog.
 
+## 2026-10-21 — metadata priority and enrichment (approved)
+
+The user replaces selected-provider-only fetching with an ordered provider list
+(default Cinemeta, TMDB; reset the old single setting without migration). The
+first enabled, active provider owns search/browse; others enrich through a common
+capability-declaring interface and normalized catalog observations. Missing
+credentials make a provider inactive and skipped, not an error.
+
+Per-field provider priority wins, lower providers fill gaps, and newer observations
+win within one provider without summary replacing detail. Explicit external IDs
+alone establish identity; ratings stay separate by source/metric/supplier.
+Details show the primary result then enrich fully; visible cards enrich only
+missing card fields with bounded, cancellable, generation-checked work. Details
+attribute actual contributors in a “Data from TMDB and Cinemeta” footer, without
+per-field provenance UI. See the [full contract](architecture.md#agreed-metadata-provider-contract).
+Implementation is in progress in this change; no live-provider verification is
+claimed. Automatic TTLs and full-catalog crawling are not part of this decision.
+
 ## 2026-10-20 — desktop v3 visual-language revision (approved)
 
 The user supersedes v3's violet accent, zero-radius geometry, flat/no-shadow
@@ -49,7 +67,7 @@ before GPUI visual implementation. Navigation is no longer an open choice; broad
 visual details and full rich/provenance UI presentation are not yet accepted.
 
 The user additionally approved [narrow automatic transactional reconciliation](catalog-schema.md#approved-narrow-identity-reconciliation)
-when explicit selected-provider IMDb mapping proves duplicates with no contradictory
+when explicit provider-supplied IMDb mapping proves duplicates with no contradictory
 IDs or season/episode coordinates. Preserve metadata/references and abort conflicts;
 this is identity reconciliation, not cache cleanup. Backend reports graph
 reconciliation and rollback coverage, with current root checks passing. Post-v4
@@ -59,9 +77,9 @@ The **Graphite v2** [HTML artifact](design/desktop-wireframes.html) is frozen an
 review-ready; [review guidance](design/README.md) separates its browser checks
 from unmeasured/unimplemented native GPUI performance. The design-system proposal
 and guide are frozen after token/alias alignment and API peer review. User review
-of the proposal, cards, and motion remains pending, not navigation selection. Selected-provider-only fetching remains
-required: approval does not add both-provider enrichment, automatic fallback,
-automatic TTLs, or a full-catalog crawler.
+of the proposal, cards, and motion remains pending, not navigation selection.
+Provider policy is now superseded by the 2026-10-21 priority/enrichment decision;
+automatic TTLs and full-catalog crawling remain outside that decision.
 
 ## Other open media storage behavior
 
@@ -76,7 +94,7 @@ at a time; no additional behavior is resolved here.
 | --- | --- |
 | Media storage | A custom cache location and checkpoint intervals |
 | UI design | Implement and visually validate the approved desktop v3 revision; backdrop pipeline and screen redesign remain in progress |
-| Metadata | Automatic refresh intervals, multi-locale behavior, and additional free providers with suitable terms; selected-provider-only fetching with no automatic fallback or both-provider enrichment is [agreed](architecture.md#agreed-metadata-provider-contract) |
+| Metadata | Automatic refresh intervals, multi-locale behavior, and additional providers with suitable terms; ordered priority and bounded enrichment are [decided, implementation in progress](architecture.md#agreed-metadata-provider-contract) |
 | Catalog retention | Retention/deletion policy is separately open; response/page, indexer, and media eviction must preserve canonical catalog identities, ratings, and provenance under the [cleanup boundary](cache-policy.md#target-cache-coverage) and authoritative schema rules |
 | Response caches | Exact TTLs, retained-entry limits, and offline use of stale results; not authority to delete canonical catalog records |
 | Provider integrations | Rollout order for debrid providers, required capabilities, and whether built-in adapters are sufficient |

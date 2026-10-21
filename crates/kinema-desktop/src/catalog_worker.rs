@@ -1,6 +1,6 @@
 //! One SQLite owner with a bounded, four-thread blocking HTTP fetch pool.
 //!
-//! Two search slots and sixteen metadata slots coalesce/replace queued work.
+//! Two search slots and twenty metadata slots coalesce/replace queued work.
 //! Preparation and persistence run only on `kinema-catalog`; Send network/parse
 //! jobs run on `kinema-fetch-N`. Completed jobs are persisted before new work is
 //! prepared. At most four jobs (including unpersisted completions) are admitted.
@@ -61,6 +61,36 @@ pub(crate) enum MetadataAction {
         target: PlaybackTarget,
     },
     Tmdb(TmdbQuery),
+    /// One or several visible titles (at most 20); work is sequential inside one
+    /// fetch slot, so total network concurrency remains bounded by four.
+    Enrich {
+        kind: MediaKind,
+        imdb: Vec<ImdbId>,
+        providers: Vec<kinema_core::provider::ProviderId>,
+        priority: Vec<kinema_core::provider::ProviderId>,
+        mode: EnrichMode,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum EnrichMode {
+    Details,
+    CardFields,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct EnrichedTitle {
+    pub title: CatalogTitle,
+    pub fields: std::collections::BTreeMap<String, kinema_core::catalog_normalized::FieldValue>,
+    pub details: CachedDetails,
+    pub contributors: Vec<kinema_core::provider::ProviderId>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct EnrichmentSnapshot {
+    pub titles: Vec<EnrichedTitle>,
+    /// Quiet failures: never replace a successful primary view with an error.
+    pub failed: Vec<kinema_core::provider::ProviderId>,
+    pub inactive: Vec<kinema_core::provider::ProviderId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,6 +106,7 @@ pub(crate) enum MetadataSnapshot {
     Details(CachedDetails),
     Sources(CachedSources),
     Tmdb(CachedTmdb),
+    Enrichment(EnrichmentSnapshot),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -103,6 +134,7 @@ impl Work {
         let operation = match self {
             Self::Search(_) => "search",
             Self::Metadata(r) => match &r.action {
+                MetadataAction::Enrich { .. } => "enrich",
                 MetadataAction::Browse { .. } => "browse",
                 MetadataAction::Details { .. } => "details",
                 MetadataAction::Sources { .. } => "sources",
@@ -121,6 +153,10 @@ impl Work {
                 IndexerKind::Torrentio => "torrentio",
                 IndexerKind::Peerflix => "peerflix",
             },
+            Self::Metadata(MetadataRequest {
+                action: MetadataAction::Enrich { .. },
+                ..
+            }) => "multiple",
             _ => "cinemeta",
         };
         // Worker, fetch, persistence and terminal paths may establish this
@@ -165,6 +201,9 @@ impl Work {
                         span.record("episode", episode);
                     }
                 }
+                MetadataAction::Enrich { kind, .. } => {
+                    span.record("media_kind", tracing::field::debug(kind));
+                }
                 MetadataAction::Tmdb(q) => {
                     q.record_diagnostics(&span);
                 }
@@ -178,6 +217,7 @@ fn refreshed_count(value: &Refreshed) -> usize {
     match value {
         Refreshed::Search(s) => s.titles.len(),
         Refreshed::Metadata(s) => match s.as_ref() {
+            MetadataSnapshot::Enrichment(s) => s.titles.len(),
             MetadataSnapshot::Browse(s) => s.titles.len(),
             MetadataSnapshot::Details(_) => 1,
             MetadataSnapshot::Sources(s) => s.candidates.len(),
@@ -253,11 +293,19 @@ fn slot(kind: MediaKind) -> usize {
 }
 
 // Separate kind/indexer operation slots avoid one page starving another while
-// keeping pending metadata bounded to sixteen operations, regardless of IDs/pages.
-const METADATA_SLOTS: usize = 16;
+// keeping pending metadata bounded to twenty operations, regardless of IDs/pages.
+const METADATA_SLOTS: usize = 20;
 
 fn metadata_slot(action: &MetadataAction) -> usize {
     match action {
+        MetadataAction::Enrich { kind, mode, .. } => {
+            16 + slot(*kind)
+                + if *mode == EnrichMode::CardFields {
+                    2
+                } else {
+                    0
+                }
+        }
         MetadataAction::Browse { kind, .. } => slot(*kind),
         MetadataAction::Details { kind, .. } => 2 + slot(*kind),
         MetadataAction::Sources { indexer, target } => {
@@ -771,6 +819,7 @@ impl Backend for CatalogService {
         action: &MetadataAction,
     ) -> Result<Option<MetadataSnapshot>, String> {
         match action {
+            MetadataAction::Enrich { .. } => Ok(None),
             MetadataAction::Browse { kind, offset } => self
                 .read_browse(*kind, *offset)
                 .map(|value| value.map(MetadataSnapshot::Browse)),
@@ -801,6 +850,7 @@ impl Backend for CatalogService {
     ) -> Result<MetadataSnapshot, String> {
         self.cancellation = Some(Arc::clone(cancel));
         let result = match action {
+            MetadataAction::Enrich { .. } => Err(crate::catalog::CatalogError::InvalidMetadata),
             MetadataAction::Browse { kind, offset } => self
                 .refresh_browse(*kind, *offset)
                 .map(MetadataSnapshot::Browse),
@@ -1752,6 +1802,39 @@ mod tests {
             titles: Vec::new(),
             fetched_at: 123,
         })
+    }
+
+    #[test]
+    fn enrichment_generation_replacement_cancels_stale_work() {
+        let mailbox = Mailbox::default();
+        let action = MetadataAction::Enrich {
+            kind: MediaKind::Movie,
+            imdb: vec![ImdbId::new("tt0133093").expect("id")],
+            providers: vec![kinema_core::provider::ProviderId::Tmdb],
+            priority: kinema_core::provider::ProviderId::ALL.to_vec(),
+            mode: EnrichMode::Details,
+        };
+        let old = MetadataRequest {
+            generation: 1,
+            action: action.clone(),
+            mode: Mode::Refresh,
+        };
+        mailbox.submit_metadata(old.clone());
+        assert!(matches!(mailbox.take_work(), Some(Work::Metadata(_))));
+        let flag = mailbox.metadata_cancellation(&old);
+        let newer = MetadataRequest {
+            generation: 2,
+            action,
+            mode: Mode::Refresh,
+        };
+        mailbox.submit_metadata(newer.clone());
+        assert!(flag.load(Ordering::Acquire));
+        assert!(mailbox.metadata_superseded(&old.action));
+        mailbox.cancel_metadata(&old.action, old.generation);
+        assert_eq!(
+            mailbox.lock().metadata[metadata_slot(&newer.action)],
+            Some(newer)
+        );
     }
 
     #[test]

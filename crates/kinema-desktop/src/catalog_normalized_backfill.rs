@@ -113,6 +113,7 @@ pub(super) fn backfill(tx: &Transaction<'_>) -> Result<(), CatalogError> {
                 None,
                 &[],
                 time,
+                &Default::default(),
             )
         },
     )?;
@@ -196,7 +197,7 @@ pub(super) fn backfill(tx: &Transaction<'_>) -> Result<(), CatalogError> {
                 }
                 let data = crate::tmdb::decode(&payload, &query)
                     .map_err(|_| CatalogError::InvalidCache)?;
-                normalized_tmdb::write(tx, &query, &data, time, false)
+                normalized_tmdb::write(tx, &query, &data, time, false, &Default::default())
             },
         )?;
     }
@@ -628,6 +629,7 @@ mod tests {
                 None,
                 &[summary],
                 100,
+                &Default::default(),
             )?;
             let mut newer = tmdb_title;
             newer.name = "Newer TMDB summary".into();
@@ -645,6 +647,7 @@ mod tests {
                 }),
                 100,
                 true,
+                &Default::default(),
             )?;
             for (namespace, external, name, poster, time) in [
                 (

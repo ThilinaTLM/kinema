@@ -33,6 +33,7 @@ fn cinemeta_then_tmdb_browse_then_details_unifies_canonical_title_and_both_pages
                 None,
             )?)],
             1,
+            &Default::default(),
         )?;
         tx.commit()?;
     }
@@ -125,9 +126,16 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
             }),
             1,
             true,
+            &Default::default(),
         )?;
         let raw = serde_json::json!({"id":91,"season_number":0,"poster_path":"/season.jpg","episodes":[{"id":101,"season_number":0,"episode_number":1,"name":"TMDB episode","still_path":"/still.jpg","vote_average":8,"vote_count":0}]});
-        normalized_tmdb::write_rich(&tx, &query, &normalized_rich::tmdb(&raw, &query)?, 1)?;
+        normalized_tmdb::write_rich(
+            &tx,
+            &query,
+            &normalized_rich::tmdb(&raw, &query)?,
+            1,
+            &Default::default(),
+        )?;
         let details = TitleDetails {
             facts: Default::default(),
             title: series("tt3000002")?,
@@ -156,7 +164,7 @@ fn compatible_graph_reconciliation_preserves_children_provenance_ratings_fetches
                 },
             ],
         };
-        write_cinemeta_details(&tx, &details, 2, true)?;
+        write_cinemeta_details(&tx, &details, 2, true, &Default::default())?;
         let parent =
             title_id(&tx, MediaKind::Series, "imdb", "tt3000002")?.ok_or("missing IMDb")?;
         let season_id = season(&tx, parent, 0, 2)?;
@@ -275,7 +283,7 @@ fn contradictory_external_ids_abort_reconciliation_without_mutating_either_graph
             namespace: "tmdb".into(),
             external_id: "100".into(),
         });
-        let id = resolve_title(&tx, &first, 1)?;
+        let id = resolve_title(&tx, &first, 1, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(id),
@@ -285,7 +293,16 @@ fn contradictory_external_ids_abort_reconciliation_without_mutating_either_graph
             false,
             1,
         )?;
-        import_title(&tx, id, &first, "tmdb", Quality::Detail, f, 1)?;
+        import_title(
+            &tx,
+            id,
+            &first,
+            "tmdb",
+            Quality::Detail,
+            f,
+            1,
+            &Default::default(),
+        )?;
         let second = normalized_tmdb::observation(&TmdbTitle {
             id: 101,
             kind: MediaKind::Series,
@@ -296,7 +313,7 @@ fn contradictory_external_ids_abort_reconciliation_without_mutating_either_graph
             display: Default::default(),
             imdb: None,
         });
-        let id = resolve_title(&tx, &second, 2)?;
+        let id = resolve_title(&tx, &second, 2, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(id),
@@ -306,7 +323,16 @@ fn contradictory_external_ids_abort_reconciliation_without_mutating_either_graph
             false,
             2,
         )?;
-        import_title(&tx, id, &second, "tmdb", Quality::Detail, f, 2)?;
+        import_title(
+            &tx,
+            id,
+            &second,
+            "tmdb",
+            Quality::Detail,
+            f,
+            2,
+            &Default::default(),
+        )?;
         tx.commit()?;
     }
     {
@@ -317,7 +343,7 @@ fn contradictory_external_ids_abort_reconciliation_without_mutating_either_graph
             external_id: "101".into(),
         });
         assert_eq!(
-            resolve_title(&tx, &incoming, 3),
+            resolve_title(&tx, &incoming, 3, &Default::default()),
             Err(CatalogError::IdentityConflict)
         );
     }
@@ -357,7 +383,7 @@ fn contradictory_same_coordinate_child_identifiers_rollback_before_graph_changes
                     imdb: None,
                 })
             };
-            let id = resolve_title(&tx, &item, 1)?;
+            let id = resolve_title(&tx, &item, 1, &Default::default())?;
             let f = fetch(
                 &tx,
                 Target::Title(id),
@@ -367,7 +393,16 @@ fn contradictory_same_coordinate_child_identifiers_rollback_before_graph_changes
                 false,
                 1,
             )?;
-            import_title(&tx, id, &item, "tmdb", Quality::Detail, f, 1)?;
+            import_title(
+                &tx,
+                id,
+                &item,
+                "tmdb",
+                Quality::Detail,
+                f,
+                1,
+                &Default::default(),
+            )?;
             let season = season(&tx, id, 1, 1)?;
             identifier(
                 &tx,
@@ -391,7 +426,7 @@ fn contradictory_same_coordinate_child_identifiers_rollback_before_graph_changes
             external_id: "400".into(),
         });
         assert_eq!(
-            resolve_title(&tx, &incoming, 2),
+            resolve_title(&tx, &incoming, 2, &Default::default()),
             Err(CatalogError::IdentityConflict)
         );
     }
@@ -431,9 +466,10 @@ fn duplicate_fetch_resources_and_duplicate_page_members_reconcile_without_orphan
         None,
         &[first.clone(), second.clone()],
         1,
+        &Default::default(),
     )?;
     for (item, time) in [(&first, 2), (&second, 3)] {
-        let id = resolve_title(&tx, item, time)?;
+        let id = resolve_title(&tx, item, time, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(id),
@@ -443,11 +479,20 @@ fn duplicate_fetch_resources_and_duplicate_page_members_reconcile_without_orphan
             false,
             time,
         )?;
-        import_title(&tx, id, item, "tmdb", Quality::Detail, f, time)?;
+        import_title(
+            &tx,
+            id,
+            item,
+            "tmdb",
+            Quality::Detail,
+            f,
+            time,
+            &Default::default(),
+        )?;
     }
     let mut incoming = first;
     incoming.identifiers.extend(second.identifiers);
-    let id = resolve_title(&tx, &incoming, 4)?;
+    let id = resolve_title(&tx, &incoming, 4, &Default::default())?;
     let page = read_page(&tx, "tmdb", "mixed-fixture-v1", 1)?.ok_or("missing page")?;
     assert_eq!(page.ids, [id]);
     let (count, time): (i64, i64) = tx.query_row(
@@ -489,7 +534,7 @@ fn tied_fetch_merge_keeps_acquired_facts_over_unacquired_payload() -> TestResult
         ..Default::default()
     };
     for (item, acquired) in [(&first, false), (&second, true)] {
-        let id = resolve_title(&tx, item, 2)?;
+        let id = resolve_title(&tx, item, 2, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(id),
@@ -499,17 +544,95 @@ fn tied_fetch_merge_keeps_acquired_facts_over_unacquired_payload() -> TestResult
             false,
             2,
         )?;
-        import_title(&tx, id, item, "tmdb", Quality::Detail, f, 2)?;
+        import_title(
+            &tx,
+            id,
+            item,
+            "tmdb",
+            Quality::Detail,
+            f,
+            2,
+            &Default::default(),
+        )?;
         if acquired {
             write_facts(&tx, f, &facts)?;
         }
     }
     let mut incoming = first;
     incoming.identifiers.extend(second.identifiers);
-    let id = resolve_title(&tx, &incoming, 3)?;
+    let id = resolve_title(&tx, &incoming, 3, &Default::default())?;
     assert_eq!(
         read_facts(&tx, id, "tmdb", "same-fixture-resource-v1")?,
         facts
     );
+    Ok(())
+}
+
+#[test]
+fn reconciliation_uses_supplier_priority_before_quality_and_time() -> TestResult {
+    use kinema_core::catalog_normalized::{FieldValue, TitleObservation};
+    use kinema_core::provider::{ProviderId, ProviderPriority};
+    for primary in [ProviderId::Cinemeta, ProviderId::Tmdb] {
+        for reverse in [false, true] {
+            let dir = tempfile::tempdir()?;
+            let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+            service.set_provider_priority(ProviderPriority::new([primary]));
+            let priority = service.provider_priority.clone();
+            let tx = service.connection.transaction()?;
+            let first = TitleObservation {
+                kind: MediaKind::Movie,
+                identifiers: vec![ExternalIdentifier {
+                    namespace: "imdb".into(),
+                    external_id: "tt3000099".into(),
+                }],
+                fields: vec![(
+                    "overview".into(),
+                    FieldValue::Text("Cinemeta overview".into()),
+                )],
+                ratings: vec![],
+            };
+            let second = TitleObservation {
+                identifiers: vec![ExternalIdentifier {
+                    namespace: "tmdb".into(),
+                    external_id: "999".into(),
+                }],
+                fields: vec![("overview".into(), FieldValue::Text("TMDB overview".into()))],
+                ..first.clone()
+            };
+            let mut observations = vec![
+                (&first, "cinemeta", Quality::Summary, 1),
+                (&second, "tmdb", Quality::Detail, 100),
+            ];
+            if reverse {
+                observations.reverse();
+            }
+            for (item, supplier, quality, time) in observations {
+                let id = resolve_title(&tx, item, time, &priority)?;
+                let f = fetch(
+                    &tx,
+                    Target::Title(id),
+                    supplier,
+                    "detail-v1",
+                    quality,
+                    false,
+                    time,
+                )?;
+                import_title(&tx, id, item, supplier, quality, f, time, &priority)?;
+            }
+            let mut mapping = first.clone();
+            mapping.identifiers.extend(second.identifiers);
+            let id = resolve_title(&tx, &mapping, 101, &priority)?;
+            let record = CatalogService::title_record(&tx, id)?;
+            assert_eq!(
+                record.text("overview"),
+                Some(if primary == ProviderId::Cinemeta {
+                    "Cinemeta overview"
+                } else {
+                    "TMDB overview"
+                })
+            );
+            assert_eq!(record.provenance[0].supplied_by, primary.as_str());
+        }
+    }
     Ok(())
 }

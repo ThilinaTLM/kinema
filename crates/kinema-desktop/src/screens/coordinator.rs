@@ -13,17 +13,19 @@ use crate::{
     app_state::{Resource, Stage},
     app_tracker::{Pending, Tracker},
     catalog_worker::{
-        CatalogWorker, MetadataAction, MetadataRequest, MetadataSnapshot, Mode, Outcome, Poll,
-        Request, Submit,
+        CatalogWorker, EnrichMode, MetadataAction, MetadataEvent, MetadataRequest,
+        MetadataSnapshot, Mode, Outcome, Poll, Request, Submit,
     },
     metadata_bridge::{self, Ask, MetaEvent, Polled, SourceSet},
-    settings::{MetadataProvider, Settings},
+    screens::enrichment,
+    settings::Settings,
     tmdb::{TmdbData, TmdbDetails, TmdbQuery, TmdbTitle},
 };
 use gpui::*;
 use kinema_core::{
     MediaKind,
     catalog::{CatalogTitle, ImdbId, SearchQuery, TitleDetails},
+    provider::ProviderId,
     sources::{IndexerKind, PlaybackTarget},
 };
 use std::time::Duration;
@@ -167,6 +169,17 @@ pub struct SessionSnapshot {
     pub can_reveal: bool,
 }
 
+/// The in-flight (or settled) Details enrichment for the open title.
+struct DetailEnrichment {
+    /// `None` when nothing can be requested (no IMDb ID or no active enricher).
+    action: Option<MetadataAction>,
+    generation: u64,
+    source: ProviderId,
+    contributors: Vec<ProviderId>,
+    /// Last completed canonical record, re-applied after the primary is re-stored.
+    overlay: Option<TitleDetails>,
+}
+
 pub struct AppCoordinator {
     worker: Result<CatalogWorker, String>,
     app: Result<AppWorker, String>,
@@ -195,6 +208,15 @@ pub struct AppCoordinator {
     source_request: Option<(Ask, u64)>,
     fixture: Option<Vec<BrowseTitle>>,
     fixture_failure: Option<String>,
+    // ── enrichment: optional, quiet, generation-checked ──
+    detail_enrichment: Option<DetailEnrichment>,
+    detail_enrich_generation: u64,
+    card_enrichment: Option<(MetadataAction, u64)>,
+    card_generation: u64,
+    card_pending: Vec<ImdbId>,
+    card_last: Vec<ImdbId>,
+    card_done: Option<(Vec<ImdbId>, u64)>,
+    card_task: Option<Task<()>>,
     #[cfg(feature = "ui-probe")]
     pub(crate) fixture_art: std::collections::HashMap<String, std::sync::Arc<RenderImage>>,
     worker_disconnect_reported: [bool; 2],
@@ -256,6 +278,15 @@ impl AppCoordinator {
             source_request: None,
             fixture: None,
             fixture_failure: None,
+            // ── enrichment ──
+            detail_enrichment: None,
+            detail_enrich_generation: 0,
+            card_enrichment: None,
+            card_generation: 0,
+            card_pending: Vec::new(),
+            card_last: Vec::new(),
+            card_done: None,
+            card_task: None,
             #[cfg(feature = "ui-probe")]
             fixture_art: Default::default(),
             worker_disconnect_reported: [false; 2],
@@ -321,6 +352,15 @@ impl AppCoordinator {
             source_request: None,
             fixture: Some(titles),
             fixture_failure: failure,
+            // ── enrichment ──
+            detail_enrichment: None,
+            detail_enrich_generation: 0,
+            card_enrichment: None,
+            card_generation: 0,
+            card_pending: Vec::new(),
+            card_last: Vec::new(),
+            card_done: None,
+            card_task: None,
             fixture_art: Default::default(),
             worker_disconnect_reported: [false; 2],
             _poll: cx.spawn(async |_, _| {}),
@@ -385,6 +425,7 @@ impl AppCoordinator {
         self.exhausted = false;
         if replace {
             self.titles.clear();
+            self.reset_card_enrichment();
         }
         self.fetch(replace, refresh, cx);
     }
@@ -392,22 +433,44 @@ impl AppCoordinator {
         if self.collection.busy()
             || self.collection.error().is_some()
             || self.exhausted
-            || !self.query.is_empty() && self.provider() == MetadataProvider::Cinemeta
+            || !self.query.is_empty() && self.provider() == ProviderId::Cinemeta
         {
             return;
         }
-        self.offset += if self.provider() == MetadataProvider::Tmdb {
+        self.offset += if self.provider() == ProviderId::Tmdb {
             1
         } else {
             100
         };
         self.fetch(true, false, cx);
     }
-    fn provider(&self) -> MetadataProvider {
+    /// Discards the grid and loads it again from the effective primary provider.
+    fn reload_collection(&mut self, cx: &mut Context<Self>) {
+        self.generation += 1;
+        self.collection = Resource::with_base(self.generation * 1_000_000);
+        self.titles.clear();
+        self.reset_card_enrichment();
+        self.load(self.kind, self.query.clone(), false, cx);
+    }
+    /// A changed token can change which provider is primary: reload only then.
+    pub(crate) fn apply_credential_status(
+        &mut self,
+        status: CredentialState,
+        cx: &mut Context<Self>,
+    ) {
+        let before = self.provider();
+        self.tmdb_credential = Some(status);
+        if self.provider() != before {
+            self.reload_collection(cx);
+        }
+        self.refresh_detail_enrichment();
+    }
+    /// The effective primary provider: first in priority order that is active.
+    pub(crate) fn provider(&self) -> ProviderId {
+        let tmdb_active = matches!(self.tmdb_credential, Some(CredentialState::Present));
         self.settings
             .as_ref()
-            .map(|s| s.metadata)
-            .unwrap_or_default()
+            .map_or(ProviderId::Cinemeta, |s| s.primary_provider(tmdb_active))
     }
     fn fetch(&mut self, replace: bool, refresh: bool, cx: &mut Context<Self>) {
         if self.offset == 0 {
@@ -425,7 +488,7 @@ impl AppCoordinator {
         let mode = if refresh { Mode::Refresh } else { Mode::Load };
         let result = (|| {
             let worker = self.worker.as_ref().map_err(Clone::clone)?;
-            if self.provider() == MetadataProvider::Tmdb {
+            if self.provider() == ProviderId::Tmdb {
                 let query = if self.query.trim().is_empty() {
                     TmdbQuery::Browse {
                         kind: self.kind,
@@ -486,6 +549,8 @@ impl AppCoordinator {
             stage,
         ) {
             self.exhausted = exhausted;
+            // Page values replaced the shown cards; enrichment must run again.
+            self.card_done = None;
         }
     }
     fn drain(&mut self, cx: &mut Context<Self>) {
@@ -566,7 +631,10 @@ impl AppCoordinator {
                 Polled::Cinemeta(MetaEvent::Details {
                     generation, stage, ..
                 }) => {
-                    apply_stage("details", &mut self.details, generation, stage);
+                    let usable = !matches!(stage, Stage::Failed(_));
+                    if apply_stage("details", &mut self.details, generation, stage) && usable {
+                        self.start_detail_enrichment();
+                    }
                 }
                 Polled::Cinemeta(MetaEvent::Sources {
                     generation, stage, ..
@@ -615,13 +683,19 @@ impl AppCoordinator {
                         Err(error) => Stage::Failed(error),
                         _ => continue,
                     };
-                    apply_stage(
+                    let usable = !matches!(stage, Stage::Failed(_));
+                    if apply_stage(
                         "tmdb_details",
                         &mut self.tmdb_details,
                         event.generation,
                         stage,
-                    );
+                    ) && usable
+                    {
+                        self.start_detail_enrichment();
+                    }
                 }
+                // ── enrichment: quiet; never a primary-view failure ──
+                Polled::Enrichment(event) => self.apply_enrichment(event),
                 Polled::Tmdb(event)
                     if Some(&event.action)
                         == self
@@ -664,6 +738,16 @@ impl AppCoordinator {
                     "UI metadata result no longer matches the active route"
                 ),
             }
+        }
+        if self.card_done.is_none()
+            && self.card_pending.is_empty()
+            && self.card_task.is_none()
+            && !self.card_last.is_empty()
+            && !self.collection.busy()
+        {
+            // A page replaced the shown cards: enrich the visible set again.
+            let ids = self.card_last.clone();
+            self.note_visible_titles(ids, cx);
         }
         if stopped {
             if !self.worker_disconnect_reported[0] {
@@ -833,22 +917,21 @@ impl AppCoordinator {
                 credentials,
                 ..
             } => {
+                let before = self.provider();
                 let reload = self
                     .settings
                     .as_ref()
-                    .is_none_or(|s| s.metadata != settings.metadata);
+                    .is_none_or(|s| s.metadata_priority != settings.metadata_priority);
                 self.settings = Some(settings.clone());
                 self.credentials = credentials.clone();
                 self.tmdb_credential = Some(tmdb_credential.clone());
-                if reload {
-                    self.generation += 1;
-                    self.collection = Resource::with_base(self.generation * 1_000_000);
-                    self.titles.clear();
-                    self.load(self.kind, self.query.clone(), false, cx);
+                if reload || self.provider() != before {
+                    self.reload_collection(cx);
                 }
+                self.refresh_detail_enrichment();
             }
             AppOutcome::MetadataCredential { status } => {
-                self.tmdb_credential = Some(status.clone());
+                self.apply_credential_status(status.clone(), cx);
             }
             AppOutcome::Failed { message } => {
                 tracing::warn!(message, "UI notice displayed");
@@ -942,6 +1025,7 @@ impl AppCoordinator {
         }
     }
     fn cancel_details(&mut self) {
+        self.cancel_detail_enrichment();
         if let (Ok(worker), Some((action, generation))) = (&self.worker, self.detail_request.take())
         {
             worker.cancel_metadata(&action, generation);
@@ -1790,7 +1874,7 @@ impl AppCoordinator {
     }
     #[cfg(feature = "ui-probe")]
     pub(crate) fn fixture_pending_append(&mut self, cx: &mut Context<Self>) {
-        self.offset = if self.provider() == MetadataProvider::Tmdb {
+        self.offset = if self.provider() == ProviderId::Tmdb {
             1
         } else {
             100
@@ -1801,11 +1885,315 @@ impl AppCoordinator {
     }
 }
 
+// ── enrichment: details overlay, visible-card batches and attribution ──
+impl AppCoordinator {
+    fn provider_active(&self, id: ProviderId) -> bool {
+        id != ProviderId::Tmdb || matches!(self.tmdb_credential, Some(CredentialState::Present))
+    }
+    /// Active providers in priority order, excluding the one that supplied the view.
+    pub(crate) fn enrichers_for(&self, source: ProviderId) -> Vec<ProviderId> {
+        self.settings.as_ref().map_or_else(Vec::new, |s| {
+            s.metadata_priority
+                .order()
+                .iter()
+                .copied()
+                .filter(|id| *id != source && self.provider_active(*id))
+                .collect()
+        })
+    }
+    /// Provider, kind and IMDb ID of the open detail, when it can be enriched.
+    fn detail_identity(&self) -> Option<(ProviderId, MediaKind, Option<ImdbId>)> {
+        match &self.detail_request.as_ref()?.0 {
+            MetadataAction::Details { kind, id } => {
+                Some((ProviderId::Cinemeta, *kind, Some(id.clone())))
+            }
+            MetadataAction::Tmdb(TmdbQuery::Details { kind, .. }) => Some((
+                ProviderId::Tmdb,
+                *kind,
+                self.tmdb_details.value().and_then(|d| d.imdb.clone()),
+            )),
+            _ => None,
+        }
+    }
+    /// Runs after the primary details are shown or when the active enrichers
+    /// change. Submits only when the (title, enrichers) request differs from the
+    /// one already in flight or completed; a re-shown primary just gets the
+    /// completed overlay applied again.
+    fn start_detail_enrichment(&mut self) {
+        let Some((source, kind, imdb)) = self.detail_identity() else {
+            return;
+        };
+        let providers = self.enrichers_for(source);
+        let Some(settings) = self.settings.as_ref() else {
+            return;
+        };
+        let action = enrichment::detail_action(kind, imdb, providers, &settings.metadata_priority);
+        let same = self
+            .detail_enrichment
+            .as_ref()
+            .is_some_and(|e| e.source == source && e.action == action);
+        if same {
+            self.reapply_detail_overlay();
+            return;
+        }
+        let kept = self.detail_enrichment.take();
+        if let Some(old) = &kept
+            && let (Some(old_action), Ok(worker)) = (&old.action, &self.worker)
+        {
+            worker.cancel_metadata(old_action, old.generation);
+        }
+        // Data already merged into the view stays attributed after a request ends.
+        let (contributors, overlay) = kept
+            .filter(|e| e.source == source)
+            .map_or((vec![source], None), |e| (e.contributors, e.overlay));
+        let Some(action) = action else {
+            self.detail_enrichment = Some(DetailEnrichment {
+                action: None,
+                generation: 0,
+                source,
+                contributors,
+                overlay,
+            });
+            return;
+        };
+        self.detail_enrich_generation += 1;
+        let generation = self.detail_enrich_generation;
+        if let Ok(worker) = &self.worker
+            && worker.submit_metadata(MetadataRequest {
+                generation,
+                action: action.clone(),
+                mode: Mode::Refresh,
+            }) == Submit::Closed
+        {
+            return;
+        }
+        self.detail_enrichment = Some(DetailEnrichment {
+            action: Some(action),
+            generation,
+            source,
+            contributors,
+            overlay,
+        });
+        self.reapply_detail_overlay();
+    }
+    /// Re-merges the completed overlay into a freshly stored primary value.
+    fn reapply_detail_overlay(&mut self) {
+        let Some(state) = &self.detail_enrichment else {
+            return;
+        };
+        let Some(overlay) = &state.overlay else {
+            return;
+        };
+        match state.source {
+            ProviderId::Cinemeta => {
+                if let Some(d) = self.details.value_mut() {
+                    enrichment::merge_cinemeta_details(d, overlay);
+                }
+            }
+            ProviderId::Tmdb => {
+                if let Some(d) = self.tmdb_details.value_mut() {
+                    enrichment::merge_tmdb_details(d, overlay);
+                }
+            }
+        }
+    }
+    /// The enricher set changed (token saved/removed): refresh an open details page.
+    fn refresh_detail_enrichment(&mut self) {
+        let shown = self.details.value().is_some() || self.tmdb_details.value().is_some();
+        if shown && self.detail_request.is_some() {
+            self.start_detail_enrichment();
+        }
+    }
+    fn cancel_detail_enrichment(&mut self) {
+        if let Some(old) = self.detail_enrichment.take()
+            && let Some(action) = old.action
+            && let Ok(worker) = &self.worker
+        {
+            worker.cancel_metadata(&action, old.generation);
+        }
+    }
+    fn apply_enrichment(&mut self, event: MetadataEvent) {
+        let mode = match &event.action {
+            MetadataAction::Enrich { mode, .. } => *mode,
+            _ => return,
+        };
+        let current = match mode {
+            EnrichMode::Details => self
+                .detail_enrichment
+                .as_ref()
+                .and_then(|e| Some((e.action.as_ref()?, e.generation))),
+            EnrichMode::CardFields => self.card_enrichment.as_ref().map(|(a, g)| (a, *g)),
+        };
+        if !enrichment::is_current(current, &event.action, event.generation) {
+            tracing::debug!(
+                generation = event.generation,
+                outcome = "rejected_stale",
+                "UI enrichment result no longer matches the active request"
+            );
+            return;
+        }
+        let snapshot = match event.result {
+            Ok(MetadataSnapshot::Enrichment(snapshot)) => snapshot,
+            Ok(_) => return,
+            Err(_) => {
+                // Optional data: the primary view stays exactly as it is.
+                tracing::debug!(?mode, "UI enrichment unavailable");
+                return;
+            }
+        };
+        tracing::debug!(
+            ?mode,
+            titles = snapshot.titles.len(),
+            failed = snapshot.failed.len(),
+            inactive = snapshot.inactive.len(),
+            "UI enrichment applied"
+        );
+        match mode {
+            EnrichMode::Details => {
+                let Some(state) = self.detail_enrichment.as_mut() else {
+                    return;
+                };
+                let Some(MetadataAction::Enrich { imdb, .. }) = &state.action else {
+                    return;
+                };
+                let Some(found) = snapshot
+                    .titles
+                    .into_iter()
+                    .find(|t| imdb.first() == Some(t.title.id()))
+                else {
+                    return;
+                };
+                let source = state.source;
+                state.contributors = found.contributors.clone();
+                if !state.contributors.contains(&source) {
+                    state.contributors.push(source);
+                }
+                state.overlay = Some(found.details.details);
+                self.reapply_detail_overlay();
+            }
+            EnrichMode::CardFields => {
+                for found in snapshot.titles {
+                    for card in &mut self.titles {
+                        if card.imdb() == Some(found.title.id())
+                            && let Some(filled) = enrichment::fill_card(card, &found.title)
+                        {
+                            *card = filled;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /// Offline fixture: pretend both providers contributed to the shown details.
+    #[cfg(feature = "ui-probe")]
+    pub(crate) fn fixture_enrichment_contributors(&mut self) {
+        if let Some((source, ..)) = self.detail_identity() {
+            self.detail_enrichment = Some(DetailEnrichment {
+                action: None,
+                generation: 0,
+                source,
+                contributors: vec![ProviderId::Tmdb, ProviderId::Cinemeta],
+                overlay: None,
+            });
+        }
+    }
+    /// "Data from …" for the open details; at least the primary once it is shown.
+    pub(crate) fn detail_attribution(&self) -> Option<String> {
+        let settings = self.settings.as_ref()?;
+        let (source, ..) = self.detail_identity()?;
+        let shown = match source {
+            ProviderId::Cinemeta => self.details.value().is_some(),
+            ProviderId::Tmdb => self.tmdb_details.value().is_some(),
+        };
+        if !shown {
+            return None;
+        }
+        let known = self
+            .detail_enrichment
+            .as_ref()
+            .map_or_else(|| vec![source], |e| e.contributors.clone());
+        kinema_core::provider::attribution(&known, &settings.metadata_priority)
+    }
+    /// Debounced entry point for the grid: a changed visible set is batched after
+    /// it rests, so scrolling never submits a request per frame.
+    pub(crate) fn note_visible_titles(&mut self, ids: Vec<ImdbId>, cx: &mut Context<Self>) {
+        let ids = enrichment::visible_batch(ids);
+        if ids.is_empty() {
+            return;
+        }
+        self.card_last.clone_from(&ids);
+        let generation = self.collection.generation();
+        if self.card_pending == ids
+            || self
+                .card_done
+                .as_ref()
+                .is_some_and(|(done, at)| *done == ids && *at == generation)
+        {
+            return;
+        }
+        self.card_pending = ids;
+        self.card_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(enrichment::CARD_DEBOUNCE)
+                .await;
+            let _ = this.update(cx, |this, _| this.submit_card_enrichment());
+        }));
+    }
+    fn submit_card_enrichment(&mut self) {
+        self.card_task = None;
+        let ids = std::mem::take(&mut self.card_pending);
+        if ids.is_empty() {
+            return;
+        }
+        self.cancel_card_enrichment();
+        let providers = self.enrichers_for(self.provider());
+        let Some(settings) = self.settings.as_ref() else {
+            return;
+        };
+        let Some(action) = enrichment::card_action(
+            self.kind,
+            ids.clone(),
+            providers,
+            &settings.metadata_priority,
+        ) else {
+            return;
+        };
+        self.card_generation += 1;
+        let generation = self.card_generation;
+        if let Ok(worker) = &self.worker
+            && worker.submit_metadata(MetadataRequest {
+                generation,
+                action: action.clone(),
+                mode: Mode::Refresh,
+            }) == Submit::Closed
+        {
+            return;
+        }
+        self.card_enrichment = Some((action, generation));
+        self.card_done = Some((ids, self.collection.generation()));
+    }
+    fn cancel_card_enrichment(&mut self) {
+        if let Some((action, generation)) = self.card_enrichment.take()
+            && let Ok(worker) = &self.worker
+        {
+            worker.cancel_metadata(&action, generation);
+        }
+    }
+    /// The subject changed: drop pending and in-flight card work.
+    fn reset_card_enrichment(&mut self) {
+        self.card_task = None;
+        self.card_pending.clear();
+        self.card_last.clear();
+        self.card_done = None;
+        self.cancel_card_enrichment();
+    }
+}
+
 // ── detail: actual coordinator failure/stale-routing tests, without services ──
 #[cfg(all(test, feature = "ui-probe-test"))]
 mod detail_request_tests {
     use super::{
-        AppCoordinator, BrowseTitle, MetadataAction, MetadataProvider, MetadataSnapshot, TmdbData,
+        AppCoordinator, BrowseTitle, MetadataAction, MetadataSnapshot, ProviderId, TmdbData,
         TmdbQuery,
     };
     use crate::{
@@ -1847,15 +2235,13 @@ mod detail_request_tests {
     fn append_offsets_are_zero_based_for_both_providers() {
         let mut cx = TestAppContext::single();
         let c = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
-        for (provider, offset) in [
-            (MetadataProvider::Cinemeta, 100),
-            (MetadataProvider::Tmdb, 1),
-        ] {
+        for (provider, offset) in [(ProviderId::Cinemeta, 100), (ProviderId::Tmdb, 1)] {
             c.update(&mut cx, |c, cx| {
+                c.tmdb_credential = Some(crate::app::CredentialState::Present);
                 c.settings
                     .as_mut()
                     .unwrap_or_else(|| panic!("settings"))
-                    .metadata = provider;
+                    .metadata_priority = kinema_core::provider::ProviderPriority::new([provider]);
                 c.offset = 0;
                 c.exhausted = false;
                 c.collection.begin(false);
@@ -1992,5 +2378,261 @@ impl AppCoordinator {
         }
         self.sources.cancel();
         cx.notify();
+    }
+}
+
+// ── enrichment: coordinator-level behavior without services ──
+#[cfg(all(test, feature = "ui-probe-test"))]
+mod enrichment_tests {
+    use super::*;
+    use crate::{
+        catalog::CachedDetails,
+        catalog_worker::{EnrichedTitle, EnrichmentSnapshot},
+    };
+    use ::core::prelude::v1::test;
+    use gpui::{AppContext, TestAppContext};
+
+    fn id(n: u32) -> ImdbId {
+        ImdbId::new(format!("tt{n:07}")).unwrap_or_else(|e| panic!("{e}"))
+    }
+    fn title(n: u32) -> CatalogTitle {
+        CatalogTitle::new(id(n), MediaKind::Movie, "Name", None).unwrap_or_else(|e| panic!("{e}"))
+    }
+    fn details(n: u32) -> TitleDetails {
+        TitleDetails {
+            facts: Default::default(),
+            title: title(n),
+            poster_url: None,
+            background_url: None,
+            release_info: None,
+            genres: vec![],
+            episodes: vec![],
+        }
+    }
+    fn open(c: &mut AppCoordinator, n: u32, cx: &mut Context<AppCoordinator>) {
+        c.cancel_details();
+        let action = MetadataAction::Details {
+            kind: MediaKind::Movie,
+            id: id(n),
+        };
+        let g = c.details.begin(true);
+        c.detail_request = Some((action, g));
+        c.details.fetched(g, details(n), 1);
+        c.start_detail_enrichment();
+        cx.notify();
+    }
+    fn reply(action: MetadataAction, generation: u64, n: u32, tagline: &str) -> MetadataEvent {
+        let mut shown = details(n);
+        shown.facts.tagline = Some(tagline.into());
+        MetadataEvent {
+            generation,
+            action,
+            result: Ok(MetadataSnapshot::Enrichment(EnrichmentSnapshot {
+                titles: vec![EnrichedTitle {
+                    title: title(n),
+                    fields: Default::default(),
+                    details: CachedDetails {
+                        details: shown,
+                        fetched_at: 2,
+                    },
+                    contributors: vec![ProviderId::Tmdb, ProviderId::Cinemeta],
+                }],
+                failed: vec![],
+                inactive: vec![],
+            })),
+            saved: false,
+            refreshing: false,
+        }
+    }
+    fn current(c: &AppCoordinator) -> (MetadataAction, u64) {
+        let e = c
+            .detail_enrichment
+            .as_ref()
+            .unwrap_or_else(|| panic!("enrichment"));
+        (
+            e.action.clone().unwrap_or_else(|| panic!("action")),
+            e.generation,
+        )
+    }
+
+    #[test]
+    fn details_enrichment_follows_title_and_ignores_stale_results() {
+        let mut cx = TestAppContext::single();
+        let c = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        c.update(&mut cx, |c, cx| {
+            c.tmdb_credential = Some(CredentialState::Present);
+            open(c, 1, cx);
+            let (first, g1) = current(c);
+            assert_eq!(
+                c.detail_attribution().as_deref(),
+                Some("Data from Cinemeta")
+            );
+            // Navigating to another title cancels and replaces the request.
+            open(c, 2, cx);
+            let (second, g2) = current(c);
+            assert!(g2 > g1);
+            // A late reply for the previous title never touches the new view.
+            c.apply_enrichment(reply(first, g1, 1, "stale"));
+            assert!(c.details.value().is_some_and(|d| d.facts.tagline.is_none()));
+            assert_eq!(
+                c.detail_attribution().as_deref(),
+                Some("Data from Cinemeta")
+            );
+            // The current reply updates facts in place and the footer.
+            c.apply_enrichment(reply(second.clone(), g2, 2, "fresh"));
+            assert_eq!(
+                c.details.value().and_then(|d| d.facts.tagline.as_deref()),
+                Some("fresh")
+            );
+            assert_eq!(
+                c.detail_attribution().as_deref(),
+                Some("Data from Cinemeta and TMDB")
+            );
+            // Same generation, wrong action: ignored.
+            c.apply_enrichment(reply(second, g2 + 1, 2, "wrong"));
+            assert_eq!(
+                c.details.value().and_then(|d| d.facts.tagline.as_deref()),
+                Some("fresh")
+            );
+            c.cancel_details();
+            assert!(c.detail_enrichment.is_none());
+            assert_eq!(c.detail_attribution(), None);
+        });
+    }
+
+    #[test]
+    fn refetched_primary_does_not_resubmit_and_keeps_overlay() {
+        let mut cx = TestAppContext::single();
+        let c = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        c.update(&mut cx, |c, cx| {
+            c.tmdb_credential = Some(CredentialState::Present);
+            open(c, 1, cx);
+            let (action, g) = current(c);
+            c.apply_enrichment(reply(action, g, 1, "merged"));
+            // A fetched stage after the cached one re-stores the primary value.
+            let gen_details = c.details.begin(false);
+            c.details.fetched(gen_details, details(1), 5);
+            assert!(c.details.value().is_some_and(|d| d.facts.tagline.is_none()));
+            c.start_detail_enrichment();
+            assert_eq!(c.detail_enrich_generation, g);
+            assert_eq!(
+                c.details.value().and_then(|d| d.facts.tagline.as_deref()),
+                Some("merged")
+            );
+        });
+    }
+
+    #[test]
+    fn token_change_reruns_details_enrichment_with_new_generation() {
+        let mut cx = TestAppContext::single();
+        let c = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        c.update(&mut cx, |c, cx| {
+            c.tmdb_credential = Some(CredentialState::Missing);
+            open(c, 1, cx);
+            assert_eq!(c.detail_enrich_generation, 0);
+            assert_eq!(
+                c.detail_attribution().as_deref(),
+                Some("Data from Cinemeta")
+            );
+            c.apply_credential_status(CredentialState::Present, cx);
+            let (action, g) = current(c);
+            assert_eq!(g, 1);
+            c.apply_enrichment(reply(action, g, 1, "tmdb"));
+            assert_eq!(
+                c.detail_attribution().as_deref(),
+                Some("Data from Cinemeta and TMDB")
+            );
+            // Removing the token ends the request but keeps truthful attribution.
+            c.apply_credential_status(CredentialState::Missing, cx);
+            assert!(
+                c.detail_enrichment
+                    .as_ref()
+                    .is_some_and(|e| e.action.is_none())
+            );
+            assert_eq!(
+                c.detail_attribution().as_deref(),
+                Some("Data from Cinemeta and TMDB")
+            );
+            assert_eq!(
+                c.details.value().and_then(|d| d.facts.tagline.as_deref()),
+                Some("tmdb")
+            );
+        });
+    }
+
+    #[test]
+    fn no_active_enricher_keeps_primary_only_footer() {
+        let mut cx = TestAppContext::single();
+        let c = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        c.update(&mut cx, |c, cx| {
+            c.tmdb_credential = Some(CredentialState::Missing);
+            open(c, 1, cx);
+            assert!(
+                c.detail_enrichment
+                    .as_ref()
+                    .is_some_and(|e| e.action.is_none())
+            );
+            assert_eq!(
+                c.detail_attribution().as_deref(),
+                Some("Data from Cinemeta")
+            );
+        });
+    }
+
+    #[test]
+    fn card_enrichment_fills_gaps_and_rejects_stale() {
+        let mut cx = TestAppContext::single();
+        let c =
+            cx.new(|cx| AppCoordinator::fixture(vec![BrowseTitle::Cinemeta(title(1))], None, cx));
+        c.update(&mut cx, |c, _| {
+            c.tmdb_credential = Some(CredentialState::Present);
+            let ids: Vec<_> = (0..30).map(id).collect();
+            c.card_pending = enrichment::visible_batch(ids);
+            assert_eq!(c.card_pending.len(), enrichment::CARD_BATCH);
+            c.submit_card_enrichment();
+            let (action, g) = c
+                .card_enrichment
+                .clone()
+                .unwrap_or_else(|| panic!("card request"));
+            let mut stale = reply(action.clone(), g, 1, "x");
+            if let Ok(MetadataSnapshot::Enrichment(s)) = &mut stale.result {
+                s.titles[0].title = title(1).with_display(kinema_core::catalog::CatalogDisplay {
+                    year: Some(2001),
+                    ..Default::default()
+                });
+            }
+            let mut old = stale.clone();
+            old.generation = g - 1;
+            c.apply_enrichment(old);
+            assert_eq!(c.titles.first().and_then(BrowseTitle::year), None);
+            c.apply_enrichment(stale);
+            assert_eq!(c.titles.first().and_then(BrowseTitle::year), Some(2001));
+            // Resubmitting a new batch supersedes the previous generation.
+            c.card_pending = vec![id(2)];
+            c.submit_card_enrichment();
+            assert!(c.card_enrichment.as_ref().is_some_and(|(_, n)| *n > g));
+        });
+    }
+
+    #[test]
+    fn credential_change_reloads_grid_only_when_primary_changes() {
+        let mut cx = TestAppContext::single();
+        let c = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        c.update(&mut cx, |c, cx| {
+            if let Some(s) = c.settings.as_mut() {
+                s.metadata_priority =
+                    kinema_core::provider::ProviderPriority::new([ProviderId::Tmdb]);
+            }
+            c.tmdb_credential = Some(CredentialState::Missing);
+            assert_eq!(c.provider(), ProviderId::Cinemeta);
+            let before = c.generation;
+            c.apply_credential_status(CredentialState::Missing, cx);
+            assert_eq!(c.generation, before);
+            c.apply_credential_status(CredentialState::Present, cx);
+            assert_eq!(c.provider(), ProviderId::Tmdb);
+            assert_eq!(c.generation, before + 1);
+            c.apply_credential_status(CredentialState::Present, cx);
+            assert_eq!(c.generation, before + 1);
+        });
     }
 }

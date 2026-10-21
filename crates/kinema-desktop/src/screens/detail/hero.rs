@@ -1,9 +1,9 @@
 //! Detail page: compact hero (backdrop, poster, chips, actions) and the
 //! scrolling page body that hosts the other sections.
 use super::*;
-use crate::widgets::menu::OpenContextMenu;
 use crate::widgets::patterns::{MediaHero, uses_over_art};
-use kinema_core::catalog::{ImdbId, TitleFacts};
+use kinema_core::catalog::TitleFacts;
+use std::time::Duration;
 
 /// Wraps a page section in the shared frame: the same side gutters and
 /// maximum width as the hero content, centred only beyond that width.
@@ -15,27 +15,6 @@ pub(super) fn body_shell(viewport: Pixels, child: impl IntoElement) -> Div {
             .px(gutter(viewport))
             .child(child),
     )
-}
-
-fn more_items(weak: WeakEntity<Detail>, name: String, imdb: Option<ImdbId>) -> Vec<MenuItem> {
-    let mut items = vec![
-        menu_item("Refresh", {
-            let weak = weak.clone();
-            move |_, cx| {
-                let _ = weak.update(cx, |s, cx| s.refresh(cx));
-            }
-        }),
-        menu_item("Copy title", {
-            let name = name.clone();
-            move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(name.clone()))
-        }),
-    ];
-    if let Some(id) = imdb {
-        items.push(menu_item("Open on IMDb", move |_, cx| {
-            cx.open_url(&format!("https://www.imdb.com/title/{}/", id.as_str()))
-        }));
-    }
-    items
 }
 
 impl Detail {
@@ -205,6 +184,7 @@ impl Detail {
             .poster(poster)
             .fade_into(p.bg_canvas)
             .min_height(px(0.))
+            .top_inset(s::TOOLBAR_HEIGHT)
             .frame(gutter(viewport), geometry::PAGE_MAX_WIDTH)
             .sizing(hero_sizing(viewport).0, hero_sizing(viewport).1)
             .overview_loading(status.busy && !status.loaded)
@@ -216,24 +196,31 @@ impl Detail {
         if let Some(text) = title.overview().filter(|o| !o.trim().is_empty()) {
             banner = banner.overview(text.to_owned());
         }
-        banner = banner.secondary(self.more_button(title, over_art, cx));
+        banner = banner
+            .title_action(CopyTitleButton {
+                title: title.name().to_owned().into(),
+                over_art,
+            })
+            .secondary(
+                IconButton::new("detail-refresh", IconName::Refresh, "Refresh")
+                    .over_art(over_art)
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+            );
+        if let Some(id) = title.imdb() {
+            let url = format!("https://www.imdb.com/title/{}/", id.as_str());
+            banner = banner.secondary(
+                IconButton::new("detail-imdb", IconName::ExternalLink, "Open on IMDb")
+                    .over_art(over_art)
+                    .on_click(move |_, _, cx| cx.open_url(&url)),
+            );
+        }
 
-        let weak = cx.entity().downgrade();
-        let name = title.name().to_owned();
-        let imdb = title.imdb().cloned();
         let mut section = div()
             .id("detail-hero-body")
             .w_full()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .w_full()
-                    .child(banner)
-                    .context_menu("detail-backdrop-menu", move |_, _| {
-                        more_items(weak.clone(), name.clone(), imdb.clone())
-                    }),
-            );
+            .child(div().w_full().child(banner));
         if let Some(error) = status.error.clone() {
             let retry = cx.listener(|this, _, _, cx| this.retry_metadata(cx));
             section = section.child(body_shell(
@@ -287,33 +274,47 @@ impl Detail {
             )
             .into_any_element()
     }
+}
 
-    /// Icon button that opens the same menu as right-click, anchored to itself.
-    fn more_button(
-        &self,
-        title: &BrowseTitle,
-        over_art: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let weak = cx.entity().downgrade();
-        let name = title.name().to_owned();
-        let imdb = title.imdb().cloned();
-        // Same height as the neighbouring buttons and centred, so the icon
-        // shares their vertical centre.
-        div()
-            .id("detail-more")
-            .h(s::CONTROL_HEIGHT)
-            .flex()
-            .items_center()
-            .child(
-                IconButton::new("detail-more-button", IconName::MoreHorizontal, "More")
-                    .over_art(over_art)
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(OpenContextMenu.boxed_clone(), cx);
-                    }),
-            )
-            .context_menu("detail-more-menu", move |_, _| {
-                more_items(weak.clone(), name.clone(), imdb.clone())
+/// How long the copy button shows its confirmation.
+const COPIED_FEEDBACK: Duration = Duration::from_millis(1500);
+
+/// Icon-only "Copy title" button beside the title; swaps to a check mark and
+/// a "Copied" tooltip label briefly after copying.
+#[derive(IntoElement)]
+struct CopyTitleButton {
+    title: SharedString,
+    over_art: bool,
+}
+
+impl RenderOnce for CopyTitleButton {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let copied = window.use_keyed_state("detail-copy-title-copied", cx, |_, _| false);
+        let is_copied = *copied.read(cx);
+        let (icon, label) = if is_copied {
+            (IconName::Check, "Copied")
+        } else {
+            (IconName::Copy, "Copy title")
+        };
+        let title = self.title;
+        IconButton::new("detail-copy-title", icon, label)
+            .over_art(self.over_art)
+            .on_click(move |_, window, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(title.to_string()));
+                copied.update(cx, |state, cx| {
+                    *state = true;
+                    cx.notify();
+                });
+                let copied = copied.clone();
+                window
+                    .spawn(cx, async move |cx| {
+                        cx.background_executor().timer(COPIED_FEEDBACK).await;
+                        copied.update(cx, |state, cx| {
+                            *state = false;
+                            cx.notify();
+                        });
+                    })
+                    .detach();
             })
     }
 }

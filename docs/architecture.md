@@ -9,8 +9,9 @@ and episodes, source selection, settings/keyring actions, preparation/file choic
 managed-media sessions, local-file playback, manual cleanup, and quit confirmation.
 The reported v4 source uses normalized canonical metadata and indexer rows, with
 saved provider-specific search/page membership;
-it is not arbitrary offline full-text search over all saved titles. There is no
-automatic provider fallback or TTL refresh.
+it is not arbitrary offline full-text search over all saved titles. The approved
+provider-priority/enrichment revision below is in progress; automatic TTL refresh
+remains undecided.
 
 `kinema-core` holds pure validated values and policies; `kinema-desktop` owns UI,
 provider/storage/process adapters, and background work. Backend-owner evidence
@@ -86,26 +87,42 @@ Do not expand the six-area scope into later library/history or other deferred wo
 
 ## Agreed metadata-provider contract
 
-Both Cinemeta and TMDB are required. Retain Cinemeta as the default; the metadata
-setting explicitly selects TMDB, whose bearer token belongs in OS secure storage,
-not ordinary settings. Do not automatically fall back between providers.
+**Decided 2026-10-21; implementation in progress in this change.** This supersedes
+the selected-provider-only policy; it is not live-provider or UI verification.
 
-TMDB titles must map to IMDb before source lookup. Clearly mark source lookup
-unavailable when no mapping exists; never guess from a name or numeric ID. The
-current adapter contract fixes TMDB locale to `en-US`; this does not establish
-multi-locale storage or a broader global fallback policy.
+- Cinemeta and TMDB implement one common provider interface with declared search,
+  browse/discover, title-detail, season/episode, and external-ID lookup capabilities.
+  Future providers (e.g. TVmaze/OMDb) use the same boundary. Adapters normalize output
+  into `kinema-core::catalog_normalized::{TitleObservation, FieldValue,
+  RatingObservation, ExternalIdentifier}` for local storage with per-field provenance.
+- Settings replace the single `MetadataProvider` choice with an ordered provider
+  priority list, reset to Cinemeta, TMDB without migration. The first enabled,
+  active provider is PRIMARY for grid search/browse; the rest are ENRICHMENT.
+  Providers missing required credentials are shown inactive and skipped, not errors.
+  TMDB's bearer token stays in OS secure storage, not ordinary settings.
+- Per field, the highest-priority provider with a value wins; lower-priority
+  providers fill gaps. Within one provider newer wins, but summary does not replace
+  detail. Unknowns stay nullable. Ratings retain separate source/metric/supplier
+  rows; TMDB scores are never labelled IMDb.
+- Details show the primary result first, then enrich fully from all enabled,
+  active enrichment providers asynchronously. Work is owned, cancellable, and
+  generation-checked; enrichment failures are quiet and non-fatal. Grid enrichment
+  covers only visible cards and missing poster, year, rating, runtime, or genres,
+  with bounded concurrency, catalog-based skipping of already enriched titles,
+  and cancellation on scroll/query changes.
+- Identity matching uses explicit external IDs only (IMDb mappings, TMDB
+  find-by-IMDb / `external_ids`), never name/year guesses. Source lookup remains
+  unavailable without IMDb mapping. The current TMDB locale is `en-US`;
+  multi-locale storage remains open.
+- Details use a footer such as “Data from TMDB and Cinemeta”, listing only actual
+  contributors (“Data from Cinemeta” for one). No per-field provenance UI is
+  planned. TMDB's required About attribution notice stays.
 
-The agreed target uses shared movie/series, season, and episode records regardless
-of which selected provider supplies them. Rich descriptions, artwork, external
-IDs, and ratings belong in that local catalog, with source provenance and safe
-identity matching rather than implicit cross-provider merges. Unknown values stay
-nullable; IMDb, TMDB, Rotten Tomatoes critic, and Rotten Tomatoes audience ratings
-remain distinct. The [target specification](catalog-schema.md#target-catalog-schema)
-is the approved authority for the ERD and field/merge rules. Backend implementation
-and current root checks passed; full UI acceptance remains pending.
+The [target specification](catalog-schema.md#target-catalog-schema) remains the
+authority for identity, rating, and merge rules.
 
 The user also approved narrow automatic transactional identity reconciliation when
-explicit selected-provider IMDb mapping proves duplicates without contradictory
+explicit provider-supplied IMDb mapping proves duplicates without contradictory
 external IDs or season/episode coordinates. Preserve metadata and references;
 abort contradictions. This is not name/year matching or cache cleanup. The
 [authoritative reconciliation policy](catalog-schema.md#approved-narrow-identity-reconciliation)
@@ -113,9 +130,8 @@ is approved, with backend-reported graph reconciliation and rollback coverage;
 current root checks passed, while integrated UI acceptance remains pending.
 
 The local catalog is the target primary read model. Owned, bounded background
-work fetches missing/new details on demand from the selected provider only; this
-does not authorize automatic both-provider enrichment, fallback, a full-catalog
-crawler, or an automatic TTL. Current source paths use canonical rows; legacy
+work fetches missing/new details and enrichment on demand under the priority
+policy above, rather than crawling the full catalog or adopting an automatic TTL. Current source paths use canonical rows; legacy
 rows remain preserved with deliberately limited backfill, not guaranteed offline
 reuse of every old query/detail/source snapshot.
 
@@ -211,7 +227,7 @@ fully cancellable networking or an orderly joined shutdown.
 
 ## Target responsiveness and lifetime rules
 
-- Read the local catalog first. Fetch missing/new details through owned, bounded, demand-driven work from the selected provider; keep usable data visible during explicit refresh. Automatic refresh timing remains open. See the [target catalog](catalog-schema.md#target-catalog-schema) and [cache policies](cache-policy.md).
+- Read the local catalog first. Fetch missing/new details through owned, bounded, demand-driven work under the provider-priority/enrichment policy; keep usable data visible during explicit refresh. Automatic refresh timing remains open. See the [target catalog](catalog-schema.md#target-catalog-schema) and [cache policies](cache-policy.md).
 - Keep SQL, network waits, image decoding, and blocking file operations outside UI rendering.
 - Give background tasks an owner. Cancel obsolete work and reject late results using request/session generations; these solve different problems.
 - Screen state belongs to its navigation entry. Closing a page must not stop an external player or remove files it is using.

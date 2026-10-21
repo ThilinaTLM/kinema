@@ -375,6 +375,7 @@ pub(super) fn write(
     provider: &str,
     fetch_id: i64,
     time: i64,
+    priority: &kinema_core::provider::ProviderPriority,
 ) -> Result<(), CatalogError> {
     for record in records {
         let target = match (record.season, record.episode) {
@@ -396,6 +397,7 @@ pub(super) fn write(
             Quality::Detail,
             fetch_id,
             time,
+            priority,
         )?;
         for observation in &record.ratings {
             rating(tx, target, observation, provider, fetch_id, time)?;
@@ -404,6 +406,10 @@ pub(super) fn write(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Explicit transaction, resource identity, observation and merge policy context"
+)]
 pub(super) fn write_page_rich(
     tx: &Transaction<'_>,
     provider: &str,
@@ -412,6 +418,7 @@ pub(super) fn write_page_rich(
     kind: MediaKind,
     records: &[RichRecord],
     time: i64,
+    priority: &kinema_core::provider::ProviderPriority,
 ) -> Result<(), CatalogError> {
     if records.is_empty() {
         return Ok(());
@@ -430,6 +437,7 @@ pub(super) fn write_page_rich(
             Quality::Summary,
             fetch_id,
             time,
+            priority,
         )?;
         for observation in &record.ratings {
             rating(tx, Target::Title(id), observation, provider, fetch_id, time)?;

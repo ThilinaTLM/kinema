@@ -319,6 +319,16 @@ mod tests {
                 "cinemeta",
             ),
             (
+                metadata(MetadataAction::Enrich {
+                    kind: MediaKind::Movie,
+                    imdb: vec![ImdbId::new("tt0133093").unwrap()],
+                    providers: vec![kinema_core::provider::ProviderId::Tmdb],
+                    priority: kinema_core::provider::ProviderId::ALL.to_vec(),
+                    mode: crate::catalog_worker::EnrichMode::CardFields,
+                }),
+                "multiple",
+            ),
+            (
                 metadata(MetadataAction::Browse {
                     kind: MediaKind::Series,
                     offset: 100,
@@ -426,6 +436,7 @@ mod tests {
             let expected_fields: &[&str] = match work {
                 Work::Search(_) => &["media_kind"],
                 Work::Metadata(request) => match &request.action {
+                    MetadataAction::Enrich { .. } => &["media_kind"],
                     MetadataAction::Browse { .. } => &["media_kind", "offset"],
                     MetadataAction::Details { .. } => &["media_kind", "imdb_id"],
                     MetadataAction::Sources {

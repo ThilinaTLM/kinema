@@ -3,17 +3,10 @@ use crate::{
     paths::AppPaths,
     player::{PlayerChoice, validate_choice},
 };
+use kinema_core::provider::{ProviderId, ProviderPriority};
 use kinema_core::sources::{DebridKind, IndexerKind};
 use serde::{Deserialize, Serialize};
 use std::{fmt, io::Write, path::PathBuf};
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MetadataProvider {
-    #[default]
-    Cinemeta,
-    Tmdb,
-}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -57,7 +50,7 @@ pub enum MotionChoice {
 
 #[derive(Clone, Debug)]
 pub struct Settings {
-    pub metadata: MetadataProvider,
+    pub metadata_priority: ProviderPriority,
     pub indexer: IndexerKind,
     pub debrid: DebridKind,
     pub media_limit_bytes: u64,
@@ -69,7 +62,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            metadata: MetadataProvider::Cinemeta,
+            metadata_priority: ProviderPriority::default(),
             indexer: IndexerKind::Torrentio,
             debrid: DebridKind::RealDebrid,
             media_limit_bytes: 20 * 1024 * 1024 * 1024,
@@ -78,6 +71,15 @@ impl Default for Settings {
             poster_size: PosterSize::default(),
             reduce_motion: MotionChoice::default(),
         }
+    }
+}
+
+impl Settings {
+    /// The first active provider in priority order; Cinemeta when none is active.
+    pub fn primary_provider(&self, tmdb_active: bool) -> ProviderId {
+        self.metadata_priority
+            .primary(|id| id != ProviderId::Tmdb || tmdb_active)
+            .unwrap_or(ProviderId::Cinemeta)
     }
 }
 
@@ -255,8 +257,12 @@ fn validate(settings: &Settings) -> Result<(), SettingsError> {
 #[serde(deny_unknown_fields)]
 struct Document {
     version: u32,
+    /// Ordered provider ids; unknown entries are ignored on load.
     #[serde(default)]
-    metadata: Option<MetadataProvider>,
+    metadata_providers: Option<Vec<String>>,
+    /// Legacy single-provider key: accepted and ignored, never written.
+    #[serde(default, skip_serializing, rename = "metadata")]
+    _legacy_metadata: Option<serde::de::IgnoredAny>,
     #[serde(default)]
     theme: ThemeChoice,
     #[serde(default)]
@@ -286,7 +292,15 @@ impl Document {
         };
         Ok(Self {
             version: 1,
-            metadata: Some(settings.metadata),
+            metadata_providers: Some(
+                settings
+                    .metadata_priority
+                    .order()
+                    .iter()
+                    .map(|id| id.as_str().to_owned())
+                    .collect(),
+            ),
+            _legacy_metadata: None,
             theme: settings.theme,
             poster_size: settings.poster_size,
             reduce_motion: settings.reduce_motion,
@@ -310,7 +324,12 @@ impl Document {
             return Err(SettingsError::UnsupportedVersion);
         }
         let settings = Settings {
-            metadata: self.metadata.unwrap_or_default(),
+            metadata_priority: ProviderPriority::new(
+                self.metadata_providers
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|name| ProviderId::parse(name)),
+            ),
             theme: self.theme,
             poster_size: self.poster_size,
             reduce_motion: self.reduce_motion,
@@ -473,34 +492,70 @@ mod tests {
     }
 
     #[test]
-    fn old_v1_defaults_metadata_and_explicit_selection_roundtrips()
+    fn old_v1_defaults_priority_and_legacy_metadata_key_is_ignored()
     -> Result<(), Box<dyn std::error::Error>> {
         let dir = tempfile::tempdir()?;
         let store = SettingsStore::open(&paths(dir.path()))?;
         let old = "version = 1\nindexer = \"peerflix\"\ndebrid = \"all-debrid\"\nmedia_limit_bytes = 1234\nplayer = \"vlc\"\n";
         std::fs::write(&store.path, old)?;
-        let mut settings = store.load()?;
-        assert_eq!(settings.metadata, MetadataProvider::Cinemeta);
+        let settings = store.load()?;
+        assert_eq!(settings.metadata_priority, ProviderPriority::default());
+        assert_eq!(
+            settings.metadata_priority.order(),
+            &[ProviderId::Cinemeta, ProviderId::Tmdb]
+        );
         assert_eq!(settings.indexer, IndexerKind::Peerflix);
         assert_eq!(settings.player, PlayerChoice::Vlc);
-        settings.metadata = MetadataProvider::Tmdb;
+        std::fs::write(&store.path, format!("{old}metadata = \"tmdb\"\n"))?;
+        let legacy = store.load()?;
+        assert_eq!(legacy.metadata_priority, ProviderPriority::default());
+        store.save(&legacy)?;
+        assert!(!std::fs::read_to_string(&store.path)?.contains("metadata ="));
+        let invalid = format!("{old}tmdb_bearer = \"not-allowed\"\n");
+        std::fs::write(&store.path, &invalid)?;
+        assert!(store.load().is_err());
+        assert!(store.save(&Settings::default()).is_err());
+        assert_eq!(std::fs::read_to_string(&store.path)?, invalid);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_priority_roundtrips_and_normalizes() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        let settings = Settings {
+            metadata_priority: ProviderPriority::new([ProviderId::Tmdb, ProviderId::Cinemeta]),
+            ..Settings::default()
+        };
         store.save(&settings)?;
-        assert_eq!(store.load()?.metadata, MetadataProvider::Tmdb);
-        assert_eq!(store.load()?.media_limit_bytes, 1234);
-        settings.metadata = MetadataProvider::Cinemeta;
-        store.save(&settings)?;
-        assert!(std::fs::read_to_string(&store.path)?.contains("metadata = \"cinemeta\""));
-        for extra in [
-            "metadata = \"unknown\"\n",
-            "tmdb_bearer = \"not-allowed\"\n",
+        let text = std::fs::read_to_string(&store.path)?;
+        assert!(text.contains("metadata_providers = [\"tmdb\", \"cinemeta\"]"));
+        assert!(!text.contains("token"));
+        assert_eq!(store.load()?.metadata_priority, settings.metadata_priority);
+
+        let base = "version = 1\nindexer = \"torrentio\"\ndebrid = \"real-debrid\"\nmedia_limit_bytes = 1\nplayer = \"mpv\"\n";
+        for (list, expected) in [
+            (
+                "[\"tmdb\", \"bogus\", \"tmdb\"]",
+                [ProviderId::Tmdb, ProviderId::Cinemeta],
+            ),
+            ("[]", [ProviderId::Cinemeta, ProviderId::Tmdb]),
+            ("[\"bogus\"]", [ProviderId::Cinemeta, ProviderId::Tmdb]),
         ] {
-            let invalid = format!("{old}{extra}");
-            std::fs::write(&store.path, &invalid)?;
-            assert!(store.load().is_err());
-            assert!(store.save(&Settings::default()).is_err());
-            assert_eq!(std::fs::read_to_string(&store.path)?, invalid);
+            std::fs::write(&store.path, format!("{base}metadata_providers = {list}\n"))?;
+            assert_eq!(store.load()?.metadata_priority.order(), &expected);
         }
         Ok(())
+    }
+
+    #[test]
+    fn primary_provider_skips_inactive_and_falls_back() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.primary_provider(true), ProviderId::Cinemeta);
+        assert_eq!(settings.primary_provider(false), ProviderId::Cinemeta);
+        settings.metadata_priority = ProviderPriority::new([ProviderId::Tmdb]);
+        assert_eq!(settings.primary_provider(true), ProviderId::Tmdb);
+        assert_eq!(settings.primary_provider(false), ProviderId::Cinemeta);
     }
 
     #[test]

@@ -1,10 +1,10 @@
 //! Cinematic detail header: blurred backdrop fading into the canvas, poster,
-//! title, meta chips, clamped overview and action slots.
+//! title, meta chips, overview and action slots.
 //!
 //! The art melts into the canvas through one long gradient (stacked twice in
 //! light mode so dark ink always sits on a mostly-canvas surface). Dark art
 //! stays behind the controls only in dark mode, so over-art styling follows
-//! [`uses_over_art`]: the hero applies it to its own badges and More toggle;
+//! [`uses_over_art`]: the hero applies it to its own badges;
 //! callers pass the same value to `Button`/`IconButton`/`Badge` slots.
 use std::{sync::Arc, time::Instant};
 
@@ -15,8 +15,7 @@ use super::{Badge, SkeletonText};
 use crate::{
     artwork::ArtworkState,
     widgets::{
-        IconName, TypeExt,
-        button::{Button, ButtonVariant},
+        TypeExt,
         motion::{self, Motion},
         tokens::{Mode, elevation, palette, radius, space, theme, typeface},
     },
@@ -31,10 +30,11 @@ pub const POSTER_WIDTH: Pixels = px(168.0);
 /// Poster height / width (2:3).
 pub const POSTER_ASPECT: f32 = 1.5;
 const TEXT_MAX_WIDTH: Pixels = px(640.0);
-/// Overview lines shown before expansion.
-const OVERVIEW_LINES: usize = 3;
-/// Overviews at most this long never need an expand toggle.
-const OVERVIEW_COLLAPSE_CHARS: usize = 220;
+/// Lines of the overview placeholder shown while the text loads.
+const OVERVIEW_SKELETON_LINES: usize = 3;
+/// Safety clamp for pathologically long overviews; normal ones (3-5 lines)
+/// show in full.
+const OVERVIEW_MAX_LINES: usize = 8;
 /// Share of the hero height over which the art melts into the canvas.
 const FADE_HEIGHT: f32 = 0.7;
 /// Default strength of the even veil over the backdrop (times `backdrop_scrim`).
@@ -72,6 +72,7 @@ pub struct MediaHero {
     poster: Option<AnyElement>,
     meta: Vec<MetaItem>,
     overview: Option<SharedString>,
+    title_action: Option<AnyElement>,
     primary: Option<AnyElement>,
     secondary: Vec<AnyElement>,
     min_height: Pixels,
@@ -81,6 +82,7 @@ pub struct MediaHero {
     side_scrim: f32,
     overview_loading: bool,
     gutter: Pixels,
+    top_inset: Pixels,
     max_width: Option<Pixels>,
     poster_width: Pixels,
     text_max_width: Pixels,
@@ -96,6 +98,7 @@ impl MediaHero {
             poster: None,
             meta: Vec::new(),
             overview: None,
+            title_action: None,
             primary: None,
             secondary: Vec::new(),
             min_height: MIN_HEIGHT,
@@ -105,6 +108,7 @@ impl MediaHero {
             side_scrim: DEFAULT_SIDE_SCRIM,
             overview_loading: false,
             gutter: space::GRID_INSET,
+            top_inset: px(0.0),
             max_width: None,
             poster_width: POSTER_WIDTH,
             text_max_width: TEXT_MAX_WIDTH,
@@ -175,6 +179,12 @@ impl MediaHero {
         self.overview_loading = loading;
         self
     }
+    /// Reserve space at the top for a floating header overlaying the hero;
+    /// the backdrop still extends to the top edge underneath it.
+    pub fn top_inset(mut self, inset: Pixels) -> Self {
+        self.top_inset = inset;
+        self
+    }
     /// Align the content with a page frame: side gutter and a maximum content
     /// width (the backdrop itself stays full-bleed).
     pub fn frame(mut self, gutter: Pixels, max_width: Pixels) -> Self {
@@ -193,6 +203,11 @@ impl MediaHero {
         self.overview = Some(overview.into());
         self
     }
+    /// Small control right next to the title (e.g. an icon-only copy button).
+    pub fn title_action(mut self, action: impl IntoElement) -> Self {
+        self.title_action = Some(action.into_any_element());
+        self
+    }
     pub fn primary(mut self, action: impl IntoElement) -> Self {
         self.primary = Some(action.into_any_element());
         self
@@ -203,22 +218,9 @@ impl MediaHero {
     }
 }
 
-/// Short overviews fit the clamp, so they get no toggle.
-fn overview_collapsible(text: &str) -> bool {
-    text.chars().count() > OVERVIEW_COLLAPSE_CHARS
-}
-
-/// Lines the overview is clamped to; `None` shows (and wraps) all of it.
-/// Short overviews never clamp; long ones clamp until expanded.
-fn overview_clamp(collapsible: bool, expanded: bool) -> Option<usize> {
-    (!(collapsible && expanded)).then_some(OVERVIEW_LINES)
-}
-
 impl RenderOnce for MediaHero {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
-        let expanded = window.use_keyed_state((self.id.clone(), "expanded"), cx, |_, _| false);
-        let is_expanded = *expanded.read(cx);
         let fade = motion::duration(Motion::Crossfade, cx);
 
         // Remember the previous image so a change crossfades image-to-image.
@@ -305,54 +307,14 @@ impl RenderOnce for MediaHero {
 
         let loading = self.overview_loading && self.overview.is_none();
         let overview = self.overview.map(|text| {
-            let collapsible = overview_collapsible(&text);
-            let toggle = collapsible.then(|| {
-                let expanded = expanded.clone();
-                let (label, icon) = if is_expanded {
-                    ("Less", IconName::ChevronDown)
-                } else {
-                    ("More", IconName::ChevronRight)
-                };
-                Button::new((self.id.clone(), "overview-toggle"), label)
-                    .variant(ButtonVariant::Ghost)
-                    .icon(icon)
-                    .over_art(over_art)
-                    .on_click(move |_, _, cx| {
-                        expanded.update(cx, |state, cx| {
-                            *state = !*state;
-                            cx.notify();
-                        })
-                    })
-            });
             div()
-                .flex()
-                .flex_col()
-                .gap(space::S4)
                 .w_full()
+                .min_w_0()
                 .max_w(self.text_max_width)
-                .child(
-                    // Clamped and full text keep separate element state: a text
-                    // layout cached under a line clamp keeps its single
-                    // unwrapped tail line when the clamp is lifted.
-                    div()
-                        .id((
-                            self.id.clone(),
-                            if overview_clamp(collapsible, is_expanded).is_some() {
-                                "overview-clamped"
-                            } else {
-                                "overview-full"
-                            },
-                        ))
-                        .w_full()
-                        .min_w_0()
-                        .type_style(typeface::BODY_LONG)
-                        .text_color(ink.text_secondary)
-                        .when_some(overview_clamp(collapsible, is_expanded), |el, lines| {
-                            el.clamp_lines(lines)
-                        })
-                        .child(text),
-                )
-                .children(toggle.map(|toggle| div().flex().child(toggle)))
+                .type_style(typeface::BODY_LONG)
+                .text_color(ink.text_secondary)
+                .clamp_lines(OVERVIEW_MAX_LINES)
+                .child(text)
         });
 
         let overview = overview.or_else(|| {
@@ -360,7 +322,7 @@ impl RenderOnce for MediaHero {
                 div()
                     .w(OVERVIEW_SKELETON_WIDTH)
                     .max_w_full()
-                    .child(SkeletonText::new(OVERVIEW_LINES))
+                    .child(SkeletonText::new(OVERVIEW_SKELETON_LINES))
             })
         });
         let has_actions = self.primary.is_some() || !self.secondary.is_empty();
@@ -405,7 +367,7 @@ impl RenderOnce for MediaHero {
                         .items_end()
                         .gap(space::S24)
                         .px(self.gutter)
-                        .pt(space::S24)
+                        .pt(space::S24 + self.top_inset)
                         .pb(space::S24)
                         .children(poster)
                         .child(
@@ -417,10 +379,20 @@ impl RenderOnce for MediaHero {
                                 .gap(space::S8)
                                 .child(
                                     div()
-                                        .type_style(typeface::DISPLAY)
-                                        .text_color(ink.text_primary)
-                                        .clamp_lines(2)
-                                        .child(self.title),
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S8)
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .type_style(typeface::DISPLAY)
+                                                .text_color(ink.text_primary)
+                                                .clamp_lines(2)
+                                                .child(self.title),
+                                        )
+                                        .children(
+                                            self.title_action.map(|a| div().flex_none().child(a)),
+                                        ),
                                 )
                                 .when(!self.meta.is_empty(), |el| {
                                     el.child(
@@ -462,10 +434,7 @@ impl RenderOnce for MediaHero {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        OVERVIEW_COLLAPSE_CHARS, OVERVIEW_LINES, overview_clamp, overview_collapsible,
-        uses_over_art,
-    };
+    use super::uses_over_art;
     use crate::widgets::tokens::Mode;
 
     #[test]
@@ -473,24 +442,5 @@ mod tests {
         assert!(uses_over_art(true, Mode::Dark));
         assert!(!uses_over_art(true, Mode::Light));
         assert!(!uses_over_art(false, Mode::Dark));
-    }
-
-    #[test]
-    fn only_long_overviews_get_a_toggle() {
-        assert!(!overview_collapsible(""));
-        assert!(!overview_collapsible(&"a".repeat(OVERVIEW_COLLAPSE_CHARS)));
-        assert!(overview_collapsible(
-            &"a".repeat(OVERVIEW_COLLAPSE_CHARS + 1)
-        ));
-        // Counts characters, not bytes.
-        assert!(!overview_collapsible(&"é".repeat(OVERVIEW_COLLAPSE_CHARS)));
-    }
-
-    #[test]
-    fn expanding_lifts_the_clamp_only_for_collapsible_overviews() {
-        assert_eq!(overview_clamp(true, false), Some(OVERVIEW_LINES));
-        assert_eq!(overview_clamp(true, true), None);
-        assert_eq!(overview_clamp(false, true), Some(OVERVIEW_LINES));
-        assert_eq!(overview_clamp(false, false), Some(OVERVIEW_LINES));
     }
 }

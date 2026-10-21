@@ -17,6 +17,7 @@ use crate::widgets::{
 };
 use gpui::{prelude::*, *};
 use kinema_core::MediaKind;
+use std::rc::Rc;
 
 actions!(
     v3_main,
@@ -305,6 +306,72 @@ impl MainWindow {
         cx.notify();
     }
 }
+
+/// Opacity of the control pills drawn over detail backdrops.
+const PILL_ALPHA: f32 = 0.78;
+
+/// Equal-size, centered cell for one toolbar icon control; grows only for a badge.
+fn icon_cell(child: impl IntoElement) -> Div {
+    div()
+        .flex_none()
+        .min_w(s::ICON_TARGET)
+        .h(s::CONTROL_HEIGHT)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(child)
+}
+
+/// Scroll distance over which the scrim fades in.
+const SCRIM_RAMP: Pixels = px(24.);
+
+/// Top fade behind the floating header. Offset is read at paint time so it
+/// tracks scrolling without re-rendering the window; it is invisible at scroll top.
+fn scroll_scrim(scrolled: Rc<dyn Fn(&App) -> Pixels>, canvas_color: Hsla) -> impl IntoElement {
+    let height = s::TOOLBAR_HEIGHT + s::S24;
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, cx| {
+            let strength = (scrolled(cx) / SCRIM_RAMP).clamp(0., 1.);
+            if strength <= 0. {
+                return;
+            }
+            // Stepped eased ramp: two-stop GPUI gradients leave visible seams
+            // where alpha reaches zero, thin solid strips do not.
+            let step = height / SCRIM_STEPS as f32;
+            for i in 0..SCRIM_STEPS {
+                let t = (i as f32 + 0.5) / SCRIM_STEPS as f32;
+                let hold = SCRIM_HOLD;
+                let falloff = if t <= hold {
+                    1.
+                } else {
+                    let u = (t - hold) / (1. - hold);
+                    1. - u * u * (3. - 2. * u)
+                };
+                let color = Hsla {
+                    a: SCRIM_ALPHA * strength * falloff,
+                    ..canvas_color
+                };
+                let strip = Bounds::new(
+                    point(bounds.origin.x, bounds.origin.y + step * i as f32),
+                    size(bounds.size.width, step + px(0.5)),
+                );
+                window.paint_quad(fill(strip, color));
+            }
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .right_0()
+    .h(height)
+}
+/// Peak opacity of the scrim at the window edge.
+const SCRIM_ALPHA: f32 = 0.92;
+/// Fraction of the scrim band (from the top) that stays at peak opacity.
+const SCRIM_HOLD: f32 = 0.6;
+const SCRIM_STEPS: usize = 36;
+
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = *tokens::palette(cx);
@@ -312,6 +379,8 @@ impl Render for MainWindow {
         let count = self.coordinator.read(cx).active_sessions();
         let change = cx.entity().downgrade();
         let in_detail = matches!(self.route, Route::Detail(_));
+        // The popover wraps its trigger; a control-height flex box keeps the glyph
+        // on the same centre line as its neighbours.
         let transfer_trigger = div().child(
             IconButton::new("transfers-trigger", IconName::Transfers, "Transfers").badge(count),
         );
@@ -327,27 +396,66 @@ impl Render for MainWindow {
         } else {
             transfer_trigger.into_any_element()
         };
-        let toolbar_title = match &self.route {
-            Route::Browse => String::new(),
-            Route::Detail(detail) => detail.read(cx).name().to_owned(),
+        // Light backdrops swallow bare ghost icons, so light browse pills too.
+        let light = tokens::theme(cx).mode == tokens::Mode::Light;
+        let pill_bg = Hsla {
+            a: PILL_ALPHA,
+            ..p.bg_overlay
         };
-        let leading = if in_detail {
-            div()
+        // Translucent capsule sized from its content: every control sits in an
+        // equal icon-target cell, centered on both axes.
+        let pill = move |el: Div| {
+            el.flex_none()
                 .flex()
                 .items_center()
-                .gap(s::S8)
-                .min_w_0()
-                .child(
-                    IconButton::new("detail-back", IconName::ArrowLeft, "Back")
+                .gap(s::S2)
+                .rounded_full()
+                .bg(pill_bg)
+                .border_1()
+                .border_color(p.line_subtle)
+                .p(s::S2)
+        };
+        let actions = vec![
+            icon_cell(
+                Popover::new("transfers")
+                    .trigger(transfer_trigger)
+                    .content(self.transfers.clone()),
+            )
+            // Popover's wrapper reports a taller box than its glyph; top-aligning
+            // puts the glyph on the same centre line as its neighbours.
+            .items_start(),
+            icon_cell(
+                IconButton::new("settings", IconName::Settings, "Settings").on_click({
+                    let coordinator = self.coordinator.clone();
+                    move |_, _, cx| coordinator.update(cx, |c, cx| c.open_settings(cx))
+                }),
+            ),
+            icon_cell(
+                IconButton::new("overflow", IconName::MoreHorizontal, "App menu")
+                    .on_click(cx.listener(|this, _, window, cx| this.overflow(window, cx))),
+            ),
+        ];
+        let mut actions = Some(actions);
+        let back_label = match &self.route {
+            Route::Detail(detail) if detail.read(cx).on_streams_page() => "Back to details",
+            _ => "Back to browse",
+        };
+        let leading = if in_detail {
+            // One left-aligned capsule: back | divider | app actions.
+            pill(div())
+                .child(icon_cell(
+                    IconButton::new("detail-back", IconName::ArrowLeft, back_label)
                         .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
-                )
+                ))
                 .child(
                     div()
-                        .type_style(t::HEADING)
-                        .min_w_0()
-                        .truncate()
-                        .child(toolbar_title),
+                        .flex_none()
+                        .w(px(1.))
+                        .h(s::S16)
+                        .mx(s::S4)
+                        .bg(p.line_hairline),
                 )
+                .children(actions.take().unwrap_or_default())
                 .into_any_element()
         } else {
             Segmented::new(
@@ -379,16 +487,18 @@ impl Render for MainWindow {
         };
         // Left and right groups share the free space equally, so the search
         // field stays centered regardless of what each side holds.
+        // Transparent overlay: no bar surface or border. The controls float over
+        // the page; `scroll_scrim` provides legibility once content scrolls under.
         let toolbar = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
             .h(s::TOOLBAR_HEIGHT)
-            .flex_none()
             .flex()
             .items_center()
             .gap(s::S12)
             .px(s::S20)
-            .bg(p.bg_surface)
-            .border_b_1()
-            .border_color(p.line_subtle)
             .child(
                 div()
                     .flex_1()
@@ -405,16 +515,16 @@ impl Render for MainWindow {
                         .child(self.search.clone()),
                 )
             })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(s::S8)
-                    .when(!in_detail, |el| {
-                        el.child(
+            .when(!in_detail, |el| {
+                el.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .gap(s::S8)
+                        .child(
                             div()
                                 .flex()
                                 .items_center()
@@ -422,28 +532,36 @@ impl Render for MainWindow {
                                 .child(
                                     div()
                                         .type_style(t::SMALL)
-                                        .text_color(p.text_secondary)
+                                        .text_color(p.text_primary)
                                         .child("Sort"),
                                 )
                                 .child(self.sort.clone()),
                         )
-                    })
-                    .child(
-                        Popover::new("transfers")
-                            .trigger(transfer_trigger)
-                            .content(self.transfers.clone()),
-                    )
-                    .child(
-                        IconButton::new("settings", IconName::Settings, "Settings").on_click({
-                            let coordinator = self.coordinator.clone();
-                            move |_, _, cx| coordinator.update(cx, |c, cx| c.open_settings(cx))
+                        .child(if light {
+                            pill(div())
+                                .children(actions.take().unwrap_or_default())
+                                .into_any_element()
+                        } else {
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(s::S8)
+                                .children(actions.take().unwrap_or_default())
+                                .into_any_element()
                         }),
-                    )
-                    .child(
-                        IconButton::new("overflow", IconName::MoreHorizontal, "App menu")
-                            .on_click(cx.listener(|this, _, window, cx| this.overflow(window, cx))),
-                    ),
-            );
+                )
+            });
+        let scrolled: Rc<dyn Fn(&App) -> Pixels> = match &self.route {
+            Route::Browse => {
+                let browse = self.browse.clone();
+                Rc::new(move |cx| browse.read(cx).scrolled_under_header())
+            }
+            Route::Detail(detail) => {
+                let detail = detail.clone();
+                Rc::new(move |cx| detail.read(cx).scrolled_under_header())
+            }
+        };
         let body = match &self.route {
             Route::Browse => self.browse.clone().into_any_element(),
             Route::Detail(detail) => detail.clone().into_any_element(),
@@ -510,22 +628,33 @@ impl Render for MainWindow {
             .bg(p.bg_canvas)
             .text_color(p.text_primary)
             .type_style(t::BODY)
-            .child(toolbar)
-            .children(
-                self.coordinator
-                    .read(cx)
-                    .notice
-                    .clone()
-                    .map(|n| div().p(s::S8).child(n)),
-            )
             .child(div().flex_1().min_h_0().child(body))
+            .child(scroll_scrim(scrolled, p.bg_canvas))
+            .children(self.coordinator.read(cx).notice.clone().map(|n| {
+                div()
+                    .absolute()
+                    .top(s::TOOLBAR_HEIGHT)
+                    .left_0()
+                    .right_0()
+                    .p(s::S8)
+                    .child(n)
+            }))
+            .child(toolbar)
             .when_some(self.menu.clone(), |el, menu| {
                 el.child(
                     deferred(
                         anchored()
-                            .anchor(Anchor::TopRight)
+                            .anchor(if in_detail {
+                                Anchor::TopLeft
+                            } else {
+                                Anchor::TopRight
+                            })
                             .position(point(
-                                window.viewport_size().width - s::S20,
+                                if in_detail {
+                                    s::S20
+                                } else {
+                                    window.viewport_size().width - s::S20
+                                },
                                 s::TOOLBAR_HEIGHT,
                             ))
                             .child(menu),

@@ -7,9 +7,169 @@
 use super::episodes::{episode_meta, episode_overview};
 use super::streams::stream_skeleton;
 use super::*;
-use crate::widgets::patterns::{POSTER_ASPECT, ViewState};
+use crate::metadata_bridge::SourceSet;
+use crate::widgets::{
+    choice_card::{ChoiceCard, ChoiceChip},
+    patterns::{POSTER_ASPECT, ViewState},
+};
+
+/// What the controls panel needs to say about the current stream request.
+struct StreamsStatus {
+    busy: bool,
+    failed: bool,
+    /// Candidates returned by the provider, if a result exists.
+    total: Option<usize>,
+    /// Candidates passing the quality filter, only while the list is shown.
+    visible: Option<usize>,
+}
+
+fn plural_streams(n: usize) -> String {
+    if n == 1 {
+        "1 stream".into()
+    } else {
+        format!("{n} streams")
+    }
+}
 
 impl Detail {
+    /// Side-panel controls for the stream list: refresh, provider cards and
+    /// quality chips with per-quality counts.
+    fn stream_controls(
+        &self,
+        status: StreamsStatus,
+        filters: &[(Quality, SharedString)],
+        sources: Option<&SourceSet>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let p = self.tinted_palette(cx);
+        let active = *self.indexer.read(cx).value();
+        let weak = cx.entity().downgrade();
+        let count_line = match (status.visible, status.total) {
+            (Some(v), Some(t)) if v != t => format!("{v} of {}", plural_streams(t)),
+            (_, Some(t)) if !status.busy || status.visible.is_some() => plural_streams(t),
+            _ if status.busy => "Searching…".to_owned(),
+            _ if status.failed => "Couldn’t load".to_owned(),
+            _ => String::new(),
+        };
+        let header = div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(s::S8)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .type_style(t::HEADING)
+                            .text_color(p.text_primary)
+                            .child("Streams"),
+                    )
+                    .child(
+                        div()
+                            .id("streams-count")
+                            .type_style(t::SMALL)
+                            .text_color(p.text_muted)
+                            .child(count_line),
+                    ),
+            )
+            .child(
+                Button::new("streams-refresh", "Refresh")
+                    .icon(IconName::Refresh)
+                    .busy(status.busy)
+                    .on_click(cx.listener(|this, _, _, cx| this.retry_streams(cx))),
+            );
+        let label = |text: &'static str| {
+            div()
+                .type_style(t::CAPTION)
+                .text_color(p.text_muted)
+                .child(text.to_uppercase())
+        };
+        let cards = [IndexerKind::Torrentio, IndexerKind::Peerflix].map(|kind| {
+            let selected = kind == active;
+            let subtitle = if !selected {
+                "Switch to this provider".to_owned()
+            } else if status.busy {
+                "Searching…".to_owned()
+            } else if status.failed {
+                "Couldn’t load streams".to_owned()
+            } else {
+                status.total.map_or("Selected".to_owned(), plural_streams)
+            };
+            let weak = weak.clone();
+            ChoiceCard::new(("streams-provider", kind as usize), indexer_name(kind))
+                .subtitle(subtitle)
+                .selected(selected)
+                .on_click(move |_, cx| {
+                    let _ = weak.update(cx, |this, cx| this.choose_indexer(kind, cx));
+                })
+        });
+        let quality = sources.filter(|_| status.visible.is_some()).map(|sources| {
+            let chips = filters.iter().map(|(q, name)| {
+                let count = if *q == Quality::All {
+                    sources.candidates.len()
+                } else {
+                    sources
+                        .candidates
+                        .iter()
+                        .filter(|c| source_quality(c) == *q)
+                        .count()
+                };
+                let q = *q;
+                let weak = weak.clone();
+                ChoiceChip::new(("streams-quality", q as usize), name.clone())
+                    .count(count)
+                    .selected(self.filter == q)
+                    .on_click(move |_, cx| {
+                        let _ = weak.update(cx, |s, cx| {
+                            s.filter = q;
+                            cx.notify();
+                        });
+                    })
+            });
+            div()
+                .flex()
+                .flex_col()
+                .gap(s::S8)
+                .child(label("Quality"))
+                .child(div().flex().flex_wrap().gap(s::S6).children(chips))
+        });
+        div()
+            .w_full()
+            .p(s::S12)
+            .flex()
+            .flex_col()
+            .gap(s::S16)
+            .rounded(radius::MD)
+            .bg(p.bg_surface)
+            .border(s::HAIRLINE)
+            .border_color(p.line_subtle)
+            .child(header)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(s::S8)
+                    .child(label("Provider"))
+                    .children(cards),
+            )
+            .children(quality)
+    }
+
+    /// Switch provider through the same `Select` state and change event the
+    /// stream request listens to.
+    fn choose_indexer(&mut self, kind: IndexerKind, cx: &mut Context<Self>) {
+        self.indexer.update(cx, |select, cx| {
+            if *select.value() != kind {
+                select.set_value(kind, cx);
+                cx.emit(SelectEvent::Changed(kind));
+            }
+        });
+    }
+
     /// Poster, title and (for episodes) the `SxxExx · name` caption.
     fn streams_header(
         &self,
@@ -35,6 +195,7 @@ impl Detail {
         ) {
             poster = poster.child(img(image).size_full().object_fit(ObjectFit::Cover));
         }
+        let chips = self.streams_chips(title, cx);
         let text = div()
             .flex_1()
             .min_w_0()
@@ -56,28 +217,7 @@ impl Detail {
                     .text_color(p.text_secondary)
                     .clamp_lines(2)
                     .child(episode_caption(ep))
-            }));
-        div().w_full().flex().gap(s::S16).child(poster).child(text)
-    }
-
-    /// Chips and a short overview of what is being played.
-    fn streams_summary(&self, title: &BrowseTitle, cx: &mut Context<Self>) -> Div {
-        let p = self.tinted_palette(cx);
-        let facts = self.title_facts(cx);
-        let mut chips = Self::meta_badges(title, &facts);
-        let text = match &self.episode {
-            Some(ep) => {
-                chips.clear();
-                chips.extend(episode_meta(ep).map(Badge::new));
-                episode_overview(ep).or(title.overview().map(str::to_owned))
-            }
-            None => title.overview().map(str::to_owned),
-        };
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(s::S8)
+            }))
             .when(!chips.is_empty(), |el| {
                 el.child(
                     div()
@@ -86,15 +226,35 @@ impl Detail {
                         .gap(s::S6)
                         .children(chips.into_iter().take(6)),
                 )
-            })
-            .children(text.filter(|t| !t.trim().is_empty()).map(|text| {
+            });
+        div().w_full().flex().gap(s::S16).child(poster).child(text)
+    }
+
+    /// Badges describing what is being played (episode facts or title facts).
+    fn streams_chips(&self, title: &BrowseTitle, cx: &mut Context<Self>) -> Vec<Badge> {
+        match &self.episode {
+            Some(ep) => episode_meta(ep).map(Badge::new).into_iter().collect(),
+            None => Self::meta_badges(title, &self.title_facts(cx)),
+        }
+    }
+
+    /// Short overview of what is being played.
+    fn streams_summary(&self, title: &BrowseTitle, cx: &mut Context<Self>) -> Option<Div> {
+        let p = self.tinted_palette(cx);
+        let text = match &self.episode {
+            Some(ep) => episode_overview(ep).or(title.overview().map(str::to_owned)),
+            None => title.overview().map(str::to_owned),
+        };
+        text.filter(|t| !t.trim().is_empty()).map(|text| {
+            div().w_full().child(
                 div()
                     .id("streams-overview")
                     .type_style(t::SMALL)
                     .text_color(p.text_secondary)
-                    .clamp_lines(6)
-                    .child(text)
-            }))
+                    .clamp_lines(4)
+                    .child(text),
+            )
+        })
     }
 
     pub(super) fn streams_page(
@@ -139,58 +299,18 @@ impl Detail {
         });
         let content = sel.state == ViewState::Content;
 
-        let heading = div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .items_baseline()
-            .gap(s::S8)
-            .child(
-                div()
-                    .type_style(t::HEADING)
-                    .text_color(p.text_primary)
-                    .child("Streams"),
-            )
-            .children(visible.filter(|_| content).map(|count| {
-                div()
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
-                    .child(count.to_string())
-            }));
-        let controls = div()
-            .w_full()
-            .min_h(s::CONTROL_HEIGHT)
-            .flex()
-            .items_center()
-            .gap(s::S12)
-            .child(heading)
-            .child(self.indexer.clone())
-            .child(
-                IconButton::new("streams-refresh", IconName::Refresh, "Refresh streams")
-                    .on_click(cx.listener(|this, _, _, cx| this.retry_streams(cx))),
-            );
-        let back = div().flex().child(
-            Button::new("streams-back", "Back")
-                .variant(ButtonVariant::Ghost)
-                .icon(IconName::ArrowLeft)
-                .focus_handle(self.page_focus.clone())
-                .on_click(cx.listener(|this, _, _, cx| this.close_streams(cx))),
+        let total = sources.as_ref().map(|s| s.candidates.len());
+        let controls = self.stream_controls(
+            StreamsStatus {
+                busy,
+                failed: error.is_some(),
+                total,
+                visible: visible.filter(|_| content),
+            },
+            &filters,
+            sources.as_ref(),
+            cx,
         );
-        let quality = (content && sources.is_some()).then(|| {
-            let weak = cx.entity().downgrade();
-            // Wrapped so the control's negative focus margin has room to draw.
-            div()
-                .px(s::S4)
-                .child(Segmented::new("quality", filters, self.filter).on_change(
-                    move |q, _, cx| {
-                        let _ = weak.update(cx, |s, cx| {
-                            s.filter = *q;
-                            cx.notify();
-                        });
-                    },
-                ))
-        });
-
         let weak = cx.entity().downgrade();
         let mut view = state_view("streams", sel)
             .skeleton(stream_skeleton())
@@ -220,11 +340,17 @@ impl Detail {
                 .justify_center()
                 .child(child.w_full().max_w(geometry::PAGE_MAX_WIDTH).px(gutter))
         };
-        let page = div().id("detail-streams-page").size_full().bg(p.bg_canvas);
+        // Fallback keyboard target when the list is empty (the header owns Back).
+        let page = div()
+            .id("detail-streams-page")
+            .track_focus(&self.page_focus)
+            .size_full()
+            .pt(s::TOOLBAR_HEIGHT)
+            .bg(p.bg_canvas);
         if two_pane {
             let sidebar =
                 (frame * 0.27).clamp(geometry::STREAMS_SIDEBAR_MIN, geometry::STREAMS_SIDEBAR_MAX);
-            let poster_width = (sidebar * 0.55).min(px(200.));
+            let poster_width = (sidebar * 0.4).min(px(150.));
             let left = div()
                 .id("streams-sidebar")
                 .w(sidebar)
@@ -235,11 +361,9 @@ impl Detail {
                 .flex()
                 .flex_col()
                 .gap(s::S16)
-                .child(back)
                 .child(self.streams_header(&title, poster_width, cx))
-                .child(self.streams_summary(&title, cx))
-                .child(controls)
-                .children(quality);
+                .children(self.streams_summary(&title, cx))
+                .child(controls);
             let right = div().flex_1().min_w_0().h_full().child(
                 ScrollArea::new("streams-scroll", self.streams_scroll.clone())
                     .child(div().w_full().py(s::S20).child(view)),
@@ -266,11 +390,9 @@ impl Detail {
             .flex()
             .flex_col()
             .gap(s::S16)
-            .child(back)
             .child(self.streams_header(&title, px(96.), cx))
-            .child(self.streams_summary(&title, cx))
+            .children(self.streams_summary(&title, cx))
             .child(controls)
-            .children(quality)
             .child(view);
         page.child(
             ScrollArea::new("streams-scroll", self.streams_scroll.clone()).child(framed(body)),

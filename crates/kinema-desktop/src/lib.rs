@@ -28,6 +28,7 @@ pub mod logging;
 pub mod media;
 #[cfg(not(target_family = "wasm"))]
 mod metadata_bridge;
+mod metadata_providers;
 #[cfg(not(target_family = "wasm"))]
 pub mod paths;
 #[cfg(not(target_family = "wasm"))]

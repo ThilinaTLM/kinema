@@ -65,7 +65,8 @@ keyboard focus—not only attractive poster screenshots.
   inactive-only cleanup. In-use files are protected; original local files are
   not cache entries to delete. Quota-full can be explored by removing inactive
   fixture files or increasing the fixture limit, then checking again.
-- **Settings:** provider/account status flags, default indexer, external player,
+- **Settings:** provider/account status flags, ordered metadata-provider priority
+  (default Cinemeta, TMDB; reset the single setting without migration), default indexer, external player,
   media limit, theme, density and reduced-motion preview. Credential presence
   is not successful service validation. Test connection/launch are unavailable.
 - **About and quit:** attribution; persistent session indicator; simulated close/
@@ -126,8 +127,13 @@ or production memory bounds. This mock has no real decoded-image cache. The desi
 system's native artwork limits now have an [implemented bounded pipeline](native-implementation.md#artwork-bounds-are-implemented-constants-not-ram-measurements);
 its constants still require profiling and are not measured RAM/GPU guarantees or
 user-facing application settings. Artwork
-memory is separate from the **20 GiB default managed-media quota**. No new data TTL,
-automatic provider enrichment, or automatic media eviction is adopted.
+memory is separate from the **20 GiB default managed-media quota**. No new data TTL
+or automatic media eviction is adopted. The approved [provider-priority revision](../architecture.md#agreed-metadata-provider-contract)
+is in progress: the first enabled, active provider handles search/browse, others
+enrich details and visible missing-field cards; missing credentials mean inactive
+and skipped. Details use a “Data from TMDB and Cinemeta” footer listing only actual
+contributors, not per-field provenance. TMDB's required About notice stays; TMDB
+scores are never labelled IMDb. Frozen HTML checks do not verify this behavior.
 
 ## Direct review URLs
 

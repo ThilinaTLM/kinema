@@ -100,6 +100,7 @@ impl Detail {
                     }
                 }
             }
+            c.fixture_enrichment_contributors();
             use crate::metadata_bridge::SourceSet;
             use kinema_core::sources::{InfoHash,TorrentSource};
             let sources=SourceSet{omitted:0,candidates:["2160p.HDR","1080p.WEB","1080p.BluRay.x265","1080p.WEB-DL.x264","720p"].into_iter().map(|q|SourceCandidate{name:format!("Quiet.Orbit.2024.{q}.REMUX.DTS-HD.MA.5.1-GROUP Quiet Orbit (2024) complete release with extras, commentary and multi-language subtitles [FIXTURE]"),quality:Some(q.into()),size:Some(4_200_000_000),seeders:Some(412),torrent:TorrentSource{hash:InfoHash::new("a".repeat(40)).unwrap_or_else(|e|panic!("fixture hash: {e}")),file_index:None,filename:None}}).collect()};

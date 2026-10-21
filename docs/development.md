@@ -79,6 +79,19 @@ Keep shared dependency versions in the root workspace. Update and review
 `Cargo.lock` intentionally when changing dependencies; do not omit `--locked` to
 hide a stale lockfile during validation. There is no Rust release-packaging pipeline yet.
 
+## Desktop branding and packaging assets
+
+Root [`packaging/`](../packaging/README.md) contains Linux desktop/AppStream
+integration files and the reproducible icon generator. Checked-in SVG, PNG, ICO
+and ICNS artwork lives in `crates/kinema-desktop/assets/brand/`. Regenerate with
+`python3 packaging/generate-icons.py` (Python 3, Pillow and `rsvg-convert`), then
+run `python3 packaging/test_assets.py`. No generation runs during Cargo builds.
+The main window uses application ID `dev.tlmtech.kinema` and an embedded X11
+icon; the Linux launcher executes `kinema-desktop`. See the packaging README for
+staging paths and validation commands. Windows EXE icon embedding and macOS
+bundling/signing remain follow-ups; shipping ICO/ICNS files is not a packaging
+pipeline or cross-platform runtime verification.
+
 ## Logging
 
 Desktop startup installs human-readable stderr diagnostics and non-ANSI daily

@@ -29,6 +29,16 @@ fn run_desktop() -> ExitCode {
             // MainWindow installs app-wide actions and shutdown policy. Settings
             // closing is independent; Main closing quits even with Settings open.
             let options = gpui::WindowOptions {
+                app_id: Some("dev.tlmtech.kinema".into()),
+                // GPUI uses this icon on X11; Wayland resolves the desktop ID.
+                icon: image::load_from_memory(include_bytes!(
+                    "../assets/brand/png/256/dev.tlmtech.kinema.png"
+                ))
+                .inspect_err(|error| {
+                    tracing::warn!(%error, "Could not decode the application icon; continuing without it");
+                })
+                .ok()
+                .map(|image| std::sync::Arc::new(image.into_rgba8())),
                 window_min_size: Some(size(px(960.), px(600.))),
                 titlebar: Some(gpui::TitlebarOptions {
                     title: Some("Kinema Next".into()),

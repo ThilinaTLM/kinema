@@ -30,6 +30,7 @@ pub mod tooltip;
 // Controls and surfaces.
 pub mod button;
 pub mod chip;
+pub mod choice_card;
 pub mod icon_button;
 pub mod notice;
 pub mod progress;

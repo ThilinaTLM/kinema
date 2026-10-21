@@ -5,9 +5,11 @@ use crate::{
     app::{AppAction, AppOutcome, CredentialState},
     credentials::SecretString,
     player::PlayerChoice,
-    settings::{MetadataProvider, MotionChoice, PosterSize, Settings, ThemeChoice},
+    settings::{MotionChoice, PosterSize, Settings, ThemeChoice},
     widgets::{
         button::Button,
+        icon::IconName,
+        icon_button::IconButton,
         menu::{Select, SelectEvent},
         segmented::{self, Segmented},
         switch::Switch,
@@ -17,6 +19,7 @@ use crate::{
     },
 };
 use gpui::{prelude::*, *};
+use kinema_core::provider::{ProviderId, ProviderPriority};
 use kinema_core::sources::{DebridKind, IndexerKind};
 use std::{collections::HashMap, path::PathBuf};
 
@@ -304,7 +307,8 @@ enum SettingChange {
     Theme(ThemeChoice),
     Poster(PosterSize),
     Motion(MotionChoice),
-    Metadata(MetadataProvider),
+    ProviderUp(ProviderId),
+    ProviderDown(ProviderId),
     Indexer(IndexerKind),
     Debrid(DebridKind),
 }
@@ -313,7 +317,8 @@ fn apply_change(settings: &mut Settings, change: SettingChange) {
         SettingChange::Theme(v) => settings.theme = v,
         SettingChange::Poster(v) => settings.poster_size = v,
         SettingChange::Motion(v) => settings.reduce_motion = v,
-        SettingChange::Metadata(v) => settings.metadata = v,
+        SettingChange::ProviderUp(id) => settings.metadata_priority.move_up(id),
+        SettingChange::ProviderDown(id) => settings.metadata_priority.move_down(id),
         SettingChange::Indexer(v) => settings.indexer = v,
         SettingChange::Debrid(v) => settings.debrid = v,
     }
@@ -326,7 +331,6 @@ pub struct SettingsWindow {
     account_focus: HashMap<Account, FocusHandle>,
     settings: Settings,
     settings_loaded: bool,
-    metadata: Entity<Select<MetadataProvider>>,
     indexer: Entity<Select<IndexerKind>>,
     debrid: Entity<Select<DebridKind>>,
     player: Entity<Select<PlayerKind>>,
@@ -351,16 +355,6 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = coordinator.read(cx).settings.clone().unwrap_or_default();
-        let metadata = cx.new(|cx| {
-            Select::new(
-                settings.metadata,
-                vec![
-                    (MetadataProvider::Cinemeta, "Cinemeta".into()),
-                    (MetadataProvider::Tmdb, "TMDB".into()),
-                ],
-                cx,
-            )
-        });
         let indexer = cx.new(|cx| {
             Select::new(
                 settings.indexer,
@@ -429,10 +423,6 @@ impl SettingsWindow {
                 this.sync(cx);
                 cx.notify();
             }),
-            cx.subscribe(&metadata, |this, _, event, cx| {
-                let SelectEvent::Changed(value) = event;
-                this.change("Metadata", SettingChange::Metadata(*value), cx);
-            }),
             cx.subscribe(&indexer, |this, _, event, cx| {
                 let SelectEvent::Changed(value) = event;
                 this.change("Streams", SettingChange::Indexer(*value), cx);
@@ -470,7 +460,6 @@ impl SettingsWindow {
                 .collect(),
             settings,
             settings_loaded,
-            metadata,
             indexer,
             debrid,
             player,
@@ -538,9 +527,6 @@ impl SettingsWindow {
                 self.player
                     .update(cx, |select, cx| select.set_value(kind, cx));
             }
-            self.metadata.update(cx, |select, cx| {
-                select.set_value(self.settings.metadata, cx)
-            });
             self.indexer
                 .update(cx, |select, cx| select.set_value(self.settings.indexer, cx));
             self.debrid
@@ -879,6 +865,103 @@ impl SettingsWindow {
             )
             .into_any_element()
     }
+    /// Whether the TMDB token is saved; a still-loading status counts as inactive.
+    fn tmdb_active(&self) -> bool {
+        tmdb_token_active(self.status.get(&Account::Tmdb).copied())
+    }
+    fn provider_priority(&self, cx: &Context<Self>) -> AnyElement {
+        let p = *tokens::palette(cx);
+        let weak = cx.entity().downgrade();
+        let roles = provider_roles(&self.settings.metadata_priority, self.tmdb_active());
+        let last = roles.len().saturating_sub(1);
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .gap(s::S4)
+            .w(s::CONTROL_HEIGHT * 14.)
+            .child(
+                div()
+                    .type_style(t::SMALL)
+                    .text_color(p.text_secondary)
+                    .child("Metadata providers, highest priority first"),
+            );
+        for (index, (id, role)) in roles.into_iter().enumerate() {
+            let tmdb_hint = id == ProviderId::Tmdb
+                && matches!(
+                    self.status.get(&Account::Tmdb),
+                    Some(AccountStatus::Missing | AccountStatus::Unavailable)
+                );
+            let ink = if role == ProviderRole::Inactive {
+                p.text_muted
+            } else {
+                p.text_primary
+            };
+            let (up, down) = (weak.clone(), weak.clone());
+            list = list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(s::S8)
+                    .px(s::S12)
+                    .py(s::S4)
+                    .min_h(s::CONTROL_HEIGHT * 1.5)
+                    .bg(p.bg_raised)
+                    .border(s::HAIRLINE)
+                    .border_color(p.line_hairline)
+                    .child(
+                        div()
+                            .w(s::S48 * 2.)
+                            .flex_none()
+                            .type_style(t::SMALL)
+                            .text_color(p.text_secondary)
+                            .child(role.label()),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .text_color(ink)
+                            .child(id.display_name())
+                            .when(tmdb_hint, |el| {
+                                el.child(
+                                    div()
+                                        .type_style(t::SMALL)
+                                        .text_color(p.status_warn)
+                                        .child("Inactive — needs token"),
+                                )
+                            }),
+                    )
+                    .child(
+                        IconButton::new(
+                            ("provider-up", index),
+                            IconName::ChevronUp,
+                            format!("Move {} up", id.display_name()),
+                        )
+                        .disabled(index == 0)
+                        .on_click(move |_, _, cx| {
+                            let _ = up.update(cx, |this, cx| {
+                                this.change("Metadata", SettingChange::ProviderUp(id), cx)
+                            });
+                        }),
+                    )
+                    .child(
+                        IconButton::new(
+                            ("provider-down", index),
+                            IconName::ChevronDown,
+                            format!("Move {} down", id.display_name()),
+                        )
+                        .disabled(index == last)
+                        .on_click(move |_, _, cx| {
+                            let _ = down.update(cx, |this, cx| {
+                                this.change("Metadata", SettingChange::ProviderDown(id), cx)
+                            });
+                        }),
+                    ),
+            );
+        }
+        list.into_any_element()
+    }
     fn content(&self, cx: &Context<Self>) -> AnyElement {
         let p = *tokens::palette(cx);
         let weak = cx.entity().downgrade();
@@ -893,7 +976,7 @@ impl SettingsWindow {
             }
             Section::Accounts => {
                 body = body
-                    .child(row("Metadata", self.metadata.clone()))
+                    .child(self.provider_priority(cx))
                     .child(row("Streams", self.indexer.clone()))
                     .child(row("Debrid", self.debrid.clone()));
                 let mut accounts = div()
@@ -1033,6 +1116,54 @@ fn player_preview(player: &PlayerChoice) -> String {
     };
     format!("[{executable:?}, \"--\", \"http://127.0.0.1:<port>/<local-media>\"]")
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProviderRole {
+    Primary,
+    Enrichment,
+    Inactive,
+}
+impl ProviderRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Primary => "Primary",
+            Self::Enrichment => "Enrichment",
+            Self::Inactive => "Inactive",
+        }
+    }
+}
+/// TMDB is usable once a token exists in secure storage (even if untested).
+fn tmdb_token_active(status: Option<AccountStatus>) -> bool {
+    matches!(
+        status,
+        Some(
+            AccountStatus::Saved
+                | AccountStatus::Verified
+                | AccountStatus::Rejected
+                | AccountStatus::ServiceFailure
+        )
+    )
+}
+fn provider_roles(
+    priority: &ProviderPriority,
+    tmdb_active: bool,
+) -> Vec<(ProviderId, ProviderRole)> {
+    let active = |id: ProviderId| id != ProviderId::Tmdb || tmdb_active;
+    let primary = priority.primary(active);
+    priority
+        .order()
+        .iter()
+        .map(|&id| {
+            let role = if !active(id) {
+                ProviderRole::Inactive
+            } else if Some(id) == primary {
+                ProviderRole::Primary
+            } else {
+                ProviderRole::Enrichment
+            };
+            (id, role)
+        })
+        .collect()
+}
 fn bytes_label(bytes: u64) -> String {
     format!("{:.1} GiB", bytes as f64 / (1024. * 1024. * 1024.))
 }
@@ -1150,6 +1281,10 @@ impl SettingsWindow {
             .insert(Account::AllDebrid, AccountStatus::Missing);
         view
     }
+    /// Fixture variant: no saved TMDB token.
+    pub fn fixture_tmdb_missing(&mut self) {
+        self.status.insert(Account::Tmdb, AccountStatus::Missing);
+    }
 }
 
 #[cfg(test)]
@@ -1178,10 +1313,65 @@ mod tests {
         assert_eq!(settings.theme, ThemeChoice::Light);
         assert_eq!(settings.poster_size.preferred_width(), 212.);
         assert_eq!(settings.reduce_motion, MotionChoice::Always);
-        assert_eq!(settings.metadata, MetadataProvider::Cinemeta);
+        assert_eq!(settings.metadata_priority, ProviderPriority::default());
         assert_eq!(
             settings.media_limit_bytes,
             Settings::default().media_limit_bytes
+        );
+    }
+    #[test]
+    fn provider_roles_follow_priority_and_token_state() {
+        use ProviderId::{Cinemeta, Tmdb};
+        let mut priority = ProviderPriority::default();
+        assert_eq!(
+            provider_roles(&priority, true),
+            [
+                (Cinemeta, ProviderRole::Primary),
+                (Tmdb, ProviderRole::Enrichment)
+            ]
+        );
+        assert_eq!(
+            provider_roles(&priority, false),
+            [
+                (Cinemeta, ProviderRole::Primary),
+                (Tmdb, ProviderRole::Inactive)
+            ]
+        );
+        priority.move_up(Tmdb);
+        assert_eq!(
+            provider_roles(&priority, true),
+            [
+                (Tmdb, ProviderRole::Primary),
+                (Cinemeta, ProviderRole::Enrichment)
+            ]
+        );
+        assert_eq!(
+            provider_roles(&priority, false),
+            [
+                (Tmdb, ProviderRole::Inactive),
+                (Cinemeta, ProviderRole::Primary)
+            ]
+        );
+        assert!(!tmdb_token_active(None));
+        assert!(!tmdb_token_active(Some(AccountStatus::Missing)));
+        assert!(!tmdb_token_active(Some(AccountStatus::Loading)));
+        assert!(tmdb_token_active(Some(AccountStatus::Saved)));
+    }
+    #[test]
+    fn provider_moves_apply_and_clamp() {
+        let mut settings = Settings::default();
+        apply_change(
+            &mut settings,
+            SettingChange::ProviderUp(ProviderId::Cinemeta),
+        );
+        assert_eq!(settings.metadata_priority, ProviderPriority::default());
+        apply_change(
+            &mut settings,
+            SettingChange::ProviderDown(ProviderId::Cinemeta),
+        );
+        assert_eq!(
+            settings.metadata_priority.order(),
+            &[ProviderId::Tmdb, ProviderId::Cinemeta]
         );
     }
     #[test]

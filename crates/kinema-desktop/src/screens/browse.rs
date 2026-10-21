@@ -28,7 +28,6 @@ const BACKDROP_DEBOUNCE: Duration = Duration::from_millis(150);
 const BACKDROP_LIGHT_OPACITY: f32 = 0.22;
 /// Share of the height, from the bottom, that fades into the canvas.
 const BACKDROP_FADE_HEIGHT: f32 = 0.7;
-const EMPTY_WIDTH: Pixels = px(420.);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Sort {
@@ -162,6 +161,8 @@ pub(crate) struct Browse {
     selected: Option<String>,
     cols: usize,
     page_request_generation: Option<u64>,
+    /// Last visible IMDb IDs reported for enrichment; avoids per-frame calls.
+    last_visible: Vec<kinema_core::catalog::ImdbId>,
     subject: (MediaKind, String),
     artwork_generation: u64,
     /// Settled title (by key) the backdrop follows; set after `BACKDROP_DEBOUNCE`.
@@ -172,6 +173,10 @@ pub(crate) struct Browse {
     _observation: Subscription,
 }
 impl Browse {
+    /// How far the grid has scrolled under the floating header.
+    pub(crate) fn scrolled_under_header(&self) -> Pixels {
+        (-self.scroll.0.borrow().base_handle.offset().y).max(px(0.))
+    }
     pub fn new(coordinator: Entity<AppCoordinator>, cx: &mut Context<Self>) -> Self {
         let observation = cx.observe(&coordinator, |_, _, cx| cx.notify());
         Self {
@@ -183,6 +188,7 @@ impl Browse {
             selected: None,
             cols: 2,
             page_request_generation: None,
+            last_visible: Vec::new(),
             subject: (MediaKind::Movie, String::new()),
             artwork_generation: artwork::begin_generation("v3-browse", cx),
             backdrop_title: None,
@@ -336,6 +342,7 @@ impl Browse {
             self.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
             self.artwork_generation = artwork::begin_generation("v3-browse", cx);
             self.reset_backdrop();
+            self.last_visible.clear();
         }
 
         match self.sort {
@@ -489,37 +496,20 @@ impl Render for Browse {
         let generation = state.collection.generation();
         let error = state.collection.error().map(str::to_owned);
         let query = state.query.clone();
-        let missing = state
-            .settings
-            .as_ref()
-            .is_some_and(|s| s.metadata == crate::settings::MetadataProvider::Tmdb)
-            && matches!(
-                state.tmdb_credential,
-                Some(crate::app::CredentialState::Missing)
-            );
         let count = self.cells.len();
         self.update_backdrop(cols, cx);
+        let is_list = !(count == 0 && !busy);
+        let stale =
+            !self.cells.is_empty() && self.coordinator.read(cx).collection.error().is_some();
+        // A stale strip sits directly under the header and pushes the grid down.
+        let top_inset = if stale {
+            s::GRID_INSET
+        } else {
+            s::TOOLBAR_HEIGHT + s::GRID_INSET
+        };
         let content = if count == 0 && !busy {
             let coordinator = self.coordinator.clone();
-            if missing {
-                div()
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(s::S12)
-                    .child(
-                        div()
-                            .w(EMPTY_WIDTH)
-                            .max_w_full()
-                            .child(Notice::new(NoticeKind::Warning, "TMDB needs an API token.")),
-                    )
-                    .child(Button::new("collection-action", "Open Settings…").on_click(
-                        move |_, _, cx| coordinator.update(cx, |c, cx| c.open_settings(cx)),
-                    ))
-                    .into_any_element()
-            } else if let Some(message) = error.clone() {
+            if let Some(message) = error.clone() {
                 // A failed request is never presented as "no results".
                 StateView::new("browse-error", ViewState::Error)
                     .message(message)
@@ -593,6 +583,21 @@ impl Render for Browse {
                             })
                             .collect();
                         artwork::request_window("v3-browse", this.artwork_generation, keys, cx);
+                    }
+                    if range.len() > 1 {
+                        // Visible rows only; a changed set is debounced by the
+                        // coordinator, never submitted from this render pass.
+                        let ids: Vec<_> = (range.start * cols..(range.end * cols).min(count))
+                            .filter_map(|index| this.cells.get(index))
+                            .filter_map(|cell| cell.title.imdb().cloned())
+                            .collect();
+                        if ids != this.last_visible {
+                            this.last_visible.clone_from(&ids);
+                            let coordinator = this.coordinator.clone();
+                            cx.defer(move |cx| {
+                                coordinator.update(cx, |c, cx| c.note_visible_titles(ids, cx));
+                            });
+                        }
                     }
                     if layout.should_request(
                         &range,
@@ -685,11 +690,27 @@ impl Render for Browse {
                 }),
             )
             .track_scroll(&self.scroll)
+            // Rows scroll under the transparent header; the inset keeps the
+            // first row clear of it at scroll top.
+            .pt(top_inset)
+            .pb(s::GRID_INSET)
+            .px(s::GRID_INSET)
             .size_full()
             .into_any_element()
         };
-        let stale =
-            !self.cells.is_empty() && self.coordinator.read(cx).collection.error().is_some();
+        // Non-list states start below the floating header; the list insets itself
+        // so its rows can scroll under it.
+        let content = if is_list {
+            content
+        } else {
+            div()
+                .size_full()
+                .px(s::GRID_INSET)
+                .pb(s::GRID_INSET)
+                .pt(s::TOOLBAR_HEIGHT + s::GRID_INSET)
+                .child(content)
+                .into_any_element()
+        };
         div()
             .id("v3-browse")
             .track_focus(&self.focus)
@@ -752,19 +773,21 @@ impl Render for Browse {
             .when(stale, |el| {
                 let coordinator = self.coordinator.clone();
                 el.child(
-                    Notice::new(
-                        NoticeKind::Warning,
-                        "Showing previous results · request failed",
-                    )
-                    .strip()
-                    .action(
-                        Button::new("retry-stale", "Retry").on_click(move |_, _, cx| {
-                            coordinator.update(cx, |c, cx| c.retry_page(cx))
-                        }),
+                    div().pt(s::TOOLBAR_HEIGHT).child(
+                        Notice::new(
+                            NoticeKind::Warning,
+                            "Showing previous results · request failed",
+                        )
+                        .strip()
+                        .action(
+                            Button::new("retry-stale", "Retry").on_click(move |_, _, cx| {
+                                coordinator.update(cx, |c, cx| c.retry_page(cx))
+                            }),
+                        ),
                     ),
                 )
             })
-            .child(div().flex_1().min_h_0().p(s::GRID_INSET).child(content))
+            .child(div().flex_1().min_h_0().child(content))
     }
 }
 #[cfg(test)]

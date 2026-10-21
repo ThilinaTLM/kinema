@@ -418,8 +418,9 @@ these canonical ranges (e.g. percent text to numeric percent). Reject invalid,
 nonfinite, or ambiguously scaled data; never infer scale from magnitude. Display
 with its source and scale. A future metric requires an explicit scale/validation
 contract, not a free-form rating bucket. No score averaging, invented ratings, or
-direct IMDb/Rotten Tomatoes integration is implied. A selected provider that does
-not supply a rating leaves it unavailable; it triggers no secondary-provider call.
+direct IMDb/Rotten Tomatoes integration is implied. If the primary provider lacks
+a rating, enrichment may supply it under the provider-priority policy; an absent
+IMDb score stays unavailable rather than being replaced by a TMDB score.
 
 ### Fetch state, saved pages, and source snapshots
 
@@ -561,18 +562,20 @@ them and is not used. JSON genre arrays are one field, not independently merged
 fragments. Unlike descriptive fields, ratings can retain separate current rows
 per source/metric/supplier, but not a history of observations within each tuple.
 
-Approved target deterministic write policy (backend source and current root checks
-validated; full UI acceptance pending):
+Approved target deterministic write policy (priority/enrichment revision approved
+2026-10-21; implementation in progress, not live-provider verification):
 
-1. Fetch **only the explicitly selected metadata provider**. Never call another
-   provider to fill a NULL field, map an ID, or repair a failed request. Requests
-   requiring unavailable mappings/credentials report that state. Selection changes
-   do not delete shared identities or older catalog values.
+1. Use the ordered provider list: the first enabled, active provider handles
+   search/browse; enrichment providers may fill missing fields and supply explicit
+   ID mappings. Skip providers missing required credentials as inactive, not errors.
+   Details enrich after the primary result; grid work covers visible cards only,
+   under the [bounded enrichment policy](architecture.md#agreed-metadata-provider-contract).
+   Priority changes do not delete shared identities or older catalog values.
 2. Resolve an incoming entity by validated external identifiers first, then by
    verified parent and explicit season/episode coordinates for children. Cross-ID
-   mappings must be supplied explicitly by the selected provider. Never merge by
+   mappings must be supplied explicitly by a provider. Never merge by
    name, year, artwork URL, similar runtime, or coincident numeric provider IDs.
-   When explicit selected-provider IMDb mapping proves that different local rows
+   When explicit provider-supplied IMDb mapping proves that different local rows
    represent the same entity, apply only the approved narrow transactional
    reconciliation below. Otherwise, different-row resolution or any contradictory
    external ID, kind, parent identity, or season/episode coordinate aborts the
@@ -583,26 +586,23 @@ validated; full UI acceptance pending):
    known values. Treat reported zero counts/scores as known, not blank. Removal
    or correction to unknown requires an explicit reviewed clearing operation;
    absence from a page does not delete a catalog entity or its children.
-4. For an existing non-NULL descriptive field, summary cannot replace detail.
-   At equal quality, a newer accepted selected-provider observation wins; detail
-   can replace summary. Reject older request generations before writes, including
-   after provider/configuration changes; serialize accepted writes so completion
-   order cannot overwrite newer demand. This rule applies to each field, not the
-   whole title. Update value and provenance atomically.
-5. Retained fields from another supplier remain usable **with their origin shown**,
-   not represented as selected-provider success. They do not satisfy missing
-   selected-provider resource/detail state. Lower-quality data from a newly
-   selected provider cannot silently downgrade old detail. No network fallback
-   or implicit claim of same-provider completeness follows from these retained
-   local values. Whether to offer a stricter provider-only display is a review
-   question, not an implemented mode.
+4. Per descriptive field, the highest-priority provider with a value wins;
+   lower-priority providers fill gaps, regardless of cross-provider observation
+   time. Within the same provider, newer accepted observations win at equal
+   quality; detail can replace summary, but summary cannot replace detail.
+   Reject stale request generations before writes, including after priority or
+   configuration changes; serialize accepted writes so completion order cannot
+   overwrite newer demand. Update each value and its provenance atomically.
+5. Retained fields from other suppliers remain usable gap-fill values with stored
+   provenance. They do not imply success/completeness for another provider's
+   resource. Details attribute actual contributors in a footer, not per-field UI.
 6. Rating observations are separate per source/metric/supplier; never merge their
    values or votes across rows. For the same tuple, accept newer validated
    observations as a unit; unknown parts remain NULL, not borrowed from an older
    observation. A wholly absent rating leaves the previous dated observation
-   intact. Selected-provider ratings are the current display candidates; older
-   other-supplier observations may be shown only explicitly labeled as retained,
-   never automatically substituted as the current selected-provider rating.
+   intact. For a given source/metric, provider priority selects the display
+   candidate among suppliers with a value. Keep source labels truthful: a TMDB
+   score cannot fill an IMDb score slot.
 7. Fetch success advances only after all entities, provenance, ratings, page
    membership (if any), and fetch state commit together. Failure rolls back the
    resource import, retains last good data/time, and reports failure separately.
@@ -701,10 +701,11 @@ usable data are distinct states.
 ## Provider and locale boundaries
 
 The [agreed metadata contract](architecture.md#agreed-metadata-provider-contract)
-requires explicit Cinemeta/TMDB selection with no automatic fallback. A shared
-local title does not imply shared provider page membership or fetch success.
-Cached public metadata does not require reading a token; remote work uses OS
-secure storage and reports missing credentials without erasing local rows.
+uses ordered provider priority with primary search/browse and secondary
+enrichment. A shared local title does not imply shared provider page membership
+or fetch success. Cached public metadata does not require reading a token;
+remote work uses OS secure storage. Providers missing required credentials are
+inactive and skipped without erasing local rows.
 
 The initial target keeps the current fixed `en-US` contract. Entity `locale` and
 fetch/page locale must agree; nonlocalized identifiers/ratings remain independent
@@ -748,7 +749,7 @@ ID collisions (including cross-table IMDb reuse), proven duplicate reconciliatio
 contradiction rollback, reference/page/count/provenance preservation, conflicting
 numbering, current-
 value provenance replacement and summary/detail precedence, distinct
-rating scales/votes/suppliers, selected-provider changes, stale generations,
+rating scales/votes/suppliers, provider-priority changes, stale generations,
 successful empty versus failure, identical refresh timestamps, atomic membership,
 locale mismatch, membership-pruning versus successful-empty states, referenced
 page/fetch-stub preservation, prohibition of canonical deletion by cache cleanup,
@@ -765,8 +766,9 @@ IMDb score, runtime, dates/status, US certification, language, credits, studios,
 networks and tagline where supplied. Cinemeta also retains its supplied writers,
 countries and release-info text. Cast is limited to ten; unknown character names
 remain null. Canonical scalar fields and ratings continue using existing rich
-imports/provenance; the payload supplies detail-only collections and the selected
-provider's facts without implicit cross-provider enrichment.
+imports/provenance; the payload supplies provider-scoped detail-only collections
+and facts. The approved priority/enrichment revision is in progress; this payload
+alone does not establish merged detail-facts behavior.
 
 The atomic v4 → v5 upgrade preserves existing rows and timestamps; NULL facts
 load as empty facts and remain explicitly unacquired. The non-NULL payload itself
@@ -776,7 +778,7 @@ no schema bump, migration rewrite or user-data reset is needed. The detail-only
 worker cache-hit-then-remote routing. Load consumes this only after a successful
 metadata cache hit; predicate failures preserve the cache hit without refreshing. Existing reduced snapshots omit the new optional payload
 and also decode empty. The next successful selected-provider remote detail fetch
-replaces facts, including clearing facts now unknown. This introduces no TTL,
-automatic fallback or credential storage. The adapter locale is currently fixed
+replaces facts, including clearing facts now unknown. This payload introduces no TTL or credential storage; enrichment follows the
+approved provider-priority policy. The adapter locale is currently fixed
 to en-US, hence certification preference is US; user locale selection is not yet
 implemented. Offline fixture tests do not establish real-provider/GUI acceptance.

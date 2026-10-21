@@ -96,6 +96,7 @@ impl CatalogService {
                 .map(normalized::imdb_observation)
                 .collect::<Vec<_>>(),
             timestamp,
+            &self.provider_priority,
         )?;
         normalized_rich::write_page_rich(
             &tx,
@@ -105,6 +106,7 @@ impl CatalogService {
             kind,
             &rich,
             timestamp,
+            &self.provider_priority,
         )?;
         check_cancellation(cancellation.as_deref())?;
         tx.commit()?;
@@ -168,11 +170,25 @@ impl CatalogService {
         let cancellation = self.cancellation.clone();
         check_cancellation(cancellation.as_deref())?;
         let tx = self.connection.transaction()?;
-        normalized_pages::write_cinemeta_details(&tx, &details, timestamp, true)?;
+        normalized_pages::write_cinemeta_details(
+            &tx,
+            &details,
+            timestamp,
+            true,
+            &self.provider_priority,
+        )?;
         let title = normalized::title_id(&tx, kind, "imdb", id.as_str())?
             .ok_or(CatalogError::InvalidResponse)?;
         let fetch_id: i64 = tx.query_row("SELECT id FROM metadata_fetches WHERE title_id=?1 AND provider='cinemeta' AND resource_key=?2",params![title,normalized_pages::cinemeta_detail_key(kind,id)],|row|row.get(0))?;
-        normalized_rich::write(&tx, title, &rich, "cinemeta", fetch_id, timestamp)?;
+        normalized_rich::write(
+            &tx,
+            title,
+            &rich,
+            "cinemeta",
+            fetch_id,
+            timestamp,
+            &self.provider_priority,
+        )?;
         check_cancellation(cancellation.as_deref())?;
         tx.commit()?;
         self.read_details(kind, id)?
@@ -237,6 +253,7 @@ pub(super) fn backfill_browse(
             .map(normalized::imdb_observation)
             .collect::<Vec<_>>(),
         time,
+        &Default::default(),
     )
 }
 pub(super) fn backfill_details(
@@ -254,7 +271,7 @@ pub(super) fn backfill_details(
     let details = document
         .validate(kind, &id)
         .map_err(|_| CatalogError::InvalidCache)?;
-    normalized_pages::write_cinemeta_details(tx, &details, time, false)
+    normalized_pages::write_cinemeta_details(tx, &details, time, false, &Default::default())
 }
 
 fn validate_search(
@@ -875,7 +892,7 @@ impl CatalogService {
             "TMDB credential reloading from secure storage"
         );
         let secret = credential().map_err(|error| {
-            tracing::warn!(provider = "tmdb", category = ?error, "TMDB credential reload failed");
+            tracing::debug!(provider = "tmdb", category = ?error, "TMDB credential reload failed");
             match error {
                 crate::credentials::CredentialError::Missing => CatalogError::TmdbMissingCredential,
                 crate::credentials::CredentialError::Unavailable => {
@@ -925,8 +942,8 @@ impl CatalogService {
         let cancellation = self.cancellation.clone();
         check_cancellation(cancellation.as_deref())?;
         let tx = self.connection.transaction()?;
-        normalized_tmdb::write(&tx, query, &data, timestamp, true)?;
-        normalized_tmdb::write_rich(&tx, query, rich, timestamp)?;
+        normalized_tmdb::write(&tx, query, &data, timestamp, true, &self.provider_priority)?;
+        normalized_tmdb::write_rich(&tx, query, rich, timestamp, &self.provider_priority)?;
         check_cancellation(cancellation.as_deref())?;
         tx.commit()?;
         self.read_tmdb(query)?.ok_or(CatalogError::InvalidCache)
@@ -987,6 +1004,9 @@ fn fetch_json<T: serde::de::DeserializeOwned>(
         duration_ms = started.elapsed().as_millis() as u64,
         "Cinemeta HTTP headers received"
     );
+    if response.status().as_u16() == 404 {
+        return Err(CatalogError::NotFound);
+    }
     if !response.status().is_success() {
         tracing::warn!(
             provider = "cinemeta",
@@ -1027,7 +1047,13 @@ fn fetch_json<T: serde::de::DeserializeOwned>(
 }
 
 // Only these validated values cross back from the fetch pool. SQLite never does.
+struct EnrichmentData {
+    values: Vec<crate::metadata_providers::ProviderTitleDetails>,
+    failed: Vec<kinema_core::provider::ProviderId>,
+    inactive: Vec<kinema_core::provider::ProviderId>,
+}
 enum RemoteData {
+    Enrichment(EnrichmentData),
     Page(Vec<CatalogTitle>, Vec<normalized_rich::RichRecord>),
     Details(TitleDetails, Vec<normalized_rich::RichRecord>),
     Sources(crate::sources::SourceResults),
@@ -1071,6 +1097,107 @@ impl CatalogService {
                 })
             }
             Work::Metadata(request) => match &request.action {
+                A::Enrich {
+                    kind,
+                    imdb,
+                    providers,
+                    priority,
+                    mode,
+                } => {
+                    use crate::metadata_providers::{MetadataSource, ProviderError};
+                    use kinema_core::provider::{ProviderId, ProviderPriority};
+                    self.set_provider_priority(ProviderPriority::new(priority.iter().copied()));
+                    if imdb.len() > 20 {
+                        return Err(CatalogError::InvalidMetadata);
+                    }
+                    let mut ids = Vec::new();
+                    for id in imdb.iter().take(20) {
+                        check_id(id)?;
+                        if ids.contains(id) {
+                            continue;
+                        }
+                        if *mode == crate::catalog_worker::EnrichMode::CardFields
+                            && self.card_fields_complete(*kind, id)?
+                        {
+                            continue;
+                        }
+                        ids.push(id.clone());
+                    }
+                    let mut sources: Vec<Box<dyn MetadataSource>> = Vec::new();
+                    let mut failed = Vec::new();
+                    let mut inactive = Vec::new();
+                    for provider in providers.iter().copied().filter(|_| !ids.is_empty()) {
+                        if sources.iter().any(|s| s.id() == provider)
+                            || failed.contains(&provider)
+                            || inactive.contains(&provider)
+                        {
+                            continue;
+                        }
+                        match provider {
+                            ProviderId::Cinemeta => sources.push(Box::new(
+                                crate::metadata_providers::cinemeta::Cinemeta {
+                                    client: self.client.clone(),
+                                    endpoint: self.endpoint.clone(),
+                                },
+                            )),
+                            ProviderId::Tmdb => match self.tmdb_client(|| {
+                                crate::credentials::MetadataCredentialStore::new().get()
+                            }) {
+                                Ok(client) => {
+                                    sources.push(Box::new(crate::metadata_providers::tmdb::Tmdb {
+                                        client: Some(client),
+                                    }))
+                                }
+                                Err(CatalogError::TmdbMissingCredential) => inactive.push(provider),
+                                Err(_) => failed.push(provider),
+                            },
+                        }
+                    }
+                    let (kind, mode) = (*kind, *mode);
+                    Box::new(move || {
+                        let mut values = Vec::new();
+                        for id in ids {
+                            for source in &sources {
+                                check_cancellation(Some(&cancel))?;
+                                let result = match mode {
+                                    crate::catalog_worker::EnrichMode::Details => {
+                                        source.details_by_imdb(kind, &id, &cancel)
+                                    }
+                                    crate::catalog_worker::EnrichMode::CardFields => {
+                                        source.summary_by_imdb(kind, &id, &cancel)
+                                    }
+                                };
+                                match result {
+                                    Ok(Some(value)) => values.push(value),
+                                    Ok(None) => (),
+                                    Err(ProviderError::Inactive) => {
+                                        if !inactive.contains(&source.id()) {
+                                            inactive.push(source.id());
+                                        }
+                                    }
+                                    Err(ProviderError::Canceled) => {
+                                        return Err(CatalogError::Canceled);
+                                    }
+                                    Err(ProviderError::Failed(category)) => {
+                                        tracing::debug!(
+                                            provider = source.id().as_str(),
+                                            ?category,
+                                            "Optional metadata enrichment failed"
+                                        );
+                                        if !failed.contains(&source.id()) {
+                                            failed.push(source.id());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Ok(RemoteData::Enrichment(EnrichmentData {
+                            values,
+                            failed,
+                            inactive,
+                        }))
+                    })
+                }
                 A::Browse { kind, offset } => {
                     let kind = *kind;
                     let mut url = self.endpoint.clone();
@@ -1160,6 +1287,26 @@ impl CatalogService {
             Box::new(move |service: &mut Self| {
                 let _span = work.diagnostic_span().entered();
                 let result = match (result, &work) {
+                    (Ok(RemoteData::Enrichment(data)), Work::Metadata(request)) => {
+                        if let A::Enrich {
+                            kind,
+                            imdb,
+                            priority,
+                            ..
+                        } = &request.action
+                        {
+                            service.set_provider_priority(
+                                kinema_core::provider::ProviderPriority::new(
+                                    priority.iter().copied(),
+                                ),
+                            );
+                            service
+                                .save_enrichment(*kind, imdb, data)
+                                .map(|s| R::metadata(S::Enrichment(s)))
+                        } else {
+                            Err(CatalogError::InvalidResponse)
+                        }
+                    }
                     (Ok(RemoteData::Page(titles, rich)), Work::Search(request)) => service
                         .save_search(&request.query, titles, rich)
                         .map(|s| R::Search(crate::catalog_worker::snapshot(s))),
@@ -1227,7 +1374,7 @@ impl CatalogService {
                 }
                 A::Details { kind, id } => normalized_fetches::details(self, *kind, id, error),
                 A::Tmdb(query) => normalized_fetches::tmdb(self, query, error),
-                A::Sources { .. } => (),
+                A::Sources { .. } | A::Enrich { .. } => (),
             },
         }
     }
@@ -1510,7 +1657,7 @@ mod facts_tests {
         assert_eq!(details.facts.cast[0].character, None);
         let mut service = CatalogService::open(std::path::Path::new(":memory:"))?;
         let tx = service.connection.transaction()?;
-        normalized_pages::write_cinemeta_details(&tx, &details, 1, true)?;
+        normalized_pages::write_cinemeta_details(&tx, &details, 1, true, &Default::default())?;
         tx.commit()?;
         let saved = service
             .read_details(MediaKind::Movie, &id)?
@@ -1550,7 +1697,7 @@ mod facts_migration_tests {
             &id,
         )?;
         let tx = service.connection.transaction()?;
-        normalized_pages::write_cinemeta_details(&tx, &details, 123, true)?;
+        normalized_pages::write_cinemeta_details(&tx, &details, 123, true, &Default::default())?;
         tx.commit()?;
         service.connection.execute_batch(
             "ALTER TABLE metadata_fetches DROP COLUMN facts_json; PRAGMA user_version=4;",
@@ -1577,4 +1724,292 @@ mod facts_migration_tests {
         );
         Ok(())
     }
+}
+
+pub(crate) fn provider_cinemeta(
+    client: &Client,
+    endpoint: &Url,
+    kind: MediaKind,
+    imdb: &ImdbId,
+    cancel: &AtomicBool,
+) -> Result<Option<crate::metadata_providers::ProviderTitleDetails>, CatalogError> {
+    use crate::metadata_providers::{Payload, ProviderTitleDetails};
+    use kinema_core::catalog_normalized::{FieldValue, Quality};
+    let mut url = endpoint.clone();
+    url.path_segments_mut()
+        .map_err(|_| CatalogError::Network)?
+        .pop_if_empty()
+        .extend(["meta", kind_text(kind)])
+        .push(&format!("{}.json", imdb.as_str()));
+    let raw: serde_json::Value = match fetch_json(client, url, cancel) {
+        Ok(raw) => raw,
+        Err(CatalogError::NotFound) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if raw.get("meta").is_none_or(serde_json::Value::is_null) {
+        return Ok(None);
+    }
+    let (details, rich) = parse_details(raw, kind, imdb)?;
+    let mut observation = normalized::imdb_observation(&details.title);
+    for (field, value) in [
+        ("poster_url", &details.poster_url),
+        ("backdrop_url", &details.background_url),
+    ] {
+        if let Some(value) = value {
+            observation
+                .fields
+                .push((field.into(), FieldValue::Text(value.clone())));
+        }
+    }
+    if !details.genres.is_empty() {
+        observation.fields.push((
+            "genres_json".into(),
+            FieldValue::Labels(details.genres.clone()),
+        ));
+    }
+    for record in rich
+        .iter()
+        .filter(|r| r.season.is_none() && r.episode.is_none())
+    {
+        observation.fields.extend(record.fields.clone());
+        observation.ratings.extend(record.ratings.clone());
+        observation.identifiers.extend(record.identifiers.clone());
+    }
+    Ok(Some(ProviderTitleDetails {
+        observation,
+        quality: Quality::Detail,
+        payload: Payload::Cinemeta(details),
+        rich,
+    }))
+}
+
+impl CatalogService {
+    /// Reconstruct details even when only TMDB has acquired the title. Optional
+    /// legacy detail facts are gap-filled in priority order; normalized fields
+    /// are authoritative for facts represented by the canonical schema.
+    fn enriched_details(
+        &mut self,
+        record: &kinema_core::catalog_normalized::CanonicalTitle,
+        title: CatalogTitle,
+    ) -> Result<CachedDetails, CatalogError> {
+        use kinema_core::catalog::{ImdbRating, TitleFacts};
+        let tx = self.connection.transaction()?;
+        let mut facts = TitleFacts::default();
+        for provider in self.provider_priority.order() {
+            let resource: Option<String> = tx.query_row("SELECT resource_key FROM metadata_fetches WHERE title_id=?1 AND provider=?2 AND facts_json IS NOT NULL ORDER BY fetched_at DESC LIMIT 1", params![record.id, provider.as_str()], |r| r.get(0)).optional()?;
+            if let Some(resource) = resource {
+                let incoming =
+                    normalized_pages::read_facts(&tx, record.id, provider.as_str(), &resource)?;
+                macro_rules! optional { ($($field:ident),*) => { $(if facts.$field.is_none() { facts.$field = incoming.$field; })* }; }
+                macro_rules! lists { ($($field:ident),*) => { $(if facts.$field.is_empty() { facts.$field = incoming.$field; })* }; }
+                optional!(
+                    tmdb_rating,
+                    tmdb_vote_count,
+                    imdb_rating,
+                    runtime_minutes,
+                    status,
+                    release_date,
+                    first_air_date,
+                    last_air_date,
+                    certification,
+                    original_language,
+                    tagline,
+                    release_info
+                );
+                lists!(
+                    directors, creators, cast, studios, networks, writers, countries
+                );
+            }
+        }
+        facts.runtime_minutes = record
+            .integer("runtime_minutes")
+            .and_then(|v| u32::try_from(v).ok())
+            .or(facts.runtime_minutes);
+        for (field, slot) in [
+            ("status", &mut facts.status),
+            ("release_date", &mut facts.release_date),
+            ("first_air_date", &mut facts.first_air_date),
+            ("last_air_date", &mut facts.last_air_date),
+            ("original_language", &mut facts.original_language),
+            ("tagline", &mut facts.tagline),
+        ] {
+            if let Some(value) = record.text(field) {
+                *slot = Some(value.into());
+            }
+        }
+        for source in ["imdb", "tmdb"] {
+            let rating = record
+                .ratings
+                .iter()
+                .filter(|r| r.observation.source == source && r.observation.metric == "score")
+                .min_by_key(|r| {
+                    kinema_core::provider::ProviderId::parse(&r.observation.supplied_by)
+                        .map_or(usize::MAX, |p| self.provider_priority.rank(p))
+                });
+            if let Some(rating) = rating {
+                let score = rating.observation.value.and_then(ImdbRating::new);
+                if source == "imdb" {
+                    facts.imdb_rating = score;
+                } else {
+                    facts.tmdb_rating = score;
+                    facts.tmdb_vote_count = rating.observation.vote_count;
+                }
+            }
+        }
+        let prefix = if record.kind == MediaKind::Movie {
+            "release"
+        } else {
+            "first_air"
+        };
+        let release_info = record
+            .text(&format!("{prefix}_date"))
+            .map(str::to_owned)
+            .or_else(|| {
+                record
+                    .integer(&format!("{prefix}_year"))
+                    .map(|v| v.to_string())
+            });
+        Ok(CachedDetails {
+            details: TitleDetails {
+                facts,
+                poster_url: record.text("poster_url").map(str::to_owned),
+                background_url: record.text("backdrop_url").map(str::to_owned),
+                release_info,
+                genres: title.genres().to_vec(),
+                title,
+                episodes: normalized::read_episodes(&tx, record.id, None)?,
+            },
+            fetched_at: u64::try_from(record.updated_at).map_err(|_| CatalogError::InvalidCache)?,
+        })
+    }
+
+    fn card_fields_complete(
+        &mut self,
+        kind: MediaKind,
+        imdb: &ImdbId,
+    ) -> Result<bool, CatalogError> {
+        let tx = self.connection.transaction()?;
+        let Some(id) = normalized::title_id(&tx, kind, "imdb", imdb.as_str())? else {
+            return Ok(false);
+        };
+        let record = Self::title_record(&tx, id)?;
+        Ok(complete_card(
+            &Self::display_title(&record)?,
+            record.ratings.iter().any(|r| r.observation.value.is_some()),
+        ))
+    }
+
+    fn save_enrichment(
+        &mut self,
+        kind: MediaKind,
+        imdb: &[ImdbId],
+        mut data: EnrichmentData,
+    ) -> Result<crate::catalog_worker::EnrichmentSnapshot, CatalogError> {
+        use crate::metadata_providers::Payload;
+        use kinema_core::provider::ProviderId;
+        for value in data.values {
+            self.ensure_active()?;
+            // Observations are normalized and validated before crossing workers;
+            // the established imports also retain child episodes and rich facts.
+            if !value.observation.identifiers.iter().all(|id| id.valid()) {
+                continue;
+            }
+            debug_assert_eq!(
+                value.quality,
+                kinema_core::catalog_normalized::Quality::Detail
+            );
+            let (provider, result) = match value.payload {
+                Payload::Cinemeta(details) => {
+                    let id = details.title.id().clone();
+                    (
+                        ProviderId::Cinemeta,
+                        self.save_details(kind, &id, details, value.rich)
+                            .map(|_| ()),
+                    )
+                }
+                Payload::Tmdb(data) => {
+                    let crate::tmdb::TmdbData::Details(details) = &data else {
+                        continue;
+                    };
+                    let query = crate::tmdb::TmdbQuery::Details {
+                        kind,
+                        id: details.title.id,
+                    };
+                    (
+                        ProviderId::Tmdb,
+                        self.save_tmdb_rich(&query, data, &value.rich).map(|_| ()),
+                    )
+                }
+            };
+            if let Err(category) = result {
+                if category == CatalogError::Canceled {
+                    return Err(category);
+                }
+                tracing::debug!(
+                    provider = provider.as_str(),
+                    ?category,
+                    "Optional metadata import failed"
+                );
+                if !data.failed.contains(&provider) {
+                    data.failed.push(provider);
+                }
+            }
+        }
+        let mut titles = Vec::new();
+        let mut seen = HashSet::new();
+        for external in imdb.iter().take(20) {
+            if !seen.insert(external) {
+                continue;
+            }
+            self.ensure_active()?;
+            let record = {
+                let tx = self.connection.transaction()?;
+                let Some(id) = normalized::title_id(&tx, kind, "imdb", external.as_str())? else {
+                    continue;
+                };
+                Self::title_record(&tx, id)?
+            };
+            let mut contributors = Vec::new();
+            for supplier in record
+                .provenance
+                .iter()
+                .filter(|p| record.fields.contains_key(&p.field_name))
+                .map(|p| p.supplied_by.as_str())
+                .chain(
+                    record
+                        .ratings
+                        .iter()
+                        .map(|r| r.observation.supplied_by.as_str()),
+                )
+            {
+                if let Some(provider) = ProviderId::parse(supplier)
+                    && !contributors.contains(&provider)
+                {
+                    contributors.push(provider);
+                }
+            }
+            contributors.sort_by_key(|p| self.provider_priority.rank(*p));
+            let title = Self::display_title(&record)?;
+            let details = self.enriched_details(&record, title.clone())?;
+            titles.push(crate::catalog_worker::EnrichedTitle {
+                title,
+                fields: record.fields,
+                details,
+                contributors,
+            });
+        }
+        Ok(crate::catalog_worker::EnrichmentSnapshot {
+            titles,
+            failed: data.failed,
+            inactive: data.inactive,
+        })
+    }
+}
+
+fn complete_card(title: &CatalogTitle, has_rating: bool) -> bool {
+    title.poster_url().is_some()
+        && title.year().is_some()
+        && has_rating
+        && title.runtime_minutes().is_some()
+        && !title.genres().is_empty()
 }

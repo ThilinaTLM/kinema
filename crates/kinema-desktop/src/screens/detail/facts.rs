@@ -453,6 +453,7 @@ impl Detail {
         cx: &App,
     ) -> AnyElement {
         let p = self.tinted_palette(cx);
+        let attribution = self.coordinator.read(cx).detail_attribution();
         div()
             .id("detail-provenance")
             .w_full()
@@ -473,6 +474,14 @@ impl Detail {
                             .child(div().flex_1().min_w_0().child(value))
                     }),
             )
+            .children(attribution.map(|text| {
+                div()
+                    .id("detail-attribution")
+                    .pt(s::S4)
+                    .type_style(t::SMALL)
+                    .text_color(p.text_muted)
+                    .child(text)
+            }))
             .into_any_element()
     }
 }

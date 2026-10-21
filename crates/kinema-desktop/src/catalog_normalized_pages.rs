@@ -39,6 +39,10 @@ pub(super) fn cinemeta_detail_key(kind: MediaKind, id: &ImdbId) -> String {
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Explicit transaction, resource identity, observation and merge policy context"
+)]
 pub(super) fn write_page(
     tx: &Transaction<'_>,
     provider: &str,
@@ -47,6 +51,7 @@ pub(super) fn write_page(
     total: Option<u32>,
     observations: &[TitleObservation],
     time: i64,
+    priority: &kinema_core::provider::ProviderPriority,
 ) -> Result<(), CatalogError> {
     tx.execute("INSERT INTO catalog_pages(provider,query_key,page_number,total_pages,result_count,membership_available,updated_at) VALUES (?1,?2,?3,?4,NULL,0,?5) ON CONFLICT(provider,query_key,page_number) DO NOTHING",params![provider,key,page,total,time])?;
     let id: i64 = tx.query_row(
@@ -66,7 +71,7 @@ pub(super) fn write_page(
     let mut ids = Vec::with_capacity(observations.len());
     let mut seen = HashSet::new();
     for observation in observations {
-        let title = resolve_title(tx, observation, time)?;
+        let title = resolve_title(tx, observation, time, priority)?;
         if !seen.insert(title) {
             return Err(CatalogError::InvalidMetadata);
         }
@@ -78,6 +83,7 @@ pub(super) fn write_page(
             Quality::Summary,
             fetch_id,
             time,
+            priority,
         )?;
         ids.push(title);
     }
@@ -242,6 +248,7 @@ pub(super) fn write_cinemeta_details(
     details: &TitleDetails,
     time: i64,
     complete: bool,
+    priority: &kinema_core::provider::ProviderPriority,
 ) -> Result<(), CatalogError> {
     let mut observation = imdb_observation(&details.title);
     for (name, value) in [
@@ -293,7 +300,7 @@ pub(super) fn write_cinemeta_details(
             kinema_core::catalog_normalized::FieldValue::Integer(last),
         ));
     }
-    let id = resolve_title(tx, &observation, time)?;
+    let id = resolve_title(tx, &observation, time, priority)?;
     // Old reduced snapshots are useful evidence, not proof richer optional DTO
     // fields were checked. Backfill therefore records summary completeness,
     // independently of the detail origin of its supplied, known fields.
@@ -319,9 +326,18 @@ pub(super) fn write_cinemeta_details(
         Quality::Detail,
         fetch_id,
         time,
+        priority,
     )?;
     write_facts(tx, fetch_id, &details.facts)?;
-    import_episodes(tx, id, &details.episodes, "cinemeta", fetch_id, time)?;
+    import_episodes(
+        tx,
+        id,
+        &details.episodes,
+        "cinemeta",
+        fetch_id,
+        time,
+        priority,
+    )?;
     Ok(())
 }
 

@@ -6,6 +6,7 @@
 pub mod catalog;
 pub mod catalog_normalized;
 pub mod media;
+pub mod provider;
 pub mod sources;
 
 use std::num::NonZeroU64;

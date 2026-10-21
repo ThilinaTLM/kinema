@@ -60,7 +60,7 @@ fn canonical_titles_and_episodes_are_primary_not_legacy_json() -> TestResult {
         }],
     };
     let tx = service.connection.transaction()?;
-    write_cinemeta_details(&tx, &details, 10, true)?;
+    write_cinemeta_details(&tx, &details, 10, true, &Default::default())?;
     tx.commit()?;
     service.connection.execute("INSERT INTO cinemeta_v3_details VALUES ('series','tt1000001',1,'unchanged legacy evidence')",[])?;
     service.connection.execute_batch(
@@ -95,12 +95,20 @@ fn explicit_imdb_mapping_shares_title_and_tmdb_numeric_ids_remain_kind_scoped() 
         None,
         &[imdb_observation(&movie("tt1000002", "Cinemeta")?)],
         1,
+        &Default::default(),
     )?;
     let query = TmdbQuery::Details {
         kind: MediaKind::Movie,
         id: 42,
     };
-    normalized_tmdb::write(&tx, &query, &tmdb_details(42, Some("tt1000002"))?, 2, true)?;
+    normalized_tmdb::write(
+        &tx,
+        &query,
+        &tmdb_details(42, Some("tt1000002"))?,
+        2,
+        true,
+        &Default::default(),
+    )?;
     assert_eq!(
         title_id(&tx, MediaKind::Movie, "imdb", "tt1000002")?,
         title_id(&tx, MediaKind::Movie, "tmdb", "42")?
@@ -128,6 +136,7 @@ fn explicit_imdb_mapping_shares_title_and_tmdb_numeric_ids_remain_kind_scoped() 
         &series,
         3,
         true,
+        &Default::default(),
     )?;
     assert_ne!(
         title_id(&tx, MediaKind::Movie, "tmdb", "42")?,
@@ -151,6 +160,7 @@ fn separately_cached_provider_identities_join_only_after_explicit_mapping() -> T
             None,
             &[imdb_observation(&movie("tt1000003", "Cinemeta")?)],
             1,
+            &Default::default(),
         )?;
         normalized_tmdb::write(
             &tx,
@@ -161,6 +171,7 @@ fn separately_cached_provider_identities_join_only_after_explicit_mapping() -> T
             &tmdb_details(43, None)?,
             2,
             true,
+            &Default::default(),
         )?;
         tx.commit()?;
     }
@@ -197,7 +208,7 @@ fn identical_refresh_advances_fetch_not_material_time_and_summary_preserves_deta
         .push(("overview".into(), FieldValue::Text("Full overview".into())));
     {
         let tx = service.connection.transaction()?;
-        let id = resolve_title(&tx, &item, 10)?;
+        let id = resolve_title(&tx, &item, 10, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(id),
@@ -207,12 +218,21 @@ fn identical_refresh_advances_fetch_not_material_time_and_summary_preserves_deta
             false,
             10,
         )?;
-        import_title(&tx, id, &item, "cinemeta", Quality::Detail, f, 10)?;
+        import_title(
+            &tx,
+            id,
+            &item,
+            "cinemeta",
+            Quality::Detail,
+            f,
+            10,
+            &Default::default(),
+        )?;
         tx.commit()?;
     }
     {
         let tx = service.connection.transaction()?;
-        let id = resolve_title(&tx, &item, 20)?;
+        let id = resolve_title(&tx, &item, 20, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(id),
@@ -222,7 +242,16 @@ fn identical_refresh_advances_fetch_not_material_time_and_summary_preserves_deta
             false,
             20,
         )?;
-        import_title(&tx, id, &item, "cinemeta", Quality::Detail, f, 20)?;
+        import_title(
+            &tx,
+            id,
+            &item,
+            "cinemeta",
+            Quality::Detail,
+            f,
+            20,
+            &Default::default(),
+        )?;
         tx.commit()?;
     }
     let (updated, fetched): (i64, i64) = service.connection.query_row(
@@ -241,6 +270,7 @@ fn identical_refresh_advances_fetch_not_material_time_and_summary_preserves_deta
             None,
             &[imdb_observation(&movie("tt1000004", "Short")?)],
             30,
+            &Default::default(),
         )?;
         tx.commit()?;
     }
@@ -269,7 +299,7 @@ fn ratings_are_supplier_scoped_atomic_observations_and_reject_cross_entity_imdb(
         "Series",
         None,
     )?);
-    let id = resolve_title(&tx, &item, 1)?;
+    let id = resolve_title(&tx, &item, 1, &Default::default())?;
     let f = fetch(
         &tx,
         Target::Title(id),
@@ -279,7 +309,16 @@ fn ratings_are_supplier_scoped_atomic_observations_and_reject_cross_entity_imdb(
         false,
         1,
     )?;
-    import_title(&tx, id, &item, "cinemeta", Quality::Detail, f, 1)?;
+    import_title(
+        &tx,
+        id,
+        &item,
+        "cinemeta",
+        Quality::Detail,
+        f,
+        1,
+        &Default::default(),
+    )?;
     let mut observation = RatingObservation {
         source: "imdb".into(),
         metric: "score".into(),
@@ -325,7 +364,7 @@ fn grouped_dates_change_year_atomically_and_inconsistent_partial_updates_rollbac
             ("release_date".into(), FieldValue::Text(date.into())),
             ("release_year".into(), FieldValue::Integer(year)),
         ]);
-        let id = resolve_title(&tx, &item, time)?;
+        let id = resolve_title(&tx, &item, time, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(id),
@@ -335,7 +374,16 @@ fn grouped_dates_change_year_atomically_and_inconsistent_partial_updates_rollbac
             false,
             time,
         )?;
-        import_title(&tx, id, &item, "cinemeta", Quality::Detail, f, time)?;
+        import_title(
+            &tx,
+            id,
+            &item,
+            "cinemeta",
+            Quality::Detail,
+            f,
+            time,
+            &Default::default(),
+        )?;
         tx.commit()?;
     }
     {
@@ -343,7 +391,7 @@ fn grouped_dates_change_year_atomically_and_inconsistent_partial_updates_rollbac
         let mut item = imdb_observation(&movie("tt1000006", "Dated movie")?);
         item.fields
             .push(("release_year".into(), FieldValue::Integer(2027)));
-        let id = resolve_title(&tx, &item, 3)?;
+        let id = resolve_title(&tx, &item, 3, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(id),
@@ -354,7 +402,16 @@ fn grouped_dates_change_year_atomically_and_inconsistent_partial_updates_rollbac
             3,
         )?;
         assert_eq!(
-            import_title(&tx, id, &item, "cinemeta", Quality::Detail, f, 3),
+            import_title(
+                &tx,
+                id,
+                &item,
+                "cinemeta",
+                Quality::Detail,
+                f,
+                3,
+                &Default::default()
+            ),
             Err(CatalogError::InvalidMetadata)
         );
     }
@@ -376,6 +433,7 @@ fn page_pruning_is_a_miss_with_retained_identity_and_fetch_stubs() -> TestResult
         None,
         &[imdb_observation(&movie("tt1000007", "Retained")?)],
         1,
+        &Default::default(),
     )?;
     tx.commit()?;
     service.connection.execute_batch(
@@ -414,8 +472,8 @@ fn rich_tmdb_dtos_supply_real_child_ids_artwork_and_distinct_rating_sources() ->
         }],
     });
     let tx = service.connection.transaction()?;
-    normalized_tmdb::write(&tx, &query, &data, 1, true)?;
-    normalized_tmdb::write_rich(&tx, &query, &rich, 1)?;
+    normalized_tmdb::write(&tx, &query, &data, 1, true, &Default::default())?;
+    normalized_tmdb::write_rich(&tx, &query, &rich, 1, &Default::default())?;
     let (season,episode,still,source,value,votes):(String,String,String,String,f64,i64)=tx.query_row("SELECT si.external_id,ei.external_id,e.still_url,r.rating_source,r.value,r.vote_count FROM seasons s JOIN season_identifiers si ON si.season_id=s.id JOIN episodes e ON e.season_id=s.id JOIN episode_identifiers ei ON ei.episode_id=e.id JOIN ratings r ON r.episode_id=e.id",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
     assert_eq!(
         (
@@ -493,20 +551,28 @@ fn episode_art_and_season_art_are_projected_and_not_erased_by_reduced_updates() 
         }],
     };
     let tx = service.connection.transaction()?;
-    super::normalized_tmdb::write(&tx, &query, &details, 1, true)?;
+    super::normalized_tmdb::write(&tx, &query, &details, 1, true, &Default::default())?;
     super::normalized_tmdb::write(
         &tx,
         &season_query,
         &TmdbData::Season(season.clone()),
         1,
         true,
+        &Default::default(),
     )?;
     tx.commit()?;
     season.poster_url = None;
     season.episodes[0].still_url = None;
     season.episodes[0].runtime_minutes = None;
     let tx = service.connection.transaction()?;
-    super::normalized_tmdb::write(&tx, &season_query, &TmdbData::Season(season), 2, true)?;
+    super::normalized_tmdb::write(
+        &tx,
+        &season_query,
+        &TmdbData::Season(season),
+        2,
+        true,
+        &Default::default(),
+    )?;
     tx.commit()?;
     let saved = super::normalized_tmdb::read(&mut service, &query)?.ok_or("details")?;
     let TmdbData::Details(saved) = saved.data else {
@@ -553,7 +619,7 @@ fn similar_pages_are_isolated_from_browse_and_other_titles() -> TestResult {
             }],
         });
         let tx = service.connection.transaction()?;
-        super::normalized_tmdb::write(&tx, &query, &data, 1, true)?;
+        super::normalized_tmdb::write(&tx, &query, &data, 1, true, &Default::default())?;
         tx.commit()?;
     }
     for (query, id) in [
@@ -599,11 +665,11 @@ fn cinemeta_thumbnail_survives_reduced_episode_updates() -> TestResult {
         }],
     };
     let tx = service.connection.transaction()?;
-    write_cinemeta_details(&tx, &details, 1, true)?;
+    write_cinemeta_details(&tx, &details, 1, true, &Default::default())?;
     tx.commit()?;
     details.episodes[0].still_url = None;
     let tx = service.connection.transaction()?;
-    write_cinemeta_details(&tx, &details, 2, true)?;
+    write_cinemeta_details(&tx, &details, 2, true, &Default::default())?;
     tx.commit()?;
     let saved = service
         .read_details(MediaKind::Series, details.title.id())?
@@ -613,4 +679,122 @@ fn cinemeta_thumbnail_survives_reduced_episode_updates() -> TestResult {
         Some("https://images.example.test/still.jpg")
     );
     Ok(())
+}
+
+#[test]
+fn ranked_providers_merge_fields_and_keep_supplier_scoped_ratings() -> TestResult {
+    use kinema_core::provider::{ProviderId, ProviderPriority};
+    for primary in [ProviderId::Cinemeta, ProviderId::Tmdb] {
+        let dir = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+        service.set_provider_priority(ProviderPriority::new([primary]));
+        let priority = service.provider_priority.clone();
+        let tx = service.connection.transaction()?;
+        let mut item = imdb_observation(&movie("tt1000091", "Cinemeta title")?);
+        item.fields.push((
+            "overview".into(),
+            FieldValue::Text("Cinemeta overview".into()),
+        ));
+        item.ratings.push(RatingObservation {
+            source: "imdb".into(),
+            metric: "score".into(),
+            supplied_by: "cinemeta".into(),
+            value: Some(7.0),
+            vote_count: Some(100),
+            source_updated_at: None,
+        });
+        let id = resolve_title(&tx, &item, 100, &priority)?;
+        let f = fetch(
+            &tx,
+            Target::Title(id),
+            "cinemeta",
+            "detail-v1",
+            Quality::Detail,
+            false,
+            100,
+        )?;
+        import_title(
+            &tx,
+            id,
+            &item,
+            "cinemeta",
+            Quality::Detail,
+            f,
+            100,
+            &priority,
+        )?;
+        item.fields = vec![
+            ("overview".into(), FieldValue::Text("TMDB overview".into())),
+            ("runtime_minutes".into(), FieldValue::Integer(95)),
+            (
+                "genres_json".into(),
+                FieldValue::Labels(vec!["Drama".into()]),
+            ),
+        ];
+        item.ratings[0].supplied_by = "tmdb".into();
+        item.ratings[0].value = Some(8.0);
+        // Deliberately older and lower quality: supplier priority wins first.
+        let f = fetch(
+            &tx,
+            Target::Title(id),
+            "tmdb",
+            "summary-v1",
+            Quality::Summary,
+            false,
+            1,
+        )?;
+        import_title(&tx, id, &item, "tmdb", Quality::Summary, f, 1, &priority)?;
+        let record = CatalogService::title_record(&tx, id)?;
+        assert_eq!(
+            record.text("overview"),
+            Some(if primary == ProviderId::Tmdb {
+                "TMDB overview"
+            } else {
+                "Cinemeta overview"
+            })
+        );
+        assert_eq!(record.integer("runtime_minutes"), Some(95));
+        assert_eq!(
+            record.fields.get("genres_json"),
+            Some(&FieldValue::Labels(vec!["Drama".into()]))
+        );
+        let overview = record
+            .provenance
+            .iter()
+            .find(|field| field.field_name == "overview")
+            .ok_or("overview provenance missing")?;
+        assert_eq!(overview.supplied_by, primary.as_str());
+        assert_eq!(record.ratings.len(), 2);
+        for (supplier, value) in [("cinemeta", 7.0), ("tmdb", 8.0)] {
+            assert!(
+                record
+                    .ratings
+                    .iter()
+                    .any(|rating| rating.observation.supplied_by == supplier
+                        && rating.observation.value == Some(value))
+            );
+        }
+        tx.commit()?;
+    }
+    Ok(())
+}
+
+#[test]
+fn unknown_field_suppliers_rank_below_known_providers() {
+    use kinema_core::provider::ProviderPriority;
+    let priority = ProviderPriority::default();
+    assert!(accepts_supplier_field(
+        Some(("unknown".into(), "detail".into(), 100)),
+        "tmdb",
+        Quality::Summary,
+        1,
+        &priority
+    ));
+    assert!(!accepts_supplier_field(
+        Some(("tmdb".into(), "summary".into(), 1)),
+        "unknown",
+        Quality::Detail,
+        100,
+        &priority
+    ));
 }

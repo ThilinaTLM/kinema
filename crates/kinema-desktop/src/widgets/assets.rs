@@ -22,6 +22,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "chevron-down",
     "chevron-left",
     "chevron-right",
+    "chevron-up",
     "x",
     "copy",
     "download",

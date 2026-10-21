@@ -1,7 +1,8 @@
 //! User-approved verified-ID reconciliation. Never infer identity from metadata.
-use super::normalized::{TITLE_FIELDS, Target};
+use super::normalized::{TITLE_FIELDS, Target, accepts_supplier_field};
 use super::*;
-use kinema_core::catalog_normalized::{Quality, accepts_field};
+use kinema_core::catalog_normalized::Quality;
+use kinema_core::provider::ProviderPriority;
 use rusqlite::{Transaction, types::Value};
 
 fn entity(target: Target) -> (&'static str, &'static str, &'static str, i64) {
@@ -102,6 +103,7 @@ pub(super) fn reconcile(
     first: i64,
     second: i64,
     time: i64,
+    priority: &ProviderPriority,
 ) -> Result<i64, CatalogError> {
     let (winner, loser) = if first < second {
         (first, second)
@@ -109,7 +111,7 @@ pub(super) fn reconcile(
         (second, first)
     };
     validate_graph(tx, Target::Title(winner), loser)?;
-    merge_entity(tx, Target::Title(winner), loser, time)?;
+    merge_entity(tx, Target::Title(winner), loser, time, priority)?;
     Ok(winner)
 }
 
@@ -118,6 +120,7 @@ fn merge_entity(
     target: Target,
     other: i64,
     time: i64,
+    priority: &ProviderPriority,
 ) -> Result<(), CatalogError> {
     let (table, column, identifiers, id) = entity(target);
     // Move/merge children before parents. The verified parent mapping makes
@@ -137,7 +140,7 @@ fn merge_entity(
                     )
                     .optional()?;
                 if let Some(existing) = existing {
-                    merge_entity(tx, Target::Season(existing), child, time)?;
+                    merge_entity(tx, Target::Season(existing), child, time, priority)?;
                 } else {
                     tx.execute(
                         "UPDATE seasons SET series_id=?1 WHERE id=?2",
@@ -160,7 +163,7 @@ fn merge_entity(
                     )
                     .optional()?;
                 if let Some(existing) = existing {
-                    merge_entity(tx, Target::Episode(existing), child, time)?;
+                    merge_entity(tx, Target::Episode(existing), child, time, priority)?;
                 } else {
                     tx.execute(
                         "UPDATE episodes SET season_id=?1 WHERE id=?2",
@@ -171,7 +174,7 @@ fn merge_entity(
         }
         _ => {}
     }
-    merge_fields(tx, target, other, time)?;
+    merge_fields(tx, target, other, time, priority)?;
     merge_ratings(tx, target, other)?;
     merge_fetches(tx, target, other)?;
     tx.execute(
@@ -195,6 +198,7 @@ fn merge_fields(
     target: Target,
     other: i64,
     time: i64,
+    priority: &ProviderPriority,
 ) -> Result<(), CatalogError> {
     let (table, column, _, id) = entity(target);
     let fields: &[&str] = match target {
@@ -228,30 +232,17 @@ fn merge_fields(
         if value == Value::Null {
             continue;
         }
-        let origin:Option<(i64,String,i64)>=tx.query_row(&format!("SELECT id,quality,observed_at FROM field_provenance WHERE {column}=?1 AND field_name=?2"),params![other,name],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-        let Some((provenance, quality, observed)) = origin else {
+        let origin:Option<(i64,String,i64,String)>=tx.query_row(&format!("SELECT id,quality,observed_at,supplied_by FROM field_provenance WHERE {column}=?1 AND field_name=?2"),params![other,name],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+        let Some((provenance, quality, observed, supplier)) = origin else {
             return Err(CatalogError::InvalidCache);
         };
-        let old:Option<(String,i64)>=tx.query_row(&format!("SELECT quality,observed_at FROM field_provenance WHERE {column}=?1 AND field_name=?2"),params![id,name],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let old:Option<(String,String,i64)>=tx.query_row(&format!("SELECT supplied_by,quality,observed_at FROM field_provenance WHERE {column}=?1 AND field_name=?2"),params![id,name],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
         let quality = if quality == "detail" {
             Quality::Detail
         } else {
             Quality::Summary
         };
-        if accepts_field(
-            old.map(|(q, t)| {
-                (
-                    if q == "detail" {
-                        Quality::Detail
-                    } else {
-                        Quality::Summary
-                    },
-                    t,
-                )
-            }),
-            quality,
-            observed,
-        ) {
+        if accepts_supplier_field(old, &supplier, quality, observed, priority) {
             chosen.push((name, value));
             transfers.push((name, provenance));
         }

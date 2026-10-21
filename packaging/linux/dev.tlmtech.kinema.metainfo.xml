@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>dev.tlmtech.kinema</id>
+  <name>Kinema</name>
+  <summary>Browse movies and TV series with a native desktop interface</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <developer id="dev.tlmtech">
+    <name>Thilina Lakshan</name>
+  </developer>
+  <description>
+    <p>Kinema is a pre-release Rust desktop application using GPUI. Browse
+    movie and series metadata, inspect available streams, and prepare authorized
+    media for playback in a separately installed external player.</p>
+    <p>The application includes metadata provider settings, optional debrid
+    integration, managed media storage, and operating-system secure credential
+    storage. Provider accounts and an external player may be required. This
+    scaffold is under development; complete workflows and platform support
+    have not yet been accepted.</p>
+  </description>
+  <url type="homepage">https://tlmtech.dev/kinema</url>
+  <launchable type="desktop-id">dev.tlmtech.kinema.desktop</launchable>
+  <icon type="stock">dev.tlmtech.kinema</icon>
+  <provides>
+    <binary>kinema-desktop</binary>
+  </provides>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+</component>

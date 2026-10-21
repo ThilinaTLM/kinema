@@ -32,7 +32,7 @@ use crate::widgets::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 31] = [
+const SCENES: [&str; 36] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
@@ -40,6 +40,13 @@ const SCENES: [&str; 31] = [
     "detail-live-tmdb-series",
     "detail-live-tmdb-series-streams",
     "detail-live-no-art",
+    // Full MainWindow (floating header) on the detail route; `-scrolled`
+    // wheel-scrolls the page to show the header scrim over long content.
+    "detail-live-window-tmdb-movie",
+    "detail-live-window-tmdb-movie-scrolled",
+    "detail-live-window-tmdb-movie-streams",
+    "detail-live-window-tmdb-series",
+    "detail-live-window-tmdb-series-scrolled",
     "browse-live-pending",
     "detail-live-movie",
     "detail-live-series",
@@ -1667,9 +1674,10 @@ impl Lab {
                     .over_art(true),
             )
             .secondary(Button::new("pat-trailer", "Trailer").over_art(true))
+            .title_action(IconButton::new("pat-copy", IconName::Copy, "Copy title").over_art(true))
+            .secondary(IconButton::new("pat-refresh", IconName::Refresh, "Refresh").over_art(true))
             .secondary(
-                IconButton::new("pat-more", IconName::MoreHorizontal, "More actions")
-                    .over_art(true),
+                IconButton::new("pat-imdb", IconName::ExternalLink, "Open on IMDb").over_art(true),
             );
         let _ = window;
         col()
@@ -1882,8 +1890,9 @@ impl Render for Lab {
 }
 
 // ── P4 Settings: append-only production fixture scene registrations ──────────
-const SETTINGS_SCENES: [&str; 6] = [
+const SETTINGS_SCENES: [&str; 7] = [
     "settings-general",
+    "settings-accounts-no-token",
     "settings-accounts",
     "settings-playback",
     "settings-storage",
@@ -1903,7 +1912,7 @@ fn open_settings_fixture(
     };
     use settings_window::{Section, SettingsWindow};
     let section = match scene {
-        "settings-accounts" => Section::Accounts,
+        "settings-accounts" | "settings-accounts-no-token" => Section::Accounts,
         "settings-playback" => Section::Playback,
         "settings-storage" => Section::Storage,
         "settings-appearance" => Section::Appearance,
@@ -1928,6 +1937,13 @@ fn open_settings_fixture(
                 } else {
                     MotionChoice::System
                 },
+                metadata_priority: kinema_core::provider::ProviderPriority::new(
+                    if scene == "settings-accounts-no-token" {
+                        [kinema_core::provider::ProviderId::Tmdb]
+                    } else {
+                        [kinema_core::provider::ProviderId::Cinemeta]
+                    },
+                ),
                 ..Default::default()
             });
             state.usage = Some(crate::media::UsageSnapshot {
@@ -1937,7 +1953,14 @@ fn open_settings_fixture(
             });
             state
         });
-        cx.new(|cx| SettingsWindow::fixture(coordinator, section, window, cx))
+        let no_token = scene == "settings-accounts-no-token";
+        cx.new(|cx| {
+            let mut view = SettingsWindow::fixture(coordinator, section, window, cx);
+            if no_token {
+                view.fixture_tmdb_missing();
+            }
+            view
+        })
     }) {
         eprintln!("Could not open production settings fixture: {error}");
         cx.quit();
@@ -2091,7 +2114,22 @@ impl ProductionScene {
                     c.fixture_art.clear();
                 }
             });
-            detail.into()
+            if scene.starts_with("detail-live-window") {
+                let detail_route = detail.clone();
+                let main = cx.new(|cx| {
+                    crate::screens::main_window::MainWindow::with_coordinator(
+                        coordinator.clone(),
+                        window,
+                        cx,
+                    )
+                });
+                main.update(cx, |m, _| {
+                    m.route = crate::screens::main_window::Route::Detail(detail_route)
+                });
+                main.into()
+            } else {
+                detail.into()
+            }
         };
         let focus = cx.focus_handle().tab_stop(true);
         let startup = if scene.starts_with("transfers-live") {
@@ -2122,6 +2160,25 @@ impl ProductionScene {
                         );
                     });
                 }
+            }))
+        } else if scene.ends_with("-scrolled") {
+            Some(cx.spawn_in(window, async move |_, cx| {
+                // Let artwork and layout settle, then wheel over the page body.
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(500))
+                    .await;
+                let _ = cx.update(|window, cx| {
+                    let size = window.viewport_size();
+                    window.dispatch_event(
+                        PlatformInput::ScrollWheel(ScrollWheelEvent {
+                            position: point(size.width / 2., size.height / 2.),
+                            delta: ScrollDelta::Pixels(point(px(0.), px(-420.))),
+                            modifiers: Modifiers::default(),
+                            touch_phase: TouchPhase::Moved,
+                        }),
+                        cx,
+                    );
+                });
             }))
         } else {
             None

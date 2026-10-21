@@ -350,7 +350,7 @@ mod display_tests {
             episodes: vec![],
         };
         let tx = service.connection.transaction()?;
-        normalized_pages::write_cinemeta_details(&tx, &details, 10, true)?;
+        normalized_pages::write_cinemeta_details(&tx, &details, 10, true, &Default::default())?;
         let id = normalized::title_id(&tx, MediaKind::Movie, "imdb", "tt1234567")?
             .ok_or("missing title")?;
         let fetch_id: i64 = tx.query_row(
@@ -361,7 +361,15 @@ mod display_tests {
         // Synthetic provider document, never a real provider/authentication request.
         let document = serde_json::json!({"type":"movie", "runtime":"93 min", "released":"2024-03-12", "genres":["Drama"], "imdbRating":"0.0"});
         let records = normalized_rich::cinemeta(&document)?;
-        normalized_rich::write(&tx, id, &records, "cinemeta", fetch_id, 10)?;
+        normalized_rich::write(
+            &tx,
+            id,
+            &records,
+            "cinemeta",
+            fetch_id,
+            10,
+            &Default::default(),
+        )?;
         let record = CatalogService::title_record(&tx, id)?;
         let projected = CatalogService::display_title(&record)?;
         assert_eq!(projected.year(), Some(2024));

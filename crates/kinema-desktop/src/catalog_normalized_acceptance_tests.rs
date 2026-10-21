@@ -16,7 +16,7 @@ fn season_date_year_pairs_refresh_atomically_and_partial_conflict_is_explicit() 
             "Series",
             None,
         )?);
-        let title = resolve_title(&tx, &item, time)?;
+        let title = resolve_title(&tx, &item, time, &Default::default())?;
         let f = fetch(
             &tx,
             Target::Title(title),
@@ -26,7 +26,16 @@ fn season_date_year_pairs_refresh_atomically_and_partial_conflict_is_explicit() 
             false,
             time,
         )?;
-        import_title(&tx, title, &item, "cinemeta", Quality::Detail, f, time)?;
+        import_title(
+            &tx,
+            title,
+            &item,
+            "cinemeta",
+            Quality::Detail,
+            f,
+            time,
+            &Default::default(),
+        )?;
         let id = season(&tx, title, 0, time)?;
         normalized_pairs::fields(
             &tx,
@@ -39,6 +48,7 @@ fn season_date_year_pairs_refresh_atomically_and_partial_conflict_is_explicit() 
             Quality::Detail,
             f,
             time,
+            &Default::default(),
         )?;
         tx.commit()?;
     }
@@ -53,7 +63,8 @@ fn season_date_year_pairs_refresh_atomically_and_partial_conflict_is_explicit() 
             "cinemeta",
             Quality::Detail,
             f,
-            3
+            3,
+            &Default::default()
         ),
         Err(CatalogError::InvalidMetadata)
     );
@@ -89,6 +100,7 @@ fn failure_state_is_not_empty_or_success_and_repeated_failure_retains_success_ti
             None,
             &[],
             123,
+            &Default::default(),
         )?;
         tx.commit()?;
     }
@@ -129,6 +141,7 @@ fn stale_generation_mid_transaction_rolls_back_every_new_canonical_row() -> Test
             None,
             &[imdb_observation(&title)],
             10,
+            &Default::default(),
         )?;
         cancel.store(true, Ordering::Release);
         assert_eq!(
@@ -165,7 +178,7 @@ fn child_external_id_cannot_be_reparented_or_renumbered() -> TestResult {
         "Series",
         None,
     )?);
-    let title = resolve_title(&tx, &item, 1)?;
+    let title = resolve_title(&tx, &item, 1, &Default::default())?;
     let f = fetch(
         &tx,
         Target::Title(title),
@@ -175,7 +188,16 @@ fn child_external_id_cannot_be_reparented_or_renumbered() -> TestResult {
         false,
         1,
     )?;
-    import_title(&tx, title, &item, "tmdb", Quality::Detail, f, 1)?;
+    import_title(
+        &tx,
+        title,
+        &item,
+        "tmdb",
+        Quality::Detail,
+        f,
+        1,
+        &Default::default(),
+    )?;
     let first = season(&tx, title, 1, 1)?;
     let second = season(&tx, title, 2, 1)?;
     let ident = kinema_core::catalog_normalized::ExternalIdentifier {
@@ -208,7 +230,7 @@ fn rich_title_read_exposes_origins_and_supplier_scoped_rating_without_fallback()
         "Rich",
         None,
     )?);
-    let id = resolve_title(&tx, &item, 1)?;
+    let id = resolve_title(&tx, &item, 1, &Default::default())?;
     let f = fetch(
         &tx,
         Target::Title(id),
@@ -218,9 +240,26 @@ fn rich_title_read_exposes_origins_and_supplier_scoped_rating_without_fallback()
         false,
         1,
     )?;
-    import_title(&tx, id, &item, "cinemeta", Quality::Detail, f, 1)?;
+    import_title(
+        &tx,
+        id,
+        &item,
+        "cinemeta",
+        Quality::Detail,
+        f,
+        1,
+        &Default::default(),
+    )?;
     let raw = serde_json::json!({"id":"tt2000004","type":"movie","logo":"https://images.example.test/logo.png","imdbRating":"7.4","genres":[]});
-    normalized_rich::write(&tx, id, &normalized_rich::cinemeta(&raw)?, "cinemeta", f, 1)?;
+    normalized_rich::write(
+        &tx,
+        id,
+        &normalized_rich::cinemeta(&raw)?,
+        "cinemeta",
+        f,
+        1,
+        &Default::default(),
+    )?;
     let record = CatalogService::title_record(&tx, id)?;
     assert_eq!(
         record.text("logo_url"),
@@ -258,6 +297,7 @@ fn deleted_nonnull_field_provenance_is_invalid_cache_not_unattributed_metadata()
             None,
             &[imdb_observation(&title)],
             1,
+            &Default::default(),
         )?;
         tx.commit()?;
     }
@@ -269,8 +309,7 @@ fn deleted_nonnull_field_provenance_is_invalid_cache_not_unattributed_metadata()
 }
 
 #[test]
-fn selected_provider_missing_field_retains_actual_other_supplier_origin_without_detail_fallback()
--> TestResult {
+fn lower_priority_provider_missing_field_retains_actual_supplier_origin() -> TestResult {
     use crate::tmdb::{TmdbData, TmdbDetails, TmdbQuery, TmdbTitle};
     let dir = tempfile::tempdir()?;
     let mut service = CatalogService::open(&dir.path().join("catalog"))?;
@@ -291,7 +330,7 @@ fn selected_provider_missing_field_retains_actual_other_supplier_origin_without_
             genres: vec![],
             episodes: vec![],
         };
-        write_cinemeta_details(&tx, &details, 1, true)?;
+        write_cinemeta_details(&tx, &details, 1, true, &Default::default())?;
         tx.commit()?;
     }
     let query = TmdbQuery::Details {
@@ -338,7 +377,8 @@ fn selected_provider_missing_field_retains_actual_other_supplier_origin_without_
         .iter()
         .find(|origin| origin.field_name == "name")
         .ok_or("missing name origin")?;
-    assert_eq!(name.supplied_by, "tmdb");
+    assert_eq!(name.supplied_by, "cinemeta");
+    assert_eq!(record.text("name"), Some("Rich Cinemeta"));
     Ok(())
 }
 
@@ -352,5 +392,60 @@ fn unmapped_source_target_is_explicit_unavailability_before_indexer_initializati
         Err(CatalogError::MissingIdentityMapping)
     );
     assert!(service.indexers.is_none());
+    Ok(())
+}
+
+#[test]
+fn date_pair_eligibility_uses_supplier_priority() -> TestResult {
+    use kinema_core::provider::{ProviderId, ProviderPriority};
+    let dir = tempfile::tempdir()?;
+    let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+    service.set_provider_priority(ProviderPriority::new([ProviderId::Tmdb]));
+    let priority = service.provider_priority.clone();
+    let tx = service.connection.transaction()?;
+    let item = imdb_observation(&CatalogTitle::new(
+        ImdbId::new("tt4000099")?,
+        MediaKind::Movie,
+        "Dated",
+        None,
+    )?);
+    let id = resolve_title(&tx, &item, 1, &priority)?;
+    for (supplier, quality, time, date, year) in [
+        ("cinemeta", Quality::Detail, 100, "2025-01-02", 2025),
+        ("tmdb", Quality::Summary, 1, "2026-02-03", 2026),
+        ("cinemeta", Quality::Detail, 200, "2027-03-04", 2027),
+    ] {
+        let f = fetch(
+            &tx,
+            Target::Title(id),
+            supplier,
+            "dates-v1",
+            quality,
+            false,
+            time,
+        )?;
+        normalized_pairs::fields(
+            &tx,
+            Target::Title(id),
+            &[
+                ("release_date".into(), FieldValue::Text(date.into())),
+                ("release_year".into(), FieldValue::Integer(year)),
+            ],
+            supplier,
+            quality,
+            f,
+            time,
+            &priority,
+        )?;
+    }
+    let record = CatalogService::title_record(&tx, id)?;
+    assert_eq!(record.text("release_date"), Some("2026-02-03"));
+    assert_eq!(record.integer("release_year"), Some(2026));
+    assert!(
+        record
+            .provenance
+            .iter()
+            .all(|field| field.supplied_by == "tmdb")
+    );
     Ok(())
 }

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: CC0-1.0
+[Desktop Entry]
+Type=Application
+Name=Kinema
+GenericName=Movie and TV Browser
+Comment=Browse movies and series, select streams, and launch an external player
+Exec=kinema-desktop
+Icon=dev.tlmtech.kinema
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=movie;series;cinema;stream;
+StartupWMClass=dev.tlmtech.kinema
+StartupNotify=true

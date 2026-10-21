@@ -9,7 +9,7 @@ use crate::{
         button::{Button, ButtonSize, ButtonVariant},
         icon::{Icon, IconName},
         icon_button::IconButton,
-        menu::{ContextMenuExt, MenuItem, Select, SelectEvent},
+        menu::{ContextMenuExt, Select, SelectEvent},
         motion::{self, Motion},
         patterns::{
             Badge, BadgeTone, ListRow, Section, Skeleton, StateView, ViewSelection, menu_item,
@@ -328,6 +328,15 @@ pub(crate) struct Detail {
     _subscriptions: Vec<Subscription>,
 }
 impl Detail {
+    /// How far the overview body has scrolled under the floating header
+    /// (zero on the Streams page, which is inset below the header instead).
+    pub(crate) fn scrolled_under_header(&self) -> Pixels {
+        if self.page == Page::Overview {
+            (-self.scroll.offset().y).max(px(0.))
+        } else {
+            px(0.)
+        }
+    }
     pub(crate) fn new(
         coordinator: Entity<AppCoordinator>,
         title: BrowseTitle,
@@ -415,6 +424,7 @@ impl Detail {
         this.reconcile_similar(cx);
         this
     }
+    #[cfg(all(test, feature = "ui-probe-test"))]
     pub(crate) fn name(&self) -> &str {
         self.title.name()
     }
@@ -425,6 +435,10 @@ impl Detail {
     #[allow(dead_code, reason = "P3 reads the stable hero slot after layout")]
     pub(crate) fn hero_slot_bounds(&self) -> Option<Bounds<Pixels>> {
         self.bounds.get()
+    }
+    /// True while the Streams sub-page is showing (header Back returns to details).
+    pub(crate) fn on_streams_page(&self) -> bool {
+        self.page == Page::Streams
     }
     /// Back from the Streams page to the detail page; false on the detail page
     /// itself so the route can leave Detail instead.
@@ -963,6 +977,9 @@ impl Render for Detail {
         self.apply_pending_focus(window, cx);
         let duration = motion::duration(Motion::Column, cx);
         let direction = self.page_direction;
+        // Overview content runs under the transparent header (hero art reaches
+        // the window top). The Streams page paints its own background to y=0 and
+        // insets its content, so the header blends without a seam.
         let page = div().relative().size_full().child(page);
         let page = if self.page_generation > 0 && !duration.is_zero() {
             page.with_animation(
