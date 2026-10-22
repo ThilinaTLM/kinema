@@ -1,0 +1,25 @@
+[package]
+name = "kinema-mpv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Isolated runtime-loaded libmpv playback and rendering backend"
+
+# Deliberately do not inherit workspace unsafe_code=forbid: this crate is the
+# audited native FFI boundary. Desktop and core continue to forbid unsafe code.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "warn"
+
+[features]
+default = ["gpu-render"]
+gpu-render = ["dep:glow"]
+
+[dependencies]
+glow = { workspace = true, optional = true }
+libloading.workspace = true
+thiserror.workspace = true

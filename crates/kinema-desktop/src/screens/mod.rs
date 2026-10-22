@@ -3,6 +3,7 @@ pub(crate) mod browse;
 pub mod coordinator;
 pub(crate) mod enrichment;
 pub mod main_window;
+pub mod player_window;
 
 pub(crate) mod detail;
 pub(crate) mod play_sheet;

@@ -36,6 +36,98 @@ not establish GUI rendering, secure storage, live-provider behavior, or external
 playback support. The commands below are validation instructions, not a report of
 checks or runtime verification for the current increment.
 
+## Embedded mpv prerequisites and validation plan
+
+**Source implemented; scoped Linux presentation and root checks reviewed.** Embedded mpv is the
+playback default in source, with a separate managed GPUI window; Settings offers
+embedded mpv, external mpv, and VLC. The backend import, original-player per-session
+replay, close/lease release, retry, and stale-event logic are implemented. Actual
+GPUI presentation has scoped Linux evidence; final option hardening and root/native
+reruns passed, while broader acceptance remains incomplete. See the
+[player contract and validation evidence](design/player.md#validation-evidence-lead-reviewed).
+
+The new `kinema-mpv` backend ports the experiment without modifying it. Desktop
+presentation must use the workspace's sole `gpui-pre =0.3.9`, not the experiment's
+GPUI 0.2.2 view. Native **libmpv** is a separate runtime requirement for embedded
+playback; an installed `mpv` executable alone does not satisfy it. External modes
+continue to require their respective executables and argument-list launching.
+
+The backend dynamically loads a trusted, architecture-compatible
+shared library rather than link or bundle a download implicitly. Conventional
+filenames include Linux `libmpv.so.2`, macOS `libmpv.2.dylib`, and Windows
+`mpv-2.dll` / `libmpv-2.dll`; the OS loader must also resolve their codec/runtime
+and graphics dependencies. On Debian/Ubuntu the runtime package is commonly
+`libmpv2`; package names differ elsewhere. macOS installations must expose the
+actual dylib and its dependencies; Windows requires matching DLL architecture
+and a trusted dependency search path. Do not assume Unix loader environment
+variables work on other platforms. A custom library path executes native code:
+never discover libraries from media downloads or untrusted working directories.
+Exact Kinema lookup order/path override UI or environment support awaits owner
+confirmation; the experiment's configuration is not a published Kinema interface.
+Missing libraries, symbols/API mismatch, unavailable render backends, and decoder
+failures need redacted actionable errors, not automatic installation or silent
+external fallback. Backend option hardening explicitly sets `load-scripts=no`,
+`osc=no`, and `osd-level=0`, excluding user-autoloaded scripts and native mpv
+chrome. Missing scripting/OSC options in no-engine builds are accepted only as
+`OptionNotFound`; other disable failures fail startup. This is not sandboxing or
+native crash isolation. Final root/native reruns passed with the added focused
+test. Missing-option classification has pure-test coverage only; native no-Lua
+builds are not runtime-qualified.
+
+The experiment identifies its Rust source as Apache-2.0; preserve applicable
+notices when porting. That does not license libmpv, FFmpeg, codecs, or other native
+dependencies under Kinema's license. libmpv builds may have GPL or LGPL obligations
+depending on build configuration and linked components. Dynamic loading is not a
+licensing exemption. Before redistribution, review the exact native binaries,
+source/notice requirements, dependencies, and applicable codec/patent terms.
+No bundled-library packaging, signing, notarization, or licensing clearance is
+claimed by this increment.
+
+GPUI native prerequisites above still apply. Platform graphics contexts, audio,
+decoder availability, DLL/dylib discovery, and Wayland/X11 behavior require native
+testing. The experiment's copy/readback pipeline establishes neither zero-copy
+nor HDR/wide-gamut output; hardware rendering and hardware decoding are separate
+policies. CPU fallback is not a quality or performance guarantee. Compilation or
+headless fixture tests cannot establish sustained decoding/rendering or OS support.
+
+Reproducible native probe entry points (generated media, no provider credentials):
+
+```sh
+cargo build -p kinema-desktop --bin ui-probe --features ui-probe --locked
+ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30 -t 10 -c:v mpeg4 -q:v 5 -an /tmp/kinema-player-test.mp4
+target/debug/ui-probe --scene player-native --media /tmp/kinema-player-test.mp4 --smoke-seconds 6
+xvfb-run -a -s '-screen 0 1200x760x24' env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11 target/debug/ui-probe --scene player --light --smoke-seconds 8
+```
+
+`player --light` is a synthetic chrome fixture with disabled backend controls,
+not native playback. `player-native` consumes the supplied media. Both accept
+`--size WIDTHxHEIGHT` (default 1100x680). Use isolated app data/session resources
+for automated interaction. Local ignored [artifact notes](../target/ui-probe/player/README.md)
+record the evidence and commands; the files may be absent on another checkout.
+
+Remaining validation plan (scoped results are recorded below):
+
+- Run root fmt, strict locked workspace Clippy, and locked workspace tests below,
+  including the imported backend. Keep deterministic
+  no-library tests separate from opt-in native playback checks.
+- Test missing/incompatible libraries, invalid input, worker/event cancellation,
+  stale results, bounded delivery, and teardown; failures must release leases.
+- Use temporary app data and synthetic/authorized local media for a native window
+  smoke: play/pause, ±10-second and timeline seek, mute/volume, resize, fullscreen,
+  keyboard, auto-hide/focus, EOF/replay, and close during initialization/buffering.
+  Audio/subtitle selection, More menus, drag-seek preview, and custom pointer
+  hiding are design follow-ups, not initial acceptance gates. No user tokens required.
+- Exercise loopback managed-media buffering/missing-range seeks, pause intent
+  surviving recovery, multiple leases, final-lease cancellation, and quit
+  Cancel/confirm. Verify external mpv/VLC and their lifetime policy remain intact.
+- Measure frame throughput, UI stalls, memory and teardown on Windows, macOS,
+  Linux Wayland and X11. Record observed renderer/decoder, library build, OS,
+  graphics/audio environment, command, and evidence limits; redact URLs/secrets.
+
+Historical validation elsewhere in this document predates this increment and
+must not be relabelled embedded-player acceptance. Download pause/prefetch
+suspension and tracked persistent resume/history remain deferred.
+
 ## Run and validate
 
 ```sh
@@ -140,10 +232,16 @@ V3 is the sole/default UI. These steps describe current source wiring, not a
 completed end-to-end GUI acceptance test. Historical validation totals below
 predate the v3 cleanup and do not establish current provider/playback acceptance.
 
-1. Install a native **mpv or VLC** executable separately; neither is bundled.
-   Start `cargo run -p kinema-desktop --locked` from the repository root.
+1. For the prior external-player flow, install a native **mpv or VLC** executable
+   separately; neither is bundled. For the approved embedded-default increment,
+   follow [libmpv prerequisites](#embedded-mpv-prerequisites-and-validation-plan);
+   source integration and scoped Linux UI presentation are recorded, while full
+   acceptance remains pending. Start
+   `cargo run -p kinema-desktop --locked` from the repository root.
 2. Open the separate **Settings** window. Defaults are Cinemeta, Torrentio,
-   Real-Debrid, mpv, and a **20 GiB** managed-media limit. Preferences apply
+   Real-Debrid, embedded mpv, and a **20 GiB** managed-media limit. Player choices
+   include external mpv and VLC; changes apply to new sessions, while replay
+   retains the original per-session player. Preferences apply
    immediately; wait for the save status and inspect errors. There is no legacy
    Save/Revert bar. Custom player selection requires an absolute executable path,
    not a shell command.
@@ -206,6 +304,49 @@ Development/release ordinary-data separation does not imply separate keyring
 accounts; do not assume deleting `./data/` deletes credentials.
 
 ## Validation status and limits
+
+### Embedded-player increment — scoped validation
+
+Lead-reported source status: backend imported into `kinema-mpv`; embedded default
+and three primary player choices; original-player per-session replay; separate
+managed window, close/lease release, retry, and stale-event logic implemented.
+Control source covers play/pause/EOF reload, ±10-second seek, click-seek timeline,
+mute/volume decrement/increment, fullscreen, Escape leaving fullscreen without
+closing, keyboard focus, and chrome auto-hide. Download pause/prefetch suspension
+remain deferred; minimize/occlusion suppression is not automatic.
+
+Lead-reviewed passes (not rerun by this docs owner):
+
+| Scope | Result |
+| --- | --- |
+| Backend deterministic, default | 37 passed |
+| Backend deterministic, CPU-only | 26 passed |
+| Native synthetic backend | `real_mpv_render_and_teardown`, `real_cpu_player_media_lifecycle`, `real_gpu_player_media_lifecycle`, `real_source_native_4k` passed |
+| Scoped integration | app 35 passed; settings 13 passed; `ui-probe-test` `embedded_` 4 passed |
+| Final root fmt / strict locked Clippy / locked tests | Passed; 477 tests passed (40 core + 400 desktop + 37 backend), 11 ignored |
+| Full desktop `ui-probe-test` strict Clippy / tests | Passed; 447 tests passed, 4 ignored |
+
+Native runs used local Linux Intel RPL-S, Mesa 26.2.5, OpenGL 4.6, and
+software-decoded synthetic fixtures. Separately, the production GPUI native
+Wayland probe consumed **172 GPU frames** from a generated 1280×720 clip into a
+physical **1100×680 viewport**, background shutdown `true`, error `false`. Owned
+isolated Xvfb playback used CPU fallback (expected DRI3 warnings): **22 frames**,
+position **15/30 seconds**, paused/muted `true`, shutdown `true`. Space/M/Right/
+Left/Escape and timeline click were exercised, not fullscreen or audio acceptance.
+The lead inspected the raw logs and synthetic-Light/real-paused captures in
+[ignored player artifacts](../target/ui-probe/player/README.md). Dark video chrome
+under Light is intentional. Viewport resolution is deliberate, not a hidden
+720p cap.
+
+These establish scoped backend and Linux GPUI presentation evidence, not hardware
+decoding, full-provider playback, cross-platform support, or performance claims.
+Final backend review added script/OSC/OSD option hardening and a focused test;
+all four native backend tests and the native Wayland UI smoke passed on rerun.
+The lead directly inspected `target/ui-probe/player/final-validation.log`, ending
+`TOTAL_FAILED_COMMANDS:0`. Track selection, More menus, drag-seek preview, and
+custom pointer hiding remain design follow-ups.
+
+The older records below are historical and are not embedded-player acceptance.
 
 This matrix distinguishes source inspection, reported subsystem/live-GUI evidence,
 and historical passing root checks from unperformed end-to-end acceptance.

@@ -49,6 +49,7 @@ tempfile.workspace = true
 reqwest.workspace = true
 rusqlite.workspace = true
 kinema-core.workspace = true
+kinema-mpv.workspace = true
 percent-encoding.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true

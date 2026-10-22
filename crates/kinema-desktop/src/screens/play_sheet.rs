@@ -246,8 +246,9 @@ impl Render for PlaySheet {
             .settings
             .as_ref()
             .map(|s| match &s.player {
-                PlayerChoice::Mpv => "mpv",
-                PlayerChoice::Vlc => "VLC",
+                PlayerChoice::Embedded => "Embedded MPV",
+                PlayerChoice::Mpv => "External MPV",
+                PlayerChoice::Vlc => "External VLC",
                 PlayerChoice::Custom(_) => "Custom player",
             });
         if let Some(player) = player {

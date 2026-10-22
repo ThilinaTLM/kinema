@@ -66,7 +66,7 @@ impl Default for Settings {
             indexer: IndexerKind::Torrentio,
             debrid: DebridKind::RealDebrid,
             media_limit_bytes: 20 * 1024 * 1024 * 1024,
-            player: PlayerChoice::Mpv,
+            player: PlayerChoice::Embedded,
             theme: ThemeChoice::default(),
             poster_size: PosterSize::default(),
             reduce_motion: MotionChoice::default(),
@@ -279,6 +279,7 @@ struct Document {
 impl Document {
     fn from_settings(settings: &Settings) -> Result<Self, SettingsError> {
         let (player, player_path) = match &settings.player {
+            PlayerChoice::Embedded => ("embedded", None),
             PlayerChoice::Mpv => ("mpv", None),
             PlayerChoice::Vlc => ("vlc", None),
             PlayerChoice::Custom(path) => (
@@ -345,6 +346,7 @@ impl Document {
             },
             media_limit_bytes: self.media_limit_bytes,
             player: match (self.player.as_str(), self.player_path) {
+                ("embedded", None) => PlayerChoice::Embedded,
                 ("mpv", None) => PlayerChoice::Mpv,
                 ("vlc", None) => PlayerChoice::Vlc,
                 ("custom", Some(path)) => PlayerChoice::Custom(path.into()),
@@ -366,6 +368,28 @@ mod tests {
             cache: root.into(),
         }
     }
+    #[test]
+    fn embedded_is_default_and_explicit_player_choices_round_trip()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(Settings::default().player, PlayerChoice::Embedded);
+        assert_eq!(PlayerChoice::default(), PlayerChoice::Embedded);
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        assert_eq!(store.load()?.player, PlayerChoice::Embedded);
+        for player in [PlayerChoice::Embedded, PlayerChoice::Mpv, PlayerChoice::Vlc] {
+            let settings = Settings {
+                player: player.clone(),
+                ..Settings::default()
+            };
+            store.save(&settings)?;
+            assert_eq!(store.load()?.player, player);
+        }
+        let document = Document::from_settings(&Settings::default())?;
+        assert_eq!(document.player, "embedded");
+        assert!(document.player_path.is_none());
+        Ok(())
+    }
+
     #[test]
     fn appearance_defaults_and_widths() -> Result<(), Box<dyn std::error::Error>> {
         let dir = tempfile::tempdir()?;

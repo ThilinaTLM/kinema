@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/kinema-core", "crates/kinema-desktop"]
+members = ["crates/kinema-core", "crates/kinema-desktop", "crates/kinema-mpv"]
 resolver = "3"
 
 [workspace.package]
@@ -12,6 +12,10 @@ publish = false
 [workspace.dependencies]
 unicode-segmentation = "1.13"
 kinema-core = { path = "crates/kinema-core" }
+kinema-mpv = { path = "crates/kinema-mpv" }
+glow = "0.16"
+libloading = "0.8"
+thiserror = "2"
 gpui = { package = "gpui-pre", version = "=0.3.9" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9" }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
@@ -51,4 +55,9 @@ debug = 1
 
 # Optimize codecs/transport while keeping workspace development builds cheap.
 [profile.dev.package."*"]
+opt-level = 2
+
+# Workspace members are excluded from the wildcard above. Keep the backend's
+# per-pixel packing/alpha loops optimized for representative dev playback.
+[profile.dev.package.kinema-mpv]
 opt-level = 2

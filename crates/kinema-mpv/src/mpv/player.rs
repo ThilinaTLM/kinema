@@ -1,0 +1,1082 @@
+use super::{
+    ffi::{EndFile, Property},
+    library::{Client, Loaded},
+    render::{self, Pipeline},
+    software::Frame,
+};
+use crate::{
+    Error, HardwareDecoding, PlaybackState, RenderBackend, RenderDiagnostics, ResolutionPolicy,
+    Result,
+};
+use std::{
+    ffi::{CStr, CString, c_int},
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TrySendError},
+    },
+    thread::{self, JoinHandle},
+    time::Duration,
+};
+
+#[derive(Clone, Debug)]
+pub struct Config {
+    pub library_path: Option<PathBuf>,
+    pub initial_volume: f64,
+    pub max_render_size: Option<[u32; 2]>,
+    pub render_backend: RenderBackend,
+    pub hardware_decoding: HardwareDecoding,
+    pub resolution: ResolutionPolicy,
+    pub max_frame_bytes: usize,
+    pub egl_library_path: Option<PathBuf>,
+    pub gles_library_path: Option<PathBuf>,
+}
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            library_path: None,
+            initial_volume: 100.0,
+            max_render_size: None,
+            render_backend: RenderBackend::Auto,
+            hardware_decoding: HardwareDecoding::Auto,
+            resolution: ResolutionPolicy::Source,
+            max_frame_bytes: 64 * 1024 * 1024,
+            egl_library_path: None,
+            gles_library_path: None,
+        }
+    }
+}
+
+pub(super) struct Shared {
+    pub stopped: AtomicBool,
+    pub pipeline: Mutex<Pipeline>,
+    pub state: Mutex<PlaybackState>,
+}
+impl Shared {
+    /// Only nonfatal control/media errors may be replaced by later events.
+    pub fn set_error(&self, error: String) {
+        if let Some(mut state) = self.control_state() {
+            state.error = Some(error);
+        }
+    }
+    /// Fatal render failures require Player recreation, never backend recovery.
+    pub fn fail_render(&self, error: String) {
+        // Publish shutdown first. An event already holding state completes before
+        // this final error is written; later events cannot obtain a mutation guard.
+        self.stopped.store(true, Ordering::Release);
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.stopped = true;
+        state.loading = false;
+        state.paused_for_cache = false;
+        if state.fatal_error.is_none() {
+            state.fatal_error = Some(error.clone());
+            state.error = Some(error);
+        }
+    }
+    fn control_state(&self) -> Option<std::sync::MutexGuard<'_, PlaybackState>> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if self.stopped.load(Ordering::Acquire) {
+            None
+        } else {
+            Some(state)
+        }
+    }
+}
+
+/// Marks unexpected worker exits (including unwinding) as terminal failures.
+pub(super) struct WorkerExit(pub Arc<Shared>);
+impl Drop for WorkerExit {
+    fn drop(&mut self) {
+        if !self.0.stopped.load(Ordering::Acquire) {
+            self.0
+                .fail_render("playback worker exited unexpectedly; recreate Player".into());
+        }
+    }
+}
+
+/// A bounded asynchronous control queue and a latest-frame mailbox.
+/// Dropping joins both workers; rendering is freed before the libmpv client.
+/// Runtime renderer errors permanently stop this Player; inspect state/diagnostics
+/// and recreate the Player to recover. Media/command errors remain recoverable.
+pub struct Player {
+    shared: Arc<Shared>,
+    commands: SyncSender<Vec<CString>>,
+    control: Option<JoinHandle<()>>,
+    render: Option<JoinHandle<()>>,
+}
+impl Player {
+    pub fn new(config: Config) -> Result<Self> {
+        validate_volume(config.initial_volume)?;
+        render::validate_config(&config)?;
+        let loaded = Loaded::load(config.library_path.as_deref())?;
+        let handle = unsafe { (loaded.api.create)() };
+        if handle.is_null() {
+            return Err(Error::Allocation);
+        }
+        let client = Arc::new(Client { loaded, handle });
+        for (name, value) in [
+            ("config", "no".into()),
+            ("vo", "libmpv".into()),
+            ("idle", "yes".into()),
+            ("terminal", "no".into()),
+            ("input-default-bindings", "no".into()),
+            ("osd-level", "0".into()),
+            ("volume", config.initial_volume.to_string()),
+            (
+                "hwdec",
+                render::hwdec(config.hardware_decoding, config.render_backend).into(),
+            ),
+        ] {
+            let name = CString::new(name).map_err(|_| Error::InvalidInput("option name"))?;
+            let value = CString::new(value).map_err(|_| Error::InvalidInput("option value"))?;
+            client.loaded.check(
+                unsafe { (client.loaded.api.option)(handle, name.as_ptr(), value.as_ptr()) },
+                "configure libmpv",
+            )?;
+        }
+        // These options are compiled out when their scripting engines are absent.
+        // Missing capability is safe; any other failure to disable it is an error.
+        for name in [c"load-scripts", c"osc"] {
+            let code = unsafe { (client.loaded.api.option)(handle, name.as_ptr(), c"no".as_ptr()) };
+            check_scripting_option(&client.loaded, code)?;
+        }
+        let mut option_warnings = Vec::new();
+        if config.render_backend != RenderBackend::Cpu {
+            // Best-effort stock-mpv quality settings and explicit SDR output.
+            // Configure on the creator/control side, never on the renderer worker.
+            for (name, value) in [
+                (c"scale", c"bicubic"),
+                (c"dscale", c"bicubic"),
+                (c"cscale", c"bilinear"),
+                (c"target-prim", c"bt.709"),
+                (c"target-trc", c"bt.1886"),
+                (c"tone-mapping", c"bt.2390"),
+            ] {
+                let code =
+                    unsafe { (client.loaded.api.option)(handle, name.as_ptr(), value.as_ptr()) };
+                if let Err(e) = client
+                    .loaded
+                    .check(code, "configure optional GPU quality/SDR option")
+                {
+                    option_warnings.push(format!("{}: {e}", name.to_string_lossy()));
+                }
+            }
+        }
+        client.loaded.check(
+            unsafe { (client.loaded.api.initialize)(handle) },
+            "initialize libmpv",
+        )?;
+        for (id, name, format) in [
+            (1, c"time-pos", 5),
+            (2, c"duration", 5),
+            (3, c"pause", 3),
+            (4, c"volume", 5),
+            (5, c"mute", 3),
+            (6, c"video-out-params/w", 4),
+            (7, c"video-out-params/h", 4),
+            (8, c"video-out-params/dw", 4),
+            (9, c"video-out-params/dh", 4),
+            (10, c"video-out-params/rotate", 4),
+            (11, c"hwdec-current", 1),
+            (12, c"paused-for-cache", 3),
+        ] {
+            client.loaded.check(
+                unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), format) },
+                "observe property",
+            )?;
+        }
+        let shared = Arc::new(Shared {
+            stopped: AtomicBool::new(false),
+            pipeline: Mutex::new(Pipeline::new(config.clone())),
+            state: Mutex::new(PlaybackState {
+                volume: config.initial_volume,
+                requested_backend: config.render_backend,
+                ..PlaybackState::default()
+            }),
+        });
+        shared
+            .pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .option_warnings(option_warnings);
+        let (commands, receiver) = mpsc::sync_channel(64);
+        let (decoder_tx, decoder_rx) = mpsc::sync_channel(1);
+        let control_shared = shared.clone();
+        let control_client = client.clone();
+        let control = thread::Builder::new()
+            .name("mpv-control".into())
+            .spawn(move || control_worker(control_client, control_shared, receiver, decoder_rx))?;
+        let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+        let render_shared = shared.clone();
+        let render = match thread::Builder::new()
+            .name("mpv-render".into())
+            .spawn(move || render::run(client, render_shared, config, decoder_tx, ready_sender))
+        {
+            Ok(worker) => worker,
+            Err(e) => {
+                shared.stopped.store(true, Ordering::Release);
+                control.thread().unpark();
+                let _ = control.join();
+                return Err(e.into());
+            }
+        };
+        if let Err(e) = ready_receiver.recv().unwrap_or(Err(Error::Disconnected)) {
+            shared.stopped.store(true, Ordering::Release);
+            control.thread().unpark();
+            let _ = render.join();
+            let _ = control.join();
+            return Err(e);
+        }
+        Ok(Self {
+            shared,
+            commands,
+            control: Some(control),
+            render: Some(render),
+        })
+    }
+    fn command(&self, arguments: &[&str]) -> Result<()> {
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return Err(Error::Disconnected);
+        }
+        let arguments = arguments
+            .iter()
+            .map(|s| {
+                CString::new(*s).map_err(|_| Error::InvalidInput("command contains a NUL byte"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.commands.try_send(arguments).map_err(|e| match e {
+            TrySendError::Full(_) => Error::QueueFull,
+            TrySendError::Disconnected(_) => Error::Disconnected,
+        })?;
+        if let Some(worker) = &self.control {
+            worker.thread().unpark();
+        }
+        Ok(())
+    }
+    pub fn load(&self, source: &str) -> Result<()> {
+        if source.is_empty() {
+            return Err(Error::InvalidInput("media path or URL cannot be empty"));
+        }
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pipeline = self
+            .shared
+            .pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        self.command(&["loadfile", source, "replace"])?;
+        pipeline.clear(&mut state);
+        Ok(())
+    }
+    pub fn set_paused(&self, paused: bool) -> Result<()> {
+        self.command(&["set", "pause", if paused { "yes" } else { "no" }])
+    }
+    pub fn toggle_pause(&self) -> Result<()> {
+        self.command(&["cycle", "pause"])
+    }
+    pub fn stop(&self) -> Result<()> {
+        self.command(&["stop"])
+    }
+    /// Seek by a finite relative number of seconds.
+    pub fn seek(&self, seconds: f64) -> Result<()> {
+        if !seconds.is_finite() {
+            return Err(Error::InvalidInput("seek seconds must be finite"));
+        }
+        self.command(&["seek", &seconds.to_string(), "relative+exact"])
+    }
+    /// Set a finite volume percentage in 0..=100.
+    pub fn set_volume(&self, volume: f64) -> Result<()> {
+        validate_volume(volume)?;
+        self.command(&["set", "volume", &volume.to_string()])
+    }
+    pub fn set_muted(&self, muted: bool) -> Result<()> {
+        self.command(&["set", "mute", if muted { "yes" } else { "no" }])
+    }
+    pub fn toggle_mute(&self) -> Result<()> {
+        self.command(&["cycle", "mute"])
+    }
+    /// Coalesced physical viewport resize. Zero dimensions suspend rendering.
+    pub fn resize(&self, width: u32, height: u32) -> Result<()> {
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return Err(Error::Disconnected);
+        }
+        {
+            let mut state = self.shared.control_state().ok_or(Error::Disconnected)?;
+            let mut pipeline = self
+                .shared
+                .pipeline
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            pipeline.viewport = [width, height];
+            pipeline.recompute(&mut state)?;
+        }
+        if let Some(worker) = &self.render {
+            worker.thread().unpark();
+        }
+        Ok(())
+    }
+    pub fn state(&self) -> PlaybackState {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        state.stopped |= self.shared.stopped.load(Ordering::Acquire);
+        state
+    }
+    /// Whether workers have permanently stopped, not whether media reached EOF.
+    pub fn is_stopped(&self) -> bool {
+        self.shared.stopped.load(Ordering::Acquire)
+    }
+    pub fn diagnostics(&self) -> RenderDiagnostics {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        self.shared
+            .pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .snapshot(&state)
+    }
+    pub fn take_frame(&self) -> Option<Frame> {
+        self.shared
+            .pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+    }
+}
+impl Drop for Player {
+    fn drop(&mut self) {
+        self.shared.stopped.store(true, Ordering::Release);
+        if let Some(worker) = &self.control {
+            worker.thread().unpark();
+        }
+        if let Some(worker) = self.render.take() {
+            worker.thread().unpark();
+            let _ = worker.join();
+        }
+        if let Some(worker) = self.control.take() {
+            let _ = worker.join();
+        }
+    }
+}
+fn check_scripting_option(loaded: &Loaded, code: i32) -> Result<()> {
+    if scripting_option_absent(code) {
+        Ok(())
+    } else {
+        loaded.check(code, "disable scripting/OSC")
+    }
+}
+fn scripting_option_absent(code: i32) -> bool {
+    // MPV_ERROR_OPTION_NOT_FOUND: options/options.c conditionally registers
+    // load-scripts for scripting builds and osc for Lua builds only.
+    code == -5
+}
+fn validate_volume(volume: f64) -> Result<()> {
+    if !volume.is_finite() || !(0.0..=100.0).contains(&volume) {
+        Err(Error::InvalidInput(
+            "volume must be finite and between 0 and 100",
+        ))
+    } else {
+        Ok(())
+    }
+}
+// SAFETY: non-null payloads must have libmpv's documented string-property layout.
+unsafe fn copied_string(property: &Property) -> Option<String> {
+    if property.format != 1 || property.data.is_null() {
+        return None;
+    }
+    let ptr = unsafe { *property.data.cast::<*const std::ffi::c_char>() };
+    if ptr.is_null() {
+        None
+    } else {
+        Some(
+            unsafe { CStr::from_ptr(ptr) }
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+}
+
+fn control_worker(
+    client: Arc<Client>,
+    shared: Arc<Shared>,
+    receiver: Receiver<Vec<CString>>,
+    decoder: Receiver<SyncSender<Result<()>>>,
+) {
+    let _exit = WorkerExit(shared.clone());
+    while !shared.stopped.load(Ordering::Acquire) {
+        for reply in decoder.try_iter() {
+            if shared.stopped.load(Ordering::Acquire) {
+                let _ = reply.send(Err(Error::Disconnected));
+                break;
+            }
+            let result = client.loaded.check(
+                unsafe {
+                    (client.loaded.api.option)(
+                        client.handle,
+                        c"hwdec".as_ptr(),
+                        c"auto-copy".as_ptr(),
+                    )
+                },
+                "set fallback hardware decoding",
+            );
+            let _ = reply.send(result);
+        }
+        // Bounded batches prevent command floods starving events or shutdown.
+        for arguments in receiver.try_iter().take(64) {
+            if shared.stopped.load(Ordering::Acquire) {
+                break;
+            }
+            let mut pointers: Vec<_> = arguments.iter().map(|s| s.as_ptr()).collect();
+            pointers.push(std::ptr::null());
+            let code = unsafe { (client.loaded.api.command)(client.handle, 0, pointers.as_ptr()) };
+            if let Err(e) = client.loaded.check(code, "queue command") {
+                shared.set_error(e.to_string());
+            }
+        }
+        for _ in 0..256 {
+            if shared.stopped.load(Ordering::Acquire) {
+                break;
+            }
+            // Event payloads are consumed completely before the next wait_event call.
+            let event = unsafe { &*(client.loaded.api.wait)(client.handle, 0.0) };
+            if event.id == 0 {
+                break;
+            }
+            // Recheck under the mutation lock: an already-read START_FILE must
+            // not erase a fatal renderer error after shutdown was published.
+            let Some(mut state) = shared.control_state() else {
+                break;
+            };
+            match event.id {
+                1 => {
+                    shared.stopped.store(true, Ordering::Release);
+                    state.stopped = true;
+                    state.loading = false;
+                    state.paused_for_cache = false;
+                    break;
+                }
+                5 if event.error < 0 => {
+                    state.error = client
+                        .loaded
+                        .check(event.error, "command")
+                        .err()
+                        .map(|e| e.to_string());
+                    state.loading = false;
+                }
+                6 => {
+                    state.loading = true;
+                    state.media_stopped = false;
+                    state.paused_for_cache = false;
+                    state.ended = false;
+                    state.error = None;
+                    state.position = 0.0;
+                    state.duration = None;
+                    shared
+                        .pipeline
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clear(&mut state);
+                }
+                7 => {
+                    shared
+                        .pipeline
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clear(&mut state);
+                    state.loading = false;
+                    state.media_stopped = true;
+                    state.paused_for_cache = false;
+                    if !event.data.is_null() {
+                        let end = unsafe { &*event.data.cast::<EndFile>() };
+                        state.ended = end.reason == 0;
+                        if end.reason == 4 {
+                            state.error = client
+                                .loaded
+                                .check(end.error, "playback")
+                                .err()
+                                .map(|e| e.to_string())
+                                .or(Some("playback failed".into()));
+                        }
+                    }
+                }
+                8 => {
+                    state.loading = false;
+                }
+                22 if !event.data.is_null() => {
+                    let property = unsafe { &*event.data.cast::<Property>() };
+                    match (event.userdata, property.format, property.data.is_null()) {
+                        (1 | 2 | 4, 5, false) => {
+                            let value = unsafe { *property.data.cast::<f64>() };
+                            if value.is_finite() {
+                                match event.userdata {
+                                    1 => state.position = value.max(0.0),
+                                    2 => state.duration = Some(value.max(0.0)),
+                                    4 => state.volume = value,
+                                    _ => {}
+                                }
+                            }
+                        }
+                        (3 | 5 | 12, 3, false) => {
+                            let value = unsafe { *property.data.cast::<c_int>() } != 0;
+                            if event.userdata == 3 {
+                                state.paused = value;
+                            } else if event.userdata == 5 {
+                                state.muted = value;
+                            } else {
+                                state.paused_for_cache = value;
+                            }
+                        }
+                        (2, 0, _) => state.duration = None,
+                        (6..=10, _, _) => {
+                            let value = if property.format == 4 && !property.data.is_null() {
+                                Some(unsafe { *property.data.cast::<i64>() })
+                            } else {
+                                None
+                            };
+                            let mut pipeline =
+                                shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+                            pipeline.metadata[(event.userdata - 6) as usize] = value;
+                            if event.userdata == 6 {
+                                pipeline.video_absent = value.is_none_or(|v| v <= 0);
+                            }
+                            if let Err(e) = pipeline.recompute(&mut state) {
+                                state.error = Some(e.to_string());
+                            }
+                        }
+                        (11, _, _) => {
+                            // The string and its pointer are borrowed only until wait_event.
+                            state.hardware_decoder = unsafe { copied_string(property) };
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        thread::park_timeout(Duration::from_millis(10));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn mock_player() -> (Player, Receiver<Vec<CString>>) {
+        let (commands, receiver) = mpsc::sync_channel(1);
+        (
+            Player {
+                shared: Arc::new(Shared {
+                    stopped: AtomicBool::new(false),
+                    pipeline: Mutex::new(Pipeline::new(Config::default())),
+                    state: Mutex::new(PlaybackState::default()),
+                }),
+                commands,
+                control: None,
+                render: None,
+            },
+            receiver,
+        )
+    }
+    #[test]
+    fn fatal_render_failure_rejects_control_and_preserves_last_diagnostics() {
+        let (player, receiver) = mock_player();
+        player.shared.state.lock().unwrap().render_size = [640, 480];
+        player
+            .shared
+            .fail_render("lost GPU context; recreate Player".into());
+        assert!(player.shared.stopped.load(Ordering::Acquire));
+        assert!(player.is_stopped());
+        assert!(player.state().stopped);
+        assert_eq!(
+            player.state().fatal_error.as_deref(),
+            Some("lost GPU context; recreate Player")
+        );
+        assert!(matches!(player.load("later.mkv"), Err(Error::Disconnected)));
+        assert!(matches!(player.stop(), Err(Error::Disconnected)));
+        assert!(matches!(player.resize(320, 240), Err(Error::Disconnected)));
+        assert!(receiver.try_recv().is_err());
+        // Simulate a START_FILE already read by the control worker: every event
+        // must acquire this exact guard before clearing/mutating observed state.
+        assert!(player.shared.control_state().is_none());
+        player
+            .shared
+            .set_error("late nonfatal command error".into());
+        assert_eq!(
+            player.state().error.as_deref(),
+            Some("lost GPU context; recreate Player")
+        );
+        assert_eq!(player.diagnostics().render_size, [640, 480]);
+    }
+    #[test]
+    fn in_flight_event_mutation_cannot_outlive_fatal_error_recording() {
+        let (player, _receiver) = mock_player();
+        let mut already_read_event = player.shared.control_state().unwrap();
+        let shared = player.shared.clone();
+        let failing_renderer =
+            thread::spawn(move || shared.fail_render("fatal renderer failure".into()));
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !player.shared.stopped.load(Ordering::Acquire) {
+            assert!(std::time::Instant::now() < deadline);
+            thread::yield_now();
+        }
+        // An event which acquired the guard before failure may finish, but the
+        // fatal writer waits for this guard and has the final state mutation.
+        already_read_event.error = None;
+        drop(already_read_event);
+        failing_renderer.join().unwrap();
+        assert_eq!(
+            player.state().error.as_deref(),
+            Some("fatal renderer failure")
+        );
+        assert!(player.shared.control_state().is_none());
+    }
+    #[test]
+    fn nonfatal_media_error_keeps_control_events_recoverable() {
+        let (player, receiver) = mock_player();
+        player.shared.set_error("invalid media".into());
+        assert!(!player.shared.stopped.load(Ordering::Acquire));
+        let mut state = player
+            .shared
+            .control_state()
+            .expect("nonfatal error permits START_FILE");
+        state.error = None;
+        drop(state);
+        player.load("valid.mkv").unwrap();
+        assert!(receiver.try_recv().is_ok());
+        assert!(player.state().error.is_none());
+    }
+    #[test]
+    fn unexpected_worker_exit_is_terminal_and_keeps_original_failure() {
+        let (player, _receiver) = mock_player();
+        drop(WorkerExit(player.shared.clone()));
+        let state = player.state();
+        assert!(state.stopped);
+        assert!(state.fatal_error.is_some());
+        assert_eq!(state.error, state.fatal_error);
+        player.shared.set_error("late error".into());
+        player.shared.fail_render("second worker failure".into());
+        assert_eq!(player.state().fatal_error, state.fatal_error);
+        assert_eq!(player.state().error, state.error);
+    }
+    #[test]
+    fn dropping_player_joins_both_workers() {
+        let (mut player, _receiver) = mock_player();
+        let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for render in [true, false] {
+            let shared = player.shared.clone();
+            let completed = completed.clone();
+            let worker = thread::spawn(move || {
+                while !shared.stopped.load(Ordering::Acquire) {
+                    thread::park_timeout(Duration::from_millis(10));
+                }
+                completed.fetch_add(1, Ordering::AcqRel);
+            });
+            if render {
+                player.render = Some(worker);
+            } else {
+                player.control = Some(worker);
+            }
+        }
+        drop(player);
+        assert_eq!(completed.load(Ordering::Acquire), 2);
+    }
+    #[test]
+    fn string_properties_are_copied_and_tolerate_missing_values() {
+        let text = CString::new(vec![b'a', 0xff]).unwrap();
+        let mut ptr = text.as_ptr();
+        let mut property = Property {
+            name: std::ptr::null(),
+            format: 1,
+            data: (&mut ptr as *mut *const std::ffi::c_char).cast(),
+        };
+        assert_eq!(unsafe { copied_string(&property) }.unwrap(), "a�");
+        property.format = 0;
+        assert!(unsafe { copied_string(&property) }.is_none());
+        property.format = 1;
+        property.data = std::ptr::null_mut();
+        assert!(unsafe { copied_string(&property) }.is_none());
+        let mut ptr: *const std::ffi::c_char = std::ptr::null();
+        property.data = (&mut ptr as *mut *const std::ffi::c_char).cast();
+        assert!(unsafe { copied_string(&property) }.is_none());
+    }
+    #[test]
+    #[ignore = "requires installed libmpv and ffmpeg; native 4K CPU rendering"]
+    fn real_source_native_4k() {
+        let path = std::env::temp_dir().join(format!("mpv-gpui-4k-{}.mkv", std::process::id()));
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=3840x2160:r=1",
+                    "-t",
+                    "2",
+                    "-c:v",
+                    "mpeg4"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            hardware_decoding: HardwareDecoding::Disabled,
+            ..Config::default()
+        })
+        .unwrap();
+        player.resize(640, 360).unwrap();
+        player.load(path.to_str().unwrap()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(frame) = player.take_frame()
+                && [frame.width, frame.height] == [3840, 2160]
+            {
+                assert_eq!(frame.pixels.len(), 3840 * 2160 * 4);
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no native 4K frame: {:?}",
+                player.state()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(player.state().source_size, Some([3840, 2160]));
+        drop(player);
+        let _ = std::fs::remove_file(path);
+    }
+    #[test]
+    fn input_errors_do_not_enqueue() {
+        let (player, receiver) = mock_player();
+        assert!(player.load("").is_err());
+        assert!(player.load("invalid\0path").is_err());
+        assert!(player.seek(f64::NAN).is_err());
+        assert!(player.set_volume(f64::INFINITY).is_err());
+        assert!(receiver.try_recv().is_err());
+        player.load("a file with spaces.mp4").unwrap();
+        let command = receiver.try_recv().unwrap();
+        assert_eq!(command[1].to_str().unwrap(), "a file with spaces.mp4");
+    }
+    #[test]
+    fn command_backpressure_and_disconnect() {
+        let (player, receiver) = mock_player();
+        player.stop().unwrap();
+        assert!(matches!(player.stop(), Err(Error::QueueFull)));
+        drop(receiver);
+        assert!(matches!(player.stop(), Err(Error::Disconnected)));
+    }
+    #[test]
+    fn shutdown_rejects_commands_and_resize() {
+        let (player, _receiver) = mock_player();
+        player.shared.stopped.store(true, Ordering::Release);
+        assert!(matches!(player.stop(), Err(Error::Disconnected)));
+        assert!(matches!(player.resize(10, 10), Err(Error::Disconnected)));
+    }
+    #[test]
+    fn absent_scripting_options_are_optional_but_other_errors_are_not() {
+        assert!(scripting_option_absent(-5));
+        for code in [-3, -4, -6, -7, -12, 0] {
+            assert!(!scripting_option_absent(code));
+        }
+    }
+    #[test]
+    fn volume_validation() {
+        for invalid in [f64::NAN, f64::INFINITY, -1.0, 101.0] {
+            assert!(validate_volume(invalid).is_err());
+        }
+        assert!(validate_volume(0.0).is_ok());
+        assert!(validate_volume(100.0).is_ok());
+    }
+    #[test]
+    fn mailbox_replaces_and_takes() {
+        let frame = Mutex::new(None);
+        for width in [1, 2, 3] {
+            *frame.lock().unwrap() = Some(Frame {
+                width,
+                height: 1,
+                pixels: vec![],
+            });
+        }
+        assert_eq!(frame.lock().unwrap().take().unwrap().width, 3);
+        assert!(frame.lock().unwrap().take().is_none());
+    }
+    #[test]
+    fn missing_library_is_actionable() {
+        let result = Player::new(Config {
+            library_path: Some("/definitely/not/a/libmpv-library".into()),
+            ..Config::default()
+        });
+        assert!(matches!(result, Err(Error::Library { .. })));
+    }
+    #[test]
+    #[ignore = "requires installed libmpv and ffmpeg; exercises real software rendering"]
+    fn real_mpv_render_and_teardown() {
+        let path = std::env::temp_dir().join(format!("mpv-gpui-test-{}.mkv", std::process::id()));
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=64x48:r=10",
+                "-t",
+                "2",
+                "-c:v",
+                "mpeg4",
+            ])
+            .arg(&path)
+            .status()
+            .expect("ffmpeg is required");
+        assert!(status.success());
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            resolution: ResolutionPolicy::Viewport,
+            ..Config::default()
+        })
+        .unwrap();
+        player.resize(64, 48).unwrap();
+        player.load(path.to_str().unwrap()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut saw_red = false;
+        while std::time::Instant::now() < deadline {
+            if let Some(frame) = player.take_frame()
+                && frame
+                    .pixels
+                    .chunks_exact(4)
+                    .any(|p| p[0] > 200 && p[1] < 40 && p[2] < 40 && p[3] == 255)
+            {
+                saw_red = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(saw_red, "no red RGBA frame; state: {:?}", player.state());
+        assert!(player.seek(f64::NAN).is_err());
+        assert!(player.load("bad\0path").is_err());
+        player.set_paused(true).unwrap();
+        wait_for(&player, |s| s.paused && s.duration.is_some());
+        player.seek(0.2).unwrap();
+        wait_for(&player, |s| s.position >= 0.15);
+        player.resize(32, 24).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(frame) = player.take_frame()
+                && frame.width == 32
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "paused resize did not redraw"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        player.set_paused(false).unwrap();
+        wait_for(&player, |s| s.ended);
+        player.load("/definitely/not/a/video-file").unwrap();
+        wait_for(&player, |s| s.error.is_some() && !s.loading);
+        player.stop().unwrap();
+        drop(player);
+        let _ = std::fs::remove_file(path);
+        // Exercise context initialization and destruction repeatedly without media.
+        for _ in 0..3 {
+            drop(
+                Player::new(Config {
+                    render_backend: RenderBackend::Cpu,
+                    resolution: ResolutionPolicy::Viewport,
+                    ..Config::default()
+                })
+                .unwrap(),
+            );
+        }
+    }
+    struct TemporaryMedia(std::path::PathBuf);
+    impl TemporaryMedia {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "mpv-gpui-lifecycle-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn clip(&self, name: &str, filter: &str, audio: bool) -> std::path::PathBuf {
+            let path = self.0.join(name);
+            let mut command = std::process::Command::new("ffmpeg");
+            command.args([
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                filter,
+                "-t",
+                if audio { "2" } else { "4" },
+            ]);
+            command.args(if audio {
+                ["-c:a", "pcm_s16le"]
+            } else {
+                ["-c:v", "mpeg4"]
+            });
+            assert!(
+                command
+                    .arg(&path)
+                    .status()
+                    .expect("ffmpeg required for opt-in lifecycle tests")
+                    .success()
+            );
+            path
+        }
+    }
+    impl Drop for TemporaryMedia {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn wait_frame(player: &Player, size: [u32; 2], color: [u8; 3]) -> Frame {
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            if let Some(frame) = player.take_frame()
+                && [frame.width, frame.height] == size
+                && frame.pixels.chunks_exact(4).any(|p| {
+                    p[3] == 255
+                        && p[..3]
+                            .iter()
+                            .zip(color)
+                            .all(|(&actual, expected)| actual.abs_diff(expected) < 40)
+                })
+            {
+                return frame;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no expected {size:?}/{color:?} frame; state={:?}, diagnostics={:?}",
+                player.state(),
+                player.diagnostics()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    fn player_media_lifecycle(backend: RenderBackend) {
+        let media = TemporaryMedia::new();
+        let red = media.clip("red.mkv", "color=c=red:s=64x48:r=10", false);
+        let blue = media.clip("blue.mkv", "color=c=blue:s=96x64:r=10", false);
+        let audio = media.clip("audio.wav", "sine=frequency=440:sample_rate=8000", true);
+        let config = Config {
+            render_backend: backend,
+            hardware_decoding: HardwareDecoding::Auto,
+            ..Config::default()
+        };
+        let player = Player::new(config.clone())
+            .unwrap_or_else(|e| panic!("requested {backend:?} capability unavailable: {e}"));
+        player.resize(160, 120).unwrap();
+        player.load(red.to_str().unwrap()).unwrap();
+        wait_frame(&player, [64, 48], [255, 0, 0]);
+        assert_eq!(player.state().active_backend, backend);
+        player.set_paused(true).unwrap();
+        wait_for(&player, |s| s.paused);
+        player.seek(0.5).unwrap();
+        wait_for(&player, |s| s.position >= 0.4);
+        // Source is native, not a disguised viewport cap, even while paused.
+        player.resize(32, 24).unwrap();
+        assert_eq!(player.state().render_size, [64, 48]);
+        assert_eq!(player.state().source_display_size, Some([64, 48]));
+        player.load(blue.to_str().unwrap()).unwrap();
+        wait_frame(&player, [96, 64], [0, 0, 255]);
+        assert_eq!(player.state().source_size, Some([96, 64]));
+        assert!(
+            player.state().paused,
+            "source replacement unexpectedly unpaused"
+        );
+        player.resize(320, 240).unwrap();
+        assert_eq!(player.state().render_size, [96, 64]);
+        // Existing/late GPU readbacks must not leak across a no-video load.
+        player.load(audio.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| {
+            !s.loading && s.duration.is_some_and(|d| d > 1.8 && d < 2.2)
+        });
+        let deadline = std::time::Instant::now() + Duration::from_millis(250);
+        while std::time::Instant::now() < deadline {
+            assert!(
+                player.take_frame().is_none(),
+                "audio-only media delivered a stale video frame"
+            );
+            let state = player.state();
+            assert_eq!(state.source_size, None);
+            assert_eq!(state.source_display_size, None);
+            assert_eq!(state.render_size, [0, 0]);
+            thread::sleep(Duration::from_millis(5));
+        }
+        player
+            .load(media.0.join("missing.mkv").to_str().unwrap())
+            .unwrap();
+        wait_for(&player, |s| s.error.is_some() && !s.loading);
+        assert!(player.take_frame().is_none());
+        player.load(red.to_str().unwrap()).unwrap();
+        wait_frame(&player, [64, 48], [255, 0, 0]);
+        player.set_paused(false).unwrap();
+        player.seek(3.7).unwrap();
+        wait_for(&player, |s| s.ended);
+        assert!(player.take_frame().is_none());
+        let diagnostics = player.diagnostics();
+        assert!(diagnostics.delivered_frames > 0);
+        if backend == RenderBackend::Gpu {
+            assert!(diagnostics.readback_bytes > 0);
+        }
+        // Decoder reporting is observed; hardware activation is driver/codec dependent.
+        eprintln!("Player lifecycle {backend:?}: {diagnostics:?}");
+        drop(player);
+        let viewport = Player::new(Config {
+            resolution: ResolutionPolicy::Viewport,
+            ..config.clone()
+        })
+        .unwrap();
+        viewport.resize(80, 60).unwrap();
+        viewport.set_paused(true).unwrap();
+        viewport.load(red.to_str().unwrap()).unwrap();
+        wait_frame(&viewport, [80, 60], [255, 0, 0]);
+        wait_for(&viewport, |s| s.paused);
+        viewport.resize(32, 24).unwrap();
+        wait_frame(&viewport, [32, 24], [255, 0, 0]);
+        assert_eq!(viewport.state().source_size, Some([64, 48]));
+        drop(viewport);
+        for _ in 0..3 {
+            drop(Player::new(config.clone()).unwrap());
+        }
+    }
+    #[test]
+    #[ignore = "requires libmpv and ffmpeg; real source/viewport/audio-only control lifecycle"]
+    fn real_cpu_player_media_lifecycle() {
+        player_media_lifecycle(RenderBackend::Cpu);
+    }
+    #[cfg(feature = "gpu-render")]
+    #[test]
+    #[ignore = "requires native hardware GL, libmpv and ffmpeg; full Player control/readback lifecycle"]
+    fn real_gpu_player_media_lifecycle() {
+        player_media_lifecycle(RenderBackend::Gpu);
+    }
+    fn wait_for(player: &Player, predicate: impl Fn(&PlaybackState) -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !predicate(&player.state()) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "state timed out: {:?}",
+                player.state()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}

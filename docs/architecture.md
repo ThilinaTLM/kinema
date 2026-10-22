@@ -2,7 +2,7 @@
 
 ## What we are building
 
-**Current state:** MVP source flows are composed in the two-crate Rust workspace,
+**Current state:** MVP source flows are composed in the Rust workspace,
 using direct GPUI (`gpui-pre =0.3.9`) and `gpui_platform`. V3 is the sole/default
 UI, with in-house widgets and no version switch or Kit dependency. It wires Cinemeta/TMDB browse/search/details
 and episodes, source selection, settings/keyring actions, preparation/file choice,
@@ -46,15 +46,71 @@ Kinema Next is a local-first movie and TV-series application written in Rust wit
 - Find and select sources through Torrentio and Peerflix.
 - Integrate debrid services, targeting Real-Debrid and AllDebrid.
 - Download media into managed local storage and serve it through Kinema's media server while downloading.
-- Open local server URLs in external VLC or standalone mpv. Also serve existing local files. The server is loopback-only; LAN access is excluded.
+- Play local server URLs, including served existing local files. The previous external-only MVP is superseded by the approved embedded-mpv default below; retain external VLC and standalone mpv. The server is loopback-only; LAN access is excluded.
 - Cache metadata and indexer results; show last-update times and provide force-refresh.
 - Enforce a user-configurable media-cache limit, defaulting to 20 GiB. Warn and offer to increase it when one file exceeds the limit. See [storage policy](storage-layout.md#limits-and-cleanup) for remaining choices.
 
-**Later:** personalized library membership, watch history/progress and tracked resume, embedded playback, and a built-in torrent engine. Manual inactive-only media cleanup is sufficient for the MVP; active eviction is excluded. Mobile support is only a future possibility.
+**Later:** personalized library membership, watch history/progress and tracked persistent resume, download pause/prefetch suspension, and a built-in torrent engine. Manual inactive-only media cleanup is sufficient for the MVP; active eviction is excluded. Mobile support is only a future possibility.
 
 The catalog is not a personalized library. Media downloading is not proof that someone watched it.
 
-## Approved UI direction and current work
+## Approved embedded-player direction
+
+**Source implemented; scoped Linux presentation and root checks passed, full acceptance pending.**
+The backend crate import, embedded default and three primary settings choices
+(embedded mpv, external mpv, VLC), managed-window code, close/lease release,
+retry, and stale-event logic are implemented. Backend native synthetic checks
+and scoped integration tests passed as reviewed by the lead. Root checks passed
+(477 tests, 11 ignored), as did full desktop `ui-probe-test` checks (447 tests,
+4 ignored). Native Wayland and isolated Xvfb probes establish scoped GPUI video
+presentation, not full-provider, cross-platform, or performance acceptance. Final
+backend review added explicit script/OSC/OSD disabling; post-change root/native
+reruns passed. Native no-Lua builds are not runtime-qualified; missing-option
+classification has pure-test coverage only. See the [validation evidence](design/player.md#validation-evidence-lead-reviewed).
+
+Embedded mpv is the default playback choice in an independent,
+Kinema-managed GPUI window, not a pane in the browser or an external mpv process.
+External mpv and VLC remain explicit alternatives with their existing lifetime
+policy. See the [player design](design/player.md) for chrome, controls, states,
+ownership, and acceptance requirements.
+
+The backend is imported from `/home/tlm/Projects/Random/mpv-gpui` into the new
+`kinema-mpv` crate without modifying the experiment. Keep native libmpv loading,
+commands, events, decoding/render workers, and resource teardown behind that
+backend boundary; the desktop owns the GPUI view, window, Cinema tokens, and
+session coordination. Do not import the experiment's GPUI 0.2.2 view or introduce
+a second engine: desktop presentation uses only pinned `gpui-pre =0.3.9` and
+`gpui_platform`. Domain policies remain in `kinema-core`.
+
+Embedded playback consumes the same loopback media-server lease boundary as
+external playback, never upstream debrid URLs. Each embedded window owns one
+lease; replay of that lease focuses its existing window rather than creating
+another embedded owner. External replay can share a lease, so playback instances
+and leases are not interchangeable. The implemented replay guard remembers the
+original player choice per session: changed preferences apply to new sessions,
+and replay retains its original backend. An externally used lease is not converted
+to embedded ownership based only on a settings change. No alternate new-lease
+switching is claimed.
+Closing an embedded window stops its decoder
+and releases its lease exactly once; acquisition cancellation occurs only when
+the final lease for the asset is released. A media session is a lease; multiple
+leases can share an asset. Other leases and assets survive.
+User pause is decoder intent, not download pause or prefetch suspension. Buffering
+is observed media starvation, not evidence that the user paused. No tracked
+persistent resume/history is added in this increment.
+
+Native libmpv must be supplied separately and dynamically loaded; an mpv executable
+alone is insufficient. Library/API/dependency failures must be actionable, without
+silent installation or silent external fallback. Dynamic loading does not waive
+libmpv/FFmpeg licensing obligations. See [native playback prerequisites and
+validation limits](development.md#embedded-mpv-prerequisites-and-validation-plan).
+
+## UI direction and historical implementation evidence
+
+**Current authority:** [Desktop v3](design/desktop-v3.md) is the sole/default
+Cinema dark/warm UI, using direct pinned GPUI and in-house widgets. The Graphite
+and Kit records below are historical evidence, not current dependencies or
+instructions; their checks do not validate the embedded-player increment.
 
 The user approved the six-area UI feature scope and decided on a **permanent
 left icon-only rail**, with no expanded-sidebar or top-navigation mode. The new
@@ -67,8 +123,8 @@ The user **approved native Graphite implementation** and lead-owned commits.
 The [design system](design/design-system.md) is the visual/state contract; the
 [native implementation record](design/native-implementation.md) describes actual
 shared themes/cards/buttons/grid sizing, fixed-rail shell/provider-view composition,
-bounded artwork, safe gallery commands and remaining gaps. Use only pinned
-Kit reexports/components/assets/init/open_window, not a second UI engine.
+bounded artwork, safe gallery commands and remaining gaps. That historical implementation used pinned Kit reexports/components/assets/init/open_window;
+current v3 must not restore Kit or introduce a second UI engine.
 
 The **Graphite v2** [HTML artifact](design/desktop-wireframes.html) remains frozen
 as a design-only reference, with its historical browser checks and simulated
@@ -158,8 +214,10 @@ flowchart TB
     Debrid -->|"Media bytes"| Storage["Managed files + available ranges"]
     Acquire -.-> Torrent["Future torrent engine"]
     Torrent -.-> Storage
+    Playback -->|"Local URL + owned lease"| Embedded["Approved embedded mpv / GPUI window"]
     Playback -->|"Local URL"| Player["External VLC / mpv"]
-    Player -->|"HTTP range requests"| Server["Local media server"]
+    Embedded -->|"HTTP range requests"| Server["Local media server"]
+    Player -->|"HTTP range requests"| Server
     Server --> Storage
     Server -->|"Request missing ranges"| Acquire
     Local["Existing local files"] --> Server
@@ -237,12 +295,20 @@ fully cancellable networking or an orderly joined shutdown.
 
 ### Agreed session lifetime policy
 
-Navigation must not stop active sessions. Quitting or closing the window with
+Navigation must not stop active sessions. Quitting or closing the main window with
 active sessions requires a warning and explicit confirmation that Kinema's server
 will stop. The external player remains open; it is not a child UI session that
 Kinema closes. There is no daemon keeping the server alive after exit. This is an
 agreed requirement. The shell now wires confirmation for tracked active sessions
 and pending playback launch; live UI/OS-close acceptance is still required.
+
+The approved embedded window has a separate lifetime: closing it tears down its
+player and releases its owned lease, not the application. Confirmed application
+quit must tear down embedded players before their server resources disappear.
+This does not change external-player close policy; Kinema does not infer external
+closure from silence or kill external players. Cancelling quit retains windows,
+leases, and sessions. Embedded source integration is implemented; actual GPUI
+presentation has scoped Linux probe evidence; full OS-close acceptance remains pending.
 
 External launch success and HTTP traffic do not establish playing/paused/completed state. Real player telemetry will be needed when watch tracking is introduced.
 
@@ -260,6 +326,7 @@ The [feature inventory](features.md) links to the reference implementation. Thes
 
 ## Remaining end-to-end MVP slice
 
-Select a movie, find a source, resolve it through one debrid provider, download into managed storage, and launch VLC/mpv with the local URL. Test seeking to missing bytes, repeated local metadata reads, interrupted downloads, refresh failures, and cache exhaustion on all desktop targets. Then cover episodes and both indexers before calling the MVP complete.
+Select a movie, find a source, resolve it through one debrid provider, download into managed storage, and play the local URL in the approved embedded
+window, with external VLC/mpv alternatives retained. Test seeking to missing bytes, repeated local metadata reads, interrupted downloads, refresh failures, and cache exhaustion on all desktop targets. Then cover episodes and both indexers before calling the MVP complete.
 
 Measure UI stalls, result latency, seek recovery, startup, memory, and disk usage. Use those results to justify complexity—not assumptions that rewriting in Rust automatically makes the application faster.

@@ -118,7 +118,11 @@ fn log_operation_result(result: &Result<AppOutcome, String>, canceled: bool, sta
         Ok(AppOutcome::Prepared { prepared, .. }) => {
             tracing::info!(duration_ms, provider = ?prepared.provider, files = prepared.files.len(), "Application preparation completed")
         }
-        Ok(AppOutcome::PlaybackStarted { .. } | AppOutcome::SessionRelaunched { .. }) => {
+        Ok(
+            AppOutcome::PlaybackStarted { .. }
+            | AppOutcome::EmbeddedPlaybackStarted { .. }
+            | AppOutcome::SessionRelaunched { .. },
+        ) => {
             tracing::info!(duration_ms, "Application player launch completed")
         }
         Ok(AppOutcome::CredentialChecked { provider }) => {
@@ -167,6 +171,11 @@ pub enum AppOutcome {
         selection: FileSelection,
     },
     PlaybackStarted {
+        session: PlaybackSession,
+        file_name: String,
+    },
+    /// The worker owns the lease; the UI must open/activate its managed window.
+    EmbeddedPlaybackStarted {
         session: PlaybackSession,
         file_name: String,
     },
@@ -245,6 +254,31 @@ struct Shared {
 pub struct AppWorker {
     shared: Arc<Shared>,
     thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(all(test, feature = "ui-probe-test"))]
+impl AppWorker {
+    pub(crate) fn test_mailbox() -> Self {
+        Self {
+            shared: new_shared(),
+            thread: None,
+        }
+    }
+
+    pub(crate) fn test_drain_requests(&self) -> Vec<AppCommand> {
+        let mut mail = self
+            .shared
+            .mailbox
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let commands = mail
+            .requests
+            .drain(..)
+            .map(|request| request.command)
+            .collect();
+        mail.outstanding = 0;
+        commands
+    }
 }
 fn new_shared() -> Arc<Shared> {
     Arc::new(Shared {
@@ -645,6 +679,8 @@ struct Application {
 }
 struct SessionRecord {
     id: String,
+    file_name: String,
+    player: player::PlayerChoice,
     remote: bool,
     reported_errors: Vec<MediaError>,
 }
@@ -982,10 +1018,21 @@ impl Application {
                         .session(&session_id)
                         .map_err(|e| e.to_string())?;
                     check(&cancel)?;
-                    let settings = self.settings()?;
-                    check(&cancel)?;
-                    if let Some(child) = (self.io.launch)(&settings.player, &session.url)
-                        .map_err(|e| e.to_string())?
+                    // A lease never moves between managed and external players.
+                    // Preference changes apply only when creating a new session.
+                    let record = self
+                        .sessions
+                        .iter()
+                        .find(|record| record.id == session_id)
+                        .ok_or("Media session ended")?;
+                    if record.player == player::PlayerChoice::Embedded {
+                        return Ok(AppOutcome::EmbeddedPlaybackStarted {
+                            session,
+                            file_name: record.file_name.clone(),
+                        });
+                    }
+                    if let Some(child) =
+                        (self.io.launch)(&record.player, &session.url).map_err(|e| e.to_string())?
                     {
                         self.children.push(child);
                     }
@@ -1024,13 +1071,17 @@ impl Application {
         remote: bool,
     ) -> Result<AppOutcome, String> {
         let mut child = None;
+        let mut choice = player::PlayerChoice::Embedded;
         let result = (|| {
             check(cancel)?;
             let settings = self.settings()?;
             check(cancel)?;
             // A spawned child is not evidence of playing/completed. Retain it
             // only for nonblocking reaping; never terminate the external player.
-            child = (self.io.launch)(&settings.player, &session.url).map_err(|e| e.to_string())?;
+            choice = settings.player;
+            if choice != player::PlayerChoice::Embedded {
+                child = (self.io.launch)(&choice, &session.url).map_err(|e| e.to_string())?;
+            }
             Ok(())
         })();
         finish_launch(result, &session.id, |id| {
@@ -1043,10 +1094,16 @@ impl Application {
         }
         self.sessions.push(SessionRecord {
             id: session.id.clone(),
+            file_name: file_name.clone(),
+            player: choice.clone(),
             remote,
             reported_errors: Vec::new(),
         });
-        Ok(AppOutcome::PlaybackStarted { session, file_name })
+        Ok(if choice == player::PlayerChoice::Embedded {
+            AppOutcome::EmbeddedPlaybackStarted { session, file_name }
+        } else {
+            AppOutcome::PlaybackStarted { session, file_name }
+        })
     }
 }
 /// Rename success is effective even if directory sync failed. Only failures
@@ -1611,11 +1668,15 @@ mod tests {
         let mut sessions = vec![
             SessionRecord {
                 id: "remote".into(),
+                file_name: "remote.mkv".into(),
+                player: player::PlayerChoice::Mpv,
                 remote: true,
                 reported_errors: Vec::new(),
             },
             SessionRecord {
                 id: "local".into(),
+                file_name: "local.mkv".into(),
+                player: player::PlayerChoice::Mpv,
                 remote: false,
                 reported_errors: Vec::new(),
             },
@@ -1636,6 +1697,8 @@ mod tests {
         let worker = unstarted_worker();
         let mut sessions = vec![SessionRecord {
             id: "remote".into(),
+            file_name: "remote.mkv".into(),
+            player: player::PlayerChoice::Mpv,
             remote: true,
             reported_errors: Vec::new(),
         }];
@@ -2251,6 +2314,7 @@ mod tests {
             }),
             settings: Some(Settings {
                 media_limit_bytes: 1024,
+                player: player::PlayerChoice::Mpv,
                 ..Settings::default()
             }),
             ..Application::default()

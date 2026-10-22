@@ -2131,6 +2131,18 @@ dependencies = [
 
 [[package]]
 name = "glow"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5e5ea60d70410161c8bf5da3fdfeaa1c72ed2c15f8bbb9d19fe3a4fad085f08"
+dependencies = [
+ "js-sys",
+ "slotmap",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "glow"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5"
@@ -3261,6 +3273,7 @@ dependencies = [
  "image",
  "keyring",
  "kinema-core",
+ "kinema-mpv",
  "percent-encoding",
  "rand 0.9.5",
  "reqwest",
@@ -3278,6 +3291,15 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "zeroize",
+]
+
+[[package]]
+name = "kinema-mpv"
+version = "0.1.0"
+dependencies = [
+ "glow 0.16.0",
+ "libloading",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6917,7 +6939,7 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "cfg_aliases",
- "glow",
+ "glow 0.17.0",
  "glutin_wgl_sys",
  "gpu-allocator",
  "gpu-descriptor",

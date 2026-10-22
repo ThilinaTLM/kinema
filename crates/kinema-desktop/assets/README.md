@@ -15,13 +15,18 @@ Pinned sources (downloaded 2026-10-18):
   `star-filled.svg` is derived from the same pinned `star.svg`, with
   `fill="currentColor"` instead of `none`; its stroke remains `currentColor`.
   `circle.svg` and `circle-dot.svg` come from the same pinned release.
+  Player transport additions (`pause`, `volume-2`, `volume-x`, `maximize`,
+  `minimize`, `rotate-ccw`, `rotate-cw`, `minus`, `plus`) were downloaded from
+  that same pinned release on 2026-10-22, with only the stroke-width adjustment.
   License: https://raw.githubusercontent.com/lucide-icons/lucide/0.468.0/LICENSE
   retained as `icons/LICENSE-lucide.txt` (ISC; includes Feather attribution).
 - **TMDB logo**: existing, unchanged; source URL and terms are in root `NOTICE`.
 
-Verification: `file` identified all five fonts as TrueType and all 29 icons as SVG;
+Verification: `file` identified all five fonts as TrueType and all 38 icons as SVG;
 SVGs were also parsed as XML. SHA-256 below covers the shipped bytes (including
 the documented Lucide stroke and fill changes), not a claim of upstream signed provenance.
+
+The nine player additions were parsed as XML as well.
 
 ## SHA-256
 
@@ -64,6 +69,15 @@ a994fad4185ecbf309615023785731f8e23a5bbd863bd565f2d9c788a3c59d49  icons/triangle
 f5d672e1d4fb680360dd3e62f7553f59be4df02422326146e43a8fc37ccd5324  icons/tv.svg
 ab35d4780f28dc8527a31066e7c19732b4e5ceb7dab6d6bf0e43d1ffc08914e5  icons/x.svg
 8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c  tmdb-logo.svg
+0e1639c3acea5e669bae3a5d7b8c89389ea3ca410c016e32ff55320e47ffe612  icons/pause.svg
+d8c3b23eb6156b21584fe35c2095b5d30023ef5bd57a601b1f2cc66e5422b50b  icons/volume-2.svg
+7730715cc3e6da031ab936716d63ee33f8e8b515edf39b98dc2e3381123d5958  icons/volume-x.svg
+1659e8f9b2affe6422c69fab1e0dbd1f0d6c3c1794d0db04be325baadab2a6b8  icons/maximize.svg
+45e938096623d6c0a08955c454082acd11f142534f68ef8586b7b8813db185fe  icons/minimize.svg
+b5a82d987232ad1e5c3038fe38850ec6aa8c7253b7dc2e4be35ac51b61605a3b  icons/rotate-ccw.svg
+1029b72e250f0037cfead7429ab47234a03c7080fe625dd9d2c662fdf288af5e  icons/rotate-cw.svg
+df00c597bf626a049ba7a723a42183750db898acf11227bd51021aa384c2d9dd  icons/minus.svg
+92b529bf61fc7ab386be035194d3180dbc97320dfa766283989ec43bc5afc4e7  icons/plus.svg
 ```
 
 Verify from this directory: `awk 'NF == 2 && length($1) == 64' README.md | sha256sum -c -`.

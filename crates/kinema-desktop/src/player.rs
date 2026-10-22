@@ -8,8 +8,10 @@ use std::{
     process::{Child, Command},
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum PlayerChoice {
+    #[default]
+    Embedded,
     Mpv,
     Vlc,
     Custom(PathBuf),
@@ -18,6 +20,7 @@ pub enum PlayerChoice {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlayerError {
     InvalidUrl,
+    EmbeddedRequiresWindow,
     InvalidExecutable,
     NotFound,
     SpawnFailed,
@@ -25,6 +28,7 @@ pub enum PlayerError {
 impl fmt::Display for PlayerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::EmbeddedRequiresWindow => "embedded playback requires a managed player window",
             Self::InvalidUrl => "playback requires a loopback HTTP URL",
             Self::InvalidExecutable => "custom player must be an absolute native executable path",
             Self::NotFound => "external player was not found",
@@ -99,6 +103,7 @@ pub fn launch(choice: &PlayerChoice, local_url: &str) -> Result<Child, PlayerErr
         "player",
         operation = "launch",
         player = match choice {
+            PlayerChoice::Embedded => "embedded",
             PlayerChoice::Mpv => "mpv",
             PlayerChoice::Vlc => "vlc",
             PlayerChoice::Custom(_) => "custom",
@@ -138,6 +143,9 @@ fn command(executable: &Path, args: Vec<OsString>) -> Command {
 }
 
 fn discover(choice: &PlayerChoice) -> Result<PathBuf, PlayerError> {
+    if matches!(choice, PlayerChoice::Embedded) {
+        return Err(PlayerError::EmbeddedRequiresWindow);
+    }
     if let PlayerChoice::Custom(path) = choice {
         return if executable(path) {
             Ok(path.clone())
@@ -257,6 +265,18 @@ mod tests {
             Path::new("unix shebang wrapper"),
             false
         ));
+    }
+
+    #[test]
+    fn embedded_cannot_be_launched_as_an_external_process() {
+        assert_eq!(
+            launch(
+                &PlayerChoice::Embedded,
+                "http://127.0.0.1:1234/media/fixture"
+            )
+            .err(),
+            Some(PlayerError::EmbeddedRequiresWindow),
+        );
     }
 
     #[test]

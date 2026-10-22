@@ -134,7 +134,10 @@ fn replay_launch_failure_does_not_release_or_duplicate_existing_session()
             data: root.path().into(),
             cache: root.path().into(),
         }),
-        settings: Some(Settings::default()),
+        settings: Some(Settings {
+            player: player::PlayerChoice::Mpv,
+            ..Settings::default()
+        }),
         io: PlaybackIo {
             launch: Box::new(move |_, _| {
                 if launch_fail.load(Ordering::Acquire) {
@@ -236,4 +239,104 @@ fn unknown_cancellations_do_not_allocate_unbounded_control_work() {
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     assert!(mail.discarded_preparations.is_empty());
+}
+
+#[test]
+fn replay_preserves_original_player_across_preference_changes()
+-> Result<(), Box<dyn std::error::Error>> {
+    for original in [
+        player::PlayerChoice::Embedded,
+        player::PlayerChoice::Mpv,
+        player::PlayerChoice::Vlc,
+    ] {
+        let root = tempfile::tempdir()?;
+        let file = root.path().join("fixture.mkv");
+        std::fs::write(&file, b"fixture")?;
+        let launches = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = launches.clone();
+        let mut app = Application {
+            paths: Some(AppPaths {
+                config: root.path().into(),
+                data: root.path().into(),
+                cache: root.path().into(),
+            }),
+            settings: Some(Settings {
+                player: original.clone(),
+                ..Settings::default()
+            }),
+            io: PlaybackIo {
+                launch: Box::new(move |choice, _| {
+                    recorded
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(choice.clone());
+                    Ok(None)
+                }),
+                ..PlaybackIo::default()
+            },
+            ..Application::default()
+        };
+        let execute = |app: &mut Application, generation, action| {
+            app.execute(
+                AppCommand { generation, action },
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+            )
+        };
+        let initial = execute(&mut app, 1, AppAction::PlayLocal { path: file })?;
+        let embedded = original == player::PlayerChoice::Embedded;
+        let session = match initial {
+            AppOutcome::EmbeddedPlaybackStarted { session, file_name } if embedded => {
+                assert_eq!(file_name, "fixture.mkv");
+                session
+            }
+            AppOutcome::PlaybackStarted { session, .. } if !embedded => session,
+            _ => return Err("wrong initial launch backend".into()),
+        };
+        assert_eq!(app.sessions.len(), 1);
+        assert_eq!(app.sessions[0].player, original);
+        // Simulate an accepted preference save without involving disk I/O.
+        app.settings.as_mut().ok_or("settings missing")?.player = if embedded {
+            player::PlayerChoice::Vlc
+        } else {
+            player::PlayerChoice::Embedded
+        };
+        let replay = execute(
+            &mut app,
+            2,
+            AppAction::ReplaySession {
+                session_id: session.id.clone(),
+            },
+        )?;
+        if embedded {
+            let AppOutcome::EmbeddedPlaybackStarted {
+                session: replay,
+                file_name,
+            } = replay
+            else {
+                return Err("embedded replay changed backend".into());
+            };
+            assert_eq!(replay.id, session.id);
+            assert_eq!(replay.url, session.url);
+            assert_eq!(file_name, "fixture.mkv");
+            assert!(
+                launches
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .is_empty()
+            );
+            assert!(app.children.is_empty());
+        } else {
+            assert!(matches!(replay, AppOutcome::SessionRelaunched { .. }));
+            assert_eq!(
+                *launches.lock().unwrap_or_else(|e| e.into_inner()),
+                vec![original.clone(), original]
+            );
+        }
+        assert_eq!(app.sessions.len(), 1);
+        execute(&mut app, 3, AppAction::ReleaseSession(session.id.clone()))?;
+        assert!(app.sessions.is_empty());
+        assert!(app.media()?.session(&session.id).is_err());
+    }
+    Ok(())
 }

@@ -10,6 +10,13 @@ References: [architecture](../architecture.md), [historical feature inventory](.
 [v2 review guide](README.md), [v2 design system](design-system.md),
 [native implementation](native-implementation.md), [isolated UI probe](ui-probe.md).
 
+Approved playback extension: [independent embedded-mpv player](player.md), with
+Cinema chrome and separate window/lease lifetime rules. Embedded is the approved
+default; external mpv/VLC remain alternatives. Backend/window/control source is
+implemented, with lead-reviewed root/feature checks and scoped native Linux GPUI
+presentation evidence. Final backend option hardening passed root/native reruns;
+this remains scoped validation, not full acceptance. This introduces no second GPUI engine or UI version.
+
 ## 1. Product character and approved directions
 
 Kinema is a **media browser**, not a dashboard. The posters and backdrops are the

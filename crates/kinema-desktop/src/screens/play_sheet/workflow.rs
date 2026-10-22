@@ -120,7 +120,7 @@ impl PlaySheet {
                     AfterPrepare::Message(message) => self.error = Some(message),
                 }
             }
-            AppOutcome::PlaybackStarted { .. } => {
+            AppOutcome::PlaybackStarted { .. } | AppOutcome::EmbeddedPlaybackStarted { .. } => {
                 if let Some(preparation) = self.preparation.take() {
                     self.coordinator.update(cx, |coordinator, cx| {
                         coordinator.cancel_preparation(preparation, cx);

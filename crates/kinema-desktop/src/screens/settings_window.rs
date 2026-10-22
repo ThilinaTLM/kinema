@@ -21,7 +21,7 @@ use crate::{
 use gpui::{prelude::*, *};
 use kinema_core::provider::{ProviderId, ProviderPriority};
 use kinema_core::sources::{DebridKind, IndexerKind};
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
 
 actions!(settings_window, [NextFocus, PreviousFocus]);
 pub fn bind_keys(cx: &mut App) {
@@ -296,12 +296,6 @@ impl AccountStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PlayerKind {
-    Mpv,
-    Vlc,
-    Custom,
-}
 #[derive(Clone, Copy)]
 enum SettingChange {
     Theme(ThemeChoice),
@@ -333,8 +327,6 @@ pub struct SettingsWindow {
     settings_loaded: bool,
     indexer: Entity<Select<IndexerKind>>,
     debrid: Entity<Select<DebridKind>>,
-    player: Entity<Select<PlayerKind>>,
-    path: Entity<TextInput>,
     limit: Entity<TextInput>,
     secret: Entity<TextInput>,
     editing: Option<Account>,
@@ -375,30 +367,6 @@ impl SettingsWindow {
                 cx,
             )
         });
-        let kind = match settings.player {
-            PlayerChoice::Mpv => PlayerKind::Mpv,
-            PlayerChoice::Vlc => PlayerKind::Vlc,
-            PlayerChoice::Custom(_) => PlayerKind::Custom,
-        };
-        let player = cx.new(|cx| {
-            Select::new(
-                kind,
-                vec![
-                    (PlayerKind::Mpv, "mpv".into()),
-                    (PlayerKind::Vlc, "VLC".into()),
-                    (PlayerKind::Custom, "Custom path".into()),
-                ],
-                cx,
-            )
-        });
-        let path = cx.new(|cx| {
-            let mut input = TextInput::new(window, cx);
-            input.set_placeholder("Absolute executable path", cx);
-            if let PlayerChoice::Custom(path) = &settings.player {
-                input.set_text(path.to_string_lossy().into_owned(), cx);
-            }
-            input
-        });
         let limit = cx.new(|cx| {
             let mut input = TextInput::new(window, cx);
             input.set_text(
@@ -431,12 +399,6 @@ impl SettingsWindow {
                 let SelectEvent::Changed(value) = event;
                 this.change("Debrid", SettingChange::Debrid(*value), cx);
             }),
-            cx.subscribe(&player, |this, _, _, cx| this.apply_player(cx)),
-            cx.subscribe(&path, |this, _, event, cx| {
-                if matches!(event, TextInputEvent::Submitted | TextInputEvent::Blurred) {
-                    this.apply_player(cx);
-                }
-            }),
             cx.subscribe(&limit, |this, _, event, cx| {
                 if matches!(event, TextInputEvent::Submitted | TextInputEvent::Blurred) {
                     this.apply_limit(cx);
@@ -462,8 +424,6 @@ impl SettingsWindow {
             settings_loaded,
             indexer,
             debrid,
-            player,
-            path,
             limit,
             secret,
             editing: None,
@@ -514,18 +474,6 @@ impl SettingsWindow {
                         cx,
                     )
                 });
-                let kind = match &self.settings.player {
-                    PlayerChoice::Mpv => PlayerKind::Mpv,
-                    PlayerChoice::Vlc => PlayerKind::Vlc,
-                    PlayerChoice::Custom(path) => {
-                        self.path.update(cx, |input, cx| {
-                            input.set_text(path.to_string_lossy().into_owned(), cx)
-                        });
-                        PlayerKind::Custom
-                    }
-                };
-                self.player
-                    .update(cx, |select, cx| select.set_value(kind, cx));
             }
             self.indexer
                 .update(cx, |select, cx| select.set_value(self.settings.indexer, cx));
@@ -579,12 +527,7 @@ impl SettingsWindow {
         }
         cx.notify();
     }
-    fn apply_player(&mut self, cx: &mut Context<Self>) {
-        let choice = match self.player.read(cx).value() {
-            PlayerKind::Mpv => PlayerChoice::Mpv,
-            PlayerKind::Vlc => PlayerChoice::Vlc,
-            PlayerKind::Custom => PlayerChoice::Custom(PathBuf::from(self.path.read(cx).text())),
-        };
+    fn apply_player(&mut self, choice: PlayerChoice, cx: &mut Context<Self>) {
         if let Err(error) = crate::player::validate_choice(&choice) {
             self.show_error("Player", error.to_string());
             cx.notify();
@@ -1034,21 +977,33 @@ impl SettingsWindow {
             }
             Section::Playback => {
                 body = body
-                    .child(row("External player", self.player.clone()))
-                    .child(row("Custom path", self.path.clone()))
+                    .child(row(
+                        "Player",
+                        Segmented::new(
+                            "settings-player",
+                            [
+                                (PlayerChoice::Embedded, "Embedded MPV".into()),
+                                (PlayerChoice::Mpv, "External MPV".into()),
+                                (PlayerChoice::Vlc, "External VLC".into()),
+                            ],
+                            self.settings.player.clone(),
+                        )
+                        .on_change(move |value, _, cx| {
+                            let _ =
+                                weak.update(cx, |this, cx| this.apply_player(value.clone(), cx));
+                        }),
+                    ))
                     .child(text(
-                        "Path and quota edits apply on Enter or leaving the field.",
+                        "Player changes apply to new sessions; replay keeps its original player.",
                         p.text_muted,
-                    ))
-                    .child(text(
-                        "Argument preview (separate arguments; no shell):",
-                        p.text_secondary,
-                    ))
-                    .child(
-                        div()
-                            .type_style(t::MONO)
-                            .child(player_preview(&self.settings.player)),
-                    );
+                    ));
+                if matches!(self.settings.player, PlayerChoice::Custom(_)) {
+                    body = body.child(text("Stored custom external player retained. Select a player above to replace it.", p.text_secondary));
+                }
+                body = body.child(text(
+                    player_preview(&self.settings.player),
+                    p.text_secondary,
+                ));
             }
             Section::Storage => {
                 let usage = self.coordinator.read(cx).usage.as_ref();
@@ -1110,6 +1065,7 @@ fn clear_secret(input: &mut TextInput, cx: &mut Context<TextInput>) {
 }
 fn player_preview(player: &PlayerChoice) -> String {
     let executable = match player {
+        PlayerChoice::Embedded => return "Plays in a separate managed Kinema window.".into(),
         PlayerChoice::Mpv => "mpv".into(),
         PlayerChoice::Vlc => "vlc".into(),
         PlayerChoice::Custom(path) => path.to_string_lossy(),

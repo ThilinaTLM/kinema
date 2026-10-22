@@ -189,6 +189,11 @@ pub struct AppCoordinator {
     pub credentials: Vec<(kinema_core::sources::DebridKind, CredentialState)>,
     pub usage: Option<crate::media::UsageSnapshot>,
     pub sessions: Vec<SessionSnapshot>,
+    embedded_sessions: std::collections::HashSet<String>,
+    // Tombstones live only until release acknowledgement and queued replays drain.
+    closed_embedded_sessions: std::collections::HashMap<String, bool>,
+    pending_embedded_releases: std::collections::HashSet<String>,
+    embedded_replays: std::collections::HashMap<u64, String>,
     pub(crate) collection: Resource<Vec<BrowseTitle>>,
     pub(crate) titles: Vec<BrowseTitle>,
     pub(crate) details: Resource<TitleDetails>,
@@ -259,6 +264,10 @@ impl AppCoordinator {
             credentials: Vec::new(),
             usage: None,
             sessions: Vec::new(),
+            embedded_sessions: Default::default(),
+            closed_embedded_sessions: Default::default(),
+            pending_embedded_releases: Default::default(),
+            embedded_replays: Default::default(),
             collection: Resource::default(),
             titles: Vec::new(),
             details: Resource::default(),
@@ -333,6 +342,10 @@ impl AppCoordinator {
             credentials: Vec::new(),
             usage: None,
             sessions: Vec::new(),
+            embedded_sessions: Default::default(),
+            closed_embedded_sessions: Default::default(),
+            pending_embedded_releases: Default::default(),
+            embedded_replays: Default::default(),
             collection,
             titles: titles.clone(),
             details: Resource::default(),
@@ -801,6 +814,7 @@ impl AppCoordinator {
         for event in events {
             self.apply_app(event, cx);
         }
+        self.retry_embedded_releases(cx);
         if changed {
             cx.notify();
         }
@@ -812,42 +826,68 @@ impl AppCoordinator {
             AppOutcome::Usage(_) | AppOutcome::SessionUpdates(_) | AppOutcome::Invalidated { .. }
         );
         let resolved = (!unsolicited).then(|| self.tracker.resolve(event.generation));
+        self.embedded_replays.remove(&event.generation);
+        if let AppOutcome::EmbeddedPlaybackStarted { session, .. } = &event.outcome
+            && self.closed_embedded_sessions.contains_key(&session.id)
+        {
+            self.session_identity.remove(&event.generation);
+            self.prune_embedded_tombstones();
+            return;
+        }
         match &event.outcome {
-            AppOutcome::PlaybackStarted { session, file_name } => {
-                self.sessions.retain(|s| s.session.id != session.id);
-                self.sessions.push(SessionSnapshot {
-                    session: session.clone(),
-                    file_name: file_name.clone(),
-                    origin: if resolved
-                        .as_ref()
-                        .is_some_and(|r| matches!(r.pending, Some(Pending::Play { remote: true })))
+            AppOutcome::PlaybackStarted { session, file_name }
+            | AppOutcome::EmbeddedPlaybackStarted { session, file_name } => {
+                // Replay keeps the original route-independent metadata/progress.
+                if resolved
+                    .as_ref()
+                    .is_some_and(|r| r.pending == Some(Pending::Replay))
+                {
+                    if let Some(row) = self
+                        .sessions
+                        .iter_mut()
+                        .find(|s| s.session.id == session.id)
                     {
-                        crate::media::SessionOrigin::Remote
-                    } else {
-                        crate::media::SessionOrigin::Local
-                    },
-                    title: self
-                        .session_identity
-                        .get(&event.generation)
-                        .map(|v| v.0.clone()),
-                    target: self.session_identity.remove(&event.generation).map(|v| v.1),
-                    progress: None,
-                    error: None,
-                    can_reveal: true,
-                });
-                self.tracker.session_started(
-                    session.id.clone(),
-                    resolved
-                        .as_ref()
-                        .is_some_and(|r| matches!(r.pending, Some(Pending::Play { remote: true }))),
-                );
+                        row.error = None;
+                    }
+                } else {
+                    self.sessions.retain(|s| s.session.id != session.id);
+                    self.sessions.push(SessionSnapshot {
+                        session: session.clone(),
+                        file_name: file_name.clone(),
+                        origin: if resolved.as_ref().is_some_and(|r| {
+                            matches!(r.pending, Some(Pending::Play { remote: true }))
+                        }) {
+                            crate::media::SessionOrigin::Remote
+                        } else {
+                            crate::media::SessionOrigin::Local
+                        },
+                        title: self
+                            .session_identity
+                            .get(&event.generation)
+                            .map(|v| v.0.clone()),
+                        target: self.session_identity.remove(&event.generation).map(|v| v.1),
+                        progress: None,
+                        error: None,
+                        can_reveal: true,
+                    });
+                    self.tracker.session_started(
+                        session.id.clone(),
+                        resolved.as_ref().is_some_and(|r| {
+                            matches!(r.pending, Some(Pending::Play { remote: true }))
+                        }),
+                    );
+                }
             }
             AppOutcome::Released { id } => {
+                self.close_embedded_session(id, cx);
+                self.embedded_release_acknowledged(id);
                 self.tracker.session_released(id);
                 self.sessions.retain(|s| s.session.id != *id);
             }
             AppOutcome::Invalidated { released } => {
                 for id in released {
+                    self.close_embedded_session(id, cx);
+                    self.embedded_release_acknowledged(id);
                     self.tracker.session_released(id);
                     self.sessions.retain(|s| s.session.id != *id);
                 }
@@ -870,6 +910,13 @@ impl AppCoordinator {
             AppOutcome::Failed { message } => {
                 if let Some(id) = resolved.as_ref().and_then(|r| r.release.as_ref()) {
                     self.session_error(id, message);
+                    if resolved
+                        .as_ref()
+                        .is_some_and(|r| r.pending == Some(Pending::Release))
+                        && self.closed_embedded_sessions.contains_key(id)
+                    {
+                        self.pending_embedded_releases.insert(id.clone());
+                    }
                 }
             }
             AppOutcome::SessionRelaunched { session_id } => {
@@ -885,9 +932,39 @@ impl AppCoordinator {
         }
         if !matches!(
             event.outcome,
-            AppOutcome::Prepared { .. } | AppOutcome::PlaybackStarted { .. }
+            AppOutcome::Prepared { .. }
+                | AppOutcome::PlaybackStarted { .. }
+                | AppOutcome::EmbeddedPlaybackStarted { .. }
         ) {
             self.session_identity.remove(&event.generation);
+        }
+        self.prune_embedded_tombstones();
+        if let AppOutcome::EmbeddedPlaybackStarted { session, file_name } = &event.outcome {
+            if resolved.as_ref().is_some_and(|r| !r.current) {
+                // Unlike an external process, obsolete embedded work need not be shown.
+                self.queue_embedded_release(session.id.clone(), cx);
+            } else {
+                self.embedded_sessions.insert(session.id.clone());
+                let title = self
+                    .sessions
+                    .iter()
+                    .find(|s| s.session.id == session.id)
+                    .and_then(|s| s.title.clone())
+                    .unwrap_or_else(|| file_name.clone());
+                if crate::screens::player_window::open(
+                    session.id.clone(),
+                    session.url.clone(),
+                    title,
+                    cx.entity(),
+                    cx,
+                )
+                .is_err()
+                {
+                    // Backend/window errors must not expose the capability URL.
+                    self.notice = Some("Embedded player could not be opened.".into());
+                    self.queue_embedded_release(session.id.clone(), cx);
+                }
+            }
         }
         if resolved.as_ref().is_some_and(|r| !r.current) {
             tracing::debug!(
@@ -957,6 +1034,86 @@ impl AppCoordinator {
         }
         cx.emit(CoordinatorEvent::App(event));
     }
+    fn close_embedded_session(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        if self.embedded_sessions.remove(session_id) {
+            self.closed_embedded_sessions
+                .insert(session_id.to_owned(), false);
+            crate::screens::player_window::close_session(session_id, cx);
+        }
+    }
+
+    fn embedded_release_acknowledged(&mut self, session_id: &str) {
+        self.pending_embedded_releases.remove(session_id);
+        if let Some(acknowledged) = self.closed_embedded_sessions.get_mut(session_id) {
+            *acknowledged = true;
+        }
+    }
+
+    fn prune_embedded_tombstones(&mut self) {
+        self.closed_embedded_sessions.retain(|id, acknowledged| {
+            !*acknowledged || self.embedded_replays.values().any(|pending| pending == id)
+        });
+    }
+
+    fn queue_embedded_release(&mut self, session_id: String, cx: &mut Context<Self>) {
+        self.embedded_sessions.remove(&session_id);
+        self.closed_embedded_sessions
+            .entry(session_id.clone())
+            .or_insert(false);
+        self.pending_embedded_releases.insert(session_id);
+        self.retry_embedded_releases(cx);
+    }
+
+    // Native close/fatal failure cannot be dropped like a lossy user command.
+    // The retained set is bounded by outstanding leases, not playback history.
+    fn retry_embedded_releases(&mut self, cx: &mut Context<Self>) {
+        if !self.app.as_ref().is_ok_and(|app| !app.is_stopped()) {
+            return;
+        }
+        for id in self
+            .pending_embedded_releases
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            let notice = self.notice.clone();
+            let accepted = self
+                .command(AppAction::ReleaseSession(id.clone()), cx)
+                .is_some();
+            // Retrying terminal cleanup must not replace a useful fatal-player
+            // notice with a transient mailbox-busy warning.
+            if notice.is_some() {
+                self.notice = notice;
+            }
+            if accepted {
+                self.pending_embedded_releases.remove(&id);
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// A window close releases only its own lease, at most once. Never navigates
+    /// or quits; queued replay completions cannot resurrect this closed window.
+    pub fn embedded_player_closed(&mut self, session_id: String, cx: &mut Context<Self>) {
+        if !self.embedded_sessions.contains(&session_id) {
+            return;
+        }
+        self.queue_embedded_release(session_id, cx);
+        cx.notify();
+    }
+
+    /// Fatal initialization/render failure. Only static UI text is surfaced;
+    /// backend diagnostics and capability URLs never enter notices or logs.
+    pub fn embedded_player_failed(&mut self, session_id: String, cx: &mut Context<Self>) {
+        if !self.embedded_sessions.contains(&session_id) {
+            return;
+        }
+        self.embedded_player_closed(session_id, cx);
+        self.notice = Some("Embedded playback failed. Try another player in Settings.".into());
+        cx.notify();
+    }
+
     /// Typed application intent gateway. Returns its command generation, or None
     /// on backpressure/start failure. P2/P4 should subscribe before submitting.
     pub fn command(&mut self, action: AppAction, cx: &mut Context<Self>) -> Option<u64> {
@@ -987,6 +1144,11 @@ impl AppCoordinator {
         {
             self.session_identity.insert(generation, identity);
         }
+        let release_id = if let AppAction::ReleaseSession(id) = &action {
+            Some(id.clone())
+        } else {
+            None
+        };
         let session_action = match &action {
             AppAction::ReleaseSession(id)
             | AppAction::ReplaySession { session_id: id }
@@ -998,6 +1160,14 @@ impl AppCoordinator {
             .as_ref()
             .is_ok_and(|a| a.submit(AppCommand { generation, action }))
         {
+            if pending == Pending::Replay
+                && let Some(id) = &session_action
+            {
+                self.embedded_replays.insert(generation, id.clone());
+            }
+            if let Some(id) = release_id {
+                self.close_embedded_session(&id, cx);
+            }
             cx.notify();
             Some(generation)
         } else {
@@ -1659,6 +1829,103 @@ mod session_tests {
     use super::{AppCoordinator, AppEvent, AppOutcome, ImdbId, Pending, PlaybackTarget};
     use crate::media::{PlaybackSession, SessionOrigin, SessionProgress, SessionUpdate};
     use gpui::AppContext;
+    #[test]
+    fn embedded_terminal_close_retries_backpressure_and_prunes_after_replay_drains() {
+        let mut cx = gpui::TestAppContext::single();
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        coordinator.update(&mut cx, |c, cx| {
+            c.app = Ok(crate::app::AppWorker::test_mailbox());
+            c.embedded_sessions.insert("one".into());
+            let replay = c.command(crate::app::AppAction::ReplaySession { session_id: "one".into() }, cx)
+                .unwrap_or_else(|| panic!("fixture replay rejected"));
+            for _ in 0..100 {
+                if c.command(crate::app::AppAction::LoadSettings, cx).is_none() { break; }
+            }
+            c.embedded_player_failed("one".into(), cx);
+            assert!(c.pending_embedded_releases.contains("one"));
+            c.embedded_player_closed("one".into(), cx);
+            assert_eq!(c.pending_embedded_releases.len(), 1);
+            c.app.as_ref().unwrap_or_else(|_| panic!("fixture worker")).test_drain_requests();
+            c.retry_embedded_releases(cx);
+            assert!(c.pending_embedded_releases.is_empty());
+            let requests = c.app.as_ref().unwrap_or_else(|_| panic!("fixture worker")).test_drain_requests();
+            assert_eq!(requests.len(), 1);
+            assert!(matches!(&requests[0].action, crate::app::AppAction::ReleaseSession(id) if id == "one"));
+            c.apply_app(AppEvent { generation: requests[0].generation, outcome: AppOutcome::Released { id: "one".into() } }, cx);
+            assert!(c.closed_embedded_sessions.contains_key("one"));
+            c.apply_app(AppEvent { generation: replay, outcome: AppOutcome::EmbeddedPlaybackStarted {
+                session: PlaybackSession { id: "one".into(), url: "http://127.0.0.1:1234/private-capability".into() },
+                file_name: "fixture.mkv".into(),
+            } }, cx);
+            assert!(c.closed_embedded_sessions.is_empty());
+            assert!(c.embedded_replays.is_empty());
+            assert!(c.embedded_sessions.is_empty());
+            assert!(c.sessions.is_empty());
+        });
+    }
+
+    #[test]
+    fn embedded_close_is_matching_idempotent_and_rejects_queued_replay() {
+        let mut cx = gpui::TestAppContext::single();
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        coordinator.update(&mut cx, |c, cx| {
+            c.embedded_sessions.extend(["one".into(), "two".into()]);
+            c.tracker.session_started("one".into(), false);
+            c.tracker.session_started("two".into(), false);
+            c.embedded_player_closed("unknown".into(), cx);
+            assert_eq!(c.embedded_sessions.len(), 2);
+            c.embedded_player_closed("one".into(), cx);
+            assert!(!c.embedded_sessions.contains("one"));
+            assert!(c.embedded_sessions.contains("two"));
+            let notice = c.notice.clone();
+            c.embedded_player_closed("one".into(), cx);
+            assert_eq!(c.notice, notice);
+            let generation = c.tracker.issue_session(Pending::Replay, "one".into());
+            c.apply_app(
+                AppEvent {
+                    generation,
+                    outcome: AppOutcome::EmbeddedPlaybackStarted {
+                        session: PlaybackSession {
+                            id: "one".into(),
+                            url: "http://127.0.0.1:1234/private-capability".into(),
+                        },
+                        file_name: "fixture.mkv".into(),
+                    },
+                },
+                cx,
+            );
+            assert!(c.sessions.is_empty());
+            assert!(!c.embedded_sessions.contains("one"));
+            c.apply_app(
+                AppEvent {
+                    generation: 0,
+                    outcome: AppOutcome::Released { id: "one".into() },
+                },
+                cx,
+            );
+            assert_eq!(c.tracker.active_sessions(), 1);
+            c.embedded_player_failed("two".into(), cx);
+            assert_eq!(
+                c.notice.as_deref(),
+                Some("Embedded playback failed. Try another player in Settings.")
+            );
+            c.embedded_player_failed("two".into(), cx);
+            assert_eq!(
+                c.notice.as_deref(),
+                Some("Embedded playback failed. Try another player in Settings.")
+            );
+            assert!(!c.quit_requested);
+            c.apply_app(
+                AppEvent {
+                    generation: 0,
+                    outcome: AppOutcome::Released { id: "two".into() },
+                },
+                cx,
+            );
+            assert_eq!(c.tracker.active_sessions(), 0);
+        });
+    }
+
     #[test]
     fn late_launch_is_accounted_and_session_failures_survive_telemetry() {
         let mut cx = gpui::TestAppContext::single();

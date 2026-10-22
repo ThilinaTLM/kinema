@@ -26,6 +26,7 @@ fn run_desktop() -> ExitCode {
             widgets::text_input::bind_keys(cx);
             widgets::menu::bind_keys(cx);
             screens::main_window::bind_keys(cx);
+            screens::player_window::bind_keys(cx);
             // MainWindow installs app-wide actions and shutdown policy. Settings
             // closing is independent; Main closing quits even with Settings open.
             let options = gpui::WindowOptions {
