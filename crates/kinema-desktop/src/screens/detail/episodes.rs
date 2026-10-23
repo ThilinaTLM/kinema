@@ -63,6 +63,12 @@ pub(super) fn episode_overview(ep: &CatalogEpisode) -> Option<String> {
 }
 
 impl Detail {
+    fn episode_streams_unavailable(&self, cx: &App) -> bool {
+        // Use the enriched details, just like `open_episode`: a TMDB browse
+        // result may not carry the IMDb ID resolved by the details request.
+        self.display_title(cx).imdb().is_none() && !self.meta_status(cx).busy
+    }
+
     /// Scrollable so any number of seasons stays reachable; large sets use
     /// bare numbers to keep the strip short.
     fn season_selector(&self, season: u32, cx: &mut Context<Self>) -> AnyElement {
@@ -209,7 +215,7 @@ impl Detail {
             let season = self.season.unwrap_or_default();
             column = column.child(self.season_selector(season, cx));
         }
-        if self.title.imdb().is_none() && !self.meta_status(cx).busy {
+        if self.episode_streams_unavailable(cx) {
             column = column.child(
                 Notice::new(NoticeKind::Info, "Streams aren’t available for this title")
                     .body("You can still browse its episodes."),
@@ -362,6 +368,53 @@ mod tests {
             name: None,
             overview: overview.map(Into::into),
             released: released.map(Into::into),
+        }
+    }
+
+    #[cfg(feature = "ui-probe-test")]
+    #[gpui::test]
+    fn stream_notice_uses_imdb_from_loaded_details(cx: &mut gpui::TestAppContext) {
+        use crate::tmdb::{TmdbDetails, TmdbTitle};
+        use kinema_core::catalog::ImdbId;
+
+        cx.update(tokens::init);
+        let title = BrowseTitle::Tmdb(TmdbTitle {
+            id: 1,
+            kind: MediaKind::Series,
+            name: "Series".into(),
+            overview: None,
+            release_info: None,
+            poster_url: None,
+            display: Default::default(),
+            imdb: None,
+        });
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+        let detail = cx.new(|cx| Detail::new(coordinator.clone(), title.clone(), cx));
+        for imdb in [Some("tt1234567"), None] {
+            coordinator.update(cx, |c, _| {
+                let BrowseTitle::Tmdb(title) = &title else {
+                    unreachable!()
+                };
+                let generation = c.tmdb_details.begin(true);
+                c.tmdb_details.fetched(
+                    generation,
+                    TmdbDetails {
+                        title: title.clone(),
+                        imdb: imdb.map(|id| {
+                            ImdbId::new(id).unwrap_or_else(|_| panic!("invalid fixture IMDb ID"))
+                        }),
+                        facts: Default::default(),
+                        backdrop_url: None,
+                        genres: vec![],
+                        seasons: vec![],
+                    },
+                    1,
+                );
+            });
+            detail.read_with(cx, |d, cx| {
+                assert!(d.title.imdb().is_none());
+                assert_eq!(d.episode_streams_unavailable(cx), imdb.is_none());
+            });
         }
     }
 
