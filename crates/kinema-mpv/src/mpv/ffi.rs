@@ -36,6 +36,27 @@ impl Param {
         Self::new(0, std::ptr::null_mut())
     }
 }
+// mpv_node / mpv_node_list from client.h. Union members are read only after
+// checking the format discriminant. Lists and strings remain event-owned.
+#[repr(C)]
+pub union NodeValue {
+    pub string: *const c_char,
+    pub flag: c_int,
+    pub int64: i64,
+    pub double: f64,
+    pub list: *const NodeList,
+}
+#[repr(C)]
+pub struct Node {
+    pub value: NodeValue,
+    pub format: c_int,
+}
+#[repr(C)]
+pub struct NodeList {
+    pub num: c_int,
+    pub values: *const Node,
+    pub keys: *const *const c_char,
+}
 pub type Callback = unsafe extern "C" fn(*mut c_void);
 
 pub struct Api {

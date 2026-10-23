@@ -51,10 +51,49 @@ pub struct RenderDiagnostics {
     pub transfer_bytes_per_second: f64,
 }
 
+/// A chapter in media order; its index is implicit in the chapter list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Chapter {
+    pub time: f64,
+    pub title: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrackKind {
+    Video,
+    Audio,
+    Subtitle,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Track {
+    pub id: i64,
+    pub kind: TrackKind,
+    pub title: Option<String>,
+    pub lang: Option<String>,
+    pub selected: bool,
+}
+
+/// An actual demuxer-cache seekable interval, in seconds (not a download estimate).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BufferedRange {
+    pub start: f64,
+    pub end: f64,
+}
+
 /// Latest observed libmpv state. Commands are asynchronous; snapshots are not optimistic.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaybackState {
     pub position: f64,
+    pub chapters: Vec<Chapter>,
+    /// True only after a successful chapter-list observation, including an empty list.
+    pub chapters_available: bool,
+    pub tracks: Vec<Track>,
+    /// True only after a successful track-list observation, including an empty list.
+    pub tracks_available: bool,
+    pub speed: f64,
+    /// None means unavailable; Some(empty) is an observed empty cache.
+    pub buffered_ranges: Option<Vec<BufferedRange>>,
     pub duration: Option<f64>,
     pub paused: bool,
     /// libmpv has paused playback to refill its cache (distinct from user pause).
@@ -83,6 +122,12 @@ impl Default for PlaybackState {
     fn default() -> Self {
         Self {
             position: 0.0,
+            chapters: Vec::new(),
+            chapters_available: false,
+            tracks: Vec::new(),
+            tracks_available: false,
+            speed: 1.0,
+            buffered_ranges: None,
             duration: None,
             paused: false,
             paused_for_cache: false,

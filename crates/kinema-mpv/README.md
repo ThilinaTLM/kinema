@@ -57,12 +57,42 @@ identifies initial/no-media and END_FILE states; `ended` identifies EOF only.
 `paused_for_cache` distinguishes buffering from user pause. No source URL is
 logged by this backend; hosts must not log capability URLs or command arguments.
 
+## Cinema Dock observations and commands
+
+`PlaybackState.chapters` contains ordered `Chapter { time, title }` values;
+`tracks` contains `Track { id, kind, title, lang, selected }`, where `TrackKind`
+is Video, Audio, or Subtitle. `chapters_available` and `tracks_available` are true
+only for successfully parsed observations, including empty lists. Both default
+and reset to false; unavailable/malformed properties clear the corresponding Vec
+and availability flag. Hosts must check availability before presenting a definitive
+“No chapters/tracks” result. `speed` is the observed playback multiplier.
+`buffered_ranges: Option<Vec<BufferedRange>>` copies actual demuxer-cache
+`seekable-ranges` (`start`/`end` seconds); None means unavailable, not zero
+buffering. These ranges need not cover every byte downloaded or every decoder
+buffer. Media metadata is cleared on accepted load, START_FILE and END_FILE.
+Speed is session-level and is not reset by media replacement.
+
+`seek_absolute(seconds)` accepts finite nonnegative seconds;
+`set_speed(rate)` accepts 0.01..=100; `select_audio(Some(id))` and
+`select_subtitle(Some(id))` select observed track IDs, while None means Off.
+`set_subtitle_position(percent: u8)` enqueues the presentation-only `sub-pos`
+property: 0..=100 (0 top, 100 default bottom). It persists across media loads
+on the same Player; the backend does not reset it. Hosts can raise subtitles
+while chrome is visible and restore 100 when hidden;
+subtitle styling/format can affect placement, so this is not a guaranteed safe zone.
+Commands only enqueue and never optimistically change observed selections.
+Seek chapters by their time; no thumbnail extraction is implemented.
+Event-owned nodes are copied on the control worker before the next event wait;
+parsing is nonrecursive and bounded to 4096 entries, 128 fields per map and
+4096 bytes per string. Unavailable/malformed metadata clears its observation.
+
 ## Validation / opt-in smoke tests
 
 From the workspace root:
 
 ```sh
 cargo test -p kinema-mpv --locked
+cargo test -p kinema-mpv --locked real_cinema_dock_metadata -- --ignored --nocapture
 cargo clippy -p kinema-mpv --all-targets --locked -- -D warnings
 cargo test -p kinema-mpv --no-default-features --locked
 # List native smoke tests (ignored by default):

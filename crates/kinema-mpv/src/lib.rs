@@ -10,5 +10,6 @@ mod state;
 pub use error::{Error, Result};
 pub use mpv::{Config, Frame, Player};
 pub use state::{
-    HardwareDecoding, PlaybackState, RenderBackend, RenderDiagnostics, ResolutionPolicy,
+    BufferedRange, Chapter, HardwareDecoding, PlaybackState, RenderBackend, RenderDiagnostics,
+    ResolutionPolicy, Track, TrackKind,
 };

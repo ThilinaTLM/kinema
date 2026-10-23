@@ -1,6 +1,7 @@
 use super::{
     ffi::{EndFile, Property},
     library::{Client, Loaded},
+    metadata,
     render::{self, Pipeline},
     software::Frame,
 };
@@ -180,6 +181,10 @@ impl Player {
             (10, c"video-out-params/rotate", 4),
             (11, c"hwdec-current", 1),
             (12, c"paused-for-cache", 3),
+            (13, c"chapter-list", 6),
+            (14, c"track-list", 6),
+            (15, c"speed", 5),
+            (16, c"demuxer-cache-state", 6),
         ] {
             client.loaded.check(
                 unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), format) },
@@ -266,6 +271,7 @@ impl Player {
             .unwrap_or_else(|e| e.into_inner());
         self.command(&["loadfile", source, "replace"])?;
         pipeline.clear(&mut state);
+        clear_media_metadata(&mut state);
         Ok(())
     }
     pub fn set_paused(&self, paused: bool) -> Result<()> {
@@ -283,6 +289,51 @@ impl Player {
             return Err(Error::InvalidInput("seek seconds must be finite"));
         }
         self.command(&["seek", &seconds.to_string(), "relative+exact"])
+    }
+    /// Seek to a finite, nonnegative media time in seconds.
+    pub fn seek_absolute(&self, seconds: f64) -> Result<()> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(Error::InvalidInput(
+                "absolute seek must be finite and nonnegative",
+            ));
+        }
+        self.command(&["seek", &seconds.to_string(), "absolute+exact"])
+    }
+    /// Set playback rate in libmpv's supported range, 0.01..=100.
+    pub fn set_speed(&self, speed: f64) -> Result<()> {
+        if !speed.is_finite() || !(0.01..=100.0).contains(&speed) {
+            return Err(Error::InvalidInput(
+                "speed must be finite and between 0.01 and 100",
+            ));
+        }
+        self.command(&["set", "speed", &speed.to_string()])
+    }
+    /// Select an observed audio track ID; None disables audio.
+    pub fn select_audio(&self, id: Option<i64>) -> Result<()> {
+        self.select_track("aid", id)
+    }
+    /// Select an observed subtitle track ID; None disables subtitles.
+    pub fn select_subtitle(&self, id: Option<i64>) -> Result<()> {
+        self.select_track("sid", id)
+    }
+    /// Position subtitles vertically: 0 is the top, 100 the default bottom.
+    /// Accepts 0..=100 and persists across media loads on this Player.
+    /// Presentation-only: acceptance does not update the observed playback state.
+    /// Placement remains subject to subtitle format/styling and libmpv behavior.
+    pub fn set_subtitle_position(&self, percent: u8) -> Result<()> {
+        if percent > 100 {
+            return Err(Error::InvalidInput(
+                "subtitle position must be between 0 and 100",
+            ));
+        }
+        self.command(&["set", "sub-pos", &percent.to_string()])
+    }
+    fn select_track(&self, property: &str, id: Option<i64>) -> Result<()> {
+        if id.is_some_and(|id| id < 0) {
+            return Err(Error::InvalidInput("track ID must be nonnegative"));
+        }
+        let value = id.map_or_else(|| "no".to_owned(), |id| id.to_string());
+        self.command(&["set", property, &value])
     }
     /// Set a finite volume percentage in 0..=100.
     pub fn set_volume(&self, volume: f64) -> Result<()> {
@@ -360,6 +411,32 @@ impl Drop for Player {
         }
     }
 }
+// SAFETY: property payload must be a live libmpv event; copied values alone escape.
+unsafe fn observe_media_metadata(state: &mut PlaybackState, id: u64, property: &Property) {
+    match id {
+        13 => {
+            let chapters = unsafe { metadata::chapters(property) };
+            state.chapters_available = chapters.is_some();
+            state.chapters = chapters.unwrap_or_default();
+        }
+        14 => {
+            let tracks = unsafe { metadata::tracks(property) };
+            state.tracks_available = tracks.is_some();
+            state.tracks = tracks.unwrap_or_default();
+        }
+        16 => state.buffered_ranges = unsafe { metadata::buffered_ranges(property) },
+        _ => {}
+    }
+}
+
+fn clear_media_metadata(state: &mut PlaybackState) {
+    state.chapters.clear();
+    state.chapters_available = false;
+    state.tracks.clear();
+    state.tracks_available = false;
+    state.buffered_ranges = None;
+}
+
 fn check_scripting_option(loaded: &Loaded, code: i32) -> Result<()> {
     if scripting_option_absent(code) {
         Ok(())
@@ -473,6 +550,7 @@ fn control_worker(
                     state.error = None;
                     state.position = 0.0;
                     state.duration = None;
+                    clear_media_metadata(&mut state);
                     shared
                         .pipeline
                         .lock()
@@ -488,6 +566,7 @@ fn control_worker(
                     state.loading = false;
                     state.media_stopped = true;
                     state.paused_for_cache = false;
+                    clear_media_metadata(&mut state);
                     if !event.data.is_null() {
                         let end = unsafe { &*event.data.cast::<EndFile>() };
                         state.ended = end.reason == 0;
@@ -507,6 +586,15 @@ fn control_worker(
                 22 if !event.data.is_null() => {
                     let property = unsafe { &*event.data.cast::<Property>() };
                     match (event.userdata, property.format, property.data.is_null()) {
+                        (13 | 14 | 16, _, _) if !state.media_stopped => unsafe {
+                            observe_media_metadata(&mut state, event.userdata, property);
+                        },
+                        (15, 5, false) => {
+                            let speed = unsafe { *property.data.cast::<f64>() };
+                            if speed.is_finite() && speed > 0.0 {
+                                state.speed = speed;
+                            }
+                        }
                         (1 | 2 | 4, 5, false) => {
                             let value = unsafe { *property.data.cast::<f64>() };
                             if value.is_finite() {
@@ -577,6 +665,211 @@ mod tests {
             },
             receiver,
         )
+    }
+    #[test]
+    fn dock_commands_enqueue_exact_arguments_without_optimistic_state() {
+        let (player, receiver) = mock_player();
+        let initial = player.state();
+        type CommandCase<'a> = (&'a dyn Fn() -> Result<()>, &'a [&'a str]);
+        let cases: &[CommandCase<'_>] = &[
+            (
+                &|| player.seek_absolute(12.5),
+                &["seek", "12.5", "absolute+exact"],
+            ),
+            (&|| player.set_speed(1.5), &["set", "speed", "1.5"]),
+            (&|| player.select_audio(Some(7)), &["set", "aid", "7"]),
+            (&|| player.select_audio(None), &["set", "aid", "no"]),
+            (&|| player.select_subtitle(Some(4)), &["set", "sid", "4"]),
+            (&|| player.select_subtitle(None), &["set", "sid", "no"]),
+        ];
+        for (command, expected) in cases {
+            command().unwrap();
+            let arguments = receiver.try_recv().unwrap();
+            let actual: Vec<_> = arguments.iter().map(|a| a.to_str().unwrap()).collect();
+            assert_eq!(actual, *expected);
+            assert_eq!(player.state(), initial);
+        }
+    }
+    #[test]
+    fn subtitle_position_validation_enqueue_and_lifecycle() {
+        let (player, receiver) = mock_player();
+        let initial = player.state();
+        for percent in [101, 150, u8::MAX] {
+            assert!(matches!(
+                player.set_subtitle_position(percent),
+                Err(Error::InvalidInput(_))
+            ));
+        }
+        assert!(receiver.try_recv().is_err());
+        for (percent, expected) in [(0, "0"), (85, "85"), (100, "100")] {
+            player.set_subtitle_position(percent).unwrap();
+            let arguments = receiver.try_recv().unwrap();
+            let actual: Vec<_> = arguments.iter().map(|a| a.to_str().unwrap()).collect();
+            assert_eq!(actual, ["set", "sub-pos", expected]);
+            assert_eq!(player.state(), initial);
+        }
+        player.set_subtitle_position(85).unwrap();
+        assert!(matches!(
+            player.set_subtitle_position(100),
+            Err(Error::QueueFull)
+        ));
+        receiver.try_recv().unwrap();
+        player.shared.stopped.store(true, Ordering::Release);
+        assert!(matches!(
+            player.set_subtitle_position(100),
+            Err(Error::Disconnected)
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+    #[test]
+    fn dock_commands_reject_invalid_values_and_respect_queue_lifecycle() {
+        let (player, receiver) = mock_player();
+        for seconds in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                player.seek_absolute(seconds),
+                Err(Error::InvalidInput(_))
+            ));
+        }
+        for speed in [0.0, -1.0, 0.009, 101.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                player.set_speed(speed),
+                Err(Error::InvalidInput(_))
+            ));
+        }
+        assert!(matches!(
+            player.select_audio(Some(-1)),
+            Err(Error::InvalidInput(_))
+        ));
+        assert!(matches!(
+            player.select_subtitle(Some(-1)),
+            Err(Error::InvalidInput(_))
+        ));
+        assert!(receiver.try_recv().is_err());
+        for speed in [0.01, 100.0] {
+            player.set_speed(speed).unwrap();
+            receiver.try_recv().unwrap();
+        }
+        player.seek_absolute(0.0).unwrap();
+        assert!(matches!(
+            player.select_subtitle(None),
+            Err(Error::QueueFull)
+        ));
+        receiver.try_recv().unwrap();
+        player.shared.stopped.store(true, Ordering::Release);
+        assert!(matches!(
+            player.seek_absolute(0.0),
+            Err(Error::Disconnected)
+        ));
+        assert!(matches!(player.set_speed(1.0), Err(Error::Disconnected)));
+        assert!(matches!(
+            player.select_audio(None),
+            Err(Error::Disconnected)
+        ));
+        assert!(matches!(
+            player.select_subtitle(None),
+            Err(Error::Disconnected)
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+    #[test]
+    fn metadata_availability_distinguishes_empty_unavailable_invalid_and_reset() {
+        use super::super::ffi::{Node, NodeList, NodeValue};
+        let mut state = PlaybackState::default();
+        assert!(!state.chapters_available && !state.tracks_available);
+        let list = NodeList {
+            num: 0,
+            values: std::ptr::null(),
+            keys: std::ptr::null(),
+        };
+        let mut node = Node {
+            format: 7,
+            value: NodeValue { list: &list },
+        };
+        let empty = Property {
+            name: std::ptr::null(),
+            format: 6,
+            data: (&mut node as *mut Node).cast(),
+        };
+        let unavailable = Property {
+            name: std::ptr::null(),
+            format: 0,
+            data: std::ptr::null_mut(),
+        };
+        let mut invalid_node = Node {
+            format: 5,
+            value: NodeValue { double: 1.0 },
+        };
+        let invalid = Property {
+            name: std::ptr::null(),
+            format: 6,
+            data: (&mut invalid_node as *mut Node).cast(),
+        };
+        for failure in [&unavailable, &invalid] {
+            for id in [13, 14] {
+                unsafe { observe_media_metadata(&mut state, id, &empty) };
+            }
+            assert!(state.chapters_available && state.tracks_available);
+            assert!(state.chapters.is_empty() && state.tracks.is_empty());
+            for id in [13, 14] {
+                unsafe { observe_media_metadata(&mut state, id, failure) };
+            }
+            assert!(!state.chapters_available && !state.tracks_available);
+            assert!(state.chapters.is_empty() && state.tracks.is_empty());
+        }
+        for id in [13, 14] {
+            unsafe { observe_media_metadata(&mut state, id, &empty) };
+        }
+        clear_media_metadata(&mut state);
+        assert!(!state.chapters_available && !state.tracks_available);
+        assert!(state.chapters.is_empty() && state.tracks.is_empty());
+        // Accepted load also resets availability immediately, before worker events.
+        let (player, _receiver) = mock_player();
+        {
+            let mut observed = player.shared.state.lock().unwrap();
+            observed.chapters_available = true;
+            observed.tracks_available = true;
+        }
+        player.load("new.mkv").unwrap();
+        let observed = player.state();
+        assert!(!observed.chapters_available && !observed.tracks_available);
+    }
+    #[test]
+    fn clearing_media_metadata_does_not_reset_session_speed() {
+        let mut state = PlaybackState {
+            speed: 1.5,
+            chapters: vec![crate::Chapter {
+                time: 1.0,
+                title: None,
+            }],
+            tracks: vec![crate::Track {
+                id: 1,
+                kind: crate::TrackKind::Audio,
+                title: None,
+                lang: None,
+                selected: true,
+            }],
+            buffered_ranges: Some(vec![crate::BufferedRange {
+                start: 0.0,
+                end: 2.0,
+            }]),
+            ..PlaybackState::default()
+        };
+        let unavailable = Property {
+            name: std::ptr::null(),
+            format: 0,
+            data: std::ptr::null_mut(),
+        };
+        for id in [13, 14, 16] {
+            unsafe { observe_media_metadata(&mut state, id, &unavailable) };
+        }
+        assert!(state.chapters.is_empty());
+        assert!(state.tracks.is_empty());
+        assert!(state.buffered_ranges.is_none());
+        clear_media_metadata(&mut state);
+        assert!(state.chapters.is_empty());
+        assert!(state.tracks.is_empty());
+        assert_eq!(state.buffered_ranges, None);
+        assert_eq!(state.speed, 1.5);
     }
     #[test]
     fn fatal_render_failure_rejects_control_and_preserves_last_diagnostics() {
@@ -1056,6 +1349,169 @@ mod tests {
         for _ in 0..3 {
             drop(Player::new(config.clone()).unwrap());
         }
+    }
+    #[test]
+    #[ignore = "requires libmpv and ffmpeg; real Cinema Dock metadata and commands"]
+    fn real_cinema_dock_metadata() {
+        let media = TemporaryMedia::new();
+        let metadata = media.0.join("chapters.txt");
+        let subtitles = media.0.join("captions.srt");
+        let path = media.0.join("cinema.mkv");
+        std::fs::write(&metadata, ";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=2000\ntitle=Opening\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=2000\nEND=4000\ntitle=Closing\n").unwrap();
+        std::fs::write(
+            &subtitles,
+            "1\n00:00:00,000 --> 00:00:04,000\nCinema metadata test\n",
+        )
+        .unwrap();
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=640x360:r=10",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=8000",
+                    "-i"
+                ])
+                .arg(&subtitles)
+                .args(["-i"])
+                .arg(&metadata)
+                .args([
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1:a",
+                    "-map",
+                    "2:s",
+                    "-map_metadata",
+                    "3",
+                    "-map_chapters",
+                    "3",
+                    "-metadata:s:a:0",
+                    "language=eng",
+                    "-metadata:s:s:0",
+                    "language=eng",
+                    "-c:v",
+                    "mpeg4",
+                    "-c:a",
+                    "pcm_s16le",
+                    "-c:s",
+                    "srt",
+                    "-t",
+                    "4"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            ..Config::default()
+        })
+        .unwrap();
+        player.set_paused(true).unwrap();
+        player.resize(640, 360).unwrap();
+        // Avoid requiring a real audio device in this headless native test.
+        player.select_audio(None).unwrap();
+        player.load(path.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| {
+            s.paused && s.chapters.len() == 2 && s.tracks.len() == 3
+        });
+        let state = player.state();
+        assert!(state.chapters_available && state.tracks_available);
+        assert_eq!(state.chapters[0].title.as_deref(), Some("Opening"));
+        assert_eq!(state.chapters[1].time, 2.0);
+        assert!(
+            state
+                .tracks
+                .iter()
+                .any(|t| t.kind == crate::TrackKind::Audio && t.lang.as_deref() == Some("eng"))
+        );
+        let subtitle = state
+            .tracks
+            .iter()
+            .find(|t| t.kind == crate::TrackKind::Subtitle)
+            .unwrap()
+            .id;
+        player.select_subtitle(Some(subtitle)).unwrap();
+        wait_for(&player, |s| {
+            s.tracks
+                .iter()
+                .any(|t| t.id == subtitle && t.kind == crate::TrackKind::Subtitle && t.selected)
+        });
+        // Verify the real sub-pos effect in rendered pixels, not just acceptance.
+        fn wait_subtitle_band(player: &Player, raised: bool) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(frame) = player.take_frame() {
+                    let top = frame
+                        .pixels
+                        .chunks_exact(4)
+                        .position(|p| p[0] > 180 && p[1] > 180 && p[2] > 180)
+                        .map(|i| i / frame.width as usize);
+                    if top.is_some_and(|y| {
+                        if raised {
+                            y < frame.height as usize * 3 / 5
+                        } else {
+                            y > frame.height as usize * 3 / 4
+                        }
+                    }) {
+                        return;
+                    }
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "subtitle band not rendered; raised={raised}, state={:?}",
+                    player.state()
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        player.seek_absolute(1.0).unwrap();
+        wait_subtitle_band(&player, false);
+        player.set_subtitle_position(50).unwrap();
+        wait_subtitle_band(&player, true);
+        // The UI deduplicates updates: a new load must retain the position.
+        player.stop().unwrap();
+        wait_for(&player, |s| s.media_stopped);
+        // Allow the unavailable video-out-params observations to drain before
+        // reloading identical media (whose dimensions otherwise never change).
+        thread::sleep(Duration::from_millis(100));
+        player.load(path.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| s.chapters.len() == 2 && !s.loading);
+        player.select_subtitle(Some(subtitle)).unwrap();
+        player.seek_absolute(1.0).unwrap();
+        wait_subtitle_band(&player, true);
+        player.set_subtitle_position(100).unwrap();
+        wait_subtitle_band(&player, false);
+        player.select_subtitle(None).unwrap();
+        wait_for(&player, |s| {
+            s.tracks
+                .iter()
+                .all(|t| t.kind != crate::TrackKind::Subtitle || !t.selected)
+        });
+        player.set_speed(1.5).unwrap();
+        wait_for(&player, |s| s.speed == 1.5);
+        player.seek_absolute(2.5).unwrap();
+        wait_for(&player, |s| (s.position - 2.5).abs() < 0.2);
+        player.stop().unwrap();
+        wait_for(&player, |s| s.media_stopped);
+        let state = player.state();
+        assert!(state.chapters.is_empty());
+        assert!(state.tracks.is_empty());
+        assert!(state.buffered_ranges.is_none());
+        assert!(!state.chapters_available && !state.tracks_available);
+        player.load("/definitely/not/a/cinema-file").unwrap();
+        wait_for(&player, |s| s.error.is_some() && !s.loading);
+        assert!(player.state().chapters.is_empty());
+        assert!(player.state().tracks.is_empty());
     }
     #[test]
     #[ignore = "requires libmpv and ffmpeg; real source/viewport/audio-only control lifecycle"]

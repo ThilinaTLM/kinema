@@ -1,10 +1,11 @@
 # Player — independent native playback window
 
-**Status: source implemented; scoped validation and Linux presentation reviewed by the lead.**
-The backend import, embedded default/settings choices, managed window, original
-player per-session replay, close/lease release, retry, and stale-event logic are
-implemented in source. Root checks and scoped Linux GPUI presentation passed as
-reported below, including final backend option hardening and verification reruns. Design targets below are not blanket
+**Status: Cinema Dock source implemented; scoped Linux synthetic-media presentation reviewed.**
+The earlier embedded-player increment implemented the backend import, embedded
+default/settings choices, managed window, original player per-session replay,
+close/lease release, retry, and stale-event logic. Its root checks and scoped Linux
+presentation evidence are retained below as historical results, not validation of
+the new controls. Design targets and source implementation are not blanket
 implementation or acceptance claims. [Desktop v3](desktop-v3.md) supplies the sole Cinema
 visual system; [architecture](../architecture.md#approved-embedded-player-direction)
 sets the backend boundary and lifetime policy.
@@ -17,8 +18,11 @@ as explicit alternatives, not silent fallbacks. Use only pinned `gpui-pre =0.3.9
 and `gpui_platform`, with in-house desktop widgets. Backend functionality has been
 imported into `kinema-mpv` from `/home/tlm/Projects/Random/mpv-gpui`; the experiment
 is unchanged and its GPUI 0.2.2 view is not imported. No HTML player or second UI
-engine. Settings provide three primary choices: embedded mpv (default), external
-mpv, and VLC.
+engine. The approved [Cinema Dock wireframe](player-controls-wireframes.html) is
+an HTML **design artifact exception only**, not shipped player UI or a second
+engine. Its illustrative media, metadata, buffering, thumbnails, and demo actions
+are not evidence of native capabilities. Settings provide three primary choices:
+embedded mpv (default), external mpv, and VLC.
 
 The backend owns libmpv commands/events and decoding/render workers. Desktop owns
 window, view, controls, focus, and session coordination. Rendering must not block
@@ -26,14 +30,60 @@ on I/O, decoder commands, or worker shutdown. Bound frame/event handoff, cancel
 obsolete work, and reject stale events by window/session generation. A frame from
 a closed/replaced session must never update another player.
 
-Implemented control source scope: play/pause with reload at EOF, ±10-second seek,
-click-seek timeline, mute and volume decrement/increment, fullscreen, Escape to
-leave fullscreen (never close), keyboard focus, and chrome auto-hide. Native
-window close releases the lease. This source status does not establish actual
-full GPUI interaction acceptance. Audio/subtitle
-track selection, More menus, drag-seek preview, and custom pointer hiding are
-**design follow-ups**, not required first-increment controls; expose no placeholder
-buttons for them unless implementation and review confirm they work.
+The current native source adds chapter-aware drag/hover seeking,
+vertical volume and keyboard adjustment, and real audio/subtitle/chapter/speed
+menus to play/pause with reload at EOF, ±10-second seek, mute, fullscreen, focus,
+and chrome auto-hide. Escape leaves fullscreen (never closes playback), after
+dismissing an open menu. Native window close releases the lease. These controls
+are no longer deferred first-increment follow-ups; their current source and
+validation status are recorded separately below. Expose no fake options or
+placeholder actions. Actual decoded thumbnail generation is explicitly deferred:
+there is no thumbnail API, and no fixture or repeated video frame may impersonate
+a seek thumbnail. Custom pointer hiding remains a separate follow-up.
+
+## Current implementation and scoped validation
+
+- Native source implements the Cinema Dock: chapter-marked 12 px seek rail,
+  hover/drag time/chapter preview and release-to-seek, same-size ghost transport,
+  middle-right vertical volume with mute/percentage and keyboard adjustment, and
+  real audio/subtitle/chapter/speed menus. Utility controls use definite-width
+  slots; popups anchor above the dock in viewport coordinates. The 100 px volume
+  rail is offset upward for minimum-window clearance. Timeline and volume have
+  explicit accessibility labels.
+- Backend source supplies observed chapters/tracks/speed/buffered ranges, bounded
+  metadata parsing, and real seek/selection/speed commands. Availability flags
+  distinguish unknown metadata from known-empty lists; disabled tooltips explain
+  the difference.
+- Subtitle placement uses `set_subtitle_position(u8)`, measured dock height and a
+  conservative fallback to move text above visible chrome and restore the default
+  when hidden. Updates are deduplicated, reapplied after load, and do not reset
+  the idle timer. Styled ASS subtitles may ignore `sub-pos`; universal subtitle
+  clearance is not established. Backend restoration is tested; hidden-chrome
+  subtitle restoration has not been observed in the native UI.
+- Lead final checks passed: `cargo fmt --all -- --check`, strict locked workspace
+  all-target Clippy, and locked workspace tests. Strict `ui-probe-test` feature
+  Clippy and tests passed (**459 desktop tests passed, 4 ignored**); CPU-only
+  backend tests passed (**35 passed, 4 ignored**). The lead independently reran
+  native `real_cinema_dock_metadata` and `real_cpu_player_media_lifecycle` tests
+  successfully.
+- The lead personally reviewed final Linux synthetic-media captures at 1100×680
+  and 720×440: all tools visible, menus above the right dock, minimum-window
+  volume clearance, and plain SRT subtitles clear of the dock. The validator
+  reviewed earlier seek-preview, drag, and keyboard captures. Ignored local
+  evidence is in the ignored local capture directory
+  `target/ui-probe/cinema-dock-20261022-final2-stable-oc4uyz/`, including
+  `subtitles-1100x680-selected.png`, `subtitles-720x440-selected.png`,
+  `speed-720x440-selected-menu.png`, and `volume-720x440-drag.png`; these are not
+  distributed documentation assets.
+- This establishes scoped Linux synthetic-media review, not blanket UI or
+  accessibility acceptance. Audible audio, hardware decoding, sustained
+  performance, and cross-platform behavior remain unqualified.
+- Native reload coverage uses stop-and-settle before reload. An exploratory
+  immediate same-file replacement while paused, without stop, could leave
+  `source_size`/`render_size` missing; provenance and broader EOF-replay impact
+  remain unverified. No claim is made that this is preexisting, introduced, or fixed.
+- Decoded thumbnail generation is explicitly deferred: previews are time/chapter
+  text only. No thumbnail pipeline, HTML runtime, or second engine is added.
 
 ## Compact Cinema chrome
 
@@ -43,19 +93,22 @@ and OS close affordances. Fullscreen hides ordinary window chrome, not escape
 routes. No browse rail, poster dashboard, decorative glass, or large floating
 transport pills.
 
-Text wireframe (labels describe accessible icon controls):
+Use the approved Cinema Dock artifact for composition, with native GPUI controls:
 
-```text
-┌ Kinema · Title / S01E02                                [OS controls] ┐
-│ [Title / episode, truncated]                                        │
-│                                                                    │
-│                          VIDEO                                     │
-│                    [Buffering… if stalled]                         │
-│                                                                    │
-│  00:42:18 ─────────────●────────────────────────────── 01:48:06       │
-│  [Play/Pause] [−10s] [+10s]       [Mute] [−] 80% [+] [Fullscreen]     │
-└────────────────────────────────────────────────────────────────────┘
-```
+- Compact title at the top; video remains dominant.
+- Bottom dock: elapsed/remaining time and current chapter above a bold **12 px**
+  seek rail inside a **32 px** interaction target. Chapter marks come from mpv.
+- Below the rail, play/pause and ±10-second transport on the left use the same-size
+  ghost buttons, not an oversized filled play pill. Chapter, subtitle, audio,
+  speed, and fullscreen controls occupy the right.
+- A separate **middle-right vertical volume slider** increases upward, with mute
+  and percentage together on a contrast-safe backing. This replaces the old
+  bottom-row volume −/+ buttons.
+- Hover/drag preview floats above the rail with time and the observed chapter
+  label when available. It is text-only until a real thumbnail pipeline exists.
+
+Do not copy fixture-only back navigation, quality/HDR badges, settings actions,
+buffer ranges, or subtitle samples into production as invented capabilities.
 
 - Use existing token roles, not a separate palette: `bg.canvas` `#0B0C0E`,
   `bg.surface` `#131418`, raised/overlay surfaces, `text.primary` `#F2F3F5`,
@@ -69,41 +122,48 @@ Text wireframe (labels describe accessible icon controls):
   Aim for 32 px icon controls with clear hit regions, a compact top title row,
   and a two-row bottom transport. Use tabular time numerals. Narrow windows
   truncate titles while retaining play, seek, volume, and a fullscreen escape
-  route. A responsive More menu is a follow-up, not a required placeholder.
+  route. A responsive More menu is optional; it must contain only working actions.
 - Progress is warm accent; any buffered/available-range indication is neutral
   and separately labelled. Decoder buffer is not the managed download's
   completion percentage. Unknown duration shows `—`, not a fabricated total;
   disable unsupported seek operations visibly.
-- Follow-up only: audio/subtitle menus would list observed tracks, selection,
-  subtitle Off, and explicit empty states; More could expose these when space is
-  tight. Do not show unimplemented track, More, speed/HDR/equalizer controls.
+- Audio/subtitle menus list observed tracks and selection, subtitle Off, and
+  explicit empty/unavailable states. Chapters use observed titles and start times;
+  speed choices issue real mpv commands and selection reflects observed speed.
+  Requested values are not proof of backend success. More may expose working
+  actions when space is tight; do not invent HDR/equalizer/settings controls.
+- Show buffered ranges only when genuinely observed, never a decorative fixture.
+  Missing chapter metadata means no fabricated chapter ticks or names.
 
 ## Controls and focus
 
 All icon buttons have accessible names and hover tooltips including shortcuts.
 Focus-visible uses the shared ring; selected, disabled, hover and pressed states
-remain distinct. Follow-up menus should support arrows, Enter, Escape,
+remain distinct. Native menus should support arrows, Enter, Escape,
 Menu key / Shift+F10.
 Keyboard shortcuts are scoped to the focused player and do not override a text
 input or open menu's editing/navigation keys.
 
-Shortcut design contract (exact mapping still subject to native review):
+Shortcut design contract (current implementation requires native review):
 
-| Input | Proposed player action |
+| Input | Player action target |
 | --- | --- |
 | Space or K | Toggle user play/pause intent |
 | Left / Right | Seek −/+10 seconds, clamped to available timeline bounds |
 | Up / Down | Volume +/−5 percentage points, clamped 0–100 |
 | M | Mute/unmute without losing the prior volume |
 | F or double-click video | Toggle fullscreen |
-| Escape | Leave fullscreen; never close playback (dismiss an open menu first if menus are later added) |
+| Escape | Dismiss an open menu first, otherwise leave fullscreen; never close playback |
 | Tab / Shift+Tab | Reveal chrome and move through enabled controls |
 | Enter / Space on focused control | Activate that control, not a second playback toggle |
 | Native OS close shortcut/button | Close this player window and release its lease |
 
-Clicking the seek rail requests that time. Drag-seek preview and commit-on-release
-are design follow-ups, not first-increment requirements. Seeking missing managed bytes requests priority
-ranges through the server; it must not claim those bytes are already downloaded.
+Clicking the seek rail requests that time. Dragging updates the thumb and
+text-only time/chapter preview; commit the seek on release, keeping the requested
+position distinct from observed playback until reconciled. Hover previews do not
+seek. Clamp to valid duration and suppress seeking when duration is unavailable.
+Seeking missing managed bytes requests priority ranges through the server; it
+must not claim those bytes are already downloaded.
 Single-click video reveals chrome; use the explicit button/keyboard to pause so
 fullscreen double-click does not accidentally toggle playback twice.
 
@@ -178,7 +238,8 @@ without the scripting/OSC engine, only `OptionNotFound` is accepted for those
 missing options; other disable failures fail startup. This is configuration
 hardening, not a sandbox or crash-isolation boundary. The backend owner reviewed
 upstream `options/options.c` and installed `client.h` option evidence and added
-one focused test. Final root/native reruns passed. Missing-option classification
+one focused test. Earlier-increment final root/native reruns passed (see historical
+evidence below). Missing-option classification
 is pure-test coverage only; native no-Lua builds are not runtime-qualified.
 
 Playback requires separately supplied native **libmpv**, not merely the mpv
@@ -189,7 +250,7 @@ promise for Kinema. CPU fallback, hardware decode, renderer choice, native
 resolution, and color behavior require explicit observation rather than inferred
 support from successful compilation.
 
-### Validation evidence (lead-reviewed)
+### Historical validation evidence (earlier increment; lead-reviewed)
 
 - Backend deterministic tests: default **37 passed**, CPU-only **26 passed**.
 - All four native synthetic tests passed again after option hardening: `real_mpv_render_and_teardown`,
@@ -213,8 +274,9 @@ support from successful compilation.
   `player-native-paused.png` (real generated media). Cinema chrome was consistent;
   video overlays intentionally stay dark under Light.
 
-These results were independently inspected by the lead, not rerun by the docs
-owner. Ignored local [artifacts and probe commands](../../target/ui-probe/player/README.md)
+These earlier-increment results were independently inspected by the lead, not
+rerun by the docs owner. They do **not** validate the Cinema Dock changes or its
+new metadata/command paths. Ignored local [artifacts and probe commands](../../target/ui-probe/player/README.md)
 include `final-validation.log` (lead inspected, ending `TOTAL_FAILED_COMMANDS:0`),
 `native-wayland.log`, `keyboard.log`, `workspace-validation.log`, and
 `ui-validation.log`; they are not distributed documentation assets. See
@@ -223,13 +285,15 @@ for reproducible probe entry points. Viewport resolution is deliberate, with no
 hidden 720p cap. This establishes scoped Linux presentation, not cross-platform,
 full-provider, fullscreen/audio, or sustained-performance acceptance.
 
-Remaining acceptance plan (do not interpret the list as completed results):
+Remaining acceptance plan (including the current changes; not completed results):
 
 1. Deterministic backend/load failures, event ordering, stale-generation rejection,
    bounded frame delivery, worker teardown, and missing/invalid library handling.
-2. Native window open/replay focus/resize/fullscreen/close, first-increment controls
-   and keyboard,
-   focus/auto-hide/reduced motion, contrast over bright video, and actionable errors.
+2. Native window open/replay focus/resize/fullscreen/close; Cinema Dock layout,
+   chapter marks, hover/drag preview and release commit, vertical volume and
+   keyboard control; observed audio/subtitle/chapter/speed menus, command failure
+   and empty states; focus/menu navigation/auto-hide/reduced motion, contrast over
+   bright video, and actionable errors.
 3. Local file and loopback range playback, missing-range seek, buffering recovery,
    pause during buffering, EOF/replay, and close during initialization/seek/failure.
 4. Two leases sharing one asset: close one player and prove the other survives;
@@ -239,8 +303,9 @@ Remaining acceptance plan (do not interpret the list as completed results):
    frame/memory/latency measurements, and platform-specific library/graphics/audio
    behavior on Windows, macOS, Linux Wayland and Linux X11.
 
-Follow-up acceptance, only when implemented: audio/subtitle track selection,
-More/menu keyboard behavior, drag-seek preview, and custom pointer hiding.
+Deferred acceptance: decoded thumbnail generation/cache and custom pointer
+hiding, only once implemented. Real track/chapter/speed menus and drag/hover
+text previews belong to the current acceptance scope, not this deferred list.
 
 **Open implementation assumptions:** the shortcut mapping, 2.5-second hide delay,
 narrow-window layout, and minimize/occlusion optimization above remain proposed
