@@ -312,3 +312,25 @@ narrow-window layout, and minimize/occlusion optimization above remain proposed
 interaction details until native review. Library lookup/configuration and redistribution packaging must be
 confirmed by the implementation owner. Evidence above is scoped; remaining
 acceptance and any post-review reruns must be recorded separately.
+
+## Cinema Dock presentation correction
+
+The bottom chrome is not a card. The approved wireframe's `.dock` is only a
+content position (28 px sides, 23 px bottom); it has no background, border or
+radius. Native implementation: a full-width, edge-attached `scrim_max` backing
+behind the time row, timeline and controls (so text stays contrast-safe), with a
+72 px transparent-to-`scrim_max` fade above it that ends at the same colour. The
+vertical volume panel intentionally remains a floating panel at middle right.
+Menu anchoring uses the measured controls height plus the 23 px bottom inset.
+The subtitle safe zone additionally reserves the 72 px fade (plus 8 px
+clearance) so burned-in subtitles are not dimmed by it; it is applied only while
+the chrome is visible.
+
+Validation: root formatting, strict locked workspace Clippy, and locked workspace
+tests passed. Lead-reviewed isolated Linux bright-media captures at 1100×680 and
+720×440 confirm the edge-to-edge backing, upward fade, readable time/chapter row,
+and subtitles above the fade. Menu placement and pointer-click mute also passed.
+Local evidence is under ignored `target/ui-probe/cinema-dock-edge-8qtV89/`
+(layout/menu), `cinema-dock-edge-final-nZmh2N/` (pointer mute), and
+`cinema-dock-edge-subtitles-PwoEbX/` (final subtitle clearance). This is scoped
+presentation evidence, not audio, hardware-decoding, or cross-platform acceptance.

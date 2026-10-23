@@ -78,6 +78,11 @@ const CONTROL_COUNT: usize = 12;
 /// Chrome auto-hides after this much inactivity while playing (approved design).
 const CHROME_IDLE: Duration = Duration::from_millis(2500);
 /// Dock height assumed until its first layout is measured.
+/// Approved Cinema Dock content insets (design `.dock{left/right:28px;bottom:23px}`).
+const DOCK_SIDE_INSET: Pixels = px(28.);
+const DOCK_BOTTOM_INSET: Pixels = px(23.);
+/// Height of the transparent-to-scrim fade above the dock backing (decoration only).
+const DOCK_FADE: Pixels = px(72.);
 const DOCK_ESTIMATE: Pixels = px(148.);
 const SPEEDS: [f64; 7] = [0.5, 0.75, 1., 1.25, 1.5, 1.75, 2.];
 
@@ -495,7 +500,8 @@ impl PlayerWindow {
         };
         let desired = subtitle_position(
             self.chrome_visible(window),
-            f32::from(dock + s::S20 + s::S8),
+            // Controls, bottom inset and the fade above them, so subtitles are not dimmed.
+            f32::from(dock + DOCK_BOTTOM_INSET + DOCK_FADE + s::S8),
             f32::from(window.viewport_size().height),
         );
         if self.subtitle_position != Some(desired) {
@@ -1122,8 +1128,8 @@ impl PlayerWindow {
             DOCK_ESTIMATE
         };
         let menu_anchor = point(
-            viewport.width - s::S20,
-            viewport.height - s::S20 - dock_extent - s::S8,
+            viewport.width - DOCK_SIDE_INSET,
+            viewport.height - DOCK_BOTTOM_INSET - dock_extent - s::S8,
         );
         let dock_entity = cx.entity();
         let status: &'static str = {
@@ -1245,113 +1251,142 @@ impl PlayerWindow {
                             .on_click(|_, window, _| window.remove_window()),
                     ),
             )
-            .child(self.volume_panel(cx))
             .child(
+                // Edge-attached, full-bleed scrim fading up into the video; the
+                // approved `.dock` is only inset content, with no card or border.
                 div()
-                    .id("player-dock")
+                    .id("player-dock-scrim")
+                    .w_full()
+                    .flex_none()
                     .relative()
-                    .mx(s::S20)
-                    .mb(s::S20)
-                    .p(s::S16)
-                    .rounded(radius::LG)
+                    .pt(s::S8)
+                    .pb(DOCK_BOTTOM_INSET)
+                    .px(DOCK_SIDE_INSET)
+                    // Opaque-enough backing keeps text/buttons contrast-safe; the
+                    // fade above it ends at the same colour, so there is no edge.
                     .bg(p.scrim_max)
-                    .border_1()
-                    .border_color(p.line_subtle)
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .top(-DOCK_FADE)
+                            .h(DOCK_FADE)
+                            .bg(linear_gradient(
+                                180.,
+                                linear_color_stop(p.scrim_max.opacity(0.), 0.),
+                                linear_color_stop(p.scrim_max, 1.),
+                            )),
+                    )
                     .on_hover(cx.listener(|view, hovered: &bool, _, cx| {
                         view.dock_hover = *hovered;
                         view.activity(cx);
                     }))
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(s::S12)
-                            .type_style(t::MONO)
-                            .text_color(p.text_secondary)
-                            .child(div().w(s::S48 + s::S16).child(format_clock(shown)))
+                            .id("player-dock")
+                            .relative()
                             .child(
                                 div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_center()
-                                    .type_style(t::BODY_STRONG)
-                                    .text_color(p.text_primary)
-                                    .children(chapter),
-                            )
-                            .child(div().w(s::S48 + s::S16).text_right().child(match duration {
-                                Some(d) if seekable => format_remaining(shown, d),
-                                _ => "—:—".into(),
-                            })),
-                    )
-                    .child(self.timeline(window, cx))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(s::S8)
-                            .child(
-                                self.control(
-                                    PLAY,
-                                    "player-play",
-                                    if self.state.paused || self.state.ended {
-                                        IconName::Play
-                                    } else {
-                                        IconName::Pause
-                                    },
-                                    if self.state.ended {
-                                        "Replay (K)"
-                                    } else if self.state.paused {
-                                        "Play (K)"
-                                    } else {
-                                        "Pause (K)"
-                                    },
-                                )
-                                .on_click(cx.listener(|view, _, _, cx| view.toggle_playback(cx))),
-                            )
-                            .child(
-                                self.control(
-                                    BACK,
-                                    "player-back",
-                                    IconName::SeekBack,
-                                    "Back 10 seconds (←)",
-                                )
-                                .on_click(cx.listener(|view, _, _, cx| view.seek(-10., cx))),
-                            )
-                            .child(
-                                self.control(
-                                    FORWARD,
-                                    "player-forward",
-                                    IconName::SeekForward,
-                                    "Forward 10 seconds (→)",
-                                )
-                                .on_click(cx.listener(|view, _, _, cx| view.seek(10., cx))),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .w(px(0.))
-                                    .min_w_0()
-                                    .truncate()
-                                    .px(s::S8)
-                                    .type_style(t::SMALL)
+                                    .flex()
+                                    .items_center()
+                                    .gap(s::S12)
+                                    .type_style(t::MONO)
                                     .text_color(p.text_secondary)
-                                    .child(status),
+                                    .child(div().w(s::S48 + s::S16).child(format_clock(shown)))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_center()
+                                            .type_style(t::BODY_STRONG)
+                                            .text_color(p.text_primary)
+                                            .children(chapter),
+                                    )
+                                    .child(div().w(s::S48 + s::S16).text_right().child(
+                                        match duration {
+                                            Some(d) if seekable => format_remaining(shown, d),
+                                            _ => "—:—".into(),
+                                        },
+                                    )),
                             )
-                            .child(utilities),
-                    )
-                    .child(
-                        canvas(
-                            move |bounds, _, cx| {
-                                dock_entity
-                                    .update(cx, |view, _| view.dock_height = bounds.size.height)
-                            },
-                            |_, _, _, _| {},
-                        )
-                        .absolute()
-                        .size_full(),
+                            .child(self.timeline(window, cx))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(s::S8)
+                                    .child(
+                                        self.control(
+                                            PLAY,
+                                            "player-play",
+                                            if self.state.paused || self.state.ended {
+                                                IconName::Play
+                                            } else {
+                                                IconName::Pause
+                                            },
+                                            if self.state.ended {
+                                                "Replay (K)"
+                                            } else if self.state.paused {
+                                                "Play (K)"
+                                            } else {
+                                                "Pause (K)"
+                                            },
+                                        )
+                                        .on_click(
+                                            cx.listener(|view, _, _, cx| view.toggle_playback(cx)),
+                                        ),
+                                    )
+                                    .child(
+                                        self.control(
+                                            BACK,
+                                            "player-back",
+                                            IconName::SeekBack,
+                                            "Back 10 seconds (←)",
+                                        )
+                                        .on_click(
+                                            cx.listener(|view, _, _, cx| view.seek(-10., cx)),
+                                        ),
+                                    )
+                                    .child(
+                                        self.control(
+                                            FORWARD,
+                                            "player-forward",
+                                            IconName::SeekForward,
+                                            "Forward 10 seconds (→)",
+                                        )
+                                        .on_click(cx.listener(|view, _, _, cx| view.seek(10., cx))),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .w(px(0.))
+                                            .min_w_0()
+                                            .truncate()
+                                            .px(s::S8)
+                                            .type_style(t::SMALL)
+                                            .text_color(p.text_secondary)
+                                            .child(status),
+                                    )
+                                    .child(utilities),
+                            )
+                            .child(
+                                canvas(
+                                    move |bounds, _, cx| {
+                                        dock_entity.update(cx, |view, _| {
+                                            view.dock_height = bounds.size.height
+                                        })
+                                    },
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .size_full(),
+                            ),
                     ),
             )
+            // After the bottom scrim/fade so the floating volume paints and hit-tests above it.
+            .child(self.volume_panel(cx))
             .when_some(self.menu.as_ref(), |el, open| {
                 el.child(
                     deferred(
