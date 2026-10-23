@@ -17,6 +17,9 @@ implemented, with lead-reviewed root/feature checks and scoped native Linux GPUI
 presentation evidence. Final backend option hardening passed root/native reruns;
 this remains scoped validation, not full acceptance. This introduces no second GPUI engine or UI version.
 
+Related proposal (not approved or implemented): [Library membership and manual
+watched-status wireframes](library.md), including a landing-page Library scope.
+
 ## 1. Product character and approved directions
 
 Kinema is a **media browser**, not a dashboard. The posters and backdrops are the
