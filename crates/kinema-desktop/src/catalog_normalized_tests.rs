@@ -62,6 +62,9 @@ fn canonical_titles_and_episodes_are_primary_not_legacy_json() -> TestResult {
     let tx = service.connection.transaction()?;
     write_cinemeta_details(&tx, &details, 10, true, &Default::default())?;
     tx.commit()?;
+    // Inject obsolete evidence to prove reads ignore it; v6 catalogs no longer
+    // create or retain this legacy table.
+    service.connection.execute_batch("CREATE TABLE cinemeta_v3_details(kind TEXT, imdb_id TEXT, fetched_at INTEGER, payload TEXT);")?;
     service.connection.execute("INSERT INTO cinemeta_v3_details VALUES ('series','tt1000001',1,'unchanged legacy evidence')",[])?;
     service.connection.execute_batch(
         "UPDATE titles SET name='Canonical series'; UPDATE episodes SET name='Canonical episode';",

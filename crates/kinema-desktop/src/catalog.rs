@@ -51,7 +51,7 @@ mod normalized_tmdb;
 mod schema;
 
 const ENDPOINT: &str = "https://v3-cinemeta.strem.io/";
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 const MAX_EPISODES: usize = 20_000;
 const MAX_URL_BYTES: usize = 4096;
 const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
@@ -170,6 +170,29 @@ pub(crate) struct CatalogService {
     pub(super) cancellation: Option<Arc<AtomicBool>>,
 }
 
+fn retire_legacy_caches(tx: &rusqlite::Transaction<'_>) -> Result<(), CatalogError> {
+    // Child first, with foreign keys enabled. IF EXISTS also supports catalogs
+    // initialized directly with the normalized-only v5 schema.
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS cinemeta_v3_members;
+         DROP TABLE IF EXISTS cinemeta_v3_searches;
+         DROP TABLE IF EXISTS cinemeta_v3_titles;
+         DROP TABLE IF EXISTS cinemeta_v3_browse;
+         DROP TABLE IF EXISTS cinemeta_v3_details;
+         DROP TABLE IF EXISTS indexer_sources_v1;
+         DROP TABLE IF EXISTS tmdb_v1_cache;",
+    )?;
+    Ok(())
+}
+
+fn initialize_catalog(connection: &mut Connection) -> Result<(), CatalogError> {
+    let tx = connection.transaction()?;
+    schema::migrate(&tx)?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.commit()?;
+    Ok(())
+}
+
 impl CatalogService {
     pub(super) fn ensure_active(&self) -> Result<(), CatalogError> {
         check_cancellation(self.cancellation.as_deref())
@@ -249,56 +272,29 @@ impl CatalogService {
             if objects != 0 {
                 return Err(CatalogError::InvalidCache);
             }
-            let tx = connection.transaction()?;
-            // Schema v1: the sole provider/key namespace is Cinemeta v3. Query
-            // keys are (kind, trimmed text), case-sensitive, with no TTL.
-            tx.execute_batch(
-                "CREATE TABLE cinemeta_v3_searches (
-                    kind TEXT NOT NULL CHECK(kind IN ('movie', 'series')),
-                    query TEXT NOT NULL,
-                    fetched_at INTEGER NOT NULL CHECK(fetched_at >= 0),
-                    result_count INTEGER NOT NULL CHECK(result_count BETWEEN 0 AND 500),
-                    PRIMARY KEY(kind, query)
-                );
-                CREATE TABLE cinemeta_v3_titles (
-                    kind TEXT NOT NULL CHECK(kind IN ('movie', 'series')),
-                    imdb_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    overview TEXT,
-                    PRIMARY KEY(kind, imdb_id)
-                );
-                CREATE TABLE cinemeta_v3_members (
-                    kind TEXT NOT NULL,
-                    query TEXT NOT NULL,
-                    position INTEGER NOT NULL CHECK(position BETWEEN 0 AND 499),
-                    imdb_id TEXT NOT NULL,
-                    PRIMARY KEY(kind, query, position),
-                    UNIQUE(kind, query, imdb_id),
-                    FOREIGN KEY(kind, query) REFERENCES cinemeta_v3_searches(kind, query)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY(kind, imdb_id) REFERENCES cinemeta_v3_titles(kind, imdb_id)
-                );
-                PRAGMA user_version = 1;",
-            )?;
-            tx.commit()?;
+            // Fresh catalogs have no legacy records to preserve. Create only
+            // the canonical schema, with its version in the same transaction.
+            initialize_catalog(&mut connection)?;
         }
-        if version < 2 {
+        if version == 1 {
             migrate_metadata(&mut connection)?;
         }
-        if version < 3 {
+        if (1..3).contains(&version) {
             metadata::migrate_tmdb(&mut connection)?;
         }
-        if version < 4 {
+        if (1..SCHEMA_VERSION).contains(&version) {
             let tx = connection.transaction()?;
-            schema::migrate(&tx)?;
-            normalized_backfill::backfill(&tx)?;
-            tx.pragma_update(None, "user_version", 5)?;
-            tx.commit()?;
-        }
-        if version == 4 {
-            let tx = connection.transaction()?;
-            tx.execute_batch("ALTER TABLE metadata_fetches ADD COLUMN facts_json TEXT;")?;
-            tx.pragma_update(None, "user_version", 5)?;
+            if version < 4 {
+                schema::migrate(&tx)?;
+                normalized_backfill::backfill(&tx)?;
+            } else if version == 4 {
+                tx.execute_batch("ALTER TABLE metadata_fetches ADD COLUMN facts_json TEXT;")?;
+            }
+            // v5 already has canonical data: never replay stale legacy snapshots.
+            // The user explicitly authorized disposal of obsolete caches, even
+            // old-only results that the conservative backfill cannot represent.
+            retire_legacy_caches(&tx)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
         if version < SCHEMA_VERSION {
@@ -1428,6 +1424,323 @@ mod tests {
     }
 
     #[test]
+    fn fresh_database_has_only_normalized_tables_and_reopens() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("fresh");
+        let service = CatalogService::open(&path)?;
+        let tables: i64 = service.connection.query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(tables, 12);
+        assert_eq!(
+            service
+                .connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            SCHEMA_VERSION
+        );
+        assert_eq!(
+            service
+                .connection
+                .pragma_query_value(None, "foreign_keys", |row| row.get::<_, i64>(0))?,
+            1
+        );
+        assert!(
+            !service
+                .connection
+                .prepare("PRAGMA foreign_key_check")?
+                .exists([])?
+        );
+        drop(service);
+        CatalogService::open(&path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn fresh_schema_failure_rolls_back_tables_and_version() -> TestResult {
+        let mut connection = Connection::open_in_memory()?;
+        // Force a DDL failure after titles/seasons/episodes have been created.
+        connection.execute_batch(
+            "CREATE TABLE catalog_pages(marker TEXT); INSERT INTO catalog_pages VALUES ('keep');",
+        )?;
+        assert_eq!(
+            initialize_catalog(&mut connection),
+            Err(CatalogError::Storage)
+        );
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            0
+        );
+        let tables: i64 = connection.query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE type='table'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(tables, 1);
+        let marker: String =
+            connection.query_row("SELECT marker FROM catalog_pages", [], |row| row.get(0))?;
+        assert_eq!(marker, "keep");
+        Ok(())
+    }
+
+    fn assert_retired(connection: &Connection) -> TestResult {
+        let tables: i64 = connection.query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(tables, 12);
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            SCHEMA_VERSION
+        );
+        assert!(!connection.prepare("PRAGMA foreign_key_check")?.exists([])?);
+        Ok(())
+    }
+
+    fn canonical_snapshot(
+        connection: &Connection,
+    ) -> Result<Vec<Vec<Vec<rusqlite::types::Value>>>, rusqlite::Error> {
+        [
+            "titles",
+            "title_identifiers",
+            "seasons",
+            "season_identifiers",
+            "episodes",
+            "episode_identifiers",
+            "ratings",
+            "field_provenance",
+            "metadata_fetches",
+            "catalog_pages",
+            "catalog_page_items",
+            "indexer_snapshots",
+        ]
+        .iter()
+        .map(|table| {
+            let mut statement =
+                connection.prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))?;
+            let columns = statement.column_count();
+            statement
+                .query_map([], |row| {
+                    (0..columns).map(|column| row.get(column)).collect()
+                })?
+                .collect()
+        })
+        .collect()
+    }
+
+    fn populated_v5(path: &Path) -> Result<Connection, Box<dyn Error>> {
+        let mut connection = legacy_database(path)?;
+        let tx = connection.transaction()?;
+        schema::migrate(&tx)?;
+        let id = ImdbId::new("tt0903747")?;
+        let details = TitleDetails {
+            title: CatalogTitle::new(
+                id,
+                MediaKind::Series,
+                "Breaking Bad",
+                Some("Canonical overview".into()),
+            )?,
+            facts: Default::default(),
+            poster_url: Some("https://example.test/poster.jpg".into()),
+            background_url: None,
+            release_info: Some("2008".into()),
+            genres: vec![],
+            episodes: vec![CatalogEpisode {
+                season: 1,
+                number: 1,
+                name: Some("Pilot".into()),
+                overview: Some("Canonical episode".into()),
+                released: None,
+                still_url: None,
+                runtime_minutes: None,
+            }],
+        };
+        normalized_pages::write_cinemeta_details(&tx, &details, 123, true, &Default::default())?;
+        normalized_pages::write_page(
+            &tx,
+            "cinemeta",
+            "preserved-page",
+            1,
+            None,
+            &[normalized::imdb_observation(&details.title)],
+            124,
+            &Default::default(),
+        )?;
+        // Populate every normalized table, including identifiers and snapshots
+        // not supplied by the reduced Cinemeta fixture above.
+        let series: i64 = tx.query_row("SELECT id FROM titles", [], |row| row.get(0))?;
+        let season: i64 = tx.query_row("SELECT id FROM seasons", [], |row| row.get(0))?;
+        let episode: i64 = tx.query_row("SELECT id FROM episodes", [], |row| row.get(0))?;
+        let title_fetch: i64 = tx.query_row(
+            "SELECT id FROM metadata_fetches WHERE title_id=?1 LIMIT 1",
+            [series],
+            |row| row.get(0),
+        )?;
+        tx.execute("INSERT INTO ratings(title_id,rating_source,metric,supplied_by,value,vote_count,fetch_state_id,observed_at,updated_at) VALUES (?1,'imdb','score','cinemeta',8.5,123,?2,123,123)", params![series,title_fetch])?;
+        tx.execute("INSERT INTO metadata_fetches(season_id,provider,resource_key,locale,fetched_at,success_kind,completeness) VALUES (?1,'tmdb',?2,'en-US',123,'data','detail')", params![season,crate::tmdb::cache_query_identity(&crate::tmdb::TmdbQuery::Season {series_id:1396,season:1})?])?;
+        let season_fetch = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO season_identifiers VALUES ('tmdb','3572',?1,?2,123)",
+            params![season, season_fetch],
+        )?;
+        tx.execute("INSERT INTO metadata_fetches(episode_id,provider,resource_key,locale,fetched_at,success_kind,completeness) VALUES (?1,'tmdb','synthetic-episode-details','en-US',123,'data','detail')", [episode])?;
+        let episode_fetch = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO episode_identifiers VALUES ('tmdb','62085',?1,?2,123)",
+            params![episode, episode_fetch],
+        )?;
+        tx.execute("INSERT INTO indexer_snapshots(episode_id,indexer,query_key,cache_scope,payload_version,sources_json,has_omitted_sources,fetched_at,updated_at) VALUES (?1,'torrentio','series:tt0903747:1:1','public-default-v1',1,'{\"candidates\":[],\"omitted\":0}',0,123,123)", [episode])?;
+        tx.pragma_update(None, "user_version", 5)?;
+        tx.commit()?;
+        assert!(
+            canonical_snapshot(&connection)?
+                .iter()
+                .all(|rows| !rows.is_empty())
+        );
+        // Every legacy table contains data, including unsupported payloads and
+        // stale details that must never overwrite the canonical series above.
+        connection.execute_batch("INSERT INTO cinemeta_v3_searches VALUES ('movie','exact query',1,1);
+            INSERT INTO cinemeta_v3_titles VALUES ('movie','tt1234567','Unique title','Unique overview');
+            INSERT INTO cinemeta_v3_members VALUES ('movie','exact query',0,'tt1234567');
+            INSERT INTO cinemeta_v3_browse VALUES ('movie',0,1,'unsupported browse');
+            INSERT INTO cinemeta_v3_details VALUES ('series','tt0903747',999,'stale unsupported detail');
+            INSERT INTO indexer_sources_v1 VALUES ('torrentio','movie:tt9999999','public-default-v1',2,'unsupported source');
+            INSERT INTO tmdb_v1_cache VALUES ('unsupported','en-US',1,'unsupported TMDB');")?;
+        Ok(connection)
+    }
+
+    #[test]
+    fn version_five_disposes_legacy_without_replaying_or_changing_canonical_data() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("v5");
+        let connection = populated_v5(&path)?;
+        let before = canonical_snapshot(&connection)?;
+        drop(connection);
+        let mut service = CatalogService::open(&path)?;
+        assert_retired(&service.connection)?;
+        assert_eq!(canonical_snapshot(&service.connection)?, before);
+        assert_eq!(
+            service
+                .read_details(MediaKind::Series, &ImdbId::new("tt0903747")?)?
+                .ok_or("missing details")?
+                .details
+                .title
+                .name(),
+            "Breaking Bad"
+        );
+        drop(service);
+        let service = CatalogService::open(&path)?;
+        assert_retired(&service.connection)?;
+        assert_eq!(canonical_snapshot(&service.connection)?, before);
+        Ok(())
+    }
+
+    #[test]
+    fn failed_last_drop_restores_all_legacy_tables_and_version() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("v5");
+        let connection = populated_v5(&path)?;
+        let before = canonical_snapshot(&connection)?;
+        // A view with the final table's name makes DROP TABLE fail after the
+        // preceding six drops. SQLite must roll all those DDL operations back.
+        connection.execute_batch("ALTER TABLE tmdb_v1_cache RENAME TO retained_tmdb; CREATE VIEW tmdb_v1_cache AS SELECT * FROM retained_tmdb;")?;
+        drop(connection);
+        assert!(matches!(
+            CatalogService::open(&path),
+            Err(CatalogError::Storage)
+        ));
+        let connection = Connection::open(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            5
+        );
+        assert_eq!(canonical_snapshot(&connection)?, before);
+        for table in [
+            "cinemeta_v3_searches",
+            "cinemeta_v3_titles",
+            "cinemeta_v3_members",
+            "cinemeta_v3_browse",
+            "cinemeta_v3_details",
+            "indexer_sources_v1",
+            "tmdb_v1_cache",
+        ] {
+            let count: i64 =
+                connection.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(count, 1, "{table}");
+        }
+        assert!(!connection.prepare("PRAGMA foreign_key_check")?.exists([])?);
+        // Repair only this synthetic fixture and verify the next open succeeds.
+        connection.execute_batch(
+            "DROP VIEW tmdb_v1_cache; ALTER TABLE retained_tmdb RENAME TO tmdb_v1_cache;",
+        )?;
+        drop(connection);
+        let service = CatalogService::open(&path)?;
+        assert_retired(&service.connection)?;
+        Ok(())
+    }
+
+    #[test]
+    fn version_four_failed_retirement_rolls_back_facts_alter_and_preserves_catalog() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("v4");
+        let connection = populated_v5(&path)?;
+        connection.execute_batch("ALTER TABLE metadata_fetches DROP COLUMN facts_json; PRAGMA user_version=4; ALTER TABLE tmdb_v1_cache RENAME TO retained_tmdb; CREATE VIEW tmdb_v1_cache AS SELECT * FROM retained_tmdb;")?;
+        let before = canonical_snapshot(&connection)?;
+        drop(connection);
+        assert!(matches!(
+            CatalogService::open(&path),
+            Err(CatalogError::Storage)
+        ));
+        let connection = Connection::open(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            4
+        );
+        assert_eq!(canonical_snapshot(&connection)?, before);
+        assert!(
+            !connection
+                .prepare(
+                    "SELECT name FROM pragma_table_info('metadata_fetches') WHERE name='facts_json'"
+                )?
+                .exists([])?
+        );
+        let legacy_count: i64 =
+            connection.query_row("SELECT count(*) FROM cinemeta_v3_members", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(legacy_count, 1);
+        connection.execute_batch(
+            "DROP VIEW tmdb_v1_cache; ALTER TABLE retained_tmdb RENAME TO tmdb_v1_cache;",
+        )?;
+        drop(connection);
+        let service = CatalogService::open(&path)?;
+        assert_retired(&service.connection)?;
+        let mut after = canonical_snapshot(&service.connection)?;
+        // ALTER appends exactly one nullable facts column; all v4 values survive.
+        for fetch in &mut after[8] {
+            assert_eq!(fetch.pop(), Some(rusqlite::types::Value::Null));
+        }
+        assert_eq!(after, before);
+        Ok(())
+    }
+
+    #[test]
+    fn normalized_only_version_five_upgrades_without_legacy_tables() -> TestResult {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("v5");
+        let service = CatalogService::open(&path)?;
+        service.connection.pragma_update(None, "user_version", 5)?;
+        drop(service);
+        let service = CatalogService::open(&path)?;
+        assert_retired(&service.connection)?;
+        Ok(())
+    }
+
+    #[test]
     fn newer_or_unversioned_existing_database_is_never_reset() -> TestResult {
         let dir = tempfile::tempdir()?;
         for version in [0, SCHEMA_VERSION + 1] {
@@ -1453,7 +1766,7 @@ mod tests {
     const DETAILS: &str = r#"{"meta":{"id":"tt0903747","type":"series","name":"Breaking Bad","description":"Full overview","poster":"https://images.metahub.space/poster/tt0903747","releaseInfo":"2008–2013","genres":["Drama"],"videos":[{"season":1,"episode":2,"name":"Second","overview":"Episode two","released":"2008-01-28T00:00:00Z"},{"season":1,"episode":1,"name":"Pilot"}]}}"#;
 
     #[test]
-    fn migration_preserves_version_one_search_cache() -> TestResult {
+    fn migration_discards_unrepresentable_version_one_search_cache() -> TestResult {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("catalog");
         let connection = legacy_database(&path)?;
@@ -1464,17 +1777,7 @@ mod tests {
             service.read(&SearchQuery::new(MediaKind::Movie, "ambiguous")?)?,
             None
         );
-        let name: String =
-            service
-                .connection
-                .query_row("SELECT name FROM cinemeta_v3_titles", [], |row| row.get(0))?;
-        assert_eq!(name, "Legacy");
-        assert_eq!(
-            service
-                .connection
-                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-            5
-        );
+        assert_retired(&service.connection)?;
         Ok(())
     }
 
@@ -1746,14 +2049,43 @@ mod tests {
     }
 
     fn legacy_database(path: &Path) -> Result<Connection, Box<dyn Error>> {
-        let service = CatalogService::open(path)?;
-        service.connection.execute_batch("PRAGMA foreign_keys=OFF; DROP TABLE indexer_snapshots; DROP TABLE catalog_page_items; DROP TABLE field_provenance; DROP TABLE ratings; DROP TABLE episode_identifiers; DROP TABLE season_identifiers; DROP TABLE title_identifiers; DROP TABLE metadata_fetches; DROP TABLE catalog_pages; DROP TABLE episodes; DROP TABLE seasons; DROP TABLE titles; PRAGMA user_version=3; PRAGMA foreign_keys=ON;")?;
-        Ok(service.connection)
+        let mut connection = Connection::open(path)?;
+        connection.pragma_update(None, "foreign_keys", true)?;
+        connection.execute_batch(
+            "CREATE TABLE cinemeta_v3_searches (
+                    kind TEXT NOT NULL CHECK(kind IN ('movie', 'series')),
+                    query TEXT NOT NULL,
+                    fetched_at INTEGER NOT NULL CHECK(fetched_at >= 0),
+                    result_count INTEGER NOT NULL CHECK(result_count BETWEEN 0 AND 500),
+                    PRIMARY KEY(kind, query)
+                );
+                CREATE TABLE cinemeta_v3_titles (
+                    kind TEXT NOT NULL CHECK(kind IN ('movie', 'series')),
+                    imdb_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    overview TEXT,
+                    PRIMARY KEY(kind, imdb_id)
+                );
+                CREATE TABLE cinemeta_v3_members (
+                    kind TEXT NOT NULL,
+                    query TEXT NOT NULL,
+                    position INTEGER NOT NULL CHECK(position BETWEEN 0 AND 499),
+                    imdb_id TEXT NOT NULL,
+                    PRIMARY KEY(kind, query, position),
+                    UNIQUE(kind, query, imdb_id),
+                    FOREIGN KEY(kind, query) REFERENCES cinemeta_v3_searches(kind, query)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(kind, imdb_id) REFERENCES cinemeta_v3_titles(kind, imdb_id)
+                );
+                PRAGMA user_version = 1;",
+        )?;
+        migrate_metadata(&mut connection)?;
+        metadata::migrate_tmdb(&mut connection)?;
+        Ok(connection)
     }
 
     #[test]
-    fn valid_v3_backfill_keeps_legacy_payloads_and_does_not_invent_optional_rich_data() -> TestResult
-    {
+    fn valid_v3_backfill_retires_legacy_without_inventing_optional_rich_data() -> TestResult {
         use crate::tmdb::{TmdbData, TmdbDetails, TmdbPage, TmdbQuery, TmdbTitle};
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("catalog");
@@ -1806,12 +2138,6 @@ mod tests {
             params![cinemeta],
         )?;
         connection.execute("INSERT INTO indexer_sources_v1 VALUES ('torrentio','movie:tt4000001','public-default-v1',13,?1)",params![r#"{"candidates":[],"omitted":0}"#])?;
-        let before: Vec<String> = {
-            let mut stmt =
-                connection.prepare("SELECT payload FROM tmdb_v1_cache ORDER BY resource")?;
-            stmt.query_map([], |r| r.get(0))?
-                .collect::<Result<_, _>>()?
-        };
         drop(connection);
         let mut service = CatalogService::open(&path)?;
         let count: i64 = service
@@ -1824,19 +2150,7 @@ mod tests {
             service.read_details(MediaKind::Movie, &ImdbId::new("tt4000001")?)?,
             None
         );
-        let details: String =
-            service
-                .connection
-                .query_row("SELECT payload FROM cinemeta_v3_details", [], |r| r.get(0))?;
-        assert_eq!(details, cinemeta);
-        let after: Vec<String> = {
-            let mut stmt = service
-                .connection
-                .prepare("SELECT payload FROM tmdb_v1_cache ORDER BY resource")?;
-            stmt.query_map([], |r| r.get(0))?
-                .collect::<Result<_, _>>()?
-        };
-        assert_eq!(before, after);
+        assert_retired(&service.connection)?;
         for table in ["season_identifiers", "episode_identifiers", "ratings"] {
             let count: i64 = service.connection.query_row(
                 &format!("SELECT count(*) FROM {table}"),
@@ -2220,17 +2534,7 @@ mod tests {
             service.read_details(MediaKind::Series, &ImdbId::new("tt0903747")?)?,
             None
         );
-        let payload: String =
-            service
-                .connection
-                .query_row("SELECT payload FROM cinemeta_v3_browse", [], |r| r.get(0))?;
-        assert_eq!(payload, MOVIE);
-        assert_eq!(
-            service
-                .connection
-                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-            5
-        );
+        assert_retired(&service.connection)?;
         Ok(())
     }
 
@@ -2239,10 +2543,10 @@ mod tests {
     {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("catalog");
-        let service = CatalogService::open(&path)?;
+        let connection = legacy_database(&path)?;
         // A collision at migration time must be an error, never a reset.
-        service.connection.execute_batch("PRAGMA user_version = 2; INSERT INTO cinemeta_v3_searches(kind, query, fetched_at, result_count) VALUES ('movie', 'keep', 123, 0);")?;
-        drop(service);
+        connection.execute_batch("PRAGMA user_version = 2; INSERT INTO cinemeta_v3_searches(kind, query, fetched_at, result_count) VALUES ('movie', 'keep', 123, 0);")?;
+        drop(connection);
         assert!(matches!(
             CatalogService::open(&path),
             Err(CatalogError::Storage)

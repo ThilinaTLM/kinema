@@ -90,7 +90,11 @@ graph reconciliation and contradiction rollback coverage; current post-fix root
 checks passed. Post-v4 authenticated-provider/debrid and new GUI acceptance remain
 unverified, regardless of historical user-reported success on earlier versions.
 
-**Current source status (backend-owner evidence): `SCHEMA_VERSION = 4`.** The
+**Historical v4 source status (superseded by schema v6).** See
+[catalog retirement](catalog-schema.md#legacy-cache-retirement-schema-v6): fresh
+databases now create twelve tables, and upgrades remove the seven old caches with
+explicit authorization to discard old-only results. No user database was migrated
+by this work. The historical v4 evidence follows: the
 atomic upgrade creates twelve normalized `STRICT` tables, conservatively backfills
 supported data, retains seven legacy tables (nineteen application tables total),
 and advances the version. Metadata/indexer paths read/write canonical rows; the

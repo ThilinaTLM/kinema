@@ -14,17 +14,20 @@ provider-priority/enrichment revision below is in progress; automatic TTL refres
 remains undecided.
 
 `kinema-core` holds pure validated values and policies; `kinema-desktop` owns UI,
-provider/storage/process adapters, and background work. Backend-owner evidence
-reports `SCHEMA_VERSION = 4`: twelve normalized `STRICT` tables plus seven retained
-legacy tables, with atomic schema/backfill/version upgrade. Metadata/indexer paths
-now read and write canonical rows under the
+provider/storage/process adapters, and background work. The current catalog is
+schema v6 with twelve normalized `STRICT` tables. Its transactional retirement
+migration removes the seven obsolete provider-cache tables with explicit user
+authorization to discard old-only cached results; normalized catalog data remains.
+Fresh databases create only the normalized schema. Metadata/indexer paths
+read and write canonical rows under the
 [approved catalog design](catalog-schema.md#target-catalog-schema). The rich domain
 API exposes artwork, ratings, identifiers, seasons/episodes, and provenance, but
 native display projections now retain optional artwork/IMDb/facts through shared
 display DTOs, but do not render a full per-field provenance inspector.
 The historical bounded-memory backfill and field-quality checkpoint passed root fmt,
-strict locked workspace Clippy, locked tests (295 passed, 3 ignored), and diff checks. No user database or credentials were accessed.
-A user's v3 database upgrades only when next opened with the new build. See the
+strict locked workspace Clippy, locked tests (295 passed, 3 ignored), and diff checks. Those historical checks did not access a user database or credentials. The later
+schema review inspected the development database read-only; migration tests use
+synthetic databases. A user's database upgrades only when next opened with the new build. See the
 [conservative backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
 
 **Not complete acceptance:** source wiring and reported subsystem fixtures/local

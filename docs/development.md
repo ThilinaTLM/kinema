@@ -354,8 +354,32 @@ The frozen outgoing snapshot is `107317a`; current HEAD is documentation commit
 `f1beeb9`. Continuation evidence below is reported by the lead, not independently
 rerun by this documentation owner.
 
+### Catalog simplification (schema v6)
+
+Fresh catalogs create twelve normalized tables directly. The v6 upgrade retires
+all seven legacy provider-cache tables transactionally, following explicit user
+authorization to discard old-only cached results. It does not replay legacy data
+over a v5 canonical catalog. Identifier consolidation was reviewed and rejected:
+separate tables retain simpler collision-domain and owner constraints.
+
+Migration fixtures use temporary/in-memory databases, not `data/catalog.sqlite3`.
+The development database was previously inspected read-only at the user's request;
+no actual user-database upgrade is claimed. See the
+[v6 policy](catalog-schema.md#legacy-cache-retirement-schema-v6).
+
+Validation from the repository root (Rust 1.97.1):
+`cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets --locked -- -D warnings`, and
+`cargo test --workspace --locked` passed: **504 passed, 12 ignored**
+(40 core, 418 desktop, 46 mpv). Focused catalog tests passed **92**, with **1 ignored**.
+Fixtures cover fresh twelve-table creation, v1/v2/v3 upgrades, populated v5 exact
+preservation of every normalized table, v4 facts-column/retirement rollback,
+failed final-drop rollback, foreign-key integrity, and reopening. No live-provider,
+GUI, or cross-platform migration acceptance is implied.
+
 ### Current normalized catalog batch
 
+**Historical v4 evidence, superseded by v6 retirement above.**
 Backend-owner evidence reports `catalog.rs` `SCHEMA_VERSION = 4`: twelve normalized
 `STRICT` tables plus seven retained legacy tables (nineteen application tables).
 Schema creation, conservative backfill, and `user_version` advance are atomic.

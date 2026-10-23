@@ -2,12 +2,28 @@
 
 The [architecture](architecture.md) is the single summary of agreed scope. The
 [catalog schema](catalog-schema.md#target-catalog-schema) is the single authoritative
-approved target specification for the normalized catalog. Backend evidence reports
-v4 source implementation and atomic conservative upgrade: twelve normalized
-`STRICT` tables plus seven retained legacy tables. Current post-fix root checks
-passed (295 tests passed, 3 ignored); no actual user-database upgrade is claimed. Other implementation notes, proposed
-file layout, and open policies remain distinct. Discuss questions **one at a time**;
-don't turn this list into an implementation backlog.
+approved target specification for the normalized catalog. Schema v6 keeps twelve
+normalized `STRICT` tables and retires seven obsolete provider-cache tables under
+the explicit disposal decision below. No actual user-database upgrade is claimed.
+Other implementation notes, proposed file layout, and open policies remain distinct.
+Discuss questions **one at a time**; don't turn this list into an implementation backlog.
+
+## 2026-10-24 — catalog simplification and obsolete-cache disposal (approved)
+
+After a read-only review of `data/catalog.sqlite3`, the user authorized retiring
+all seven legacy provider-cache tables, explicitly selecting **Discard obsolete
+legacy caches** when informed that some records cannot be faithfully transferred.
+Old-only saved results may become unavailable offline and require refetching.
+Normalized catalog entities, identifiers, ratings, provenance, saved pages, and
+indexer snapshots must survive unchanged. V6 retires the legacy tables and advances
+the schema version transactionally; fresh databases create only normalized tables.
+Tests use synthetic databases; this work does not directly migrate `data/`.
+
+Identifier consolidation was conditional on genuine simplification without weaker
+integrity. Review favors retaining the three tables: registry collision domains,
+owner FKs, and namespace constraints differ, and application import code already
+shares identifier handling. No generic entity table or archive subsystem is added.
+See [v6 migration details](catalog-schema.md#legacy-cache-retirement-schema-v6).
 
 ## 2026-10-21 — metadata priority and enrichment (approved)
 

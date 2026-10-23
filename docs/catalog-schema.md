@@ -1,6 +1,6 @@
 # Catalog and database
 
-**Single authoritative approved target specification; v4 implementation reported in source.**
+**Single authoritative approved target specification; normalized catalog with v6 legacy-cache retirement.**
 The user approved the reviewed provider-agnostic catalog design and authorized
 implementation: shared movies/series, rich optional metadata, seasons and episodes,
 and bounded background fetching of missing/new details. The tables, fields,
@@ -8,20 +8,19 @@ constraints, and merge rules below describe that approved target, not observed
 runtime behavior. This replaces the former seven-table proposal; it does not
 supplement it with a second competing target.
 
-**Current source status (backend-owner evidence):** `catalog.rs` sets
-`SCHEMA_VERSION = 5` (v4 foundation plus the [detail facts payload](#detail-facts-payload-schema-v5)). The v4 upgrade transaction creates twelve normalized `STRICT`
-tables, conservatively backfills supported legacy metadata, and advances
-`user_version` atomically, retaining all seven legacy tables (nineteen application
-tables total). Live metadata/indexer paths read and write canonical rows. Legacy
-backfill uses bounded single-row keyset batches. Current post-fix root fmt,
-strict locked workspace Clippy, locked workspace tests (**295 passed, 3 ignored**),
-and diff checks passed. This is not full target UI acceptance or a claim that a user
-database has been migrated. No user database or credentials were accessed; a user's database
-upgrades when they next open it with the new build.
+**Current source status:** `catalog.rs` sets `SCHEMA_VERSION = 6`: the v4
+normalized foundation, the [v5 detail facts payload](#detail-facts-payload-schema-v5),
+and [v6 legacy-cache retirement](#legacy-cache-retirement-schema-v6). Fresh databases
+create only the twelve normalized `STRICT` tables. Older supported databases pass
+through the conservative backfill where applicable before the seven legacy cache
+tables are retired. Live metadata/indexer paths use canonical rows. Legacy backfill
+uses bounded single-row keyset batches. Migration validation uses synthetic temporary
+or in-memory databases, not a writable user database. A user's database upgrades
+when next opened with the new build. This is not full runtime or UI acceptance.
 
 ## Implemented normalized catalog (source evidence)
 
-The twelve normalized tables correspond to the approved entities in the ERD:
+The twelve normalized tables retained by v6 correspond to the approved entities in the ERD:
 `titles`, `title_identifiers`, `seasons`, `season_identifiers`, `episodes`,
 `episode_identifiers`, `ratings`, `field_provenance`, `metadata_fetches`,
 `catalog_pages`, `catalog_page_items`, and `indexer_snapshots`. The diagram remains
@@ -35,20 +34,41 @@ and contradiction rollback coverage. Existing GPUI projections remain narrower:
 per-field origins and the full rich model are not rendered. The HTML prototype is
 frozen for user review; no GPUI redesign has been implemented.
 
+### Legacy-cache retirement (schema v6)
+
+The user explicitly approved discarding obsolete provider-cache records, including
+records that cannot be faithfully transferred. V6 drops `cinemeta_v3_searches`,
+`cinemeta_v3_titles`, `cinemeta_v3_members`, `cinemeta_v3_browse`,
+`cinemeta_v3_details`, `tmdb_v1_cache`, and `indexer_sources_v1`. The retirement
+and its version advance are transactional. Normalized titles, seasons, episodes,
+identifiers, ratings, provenance, fetch state, saved pages, and indexer snapshots
+are preserved. A v5 upgrade does not replay stale legacy metadata over canonical
+values. Old-only saved results may no longer be available offline and may require
+refetching; rollback or an automatic reconstruction of discarded cache data is
+not promised. No separate archive subsystem is introduced.
+
+Identifier consolidation was reviewed and rejected for this increment. The three
+identifier tables preserve distinct registry collision domains and concrete owner
+FKs. A unified table would replace those simple boundaries with conditional target
+and uniqueness rules; existing import code already shares identifier handling.
+
 ### Conservative v3 preservation and backfill limits
 
-- All seven legacy tables and their data remain; the upgrade does not drop or
-  reset them. Schema creation, supported backfill, and version advance are atomic.
+These describe the historical v4 backfill, which still runs for pre-v4 upgrades.
+V6 subsequently removes the legacy tables with the user's explicit authorization.
+
+- The v4 stage retains legacy rows while creating and backfilling normalized data;
+  legacy preservation is no longer the final v6 state.
 - Nonempty legacy Cinemeta exact-query searches are **not backfilled** because
   shared title fields cannot establish unambiguous query-specific provenance.
-  Their old rows survive, but the first canonical query requires a refresh/fetch;
-  physical preservation is not a guarantee of immediate offline query reuse.
+  Before v6 their old rows survive, but the first canonical query requires a
+  refresh/fetch; v6 discards the old rows rather than claiming lossless transfer.
 - Known legacy detail **fields retain `Detail` provenance quality**. Only the
   corresponding **fetch-resource completeness stays `Summary`**, so richer details
   are refetched on demand without downgrading known field values. Do not mistake
   resource incompleteness for summary-quality provenance on every backfilled field.
-- Legacy source targets without verified canonical mappings remain retained but
-  unmapped in legacy storage; never invent identities to make snapshots reusable.
+- Legacy source targets without verified canonical mappings are not imported;
+  v6 discards those legacy snapshots. Never invent identities to make them reusable.
 
 Detailed check scopes, intermediate runs, and logs are recorded in the
 [development validation history](development.md#current-normalized-catalog-batch)
@@ -58,10 +78,10 @@ earlier user-reported successes apply to earlier versions, not this acceptance.
 
 ## Implemented first increment
 
-**Historical v1–v3 provider-cache layout, retained by v4.** This section preserves
+**Historical v1–v3 provider-cache layout, retained by v4/v5 and retired by v6.** This section preserves
 the original implementation evidence; it is not the current canonical read path.
-The original exact-query cache was the foundation. Version 2 adds
-Cinemeta browse/details and source snapshots; version 3 adds TMDB resources.
+The original exact-query cache was the foundation. Version 2 added
+Cinemeta browse/details and source snapshots; version 3 added TMDB resources.
 These source-level migrations are not proof of final end-to-end acceptance.
 
 The desktop adapter stores `catalog.sqlite3` under the build-mode location
@@ -723,21 +743,19 @@ multi-locale storage, and offline full-text search remain unresolved; approval d
 not settle those open policies by implication. The prototype still requires user
 review before any GPUI redesign.
 
-The backend now reports a forward **Rust v3 → v4** upgrade in source, with
-conservative backfill, bounded-memory streaming, and passing final root checks.
-Actual user-database migration and full UI/provider acceptance are not established.
-The preservation boundary remains: add new tables without
-dropping/reinterpreting existing caches, validate/backfill only unambiguous public
-metadata with known provenance, and switch reads only after transactional tests
-and a recovery plan. Keep old tables until a separately reviewed retirement step;
-unmappable/conflicting rows remain preserved, not guessed into the new catalog.
-Do not mark backfilled optional details complete without resource evidence. The
-source sets `user_version = 4` only in the successful upgrade transaction; no
-actual user-database upgrade was performed or verified by agents.
+The historical **Rust v3 → v4** upgrade introduced conservative backfill and
+bounded-memory streaming. The separately reviewed [v6 retirement](#legacy-cache-retirement-schema-v6)
+now supersedes the requirement to keep those seven legacy cache tables. The user
+explicitly authorized disposal of old-only cache records, not guessed provenance
+or identities. Continue to backfill only unambiguous metadata and do not mark
+optional details complete without resource evidence. V6 retirement and version
+advance commit together; failure rolls both back. No actual user-database upgrade
+or full UI/provider acceptance is established by synthetic migration tests.
 
 Preserve existing Rust/user worktree data, settings, managed media, and OS secure
 storage. Do not migrate historical `~/.config/kinemarc`, `kinema.db`, or old keyring
-entries; do not inspect tokens or user databases to develop this design. Unknown
+entries; do not inspect tokens. The user-requested development database review was
+read-only; migration development and testing use synthetic databases. Unknown
 newer/nonempty unversioned databases remain errors, never deletion/reset triggers.
 Ordinary cleanup prunes only disposable membership/snapshots/payloads, not the
 database file or canonical catalog. Referenced page/fetch stubs survive pruning;

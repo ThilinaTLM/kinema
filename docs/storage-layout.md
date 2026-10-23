@@ -36,25 +36,24 @@ The settings store uses `CONFIG/settings.toml`; managed storage uses
 remain separate. Source wiring and reported recovery fixtures do not establish
 cross-platform crash safety or end-to-end paid-provider playback.
 
-The backend reports an in-place Rust **v3 → v4** schema upgrade: twelve normalized
-`STRICT` tables plus all seven retained legacy tables (nineteen application tables),
-with schema creation, conservative backfill, and version advance atomic. Canonical
-metadata/indexer paths use the new rows under the
-[approved catalog specification](catalog-schema.md#target-catalog-schema). This
-changes neither database paths nor media/settings/credential locations. It is not
-a migration of historical C++ data or permission to reset/move user files.
+The current Rust catalog is **schema v6** with twelve normalized `STRICT` tables.
+Fresh databases create only these tables. Supported older databases receive
+version-appropriate schema/backfill work and then transactionally retire all seven
+obsolete provider-cache tables, with explicit user authorization to discard old-only
+cache records. Normalized metadata/indexer data remains intact. See the
+[v6 retirement policy](catalog-schema.md#legacy-cache-retirement-schema-v6).
+This changes neither database paths nor media/settings/credential locations. It is
+not migration of historical C++ data or permission to reset/move user files.
 
-Preserved legacy data does not guarantee immediate offline reuse: nonempty
-Cinemeta exact-query searches are not backfilled because shared-field provenance
-is ambiguous; first canonical queries need refresh/fetch. Known legacy detail
-fields retain `Detail` provenance quality, while fetch-resource completeness stays
-`Summary` to force richer refetch on demand; source targets lacking verified canonical
-mapping remain unmapped in legacy storage. See [backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
-Current post-fix root fmt, strict locked workspace Clippy, locked tests (295 passed,
-3 ignored), and diff checks passed; full post-v4 UI/provider acceptance remains
-unverified.
-Agents did not access user databases or credentials. A user's database upgrades
-only on next open with the new build, not as part of this documentation update.
+The conservative pre-v4 backfill does not transfer ambiguous nonempty Cinemeta
+exact-query results or source snapshots lacking verified mappings. V6 discards
+those legacy records, so old-only offline results may require refetching. Known
+backfilled detail fields retain `Detail` provenance quality while resource
+completeness stays `Summary`; no richer fetch success is invented. See
+[backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
+The user-requested development database inspection was read-only. Migration tests
+use synthetic databases; a user's database upgrades only on next open with the
+new build. Live-provider and full UI acceptance remain separate.
 
 Artwork encoded bytes now use `AppPaths.cache/artwork/<sha256-of-url>.img`:
 `./data/artwork/` in development and native `cache_dir()/artwork/` in production.

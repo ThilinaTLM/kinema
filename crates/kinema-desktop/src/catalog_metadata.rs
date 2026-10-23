@@ -578,8 +578,9 @@ pub(super) fn backfill_sources(
     if time < 0 {
         return Err(CatalogError::InvalidCache);
     }
-    // Unknown endpoint/scope contracts and missing metadata mappings remain
-    // retained legacy evidence; never create a guessed catalog parent.
+    // Unknown endpoint/scope contracts and missing metadata mappings cannot be
+    // imported: never create a guessed catalog parent. The v6 migration later
+    // discards this obsolete cache under the explicit disposal policy.
     if !matches!(indexer, "torrentio" | "peerflix") || scope != SOURCE_SCOPE {
         return Ok(());
     }
@@ -1720,7 +1721,7 @@ mod facts_migration_tests {
             upgraded
                 .connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-            5
+            SCHEMA_VERSION
         );
         Ok(())
     }

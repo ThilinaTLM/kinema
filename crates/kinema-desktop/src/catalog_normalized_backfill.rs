@@ -1,4 +1,5 @@
-//! Conservative v3-only forward import. Historical databases are never opened.
+//! Conservative v3-only forward import before explicitly authorized cache disposal.
+//! Historical databases are never opened.
 //! Each reduced legacy snapshot is independently validated; ambiguous shared
 //! search-title rows are not attributed to a particular upstream observation.
 use super::*;
@@ -421,10 +422,6 @@ mod tests {
             ("seasons", ROWS),
             ("catalog_pages", 3 * ROWS),
             ("indexer_snapshots", ROWS),
-            ("cinemeta_v3_details", ROWS),
-            ("cinemeta_v3_browse", ROWS),
-            ("tmdb_v1_cache", 4 * ROWS),
-            ("indexer_sources_v1", ROWS),
         ] {
             assert_eq!(count(db, table)?, i64::from(expected), "{table}");
         }
@@ -436,7 +433,7 @@ mod tests {
         }
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            5
+            SCHEMA_VERSION
         );
         assert_eq!(count(db, "pragma_foreign_key_check")?, 0);
         Ok(())
@@ -489,7 +486,12 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(unwanted, 0);
-        assert_eq!(count(&service.connection, "tmdb_v1_cache")?, 17);
+        let legacy: i64 = service.connection.query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE name='tmdb_v1_cache'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(legacy, 0);
         Ok(())
     }
 
