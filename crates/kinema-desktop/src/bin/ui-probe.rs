@@ -72,6 +72,28 @@ fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'stat
     }))
 }
 
+fn probe_log_filter(value: Option<&str>) -> tracing_subscriber::EnvFilter {
+    value
+        .and_then(|value| {
+            tracing_subscriber::EnvFilter::builder()
+                .with_regex(false)
+                .parse(value)
+                .ok()
+        })
+        .unwrap_or_else(|| {
+            tracing_subscriber::EnvFilter::new("kinema_mpv=info,kinema_desktop=info")
+        })
+}
+
+fn probe_subscriber(
+    filter: tracing_subscriber::EnvFilter,
+) -> impl tracing::Subscriber + Send + Sync {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(filter)
+        .finish()
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     let probe = match parse_player_probe(&args) {
@@ -90,6 +112,13 @@ fn main() {
             "player probe: --media must be an existing local generated video; no services or user data are opened"
         );
         std::process::exit(2);
+    }
+    // Do not use init/try_init: those install LogTracer and would conflict
+    // with the native probe's dedicated GPU-error log::Log collector. No app
+    // paths, file logging, user configuration, or provider setup is involved.
+    let filter = probe_log_filter(std::env::var("RUST_LOG").ok().as_deref());
+    if tracing::subscriber::set_global_default(probe_subscriber(filter)).is_err() {
+        eprintln!("player probe: category=tracing-subscriber-already-set");
     }
     let successful = if probe.experimental {
         player_window::run_probe_mode(
@@ -119,6 +148,28 @@ mod tests {
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).into()).collect()
     }
+    #[test]
+    fn stderr_subscriber_filters_backend_events_without_replacing_log_collector() {
+        let logger = log::logger();
+        let subscriber = probe_subscriber(probe_log_filter(None));
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(tracing::enabled!(target: "kinema_mpv", tracing::Level::INFO));
+            assert!(tracing::enabled!(target: "kinema_desktop", tracing::Level::WARN));
+            assert!(!tracing::enabled!(target: "kinema_mpv", tracing::Level::DEBUG));
+            assert!(!tracing::enabled!(target: "wgpu", tracing::Level::INFO));
+        });
+        assert!(std::ptr::eq(logger, log::logger()));
+        assert_eq!(
+            probe_log_filter(Some("invalid[filter")).to_string(),
+            probe_log_filter(None).to_string()
+        );
+        let subscriber = probe_subscriber(probe_log_filter(Some("kinema_mpv=debug")));
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(tracing::enabled!(target: "kinema_mpv", tracing::Level::DEBUG));
+        });
+        assert!(std::ptr::eq(logger, log::logger()));
+    }
+
     #[test]
     fn existing_player_defaults_are_preserved() -> Result<(), &'static str> {
         let Some(probe) = parse_player_probe(&args(&["--scene", "player"]))? else {

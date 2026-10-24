@@ -9,7 +9,9 @@ use std::{
 
 use crate::player::PlayerChoice;
 use gpui::{prelude::*, *};
-use kinema_mpv::{Config, Frame, PlaybackState, Player, ResolutionPolicy, TrackKind};
+use kinema_mpv::{
+    Config, Frame, PlaybackFailure, PlaybackState, Player, ResolutionPolicy, TrackKind,
+};
 
 use super::{
     coordinator::AppCoordinator,
@@ -39,7 +41,80 @@ fn experimental_help() -> &'static str {
     }
 }
 
-fn player_config(mode: &PlayerChoice) -> Result<Config, String> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FailurePhase {
+    Config,
+    Initialize,
+    Load,
+    Runtime,
+    Command,
+    #[cfg(feature = "experimental-gpu")]
+    Surface,
+}
+
+impl FailurePhase {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Config => "config",
+            Self::Initialize => "initialize",
+            Self::Load => "load",
+            Self::Runtime => "runtime",
+            Self::Command => "command",
+            #[cfg(feature = "experimental-gpu")]
+            Self::Surface => "surface",
+        }
+    }
+}
+
+// The string stays private; only reviewed categories may be presented or logged.
+type StartupError = (String, PlaybackFailure, FailurePhase);
+
+fn startup_error(error: kinema_mpv::Error, phase: FailurePhase) -> StartupError {
+    let reason = error.playback_failure();
+    (error.to_string(), reason, phase)
+}
+
+fn failure_phase(state: &PlaybackState, private: Option<FailurePhase>) -> FailurePhase {
+    if state.failure_reason.is_some() {
+        FailurePhase::Runtime
+    } else {
+        private.unwrap_or(FailurePhase::Runtime)
+    }
+}
+
+/// Only reviewed, static backend text crosses the presentation boundary.
+fn failure_label(reason: PlaybackFailure) -> String {
+    format!("{}: {}", reason.code(), reason.message())
+}
+
+fn failure_reason(state: &PlaybackState, private: Option<PlaybackFailure>) -> PlaybackFailure {
+    state
+        .failure_reason
+        .or(private)
+        .unwrap_or(PlaybackFailure::Unknown)
+}
+
+/// A failed window reports exactly once, even when sampled at display cadence.
+fn failure_transition(failed: bool, reported: &mut bool) -> bool {
+    if !failed || *reported {
+        return false;
+    }
+    *reported = true;
+    true
+}
+
+#[cfg(feature = "experimental-gpu")]
+fn required_gpu_context<T>(context: Option<T>) -> Result<T, StartupError> {
+    context.ok_or_else(|| {
+        (
+            experimental_help().into(),
+            PlaybackFailure::GpuContextUnavailable,
+            FailurePhase::Config,
+        )
+    })
+}
+
+fn player_config(mode: &PlayerChoice) -> Result<Config, StartupError> {
     if *mode != PlayerChoice::ExperimentalEmbedded {
         return Ok(Config {
             resolution: ResolutionPolicy::Viewport,
@@ -48,13 +123,17 @@ fn player_config(mode: &PlayerChoice) -> Result<Config, String> {
     }
     #[cfg(not(feature = "experimental-gpu"))]
     {
-        Err(experimental_help().into())
+        Err((
+            experimental_help().into(),
+            PlaybackFailure::BackendNotCompiled,
+            FailurePhase::Config,
+        ))
     }
     #[cfg(feature = "experimental-gpu")]
     {
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         let context = {
-            let context = gpui_wgpu::experimental_gpu_context().ok_or(experimental_help())?;
+            let context = required_gpu_context(gpui_wgpu::experimental_gpu_context())?;
             let gate = context.experimental_gpu_queue_gate();
             kinema_mpv::ExperimentalGpuContext::new(
                 context.device.clone(),
@@ -63,9 +142,9 @@ fn player_config(mode: &PlayerChoice) -> Result<Config, String> {
             )
         };
         #[cfg(target_os = "macos")]
-        let context = kinema_mpv::ExperimentalGpuContext::new_metal(
-            gpui_apple::experimental_gpu_registry_id().ok_or(experimental_help())?,
-        );
+        let context = kinema_mpv::ExperimentalGpuContext::new_metal(required_gpu_context(
+            gpui_apple::experimental_gpu_registry_id(),
+        )?);
         Ok(Config {
             resolution: ResolutionPolicy::Source,
             experimental_gpu: Some(context),
@@ -989,6 +1068,9 @@ pub struct PlayerWindow {
     player: Option<BackgroundPlayer>,
     state: PlaybackState,
     error: Option<String>,
+    failure_reason: Option<PlaybackFailure>,
+    failure_phase: Option<FailurePhase>,
+    failure_reported: bool,
     control_notice: bool,
     source_url: Option<String>,
     image: Option<Arc<RenderImage>>,
@@ -1076,6 +1158,9 @@ impl PlayerWindow {
                 ..Default::default()
             },
             error: None,
+            failure_reason: None,
+            failure_phase: None,
+            failure_reported: false,
             control_notice: false,
             source_url,
             image: None,
@@ -1104,6 +1189,11 @@ impl PlayerWindow {
             _updates: updates,
         };
         if experimental {
+            tracing::info!(
+                mode = "experimental-embedded",
+                phase = "requested",
+                "Experimental GPU startup requested"
+            );
             // Capture the actual renderer context only after native window
             // registration, not after an assumed amount of wall-clock time.
             cx.defer_in(window, |view, _, cx| view.start_player(cx));
@@ -1132,7 +1222,8 @@ impl PlayerWindow {
             if canceled.load(std::sync::atomic::Ordering::Acquire) {
                 return Ok(None);
             }
-            let player = Player::new(config?).map_err(|error| error.to_string())?;
+            let player = Player::new(config?)
+                .map_err(|error| startup_error(error, FailurePhase::Initialize))?;
             // Wrap before load so every failure/cancellation destroys off-thread.
             let owner = BackgroundPlayer {
                 player: Some(player),
@@ -1143,7 +1234,9 @@ impl PlayerWindow {
                 return Ok(None);
             }
             if let Some(player) = owner.player.as_ref() {
-                player.load(&url).map_err(|error| error.to_string())?;
+                player
+                    .load(&url)
+                    .map_err(|error| startup_error(error, FailurePhase::Load))?;
             }
             if canceled.load(std::sync::atomic::Ordering::Acquire) {
                 return Ok(None);
@@ -1163,7 +1256,11 @@ impl PlayerWindow {
                 }
                 match result {
                     Ok(player) => view.player = player,
-                    Err(error) => view.error = Some(error),
+                    Err((error, reason, phase)) => {
+                        view.failure_phase = Some(phase);
+                        view.failure_reason = Some(reason);
+                        view.error = Some(error);
+                    }
                 }
                 cx.notify();
             });
@@ -1218,6 +1315,8 @@ impl PlayerWindow {
                         frame_received = true;
                     }
                     Err(error) => {
+                        self.failure_reason = Some(PlaybackFailure::Unknown);
+                        self.failure_phase = Some(FailurePhase::Surface);
                         self.error = Some(error);
                         state_changed = true;
                     }
@@ -1263,6 +1362,20 @@ impl PlayerWindow {
         #[cfg(feature = "experimental-gpu")]
         if terminal_failure(self.error.is_some(), &self.state) {
             frame_received |= self.gpu_frame.take().is_some();
+        }
+        if self.mode == PlayerChoice::ExperimentalEmbedded
+            && failure_transition(
+                terminal_failure(self.error.is_some(), &self.state),
+                &mut self.failure_reported,
+            )
+        {
+            let reason = failure_reason(&self.state, self.failure_reason);
+            tracing::warn!(
+                mode = "experimental-embedded",
+                phase = failure_phase(&self.state, self.failure_phase).code(),
+                reason = reason.code(),
+                "Experimental GPU playback unavailable"
+            );
         }
         self.sync_subtitle_position(window, cx);
         let now = Instant::now();
@@ -1349,6 +1462,8 @@ impl PlayerWindow {
             && let Err(error) = command(player)
         {
             if matches!(error, kinema_mpv::Error::Disconnected) {
+                self.failure_reason = Some(error.playback_failure());
+                self.failure_phase = Some(FailurePhase::Command);
                 self.error = Some(error.to_string());
             } else {
                 self.control_notice = true;
@@ -1397,6 +1512,8 @@ impl PlayerWindow {
             && let Err(error) = command(player)
         {
             if matches!(error, kinema_mpv::Error::Disconnected) {
+                self.failure_reason = Some(error.playback_failure());
+                self.failure_phase = Some(FailurePhase::Command);
                 self.error = Some(error.to_string());
             } else {
                 self.control_notice = true;
@@ -2402,6 +2519,10 @@ impl Render for PlayerWindow {
                 div().absolute().inset_0().flex().flex_col().items_center().justify_center().gap(s::S12).when(failed, |panel| panel.bg(p.scrim_max))
                     .child(div().type_style(t::TITLE).child(if failed { "Playback unavailable" } else if self.state.ended { "Playback finished" } else if self.state.paused_for_cache { "Buffering…" } else if self.state.loading || self.player.is_none() { "Opening media…" } else { "Audio playback" }))
                     .child(div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary).child(if failed && self.mode == PlayerChoice::ExperimentalEmbedded { experimental_help() } else if failed { "Playback stopped. Choose external MPV or VLC in Settings → Playback, then try again. If libmpv is missing, install its runtime first." } else if self.state.loading || self.player.is_none() { "Preparing the embedded player. You can close this window at any time." } else { "Use the controls below. Press K to play or pause." }))
+                    .when(failed && self.mode == PlayerChoice::ExperimentalEmbedded, |panel| panel.child(
+                        div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary)
+                            .child(failure_label(failure_reason(&self.state, self.failure_reason)))
+                    ))
                     // Backend errors may contain media URLs; never display/log
                     // their raw contents (signed stream URLs can be credentials).
             ))
@@ -3028,13 +3149,133 @@ mod tests {
         assert!(resize.verified());
     }
 
+    #[test]
+    fn failure_labels_never_use_private_error_text() {
+        let secret =
+            "https://secret.invalid/media?credential=SECRET_MARKER /private/media raw-driver-error";
+        let state = PlaybackState {
+            error: Some(secret.into()),
+            fatal_error: Some(secret.into()),
+            ..Default::default()
+        };
+        for reason in [
+            PlaybackFailure::Unknown,
+            PlaybackFailure::BackendNotCompiled,
+            PlaybackFailure::GpuContextUnavailable,
+            PlaybackFailure::HdrUnsupported,
+            PlaybackFailure::ColorMetadataUnavailable,
+            PlaybackFailure::ColorTransferUnqualified,
+            PlaybackFailure::DecodeMetadataUnavailable,
+            PlaybackFailure::DecoderNotDirect,
+            PlaybackFailure::GpuDeviceUnsupported,
+            PlaybackFailure::GpuInteropUnavailable,
+            PlaybackFailure::GpuCompletionFailed,
+            PlaybackFailure::LibmpvUnavailable,
+            PlaybackFailure::LibmpvIncompatible,
+            PlaybackFailure::RenderInitFailed,
+            PlaybackFailure::MediaLoadFailed,
+            PlaybackFailure::RenderSizeLimit,
+        ] {
+            let label = failure_label(failure_reason(&state, Some(reason)));
+            assert_eq!(label, format!("{}: {}", reason.code(), reason.message()));
+            for forbidden in [
+                "https://",
+                "SECRET_MARKER",
+                "/private/media",
+                "raw-driver-error",
+            ] {
+                assert!(!label.contains(forbidden));
+            }
+        }
+        assert_eq!(failure_reason(&state, None), PlaybackFailure::Unknown);
+        let state = PlaybackState {
+            failure_reason: Some(PlaybackFailure::GpuContextUnavailable),
+            ..state
+        };
+        assert_eq!(
+            failure_reason(&state, Some(PlaybackFailure::Unknown)),
+            PlaybackFailure::GpuContextUnavailable
+        );
+    }
+
+    #[test]
+    fn startup_failure_preserves_typed_reason_and_safe_phase() {
+        for phase in [FailurePhase::Initialize, FailurePhase::Load] {
+            let raw = "https://SECRET.invalid/private raw-driver-error";
+            let error = kinema_mpv::Error::Library {
+                attempts: raw.into(),
+            };
+            let expected = error.playback_failure();
+            let (_, reason, actual_phase) = startup_error(error, phase);
+            assert_eq!(reason, expected);
+            assert_eq!(actual_phase, phase);
+            assert!(!actual_phase.code().contains("SECRET"));
+        }
+        let state = PlaybackState::default();
+        assert_eq!(failure_phase(&state, None), FailurePhase::Runtime);
+        assert_eq!(
+            failure_phase(&state, Some(FailurePhase::Load)),
+            FailurePhase::Load
+        );
+        let state = PlaybackState {
+            failure_reason: Some(PlaybackFailure::Unknown),
+            ..state
+        };
+        assert_eq!(
+            failure_phase(&state, Some(FailurePhase::Load)),
+            FailurePhase::Runtime
+        );
+    }
+
+    #[test]
+    fn experimental_failure_reports_once_not_each_sample() {
+        let mut reported = false;
+        assert!(!failure_transition(false, &mut reported));
+        assert!(failure_transition(true, &mut reported));
+        for _ in 0..120 {
+            assert!(!failure_transition(true, &mut reported));
+        }
+        assert!(!failure_transition(false, &mut reported));
+        assert!(!failure_transition(true, &mut reported));
+    }
+
+    #[cfg(feature = "experimental-gpu")]
+    #[test]
+    fn absent_renderer_context_has_distinct_startup_reason() {
+        let Err((_, reason, phase)) = required_gpu_context::<()>(None) else {
+            panic!("missing renderer context must fail closed");
+        };
+        assert_eq!(reason, PlaybackFailure::GpuContextUnavailable);
+        assert_eq!(phase, FailurePhase::Config);
+        assert_eq!(required_gpu_context(Some(42)), Ok(42));
+        // Unit tests register no native window renderer. This only reads its
+        // context registry; it must not create a device or silently fall back.
+        let Err((_, reason, phase)) =
+            player_config(&crate::player::PlayerChoice::ExperimentalEmbedded)
+        else {
+            panic!("experimental startup requires the actual window renderer context");
+        };
+        assert_eq!(reason, PlaybackFailure::GpuContextUnavailable);
+        assert_eq!(phase, FailurePhase::Config);
+    }
+
+    #[test]
+    fn default_player_config_keeps_viewport_policy() {
+        let Ok(config) = player_config(&crate::player::PlayerChoice::Embedded) else {
+            panic!("default embedded configuration must remain available");
+        };
+        assert_eq!(config.resolution, ResolutionPolicy::Viewport);
+    }
+
     #[cfg(not(feature = "experimental-gpu"))]
     #[test]
     fn experimental_backend_is_explicitly_unavailable_without_feature() {
         let result = super::player_config(&crate::player::PlayerChoice::ExperimentalEmbedded);
-        let Err(error) = result else {
+        let Err((error, reason, phase)) = result else {
             panic!("feature-off backend must fail closed");
         };
+        assert_eq!(reason, PlaybackFailure::BackendNotCompiled);
+        assert_eq!(phase, FailurePhase::Config);
         assert!(error.contains("not compiled"));
         assert!(error.contains("isolated experimental app build"));
     }
