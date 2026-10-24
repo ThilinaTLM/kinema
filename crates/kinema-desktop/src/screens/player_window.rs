@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::player::PlayerChoice;
 use gpui::{prelude::*, *};
 use kinema_mpv::{Config, Frame, PlaybackState, Player, ResolutionPolicy, TrackKind};
 
@@ -26,6 +27,73 @@ use crate::widgets::{
     text::TypeExt,
     tokens::{Palette, radius, space as s, typeface as t},
 };
+
+#[cfg(feature = "experimental-gpu")]
+type ExperimentalSurfaceFrame = GpuSurfaceFrame;
+
+fn experimental_help() -> &'static str {
+    if cfg!(feature = "experimental-gpu") {
+        "Experimental GPU playback unavailable. No CPU fallback or device-loss recovery. Close and reopen the window, or restart Kinema; you can also choose another player in Settings → Playback. Required SDR GPU interop capabilities may be missing. HDR deferred; Windows/macOS runtime qualification pending."
+    } else {
+        "Experimental GPU backend not compiled. Use the isolated experimental app build, or choose Embedded MPV, MPV, or VLC in Settings → Playback."
+    }
+}
+
+fn player_config(mode: &PlayerChoice) -> Result<Config, String> {
+    if *mode != PlayerChoice::ExperimentalEmbedded {
+        return Ok(Config {
+            resolution: ResolutionPolicy::Viewport,
+            ..Default::default()
+        });
+    }
+    #[cfg(not(feature = "experimental-gpu"))]
+    {
+        Err(experimental_help().into())
+    }
+    #[cfg(feature = "experimental-gpu")]
+    {
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        let context = {
+            let context = gpui_wgpu::experimental_gpu_context().ok_or(experimental_help())?;
+            let gate = context.experimental_gpu_queue_gate();
+            kinema_mpv::ExperimentalGpuContext::new(
+                context.device.clone(),
+                context.queue.clone(),
+                gate,
+            )
+        };
+        #[cfg(target_os = "macos")]
+        let context = kinema_mpv::ExperimentalGpuContext::new_metal(
+            gpui_apple::experimental_gpu_registry_id().ok_or(experimental_help())?,
+        );
+        Ok(Config {
+            resolution: ResolutionPolicy::Source,
+            experimental_gpu: Some(context),
+            ..Default::default()
+        })
+    }
+}
+
+#[cfg(feature = "experimental-gpu")]
+fn experimental_surface(
+    frame: kinema_mpv::ExperimentalFrame,
+) -> Result<Arc<ExperimentalSurfaceFrame>, String> {
+    let frame = Arc::new(frame);
+    let dimensions = frame.size();
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    let surface = GpuSurfaceFrame::new(
+        frame
+            .texture()
+            .create_view(&wgpu::TextureViewDescriptor::default()),
+        dimensions,
+        frame,
+    );
+    #[cfg(target_os = "macos")]
+    let surface = GpuSurfaceFrame::new(frame.pixel_buffer(), dimensions, frame);
+    surface
+        .map(Arc::new)
+        .map_err(|_| "Invalid experimental GPU surface; refusing CPU fallback".into())
+}
 
 actions!(
     player_window,
@@ -110,16 +178,21 @@ struct LeaseWindow {
     generation: u64,
     handle: WindowHandle<PlayerWindow>,
     coordinator: Entity<AppCoordinator>,
+    mode: PlayerChoice,
 }
 
 /// Replaying a lease activates its existing window without reloading its URL.
 pub fn open(
     session_id: String,
+    mode: PlayerChoice,
     url: String,
     title: String,
     coordinator: Entity<AppCoordinator>,
     cx: &mut App,
 ) -> Result<(), String> {
+    if !mode.is_managed() {
+        return Err("External players cannot own a managed player window".into());
+    }
     if !cx.has_global::<PlayerWindows>() {
         cx.set_global(PlayerWindows::default());
         cx.on_window_closed(|cx, id| {
@@ -134,6 +207,14 @@ pub fn open(
             }
         })
         .detach();
+    }
+    if cx
+        .global::<PlayerWindows>()
+        .entries
+        .get(&session_id)
+        .is_some_and(|entry| entry.mode != mode)
+    {
+        return Err("A managed playback lease cannot change player mode".into());
     }
     if let Some(handle) = cx
         .global::<PlayerWindows>()
@@ -166,7 +247,7 @@ pub fn open(
     };
     let handle = cx
         .open_window(options, |window, cx| {
-            cx.new(|cx| PlayerWindow::new(title, Some(url), window, cx))
+            cx.new(|cx| PlayerWindow::new_mode(title, Some(url), mode.clone(), window, cx))
         })
         .map_err(|error| format!("Could not open embedded player window: {error}"))?;
     let _ = handle.update(cx, |view, _, _| {
@@ -178,6 +259,7 @@ pub fn open(
             generation,
             handle,
             coordinator,
+            mode,
         },
     );
     Ok(())
@@ -910,6 +992,9 @@ pub struct PlayerWindow {
     control_notice: bool,
     source_url: Option<String>,
     image: Option<Arc<RenderImage>>,
+    mode: PlayerChoice,
+    #[cfg(feature = "experimental-gpu")]
+    gpu_frame: Option<Arc<ExperimentalSurfaceFrame>>,
     retirement: RetirementQueue,
     last_activity: Instant,
     dock_hover: bool,
@@ -929,13 +1014,27 @@ pub struct PlayerWindow {
     last_transfer_poll: Option<Instant>,
     /// Last `sub-pos` sent for this load; None = unknown, resend on next sync.
     subtitle_position: Option<u8>,
+    startup_cancel: Arc<std::sync::atomic::AtomicBool>,
     _initialize: Task<()>,
     _updates: Task<()>,
 }
+impl Drop for PlayerWindow {
+    fn drop(&mut self) {
+        self.startup_cancel
+            .store(true, std::sync::atomic::Ordering::Release);
+        #[cfg(feature = "experimental-gpu")]
+        {
+            self.gpu_frame.take();
+        }
+        self.player.take();
+    }
+}
+
 impl PlayerWindow {
-    fn new(
+    fn new_mode(
         title: String,
         url: Option<String>,
+        mode: PlayerChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -944,38 +1043,7 @@ impl PlayerWindow {
             diagnostics_enabled(std::env::var("KINEMA_PLAYER_DIAGNOSTICS").ok().as_deref())
                 .then(|| PlayerPerformance::new(Instant::now()));
         let source_url = url.clone();
-        let executor = cx.background_executor().clone();
-        let worker = executor.clone();
-        let initialize = cx.background_executor().spawn(async move {
-            let Some(url) = url else {
-                return Ok(None);
-            };
-            let result = Player::new(Config {
-                resolution: ResolutionPolicy::Viewport,
-                ..Default::default()
-            });
-            match result {
-                Ok(player) => {
-                    player.load(&url).map_err(|error| error.to_string())?;
-                    Ok(Some(BackgroundPlayer {
-                        player: Some(player),
-                        executor: worker,
-                        stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    }))
-                }
-                Err(error) => Err(error.to_string()),
-            }
-        });
-        let initialize = cx.spawn(async move |view, cx| {
-            let result = initialize.await;
-            let _ = view.update(cx, |view, cx| {
-                match result {
-                    Ok(player) => view.player = player,
-                    Err(error) => view.error = Some(error),
-                }
-                cx.notify();
-            });
-        });
+        let startup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let updates = cx.spawn_in(window, async move |view, cx| {
             loop {
                 cx.background_executor()
@@ -992,7 +1060,8 @@ impl PlayerWindow {
         let surface_focus = cx.focus_handle();
         surface_focus.focus(window, cx);
         let controls = (0..CONTROL_COUNT).map(|_| cx.focus_handle()).collect();
-        Self {
+        let experimental = mode == PlayerChoice::ExperimentalEmbedded;
+        let mut view = Self {
             title,
             lease: None,
             frames_presented: 0,
@@ -1010,6 +1079,9 @@ impl PlayerWindow {
             control_notice: false,
             source_url,
             image: None,
+            mode,
+            #[cfg(feature = "experimental-gpu")]
+            gpu_frame: None,
             retirement: RetirementQueue::new(),
             last_activity: Instant::now(),
             dock_hover: false,
@@ -1027,9 +1099,88 @@ impl PlayerWindow {
             transfer: TransferRate::default(),
             last_transfer_poll: None,
             subtitle_position: None,
-            _initialize: initialize,
+            startup_cancel,
+            _initialize: Task::ready(()),
             _updates: updates,
+        };
+        if experimental {
+            // Capture the actual renderer context only after native window
+            // registration, not after an assumed amount of wall-clock time.
+            cx.defer_in(window, |view, _, cx| view.start_player(cx));
+        } else {
+            view.start_player(cx);
         }
+        view
+    }
+
+    fn start_player(&mut self, cx: &mut Context<Self>) {
+        if self
+            .startup_cancel
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return;
+        }
+        let config = player_config(&self.mode);
+        let url = self.source_url.clone();
+        let executor = cx.background_executor().clone();
+        let worker = executor.clone();
+        let canceled = self.startup_cancel.clone();
+        let initialize = executor.spawn(async move {
+            let Some(url) = url else {
+                return Ok(None);
+            };
+            if canceled.load(std::sync::atomic::Ordering::Acquire) {
+                return Ok(None);
+            }
+            let player = Player::new(config?).map_err(|error| error.to_string())?;
+            // Wrap before load so every failure/cancellation destroys off-thread.
+            let owner = BackgroundPlayer {
+                player: Some(player),
+                executor: worker,
+                stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            };
+            if canceled.load(std::sync::atomic::Ordering::Acquire) {
+                return Ok(None);
+            }
+            if let Some(player) = owner.player.as_ref() {
+                player.load(&url).map_err(|error| error.to_string())?;
+            }
+            if canceled.load(std::sync::atomic::Ordering::Acquire) {
+                return Ok(None);
+            }
+            Ok(Some(owner))
+        });
+        self._initialize = cx.spawn(async move |view, cx| {
+            let result = initialize.await;
+            let _ = view.update(cx, |view, cx| {
+                // A late owner is dropped through BackgroundPlayer, never joined
+                // on the UI executor and never installed after cancellation.
+                if view
+                    .startup_cancel
+                    .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    return;
+                }
+                match result {
+                    Ok(player) => view.player = player,
+                    Err(error) => view.error = Some(error),
+                }
+                cx.notify();
+            });
+        });
+    }
+
+    fn experimental_video(&self) -> AnyElement {
+        let element = div().absolute().size_full();
+        #[cfg(feature = "experimental-gpu")]
+        let element = element.when_some(self.gpu_frame.clone(), |element, frame| {
+            element.child(
+                gpu_surface(frame)
+                    .size_full()
+                    .object_fit(ObjectFit::Contain),
+            )
+        });
+        element.into_any_element()
     }
 
     fn sample(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1038,6 +1189,10 @@ impl PlayerWindow {
         let mut frame_received = false;
         let mut received = false;
         let mut retirement_skipped = false;
+        #[cfg(feature = "experimental-gpu")]
+        if terminal_failure(self.error.is_some(), &self.state) {
+            frame_received |= self.gpu_frame.take().is_some();
+        }
         if terminal_failure(self.error.is_some(), &self.state)
             && let Some((session, generation)) = self.lease.take()
         {
@@ -1051,10 +1206,27 @@ impl PlayerWindow {
             self.state = player.state();
             // Queue full (not merely "one pending") skips acquisition; no extra
             // image is allocated and the backend keeps its latest-frame mailbox.
-            let frame = if self.retirement.has_room() {
+            #[cfg(feature = "experimental-gpu")]
+            if self.mode == PlayerChoice::ExperimentalEmbedded
+                && !terminal_failure(self.error.is_some(), &self.state)
+                && let Some(frame) = player.take_gpu_frame()
+            {
+                match experimental_surface(frame) {
+                    Ok(frame) => {
+                        self.gpu_frame = Some(frame);
+                        self.frames_presented += 1;
+                        frame_received = true;
+                    }
+                    Err(error) => {
+                        self.error = Some(error);
+                        state_changed = true;
+                    }
+                }
+            }
+            let frame = if self.mode == PlayerChoice::Embedded && self.retirement.has_room() {
                 player.take_frame()
             } else {
-                retirement_skipped = true;
+                retirement_skipped = self.mode == PlayerChoice::Embedded;
                 None
             };
             received = frame.is_some();
@@ -1084,7 +1256,13 @@ impl PlayerWindow {
                     frame_received = true;
                 }
             }
-            state_changed = self.state != previous;
+            state_changed |= self.state != previous;
+        }
+        // A fresh state snapshot or surface-validation error can become fatal
+        // within this sample. Probes have no lease but must also release frames.
+        #[cfg(feature = "experimental-gpu")]
+        if terminal_failure(self.error.is_some(), &self.state) {
+            frame_received |= self.gpu_frame.take().is_some();
         }
         self.sync_subtitle_position(window, cx);
         let now = Instant::now();
@@ -1183,7 +1361,13 @@ impl PlayerWindow {
         if replay_needed(&self.state)
             && let Some(url) = self.source_url.clone()
         {
-            // A new load: do not assume the previous sub-pos survives.
+            // A new load: discard the previous GPU generation before issuing
+            // load. The backend rejects late frames from the obsolete source.
+            #[cfg(feature = "experimental-gpu")]
+            {
+                self.gpu_frame.take();
+            }
+            // Do not assume the previous sub-pos survives.
             self.subtitle_position = None;
             self.command(
                 |player| {
@@ -2189,6 +2373,9 @@ impl Render for PlayerWindow {
         self.chrome_was_visible = visible;
         let failed = terminal_failure(self.error.is_some(), &self.state);
         let entity = cx.weak_entity();
+        let has_video = self.image.is_some();
+        #[cfg(feature = "experimental-gpu")]
+        let has_video = has_video || self.gpu_frame.is_some();
         div().id("kinema-player").key_context("KinemaPlayer").relative().size_full().overflow_hidden().bg(p.bg_canvas).text_color(p.text_primary).font_family(t::UI_FAMILY)
             // While a menu is open every player shortcut is passed through
             // (`propagate`) so the menu's own key handling sees the keystroke.
@@ -2210,10 +2397,11 @@ impl Render for PlayerWindow {
             .child(div().id("player-surface").key_context("KinemaPlayerSurface").track_focus(&self.surface_focus).absolute().size_full()
                 .on_mouse_down(MouseButton::Left, cx.listener(|view, _, window, cx| { view.surface_focus.focus(window, cx); view.activity(cx); }))
                 .when_some(self.image.clone(), |div, image| div.child(img(image).absolute().size_full().object_fit(ObjectFit::Contain))))
-            .when(failed || self.image.is_none(), |element| element.child(
+            .when(self.mode == PlayerChoice::ExperimentalEmbedded && !failed, |element| element.child(self.experimental_video()))
+            .when(failed || !has_video, |element| element.child(
                 div().absolute().inset_0().flex().flex_col().items_center().justify_center().gap(s::S12).when(failed, |panel| panel.bg(p.scrim_max))
                     .child(div().type_style(t::TITLE).child(if failed { "Playback unavailable" } else if self.state.ended { "Playback finished" } else if self.state.paused_for_cache { "Buffering…" } else if self.state.loading || self.player.is_none() { "Opening media…" } else { "Audio playback" }))
-                    .child(div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary).child(if failed { "Playback stopped. Choose external MPV or VLC in Settings → Playback, then try again. If libmpv is missing, install its runtime first." } else if self.state.loading || self.player.is_none() { "Preparing the embedded player. You can close this window at any time." } else { "Use the controls below. Press K to play or pause." }))
+                    .child(div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary).child(if failed && self.mode == PlayerChoice::ExperimentalEmbedded { experimental_help() } else if failed { "Playback stopped. Choose external MPV or VLC in Settings → Playback, then try again. If libmpv is missing, install its runtime first." } else if self.state.loading || self.player.is_none() { "Preparing the embedded player. You can close this window at any time." } else { "Use the controls below. Press K to play or pause." }))
                     // Backend errors may contain media URLs; never display/log
                     // their raw contents (signed stream URLs can be credentials).
             ))
@@ -2228,6 +2416,12 @@ impl Render for PlayerWindow {
                 });
             }, |_, _, _, _| {}).absolute().size_full())
             .when(visible, |div| div.child(self.chrome(window, cx)))
+            .when(self.mode == PlayerChoice::ExperimentalEmbedded, |element| element.child(
+                div().absolute().top(s::S16).left(s::S16).px(s::S8).py(s::S4)
+                    .rounded(radius::SM).bg(p.scrim_max.opacity(0.7)).type_style(t::MONO)
+                    .text_color(p.text_secondary)
+                    .child(format!("Experimental GPU · SDR · {}×{} · no CPU fallback", self.state.render_size[0], self.state.render_size[1]))
+            ))
             // Opt-in diagnostics only: no handlers, id or focus, so it never takes input.
             .when_some(self.cadence_text.clone(), |el, text| {
                 el.child(
@@ -2360,9 +2554,197 @@ fn controls_visible(
     paused || loading || error || interacting || idle < CHROME_IDLE
 }
 
-/// Opt-in offline probe: production view, without coordinator/services, user
-/// settings, database or credentials. Native playback accepts only a local file.
-/// No screenshot is taken here; synthetic chrome can be captured under Xvfb.
+#[cfg(feature = "ui-probe")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProbeCommand {
+    Pause,
+    Adjust,
+    Resume,
+    Restore,
+}
+
+/// Each transition requires a fresh observed libmpv snapshot, not command acceptance.
+#[cfg(feature = "ui-probe")]
+#[derive(Default)]
+struct ProbeControls {
+    phase: u8,
+    target: f64,
+    resumed_at: f64,
+    failed: bool,
+}
+#[cfg(feature = "ui-probe")]
+impl ProbeControls {
+    fn observe(&mut self, state: &PlaybackState, frames: u64) -> Option<ProbeCommand> {
+        if self.failed {
+            return None;
+        }
+        match self.phase {
+            0 if frames > 2
+                && !state.loading
+                && state.duration.is_some_and(|duration| duration >= 6.) =>
+            {
+                self.target = (state.duration.unwrap_or(8.) * 0.25).clamp(1., 3.);
+                self.phase = 1;
+                Some(ProbeCommand::Pause)
+            }
+            1 if state.paused => {
+                self.phase = 2;
+                Some(ProbeCommand::Adjust)
+            }
+            2 if state.paused
+                && (state.position - self.target).abs() < 0.35
+                && (state.speed - 1.25).abs() < 0.01
+                && (state.volume - 37.).abs() < 0.5 =>
+            {
+                self.resumed_at = state.position;
+                self.phase = 3;
+                Some(ProbeCommand::Resume)
+            }
+            3 if !state.paused && state.position > self.resumed_at + 0.05 => {
+                self.phase = 4;
+                Some(ProbeCommand::Restore)
+            }
+            4 if !state.paused
+                && (state.speed - 1.).abs() < 0.01
+                && (state.volume - 100.).abs() < 0.5 =>
+            {
+                self.phase = 5;
+                None
+            }
+            _ => None,
+        }
+    }
+    fn step(&mut self, player: &Player, frames: u64) {
+        let command = self.observe(&player.state(), frames);
+        let result = match command {
+            Some(ProbeCommand::Pause) => player.set_paused(true),
+            Some(ProbeCommand::Adjust) => player
+                .seek_absolute(self.target)
+                .and_then(|()| player.set_speed(1.25))
+                .and_then(|()| player.set_volume(37.)),
+            Some(ProbeCommand::Resume) => player.set_paused(false),
+            Some(ProbeCommand::Restore) => {
+                player.set_speed(1.).and_then(|()| player.set_volume(100.))
+            }
+            None => return,
+        };
+        self.failed |= result.is_err();
+    }
+    fn verified(&self) -> bool {
+        self.phase == 5 && !self.failed
+    }
+}
+
+#[cfg(feature = "ui-probe")]
+#[derive(Default)]
+struct ProbeResize {
+    requested: u32,
+    observed: u32,
+    previous: Option<[u32; 2]>,
+}
+#[cfg(feature = "ui-probe")]
+impl ProbeResize {
+    fn observe(&mut self, viewport: [u32; 2]) {
+        if self.previous.is_some_and(|previous| previous != viewport) {
+            self.observed += 1;
+        }
+        self.previous = Some(viewport);
+    }
+    fn verified(&self) -> bool {
+        self.requested >= 2 && self.observed >= 2
+    }
+}
+
+#[cfg(feature = "ui-probe")]
+struct ProbeProxy {
+    paints: u64,
+}
+#[cfg(feature = "ui-probe")]
+impl Render for ProbeProxy {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.paints += 1;
+        div()
+            .size_full()
+            .bg(rgb(0x16202a))
+            .text_color(rgb(0xe0e0e0))
+            .child("Offline auxiliary surface — no settings or services")
+    }
+}
+#[cfg(feature = "ui-probe")]
+fn open_probe_proxy(cx: &mut App, offset: f32) -> Option<WindowHandle<ProbeProxy>> {
+    cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(offset), px(60.)),
+                size: size(px(340.), px(240.)),
+            })),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Kinema / OFFLINE SURFACE PROXY".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        |_, cx| cx.new(|_| ProbeProxy { paints: 0 }),
+    )
+    .ok()
+}
+#[cfg(feature = "ui-probe")]
+fn probe_viewport(window: &Window) -> [u32; 2] {
+    let viewport = window.viewport_size();
+    [
+        f32::from(viewport.width).round() as u32,
+        f32::from(viewport.height).round() as u32,
+    ]
+}
+
+#[cfg(feature = "ui-probe")]
+static PROBE_GPU_ERRORS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(feature = "ui-probe")]
+static PROBE_PANICS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(feature = "ui-probe")]
+struct ProbeLogger;
+#[cfg(feature = "ui-probe")]
+impl log::Log for ProbeLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+    fn log(&self, record: &log::Record<'_>) {
+        let target = record.target();
+        if record.level() == log::Level::Error
+            && ["wgpu", "naga", "gpui", "vulkan", "metal"]
+                .iter()
+                .any(|category| target.contains(category))
+        {
+            PROBE_GPU_ERRORS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            eprintln!("player probe: category=gpu-error-log");
+        }
+        // Never print arbitrary log bodies, paths, URLs, or panic payloads.
+    }
+    fn flush(&self) {}
+}
+#[cfg(feature = "ui-probe")]
+static PROBE_LOGGER: ProbeLogger = ProbeLogger;
+
+#[cfg(feature = "ui-probe")]
+fn install_probe_gpu_guard() {
+    #[cfg(all(
+        feature = "experimental-gpu",
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    if let Some(context) = gpui_wgpu::experimental_gpu_context() {
+        context
+            .device
+            .on_uncaptured_error(Arc::new(|_: wgpu::Error| {
+                PROBE_GPU_ERRORS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                eprintln!("player probe: category=uncaptured-wgpu-error");
+            }));
+    } else {
+        PROBE_GPU_ERRORS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        eprintln!("player probe: category=gpu-guard-unavailable");
+    }
+}
+
+/// Original offline probe entry point, unchanged for existing callers.
 #[cfg(feature = "ui-probe")]
 pub fn run_probe(
     media: Option<std::path::PathBuf>,
@@ -2370,8 +2752,52 @@ pub fn run_probe(
     light: bool,
     dimensions: [f32; 2],
 ) -> bool {
+    run_probe_mode(
+        media,
+        seconds,
+        light,
+        dimensions,
+        PlayerChoice::Embedded,
+        false,
+    )
+}
+
+/// Offline production-window smoke. Never initializes the coordinator, settings,
+/// providers, database, credentials, or the normal application entry point.
+#[cfg(feature = "ui-probe")]
+pub fn run_probe_mode(
+    media: Option<std::path::PathBuf>,
+    seconds: u64,
+    light: bool,
+    dimensions: [f32; 2],
+    mode: PlayerChoice,
+    stress_resize: bool,
+) -> bool {
     use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
+    let experimental = mode == PlayerChoice::ExperimentalEmbedded;
     let native = media.is_some();
+    if !mode.is_managed()
+        || (native && !media.as_ref().is_some_and(|path| path.is_file()))
+        || (experimental && (!native || !cfg!(feature = "experimental-gpu")))
+        || (stress_resize && !experimental)
+    {
+        eprintln!("player probe: category=invalid-probe-capability");
+        return false;
+    }
+    PROBE_GPU_ERRORS.store(0, Ordering::Relaxed);
+    PROBE_PANICS.store(0, Ordering::Relaxed);
+    let old_hook = experimental.then(|| {
+        let old = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {
+            PROBE_PANICS.fetch_add(1, Ordering::Relaxed);
+            eprintln!("player probe: category=panic");
+        }));
+        old
+    });
+    let logger_ready = !experimental || log::set_logger(&PROBE_LOGGER).is_ok();
+    if experimental {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
     let result = Rc::new(Cell::new(false));
     let outcome = result.clone();
     gpui_platform::application().with_assets(crate::widgets::assets::Assets).run(move |cx| {
@@ -2380,11 +2806,12 @@ pub fn run_probe(
         bind_keys(cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds { origin: point(px(0.), px(0.)), size: size(px(dimensions[0]), px(dimensions[1])) })),
-            titlebar: Some(TitlebarOptions { title: Some(if native { "Kinema / Player — NATIVE SMOKE" } else { "Kinema Design Lab / Player — FIXTURE ONLY" }.into()), ..Default::default() }),
+            titlebar: Some(TitlebarOptions { title: Some(if experimental { "Kinema / EXPERIMENTAL GPU SMOKE" } else if native { "Kinema / Player — NATIVE SMOKE" } else { "Kinema Design Lab / Player — FIXTURE ONLY" }.into()), ..Default::default() }),
             ..Default::default()
         };
         let handle = cx.open_window(options, |window, cx| cx.new(|cx| {
-            let mut view = PlayerWindow::new("The Last Light".into(), media.map(|path| path.to_string_lossy().into_owned()), window, cx);
+            let mut view = PlayerWindow::new_mode(if experimental { "Offline fixture" } else { "The Last Light" }.into(), media.map(|path| path.to_string_lossy().into_owned()), mode, window, cx);
+            if experimental { cx.defer_in(window, |_, _, _| install_probe_gpu_guard()); }
             if !native {
                 let chapter = |time, title: &str| kinema_mpv::Chapter { time, title: Some(title.into()) };
                 let track = |id, kind, title: &str, lang: &str, selected| kinema_mpv::Track { id, kind, title: Some(title.into()), lang: Some(lang.into()), selected };
@@ -2407,37 +2834,211 @@ pub fn run_probe(
             }
             view
         }));
-        let Ok(handle) = handle else { eprintln!("player probe: could not open window"); cx.quit(); return; };
+        let Ok(handle) = handle else { eprintln!("player probe: category=window-open-failed"); cx.quit(); return; };
+        let mut auxiliaries = Vec::new();
+        if stress_resize {
+            for offset in [100., 500.] {
+                if let Some(window) = open_probe_proxy(cx, offset) { auxiliaries.push(window); }
+            }
+            if auxiliaries.len() != 2 { eprintln!("player probe: category=auxiliary-open-failed"); cx.quit(); return; }
+        }
         cx.activate(true);
         cx.spawn(async move |cx| {
-            cx.background_executor().timer(Duration::from_secs(seconds.clamp(1, 8))).await;
-            let snapshot = handle.update(cx, |view, _, _| {
-                let successful = !native || (view.frames_presented > 2 && view.error.is_none() && view.state.error.is_none());
-                eprintln!("player probe: frames={} backend={:?} source={:?} output={:?} position={:.2} paused={} muted={} error={} successful={}", view.frames_presented, view.state.active_backend, view.state.source_size, view.state.render_size, view.state.position, view.state.paused, view.state.muted, terminal_failure(view.error.is_some(), &view.state), successful);
-                let stopped = view.player.as_ref().map(|owner| owner.stopped.clone());
-                // Keep the native window alive until the background join is
-                // observed; some platforms exit the event loop on last close.
-                view.player.take();
-                (successful, stopped)
-            });
-            if let Ok((successful, stopped)) = snapshot {
-                let deadline = Instant::now() + Duration::from_secs(1);
-                while stopped.as_ref().is_some_and(|signal| !signal.load(Ordering::Acquire)) && Instant::now() < deadline {
-                    cx.background_executor().timer(Duration::from_millis(20)).await;
+            let started = Instant::now();
+            let deadline = started + Duration::from_secs(seconds.clamp(1, 15));
+            let playback_deadline = if experimental { deadline - Duration::from_millis(1000) } else { deadline };
+            let mut controls = ProbeControls::default();
+            let mut resize = ProbeResize::default();
+            let mut aux_initial = None;
+            let mut aux_resized = false;
+            let mut aux_closed_painted = false;
+            let mut aux_reopened = false;
+            let mut stress_phase = 0;
+            let mut stress_at = Instant::now();
+            let mut failed = !logger_ready;
+            while experimental && Instant::now() < playback_deadline {
+                cx.background_executor().timer(Duration::from_millis(40)).await;
+                let tick = handle.update(cx, |view, window, _| {
+                    resize.observe(probe_viewport(window));
+                    if let Some(player) = view.player.as_ref().and_then(|owner| owner.player.as_ref()) {
+                        controls.step(player, view.frames_presented);
+                    }
+                    (view.frames_presented, terminal_failure(view.error.is_some(), &view.state))
+                });
+                let Ok((frames, terminal)) = tick else { failed = true; break; };
+                if terminal || controls.failed || PROBE_GPU_ERRORS.load(Ordering::Relaxed) > 0 || PROBE_PANICS.load(Ordering::Relaxed) > 0 {
+                    failed = true; break;
                 }
-                let shutdown = stopped.is_none_or(|signal| signal.load(Ordering::Acquire));
-                eprintln!("player probe: background shutdown completed={shutdown}");
-                outcome.set(successful && shutdown);
+                if stress_resize && frames > 2 {
+                    if let Some(auxiliary) = auxiliaries.first() {
+                        let viewport = auxiliary.update(cx, |_, window, _| probe_viewport(window)).ok();
+                        if aux_initial.is_none() { aux_initial = viewport; }
+                        aux_resized |= viewport.zip(aux_initial).is_some_and(|(current, previous)| current != previous);
+                    }
+                    if stress_phase == 0 {
+                        if handle.update(cx, |_, window, _| {
+                            let target = if probe_viewport(window) == [940, 620] { [1000., 640.] } else { [940., 620.] };
+                            window.resize(size(px(target[0]), px(target[1])));
+                        }).is_ok() { resize.requested += 1; }
+                        if let Some(auxiliary) = auxiliaries.first() {
+                            failed |= auxiliary.update(cx, |_, window, _| window.resize(size(px(430.), px(310.)))).is_err();
+                        }
+                        stress_phase = 1;
+                        stress_at = Instant::now();
+                    } else if stress_phase == 1 && resize.observed >= 1 && aux_resized && stress_at.elapsed() >= Duration::from_millis(400) {
+                        if handle.update(cx, |_, window, _| window.resize(size(px(1260.), px(760.)))).is_ok() { resize.requested += 1; }
+                        if let Some(auxiliary) = auxiliaries.get(1) {
+                            aux_closed_painted = auxiliary.update(cx, |view, window, _| {
+                                let painted = view.paints > 0;
+                                window.remove_window();
+                                painted
+                            }).unwrap_or(false);
+                        }
+                        if let Some(reopened) = cx.update(|cx| open_probe_proxy(cx, 500.)) {
+                            auxiliaries[1] = reopened;
+                            aux_reopened = true;
+                        } else { failed = true; }
+                        stress_phase = 2;
+                    }
+                }
             }
+            if !experimental {
+                cx.background_executor().timer(Duration::from_secs(seconds.clamp(1, 15))).await;
+            }
+            let auxiliaries_painted = auxiliaries.iter().all(|handle| handle.update(cx, |view, _, _| view.paints > 0).unwrap_or(false));
+            let stress_verified = !stress_resize || (resize.verified() && aux_resized && aux_closed_painted && aux_reopened && auxiliaries_painted);
+            let released = Rc::new(Cell::new(!experimental));
+            let release_signal = released.clone();
+            let snapshot = handle.update(cx, |view, window, _| {
+                let diagnostics = view.player.as_ref().and_then(|owner| owner.player.as_ref()).map(Player::diagnostics);
+                let source_sized = diagnostics.as_ref().is_some_and(|stats| {
+                    matches!(stats.source_size, Some([1920, 1080] | [3840, 2160])) && stats.source_size == Some(stats.render_size)
+                });
+                let gpu_clean = diagnostics.as_ref().is_some_and(|stats| stats.gpu_surface_frames > 2
+                    && stats.readback_bytes == 0 && stats.upload_bytes_estimate == 0
+                    && stats.active_backend == kinema_mpv::RenderBackend::Gpu && stats.fallback_reason.is_none());
+                let successful = !failed && (!native || (view.frames_presented > 2 && !terminal_failure(view.error.is_some(), &view.state) && view.state.error.is_none()))
+                    && (!experimental || (controls.verified() && source_sized && gpu_clean && stress_verified));
+                if let Some(stats) = diagnostics.as_ref() {
+                    eprintln!("player probe: category=render-diagnostics source={:?} render={:?} gpu-surfaces={} readback-bytes={} upload-bytes={} controls-phase={} position={:.2} speed={:.2} volume={:.0} paused={}",
+                        stats.source_size, stats.render_size, stats.gpu_surface_frames, stats.readback_bytes, stats.upload_bytes_estimate,
+                        controls.phase, view.state.position, view.state.speed, view.state.volume, view.state.paused);
+                }
+                eprintln!("player probe: category=snapshot frames={} error={} controls={} source-sized={} gpu-clean={} resize-requested={} resize-observed={} auxiliary-resized={} auxiliary-closed-painted={} auxiliary-reopened={} auxiliary-painted={} successful={}",
+                    view.frames_presented, terminal_failure(view.error.is_some(), &view.state), controls.verified(), source_sized, gpu_clean,
+                    resize.requested, resize.observed, aux_resized, aux_closed_painted, aux_reopened, auxiliaries_painted, successful);
+                // Stop sampling and reject any late initialization result before
+                // releasing the GPUI presentation lease and joining the worker.
+                view.startup_cancel.store(true, Ordering::Release);
+                view._updates = Task::ready(());
+                view._initialize = Task::ready(());
+                #[cfg(feature = "experimental-gpu")]
+                { view.gpu_frame.take(); }
+                if experimental {
+                    window.refresh();
+                    window.on_next_frame(move |window, _| {
+                        window.refresh();
+                        window.on_next_frame(move |_, _| release_signal.set(true));
+                    });
+                }
+                (successful, view.frames_presented)
+            });
+            let cleanup_deadline = if experimental { deadline } else { Instant::now() + Duration::from_secs(1) };
+            while !released.get() && Instant::now() < cleanup_deadline {
+                cx.background_executor().timer(Duration::from_millis(10)).await;
+            }
+            let stopped = handle.update(cx, |view, _, _| {
+                let stopped = view.player.as_ref().map(|owner| owner.stopped.clone());
+                view.player.take();
+                stopped
+            }).ok().flatten();
+            while stopped.as_ref().is_some_and(|signal| !signal.load(Ordering::Acquire)) && Instant::now() < cleanup_deadline {
+                cx.background_executor().timer(Duration::from_millis(10)).await;
+            }
+            let shutdown = stopped.as_ref().is_some_and(|signal| signal.load(Ordering::Acquire)) || !native;
+            let errors = PROBE_GPU_ERRORS.load(Ordering::Relaxed);
+            let panics = PROBE_PANICS.load(Ordering::Relaxed);
+            let no_late_frames = handle.update(cx, |view, _, _| {
+                snapshot.as_ref().is_ok_and(|(_, frames)| *frames == view.frames_presented) && view.player.is_none()
+            }).unwrap_or(false);
+            eprintln!("player probe: category=teardown presentation-released={} shutdown={} no-late-frames={} gpu-errors={} panics={}", released.get(), shutdown, no_late_frames, errors, panics);
+            outcome.set(snapshot.is_ok_and(|(successful, _)| successful) && released.get() && shutdown && no_late_frames && errors == 0 && panics == 0);
+            for auxiliary in auxiliaries { let _ = auxiliary.update(cx, |_, window, _| window.remove_window()); }
             let _ = handle.update(cx, |_, window, _| window.remove_window());
             cx.update(|cx| cx.quit());
         }).detach();
     });
+    if let Some(old_hook) = old_hook {
+        std::panic::set_hook(old_hook);
+    }
     result.get()
+        && PROBE_GPU_ERRORS.load(Ordering::Relaxed) == 0
+        && PROBE_PANICS.load(Ordering::Relaxed) == 0
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "ui-probe")]
+    #[test]
+    fn probe_controls_require_observed_mpv_state_for_every_phase() {
+        use super::{ProbeCommand, ProbeControls};
+        let mut controls = ProbeControls::default();
+        let mut state = kinema_mpv::PlaybackState {
+            duration: Some(12.),
+            ..Default::default()
+        };
+        assert_eq!(controls.observe(&state, 2), None);
+        assert_eq!(controls.observe(&state, 3), Some(ProbeCommand::Pause));
+        assert_eq!(controls.observe(&state, 3), None);
+        state.paused = true;
+        assert_eq!(controls.observe(&state, 3), Some(ProbeCommand::Adjust));
+        assert_eq!(controls.observe(&state, 4), None);
+        state.position = controls.target;
+        state.speed = 1.25;
+        assert_eq!(controls.observe(&state, 4), None);
+        state.volume = 37.;
+        assert_eq!(controls.observe(&state, 4), Some(ProbeCommand::Resume));
+        assert!(!controls.verified());
+        state.paused = false;
+        assert_eq!(controls.observe(&state, 4), None);
+        state.position += 0.1;
+        assert_eq!(controls.observe(&state, 5), Some(ProbeCommand::Restore));
+        assert!(!controls.verified());
+        state.speed = 1.;
+        state.volume = 100.;
+        assert_eq!(controls.observe(&state, 5), None);
+        assert!(controls.verified());
+    }
+
+    #[cfg(feature = "ui-probe")]
+    #[test]
+    fn probe_resize_requires_changes_not_requests_or_repeated_samples() {
+        let mut resize = super::ProbeResize {
+            requested: 2,
+            ..Default::default()
+        };
+        resize.observe([1100, 680]);
+        resize.observe([1100, 680]);
+        assert!(!resize.verified());
+        resize.observe([940, 620]);
+        resize.observe([940, 620]);
+        assert_eq!(resize.observed, 1);
+        assert!(!resize.verified());
+        resize.observe([1260, 760]);
+        assert!(resize.verified());
+    }
+
+    #[cfg(not(feature = "experimental-gpu"))]
+    #[test]
+    fn experimental_backend_is_explicitly_unavailable_without_feature() {
+        let result = super::player_config(&crate::player::PlayerChoice::ExperimentalEmbedded);
+        let Err(error) = result else {
+            panic!("feature-off backend must fail closed");
+        };
+        assert!(error.contains("not compiled"));
+        assert!(error.contains("isolated experimental app build"));
+    }
+
     use super::*;
     use ::core::prelude::v1::test;
     #[test]

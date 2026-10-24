@@ -178,6 +178,7 @@ pub enum AppOutcome {
     EmbeddedPlaybackStarted {
         session: PlaybackSession,
         file_name: String,
+        mode: player::PlayerChoice,
     },
     CredentialChecked {
         provider: DebridKind,
@@ -1025,10 +1026,11 @@ impl Application {
                         .iter()
                         .find(|record| record.id == session_id)
                         .ok_or("Media session ended")?;
-                    if record.player == player::PlayerChoice::Embedded {
+                    if record.player.is_managed() {
                         return Ok(AppOutcome::EmbeddedPlaybackStarted {
                             session,
                             file_name: record.file_name.clone(),
+                            mode: record.player.clone(),
                         });
                     }
                     if let Some(child) =
@@ -1079,7 +1081,7 @@ impl Application {
             // A spawned child is not evidence of playing/completed. Retain it
             // only for nonblocking reaping; never terminate the external player.
             choice = settings.player;
-            if choice != player::PlayerChoice::Embedded {
+            if !choice.is_managed() {
                 child = (self.io.launch)(&choice, &session.url).map_err(|e| e.to_string())?;
             }
             Ok(())
@@ -1099,8 +1101,12 @@ impl Application {
             remote,
             reported_errors: Vec::new(),
         });
-        Ok(if choice == player::PlayerChoice::Embedded {
-            AppOutcome::EmbeddedPlaybackStarted { session, file_name }
+        Ok(if choice.is_managed() {
+            AppOutcome::EmbeddedPlaybackStarted {
+                session,
+                file_name,
+                mode: choice,
+            }
         } else {
             AppOutcome::PlaybackStarted { session, file_name }
         })

@@ -246,6 +246,7 @@ fn replay_preserves_original_player_across_preference_changes()
 -> Result<(), Box<dyn std::error::Error>> {
     for original in [
         player::PlayerChoice::Embedded,
+        player::PlayerChoice::ExperimentalEmbedded,
         player::PlayerChoice::Mpv,
         player::PlayerChoice::Vlc,
     ] {
@@ -284,9 +285,14 @@ fn replay_preserves_original_player_across_preference_changes()
             )
         };
         let initial = execute(&mut app, 1, AppAction::PlayLocal { path: file })?;
-        let embedded = original == player::PlayerChoice::Embedded;
+        let embedded = original.is_managed();
         let session = match initial {
-            AppOutcome::EmbeddedPlaybackStarted { session, file_name } if embedded => {
+            AppOutcome::EmbeddedPlaybackStarted {
+                session,
+                file_name,
+                mode,
+            } if embedded => {
+                assert_eq!(mode, original);
                 assert_eq!(file_name, "fixture.mkv");
                 session
             }
@@ -312,10 +318,12 @@ fn replay_preserves_original_player_across_preference_changes()
             let AppOutcome::EmbeddedPlaybackStarted {
                 session: replay,
                 file_name,
+                mode,
             } = replay
             else {
                 return Err("embedded replay changed backend".into());
             };
+            assert_eq!(mode, original);
             assert_eq!(replay.id, session.id);
             assert_eq!(replay.url, session.url);
             assert_eq!(file_name, "fixture.mkv");

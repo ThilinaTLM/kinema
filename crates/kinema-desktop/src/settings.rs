@@ -280,6 +280,7 @@ impl Document {
     fn from_settings(settings: &Settings) -> Result<Self, SettingsError> {
         let (player, player_path) = match &settings.player {
             PlayerChoice::Embedded => ("embedded", None),
+            PlayerChoice::ExperimentalEmbedded => ("exp-embedded-mpv", None),
             PlayerChoice::Mpv => ("mpv", None),
             PlayerChoice::Vlc => ("vlc", None),
             PlayerChoice::Custom(path) => (
@@ -347,6 +348,7 @@ impl Document {
             media_limit_bytes: self.media_limit_bytes,
             player: match (self.player.as_str(), self.player_path) {
                 ("embedded", None) => PlayerChoice::Embedded,
+                ("exp-embedded-mpv", None) => PlayerChoice::ExperimentalEmbedded,
                 ("mpv", None) => PlayerChoice::Mpv,
                 ("vlc", None) => PlayerChoice::Vlc,
                 ("custom", Some(path)) => PlayerChoice::Custom(path.into()),
@@ -376,7 +378,12 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let store = SettingsStore::open(&paths(dir.path()))?;
         assert_eq!(store.load()?.player, PlayerChoice::Embedded);
-        for player in [PlayerChoice::Embedded, PlayerChoice::Mpv, PlayerChoice::Vlc] {
+        for player in [
+            PlayerChoice::Embedded,
+            PlayerChoice::ExperimentalEmbedded,
+            PlayerChoice::Mpv,
+            PlayerChoice::Vlc,
+        ] {
             let settings = Settings {
                 player: player.clone(),
                 ..Settings::default()
@@ -387,6 +394,24 @@ mod tests {
         let document = Document::from_settings(&Settings::default())?;
         assert_eq!(document.player, "embedded");
         assert!(document.player_path.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn experimental_player_has_stable_persisted_key() -> Result<(), Box<dyn std::error::Error>> {
+        let settings = Settings {
+            player: PlayerChoice::ExperimentalEmbedded,
+            ..Settings::default()
+        };
+        let document = Document::from_settings(&settings)?;
+        assert_eq!(document.player, "exp-embedded-mpv");
+        assert!(document.player_path.is_none());
+        let serialized = toml::to_string(&document)?;
+        let restored: Document = toml::from_str(&serialized)?;
+        assert_eq!(
+            restored.into_settings()?.player,
+            PlayerChoice::ExperimentalEmbedded
+        );
         Ok(())
     }
 

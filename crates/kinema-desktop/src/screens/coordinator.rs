@@ -917,7 +917,9 @@ impl AppCoordinator {
         }
         match &event.outcome {
             AppOutcome::PlaybackStarted { session, file_name }
-            | AppOutcome::EmbeddedPlaybackStarted { session, file_name } => {
+            | AppOutcome::EmbeddedPlaybackStarted {
+                session, file_name, ..
+            } => {
                 // Replay keeps the original route-independent metadata/progress.
                 if resolved
                     .as_ref()
@@ -1020,7 +1022,12 @@ impl AppCoordinator {
             self.session_identity.remove(&event.generation);
         }
         self.prune_embedded_tombstones();
-        if let AppOutcome::EmbeddedPlaybackStarted { session, file_name } = &event.outcome {
+        if let AppOutcome::EmbeddedPlaybackStarted {
+            session,
+            file_name,
+            mode,
+        } = &event.outcome
+        {
             if resolved.as_ref().is_some_and(|r| !r.current) {
                 // Unlike an external process, obsolete embedded work need not be shown.
                 self.queue_embedded_release(session.id.clone(), cx);
@@ -1034,6 +1041,7 @@ impl AppCoordinator {
                     .unwrap_or_else(|| file_name.clone());
                 if crate::screens::player_window::open(
                     session.id.clone(),
+                    mode.clone(),
                     session.url.clone(),
                     title,
                     cx.entity(),
@@ -1957,6 +1965,7 @@ mod session_tests {
             c.apply_app(AppEvent { generation: replay, outcome: AppOutcome::EmbeddedPlaybackStarted {
                 session: PlaybackSession { id: "one".into(), url: "http://127.0.0.1:1234/private-capability".into() },
                 file_name: "fixture.mkv".into(),
+                mode: crate::player::PlayerChoice::Embedded,
             } }, cx);
             assert!(c.closed_embedded_sessions.is_empty());
             assert!(c.embedded_replays.is_empty());
@@ -1991,6 +2000,7 @@ mod session_tests {
                             url: "http://127.0.0.1:1234/private-capability".into(),
                         },
                         file_name: "fixture.mkv".into(),
+                        mode: crate::player::PlayerChoice::Embedded,
                     },
                 },
                 cx,

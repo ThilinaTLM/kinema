@@ -11,7 +11,8 @@ default-run = "kinema-desktop"
 workspace = true
 
 [features]
-ui-probe = []
+experimental-gpu = ["dep:wgpu", "dep:gpui_wgpu", "dep:gpui_apple", "kinema-mpv/experimental-gpu"]
+ui-probe = ["dep:log"]
 ui-probe-test = ["ui-probe", "gpui/test-support"]
 
 [[bin]]
@@ -24,6 +25,7 @@ unicode-segmentation.workspace = true
 gpui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+log = { workspace = true, optional = true }
 
 # gpui_platform defaults do not enable native Linux windowing backends.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -54,3 +56,10 @@ percent-encoding.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+wgpu = { workspace = true, optional = true }
+gpui_wgpu = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui_apple = { workspace = true, optional = true }

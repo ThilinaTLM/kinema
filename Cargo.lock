@@ -3269,11 +3269,14 @@ dependencies = [
  "directories",
  "fs4",
  "gpui-pre",
+ "gpui-pre-apple",
  "gpui-pre-platform",
+ "gpui-pre-wgpu",
  "image",
  "keyring",
  "kinema-core",
  "kinema-mpv",
+ "log",
  "percent-encoding",
  "rand 0.9.5",
  "reqwest",
@@ -3290,6 +3293,7 @@ dependencies = [
  "tracing-subscriber",
  "unicode-segmentation",
  "url",
+ "wgpu",
  "zeroize",
 ]
 
