@@ -424,6 +424,10 @@ fn wait_state(player: &Player, predicate: impl Fn(&PlaybackState) -> bool) {
     }
 }
 fn load(player: &Player, path: &Path, size: [u32; 2]) {
+    // A zero viewport means hidden/suspended even under Source resolution.
+    // Exercise the public visibility contract while keeping the viewport much
+    // smaller than HD/UHD: all output assertions must still match source size.
+    player.resize(640, 360).unwrap();
     player
         .load(path.to_str().expect("generated fixture path must be UTF-8"))
         .unwrap();
