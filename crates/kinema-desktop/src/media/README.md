@@ -46,12 +46,24 @@ Core `parse_http_range`, `ByteRange`, and
 `RangeSet` implement range policies. Headers do not claim any missing bytes are
 available: streaming waits for durable range membership and aborts on failure.
 
-Each active remote asset has one acquisition owner. It fetches 256KiB chunks,
-prioritizing missing reader offsets over sequential background progress. HTTP
-bodies use 64KiB buffers and a two-message queue. Limits: 8 acquisition workers,
-8 HTTP workers, 32 accepted sockets and 32 session leases. Socket inactivity is
-60s; a missing chunk waits at most 45s; a stalled body consumer at most 30s.
-Upstream connect/whole-request deadlines are 5s/20s. Drop only sets cancellation
+Each active remote asset has one acquisition owner. It fetches at most 4MiB per
+request, clipped to the next missing gap or file end, prioritizing missing reader
+offsets over sequential background progress. The larger range amortizes measured
+request-header latency; it does not introduce parallel requests per asset. Each
+worker buffers one full range plus one validation probe byte (about 32MiB of
+payload buffers across the maximum 8 acquisition workers, excluding HTTP/TLS,
+allocator and other service overhead). A range becomes available only after full
+validation, payload sync and manifest checkpoint. Larger ranges can increase
+initial/seek latency: a new reader priority is honored after the in-flight cycle,
+not by interrupting it. Cancellation checks and durability ordering are unchanged.
+
+Loopback HTTP bodies use 64KiB buffers and a two-message queue. Limits: 8 acquisition
+workers, 8 HTTP workers, 32 accepted sockets and 32 session leases. Socket inactivity
+is 60s; a missing chunk waits at most 45s; a stalled body consumer at most 30s.
+Upstream connect/whole-request deadlines remain 10s/20s, including body transfer
+in the whole-request deadline. A slow 4MiB transfer may therefore fail rather than
+receive more time; larger chunks do not guarantee adequate provider throughput.
+Drop only sets cancellation
 and signals the owned server thread; it never joins or waits for provider I/O.
 The root lock remains owned until all service/network/reader owners finish.
 

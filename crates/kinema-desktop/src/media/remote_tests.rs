@@ -541,3 +541,34 @@ fn media_diagnostics_exclude_signed_urls_identities_and_session_tokens()
     );
     Ok(())
 }
+
+#[test]
+fn remote_acquisition_amortizes_requests_with_four_mib_ranges()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let size = CHUNK * 2 + 123;
+    // The fixture adds per-request delay. Assert request shape/count rather than
+    // wall-clock throughput, which would depend on host scheduling and storage.
+    let fixture = Fixture::start(size as usize, 0)?;
+    let service = service(root.path(), CHUNK * 3);
+    let resolved = fixture.resolved();
+    let renewal = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(renewal.clone())))?;
+    wait_until(|| service.usage().downloaded_bytes == size || !service.session_errors().is_empty());
+    assert!(service.session_errors().is_empty());
+    assert_eq!(service.usage().downloaded_bytes, size);
+    let requests = fixture
+        .requests
+        .lock()
+        .map_err(|_| "request lock poisoned")?;
+    assert_eq!(
+        requests.as_slice(),
+        &[(0, CHUNK), (CHUNK, CHUNK * 2), (CHUNK * 2, size)]
+    );
+    drop(requests);
+    // Read the entire durable result through the same route players use.
+    let bytes = reqwest::blocking::get(&lease.url)?.bytes()?;
+    assert_eq!(bytes.as_ref(), fixture.bytes.as_slice());
+    service.release(&lease.id)?;
+    Ok(())
+}

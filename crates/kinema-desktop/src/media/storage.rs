@@ -396,12 +396,96 @@ pub(super) fn check_payload(asset: &Asset) -> Result<(), MediaError> {
     }
     regular(&asset.dir.join("payload"))
 }
+const ACQUISITION_REPORT_INTERVAL: Duration = Duration::from_secs(5);
+
+#[derive(Default)]
+struct AcquisitionTimings {
+    request_headers: Duration,
+    body_read: Duration,
+    payload_write_sync: Duration,
+    checkpoint: Duration,
+    cycle: Duration,
+}
+
+#[derive(Default)]
+struct AcquisitionReport {
+    bytes: u64,
+    requests: u64,
+    elapsed: Duration,
+    totals: AcquisitionTimings,
+    cycle_max: Duration,
+}
+
+struct AcquisitionTelemetry {
+    started: std::time::Instant,
+    interval: AcquisitionReport,
+}
+
+impl AcquisitionTelemetry {
+    fn new(started: std::time::Instant) -> Self {
+        Self {
+            started,
+            interval: AcquisitionReport::default(),
+        }
+    }
+
+    // Only fully validated, durable chunks contribute. Failed/retried requests are
+    // not samples. Keep constant-size interval totals, never per-chunk history.
+    // Check on completion only: no timer, catch-up reports, or short tail flush.
+    fn record(
+        &mut self,
+        now: std::time::Instant,
+        bytes: u64,
+        timings: AcquisitionTimings,
+    ) -> Option<AcquisitionReport> {
+        let interval = &mut self.interval;
+        interval.bytes = interval.bytes.saturating_add(bytes);
+        interval.requests = interval.requests.saturating_add(1);
+        interval.totals.request_headers += timings.request_headers;
+        interval.totals.body_read += timings.body_read;
+        interval.totals.payload_write_sync += timings.payload_write_sync;
+        interval.totals.checkpoint += timings.checkpoint;
+        interval.totals.cycle += timings.cycle;
+        interval.cycle_max = interval.cycle_max.max(timings.cycle);
+        interval.elapsed = now.duration_since(self.started);
+        if interval.elapsed < ACQUISITION_REPORT_INTERVAL {
+            return None;
+        }
+        self.started = now;
+        Some(std::mem::take(interval))
+    }
+}
+
+impl AcquisitionReport {
+    fn log(&self) {
+        let mean_ms = |total: Duration| total.as_secs_f64() * 1000.0 / self.requests as f64;
+        tracing::info!(
+            target: "kinema_desktop::media_performance",
+            interval_bytes = self.bytes,
+            interval_completed_requests = self.requests,
+            interval_seconds = self.elapsed.as_secs_f64(),
+            interval_bytes_per_second = self.bytes as f64 / self.elapsed.as_secs_f64(),
+            request_header_mean_ms = mean_ms(self.totals.request_headers),
+            body_read_mean_ms = mean_ms(self.totals.body_read),
+            payload_write_sync_mean_ms = mean_ms(self.totals.payload_write_sync),
+            checkpoint_mean_ms = mean_ms(self.totals.checkpoint),
+            total_cycle_mean_ms = mean_ms(self.totals.cycle),
+            total_cycle_max_ms = self.cycle_max.as_secs_f64() * 1000.0,
+            "Media acquisition completed-chunk interval"
+        );
+    }
+}
+
 pub(super) fn acquire(
     shared: &Shared,
     asset: &Asset,
     mut resolved: ResolvedMedia,
     renew: Renew,
 ) -> Result<(), MediaError> {
+    // Snapshot opt-in once per acquisition; no environment reads on the hot path.
+    let mut telemetry = (std::env::var_os("KINEMA_PLAYER_DIAGNOSTICS").as_deref()
+        == Some(std::ffi::OsStr::new("1")))
+    .then(|| AcquisitionTelemetry::new(std::time::Instant::now()));
     check_payload(asset)?;
     let mut payload = std::fs::OpenOptions::new()
         .read(true)
@@ -413,6 +497,7 @@ pub(super) fn acquire(
         if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
         }
+        let cycle_started = telemetry.as_ref().map(|_| std::time::Instant::now());
         let range = {
             let mut state = asset.state.lock().map_err(|_| MediaError::Storage)?;
             let preferred = state.priority.take().unwrap_or(0);
@@ -454,6 +539,7 @@ pub(super) fn acquire(
                 );
                 request_error(error)
             })?;
+        let request_headers = telemetry.as_ref().map(|_| request_started.elapsed());
         tracing::trace!(
             status = response.status().as_u16(),
             bytes = end - start,
@@ -498,12 +584,16 @@ pub(super) fn acquire(
             tracing::warn!(category = "identity_mismatch", "Media validation failed");
             return Err(MediaError::IdentityMismatch);
         }
-        let mut bytes = Vec::with_capacity((end - start) as usize);
+        let body_started = telemetry.as_ref().map(|_| std::time::Instant::now());
+        // Reserve the validation probe byte too, avoiding capacity doubling if
+        // an invalid response yields one byte beyond the requested range.
+        let mut bytes = Vec::with_capacity((end - start + 1) as usize);
         response
             .by_ref()
             .take(end - start + 1)
             .read_to_end(&mut bytes)
             .map_err(|error| { tracing::warn!(io_kind = ?error.kind(), duration_ms = request_started.elapsed().as_millis() as u64, "Media upstream body read failed"); MediaError::BodyRead })?;
+        let body_read = body_started.map(|started| started.elapsed());
         if bytes.len() as u64 != end - start {
             tracing::warn!(
                 category = "body_length",
@@ -516,9 +606,11 @@ pub(super) fn acquire(
         if asset.cancel.load(Ordering::Relaxed) || shared.canceled.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
         }
+        let payload_started = telemetry.as_ref().map(|_| std::time::Instant::now());
         payload.seek(SeekFrom::Start(start))?;
         payload.write_all(&bytes)?;
         payload.sync_data()?;
+        let payload_write_sync = payload_started.map(|started| started.elapsed());
         let mut ranges = asset
             .state
             .lock()
@@ -531,10 +623,28 @@ pub(super) fn acquire(
             .iter()
             .map(|r| (r.start(), r.end()))
             .collect();
+        let checkpoint_started = telemetry.as_ref().map(|_| std::time::Instant::now());
         checkpoint(asset, &durable)?;
+        let checkpoint_time = checkpoint_started.map(|started| started.elapsed());
         asset.state.lock().map_err(|_| MediaError::Storage)?.ranges = ranges;
         renewals = 0;
         asset.changed.notify_all();
+        if let (Some(telemetry), Some(cycle_started)) = (&mut telemetry, cycle_started) {
+            let now = std::time::Instant::now();
+            if let Some(report) = telemetry.record(
+                now,
+                bytes.len() as u64,
+                AcquisitionTimings {
+                    request_headers: request_headers.unwrap_or_default(),
+                    body_read: body_read.unwrap_or_default(),
+                    payload_write_sync: payload_write_sync.unwrap_or_default(),
+                    checkpoint: checkpoint_time.unwrap_or_default(),
+                    cycle: now.duration_since(cycle_started),
+                },
+            ) {
+                report.log();
+            }
+        }
     }
 }
 pub(super) fn needs_renewal(expires_at: Option<u64>, age: Duration, now: Option<u64>) -> bool {
@@ -663,4 +773,118 @@ pub(super) fn cleanup(shared: &Shared) -> Result<super::CleanupReport, MediaErro
         }
     }
     result
+}
+
+#[cfg(test)]
+mod acquisition_telemetry_tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn timings(milliseconds: u64) -> AcquisitionTimings {
+        AcquisitionTimings {
+            request_headers: Duration::from_millis(milliseconds),
+            body_read: Duration::from_millis(milliseconds * 2),
+            payload_write_sync: Duration::from_millis(milliseconds * 3),
+            checkpoint: Duration::from_millis(milliseconds * 4),
+            cycle: Duration::from_millis(milliseconds * 10),
+        }
+    }
+
+    #[test]
+    fn completed_chunks_aggregate_at_boundary_and_reset() -> Result<(), &'static str> {
+        let start = Instant::now();
+        let mut telemetry = AcquisitionTelemetry::new(start);
+        assert!(
+            telemetry
+                .record(start + Duration::from_millis(4999), 256, timings(10))
+                .is_none()
+        );
+        let report = telemetry
+            .record(start + Duration::from_secs(5), 512, timings(20))
+            .ok_or("missing boundary report")?;
+        assert_eq!(report.bytes, 768);
+        assert_eq!(report.requests, 2);
+        assert_eq!(report.elapsed, Duration::from_secs(5));
+        assert_eq!(report.totals.request_headers, Duration::from_millis(30));
+        assert_eq!(report.totals.body_read, Duration::from_millis(60));
+        assert_eq!(report.totals.payload_write_sync, Duration::from_millis(90));
+        assert_eq!(report.totals.checkpoint, Duration::from_millis(120));
+        assert_eq!(report.totals.cycle, Duration::from_millis(300));
+        assert_eq!(report.cycle_max, Duration::from_millis(200));
+        assert!(
+            telemetry
+                .record(start + Duration::from_secs(6), 128, timings(1))
+                .is_none()
+        );
+        let next = telemetry
+            .record(start + Duration::from_secs(10), 128, timings(2))
+            .ok_or("missing next interval report")?;
+        assert_eq!(next.bytes, 256);
+        assert_eq!(next.requests, 2);
+        assert_eq!(next.elapsed, Duration::from_secs(5));
+        assert_eq!(next.totals.cycle, Duration::from_millis(30));
+        assert_eq!(next.cycle_max, Duration::from_millis(20));
+        Ok(())
+    }
+
+    #[test]
+    fn slow_chunk_reports_once_without_catch_up_intervals() -> Result<(), &'static str> {
+        let start = Instant::now();
+        let mut telemetry = AcquisitionTelemetry::new(start);
+        let report = telemetry
+            .record(start + Duration::from_secs(16), 262_144, timings(1600))
+            .ok_or("missing slow chunk report")?;
+        assert_eq!(report.requests, 1);
+        assert_eq!(report.elapsed, Duration::from_secs(16));
+        assert!(
+            telemetry
+                .record(start + Duration::from_secs(17), 262_144, timings(100))
+                .is_none()
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod missing_range_tests {
+    use super::*;
+
+    #[test]
+    fn caps_requests_at_four_mib_and_clips_file_end() {
+        assert_eq!(CHUNK, 4 * 1024 * 1024);
+        let ranges = RangeSet::new();
+        assert_eq!(missing(&ranges, CHUNK * 3, 0), Some((0, CHUNK)));
+        assert_eq!(
+            missing(&ranges, CHUNK + 123, CHUNK),
+            Some((CHUNK, CHUNK + 123))
+        );
+        assert_eq!(missing(&ranges, CHUNK, CHUNK), None);
+        assert_eq!(missing(&ranges, CHUNK, CHUNK + 1), None);
+        assert_eq!(missing(&ranges, 0, 0), None);
+    }
+
+    #[test]
+    fn preferred_offset_selects_gap_without_crossing_durable_ranges() -> Result<(), &'static str> {
+        let mut ranges = RangeSet::new();
+        ranges.insert(ByteRange::new(0, CHUNK).ok_or("invalid first range")?);
+        ranges.insert(ByteRange::new(CHUNK + 100, CHUNK * 2).ok_or("invalid second range")?);
+        // Sequential work clips at the next durable range, even below the cap.
+        assert_eq!(missing(&ranges, CHUNK * 4, 0), Some((CHUNK, CHUNK + 100)));
+        assert_eq!(
+            missing(&ranges, CHUNK * 4, CHUNK + 50),
+            Some((CHUNK + 50, CHUNK + 100))
+        );
+        // A preferred offset in a durable range advances to the following gap;
+        // it does not backfill an earlier hole until acquisition's fallback.
+        assert_eq!(
+            missing(&ranges, CHUNK * 4, CHUNK + 100),
+            Some((CHUNK * 2, CHUNK * 3))
+        );
+        assert_eq!(
+            missing(&ranges, CHUNK * 4, CHUNK * 3 + 50),
+            Some((CHUNK * 3 + 50, CHUNK * 4))
+        );
+        assert_eq!(missing(&ranges, CHUNK * 2, CHUNK + 100), None);
+        Ok(())
+    }
 }

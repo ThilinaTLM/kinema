@@ -1,7 +1,7 @@
 //! Separate, lease-owned Cinema player. libmpv initialization and destruction
 //! (including worker joins) never run on GPUI's foreground executor.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     rc::Rc,
     sync::Arc,
     time::{Duration, Instant},
@@ -249,17 +249,668 @@ impl Drop for BackgroundPlayer {
     }
 }
 
+fn diagnostics_enabled(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+fn window_rate(count: u64, seconds: f64) -> f64 {
+    if seconds.is_finite() && seconds > 0. {
+        count as f64 / seconds
+    } else {
+        0.
+    }
+}
+
+/// Furthest end of a valid observed range containing the playhead, in O(n).
+/// Adjacent/overlapping ranges are not merged; never a download estimate.
+fn cache_ahead(state: &PlaybackState) -> Option<f64> {
+    let ranges = state.buffered_ranges.as_ref()?;
+    let position = state.position;
+    if !position.is_finite() {
+        return None;
+    }
+    let end = ranges
+        .iter()
+        .filter(|range| {
+            range.start.is_finite()
+                && range.end.is_finite()
+                && range.start <= position
+                && range.end >= position
+        })
+        .fold(position, |end, range| end.max(range.end));
+    Some(end - position)
+}
+
+/// Valid buffered ranges as clamped `(start, end)` fractions of `duration`.
+/// Invalid, empty or out-of-media ranges are dropped; widths are never widened.
+fn buffered_fractions(
+    ranges: Option<&[kinema_mpv::BufferedRange]>,
+    duration: f64,
+) -> Vec<(f32, f32)> {
+    if !(duration.is_finite() && duration > 0.) {
+        return Vec::new();
+    }
+    ranges
+        .into_iter()
+        .flatten()
+        .filter(|range| range.start.is_finite() && range.end.is_finite())
+        .filter_map(|range| {
+            let start = (range.start / duration).clamp(0., 1.) as f32;
+            let end = (range.end / duration).clamp(0., 1.) as f32;
+            (end > start).then_some((start, end))
+        })
+        .collect()
+}
+
+/// Rolling window for the recent download speed.
+const RATE_WINDOW: Duration = Duration::from_secs(5);
+/// Shortest observed span that yields a speed rather than noise.
+const RATE_MIN_SPAN: Duration = Duration::from_secs(1);
+
+/// Recent download speed from monotonically observed byte counters. The first
+/// observation is only a baseline: bytes that already existed are never counted
+/// as newly downloaded. A different session or a regressing counter resets it.
+#[derive(Default)]
+struct TransferRate {
+    session: Option<String>,
+    samples: VecDeque<(Instant, u64)>,
+    latest: Option<(u64, u64)>,
+}
+
+impl TransferRate {
+    fn observe(&mut self, session: &str, progress: Option<(u64, u64)>, now: Instant) {
+        if self.session.as_deref() != Some(session) {
+            self.session = Some(session.to_owned());
+            self.samples.clear();
+        }
+        self.latest = progress;
+        let Some((downloaded, _)) = progress else {
+            self.samples.clear();
+            return;
+        };
+        if let Some(&(_, last)) = self.samples.back()
+            && downloaded < last
+        {
+            self.samples.clear();
+        }
+        let unchanged = self.samples.back().is_some_and(|&(at, bytes)| {
+            bytes == downloaded && now.saturating_duration_since(at) < Duration::from_millis(250)
+        });
+        if !unchanged {
+            self.samples.push_back((now, downloaded));
+        }
+        // Keep one sample at/before the window start so the span is ~RATE_WINDOW.
+        while self.samples.len() > 1
+            && self
+                .samples
+                .get(1)
+                .is_some_and(|&(at, _)| now.saturating_duration_since(at) >= RATE_WINDOW)
+        {
+            self.samples.pop_front();
+        }
+    }
+    /// What the label shows: counters and the whole-KB/s speed.
+    fn display_key(&self) -> (Option<(u64, u64)>, Option<u64>) {
+        (
+            self.latest,
+            self.bytes_per_second().map(|rate| rate as u64 / 1000),
+        )
+    }
+    fn clear(&mut self) {
+        self.session = None;
+        self.samples.clear();
+        self.latest = None;
+    }
+    /// Bytes/s, or `None` while there is too little observation (not zero).
+    fn bytes_per_second(&self) -> Option<f64> {
+        let &(first_at, first) = self.samples.front()?;
+        let &(last_at, last) = self.samples.back()?;
+        let span = last_at.saturating_duration_since(first_at);
+        (span >= RATE_MIN_SPAN).then(|| last.saturating_sub(first) as f64 / span.as_secs_f64())
+    }
+}
+
+const TRANSFER_POLL: Duration = Duration::from_secs(1);
+fn transfer_poll_due(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|at| now.saturating_duration_since(at) >= TRANSFER_POLL)
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1000. && unit < UNITS.len() - 1 {
+        value /= 1000.;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Playable MPV cache ahead of the playhead; `—` when MPV reports no cache.
+fn buffer_ahead_label(state: &PlaybackState) -> String {
+    match cache_ahead(state) {
+        None => "Buffer —".into(),
+        Some(seconds) => {
+            // Round once, then split, so 179.9 s is 3m 00s rather than 2m 60s.
+            let total = seconds.max(0.).round() as u64;
+            if total < 120 {
+                format!("Buffer {total}s")
+            } else {
+                format!("Buffer {}m {:02}s", total / 60, total % 60)
+            }
+        }
+    }
+}
+
+/// Downloaded file bytes (not MPV's playable cache), labelled as such.
+fn download_label(transfer: &TransferRate, compact: bool) -> Option<String> {
+    let (downloaded, total) = transfer.latest?;
+    let speed = transfer.bytes_per_second().map_or_else(
+        || "—".to_owned(),
+        |rate| format!("{}/s", format_bytes(rate as u64)),
+    );
+    let percent =
+        (total > 0).then(|| (u128::from(downloaded.min(total)) * 100 / u128::from(total)) as u64);
+    Some(match (compact, percent) {
+        (true, Some(p)) => format!("Download {speed} · {p}%"),
+        (true, None) => format!("Download {speed} · {}", format_bytes(downloaded)),
+        (false, Some(p)) => format!(
+            "Downloaded {} of {} ({p}%) · {speed}",
+            format_bytes(downloaded),
+            format_bytes(total)
+        ),
+        (false, None) => format!("Downloaded {} · {speed}", format_bytes(downloaded)),
+    })
+}
+
+// Emit only fixed categories, never driver/decoder strings or fallback errors.
+fn decoder_category(value: Option<&str>) -> &'static str {
+    match value {
+        None => "unavailable",
+        Some("no" | "") => "software",
+        Some("vaapi" | "vaapi-copy") => "vaapi",
+        Some("vdpau" | "vdpau-copy") => "vdpau",
+        Some("nvdec" | "nvdec-copy" | "cuda" | "cuda-copy") => "nvdec",
+        Some("d3d11va" | "d3d11va-copy" | "dxva2" | "dxva2-copy") => "windows_hw",
+        Some("videotoolbox" | "videotoolbox-copy") => "videotoolbox",
+        Some(_) => "other",
+    }
+}
+
+fn renderer_category(value: Option<&str>) -> &'static str {
+    let Some(value) = value else {
+        return "unavailable";
+    };
+    let value = value.to_ascii_lowercase();
+    if ["llvmpipe", "softpipe", "swrast", "software"]
+        .iter()
+        .any(|s| value.contains(s))
+    {
+        "software"
+    } else if value.contains("nvidia") {
+        "nvidia"
+    } else if value.contains("amd") || value.contains("radeon") {
+        "amd"
+    } else if value.contains("intel") {
+        "intel"
+    } else if value.contains("apple") {
+        "apple"
+    } else {
+        "other"
+    }
+}
+
+/// What the video pipeline is expected to be doing; only `Playing` makes the
+/// accepted-image rate meaningful. Everything else is a state, not a regression.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Activity {
+    Playing,
+    Paused,
+    Buffering,
+    Waiting,
+    Stopped,
+}
+
+fn activity_of(state: &PlaybackState, has_player: bool) -> Activity {
+    if !has_player || state.loading {
+        Activity::Waiting
+    } else if state.paused_for_cache {
+        Activity::Buffering
+    } else if state.ended || state.media_stopped {
+        Activity::Stopped
+    } else if state.paused {
+        Activity::Paused
+    } else {
+        Activity::Playing
+    }
+}
+
+const CADENCE_INTERVAL: Duration = Duration::from_secs(1);
+
+struct CadenceReport {
+    interval_seconds: f64,
+    playing_seconds: f64,
+    accepted: u64,
+    /// Accepted images per playing second; `None` when nothing was playing.
+    fps: Option<f64>,
+    /// Longest accepted-image interarrival gap while playing, including a gap
+    /// still open at the interval end (a UI stall is not hidden by the boundary).
+    max_accept_gap_ms: Option<f64>,
+    sample_max_gap_ms: f64,
+    retirement_skips: u64,
+    cache_paused_samples: u64,
+    /// `Render::render` invocations: view renders, not GPU presents.
+    view_render_calls: u64,
+    max_view_render_gap_ms: Option<f64>,
+    activity: Activity,
+}
+impl CadenceReport {
+    /// A UI-side image-acceptance rate, not the physical display refresh rate.
+    fn label(&self) -> String {
+        match (self.activity, self.fps) {
+            (Activity::Playing, Some(fps)) => match self.max_accept_gap_ms {
+                Some(gap) => format!("Video updates: {fps:.1} fps · max gap {gap:.0} ms"),
+                None => format!("Video updates: {fps:.1} fps"),
+            },
+            (Activity::Playing, None) => "Video updates: measuring…".into(),
+            (Activity::Paused, _) => "Video updates: Paused".into(),
+            (Activity::Buffering, _) => "Video updates: Buffering".into(),
+            (Activity::Waiting, _) => "Video updates: Waiting".into(),
+            (Activity::Stopped, _) => "Video updates: Stopped".into(),
+        }
+    }
+}
+
+/// Per-second accepted-image cadence. Pure and clock-injected. Only images that
+/// were successfully turned into a render image while `Playing` count; any
+/// non-playing sample drops the interarrival baseline, so the first image after
+/// load/seek-pause/resume/replay never measures the idle gap.
+struct CadenceMeter {
+    interval_start: Instant,
+    last_sample: Instant,
+    last_accept: Option<Instant>,
+    activity: Activity,
+    playing: Duration,
+    accepted: u64,
+    max_accept_gap: Option<Duration>,
+    sample_max_gap: Duration,
+    retirement_skips: u64,
+    cache_paused_samples: u64,
+    render_calls: u64,
+    last_render: Option<Instant>,
+    max_render_gap: Option<Duration>,
+}
+impl CadenceMeter {
+    fn new(now: Instant) -> Self {
+        Self {
+            interval_start: now,
+            last_sample: now,
+            last_accept: None,
+            activity: Activity::Waiting,
+            playing: Duration::ZERO,
+            accepted: 0,
+            max_accept_gap: None,
+            sample_max_gap: Duration::ZERO,
+            retirement_skips: 0,
+            cache_paused_samples: 0,
+            render_calls: 0,
+            last_render: None,
+            max_render_gap: None,
+        }
+    }
+    /// Count a `Render::render` call (not a GPU present) and its gap.
+    fn render_called(&mut self, now: Instant) {
+        self.render_calls += 1;
+        if let Some(previous) = self.last_render {
+            let gap = now.saturating_duration_since(previous);
+            self.max_render_gap = Some(self.max_render_gap.map_or(gap, |max| max.max(gap)));
+        }
+        self.last_render = Some(now);
+    }
+    fn sample(&mut self, now: Instant, activity: Activity, accepted: bool, skipped: bool) {
+        let dt = now.saturating_duration_since(self.last_sample);
+        self.last_sample = now;
+        self.sample_max_gap = self.sample_max_gap.max(dt);
+        // The elapsed span belongs to what was observed at its start, so idle
+        // time before the first Playing sample is never charged to playback,
+        // while a long UI stall during Playing stays in the playing time.
+        let previous = std::mem::replace(&mut self.activity, activity);
+        if previous == Activity::Playing {
+            self.playing += dt;
+        }
+        self.retirement_skips += u64::from(skipped);
+        if activity == Activity::Buffering {
+            self.cache_paused_samples += 1;
+        }
+        if activity != Activity::Playing {
+            self.last_accept = None;
+            self.last_render = None;
+            return;
+        }
+        if accepted {
+            self.accepted += 1;
+            if let Some(previous) = self.last_accept {
+                let gap = now.saturating_duration_since(previous);
+                self.max_accept_gap = Some(self.max_accept_gap.map_or(gap, |max| max.max(gap)));
+            }
+            self.last_accept = Some(now);
+        }
+    }
+    /// One report per elapsed interval; a long stall yields one honest report
+    /// covering the whole stall, never a burst of catch-up reports.
+    fn finish_if_due(&mut self, now: Instant) -> Option<CadenceReport> {
+        let elapsed = now.saturating_duration_since(self.interval_start);
+        if elapsed < CADENCE_INTERVAL {
+            return None;
+        }
+        // Time since the last sample (a stall, or just the tail of the interval)
+        // belongs to the last observed activity.
+        let tail = now.saturating_duration_since(self.last_sample);
+        self.last_sample = now;
+        self.sample_max_gap = self.sample_max_gap.max(tail);
+        if self.activity == Activity::Playing {
+            self.playing += tail;
+        }
+        let open = (self.activity == Activity::Playing)
+            .then_some(self.last_accept)
+            .flatten()
+            .map(|at| now.saturating_duration_since(at));
+        let max_gap = match (self.max_accept_gap, open) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        let open_render = (self.activity == Activity::Playing)
+            .then_some(self.last_render)
+            .flatten()
+            .map(|at| now.saturating_duration_since(at));
+        let render_gap = match (self.max_render_gap, open_render) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        let playing = self.playing.as_secs_f64();
+        let report = CadenceReport {
+            interval_seconds: elapsed.as_secs_f64(),
+            playing_seconds: playing,
+            accepted: self.accepted,
+            fps: (playing > 0.).then(|| self.accepted as f64 / playing),
+            max_accept_gap_ms: max_gap.map(|gap| gap.as_secs_f64() * 1000.),
+            sample_max_gap_ms: self.sample_max_gap.as_secs_f64() * 1000.,
+            retirement_skips: self.retirement_skips,
+            cache_paused_samples: self.cache_paused_samples,
+            view_render_calls: self.render_calls,
+            max_view_render_gap_ms: render_gap.map(|gap| gap.as_secs_f64() * 1000.),
+            activity: self.activity,
+        };
+        self.interval_start = now;
+        self.playing = Duration::ZERO;
+        self.accepted = 0;
+        self.max_accept_gap = None;
+        self.sample_max_gap = Duration::ZERO;
+        self.retirement_skips = 0;
+        self.cache_paused_samples = 0;
+        self.render_calls = 0;
+        self.max_render_gap = None;
+        Some(report)
+    }
+    fn log(report: &CadenceReport) {
+        tracing::info!(
+            target: "kinema_desktop::player_performance",
+            interval_seconds = report.interval_seconds,
+            playing_seconds = report.playing_seconds,
+            accepted_images = report.accepted,
+            accepted_images_fps = report.fps,
+            max_accepted_gap_ms = report.max_accept_gap_ms,
+            sample_max_gap_ms = report.sample_max_gap_ms,
+            samples_skipped_retiring = report.retirement_skips,
+            samples_paused_for_cache = report.cache_paused_samples,
+            view_render_calls = report.view_render_calls,
+            max_view_render_gap_ms = report.max_view_render_gap_ms,
+            activity = ?report.activity,
+            "Embedded player cadence"
+        );
+    }
+}
+
+/// Old images allowed to wait for their two GPUI frame boundaries at once, in
+/// addition to the one currently displayed.
+const RETIRE_CAPACITY: usize = 2;
+
+#[derive(Clone, Copy, Default)]
+struct Aggregate {
+    count: u64,
+    sum_ms: f64,
+    max_ms: f64,
+}
+impl Aggregate {
+    fn record(&mut self, elapsed: Duration) {
+        let ms = elapsed.as_secs_f64() * 1000.;
+        self.count += 1;
+        self.sum_ms += ms;
+        self.max_ms = self.max_ms.max(ms);
+    }
+    fn mean_ms(&self) -> Option<f64> {
+        (self.count > 0).then(|| self.sum_ms / self.count as f64)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PendingRetirement {
+    ticket: u64,
+    started: Instant,
+    first: Option<Instant>,
+}
+
+/// Per-window retirement statistics (`first` = start -> first callback,
+/// `complete` = start -> `drop_image`). Callback timing, not GPU fences.
+struct RetirementWindow {
+    high_water: usize,
+    first: Aggregate,
+    complete: Aggregate,
+}
+
+/// Bounded ticket accounting for images waiting on the nested two-frame
+/// retirement. Each completion removes only its own ticket, so a stale or
+/// duplicate completion can never release another image's slot. The images
+/// themselves stay owned by their callback closures.
+struct RetirementQueue {
+    next: u64,
+    pending: Vec<PendingRetirement>,
+    high_water: usize,
+    first: Aggregate,
+    complete: Aggregate,
+}
+impl RetirementQueue {
+    fn new() -> Self {
+        Self {
+            next: 0,
+            pending: Vec::with_capacity(RETIRE_CAPACITY),
+            high_water: 0,
+            first: Aggregate::default(),
+            complete: Aggregate::default(),
+        }
+    }
+    fn has_room(&self) -> bool {
+        // Ticket exhaustion also closes the queue: tickets are never reused.
+        self.pending.len() < RETIRE_CAPACITY && self.next < u64::MAX
+    }
+    fn inflight(&self) -> usize {
+        self.pending.len()
+    }
+    /// A fresh non-zero ticket, or `None` when the queue is full.
+    fn admit(&mut self, now: Instant) -> Option<u64> {
+        if !self.has_room() {
+            return None;
+        }
+        let ticket = self.next.checked_add(1)?;
+        self.next = ticket;
+        self.pending.push(PendingRetirement {
+            ticket,
+            started: now,
+            first: None,
+        });
+        self.high_water = self.high_water.max(self.pending.len());
+        Some(ticket)
+    }
+    /// Record the first boundary for a still-pending ticket (once).
+    fn first_callback(&mut self, ticket: u64, now: Instant) -> bool {
+        let Some(entry) = self
+            .pending
+            .iter_mut()
+            .find(|entry| entry.ticket == ticket && entry.first.is_none())
+        else {
+            return false;
+        };
+        entry.first = Some(now);
+        self.first
+            .record(now.saturating_duration_since(entry.started));
+        true
+    }
+    /// Release exactly `ticket`; unknown/duplicate tickets change nothing.
+    fn complete(&mut self, ticket: u64, now: Instant) -> bool {
+        let Some(index) = self.pending.iter().position(|entry| entry.ticket == ticket) else {
+            return false;
+        };
+        let entry = self.pending.remove(index);
+        self.complete
+            .record(now.saturating_duration_since(entry.started));
+        true
+    }
+    fn take_window(&mut self) -> RetirementWindow {
+        let window = RetirementWindow {
+            high_water: self.high_water,
+            first: self.first,
+            complete: self.complete,
+        };
+        self.high_water = self.pending.len();
+        self.first = Aggregate::default();
+        self.complete = Aggregate::default();
+        window
+    }
+}
+
+struct PlayerPerformance {
+    started: Instant,
+    last_report: Instant,
+    last_sample: Instant,
+    max_sample_gap_ms: f64,
+    samples: u64,
+    received: u64,
+    presented: u64,
+    retirement_skips: u64,
+    paused_for_cache_samples: u64,
+    sample_ms: f64,
+}
+impl PlayerPerformance {
+    fn new(now: Instant) -> Self {
+        Self {
+            started: now,
+            last_report: now,
+            last_sample: now,
+            max_sample_gap_ms: 0.,
+            samples: 0,
+            received: 0,
+            presented: 0,
+            retirement_skips: 0,
+            paused_for_cache_samples: 0,
+            sample_ms: 0.,
+        }
+    }
+
+    fn report(
+        &mut self,
+        now: Instant,
+        backend: &kinema_mpv::RenderDiagnostics,
+        state: &PlaybackState,
+        retirement: &mut RetirementQueue,
+    ) {
+        let inflight = retirement.inflight();
+        let retired = retirement.take_window();
+        let seconds = now.duration_since(self.last_report).as_secs_f64();
+        tracing::info!(
+            target: "kinema_desktop::player_performance",
+            elapsed_seconds = now.duration_since(self.started).as_secs_f64(),
+            window_seconds = seconds,
+            window_samples = self.samples,
+            window_received_frames = self.received,
+            window_accepted_images = self.presented,
+            window_received_fps = window_rate(self.received, seconds),
+            window_accepted_images_fps = window_rate(self.presented, seconds),
+            window_samples_skipped_retiring = self.retirement_skips,
+            window_samples_paused_for_cache = self.paused_for_cache_samples,
+            window_sample_max_gap_ms = self.max_sample_gap_ms,
+            window_sample_mean_ms = self.sample_ms / self.samples.max(1) as f64,
+            retiring = inflight > 0,
+            retirement_capacity = RETIRE_CAPACITY,
+            retirement_inflight = inflight,
+            retirement_inflight_high_water = retired.high_water,
+            retirement_first_callback_count = retired.first.count,
+            retirement_first_callback_mean_ms = retired.first.mean_ms(),
+            retirement_first_callback_max_ms = retired.first.max_ms,
+            retirement_complete_count = retired.complete.count,
+            retirement_complete_mean_ms = retired.complete.mean_ms(),
+            retirement_complete_max_ms = retired.complete.max_ms,
+            backend_elapsed_seconds = backend.elapsed_seconds,
+            backend_cumulative_rendered_frames = backend.rendered_frames,
+            backend_cumulative_delivered_frames = backend.delivered_frames,
+            backend_cumulative_coalesced_frames = backend.coalesced_frames,
+            backend_cumulative_delivered_fps = backend.delivered_fps,
+            backend_cumulative_readback_bytes = backend.readback_bytes,
+            backend_cumulative_upload_bytes_estimate = backend.upload_bytes_estimate,
+            backend_cumulative_transfer_bytes_per_second = backend.transfer_bytes_per_second,
+            backend_cumulative_mean_render_call_ms = backend.render_call_ms,
+            backend_cumulative_mean_readback_submit_ms = backend.readback_submit_ms,
+            backend_cumulative_mean_readback_copy_ms = backend.readback_copy_ms,
+            backend_cumulative_mean_fence_latency_ms = backend.fence_latency_ms,
+            backend_cumulative_mean_frame_age_ms = backend.frame_age_ms,
+            render_width = backend.render_size[0],
+            render_height = backend.render_size[1],
+            source_width = backend.source_size.map(|size| size[0]),
+            source_height = backend.source_size.map(|size| size[1]),
+            position_seconds = state.position,
+            duration_seconds = state.duration,
+            loading = state.loading,
+            media_stopped = state.media_stopped,
+            requested_backend = ?backend.requested_backend,
+            active_backend = ?backend.active_backend,
+            hardware_decoder_category = decoder_category(backend.hardware_decoder.as_deref()),
+            gl_renderer_category = renderer_category(backend.gl_renderer.as_deref()),
+            fallback_category = if backend.fallback_reason.is_some() { "backend_fallback" } else { "none" },
+            paused = state.paused,
+            paused_for_cache = state.paused_for_cache,
+            cache_available = state.buffered_ranges.is_some(),
+            cache_range_count = state.buffered_ranges.as_ref().map(Vec::len),
+            cache_ahead_seconds = cache_ahead(state),
+            "Embedded player performance"
+        );
+        self.last_report = now;
+        self.samples = 0;
+        self.received = 0;
+        self.presented = 0;
+        self.retirement_skips = 0;
+        self.paused_for_cache_samples = 0;
+        self.sample_ms = 0.;
+        self.max_sample_gap_ms = 0.;
+    }
+}
+
 pub struct PlayerWindow {
     title: String,
     lease: Option<(String, u64)>,
     frames_presented: u64,
+    diagnostics: Option<PlayerPerformance>,
+    cadence: Option<CadenceMeter>,
+    cadence_text: Option<String>,
     player: Option<BackgroundPlayer>,
     state: PlaybackState,
     error: Option<String>,
     control_notice: bool,
     source_url: Option<String>,
     image: Option<Arc<RenderImage>>,
-    retiring: bool,
+    retirement: RetirementQueue,
     last_activity: Instant,
     dock_hover: bool,
     chrome_was_visible: bool,
@@ -273,6 +924,9 @@ pub struct PlayerWindow {
     volume_requested: Option<(f64, Instant)>,
     menu: Option<OpenMenu>,
     dock_height: Pixels,
+    /// In-memory download observations of the leased remote session.
+    transfer: TransferRate,
+    last_transfer_poll: Option<Instant>,
     /// Last `sub-pos` sent for this load; None = unknown, resend on next sync.
     subtitle_position: Option<u8>,
     _initialize: Task<()>,
@@ -285,6 +939,10 @@ impl PlayerWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // Read once per view; never inspect the environment on the sample path.
+        let diagnostics =
+            diagnostics_enabled(std::env::var("KINEMA_PLAYER_DIAGNOSTICS").ok().as_deref())
+                .then(|| PlayerPerformance::new(Instant::now()));
         let source_url = url.clone();
         let executor = cx.background_executor().clone();
         let worker = executor.clone();
@@ -338,6 +996,11 @@ impl PlayerWindow {
             title,
             lease: None,
             frames_presented: 0,
+            cadence: diagnostics
+                .is_some()
+                .then(|| CadenceMeter::new(Instant::now())),
+            cadence_text: None,
+            diagnostics,
             player: None,
             state: PlaybackState {
                 loading: true,
@@ -347,7 +1010,7 @@ impl PlayerWindow {
             control_notice: false,
             source_url,
             image: None,
-            retiring: false,
+            retirement: RetirementQueue::new(),
             last_activity: Instant::now(),
             dock_hover: false,
             chrome_was_visible: true,
@@ -361,6 +1024,8 @@ impl PlayerWindow {
             volume_requested: None,
             menu: None,
             dock_height: Pixels::default(),
+            transfer: TransferRate::default(),
+            last_transfer_poll: None,
             subtitle_position: None,
             _initialize: initialize,
             _updates: updates,
@@ -368,8 +1033,11 @@ impl PlayerWindow {
     }
 
     fn sample(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let sample_started = self.diagnostics.as_ref().map(|_| Instant::now());
         let mut state_changed = false;
         let mut frame_received = false;
+        let mut received = false;
+        let mut retirement_skipped = false;
         if terminal_failure(self.error.is_some(), &self.state)
             && let Some((session, generation)) = self.lease.take()
         {
@@ -381,23 +1049,54 @@ impl PlayerWindow {
         if let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref()) {
             let previous = self.state.clone();
             self.state = player.state();
-            let frame = if !self.retiring {
+            // Queue full (not merely "one pending") skips acquisition; no extra
+            // image is allocated and the backend keeps its latest-frame mailbox.
+            let frame = if self.retirement.has_room() {
                 player.take_frame()
             } else {
+                retirement_skipped = true;
                 None
             };
+            received = frame.is_some();
             if let Some(frame) = frame.and_then(render_image) {
-                self.frames_presented += 1;
-                if let Some(old) = self.image.replace(frame) {
-                    self.retiring = true;
-                    retire_image(old, cx.weak_entity(), window);
+                // Admit BEFORE displacing the current image. An old image is
+                // only ever replaced with a tracked ticket; if admission fails
+                // (unreachable after the room check) keep the current image and
+                // drop the new, not-yet-uploaded one. Fail closed.
+                let admitted = self
+                    .image
+                    .is_some()
+                    .then(|| self.retirement.admit(Instant::now()));
+                if admitted == Some(None) {
+                    retirement_skipped = true;
+                } else {
+                    self.frames_presented += 1;
+                    let old = self.image.replace(frame);
+                    if let (Some(old), Some(Some(ticket))) = (old, admitted) {
+                        retire_image(
+                            old,
+                            cx.weak_entity(),
+                            window,
+                            ticket,
+                            self.diagnostics.is_some(),
+                        );
+                    }
+                    frame_received = true;
                 }
-                frame_received = true;
             }
             state_changed = self.state != previous;
         }
         self.sync_subtitle_position(window, cx);
         let now = Instant::now();
+        // Bounded in-memory read (~1 Hz, by reference, no session clones). The
+        // dock repaints on a change even when playback state/frames are static,
+        // e.g. during a cache stall; hidden chrome redraws on reveal instead.
+        let transfer_changed = if transfer_poll_due(self.last_transfer_poll, now) {
+            self.last_transfer_poll = Some(now);
+            self.observe_transfer(now, cx)
+        } else {
+            false
+        };
         if scrub_settled(self.scrub, self.state.position, now)
             || (self.scrub.is_some() && !self.can_seek())
         {
@@ -415,12 +1114,47 @@ impl PlayerWindow {
         // GPUI's is_visible is application hide/show, not a reliable cross-platform
         // minimized/occluded signal; do not pause or change lease state from it.
         if redraw_needed(
-            state_changed,
+            state_changed || (transfer_changed && self.chrome_visible(window)),
             frame_received,
             self.chrome_was_visible,
             self.chrome_visible(window),
         ) {
             cx.notify();
+        }
+        if let Some(meter) = self.cadence.as_mut() {
+            let activity = activity_of(&self.state, self.player.is_some());
+            meter.sample(Instant::now(), activity, frame_received, retirement_skipped);
+            if let Some(report) = meter.finish_if_due(Instant::now()) {
+                CadenceMeter::log(&report);
+                let text = report.label();
+                if self.cadence_text.as_deref() != Some(text.as_str()) {
+                    self.cadence_text = Some(text);
+                    cx.notify();
+                }
+            }
+        }
+        if let (Some(metrics), Some(started)) = (&mut self.diagnostics, sample_started) {
+            let now = Instant::now();
+            metrics.max_sample_gap_ms = metrics
+                .max_sample_gap_ms
+                .max(started.duration_since(metrics.last_sample).as_secs_f64() * 1000.);
+            metrics.last_sample = started;
+            metrics.samples += 1;
+            metrics.received += u64::from(received);
+            metrics.presented += u64::from(frame_received);
+            metrics.retirement_skips += u64::from(retirement_skipped);
+            metrics.paused_for_cache_samples += u64::from(self.state.paused_for_cache);
+            metrics.sample_ms += now.duration_since(started).as_secs_f64() * 1000.;
+            if now.duration_since(metrics.last_report) >= Duration::from_secs(5)
+                && let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref())
+            {
+                metrics.report(
+                    now,
+                    &player.diagnostics(),
+                    &self.state,
+                    &mut self.retirement,
+                );
+            }
         }
     }
     fn activity(&mut self, cx: &mut Context<Self>) {
@@ -952,19 +1686,16 @@ impl PlayerWindow {
             .overflow_hidden()
             .bg(p.line_control.opacity(0.5));
         if seekable {
-            for range in self.state.buffered_ranges.iter().flatten() {
-                let start = (range.start / duration).clamp(0., 1.) as f32;
-                let end = (range.end / duration).clamp(0., 1.) as f32;
-                if end > start {
-                    track = track.child(
-                        div()
-                            .absolute()
-                            .h_full()
-                            .left(relative(start))
-                            .w(relative(end - start))
-                            .bg(p.text_muted.opacity(0.45)),
-                    );
-                }
+            for (start, end) in buffered_fractions(self.state.buffered_ranges.as_deref(), duration)
+            {
+                track = track.child(
+                    div()
+                        .absolute()
+                        .h_full()
+                        .left(relative(start))
+                        .w(relative(end - start))
+                        .bg(p.text_secondary.opacity(0.6)),
+                );
             }
         }
         track = track.child(
@@ -990,9 +1721,10 @@ impl PlayerWindow {
             .id("player-timeline")
             .aria_label(if seekable {
                 format!(
-                    "Playback position, {} of {}. Left and right arrows seek 10 seconds.",
+                    "Playback position, {} of {}. {}. Left and right arrows seek 10 seconds.",
                     format_clock(shown),
-                    format_clock(duration)
+                    format_clock(duration),
+                    self.buffer_summary(false)
                 )
             } else {
                 "Playback position, seeking unavailable".to_owned()
@@ -1096,6 +1828,44 @@ impl PlayerWindow {
                 .size_full(),
             )
     }
+    /// Buffer-ahead (MPV playable cache) plus, for leased remote sessions,
+    /// separately labelled downloaded bytes and recent speed.
+    fn buffer_summary(&self, compact: bool) -> String {
+        if self.state.loading || self.state.ended {
+            return String::new();
+        }
+        let mut parts = vec![buffer_ahead_label(&self.state)];
+        parts.extend(download_label(&self.transfer, compact));
+        parts.join(" · ")
+    }
+    /// Cheap in-memory coordinator read; never touches MediaService or disk.
+    /// Returns whether the displayed download figures changed. Views without a
+    /// remote lease (local/probe) keep no download state, never a fake 0 B/s.
+    fn observe_transfer(&mut self, now: Instant, cx: &App) -> bool {
+        let before = self.transfer.display_key();
+        let found = self.lease.as_ref().and_then(|(id, _)| {
+            let coordinator = &cx
+                .try_global::<PlayerWindows>()?
+                .entries
+                .get(id)?
+                .coordinator;
+            let snapshot = coordinator.read(cx).sessions.iter().find(|snapshot| {
+                snapshot.session.id == *id && snapshot.origin == crate::media::SessionOrigin::Remote
+            })?;
+            Some((
+                id.clone(),
+                snapshot
+                    .progress
+                    .as_ref()
+                    .map(|p| (p.downloaded_bytes, p.total_bytes)),
+            ))
+        });
+        match found {
+            Some((id, progress)) => self.transfer.observe(&id, progress, now),
+            None => self.transfer.clear(),
+        }
+        self.transfer.display_key() != before
+    }
     fn chrome(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = Palette::dark();
         let fullscreen = window.is_fullscreen();
@@ -1132,7 +1902,7 @@ impl PlayerWindow {
             viewport.height - DOCK_BOTTOM_INSET - dock_extent - s::S8,
         );
         let dock_entity = cx.entity();
-        let status: &'static str = {
+        let notice = {
             if self.state.paused_for_cache {
                 "Buffering…"
             } else if self.control_notice
@@ -1147,6 +1917,12 @@ impl PlayerWindow {
                 ""
             }
         };
+        let buffer = self.buffer_summary(f32::from(viewport.width) < 960.);
+        let status = [notice, buffer.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
         let slot = |width: Pixels, button: Button| {
             div()
                 .w(width)
@@ -1405,6 +2181,9 @@ impl PlayerWindow {
 
 impl Render for PlayerWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(meter) = self.cadence.as_mut() {
+            meter.render_called(Instant::now());
+        }
         let p = Palette::dark();
         let visible = self.chrome_visible(window);
         self.chrome_was_visible = visible;
@@ -1449,20 +2228,51 @@ impl Render for PlayerWindow {
                 });
             }, |_, _, _, _| {}).absolute().size_full())
             .when(visible, |div| div.child(self.chrome(window, cx)))
+            // Opt-in diagnostics only: no handlers, id or focus, so it never takes input.
+            .when_some(self.cadence_text.clone(), |el, text| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top(px(72.))
+                        .left(s::S16)
+                        .max_w(px(360.))
+                        .px(s::S8)
+                        .py(s::S4)
+                        .truncate()
+                        .rounded(radius::SM)
+                        .bg(p.scrim_max.opacity(0.7))
+                        .type_style(t::MONO)
+                        .text_color(p.text_secondary)
+                        .child(text),
+                )
+            })
     }
 }
 
 /// next_frame_callbacks run BEFORE should_draw in gpui-pre 0.3.9. WGPU
-/// atlas removal deallocates/reuses tiles immediately. Keep one retiring image,
-/// force a draw without it, then remove it on the following boundary. This is a
-/// conservative bounded retirement policy, not a GPU-fence proof for every OS.
-fn retire_image(image: Arc<RenderImage>, view: WeakEntity<PlayerWindow>, window: &mut Window) {
-    window.on_next_frame(move |window, _| {
+/// atlas removal deallocates/reuses tiles immediately. Each old image (at most
+/// `RETIRE_CAPACITY` at once) is owned by its closure through two nested frame
+/// boundaries: the first requests a draw without it
+/// (GPUI callbacks do not prove `should_draw` ran), the second removes it. This
+/// is a conservative bounded policy, not a GPU-fence proof for every OS.
+fn retire_image(
+    image: Arc<RenderImage>,
+    view: WeakEntity<PlayerWindow>,
+    window: &mut Window,
+    ticket: u64,
+    timed: bool,
+) {
+    window.on_next_frame(move |window, cx| {
         window.refresh();
+        if timed {
+            let _ = view.update(cx, |view, _| {
+                view.retirement.first_callback(ticket, Instant::now());
+            });
+        }
         window.on_next_frame(move |window, cx| {
             let _ = window.drop_image(image);
             let _ = view.update(cx, |view, cx| {
-                view.retiring = false;
+                view.retirement.complete(ticket, Instant::now());
                 cx.notify();
             });
         });
@@ -1630,6 +2440,411 @@ pub fn run_probe(
 mod tests {
     use super::*;
     use ::core::prelude::v1::test;
+    #[test]
+    fn performance_opt_in_is_exact_and_categories_are_closed() {
+        for value in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("true"),
+            Some(" 1"),
+            Some("1 "),
+        ] {
+            assert!(!diagnostics_enabled(value));
+        }
+        assert!(diagnostics_enabled(Some("1")));
+        assert_eq!(decoder_category(Some("vaapi-copy")), "vaapi");
+        assert_eq!(
+            decoder_category(Some("https://secret.invalid/token")),
+            "other"
+        );
+        assert_eq!(renderer_category(Some("llvmpipe (LLVM)")), "software");
+        assert_eq!(renderer_category(Some("private driver string")), "other");
+    }
+    #[test]
+    fn performance_rates_use_window_time_and_reject_invalid_time() {
+        assert_eq!(window_rate(150, 5.), 30.);
+        assert_eq!(window_rate(0, 5.), 0.);
+        for seconds in [0., -1., f64::NAN, f64::INFINITY] {
+            assert_eq!(window_rate(150, seconds), 0.);
+        }
+    }
+    #[test]
+    fn buffered_fractions_drop_invalid_and_clamp_without_widening() {
+        use kinema_mpv::BufferedRange as R;
+        let r = |start, end| R { start, end };
+        let ranges = [
+            r(10., 20.),
+            r(20., 20.),
+            r(30., 10.),
+            r(f64::NAN, 5.),
+            r(5., f64::INFINITY),
+            r(-5., 10.),
+            r(90., 200.),
+            r(150., 200.),
+        ];
+        assert_eq!(
+            buffered_fractions(Some(&ranges), 100.),
+            vec![(0.1, 0.2), (0., 0.1), (0.9, 1.)]
+        );
+        assert!(buffered_fractions(None, 100.).is_empty());
+        assert!(buffered_fractions(Some(&[]), 100.).is_empty());
+        assert!(buffered_fractions(Some(&ranges), 0.).is_empty());
+        assert!(buffered_fractions(Some(&ranges), f64::NAN).is_empty());
+    }
+    #[test]
+    fn transfer_rate_is_unknown_until_observed_and_ignores_baseline() {
+        let t0 = Instant::now();
+        let secs = |n| t0 + Duration::from_secs(n);
+        let mut rate = TransferRate::default();
+        assert_eq!(rate.bytes_per_second(), None);
+        rate.observe("a", Some((500_000_000, 1_000_000_000)), t0);
+        assert_eq!(rate.bytes_per_second(), None);
+        rate.observe("a", Some((500_000_000, 1_000_000_000)), secs(2));
+        assert_eq!(rate.bytes_per_second(), Some(0.));
+        rate.observe("a", Some((502_000_000, 1_000_000_000)), secs(4));
+        assert_eq!(rate.bytes_per_second(), Some(500_000.));
+        // Samples older than the window are pruned.
+        rate.observe("a", Some((502_000_000, 1_000_000_000)), secs(10));
+        assert_eq!(rate.bytes_per_second(), Some(0.));
+    }
+    #[test]
+    fn transfer_rate_resets_on_session_regression_and_missing_progress() {
+        let t0 = Instant::now();
+        let mut rate = TransferRate::default();
+        rate.observe("a", Some((100, 1000)), t0);
+        rate.observe(
+            "a",
+            Some((3_000_100, 5_000_000)),
+            t0 + Duration::from_secs(2),
+        );
+        assert!(rate.bytes_per_second().is_some());
+        rate.observe("a", Some((50, 5_000_000)), t0 + Duration::from_secs(3));
+        assert_eq!(rate.bytes_per_second(), None);
+        rate.observe("a", Some((60, 5_000_000)), t0 + Duration::from_secs(5));
+        assert!(rate.bytes_per_second().is_some());
+        rate.observe("b", Some((60, 5_000_000)), t0 + Duration::from_secs(6));
+        assert_eq!(rate.bytes_per_second(), None);
+        rate.observe("b", None, t0 + Duration::from_secs(8));
+        assert_eq!(rate.latest, None);
+        assert_eq!(download_label(&rate, false), None);
+    }
+    #[test]
+    fn cadence_counts_playing_rate_and_gap_and_resets_per_interval() {
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut meter = CadenceMeter::new(t0);
+        // Initial loading: no rate, and the first accepted image is only a baseline.
+        for n in (16..=300).step_by(16) {
+            meter.sample(ms(n), Activity::Waiting, false, false);
+        }
+        meter.sample(ms(304), Activity::Playing, true, false);
+        for n in [350, 400, 450, 500] {
+            meter.sample(ms(n), Activity::Playing, true, false);
+        }
+        meter.sample(ms(900), Activity::Playing, false, true);
+        let Some(report) = meter.finish_if_due(ms(1000)) else {
+            unreachable!("interval due")
+        };
+        assert_eq!(report.accepted, 5);
+        assert!(
+            report
+                .fps
+                .is_some_and(|fps| (fps - 5. / 0.696).abs() < 0.01)
+        );
+        // The open gap since the last image (500 -> 1000) is included.
+        assert_eq!(report.max_accept_gap_ms, Some(500.));
+        assert_eq!(report.retirement_skips, 1);
+        assert_eq!(report.sample_max_gap_ms, 400.);
+        assert!(meter.finish_if_due(ms(1500)).is_none());
+        let Some(next) = meter.finish_if_due(ms(2000)) else {
+            unreachable!("interval due")
+        };
+        assert_eq!(next.accepted, 0);
+        assert_eq!(next.fps, Some(0.));
+    }
+    #[test]
+    fn cadence_pause_buffering_and_reload_are_states_not_regressions() {
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut meter = CadenceMeter::new(t0);
+        meter.sample(ms(100), Activity::Playing, true, false);
+        meter.sample(ms(200), Activity::Paused, false, false);
+        let Some(paused) = meter.finish_if_due(ms(1000)) else {
+            unreachable!("interval due")
+        };
+        assert_eq!(paused.label(), "Video updates: Paused");
+        assert_eq!(paused.max_accept_gap_ms, None);
+        meter.sample(ms(1100), Activity::Buffering, false, false);
+        meter.sample(ms(1200), Activity::Buffering, false, false);
+        let Some(buffering) = meter.finish_if_due(ms(2000)) else {
+            unreachable!("interval due")
+        };
+        assert_eq!(buffering.fps, None);
+        assert_eq!(buffering.cache_paused_samples, 2);
+        assert_eq!(buffering.label(), "Video updates: Buffering");
+        // Resume: the first image after the idle period must not span the gap.
+        meter.sample(ms(2500), Activity::Playing, true, false);
+        meter.sample(ms(2540), Activity::Playing, true, false);
+        let Some(resumed) = meter.finish_if_due(ms(3000)) else {
+            unreachable!("interval due")
+        };
+        assert_eq!(resumed.accepted, 2);
+        assert_eq!(resumed.max_accept_gap_ms, Some(460.));
+        // A replay passes through Stopped/Waiting and re-baselines.
+        meter.sample(ms(3100), Activity::Stopped, false, false);
+        meter.sample(ms(3200), Activity::Waiting, false, false);
+        meter.sample(ms(3300), Activity::Playing, true, false);
+        let Some(replay) = meter.finish_if_due(ms(4000)) else {
+            unreachable!("interval due")
+        };
+        assert!(replay.max_accept_gap_ms.is_some_and(|gap| gap <= 700.));
+        assert!(replay.label().starts_with("Video updates: "));
+    }
+    #[test]
+    fn cadence_long_stall_yields_one_honest_report() {
+        let t0 = Instant::now();
+        let mut meter = CadenceMeter::new(t0);
+        meter.sample(
+            t0 + Duration::from_millis(16),
+            Activity::Playing,
+            true,
+            false,
+        );
+        meter.sample(
+            t0 + Duration::from_millis(3016),
+            Activity::Playing,
+            true,
+            false,
+        );
+        let Some(report) = meter.finish_if_due(t0 + Duration::from_millis(3020)) else {
+            unreachable!("interval due")
+        };
+        assert_eq!(report.accepted, 2);
+        assert_eq!(report.max_accept_gap_ms, Some(3000.));
+        assert!(report.interval_seconds > 3.);
+        assert!(report.fps.is_some_and(|fps| fps < 1.));
+        assert!(
+            meter
+                .finish_if_due(t0 + Duration::from_millis(3100))
+                .is_none()
+        );
+    }
+    #[test]
+    fn activity_distinguishes_states() {
+        let mut state = PlaybackState {
+            loading: false,
+            paused: false,
+            paused_for_cache: false,
+            ended: false,
+            media_stopped: false,
+            ..Default::default()
+        };
+        assert_eq!(activity_of(&state, true), Activity::Playing);
+        state.ended = true;
+        assert_eq!(activity_of(&state, true), Activity::Stopped);
+        state.ended = false;
+        assert_eq!(activity_of(&state, false), Activity::Waiting);
+        state.paused = true;
+        assert_eq!(activity_of(&state, true), Activity::Paused);
+        state.paused_for_cache = true;
+        assert_eq!(activity_of(&state, true), Activity::Buffering);
+        state.loading = true;
+        assert_eq!(activity_of(&state, true), Activity::Waiting);
+    }
+    #[test]
+    fn retirement_queue_admits_two_and_rejects_third_until_completion() {
+        let t0 = Instant::now();
+        let mut queue = RetirementQueue::new();
+        assert_eq!(RETIRE_CAPACITY, 2);
+        assert!(queue.has_room());
+        let (a, b) = (queue.admit(t0), queue.admit(t0));
+        assert_eq!((a, b), (Some(1), Some(2)));
+        assert!(!queue.has_room());
+        assert_eq!(queue.admit(t0), None);
+        assert_eq!(queue.inflight(), 2);
+        assert!(queue.complete(1, t0 + Duration::from_millis(40)));
+        assert!(queue.has_room());
+        assert_eq!(queue.admit(t0), Some(3));
+    }
+    #[test]
+    fn retirement_ticket_exhaustion_fails_closed_without_reuse() {
+        let t0 = Instant::now();
+        let mut queue = RetirementQueue::new();
+        queue.next = u64::MAX - 1;
+        assert_eq!(queue.admit(t0), Some(u64::MAX));
+        assert!(queue.complete(u64::MAX, t0));
+        assert!(!queue.has_room());
+        assert_eq!(queue.admit(t0), None);
+        assert_eq!(queue.inflight(), 0);
+    }
+    #[test]
+    fn retirement_completion_releases_only_its_own_ticket() {
+        let t0 = Instant::now();
+        let mut queue = RetirementQueue::new();
+        queue.admit(t0);
+        queue.admit(t0);
+        // Out-of-order, duplicate, unknown and untracked (0) completions.
+        assert!(queue.complete(2, t0));
+        assert!(!queue.complete(2, t0));
+        assert!(!queue.complete(99, t0));
+        assert!(!queue.complete(0, t0));
+        assert_eq!(queue.inflight(), 1);
+        assert!(queue.complete(1, t0));
+        assert_eq!(queue.inflight(), 0);
+        assert!(!queue.complete(1, t0));
+    }
+    #[test]
+    fn retirement_stats_aggregate_timings_and_reset_per_window() {
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut queue = RetirementQueue::new();
+        let a = queue.admit(t0).unwrap_or(0);
+        let b = queue.admit(ms(10)).unwrap_or(0);
+        assert!(queue.first_callback(a, ms(10)));
+        assert!(
+            !queue.first_callback(a, ms(11)),
+            "first boundary counts once"
+        );
+        assert!(queue.first_callback(b, ms(30)));
+        assert!(!queue.first_callback(99, ms(30)));
+        queue.complete(a, ms(30));
+        queue.complete(b, ms(70));
+        let window = queue.take_window();
+        assert_eq!(window.high_water, 2);
+        assert_eq!(window.first.count, 2);
+        assert_eq!(window.first.mean_ms(), Some(15.));
+        assert_eq!(window.first.max_ms, 20.);
+        assert_eq!(window.complete.count, 2);
+        assert_eq!(window.complete.mean_ms(), Some(45.));
+        assert_eq!(window.complete.max_ms, 60.);
+        let empty = queue.take_window();
+        assert_eq!(empty.high_water, 0);
+        assert_eq!(empty.first.mean_ms(), None);
+    }
+    #[test]
+    fn cadence_counts_view_renders_and_gaps_only_while_playing() {
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut meter = CadenceMeter::new(t0);
+        meter.sample(ms(10), Activity::Playing, false, false);
+        meter.render_called(ms(20));
+        meter.render_called(ms(60));
+        meter.sample(ms(70), Activity::Playing, false, false);
+        let Some(report) = meter.finish_if_due(ms(1000)) else {
+            unreachable!("interval due")
+        };
+        assert_eq!(report.view_render_calls, 2);
+        // The open gap since the last render (60 -> 1000) is included.
+        assert_eq!(report.max_view_render_gap_ms, Some(940.));
+        meter.sample(ms(1100), Activity::Paused, false, false);
+        meter.render_called(ms(1200));
+        let Some(next) = meter.finish_if_due(ms(2000)) else {
+            unreachable!("interval due")
+        };
+        assert_eq!(next.view_render_calls, 1);
+        assert_eq!(next.max_view_render_gap_ms, None);
+    }
+    #[test]
+    fn transfer_poll_is_bounded_and_display_key_tracks_changes() {
+        let t0 = Instant::now();
+        assert!(transfer_poll_due(None, t0));
+        assert!(!transfer_poll_due(
+            Some(t0),
+            t0 + Duration::from_millis(900)
+        ));
+        assert!(transfer_poll_due(Some(t0), t0 + Duration::from_secs(1)));
+        let mut rate = TransferRate::default();
+        let empty = rate.display_key();
+        rate.observe("a", Some((10, 100)), t0);
+        assert_ne!(rate.display_key(), empty);
+        rate.clear();
+        assert_eq!(rate.display_key(), empty);
+    }
+    #[test]
+    fn buffer_and_download_labels_are_distinct_and_honest() {
+        let mut state = PlaybackState {
+            position: 10.,
+            ..Default::default()
+        };
+        assert_eq!(buffer_ahead_label(&state), "Buffer —");
+        state.buffered_ranges = Some(vec![]);
+        assert_eq!(buffer_ahead_label(&state), "Buffer 0s");
+        state.buffered_ranges = Some(vec![kinema_mpv::BufferedRange {
+            start: 0.,
+            end: 145.,
+        }]);
+        assert_eq!(buffer_ahead_label(&state), "Buffer 2m 15s");
+        let mut transfer = TransferRate::default();
+        let t0 = Instant::now();
+        transfer.observe("a", Some((1_500_000, 4_500_000)), t0);
+        assert_eq!(
+            download_label(&transfer, false).as_deref(),
+            Some("Downloaded 1.5 MB of 4.5 MB (33%) · —")
+        );
+        transfer.observe(
+            "a",
+            Some((2_500_000, 4_500_000)),
+            t0 + Duration::from_secs(2),
+        );
+        assert_eq!(
+            download_label(&transfer, true).as_deref(),
+            Some("Download 500.0 KB/s · 55%")
+        );
+        assert_eq!(format_bytes(999), "999 B");
+        // Position 10: ahead = end - 10, rounded once before splitting.
+        for (end, label) in [
+            (129.6, "Buffer 2m 00s"),
+            (189.9, "Buffer 3m 00s"),
+            (129.4, "Buffer 119s"),
+            (10. + 180.4, "Buffer 3m 00s"),
+        ] {
+            state.buffered_ranges = Some(vec![kinema_mpv::BufferedRange { start: 0., end }]);
+            assert_eq!(buffer_ahead_label(&state), label);
+        }
+        let mut huge = TransferRate::default();
+        huge.observe("a", Some((u64::MAX, u64::MAX)), t0);
+        assert!(download_label(&huge, true).is_some_and(|label| label.contains("100%")));
+    }
+    #[test]
+    fn performance_cache_preserves_unknown_empty_and_containing_ranges() {
+        use kinema_mpv::BufferedRange;
+        let mut state = PlaybackState {
+            position: 10.,
+            ..Default::default()
+        };
+        assert_eq!(cache_ahead(&state), None);
+        state.buffered_ranges = Some(vec![]);
+        assert_eq!(cache_ahead(&state), Some(0.));
+        state.buffered_ranges = Some(vec![
+            BufferedRange {
+                start: 15.,
+                end: 20.,
+            },
+            BufferedRange {
+                start: 25.,
+                end: 30.,
+            },
+            BufferedRange {
+                start: 8.,
+                end: 15.,
+            },
+            BufferedRange {
+                start: f64::NAN,
+                end: 99.,
+            },
+            BufferedRange {
+                start: 9.,
+                end: f64::INFINITY,
+            },
+        ]);
+        // The adjacent 15..20 range is intentionally not merged.
+        assert_eq!(cache_ahead(&state), Some(5.));
+        state.position = 22.;
+        assert_eq!(cache_ahead(&state), Some(0.));
+        state.position = f64::NAN;
+        assert_eq!(cache_ahead(&state), None);
+    }
     #[test]
     fn time_is_safe_and_handles_hours() {
         assert_eq!(format_clock(f64::NAN), "0:00");

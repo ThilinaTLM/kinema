@@ -135,6 +135,159 @@ not establish GUI rendering, secure storage, live-provider behavior, or external
 playback support. The commands below are validation instructions, not a report of
 checks or runtime verification for the current increment.
 
+## Opt-in playback performance logging
+
+Set `KINEMA_PLAYER_DIAGNOSTICS=1` in the desktop process environment before
+starting acquisition or opening a player window (unset or any other value
+disables it). The toggle is read once per acquisition worker and once per player
+view. With info-level tracing enabled, target
+`kinema_desktop::player_performance` emits structured summaries
+from sampling; never per frame. Existing approximately five-second backend
+summaries remain. The finer monitor is now visible in source: an overlay labelled
+`Video updates: <fps> fps · max gap <ms>`, enabled only by the exact value `1`.
+It persists when controls auto-hide and captures no input. Its gap is the maximum
+accepted-image interarrival, including any still-open gap at the window end;
+it is not the maximum UI sample gap. These are **UI-accepted image updates, not
+actual GPU/display/monitor FPS**.
+Approximately one-second `Embedded player cadence` events on the same target
+report `interval_seconds`, `playing_seconds`, `accepted_images`,
+`accepted_images_fps`, `max_accepted_gap_ms`, `sample_max_gap_ms`,
+`samples_skipped_retiring`, `samples_paused_for_cache` and `activity`.
+`sample_max_gap_ms` separately measures UI sampling gaps. The monitor is source
+complete. Lead independent final checks passed: root fmt, strict workspace
+Clippy, workspace tests (480 desktop + 46 mpv + 42 core = 568 passed, 12 ignored),
+desktop `ui-probe-test` tests (558 passed, 4 ignored), build and diff check.
+These checks include the bounded-retirement pipeline. The native A/B was
+lead-reviewed; the user confirms much smoother playback without reported artifacts.
+The user full-size capture `image20261024T052717Z` (about 1907×987) was visually
+verified to show the FPS overlay and buffer/download readouts. Narrow 720×440
+layout and broader cross-platform qualification remain unverified.
+Unset `KINEMA_PLAYER_DIAGNOSTICS` after investigation: one-second summaries add
+log volume. There are no raw-frame or per-frame logs. This monitor tracks the
+remaining presentation dip; it does not fix it or change rendering policy.
+Acquisition aggregation in `media/storage.rs` uses target
+`kinema_desktop::media_performance` with the same opt-in; it is separate from
+presentation sampling and also applies to acquisition for external playback.
+
+Only numeric metrics, booleans, backend enums and fixed decoder/GL/fallback
+categories are logged: no URLs, media/track/chapter titles, credentials, raw
+driver strings or error text. These opt-in events use the normal tracing sinks
+and retention; review local logs before sharing. Unknown cache data remains
+unavailable, distinct from an observed empty cache; ahead seconds cover only
+the furthest end of a valid actual demuxer-cache range containing the playhead,
+not download estimates. This bounded O(n) calculation does not merge adjacent or
+overlapping ranges.
+
+`window_*` counts/rates cover the reported window. Accepted images are images
+handed to GPUI, **not measured GPU/display presentations**. Sample count,
+`window_samples_skipped_retiring` and maximum sample gap distinguish the existing
+two-frame image-retirement throttle from UI sampling stalls.
+`window_samples_paused_for_cache` counts samples observing a cache pause, so brief
+observed stalls are retained even if playback resumes before the report.
+Sample mean CPU
+wall time excludes diagnostics snapshot/logging and does not measure GPU work.
+`backend_cumulative_*` counters, averages and rates cover the backend lifetime,
+not the five-second window; backend elapsed time can differ from view elapsed
+time. Render/readback/fence/age means and transfer estimates retain backend
+semantics. No playback/performance policy changes are enabled by this toggle.
+
+Acquisition reports aggregate approximately five-second completed-durable-chunk
+windows: bytes, completed requests and byte rate; mean header wait, body read,
+payload write/sync, manifest checkpoint and total cycle times; maximum total
+cycle time. Failed/retried requests are not completed-chunk samples; blocked
+requests can delay reports. These timings are worker wall times, not loopback
+serving throughput. No URLs, headers, paths, identity values or error text are
+included. See [the investigation record](player-performance-investigation.md)
+for the source-evidenced sequential request/durability path. Acquisition now
+uses 4 MiB requests (last/missing ranges may be smaller); the measured
+pre-change investigation used 256 KiB requests. That sample delivered only
+0.57–0.77 MB/s against a calculated 1.09 MB/s file average, with typical header
+waits dominating the chunk cycle. In the user native retest after the change,
+steady intervals measured 2.1–5.8 MB/s; the user reports buffering resolved and
+buffer information visible. This supports improvement of the main sustained
+supply problem in that sample, not elimination of all cache pauses. Occasional
+accepted-image FPS dips remain, including one window with ample cache and no
+cache pause. See the investigation record for exact counts and differing stall
+signals. The media agent reported 33 focused media tests passing, and root
+format/Clippy/tests/build passed again with the completed FPS monitor (counts
+above). Native A/B results for the subsequent pipeline are recorded below.
+The 20-second request deadline and full-chunk validation/durability
+before reader notification remain unchanged. Larger chunks can delay startup or
+seeks on slow sources; eight active workers can hold about 32 MiB of payload
+buffers alone, excluding other memory. Preserve user mpv configuration;
+external playback can inherit cache settings while embedded mpv uses `config=no`.
+
+The user confirms the clearer buffer display is visible: normal player chrome shows
+higher-contrast valid buffered ranges, buffer-ahead time, downloaded-byte progress
+and rolling five-second observed download speed. These metrics are available
+whenever the chrome is visible, **without** the opt-in logging toggle; existing
+chrome auto-hide behavior is separate. Download progress/speed use in-memory
+coordinator snapshots polled every second, not disk/network reads in rendering.
+The rate baseline excludes preexisting bytes and resets on byte regression or
+session change. Unknown remains distinct from observed zero; interval-test
+coverage is reported. Downloaded bytes/rate are not demuxer-cache seconds or
+instantaneous network speed. The new opt-in FPS/max-gap display is separate
+from these normal buffer metrics, remains visible through controls auto-hide,
+and makes no rendering-policy change; preserve
+image-retirement lifetime safety.
+
+The separately approved bounded-retirement pipeline is implemented and native
+A/B reviewed. It allows two
+pending old images plus the current image, gates acceptance only with both slots
+occupied, and preserves the exact two-callback cleanup procedure for each old
+image. This adds at most one retained pixel image versus the old policy: about
+7.9 MiB at 1080p RGBA or 31.6 MiB at 4K, excluding GPU atlas/storage, copies and
+backend PBOs. GPUI next-frame callbacks precede `should_draw`; callback boundaries
+are not GPU-fence proof. No zero-copy, compositor-bug or KDE-cause claim is made.
+Ticket admission is checked; exhaustion fails closed, with no untracked fallback,
+and the current image is displaced only after admission. Existing throughput and
+cache-display behavior are preserved. Five-second diagnostics add
+`retirement_capacity`, `retirement_inflight`, `retirement_inflight_high_water`,
+`retirement_first_callback_count`, `retirement_first_callback_mean_ms`,
+`retirement_first_callback_max_ms`, `retirement_complete_count`,
+`retirement_complete_mean_ms` and `retirement_complete_max_ms`. One-second cadence
+adds `view_render_calls` and `max_view_render_gap_ms`: these measure GPUI view
+builds, **not GPU rendering or physical display presentation**.
+
+In the user drag retest, five-second windows accepted 22.1–22.8 images/s against
+about 24 backend rendered/s, versus the prior example of 11.4 accepted/s at
+24 backend rendered/s. The user reports usually 23–24 updates/s, mostly above
+20 during dragging, with one brief dip near/below 20. Across 82 full-ish playing
+one-second windows the median was 23.31, minimum 16.92 and maximum 25.54; not all
+windows were action-correlated. Later logs included paused states and a
+cache-ahead reset with backend drops; exact seek/action timing was not confirmed.
+These are separate signals. Occasional dips remain; no all-stalls-fixed, GPU-fence or
+cross-platform qualification is claimed. See the investigation record for detail.
+
+Manual check: use the generated local media/native probe below (extend media and
+`--smoke-seconds` to at least 20), first without the variable, then with it set to
+`1`. Confirm no diagnostics summaries or FPS monitor when disabled. Confirm approximately one-second cadence events and the
+persistent overlay when enabled; five-second backend/acquisition summaries remain.
+Pause/resume and resize; inspect accepted-image vs received/backend
+rates, sample gaps/retirement skips, dimensions, cache state and timing fields.
+Use an authorized stream through Kinema's acquisition path for at least 60 s to
+correlate cache depletion/pause with acquisition byte rates and stage timings;
+a direct local-file probe does not exercise acquisition aggregation. Repeat in
+external MPV through Kinema to compare the shared path, without sharing its URL.
+For the 4 MiB request change, compare measured throughput, startup/seek latency,
+request-deadline behavior, memory use, cache depletion/recovery and buffer-display
+clarity against the pre-change
+sample before extending the sample-specific improvement claim. For remaining
+FPS dips, record actions such as seeks/resizes alongside one-second accepted-image
+rate, retirement skips, maximum sample gap and cache-pause counts. Distinguish
+short cache/seek effects from retirement gating or UI sampling stalls; a low
+accepted-image rate does not measure actual monitor presentation. Specifically,
+repeat dragging another window while leaving the player stationary, then stop
+without closing/minimizing it or deliberately changing focus. The user reports
+immediate recovery on stopping; no focus dependency is established. Record the
+action times and monitor refresh settings rather than attributing a compositor
+cause. Larger cache
+settings cannot fix sustained
+supply below consumption. Do not copy or modify user mpv configuration for parity.
+Inspect events for only the allowlisted fields;
+do not attach unreviewed application logs. This does not establish sustained
+playback performance or cross-platform support.
+
 ## Embedded mpv prerequisites and validation plan
 
 **Source implemented; scoped Linux presentation and root checks reviewed.** Embedded mpv is the

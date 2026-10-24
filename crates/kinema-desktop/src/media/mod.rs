@@ -31,7 +31,9 @@ use std::{
     time::Duration,
 };
 
-const CHUNK: u64 = 256 * 1024;
+// Amortize upstream request-header latency while retaining one bounded,
+// validated and durable range per acquisition cycle.
+const CHUNK: u64 = 4 * 1024 * 1024;
 const MAX_ASSETS: usize = 8;
 const MAX_SESSIONS: usize = 32;
 type Renew = Arc<dyn Fn() -> Result<ResolvedMedia, MediaError> + Send + Sync>;
