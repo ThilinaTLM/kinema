@@ -18,8 +18,23 @@ all = "warn"
 [features]
 default = ["gpu-render"]
 gpu-render = ["dep:glow"]
+experimental-gpu = ["gpu-render", "dep:wgpu", "dep:wgpu-hal", "dep:ash", "dep:windows", "dep:objc2-core-foundation", "dep:objc2-core-video"]
 
 [dependencies]
 glow = { workspace = true, optional = true }
 libloading.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+wgpu = { workspace = true, optional = true }
+wgpu-hal = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ash = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, optional = true, features = ["Win32_Graphics_Direct3D11", "Win32_Graphics_Direct3D11on12", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Direct3D", "Win32_Foundation", "Win32_System_LibraryLoader"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { workspace = true, optional = true }
+objc2-core-video = { workspace = true, optional = true }

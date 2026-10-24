@@ -42,6 +42,10 @@ impl Loaded {
                 }};
             }
             let api = Api {
+                #[cfg(feature = "experimental-gpu")]
+                get_property_string: symbol!("mpv_get_property_string"),
+                #[cfg(feature = "experimental-gpu")]
+                free: symbol!("mpv_free"),
                 version: symbol!("mpv_client_api_version"),
                 create: symbol!("mpv_create"),
                 initialize: symbol!("mpv_initialize"),

@@ -3297,9 +3297,15 @@ dependencies = [
 name = "kinema-mpv"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "glow 0.16.0",
  "libloading",
+ "objc2-core-foundation",
+ "objc2-core-video",
  "thiserror 2.0.21",
+ "wgpu",
+ "wgpu-hal",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -3964,7 +3970,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "dispatch2",
+ "libc",
  "objc2 0.6.5",
 ]
 
@@ -4000,6 +4008,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",

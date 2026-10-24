@@ -191,6 +191,61 @@ fn displays() -> &'static Mutex<DisplayRegistry> {
     DISPLAYS.get_or_init(|| Mutex::new(DisplayRegistry::default()))
 }
 
+/// Acquire a shared, null-native EGL display. The caller must retain the library
+/// containing both entrypoints until release (or forever if quarantined).
+///
+/// # Safety
+/// `display` and `initialize` must belong to the same live EGL implementation.
+#[cfg(all(feature = "experimental-gpu", target_os = "linux"))]
+pub(in crate::mpv) unsafe fn acquire_headless_display(
+    initialize: unsafe extern "system" fn(*mut c_void, *mut i32, *mut i32) -> u32,
+    display: *mut c_void,
+) -> crate::Result<()> {
+    displays()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .acquire(
+            DisplayKey {
+                initialize: initialize as usize,
+                display: display as usize,
+            },
+            None,
+            || {
+                if unsafe { initialize(display, ptr::null_mut(), ptr::null_mut()) } == 0 {
+                    Err(crate::Error::Gpu(
+                        "headless EGL initialization failed".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+}
+
+/// Release exactly one successful acquisition; never call for quarantined work.
+///
+/// # Safety
+/// Entry points/display must match the acquisition and remain live throughout.
+#[cfg(all(feature = "experimental-gpu", target_os = "linux"))]
+pub(in crate::mpv) unsafe fn release_headless_display(
+    initialize: unsafe extern "system" fn(*mut c_void, *mut i32, *mut i32) -> u32,
+    terminate: unsafe extern "system" fn(*mut c_void) -> u32,
+    display: *mut c_void,
+) {
+    displays()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .release(
+            DisplayKey {
+                initialize: initialize as usize,
+                display: display as usize,
+            },
+            || unsafe {
+                terminate(display);
+            },
+        );
+}
+
 pub(crate) struct GlContext {
     api: Api,
     display: Display,
@@ -614,6 +669,48 @@ mod tests {
         assert_eq!(registry.0[&other_library].references, 1);
         registry.release(other_library, || {});
         assert!(registry.0.is_empty());
+    }
+
+    #[cfg(all(feature = "experimental-gpu", target_os = "linux"))]
+    #[test]
+    fn experimental_and_production_headless_acquisitions_share_registry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static INITIALIZE: AtomicUsize = AtomicUsize::new(0);
+        static TERMINATE: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "system" fn initialize(_: Display, _: *mut Int, _: *mut Int) -> Boolean {
+            INITIALIZE.fetch_add(1, Ordering::SeqCst);
+            1
+        }
+        unsafe extern "system" fn terminate(_: Display) -> Boolean {
+            TERMINATE.fetch_add(1, Ordering::SeqCst);
+            1
+        }
+        // Synthetic display is never dereferenced; no EGL/GPU libraries are loaded.
+        let display = ptr::dangling_mut::<c_void>();
+        let key = DisplayKey {
+            initialize: initialize as *const () as usize,
+            display: display as usize,
+        };
+        displays()
+            .lock()
+            .unwrap()
+            .acquire(key, None, || {
+                unsafe {
+                    initialize(display, ptr::null_mut(), ptr::null_mut());
+                }
+                Ok(())
+            })
+            .unwrap();
+        unsafe { acquire_headless_display(initialize, display) }.unwrap();
+        assert_eq!(INITIALIZE.load(Ordering::SeqCst), 1);
+        unsafe {
+            release_headless_display(initialize, terminate, display);
+        }
+        assert_eq!(TERMINATE.load(Ordering::SeqCst), 0);
+        displays().lock().unwrap().release(key, || unsafe {
+            terminate(display);
+        });
+        assert_eq!(TERMINATE.load(Ordering::SeqCst), 1);
     }
 
     #[test]

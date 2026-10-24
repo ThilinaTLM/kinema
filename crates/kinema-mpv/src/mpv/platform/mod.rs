@@ -32,3 +32,6 @@ mod unsupported {
 }
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 pub(crate) use unsupported::GlContext;
+
+#[cfg(all(feature = "experimental-gpu", target_os = "linux"))]
+pub(super) use egl::{acquire_headless_display, release_headless_display};

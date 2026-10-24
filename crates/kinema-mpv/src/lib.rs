@@ -13,3 +13,6 @@ pub use state::{
     BufferedRange, Chapter, HardwareDecoding, PlaybackState, RenderBackend, RenderDiagnostics,
     ResolutionPolicy, Track, TrackKind,
 };
+
+#[cfg(feature = "experimental-gpu")]
+pub use mpv::{ExperimentalFrame, ExperimentalGpuContext};

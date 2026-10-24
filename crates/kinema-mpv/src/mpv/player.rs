@@ -23,6 +23,8 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    #[cfg(feature = "experimental-gpu")]
+    pub experimental_gpu: Option<super::experimental::ExperimentalGpuContext>,
     pub library_path: Option<PathBuf>,
     pub initial_volume: f64,
     pub max_render_size: Option<[u32; 2]>,
@@ -36,6 +38,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "experimental-gpu")]
+            experimental_gpu: None,
             library_path: None,
             initial_volume: 100.0,
             max_render_size: None,
@@ -74,6 +78,11 @@ impl Shared {
             state.fatal_error = Some(error.clone());
             state.error = Some(error);
         }
+        #[cfg(feature = "experimental-gpu")]
+        self.pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cancel_gpu();
     }
     fn control_state(&self) -> Option<std::sync::MutexGuard<'_, PlaybackState>> {
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -108,6 +117,14 @@ pub struct Player {
 }
 impl Player {
     pub fn new(config: Config) -> Result<Self> {
+        #[cfg(feature = "experimental-gpu")]
+        let config = {
+            let mut config = config;
+            if config.experimental_gpu.is_some() {
+                config.render_backend = RenderBackend::Gpu;
+            }
+            config
+        };
         validate_volume(config.initial_volume)?;
         render::validate_config(&config)?;
         let loaded = Loaded::load(config.library_path.as_deref())?;
@@ -126,7 +143,17 @@ impl Player {
             ("volume", config.initial_volume.to_string()),
             (
                 "hwdec",
-                render::hwdec(config.hardware_decoding, config.render_backend).into(),
+                {
+                    #[cfg(feature = "experimental-gpu")]
+                    if config.experimental_gpu.is_some() {
+                        super::experimental::hwdec()
+                    } else {
+                        render::hwdec(config.hardware_decoding, config.render_backend)
+                    }
+                    #[cfg(not(feature = "experimental-gpu"))]
+                    render::hwdec(config.hardware_decoding, config.render_backend)
+                }
+                .into(),
             ),
         ] {
             let name = CString::new(name).map_err(|_| Error::InvalidInput("option name"))?;
@@ -134,6 +161,19 @@ impl Player {
             client.loaded.check(
                 unsafe { (client.loaded.api.option)(handle, name.as_ptr(), value.as_ptr()) },
                 "configure libmpv",
+            )?;
+        }
+        #[cfg(feature = "experimental-gpu")]
+        if config.experimental_gpu.is_some() {
+            client.loaded.check(
+                unsafe {
+                    (client.loaded.api.option)(
+                        handle,
+                        c"hwdec-software-fallback".as_ptr(),
+                        c"no".as_ptr(),
+                    )
+                },
+                "require direct hardware decode",
             )?;
         }
         // These options are compiled out when their scripting engines are absent.
@@ -190,6 +230,20 @@ impl Player {
                 unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), format) },
                 "observe property",
             )?;
+        }
+        #[cfg(feature = "experimental-gpu")]
+        if config.experimental_gpu.is_some() {
+            for (id, name) in [
+                (17, c"video-dec-params/pixelformat"),
+                (18, c"video-out-params/pixelformat"),
+                (19, c"video-dec-params/hw-pixelformat"),
+                (20, c"video-dec-params/gamma"),
+            ] {
+                client.loaded.check(
+                    unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), 1) },
+                    "observe direct decode evidence",
+                )?;
+            }
         }
         let shared = Arc::new(Shared {
             stopped: AtomicBool::new(false),
@@ -366,6 +420,17 @@ impl Player {
         }
         Ok(())
     }
+    #[cfg(feature = "experimental-gpu")]
+    pub fn take_gpu_frame(&self) -> Option<super::experimental::ExperimentalFrame> {
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return None;
+        }
+        self.shared
+            .pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take_gpu()
+    }
     pub fn state(&self) -> PlaybackState {
         let mut state = self
             .shared
@@ -399,6 +464,12 @@ impl Player {
 impl Drop for Player {
     fn drop(&mut self) {
         self.shared.stopped.store(true, Ordering::Release);
+        #[cfg(feature = "experimental-gpu")]
+        self.shared
+            .pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cancel_gpu();
         if let Some(worker) = &self.control {
             worker.thread().unpark();
         }
@@ -642,8 +713,55 @@ fn control_worker(
                 }
                 _ => {}
             }
+            #[cfg(feature = "experimental-gpu")]
+            if !state.loading
+                && !state.media_stopped
+                && (event.id == 8 || (event.id == 22 && matches!(event.userdata, 11 | 17..=20)))
+            {
+                // Never hold UI-visible state/pipeline locks during client calls.
+                drop(state);
+                refresh_decode_evidence(&client, &shared);
+            }
         }
         thread::park_timeout(Duration::from_millis(10));
+    }
+}
+
+#[cfg(feature = "experimental-gpu")]
+fn refresh_decode_evidence(client: &Client, shared: &Shared) {
+    // Client property calls belong exclusively on the existing control worker.
+    // Query all fields together after FILE_LOADED/property changes, rather than
+    // accepting queued string values from a previous source.
+    let generation = {
+        let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+        if !pipeline.experimental_enabled() {
+            return;
+        }
+        pipeline.generation
+    };
+    let evidence = [
+        c"hwdec-current",
+        c"video-dec-params/pixelformat",
+        c"video-out-params/pixelformat",
+        c"video-dec-params/hw-pixelformat",
+        c"video-dec-params/gamma",
+    ]
+    .map(|name| {
+        let ptr = unsafe { (client.loaded.api.get_property_string)(client.handle, name.as_ptr()) };
+        if ptr.is_null() {
+            return String::new();
+        }
+        let value = unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe {
+            (client.loaded.api.free)(ptr.cast());
+        }
+        value
+    });
+    let mut pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+    if pipeline.generation == generation {
+        pipeline.decode_evidence = evidence;
     }
 }
 

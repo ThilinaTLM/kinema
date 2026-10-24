@@ -85,13 +85,17 @@ fn dimensions(w: Option<i64>, h: Option<i64>) -> Option<[u32; 2]> {
 pub(super) struct Pipeline {
     config: Config,
     pub viewport: [u32; 2],
+    #[cfg(feature = "experimental-gpu")]
+    pub decode_evidence: [String; 5],
     pub metadata: [Option<i64>; 5],
     size: [u32; 2],
     pub video_absent: bool,
     readbacks: u64,
     gpu_submissions: u64,
-    generation: u64,
+    pub(super) generation: u64,
     frame: Option<RenderedFrame>,
+    #[cfg(feature = "experimental-gpu")]
+    gpu_frame: Option<(super::experimental::ExperimentalFrame, u64, Instant)>,
     stats: RenderDiagnostics,
     started: Instant,
     age_total: f64,
@@ -105,6 +109,8 @@ impl Pipeline {
             },
             config,
             viewport: [0, 0],
+            #[cfg(feature = "experimental-gpu")]
+            decode_evidence: Default::default(),
             metadata: [None; 5],
             size: [0, 0],
             video_absent: false,
@@ -112,14 +118,30 @@ impl Pipeline {
             gpu_submissions: 0,
             generation: 0,
             frame: None,
+            #[cfg(feature = "experimental-gpu")]
+            gpu_frame: None,
             started: Instant::now(),
             age_total: 0.0,
         }
     }
     fn invalidate(&mut self) {
+        #[cfg(feature = "experimental-gpu")]
+        if self.gpu_frame.take().is_some() {
+            self.stats.coalesced_frames += 1;
+        }
         self.generation = self.generation.wrapping_add(1);
         if self.frame.take().is_some() {
             self.stats.coalesced_frames += 1;
+        }
+    }
+    #[cfg(feature = "experimental-gpu")]
+    pub fn experimental_enabled(&self) -> bool {
+        self.config.experimental_gpu.is_some()
+    }
+    #[cfg(feature = "experimental-gpu")]
+    pub fn cancel_gpu(&mut self) {
+        if self.experimental_enabled() {
+            self.invalidate();
         }
     }
     pub fn option_warnings(&mut self, warnings: Vec<String>) {
@@ -127,6 +149,10 @@ impl Pipeline {
     }
     pub fn clear(&mut self, state: &mut PlaybackState) {
         self.metadata = [None; 5];
+        #[cfg(feature = "experimental-gpu")]
+        {
+            self.decode_evidence = Default::default();
+        }
         self.video_absent = true;
         self.invalidate();
         state.source_size = None;
@@ -192,6 +218,17 @@ impl Pipeline {
         self.age_total += frame.created_at.elapsed().as_secs_f64() * 1000.0;
         Some(frame.frame)
     }
+    #[cfg(feature = "experimental-gpu")]
+    pub fn take_gpu(&mut self) -> Option<super::experimental::ExperimentalFrame> {
+        let (frame, generation, created) = self.gpu_frame.take()?;
+        if generation != self.generation || self.size.contains(&0) {
+            self.stats.coalesced_frames += 1;
+            return None;
+        }
+        self.stats.delivered_frames += 1;
+        self.age_total += created.elapsed().as_secs_f64() * 1000.0;
+        Some(frame)
+    }
     pub fn snapshot(&self, state: &PlaybackState) -> RenderDiagnostics {
         let mut stats = self.stats.clone();
         stats.requested_backend = state.requested_backend;
@@ -216,6 +253,8 @@ impl Pipeline {
 }
 
 enum Renderer {
+    #[cfg(feature = "experimental-gpu")]
+    Experimental(super::experimental::Renderer),
     Cpu(CpuRenderer),
     #[cfg(feature = "gpu-render")]
     Gpu(super::gpu::GpuRenderer),
@@ -224,6 +263,8 @@ impl Renderer {
     fn update(&mut self) -> u64 {
         match self {
             Self::Cpu(r) => r.update(),
+            #[cfg(feature = "experimental-gpu")]
+            Self::Experimental(r) => r.update(),
             #[cfg(feature = "gpu-render")]
             Self::Gpu(r) => r.update(),
         }
@@ -231,6 +272,8 @@ impl Renderer {
     fn pending(&self) -> bool {
         match self {
             Self::Cpu(_) => false,
+            #[cfg(feature = "experimental-gpu")]
+            Self::Experimental(_) => false,
             #[cfg(feature = "gpu-render")]
             Self::Gpu(r) => r.pending(),
         }
@@ -268,6 +311,11 @@ fn initialize(
     config: &Config,
     decoder: &SyncSender<SyncSender<Result<()>>>,
 ) -> Result<(Renderer, Option<String>)> {
+    #[cfg(feature = "experimental-gpu")]
+    if let Some(context) = &config.experimental_gpu {
+        return super::experimental::Renderer::new(client, context)
+            .map(|r| (Renderer::Experimental(r), None));
+    }
     select(
         config.render_backend,
         || gpu(client.clone(), config),
@@ -283,12 +331,12 @@ fn initialize(
 }
 /// Coalesce libmpv update notifications without losing them while waiting for
 /// older readbacks. Generations are acknowledged only after render/skip consumption.
-#[cfg(any(feature = "gpu-render", test))]
+#[cfg(any(feature = "gpu-render", feature = "experimental-gpu", test))]
 struct GpuSchedule {
     frame_requested: bool,
     consumed_generation: Option<u64>,
 }
-#[cfg(any(feature = "gpu-render", test))]
+#[cfg(any(feature = "gpu-render", feature = "experimental-gpu", test))]
 impl GpuSchedule {
     fn new() -> Self {
         Self {
@@ -329,6 +377,8 @@ pub(super) fn run(
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.active_backend = match &renderer {
             Renderer::Cpu(_) => RenderBackend::Cpu,
+            #[cfg(feature = "experimental-gpu")]
+            Renderer::Experimental(_) => RenderBackend::Gpu,
             #[cfg(feature = "gpu-render")]
             Renderer::Gpu(_) => RenderBackend::Gpu,
         };
@@ -344,7 +394,7 @@ pub(super) fn run(
     }
     let _ = ready.send(Ok(()));
     let mut last_generation = u64::MAX;
-    #[cfg(feature = "gpu-render")]
+    #[cfg(any(feature = "gpu-render", feature = "experimental-gpu"))]
     let mut gpu_schedule = GpuSchedule::new();
     while !shared.stopped.load(Ordering::Acquire) {
         let (size, generation) = {
@@ -378,6 +428,53 @@ pub(super) fn run(
                         }
                         last_generation = generation;
                     }
+                }
+                #[cfg(feature = "experimental-gpu")]
+                Renderer::Experimental(gpu) => {
+                    gpu_schedule.observe(updates);
+                    let (evidence, video_ready) = {
+                        let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+                        (
+                            pipeline.decode_evidence.clone(),
+                            dimensions(pipeline.metadata[0], pipeline.metadata[1]).is_some(),
+                        )
+                    };
+                    let valid = video_ready && gpu.evidence_ready(generation, &evidence)?;
+                    if !gpu_schedule.ready(false, generation) {
+                        return Ok(());
+                    }
+                    if size.contains(&0) {
+                        if gpu_schedule.frame_requested {
+                            gpu.skip()?;
+                        }
+                    } else {
+                        let created = Instant::now();
+                        let frame = gpu.render(size)?;
+                        let frame = frame.filter(|_| valid);
+                        let mut pipeline =
+                            shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(frame) = frame {
+                            pipeline.stats.rendered_frames += 1;
+                            pipeline.gpu_submissions += 1;
+                            pipeline.stats.gpu_surface_frames += 1;
+                            pipeline.stats.render_call_ms +=
+                                created.elapsed().as_secs_f64() * 1000.0;
+                            if generation == pipeline.generation && !pipeline.size.contains(&0) {
+                                if pipeline
+                                    .gpu_frame
+                                    .replace((frame, generation, created))
+                                    .is_some()
+                                {
+                                    pipeline.stats.coalesced_frames += 1;
+                                }
+                            } else {
+                                pipeline.stats.coalesced_frames += 1;
+                            }
+                        } else {
+                            pipeline.stats.coalesced_frames += 1;
+                        }
+                    }
+                    gpu_schedule.consumed(generation);
                 }
                 #[cfg(feature = "gpu-render")]
                 Renderer::Gpu(gpu) => {

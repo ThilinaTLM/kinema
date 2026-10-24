@@ -34,6 +34,8 @@ pub struct RenderDiagnostics {
     pub render_size: [u32; 2],
     pub source_size: Option<[u32; 2]>,
     pub rendered_frames: u64,
+    /// GPU-resident surfaces produced by the opt-in experimental renderer.
+    pub gpu_surface_frames: u64,
     pub delivered_frames: u64,
     pub coalesced_frames: u64,
     pub readback_bytes: u64,

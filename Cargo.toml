@@ -17,6 +17,8 @@ wgpu = "=29.0.4"
 wgpu-hal = "=29.0.4"
 ash = "0.38"
 gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.9" }
+objc2-core-foundation = "0.3.2"
+objc2-core-video = "0.3.2"
 log = "0.4"
 glow = "0.16"
 libloading = "0.8"

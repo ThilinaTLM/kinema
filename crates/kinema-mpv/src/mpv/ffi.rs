@@ -61,6 +61,10 @@ pub type Callback = unsafe extern "C" fn(*mut c_void);
 
 pub struct Api {
     pub version: unsafe extern "C" fn() -> std::os::raw::c_ulong,
+    #[cfg(feature = "experimental-gpu")]
+    pub get_property_string: unsafe extern "C" fn(*mut Handle, *const c_char) -> *mut c_char,
+    #[cfg(feature = "experimental-gpu")]
+    pub free: unsafe extern "C" fn(*mut c_void),
     pub create: unsafe extern "C" fn() -> *mut Handle,
     pub initialize: unsafe extern "C" fn(*mut Handle) -> c_int,
     pub terminate: unsafe extern "C" fn(*mut Handle),
