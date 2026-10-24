@@ -168,6 +168,7 @@ impl Detail {
             let backdrop = match &self.title {
                 BrowseTitle::Cinemeta(_) => details.and_then(|d| d.background_url.clone()),
                 BrowseTitle::Tmdb(_) => c.tmdb_details.value().and_then(|d| d.backdrop_url.clone()),
+                BrowseTitle::Local(_) => self.local_backdrop(cx),
             };
             (poster, backdrop)
         };
@@ -215,12 +216,22 @@ impl Detail {
             );
         }
 
+        // Library membership (all titles) and watched (movies) follow all existing
+        // utility actions (Refresh, IMDb); each is an independent toggle with its own pending/error state.
+        banner = banner.secondary(self.membership_toggle(over_art, cx));
+        if !self.is_series() {
+            banner = banner.secondary(self.movie_watched_toggle(over_art, cx));
+        }
+
         let mut section = div()
             .id("detail-hero-body")
             .w_full()
             .flex()
             .flex_col()
             .child(div().w_full().child(banner));
+        if let Some(notices) = self.personal_notices(viewport, cx) {
+            section = section.child(notices);
+        }
         if let Some(error) = status.error.clone() {
             let retry = cx.listener(|this, _, _, cx| this.retry_metadata(cx));
             section = section.child(body_shell(
@@ -239,7 +250,10 @@ impl Detail {
                 ),
             ));
         }
-        section.into_any_element()
+        let commands = self.hero_commands(cx);
+        section
+            .context_menu("detail-hero-menu", move |_, _| commands.clone())
+            .into_any_element()
     }
 
     /// The detail page: compact hero, then one scrolling body of facts,

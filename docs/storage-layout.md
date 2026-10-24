@@ -36,7 +36,10 @@ The settings store uses `CONFIG/settings.toml`; managed storage uses
 remain separate. Source wiring and reported recovery fixtures do not establish
 cross-platform crash safety or end-to-end paid-provider playback.
 
-The current Rust catalog is **schema v6** with twelve normalized `STRICT` tables.
+The last documented Rust catalog baseline is **schema v6** with twelve normalized
+`STRICT` tables. V7 storage is now source implemented with 15 `STRICT` tables;
+scoped validation has passed. The following v6 evidence remains historical;
+separate v7 evidence is linked below.
 Fresh databases create only these tables. Supported older databases receive
 version-appropriate schema/backfill work and then transactionally retire all seven
 obsolete provider-cache tables, with explicit user authorization to discard old-only
@@ -65,7 +68,34 @@ no URL index, provider credentials or error responses.
 Artwork bytes remain a separate cache; media payloads/manifests and credentials
 remain outside the catalog. Cache/media cleanup must preserve canonical identities,
 ratings, provenance, and referenced page/fetch stubs; identity reconciliation is a
-separate proven-ID transaction, not eviction. No history/library tables are added.
+separate proven-ID transaction, not eviction. The baseline has no personal tables;
+the approved extension below adds Library/manual watch records, not history.
+
+## Implemented personal-data durability extension — scoped validation
+
+[Source-implemented schema v7](catalog-schema.md#personal-library-and-manual-watch-state-proposed-schema-v7)
+adds `library_entries`, `movie_watch_state` and `episode_watch_state` to the **same**
+`catalog.sqlite3` at the build-mode paths above. There is no new personal database,
+path migration, historical import or permission to reset a user's database.
+Migration, personal storage/query operations and shared state/UI integration are
+source implemented and reviewed. Lead-reviewed root/feature checks and synthetic
+Linux captures provide scoped evidence, including real-worker SQLite durability
+and failed-write tests; see [development](development.md#library-and-manual-watch-tracking-validation-pending).
+This is not deployed-user-database, full offline, real-provider/playback or
+Windows/macOS acceptance.
+
+Membership and explicit manual watch records are durable personal data, not
+provider cache. Cache/media/artwork cleanup and refresh must exclude these rows
+and referenced canonical entities. Membership removal keeps watch records and
+files. Verified identity merges preserve/reconcile personal rows transactionally
+before deleting losing canonical entities; cleanup is not identity reconciliation.
+
+**Deleting `catalog.sqlite3` also deletes Library membership and watch records.**
+Do not recommend database deletion as cache cleanup. Separate debug/release
+locations mean separate personal records too; switching modes does not transfer
+them. No backup/export, history, resume or automatic marking is added here.
+Credentials remain in OS secure storage, never these tables. Ordinary cleanup
+must preserve this database even when development data/cache roots coincide.
 
 ## Proposed broader locations
 
@@ -107,7 +137,8 @@ CACHE/
 
 In the proposed production layout on macOS, settings sit beside the database because data/config share a root. SQLite manages its own WAL/SHM files. Credentials live in the OS secure store, not this tree.
 
-Keep the catalog in app data so deleting large media caches does not remove identities/settings. Cached catalog/indexer rows can be pruned transactionally; ordinary cleanup must not delete the database. Future personal records must remain separate from disposable data.
+Keep the catalog in app data so deleting large media caches does not remove identities/settings. Cached catalog/indexer rows can be pruned transactionally; ordinary cleanup must not delete the database. The approved personal records share the catalog database but must be excluded
+from disposable-row cleanup; they are not a separately disposable cache.
 
 ## One media file, one manifest
 

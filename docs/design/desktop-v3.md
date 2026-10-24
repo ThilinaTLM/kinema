@@ -17,8 +17,20 @@ implemented, with lead-reviewed root/feature checks and scoped native Linux GPUI
 presentation evidence. Final backend option hardening passed root/native reruns;
 this remains scoped validation, not full acceptance. This introduces no second GPUI engine or UI version.
 
-Related proposal (not approved or implemented): [Library membership and manual
-watched-status wireframes](library.md), including a landing-page Library scope.
+Approved extension, **source implemented and reviewed; scoped validation passed**:
+[Library membership and manual watch tracking](library.md). Its control placements
+supersede the earlier Saved badge/dropdown proposal: always-visible top-right
+poster `bookmark-off` / `bookmark`, with SERIES below; movie hero membership and
+`circle` / `circle-check` watch controls after existing actions; show hero
+membership and episode-still top-right watch controls. No episode membership or
+whole-show watch flag. Detail actions are identical from every entry point;
+child toggles never navigate. The landing scope menu selects Discover / Library.
+The linked contract governs independent personal states, conservative summaries,
+Undo and loading/errors. Lead-reviewed checks and Linux synthetic captures
+(including movie, hero membership and episode watched keyboard focus) are recorded
+in [development](../development.md#library-and-manual-watch-tracking-validation-pending),
+not full MVP or cross-platform acceptance. This is manual tracking only,
+not history, resume or automatic playback completion.
 
 ## 1. Product character and approved directions
 
@@ -590,7 +602,9 @@ position, season and focus (the episode card is refocused).
 - Loading, empty, error (with retry) and "hidden by provider limit" states are
   kept; quality tabs show only buckets present.
 - Click / Enter on a stream opens the Play sheet (§4.7). Episode packs never use
-  largest/positional file guesses. No watched/progress/auto-next claims.
+  largest/positional file guesses. No automatic watched/progress/auto-next claims; the approved manual Library
+   tracking extension is source implemented with scoped validation, not automatic
+   playback behavior.
 
 ### 4.7 Play sheet (modal, 560 wide)
 

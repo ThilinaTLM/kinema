@@ -1701,7 +1701,11 @@ mod facts_migration_tests {
         normalized_pages::write_cinemeta_details(&tx, &details, 123, true, &Default::default())?;
         tx.commit()?;
         service.connection.execute_batch(
-            "ALTER TABLE metadata_fetches DROP COLUMN facts_json; PRAGMA user_version=4;",
+            "DROP TABLE library_entries;
+             DROP TABLE movie_watch_state;
+             DROP TABLE episode_watch_state;
+             ALTER TABLE metadata_fetches DROP COLUMN facts_json;
+             PRAGMA user_version=4;",
         )?;
         drop(service);
         let mut upgraded = CatalogService::open(&path)?;

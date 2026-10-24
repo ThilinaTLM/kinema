@@ -3,6 +3,7 @@ use super::*;
 use crate::widgets::{
     notice::{Notice, NoticeKind},
     patterns::{ViewState, focus_ring},
+    state_toggle::ToggleStatus,
 };
 
 /// Placeholder shaped like the episode grid: 16:9 still and two text lines.
@@ -131,6 +132,7 @@ impl Detail {
         let show_art = match &self.title {
             BrowseTitle::Cinemeta(_) => c.details.value().and_then(|d| d.background_url.clone()),
             BrowseTitle::Tmdb(_) => c.tmdb_details.value().and_then(|d| d.backdrop_url.clone()),
+            BrowseTitle::Local(_) => self.local_backdrop(cx),
         };
         let show = self.display_title(cx);
         let choices = [
@@ -153,18 +155,27 @@ impl Detail {
                 break;
             }
         }
-        thumbnail.child(
-            div()
-                .absolute()
-                .left(s::S6)
-                .bottom(s::S6)
-                .px(s::S6)
-                .rounded(radius::XS)
-                .bg(p.backdrop_scrim.opacity(0.8))
-                .type_style(t::CAPTION)
-                .text_color(p.text_primary)
-                .child(format!("E{:02}", ep.number)),
-        )
+        thumbnail
+            .child(
+                // Top-right watched toggle; it consumes its own pointer events.
+                div()
+                    .absolute()
+                    .top(s::S6)
+                    .right(s::S6)
+                    .child(self.episode_toggle(ep.season, ep.number, cx)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(s::S6)
+                    .bottom(s::S6)
+                    .px(s::S6)
+                    .rounded(radius::XS)
+                    .bg(p.backdrop_scrim.opacity(0.8))
+                    .type_style(t::CAPTION)
+                    .text_color(p.text_primary)
+                    .child(format!("E{:02}", ep.number)),
+            )
     }
 
     /// Episodes below the details: season tabs and a responsive card grid.
@@ -195,6 +206,24 @@ impl Detail {
                     c.details.busy(),
                     c.details.error().map(str::to_owned),
                 ),
+                BrowseTitle::Local(_) => {
+                    let season_error = self
+                        .local_tmdb(cx)
+                        .is_some_and(|id| c.tmdb_season.value().is_none_or(|s| s.series_id != id))
+                        .then(|| c.tmdb_season.error())
+                        .flatten();
+                    (
+                        c.local_details.value().is_some(),
+                        c.local_details.busy()
+                            || c.tmdb_season.busy()
+                            || c.local_acquisition_busy(),
+                        c.local_details
+                            .error()
+                            .or(season_error)
+                            .or(c.local_acquisition_error())
+                            .map(str::to_owned),
+                    )
+                }
             }
         };
         let sel = selection(loaded, episodes.is_empty(), error.is_some(), busy);
@@ -211,9 +240,20 @@ impl Detail {
             .flex_col()
             .gap(s::S12)
             .child(header);
+        if let Some(progress) = self.show_progress(cx) {
+            column = column.child(
+                div()
+                    .type_style(t::SMALL)
+                    .text_color(tokens::palette(cx).text_muted)
+                    .child(progress),
+            );
+        }
         if self.season.is_some() && !self.season_options.is_empty() {
             let season = self.season.unwrap_or_default();
             column = column.child(self.season_selector(season, cx));
+        }
+        if self.season.is_some() {
+            column = column.child(self.season_actions(self.season.unwrap_or_default(), cx));
         }
         if self.episode_streams_unavailable(cx) {
             column = column.child(
@@ -274,6 +314,16 @@ impl Detail {
         let find = cx.entity().downgrade();
         let id = ep.number as usize;
         let thumbnail = self.episode_thumbnail(&ep, tile, cx);
+        let watched_now = matches!(
+            self.episode_status(ep.season, ep.number, cx),
+            ToggleStatus::Known { on: true, .. }
+        );
+        let writable = matches!(
+            self.episode_status(ep.season, ep.number, cx),
+            ToggleStatus::Known { pending: false, .. }
+        );
+        let write_ref = Some(self.episode_ref(ep.season, ep.number));
+        let season = ep.season;
         let card = div()
             .id(("episode", id))
             .debug_selector(|| format!("episode-{id}"))
@@ -295,8 +345,13 @@ impl Detail {
                 click_focus.focus(window, cx)
             })
             .on_click(cx.listener(move |this, _, _, cx| this.open_episode(click.clone(), cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                // Keys from the watched toggle bubble here; only the card itself opens.
+                let own_focus = this
+                    .episode_focus
+                    .get(&(enter.season, enter.number))
+                    .is_some_and(|f| f.is_focused(window));
+                if own_focus && matches!(event.keystroke.key.as_str(), "enter" | "space") {
                     this.open_episode(enter.clone(), cx);
                     cx.stop_propagation();
                 }
@@ -336,6 +391,43 @@ impl Detail {
                         let ep = ep.clone();
                         move |_, cx| {
                             let _ = find.update(cx, |s, cx| s.open_episode(ep.clone(), cx));
+                        }
+                    }),
+                    if watched_now {
+                        menu_item("Mark episode unwatched", {
+                            let find = find.clone();
+                            let write_ref = write_ref.clone();
+                            move |_, cx| {
+                                if let (true, Some(r)) = (writable, write_ref.clone()) {
+                                    let _ = find.update(cx, |s, cx| {
+                                        s.perform(personal::Write::Episode(r, false), cx)
+                                    });
+                                }
+                            }
+                        })
+                    } else {
+                        menu_item("Mark episode watched", {
+                            let find = find.clone();
+                            let write_ref = write_ref.clone();
+                            move |_, cx| {
+                                if let (true, Some(r)) = (writable, write_ref.clone()) {
+                                    let _ = find.update(cx, |s, cx| {
+                                        s.perform(personal::Write::Episode(r, true), cx)
+                                    });
+                                }
+                            }
+                        })
+                    },
+                    menu_item("Mark season watched…", {
+                        let find = find.clone();
+                        move |_, cx| {
+                            let _ = find.update(cx, |s, cx| s.request_season(season, true, cx));
+                        }
+                    }),
+                    menu_item("Mark season unwatched…", {
+                        let find = find.clone();
+                        move |_, cx| {
+                            let _ = find.update(cx, |s, cx| s.request_season(season, false, cx));
                         }
                     }),
                     menu_item("Copy episode title", {

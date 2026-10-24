@@ -1,261 +1,190 @@
-# Library — UI wireframe proposal
+# Library — membership and manual watch tracking
 
-**Status: proposal for review; not approved or implemented.**
+**Status: source implemented and lead-reviewed; scoped validation passed.**
+Storage, shared state and native UI are implemented, with reviewed root/feature
+checks and Linux synthetic native captures, including movie, hero membership and
+episode watched keyboard focus. This is not full MVP, live-provider/playback or
+cross-platform acceptance. Exact evidence and remaining limits are recorded in
+[development](../development.md#library-and-manual-watch-tracking-validation-pending).
+Examples remain fixtures.
 
-Extends [Desktop v3](desktop-v3.md), retaining its single-row toolbar,
-poster-first grid, in-place Detail, Cinema tokens, and native GPUI components.
-This proposes bringing personalized library membership and manual watched status
-forward from the architecture's “Later” list; it does not claim either exists.
-All titles and counts below are fixtures. No application behavior changes here.
+Extends [Desktop v3](desktop-v3.md), retaining direct GPUI, Cinema tokens, the
+48 px single-row toolbar, poster-first grid and in-place Detail. This approved
+contract replaces the earlier bottom-edge Saved badge and watched dropdown
+proposal; those are not alternative layouts.
 
-## 1. Recommended model
+## 1. Independent personal states
 
-- **Discover** browses provider catalogs; **Library** browses titles explicitly
-  saved by the user. Library means a personal collection, not downloaded files.
-- Save a movie or an entire show with **Add to library**. Episodes belong to the
-  saved show; there is no separate episode-library collection.
-- Membership and watched status are independent. Marking watched does not add a
-  title; removing it from Library does not erase its watched status.
-- Movies have a manual Watched / Unwatched state. Episodes have their own manual
-  state; a show's summary is derived from its episodes, not a separate checkbox.
-- First iteration: manual tracking only. Playback launch, download completion,
-  and playback failure never imply watched. Automatic completion thresholds,
-  resume positions, watch dates, history, and sync are separate future decisions.
+- **Discover** browses provider catalogs; **Library** lists explicitly saved movies
+  and shows, not downloaded files. Episodes have no separate membership.
+- Membership and watched state are independent. Unsaved movies and episodes can
+  be marked watched. Removing membership never deletes watch state or media files.
+- Movies and episodes have manual watched/unwatched state. A show's summary is
+  computed from canonical episodes, never an independent whole-show flag.
+- No watch history, viewing dates, resume position, automatic playback completion,
+  cloud sync, profiles, import/export or download changes in this increment.
+  Playback launch/failure and download completion never mark anything watched.
 
-## 2. Landing page — Discover / Library scope
+## 2. Approved control placement
 
-Use one compact scope menu, not a navigation rail or a new tab bar. It remains
-visible on the main landing page, next to the media-kind control. “Discover” is
-the provider-browse scope, not a library membership state.
+Use Lucide icons, not substitute glyphs or dropdown state controls:
 
-```text
-DISCOVER
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ ◆ [Discover ▾] [Movies|Series] [⌕ Search movies…     ] [Popular ▾]    ⇅ ⚙ ⋯    │
-│                                                                              │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐                     │
-│   │ ★ 8.1    │  │ ★ 7.4    │  │   SERIES │  │ ★ 8.0    │                     │
-│   │          │  │          │  │          │  │          │                     │
-│   │  POSTER  │  │  POSTER  │  │  POSTER  │  │  POSTER  │                     │
-│   │ ▣ Saved  │  │          │  │ ▣ Saved  │  │          │                     │
-│   └──────────┘  └──────────┘  └──────────┘  └──────────┘                     │
-└──────────────────────────────────────────────────────────────────────────────┘
+| Surface | Placement and state |
+| --- | --- |
+| Poster cards (including Discover, Library and recommendations) | Always-visible top-right membership button: `bookmark-off` when unsaved, `bookmark` when saved. Place SERIES **below** this control, not overlapping it. |
+| Movie Detail | Hero action row, after existing playback/utility actions: membership button and watched button (`circle` unwatched, `circle-check` watched). |
+| Show Detail | Hero membership button; no whole-show watched toggle. |
+| Episode still | Top-right watched button (`circle` / `circle-check`); no episode membership. |
 
-SCOPE MENU                    LIBRARY FILTER / SORT MENU
-┌──────────────────────┐      ┌────────────────────────────┐
-│ ✓ Discover           │      │ Watched status             │
-│   Library            │      │ ✓ Any status               │
-└──────────────────────┘      │   Unwatched                │
-                             │   In progress (shows only) │
-                             │   Watched                  │
-                             ├────────────────────────────┤
-                             │ Sort                       │
-                             │ ✓ Recently added           │
-                             │   Title A–Z                │
-                             │   Release year, newest     │
-                             └────────────────────────────┘
+Tooltips and accessible names describe the next action: Add to library / Remove
+from library, Mark watched / Mark unwatched. Expose current state accessibly too.
+Use 16 px glyphs in at least 28 px independently focusable targets, contrast-safe
+backing, v3 radius/focus tokens, and pressed/disabled/pending states. Keep Play the
+sole primary hero action; secondary actions wrap within the hero when necessary.
 
-LIBRARY (mixed movies and shows)
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ ◆ [Library ▾] [All|Movies|Series] [⌕ Search library…  ] [Filters ▾ •]  ⇅ ⚙ ⋯    │
-│                                                                              │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐                     │
-│   │ ★ 8.1    │  │   SERIES │  │ ★ 7.4    │  │   SERIES │                     │
-│   │          │  │          │  │          │  │          │                     │
-│   │  POSTER  │  │  POSTER  │  │  POSTER  │  │  POSTER  │                     │
-│   │ ✓ Watched│  │ 5/12 seen│  │          │  │ 2/8 seen │                     │
-│   └──────────┘  └──────────┘  └──────────┘  └──────────┘                     │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+Click/Enter on a poster still opens Detail; the episode body still opens Streams.
+Child toggle activation must not bubble into card/detail/Streams navigation or
+playback. Include controls in keyboard focus traversal. Secondary/context menus
+retain equivalent text commands (right-click, Menu key, Shift+F10); a show card
+only manages membership, with episode tracking in Detail. No bottom Saved badge
+is used as a replacement for the always-visible membership control.
 
-### Scope and filter behavior
+### Entry-point-independent Detail
 
-- Library is a complete local membership query, **not an intersection with the
-  current Popular page or currently loaded provider results**. Saved titles
-  remain available when a provider is unavailable. Missing metadata can be shown
-  as unavailable without hiding the saved entry.
-- Library defaults to All kinds, Any status, Recently added. Discover retains
-  its Movies/Series control and provider collection menu. Library's Filters menu
-  replaces that collection menu; it contains both status and sort controls.
-- Switching scope restores each scope's search, filters, sort, scroll and focus
-  within the window. Detail → Back restores that same context. Persisting this
-  context across app launches is outside this proposal.
-- Library search is local over saved titles; Discover search is provider search.
-  Search placeholders and accessible labels make that difference explicit.
-- For movies: Unwatched means not marked watched. For shows: Unwatched means no
-  known episodes watched; In progress means some but not all known episodes
-  watched; Watched means all known episodes watched with a nonempty, complete
-  episode listing. A newly discovered unwatched episode can move a show back
-  to In progress.
-- Unknown or incomplete episode listings are not “0 episodes” or “all watched”.
-  Show “Episode status unavailable” or “5 watched · total unknown”; do not classify
-  the show under a status filter until the listing is complete. It remains in
-  Any status. Specials count when supplied as canonical episodes by the catalog.
-- An active-status dot is paired with a descriptive accessible label and a
-  checked menu item, never color alone. “In progress” is disabled for Movies;
-  switching to Movies while it is active resets status to Any.
-- Keep the 48 px single-row toolbar. At the 960 px minimum, shorten search
-  (minimum 160 px), use the app mark without the wordmark, and shorten Filters
-  to an icon with accessible name and tooltip. Do not wrap into a second row.
-  Native lab review must verify this fit; the text drawings are not pixel proof.
+Movie and show Detail expose exactly the same personal actions whether reached
+from Discover, Library, search or recommendations. Only Back context depends on
+arrival. Discover Detail can remove a saved title or mark it unwatched; unsaved
+shows still expose episode tracking and eligible season bulk actions. All instances
+observe shared state after a committed change. Back reapplies current filters to
+the originating context rather than restoring stale membership/watch snapshots.
 
-## 3. Add and manage titles
+## 3. Landing scope and local queries
 
-### Shared Detail actions — user-confirmed requirement
+One compact **Discover / Library** scope menu sits next to media kind; no rail or
+new tab bar. Discover retains its provider kind/search/sort behavior.
 
-Movie and show Detail pages are shared destinations, regardless of whether they
-were opened from Discover, Library, search, or another entry point. The entry
-point affects only Back navigation and restored browse context, never which
-library or watched-status actions are available.
+Library offers:
 
-- Every movie and show Detail exposes **Add to library / Remove from library**,
-  based on current membership, not the route used to reach it.
-- Movie Detail exposes **Mark watched / Mark unwatched**, based on current status.
-- Show Detail exposes **Mark watched / Mark unwatched** for its episodes and
-  confirmed season bulk actions, regardless of library membership or entry point.
-  The show-level summary remains derived; a whole-show toggle is not proposed.
-- These are common Detail controls, not Library-only controls. Discover Detail
-  can remove an already-saved title or mark it unwatched; Library Detail can do
-  the same. Watching an unsaved title does not silently add it to Library.
-- After a successful mutation, all representations of that title share the same
-  updated membership/status. Back restores the originating context and applies
-  its filters to the updated data; it must not restore stale action states.
+- **All / Movies / Series** (default All).
+- Local, literal case-insensitive title-name substring search over saved titles.
+- **Any / Unwatched / In progress / Watched** (default Any). In progress is
+  show-only; selecting Movies resets an active In progress filter to Any.
+- **Recently added / Title A–Z / Newest release-year** (default Recently added).
+  Status and sort live in Library's Filters menu, replacing provider sort.
 
-This entry-point-independent integration is confirmed by the user; the remaining
-wireframe choices below are still proposals.
+Library begins at local membership, not an intersection with a provider page or
+loaded cards. Apply kind/search/status before pagination, with stable ID tie
+breakers. Do not fetch an entire show to answer a Library query. Saved entries
+remain visible without credentials; canonical-only entries must open local Detail
+without a usable provider route. Remote artwork/details can remain unavailable.
 
-### Movie detail
+Restore search, filters, sort, scroll and focus independently per scope within
+the window. Persist personal records across restart, not browse context. Detail
+Back restores the originating view against updated personal state.
 
-```text
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ [←] The Quiet Orbit                                                 ⇅ ⚙ ⋯   │
-│                                                                              │
-│ ┌─────────┐  The Quiet Orbit                                                  │
-│ │ POSTER  │  2024 · 118 min · Drama · ★ 8.1                                   │
-│ │         │  Synopsis…                                                       │
-│ └─────────┘  [▶ Play] [+ Add to library] [○ Mark watched] [⋯]                 │
-│                                                                              │
-│ After saving: [▶ Play] [✓ In library ▾] [○ Mark watched] [⋯]                 │
-│ After watching:                        [✓ Watched ▾]                         │
-└──────────────────────────────────────────────────────────────────────────────┘
+Keep the 48 px toolbar on one row. At 960 px, allow search to shrink to 160 px,
+use the app mark without wordmark, and icon-only Filters with accessible name and
+tooltip. Status indicators use checked menu items and descriptive labels, not
+color alone. Native review must verify actual fit.
 
-[✓ In library ▾]                 [✓ Watched ▾]
-┌─────────────────────────┐     ┌─────────────────────────┐
-│ Remove from library     │     │ Mark unwatched          │
-└─────────────────────────┘     └─────────────────────────┘
-```
+## 4. Conservative show completeness
 
-Play stays the only primary action. Library and status actions are secondary;
-long titles/actions wrap inside the hero, never overflow it.
+Count canonical episodes including specials and announced episodes already in the
+catalog. Known future episodes remain unwatched until manually marked. Newly
+arriving episodes are never automatically marked; they can change a summary.
 
-### Poster context menu (Discover and Library)
+Completeness requires successfully acquired episode listings whose advertised
+season/episode totals reconcile. Missing counts, missing/failed season acquisition,
+contradictory counts or partial fetches mean **unknown**, based on locally persisted
+acquisition evidence, not an eager network crawl.
 
-```text
-┌─────────────────────────────┐
-│ Open details                │
-├─────────────────────────────┤
-│ Add to library              │  or Remove from library
-│ Mark watched                │  movie only; or Mark unwatched
-└─────────────────────────────┘
-```
+- Complete, nonempty sets classify as Unwatched (none), In progress (some), or
+  Watched (all).
+- Empty sets and unknown completeness never imply Watched. Unknown summaries
+  remain in Any only, not any of the three status-specific filters. Show
+  “N watched · total unknown” or “Episode status unavailable”, not a false zero.
+- Season bulk watched/unwatched actions require a complete loaded season.
+  Confirm the exact season and count (for example “Mark 6 episodes in Season 1
+  watched?”), then atomically change that displayed episode set. Episodes arriving
+  after confirmation are excluded. There is no whole-show bulk toggle.
+- Storage source now freezes verified title identity anchors, title/season IDs,
+  season number and episode ID/number pairs. It rechecks these before the atomic
+  bulk write, rejecting stale merged/reused identities instead of targeting
+  different rows. Later arrivals do not expand the confirmed set. This source
+  guard has scoped source-test coverage; see the schema contract and development
+  evidence for validation limits.
 
-- Detail has the always-visible Add action; card context menus offer the fast
-  path without turning poster clicks into save toggles. Click/Enter still opens
-  Detail. A show card offers membership management; episode status lives in Detail.
-- In Discover, saved titles get a quiet bottom-edge “Saved” badge. In Library,
-  membership is implicit: use that space for Watched or episode counts. Unwatched
-  movies need no rest-state badge. Hover/focus exposes textual membership and
-  status without replacing the existing title/facts overlay.
-- Context menus support right-click, Menu key and Shift+F10. Badges have accessible
-  text and contrast-safe backing, using existing v3 tokens.
-- A save/removal only reports success after persistence succeeds. While pending,
-  disable repeat activation of that action, not the whole page. On failure keep
-  the previous state and show an inline error with Retry; never silently lose it.
-- Removal is immediate with an **Undo** notice: “Removed from library. Watched
-  status kept.” It never deletes media files. In a filtered grid, restore focus
-  to the next item (previous if last), and restore the item on Undo without
-  changing sort. The same rule applies when marking watched filters a card out.
-- Saved membership and status must refer to canonical title/episode identity,
-  not a provider page or poster card. Duplicate provider results must not create
-  duplicate library entries. Identity/storage details require implementation design.
+## 5. Loading, writes, Undo and focus
 
-## 4. Show detail — episode tracking
+Personal state has explicit **Loading / Ready / Failed** states. Unknown state is
+not unsaved/unwatched: disable controls until known; offer Retry on failure.
+Metadata remains visible even when personal-state reads fail.
 
-```text
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ [←] North Harbor                                                    ⇅ ⚙ ⋯   │
-│ ┌─────────┐  North Harbor                                                    │
-│ │ POSTER  │  2024 · 2 seasons · Drama                                        │
-│ └─────────┘  [Episodes] [✓ In library ▾] [⋯]                                 │
-│                                                                              │
-│ Episodes          5 of 12 watched                                            │
-│ [Season 1 ▾]  3 of 6 watched                      [Season actions ▾]        │
-│                                                                              │
-│ ┌──────────────────────────────┐  ┌──────────────────────────────┐           │
-│ │ STILL                        │  │ STILL                        │           │
-│ │ S01E01 · Arrival              │  │ S01E02 · Signals             │           │
-│ │ 46 min          [✓ Watched ▾]│  │ 44 min      [○ Mark watched] │           │
-│ └──────────────────────────────┘  └──────────────────────────────┘           │
-└──────────────────────────────────────────────────────────────────────────────┘
+Mutations express desired state, with unique request IDs and per-subject pending
+guards. Report success only after commit; on failure retain previous state and
+show actionable Retry. Disable repeat activation of that action, not the page.
+Queue-full rejection leaves UI unchanged. Navigation/read cancellation cannot
+cancel an accepted durable mutation. Shared snapshots update even if the initiating
+Detail has closed; provider refresh must not overwrite personal state.
 
-SEASON ACTIONS
-┌────────────────────────────────┐
-│ Mark season watched…           │
-│ Mark season unwatched…         │
-└────────────────────────────────┘
-```
+After committed removal offer **Undo**: “Removed from library. Watched status
+kept.” Restore original added-at ordering only if no newer membership intent has
+superseded removal. Undo reapplies the query without discarding sort. When a filter
+removes the focused card, focus next (previous if last); empty results focus the
+appropriate state action. Back must not resurrect removed items from saved views.
 
-- Activating the episode body still opens Streams; the separate status button
-  does not navigate or start playback. It is independently keyboard focusable.
-- Episode context menus also include Mark watched / Mark unwatched.
-- Bulk actions confirm the loaded season and affected count: “Mark 6 episodes
-  in Season 1 watched?” They operate atomically on that displayed episode set,
-  not future episodes. Disable bulk actions when the season listing is incomplete.
-- No whole-show “watched” toggle in the first iteration: explicit season actions
-  avoid accidentally marking a long-running show complete.
-- Counts update across Detail and Library after a successful save. Unknown totals
-  are visibly unknown, never a false completion checkmark.
+Distinguish:
 
-## 5. Empty and failure states
+- Empty Library: “Your library starts here.” → Browse Discover.
+- No matches: “No library titles match these filters.” → Clear filters (reset
+  search, kind and status, preserve sort).
+- Load failure: “Couldn't load your library.” → Retry; retain existing cards,
+  never substitute an empty success.
+- Write failure: previous state unchanged → Retry.
 
-```text
-Library empty
-    Your library starts here.
-    Save movies and shows to keep them together.             [Browse Discover]
+## 6. Identity, durability and background ownership
 
-No filter/search matches
-    No library titles match these filters.                   [Clear filters]
-    Clear filters resets search, kind and status; preserves sort.
+Use canonical integer title/episode IDs resolved through verified external-ID
+mappings at the SQLite boundary, never provider keys, names or artwork guesses.
+If resolution fails, disable writes with a recoverable identity error. Preserve
+provider navigation data only where metadata/source APIs require it.
 
-Library load failure
-    Couldn't load your library.                              [Retry]
-    Never show this as an empty library; retain already loaded cards.
+The [source-implemented schema v7](../catalog-schema.md#personal-library-and-manual-watch-state-proposed-schema-v7)
+adds membership, movie watch and episode watch tables to the **same**
+`catalog.sqlite3`. They and referenced catalog rows are excluded from cache cleanup.
+Removing membership does not erase watch records. Deleting the database **loses
+these personal records**; no backup/export feature is promised here. No user DB
+reset, legacy C++ import, credential storage or path migration is authorized.
 
-Write failure
-    Couldn't save watched status. Your previous status is unchanged. [Retry]
-```
+Verified canonical graph merges transfer personal rows before deleting losers,
+within the same transaction: union membership with earliest added-at; newer watch
+mutation wins, ties with conflicting state prefer unwatched. Preserve explicit
+unwatched rows and refresh remapped UI refs. Contradictions roll everything back.
 
-Library membership and watched status are durable personal data, not disposable
-provider/media cache. Refresh and cache cleanup must not remove either. Library
-load/search must not require provider credentials; remote artwork/details may
-still be unavailable offline. Offline native acceptance remains to be tested.
+Pure policies belong in `kinema-core`; SQL, workers and GPUI in desktop.
+`CatalogWorker` remains the sole SQLite owner, with a distinct bounded local-work
+queue: accepted mutations are FIFO, acknowledged and never coalesced away by
+search/enrichment. Keep HTTP in the existing fetch pool and render free of I/O.
+Batch personal reads and summaries rather than querying per card. AppCoordinator
+owns shared canonical snapshots, pending/error state and outcomes. Reject stale
+scope/detail generations and reads older than a committed personal-state revision.
 
-## 6. Review decisions before implementation
+## 7. Validation contract and scoped evidence
 
-Recommended defaults to approve or revise:
+The visual validation contract calls for native fixtures
+at **1280×800 and 960×600**, dark/light, keyboard focus and reduced motion:
+Discover, Library, movie Detail and show/episodes. Check SERIES stacking, overlay,
+title and tooltip collisions. Fixtures are not real-provider acceptance.
 
-1. **Discover / Library scope menu** on the landing page, with a mixed All view
-   in Library; avoid a separate route or navigation rail.
-2. **Manual watched status first**, independent of membership; episode-level
-   tracking plus confirmed season bulk actions, not automatic playback tracking.
-3. **Keep watched status on removal**, with Undo for membership removal.
+Required automated/native scenarios include migrations and restart durability;
+FK/type constraints and version refusal; merge collisions/rollback; explicit
+unwatched and timestamp ordering; query filtering before pagination; unknown/empty
+completeness, specials and future arrivals; season snapshot boundaries; full queues,
+failed commits, stale reads and navigation during writes; independent membership;
+entry-point parity; child-event isolation; focus/Undo; credential-free local Detail
+and cleanup exclusions. See [development validation requirements](../development.md#library-and-manual-watch-tracking-validation-pending).
 
-After approval: resolve canonical identity, incomplete/changed episode listings,
-durable storage, background writes and stale-result handling; then add native
-GPUI lab fixtures/captures at 1280×800 and 960×600 before production wiring.
-Validate identical Detail actions when entering from Discover, Library and search,
-including removal and marking unwatched from Discover, and episode tracking for
-unsaved shows. Also validate keyboard focus, filter transitions, failed writes,
-persistence across restart, provider duplicates, offline listing, and
-cache-cleanup safety. Domain
-policies belong in kinema-core; presentation/storage adapters in kinema-desktop.
+Implementation is lead-reviewed with scoped checks and captures; the development
+evidence lists the exact reviewed scenes rather than implying every matrix cell
+was accepted. Compiling code or synthetic fixtures alone do not establish full
+offline, provider, playback or cross-platform acceptance.

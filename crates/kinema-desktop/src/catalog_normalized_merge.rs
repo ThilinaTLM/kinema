@@ -189,6 +189,7 @@ fn merge_entity(
         Target::Episode(_) => merge_snapshots(tx, "episode_id", id, other)?,
         _ => {}
     }
+    merge_personal(tx, target, other)?;
     tx.execute(&format!("DELETE FROM {table} WHERE id=?1"), params![other])?;
     Ok(())
 }
@@ -468,5 +469,21 @@ fn merge_snapshots(
             params![winner, snapshot],
         )?;
     }
+    Ok(())
+}
+
+/// Transfer personal rows before RESTRICTed loser deletion, inside the graph transaction.
+fn merge_personal(tx: &Transaction<'_>, target: Target, loser: i64) -> Result<(), CatalogError> {
+    let (table, column, winner) = match target {
+        Target::Title(winner) => {
+            tx.execute("INSERT INTO library_entries(title_id,added_at) SELECT ?1,added_at FROM library_entries WHERE title_id=?2 ON CONFLICT(title_id) DO UPDATE SET added_at=min(library_entries.added_at,excluded.added_at)",params![winner,loser])?;
+            tx.execute("DELETE FROM library_entries WHERE title_id=?1", [loser])?;
+            ("movie_watch_state", "title_id", winner)
+        }
+        Target::Episode(winner) => ("episode_watch_state", "episode_id", winner),
+        _ => return Ok(()),
+    };
+    tx.execute(&format!("INSERT INTO {table}({column},watched,updated_at) SELECT ?1,watched,updated_at FROM {table} WHERE {column}=?2 ON CONFLICT({column}) DO UPDATE SET watched=CASE WHEN excluded.updated_at>{table}.updated_at THEN excluded.watched WHEN excluded.updated_at={table}.updated_at THEN min({table}.watched,excluded.watched) ELSE {table}.watched END,updated_at=max({table}.updated_at,excluded.updated_at)"),params![winner,loser])?;
+    tx.execute(&format!("DELETE FROM {table} WHERE {column}=?1"), [loser])?;
     Ok(())
 }

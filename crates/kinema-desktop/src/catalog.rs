@@ -29,6 +29,8 @@ mod metadata;
 use metadata::migrate_metadata;
 pub(crate) use metadata::provider_cinemeta;
 pub(crate) use normalized_tmdb::observation as provider_tmdb_observation;
+#[path = "catalog_library.rs"]
+pub(crate) mod library;
 #[path = "catalog_normalized.rs"]
 mod normalized;
 #[path = "catalog_normalized_backfill.rs"]
@@ -51,7 +53,7 @@ mod normalized_tmdb;
 mod schema;
 
 const ENDPOINT: &str = "https://v3-cinemeta.strem.io/";
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 const MAX_EPISODES: usize = 20_000;
 const MAX_URL_BYTES: usize = 4096;
 const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
@@ -97,7 +99,7 @@ impl fmt::Display for CatalogError {
             Self::InvalidResponse => "Cinemeta returned an invalid catalog response.",
             Self::InvalidMetadata => "The provider returned invalid catalog metadata.",
             Self::MissingIdentityMapping => {
-                "Source lookup requires a verified catalog target and IMDb mapping."
+                "This action requires a verified catalog identity. Refresh title details and retry."
             }
             Self::IdentityConflict => "The metadata identifiers conflict with the saved catalog.",
             Self::ResponseTooLarge => "Cinemeta returned a catalog response that is too large.",
@@ -188,6 +190,7 @@ fn retire_legacy_caches(tx: &rusqlite::Transaction<'_>) -> Result<(), CatalogErr
 fn initialize_catalog(connection: &mut Connection) -> Result<(), CatalogError> {
     let tx = connection.transaction()?;
     schema::migrate(&tx)?;
+    schema::migrate_library(&tx)?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
     Ok(())
@@ -286,6 +289,9 @@ impl CatalogService {
             let tx = connection.transaction()?;
             if version < 4 {
                 schema::migrate(&tx)?;
+                // Backfill may reconcile verified graphs, whose merge boundary
+                // now preserves personal rows even though these start empty.
+                schema::migrate_library(&tx)?;
                 normalized_backfill::backfill(&tx)?;
             } else if version == 4 {
                 tx.execute_batch("ALTER TABLE metadata_fetches ADD COLUMN facts_json TEXT;")?;
@@ -294,6 +300,9 @@ impl CatalogService {
             // The user explicitly authorized disposal of obsolete caches, even
             // old-only results that the conservative backfill cannot represent.
             retire_legacy_caches(&tx)?;
+            if version >= 4 {
+                schema::migrate_library(&tx)?;
+            }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -1433,7 +1442,7 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(tables, 12);
+        assert_eq!(tables, 15);
         assert_eq!(
             service
                 .connection
@@ -1490,7 +1499,7 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(tables, 12);
+        assert_eq!(tables, 15);
         assert_eq!(
             connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
             SCHEMA_VERSION
@@ -1733,6 +1742,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("v5");
         let service = CatalogService::open(&path)?;
+        service.connection.execute_batch("DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state;")?;
         service.connection.pragma_update(None, "user_version", 5)?;
         drop(service);
         let service = CatalogService::open(&path)?;

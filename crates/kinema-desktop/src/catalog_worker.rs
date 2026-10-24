@@ -8,6 +8,14 @@
 //! fetch thread can start the replacement immediately; saturation still waits
 //! for a bounded HTTP timeout. Drop closes mailboxes without joining threads.
 
+pub(crate) mod local;
+#[cfg(test)]
+#[path = "catalog_worker/local_tests.rs"]
+mod local_tests;
+use local::{
+    LOCAL_CAPACITY, LibraryOperation, LibraryResult, LocalEvent, LocalRequest, LocalSubmit,
+};
+
 use std::{
     any::Any,
     collections::VecDeque,
@@ -261,6 +269,10 @@ pub(crate) enum Submit {
 
 #[derive(Default)]
 struct MailState {
+    local: VecDeque<LocalRequest>,
+    local_events: VecDeque<LocalEvent>,
+    local_outstanding: usize,
+    local_burst: usize,
     slots: [Option<Request>; 2],
     search_enqueued: [Option<Instant>; 2],
     metadata_enqueued: [Option<Instant>; METADATA_SLOTS],
@@ -334,6 +346,27 @@ pub(crate) struct Mailbox {
 }
 
 impl Mailbox {
+    fn submit_local(&self, request: LocalRequest) -> LocalSubmit {
+        let mut state = self.lock();
+        if state.closed {
+            return LocalSubmit::Closed;
+        }
+        if state.local_outstanding >= LOCAL_CAPACITY {
+            return LocalSubmit::Full;
+        }
+        state.local_outstanding += 1;
+        state.local.push_back(request);
+        self.wake.notify_one();
+        LocalSubmit::Queued
+    }
+
+    fn poll_local(&self) -> Option<LocalEvent> {
+        let mut state = self.lock();
+        let event = state.local_events.pop_front()?;
+        state.local_outstanding -= 1;
+        Some(event)
+    }
+
     fn lock(&self) -> MutexGuard<'_, MailState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -462,10 +495,20 @@ impl Mailbox {
     fn next<B: Backend>(&self, in_flight: usize) -> Option<Ready<B>> {
         let mut state = self.lock();
         loop {
+            // Normal shutdown drains accepted durable work, even after views close.
             if state.closed {
-                return None;
+                return state.local.pop_front().map(Ready::Local);
+            }
+            // At most four local jobs before giving completed persistence and
+            // remote preparation a turn. Saturated HTTP never blocks local jobs.
+            if state.local_burst < 4
+                && let Some(request) = state.local.pop_front()
+            {
+                state.local_burst += 1;
+                return Some(Ready::Local(request));
             }
             if let Some(completed) = state.completed.pop_front() {
+                state.local_burst = 0;
                 return completed
                     .downcast::<Completed<B>>()
                     .ok()
@@ -496,6 +539,7 @@ impl Mailbox {
                         })
                     };
                     if let Some(work) = work {
+                        state.local_burst = 0;
                         state.next = (index + 1) % slots;
                         let enqueued = if index < state.slots.len() {
                             state.search_enqueued[index].take()
@@ -509,6 +553,10 @@ impl Mailbox {
                         ));
                     }
                 }
+            }
+            if let Some(request) = state.local.pop_front() {
+                state.local_burst = 1;
+                return Some(Ready::Local(request));
             }
             let queued =
                 state.slots.iter().flatten().count() + state.metadata.iter().flatten().count();
@@ -732,6 +780,9 @@ pub(crate) type Fetch<B> = Box<dyn FnOnce() -> Persist<B> + Send>;
 
 /// Blocking catalog operations; errors are already user-safe messages.
 pub(crate) trait Backend: Sized + 'static {
+    fn local_work(&mut self, _operation: &LibraryOperation) -> Result<LibraryResult, String> {
+        Err("Local personal state is unavailable from this backend.".into())
+    }
     fn prepare(
         &mut self,
         _work: &Work,
@@ -778,6 +829,10 @@ pub(crate) fn snapshot(search: CachedSearch) -> Snapshot {
 }
 
 impl Backend for CatalogService {
+    fn local_work(&mut self, operation: &LibraryOperation) -> Result<LibraryResult, String> {
+        CatalogService::library_operation(self, operation.clone())
+            .map_err(crate::catalog::diagnostic_error)
+    }
     fn prepare(
         &mut self,
         work: &Work,
@@ -904,6 +959,13 @@ impl CatalogWorker {
     pub(crate) fn spawn<B: Backend + 'static>(
         open: impl FnMut() -> Result<B, String> + Send + 'static,
     ) -> io::Result<Self> {
+        Self::spawn_configured(open, FETCH_THREADS)
+    }
+
+    fn spawn_configured<B: Backend + 'static>(
+        open: impl FnMut() -> Result<B, String> + Send + 'static,
+        fetch_threads: usize,
+    ) -> io::Result<Self> {
         let mailbox = Arc::new(Mailbox::default());
         let events = Arc::new(EventBox::default());
         let metadata_events = Arc::new(MetadataEventBox::default());
@@ -919,6 +981,7 @@ impl CatalogWorker {
                     &worker_events,
                     &worker_metadata_events,
                     open,
+                    fetch_threads,
                 );
             })?;
         Ok(Self {
@@ -937,6 +1000,14 @@ impl CatalogWorker {
         self.mailbox.submit_metadata(request)
     }
 
+    pub(crate) fn submit_local(&self, request: LocalRequest) -> LocalSubmit {
+        self.mailbox.submit_local(request)
+    }
+
+    pub(crate) fn poll_local(&self) -> Option<LocalEvent> {
+        self.mailbox.poll_local()
+    }
+
     /// Exact-generation cancellation for clear-search/provider-change owners.
     pub(crate) fn cancel_search(&self, kind: MediaKind, generation: u64) {
         self.mailbox.cancel_search(kind, generation);
@@ -946,6 +1017,16 @@ impl CatalogWorker {
     pub(crate) fn cancel_metadata(&self, action: &MetadataAction, generation: u64) {
         self.mailbox.cancel_metadata(action, generation);
         self.metadata_events.cancel(action, generation);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stop_for_test(&self) {
+        self.mailbox.close();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_finished_for_test(&self) -> bool {
+        self._thread.is_finished()
     }
 
     /// Non-blocking; the UI checks the action and generation before applying.
@@ -1000,23 +1081,47 @@ struct Completed<B> {
     persist: Persist<B>,
 }
 enum Ready<B> {
+    Local(LocalRequest),
     Work(Work, Duration),
     Completed(Completed<B>),
 }
 type FetchJob = Box<dyn FnOnce() + Send>;
+
+// Validate revision capacity before calling a potentially committing operation.
+fn execute_local<B: Backend>(
+    backend: &mut B,
+    operation: &LibraryOperation,
+    revision: &mut u64,
+) -> Result<LibraryResult, String> {
+    let next = if local::is_mutation(operation) {
+        revision
+            .checked_add(1)
+            .ok_or("Personal-state revision limit reached. Restart before retrying.")?
+    } else {
+        *revision
+    };
+    backend.set_cancellation(None);
+    let result = backend.local_work(operation);
+    if result.is_ok() {
+        *revision = next;
+    }
+    result
+}
 
 fn run<B: Backend>(
     mailbox: &Arc<Mailbox>,
     events: &EventBox,
     metadata_events: &MetadataEventBox,
     mut open: impl FnMut() -> Result<B, String>,
+    fetch_threads: usize,
 ) {
     tracing::info!(fetch_threads = FETCH_THREADS, "Catalog worker started");
     // At most four submitted jobs, including completed-but-not-persisted jobs.
     // The SQLite owner never waits for a busy fetch thread or joins on shutdown.
     let (jobs, receiver) = std::sync::mpsc::sync_channel::<FetchJob>(FETCH_THREADS);
     let receiver = Arc::new(Mutex::new(receiver));
-    for index in 0..FETCH_THREADS {
+    let mut started_threads = 0;
+    for index in 0..fetch_threads {
         let receiver = Arc::clone(&receiver);
         let close = Arc::clone(mailbox);
         if std::thread::Builder::new()
@@ -1038,15 +1143,34 @@ fn run<B: Backend>(
                 }
             })
             .inspect_err(|error| tracing::error!(io_kind = ?error.kind(), "Catalog fetch worker spawn failed"))
-            .is_err()
+            .is_ok()
         {
-            return;
+            started_threads += 1;
         }
     }
     let mut backend: Option<B> = None;
     let mut in_flight = 0;
+    let mut personal_revision = 0_u64;
     while let Some(ready) = mailbox.next::<B>(in_flight) {
         match ready {
+            Ready::Local(request) => {
+                let result = if backend.is_none() {
+                    open().map(|opened| backend = Some(opened))
+                } else {
+                    Ok(())
+                }
+                .and_then(|()| {
+                    let backend = backend
+                        .as_mut()
+                        .ok_or("The local catalog could not be opened.")?;
+                    execute_local(backend, &request.operation, &mut personal_revision)
+                });
+                mailbox.lock().local_events.push_back(LocalEvent {
+                    request,
+                    revision: personal_revision,
+                    result,
+                });
+            }
             Ready::Completed(completed) => {
                 in_flight -= 1;
                 let Completed {
@@ -1119,6 +1243,12 @@ fn run<B: Backend>(
                     continue;
                 };
                 if !read_before_fetch(mailbox, events, metadata_events, backend, &work, &cancel) {
+                    finish_work(mailbox, &work, &cancel);
+                    continue;
+                }
+                if started_threads == 0 {
+                    send_terminal(mailbox, events, metadata_events, &work, &cancel,
+                        Err("Remote fetch workers are unavailable. Local Library remains available.".into()));
                     finish_work(mailbox, &work, &cancel);
                     continue;
                 }

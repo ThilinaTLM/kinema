@@ -1,13 +1,19 @@
 //! V3 composition root: persistent Browse, route-local Detail, and shared sessions.
 use super::{
-    browse::{Browse, OpenTitle, Sort, menu_item},
+    browse::{
+        Browse, BrowseRequest, LibraryFilters, OpenTitle, Scope, Sort,
+        filters::{FiltersButton, FiltersChanged},
+        menu_item,
+    },
     coordinator::{AppCoordinator, BrowseTitle, CoordinatorEvent},
     detail::{Detail, OpenDetailTitle},
 };
 use crate::widgets::{
+    button::Button,
     icon::IconName,
     icon_button::IconButton,
     menu::{Menu, Select, SelectEvent},
+    notice::{Notice, NoticeKind},
     popover::Popover,
     search_field::{SearchField, SearchFieldEvent},
     segmented::Segmented,
@@ -16,8 +22,11 @@ use crate::widgets::{
     tokens::{self, radius, space as s, typeface as t},
 };
 use gpui::{prelude::*, *};
-use kinema_core::MediaKind;
-use std::rc::Rc;
+use kinema_core::{MediaKind, library::LibraryKind};
+use std::{rc::Rc, time::Duration};
+
+/// How long a non-actionable personal-state notice stays visible.
+const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
 
 actions!(
     v3_main,
@@ -57,7 +66,7 @@ const SEARCH_HINT: &str = if cfg!(target_os = "macos") {
 };
 /// Preferred search width; it yields space to the side groups when narrow.
 const SEARCH_WIDTH: Pixels = px(420.);
-const SEARCH_MIN_WIDTH: Pixels = px(180.);
+const SEARCH_MIN_WIDTH: Pixels = px(160.);
 
 pub(crate) enum Route {
     Browse,
@@ -69,6 +78,11 @@ pub struct MainWindow {
     transfers: Entity<super::transfers::Transfers>,
     search: Entity<SearchField>,
     sort: Entity<Select<Sort>>,
+    scope_select: Entity<Select<Scope>>,
+    library_kind: Entity<Select<LibraryKind>>,
+    filters_button: Entity<FiltersButton>,
+    notice_seen: Option<String>,
+    notice_task: Option<Task<()>>,
     pub(crate) route: Route,
     detail_subscription: Option<Subscription>,
     launch_pulse: u64,
@@ -105,6 +119,10 @@ impl MainWindow {
             s
         });
         let sort = cx.new(|cx| Select::new(Sort::Provider, Sort::options(), cx));
+        let scope_select = cx.new(|cx| Select::new(Scope::Discover, Scope::options(), cx));
+        let library_kind =
+            cx.new(|cx| Select::new(LibraryKind::All, LibraryFilters::kind_options(), cx));
+        let filters_button = cx.new(FiltersButton::new);
         let editor = search.read(cx).input();
         let subscriptions = vec![
             cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
@@ -134,19 +152,93 @@ impl MainWindow {
             ),
             cx.observe(&coordinator, |this, coordinator, cx| {
                 let query = coordinator.read(cx).query.clone();
-                if query != this.observed_query {
+                // Library keeps its own search text; Discover's query never overwrites it.
+                if query != this.observed_query && this.browse.read(cx).scope() == Scope::Discover {
                     this.observed_query = query.clone();
                     if this.search.read(cx).text(cx) != query {
                         this.search.update(cx, |s, cx| s.set_text(query, cx));
                     }
                 }
+                let notice = coordinator.read(cx).personal_notice.clone();
+                if notice != this.notice_seen {
+                    this.notice_seen.clone_from(&notice);
+                    this.notice_task = None;
+                    // Only confirmations expire. Every failure (retryable or not)
+                    // stays until Retry, Dismiss or a newer outcome replaces it.
+                    if let Some(message) = notice
+                        && !coordinator.read(cx).personal_notice_failed()
+                    {
+                        this.notice_task = Some(cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(NOTICE_TIMEOUT).await;
+                            let _ = this.update(cx, |this, cx| {
+                                this.coordinator.update(cx, |c, cx| {
+                                    if c.personal_notice.as_deref() == Some(message.as_str())
+                                        && !c.personal_notice_failed()
+                                    {
+                                        c.dismiss_personal_notice(cx);
+                                    }
+                                })
+                            });
+                        }));
+                    }
+                }
                 cx.notify();
             }),
-            cx.subscribe(&search, |this, search, _: &SearchFieldEvent, cx| {
-                let query = search.read(cx).text(cx).to_owned();
-                this.coordinator
-                    .update(cx, |c, cx| c.load(c.kind, query, false, cx));
+            cx.subscribe(&search, |this, search, event: &SearchFieldEvent, cx| {
+                // Routed by the scope showing *now*: a debounce that outlived a scope
+                // switch carries the other scope's text and is a no-op there.
+                let text = search.read(cx).text(cx).to_owned();
+                let submitted = *event == SearchFieldEvent::Submitted;
+                match this.browse.read(cx).scope() {
+                    Scope::Library => {
+                        let (filters, same) = {
+                            let browse = this.browse.read(cx);
+                            (browse.library_filters(), browse.library_search() == text)
+                        };
+                        if !same || submitted {
+                            this.browse
+                                .update(cx, |b, cx| b.set_library(filters, &text, cx));
+                        }
+                    }
+                    Scope::Discover => {
+                        if submitted || this.coordinator.read(cx).query != text {
+                            this.coordinator
+                                .update(cx, |c, cx| c.load(c.kind, text, false, cx));
+                        }
+                    }
+                }
             }),
+            cx.subscribe_in(
+                &scope_select,
+                window,
+                |this, _, event: &SelectEvent<Scope>, window, cx| {
+                    let SelectEvent::Changed(scope) = event;
+                    this.switch_scope(*scope, window, cx);
+                },
+            ),
+            cx.subscribe(
+                &library_kind,
+                |this, _, event: &SelectEvent<LibraryKind>, cx| {
+                    let SelectEvent::Changed(kind) = event;
+                    let kind = *kind;
+                    this.update_filters(cx, |f| f.set_kind(kind));
+                },
+            ),
+            cx.subscribe(&filters_button, |this, _, event: &FiltersChanged, cx| {
+                let FiltersChanged(next) = *event;
+                this.update_filters(cx, |f| {
+                    f.status = next.status;
+                    f.sort = next.sort;
+                });
+            }),
+            cx.subscribe_in(
+                &browse,
+                window,
+                |this, _, request: &BrowseRequest, window, cx| match request {
+                    BrowseRequest::ShowDiscover => this.switch_scope(Scope::Discover, window, cx),
+                    BrowseRequest::ClearLibraryFilters => this.clear_library(cx),
+                },
+            ),
             cx.subscribe(&sort, |this, _, event: &SelectEvent<Sort>, cx| {
                 let SelectEvent::Changed(sort) = event;
                 this.browse.update(cx, |b, cx| {
@@ -177,6 +269,11 @@ impl MainWindow {
             transfers,
             search,
             sort,
+            scope_select,
+            library_kind,
+            filters_button,
+            notice_seen: None,
+            notice_task: None,
             route: Route::Browse,
             detail_subscription: None,
             launch_pulse: 0,
@@ -189,6 +286,10 @@ impl MainWindow {
     }
     fn open_title(&mut self, title: BrowseTitle, window: &mut Window, cx: &mut Context<Self>) {
         title.log_navigation("detail");
+        if matches!(self.route, Route::Browse) {
+            self.browse
+                .update(cx, |b, cx| b.remember_context(window, cx));
+        }
         // Retire the old view/subscription before its shared resources change.
         // Browse stays mounted as an entity, preserving its selection and scroll.
         self.detail_subscription = None;
@@ -209,6 +310,143 @@ impl MainWindow {
         self.route = Route::Detail(detail);
         self.focus.focus(window, cx);
         cx.notify();
+    }
+
+    /// Native fixture seam for production Library captures: seeds saved results and
+    /// personal state, selects Library and mirrors the toolbar, with no worker read.
+    #[cfg(feature = "ui-probe")]
+    pub(crate) fn show_library_fixture(
+        &mut self,
+        titles: Vec<(BrowseTitle, super::coordinator::PersonalTitle)>,
+        filters: LibraryFilters,
+        search: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.coordinator.update(cx, |c, cx| {
+            let mut shown = Vec::new();
+            for (title, personal) in titles {
+                c.fixture_personal(&title, personal, Vec::new());
+                shown.push(title);
+            }
+            let generation = c.library.begin(true);
+            c.library_titles = shown.clone();
+            c.library_has_more = false;
+            c.library.fetched(generation, shown, 0);
+            cx.notify();
+        });
+        self.browse.update(cx, |b, cx| {
+            b.show_library_fixture(filters, search, window, cx)
+        });
+        self.scope_select
+            .update(cx, |s, cx| s.set_value(Scope::Library, cx));
+        self.library_kind
+            .update(cx, |s, cx| s.set_value(filters.kind, cx));
+        self.filters_button
+            .update(cx, |button, cx| button.set_filters(filters, cx));
+        self.search.update(cx, |s, cx| {
+            s.set_placeholder(Scope::Library.search_placeholder(MediaKind::Movie), cx);
+            s.set_text(search, cx);
+        });
+        cx.notify();
+    }
+    /// Switch Discover/Library; each scope keeps its own search text, filters,
+    /// scroll and selection, so only the visible scope's state is shown.
+    fn switch_scope(&mut self, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {
+        if self.browse.read(cx).scope() == scope {
+            return;
+        }
+        self.browse
+            .update(cx, |b, cx| b.set_scope(scope, window, cx));
+        self.scope_select.update(cx, |s, cx| s.set_value(scope, cx));
+        let (text, placeholder) = match scope {
+            Scope::Library => (
+                self.browse.read(cx).library_search().to_owned(),
+                scope.search_placeholder(MediaKind::Movie),
+            ),
+            Scope::Discover => {
+                let c = self.coordinator.read(cx);
+                (c.query.clone(), scope.search_placeholder(c.kind))
+            }
+        };
+        self.search.update(cx, |s, cx| {
+            s.set_placeholder(placeholder, cx);
+            if s.text(cx) != text {
+                s.set_text(text, cx);
+            }
+        });
+        cx.notify();
+    }
+    fn update_filters(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut LibraryFilters)) {
+        let (before, search) = {
+            let browse = self.browse.read(cx);
+            (browse.library_filters(), browse.library_search().to_owned())
+        };
+        let mut filters = before;
+        change(&mut filters);
+        if filters == before {
+            return;
+        }
+        self.filters_button
+            .update(cx, |button, cx| button.set_filters(filters, cx));
+        self.browse
+            .update(cx, |b, cx| b.set_library(filters, &search, cx));
+        cx.notify();
+    }
+    fn clear_library(&mut self, cx: &mut Context<Self>) {
+        self.library_kind
+            .update(cx, |s, cx| s.set_value(LibraryKind::All, cx));
+        self.browse.update(cx, |b, cx| b.clear_library_filters(cx));
+        let filters = self.browse.read(cx).library_filters();
+        self.filters_button
+            .update(cx, |button, cx| button.set_filters(filters, cx));
+        self.search.update(cx, |s, cx| s.set_text("", cx));
+        cx.notify();
+    }
+    /// The one global personal-state toast: confirmation (with Undo after a
+    /// removal) or the latest failure (with the coordinator's exact Retry).
+    fn personal_notice(&self, cx: &mut Context<Self>) -> Option<Notice> {
+        let (message, failed, retry, undo) = {
+            let c = self.coordinator.read(cx);
+            let failed = c.personal_notice_failed();
+            (
+                c.personal_notice.clone()?,
+                failed,
+                failed && c.can_retry_personal_write(),
+                !failed && c.can_undo_membership(),
+            )
+        };
+        let kind = match (failed, undo) {
+            (true, _) => NoticeKind::Error,
+            (_, true) => NoticeKind::Info,
+            _ => NoticeKind::Success,
+        };
+        let label = if retry {
+            "Retry"
+        } else if undo {
+            "Undo"
+        } else {
+            "Dismiss"
+        };
+        Some(Notice::new(kind, message).action(
+            Button::new("personal-notice-action", label).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.coordinator.update(cx, |c, cx| {
+                        let result = if retry {
+                            c.retry_personal_write(cx)
+                        } else if undo {
+                            c.undo_membership(cx)
+                        } else {
+                            c.dismiss_personal_notice(cx);
+                            Ok(())
+                        };
+                        if let Err(error) = result {
+                            c.report_personal_failure(error, cx);
+                        }
+                    });
+                },
+            )),
+        ))
     }
 
     fn open_local(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -279,6 +517,9 @@ impl MainWindow {
     }
     fn refresh(&mut self, cx: &mut Context<Self>) {
         match &self.route {
+            Route::Browse if self.browse.read(cx).scope() == Scope::Library => {
+                self.browse.update(cx, |b, cx| b.reload_library(cx))
+            }
             Route::Browse => self
                 .coordinator
                 .update(cx, |c, cx| c.load(c.kind, c.query.clone(), true, cx)),
@@ -302,6 +543,12 @@ impl MainWindow {
         crate::artwork::begin_generation("v3-detail", cx);
         self.coordinator
             .update(cx, |c, cx| c.cancel_title_requests(cx));
+        // Detail may have acquired metadata that changes derived watch status, sort
+        // or titles; re-run the same local query (no remote request, loaded range
+        // retained by the coordinator) before focus returns to the grid.
+        if self.browse.read(cx).scope() == Scope::Library {
+            self.browse.update(cx, |b, cx| b.reload_library(cx));
+        }
         self.browse.update(cx, |b, cx| b.restore_focus(window, cx));
         cx.notify();
     }
@@ -376,6 +623,8 @@ impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = *tokens::palette(cx);
         let kind = self.coordinator.read(cx).kind;
+        let scope = self.browse.read(cx).scope();
+        let personal_notice = self.personal_notice(cx);
         let count = self.coordinator.read(cx).active_sessions();
         let change = cx.entity().downgrade();
         let in_detail = matches!(self.route, Route::Detail(_));
@@ -458,32 +707,43 @@ impl Render for MainWindow {
                 .children(actions.take().unwrap_or_default())
                 .into_any_element()
         } else {
-            Segmented::new(
-                "kind",
-                [
-                    (MediaKind::Movie, "Movies".into()),
-                    (MediaKind::Series, "Series".into()),
-                ],
-                kind,
-            )
-            .on_change(move |kind, _, cx| {
-                let _ = change.update(cx, |this, cx| {
-                    let query = this.search.read(cx).text(cx).to_owned();
-                    this.coordinator
-                        .update(cx, |c, cx| c.load(*kind, query, false, cx));
-                    this.search.update(cx, |s, cx| {
-                        s.set_placeholder(
-                            if *kind == MediaKind::Movie {
-                                "Search movies…"
-                            } else {
-                                "Search series…"
-                            },
-                            cx,
-                        )
+            let kind_control = if scope == Scope::Library {
+                self.library_kind.clone().into_any_element()
+            } else {
+                Segmented::new(
+                    "kind",
+                    [
+                        (MediaKind::Movie, "Movies".into()),
+                        (MediaKind::Series, "Series".into()),
+                    ],
+                    kind,
+                )
+                .on_change(move |kind, _, cx| {
+                    let _ = change.update(cx, |this, cx| {
+                        let query = this.search.read(cx).text(cx).to_owned();
+                        this.coordinator
+                            .update(cx, |c, cx| c.load(*kind, query, false, cx));
+                        this.search.update(cx, |s, cx| {
+                            s.set_placeholder(
+                                if *kind == MediaKind::Movie {
+                                    "Search movies…"
+                                } else {
+                                    "Search series…"
+                                },
+                                cx,
+                            )
+                        });
                     });
-                });
-            })
-            .into_any_element()
+                })
+                .into_any_element()
+            };
+            div()
+                .flex()
+                .items_center()
+                .gap(s::S8)
+                .child(self.scope_select.clone())
+                .child(kind_control)
+                .into_any_element()
         };
         // Left and right groups share the free space equally, so the search
         // field stays centered regardless of what each side holds.
@@ -528,7 +788,14 @@ impl Render for MainWindow {
                         .items_center()
                         .justify_end()
                         .gap(s::S8)
-                        .child(
+                        .child(if scope == Scope::Library {
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(s::S6)
+                                .child(self.filters_button.clone())
+                                .into_any_element()
+                        } else {
                             div()
                                 .flex()
                                 .items_center()
@@ -539,8 +806,9 @@ impl Render for MainWindow {
                                         .text_color(p.text_primary)
                                         .child("Sort"),
                                 )
-                                .child(self.sort.clone()),
-                        )
+                                .child(self.sort.clone())
+                                .into_any_element()
+                        })
                         .child(if light {
                             pill(div())
                                 .children(actions.take().unwrap_or_default())
@@ -634,15 +902,20 @@ impl Render for MainWindow {
             .type_style(t::BODY)
             .child(div().flex_1().min_h_0().child(body))
             .child(scroll_scrim(scrolled, p.bg_canvas))
-            .children(self.coordinator.read(cx).notice.clone().map(|n| {
+            .child({
+                let notice = self.coordinator.read(cx).notice.clone();
                 div()
                     .absolute()
                     .top(s::TOOLBAR_HEIGHT)
                     .left_0()
                     .right_0()
                     .p(s::S8)
-                    .child(n)
-            }))
+                    .flex()
+                    .flex_col()
+                    .gap(s::S8)
+                    .children(notice)
+                    .children(personal_notice)
+            })
             .child(toolbar)
             .when_some(self.menu.clone(), |el, menu| {
                 el.child(
@@ -677,11 +950,12 @@ impl Render for MainWindow {
 }
 
 #[cfg(all(test, feature = "ui-probe-test"))]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod interaction_tests {
     use super::*;
     use crate::app::{AppEvent, AppOutcome};
     use ::core::prelude::v1::test;
+    use std::time::Duration;
 
     fn movie(id: u64, name: &str) -> crate::tmdb::TmdbTitle {
         crate::tmdb::TmdbTitle {
@@ -882,6 +1156,467 @@ mod interaction_tests {
             main.update(cx, |view, _, _| assert_eq!(view.launch_pulse, expected))
                 .unwrap();
         }
+    }
+
+    fn draw(main: WindowHandle<MainWindow>, cx: &mut TestAppContext) {
+        cx.run_until_parked();
+        cx.update_window(main.into(), |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+    }
+
+    fn fixture_window(
+        cx: &mut TestAppContext,
+    ) -> (Entity<AppCoordinator>, WindowHandle<MainWindow>) {
+        cx.update(|cx| {
+            tokens::init(cx);
+            tokens::set_reduce_motion(true, cx);
+            bind_keys(cx);
+        });
+        let coordinator = cx.new(|cx| {
+            let mut c = AppCoordinator::fixture(
+                vec![BrowseTitle::Tmdb(movie(1, "Provider movie"))],
+                None,
+                cx,
+            );
+            c.load(MediaKind::Movie, "Provider".into(), false, cx);
+            c
+        });
+        let main = cx
+            .add_window(|window, cx| MainWindow::with_coordinator(coordinator.clone(), window, cx));
+        draw(main, cx);
+        (coordinator, main)
+    }
+
+    /// Replace the Library result list as a completed local read would.
+    fn set_library(coordinator: &Entity<AppCoordinator>, ids: &[u64], cx: &mut TestAppContext) {
+        coordinator.update(cx, |c, cx| {
+            let generation = c.library.begin(true);
+            c.library_titles = ids
+                .iter()
+                .map(|id| BrowseTitle::Tmdb(movie(*id, &format!("Saved {id}"))))
+                .collect();
+            c.library_has_more = false;
+            c.library.fetched(generation, c.library_titles.clone(), 0);
+            cx.notify();
+        });
+    }
+
+    fn type_in_search(main: WindowHandle<MainWindow>, text: &str, cx: &mut TestAppContext) {
+        main.update(cx, |view, _, cx| {
+            view.search.update(cx, |s, cx| s.set_text(text, cx))
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn library_scope_reads_local_results_and_restores_each_scopes_context(cx: &mut TestAppContext) {
+        let (coordinator, main) = fixture_window(cx);
+        let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+        assert_eq!(browse.read_with(cx, |b, _| b.card_keys()), ["Movie:tmdb:1"]);
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Library, window, cx)
+        })
+        .unwrap();
+        set_library(&coordinator, &[7, 8], cx);
+        draw(main, cx);
+        // Library shows its own rows, never the provider grid filtered.
+        assert_eq!(
+            browse.read_with(cx, |b, _| b.card_keys()),
+            ["Movie:tmdb:7", "Movie:tmdb:8"]
+        );
+        main.read_with(cx, |v, cx| {
+            assert_eq!(v.search.read(cx).text(cx), "");
+        })
+        .unwrap();
+        type_in_search(main, "saved", cx);
+        cx.background_executor
+            .advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        browse.read_with(cx, |b, _| assert_eq!(b.library_search(), "saved"));
+        coordinator.read_with(cx, |c, _| assert_eq!(c.query, "Provider"));
+        // Back in Discover the provider query is restored, not Library text.
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Discover, window, cx)
+        })
+        .unwrap();
+        draw(main, cx);
+        main.read_with(cx, |v, cx| {
+            assert_eq!(v.search.read(cx).text(cx), "Provider")
+        })
+        .unwrap();
+        assert_eq!(browse.read_with(cx, |b, _| b.card_keys()), ["Movie:tmdb:1"]);
+    }
+
+    #[gpui::test]
+    fn stale_discover_search_cannot_leak_into_library_or_provider(cx: &mut TestAppContext) {
+        let (coordinator, main) = fixture_window(cx);
+        let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Library, window, cx)
+        })
+        .unwrap();
+        type_in_search(main, "dune", cx);
+        cx.background_executor
+            .advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Discover, window, cx)
+        })
+        .unwrap();
+        // A Discover edit is still inside its debounce window when the user
+        // flips back to Library.
+        type_in_search(main, "Other", cx);
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Library, window, cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.background_executor
+            .advance_clock(Duration::from_millis(600));
+        cx.run_until_parked();
+        main.read_with(cx, |v, cx| assert_eq!(v.search.read(cx).text(cx), "dune"))
+            .unwrap();
+        browse.read_with(cx, |b, _| assert_eq!(b.library_search(), "dune"));
+        coordinator.read_with(cx, |c, _| {
+            assert_eq!(c.query, "Provider", "no provider fetch")
+        });
+        // Rapid back-and-forth settles on the provider's own query.
+        for scope in [Scope::Discover, Scope::Library, Scope::Discover] {
+            main.update(cx, |view, window, cx| view.switch_scope(scope, window, cx))
+                .unwrap();
+        }
+        cx.background_executor
+            .advance_clock(Duration::from_millis(600));
+        cx.run_until_parked();
+        main.read_with(cx, |v, cx| {
+            assert_eq!(v.search.read(cx).text(cx), "Provider")
+        })
+        .unwrap();
+        browse.read_with(cx, |b, _| assert_eq!(b.library_search(), "dune"));
+        coordinator.read_with(cx, |c, _| assert_eq!(c.query, "Provider"));
+    }
+
+    #[gpui::test]
+    fn membership_toggle_reports_failure_without_opening_detail(cx: &mut TestAppContext) {
+        use crate::widgets::poster_card::MembershipRequested;
+        let (coordinator, main) = fixture_window(cx);
+        let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+        let card = browse.read_with(cx, |b, _| b.card_for_test(0));
+        // The fixture has no catalog worker, so the write is rejected up front:
+        // the failure is surfaced and nothing navigates.
+        card.update(cx, |_, cx| cx.emit(MembershipRequested(true)));
+        draw(main, cx);
+        coordinator.read_with(cx, |c, _| assert!(c.personal_notice.is_some()));
+        main.read_with(cx, |v, _| assert!(matches!(v.route, Route::Browse)))
+            .unwrap();
+        // An unacknowledged state is never shown as unsaved: still loading/failed.
+        assert!(!matches!(
+            card.read_with(cx, |card, _| card.membership),
+            crate::widgets::state_toggle::ToggleStatus::Known { on: false, .. }
+        ));
+    }
+
+    #[gpui::test]
+    fn filtered_out_focus_moves_to_next_then_previous_card(cx: &mut TestAppContext) {
+        let (coordinator, main) = fixture_window(cx);
+        let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Library, window, cx)
+        })
+        .unwrap();
+        set_library(&coordinator, &[1, 2, 3], cx);
+        draw(main, cx);
+        let focused = |cx: &mut TestAppContext| {
+            main.update(cx, |_, window, cx| browse.read(cx).focused_key(window, cx))
+                .unwrap()
+        };
+        for (focus, remaining, expected) in [
+            (1usize, vec![1u64, 3], "Movie:tmdb:3"),
+            (2, vec![1, 2], "Movie:tmdb:2"),
+        ] {
+            set_library(&coordinator, &[1, 2, 3], cx);
+            draw(main, cx);
+            let card = browse.read_with(cx, |b, _| b.card_for_test(focus));
+            main.update(cx, |_, window, cx| {
+                card.update(cx, |c, cx| c.focus(window, cx))
+            })
+            .unwrap();
+            draw(main, cx);
+            assert!(focused(cx).is_some());
+            set_library(&coordinator, &remaining, cx);
+            draw(main, cx);
+            assert_eq!(focused(cx).as_deref(), Some(expected));
+        }
+    }
+
+    #[gpui::test]
+    fn one_filters_control_is_text_when_wide_and_icon_only_at_960(cx: &mut TestAppContext) {
+        let (_, main) = fixture_window(cx);
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Library, window, cx)
+        })
+        .unwrap();
+        let mut visual = VisualTestContext::from_window(main.into(), cx);
+        let mut widths = Vec::new();
+        for width in [1280., 960.] {
+            visual.simulate_resize(size(px(width), px(800.)));
+            draw(main, cx);
+            let bounds = visual
+                .debug_bounds("library-filters")
+                .expect("Library shows exactly one Filters control");
+            // Single 48px toolbar row, fully inside the window.
+            assert!(
+                bounds.top() >= px(0.) && bounds.bottom() <= s::TOOLBAR_HEIGHT,
+                "{bounds:?}"
+            );
+            assert!(bounds.right() <= px(width), "{bounds:?}");
+            widths.push(bounds.size.width);
+        }
+        assert!(widths[0] > widths[1] + px(20.), "{widths:?}");
+        // Discover has no Filters control.
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Discover, window, cx)
+        })
+        .unwrap();
+        draw(main, cx);
+        assert!(visual.debug_bounds("library-filters").is_none());
+    }
+
+    #[gpui::test]
+    fn library_requests_the_next_local_page_only_when_more_exist(cx: &mut TestAppContext) {
+        let (coordinator, main) = fixture_window(cx);
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Library, window, cx)
+        })
+        .unwrap();
+        // Establish the active query (the fixture has no worker, so the read fails).
+        coordinator.update(cx, |c, cx| {
+            c.load_library(Default::default(), cx);
+        });
+        let ids: Vec<u64> = (1..=14).collect();
+        set_library(&coordinator, &ids, cx);
+        let seeded = coordinator.read_with(cx, |c, _| c.library.generation());
+        draw(main, cx);
+        coordinator.read_with(cx, |c, _| {
+            assert_eq!(c.library.generation(), seeded, "no more pages: no request");
+        });
+        coordinator.update(cx, |c, cx| {
+            c.library_has_more = true;
+            cx.notify();
+        });
+        draw(main, cx);
+        cx.run_until_parked();
+        coordinator.read_with(cx, |c, _| {
+            assert!(
+                c.library.generation() > seeded,
+                "a visible short list pages"
+            );
+            assert_eq!(c.library_titles.len(), 14, "loaded cards stay on failure");
+        });
+    }
+
+    #[gpui::test]
+    fn only_confirmations_expire_and_failures_persist(cx: &mut TestAppContext) {
+        let (coordinator, _main) = fixture_window(cx);
+        for failure in [false, true] {
+            coordinator.update(cx, |c, cx| {
+                if failure {
+                    c.report_personal_failure("Could not update “Dune”: busy.".into(), cx);
+                } else {
+                    c.personal_notice = Some("Updated “Dune”.".into());
+                    cx.notify();
+                }
+            });
+            cx.run_until_parked();
+            cx.background_executor
+                .advance_clock(Duration::from_secs(60));
+            cx.run_until_parked();
+            coordinator.read_with(cx, |c, _| {
+                assert_eq!(c.personal_notice.is_none(), !failure);
+            });
+        }
+        // Dismiss is the explicit way to clear a failure.
+        coordinator.update(cx, |c, cx| c.dismiss_personal_notice(cx));
+        coordinator.read_with(cx, |c, _| assert!(c.personal_notice.is_none()));
+    }
+
+    fn local_entry(id: i64, added_at: Option<i64>) -> crate::catalog::library::LibraryEntry {
+        use kinema_core::{
+            catalog_normalized::{CanonicalTitle, ExternalIdentifier, FieldValue},
+            library::TitleId,
+        };
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("name".to_owned(), FieldValue::Text(format!("Saved {id}")));
+        crate::catalog::library::LibraryEntry {
+            metadata: CanonicalTitle {
+                id,
+                kind: MediaKind::Movie,
+                identifiers: vec![ExternalIdentifier {
+                    namespace: "imdb".into(),
+                    external_id: format!("tt{id:07}"),
+                }],
+                fields,
+                provenance: vec![],
+                ratings: vec![],
+                updated_at: 0,
+            },
+            personal: crate::catalog::library::PersonalTitle {
+                title_id: TitleId::new(id).unwrap(),
+                kind: MediaKind::Movie,
+                added_at,
+                movie_watch: None,
+                show_summary: None,
+            },
+        }
+    }
+
+    /// Apply committed results the way worker events arrive: first the mutation
+    /// acknowledgement, then the refreshed first Library page.
+    fn commit(
+        coordinator: &Entity<AppCoordinator>,
+        revision: u64,
+        mutation: Option<(i64, bool, Option<i64>)>,
+        page: Vec<crate::catalog::library::LibraryEntry>,
+        cx: &mut TestAppContext,
+    ) {
+        use crate::{
+            catalog::library::{LibraryOperation, LibraryPage, LibraryResult, TitleRef},
+            catalog_worker::local::{LocalEvent, LocalRequest},
+        };
+        use kinema_core::library::{LibraryQuery, TitleId};
+        coordinator.update(cx, |c, cx| {
+            if let Some((id, saved, previous_added_at)) = mutation {
+                let personal = local_entry(id, saved.then_some(20)).personal;
+                c.fixture_apply_personal_event(
+                    LocalEvent {
+                        request: LocalRequest {
+                            request_id: revision * 10,
+                            generation: 0,
+                            operation: LibraryOperation::SetMembership {
+                                title: TitleRef::Canonical(TitleId::new(id).unwrap()),
+                                saved,
+                                restore_added_at: None,
+                            },
+                        },
+                        revision,
+                        result: Ok(LibraryResult::Membership {
+                            personal,
+                            previous_added_at,
+                        }),
+                    },
+                    cx,
+                );
+            }
+            let generation = c.library.begin(false);
+            let total = page.len();
+            c.fixture_apply_personal_event(
+                LocalEvent {
+                    request: LocalRequest {
+                        request_id: revision * 10 + 1,
+                        generation,
+                        operation: LibraryOperation::List(LibraryQuery {
+                            limit: 60,
+                            ..Default::default()
+                        }),
+                    },
+                    revision,
+                    result: Ok(LibraryResult::Page(LibraryPage {
+                        entries: page,
+                        total,
+                    })),
+                },
+                cx,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn committed_remove_then_undo_restores_card_order_and_keeps_focus_by_title(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::widgets::state_toggle::ToggleStatus;
+        let (coordinator, main) = fixture_window(cx);
+        let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Library, window, cx)
+        })
+        .unwrap();
+        let all = || {
+            vec![
+                local_entry(1, Some(30)),
+                local_entry(2, Some(20)),
+                local_entry(3, Some(10)),
+            ]
+        };
+        commit(&coordinator, 1, None, all(), cx);
+        draw(main, cx);
+        let keys = |cx: &mut TestAppContext| browse.read_with(cx, |b, _| b.card_keys());
+        assert_eq!(keys(cx), ["canonical:1", "canonical:2", "canonical:3"]);
+        let focused = |cx: &mut TestAppContext| {
+            main.update(cx, |_, window, cx| browse.read(cx).focused_key(window, cx))
+                .unwrap()
+        };
+        // Focus the middle card, then commit its removal and the refreshed page.
+        let card = browse.read_with(cx, |b, _| b.card_for_test(1));
+        main.update(cx, |_, window, cx| {
+            card.update(cx, |c, cx| c.focus(window, cx))
+        })
+        .unwrap();
+        draw(main, cx);
+        assert_eq!(focused(cx).as_deref(), Some("canonical:2"));
+        commit(
+            &coordinator,
+            2,
+            Some((2, false, Some(20))),
+            vec![local_entry(1, Some(30)), local_entry(3, Some(10))],
+            cx,
+        );
+        draw(main, cx);
+        assert_eq!(keys(cx), ["canonical:1", "canonical:3"]);
+        assert_eq!(focused(cx).as_deref(), Some("canonical:3"), "next card");
+        coordinator.read_with(cx, |c, _| assert!(c.personal_notice.is_some()));
+        // Undo: the committed re-add and refreshed page restore the card at its
+        // original sort position; focus stays on the title it was already on.
+        commit(&coordinator, 3, Some((2, true, None)), all(), cx);
+        draw(main, cx);
+        assert_eq!(keys(cx), ["canonical:1", "canonical:2", "canonical:3"]);
+        assert_eq!(focused(cx).as_deref(), Some("canonical:3"));
+        let restored = browse.read_with(cx, |b, _| b.card_for_test(1));
+        assert!(matches!(
+            restored.read_with(cx, |c, _| c.membership),
+            ToggleStatus::Known { on: true, .. }
+        ));
+    }
+
+    #[gpui::test]
+    fn back_to_library_reruns_the_same_local_query_and_keeps_cards(cx: &mut TestAppContext) {
+        let (coordinator, main) = fixture_window(cx);
+        let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+        main.update(cx, |view, window, cx| {
+            view.switch_scope(Scope::Library, window, cx)
+        })
+        .unwrap();
+        coordinator.update(cx, |c, cx| c.load_library(Default::default(), cx));
+        set_library(&coordinator, &[1, 2], cx);
+        draw(main, cx);
+        let before = coordinator.read_with(cx, |c, _| c.library.generation());
+        main.update(cx, |view, window, cx| {
+            view.open_title(BrowseTitle::Tmdb(movie(1, "Saved 1")), window, cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+        main.update(cx, |view, window, cx| view.leave_detail(window, cx))
+            .unwrap();
+        draw(main, cx);
+        coordinator.read_with(cx, |c, _| {
+            assert!(c.library.generation() > before, "same query re-run on Back");
+        });
+        browse.read_with(cx, |b, _| {
+            assert_eq!(b.scope(), Scope::Library);
+            assert_eq!(b.library_filters(), LibraryFilters::default());
+            assert_eq!(b.card_keys().len(), 2, "loaded cards survive the refresh");
+        });
     }
 
     #[gpui::test]

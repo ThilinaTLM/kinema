@@ -210,6 +210,34 @@ CREATE UNIQUE INDEX indexer_snapshots_movie ON indexer_snapshots(movie_id, index
 CREATE UNIQUE INDEX indexer_snapshots_episode ON indexer_snapshots(episode_id, indexer, query_key, cache_scope) WHERE episode_id IS NOT NULL;
 "#;
 
+/// v7 only: called separately for existing normalized v4-v6 catalogs.
+pub(super) fn migrate_library(tx: &rusqlite::Transaction<'_>) -> Result<(), CatalogError> {
+    tx.execute_batch(
+        r#"
+CREATE TABLE library_entries (
+ title_id INTEGER PRIMARY KEY REFERENCES titles(id) ON DELETE RESTRICT,
+ added_at INTEGER NOT NULL CHECK(added_at >= 0)
+) STRICT;
+CREATE INDEX library_entries_added ON library_entries(added_at DESC, title_id);
+CREATE TABLE movie_watch_state (
+ title_id INTEGER PRIMARY KEY,
+ title_kind TEXT NOT NULL DEFAULT 'movie' CHECK(title_kind = 'movie'),
+ watched INTEGER NOT NULL CHECK(watched IN (0,1)),
+ updated_at INTEGER NOT NULL CHECK(updated_at >= 0),
+ FOREIGN KEY(title_id,title_kind) REFERENCES titles(id,kind) ON DELETE RESTRICT
+) STRICT;
+CREATE INDEX movie_watch_state_updated ON movie_watch_state(updated_at DESC);
+CREATE TABLE episode_watch_state (
+ episode_id INTEGER PRIMARY KEY REFERENCES episodes(id) ON DELETE RESTRICT,
+ watched INTEGER NOT NULL CHECK(watched IN (0,1)),
+ updated_at INTEGER NOT NULL CHECK(updated_at >= 0)
+) STRICT;
+CREATE INDEX episode_watch_state_updated ON episode_watch_state(updated_at DESC);
+"#,
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

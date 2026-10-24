@@ -10,8 +10,11 @@ use super::tokens::space;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum IconName {
     ArrowLeft,
+    Bookmark,
+    BookmarkOff,
     Check,
     Circle,
+    CircleCheck,
     CircleDot,
     ChevronDown,
     ChevronLeft,
@@ -54,7 +57,10 @@ impl IconName {
     pub const fn path(self) -> &'static str {
         match self {
             IconName::ArrowLeft => "icons/arrow-left.svg",
+            IconName::Bookmark => "icons/bookmark.svg",
+            IconName::BookmarkOff => "icons/bookmark-off.svg",
             IconName::Check => "icons/check.svg",
+            IconName::CircleCheck => "icons/circle-check.svg",
             IconName::Circle => "icons/circle.svg",
             IconName::CircleDot => "icons/circle-dot.svg",
             IconName::ChevronDown => "icons/chevron-down.svg",
@@ -96,8 +102,11 @@ impl IconName {
 
     pub const ALL: &'static [IconName] = &[
         IconName::ArrowLeft,
+        IconName::Bookmark,
+        IconName::BookmarkOff,
         IconName::Check,
         IconName::Circle,
+        IconName::CircleCheck,
         IconName::CircleDot,
         IconName::ChevronDown,
         IconName::ChevronLeft,

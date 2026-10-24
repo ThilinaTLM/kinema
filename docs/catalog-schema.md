@@ -1,6 +1,6 @@
 # Catalog and database
 
-**Single authoritative approved target specification; normalized catalog with v6 legacy-cache retirement.**
+**Approved specification: normalized catalog, v6 cache retirement and v7 personal records (source implemented; scoped validation passed).**
 The user approved the reviewed provider-agnostic catalog design and authorized
 implementation: shared movies/series, rich optional metadata, seasons and episodes,
 and bounded background fetching of missing/new details. The tables, fields,
@@ -8,15 +8,118 @@ constraints, and merge rules below describe that approved target, not observed
 runtime behavior. This replaces the former seven-table proposal; it does not
 supplement it with a second competing target.
 
-**Current source status:** `catalog.rs` sets `SCHEMA_VERSION = 6`: the v4
+**Historical v6 baseline (v7 source is now implemented):** schema v6 includes the v4
 normalized foundation, the [v5 detail facts payload](#detail-facts-payload-schema-v5),
-and [v6 legacy-cache retirement](#legacy-cache-retirement-schema-v6). Fresh databases
-create only the twelve normalized `STRICT` tables. Older supported databases pass
+and [v6 legacy-cache retirement](#legacy-cache-retirement-schema-v6). At that baseline,
+fresh databases create only the twelve normalized `STRICT` tables. Older supported databases pass
 through the conservative backfill where applicable before the seven legacy cache
 tables are retired. Live metadata/indexer paths use canonical rows. Legacy backfill
 uses bounded single-row keyset batches. Migration validation uses synthetic temporary
 or in-memory databases, not a writable user database. A user's database upgrades
 when next opened with the new build. This is not full runtime or UI acceptance.
+
+<a id="personal-library-and-manual-watch-state-proposed-schema-v7"></a>
+
+## Personal Library and manual watch state (schema v7)
+
+**Storage source implemented and reviewed; scoped validation passed.** Inspection of `catalog.rs`,
+`catalog_schema.rs`, `catalog_library.rs` and `catalog_library_query.rs` shows
+`SCHEMA_VERSION = 7`, migration wiring and personal storage/query operations.
+V7 contains **15 STRICT tables**: the twelve normalized catalog tables plus the
+three personal tables below. The v6 evidence remains historical baseline evidence,
+not validation of v7. The final Library increment has separate lead-reviewed
+root/feature tests and Linux synthetic UI captures documented in development;
+these establish scoped evidence, not deployed-database or full MVP acceptance.
+See the [Library UI contract](design/library.md).
+
+V7 adds three `STRICT` tables to the existing `catalog.sqlite3`, not a second database:
+
+| Table | Columns and integrity |
+| --- | --- |
+| `library_entries` | `title_id` primary key references `titles(id)` ON DELETE RESTRICT; `added_at` NOT NULL. Row existence means membership. |
+| `movie_watch_state` | `title_id` primary key; `title_kind` NOT NULL DEFAULT 'movie' CHECK equals 'movie'; composite FK `(title_id, title_kind)` to `titles(id, kind)` ON DELETE RESTRICT; `watched` NOT NULL integer CHECK IN (0,1); `updated_at` NOT NULL. |
+| `episode_watch_state` | `episode_id` primary key references `episodes(id)` ON DELETE RESTRICT; `watched` NOT NULL integer CHECK IN (0,1); `updated_at` NOT NULL. |
+
+All timestamps are nonnegative UTC Unix **milliseconds** (distinct from existing
+fetch-time seconds). `updated_at` is mutation order/time, not a viewing date.
+The source DDL adds these indexes:
+
+| Index | Table and ordered columns | Purpose |
+| --- | --- | --- |
+| `library_entries_added` | `library_entries(added_at DESC, title_id)` | Stable Library pagination. |
+| `movie_watch_state_updated` | `movie_watch_state(updated_at DESC)` | Persisted maximum watch timestamp lookup. |
+| `episode_watch_state_updated` | `episode_watch_state(updated_at DESC)` | Persisted maximum watch timestamp lookup. |
+
+The watch indexes support initializing monotonic mutation timestamps from both
+watch tables without a full table scan. After a successful read,
+absent watch rows mean unwatched; explicit unwatched rows persist after actions.
+Read failure/unknown identity is not absence or a successful empty result.
+Membership and watch state are independent; removal preserves watch rows/files.
+No history, resume, automatic marking, credentials or show-level watched column.
+
+V6 upgrades transactionally without changing canonical/provider data. Fresh and
+older supported creation paths include v7 exactly once; retain unsupported-newer
+version refusal. No database reset or historical C++ migration. Personal rows and
+the catalog entities they reference are excluded from cache cleanup. Deleting
+`catalog.sqlite3` loses these records; backup/export is outside this increment.
+
+### Canonical identity and personal-record reconciliation
+
+Resolve provider external IDs through verified identifier mappings at the SQLite
+boundary. Store canonical integer refs, not provider keys or guessed name/artwork
+matches. Unresolved identity disables writes with a recoverable error. Canonical-only
+saved entries must remain locally openable without credentials or a remote route.
+
+In the existing verified graph-merge transaction, before deleting title/episode
+losers (including recursively merged episodes):
+
+- Union membership, retaining the earliest `added_at`.
+- Move watch rows; greater `updated_at` wins. Equal-time conflicting values prefer
+  unwatched deterministically. Absence never overrides an explicit row.
+- Invalidate/return canonical remappings so UI refs refresh. Contradictory identity
+  rolls catalog and personal data back together.
+
+Serialize writes in the sole catalog owner. Watch timestamps use
+`max(wall_clock_ms, last_persisted_watch_timestamp + 1)`, initialized from stored
+watch state; overflow is an error. Use explicit desired state, not blind toggles.
+Accepted durable mutations are FIFO and acknowledged only after commit, separate
+from coalescible metadata/search work; queue saturation is explicit failure.
+
+### Local Library projections and conservative completeness
+
+Start queries at `library_entries` joined to `titles`, never provider page
+membership. Apply kind, bound-parameter literal case-insensitive title substring
+search and status before stable pagination with ID tie breakers. Batch personal
+reads and episode-summary SQL/adapter work; no per-card queries or network crawl.
+Mutations affecting membership/status/sort invalidate the Library query generation;
+read revisions must not overwrite newer committed personal state.
+
+Derive show summaries from canonical episodes, including specials and announced
+future episodes present locally. Future/new episodes are not automatically marked.
+Only successfully acquired listings with reconcilable advertised season/episode
+totals establish completeness. Missing counts, failed/missing season acquisition,
+contradictions and partial fetches mean unknown. Complete nonempty sets classify
+none/some/all watched. Unknown sets remain in Any only, with “N watched · total
+unknown” or status unavailable; empty/unknown never means watched. Use persisted
+acquisition evidence, not a new independent stored whole-show watch flag.
+Season bulk writes require a complete loaded season, confirmed exact count, and
+an atomic displayed episode snapshot excluding later arrivals.
+
+The source freezes title/season IDs, season number, verified title external-ID
+anchors, and paired episode IDs/original episode numbers at confirmation. Snapshot
+creation requires successful season acquisition, a nonempty episode set and a
+matching advertised count. Before writing, the transaction re-resolves every title
+anchor to the original canonical title, checks season ownership/number and retained
+successful acquisition evidence, and verifies each unique episode ID still has its
+original season and episode number. Missing/remapped identities or reused IDs
+fail rather than silently targeting different rows after a merge. The displayed
+set never expands: later arrivals or changed advertised totals alone do not
+invalidate it. All guards precede the atomic write. These guards are observed
+source behavior with scoped test coverage, not a claim of universal runtime safety.
+
+Migration, merge, query, queue and native evidence has been lead-reviewed within
+the scopes recorded in [development](development.md#library-and-manual-watch-tracking-validation-pending).
+Live-provider/playback and Windows/macOS acceptance remain unverified.
 
 ## Implemented normalized catalog (source evidence)
 
@@ -566,7 +669,8 @@ above; current root checks passed, without establishing full runtime/UI acceptan
    pruning. Delete a page/fetch stub only after explicit reference checks show it
    is unreferenced; never cascade through canonical data to make deletion possible.
    A permitted page deletion may cascade only to its page items. Do not orphan
-   provenance or reset the database on errors. No personal-record tables are added.
+   provenance or reset the database on errors. This normalized-catalog baseline adds no personal-record tables; the approved
+    v7 extension above adds them separately, with scoped validation recorded above.
 
 ## Target provenance and deterministic merge rules
 

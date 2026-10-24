@@ -10,19 +10,20 @@ use crate::widgets::{
     chip::{Chip, StatusKind},
     icon::{Icon, IconName},
     icon_button::IconButton,
-    menu::{ContextMenuExt, Menu, MenuItem, Select},
+    menu::{ContextMenuExt, Menu, MenuItem, Select, SelectEvent},
     notice::{Notice, NoticeKind},
     patterns::{
         Badge, BadgeTone, Card, Carousel, ListRow, MediaHero, ResourceView, Section, Skeleton,
         SkeletonText, StateView, ViewState,
     },
     popover::Popover,
-    poster_card::{CardOpened, PosterCard},
+    poster_card::{CardOpened, MembershipRequested, PosterCard},
     progress::Progress,
     scroll_area::ScrollArea,
     search_field::SearchField,
     segmented::Segmented,
     sheet::Sheet,
+    state_toggle::{StateToggle, ToggleKind, ToggleStatus},
     switch::{Checkbox, Radio, Switch},
     text::TypeExt,
     text_input::TextInput,
@@ -32,7 +33,7 @@ use crate::widgets::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 36] = [
+const SCENES: [&str; 45] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
@@ -40,6 +41,14 @@ const SCENES: [&str; 36] = [
     "detail-live-tmdb-series",
     "detail-live-tmdb-series-streams",
     "detail-live-no-art",
+    "library-live",
+    "library-live-filtered",
+    "library-live-empty",
+    "detail-live-local-movie",
+    "detail-live-local-movie-unsaved",
+    "detail-live-local-movie-failed",
+    "detail-live-local-series",
+    "detail-live-local-series-unsaved",
     // Full MainWindow (floating header) on the detail route; `-scrolled`
     // wheel-scrolls the page to show the header scrim over long content.
     "detail-live-window-tmdb-movie",
@@ -70,6 +79,7 @@ const SCENES: [&str; 36] = [
     "detail",
     "series",
     "series-streams",
+    "library",
     "states",
 ];
 
@@ -136,11 +146,159 @@ pub fn run_native() {
                 open_settings_fixture(&scene, options, light, reduce, cx);
                 return;
             }
-            if scene.contains("-live") && !scene.starts_with("browse-live") {
+            if scene.contains("-live")
+                && !scene.starts_with("browse-live")
+                && !scene.starts_with("library-live")
+            {
                 cx.open_window(options, |window, cx| {
                     cx.new(|cx| ProductionScene::new(&scene, window, cx))
                 })
                 .unwrap_or_else(|error| panic!("production fixture window: {error}"));
+            } else if scene.starts_with("library-live") {
+                cx.open_window(options, |window, cx| {
+                    cx.new(|cx| {
+                        use crate::screens::{
+                            browse::LibraryFilters,
+                            coordinator::{AppCoordinator, BrowseTitle, LocalBrowseTitle},
+                        };
+                        use kinema_core::{
+                            MediaKind,
+                            catalog_normalized::{CanonicalTitle, ExternalIdentifier, FieldValue},
+                            library::{
+                                LibraryKind, LibrarySort, ShowSummary, TitleId, WatchFilter,
+                                WatchState,
+                            },
+                        };
+                        let names = [
+                            "North Harbor",
+                            "The Quiet Orbit",
+                            "Last Light",
+                            "Signal",
+                            "The Visitor",
+                            "Winter Sea",
+                            "A Place to Return",
+                            "Far from Home",
+                            "Another Shore",
+                            "Northern Lights",
+                            "The Quiet Archive",
+                            "Zero Hour",
+                        ];
+                        let mut entries = Vec::new();
+                        if scene != "library-live-empty" {
+                            for (i, name) in names.iter().enumerate() {
+                                let series = i % 3 == 0;
+                                let id = 100 + i as i64;
+                                let mut fields = std::collections::BTreeMap::new();
+                                fields.insert("name".into(), FieldValue::Text((*name).into()));
+                                fields.insert(
+                                    if series {
+                                        "first_air_year"
+                                    } else {
+                                        "release_year"
+                                    }
+                                    .into(),
+                                    FieldValue::Integer(2018 + i as i64),
+                                );
+                                fields.insert(
+                                    "genres_json".into(),
+                                    FieldValue::Labels(vec!["Drama".into()]),
+                                );
+                                fields.insert(
+                                    "poster_url".into(),
+                                    FieldValue::Text(format!(
+                                        "https://images.example.test/{id}.jpg"
+                                    )),
+                                );
+                                if !series {
+                                    fields
+                                        .insert("runtime_minutes".into(), FieldValue::Integer(118));
+                                }
+                                let metadata = CanonicalTitle {
+                                    id,
+                                    kind: if series {
+                                        MediaKind::Series
+                                    } else {
+                                        MediaKind::Movie
+                                    },
+                                    identifiers: vec![ExternalIdentifier {
+                                        namespace: "imdb".into(),
+                                        external_id: format!("tt{:07}", i + 1),
+                                    }],
+                                    fields,
+                                    provenance: Vec::new(),
+                                    ratings: Vec::new(),
+                                    updated_at: 0,
+                                };
+                                let personal = crate::screens::coordinator::PersonalTitle {
+                                    title_id: TitleId::new(id)
+                                        .unwrap_or_else(|| panic!("fixture id")),
+                                    kind: metadata.kind,
+                                    added_at: Some(1_700_000_000_000 + i as i64),
+                                    movie_watch: (!series).then_some(WatchState {
+                                        watched: i % 2 == 0,
+                                        updated_at: 1,
+                                    }),
+                                    show_summary: series.then_some(ShowSummary {
+                                        watched: i % 2,
+                                        total: 10,
+                                        complete: i != 3,
+                                    }),
+                                };
+                                entries.push((
+                                    BrowseTitle::Local(LocalBrowseTitle::new(metadata)),
+                                    personal,
+                                ));
+                            }
+                        }
+                        // Manual fixture rows only: keep exactly the entries a Library query for
+                        // search "north" + Unwatched + Title A-Z would return. No SQL is run.
+                        if scene == "library-live-filtered" {
+                            entries.retain(|(title, personal)| {
+                                title.name().to_lowercase().contains("north")
+                                    && match (personal.movie_watch, personal.show_summary) {
+                                        (Some(w), _) => !w.watched,
+                                        (None, Some(s)) => {
+                                            s.status() == Some(WatchFilter::Unwatched)
+                                        }
+                                        _ => false,
+                                    }
+                            });
+                            entries.sort_by(|a, b| a.0.name().cmp(b.0.name()));
+                        }
+                        let filters = if scene == "library-live-filtered" {
+                            LibraryFilters {
+                                kind: LibraryKind::All,
+                                status: WatchFilter::Unwatched,
+                                sort: LibrarySort::Title,
+                            }
+                        } else {
+                            LibraryFilters::default()
+                        };
+                        let coordinator = cx.new(|cx| {
+                            let mut c = AppCoordinator::fixture(Vec::new(), None, cx);
+                            for (i, (title, _)) in entries.iter().enumerate() {
+                                if i % 7 != 6 {
+                                    c.fixture_art.insert(title.key(), art(i, 240, 360));
+                                }
+                            }
+                            c
+                        });
+                        let main = crate::screens::main_window::MainWindow::with_coordinator(
+                            coordinator,
+                            window,
+                            cx,
+                        );
+                        let search = if scene == "library-live-filtered" {
+                            "north"
+                        } else {
+                            ""
+                        };
+                        let mut main = main;
+                        main.show_library_fixture(entries, filters, search, window, cx);
+                        main
+                    })
+                })
+                .unwrap_or_else(|error| panic!("library-live window: {error}"));
             } else if scene.starts_with("browse-live") {
                 cx.open_window(options, |window, cx| {
                     cx.new(|cx| {
@@ -346,6 +504,12 @@ struct Lab {
     selected_episode: usize,
     provenance_open: bool,
     kind: usize,
+    library_select: Entity<Select<usize>>,
+    scope_select: Entity<Select<usize>>,
+    movie_saved: bool,
+    movie_watched: bool,
+    show_saved: bool,
+    episode_watched: [bool; 8],
     checked: bool,
     scroll: ScrollHandle,
     context: Option<Entity<Menu>>,
@@ -410,6 +574,49 @@ impl Lab {
                 cx,
             )
         });
+        let library_select = cx.new(|cx| {
+            Select::new(
+                0,
+                vec![
+                    (0, "Recently added".into()),
+                    (1, "Title A\u{2013}Z".into()),
+                    (2, "Newest release".into()),
+                    (3, "Unwatched".into()),
+                    (4, "In progress".into()),
+                    (5, "Watched".into()),
+                ],
+                cx,
+            )
+        });
+        let in_library = scene.starts_with("library");
+        let scope_select = cx.new(|cx| {
+            Select::new(
+                usize::from(in_library),
+                vec![(0, "Discover".into()), (1, "Library".into())],
+                cx,
+            )
+        });
+        cx.subscribe(&scope_select, |this, _, event: &SelectEvent<usize>, cx| {
+            let SelectEvent::Changed(value) = event;
+            this.scene = if *value == 1 { "library" } else { "browse" }.into();
+            this.search.update(cx, |field, cx| {
+                field.set_placeholder(
+                    if *value == 1 {
+                        "Search library\u{2026}"
+                    } else {
+                        "Search movies\u{2026}"
+                    },
+                    cx,
+                );
+            });
+            cx.notify();
+        })
+        .detach();
+        if in_library {
+            search.update(cx, |field, cx| {
+                field.set_placeholder("Search library\u{2026}", cx)
+            });
+        }
         let titles = [
             "North Harbor",
             "The Last Observatory",
@@ -447,11 +654,45 @@ impl Lab {
                     card.genres = "Drama · Mystery".into();
                     card.synopsis = "A visitor uncovers a secret by the distant shore.".into();
                     card.menu = card_menu();
+                    card.membership = match (in_library, i % 6) {
+                        (true, 4) => ToggleStatus::Known {
+                            on: true,
+                            pending: true,
+                        },
+                        (true, _) => ToggleStatus::Known {
+                            on: true,
+                            pending: false,
+                        },
+                        (false, 0 | 3) => ToggleStatus::Known {
+                            on: false,
+                            pending: false,
+                        },
+                        (false, 1) => ToggleStatus::Known {
+                            on: true,
+                            pending: false,
+                        },
+                        (false, 2) => ToggleStatus::Loading,
+                        (false, 4) => ToggleStatus::Failed,
+                        (false, _) => ToggleStatus::Known {
+                            on: false,
+                            pending: true,
+                        },
+                    };
                     card
                 })
             })
             .collect();
         for card in &cards {
+            // Fixture-only: the lab applies the desired value locally; production
+            // hosts must wait for a committed coordinator outcome.
+            cx.subscribe(card, |_, card, event: &MembershipRequested, cx| {
+                let on = event.0;
+                card.update(cx, |card, cx| {
+                    card.membership = ToggleStatus::Known { on, pending: false };
+                    cx.notify();
+                });
+            })
+            .detach();
             cx.subscribe(card, |this, _, _: &CardOpened, cx| {
                 this.scene = "detail".into();
                 cx.notify();
@@ -511,6 +752,12 @@ impl Lab {
             poster: art(0, 240, 360),
             thumbs: (0..6).map(|i| art(i, 112, 168)).collect(),
             kind: 0,
+            library_select,
+            scope_select,
+            movie_saved: false,
+            movie_watched: true,
+            show_saved: true,
+            episode_watched: [true, true, false, false, true, false, false, false],
             checked: true,
             scroll: ScrollHandle::new(),
             context,
@@ -531,12 +778,25 @@ impl Lab {
                     .child(Icon::new(IconName::Film))
                     .child(div().type_style(t::HEADING).child("Kinema")),
             )
+            .child(self.scope_select.clone())
             .child(
-                Segmented::new(
-                    "kind",
-                    [(0, "Movies".into()), (1, "Series".into())],
-                    self.kind,
-                )
+                if self.scene.starts_with("library") {
+                    Segmented::new(
+                        "library-kind",
+                        [
+                            (0, "All".into()),
+                            (1, "Movies".into()),
+                            (2, "Series".into()),
+                        ],
+                        self.kind,
+                    )
+                } else {
+                    Segmented::new(
+                        "kind",
+                        [(0, "Movies".into()), (1, "Series".into())],
+                        self.kind.min(1),
+                    )
+                }
                 .on_change(cx.listener(|this, value, _, cx| {
                     this.kind = *value;
                     cx.notify();
@@ -549,7 +809,11 @@ impl Lab {
                     .max_w(px(480.))
                     .child(self.search.clone()),
             )
-            .child(self.select.clone())
+            .child(if self.scene.starts_with("library") {
+                self.library_select.clone()
+            } else {
+                self.select.clone()
+            })
             .child(div().flex_1())
             .child(IconButton::new("transfers", IconName::Transfers, "Transfers").badge(2))
             .child(IconButton::new("settings", IconName::Settings, "Settings"))
@@ -1025,6 +1289,37 @@ impl Lab {
             }))
     }
 
+    fn hero_toggle(&self, kind: ToggleKind, series: bool, cx: &mut Context<Self>) -> StateToggle {
+        let on = match (kind, series) {
+            (ToggleKind::Membership, false) => self.movie_saved,
+            (ToggleKind::Membership, true) => self.show_saved,
+            (ToggleKind::Watched, _) => self.movie_watched,
+        };
+        let this = cx.entity();
+        let id = if series { "series-hero" } else { "movie-hero" };
+        StateToggle::new(
+            (id, usize::from(kind == ToggleKind::Watched)),
+            kind,
+            ToggleStatus::Known { on, pending: false },
+            if series {
+                "North Harbor"
+            } else {
+                "The Quiet Orbit"
+            },
+        )
+        .over_art(true)
+        .on_change(move |wanted, _, cx| {
+            this.update(cx, |lab, cx| {
+                match (kind, series) {
+                    (ToggleKind::Membership, false) => lab.movie_saved = wanted,
+                    (ToggleKind::Membership, true) => lab.show_saved = wanted,
+                    (ToggleKind::Watched, _) => lab.movie_watched = wanted,
+                }
+                cx.notify();
+            })
+        })
+    }
+
     fn hero(&self, window: &Window, series: bool, cx: &mut Context<Self>) -> Div {
         let p = *tokens::palette(cx);
         let dark = Palette::dark();
@@ -1124,7 +1419,14 @@ impl Lab {
                                     .overflow_hidden()
                                     .child(synopsis),
                             )
-                            .child(row().child(self.provenance_button(cx))),
+                            .child(
+                                row()
+                                    .child(self.provenance_button(cx))
+                                    .child(self.hero_toggle(ToggleKind::Membership, series, cx))
+                                    .when(!series, |el| {
+                                        el.child(self.hero_toggle(ToggleKind::Watched, series, cx))
+                                    }),
+                            ),
                     ),
             );
         col().flex_1().h_full().min_w_0().gap_0().child(band).child(
@@ -1319,10 +1621,31 @@ impl Lab {
                                     .justify_between()
                                     .child(div().type_style(t::BODY_STRONG).child(title))
                                     .child(
-                                        div()
-                                            .type_style(t::SMALL)
-                                            .text_color(p.text_secondary)
-                                            .child(runtime),
+                                        row()
+                                            .child(
+                                                div()
+                                                    .type_style(t::SMALL)
+                                                    .text_color(p.text_secondary)
+                                                    .child(runtime),
+                                            )
+                                            .child({
+                                                let this = cx.entity();
+                                                StateToggle::new(
+                                                    ("episode-watched", i),
+                                                    ToggleKind::Watched,
+                                                    ToggleStatus::Known {
+                                                        on: self.episode_watched[i],
+                                                        pending: false,
+                                                    },
+                                                    format!("episode {}", i + 1),
+                                                )
+                                                .on_change(move |wanted, _, cx| {
+                                                    this.update(cx, |lab, cx| {
+                                                        lab.episode_watched[i] = wanted;
+                                                        cx.notify();
+                                                    })
+                                                })
+                                            }),
                                     ),
                             )
                             .child(
@@ -1855,7 +2178,9 @@ impl Render for Lab {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = *tokens::palette(cx);
         let content = match self.scene.as_str() {
-            "browse" | "sheet" | "sheet-ready" => self.browse(window, cx).into_any_element(),
+            "browse" | "library" | "sheet" | "sheet-ready" => {
+                self.browse(window, cx).into_any_element()
+            }
             "menus" => self.menus(cx).into_any_element(),
             "detail" | "series" | "series-streams" => self.detail(window, cx).into_any_element(),
             "states" => self.states(window, cx).into_any_element(),
@@ -1991,7 +2316,9 @@ impl ProductionScene {
         };
         let series = scene.contains("series");
         let title=BrowseTitle::Cinemeta(CatalogTitle::new(ImdbId::new("tt1234567").unwrap_or_else(|e|panic!("fixture: {e}")),if series {MediaKind::Series}else{MediaKind::Movie},if series {"North Harbor"} else {"The Quiet Orbit"},Some("A drifting station's last engineer follows a mysterious signal across the silent ocean of space. A synthetic story, made only for this offline design fixture. Nothing here is real: the people, the station and the signal exist only so that long overviews wrap, clamp and expand the way they would for a real title with a generous synopsis.".into())).unwrap_or_else(|e|panic!("fixture: {e}")).with_display(CatalogDisplay{year:Some(2024),imdb_rating:ImdbRating::new(8.1),runtime_minutes:Some(118),genres:vec!["Drama".into(),"Sci-fi".into()],..Default::default()}));
-        let title = if scene.contains("tmdb") {
+        let title = if scene.contains("-local-") {
+            crate::screens::detail::local_fixture_title(series)
+        } else if scene.contains("tmdb") {
             BrowseTitle::Tmdb(crate::tmdb::TmdbTitle {
                 id: 91,
                 kind: if series {
@@ -2089,6 +2416,7 @@ impl ProductionScene {
                     cx,
                 )
             });
+            detail.update(cx, |d, cx| d.seed_personal_fixture(scene, cx));
             coordinator.update(cx, |c, _| {
                 let mut urls = Vec::new();
                 if let Some(d) = c.details.value() {
@@ -2183,6 +2511,9 @@ impl ProductionScene {
         } else {
             None
         };
+        if !scene.starts_with("transfers-live") {
+            focus.focus(window, cx);
+        }
         Self {
             content,
             coordinator,
@@ -2202,6 +2533,11 @@ impl Render for ProductionScene {
             .bg(p.bg_canvas)
             .text_color(p.text_primary)
             .type_style(t::BODY)
+            // Keyboard traversal for native focus captures of production scenes.
+            .key_context("KinemaLab")
+            .track_focus(&self.focus)
+            .on_action(|_: &NextFocus, window, cx| window.focus_next(cx))
+            .on_action(|_: &PreviousFocus, window, cx| window.focus_prev(cx))
             .when(!self.transfers, |el| el.child(self.content.clone()))
             .when(self.transfers, |el| {
                 el.child(

@@ -18,6 +18,10 @@ Pinned sources (downloaded 2026-10-18):
   Player transport additions (`pause`, `volume-2`, `volume-x`, `maximize`,
   `minimize`, `rotate-ccw`, `rotate-cw`, `minus`, `plus`) were downloaded from
   that same pinned release on 2026-10-22, with only the stroke-width adjustment.
+  Library tracking additions (`bookmark`, `bookmark-off`, `circle-check`, 2026-10-24)
+  are Lucide (ISC) SVGs taken from the icon set bundled in the `gpui-kit-assets`
+  0.7.3 crate, not the 0.468.0 release; the upstream Lucide version of those
+  three files is not pinned. Only the stroke-width adjustment was applied.
   License: https://raw.githubusercontent.com/lucide-icons/lucide/0.468.0/LICENSE
   retained as `icons/LICENSE-lucide.txt` (ISC; includes Feather attribution).
 - **TMDB logo**: existing, unchanged; source URL and terms are in root `NOTICE`.
@@ -78,6 +82,9 @@ b5a82d987232ad1e5c3038fe38850ec6aa8c7253b7dc2e4be35ac51b61605a3b  icons/rotate-c
 1029b72e250f0037cfead7429ab47234a03c7080fe625dd9d2c662fdf288af5e  icons/rotate-cw.svg
 df00c597bf626a049ba7a723a42183750db898acf11227bd51021aa384c2d9dd  icons/minus.svg
 92b529bf61fc7ab386be035194d3180dbc97320dfa766283989ec43bc5afc4e7  icons/plus.svg
+e9bb03148fe72a5b7eaa8b03221b0993487034ecfebc6635abdd8f0485b66cf3  icons/bookmark.svg
+a03dd3d1082ccb12ada187ed7c10a602f1d11e49c831fd341187d81d0b2d75ff  icons/bookmark-off.svg
+b1b8b00316f2abf2fbac51a78cddd001603ea561524524c3d4efb412b0973c2c  icons/circle-check.svg
 ```
 
 Verify from this directory: `awk 'NF == 2 && length($1) == 64' README.md | sha256sum -c -`.

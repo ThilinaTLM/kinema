@@ -28,9 +28,14 @@ node scripts/ui-probe/native-verify.cjs target/ui-probe/lab/browse-hover --lab -
 node scripts/ui-probe/native-verify.cjs target/ui-probe/lab/browse-focus --lab --scene browse --focus 115,190
 ```
 
-Use the Xvfb/Vulkan fallback below if needed. Lab `--focus` uses eight Tab presses
-from the initially unfocused browse window (not a card click); X,Y is retained
-for CLI compatibility, not used as a keyboard oracle. Review `native-focused.png`.
+Use the Xvfb/Vulkan fallback below if needed. Lab `--focus` uses keyboard Tab
+presses (default eight; `--tabs N` accepts integers 1–40), not a card click. Focus
+is also permitted for `library` and `-live` scenes. X,Y is retained for CLI
+compatibility, not used as a keyboard oracle. Review `native-focused.png`; a Tab
+count alone is not proof of which control has focus. Lead-reviewed Library,
+movie and series focus captures are listed in
+[development](../development.md#library-and-manual-watch-tracking-validation-pending).
+Earlier failed focus captures are not evidence of successful focus.
 The menus scene mounts a public `Menu` for the context specimen. Because Select
 and Popover have no public initial-open API, an owned fixture startup task uses
 their ordinary focus/Enter paths to open both after first layout. This is a

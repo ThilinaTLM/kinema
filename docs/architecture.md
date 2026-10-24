@@ -14,8 +14,13 @@ provider-priority/enrichment revision below is in progress; automatic TTL refres
 remains undecided.
 
 `kinema-core` holds pure validated values and policies; `kinema-desktop` owns UI,
-provider/storage/process adapters, and background work. The current catalog is
-schema v6 with twelve normalized `STRICT` tables. Its transactional retirement
+provider/storage/process adapters, and background work. The last documented catalog baseline is
+schema v6 with twelve normalized `STRICT` tables. V7 personal storage is now
+source implemented: 15 `STRICT` tables, migration wiring and personal storage/query
+operations, including frozen-season identity guards. Shared state/UI integration
+is implemented and lead-reviewed. Root/feature checks and Linux synthetic captures
+provide scoped validation, not full MVP or cross-platform acceptance; see the
+[Library evidence](development.md#library-and-manual-watch-tracking-validation-pending). Its transactional retirement
 migration removes the seven obsolete provider-cache tables with explicit user
 authorization to discard old-only cached results; normalized catalog data remains.
 Fresh databases create only the normalized schema. Metadata/indexer paths
@@ -53,9 +58,29 @@ Kinema Next is a local-first movie and TV-series application written in Rust wit
 - Cache metadata and indexer results; show last-update times and provide force-refresh.
 - Enforce a user-configurable media-cache limit, defaulting to 20 GiB. Warn and offer to increase it when one file exceeds the limit. See [storage policy](storage-layout.md#limits-and-cleanup) for remaining choices.
 
-**Later:** personalized library membership, watch history/progress and tracked persistent resume, download pause/prefetch suspension, and a built-in torrent engine. Manual inactive-only media cleanup is sufficient for the MVP; active eviction is excluded. Mobile support is only a future possibility.
+**Source implemented and reviewed; scoped validation passed:** local personal Library membership and
+manual movie/episode watched state, independent of membership, with a Library-only
+landing scope. See the [Library contract](design/library.md) and
+[schema v7](catalog-schema.md#personal-library-and-manual-watch-state-proposed-schema-v7).
+Poster membership controls are always top-right (SERIES below); movie hero actions
+include membership/watch, show hero membership, and episode stills watch controls.
+Detail actions do not depend on entry point. Show summaries derive conservatively
+from canonical episodes and locally persisted completeness evidence, not a stored
+whole-show flag. Unknown/empty listings never imply watched. AppCoordinator owns
+shared snapshots; the existing catalog worker owns serialized durable mutations,
+separate from replaceable metadata work. Personal rows and referenced entities
+survive cache cleanup; deleting the same catalog database loses personal records.
+Lead-reviewed source tests include worker durability, failed writes, identity/revision
+handling and local acquisition/fallback; reviewed Linux captures cover Library,
+movie and series controls, including keyboard focus. Full live-provider/playback
+and Windows/macOS acceptance remain unverified.
 
-The catalog is not a personalized library. Media downloading is not proof that someone watched it.
+**Later:** watch history, automatic watch tracking and tracked persistent resume,
+download pause/prefetch suspension, and a built-in torrent engine. Manual inactive-only media cleanup is sufficient for the MVP; active eviction is excluded. Mobile support is only a future possibility.
+
+Provider catalog membership is not personal Library membership. The approved
+personal records extend the same database, not the provider page cache. Media
+downloading and playback completion are never proof that someone watched it.
 
 ## Approved embedded-player direction
 
@@ -142,7 +167,8 @@ complete workflow acceptance.
 
 Search/detail/sources cancellation and shared display facts are implemented, not
 full rich/provenance UI acceptance. Preserve prior backend evidence as historical.
-Do not expand the six-area scope into later library/history or other deferred work.
+The approved Library extension above supersedes the historical library deferral;
+history and other deferred work remain outside its scope.
 
 ## Agreed metadata-provider contract
 
@@ -313,7 +339,9 @@ closure from silence or kill external players. Cancelling quit retains windows,
 leases, and sessions. Embedded source integration is implemented; actual GPUI
 presentation has scoped Linux probe evidence; full OS-close acceptance remains pending.
 
-External launch success and HTTP traffic do not establish playing/paused/completed state. Real player telemetry will be needed when watch tracking is introduced.
+External launch success and HTTP traffic do not establish playing/paused/completed
+state. Any future automatic watch tracking would require real player telemetry;
+the approved manual tracking increment does not use it or infer completion.
 
 ## Desktop support and security
 

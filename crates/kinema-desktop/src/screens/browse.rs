@@ -1,17 +1,20 @@
 //! Virtualized poster browse with stable loaded cards and static loading rows,
 //! over a cinematic backdrop that follows the hovered or keyboard-selected title.
+pub(crate) mod filters;
 mod layout;
-use super::coordinator::{AppCoordinator, BrowseTitle};
+pub(crate) mod library;
+use super::coordinator::{AppCoordinator, BrowseTitle, PersonalLoad, PersonalView};
 pub(crate) use crate::widgets::patterns::menu_item;
 use crate::{
     artwork::{self, ArtworkKey, ArtworkKind, ArtworkState},
     widgets::{
         button::Button,
         icon::IconName,
+        menu::MenuItem,
         motion::{self, Motion},
         notice::{Notice, NoticeKind},
         patterns::{StateView, ViewState},
-        poster_card::{CardOpened, PosterCard},
+        poster_card::{CardOpened, MembershipRequested, MembershipRetry, PosterCard},
         skeleton_card::SkeletonCard,
         text::TypeExt,
         tokens::{self, Mode, space as s, theme, typeface as t},
@@ -20,7 +23,9 @@ use crate::{
 use gpui::{prelude::*, *};
 use kinema_core::MediaKind;
 use layout::LoadingLayout;
-use std::{cmp::Ordering, sync::Arc, time::Duration};
+pub(crate) use library::{LibraryFilters, Scope};
+use library::{ScopeContext, membership_status, movie_watched, refocus};
+use std::{cmp::Ordering, rc::Rc, sync::Arc, time::Duration};
 
 /// Hover changes shorter than this never reach the artwork pipeline.
 const BACKDROP_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -147,10 +152,50 @@ impl BackdropLayers {
 #[derive(Clone)]
 pub(crate) struct OpenTitle(pub BrowseTitle);
 impl EventEmitter<OpenTitle> for Browse {}
+/// Empty-state actions the window handles because it owns the toolbar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BrowseRequest {
+    ShowDiscover,
+    ClearLibraryFilters,
+}
+impl EventEmitter<BrowseRequest> for Browse {}
+
+/// The last write a card initiated, kept so a failure can offer Retry.
+#[derive(Clone)]
+pub(crate) enum CardWrite {
+    Membership(BrowseTitle, bool),
+    Watched(BrowseTitle, bool),
+}
+
+/// Everything the card context menu depends on; a change rebuilds the menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MenuSig {
+    saved: Option<bool>,
+    watched: Option<bool>,
+    pending: bool,
+    failed: bool,
+}
+impl MenuSig {
+    fn of(view: &PersonalView) -> Self {
+        Self {
+            saved: match &view.state {
+                PersonalLoad::Ready(t) => Some(t.added_at.is_some()),
+                _ => None,
+            },
+            watched: movie_watched(view),
+            pending: view.pending,
+            failed: matches!(view.state, PersonalLoad::Failed(_)),
+        }
+    }
+}
+
+type Subject = (Scope, MediaKind, String, Option<LibraryFilters>);
+
 struct Cell {
     title: BrowseTitle,
     card: Entity<PosterCard>,
-    _subscription: Subscription,
+    sig: Option<MenuSig>,
+    _subscriptions: Vec<Subscription>,
 }
 pub(crate) struct Browse {
     coordinator: Entity<AppCoordinator>,
@@ -163,7 +208,13 @@ pub(crate) struct Browse {
     page_request_generation: Option<u64>,
     /// Last visible IMDb IDs reported for enrichment; avoids per-frame calls.
     last_visible: Vec<kinema_core::catalog::ImdbId>,
-    subject: (MediaKind, String),
+    subject: Subject,
+    scope: Scope,
+    /// Remembered view per scope (indexed by `Scope::index`); Library's search lives here.
+    contexts: [ScopeContext; 2],
+    library: LibraryFilters,
+    /// Row to scroll to once the restored scope has cards again.
+    pending_scroll: Option<usize>,
     artwork_generation: u64,
     /// Settled title (by key) the backdrop follows; set after `BACKDROP_DEBOUNCE`.
     backdrop_title: Option<String>,
@@ -189,7 +240,11 @@ impl Browse {
             cols: 2,
             page_request_generation: None,
             last_visible: Vec::new(),
-            subject: (MediaKind::Movie, String::new()),
+            subject: (Scope::Discover, MediaKind::Movie, String::new(), None),
+            scope: Scope::Discover,
+            contexts: Default::default(),
+            library: LibraryFilters::default(),
+            pending_scroll: None,
             artwork_generation: artwork::begin_generation("v3-browse", cx),
             backdrop_title: None,
             pending_backdrop: None,
@@ -317,6 +372,133 @@ impl Browse {
                     )),
             )
     }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn card_keys(&self) -> Vec<String> {
+        self.cells.iter().map(|c| c.title.key()).collect()
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn card_for_test(&self, index: usize) -> Entity<PosterCard> {
+        self.cells[index].card.clone()
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn focused_key(&self, window: &Window, cx: &App) -> Option<String> {
+        self.focused_cell(window, cx)
+            .map(|i| self.cells[i].title.key())
+    }
+    pub(crate) fn scope(&self) -> Scope {
+        self.scope
+    }
+    pub(crate) fn library_filters(&self) -> LibraryFilters {
+        self.library
+    }
+    pub(crate) fn library_search(&self) -> &str {
+        &self.contexts[Scope::Library.index()].search
+    }
+    fn first_visible_row(&self) -> usize {
+        self.scroll.0.borrow().base_handle.logical_scroll_top().0
+    }
+    fn focused_cell(&self, window: &Window, cx: &App) -> Option<usize> {
+        self.cells
+            .iter()
+            .position(|c| c.card.read(cx).focus_handle(cx).is_focused(window))
+    }
+    /// Snapshot of this scope's selection, scroll and focus, taken before the
+    /// window leaves it for Detail or the other scope.
+    pub(crate) fn remember_context(&mut self, window: &Window, cx: &App) {
+        let card_focused = self.focused_cell(window, cx).is_some();
+        let row = self.first_visible_row();
+        let ctx = &mut self.contexts[self.scope.index()];
+        ctx.selected = self.selected.clone();
+        ctx.scroll_row = row;
+        ctx.card_focused = card_focused || ctx.card_focused && self.selected.is_some();
+    }
+    /// Switch scope, restoring the target scope's own selection and scroll.
+    pub(crate) fn set_scope(&mut self, scope: Scope, window: &Window, cx: &mut Context<Self>) {
+        self.enter_scope(scope, true, window, cx);
+    }
+    /// Native fixture seam: show Library for `filters`/`search` without a local read
+    /// that would replace the seeded results.
+    #[cfg(feature = "ui-probe")]
+    pub(crate) fn show_library_fixture(
+        &mut self,
+        filters: LibraryFilters,
+        search: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.library = filters;
+        self.contexts[Scope::Library.index()].search = search.to_owned();
+        self.enter_scope(Scope::Library, false, window, cx);
+        self.subject = self.current_subject(cx);
+    }
+    fn enter_scope(&mut self, scope: Scope, reload: bool, window: &Window, cx: &mut Context<Self>) {
+        if scope == self.scope {
+            return;
+        }
+        self.remember_context(window, cx);
+        self.scope = scope;
+        let ctx = self.contexts[scope.index()].clone();
+        self.selected = ctx.selected;
+        self.pending_scroll = Some(ctx.scroll_row).filter(|row| *row > 0);
+        // Cards belong to one scope; the other's list is rebuilt from its source.
+        self.cells.clear();
+        self.subject = self.current_subject(cx);
+        self.reset_backdrop();
+        self.last_visible.clear();
+        self.page_request_generation = None;
+        if reload && scope == Scope::Library {
+            self.reload_library(cx);
+        }
+        cx.notify();
+    }
+    fn current_subject(&self, cx: &App) -> Subject {
+        let state = self.coordinator.read(cx);
+        match self.scope {
+            Scope::Discover => (Scope::Discover, state.kind, state.query.clone(), None),
+            Scope::Library => (
+                Scope::Library,
+                MediaKind::Movie,
+                self.library_search().to_owned(),
+                Some(self.library),
+            ),
+        }
+    }
+    pub(crate) fn reload_library(&mut self, cx: &mut Context<Self>) {
+        let query = self.library.query(self.library_search());
+        self.coordinator
+            .update(cx, |c, cx| c.load_library(query, cx));
+    }
+    /// Apply new Library filters and search; results come from a fresh local query.
+    pub(crate) fn set_library(
+        &mut self,
+        mut filters: LibraryFilters,
+        search: &str,
+        cx: &mut Context<Self>,
+    ) {
+        filters.set_kind(filters.kind);
+        self.library = filters;
+        self.contexts[Scope::Library.index()].search = search.to_owned();
+        if self.scope == Scope::Library {
+            self.reload_library(cx);
+        }
+        cx.notify();
+    }
+    pub(crate) fn clear_library_filters(&mut self, cx: &mut Context<Self>) {
+        self.library.kind = Default::default();
+        self.library.status = Default::default();
+        self.contexts[Scope::Library.index()].search.clear();
+        self.reload_library(cx);
+        cx.notify();
+    }
+    /// Issue a card-initiated write with the clicked title's identity.
+    pub(crate) fn write(&mut self, write: CardWrite, cx: &mut Context<Self>) {
+        // A rejected write is recorded by the coordinator as the latest failure
+        // (with its exact Retry), which the window's single toast presents.
+        let _ = self.coordinator.update(cx, |c, cx| match &write {
+            CardWrite::Membership(t, saved) => c.set_membership(t, *saved, cx),
+            CardWrite::Watched(t, watched) => c.set_movie_watched(t, *watched, cx),
+        });
+    }
     pub fn restore_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(cell) = self
             .cells
@@ -329,31 +511,52 @@ impl Browse {
         }
     }
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let subject = self.current_subject(cx);
         let state = self.coordinator.read(cx);
-        let subject = (state.kind, state.query.clone());
-        let mut titles = state.titles.clone();
-        let old_top = self.scroll.0.borrow().base_handle.logical_scroll_top().0 * self.cols;
+        let mut titles = match self.scope {
+            Scope::Discover => state.titles.clone(),
+            Scope::Library => state.library_titles.clone(),
+        };
+        // A same-query Library reload (or a failed one) with no rows yet keeps the
+        // loaded cards, their focus and scroll instead of flashing an empty grid.
+        let keep = self.scope == Scope::Library
+            && titles.is_empty()
+            && (state.library.busy() || state.library.error().is_some())
+            && self.subject == subject
+            && !self.cells.is_empty();
+        if keep {
+            self.finish_sync(cx);
+            return;
+        }
+        let old_top = self.first_visible_row() * self.cols;
         let anchor = (self.subject == subject)
             .then(|| self.cells.get(old_top).map(|c| c.title.key()))
             .flatten();
         if self.subject != subject {
             self.subject = subject;
             self.selected = None;
+            self.pending_scroll = None;
             self.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
             self.artwork_generation = artwork::begin_generation("v3-browse", cx);
             self.reset_backdrop();
             self.last_visible.clear();
         }
 
-        match self.sort {
-            Sort::Provider => {}
-            Sort::Title => titles.sort_by_key(|a| a.name().to_lowercase()),
-            Sort::Year => titles.sort_by_key(|a| std::cmp::Reverse(a.year())),
-            Sort::Rating => titles.sort_by(|a, b| rating_order(a.rating(), b.rating())),
+        if self.scope == Scope::Discover {
+            match self.sort {
+                Sort::Provider => {}
+                Sort::Title => titles.sort_by_key(|a| a.name().to_lowercase()),
+                Sort::Year => titles.sort_by_key(|a| std::cmp::Reverse(a.year())),
+                Sort::Rating => titles.sort_by(|a, b| rating_order(a.rating(), b.rating())),
+            }
         }
         if self.cells.iter().map(|c| &c.title).eq(titles.iter()) {
+            self.finish_sync(cx);
             return;
         }
+        let old_keys: Vec<String> = self.cells.iter().map(|c| c.title.key()).collect();
+        let focused_key = self.focused_cell(window, cx).map(|i| old_keys[i].clone());
+        let mut fresh: Vec<BrowseTitle> = Vec::new();
         let mut old = std::mem::take(&mut self.cells);
         self.cells = titles
             .into_iter()
@@ -401,64 +604,36 @@ impl Browse {
                     card.synopsis = title.overview().unwrap_or_default().to_owned().into();
                     cx.notify();
                 });
-                let title_for_event = title.clone();
-                let subscription = cx.subscribe(&card, move |this, _, _: &CardOpened, cx| {
-                    this.selected = Some(title_for_event.key());
-                    cx.emit(OpenTitle(title_for_event.clone()));
-                });
-                let weak = cx.entity().downgrade();
-                let open = title.clone();
-                let mut items = vec![menu_item("Open details", move |_, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.selected = Some(open.key());
-                        cx.emit(OpenTitle(open.clone()));
-                    });
-                })];
-                if title.kind() == MediaKind::Movie && title.imdb().is_some() {
-                    let weak = cx.entity().downgrade();
-                    let movie = title.clone();
-                    items.push(menu_item("Find streams", move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.selected = Some(movie.key());
-                            if let Some(id) = movie.imdb() {
-                                this.coordinator.update(cx, |c, cx| {
-                                    if let Some(settings) = &c.settings {
-                                        c.sources(
-                                            settings.indexer,
-                                            kinema_core::sources::PlaybackTarget::Movie(id.clone()),
-                                            cx,
-                                        );
-                                    }
-                                });
-                            }
-                            cx.emit(OpenTitle(movie.clone()));
-                        });
-                    }));
+                if !old_keys.contains(&title.key()) && !matches!(title, BrowseTitle::Local(_)) {
+                    fresh.push(title.clone());
                 }
-                let copy = title.name().to_owned();
-                items.push(menu_item("Copy title", move |_, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                let mut subscriptions = Vec::new();
+                let opened = title.clone();
+                subscriptions.push(cx.subscribe(&card, move |this, _, _: &CardOpened, cx| {
+                    this.selected = Some(opened.key());
+                    cx.emit(OpenTitle(opened.clone()));
                 }));
-                if let Some(id) = title.imdb() {
-                    let id = id.as_str().to_owned();
-                    let external = id.clone();
-                    items.push(menu_item("Copy IMDb ID", move |_, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(id.clone()))
-                    }));
-                    items.push(menu_item("Open on IMDb", move |_, cx| {
-                        cx.open_url(&format!("https://www.imdb.com/title/{external}/"))
-                    }));
-                }
-                let coordinator = self.coordinator.clone();
-                let refresh_title = title.clone();
-                items.push(menu_item("Refresh metadata", move |_, cx| {
-                    coordinator.update(cx, |c, cx| c.title_details(&refresh_title, true, cx))
-                }));
-                card.update(cx, |card, _| card.menu = items);
+                let clicked = title.clone();
+                subscriptions.push(cx.subscribe(
+                    &card,
+                    move |this, _, event: &MembershipRequested, cx| {
+                        this.selected = Some(clicked.key());
+                        this.write(CardWrite::Membership(clicked.clone(), event.0), cx);
+                    },
+                ));
+                let retried = title.clone();
+                subscriptions.push(
+                    cx.subscribe(&card, move |this, _, _: &MembershipRetry, cx| {
+                        let title = retried.clone();
+                        this.coordinator
+                            .update(cx, |c, cx| c.load_personal(&[title], cx));
+                    }),
+                );
                 Cell {
                     title,
                     card,
-                    _subscription: subscription,
+                    sig: None,
+                    _subscriptions: subscriptions,
                 }
             })
             .collect();
@@ -469,7 +644,190 @@ impl Browse {
             self.scroll
                 .scroll_to_item_strict(index / self.cols, ScrollStrategy::Top);
         }
+        // Keep focus by title; when the focused card left the list, move to the
+        // next card, else the previous, else the grid (the empty state follows).
+        let new_keys: Vec<String> = self.cells.iter().map(|c| c.title.key()).collect();
+        let tracked = focused_key.clone().or_else(|| self.selected.clone());
+        if let Some(key) = tracked
+            && !new_keys.contains(&key)
+        {
+            let target = refocus(&old_keys, &new_keys, &key);
+            self.selected = target.map(|i| new_keys[i].clone());
+            if focused_key.is_some() {
+                match target {
+                    Some(i) => self.cells[i]
+                        .card
+                        .update(cx, |card, cx| card.focus(window, cx)),
+                    None => self.focus.focus(window, cx),
+                }
+            }
+        }
+        if !fresh.is_empty() {
+            let coordinator = self.coordinator.clone();
+            cx.defer(move |cx| coordinator.update(cx, |c, cx| c.load_personal(&fresh, cx)));
+        }
+        self.finish_sync(cx);
     }
+    /// Shared per-frame tail: card state from the coordinator, then pending scroll.
+    fn finish_sync(&mut self, cx: &mut Context<Self>) {
+        let views: Vec<PersonalView> = {
+            let state = self.coordinator.read(cx);
+            self.cells
+                .iter()
+                .map(|c| state.personal(&c.title))
+                .collect()
+        };
+        let weak = cx.entity().downgrade();
+        for (cell, view) in self.cells.iter_mut().zip(views) {
+            let status = membership_status(&view);
+            cell.card.update(cx, |card, cx| {
+                if card.membership != status {
+                    card.membership = status;
+                    cx.notify();
+                }
+            });
+            let sig = MenuSig::of(&view);
+            if cell.sig != Some(sig) {
+                cell.sig = Some(sig);
+                let items = card_menu(weak.clone(), self.coordinator.clone(), &cell.title, sig);
+                cell.card.update(cx, |card, _| card.menu = items);
+            }
+        }
+        if let Some(row) = self.pending_scroll
+            && !self.cells.is_empty()
+        {
+            self.pending_scroll = None;
+            self.scroll.scroll_to_item_strict(
+                row.min((self.cells.len() - 1) / self.cols),
+                ScrollStrategy::Top,
+            );
+        }
+    }
+}
+
+fn action_item(
+    label: &str,
+    disabled_reason: Option<&str>,
+    handler: impl Fn(&mut Window, &mut App) + 'static,
+) -> MenuItem {
+    MenuItem::Action {
+        label: label.to_owned().into(),
+        shortcut: None,
+        icon: None,
+        disabled_reason: disabled_reason.map(|r| r.to_owned().into()),
+        checked: false,
+        handler: Rc::new(handler),
+    }
+}
+
+/// Context menu for one card; Library and watched commands act on the clicked title.
+fn card_menu(
+    browse: WeakEntity<Browse>,
+    coordinator: Entity<AppCoordinator>,
+    title: &BrowseTitle,
+    sig: MenuSig,
+) -> Vec<MenuItem> {
+    let weak = browse.clone();
+    let open = title.clone();
+    let mut items = vec![menu_item("Open details", move |_, cx| {
+        let _ = weak.update(cx, |this, cx| {
+            this.selected = Some(open.key());
+            cx.emit(OpenTitle(open.clone()));
+        });
+    })];
+    if title.kind() == MediaKind::Movie && title.imdb().is_some() {
+        let weak = browse.clone();
+        let movie = title.clone();
+        items.push(menu_item("Find streams", move |_, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.selected = Some(movie.key());
+                if let Some(id) = movie.imdb() {
+                    this.coordinator.update(cx, |c, cx| {
+                        if let Some(settings) = &c.settings {
+                            c.sources(
+                                settings.indexer,
+                                kinema_core::sources::PlaybackTarget::Movie(id.clone()),
+                                cx,
+                            );
+                        }
+                    });
+                }
+                cx.emit(OpenTitle(movie.clone()));
+            });
+        }));
+    }
+    let blocked = if sig.pending {
+        Some("Saving…")
+    } else if sig.failed {
+        Some("Library status unavailable")
+    } else if sig.saved.is_none() {
+        Some("Checking Library status…")
+    } else {
+        None
+    };
+    let saved = sig.saved.unwrap_or(false);
+    let weak = browse.clone();
+    let target = title.clone();
+    items.push(action_item(
+        if saved {
+            "Remove from Library"
+        } else {
+            "Add to Library"
+        },
+        blocked,
+        move |_, cx| {
+            let target = target.clone();
+            let _ = weak.update(cx, |this, cx| {
+                this.write(CardWrite::Membership(target, !saved), cx)
+            });
+        },
+    ));
+    if title.kind() == MediaKind::Movie {
+        let watched = sig.watched.unwrap_or(false);
+        let weak = browse.clone();
+        let target = title.clone();
+        items.push(action_item(
+            if watched {
+                "Mark as unwatched"
+            } else {
+                "Mark as watched"
+            },
+            blocked,
+            move |_, cx| {
+                let target = target.clone();
+                let _ = weak.update(cx, |this, cx| {
+                    this.write(CardWrite::Watched(target, !watched), cx)
+                });
+            },
+        ));
+    }
+    if sig.failed {
+        let retry = title.clone();
+        let coordinator = coordinator.clone();
+        items.push(action_item("Retry Library status", None, move |_, cx| {
+            let retry = retry.clone();
+            coordinator.update(cx, |c, cx| c.load_personal(&[retry], cx));
+        }));
+    }
+    let copy = title.name().to_owned();
+    items.push(menu_item("Copy title", move |_, cx| {
+        cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+    }));
+    if let Some(id) = title.imdb() {
+        let id = id.as_str().to_owned();
+        let external = id.clone();
+        items.push(menu_item("Copy IMDb ID", move |_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(id.clone()))
+        }));
+        items.push(menu_item("Open on IMDb", move |_, cx| {
+            cx.open_url(&format!("https://www.imdb.com/title/{external}/"))
+        }));
+    }
+    let refresh_title = title.clone();
+    items.push(menu_item("Refresh metadata", move |_, cx| {
+        coordinator.update(cx, |c, cx| c.title_details(&refresh_title, true, cx))
+    }));
+    items
 }
 impl Render for Browse {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -491,16 +849,31 @@ impl Render for Browse {
         }
         let row_height = width * 1.5 + f32::from(s::GRID_GAP);
         let state = self.coordinator.read(cx);
-        let busy = state.collection.busy();
-        let append_in_flight = state.append_in_flight();
-        let generation = state.collection.generation();
-        let error = state.collection.error().map(str::to_owned);
-        let query = state.query.clone();
+        let scope = self.scope;
+        let library = scope == Scope::Library;
+        let has_more = library && state.library_has_more;
         let count = self.cells.len();
+        let (busy, append_in_flight, generation, error, query) = if library {
+            (
+                state.library.busy(),
+                state.library.busy() && has_more && count > 0,
+                state.library.generation(),
+                state.library.error().map(str::to_owned),
+                self.library_search().to_owned(),
+            )
+        } else {
+            (
+                state.collection.busy(),
+                state.append_in_flight(),
+                state.collection.generation(),
+                state.collection.error().map(str::to_owned),
+                state.query.clone(),
+            )
+        };
+        let filtered = library && self.library.is_filtered(&query);
         self.update_backdrop(cols, cx);
         let is_list = !(count == 0 && !busy);
-        let stale =
-            !self.cells.is_empty() && self.coordinator.read(cx).collection.error().is_some();
+        let stale = !self.cells.is_empty() && error.is_some();
         // A stale strip sits directly under the header and pushes the grid down.
         let top_inset = if stale {
             s::GRID_INSET
@@ -509,13 +882,53 @@ impl Render for Browse {
         };
         let content = if count == 0 && !busy {
             let coordinator = self.coordinator.clone();
+            let weak_retry = cx.entity().downgrade();
             if let Some(message) = error.clone() {
                 // A failed request is never presented as "no results".
                 StateView::new("browse-error", ViewState::Error)
                     .message(message)
                     .on_retry(move |_, cx| {
-                        coordinator.update(cx, |c, cx| c.load(c.kind, c.query.clone(), true, cx))
+                        if library {
+                            let _ = weak_retry.update(cx, |b, cx| b.reload_library(cx));
+                        } else {
+                            coordinator
+                                .update(cx, |c, cx| c.load(c.kind, c.query.clone(), true, cx))
+                        }
                     })
+                    .into_any_element()
+            } else if library {
+                let weak = cx.entity().downgrade();
+                let (title, hint, label, request) = if filtered {
+                    (
+                        "No saved titles match".to_owned(),
+                        "Try different words or relax the filters.",
+                        "Clear search and filters",
+                        BrowseRequest::ClearLibraryFilters,
+                    )
+                } else {
+                    (
+                        "Your Library is empty".to_owned(),
+                        "Save movies and series with the bookmark on their posters.",
+                        "Browse Discover",
+                        BrowseRequest::ShowDiscover,
+                    )
+                };
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .child(StateView::new("library-empty", ViewState::Empty).empty(
+                        IconName::Bookmark,
+                        title,
+                        Some(hint.into()),
+                    ))
+                    .child(
+                        Button::new("library-action", label).on_click(move |_, _, cx| {
+                            let _ = weak.update(cx, |_, cx| cx.emit(request));
+                        }),
+                    )
                     .into_any_element()
             } else {
                 let (title, hint) = if query.is_empty() {
@@ -559,7 +972,8 @@ impl Render for Browse {
                 append_in_flight,
             );
             let rows = layout.rows();
-            let failed = error.is_some();
+            // Library pages stop at the end of the local result set.
+            let failed = error.is_some() || (library && !has_more);
             uniform_list(
                 "v3-poster-grid",
                 rows,
@@ -612,7 +1026,11 @@ impl Render for Browse {
                         let coordinator = this.coordinator.clone();
                         cx.defer(move |cx| {
                             coordinator.update(cx, |c, cx| {
-                                if c.collection.generation() == generation {
+                                if library {
+                                    if c.library.generation() == generation {
+                                        c.next_library_page(cx);
+                                    }
+                                } else if c.collection.generation() == generation {
                                     c.next_page(cx);
                                 }
                             });
@@ -772,6 +1190,7 @@ impl Render for Browse {
             }))
             .when(stale, |el| {
                 let coordinator = self.coordinator.clone();
+                let weak_retry = cx.entity().downgrade();
                 el.child(
                     div().pt(s::TOOLBAR_HEIGHT).child(
                         Notice::new(
@@ -781,7 +1200,16 @@ impl Render for Browse {
                         .strip()
                         .action(
                             Button::new("retry-stale", "Retry").on_click(move |_, _, cx| {
-                                coordinator.update(cx, |c, cx| c.retry_page(cx))
+                                if library {
+                                    // A failed page keeps loaded cards; reload only if none remain.
+                                    if coordinator.read(cx).library_titles.is_empty() {
+                                        let _ = weak_retry.update(cx, |b, cx| b.reload_library(cx));
+                                    } else {
+                                        coordinator.update(cx, |c, cx| c.next_library_page(cx));
+                                    }
+                                } else {
+                                    coordinator.update(cx, |c, cx| c.retry_page(cx))
+                                }
                             }),
                         ),
                     ),

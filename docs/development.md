@@ -5,6 +5,105 @@ the native v3 UI; it is not a fully accepted [MVP](architecture.md).
 Run commands from the repository root. Rustup selects **Rust 1.97.1** via
 `rust-toolchain.toml`; install rustfmt and Clippy for that toolchain.
 
+<a id="library-and-manual-watch-tracking-validation-pending"></a>
+
+## Library and manual watch tracking — scoped validation
+
+**Source implemented and lead-reviewed; scoped validation passed, not full MVP
+acceptance.** V7 has 15 tables, Library paging/watch timestamp indexes and frozen
+season identity/episode-number guards. Storage, shared state and native UI are
+implemented. Earlier validation counts remain historical evidence for their own
+increments. See the
+[UI contract](design/library.md) and [v7 schema](catalog-schema.md#personal-library-and-manual-watch-state-proposed-schema-v7).
+
+Use only synthetic temporary/in-memory databases and fixtures, never user DBs or
+credentials. Do not reset `data/catalog.sqlite3`: the approved same-DB extension
+contains durable membership/watch records; deleting it loses them. No server or
+real-provider credentials are required for fixture validation.
+
+Validation contract (the specific final evidence and limits follow):
+
+- Fresh/v6/older-supported migration, rollback/newer-version refusal, constraints,
+  read defaults versus failures, restart persistence and cleanup exclusions.
+- Independent membership/watch writes, removal/Undo preserving added-at/watch
+  state, unsaved-title tracking, canonical graph/episode merges, explicit unwatched
+  rows, timestamp ties/clock rollback/overflow and contradictory-ID rollback.
+- Local queries beyond a provider's first page, literal search, kind/status before
+  pagination, stable ties; unknown/empty completeness, specials/future episodes,
+  and atomic confirmed season snapshot boundaries, including stale identity after
+  merges/reused IDs and changed episode-number rejection without partial writes.
+- FIFO non-droppable accepted mutations, queue-full and commit failure, retry,
+  stale reads after commits, metadata refresh and navigation during writes.
+- Detail parity from Discover/Library/search/recommendations, child-toggle event
+  isolation, keyboard/context-menu access, filtered focus/Undo, and credential-free
+  canonical-only local Detail. Unknown personal state must not appear unwatched.
+
+Capture and inspect native Discover, Library, movie and show/episode fixtures at
+1280×800 and 960×600, dark/light, keyboard focus and reduced motion. Verify poster
+bookmark/SERIES stacking, episode overlays, tooltip/title collisions and toolbar
+fit. Follow [ui-probe](design/ui-probe.md) for feature-gated native interaction and
+capture tooling. Record actual capture review and missing prerequisites; a fixture
+pass does not prove real-provider playback, offline artwork or Windows/macOS support.
+
+### Final lead-reviewed evidence — 2026-10-24
+
+All commands used **Rust 1.97.1**, with no new dependencies. Final root format
+check passed after one serialized formatter run; diff check passed. The reviewed
+chain below passed again after formatting, including both root and native-feature
+checks. Exact checks:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo clippy -p kinema-desktop --all-targets --features ui-probe-test --locked -- -D warnings
+cargo test -p kinema-desktop --features ui-probe-test --locked
+git diff --check
+node --test scripts/ui-probe/pixels.test.cjs
+```
+
+- Root fmt, strict all-targets locked workspace Clippy and diff check: **PASS**.
+- Root tests: **546 passed, 12 ignored** (42 core + 458 desktop + 46 mpv passed).
+- Desktop strict all-targets `ui-probe-test` Clippy: **PASS**.
+- Desktop feature tests: **536 passed, 4 ignored**.
+- Pixel helper tests: **4 passed, 0 failed**. An earlier pipeline exit 1 was a
+  grep-no-matches result, not a failing test.
+
+Scoped source tests cover real-worker SQLite durability, failed writes,
+revisions/identity merges, partial refs, same-query 600-row results, summary-only
+local TMDB acquisition and saved-data failure fallback, plus an injected Undo UI
+response. These are synthetic/local checks, not authenticated-provider acceptance.
+
+Lead-read Linux native captures, all under `target/ui-probe/lab/`:
+
+- Production Library at 1280×800 dark; `final-prod-library-960-dark` and
+  `final-prod-library-960-light`.
+- Filtered one-row Library: `f-filtered-1280-light`.
+- Empty Library: `prod-library-empty-1280-dark`.
+- Focused watched movie: `f-movie-focus-watched-light/native-focused.png`.
+- Series: `f-series-1280-dark` and `f-series-1280-light`.
+- Series hero membership bookmark keyboard focus (Tab 6):
+  `v-series-tab6/native-focused.png`.
+- First episode watched-toggle keyboard focus (Tab 11):
+  `v-series-tab11/native-focused.png`.
+  Both `v-series` captures are 1280×800 dark with reduced motion, personally
+  read and approved by the lead.
+
+The captures exercise production widgets with synthetic data, not actual
+providers; no user DB or credentials were used. Earlier failed focus captures
+are not acceptance evidence; only the successful reviewed focus captures above
+are included.
+
+The Linux `scripts/ui-probe/native-verify.cjs` focus path now permits `library`
+and `-live` scenes and accepts `--tabs N` (integer 1–40, default 8). This controls
+keyboard Tab traversal in the isolated fixture, not a semantic focus guarantee
+or a click oracle. Review `native-focused.png`; see the
+[probe guide](design/ui-probe.md) for isolation and invocation.
+
+**Limits:** generic/synthetic captures and tests do not establish live TMDB,
+debrid or playback acceptance, Windows/macOS behavior or full MVP acceptance.
+Tracking is manual only: no history, resume, sync or automatic completion.
+
 ## Native prerequisites
 
 The desktop uses direct `gpui` (package `gpui-pre =0.3.9`) and

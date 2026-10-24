@@ -11,7 +11,7 @@ const { decode, crop, diff } = require('./pixels.cjs');
 const exec = promisify(execFile);
 const args = process.argv.slice(2);
 const artifacts = path.resolve(args[0] && !args[0].startsWith('--') ? args.shift() : 'target/ui-probe/native-artifacts');
-let light = false, size, scene, reduceMotion = false, hover, focusPoint;
+let light = false, size, scene, reduceMotion = false, hover, focusPoint, tabs = 8;
 while (args.length) {
   const arg = args.shift();
   if (arg === '--lab') { /* Explicitly select the sole native fixture. */ }
@@ -24,7 +24,10 @@ while (args.length) {
     size = args.shift();
     assert.ok(/^\d+x\d+$/.test(size || ''), '--size requires WxH');
   }
-  else if (arg === '--hover' || arg === '--focus') {
+  else if (arg === '--tabs') {
+    tabs = Number(args.shift());
+    assert.ok(Number.isInteger(tabs) && tabs >= 1 && tabs <= 40, '--tabs requires an integer 1-40');
+  } else if (arg === '--hover' || arg === '--focus') {
     const value = args.shift();
     assert.ok(/^\d+,\d+$/.test(value || ''), `${arg} requires X,Y`);
     if (arg === '--hover') hover = value.split(',').map(Number);
@@ -180,13 +183,14 @@ async function main() {
   if (focusPoint) {
     assert.ok(focusPoint[0] < image.width && focusPoint[1] < image.height, 'Focus point outside fixture');
     {
-      assert.equal(scene || 'components', 'browse', 'Lab keyboard-focus capture is defined only for browse');
-      await exec('xdotool', ['windowfocus', '--sync', windowId, 'mousemove', '--window', windowId, String(image.width - 4), String(image.height - 4), 'key', '--clearmodifiers', ...Array(8).fill('Tab')], { env, timeout: 3000 });
+      const focusScene = scene || 'components';
+      assert.ok(focusScene === 'browse' || focusScene === 'library' || focusScene.includes('-live'), 'Lab keyboard-focus capture is defined only for browse, library and production -live scenes');
+      await exec('xdotool', ['windowfocus', '--sync', windowId, 'mousemove', '--window', windowId, String(image.width - 4), String(image.height - 4), 'key', '--clearmodifiers', ...Array(tabs).fill('Tab')], { env, timeout: 3000 });
     }
     await pause(250);
     const focusedPath = path.join(artifacts, 'native-focused.png');
     await exec('import', ['-silent', '-window', windowId, '-depth', '8', `PNG32:${focusedPath}`], { env, timeout: 5000 });
-    report.focus = { point: focusPoint, keyboardOnly: true, pointerOutsideCards: true, path: focusedPath, needsAgentImageReview: true };
+    report.focus = { point: focusPoint, tabs, keyboardOnly: true, pointerOutsideCards: true, path: focusedPath, needsAgentImageReview: true };
   }
   report.passed = true;
 }

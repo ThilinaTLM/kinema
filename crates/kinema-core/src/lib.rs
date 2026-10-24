@@ -5,6 +5,7 @@
 
 pub mod catalog;
 pub mod catalog_normalized;
+pub mod library;
 pub mod media;
 pub mod provider;
 pub mod sources;

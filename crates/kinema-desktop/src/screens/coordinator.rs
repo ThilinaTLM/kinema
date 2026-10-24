@@ -8,6 +8,17 @@
 //! secrets are passed directly to the worker, never retained here. The entity
 //! owns both workers and its polling task; no blocking work runs on the UI thread.
 //! `needs_quit_confirmation` includes pending launches, not just active sessions.
+mod personal;
+use personal::PersonalStore;
+#[allow(
+    unused_imports,
+    reason = "UI contract exports named DTOs even when callers infer their types"
+)]
+pub(crate) use personal::{
+    EpisodePersonalView, EpisodeRef, LocalBrowseTitle, LocalDetail, PersonalEpisode, PersonalLoad,
+    PersonalTitle, PersonalView, SeasonSnapshot, TitleRef,
+};
+
 use crate::{
     app::{AppAction, AppCommand, AppEvent, AppOutcome, AppWorker, CredentialState},
     app_state::{Resource, Stage},
@@ -32,72 +43,105 @@ use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BrowseTitle {
+    Local(LocalBrowseTitle),
     Cinemeta(CatalogTitle),
     Tmdb(TmdbTitle),
 }
 impl BrowseTitle {
+    pub(crate) fn personal_ref(&self) -> TitleRef {
+        personal::title_ref(self)
+    }
     pub fn key(&self) -> String {
         match self {
+            Self::Local(t) => format!("canonical:{}", t.title_id.get()),
             Self::Cinemeta(t) => format!("{:?}:{}", t.kind(), t.id().as_str()),
             Self::Tmdb(t) => format!("{:?}:tmdb:{}", t.kind, t.id),
         }
     }
     pub fn name(&self) -> &str {
         match self {
+            Self::Local(t) => t.metadata.text("name").unwrap_or("Untitled"),
             Self::Cinemeta(t) => t.name(),
             Self::Tmdb(t) => &t.name,
         }
     }
     pub fn kind(&self) -> MediaKind {
         match self {
+            Self::Local(t) => t.metadata.kind,
             Self::Cinemeta(t) => t.kind(),
             Self::Tmdb(t) => t.kind,
         }
     }
     pub fn year(&self) -> Option<u16> {
         match self {
+            Self::Local(t) => t
+                .metadata
+                .integer("release_year")
+                .or_else(|| t.metadata.integer("first_air_year"))
+                .and_then(|v| u16::try_from(v).ok()),
             Self::Cinemeta(t) => t.year(),
             Self::Tmdb(t) => t.year(),
         }
     }
     pub fn rating(&self) -> Option<f32> {
         match self {
+            Self::Local(t) => t
+                .metadata
+                .ratings
+                .iter()
+                .find(|rating| {
+                    rating.observation.source == "imdb" && rating.observation.metric == "score"
+                })
+                .and_then(|rating| rating.observation.value)
+                .map(|value| value as f32),
             Self::Cinemeta(t) => t.imdb_rating(),
             Self::Tmdb(t) => t.imdb_rating(),
         }
     }
     pub fn poster_url(&self) -> Option<&str> {
         match self {
+            Self::Local(t) => t.metadata.text("poster_url"),
             Self::Cinemeta(t) => t.poster_url(),
             Self::Tmdb(t) => t.poster_url(),
         }
     }
     pub fn overview(&self) -> Option<&str> {
         match self {
+            Self::Local(t) => t.metadata.text("overview"),
             Self::Cinemeta(t) => t.overview(),
             Self::Tmdb(t) => t.overview.as_deref(),
         }
     }
     pub fn genres(&self) -> &[String] {
         match self {
+            Self::Local(t) => &t.genres,
             Self::Cinemeta(t) => t.genres(),
             Self::Tmdb(t) => t.genres(),
         }
     }
     pub fn runtime(&self) -> Option<u16> {
         match self {
+            Self::Local(t) => t
+                .metadata
+                .integer("runtime_minutes")
+                .and_then(|v| u16::try_from(v).ok()),
             Self::Cinemeta(t) => t.runtime_minutes(),
             Self::Tmdb(t) => t.runtime_minutes(),
         }
     }
     pub fn seasons(&self) -> Option<u32> {
         match self {
+            Self::Local(t) => t
+                .metadata
+                .integer("season_count")
+                .and_then(|v| u32::try_from(v).ok()),
             Self::Cinemeta(t) => t.season_count(),
             Self::Tmdb(t) => t.season_count(),
         }
     }
     pub fn imdb(&self) -> Option<&ImdbId> {
         match self {
+            Self::Local(t) => t.imdb.as_ref(),
             Self::Cinemeta(t) => Some(t.id()),
             Self::Tmdb(t) => t.imdb.as_ref(),
         }
@@ -181,6 +225,13 @@ struct DetailEnrichment {
 }
 
 pub struct AppCoordinator {
+    personal_state: PersonalStore,
+    pub(crate) library: Resource<Vec<BrowseTitle>>,
+    pub(crate) library_titles: Vec<BrowseTitle>,
+    pub(crate) library_has_more: bool,
+    pub(crate) local_details: Resource<LocalDetail>,
+    pub(crate) season_snapshot: Resource<SeasonSnapshot>,
+    pub(crate) personal_notice: Option<String>,
     worker: Result<CatalogWorker, String>,
     app: Result<AppWorker, String>,
     tracker: Tracker,
@@ -257,6 +308,13 @@ impl AppCoordinator {
             worker: CatalogWorker::spawn_default().map_err(|error| { tracing::error!(worker = "catalog", io_kind = ?error.kind(), "UI worker could not start"); error.to_string() }),
             app: AppWorker::spawn().map_err(|error| { tracing::error!(worker = "application", io_kind = ?error.kind(), "UI worker could not start"); error.to_string() }),
             tracker: Tracker::default(),
+            personal_state: PersonalStore::default(),
+            library: Resource::default(),
+            library_titles: Vec::new(),
+            library_has_more: false,
+            local_details: Resource::default(),
+            season_snapshot: Resource::default(),
+            personal_notice: None,
             // ── sessions ──
             session_identity: Default::default(),
             settings: None,
@@ -335,6 +393,13 @@ impl AppCoordinator {
             worker: Err("Fixture source".into()),
             app: Err("Fixture source".into()),
             tracker: Tracker::default(),
+            personal_state: PersonalStore::default(),
+            library: Resource::default(),
+            library_titles: Vec::new(),
+            library_has_more: false,
+            local_details: Resource::default(),
+            season_snapshot: Resource::default(),
+            personal_notice: None,
             // ── sessions ──
             session_identity: Default::default(),
             settings: Some(Settings::default()),
@@ -583,7 +648,20 @@ impl AppCoordinator {
             }
             metadata.extend(std::iter::from_fn(|| metadata_bridge::poll(worker)));
         }
-        let mut changed = !search.is_empty() || !metadata.is_empty();
+        let canonical_changed = search.iter().any(|event| {
+            matches!(
+                event.outcome,
+                Outcome::Fetched(_) | Outcome::CacheHit { .. }
+            )
+        }) || metadata.iter().any(|event| match event {
+            Polled::Cinemeta(MetaEvent::Sources { .. }) => false,
+            Polled::Cinemeta(MetaEvent::Browse { stage, .. }) => !matches!(stage, Stage::Failed(_)),
+            Polled::Cinemeta(MetaEvent::Details { stage, .. }) => {
+                !matches!(stage, Stage::Failed(_))
+            }
+            Polled::Tmdb(event) | Polled::Enrichment(event) => event.result.is_ok(),
+        });
+        let mut changed = self.drain_personal(cx) || !search.is_empty() || !metadata.is_empty();
         for event in search {
             if event.kind == self.kind {
                 let stage = match event.outcome {
@@ -751,6 +829,9 @@ impl AppCoordinator {
                     "UI metadata result no longer matches the active route"
                 ),
             }
+        }
+        if canonical_changed {
+            self.refresh_personal_after_catalog(cx);
         }
         if self.card_done.is_none()
             && self.card_pending.is_empty()
@@ -1202,6 +1283,9 @@ impl AppCoordinator {
         }
         self.details.cancel();
         self.tmdb_details.cancel();
+        self.cancel_local_detail();
+        self.local_details.cancel();
+        self.season_snapshot.cancel();
     }
     /// Opens or explicitly refreshes provider-native details; never remaps by name.
     pub(crate) fn title_details(
@@ -1507,15 +1591,30 @@ mod tests {
 impl AppCoordinator {
     fn load_title_details(&mut self, title: &BrowseTitle, refresh: bool, cx: &mut Context<Self>) {
         title.log_navigation("details_request");
-        tracing::debug!(refresh, "UI title details requested");
         let action = match title {
-            BrowseTitle::Cinemeta(t) => MetadataAction::Details {
-                kind: t.kind(),
-                id: t.id().clone(),
+            BrowseTitle::Local(local) => {
+                self.remember_local_title(local);
+                match self.local_detail_action(local) {
+                    Some(action) => action,
+                    None => {
+                        self.cancel_tmdb_season(cx);
+                        // No provider route follows to replace the old season
+                        // resource. Clear its value/error without resetting its
+                        // generation, so late replies still remain stale.
+                        self.tmdb_season.begin(true);
+                        self.tmdb_season.cancel();
+                        self.load_local_details(local.title_id, cx);
+                        return;
+                    }
+                }
+            }
+            BrowseTitle::Cinemeta(title) => MetadataAction::Details {
+                kind: title.kind(),
+                id: title.id().clone(),
             },
-            BrowseTitle::Tmdb(t) => MetadataAction::Tmdb(TmdbQuery::Details {
-                kind: t.kind,
-                id: t.id,
+            BrowseTitle::Tmdb(title) => MetadataAction::Tmdb(TmdbQuery::Details {
+                kind: title.kind,
+                id: title.id,
             }),
         };
         let same = self
@@ -1526,11 +1625,16 @@ impl AppCoordinator {
             self.cancel_tmdb_season(cx);
         }
         self.cancel_details();
-        let generation = match title {
-            BrowseTitle::Cinemeta(_) => self.details.begin(!(refresh && same)),
-            BrowseTitle::Tmdb(_) => self.tmdb_details.begin(!(refresh && same)),
+        let tmdb = matches!(action, MetadataAction::Tmdb(_));
+        let generation = if tmdb {
+            self.tmdb_details.begin(!(refresh && same))
+        } else {
+            self.details.begin(!(refresh && same))
         };
         self.detail_request = Some((action.clone(), generation));
+        if let BrowseTitle::Local(local) = title {
+            self.begin_local_projection(local, !(refresh && same), cx);
+        }
         let result = self
             .worker
             .as_ref()
@@ -1548,23 +1652,20 @@ impl AppCoordinator {
                 }
             });
         if let Err(error) = result {
-            match title {
-                BrowseTitle::Cinemeta(_) => {
-                    apply_stage(
-                        "details",
-                        &mut self.details,
-                        generation,
-                        Stage::Failed(error.to_string()),
-                    );
-                }
-                BrowseTitle::Tmdb(_) => {
-                    apply_stage(
-                        "tmdb_details",
-                        &mut self.tmdb_details,
-                        generation,
-                        Stage::Failed(error.to_string()),
-                    );
-                }
+            if tmdb {
+                apply_stage(
+                    "tmdb_details",
+                    &mut self.tmdb_details,
+                    generation,
+                    Stage::Failed(error),
+                );
+            } else {
+                apply_stage(
+                    "details",
+                    &mut self.details,
+                    generation,
+                    Stage::Failed(error),
+                );
             }
         }
         cx.notify();

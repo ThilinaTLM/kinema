@@ -83,6 +83,9 @@ impl Detail {
         match &self.title {
             BrowseTitle::Cinemeta(_) => c.details.value().map(|d| d.facts.clone()),
             BrowseTitle::Tmdb(_) => c.tmdb_details.value().map(|d| d.facts.clone()),
+            BrowseTitle::Local(_) => self
+                .local_detail(cx)
+                .map(|d| local::local_facts(&d.metadata)),
         }
         .unwrap_or_default()
     }
@@ -122,6 +125,14 @@ impl Detail {
                 .and_then(|d| d.release_info.clone())
                 .or_else(|| match title {
                     BrowseTitle::Tmdb(t) => t.release_info.clone(),
+                    BrowseTitle::Local(t) => t
+                        .metadata
+                        .text(if t.metadata.kind == MediaKind::Movie {
+                            "release_date"
+                        } else {
+                            "first_air_date"
+                        })
+                        .map(str::to_owned),
                     _ => None,
                 })
         };
@@ -183,6 +194,7 @@ impl Detail {
                         .map(|s| u64::from(s.episode_count))
                         .sum::<u64>()
                 }),
+                BrowseTitle::Local(_) => self.local_detail(cx).map(|d| d.episodes.len() as u64),
             };
             if let Some(n) = known.filter(|n| *n > 0) {
                 rows.push(("Episodes", n.to_string()));
@@ -421,7 +433,9 @@ impl Detail {
         title: &BrowseTitle,
         status: &MetaStatus,
     ) -> Vec<(&'static str, String)> {
-        let provider = if matches!(self.title, BrowseTitle::Tmdb(_)) {
+        let provider = if matches!(self.title, BrowseTitle::Local(_)) {
+            "Local catalog"
+        } else if matches!(self.title, BrowseTitle::Tmdb(_)) {
             "TMDB"
         } else {
             "Cinemeta"
@@ -441,6 +455,16 @@ impl Detail {
                 Some(imdb) => format!("TMDB {} · IMDb {}", t.id, imdb.as_str()),
                 None => format!("TMDB {}", t.id),
             },
+            BrowseTitle::Local(t) => {
+                let mut ids = vec![format!("Canonical {}", t.title_id.get())];
+                ids.extend(
+                    t.metadata
+                        .identifiers
+                        .iter()
+                        .map(|id| format!("{} {}", id.namespace.to_uppercase(), id.external_id)),
+                );
+                ids.join(" · ")
+            }
         };
         vec![("Metadata", freshness), ("Identifiers", ids)]
     }

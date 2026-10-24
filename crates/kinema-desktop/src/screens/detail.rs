@@ -32,9 +32,13 @@ mod episodes;
 mod facts;
 #[cfg(feature = "ui-probe")]
 mod fixtures;
+#[cfg(feature = "ui-probe")]
+pub(crate) use fixtures::local_fixture_title;
 mod hero;
 #[cfg(all(test, feature = "ui-probe-test"))]
 mod interaction_tests;
+mod local;
+mod personal;
 mod recommendations;
 mod streams;
 mod streams_page;
@@ -327,6 +331,12 @@ pub(crate) struct Detail {
     streams_scroll: ScrollHandle,
     similar: recommendations::SimilarGrid,
     similar_cols: usize,
+    /// Synchronous rejection: the exact rejected intent plus reason.
+    write_error: Option<(personal::Write, String)>,
+    season_confirm: Option<personal::SeasonConfirm>,
+    /// Episodes whose personal state has been requested (per canonical show).
+    episode_personal_requested:
+        std::collections::HashSet<(kinema_core::library::TitleId, u32, u32)>,
     #[cfg(feature = "ui-probe")]
     fixture_ambient: Option<artwork::ArtworkPalette>,
     _subscriptions: Vec<Subscription>,
@@ -366,6 +376,7 @@ impl Detail {
             cx.observe(&coordinator, |this, _, cx| {
                 this.reconcile_metadata(cx);
                 this.reconcile_similar(cx);
+                this.ensure_episode_personal(cx);
                 cx.notify();
             }),
             cx.subscribe(&indexer, |this, _, event: &SelectEvent<IndexerKind>, cx| {
@@ -421,11 +432,15 @@ impl Detail {
             streams_scroll: ScrollHandle::new(),
             similar: Default::default(),
             similar_cols: 6,
+            write_error: None,
+            season_confirm: None,
+            episode_personal_requested: Default::default(),
             #[cfg(feature = "ui-probe")]
             fixture_ambient: None,
             _subscriptions: subscriptions,
         };
         this.reconcile_similar(cx);
+        this.ensure_personal(cx);
         this
     }
     #[cfg(all(test, feature = "ui-probe-test"))]
@@ -522,6 +537,9 @@ impl Detail {
                 .tmdb_details
                 .value()
                 .and_then(|d| d.backdrop_url.as_deref()),
+            BrowseTitle::Local(_) => self
+                .local_detail(cx)
+                .and_then(|d| d.metadata.text("backdrop_url")),
         };
         backdrop
             .and_then(|url| ArtworkKey::new(ArtworkKind::Backdrop, url))
@@ -548,6 +566,14 @@ impl Detail {
                     let mut t = d.title.clone();
                     t.imdb = d.imdb.clone();
                     BrowseTitle::Tmdb(t)
+                })
+                .unwrap_or_else(|| self.title.clone()),
+            BrowseTitle::Local(_) => self
+                .local_detail(cx)
+                .map(|d| {
+                    BrowseTitle::Local(super::coordinator::LocalBrowseTitle::new(
+                        d.metadata.clone(),
+                    ))
                 })
                 .unwrap_or_else(|| self.title.clone()),
         }
@@ -600,6 +626,7 @@ impl Detail {
                 v.dedup_by_key(|s| s.0);
                 v
             }),
+            BrowseTitle::Local(_) => self.local_season_options(cx),
         };
         let Some(options) = options else {
             return;
@@ -637,6 +664,21 @@ impl Detail {
         }
     }
     fn ensure_season(&mut self, refresh: bool, cx: &mut Context<Self>) {
+        if let (BrowseTitle::Local(_), Some(season)) = (&self.title, self.season)
+            && let Some(id) = self.local_tmdb(cx)
+        {
+            let identity = (id, season);
+            if refresh || self.requested_season != Some(identity) {
+                // False when TMDB is inactive: saved local rows simply remain.
+                let title = self.title.clone();
+                if self
+                    .coordinator
+                    .update(cx, |c, cx| c.load_local_season(&title, season, refresh, cx))
+                {
+                    self.requested_season = Some(identity);
+                }
+            }
+        }
         if let (BrowseTitle::Tmdb(t), Some(season)) = (&self.title, self.season) {
             let identity = (t.id, season);
             if refresh || self.requested_season != Some(identity) {
@@ -652,10 +694,12 @@ impl Detail {
             return;
         }
         self.season = Some(n);
+        self.season_confirm = None;
         self.clear_episode(cx);
         self.reset_stream_selection();
         self.requested_season = None;
         self.ensure_season(false, cx);
+        self.ensure_episode_personal(cx);
         cx.notify();
     }
     fn episodes(&self, cx: &App) -> Vec<CatalogEpisode> {
@@ -667,6 +711,7 @@ impl Detail {
                 .value()
                 .filter(|s| s.series_id == t.id && Some(s.season) == self.season)
                 .map(|s| &s.episodes),
+            BrowseTitle::Local(_) => None,
         };
         let mut episodes = episodes
             .into_iter()
@@ -674,6 +719,9 @@ impl Detail {
             .filter(|e| Some(e.season) == self.season)
             .cloned()
             .collect::<Vec<_>>();
+        if let Some(season) = self.season.filter(|_| self.local_detail(cx).is_some()) {
+            episodes.extend(self.local_season_episodes(season, cx));
+        }
         episodes.sort_by_key(|e| e.number);
         episodes
     }
@@ -828,7 +876,19 @@ impl Detail {
     /// Loading / failure / emptiness of the title metadata resource in use.
     fn meta_status(&self, cx: &App) -> MetaStatus {
         let c = self.coordinator.read(cx);
-        if matches!(self.title, BrowseTitle::Tmdb(_)) {
+        if matches!(self.title, BrowseTitle::Local(_)) {
+            MetaStatus {
+                loaded: c.local_details.value().is_some(),
+                busy: c.local_details.busy() || c.local_acquisition_busy(),
+                error: c
+                    .local_details
+                    .error()
+                    .or(c.local_acquisition_error())
+                    .map(str::to_owned),
+                origin: c.local_details.origin(),
+                fetched_at: c.local_details.fetched_at(),
+            }
+        } else if matches!(self.title, BrowseTitle::Tmdb(_)) {
             MetaStatus {
                 loaded: c.tmdb_details.value().is_some(),
                 busy: c.tmdb_details.busy(),

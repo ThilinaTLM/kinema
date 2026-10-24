@@ -168,6 +168,9 @@ fn fill_display(base: &CatalogDisplay, src: &CatalogTitle) -> CatalogDisplay {
 /// The card with its gaps filled, or `None` when nothing would change.
 pub(crate) fn fill_card(card: &BrowseTitle, src: &CatalogTitle) -> Option<BrowseTitle> {
     let filled = match card {
+        // Local Library projections already contain canonical metadata; never
+        // turn offline saved browsing into a provider enrichment crawl.
+        BrowseTitle::Local(_) => return None,
         BrowseTitle::Cinemeta(t) => {
             let base = CatalogDisplay {
                 year: t.year(),

@@ -4,6 +4,7 @@ use super::{
     chip::{self, Chip},
     menu::{ContextMenuExt, MenuItem},
     motion::{self, Motion},
+    state_toggle::{StateToggle, ToggleKind, ToggleStatus},
     text::TypeExt,
     tokens::{self, Palette, radius, space as s, typeface as t},
 };
@@ -11,9 +12,6 @@ use gpui::{prelude::*, *};
 use std::{cell::Cell, rc::Rc, sync::Arc};
 fn col() -> Div {
     div().flex().flex_col().gap(s::S8)
-}
-fn row() -> Div {
-    div().flex().items_center().gap(s::S8)
 }
 fn focus_is_visible(focus: &FocusHandle, window: &Window) -> bool {
     window.last_input_was_keyboard() && focus.is_focused(window)
@@ -38,9 +36,17 @@ pub struct PosterCard {
     pub year: SharedString,
     pub series: bool,
     pub menu: Vec<MenuItem>,
+    /// Shared personal-state snapshot; `Loading` until the host has a successful read.
+    pub membership: ToggleStatus,
 }
 pub struct CardOpened;
 impl EventEmitter<CardOpened> for PosterCard {}
+/// Desired membership from the top-right toggle; never emitted with `CardOpened`.
+pub struct MembershipRequested(pub bool);
+impl EventEmitter<MembershipRequested> for PosterCard {}
+/// The personal-state read failed and the user asked to retry it.
+pub struct MembershipRetry;
+impl EventEmitter<MembershipRetry> for PosterCard {}
 
 impl PosterCard {
     pub fn new(
@@ -77,6 +83,7 @@ impl PosterCard {
             year: "".into(),
             series: false,
             menu: Vec::new(),
+            membership: ToggleStatus::Loading,
         }
     }
     pub fn set_title(&mut self, title: impl Into<SharedString>) {
@@ -275,6 +282,7 @@ impl Render for PosterCard {
                 )
                 .into_any_element()
         };
+        let this = cx.entity();
         let lift = div()
             .size_full()
             .relative()
@@ -283,14 +291,47 @@ impl Render for PosterCard {
             .children(artwork)
             .child(panel)
             .child(
-                row()
+                // Independent anchors: the optional rating never moves the top-right stack.
+                div()
                     .absolute()
-                    .top(s::S8)
-                    .left(s::S8)
-                    .right(s::S8)
-                    .justify_between()
-                    .child(Chip::rating(self.rating).over_art(true))
-                    .when(self.series, |el| el.child(Chip::series().over_art(true))),
+                    .inset_0()
+                    .child(
+                        div()
+                            .absolute()
+                            .top(s::S8)
+                            .left(s::S8)
+                            .child(Chip::rating(self.rating).over_art(true)),
+                    )
+                    .child(
+                        col()
+                            .absolute()
+                            .top(s::S8)
+                            .right(s::S8)
+                            .gap(s::S4)
+                            .items_end()
+                            .child(
+                                StateToggle::new(
+                                    ("poster-library", self.index),
+                                    ToggleKind::Membership,
+                                    self.membership,
+                                    self.title.clone(),
+                                )
+                                .over_art(true)
+                                .on_change({
+                                    let this = this.clone();
+                                    move |wanted, _, cx| {
+                                        this.update(cx, |_, cx| {
+                                            cx.emit(MembershipRequested(wanted))
+                                        })
+                                    }
+                                })
+                                .on_retry({
+                                    let this = this.clone();
+                                    move |_, cx| this.update(cx, |_, cx| cx.emit(MembershipRetry))
+                                }),
+                            )
+                            .when(self.series, |el| el.child(Chip::series().over_art(true))),
+                    ),
             )
             .child(
                 div()
@@ -346,8 +387,9 @@ impl Render for PosterCard {
                 focus.focus(window, cx);
                 cx.emit(CardOpened);
             }))
-            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "enter" {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                // Enter on a child toggle bubbles here; only the card itself opens.
+                if event.keystroke.key == "enter" && this.focus.is_focused(window) {
                     cx.emit(CardOpened);
                     cx.stop_propagation();
                 }
@@ -365,5 +407,162 @@ impl Render for PosterCard {
 impl Focusable for PosterCard {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
+    }
+}
+
+#[cfg(all(test, feature = "ui-probe-test"))]
+#[allow(
+    clippy::unwrap_used,
+    reason = "test setup and event dispatch must succeed"
+)]
+mod interaction_tests {
+    use super::{CardOpened, MembershipRequested, PosterCard, ToggleStatus, tokens};
+    use gpui::{
+        AppContext, InputEvent, KeyDownEvent, KeyUpEvent, Keystroke, MouseButton, MouseDownEvent,
+        MouseUpEvent, TestAppContext, WindowHandle, px,
+    };
+    use std::{cell::Cell, rc::Rc};
+
+    type Fixture = (
+        TestAppContext,
+        WindowHandle<PosterCard>,
+        Rc<Cell<usize>>,
+        Rc<std::cell::RefCell<Vec<bool>>>,
+    );
+    fn setup(status: ToggleStatus) -> Fixture {
+        setup_with(status, None, false)
+    }
+    fn setup_with(status: ToggleStatus, rating: Option<f32>, series: bool) -> Fixture {
+        let mut cx = TestAppContext::single();
+        cx.update(tokens::init);
+        let window = cx.add_window(|window, cx| {
+            let mut card = PosterCard::new(0, "Fixture", window, cx);
+            card.membership = status;
+            card.set_rating(rating);
+            card.series = series;
+            card
+        });
+        let opened = Rc::new(Cell::new(0));
+        let wanted = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let entity = window.root(&mut cx).unwrap();
+        let (o, w) = (opened.clone(), wanted.clone());
+        cx.update(|cx| {
+            cx.subscribe(&entity, move |_, _: &CardOpened, _| o.set(o.get() + 1))
+                .detach();
+            cx.subscribe(&entity, move |_, e: &MembershipRequested, _| {
+                w.borrow_mut().push(e.0)
+            })
+            .detach();
+        });
+        cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+        (cx, window, opened, wanted)
+    }
+
+    fn click(cx: &mut TestAppContext, window: WindowHandle<PosterCard>, x: f32, y: f32) {
+        cx.update_window(window.into(), |_, window, cx| {
+            let position = gpui::point(px(x), px(y));
+            window.dispatch_event(
+                MouseDownEvent {
+                    position,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.dispatch_event(
+                MouseUpEvent {
+                    position,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn toggle_pointer_click_requests_once_without_opening() {
+        let (mut cx, window, opened, wanted) = setup(ToggleStatus::Known {
+            on: false,
+            pending: false,
+        });
+        // Top-right target: card is 190 px wide; the 28 px control sits 8 px in.
+        click(&mut cx, window, 190. - 8. - 14., 8. + 14.);
+        assert_eq!(*wanted.borrow(), vec![true]);
+        assert_eq!(opened.get(), 0);
+        // The card body still opens.
+        click(&mut cx, window, 60., 200.);
+        assert_eq!(opened.get(), 1);
+        assert_eq!(wanted.borrow().len(), 1);
+    }
+
+    #[test]
+    fn rated_series_cards_keep_toggle_top_right() {
+        let (mut cx, window, opened, wanted) = setup_with(
+            ToggleStatus::Known {
+                on: false,
+                pending: false,
+            },
+            Some(8.1),
+            true,
+        );
+        click(&mut cx, window, 190. - 8. - 14., 8. + 14.);
+        assert_eq!(*wanted.borrow(), vec![true]);
+        assert_eq!(opened.get(), 0);
+    }
+
+    #[test]
+    fn toggle_enter_and_space_each_request_once_without_opening() {
+        for key in ["enter", "space"] {
+            let (mut cx, window, opened, wanted) = setup(ToggleStatus::Known {
+                on: true,
+                pending: false,
+            });
+            cx.update_window(window.into(), |_, window, cx| {
+                // Card is the first tab stop; the next stop is the toggle.
+                window.focus_next(cx);
+                window.focus_next(cx);
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+            let keystroke = Keystroke::parse(key).unwrap();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.dispatch_event(
+                    KeyDownEvent {
+                        keystroke: keystroke.clone(),
+                        is_held: false,
+                        prefer_character_input: false,
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+                window.dispatch_event(KeyUpEvent { keystroke }.to_platform_input(), cx);
+            })
+            .unwrap();
+            assert_eq!(*wanted.borrow(), vec![false], "{key}");
+            assert_eq!(opened.get(), 0, "{key}");
+        }
+    }
+
+    #[test]
+    fn loading_and_pending_toggles_do_not_write_or_open() {
+        for status in [
+            ToggleStatus::Loading,
+            ToggleStatus::Known {
+                on: false,
+                pending: true,
+            },
+        ] {
+            let (mut cx, window, opened, wanted) = setup(status);
+            click(&mut cx, window, 190. - 8. - 14., 8. + 14.);
+            assert!(wanted.borrow().is_empty(), "{status:?}");
+            assert_eq!(opened.get(), 0, "{status:?}");
+        }
     }
 }

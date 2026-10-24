@@ -40,6 +40,8 @@ pub struct Button {
     pub(crate) square: bool,
     pub(crate) badge: Option<usize>,
     pub(crate) toggled: bool,
+    /// Optional toggle semantics; `None` for ordinary actions and unknown state.
+    pub(crate) aria_toggled: Option<bool>,
     pub(crate) over_art: bool,
     pub(crate) tooltip: Option<SharedString>,
 }
@@ -58,6 +60,7 @@ impl Button {
             square: false,
             badge: None,
             toggled: false,
+            aria_toggled: None,
             over_art: false,
             tooltip: None,
         }
@@ -280,6 +283,9 @@ impl RenderOnce for Button {
             .rounded(radius::SM + space::S4)
             .role(Role::Button)
             .aria_label(self.tooltip.clone().unwrap_or(self.label.clone()))
+            .when_some(self.aria_toggled, |el, on| {
+                el.aria_toggled(if on { Toggled::True } else { Toggled::False })
+            })
             .when(!blocked, |el| {
                 el.focusable()
                     .cursor_pointer()

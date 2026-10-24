@@ -16,6 +16,9 @@ macro_rules! icons {
 
 const ICONS: &[(&str, &[u8])] = icons![
     "arrow-left",
+    "bookmark",
+    "bookmark-off",
+    "circle-check",
     "check",
     "circle",
     "circle-dot",
