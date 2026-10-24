@@ -89,6 +89,38 @@ Decode evidence uses a strict fixed vocabulary for actual decoder, pixel/storage
 formats, transfer and optional codec, with explicit unavailable booleans and
 numeric source/render dimensions. Unknown values become `other`, never sanitized
 native text. Only changed snapshots are logged, with at most 32 per Player.
+`decoded_transfer` (also the legacy `color_transfer` field) comes from
+`video-dec-params/gamma`, before user overrides. `effective_transfer` comes from
+`video-params/gamma`, mpv's effective input parameters including its resolution
+of unspecified metadata (mpv 0.41 property documentation: decoder parameters
+exclude overrides; `video-params` describes effective filter input). The backend
+sets SDR target options, not an input gamma override. Neither property is a
+measurement of displayed pixels or proof of output color correctness.
+`output_pixfmt` is `video-out-params/pixelformat` after filters, **not** actual VO
+output; `video-target-params` is the separate VO target and is not used to
+qualify input SDR.
+
+Experimental qualification requires an allowlisted effective SDR transfer
+(bt.1886, bt.709, srgb, gamma2.2 or gamma2.8) and direct hardware evidence.
+Decoded auto/unknown/unavailable is not SDR by itself; it may qualify only once
+mpv supplies effective SDR. Explicit PQ/HLG (including known aliases) in either
+transfer rejects immediately, even if the other is SDR. Explicit unsupported
+transfers reject rather than being guessed. Missing/auto/unknown effective
+transfer stays pending even with decoded SDR. Persistent missing decode/color
+evidence fails after five seconds of render-worker observation for that pipeline
+generation; a new generation resets the wait and stale snapshots are discarded.
+This is not a deadline for a blocked native call or proof of source tagging.
+Effective-property changes force requalification/redraw even while paused without
+another frame notification. Zero source dimensions still prevent publication but
+do not bypass the observed-evidence timeout.
+
+`mpv experimental metadata qualification` emits fixed `qualification` categories
+(`waiting-decode`, `waiting-effective-transfer`, `ready`, or safe failure codes),
+correlated by `player_id` and numeric `generation`. Only transitions are emitted,
+at most 32 per renderer; decode/effective values remain allowlisted evidence
+fields, never raw native text. These pure policy tests do not establish native
+playback success for untagged files, HDR display safety, or platform qualification.
+
 Libmpv warning capture is best effort; `available=false` does not prevent playback.
 Native messages become reviewed diagnostic/module/severity enums, with at most
 eight distinct tuples per Player. Raw module names, messages, errors, URLs, paths,

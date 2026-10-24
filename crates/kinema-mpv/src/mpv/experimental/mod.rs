@@ -193,6 +193,7 @@ pub(super) struct Renderer {
     mpv: Option<Box<MpvContext>>,
     retained: Vec<Arc<FrameOwner>>,
     evidence_wait: EvidenceWait,
+    evidence_events: u8,
 }
 impl Renderer {
     pub fn new(
@@ -214,6 +215,7 @@ impl Renderer {
             })),
             retained: Vec::with_capacity(3),
             evidence_wait: EvidenceWait::default(),
+            evidence_events: 0,
         };
         let mpv = this.mpv.as_mut().unwrap();
         let mut init = OpenGlInit {
@@ -273,21 +275,21 @@ impl Renderer {
         })?;
         mpv.client.loaded.check(code, "skip experimental frame")
     }
-    pub fn evidence_ready(&mut self, generation: u64, evidence: &[String; 5]) -> Result<bool> {
-        if !self
+    pub fn evidence_ready(&mut self, generation: u64, evidence: &[String; 6]) -> Result<bool> {
+        let previous = (self.evidence_wait.0.map(|v| v.0), self.evidence_wait.1);
+        let result = self
             .evidence_wait
-            .ready(generation, evidence, std::time::Instant::now())?
-        {
-            return Ok(false);
+            .ready(generation, evidence, std::time::Instant::now());
+        if previous != (Some(generation), self.evidence_wait.1) && self.evidence_events < 32 {
+            tracing::info!(
+                player_id = self.diagnostic_id,
+                generation,
+                qualification = self.evidence_wait.1.unwrap_or("unknown"),
+                "mpv experimental metadata qualification"
+            );
+            self.evidence_events += 1;
         }
-        validate_direct(
-            &evidence[0],
-            &evidence[1],
-            &evidence[2],
-            &evidence[3],
-            &evidence[4],
-        )?;
-        Ok(true)
+        result
     }
     pub fn render(&mut self, size: [u32; 2]) -> Result<Option<ExperimentalFrame>> {
         let mpv = self.mpv.as_mut().unwrap();
@@ -395,39 +397,87 @@ pub(super) fn hwdec() -> &'static str {
 }
 
 #[derive(Default)]
-struct EvidenceWait(Option<(u64, std::time::Instant)>);
+struct EvidenceWait(Option<(u64, std::time::Instant)>, Option<&'static str>);
+
+fn pending(value: &str) -> bool {
+    matches!(value, "" | "unavailable" | "auto" | "unknown")
+}
+fn hdr(value: &str) -> bool {
+    matches!(value, "pq" | "hlg" | "st2084" | "arib-std-b67")
+}
+fn sdr(value: &str) -> bool {
+    matches!(
+        value,
+        "bt.1886" | "bt.709" | "srgb" | "gamma2.2" | "gamma2.8"
+    )
+}
 impl EvidenceWait {
     fn ready(
         &mut self,
         generation: u64,
-        evidence: &[String; 5],
+        evidence: &[String; 6],
         now: std::time::Instant,
     ) -> Result<bool> {
         let started = match self.0 {
             Some((old, started)) if old == generation => started,
             _ => {
                 self.0 = Some((generation, now));
+                self.1 = None;
                 now
             }
         };
-        if evidence
-            .iter()
-            .any(|value| value.is_empty() || value == "unavailable")
-        {
-            if now.duration_since(started) >= std::time::Duration::from_secs(5) {
-                let decoder_complete = evidence[..4]
-                    .iter()
-                    .all(|value| !value.is_empty() && value != "unavailable");
-                return Err(Error::Gpu(if decoder_complete {
-                    "color metadata unavailable after five seconds".into()
-                } else {
-                    "direct decode evidence unavailable after five seconds".into()
-                }));
-            }
-            return Ok(false);
+        let result = qualify(evidence, now.duration_since(started));
+        let reason = match &result {
+            Ok(true) => "ready",
+            Ok(false) if evidence[..4].iter().any(|v| pending(v)) => "waiting-decode",
+            Ok(false) => "waiting-effective-transfer",
+            Err(error) => error.playback_failure().code(),
+        };
+        if self.1 != Some(reason) {
+            self.1 = Some(reason);
         }
-        Ok(true)
+        result
     }
+}
+
+fn qualify(evidence: &[String; 6], elapsed: std::time::Duration) -> Result<bool> {
+    // Never let a guessed/overridden SDR effective value conceal decoded HDR.
+    if evidence[4..].iter().any(|v| hdr(v)) {
+        return Err(Error::Gpu(
+            "experimental SDR only; HDR transfer detected".into(),
+        ));
+    }
+    // Explicit unsupported transfers are not startup absence. Only mpv's
+    // resolved effective SDR can qualify unspecified decoder metadata.
+    if (!pending(&evidence[4]) && !sdr(&evidence[4]))
+        || (!pending(&evidence[5]) && !sdr(&evidence[5]))
+    {
+        return Err(Error::Gpu(
+            "experimental SDR only; unqualified transfer function: unsupported".into(),
+        ));
+    }
+    let decode_pending = evidence[..4].iter().any(|v| pending(v));
+    if decode_pending || pending(&evidence[5]) {
+        if elapsed >= std::time::Duration::from_secs(5) {
+            return Err(Error::Gpu(
+                if decode_pending {
+                    "direct decode evidence unavailable after five seconds"
+                } else {
+                    "color metadata unavailable after five seconds"
+                }
+                .into(),
+            ));
+        }
+        return Ok(false);
+    }
+    validate_direct(
+        &evidence[0],
+        &evidence[1],
+        &evidence[2],
+        &evidence[3],
+        &evidence[5],
+    )?;
+    Ok(true)
 }
 
 // FFmpeg libavutil/pixdesc.c identifies AV_PIX_FMT_VIDEOTOOLBOX as
@@ -452,17 +502,17 @@ fn validate_direct(
         || output != native
         || !matches!(storage, "nv12" | "p010" | "p010le")
     {
-        return Err(Error::Gpu(format!(
-            "direct hardware surface required: hwdec={actual}, decoded={decoded}, output={output}, storage={storage}"
-        )));
+        return Err(Error::Gpu(
+            "direct hardware surface required: unsupported".into(),
+        ));
     }
     if !matches!(
         gamma,
         "bt.1886" | "bt.709" | "srgb" | "gamma2.2" | "gamma2.8"
     ) {
-        return Err(Error::Gpu(format!(
-            "experimental SDR only; unqualified transfer function: {gamma}"
-        )));
+        return Err(Error::Gpu(
+            "experimental SDR only; unqualified transfer function: unsupported".into(),
+        ));
     }
     Ok(())
 }
@@ -470,6 +520,113 @@ fn validate_direct(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn direct_evidence(decoded: &str, effective: &str) -> [String; 6] {
+        let native = if cfg!(target_os = "linux") {
+            "vaapi"
+        } else if cfg!(target_os = "windows") {
+            "d3d11"
+        } else {
+            "videotoolbox_vld"
+        };
+        [hwdec(), native, native, "nv12", decoded, effective].map(str::to_owned)
+    }
+    #[test]
+    fn auto_requires_effective_resolution_and_unknown_is_bounded() {
+        let now = std::time::Instant::now();
+        let mut resolving = EvidenceWait::default();
+        assert!(
+            !resolving
+                .ready(1, &direct_evidence("auto", "auto"), now)
+                .unwrap()
+        );
+        assert!(
+            resolving
+                .ready(
+                    1,
+                    &direct_evidence("auto", "bt.1886"),
+                    now + std::time::Duration::from_secs(1)
+                )
+                .unwrap()
+        );
+        for value in ["auto", "unknown", "", "unavailable"] {
+            let mut wait = EvidenceWait::default();
+            assert!(!wait.ready(1, &direct_evidence("auto", value), now).unwrap());
+            assert_eq!(
+                wait.ready(
+                    1,
+                    &direct_evidence("auto", value),
+                    now + std::time::Duration::from_secs(5)
+                )
+                .unwrap_err()
+                .playback_failure(),
+                crate::PlaybackFailure::ColorMetadataUnavailable
+            );
+            assert!(
+                !wait
+                    .ready(
+                        2,
+                        &direct_evidence("auto", value),
+                        now + std::time::Duration::from_secs(5)
+                    )
+                    .unwrap()
+            );
+            assert!(
+                wait.ready(
+                    2,
+                    &direct_evidence("auto", "bt.1886"),
+                    now + std::time::Duration::from_secs(6)
+                )
+                .unwrap()
+            );
+        }
+    }
+    #[test]
+    fn decoded_sdr_does_not_bypass_pending_effective_and_unsupported_is_immediate() {
+        for pending in ["auto", "unknown", "", "unavailable"] {
+            let evidence = direct_evidence("bt.709", pending);
+            assert!(!qualify(&evidence, std::time::Duration::ZERO).unwrap());
+            assert_eq!(
+                qualify(&evidence, std::time::Duration::from_secs(5))
+                    .unwrap_err()
+                    .playback_failure(),
+                crate::PlaybackFailure::ColorMetadataUnavailable
+            );
+        }
+        for (decoded, effective) in [
+            ("linear", "bt.1886"),
+            ("auto", "linear"),
+            ("https://SECRET/path", "bt.1886"),
+        ] {
+            let error = qualify(
+                &direct_evidence(decoded, effective),
+                std::time::Duration::ZERO,
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.playback_failure(),
+                crate::PlaybackFailure::ColorTransferUnqualified
+            );
+            assert!(!error.to_string().contains("SECRET"));
+        }
+    }
+    #[test]
+    fn either_hdr_transfer_rejects_even_if_other_is_sdr_or_missing() {
+        for hdr in ["pq", "hlg", "st2084", "arib-std-b67"] {
+            for other in ["bt.1886", "auto", ""] {
+                for (decoded, effective) in [(hdr, other), (other, hdr)] {
+                    assert_eq!(
+                        qualify(
+                            &direct_evidence(decoded, effective),
+                            std::time::Duration::ZERO
+                        )
+                        .unwrap_err()
+                        .playback_failure(),
+                        crate::PlaybackFailure::HdrUnsupported
+                    );
+                }
+            }
+        }
+    }
     #[test]
     fn frame_released_during_completion_wait_is_not_retired() {
         let mut retained = vec![Arc::new(())];
@@ -584,6 +741,7 @@ mod tests {
                     String::new(),
                     String::new(),
                     String::new(),
+                    String::new(),
                 ],
                 F::DecodeMetadataUnavailable,
             ),
@@ -593,6 +751,7 @@ mod tests {
                     "native".into(),
                     "native".into(),
                     "nv12".into(),
+                    String::new(),
                     String::new(),
                 ],
                 F::ColorMetadataUnavailable,
@@ -631,7 +790,7 @@ mod tests {
         assert!(
             wait.ready(
                 2,
-                &std::array::from_fn(|_| "present".into()),
+                &direct_evidence("auto", "bt.1886"),
                 now + std::time::Duration::from_secs(6)
             )
             .unwrap()

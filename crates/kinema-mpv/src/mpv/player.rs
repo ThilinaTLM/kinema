@@ -281,6 +281,7 @@ impl Player {
             (18, c"video-out-params/pixelformat"),
             (19, c"video-dec-params/hw-pixelformat"),
             (20, c"video-dec-params/gamma"),
+            (21, c"video-params/gamma"),
         ] {
             let result = client.loaded.check(
                 unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), 1) },
@@ -848,7 +849,7 @@ fn control_worker(
             }
             if !state.loading
                 && !state.media_stopped
-                && (event.id == 8 || (event.id == 22 && matches!(event.userdata, 6..=11 | 17..=20)))
+                && (event.id == 8 || (event.id == 22 && matches!(event.userdata, 6..=11 | 17..=21)))
             {
                 // Never hold UI-visible state/pipeline locks during client calls.
                 drop(state);
@@ -880,7 +881,9 @@ unsafe fn classify_native_message(message: &LogMessage) -> NativeMessage {
 fn refresh_decode_evidence(client: &Client, shared: &Shared) {
     // Client property calls belong exclusively on the existing control worker.
     // Query all fields together after FILE_LOADED/property changes, rather than
-    // accepting queued string values from a previous source.
+    // accepting queued string values from a previous source. video-params is
+    // effective filter INPUT (including inference/overrides), not rendered VO
+    // output. Keep decoder gamma separately so explicit HDR cannot be hidden.
     let generation = {
         let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
         pipeline.generation
@@ -892,6 +895,7 @@ fn refresh_decode_evidence(client: &Client, shared: &Shared) {
         c"video-dec-params/hw-pixelformat",
         c"video-dec-params/gamma",
         c"current-tracks/video/codec",
+        c"video-params/gamma",
     ]
     .map(|name| {
         let ptr = unsafe { (client.loaded.api.get_property_string)(client.handle, name.as_ptr()) };
@@ -913,16 +917,23 @@ fn refresh_decode_evidence(client: &Client, shared: &Shared) {
     if pipeline.generation != generation {
         return;
     }
-    shared.diagnostics.evidence(Evidence::new(
-        std::array::from_fn(|index| evidence[index].as_deref()),
-        state.source_size.unwrap_or([0; 2]),
-        state.render_size,
-    ));
+    shared.diagnostics.evidence(
+        Evidence::new(
+            std::array::from_fn(|index| evidence[index].as_deref()),
+            state.source_size.unwrap_or([0; 2]),
+            state.render_size,
+        )
+        .with_effective_transfer(evidence[6].as_deref()),
+    );
     #[cfg(feature = "experimental-gpu")]
     if pipeline.experimental_enabled() {
         pipeline.update_decode_evidence(
             generation,
-            std::array::from_fn(|i| evidence[i].clone().unwrap_or_default()),
+            std::array::from_fn(|i| {
+                evidence[if i == 5 { 6 } else { i }]
+                    .clone()
+                    .unwrap_or_default()
+            }),
         );
     }
     #[cfg(not(feature = "experimental-gpu"))]

@@ -103,6 +103,10 @@ impl PlaybackFailure {
 // their dynamic suffixes. Unknown messages deliberately stay unclassified.
 const GPU_PREFIXES: &[(&str, PlaybackFailure)] = &[
     (
+        "experimental SDR only; HDR transfer detected",
+        PlaybackFailure::HdrUnsupported,
+    ),
+    (
         "expected exactly one GL device UUID, got ",
         PlaybackFailure::GpuInteropUnavailable,
     ),

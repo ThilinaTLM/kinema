@@ -25,6 +25,8 @@ macro_rules! evidence_event {
             output_pixfmt = $e.output,
             storage_fmt = $e.storage,
             color_transfer = $e.transfer,
+            decoded_transfer = $e.transfer,
+            effective_transfer = $e.effective_transfer,
             codec = $e.codec,
             decoder_unavailable = $e.unavailable[0],
             decoded_unavailable = $e.unavailable[1],
@@ -202,6 +204,7 @@ pub(super) struct Evidence {
     pub output: &'static str,
     pub storage: &'static str,
     pub transfer: &'static str,
+    pub effective_transfer: &'static str,
     pub codec: &'static str,
     pub unavailable: [bool; 6],
     pub source: [u32; 2],
@@ -240,6 +243,7 @@ impl Evidence {
             "vulkan",
         ];
         Self {
+            effective_transfer: "unavailable",
             actual_decoder: vocabulary(
                 actual,
                 &[
@@ -299,16 +303,37 @@ impl Evidence {
             render,
         }
     }
+    pub fn with_effective_transfer(mut self, value: Option<&str>) -> Self {
+        self.effective_transfer = vocabulary(
+            value,
+            &[
+                "bt.1886",
+                "bt.709",
+                "srgb",
+                "gamma2.2",
+                "gamma2.8",
+                "pq",
+                "hlg",
+                "st2084",
+                "arib-std-b67",
+                "auto",
+                "unknown",
+                "linear",
+            ],
+        );
+        self
+    }
     /// Shared by telemetry and privacy tests: no native text is formatted here.
     #[cfg(test)]
     pub fn summary(self) -> String {
         format!(
-            "decoder={} decoded={} output={} storage={} transfer={} codec={} unavailable={:?} source={}x{} render={}x{}",
+            "decoder={} decoded={} output={} storage={} transfer={} effective={} codec={} unavailable={:?} source={}x{} render={}x{}",
             self.actual_decoder,
             self.decoded,
             self.output,
             self.storage,
             self.transfer,
+            self.effective_transfer,
             self.codec,
             self.unavailable,
             self.source[0],
@@ -836,7 +861,8 @@ mod tests {
             "日本語SECRET🔑",
             "password=PASSWORD_MARKER",
         ] {
-            let evidence = Evidence::new([Some(secret); 6], [1920, 1080], [1280, 720]);
+            let evidence = Evidence::new([Some(secret); 6], [1920, 1080], [1280, 720])
+                .with_effective_transfer(Some(secret));
             let output = evidence.summary();
             assert_eq!(evidence.actual_decoder, "other");
             for text in [

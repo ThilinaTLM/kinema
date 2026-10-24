@@ -115,7 +115,7 @@ pub(super) struct Pipeline {
     config: Config,
     pub viewport: [u32; 2],
     #[cfg(feature = "experimental-gpu")]
-    decode_evidence: [String; 5],
+    decode_evidence: [String; 6],
     #[cfg(feature = "experimental-gpu")]
     decode_evidence_observed: bool,
     pub metadata: [Option<i64>; 5],
@@ -171,7 +171,7 @@ impl Pipeline {
     /// changed snapshot invalidates the mailbox and forces a render even when
     /// paused libmpv has no further frame-update notification to send.
     #[cfg(feature = "experimental-gpu")]
-    pub fn update_decode_evidence(&mut self, generation: u64, evidence: [String; 5]) -> bool {
+    pub fn update_decode_evidence(&mut self, generation: u64, evidence: [String; 6]) -> bool {
         if self.generation != generation
             || (self.decode_evidence_observed && self.decode_evidence == evidence)
         {
@@ -666,12 +666,17 @@ mod tests {
         schedule.consumed(pipeline.generation);
         schedule.observe(0); // Paused video supplies no more mpv updates.
         assert!(!schedule.ready(false, pipeline.generation));
-        let evidence = ["vaapi", "vaapi", "vaapi", "nv12", "bt.1886"].map(str::to_owned);
+        let evidence = ["vaapi", "vaapi", "vaapi", "nv12", "auto", "bt.1886"].map(str::to_owned);
         assert!(pipeline.update_decode_evidence(pipeline.generation, evidence.clone()));
         assert!(schedule.ready(false, pipeline.generation));
         schedule.consumed(pipeline.generation);
         assert!(!pipeline.update_decode_evidence(pipeline.generation, evidence));
         assert!(!schedule.ready(false, pipeline.generation));
+        // Only video-params/gamma changes; no mpv frame notification follows.
+        let mut resolved = pipeline.decode_evidence.clone();
+        resolved[5] = "bt.709".into();
+        assert!(pipeline.update_decode_evidence(pipeline.generation, resolved));
+        assert!(schedule.ready(false, pipeline.generation));
         assert!(state.paused);
     }
     #[cfg(feature = "experimental-gpu")]
