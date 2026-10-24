@@ -69,6 +69,50 @@ identifies initial/no-media and END_FILE states; `ended` identifies EOF only.
 `paused_for_cache` distinguishes buffering from user pause. No source URL is
 logged by this backend; hosts must not log capability URLs or command arguments.
 
+## Privacy-reviewed playback diagnostics
+
+The backend emits structured `tracing` events through the host's subscriber;
+`RUST_LOG=kinema_mpv=info` enables lifecycle/evidence events when the host uses an
+environment filter (the desktop's default INFO logging includes these events).
+For targeted diagnostic verbosity without blanket dependency tracing:
+
+```sh
+RUST_LOG=info,kinema_mpv=debug experiments/kinema-gpu-app/run.sh run
+```
+
+The backend does not install a subscriber or log writer. A local
+monotonic `player_id` correlates startup, control/render workers, media lifecycle,
+failures and shutdown without identifying a media URL or account. Configuration
+separates `hardware_policy` from the exact `effective_hwdec_request` sent to mpv.
+
+Decode evidence uses a strict fixed vocabulary for actual decoder, pixel/storage
+formats, transfer and optional codec, with explicit unavailable booleans and
+numeric source/render dimensions. Unknown values become `other`, never sanitized
+native text. Only changed snapshots are logged, with at most 32 per Player.
+Libmpv warning capture is best effort; `available=false` does not prevent playback.
+Native messages become reviewed diagnostic/module/severity enums, with at most
+eight distinct tuples per Player. Raw module names, messages, errors, URLs, paths,
+titles and credentials are never forwarded. Final summaries count suppressed
+messages and evidence transitions; these are deliberately not full mpv logs.
+
+Use `PlaybackState.failure_reason` or `Error::playback_failure()` for fixed safe
+codes/messages. Raw `error` and `fatal_error` can contain sensitive details and
+must not be displayed or logged. Typed libmpv failures include numeric
+`mpv_error` when available, a fixed `error_kind`, and an allowlisted operation
+category (`configure`, `initialize`, `render-create`, `render`, `command`,
+`observe`, `load`, or `other`); raw operation/error strings are never forwarded.
+For a failed reproduction, share the `mpv playback failure` line and nearby
+`mpv evidence changed` / `mpv native diagnostic` lines with the same `player_id`.
+These logs cannot retroactively recover an older uninstrumented failure.
+Unqualified/missing color metadata is distinct
+from recognized HDR; a diagnostic does not relax the experimental SDR/direct
+hardware requirements or establish the cause of a previous uninstrumented run.
+
+`workers-stopped` has `scope=workers`: joins do not prove native destruction or
+recovery. Experimental `native_cleanup=complete` follows successful teardown;
+`native_cleanup=quarantined` means uncertain owners remain deliberately retained.
+Shutdown pause `enqueued=true` is explicitly a request only, not proof of silence.
+
 ## Cinema Dock observations and commands
 
 `PlaybackState.chapters` contains ordered `Chapter { time, title }` values;

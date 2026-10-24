@@ -15,6 +15,15 @@ pub struct Property {
     pub format: c_int,
     pub data: *mut c_void,
 }
+/// MPV_EVENT_LOG_MESSAGE (2), client.h mpv_event_log_message.
+/// All three strings are borrowed until the next mpv_wait_event call.
+#[repr(C)]
+pub struct LogMessage {
+    pub prefix: *const c_char,
+    pub level: *const c_char,
+    pub text: *const c_char,
+    pub log_level: c_int,
+}
 #[repr(C)]
 pub struct EndFile {
     pub reason: c_int,
@@ -58,15 +67,28 @@ pub struct NodeList {
     pub keys: *const *const c_char,
 }
 pub type Callback = unsafe extern "C" fn(*mut c_void);
+pub type RequestLogMessages = unsafe extern "C" fn(*mut Handle, *const c_char) -> c_int;
+
+/// Best effort only.
+///
+/// # Safety
+/// The handle must belong to the supplied native API and remain valid for the call.
+pub unsafe fn enable_warning_capture(
+    request: Option<RequestLogMessages>,
+    handle: *mut Handle,
+) -> bool {
+    request.is_some_and(|request| unsafe { request(handle, c"warn".as_ptr()) >= 0 })
+}
 
 pub struct Api {
     pub version: unsafe extern "C" fn() -> std::os::raw::c_ulong,
-    #[cfg(feature = "experimental-gpu")]
     pub get_property_string: unsafe extern "C" fn(*mut Handle, *const c_char) -> *mut c_char,
-    #[cfg(feature = "experimental-gpu")]
     pub free: unsafe extern "C" fn(*mut c_void),
     pub create: unsafe extern "C" fn() -> *mut Handle,
     pub initialize: unsafe extern "C" fn(*mut Handle) -> c_int,
+    // Best-effort diagnostics must not turn a missing optional symbol into a
+    // playback capability failure.
+    pub request_log_messages: Option<RequestLogMessages>,
     pub terminate: unsafe extern "C" fn(*mut Handle),
     pub error_string: unsafe extern "C" fn(c_int) -> *const c_char,
     pub option: unsafe extern "C" fn(*mut Handle, *const c_char, *const c_char) -> c_int,

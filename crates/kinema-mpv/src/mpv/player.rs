@@ -1,13 +1,14 @@
 use super::{
-    ffi::{EndFile, Property},
+    diagnostics::{Diagnostics, Evidence, FailureDetails, Lifecycle, NativeMessage},
+    ffi::{EndFile, LogMessage, Property},
     library::{Client, Loaded},
     metadata,
     render::{self, Pipeline},
     software::Frame,
 };
 use crate::{
-    Error, HardwareDecoding, PlaybackState, RenderBackend, RenderDiagnostics, ResolutionPolicy,
-    Result,
+    Error, HardwareDecoding, PlaybackFailure, PlaybackState, RenderBackend, RenderDiagnostics,
+    ResolutionPolicy, Result,
 };
 use std::{
     ffi::{CStr, CString, c_int},
@@ -57,19 +58,46 @@ impl Default for Config {
 }
 
 pub(super) struct Shared {
+    pub diagnostics: Arc<Diagnostics>,
     pub stopped: AtomicBool,
     pub pipeline: Mutex<Pipeline>,
     pub state: Mutex<PlaybackState>,
 }
 impl Shared {
     /// Only nonfatal control/media errors may be replaced by later events.
+    #[cfg(test)]
     pub fn set_error(&self, error: String) {
         if let Some(mut state) = self.control_state() {
+            state.failure_reason = Some(PlaybackFailure::from_gpu_message(&error));
             state.error = Some(error);
+        }
+    }
+    pub fn set_error_typed(&self, error: Error) {
+        if let Some(mut state) = self.control_state() {
+            state.failure_reason = Some(error.playback_failure());
+            self.diagnostics.failure_typed(&error, Some(&state));
+            state.error = Some(error.to_string());
         }
     }
     /// Fatal render failures require Player recreation, never backend recovery.
     pub fn fail_render(&self, error: String) {
+        let reason = PlaybackFailure::from_gpu_message(&error);
+        self.fail_render_with_reason(error, reason);
+    }
+    pub fn fail_render_typed(&self, error: Error) {
+        self.fail_render_ref(&error);
+    }
+    pub fn fail_render_ref(&self, error: &Error) {
+        self.fail_render_details(
+            error.to_string(),
+            error.playback_failure(),
+            FailureDetails::from_error(error),
+        );
+    }
+    fn fail_render_with_reason(&self, error: String, reason: PlaybackFailure) {
+        self.fail_render_details(error, reason, FailureDetails::default());
+    }
+    fn fail_render_details(&self, error: String, reason: PlaybackFailure, details: FailureDetails) {
         // Publish shutdown first. An event already holding state completes before
         // this final error is written; later events cannot obtain a mutation guard.
         self.stopped.store(true, Ordering::Release);
@@ -78,6 +106,9 @@ impl Shared {
         state.loading = false;
         state.paused_for_cache = false;
         if state.fatal_error.is_none() {
+            self.diagnostics
+                .failure_details(reason, Some(&state), details);
+            state.failure_reason = Some(reason);
             state.fatal_error = Some(error.clone());
             state.error = Some(error);
         }
@@ -120,6 +151,15 @@ pub struct Player {
 }
 impl Player {
     pub fn new(config: Config) -> Result<Self> {
+        let diagnostics = Arc::new(Diagnostics::new(&config));
+        let result = Self::initialize(config, diagnostics.clone());
+        if let Err(error) = &result {
+            diagnostics.event(Lifecycle::StartupFailed);
+            diagnostics.failure_typed(error, None);
+        }
+        result
+    }
+    fn initialize(config: Config, diagnostics: Arc<Diagnostics>) -> Result<Self> {
         validate_volume(config.initial_volume)?;
         render::validate_config(&config)?;
         #[cfg(feature = "experimental-gpu")]
@@ -130,12 +170,27 @@ impl Player {
             }
             config
         };
+        let effective_hwdec = {
+            #[cfg(feature = "experimental-gpu")]
+            if config.experimental_gpu.is_some() {
+                super::experimental::hwdec()
+            } else {
+                render::hwdec(config.hardware_decoding, config.render_backend)
+            }
+            #[cfg(not(feature = "experimental-gpu"))]
+            render::hwdec(config.hardware_decoding, config.render_backend)
+        };
+        diagnostics.effective_hwdec_request(effective_hwdec);
         let loaded = Loaded::load(config.library_path.as_deref())?;
         let handle = unsafe { (loaded.api.create)() };
         if handle.is_null() {
-            return Err(Error::Allocation);
+            return Err(Error::ClientCreation);
         }
         let client = Arc::new(Client { loaded, handle });
+        let warning_capture = unsafe {
+            super::ffi::enable_warning_capture(client.loaded.api.request_log_messages, handle)
+        };
+        diagnostics.warning_capability(warning_capture);
         for (name, value) in [
             ("config", "no".into()),
             ("vo", "libmpv".into()),
@@ -144,20 +199,7 @@ impl Player {
             ("input-default-bindings", "no".into()),
             ("osd-level", "0".into()),
             ("volume", config.initial_volume.to_string()),
-            (
-                "hwdec",
-                {
-                    #[cfg(feature = "experimental-gpu")]
-                    if config.experimental_gpu.is_some() {
-                        super::experimental::hwdec()
-                    } else {
-                        render::hwdec(config.hardware_decoding, config.render_backend)
-                    }
-                    #[cfg(not(feature = "experimental-gpu"))]
-                    render::hwdec(config.hardware_decoding, config.render_backend)
-                }
-                .into(),
-            ),
+            ("hwdec", effective_hwdec.into()),
         ] {
             let name = CString::new(name).map_err(|_| Error::InvalidInput("option name"))?;
             let value = CString::new(value).map_err(|_| Error::InvalidInput("option value"))?;
@@ -234,21 +276,38 @@ impl Player {
                 "observe property",
             )?;
         }
-        #[cfg(feature = "experimental-gpu")]
-        if config.experimental_gpu.is_some() {
-            for (id, name) in [
-                (17, c"video-dec-params/pixelformat"),
-                (18, c"video-out-params/pixelformat"),
-                (19, c"video-dec-params/hw-pixelformat"),
-                (20, c"video-dec-params/gamma"),
-            ] {
-                client.loaded.check(
-                    unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), 1) },
-                    "observe direct decode evidence",
-                )?;
+        for (id, name) in [
+            (17, c"video-dec-params/pixelformat"),
+            (18, c"video-out-params/pixelformat"),
+            (19, c"video-dec-params/hw-pixelformat"),
+            (20, c"video-dec-params/gamma"),
+        ] {
+            let result = client.loaded.check(
+                unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), 1) },
+                "observe direct decode evidence",
+            );
+            // Preserve the experimental requirement. Ordinary playback treats
+            // optional evidence observation as diagnostic-only.
+            #[cfg(feature = "experimental-gpu")]
+            if config.experimental_gpu.is_some() {
+                result?;
+                continue;
+            }
+            if result.is_err() {
+                tracing::info!(
+                    player_id = diagnostics.id,
+                    available = false,
+                    "mpv decode evidence observation"
+                );
             }
         }
+        tracing::info!(
+            player_id = diagnostics.id,
+            unsupported_optional_options = option_warnings.len(),
+            "mpv optional renderer configuration"
+        );
         let shared = Arc::new(Shared {
+            diagnostics,
             stopped: AtomicBool::new(false),
             pipeline: Mutex::new(Pipeline::new(config.clone())),
             state: Mutex::new(PlaybackState {
@@ -327,6 +386,8 @@ impl Player {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         self.command(&["loadfile", source, "replace"])?;
+        self.shared.diagnostics.new_media();
+        self.shared.diagnostics.event(Lifecycle::LoadRequested);
         pipeline.clear(&mut state);
         clear_media_metadata(&mut state);
         Ok(())
@@ -466,6 +527,7 @@ impl Player {
 }
 impl Drop for Player {
     fn drop(&mut self) {
+        self.shared.diagnostics.event(Lifecycle::ShutdownRequested);
         self.shared.stopped.store(true, Ordering::Release);
         #[cfg(feature = "experimental-gpu")]
         self.shared
@@ -483,6 +545,7 @@ impl Drop for Player {
         if let Some(worker) = self.control.take() {
             let _ = worker.join();
         }
+        self.shared.diagnostics.event(Lifecycle::WorkersStopped);
     }
 }
 // SAFETY: property payload must be a live libmpv event; copied values alone escape.
@@ -576,7 +639,10 @@ impl Drop for ControlPauseOnExit<'_> {
 /// Bypasses Player::command's stopped check on purpose. Only a fixed diagnostic
 /// category is recorded on enqueue failure; fatal/observed state is untouched.
 fn pause_on_control_exit(shared: &Shared, enqueue: impl FnOnce(&[&CStr; 3]) -> c_int) {
-    if enqueue(&[c"set", c"pause", c"yes"]) < 0 {
+    let code = enqueue(&[c"set", c"pause", c"yes"]);
+    shared.diagnostics.pause_result(code);
+    shared.diagnostics.event(Lifecycle::ControlStopped);
+    if code < 0 {
         shared
             .pipeline
             .lock()
@@ -591,6 +657,7 @@ fn control_worker(
     receiver: Receiver<Vec<CString>>,
     decoder: Receiver<SyncSender<Result<()>>>,
 ) {
+    shared.diagnostics.event(Lifecycle::ControlStarted);
     let _exit = WorkerExit(shared.clone());
     let _pause_on_exit = ControlPauseOnExit {
         client: &client,
@@ -612,6 +679,9 @@ fn control_worker(
                 },
                 "set fallback hardware decoding",
             );
+            if result.is_ok() {
+                shared.diagnostics.effective_hwdec_request("auto-copy");
+            }
             let _ = reply.send(result);
         }
         // Bounded batches prevent command floods starving events or shutdown.
@@ -623,7 +693,7 @@ fn control_worker(
             pointers.push(std::ptr::null());
             let code = unsafe { (client.loaded.api.command)(client.handle, 0, pointers.as_ptr()) };
             if let Err(e) = client.loaded.check(code, "queue command") {
-                shared.set_error(e.to_string());
+                shared.set_error_typed(e);
             }
         }
         for _ in 0..256 {
@@ -641,6 +711,13 @@ fn control_worker(
                 break;
             };
             match event.id {
+                2 if !event.data.is_null() => {
+                    // Consume borrowed ABI strings now. Only the classified
+                    // static tokens survive the next wait_event call.
+                    let message = unsafe { &*event.data.cast::<LogMessage>() };
+                    let copied = unsafe { classify_native_message(message) };
+                    shared.diagnostics.native_message(copied);
+                }
                 1 => {
                     shared.stopped.store(true, Ordering::Release);
                     state.stopped = true;
@@ -649,19 +726,22 @@ fn control_worker(
                     break;
                 }
                 5 if event.error < 0 => {
-                    state.error = client
-                        .loaded
-                        .check(event.error, "command")
-                        .err()
-                        .map(|e| e.to_string());
+                    let error = client.loaded.check(event.error, "command").err();
+                    state.failure_reason = error.as_ref().map(Error::playback_failure);
+                    if let Some(error) = &error {
+                        shared.diagnostics.failure_typed(error, Some(&state));
+                    }
+                    state.error = error.map(|e| e.to_string());
                     state.loading = false;
                 }
                 6 => {
+                    shared.diagnostics.new_media();
+                    shared.diagnostics.event(Lifecycle::StartFile);
                     state.loading = true;
                     state.media_stopped = false;
                     state.paused_for_cache = false;
                     state.ended = false;
-                    state.error = None;
+                    state.clear_media_failure();
                     state.position = 0.0;
                     state.duration = None;
                     clear_media_metadata(&mut state);
@@ -683,8 +763,13 @@ fn control_worker(
                     clear_media_metadata(&mut state);
                     if !event.data.is_null() {
                         let end = unsafe { &*event.data.cast::<EndFile>() };
+                        shared.diagnostics.end_file(end.reason, end.error);
                         state.ended = end.reason == 0;
                         if end.reason == 4 {
+                            state.failure_reason = Some(PlaybackFailure::MediaLoadFailed);
+                            shared
+                                .diagnostics
+                                .failure(PlaybackFailure::MediaLoadFailed, Some(&state));
                             state.error = client
                                 .loaded
                                 .check(end.error, "playback")
@@ -692,9 +777,12 @@ fn control_worker(
                                 .map(|e| e.to_string())
                                 .or(Some("playback failed".into()));
                         }
+                    } else {
+                        shared.diagnostics.end_file(-1, event.error);
                     }
                 }
                 8 => {
+                    shared.diagnostics.event(Lifecycle::FileLoaded);
                     state.loading = false;
                 }
                 22 if !event.data.is_null() => {
@@ -744,6 +832,8 @@ fn control_worker(
                                 pipeline.video_absent = value.is_none_or(|v| v <= 0);
                             }
                             if let Err(e) = pipeline.recompute(&mut state) {
+                                state.failure_reason = Some(e.playback_failure());
+                                shared.diagnostics.failure_typed(&e, Some(&state));
                                 state.error = Some(e.to_string());
                             }
                         }
@@ -756,10 +846,9 @@ fn control_worker(
                 }
                 _ => {}
             }
-            #[cfg(feature = "experimental-gpu")]
             if !state.loading
                 && !state.media_stopped
-                && (event.id == 8 || (event.id == 22 && matches!(event.userdata, 11 | 17..=20)))
+                && (event.id == 8 || (event.id == 22 && matches!(event.userdata, 6..=11 | 17..=20)))
             {
                 // Never hold UI-visible state/pipeline locks during client calls.
                 drop(state);
@@ -770,16 +859,30 @@ fn control_worker(
     }
 }
 
-#[cfg(feature = "experimental-gpu")]
+// SAFETY: message and each non-null string must belong to the current event.
+// Classify before wait_event invalidates them; no borrowed/raw text escapes.
+unsafe fn classify_native_message(message: &LogMessage) -> NativeMessage {
+    unsafe fn text<'a>(ptr: *const std::ffi::c_char) -> &'a str {
+        if ptr.is_null() {
+            ""
+        } else {
+            unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
+        }
+    }
+    NativeMessage::classify(
+        unsafe { text(message.prefix) },
+        unsafe { text(message.level) },
+        unsafe { text(message.text) },
+        message.log_level,
+    )
+}
+
 fn refresh_decode_evidence(client: &Client, shared: &Shared) {
     // Client property calls belong exclusively on the existing control worker.
     // Query all fields together after FILE_LOADED/property changes, rather than
     // accepting queued string values from a previous source.
     let generation = {
         let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
-        if !pipeline.experimental_enabled() {
-            return;
-        }
         pipeline.generation
     };
     let evidence = [
@@ -788,11 +891,12 @@ fn refresh_decode_evidence(client: &Client, shared: &Shared) {
         c"video-out-params/pixelformat",
         c"video-dec-params/hw-pixelformat",
         c"video-dec-params/gamma",
+        c"current-tracks/video/codec",
     ]
     .map(|name| {
         let ptr = unsafe { (client.loaded.api.get_property_string)(client.handle, name.as_ptr()) };
         if ptr.is_null() {
-            return String::new();
+            return None;
         }
         let value = unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
@@ -800,10 +904,29 @@ fn refresh_decode_evidence(client: &Client, shared: &Shared) {
         unsafe {
             (client.loaded.api.free)(ptr.cast());
         }
-        value
+        Some(value)
     });
+    let Some(state) = shared.control_state() else {
+        return;
+    };
     let mut pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
-    pipeline.update_decode_evidence(generation, evidence);
+    if pipeline.generation != generation {
+        return;
+    }
+    shared.diagnostics.evidence(Evidence::new(
+        std::array::from_fn(|index| evidence[index].as_deref()),
+        state.source_size.unwrap_or([0; 2]),
+        state.render_size,
+    ));
+    #[cfg(feature = "experimental-gpu")]
+    if pipeline.experimental_enabled() {
+        pipeline.update_decode_evidence(
+            generation,
+            std::array::from_fn(|i| evidence[i].clone().unwrap_or_default()),
+        );
+    }
+    #[cfg(not(feature = "experimental-gpu"))]
+    let _ = &mut pipeline;
 }
 
 #[cfg(test)]
@@ -814,6 +937,7 @@ mod tests {
         (
             Player {
                 shared: Arc::new(Shared {
+                    diagnostics: Arc::new(Diagnostics::new(&Config::default())),
                     stopped: AtomicBool::new(false),
                     pipeline: Mutex::new(Pipeline::new(Config::default())),
                     state: Mutex::new(PlaybackState::default()),
@@ -824,6 +948,43 @@ mod tests {
             },
             receiver,
         )
+    }
+    #[test]
+    fn borrowed_native_warning_strings_are_consumed_before_event_lifetime_ends() {
+        let copied = {
+            let module = CString::new("stream/curl").unwrap();
+            let level = CString::new("warn").unwrap();
+            let text = CString::new("Failed to connect https://user:PASSWORD_MARKER@example.invalid/private?signature=SIGNED_SECRET 日本語").unwrap();
+            unsafe {
+                classify_native_message(&LogMessage {
+                    prefix: module.as_ptr(),
+                    level: level.as_ptr(),
+                    text: text.as_ptr(),
+                    log_level: 30,
+                })
+            }
+        };
+        // The source CStrings are gone; the record owns only static reviewed tokens.
+        let output = format!("{copied:?}");
+        assert!(output.contains("NetworkFailed"));
+        for forbidden in [
+            "PASSWORD_MARKER",
+            "SIGNED_SECRET",
+            "https://",
+            "日本語",
+            "private",
+        ] {
+            assert!(!output.contains(forbidden));
+        }
+        let empty = unsafe {
+            classify_native_message(&LogMessage {
+                prefix: std::ptr::null(),
+                level: std::ptr::null(),
+                text: std::ptr::null(),
+                log_level: 30,
+            })
+        };
+        assert!(format!("{empty:?}").contains("Unclassified"));
     }
     #[test]
     fn control_exit_enqueues_one_async_pause_even_after_fatal_stop() {
@@ -1062,6 +1223,46 @@ mod tests {
         assert_eq!(state.speed, 1.5);
     }
     #[test]
+    fn safe_failure_reasons_survive_fatal_events_and_clear_only_for_new_media() {
+        let (player, _receiver) = mock_player();
+        assert_eq!(player.state().failure_reason, None);
+        player.shared.set_error_typed(Error::Mpv {
+            operation: "playback",
+            code: -13,
+            message: "SECRET https://user:password@example.invalid/private".into(),
+        });
+        assert_eq!(
+            player.state().failure_reason,
+            Some(PlaybackFailure::MediaLoadFailed)
+        );
+        player.shared.control_state().unwrap().clear_media_failure();
+        assert_eq!(player.state().failure_reason, None);
+        player.shared.fail_render_typed(Error::Gpu(
+            "completion GL wait incomplete: SECRET /private/path".into(),
+        ));
+        assert_eq!(
+            player.state().failure_reason,
+            Some(PlaybackFailure::GpuCompletionFailed)
+        );
+        player.shared.set_error_typed(Error::Allocation);
+        player.shared.fail_render_typed(Error::Library {
+            attempts: "SECRET".into(),
+        });
+        player.shared.state.lock().unwrap().clear_media_failure();
+        assert_eq!(
+            player.state().failure_reason,
+            Some(PlaybackFailure::GpuCompletionFailed)
+        );
+        assert!(
+            !player
+                .state()
+                .failure_reason
+                .unwrap()
+                .message()
+                .contains("SECRET")
+        );
+    }
+    #[test]
     fn fatal_render_failure_rejects_control_and_preserves_last_diagnostics() {
         let (player, receiver) = mock_player();
         player.shared.state.lock().unwrap().render_size = [640, 480];
@@ -1128,6 +1329,21 @@ mod tests {
         player.load("valid.mkv").unwrap();
         assert!(receiver.try_recv().is_ok());
         assert!(player.state().error.is_none());
+    }
+    #[test]
+    fn classified_startup_failure_is_not_replaced_by_unexpected_exit() {
+        let (player, _) = mock_player();
+        let error = Error::Gpu("this proof currently supports Intel Mesa only".into());
+        let reason = error.playback_failure();
+        player
+            .shared
+            .fail_render_with_reason(error.to_string(), reason);
+        drop(WorkerExit(player.shared.clone()));
+        assert_eq!(
+            player.state().failure_reason,
+            Some(PlaybackFailure::GpuDeviceUnsupported)
+        );
+        assert!(player.state().stopped);
     }
     #[test]
     fn unexpected_worker_exit_is_terminal_and_keeps_original_failure() {

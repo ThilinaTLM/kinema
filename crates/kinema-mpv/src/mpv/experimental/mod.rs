@@ -189,14 +189,20 @@ fn with_queue_gate<T>(
 }
 /// Owns all native refs together so uncertain teardown can quarantine all of them.
 pub(super) struct Renderer {
+    diagnostic_id: u64,
     mpv: Option<Box<MpvContext>>,
     retained: Vec<Arc<FrameOwner>>,
     evidence_wait: EvidenceWait,
 }
 impl Renderer {
-    pub fn new(client: Arc<Client>, context: &ExperimentalGpuContext) -> Result<Self> {
+    pub fn new(
+        client: Arc<Client>,
+        context: &ExperimentalGpuContext,
+        diagnostic_id: u64,
+    ) -> Result<Self> {
         let native = Box::new(NativeInterop::new(context).map_err(Error::Gpu)?);
         let mut this = Self {
+            diagnostic_id,
             mpv: Some(Box::new(MpvContext {
                 client,
                 ptr: std::ptr::null_mut(),
@@ -322,16 +328,24 @@ impl Renderer {
 }
 impl Drop for Renderer {
     fn drop(&mut self) {
-        if let Some(mut mpv) = self.mpv.take()
-            && !finish_teardown(
+        if let Some(mut mpv) = self.mpv.take() {
+            let complete = finish_teardown(
                 &mut *mpv,
                 |mpv| mpv.native.complete_submissions(),
                 MpvContext::free,
                 |mpv| mpv.native.shutdown(),
-            )
-        {
-            std::mem::forget(mpv);
-            std::mem::forget(std::mem::take(&mut self.retained));
+            );
+            let outcome = if complete {
+                super::diagnostics::NativeCleanup::Complete
+            } else {
+                super::diagnostics::NativeCleanup::Quarantined
+            };
+            if !complete {
+                std::mem::forget(mpv);
+                std::mem::forget(std::mem::take(&mut self.retained));
+            }
+            // Quarantine must be established even if a subscriber unwinds.
+            super::diagnostics::native_cleanup(self.diagnostic_id, outcome);
         }
     }
 }
@@ -401,9 +415,14 @@ impl EvidenceWait {
             .any(|value| value.is_empty() || value == "unavailable")
         {
             if now.duration_since(started) >= std::time::Duration::from_secs(5) {
-                return Err(Error::Gpu(
-                    "direct decode evidence unavailable after five seconds".into(),
-                ));
+                let decoder_complete = evidence[..4]
+                    .iter()
+                    .all(|value| !value.is_empty() && value != "unavailable");
+                return Err(Error::Gpu(if decoder_complete {
+                    "color metadata unavailable after five seconds".into()
+                } else {
+                    "direct decode evidence unavailable after five seconds".into()
+                }));
             }
             return Ok(false);
         }
@@ -552,6 +571,47 @@ mod tests {
             },
             |_| Ok(())
         ));
+    }
+    #[test]
+    fn missing_color_and_decode_metadata_have_distinct_bounded_reasons() {
+        use crate::PlaybackFailure as F;
+        let now = std::time::Instant::now();
+        for (evidence, expected) in [
+            (
+                [
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ],
+                F::DecodeMetadataUnavailable,
+            ),
+            (
+                [
+                    hwdec().into(),
+                    "native".into(),
+                    "native".into(),
+                    "nv12".into(),
+                    String::new(),
+                ],
+                F::ColorMetadataUnavailable,
+            ),
+        ] {
+            let mut wait = EvidenceWait::default();
+            assert!(!wait.ready(1, &evidence, now).unwrap());
+            assert!(
+                !wait
+                    .ready(1, &evidence, now + std::time::Duration::from_millis(4999))
+                    .unwrap()
+            );
+            assert_eq!(
+                wait.ready(1, &evidence, now + std::time::Duration::from_secs(5))
+                    .unwrap_err()
+                    .playback_failure(),
+                expected
+            );
+        }
     }
     #[test]
     fn evidence_wait_is_bounded_and_generation_scoped() {

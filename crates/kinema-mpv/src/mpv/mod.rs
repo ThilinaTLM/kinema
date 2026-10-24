@@ -1,6 +1,9 @@
+mod diagnostics;
 #[cfg(feature = "experimental-gpu")]
 mod experimental;
 mod ffi;
+#[cfg(test)]
+mod ffi_tests;
 #[cfg(feature = "gpu-render")]
 mod gpu;
 mod library;

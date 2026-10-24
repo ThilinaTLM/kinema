@@ -3303,6 +3303,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-video",
  "thiserror 2.0.21",
+ "tracing",
  "wgpu",
  "wgpu-hal",
  "windows 0.62.2",

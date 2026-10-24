@@ -116,6 +116,8 @@ pub(super) struct Pipeline {
     pub viewport: [u32; 2],
     #[cfg(feature = "experimental-gpu")]
     decode_evidence: [String; 5],
+    #[cfg(feature = "experimental-gpu")]
+    decode_evidence_observed: bool,
     pub metadata: [Option<i64>; 5],
     size: [u32; 2],
     pub video_absent: bool,
@@ -140,6 +142,8 @@ impl Pipeline {
             viewport: [0, 0],
             #[cfg(feature = "experimental-gpu")]
             decode_evidence: Default::default(),
+            #[cfg(feature = "experimental-gpu")]
+            decode_evidence_observed: false,
             metadata: [None; 5],
             size: [0, 0],
             video_absent: false,
@@ -168,9 +172,14 @@ impl Pipeline {
     /// paused libmpv has no further frame-update notification to send.
     #[cfg(feature = "experimental-gpu")]
     pub fn update_decode_evidence(&mut self, generation: u64, evidence: [String; 5]) -> bool {
-        if self.generation != generation || self.decode_evidence == evidence {
+        if self.generation != generation
+            || (self.decode_evidence_observed && self.decode_evidence == evidence)
+        {
             return false;
         }
+        // An observed unavailable snapshot (including FORMAT_NONE properties)
+        // must start the bounded metadata wait, unlike an idle unloaded player.
+        self.decode_evidence_observed = true;
         self.decode_evidence = evidence;
         self.invalidate();
         true
@@ -196,6 +205,7 @@ impl Pipeline {
         #[cfg(feature = "experimental-gpu")]
         {
             self.decode_evidence = Default::default();
+            self.decode_evidence_observed = false;
         }
         self.video_absent = true;
         self.invalidate();
@@ -354,15 +364,16 @@ fn initialize(
     client: Arc<Client>,
     config: &Config,
     decoder: &SyncSender<SyncSender<Result<()>>>,
+    diagnostics: &super::diagnostics::Diagnostics,
 ) -> Result<(Renderer, Option<String>)> {
     #[cfg(feature = "experimental-gpu")]
     if let Some(context) = &config.experimental_gpu {
-        return super::experimental::Renderer::new(client, context)
+        return super::experimental::Renderer::new(client, context, diagnostics.id)
             .map(|r| (Renderer::Experimental(r), None));
     }
     select(
         config.render_backend,
-        || gpu(client.clone(), config),
+        || gpu(client.clone(), config).inspect_err(|error| diagnostics.capability_error(error)),
         |fallback| {
             if fallback && config.hardware_decoding == HardwareDecoding::Auto {
                 let (tx, rx) = mpsc::sync_channel(1);
@@ -410,9 +421,16 @@ pub(super) fn run(
     // Declared before renderer so native render resources are released before
     // publishing an unexpected exit and allowing the client worker to terminate.
     let _exit = super::player::WorkerExit(shared.clone());
-    let (mut renderer, fallback) = match initialize(client, &config, &decoder) {
+    shared
+        .diagnostics
+        .event(super::diagnostics::Lifecycle::RendererStarting);
+    let (mut renderer, fallback) = match initialize(client, &config, &decoder, &shared.diagnostics)
+    {
         Ok(r) => r,
         Err(e) => {
+            // This is an expected terminal startup failure, not an unexplained
+            // worker exit. Preserve its classification before WorkerExit runs.
+            shared.fail_render_ref(&e);
             let _ = ready.send(Err(e));
             return;
         }
@@ -426,6 +444,7 @@ pub(super) fn run(
             #[cfg(feature = "gpu-render")]
             Renderer::Gpu(_) => RenderBackend::Gpu,
         };
+        shared.diagnostics.render_ready(state.active_backend);
         state.fallback_reason = fallback;
         #[cfg(feature = "gpu-render")]
         if let Renderer::Gpu(gpu) = &renderer {
@@ -438,6 +457,7 @@ pub(super) fn run(
     }
     let _ = ready.send(Ok(()));
     let mut last_generation = u64::MAX;
+    let mut last_diagnostic_size = None;
     #[cfg(any(feature = "gpu-render", feature = "experimental-gpu"))]
     let mut gpu_schedule = GpuSchedule::new();
     while !shared.stopped.load(Ordering::Acquire) {
@@ -445,6 +465,10 @@ pub(super) fn run(
             let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
             (pipeline.size, pipeline.generation)
         };
+        if last_diagnostic_size != Some(size) {
+            shared.diagnostics.render_size(size);
+            last_diagnostic_size = Some(size);
+        }
         let updates = renderer.update();
         let result = (|| -> Result<()> {
             match &mut renderer {
@@ -476,14 +500,18 @@ pub(super) fn run(
                 #[cfg(feature = "experimental-gpu")]
                 Renderer::Experimental(gpu) => {
                     gpu_schedule.observe(updates);
-                    let (evidence, video_ready) = {
+                    let (evidence, observed, video_ready) = {
                         let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
                         (
                             pipeline.decode_evidence.clone(),
+                            pipeline.decode_evidence_observed,
                             dimensions(pipeline.metadata[0], pipeline.metadata[1]).is_some(),
                         )
                     };
-                    let valid = video_ready && gpu.evidence_ready(generation, &evidence)?;
+                    // Missing video dimensions must not short-circuit the decode
+                    // metadata timeout after an active-media observation.
+                    let qualified = observed && gpu.evidence_ready(generation, &evidence)?;
+                    let valid = video_ready && qualified;
                     if !gpu_schedule.ready(false, generation) {
                         return Ok(());
                     }
@@ -573,7 +601,7 @@ pub(super) fn run(
             Ok(())
         })();
         if let Err(e) = result {
-            shared.fail_render(e.to_string());
+            shared.fail_render_typed(e);
             break;
         }
         thread::park_timeout(Duration::from_millis(if renderer.pending() {
@@ -800,6 +828,19 @@ mod tests {
         assert_eq!(resolution(&config, [800, 600], None).unwrap(), [1280, 720]);
         assert!(validate_size([u32::MAX, 2], usize::MAX).is_err());
         assert!(validate_size([8192, 8192], 64 * 1024 * 1024).is_err());
+    }
+    #[cfg(feature = "experimental-gpu")]
+    #[test]
+    fn unavailable_decode_observation_is_tracked_and_reset_without_a_native_context() {
+        let mut pipeline = Pipeline::new(Config::default());
+        assert!(!pipeline.decode_evidence_observed);
+        let generation = pipeline.generation;
+        assert!(pipeline.update_decode_evidence(generation, Default::default()));
+        assert!(pipeline.decode_evidence_observed);
+        assert!(!pipeline.update_decode_evidence(pipeline.generation, Default::default()));
+        pipeline.clear(&mut PlaybackState::default());
+        assert!(!pipeline.decode_evidence_observed);
+        assert!(!pipeline.update_decode_evidence(generation, Default::default()));
     }
     #[test]
     fn metadata_and_generations() {

@@ -42,13 +42,18 @@ impl Loaded {
                 }};
             }
             let api = Api {
-                #[cfg(feature = "experimental-gpu")]
                 get_property_string: symbol!("mpv_get_property_string"),
-                #[cfg(feature = "experimental-gpu")]
                 free: symbol!("mpv_free"),
                 version: symbol!("mpv_client_api_version"),
                 create: symbol!("mpv_create"),
                 initialize: symbol!("mpv_initialize"),
+                // Optional capture; absence does not affect playback support.
+                request_log_messages: unsafe {
+                    library
+                        .get(b"mpv_request_log_messages\0")
+                        .ok()
+                        .map(|symbol| *symbol)
+                },
                 terminate: symbol!("mpv_terminate_destroy"),
                 error_string: symbol!("mpv_error_string"),
                 option: symbol!("mpv_set_option_string"),

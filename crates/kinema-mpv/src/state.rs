@@ -107,13 +107,18 @@ pub struct PlaybackState {
     pub media_stopped: bool,
     /// The worker lifecycle has terminated; this Player cannot accept commands.
     pub stopped: bool,
-    /// Fatal backend failure, preserved until this Player is destroyed.
+    /// Raw fatal backend detail, preserved until this Player is destroyed.
+    /// May contain sensitive input; use `failure_reason` for UI and logs.
     pub fatal_error: Option<String>,
     pub volume: f64,
     pub muted: bool,
     pub loading: bool,
     pub ended: bool,
+    /// Raw native detail, potentially sensitive; use `failure_reason` for UI/logs.
     pub error: Option<String>,
+    /// Reviewed diagnostic safe for UI/logs; unlike raw `error`, contains no input.
+    /// Fatal reasons survive late events; a new media load clears nonfatal reasons.
+    pub failure_reason: Option<crate::PlaybackFailure>,
     pub source_size: Option<[u32; 2]>,
     pub source_display_size: Option<[u32; 2]>,
     pub active_backend: RenderBackend,
@@ -121,6 +126,16 @@ pub struct PlaybackState {
     pub hardware_decoder: Option<String>,
     pub render_size: [u32; 2],
     pub fallback_reason: Option<String>,
+}
+
+impl PlaybackState {
+    /// Only a new media lifecycle clears a recoverable diagnostic.
+    pub(crate) fn clear_media_failure(&mut self) {
+        if self.fatal_error.is_none() {
+            self.error = None;
+            self.failure_reason = None;
+        }
+    }
 }
 
 impl Default for PlaybackState {
@@ -144,6 +159,7 @@ impl Default for PlaybackState {
             loading: false,
             ended: false,
             error: None,
+            failure_reason: None,
             source_size: None,
             source_display_size: None,
             active_backend: RenderBackend::Cpu,

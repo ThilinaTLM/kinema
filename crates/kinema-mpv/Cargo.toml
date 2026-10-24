@@ -24,6 +24,7 @@ experimental-gpu = ["gpu-render", "dep:wgpu", "dep:wgpu-hal", "dep:ash", "dep:wi
 glow = { workspace = true, optional = true }
 libloading.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 wgpu = { workspace = true, optional = true }
