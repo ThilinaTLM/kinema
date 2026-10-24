@@ -4,7 +4,6 @@ use kinema_desktop::{player::PlayerChoice, screens::player_window};
 #[derive(Debug, PartialEq)]
 struct PlayerProbeArgs {
     native: bool,
-    experimental: bool,
     media: Option<std::path::PathBuf>,
     seconds: u64,
     light: bool,
@@ -21,15 +20,15 @@ fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'stat
     let Some(scene) = value("--scene") else {
         return Ok(None);
     };
+    // Historical scene id is retained for the existing offline regression scripts,
+    // not as a player choice or settings compatibility alias.
     let experimental = scene == "player-experimental";
     let native = experimental || scene == "player-native";
     if !native && scene != "player" {
         return Ok(None);
     }
-    if experimental && !cfg!(feature = "experimental-gpu") {
-        return Err(
-            "player-experimental requires the isolated experimental-gpu + ui-probe app build",
-        );
+    if native && !cfg!(feature = "gpu-surface") {
+        return Err("native GPU probes require gpu-surface + ui-probe");
     }
     let media = value("--media").map(std::path::PathBuf::from);
     if native && media.is_none() {
@@ -58,12 +57,11 @@ fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'stat
         None => [1100., 680.],
     };
     let stress_resize = args.iter().any(|arg| arg == "--stress-resize");
-    if stress_resize && !experimental {
-        return Err("--stress-resize requires --scene player-experimental");
+    if stress_resize && !native {
+        return Err("--stress-resize requires --scene player-native or player-experimental");
     }
     Ok(Some(PlayerProbeArgs {
         native,
-        experimental,
         media,
         seconds,
         light: args.iter().any(|arg| arg == "--light"),
@@ -120,13 +118,13 @@ fn main() {
     if tracing::subscriber::set_global_default(probe_subscriber(filter)).is_err() {
         eprintln!("player probe: category=tracing-subscriber-already-set");
     }
-    let successful = if probe.experimental {
+    let successful = if probe.native {
         player_window::run_probe_mode(
             probe.media,
             probe.seconds,
             probe.light,
             probe.dimensions,
-            PlayerChoice::ExperimentalEmbedded,
+            PlayerChoice::Embedded,
             probe.stress_resize,
         )
     } else {
@@ -175,13 +173,13 @@ mod tests {
         let Some(probe) = parse_player_probe(&args(&["--scene", "player"]))? else {
             panic!("player scene");
         };
-        assert!(!probe.native && !probe.experimental && !probe.stress_resize);
+        assert!(!probe.native && !probe.stress_resize);
         assert_eq!(probe.seconds, 8);
         assert_eq!(probe.dimensions, [1100., 680.]);
         Ok(())
     }
     #[test]
-    fn experimental_requires_feature_and_media() {
+    fn native_gpu_probe_requires_feature_and_media() {
         assert!(parse_player_probe(&args(&["--scene", "player-experimental"])).is_err());
         let parsed = parse_player_probe(&args(&[
             "--scene",
@@ -192,11 +190,11 @@ mod tests {
             "--smoke-seconds",
             "12",
         ]));
-        if cfg!(feature = "experimental-gpu") {
+        if cfg!(feature = "gpu-surface") {
             assert!(matches!(
                 parsed,
                 Ok(Some(PlayerProbeArgs {
-                    experimental: true,
+                    native: true,
                     stress_resize: true,
                     seconds: 12,
                     ..
@@ -206,6 +204,34 @@ mod tests {
             assert!(parsed.is_err());
         }
     }
+    #[cfg(feature = "gpu-surface")]
+    #[test]
+    fn native_scene_and_historical_regression_id_use_the_same_gpu_path() {
+        let normal = parse_player_probe(&args(&[
+            "--scene",
+            "player-native",
+            "--media",
+            "fixture.mkv",
+            "--stress-resize",
+        ]));
+        let historical = parse_player_probe(&args(&[
+            "--scene",
+            "player-experimental",
+            "--media",
+            "fixture.mkv",
+            "--stress-resize",
+        ]));
+        assert_eq!(normal, historical);
+        assert!(matches!(
+            normal,
+            Ok(Some(PlayerProbeArgs {
+                native: true,
+                stress_resize: true,
+                ..
+            }))
+        ));
+    }
+
     #[test]
     fn bounded_duration_size_and_resize_policy() {
         for value in ["0", "16", "invalid"] {

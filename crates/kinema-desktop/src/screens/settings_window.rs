@@ -983,10 +983,6 @@ impl SettingsWindow {
                             "settings-player",
                             [
                                 (PlayerChoice::Embedded, "Embedded MPV".into()),
-                                (
-                                    PlayerChoice::ExperimentalEmbedded,
-                                    "Experimental Embedded MPV".into(),
-                                ),
                                 (PlayerChoice::Mpv, "External MPV".into()),
                                 (PlayerChoice::Vlc, "External VLC".into()),
                             ],
@@ -1069,8 +1065,7 @@ fn clear_secret(input: &mut TextInput, cx: &mut Context<TextInput>) {
 }
 fn player_preview(player: &PlayerChoice) -> String {
     let executable = match player {
-        PlayerChoice::ExperimentalEmbedded => return "Opt-in GPU playback. Requires an isolated experimental build; SDR only. Windows and macOS runtime qualification pending.".into(),
-        PlayerChoice::Embedded => return "Plays in a separate managed Kinema window.".into(),
+        PlayerChoice::Embedded => return if cfg!(feature = "gpu-surface") { "GPU playback in a managed Kinema window. Requires SDR GPU interop; no CPU fallback. Windows/macOS runtime qualification pending." } else { "Embedded GPU backend not compiled. Enable gpu-surface, or choose external MPV, VLC, or a custom player." }.into(),
         PlayerChoice::Mpv => "mpv".into(),
         PlayerChoice::Vlc => "vlc".into(),
         PlayerChoice::Custom(path) => path.to_string_lossy(),

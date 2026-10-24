@@ -18,13 +18,21 @@ Typical Linux package: `libmpv2`; typical macOS installation: Homebrew `mpv`.
 Nothing is downloaded or bundled automatically. Loading a library executes native
 code; do not accept untrusted library paths.
 
-Default `gpu-render` enables worker-owned GL rendering. Auto tries GPU and falls
-back to CPU only at initialization; forced Gpu fails instead. Linux needs working
+Default `gpu-surface` (which enables `gpu-render`) uses worker-owned GL and
+GPU-resident SDR surfaces on the host presentation device. Supply
+`Config.gpu_surface: Some(GpuSurfaceContext)` and consume `take_gpu_frame()`
+(`GpuSurfaceFrame`). Default `Auto` without a context fails actionably before
+loading libmpv; it never silently selects readback. Desktop supplies GPUI's
+actual device/queue (or Metal registry ID). There is no CPU/copy-back fallback.
+Auto decoding is required; HDR and native Windows/macOS remain unqualified.
+
+Explicit low-level `RenderBackend::Cpu` or `Gpu` without a context retains RGBA
+readback support for backend consumers/tests, not desktop presentation. Building
+with `--no-default-features` also opts out of surfaces; enabling only `gpu-render`
+retains the older Auto GL-to-CPU initialization fallback. Linux needs working
 EGL/OpenGL drivers (Wayland, X11 or surfaceless); Windows needs compatible ANGLE
 EGL/GLES DLLs; macOS uses CGL. Optional Config EGL/GLES paths select trusted
-libraries. No Windows/macOS playback qualification is claimed.
-GPU rendering and hardware decoding are independent; inspect diagnostics.
-Both paths deliver copied RGBA frames, not zero-copy or end-to-end HDR output.
+libraries. Inspect diagnostics rather than assuming hardware decoding or zero-copy.
 
 ## Host lifecycle contract
 
@@ -77,7 +85,7 @@ environment filter (the desktop's default INFO logging includes these events).
 For targeted diagnostic verbosity without blanket dependency tracing:
 
 ```sh
-RUST_LOG=info,kinema_mpv=debug experiments/kinema-gpu-app/run.sh run
+RUST_LOG=info,kinema_mpv=debug cargo run -p kinema-desktop --locked
 ```
 
 The backend does not install a subscriber or log writer. A local
@@ -100,7 +108,7 @@ measurement of displayed pixels or proof of output color correctness.
 output; `video-target-params` is the separate VO target and is not used to
 qualify input SDR.
 
-Experimental qualification requires an allowlisted effective SDR transfer
+GPU surface qualification requires an allowlisted effective SDR transfer
 (bt.1886, bt.709, srgb, gamma2.2 or gamma2.8) and direct hardware evidence.
 Decoded auto/unknown/unavailable is not SDR by itself; it may qualify only once
 mpv supplies effective SDR. Explicit PQ/HLG (including known aliases) in either
@@ -114,7 +122,7 @@ Effective-property changes force requalification/redraw even while paused withou
 another frame notification. Zero source dimensions still prevent publication but
 do not bypass the observed-evidence timeout.
 
-`mpv experimental metadata qualification` emits fixed `qualification` categories
+`mpv GPU surface metadata qualification` emits fixed `qualification` categories
 (`waiting-decode`, `waiting-effective-transfer`, `ready`, or safe failure codes),
 correlated by `player_id` and numeric `generation`. Only transitions are emitted,
 at most 32 per renderer; decode/effective values remain allowlisted evidence
@@ -137,11 +145,11 @@ For a failed reproduction, share the `mpv playback failure` line and nearby
 `mpv evidence changed` / `mpv native diagnostic` lines with the same `player_id`.
 These logs cannot retroactively recover an older uninstrumented failure.
 Unqualified/missing color metadata is distinct
-from recognized HDR; a diagnostic does not relax the experimental SDR/direct
+from recognized HDR; a diagnostic does not relax the GPU surface SDR/direct
 hardware requirements or establish the cause of a previous uninstrumented run.
 
 `workers-stopped` has `scope=workers`: joins do not prove native destruction or
-recovery. Experimental `native_cleanup=complete` follows successful teardown;
+recovery. GPU surface `native_cleanup=complete` follows successful teardown;
 `native_cleanup=quarantined` means uncertain owners remain deliberately retained.
 Shutdown pause `enqueued=true` is explicitly a request only, not proof of silence.
 

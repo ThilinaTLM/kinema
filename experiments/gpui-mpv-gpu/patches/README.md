@@ -1,10 +1,12 @@
 # Isolated experimental GPU-surface patches
 
-Only apply these to **copies** of the exact crates.io releases. From each copied
-crate directory: `patch --batch --fuzz=0 -p1 < PATCH`. Never modify the registry,
-production defaults, root `[patch]` tables, or global Cargo configuration. The
-opt-in app launcher owns the generated isolated workspace and feature forwarding;
-its manifest uses the root version catalog. Resolve one **wgpu 29.0.4**.
+The canonical production build inputs now live in [`vendor/`](../../../vendor/README.md),
+including identical copies of these five patch inputs. Root `[patch.crates-io]`
+is intentional and uses authenticated exact-release sources. Ordinary root builds
+need no preparation; the regression scripts consume those same sources. Never
+modify registry sources or global Cargo configuration. For optional reproduction,
+use `vendor/verify.py --reproduce NEW_DIRECTORY` (zero-fuzz patching).
+Resolve one **wgpu 29.0.4**.
 
 | Patch | Copied crate | License |
 | --- | --- | --- |
@@ -42,10 +44,9 @@ checksum above):
 Enable `gpu-video-experiment` on core and the active renderer crate. Both WGPU
 and Apple renderer features forward it to core. On Windows, also enable
 `gpui_windows/gpu-video-experiment`: patch 0005 activates the HWND WGPU adapter and
-forwards the core/WGPU features. The generated isolated desktop manifest may add
-an optional Windows-target `gpui_windows` dependency from the root version catalog
-and forward the opt-in app feature to it; production manifests/defaults and the
-registry must not be overridden. Feature-off builds do not expose the frame/context
+forwards the core/WGPU features. The root desktop manifest has an optional Windows-target `gpui_windows`
+dependency forwarded by its default-on `gpu-surface` feature; the root catalog
+enables the underlying patched API features. Feature-off builds do not expose the frame/context
 APIs or allocate experimental pipelines/registrations, and retain the legacy
 Windows scene renderer.
 
@@ -61,11 +62,11 @@ rather than a target-gated dependency. With `runtime_shaders`, its target-aware
 build script generates a real header and stitches the real shader source on a
 Linux cross-build host. Native Apple builds without `runtime_shaders` retain the
 normal `xcrun metal`/`metallib` path. Runtime shader source stitching is **not**
-Metal shader compilation or validation. The launcher may enable `runtime_shaders`
-for the isolated app; actual Metal compilation then occurs on the Apple device.
+Metal shader compilation or validation. The root catalog enables `runtime_shaders`; actual Metal compilation then occurs
+on the Apple device.
 
-HAL's optional extension-enable patch has no feature switch: isolation is provided
-by selecting only the copied HAL crate in the generated workspace.
+HAL's optional extension-enable patch has no feature switch: root and regression
+workspaces select the same repository-owned HAL source.
 
 ## Public API
 

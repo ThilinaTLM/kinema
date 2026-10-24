@@ -246,7 +246,6 @@ fn replay_preserves_original_player_across_preference_changes()
 -> Result<(), Box<dyn std::error::Error>> {
     for original in [
         player::PlayerChoice::Embedded,
-        player::PlayerChoice::ExperimentalEmbedded,
         player::PlayerChoice::Mpv,
         player::PlayerChoice::Vlc,
     ] {

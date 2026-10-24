@@ -14,7 +14,7 @@ impl Error {
             Self::Mpv { operation, .. } => match *operation {
                 "create software render context"
                 | "create OpenGL render context"
-                | "create experimental GPU render context"
+                | "create GPU surface render context"
                 | "configure libmpv"
                 | "initialize libmpv"
                 | "require direct hardware decode"
@@ -62,7 +62,7 @@ mod tests {
             (Error::UnsupportedApi(0), F::LibmpvIncompatible),
             (
                 Error::Mpv {
-                    operation: "create experimental GPU render context",
+                    operation: "create GPU surface render context",
                     code: -1,
                     message: secret.into(),
                 },

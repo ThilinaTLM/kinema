@@ -247,7 +247,6 @@ impl Render for PlaySheet {
             .as_ref()
             .map(|s| match &s.player {
                 PlayerChoice::Embedded => "Embedded MPV",
-                PlayerChoice::ExperimentalEmbedded => "Experimental Embedded MPV",
                 PlayerChoice::Mpv => "External MPV",
                 PlayerChoice::Vlc => "External VLC",
                 PlayerChoice::Custom(_) => "Custom player",

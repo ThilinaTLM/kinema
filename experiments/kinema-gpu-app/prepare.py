@@ -105,7 +105,7 @@ def package_manifest(original, source, windows_gpu=False):
     package["workspace"] = "../.."
     if windows_gpu and name == "kinema-desktop":
         result.setdefault("target", {}).setdefault('cfg(target_os = "windows")', {}).setdefault("dependencies", {})["gpui_windows"] = {"workspace": True, "optional": True}
-        features = result.setdefault("features", {}).setdefault("experimental-gpu", [])
+        features = result.setdefault("features", {}).setdefault("gpu-surface", [])
         if "dep:gpui_windows" not in features:
             features.append("dep:gpui_windows")
     for key in ("readme", "license-file", "build"):
@@ -164,9 +164,10 @@ def workspace_manifest(original, patch_crates=None):
             features.add("runtime_shaders")
         value["features"] = sorted(features)
         catalog[name] = value
-    if "patch" in result or "replace" in result:
-        raise ValueError("root patches/replacements require explicit review, not implicit propagation")
-    result["patch"] = {"crates-io": {name: {"path": f"patched/{name}"} for name in patch_crates.values()}}
+    expected = {name: {"path": f"vendor/{name}"} for name in patch_crates.values()}
+    if "replace" in result or ("patch" in result and result["patch"] != {"crates-io": expected}):
+        raise ValueError("unreviewed root patches/replacements cannot propagate")
+    result["patch"] = {"crates-io": {name: {"path": str(ROOT / "vendor" / name)} for name in patch_crates.values()}}
     return result
 
 
@@ -212,14 +213,14 @@ def prepare(update_lock=False, manifests_only=False):
         destination = crates / name
         policy.owned_directory(destination, MARKER_VALUE)
         package = package_manifest(tomllib.loads((source / "Cargo.toml").read_text()), source, windows_gpu)
-        if name == "kinema-desktop" and "experimental-gpu" not in package.get("features", {}):
-            raise ValueError("root desktop experimental-gpu feature must land before generating app")
+        if name == "kinema-desktop" and "gpu-surface" not in package.get("features", {}):
+            raise ValueError("root desktop gpu-surface feature must land before generating app")
         write_owned(destination / "Cargo.toml", manifest_text(package))
         copy_tracked_support(source, destination)
     write_owned(BUILD / "Cargo.toml", manifest_text(workspace))
     write_owned(BUILD / "rust-toolchain.toml", (ROOT / "rust-toolchain.toml").read_text())
     if manifests_only:
-        print("Generated app manifests only; no root metadata, patch copies or lockfile updated.")
+        print("Generated app manifests only; no root metadata or lockfile updated.")
         return
     # Root metadata is always --locked: only the lead updates that lockfile.
     metadata = json.loads(subprocess.check_output(
@@ -247,7 +248,7 @@ def prepare(update_lock=False, manifests_only=False):
         raise ValueError("missing experimental app lockfile; run prepare --update-lock intentionally after dependencies settle")
     subprocess.run(["cargo", "metadata", "--locked", "--offline", "--format-version", "1", "--no-deps"],
                    cwd=BUILD, check=True, stdout=subprocess.DEVNULL)
-    print("Prepared real Kinema experimental workspace; root lockfile and registry unchanged.")
+    print("Prepared real Kinema regression workspace using promoted vendor sources; root lockfile and registry unchanged.")
 
 
 def main():
@@ -304,13 +305,26 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(generated["workspace"]["dependencies"][name]["features"], expected)
         self.assertEqual(len(generated["patch"]["crates-io"]), 5)
 
+    def test_promoted_root_patch_paths_are_rebased_and_unknown_patches_rejected(self):
+        catalog = {name: {"version": "=0.3.9"} for name in
+                   ["gpui", "gpui_wgpu", "gpui_apple", "gpui_windows"]}
+        patches = {name: {"path": f"vendor/{name}"} for name in policy.PATCH_CRATES.values()}
+        original = {"workspace": {"dependencies": catalog}, "patch": {"crates-io": patches}}
+        generated = workspace_manifest(original)
+        for name in patches:
+            self.assertEqual(generated["patch"]["crates-io"][name]["path"], str(ROOT / "vendor" / name))
+            self.assertEqual(original["patch"]["crates-io"][name]["path"], f"vendor/{name}")
+        original["patch"]["crates-io"]["unknown"] = {"path": "target/untrusted"}
+        with self.assertRaises(ValueError):
+            workspace_manifest(original)
+
     def test_windows_adapter_wiring_is_generated_only(self):
-        original = {"package": {"name": "kinema-desktop"}, "features": {"experimental-gpu": []}}
+        original = {"package": {"name": "kinema-desktop"}, "features": {"gpu-surface": []}}
         with tempfile.TemporaryDirectory() as temporary:
             generated = package_manifest(original, Path(temporary), windows_gpu=True)
-        self.assertEqual(generated["features"]["experimental-gpu"], ["dep:gpui_windows"])
+        self.assertEqual(generated["features"]["gpu-surface"], ["dep:gpui_windows"])
         self.assertEqual(generated["target"]['cfg(target_os = "windows")']["dependencies"]["gpui_windows"], {"workspace": True, "optional": True})
-        self.assertEqual(original["features"]["experimental-gpu"], [])
+        self.assertEqual(original["features"]["gpu-surface"], [])
         catalog = {name: {"version": "=0.3.9"} for name in ["gpui", "gpui_wgpu", "gpui_apple", "gpui_windows"]}
         root = {"workspace": {"dependencies": catalog}}
         five = dict(policy.PATCH_CRATES)

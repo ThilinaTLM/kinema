@@ -11,7 +11,8 @@ default-run = "kinema-desktop"
 workspace = true
 
 [features]
-experimental-gpu = ["dep:wgpu", "dep:gpui_wgpu", "dep:gpui_apple", "kinema-mpv/experimental-gpu"]
+default = ["gpu-surface"]
+gpu-surface = ["dep:wgpu", "dep:gpui_wgpu", "dep:gpui_apple", "kinema-mpv/gpu-surface", "dep:gpui_windows"]
 ui-probe = ["dep:log"]
 ui-probe-test = ["ui-probe", "gpui/test-support"]
 
@@ -63,3 +64,6 @@ gpui_wgpu = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui_apple = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui_windows = { workspace = true, optional = true, features = ["gpu-video-experiment"] }

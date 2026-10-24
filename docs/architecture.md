@@ -96,8 +96,10 @@ backend review added explicit script/OSC/OSD disabling; post-change root/native
 reruns passed. Native no-Lua builds are not runtime-qualified; missing-option
 classification has pure-test coverage only. See the [validation evidence](design/player.md#validation-evidence-lead-reviewed).
 
-Embedded mpv is the default playback choice in an independent,
+Embedded mpv uses the GPU-surface path as its sole/default renderer, enabled by
+the default Cargo feature `gpu-surface`. Playback opens an independent
 Kinema-managed GPUI window, not a pane in the browser or an external mpv process.
+This default-on policy is not release readiness or new platform qualification.
 External mpv and VLC remain explicit alternatives with their existing lifetime
 policy. See the [player design](design/player.md) for chrome, controls, states,
 ownership, and acceptance requirements.
@@ -135,21 +137,22 @@ validation limits](development.md#embedded-mpv-prerequisites-and-validation-plan
 
 <a id="experimental-fourth-embedded-option--integration-in-progress"></a>
 
-### Experimental fourth embedded option — scoped Linux validation
+### GPU-surface Embedded MPV — current default, prior scoped evidence
 
-**Implemented; scoped Linux backend and real-PlayerWindow checks passed.** The earlier
-standalone qualification-before-integration stage is complete for ten Linux SDR
-cases; it is not the acceptance record for this integration. The user has now
-explicitly authorized the fourth `exp-embedded-mpv` option and Windows/macOS
-backend implementation, while deferring HDR and native Windows/macOS runtime
-tests. That test deferral does not qualify those platforms or imply support.
+The GPU-surface path is promoted from the former fourth experimental option to
+sole/default Embedded MPV. There is no separate experimental player choice or
+ordinary readback-player fallback. External mpv and VLC remain unchanged explicit
+alternatives. On load, the current Rust settings key `exp-embedded-mpv` normalizes
+to Embedded MPV while preserving other preferences; explicit saves always write
+`embedded-mpv`. Loading does not automatically rewrite settings on disk. This is
+not migration of legacy C++ settings, databases, or keyring entries.
+Missing compiled support or native capabilities must fail explicitly, not silently
+select another renderer or player.
 
-Current settings/source wiring includes the persisted stable key
-`exp-embedded-mpv`, visible in all builds. Ordinary embedded mpv remains the
-default; external mpv and VLC are unchanged alternatives. Without the opt-in
-`experimental-gpu` build feature, selecting the experimental option fails with
-an actionable not-compiled message, never a silent switch to an ordinary player.
-The default build does not enable the experimental GPU backend.
+The historical anchor above is retained for links. The evidence below predates
+this default promotion: it records prior scoped Linux SDR tests, not fresh
+qualification of the default-on build. HDR and native Windows/macOS runtime tests
+remain deferred and unqualified; enabling a Cargo feature does not change that.
 
 This is a rendering path in the existing `kinema-mpv::Player`, using the same
 libmpv client, control/audio workers, session/lease rules and managed player
@@ -158,7 +161,7 @@ parallel playback subsystem. A separate bounded GPU-surface mailbox retains
 native frame owners; cancellation, generation rejection and teardown remain
 owned by the existing player lifecycle. Desktop presents surfaces and controls;
 `kinema-core` remains pure. Native interop/unsafe code stays behind the backend
-boundary, not in domain or desktop UI code. Experimental playback must reject
+boundary, not in domain or desktop UI code. GPU-surface playback must reject
 missing capabilities or decoder evidence rather than use rendered-frame CPU
 readback/re-upload or an automatic alternate player.
 
@@ -171,20 +174,18 @@ Source implementation includes three native paths:
 - macOS: legacy CGL rendering into IOSurface-backed CVPixelBuffer ownership,
   presented through GPUI's Apple BGRA surface path, not a WGPU/Vulkan assumption.
 
-The isolated generated [real-app workspace](../experiments/kinema-gpu-app/README.md)
-uses root application sources with local copies of five patched crates:
-`gpui-pre`, `gpui-pre-wgpu`, `gpui-pre-apple`, `wgpu-hal`, and `gpui-pre-windows`.
-The implemented fifth patch routes Windows' usual custom native D3D11 platform
-renderer to an **opt-in WGPU HWND/D3D12 adapter**; Windows GPUI was not already a
-native WGPU renderer. Feature activation is generated-workspace-only, leaving
-ordinary root GPUI/default-player behavior unchanged. The native D3D11 text system
-remains for glyph rasterization; this is not video CPU pixel mapping. The patch
-work covers GPU-surface presentation and multiwindow/shared-queue-gate behavior. Registry
-sources and ordinary root Cargo patch configuration are not modified. The lead
-coordinates intentional manifest/lockfile updates; all validation uses locked
-builds rather than root production patches.
+The root workspace uses durable vendored patches for `gpui-pre`, `gpui-pre-wgpu`,
+`gpui-pre-apple`, `wgpu-hal`, and `gpui-pre-windows`; root Cargo patch configuration
+and the lockfile own their resolution. Run `cargo run -p kinema-desktop --locked`
+from the repository root without generating an isolated wrapper workspace.
+The [former real-app wrapper](../experiments/kinema-gpu-app/README.md) is historical
+integration evidence, not a default-build prerequisite. Registry sources are not
+edited. The patches cover surface presentation, multiwindow/shared-queue gating,
+and Windows' WGPU HWND/D3D12 adapter. Windows GPUI's prior native D3D11 renderer
+was not already WGPU; native D3D11 remains for glyph rasterization, not video CPU
+pixel mapping. See [current build instructions](development.md#run-and-validate).
 
-**Evidence boundaries:** the [standalone qualification](../experiments/gpui-mpv-gpu/QUALIFICATION.md)
+**Prior scoped evidence boundaries (not a new default-build test run):** the [standalone qualification](../experiments/gpui-mpv-gpu/QUALIFICATION.md)
 combines ten-second Linux Intel Mesa resize-stress runs and separate native pixel
 tests for H.264 8-bit, HEVC 8/10-bit, and AV1 8/10-bit, each at 1080p and 4K,
 24-fps limited-range BT.709 SDR. It does not validate the real-app port,
@@ -227,9 +228,9 @@ passed, including owner-reported feature-on/off checks. These are compile-only,
 not cross-OS qualification: native linking/runtime tests, native Metal shader
 execution and HDR remain explicitly user-deferred. Device-loss recovery is
 unsupported; cooperative audio pause is best-effort and uncertain completion
-uses quarantine, not GPU-hang recovery. The ordinary default remains embedded
-mpv. User opt-in launch is `experiments/kinema-gpu-app/run.sh run`; automated
-validation uses only offline `run --probe`, not ordinary app/accounts.
+uses quarantine, not GPU-hang recovery. These historical probes used the isolated
+wrapper's offline `run --probe`, not ordinary app/accounts. Current user launch is
+`cargo run -p kinema-desktop --locked`; it is not an isolated validation fixture.
 
 ## UI direction and historical implementation evidence
 

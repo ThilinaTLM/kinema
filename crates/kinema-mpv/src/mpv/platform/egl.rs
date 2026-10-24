@@ -196,7 +196,7 @@ fn displays() -> &'static Mutex<DisplayRegistry> {
 ///
 /// # Safety
 /// `display` and `initialize` must belong to the same live EGL implementation.
-#[cfg(all(feature = "experimental-gpu", target_os = "linux"))]
+#[cfg(all(feature = "gpu-surface", target_os = "linux"))]
 pub(in crate::mpv) unsafe fn acquire_headless_display(
     initialize: unsafe extern "system" fn(*mut c_void, *mut i32, *mut i32) -> u32,
     display: *mut c_void,
@@ -226,7 +226,7 @@ pub(in crate::mpv) unsafe fn acquire_headless_display(
 ///
 /// # Safety
 /// Entry points/display must match the acquisition and remain live throughout.
-#[cfg(all(feature = "experimental-gpu", target_os = "linux"))]
+#[cfg(all(feature = "gpu-surface", target_os = "linux"))]
 pub(in crate::mpv) unsafe fn release_headless_display(
     initialize: unsafe extern "system" fn(*mut c_void, *mut i32, *mut i32) -> u32,
     terminate: unsafe extern "system" fn(*mut c_void) -> u32,
@@ -671,9 +671,9 @@ mod tests {
         assert!(registry.0.is_empty());
     }
 
-    #[cfg(all(feature = "experimental-gpu", target_os = "linux"))]
+    #[cfg(all(feature = "gpu-surface", target_os = "linux"))]
     #[test]
-    fn experimental_and_production_headless_acquisitions_share_registry() {
+    fn gpu_surface_and_production_headless_acquisitions_share_registry() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static INITIALIZE: AtomicUsize = AtomicUsize::new(0);
         static TERMINATE: AtomicUsize = AtomicUsize::new(0);

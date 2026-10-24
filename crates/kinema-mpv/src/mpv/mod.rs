@@ -1,11 +1,11 @@
 mod diagnostics;
-#[cfg(feature = "experimental-gpu")]
-mod experimental;
 mod ffi;
 #[cfg(test)]
 mod ffi_tests;
 #[cfg(feature = "gpu-render")]
 mod gpu;
+#[cfg(feature = "gpu-surface")]
+mod gpu_surface;
 mod library;
 mod metadata;
 #[cfg(feature = "gpu-render")]
@@ -17,5 +17,5 @@ mod software;
 pub use player::{Config, Player};
 pub use software::Frame;
 
-#[cfg(feature = "experimental-gpu")]
-pub use experimental::{ExperimentalFrame, ExperimentalGpuContext};
+#[cfg(feature = "gpu-surface")]
+pub use gpu_surface::{GpuSurfaceContext, GpuSurfaceFrame};

@@ -16,9 +16,9 @@ unsafe_op_in_unsafe_fn = "deny"
 all = "warn"
 
 [features]
-default = ["gpu-render"]
+default = ["gpu-surface"]
 gpu-render = ["dep:glow"]
-experimental-gpu = ["gpu-render", "dep:wgpu", "dep:wgpu-hal", "dep:ash", "dep:windows", "dep:objc2-core-foundation", "dep:objc2-core-video"]
+gpu-surface = ["gpu-render", "dep:wgpu", "dep:wgpu-hal", "dep:ash", "dep:windows", "dep:objc2-core-foundation", "dep:objc2-core-video"]
 
 [dependencies]
 glow = { workspace = true, optional = true }

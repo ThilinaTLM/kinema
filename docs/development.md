@@ -5,12 +5,12 @@ the native v3 UI; it is not a fully accepted [MVP](architecture.md).
 Run commands from the repository root. Rustup selects **Rust 1.97.1** via
 `rust-toolchain.toml`; install rustfmt and Clippy for that toolchain.
 
-The newly authorized fourth experimental GPU player is being integrated separately;
-its [build and validation status](#experimental-gpu-player-integration--validation-pending)
-now has passing scoped Linux backend and real-PlayerWindow probes plus final
-root/experimental workspace checks. The latest native-eight rerun also passed
-(48.43 seconds). Earlier standalone GPU qualification does not itself validate
-that real-app integration.
+Embedded MPV now uses the GPU-surface path as its sole/default renderer, with
+`gpu-surface` enabled by default. Use the root build below, not an isolated
+experimental wrapper. The [prior scoped evidence](#experimental-gpu-player-integration--validation-pending)
+records earlier Linux backend and PlayerWindow probes and root/experimental
+workspace checks; it is not new qualification of this default promotion.
+Native Windows/macOS tests and HDR remain deferred and unqualified.
 
 <a id="library-and-manual-watch-tracking-validation-pending"></a>
 
@@ -299,8 +299,12 @@ playback performance or cross-platform support.
 
 **Source implemented; scoped Linux presentation and root checks reviewed.** Embedded mpv is the
 playback default in source, with a separate managed GPUI window; Settings offers
-embedded mpv, external mpv, and VLC as the ordinary choices. The separately
-user-authorized experimental fourth choice is described below. The backend import, original-player per-session
+Embedded MPV (GPU-surface), external mpv, and VLC. `gpu-surface` is the default
+Cargo feature; the former experimental fourth choice is no longer a separate
+player. Existing Rust settings containing `exp-embedded-mpv` load as Embedded MPV,
+preserving other preferences. Explicit saves write `embedded-mpv`; loading alone
+does not rewrite the file. No legacy C++ settings/database/keyring migration is
+added. External player behavior is unchanged. The backend import, original-player per-session
 replay, close/lease release, retry, and stale-event logic are implemented. Actual
 GPUI presentation has scoped Linux evidence; final option hardening and root/native
 reruns passed, while broader acceptance remains incomplete. See the
@@ -345,10 +349,11 @@ claimed by this increment.
 
 GPUI native prerequisites above still apply. Platform graphics contexts, audio,
 decoder availability, DLL/dylib discovery, and Wayland/X11 behavior require native
-testing. The experiment's copy/readback pipeline establishes neither zero-copy
-nor HDR/wide-gamut output; hardware rendering and hardware decoding are separate
-policies. CPU fallback is not a quality or performance guarantee. Compilation or
-headless fixture tests cannot establish sustained decoding/rendering or OS support.
+testing. GPU-surface playback rejects missing capabilities rather than falling
+back to rendered-frame CPU readback/re-upload or another player. GPU copies are
+allowed; this is not a zero-copy or HDR/wide-gamut claim. Hardware rendering and
+hardware decoding are separate policies. Compilation or headless fixture tests
+cannot establish sustained decoding/rendering or OS support.
 
 Reproducible native probe entry points (generated media, no provider credentials):
 
@@ -388,7 +393,51 @@ Historical validation elsewhere in this document predates this increment and
 must not be relabelled embedded-player acceptance. Download pause/prefetch
 suspension and tracked persistent resume/history remain deferred.
 
+## GPU-surface default promotion — current scoped validation
+
+Lead/owner-reported results for the root default promotion, separate from the
+historical experimental evidence below:
+
+- Root fmt, strict locked workspace Clippy and locked tests passed: **617 passed,
+  23 ignored** (42 core + 480 desktop + 95 backend). The lead's actual root desktop
+  build passed. `python3 -B vendor/verify.py` verified **307 files**.
+- Desktop owner checks passed: 480 tests each with default features and features
+  off, 5 probe tests, strict default/probe/features-off Clippy, and the
+  `ui-probe-test` all-target check.
+- Default `kinema-mpv` cross-checks passed for Windows and macOS. Full desktop
+  cross-checks were blocked by host prerequisites: Windows lacks MSVC `lib.exe`
+  for bundled SQLite (`libsqlite3-sys`); macOS lacks a cross C SDK/toolchain, with
+  host `cc` rejecting `-arch`/`-mmacosx-version-min` in `aws-lc-sys`. These are not
+  native runtime qualification.
+- Under Vulkan validation, root-native synthetic tests passed H.264 1080p
+  controls/pixels, untagged SDR direct-GPU-frame playback, and explicit PQ fixture
+  rejection with `hdr-unsupported`. Rejection coverage does not qualify HDR output.
+- The lead's actual root `ui-probe` PlayerWindow run used an owned temporary CWD
+  and generated local H.264 1080p fixture: `--scene player-native`,
+  `--smoke-seconds 8`, `--size 1100x680`, `--stress-resize`, with Vulkan validation.
+  It passed with **168 GPU surfaces / 166 UI frame acceptances**, source/render
+  **1920×1080**, and zero readback/upload bytes. Controls reached phase 5; both
+  requested resizes were observed; auxiliary resize/close/reopen checks passed.
+  Presentation release, shutdown, no-late-frame checks and native cleanup all
+  completed; GPU errors and panics were zero. Decoder selection was auto, effective
+  transfer `bt.1886`, qualification ready.
+
+The GUI fixture had no audio and accessed no user configuration, accounts or
+providers. UI frame acceptance is not measured physical presentation; this short
+probe is not a soak or performance qualification. Nonfatal Mesa NVIDIA DRI warnings
+and allowlisted unclassified native diagnostics were emitted: this is not a claim
+that all native errors were absent. Native Windows/macOS tests and HDR output
+remain unqualified; default-on does not establish release readiness.
+
 ## Run and validate
+
+The root build enables `gpu-surface` by default for sole/default Embedded MPV and
+resolves its patched GPUI/HAL crates from durable vendored sources through root
+Cargo patches and the committed lockfile: `vendor/gpui-pre`,
+`vendor/gpui-pre-wgpu`, `vendor/gpui-pre-apple`, `vendor/gpui-pre-windows`, and
+`vendor/wgpu-hal`. No generated experimental workspace, registry edits, or extra
+feature flags are required. Native libmpv and platform
+prerequisites still apply. Default-on is not a release-readiness claim.
 
 ```sh
 cargo run -p kinema-desktop --locked
@@ -492,10 +541,11 @@ V3 is the sole/default UI. These steps describe current source wiring, not a
 completed end-to-end GUI acceptance test. Historical validation totals below
 predate the v3 cleanup and do not establish current provider/playback acceptance.
 
-1. For the prior external-player flow, install a native **mpv or VLC** executable
-   separately; neither is bundled. For the approved embedded-default increment,
-   follow [libmpv prerequisites](#embedded-mpv-prerequisites-and-validation-plan);
-   source integration and scoped Linux UI presentation are recorded, while full
+1. For default GPU-surface **Embedded MPV**, follow the
+   [libmpv prerequisites](#embedded-mpv-prerequisites-and-validation-plan).
+   External **mpv or VLC** remain explicit alternatives requiring separately
+   installed executables; neither is bundled.
+   Prior source integration and scoped Linux UI presentation are recorded, while full
    acceptance remains pending. Start
    `cargo run -p kinema-desktop --locked` from the repository root.
 2. Open the separate **Settings** window. Defaults are Cinemeta, Torrentio,
@@ -565,15 +615,16 @@ accounts; do not assume deleting `./data/` deletes credentials.
 
 <a id="experimental-gpu-player-integration--validation-pending"></a>
 
-## Experimental GPU player integration — scoped Linux validation
+## GPU-surface integration — prior scoped Linux validation
 
-**Implemented; scoped Linux backend and real-PlayerWindow probes passed.** Settings includes the stable persisted key `exp-embedded-mpv`
-in every build. The ordinary embedded-mpv default and external mpv/VLC behavior
-are unchanged. An ordinary build without `experimental-gpu` returns an actionable
-not-compiled error for the experimental choice; it must not silently fall back.
-Feature compilation is not enabled by merely saving that setting.
+**Historical evidence, not new default-build qualification.** The anchor above
+retains the former experimental section URL. GPU-surface is now sole/default
+Embedded MPV via default feature `gpu-surface`, not a fourth experimental setting.
+External mpv/VLC remain unchanged. See [current root build](#run-and-validate).
+The test results below describe the earlier integration snapshot and its isolated
+workspace, not a new validation run after promotion.
 
-The experimental feature extends the real `kinema_mpv::Player`: one existing
+The GPU-surface path extends the real `kinema_mpv::Player`: one existing
 libmpv client and its control/audio workers, commands and session lifecycle, plus
 a separate bounded GPU-surface mailbox. It is not the standalone producer wired
 into the app. Native FFI/unsafe stays in `kinema-mpv`; desktop owns presentation,
@@ -582,37 +633,26 @@ or decoder evidence fails closed; no playback rendered-frame CPU mapping,
 readback/re-upload or automatic alternate player is permitted. GPU copies are
 allowed, so this is not a zero-copy claim.
 
-Use the [isolated real-app wrapper](../experiments/kinema-gpu-app/README.md), not
-unpatched root `cargo run --features experimental-gpu`. It generates a workspace
-from the real root crates and applies local source-copy patches to `gpui-pre`,
-`gpui-pre-wgpu`, `gpui-pre-apple`, `wgpu-hal` and the implemented fifth
-`gpui-pre-windows` patch, including multiwindow/shared queue gating. Windows GPUI's
-ordinary platform is a custom native D3D11 renderer, not default WGPU. The fifth
-patch adds the opt-in WGPU HWND/D3D12 adapter; only the generated workspace
-activates its experimental feature. Native D3D11 remains for glyph rasterization;
-video does not use CPU pixel mapping. Ordinary root GPUI/default players are
-unchanged; do not add a root production Cargo patch. Registry sources are never
-edited. Intentional manifest/lockfile updates remain lead-coordinated. All checks
-use `--locked`; standalone passes alone do not validate the integrated app.
-Consult the wrapper's current README before running:
-
-```sh
-experiments/kinema-gpu-app/run.sh check
-experiments/kinema-gpu-app/run.sh build
-experiments/kinema-gpu-app/run.sh test
-# User opt-in real application launch, NOT an automated fixture-validation command:
-experiments/kinema-gpu-app/run.sh run
-```
+The prior [isolated real-app wrapper](../experiments/kinema-gpu-app/README.md)
+generated a workspace with five source-copy patches: `gpui-pre`, `gpui-pre-wgpu`,
+`gpui-pre-apple`, `wgpu-hal`, and `gpui-pre-windows`. It is historical integration
+infrastructure, not required for current root builds. The patches are now durable
+vendored root dependencies, including multiwindow/shared queue gating and the
+Windows WGPU HWND/D3D12 adapter. Windows GPUI's prior native D3D11 renderer was not
+already WGPU; native D3D11 remains for glyph rasterization, not video CPU pixel
+mapping. Registry sources are never edited. Intentional manifest/lockfile updates
+remain lead-coordinated; checks use `--locked`. Standalone or prior wrapper passes
+alone do not qualify the current default-on app.
 
 Do not start ordinary Kinema or access user configuration, secure storage,
 credentials, databases, remote media or services for fixture validation. The
-wrapper's automated tests use **only `run --probe`**, owned generated sessions
+historical wrapper's automated tests used **only `run --probe`**, owned generated sessions
 and the real desktop probe; the user-facing `run` command launches the real app, and ordinary startup is not implicitly credential-isolated by
 changing CWD. Follow its reviewed scene/fixture arguments rather than inventing
 a launch command here. Native GUI/tests are lead-scheduled exclusively, never
 concurrently. Generated artifacts stay in owned `target/` subdirectories.
 
-| Scope | Current evidence / remaining validation |
+| Scope | Prior scoped evidence / remaining validation |
 | --- | --- |
 | Standalone Linux Intel Mesa bridge | Ten codec/size rows qualified with separate native pixel tests; [report](../experiments/gpui-mpv-gpu/QUALIFICATION.md). Not app-integration acceptance. |
 | Real-Player Linux backend | All 8 ignored native backend tests passed in 47.89 seconds; latest rerun at `203640b` passed all 8 in 48.43 seconds. Controls, source switching, bounded ownership and coexistence covered below. |

@@ -5,20 +5,15 @@ playback backend. This standalone harness does not use production settings, a DB
 network service or credentials. Its Linux native path is qualified narrowly below;
 it does not provide Windows/macOS runtime support.
 
-**Current direction:** the user has now authorized fourth-player integration as
-`exp-embedded-mpv`, including Windows/macOS implementations, with native
-Windows/macOS runtime tests and HDR explicitly deferred. The earlier
-qualification-before-integration stage is historical, not a continuing ban on
-integration. The [real-app wrapper](../kinema-gpu-app/README.md) builds the root
-application's opt-in `experimental-gpu` feature in an isolated generated workspace;
-it is not this harness's `Producer` inserted into the app. The ordinary three
-player choices and embedded default remain unchanged. The fourth stable setting
-is visible in all builds but fails clearly if the backend is not compiled—no
-silent fallback. **The latest eight native real-Player backend tests, three offline
-Linux PlayerWindow/multiwindow probes and final root/experimental checks passed**.
-Standalone qualification remains distinct from that scoped app evidence. User
-opt-in real-app launch: `experiments/kinema-gpu-app/run.sh run`; automated validation
-uses only `run --probe`, never ordinary user app/accounts.
+**Promotion:** GPU embedded mpv is now the root application's normal/default
+embedded path, using default-on `gpu-surface`. Root Cargo directly consumes
+[durable vendor sources](../../vendor/README.md); no preparation is required for
+ordinary builds. This standalone regression harness and the
+[real-app wrapper](../kinema-gpu-app/README.md) now use those same sources rather
+than generating copied patches under target. Standalone qualification remains
+distinct from scoped app evidence. Automated validation uses only explicit offline
+fixtures, never ordinary user app/accounts. Windows/macOS native runtime and HDR
+remain unqualified.
 
 See the [VAAPI qualification report](QUALIFICATION.md) for the lead-verified
 standalone 1080p/4K results and remaining limits. Explicit VAAPI passed on the
@@ -101,25 +96,14 @@ qualification or proof of physical presentation.
 
 ## Isolation and maintenance
 
-Checked-in files under this directory are the source of truth. `prepare.py` uses
-root `cargo metadata --locked` to locate **exact registry version 0.3.9** of
-`gpui-pre`, `gpui-pre-wgpu`, `gpui-pre-apple` and `gpui-pre-windows`, plus exact
-`wgpu-hal` 29.0.4. These five local-copy patches are also used by the real-app
-wrapper. The fifth Windows adapter patch is implemented with owner-reported
-feature-on/off cross-check/Clippy passes, not native Windows runtime qualification. See the
-[patch documentation](patches/README.md) for current interfaces and limits.
-Preparation copies their complete source trees (including
-licenses) to `target/gpui-mpv-gpu/patched/`, then applies sorted checked-in
-`patches/*.patch` inside the corresponding copied crate. Each patch filename
-identifies its exact crate/version, and its paths use `a/src/...`. Registry sources
-are **never edited** and full vendor trees
-are not checked in. Patch/source-location fingerprints avoid unnecessary copies.
-Missing patches fail closed. Before copying, the script verifies per-file SHA256
-values from `.cargo-checksum.json` and matches its package checksum to root
-`Cargo.lock`. Normal Cargo registry trees lack that vendor checksum file: there
-it authenticates the cached `.crate` archive against the root locked checksum,
-then compares every extracted file to the archive. Mutated/extra files fail closed.
-No registry file is created or changed.
+The canonical patched sources and reproduction inputs now live in
+[`vendor/`](../../vendor/README.md). `prepare.py` requires root locked metadata
+to resolve the four GPUI crates at exactly 0.3.9 and HAL at 29.0.4 to those paths.
+It verifies all 307 patched-source digests and checks that the five historical
+patches here exactly match the promoted inputs. No source copies or patches are
+created under target, and registry sources are never changed. Existing generated
+patch-copy directories are left untouched. Native Windows runtime remains
+unqualified; see [patch documentation](patches/README.md) for interfaces and limits.
 
 Generated build/source directories carry `.kinema-experiment-owned` markers.
 Preparation refuses preexisting unmarked or symlinked directories rather than
@@ -131,8 +115,8 @@ experiments/gpui-mpv-gpu/run.sh prepare --self-test
 ```
 
 The generated manifest is its own edition-2024/resolver-3 workspace. Dependency
-versions come from root `[workspace.dependencies]`; its patches are local to that
-manifest. Its binary references checked-in `src/main.rs`. It has a separate
+versions come from root `[workspace.dependencies]`; its patch paths point to
+the same durable vendor sources as root Cargo. Its binary references checked-in `src/main.rs`. It has a separate
 checked-in `Cargo.lock`, copied to the generated workspace before each command.
 All normal checks/runs use `--locked`. To intentionally refresh only the experiment
 lockfile after dependency/patch maintenance:
@@ -247,17 +231,16 @@ IOSurface/CVPixelBuffer ownership into GPUI's Apple BGRA surface path. Native
 interop/unsafe remains backend-owned. There is no rendered-frame CPU
 readback/re-upload fallback or automatic alternate-player fallback.
 
-The isolated [real-app wrapper](../kinema-gpu-app/README.md) uses local copies of
-five patched GPUI/HAL/platform crates, including multiwindow/shared-queue-gate
-fixes. The implemented fifth `gpui-pre-windows` patch adds an opt-in WGPU
-HWND/D3D12 adapter to GPUI's ordinarily custom native D3D11 platform. Its feature
-is activated only in the generated workspace; ordinary root GPUI/default players
-are unchanged. Native D3D11 remains for glyph rasterization, not CPU video pixel
+The [real-app regression wrapper](../kinema-gpu-app/README.md) and root Cargo use
+the same five durable patched GPUI/HAL/platform sources, including
+multiwindow/shared-queue-gate fixes. The implemented fifth `gpui-pre-windows` patch adds an opt-in WGPU
+HWND/D3D12 adapter to GPUI's ordinarily custom native D3D11 platform. Its underlying feature
+is enabled in the root catalog; desktop `gpu-surface` is default-on. Native D3D11 remains for glyph rasterization, not CPU video pixel
 mapping.
 Follow its owner's current build/run/check/test and safe-probe contract; do not
 launch ordinary Kinema against user data/credentials for fixture validation.
-Root manifests/lockfiles remain lead-coordinated; no production root Cargo patch
-or registry edits are required.
+Root manifests/lockfiles remain lead-coordinated; repository-owned root Cargo
+patches are now intentional, while registry edits remain forbidden.
 
 The lead's latest native real-Player backend rerun at `203640b` with all five
 patches passed **8 tests in 48.43 seconds**, zero failed, 77 filtered. Its raw scan
@@ -303,9 +286,8 @@ passed as reported by their owners. This is compile-only, not native OS support.
 Native Windows/macOS linking/runtime tests, native Metal shader execution and HDR
 remain explicitly user-deferred. Earlier
 [native interop probes](../mpv-platform-probes/README.md) likewise did not qualify
-those platforms. The ordinary root embedded default and other players remain
-unchanged; selecting the fourth option without its compiled backend explains the
-required isolated build rather than falling back.
+those platforms. The root Embedded choice now uses the GPU path by default;
+external players are unchanged and there is no desktop CPU readback fallback.
 
 ### Observed stage-1 software validation (2026-10-24)
 
@@ -333,5 +315,5 @@ required isolated build rather than falling back.
   warnings were still emitted directly by Mesa.
 
 No result qualifies the rejected `auto` decoder path or an entirely CPU-free
-pipeline. The ordinary embedded-player default remains unchanged; experimental
-real-app integration has its own scoped Linux validation record above.
+pipeline. The real-app GPU integration has its own scoped Linux validation record
+above; promotion does not extend that evidence to new platforms or HDR.

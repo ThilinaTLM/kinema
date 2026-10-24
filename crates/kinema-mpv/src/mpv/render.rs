@@ -49,9 +49,9 @@ fn validate_size(size: [u32; 2], limit: usize) -> Result<usize> {
     }
     Ok(bytes)
 }
-/// Presence is an opt-in, not permission to override contradictory policies.
-#[cfg(any(feature = "experimental-gpu", test))]
-fn validate_experimental_policy(
+/// A supplied surface context must not override contradictory policies.
+#[cfg(any(feature = "gpu-surface", test))]
+fn validate_gpu_surface_policy(
     enabled: bool,
     backend: RenderBackend,
     decoding: HardwareDecoding,
@@ -61,21 +61,27 @@ fn validate_experimental_policy(
     }
     if backend == RenderBackend::Cpu {
         return Err(Error::InvalidInput(
-            "experimental_gpu requires Auto or Gpu rendering; Cpu is incompatible",
+            "gpu_surface requires Auto or Gpu rendering; Cpu is incompatible",
         ));
     }
     if decoding != HardwareDecoding::Auto {
         return Err(Error::InvalidInput(
-            "experimental_gpu requires Auto direct hardware decoding; Disabled and CopyBack are incompatible",
+            "gpu_surface requires Auto direct hardware decoding; Disabled and CopyBack are incompatible",
         ));
     }
     Ok(())
 }
 
 pub(super) fn validate_config(config: &Config) -> Result<()> {
-    #[cfg(feature = "experimental-gpu")]
-    validate_experimental_policy(
-        config.experimental_gpu.is_some(),
+    #[cfg(feature = "gpu-surface")]
+    if config.gpu_surface.is_none() && config.render_backend == RenderBackend::Auto {
+        return Err(Error::InvalidInput(
+            "GPU surface playback requires Config.gpu_surface from the presentation device; supply it, or explicitly select RenderBackend::Cpu or Gpu for low-level readback",
+        ));
+    }
+    #[cfg(feature = "gpu-surface")]
+    validate_gpu_surface_policy(
+        config.gpu_surface.is_some(),
         config.render_backend,
         config.hardware_decoding,
     )?;
@@ -114,9 +120,9 @@ fn dimensions(w: Option<i64>, h: Option<i64>) -> Option<[u32; 2]> {
 pub(super) struct Pipeline {
     config: Config,
     pub viewport: [u32; 2],
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     decode_evidence: [String; 6],
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     decode_evidence_observed: bool,
     pub metadata: [Option<i64>; 5],
     size: [u32; 2],
@@ -125,8 +131,8 @@ pub(super) struct Pipeline {
     gpu_submissions: u64,
     pub(super) generation: u64,
     frame: Option<RenderedFrame>,
-    #[cfg(feature = "experimental-gpu")]
-    gpu_frame: Option<(super::experimental::ExperimentalFrame, u64, Instant)>,
+    #[cfg(feature = "gpu-surface")]
+    gpu_frame: Option<(super::gpu_surface::GpuSurfaceFrame, u64, Instant)>,
     stats: RenderDiagnostics,
     started: Instant,
     age_total: f64,
@@ -140,9 +146,9 @@ impl Pipeline {
             },
             config,
             viewport: [0, 0],
-            #[cfg(feature = "experimental-gpu")]
+            #[cfg(feature = "gpu-surface")]
             decode_evidence: Default::default(),
-            #[cfg(feature = "experimental-gpu")]
+            #[cfg(feature = "gpu-surface")]
             decode_evidence_observed: false,
             metadata: [None; 5],
             size: [0, 0],
@@ -151,14 +157,14 @@ impl Pipeline {
             gpu_submissions: 0,
             generation: 0,
             frame: None,
-            #[cfg(feature = "experimental-gpu")]
+            #[cfg(feature = "gpu-surface")]
             gpu_frame: None,
             started: Instant::now(),
             age_total: 0.0,
         }
     }
     fn invalidate(&mut self) {
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(feature = "gpu-surface")]
         if self.gpu_frame.take().is_some() {
             self.stats.coalesced_frames += 1;
         }
@@ -170,7 +176,7 @@ impl Pipeline {
     /// Accept a control-worker snapshot only for the generation queried. A
     /// changed snapshot invalidates the mailbox and forces a render even when
     /// paused libmpv has no further frame-update notification to send.
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     pub fn update_decode_evidence(&mut self, generation: u64, evidence: [String; 6]) -> bool {
         if self.generation != generation
             || (self.decode_evidence_observed && self.decode_evidence == evidence)
@@ -184,13 +190,13 @@ impl Pipeline {
         self.invalidate();
         true
     }
-    #[cfg(feature = "experimental-gpu")]
-    pub fn experimental_enabled(&self) -> bool {
-        self.config.experimental_gpu.is_some()
+    #[cfg(feature = "gpu-surface")]
+    pub fn gpu_surface_enabled(&self) -> bool {
+        self.config.gpu_surface.is_some()
     }
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     pub fn cancel_gpu(&mut self) {
-        if self.experimental_enabled() {
+        if self.gpu_surface_enabled() {
             self.invalidate();
         }
     }
@@ -202,7 +208,7 @@ impl Pipeline {
     }
     pub fn clear(&mut self, state: &mut PlaybackState) {
         self.metadata = [None; 5];
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(feature = "gpu-surface")]
         {
             self.decode_evidence = Default::default();
             self.decode_evidence_observed = false;
@@ -272,8 +278,8 @@ impl Pipeline {
         self.age_total += frame.created_at.elapsed().as_secs_f64() * 1000.0;
         Some(frame.frame)
     }
-    #[cfg(feature = "experimental-gpu")]
-    pub fn take_gpu(&mut self) -> Option<super::experimental::ExperimentalFrame> {
+    #[cfg(feature = "gpu-surface")]
+    pub fn take_gpu(&mut self) -> Option<super::gpu_surface::GpuSurfaceFrame> {
         let (frame, generation, created) = self.gpu_frame.take()?;
         if generation != self.generation || self.size.contains(&0) {
             self.stats.coalesced_frames += 1;
@@ -307,8 +313,8 @@ impl Pipeline {
 }
 
 enum Renderer {
-    #[cfg(feature = "experimental-gpu")]
-    Experimental(super::experimental::Renderer),
+    #[cfg(feature = "gpu-surface")]
+    GpuSurface(super::gpu_surface::Renderer),
     Cpu(CpuRenderer),
     #[cfg(feature = "gpu-render")]
     Gpu(super::gpu::GpuRenderer),
@@ -317,8 +323,8 @@ impl Renderer {
     fn update(&mut self) -> u64 {
         match self {
             Self::Cpu(r) => r.update(),
-            #[cfg(feature = "experimental-gpu")]
-            Self::Experimental(r) => r.update(),
+            #[cfg(feature = "gpu-surface")]
+            Self::GpuSurface(r) => r.update(),
             #[cfg(feature = "gpu-render")]
             Self::Gpu(r) => r.update(),
         }
@@ -326,8 +332,8 @@ impl Renderer {
     fn pending(&self) -> bool {
         match self {
             Self::Cpu(_) => false,
-            #[cfg(feature = "experimental-gpu")]
-            Self::Experimental(_) => false,
+            #[cfg(feature = "gpu-surface")]
+            Self::GpuSurface(_) => false,
             #[cfg(feature = "gpu-render")]
             Self::Gpu(r) => r.pending(),
         }
@@ -366,10 +372,10 @@ fn initialize(
     decoder: &SyncSender<SyncSender<Result<()>>>,
     diagnostics: &super::diagnostics::Diagnostics,
 ) -> Result<(Renderer, Option<String>)> {
-    #[cfg(feature = "experimental-gpu")]
-    if let Some(context) = &config.experimental_gpu {
-        return super::experimental::Renderer::new(client, context, diagnostics.id)
-            .map(|r| (Renderer::Experimental(r), None));
+    #[cfg(feature = "gpu-surface")]
+    if let Some(context) = &config.gpu_surface {
+        return super::gpu_surface::Renderer::new(client, context, diagnostics.id)
+            .map(|r| (Renderer::GpuSurface(r), None));
     }
     select(
         config.render_backend,
@@ -386,12 +392,12 @@ fn initialize(
 }
 /// Coalesce libmpv update notifications without losing them while waiting for
 /// older readbacks. Generations are acknowledged only after render/skip consumption.
-#[cfg(any(feature = "gpu-render", feature = "experimental-gpu", test))]
+#[cfg(any(feature = "gpu-render", feature = "gpu-surface", test))]
 struct GpuSchedule {
     frame_requested: bool,
     consumed_generation: Option<u64>,
 }
-#[cfg(any(feature = "gpu-render", feature = "experimental-gpu", test))]
+#[cfg(any(feature = "gpu-render", feature = "gpu-surface", test))]
 impl GpuSchedule {
     fn new() -> Self {
         Self {
@@ -439,8 +445,8 @@ pub(super) fn run(
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
         state.active_backend = match &renderer {
             Renderer::Cpu(_) => RenderBackend::Cpu,
-            #[cfg(feature = "experimental-gpu")]
-            Renderer::Experimental(_) => RenderBackend::Gpu,
+            #[cfg(feature = "gpu-surface")]
+            Renderer::GpuSurface(_) => RenderBackend::Gpu,
             #[cfg(feature = "gpu-render")]
             Renderer::Gpu(_) => RenderBackend::Gpu,
         };
@@ -458,7 +464,7 @@ pub(super) fn run(
     let _ = ready.send(Ok(()));
     let mut last_generation = u64::MAX;
     let mut last_diagnostic_size = None;
-    #[cfg(any(feature = "gpu-render", feature = "experimental-gpu"))]
+    #[cfg(any(feature = "gpu-render", feature = "gpu-surface"))]
     let mut gpu_schedule = GpuSchedule::new();
     while !shared.stopped.load(Ordering::Acquire) {
         let (size, generation) = {
@@ -497,8 +503,8 @@ pub(super) fn run(
                         last_generation = generation;
                     }
                 }
-                #[cfg(feature = "experimental-gpu")]
-                Renderer::Experimental(gpu) => {
+                #[cfg(feature = "gpu-surface")]
+                Renderer::GpuSurface(gpu) => {
                     gpu_schedule.observe(updates);
                     let (evidence, observed, video_ready) = {
                         let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
@@ -616,13 +622,13 @@ pub(super) fn run(
 mod tests {
     use super::*;
     #[test]
-    fn experimental_policy_allows_only_auto_or_gpu_with_auto_decoding() {
+    fn gpu_surface_policy_allows_only_auto_or_gpu_with_auto_decoding() {
         for backend in [RenderBackend::Auto, RenderBackend::Gpu] {
-            assert!(validate_experimental_policy(true, backend, HardwareDecoding::Auto).is_ok());
+            assert!(validate_gpu_surface_policy(true, backend, HardwareDecoding::Auto).is_ok());
         }
     }
     #[test]
-    fn experimental_policy_rejects_explicit_cpu_and_non_direct_decoding() {
+    fn gpu_surface_policy_rejects_explicit_cpu_and_non_direct_decoding() {
         for backend in [RenderBackend::Auto, RenderBackend::Cpu, RenderBackend::Gpu] {
             for decoding in [
                 HardwareDecoding::Auto,
@@ -632,26 +638,63 @@ mod tests {
                 if backend != RenderBackend::Cpu && decoding == HardwareDecoding::Auto {
                     continue;
                 }
-                let error = validate_experimental_policy(true, backend, decoding).unwrap_err();
+                let error = validate_gpu_surface_policy(true, backend, decoding).unwrap_err();
                 assert!(matches!(error, Error::InvalidInput(_)));
-                assert!(error.to_string().contains("experimental_gpu requires"));
+                assert!(error.to_string().contains("gpu_surface requires"));
             }
         }
     }
+    #[cfg(feature = "gpu-surface")]
     #[test]
-    fn absent_experimental_context_preserves_all_existing_policy_combinations() {
+    fn default_requires_presentation_context_before_native_loading() {
+        let config = Config::default();
+        assert!(config.gpu_surface.is_none());
+        let error = validate_config(&config).unwrap_err();
+        assert!(error.to_string().contains("Config.gpu_surface"));
+        assert!(matches!(
+            crate::Player::new(config),
+            Err(Error::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn explicit_readback_is_available_without_surface_context() {
+        for backend in [RenderBackend::Cpu, RenderBackend::Gpu] {
+            for decoding in [
+                HardwareDecoding::Auto,
+                HardwareDecoding::Disabled,
+                HardwareDecoding::CopyBack,
+            ] {
+                let config = Config {
+                    render_backend: backend,
+                    hardware_decoding: decoding,
+                    ..Config::default()
+                };
+                assert!(validate_config(&config).is_ok());
+            }
+        }
+    }
+
+    #[cfg(not(feature = "gpu-surface"))]
+    #[test]
+    fn feature_opt_out_allows_default_readback() {
+        assert!(validate_config(&Config::default()).is_ok());
+    }
+
+    #[test]
+    fn absent_gpu_surface_context_does_not_restrict_readback_decoding() {
         for backend in [RenderBackend::Auto, RenderBackend::Cpu, RenderBackend::Gpu] {
             for decoding in [
                 HardwareDecoding::Auto,
                 HardwareDecoding::Disabled,
                 HardwareDecoding::CopyBack,
             ] {
-                assert!(validate_experimental_policy(false, backend, decoding).is_ok());
+                assert!(validate_gpu_surface_policy(false, backend, decoding).is_ok());
             }
         }
     }
 
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     #[test]
     fn paused_metadata_ready_forces_redraw_after_consumed_generation() {
         let mut pipeline = Pipeline::new(Config::default());
@@ -679,7 +722,7 @@ mod tests {
         assert!(schedule.ready(false, pipeline.generation));
         assert!(state.paused);
     }
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     #[test]
     fn stale_evidence_cannot_override_source_invalidation() {
         let mut pipeline = Pipeline::new(Config::default());
@@ -696,7 +739,7 @@ mod tests {
             std::array::from_fn(|_| String::new())
         );
     }
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     #[test]
     fn unknown_evidence_forces_recheck_but_never_produces_cpu_pixels() {
         let mut pipeline = Pipeline::new(Config::default());
@@ -834,7 +877,7 @@ mod tests {
         assert!(validate_size([u32::MAX, 2], usize::MAX).is_err());
         assert!(validate_size([8192, 8192], 64 * 1024 * 1024).is_err());
     }
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     #[test]
     fn unavailable_decode_observation_is_tracked_and_reset_without_a_native_context() {
         let mut pipeline = Pipeline::new(Config::default());

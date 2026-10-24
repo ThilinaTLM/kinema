@@ -2199,8 +2199,6 @@ dependencies = [
 [[package]]
 name = "gpui-pre"
 version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34f61c1cfd36fc9c436af09308c963822ae27a45a84feb21a77ba5c9e051f1c0"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2234,6 +2232,7 @@ dependencies = [
  "num_cpus",
  "objc2-core-foundation",
  "objc2-core-video",
+ "objc2-io-surface",
  "parking",
  "parking_lot",
  "pin-project",
@@ -2261,6 +2260,7 @@ dependencies = [
  "uuid",
  "waker-fn",
  "web-time",
+ "wgpu",
  "windows 0.62.2",
  "zed-scap",
 ]
@@ -2268,8 +2268,6 @@ dependencies = [
 [[package]]
 name = "gpui-pre-apple"
 version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b52f58893fe1a0836464428dfad2b5eaf42c9c303a9638f4c2aced5a69072a15"
 dependencies = [
  "anyhow",
  "async-task",
@@ -2550,8 +2548,6 @@ dependencies = [
 [[package]]
 name = "gpui-pre-wgpu"
 version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b1cdb26c1503bf9662ee8fbc5ab0b44b2deeee4b5c12dc67491ba6fb5fc544b"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2577,8 +2573,6 @@ dependencies = [
 [[package]]
 name = "gpui-pre-windows"
 version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "513d4f0fc7d596d3bdef2a73a524ffb83dabc95bf484f2855a698e7f431290a9"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -2590,6 +2584,7 @@ dependencies = [
  "gpui-pre-collections",
  "gpui-pre-scheduler",
  "gpui-pre-util",
+ "gpui-pre-wgpu",
  "image",
  "itertools",
  "log",
@@ -3272,6 +3267,7 @@ dependencies = [
  "gpui-pre-apple",
  "gpui-pre-platform",
  "gpui-pre-wgpu",
+ "gpui-pre-windows",
  "image",
  "keyring",
  "kinema-core",
@@ -6941,8 +6937,6 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "29.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97ace1c17727311c22a46e4e3faf56ea6de81af99dcc839bdfb54857b94d448d"
 dependencies = [
  "android_system_properties",
  "arrayvec",

@@ -88,13 +88,13 @@ impl FailureDetails {
                 "initialize libmpv" => "initialize",
                 "create software render context"
                 | "create OpenGL render context"
-                | "create experimental GPU render context" => "render-create",
+                | "create GPU surface render context" => "render-create",
                 "software render"
                 | "OpenGL render"
-                | "render experimental GPU frame"
+                | "render GPU surface frame"
                 | "skip hidden frame"
                 | "skip GPU frame"
-                | "skip experimental frame" => "render",
+                | "skip GPU surface frame" => "render",
                 "queue command" | "command" => "command",
                 "observe property" | "observe direct decode evidence" => "observe",
                 "playback" | "loadfile" | "load" => "load",
@@ -112,13 +112,13 @@ impl FailureDetails {
     }
 }
 
-#[cfg(feature = "experimental-gpu")]
+#[cfg(feature = "gpu-surface")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum NativeCleanup {
     Complete,
     Quarantined,
 }
-#[cfg(feature = "experimental-gpu")]
+#[cfg(feature = "gpu-surface")]
 impl NativeCleanup {
     fn name(self) -> &'static str {
         match self {
@@ -127,12 +127,12 @@ impl NativeCleanup {
         }
     }
 }
-#[cfg(feature = "experimental-gpu")]
+#[cfg(feature = "gpu-surface")]
 pub(super) fn native_cleanup(player_id: u64, outcome: NativeCleanup) {
     tracing::info!(
         player_id,
         native_cleanup = outcome.name(),
-        "mpv experimental native cleanup"
+        "mpv GPU surface native cleanup"
     );
 }
 
@@ -584,15 +584,15 @@ impl Diagnostics {
             observations: Mutex::new(Observations::default()),
         };
         this.event(Lifecycle::Startup);
-        #[cfg(feature = "experimental-gpu")]
-        let experimental = config.experimental_gpu.is_some();
-        #[cfg(not(feature = "experimental-gpu"))]
-        let experimental = false;
+        #[cfg(feature = "gpu-surface")]
+        let gpu_surface = config.gpu_surface.is_some();
+        #[cfg(not(feature = "gpu-surface"))]
+        let gpu_surface = false;
         tracing::info!(
             player_id = this.id,
             requested_backend = backend(config.render_backend),
             hardware_policy = decoding(config.hardware_decoding),
-            experimental,
+            gpu_surface,
             platform = std::env::consts::OS,
             "mpv configuration"
         );
@@ -805,8 +805,8 @@ mod tests {
         for (operation, expected) in [
             ("configure libmpv", "configure"),
             ("initialize libmpv", "initialize"),
-            ("create experimental GPU render context", "render-create"),
-            ("render experimental GPU frame", "render"),
+            ("create GPU surface render context", "render-create"),
+            ("render GPU surface frame", "render"),
             ("queue command", "command"),
             ("observe direct decode evidence", "observe"),
             ("playback", "load"),
@@ -1043,7 +1043,7 @@ mod tests {
         assert_eq!(evidence.transfer, "unknown");
         assert_eq!(evidence.storage, "other");
     }
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     #[test]
     fn worker_shutdown_and_native_quarantine_have_distinct_fixed_diagnostics() {
         assert_eq!(Lifecycle::WorkersStopped.name(), "workers-stopped");

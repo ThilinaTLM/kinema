@@ -1,13 +1,11 @@
-# Isolated real-Kinema experimental GPU app
+# Real-Kinema GPU regression workspace
 
-This builds the **real** `kinema-core`, `kinema-mpv` and `kinema-desktop` sources in
-an isolated generated workspace. It is not the standalone experiment's
-`Producer`, a second mpv client, a new playback application, or a production
-default. The opt-in `experimental-gpu` desktop feature enables the fourth
-experimental embedded-mpv choice; the ordinary three choices/default stay
-unchanged. The backend must use the existing `kinema_mpv::Player` client and its
-control/audio/session lifecycle. Native FFI stays in `kinema-mpv`; desktop/core
-retain their inherited unsafe-code prohibition.
+GPU embedded mpv is now the normal/default embedded path. Ordinary builds use
+`cargo run -p kinema-desktop --locked` from root, with no preparation. The public
+feature is `gpu-surface`, default-on in desktop/backend; there is one Embedded
+choice, not a fourth experimental player. This wrapper remains for regression
+work only and uses the same durable [vendor sources](../../vendor/README.md).
+It is not a second mpv client or this standalone harness's `Producer`.
 
 Linux Intel Mesa qualification evidence for the standalone bridge is recorded in
 [the qualification report](../gpui-mpv-gpu/QUALIFICATION.md). That does **not** by
@@ -15,7 +13,7 @@ itself qualify this real-app integration, multiwindow behavior, or every driver.
 HDR remains deferred. Windows ANGLE/D3D11On12/D3D12 and macOS legacy
 CGL/IOSurface/Metal paths are experimental and **native-runtime untested**, not
 qualified platform backends; see [platform probes](../mpv-platform-probes/README.md).
-No rendered-frame CPU map/readback/re-upload fallback is permitted in experimental
+No rendered-frame CPU map/readback/re-upload fallback is permitted in embedded
 playback. GPU copies are allowed; software decoder uploads are a separate issue.
 Missing capabilities must fail closed rather than silently selecting another
 player/backend. Cancellation, generation rejection, bounded GPU mailbox ownership
@@ -78,14 +76,12 @@ Do not run an unlocked root build to work around pending manifest coordination.
 The generated workspace root is `target/kinema-gpu-app/`; `CARGO_TARGET_DIR` points
 to root `target/` to reuse matching profiles/artifacts, not to mix lockfiles.
 
-Prerequisites: Python 3.11+, Git, the `patch` command, Cargo/toolchain, and normal
+Prerequisites for this wrapper: Python 3.11+, Git, Cargo/toolchain, and normal
 native GPUI/libmpv platform dependencies. There is no Linux-only guard in this
-preparation script. On Windows, use a Bash environment (e.g. Git Bash) with
-`python3` and `patch` available; preparation can also be invoked with Python
-without Bash. `patch` must be on the native Python process's PATH (for example
-from Git for Windows's Unix tools); having Git installed does not implicitly
-supply a runtime shell. Native/cross-build SDK requirements still apply. The macOS generated
-catalog enables `gpui_apple/runtime_shaders` so Rust cross-checking need not invoke
+preparation script. On Windows, use a Bash environment for `run.sh`, or invoke Python/Cargo
+commands directly. The `patch` command is needed only for optional vendor source
+reproduction, not normal builds or regression preparation. Native/cross-build SDK requirements still apply. The macOS generated
+catalog enables `gpui_apple/runtime_shaders` (as does the root catalog) so Rust cross-checking need not invoke
 the Metal SDK compiler at build time: actual native Metal shader compilation is
 still required at runtime. A cross-check is **not** a successful runtime test.
 
@@ -101,8 +97,7 @@ This launches the actual `kinema-desktop` binary, not the fixture probe, and
 passes arguments directly without shell evaluation. It deliberately uses ordinary
 application paths: debug builds use the repository's `data/` directory; ordinary
 OS credential storage may also be accessed. It is **not** an account/settings/DB
-sandbox. The existing three player defaults are unchanged; only this generated
-feature-enabled build exposes the opt-in fourth choice. The `build` command
+sandbox. This wrapper uses the same default GPU embedded path as root builds. The `build` command
 prints Cargo's actual executable path (including a custom target/profile or
 Windows `.exe`), so users can also launch that binary deliberately.
 
@@ -112,7 +107,7 @@ UI/native validation is limited to lead-controlled offline fixture launches:
 ```sh
 # All input paths must be absolute/local and synthetic.
 experiments/kinema-gpu-app/run.sh run --probe --scene player
-# Lead-controlled actual fourth-player fixture, with generated local media:
+# Lead-controlled GPU embedded fixture, with generated local media:
 VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
   experiments/kinema-gpu-app/run.sh run --probe --scene player-experimental \
   --media /absolute/generated/testsrc-h264.mkv --smoke-seconds 6 \
@@ -130,55 +125,39 @@ under the owned generated directory rather than deleting user/generated files.
 
 ### Native Python/Cargo commands (no Bash launcher required)
 
-For example, in Windows PowerShell with native Python, Rust and `patch` on PATH:
+For example, in Windows PowerShell with native Python and Rust on PATH:
 
 ```powershell
 python experiments/kinema-gpu-app/prepare.py --update-lock
 $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
-cargo build --manifest-path target/kinema-gpu-app/Cargo.toml --locked -p kinema-desktop --features experimental-gpu --bin kinema-desktop
+cargo build --manifest-path target/kinema-gpu-app/Cargo.toml --locked -p kinema-desktop --features gpu-surface --bin kinema-desktop
 # USER launch only; never an agent test:
-cargo run --manifest-path target/kinema-gpu-app/Cargo.toml --locked -p kinema-desktop --features experimental-gpu --bin kinema-desktop
+cargo run --manifest-path target/kinema-gpu-app/Cargo.toml --locked -p kinema-desktop --features gpu-surface --bin kinema-desktop
 ```
 
-Git Bash is one way to supply the preparation-time `patch` executable and run
-`run.sh`; it is not an implicit dependency of the compiled app at runtime.
+Git Bash is one way to run `run.sh`; it is not an implicit dependency of the
+compiled app at runtime.
 Cross-compilation remains unqualified runtime evidence, not a native platform pass.
 
 ## Source, manifest and patch isolation
 
-`prepare.py` reuses the standalone preparation's source-integrity policy, **not
-its playback pipeline**. Root `cargo metadata --locked` identifies exact registry
-sources; root locked package checksums authenticate `.cargo-checksum.json` maps
-or cached `.crate` archives, and every extracted file is verified before copying.
-Licenses are retained. Registry sources are never patched or rewritten.
+`prepare.py` reuses the standalone harness's safety helpers, **not its playback
+pipeline**. Root `cargo metadata --locked` must resolve all five exact package
+releases to the promoted `vendor/` paths. The vendor inventory and identical
+historical patch inputs are verified; neither script regenerates target patches
+or modifies registry sources. Authentication/reproduction provenance is documented
+in [`vendor/README.md`](../../vendor/README.md).
 
-Exactly these five checked-in patches and the lead's exact root `gpui_windows`
-catalog entry are required. Unknown or missing patches fail closed; the temporary
-four-patch staging mode is retired. `patch -p1` runs **inside** the corresponding
-copied crate:
-
-| Patch | Exact copied crate |
-| --- | --- |
-| `0001-gpui-pre-0.3.9.patch` | `gpui-pre` 0.3.9 |
-| `0002-gpui-pre-wgpu-0.3.9.patch` | `gpui-pre-wgpu` 0.3.9 |
-| `0003-wgpu-hal-29.0.4.patch` | `wgpu-hal` 29.0.4 |
-| `0004-gpui-pre-apple-0.3.9.patch` | `gpui-pre-apple` 0.3.9 |
-| `0005-gpui-pre-windows-0.3.9.patch` | `gpui-pre-windows` 0.3.9 |
-
-The patch directory belongs to the GPUI patch owner. Missing/unknown patches,
-unknown preexisting build directories, symlinks, and checksum failures fail
-closed. Distinct ownership markers prevent the app and standalone preparers from
-replacing each other's generated trees. No full vendor tree is checked in.
+Missing/unknown patches, unreviewed root patch entries, unknown preexisting build
+directories, symlinks, and checksum failures fail closed. Distinct ownership
+markers prevent the app and standalone preparers from replacing each other's
+generated trees. Existing generated patch-copy directories are left untouched.
 
 The generated root copies root workspace package metadata, lints, profiles and
-shared dependency versions. Only its copied catalog adds `gpu-video-experiment`
-to `gpui`, `gpui_wgpu`, and `gpui_apple` (plus Apple's `runtime_shaders`). Its generated catalog also enables
-`gpui_windows/gpu-video-experiment`, and only the generated desktop manifest adds
-an optional Windows `gpui_windows` dependency plus `dep:gpui_windows` to
-`experimental-gpu`. No production feature forwarding is required. Only the
-generated root has `[patch.crates-io]` for the selected copied crates. No root/global patch or
-registry change is involved. The root desktop feature need not name unknown GPUI
-features; normal root checks continue against upstream releases.
+shared dependency versions, rebasing only the reviewed vendor paths to absolute
+paths. Root and generated builds enable the same patched GPUI API features and
+Apple runtime shaders; the production desktop owns Windows dependency forwarding.
+No global patch or registry change is involved.
 
 Three generated package manifests inherit from that generated root. Absolute
 `[lib]`, default `[[bin]]`, `ui-probe`, integration test, example and benchmark

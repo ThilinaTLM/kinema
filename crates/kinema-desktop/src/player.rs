@@ -12,7 +12,6 @@ use std::{
 pub enum PlayerChoice {
     #[default]
     Embedded,
-    ExperimentalEmbedded,
     Mpv,
     Vlc,
     Custom(PathBuf),
@@ -20,7 +19,7 @@ pub enum PlayerChoice {
 
 impl PlayerChoice {
     pub fn is_managed(&self) -> bool {
-        matches!(self, Self::Embedded | Self::ExperimentalEmbedded)
+        matches!(self, Self::Embedded)
     }
 }
 
@@ -111,7 +110,6 @@ pub fn launch(choice: &PlayerChoice, local_url: &str) -> Result<Child, PlayerErr
         operation = "launch",
         player = match choice {
             PlayerChoice::Embedded => "embedded",
-            PlayerChoice::ExperimentalEmbedded => "exp-embedded-mpv",
             PlayerChoice::Mpv => "mpv",
             PlayerChoice::Vlc => "vlc",
             PlayerChoice::Custom(_) => "custom",
@@ -277,13 +275,12 @@ mod tests {
 
     #[test]
     fn embedded_cannot_be_launched_as_an_external_process() {
-        for choice in [PlayerChoice::Embedded, PlayerChoice::ExperimentalEmbedded] {
-            assert!(choice.is_managed());
-            assert_eq!(
-                launch(&choice, "http://127.0.0.1:1234/media/fixture").err(),
-                Some(PlayerError::EmbeddedRequiresWindow),
-            );
-        }
+        let choice = PlayerChoice::Embedded;
+        assert!(choice.is_managed());
+        assert_eq!(
+            launch(&choice, "http://127.0.0.1:1234/media/fixture").err(),
+            Some(PlayerError::EmbeddedRequiresWindow),
+        );
         assert!(!PlayerChoice::Mpv.is_managed());
         assert!(!PlayerChoice::Vlc.is_managed());
     }

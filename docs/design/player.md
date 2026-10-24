@@ -12,7 +12,15 @@ sets the backend boundary and lifetime policy.
 
 ## Scope and composition
 
-Embedded mpv is the default choice. Play opens an independent Kinema-managed
+Embedded MPV uses the GPU-surface path as its sole/default renderer, enabled by
+default Cargo feature `gpu-surface`. The former fourth experimental choice is
+not a separate player. Current Rust settings normalize `exp-embedded-mpv` to
+Embedded MPV on load, preserving other preferences; explicit saves write
+`embedded-mpv`, with no automatic disk rewrite on load or legacy C++ migration.
+Root `cargo run -p kinema-desktop --locked` uses durable
+vendored patches, not a generated wrapper workspace. This promotion is not new
+qualification: prior Linux evidence remains scoped; native Windows/macOS tests
+and HDR remain deferred and unqualified. Play opens an independent Kinema-managed
 GPUI window; the browse/detail window remains usable. Retain external mpv and VLC
 as explicit alternatives, not silent fallbacks. Use only pinned `gpui-pre =0.3.9`
 and `gpui_platform`, with in-house desktop widgets. Backend functionality has been
@@ -22,7 +30,7 @@ engine. The approved [Cinema Dock wireframe](player-controls-wireframes.html) is
 an HTML **design artifact exception only**, not shipped player UI or a second
 engine. Its illustrative media, metadata, buffering, thumbnails, and demo actions
 are not evidence of native capabilities. Settings provide three primary choices:
-embedded mpv (default), external mpv, and VLC.
+Embedded MPV (GPU-surface, default), external mpv, and VLC.
 
 The backend owns libmpv commands/events and decoding/render workers. Desktop owns
 window, view, controls, focus, and session coordination. Rendering must not block
@@ -245,10 +253,11 @@ is pure-test coverage only; native no-Lua builds are not runtime-qualified.
 Playback requires separately supplied native **libmpv**, not merely the mpv
 executable. Dynamic loading, dependency discovery, trust, licensing, and the
 validation matrix are covered in [development](../development.md#embedded-mpv-prerequisites-and-validation-plan).
-The experiment's frame-copy pipeline is not a zero-copy, HDR, or performance
-promise for Kinema. CPU fallback, hardware decode, renderer choice, native
-resolution, and color behavior require explicit observation rather than inferred
-support from successful compilation.
+GPU-surface playback must fail explicitly when required native capabilities are
+missing, not fall back to rendered-frame CPU readback/re-upload or another player.
+GPU copies are allowed; this is not a zero-copy, HDR, or performance promise.
+Hardware decode, native resolution, and color behavior require explicit
+observation rather than inferred support from successful compilation.
 
 ### Historical validation evidence (earlier increment; lead-reviewed)
 

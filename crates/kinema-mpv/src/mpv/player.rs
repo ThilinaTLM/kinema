@@ -24,11 +24,13 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// Presence opts into experimental direct GPU-resident SDR playback with
-    /// no CPU/copy-back fallback. Requires Auto/Gpu rendering and Auto decoding;
-    /// explicit Cpu, Disabled, or CopyBack policies are rejected before loading.
-    #[cfg(feature = "experimental-gpu")]
-    pub experimental_gpu: Option<super::experimental::ExperimentalGpuContext>,
+    /// Presentation-device context for default GPU-resident SDR playback with
+    /// no CPU/copy-back fallback. Requires Auto/Gpu rendering and Auto decoding.
+    /// With `gpu-surface` enabled, default Auto fails before loading libmpv if
+    /// this is absent. Explicit Cpu/Gpu without a context selects low-level
+    /// readback instead; desktop presentation must always supply the context.
+    #[cfg(feature = "gpu-surface")]
+    pub gpu_surface: Option<super::gpu_surface::GpuSurfaceContext>,
     pub library_path: Option<PathBuf>,
     pub initial_volume: f64,
     pub max_render_size: Option<[u32; 2]>,
@@ -42,8 +44,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            #[cfg(feature = "experimental-gpu")]
-            experimental_gpu: None,
+            #[cfg(feature = "gpu-surface")]
+            gpu_surface: None,
             library_path: None,
             initial_volume: 100.0,
             max_render_size: None,
@@ -112,7 +114,7 @@ impl Shared {
             state.fatal_error = Some(error.clone());
             state.error = Some(error);
         }
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(feature = "gpu-surface")]
         self.pipeline
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -162,22 +164,22 @@ impl Player {
     fn initialize(config: Config, diagnostics: Arc<Diagnostics>) -> Result<Self> {
         validate_volume(config.initial_volume)?;
         render::validate_config(&config)?;
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(feature = "gpu-surface")]
         let config = {
             let mut config = config;
-            if config.experimental_gpu.is_some() {
+            if config.gpu_surface.is_some() {
                 config.render_backend = RenderBackend::Gpu;
             }
             config
         };
         let effective_hwdec = {
-            #[cfg(feature = "experimental-gpu")]
-            if config.experimental_gpu.is_some() {
-                super::experimental::hwdec()
+            #[cfg(feature = "gpu-surface")]
+            if config.gpu_surface.is_some() {
+                super::gpu_surface::hwdec()
             } else {
                 render::hwdec(config.hardware_decoding, config.render_backend)
             }
-            #[cfg(not(feature = "experimental-gpu"))]
+            #[cfg(not(feature = "gpu-surface"))]
             render::hwdec(config.hardware_decoding, config.render_backend)
         };
         diagnostics.effective_hwdec_request(effective_hwdec);
@@ -208,8 +210,8 @@ impl Player {
                 "configure libmpv",
             )?;
         }
-        #[cfg(feature = "experimental-gpu")]
-        if config.experimental_gpu.is_some() {
+        #[cfg(feature = "gpu-surface")]
+        if config.gpu_surface.is_some() {
             client.loaded.check(
                 unsafe {
                     (client.loaded.api.option)(
@@ -287,10 +289,10 @@ impl Player {
                 unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), 1) },
                 "observe direct decode evidence",
             );
-            // Preserve the experimental requirement. Ordinary playback treats
+            // Preserve the GPU surface requirement. Explicit readback treats
             // optional evidence observation as diagnostic-only.
-            #[cfg(feature = "experimental-gpu")]
-            if config.experimental_gpu.is_some() {
+            #[cfg(feature = "gpu-surface")]
+            if config.gpu_surface.is_some() {
                 result?;
                 continue;
             }
@@ -485,8 +487,8 @@ impl Player {
         }
         Ok(())
     }
-    #[cfg(feature = "experimental-gpu")]
-    pub fn take_gpu_frame(&self) -> Option<super::experimental::ExperimentalFrame> {
+    #[cfg(feature = "gpu-surface")]
+    pub fn take_gpu_frame(&self) -> Option<super::gpu_surface::GpuSurfaceFrame> {
         if self.shared.stopped.load(Ordering::Acquire) {
             return None;
         }
@@ -530,7 +532,7 @@ impl Drop for Player {
     fn drop(&mut self) {
         self.shared.diagnostics.event(Lifecycle::ShutdownRequested);
         self.shared.stopped.store(true, Ordering::Release);
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(feature = "gpu-surface")]
         self.shared
             .pipeline
             .lock()
@@ -925,8 +927,8 @@ fn refresh_decode_evidence(client: &Client, shared: &Shared) {
         )
         .with_effective_transfer(evidence[6].as_deref()),
     );
-    #[cfg(feature = "experimental-gpu")]
-    if pipeline.experimental_enabled() {
+    #[cfg(feature = "gpu-surface")]
+    if pipeline.gpu_surface_enabled() {
         pipeline.update_decode_evidence(
             generation,
             std::array::from_fn(|i| {
@@ -936,7 +938,7 @@ fn refresh_decode_evidence(client: &Client, shared: &Shared) {
             }),
         );
     }
-    #[cfg(not(feature = "experimental-gpu"))]
+    #[cfg(not(feature = "gpu-surface"))]
     let _ = &mut pipeline;
 }
 
@@ -1520,6 +1522,7 @@ mod tests {
     fn missing_library_is_actionable() {
         let result = Player::new(Config {
             library_path: Some("/definitely/not/a/libmpv-library".into()),
+            render_backend: RenderBackend::Cpu,
             ..Config::default()
         });
         assert!(matches!(result, Err(Error::Library { .. })));

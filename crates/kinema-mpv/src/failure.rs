@@ -50,10 +50,10 @@ impl PlaybackFailure {
                 "The decoder did not provide the required direct hardware surface."
             }
             Self::ColorTransferUnqualified => {
-                "The video's color transfer is not qualified for experimental SDR playback."
+                "The video's color transfer is not qualified for GPU surface SDR playback."
             }
             Self::HdrUnsupported => {
-                "HDR playback is not supported by this experimental SDR backend."
+                "HDR playback is not supported by this GPU surface SDR backend."
             }
             Self::ColorMetadataUnavailable => {
                 "Required color metadata was unavailable after five seconds."
@@ -62,7 +62,7 @@ impl PlaybackFailure {
                 "Required decode metadata was unavailable after five seconds."
             }
             Self::GpuDeviceUnsupported => {
-                "The GPU device is not supported by this experimental backend."
+                "The GPU device is not supported by this GPU surface backend."
             }
             Self::GpuInteropUnavailable => {
                 "Required GPU interop or matched-device support is unavailable."
@@ -85,7 +85,7 @@ impl PlaybackFailure {
     /// a URL/path containing a diagnostic phrase must not influence attribution.
     pub(crate) fn from_gpu_message(message: &str) -> Self {
         if let Some(gamma) =
-            message.strip_prefix("experimental SDR only; unqualified transfer function: ")
+            message.strip_prefix("GPU surface SDR only; unqualified transfer function: ")
             && matches!(gamma, "pq" | "hlg" | "st2084" | "arib-std-b67")
         {
             return Self::HdrUnsupported;
@@ -103,7 +103,7 @@ impl PlaybackFailure {
 // their dynamic suffixes. Unknown messages deliberately stay unclassified.
 const GPU_PREFIXES: &[(&str, PlaybackFailure)] = &[
     (
-        "experimental SDR only; HDR transfer detected",
+        "GPU surface SDR only; HDR transfer detected",
         PlaybackFailure::HdrUnsupported,
     ),
     (
@@ -147,7 +147,7 @@ const GPU_PREFIXES: &[(&str, PlaybackFailure)] = &[
         PlaybackFailure::GpuCompletionFailed,
     ),
     (
-        "experimental macOS frame dimensions exceed GL rectangle capabilities",
+        "GPU surface macOS frame dimensions exceed GL rectangle capabilities",
         PlaybackFailure::RenderSizeLimit,
     ),
     (
@@ -163,7 +163,7 @@ const GPU_PREFIXES: &[(&str, PlaybackFailure)] = &[
         PlaybackFailure::DecoderNotDirect,
     ),
     (
-        "experimental SDR only; unqualified transfer function: ",
+        "GPU surface SDR only; unqualified transfer function: ",
         PlaybackFailure::ColorTransferUnqualified,
     ),
     (
@@ -183,7 +183,7 @@ const GPU_PREFIXES: &[(&str, PlaybackFailure)] = &[
         PlaybackFailure::GpuDeviceUnsupported,
     ),
     (
-        "experimental Windows playback requires the actual GPUI WGPU Dx12 device;",
+        "GPU surface Windows playback requires the actual GPUI WGPU Dx12 device;",
         PlaybackFailure::GpuDeviceUnsupported,
     ),
     (
@@ -297,11 +297,11 @@ const GPU_PREFIXES: &[(&str, PlaybackFailure)] = &[
         PlaybackFailure::RenderSizeLimit,
     ),
     (
-        "experimental video target size is outside GPU limits",
+        "GPU surface video target size is outside GPU limits",
         PlaybackFailure::RenderSizeLimit,
     ),
     (
-        "null experimental render context",
+        "null GPU surface render context",
         PlaybackFailure::RenderInitFailed,
     ),
     (
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn hdr_requires_an_exact_recognized_transfer_not_untrusted_substrings() {
-        let prefix = "experimental SDR only; unqualified transfer function: ";
+        let prefix = "GPU surface SDR only; unqualified transfer function: ";
         for gamma in ["pq", "hlg", "st2084", "arib-std-b67"] {
             assert_eq!(
                 PlaybackFailure::from_gpu_message(&format!("{prefix}{gamma}")),

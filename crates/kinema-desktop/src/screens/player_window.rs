@@ -9,9 +9,10 @@ use std::{
 
 use crate::player::PlayerChoice;
 use gpui::{prelude::*, *};
-use kinema_mpv::{
-    Config, Frame, PlaybackFailure, PlaybackState, Player, ResolutionPolicy, TrackKind,
-};
+use kinema_mpv::{Config, PlaybackFailure, PlaybackState, Player, TrackKind};
+
+#[cfg(feature = "gpu-surface")]
+use kinema_mpv::ResolutionPolicy;
 
 use super::{
     coordinator::AppCoordinator,
@@ -30,14 +31,14 @@ use crate::widgets::{
     tokens::{Palette, radius, space as s, typeface as t},
 };
 
-#[cfg(feature = "experimental-gpu")]
-type ExperimentalSurfaceFrame = GpuSurfaceFrame;
+#[cfg(feature = "gpu-surface")]
+type VideoSurfaceFrame = GpuSurfaceFrame;
 
-fn experimental_help() -> &'static str {
-    if cfg!(feature = "experimental-gpu") {
-        "Experimental GPU playback unavailable. No CPU fallback or device-loss recovery. Close and reopen the window, or restart Kinema; you can also choose another player in Settings → Playback. Required SDR GPU interop capabilities may be missing. HDR deferred; Windows/macOS runtime qualification pending."
+fn embedded_help() -> &'static str {
+    if cfg!(feature = "gpu-surface") {
+        "Embedded GPU playback unavailable. No CPU fallback or device-loss recovery. Close and reopen the window, or restart Kinema; you can also choose another player in Settings → Playback. Required SDR GPU interop capabilities may be missing. HDR deferred; Windows/macOS runtime qualification pending."
     } else {
-        "Experimental GPU backend not compiled. Use the isolated experimental app build, or choose Embedded MPV, MPV, or VLC in Settings → Playback."
+        "Embedded GPU backend not compiled. Rebuild with gpu-surface enabled, or choose external MPV, VLC, or a custom player in Settings → Playback."
     }
 }
 
@@ -48,7 +49,7 @@ enum FailurePhase {
     Load,
     Runtime,
     Command,
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     Surface,
 }
 
@@ -60,7 +61,7 @@ impl FailurePhase {
             Self::Load => "load",
             Self::Runtime => "runtime",
             Self::Command => "command",
-            #[cfg(feature = "experimental-gpu")]
+            #[cfg(feature = "gpu-surface")]
             Self::Surface => "surface",
         }
     }
@@ -103,60 +104,48 @@ fn failure_transition(failed: bool, reported: &mut bool) -> bool {
     true
 }
 
-#[cfg(feature = "experimental-gpu")]
+#[cfg(feature = "gpu-surface")]
 fn required_gpu_context<T>(context: Option<T>) -> Result<T, StartupError> {
     context.ok_or_else(|| {
         (
-            experimental_help().into(),
+            embedded_help().into(),
             PlaybackFailure::GpuContextUnavailable,
             FailurePhase::Config,
         )
     })
 }
 
-fn player_config(mode: &PlayerChoice) -> Result<Config, StartupError> {
-    if *mode != PlayerChoice::ExperimentalEmbedded {
-        return Ok(Config {
-            resolution: ResolutionPolicy::Viewport,
-            ..Default::default()
-        });
-    }
-    #[cfg(not(feature = "experimental-gpu"))]
+fn player_config() -> Result<Config, StartupError> {
+    #[cfg(not(feature = "gpu-surface"))]
     {
         Err((
-            experimental_help().into(),
+            embedded_help().into(),
             PlaybackFailure::BackendNotCompiled,
             FailurePhase::Config,
         ))
     }
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     {
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         let context = {
             let context = required_gpu_context(gpui_wgpu::experimental_gpu_context())?;
             let gate = context.experimental_gpu_queue_gate();
-            kinema_mpv::ExperimentalGpuContext::new(
-                context.device.clone(),
-                context.queue.clone(),
-                gate,
-            )
+            kinema_mpv::GpuSurfaceContext::new(context.device.clone(), context.queue.clone(), gate)
         };
         #[cfg(target_os = "macos")]
-        let context = kinema_mpv::ExperimentalGpuContext::new_metal(required_gpu_context(
+        let context = kinema_mpv::GpuSurfaceContext::new_metal(required_gpu_context(
             gpui_apple::experimental_gpu_registry_id(),
         )?);
         Ok(Config {
             resolution: ResolutionPolicy::Source,
-            experimental_gpu: Some(context),
+            gpu_surface: Some(context),
             ..Default::default()
         })
     }
 }
 
-#[cfg(feature = "experimental-gpu")]
-fn experimental_surface(
-    frame: kinema_mpv::ExperimentalFrame,
-) -> Result<Arc<ExperimentalSurfaceFrame>, String> {
+#[cfg(feature = "gpu-surface")]
+fn video_surface(frame: kinema_mpv::GpuSurfaceFrame) -> Result<Arc<VideoSurfaceFrame>, String> {
     let frame = Arc::new(frame);
     let dimensions = frame.size();
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -171,7 +160,7 @@ fn experimental_surface(
     let surface = GpuSurfaceFrame::new(frame.pixel_buffer(), dimensions, frame);
     surface
         .map(Arc::new)
-        .map_err(|_| "Invalid experimental GPU surface; refusing CPU fallback".into())
+        .map_err(|_| "Invalid embedded GPU surface; refusing CPU fallback".into())
 }
 
 actions!(
@@ -662,7 +651,6 @@ struct CadenceReport {
     /// still open at the interval end (a UI stall is not hidden by the boundary).
     max_accept_gap_ms: Option<f64>,
     sample_max_gap_ms: f64,
-    retirement_skips: u64,
     cache_paused_samples: u64,
     /// `Render::render` invocations: view renders, not GPU presents.
     view_render_calls: u64,
@@ -699,7 +687,6 @@ struct CadenceMeter {
     accepted: u64,
     max_accept_gap: Option<Duration>,
     sample_max_gap: Duration,
-    retirement_skips: u64,
     cache_paused_samples: u64,
     render_calls: u64,
     last_render: Option<Instant>,
@@ -716,7 +703,6 @@ impl CadenceMeter {
             accepted: 0,
             max_accept_gap: None,
             sample_max_gap: Duration::ZERO,
-            retirement_skips: 0,
             cache_paused_samples: 0,
             render_calls: 0,
             last_render: None,
@@ -732,7 +718,7 @@ impl CadenceMeter {
         }
         self.last_render = Some(now);
     }
-    fn sample(&mut self, now: Instant, activity: Activity, accepted: bool, skipped: bool) {
+    fn sample(&mut self, now: Instant, activity: Activity, accepted: bool) {
         let dt = now.saturating_duration_since(self.last_sample);
         self.last_sample = now;
         self.sample_max_gap = self.sample_max_gap.max(dt);
@@ -743,7 +729,6 @@ impl CadenceMeter {
         if previous == Activity::Playing {
             self.playing += dt;
         }
-        self.retirement_skips += u64::from(skipped);
         if activity == Activity::Buffering {
             self.cache_paused_samples += 1;
         }
@@ -800,7 +785,6 @@ impl CadenceMeter {
             fps: (playing > 0.).then(|| self.accepted as f64 / playing),
             max_accept_gap_ms: max_gap.map(|gap| gap.as_secs_f64() * 1000.),
             sample_max_gap_ms: self.sample_max_gap.as_secs_f64() * 1000.,
-            retirement_skips: self.retirement_skips,
             cache_paused_samples: self.cache_paused_samples,
             view_render_calls: self.render_calls,
             max_view_render_gap_ms: render_gap.map(|gap| gap.as_secs_f64() * 1000.),
@@ -811,7 +795,6 @@ impl CadenceMeter {
         self.accepted = 0;
         self.max_accept_gap = None;
         self.sample_max_gap = Duration::ZERO;
-        self.retirement_skips = 0;
         self.cache_paused_samples = 0;
         self.render_calls = 0;
         self.max_render_gap = None;
@@ -826,130 +809,12 @@ impl CadenceMeter {
             accepted_images_fps = report.fps,
             max_accepted_gap_ms = report.max_accept_gap_ms,
             sample_max_gap_ms = report.sample_max_gap_ms,
-            samples_skipped_retiring = report.retirement_skips,
             samples_paused_for_cache = report.cache_paused_samples,
             view_render_calls = report.view_render_calls,
             max_view_render_gap_ms = report.max_view_render_gap_ms,
             activity = ?report.activity,
             "Embedded player cadence"
         );
-    }
-}
-
-/// Old images allowed to wait for their two GPUI frame boundaries at once, in
-/// addition to the one currently displayed.
-const RETIRE_CAPACITY: usize = 2;
-
-#[derive(Clone, Copy, Default)]
-struct Aggregate {
-    count: u64,
-    sum_ms: f64,
-    max_ms: f64,
-}
-impl Aggregate {
-    fn record(&mut self, elapsed: Duration) {
-        let ms = elapsed.as_secs_f64() * 1000.;
-        self.count += 1;
-        self.sum_ms += ms;
-        self.max_ms = self.max_ms.max(ms);
-    }
-    fn mean_ms(&self) -> Option<f64> {
-        (self.count > 0).then(|| self.sum_ms / self.count as f64)
-    }
-}
-
-#[derive(Clone, Copy)]
-struct PendingRetirement {
-    ticket: u64,
-    started: Instant,
-    first: Option<Instant>,
-}
-
-/// Per-window retirement statistics (`first` = start -> first callback,
-/// `complete` = start -> `drop_image`). Callback timing, not GPU fences.
-struct RetirementWindow {
-    high_water: usize,
-    first: Aggregate,
-    complete: Aggregate,
-}
-
-/// Bounded ticket accounting for images waiting on the nested two-frame
-/// retirement. Each completion removes only its own ticket, so a stale or
-/// duplicate completion can never release another image's slot. The images
-/// themselves stay owned by their callback closures.
-struct RetirementQueue {
-    next: u64,
-    pending: Vec<PendingRetirement>,
-    high_water: usize,
-    first: Aggregate,
-    complete: Aggregate,
-}
-impl RetirementQueue {
-    fn new() -> Self {
-        Self {
-            next: 0,
-            pending: Vec::with_capacity(RETIRE_CAPACITY),
-            high_water: 0,
-            first: Aggregate::default(),
-            complete: Aggregate::default(),
-        }
-    }
-    fn has_room(&self) -> bool {
-        // Ticket exhaustion also closes the queue: tickets are never reused.
-        self.pending.len() < RETIRE_CAPACITY && self.next < u64::MAX
-    }
-    fn inflight(&self) -> usize {
-        self.pending.len()
-    }
-    /// A fresh non-zero ticket, or `None` when the queue is full.
-    fn admit(&mut self, now: Instant) -> Option<u64> {
-        if !self.has_room() {
-            return None;
-        }
-        let ticket = self.next.checked_add(1)?;
-        self.next = ticket;
-        self.pending.push(PendingRetirement {
-            ticket,
-            started: now,
-            first: None,
-        });
-        self.high_water = self.high_water.max(self.pending.len());
-        Some(ticket)
-    }
-    /// Record the first boundary for a still-pending ticket (once).
-    fn first_callback(&mut self, ticket: u64, now: Instant) -> bool {
-        let Some(entry) = self
-            .pending
-            .iter_mut()
-            .find(|entry| entry.ticket == ticket && entry.first.is_none())
-        else {
-            return false;
-        };
-        entry.first = Some(now);
-        self.first
-            .record(now.saturating_duration_since(entry.started));
-        true
-    }
-    /// Release exactly `ticket`; unknown/duplicate tickets change nothing.
-    fn complete(&mut self, ticket: u64, now: Instant) -> bool {
-        let Some(index) = self.pending.iter().position(|entry| entry.ticket == ticket) else {
-            return false;
-        };
-        let entry = self.pending.remove(index);
-        self.complete
-            .record(now.saturating_duration_since(entry.started));
-        true
-    }
-    fn take_window(&mut self) -> RetirementWindow {
-        let window = RetirementWindow {
-            high_water: self.high_water,
-            first: self.first,
-            complete: self.complete,
-        };
-        self.high_water = self.pending.len();
-        self.first = Aggregate::default();
-        self.complete = Aggregate::default();
-        window
     }
 }
 
@@ -961,7 +826,6 @@ struct PlayerPerformance {
     samples: u64,
     received: u64,
     presented: u64,
-    retirement_skips: u64,
     paused_for_cache_samples: u64,
     sample_ms: f64,
 }
@@ -975,7 +839,6 @@ impl PlayerPerformance {
             samples: 0,
             received: 0,
             presented: 0,
-            retirement_skips: 0,
             paused_for_cache_samples: 0,
             sample_ms: 0.,
         }
@@ -986,10 +849,7 @@ impl PlayerPerformance {
         now: Instant,
         backend: &kinema_mpv::RenderDiagnostics,
         state: &PlaybackState,
-        retirement: &mut RetirementQueue,
     ) {
-        let inflight = retirement.inflight();
-        let retired = retirement.take_window();
         let seconds = now.duration_since(self.last_report).as_secs_f64();
         tracing::info!(
             target: "kinema_desktop::player_performance",
@@ -1000,20 +860,9 @@ impl PlayerPerformance {
             window_accepted_images = self.presented,
             window_received_fps = window_rate(self.received, seconds),
             window_accepted_images_fps = window_rate(self.presented, seconds),
-            window_samples_skipped_retiring = self.retirement_skips,
             window_samples_paused_for_cache = self.paused_for_cache_samples,
             window_sample_max_gap_ms = self.max_sample_gap_ms,
             window_sample_mean_ms = self.sample_ms / self.samples.max(1) as f64,
-            retiring = inflight > 0,
-            retirement_capacity = RETIRE_CAPACITY,
-            retirement_inflight = inflight,
-            retirement_inflight_high_water = retired.high_water,
-            retirement_first_callback_count = retired.first.count,
-            retirement_first_callback_mean_ms = retired.first.mean_ms(),
-            retirement_first_callback_max_ms = retired.first.max_ms,
-            retirement_complete_count = retired.complete.count,
-            retirement_complete_mean_ms = retired.complete.mean_ms(),
-            retirement_complete_max_ms = retired.complete.max_ms,
             backend_elapsed_seconds = backend.elapsed_seconds,
             backend_cumulative_rendered_frames = backend.rendered_frames,
             backend_cumulative_delivered_frames = backend.delivered_frames,
@@ -1051,7 +900,6 @@ impl PlayerPerformance {
         self.samples = 0;
         self.received = 0;
         self.presented = 0;
-        self.retirement_skips = 0;
         self.paused_for_cache_samples = 0;
         self.sample_ms = 0.;
         self.max_sample_gap_ms = 0.;
@@ -1061,6 +909,7 @@ impl PlayerPerformance {
 pub struct PlayerWindow {
     title: String,
     lease: Option<(String, u64)>,
+    #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
     frames_presented: u64,
     diagnostics: Option<PlayerPerformance>,
     cadence: Option<CadenceMeter>,
@@ -1073,11 +922,12 @@ pub struct PlayerWindow {
     failure_reported: bool,
     control_notice: bool,
     source_url: Option<String>,
-    image: Option<Arc<RenderImage>>,
     mode: PlayerChoice,
-    #[cfg(feature = "experimental-gpu")]
-    gpu_frame: Option<Arc<ExperimentalSurfaceFrame>>,
-    retirement: RetirementQueue,
+    // Static offline artwork only, never populated from a backend frame.
+    #[cfg(feature = "ui-probe")]
+    fixture_image: Option<Arc<RenderImage>>,
+    #[cfg(feature = "gpu-surface")]
+    gpu_frame: Option<Arc<VideoSurfaceFrame>>,
     last_activity: Instant,
     dock_hover: bool,
     chrome_was_visible: bool,
@@ -1104,7 +954,7 @@ impl Drop for PlayerWindow {
     fn drop(&mut self) {
         self.startup_cancel
             .store(true, std::sync::atomic::Ordering::Release);
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(feature = "gpu-surface")]
         {
             self.gpu_frame.take();
         }
@@ -1142,10 +992,10 @@ impl PlayerWindow {
         let surface_focus = cx.focus_handle();
         surface_focus.focus(window, cx);
         let controls = (0..CONTROL_COUNT).map(|_| cx.focus_handle()).collect();
-        let experimental = mode == PlayerChoice::ExperimentalEmbedded;
-        let mut view = Self {
+        let view = Self {
             title,
             lease: None,
+            #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
             frames_presented: 0,
             cadence: diagnostics
                 .is_some()
@@ -1163,11 +1013,11 @@ impl PlayerWindow {
             failure_reported: false,
             control_notice: false,
             source_url,
-            image: None,
             mode,
-            #[cfg(feature = "experimental-gpu")]
+            #[cfg(feature = "ui-probe")]
+            fixture_image: None,
+            #[cfg(feature = "gpu-surface")]
             gpu_frame: None,
-            retirement: RetirementQueue::new(),
             last_activity: Instant::now(),
             dock_hover: false,
             chrome_was_visible: true,
@@ -1188,17 +1038,15 @@ impl PlayerWindow {
             _initialize: Task::ready(()),
             _updates: updates,
         };
-        if experimental {
+        {
             tracing::info!(
-                mode = "experimental-embedded",
+                mode = "embedded-mpv",
                 phase = "requested",
-                "Experimental GPU startup requested"
+                "Embedded GPU startup requested"
             );
             // Capture the actual renderer context only after native window
             // registration, not after an assumed amount of wall-clock time.
             cx.defer_in(window, |view, _, cx| view.start_player(cx));
-        } else {
-            view.start_player(cx);
         }
         view
     }
@@ -1210,7 +1058,7 @@ impl PlayerWindow {
         {
             return;
         }
-        let config = player_config(&self.mode);
+        let config = player_config();
         let url = self.source_url.clone();
         let executor = cx.background_executor().clone();
         let worker = executor.clone();
@@ -1267,9 +1115,13 @@ impl PlayerWindow {
         });
     }
 
-    fn experimental_video(&self) -> AnyElement {
+    fn embedded_video(&self) -> AnyElement {
         let element = div().absolute().size_full();
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(feature = "ui-probe")]
+        let element = element.when_some(self.fixture_image.clone(), |element, image| {
+            element.child(img(image).size_full().object_fit(ObjectFit::Contain))
+        });
+        #[cfg(feature = "gpu-surface")]
         let element = element.when_some(self.gpu_frame.clone(), |element, frame| {
             element.child(
                 gpu_surface(frame)
@@ -1283,10 +1135,11 @@ impl PlayerWindow {
     fn sample(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let sample_started = self.diagnostics.as_ref().map(|_| Instant::now());
         let mut state_changed = false;
+        #[cfg(feature = "gpu-surface")]
         let mut frame_received = false;
-        let mut received = false;
-        let mut retirement_skipped = false;
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(not(feature = "gpu-surface"))]
+        let frame_received = false;
+        #[cfg(feature = "gpu-surface")]
         if terminal_failure(self.error.is_some(), &self.state) {
             frame_received |= self.gpu_frame.take().is_some();
         }
@@ -1301,14 +1154,12 @@ impl PlayerWindow {
         if let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref()) {
             let previous = self.state.clone();
             self.state = player.state();
-            // Queue full (not merely "one pending") skips acquisition; no extra
-            // image is allocated and the backend keeps its latest-frame mailbox.
-            #[cfg(feature = "experimental-gpu")]
-            if self.mode == PlayerChoice::ExperimentalEmbedded
+            #[cfg(feature = "gpu-surface")]
+            if self.mode == PlayerChoice::Embedded
                 && !terminal_failure(self.error.is_some(), &self.state)
                 && let Some(frame) = player.take_gpu_frame()
             {
-                match experimental_surface(frame) {
+                match video_surface(frame) {
                     Ok(frame) => {
                         self.gpu_frame = Some(frame);
                         self.frames_presented += 1;
@@ -1322,48 +1173,15 @@ impl PlayerWindow {
                     }
                 }
             }
-            let frame = if self.mode == PlayerChoice::Embedded && self.retirement.has_room() {
-                player.take_frame()
-            } else {
-                retirement_skipped = self.mode == PlayerChoice::Embedded;
-                None
-            };
-            received = frame.is_some();
-            if let Some(frame) = frame.and_then(render_image) {
-                // Admit BEFORE displacing the current image. An old image is
-                // only ever replaced with a tracked ticket; if admission fails
-                // (unreachable after the room check) keep the current image and
-                // drop the new, not-yet-uploaded one. Fail closed.
-                let admitted = self
-                    .image
-                    .is_some()
-                    .then(|| self.retirement.admit(Instant::now()));
-                if admitted == Some(None) {
-                    retirement_skipped = true;
-                } else {
-                    self.frames_presented += 1;
-                    let old = self.image.replace(frame);
-                    if let (Some(old), Some(Some(ticket))) = (old, admitted) {
-                        retire_image(
-                            old,
-                            cx.weak_entity(),
-                            window,
-                            ticket,
-                            self.diagnostics.is_some(),
-                        );
-                    }
-                    frame_received = true;
-                }
-            }
             state_changed |= self.state != previous;
         }
         // A fresh state snapshot or surface-validation error can become fatal
         // within this sample. Probes have no lease but must also release frames.
-        #[cfg(feature = "experimental-gpu")]
+        #[cfg(feature = "gpu-surface")]
         if terminal_failure(self.error.is_some(), &self.state) {
             frame_received |= self.gpu_frame.take().is_some();
         }
-        if self.mode == PlayerChoice::ExperimentalEmbedded
+        if self.mode == PlayerChoice::Embedded
             && failure_transition(
                 terminal_failure(self.error.is_some(), &self.state),
                 &mut self.failure_reported,
@@ -1371,10 +1189,10 @@ impl PlayerWindow {
         {
             let reason = failure_reason(&self.state, self.failure_reason);
             tracing::warn!(
-                mode = "experimental-embedded",
+                mode = "embedded-mpv",
                 phase = failure_phase(&self.state, self.failure_phase).code(),
                 reason = reason.code(),
-                "Experimental GPU playback unavailable"
+                "Embedded GPU playback unavailable"
             );
         }
         self.sync_subtitle_position(window, cx);
@@ -1414,7 +1232,7 @@ impl PlayerWindow {
         }
         if let Some(meter) = self.cadence.as_mut() {
             let activity = activity_of(&self.state, self.player.is_some());
-            meter.sample(Instant::now(), activity, frame_received, retirement_skipped);
+            meter.sample(Instant::now(), activity, frame_received);
             if let Some(report) = meter.finish_if_due(Instant::now()) {
                 CadenceMeter::log(&report);
                 let text = report.label();
@@ -1431,20 +1249,14 @@ impl PlayerWindow {
                 .max(started.duration_since(metrics.last_sample).as_secs_f64() * 1000.);
             metrics.last_sample = started;
             metrics.samples += 1;
-            metrics.received += u64::from(received);
+            metrics.received += u64::from(frame_received);
             metrics.presented += u64::from(frame_received);
-            metrics.retirement_skips += u64::from(retirement_skipped);
             metrics.paused_for_cache_samples += u64::from(self.state.paused_for_cache);
             metrics.sample_ms += now.duration_since(started).as_secs_f64() * 1000.;
             if now.duration_since(metrics.last_report) >= Duration::from_secs(5)
                 && let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref())
             {
-                metrics.report(
-                    now,
-                    &player.diagnostics(),
-                    &self.state,
-                    &mut self.retirement,
-                );
+                metrics.report(now, &player.diagnostics(), &self.state);
             }
         }
     }
@@ -1478,7 +1290,7 @@ impl PlayerWindow {
         {
             // A new load: discard the previous GPU generation before issuing
             // load. The backend rejects late frames from the obsolete source.
-            #[cfg(feature = "experimental-gpu")]
+            #[cfg(feature = "gpu-surface")]
             {
                 self.gpu_frame.take();
             }
@@ -2490,8 +2302,10 @@ impl Render for PlayerWindow {
         self.chrome_was_visible = visible;
         let failed = terminal_failure(self.error.is_some(), &self.state);
         let entity = cx.weak_entity();
-        let has_video = self.image.is_some();
-        #[cfg(feature = "experimental-gpu")]
+        let has_video = false;
+        #[cfg(feature = "ui-probe")]
+        let has_video = has_video || self.fixture_image.is_some();
+        #[cfg(feature = "gpu-surface")]
         let has_video = has_video || self.gpu_frame.is_some();
         div().id("kinema-player").key_context("KinemaPlayer").relative().size_full().overflow_hidden().bg(p.bg_canvas).text_color(p.text_primary).font_family(t::UI_FAMILY)
             // While a menu is open every player shortcut is passed through
@@ -2512,14 +2326,13 @@ impl Render for PlayerWindow {
             .on_mouse_up(MouseButton::Left, cx.listener(|view, _: &MouseUpEvent, _, cx| view.finish_drag(cx)))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|view, _: &MouseUpEvent, _, cx| view.finish_drag(cx)))
             .child(div().id("player-surface").key_context("KinemaPlayerSurface").track_focus(&self.surface_focus).absolute().size_full()
-                .on_mouse_down(MouseButton::Left, cx.listener(|view, _, window, cx| { view.surface_focus.focus(window, cx); view.activity(cx); }))
-                .when_some(self.image.clone(), |div, image| div.child(img(image).absolute().size_full().object_fit(ObjectFit::Contain))))
-            .when(self.mode == PlayerChoice::ExperimentalEmbedded && !failed, |element| element.child(self.experimental_video()))
+                .on_mouse_down(MouseButton::Left, cx.listener(|view, _, window, cx| { view.surface_focus.focus(window, cx); view.activity(cx); })))
+            .when(self.mode == PlayerChoice::Embedded && !failed, |element| element.child(self.embedded_video()))
             .when(failed || !has_video, |element| element.child(
                 div().absolute().inset_0().flex().flex_col().items_center().justify_center().gap(s::S12).when(failed, |panel| panel.bg(p.scrim_max))
                     .child(div().type_style(t::TITLE).child(if failed { "Playback unavailable" } else if self.state.ended { "Playback finished" } else if self.state.paused_for_cache { "Buffering…" } else if self.state.loading || self.player.is_none() { "Opening media…" } else { "Audio playback" }))
-                    .child(div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary).child(if failed && self.mode == PlayerChoice::ExperimentalEmbedded { experimental_help() } else if failed { "Playback stopped. Choose external MPV or VLC in Settings → Playback, then try again. If libmpv is missing, install its runtime first." } else if self.state.loading || self.player.is_none() { "Preparing the embedded player. You can close this window at any time." } else { "Use the controls below. Press K to play or pause." }))
-                    .when(failed && self.mode == PlayerChoice::ExperimentalEmbedded, |panel| panel.child(
+                    .child(div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary).child(if failed && self.mode == PlayerChoice::Embedded { embedded_help() } else if failed { "Playback stopped. Choose external MPV or VLC in Settings → Playback, then try again. If libmpv is missing, install its runtime first." } else if self.state.loading || self.player.is_none() { "Preparing the embedded player. You can close this window at any time." } else { "Use the controls below. Press K to play or pause." }))
+                    .when(failed && self.mode == PlayerChoice::Embedded, |panel| panel.child(
                         div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary)
                             .child(failure_label(failure_reason(&self.state, self.failure_reason)))
                     ))
@@ -2537,12 +2350,6 @@ impl Render for PlayerWindow {
                 });
             }, |_, _, _, _| {}).absolute().size_full())
             .when(visible, |div| div.child(self.chrome(window, cx)))
-            .when(self.mode == PlayerChoice::ExperimentalEmbedded, |element| element.child(
-                div().absolute().top(s::S16).left(s::S16).px(s::S8).py(s::S4)
-                    .rounded(radius::SM).bg(p.scrim_max.opacity(0.7)).type_style(t::MONO)
-                    .text_color(p.text_secondary)
-                    .child(format!("Experimental GPU · SDR · {}×{} · no CPU fallback", self.state.render_size[0], self.state.render_size[1]))
-            ))
             // Opt-in diagnostics only: no handlers, id or focus, so it never takes input.
             .when_some(self.cadence_text.clone(), |el, text| {
                 el.child(
@@ -2564,42 +2371,6 @@ impl Render for PlayerWindow {
     }
 }
 
-/// next_frame_callbacks run BEFORE should_draw in gpui-pre 0.3.9. WGPU
-/// atlas removal deallocates/reuses tiles immediately. Each old image (at most
-/// `RETIRE_CAPACITY` at once) is owned by its closure through two nested frame
-/// boundaries: the first requests a draw without it
-/// (GPUI callbacks do not prove `should_draw` ran), the second removes it. This
-/// is a conservative bounded policy, not a GPU-fence proof for every OS.
-fn retire_image(
-    image: Arc<RenderImage>,
-    view: WeakEntity<PlayerWindow>,
-    window: &mut Window,
-    ticket: u64,
-    timed: bool,
-) {
-    window.on_next_frame(move |window, cx| {
-        window.refresh();
-        if timed {
-            let _ = view.update(cx, |view, _| {
-                view.retirement.first_callback(ticket, Instant::now());
-            });
-        }
-        window.on_next_frame(move |window, cx| {
-            let _ = window.drop_image(image);
-            let _ = view.update(cx, |view, cx| {
-                view.retirement.complete(ticket, Instant::now());
-                cx.notify();
-            });
-        });
-    });
-}
-fn render_image(frame: Frame) -> Option<Arc<RenderImage>> {
-    // RenderImage is explicitly BGRA in gpui-pre 0.3.9 assets.rs. Conversion
-    // belongs to the optimized backend package, not an unoptimized UI loop.
-    let (width, height) = (frame.width, frame.height);
-    let buffer = image::RgbaImage::from_raw(width, height, frame.into_bgra_pixels())?;
-    Some(Arc::new(RenderImage::new([image::Frame::new(buffer)])))
-}
 fn progress(position: f64, duration: Option<f64>) -> Option<f64> {
     duration.filter(|d| d.is_finite() && *d > 0.).map(|d| {
         if position.is_finite() {
@@ -2849,7 +2620,7 @@ static PROBE_LOGGER: ProbeLogger = ProbeLogger;
 #[cfg(feature = "ui-probe")]
 fn install_probe_gpu_guard() {
     #[cfg(all(
-        feature = "experimental-gpu",
+        feature = "gpu-surface",
         any(target_os = "linux", target_os = "windows")
     ))]
     if let Some(context) = gpui_wgpu::experimental_gpu_context() {
@@ -2865,7 +2636,7 @@ fn install_probe_gpu_guard() {
     }
 }
 
-/// Original offline probe entry point, unchanged for existing callers.
+/// Offline fixture/native entry point; native media uses Embedded GPU playback.
 #[cfg(feature = "ui-probe")]
 pub fn run_probe(
     media: Option<std::path::PathBuf>,
@@ -2895,19 +2666,19 @@ pub fn run_probe_mode(
     stress_resize: bool,
 ) -> bool {
     use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
-    let experimental = mode == PlayerChoice::ExperimentalEmbedded;
+    let gpu_playback = media.is_some();
     let native = media.is_some();
     if !mode.is_managed()
         || (native && !media.as_ref().is_some_and(|path| path.is_file()))
-        || (experimental && (!native || !cfg!(feature = "experimental-gpu")))
-        || (stress_resize && !experimental)
+        || (gpu_playback && !cfg!(feature = "gpu-surface"))
+        || (stress_resize && !gpu_playback)
     {
         eprintln!("player probe: category=invalid-probe-capability");
         return false;
     }
     PROBE_GPU_ERRORS.store(0, Ordering::Relaxed);
     PROBE_PANICS.store(0, Ordering::Relaxed);
-    let old_hook = experimental.then(|| {
+    let old_hook = gpu_playback.then(|| {
         let old = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {
             PROBE_PANICS.fetch_add(1, Ordering::Relaxed);
@@ -2915,8 +2686,8 @@ pub fn run_probe_mode(
         }));
         old
     });
-    let logger_ready = !experimental || log::set_logger(&PROBE_LOGGER).is_ok();
-    if experimental {
+    let logger_ready = !gpu_playback || log::set_logger(&PROBE_LOGGER).is_ok();
+    if gpu_playback {
         log::set_max_level(log::LevelFilter::Warn);
     }
     let result = Rc::new(Cell::new(false));
@@ -2927,12 +2698,12 @@ pub fn run_probe_mode(
         bind_keys(cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds { origin: point(px(0.), px(0.)), size: size(px(dimensions[0]), px(dimensions[1])) })),
-            titlebar: Some(TitlebarOptions { title: Some(if experimental { "Kinema / EXPERIMENTAL GPU SMOKE" } else if native { "Kinema / Player — NATIVE SMOKE" } else { "Kinema Design Lab / Player — FIXTURE ONLY" }.into()), ..Default::default() }),
+            titlebar: Some(TitlebarOptions { title: Some(if gpu_playback { "Kinema / EMBEDDED GPU SMOKE" } else { "Kinema Design Lab / Player — FIXTURE ONLY" }.into()), ..Default::default() }),
             ..Default::default()
         };
         let handle = cx.open_window(options, |window, cx| cx.new(|cx| {
-            let mut view = PlayerWindow::new_mode(if experimental { "Offline fixture" } else { "The Last Light" }.into(), media.map(|path| path.to_string_lossy().into_owned()), mode, window, cx);
-            if experimental { cx.defer_in(window, |_, _, _| install_probe_gpu_guard()); }
+            let mut view = PlayerWindow::new_mode(if gpu_playback { "Offline fixture" } else { "The Last Light" }.into(), media.map(|path| path.to_string_lossy().into_owned()), mode, window, cx);
+            if gpu_playback { cx.defer_in(window, |_, _, _| install_probe_gpu_guard()); }
             if !native {
                 let chapter = |time, title: &str| kinema_mpv::Chapter { time, title: Some(title.into()) };
                 let track = |id, kind, title: &str, lang: &str, selected| kinema_mpv::Track { id, kind, title: Some(title.into()), lang: Some(lang.into()), selected };
@@ -2951,7 +2722,8 @@ pub fn run_probe_mode(
                     let glow = ((1. - ((x as f32 - 610.) / 600.).abs()).max(0.) * (1. - ((y as f32 - 260.) / 210.).abs()).max(0.) * 40.) as u8;
                     pixels.extend_from_slice(&[8 + glow / 2, 16 + glow, 23 + glow, 255]);
                 }}
-                view.image = render_image(Frame { width: 960, height: 540, pixels });
+                view.fixture_image = image::RgbaImage::from_raw(960, 540, pixels)
+                    .map(|buffer| Arc::new(RenderImage::new([image::Frame::new(buffer)])));
             }
             view
         }));
@@ -2967,7 +2739,7 @@ pub fn run_probe_mode(
         cx.spawn(async move |cx| {
             let started = Instant::now();
             let deadline = started + Duration::from_secs(seconds.clamp(1, 15));
-            let playback_deadline = if experimental { deadline - Duration::from_millis(1000) } else { deadline };
+            let playback_deadline = if gpu_playback { deadline - Duration::from_millis(1000) } else { deadline };
             let mut controls = ProbeControls::default();
             let mut resize = ProbeResize::default();
             let mut aux_initial = None;
@@ -2977,7 +2749,7 @@ pub fn run_probe_mode(
             let mut stress_phase = 0;
             let mut stress_at = Instant::now();
             let mut failed = !logger_ready;
-            while experimental && Instant::now() < playback_deadline {
+            while gpu_playback && Instant::now() < playback_deadline {
                 cx.background_executor().timer(Duration::from_millis(40)).await;
                 let tick = handle.update(cx, |view, window, _| {
                     resize.observe(probe_viewport(window));
@@ -3023,12 +2795,12 @@ pub fn run_probe_mode(
                     }
                 }
             }
-            if !experimental {
+            if !gpu_playback {
                 cx.background_executor().timer(Duration::from_secs(seconds.clamp(1, 15))).await;
             }
             let auxiliaries_painted = auxiliaries.iter().all(|handle| handle.update(cx, |view, _, _| view.paints > 0).unwrap_or(false));
             let stress_verified = !stress_resize || (resize.verified() && aux_resized && aux_closed_painted && aux_reopened && auxiliaries_painted);
-            let released = Rc::new(Cell::new(!experimental));
+            let released = Rc::new(Cell::new(!gpu_playback));
             let release_signal = released.clone();
             let snapshot = handle.update(cx, |view, window, _| {
                 let diagnostics = view.player.as_ref().and_then(|owner| owner.player.as_ref()).map(Player::diagnostics);
@@ -3039,7 +2811,7 @@ pub fn run_probe_mode(
                     && stats.readback_bytes == 0 && stats.upload_bytes_estimate == 0
                     && stats.active_backend == kinema_mpv::RenderBackend::Gpu && stats.fallback_reason.is_none());
                 let successful = !failed && (!native || (view.frames_presented > 2 && !terminal_failure(view.error.is_some(), &view.state) && view.state.error.is_none()))
-                    && (!experimental || (controls.verified() && source_sized && gpu_clean && stress_verified));
+                    && (!gpu_playback || (controls.verified() && source_sized && gpu_clean && stress_verified));
                 if let Some(stats) = diagnostics.as_ref() {
                     eprintln!("player probe: category=render-diagnostics source={:?} render={:?} gpu-surfaces={} readback-bytes={} upload-bytes={} controls-phase={} position={:.2} speed={:.2} volume={:.0} paused={}",
                         stats.source_size, stats.render_size, stats.gpu_surface_frames, stats.readback_bytes, stats.upload_bytes_estimate,
@@ -3053,9 +2825,9 @@ pub fn run_probe_mode(
                 view.startup_cancel.store(true, Ordering::Release);
                 view._updates = Task::ready(());
                 view._initialize = Task::ready(());
-                #[cfg(feature = "experimental-gpu")]
+                #[cfg(feature = "gpu-surface")]
                 { view.gpu_frame.take(); }
-                if experimental {
+                if gpu_playback {
                     window.refresh();
                     window.on_next_frame(move |window, _| {
                         window.refresh();
@@ -3064,7 +2836,7 @@ pub fn run_probe_mode(
                 }
                 (successful, view.frames_presented)
             });
-            let cleanup_deadline = if experimental { deadline } else { Instant::now() + Duration::from_secs(1) };
+            let cleanup_deadline = if gpu_playback { deadline } else { Instant::now() + Duration::from_secs(1) };
             while !released.get() && Instant::now() < cleanup_deadline {
                 cx.background_executor().timer(Duration::from_millis(10)).await;
             }
@@ -3228,7 +3000,7 @@ mod tests {
     }
 
     #[test]
-    fn experimental_failure_reports_once_not_each_sample() {
+    fn embedded_failure_reports_once_not_each_sample() {
         let mut reported = false;
         assert!(!failure_transition(false, &mut reported));
         assert!(failure_transition(true, &mut reported));
@@ -3239,7 +3011,7 @@ mod tests {
         assert!(!failure_transition(true, &mut reported));
     }
 
-    #[cfg(feature = "experimental-gpu")]
+    #[cfg(feature = "gpu-surface")]
     #[test]
     fn absent_renderer_context_has_distinct_startup_reason() {
         let Err((_, reason, phase)) = required_gpu_context::<()>(None) else {
@@ -3250,34 +3022,24 @@ mod tests {
         assert_eq!(required_gpu_context(Some(42)), Ok(42));
         // Unit tests register no native window renderer. This only reads its
         // context registry; it must not create a device or silently fall back.
-        let Err((_, reason, phase)) =
-            player_config(&crate::player::PlayerChoice::ExperimentalEmbedded)
-        else {
-            panic!("experimental startup requires the actual window renderer context");
+        let Err((_, reason, phase)) = player_config() else {
+            panic!("embedded startup requires the actual window renderer context");
         };
         assert_eq!(reason, PlaybackFailure::GpuContextUnavailable);
         assert_eq!(phase, FailurePhase::Config);
     }
 
+    #[cfg(not(feature = "gpu-surface"))]
     #[test]
-    fn default_player_config_keeps_viewport_policy() {
-        let Ok(config) = player_config(&crate::player::PlayerChoice::Embedded) else {
-            panic!("default embedded configuration must remain available");
-        };
-        assert_eq!(config.resolution, ResolutionPolicy::Viewport);
-    }
-
-    #[cfg(not(feature = "experimental-gpu"))]
-    #[test]
-    fn experimental_backend_is_explicitly_unavailable_without_feature() {
-        let result = super::player_config(&crate::player::PlayerChoice::ExperimentalEmbedded);
+    fn embedded_backend_is_explicitly_unavailable_without_feature() {
+        let result = super::player_config();
         let Err((error, reason, phase)) = result else {
             panic!("feature-off backend must fail closed");
         };
         assert_eq!(reason, PlaybackFailure::BackendNotCompiled);
         assert_eq!(phase, FailurePhase::Config);
         assert!(error.contains("not compiled"));
-        assert!(error.contains("isolated experimental app build"));
+        assert!(error.contains("gpu-surface"));
     }
 
     use super::*;
@@ -3378,13 +3140,13 @@ mod tests {
         let mut meter = CadenceMeter::new(t0);
         // Initial loading: no rate, and the first accepted image is only a baseline.
         for n in (16..=300).step_by(16) {
-            meter.sample(ms(n), Activity::Waiting, false, false);
+            meter.sample(ms(n), Activity::Waiting, false);
         }
-        meter.sample(ms(304), Activity::Playing, true, false);
+        meter.sample(ms(304), Activity::Playing, true);
         for n in [350, 400, 450, 500] {
-            meter.sample(ms(n), Activity::Playing, true, false);
+            meter.sample(ms(n), Activity::Playing, true);
         }
-        meter.sample(ms(900), Activity::Playing, false, true);
+        meter.sample(ms(900), Activity::Playing, false);
         let Some(report) = meter.finish_if_due(ms(1000)) else {
             unreachable!("interval due")
         };
@@ -3396,7 +3158,6 @@ mod tests {
         );
         // The open gap since the last image (500 -> 1000) is included.
         assert_eq!(report.max_accept_gap_ms, Some(500.));
-        assert_eq!(report.retirement_skips, 1);
         assert_eq!(report.sample_max_gap_ms, 400.);
         assert!(meter.finish_if_due(ms(1500)).is_none());
         let Some(next) = meter.finish_if_due(ms(2000)) else {
@@ -3410,15 +3171,15 @@ mod tests {
         let t0 = Instant::now();
         let ms = |n| t0 + Duration::from_millis(n);
         let mut meter = CadenceMeter::new(t0);
-        meter.sample(ms(100), Activity::Playing, true, false);
-        meter.sample(ms(200), Activity::Paused, false, false);
+        meter.sample(ms(100), Activity::Playing, true);
+        meter.sample(ms(200), Activity::Paused, false);
         let Some(paused) = meter.finish_if_due(ms(1000)) else {
             unreachable!("interval due")
         };
         assert_eq!(paused.label(), "Video updates: Paused");
         assert_eq!(paused.max_accept_gap_ms, None);
-        meter.sample(ms(1100), Activity::Buffering, false, false);
-        meter.sample(ms(1200), Activity::Buffering, false, false);
+        meter.sample(ms(1100), Activity::Buffering, false);
+        meter.sample(ms(1200), Activity::Buffering, false);
         let Some(buffering) = meter.finish_if_due(ms(2000)) else {
             unreachable!("interval due")
         };
@@ -3426,17 +3187,17 @@ mod tests {
         assert_eq!(buffering.cache_paused_samples, 2);
         assert_eq!(buffering.label(), "Video updates: Buffering");
         // Resume: the first image after the idle period must not span the gap.
-        meter.sample(ms(2500), Activity::Playing, true, false);
-        meter.sample(ms(2540), Activity::Playing, true, false);
+        meter.sample(ms(2500), Activity::Playing, true);
+        meter.sample(ms(2540), Activity::Playing, true);
         let Some(resumed) = meter.finish_if_due(ms(3000)) else {
             unreachable!("interval due")
         };
         assert_eq!(resumed.accepted, 2);
         assert_eq!(resumed.max_accept_gap_ms, Some(460.));
         // A replay passes through Stopped/Waiting and re-baselines.
-        meter.sample(ms(3100), Activity::Stopped, false, false);
-        meter.sample(ms(3200), Activity::Waiting, false, false);
-        meter.sample(ms(3300), Activity::Playing, true, false);
+        meter.sample(ms(3100), Activity::Stopped, false);
+        meter.sample(ms(3200), Activity::Waiting, false);
+        meter.sample(ms(3300), Activity::Playing, true);
         let Some(replay) = meter.finish_if_due(ms(4000)) else {
             unreachable!("interval due")
         };
@@ -3447,18 +3208,8 @@ mod tests {
     fn cadence_long_stall_yields_one_honest_report() {
         let t0 = Instant::now();
         let mut meter = CadenceMeter::new(t0);
-        meter.sample(
-            t0 + Duration::from_millis(16),
-            Activity::Playing,
-            true,
-            false,
-        );
-        meter.sample(
-            t0 + Duration::from_millis(3016),
-            Activity::Playing,
-            true,
-            false,
-        );
+        meter.sample(t0 + Duration::from_millis(16), Activity::Playing, true);
+        meter.sample(t0 + Duration::from_millis(3016), Activity::Playing, true);
         let Some(report) = meter.finish_if_due(t0 + Duration::from_millis(3020)) else {
             unreachable!("interval due")
         };
@@ -3494,92 +3245,23 @@ mod tests {
         state.loading = true;
         assert_eq!(activity_of(&state, true), Activity::Waiting);
     }
-    #[test]
-    fn retirement_queue_admits_two_and_rejects_third_until_completion() {
-        let t0 = Instant::now();
-        let mut queue = RetirementQueue::new();
-        assert_eq!(RETIRE_CAPACITY, 2);
-        assert!(queue.has_room());
-        let (a, b) = (queue.admit(t0), queue.admit(t0));
-        assert_eq!((a, b), (Some(1), Some(2)));
-        assert!(!queue.has_room());
-        assert_eq!(queue.admit(t0), None);
-        assert_eq!(queue.inflight(), 2);
-        assert!(queue.complete(1, t0 + Duration::from_millis(40)));
-        assert!(queue.has_room());
-        assert_eq!(queue.admit(t0), Some(3));
-    }
-    #[test]
-    fn retirement_ticket_exhaustion_fails_closed_without_reuse() {
-        let t0 = Instant::now();
-        let mut queue = RetirementQueue::new();
-        queue.next = u64::MAX - 1;
-        assert_eq!(queue.admit(t0), Some(u64::MAX));
-        assert!(queue.complete(u64::MAX, t0));
-        assert!(!queue.has_room());
-        assert_eq!(queue.admit(t0), None);
-        assert_eq!(queue.inflight(), 0);
-    }
-    #[test]
-    fn retirement_completion_releases_only_its_own_ticket() {
-        let t0 = Instant::now();
-        let mut queue = RetirementQueue::new();
-        queue.admit(t0);
-        queue.admit(t0);
-        // Out-of-order, duplicate, unknown and untracked (0) completions.
-        assert!(queue.complete(2, t0));
-        assert!(!queue.complete(2, t0));
-        assert!(!queue.complete(99, t0));
-        assert!(!queue.complete(0, t0));
-        assert_eq!(queue.inflight(), 1);
-        assert!(queue.complete(1, t0));
-        assert_eq!(queue.inflight(), 0);
-        assert!(!queue.complete(1, t0));
-    }
-    #[test]
-    fn retirement_stats_aggregate_timings_and_reset_per_window() {
-        let t0 = Instant::now();
-        let ms = |n| t0 + Duration::from_millis(n);
-        let mut queue = RetirementQueue::new();
-        let a = queue.admit(t0).unwrap_or(0);
-        let b = queue.admit(ms(10)).unwrap_or(0);
-        assert!(queue.first_callback(a, ms(10)));
-        assert!(
-            !queue.first_callback(a, ms(11)),
-            "first boundary counts once"
-        );
-        assert!(queue.first_callback(b, ms(30)));
-        assert!(!queue.first_callback(99, ms(30)));
-        queue.complete(a, ms(30));
-        queue.complete(b, ms(70));
-        let window = queue.take_window();
-        assert_eq!(window.high_water, 2);
-        assert_eq!(window.first.count, 2);
-        assert_eq!(window.first.mean_ms(), Some(15.));
-        assert_eq!(window.first.max_ms, 20.);
-        assert_eq!(window.complete.count, 2);
-        assert_eq!(window.complete.mean_ms(), Some(45.));
-        assert_eq!(window.complete.max_ms, 60.);
-        let empty = queue.take_window();
-        assert_eq!(empty.high_water, 0);
-        assert_eq!(empty.first.mean_ms(), None);
-    }
+
     #[test]
     fn cadence_counts_view_renders_and_gaps_only_while_playing() {
         let t0 = Instant::now();
         let ms = |n| t0 + Duration::from_millis(n);
         let mut meter = CadenceMeter::new(t0);
-        meter.sample(ms(10), Activity::Playing, false, false);
+        meter.sample(ms(10), Activity::Playing, false);
         meter.render_called(ms(20));
         meter.render_called(ms(60));
-        meter.sample(ms(70), Activity::Playing, false, false);
+        meter.sample(ms(70), Activity::Playing, false);
         let Some(report) = meter.finish_if_due(ms(1000)) else {
             unreachable!("interval due")
         };
         assert_eq!(report.view_render_calls, 2);
         // The open gap since the last render (60 -> 1000) is included.
         assert_eq!(report.max_view_render_gap_ms, Some(940.));
-        meter.sample(ms(1100), Activity::Paused, false, false);
+        meter.sample(ms(1100), Activity::Paused, false);
         meter.render_called(ms(1200));
         let Some(next) = meter.finish_if_due(ms(2000)) else {
             unreachable!("interval due")
@@ -3837,30 +3519,5 @@ mod tests {
         state.stopped = true;
         assert!(terminal_failure(false, &state));
         assert!(!replay_needed(&state));
-    }
-    #[test]
-    fn stale_close_cannot_remove_replacement() {
-        assert!(is_current(Some(4), 4));
-        assert!(!is_current(Some(5), 4));
-        assert!(!is_current(None, 4));
-    }
-    #[test]
-    fn converts_bgra_and_rejects_malformed_frame() {
-        let Some(image) = render_image(Frame {
-            width: 1,
-            height: 1,
-            pixels: vec![255, 0, 0, 255],
-        }) else {
-            panic!("valid one-pixel frame");
-        };
-        assert_eq!(image.as_bytes(0), Some([0, 0, 255, 255].as_slice()));
-        assert!(
-            render_image(Frame {
-                width: 2,
-                height: 2,
-                pixels: vec![]
-            })
-            .is_none()
-        );
     }
 }

@@ -8,14 +8,14 @@ is not complete.**
 
 The planned MVP combines a local-first movie/series catalog, Torrentio/Peerflix
 source discovery, debrid acquisition, managed local media storage, and a local
-server for external VLC/mpv. Personal tracking, embedded playback, and a torrent
-engine are deferred. See the [design docs](docs/README.md) for scope and open decisions.
+server for default GPU-surface Embedded MPV or explicit external VLC/mpv.
+Personal tracking and a torrent engine are outside this playback increment. See the [design docs](docs/README.md) for scope and open decisions.
 
 ## Current increment
 
 Source wiring now covers Cinemeta/TMDB browse, search, details and episodes;
 Torrentio/Peerflix sources; Real-Debrid/AllDebrid adapters; settings with secure
-credentials; managed media and loopback serving to external players. Both metadata
+credentials; managed media and loopback serving to Embedded MPV or external players. Both metadata
 providers are explicit selections, with no automatic fallback or TTL refresh.
 TMDB requires a user bearer token and IMDb mapping before source lookup.
 
@@ -39,6 +39,13 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
+
+The default Cargo feature `gpu-surface` enables the sole/default Embedded MPV
+renderer using durable vendored GPUI/HAL patches in the root workspace; no
+experimental wrapper is required. Supply native [libmpv and platform prerequisites](docs/development.md#embedded-mpv-prerequisites-and-validation-plan)
+separately. External mpv/VLC are unchanged. Prior scoped Linux evidence is not
+new default-build qualification; native Windows/macOS tests and HDR remain
+unqualified. Default-on does not imply release readiness.
 
 With `debug_assertions` enabled (default debug builds), catalog data lives in
 `./data/` relative to the process working directory; the repository-root directory

@@ -279,8 +279,7 @@ struct Document {
 impl Document {
     fn from_settings(settings: &Settings) -> Result<Self, SettingsError> {
         let (player, player_path) = match &settings.player {
-            PlayerChoice::Embedded => ("embedded", None),
-            PlayerChoice::ExperimentalEmbedded => ("exp-embedded-mpv", None),
+            PlayerChoice::Embedded => ("embedded-mpv", None),
             PlayerChoice::Mpv => ("mpv", None),
             PlayerChoice::Vlc => ("vlc", None),
             PlayerChoice::Custom(path) => (
@@ -347,8 +346,8 @@ impl Document {
             },
             media_limit_bytes: self.media_limit_bytes,
             player: match (self.player.as_str(), self.player_path) {
-                ("embedded", None) => PlayerChoice::Embedded,
-                ("exp-embedded-mpv", None) => PlayerChoice::ExperimentalEmbedded,
+                // Promote the current Rust GPU selection; never write the retired key.
+                ("embedded-mpv" | "exp-embedded-mpv", None) => PlayerChoice::Embedded,
                 ("mpv", None) => PlayerChoice::Mpv,
                 ("vlc", None) => PlayerChoice::Vlc,
                 ("custom", Some(path)) => PlayerChoice::Custom(path.into()),
@@ -378,12 +377,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let store = SettingsStore::open(&paths(dir.path()))?;
         assert_eq!(store.load()?.player, PlayerChoice::Embedded);
-        for player in [
-            PlayerChoice::Embedded,
-            PlayerChoice::ExperimentalEmbedded,
-            PlayerChoice::Mpv,
-            PlayerChoice::Vlc,
-        ] {
+        for player in [PlayerChoice::Embedded, PlayerChoice::Mpv, PlayerChoice::Vlc] {
             let settings = Settings {
                 player: player.clone(),
                 ..Settings::default()
@@ -392,26 +386,59 @@ mod tests {
             assert_eq!(store.load()?.player, player);
         }
         let document = Document::from_settings(&Settings::default())?;
-        assert_eq!(document.player, "embedded");
+        assert_eq!(document.player, "embedded-mpv");
         assert!(document.player_path.is_none());
         Ok(())
     }
 
     #[test]
-    fn experimental_player_has_stable_persisted_key() -> Result<(), Box<dyn std::error::Error>> {
+    fn current_gpu_selection_is_promoted_without_losing_preferences()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
         let settings = Settings {
-            player: PlayerChoice::ExperimentalEmbedded,
+            poster_size: PosterSize::Large,
+            theme: ThemeChoice::Light,
+            reduce_motion: MotionChoice::Always,
+            media_limit_bytes: 42 * 1024 * 1024 * 1024,
             ..Settings::default()
         };
-        let document = Document::from_settings(&settings)?;
-        assert_eq!(document.player, "exp-embedded-mpv");
-        assert!(document.player_path.is_none());
-        let serialized = toml::to_string(&document)?;
-        let restored: Document = toml::from_str(&serialized)?;
+        let mut document = Document::from_settings(&settings)?;
+        document.player = "exp-embedded-mpv".into();
+        let text = toml::to_string(&document)?;
+        std::fs::write(&store.path, &text)?;
+        let loaded = store.load()?;
+        assert_eq!(loaded.player, PlayerChoice::Embedded);
         assert_eq!(
-            restored.into_settings()?.player,
-            PlayerChoice::ExperimentalEmbedded
+            toml::to_string(&Document::from_settings(&loaded)?)?,
+            toml::to_string(&Document::from_settings(&settings)?)?
         );
+        assert_eq!(std::fs::read_to_string(&store.path)?, text);
+        store.save(&loaded)?;
+        let saved: Document = toml::from_str(&std::fs::read_to_string(&store.path)?)?;
+        assert_eq!(saved.player, "embedded-mpv");
+        assert_eq!(
+            toml::to_string(&Document::from_settings(&store.load()?)?)?,
+            toml::to_string(&Document::from_settings(&settings)?)?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn obsolete_cpu_key_is_rejected_without_rewriting_settings()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        let mut document = Document::from_settings(&Settings::default())?;
+        document.player = "embedded".into();
+        let text = toml::to_string(&document)?;
+        std::fs::write(&store.path, &text)?;
+        assert!(matches!(store.load(), Err(SettingsError::Invalid)));
+        assert!(matches!(
+            store.save(&Settings::default()),
+            Err(SettingsError::Invalid)
+        ));
+        assert_eq!(std::fs::read_to_string(&store.path)?, text);
         Ok(())
     }
 

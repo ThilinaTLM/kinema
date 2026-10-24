@@ -1,8 +1,12 @@
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RenderBackend {
+    /// Requires a presentation context when `gpu-surface` is enabled.
+    /// Without that feature, selects the legacy readback initialization policy.
     #[default]
     Auto,
+    /// Explicit low-level software rendering/readback; not desktop presentation.
     Cpu,
+    /// Surface rendering with a context, otherwise explicit GL readback.
     Gpu,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -37,7 +41,7 @@ pub struct RenderDiagnostics {
     pub render_size: [u32; 2],
     pub source_size: Option<[u32; 2]>,
     pub rendered_frames: u64,
-    /// GPU-resident surfaces produced by the opt-in experimental renderer.
+    /// GPU-resident surfaces produced by the default GPU surface renderer.
     pub gpu_surface_frames: u64,
     pub delivered_frames: u64,
     pub coalesced_frames: u64,

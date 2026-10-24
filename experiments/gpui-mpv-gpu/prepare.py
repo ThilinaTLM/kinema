@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize the isolated experiment; never mutate Cargo registry sources."""
+"""Materialize regression harness using promoted repository-owned GPU sources."""
 import argparse
 import hashlib
 import json
@@ -124,60 +124,22 @@ def dependency(catalog, name, features=(), defaults=None):
 
 
 def prepare_sources(build, metadata, patch_directory, locked_packages, marker_value=MARKER_VALUE, expected_patches=None):
-    """Authenticate and patch copied sources under an explicitly owned build."""
+    """Use promoted repository-owned sources; never regenerate target patches."""
     owned_directory(build, marker_value)
-    for directory in [build / "patched", build / "patched.new"]:
-        if directory.exists() or directory.is_symlink():
-            owned_directory(directory, marker_value)
-    patches = sorted(patch_directory.glob("*.patch"))
-    patch_crates = validate_patches(patches)
+    patch_crates = selected_patch_crates(patch_directory)
     if expected_patches is not None and patch_crates != expected_patches:
-        raise ValueError("patch set changed during preparation; retry against a stable snapshot")
-    if any(patch.is_symlink() or not patch.is_file() for patch in patches):
-        raise ValueError("patch inputs must be regular checked-in files")
-    patch_inputs = [(patch, patch.read_bytes()) for patch in patches]
-    crates = {name: PATCH_VERSIONS[name] for name in patch_crates.values()}
-    patch_sources = {}
-    for name, version in crates.items():
-        matches = [p for p in metadata["packages"] if p["name"] == name and p["version"] == version and (p.get("source") or "").startswith("registry+")]
+        raise ValueError("patch set changed during preparation")
+    for patch in patch_crates:
+        if (patch_directory / patch).read_bytes() != (ROOT / "vendor/patches" / patch).read_bytes():
+            raise ValueError("historical experiment patch differs from promoted vendor input")
+    run([sys.executable, "-B", str(ROOT / "vendor/verify.py")])
+    for name, version in PATCH_VERSIONS.items():
+        expected = ROOT / "vendor" / name / "Cargo.toml"
+        matches = [p for p in metadata["packages"] if p["name"] == name and p["version"] == version
+                   and Path(p["manifest_path"]).resolve() == expected.resolve()]
         if len(matches) != 1:
-            raise SystemExit(f"expected exactly one registry {name} ={version}")
-        package = matches[0]
-        source = Path(package["manifest_path"]).parent
-        locked = [p for p in locked_packages if p["name"] == name
-                  and p["version"] == version and p.get("source") == package["source"]]
-        if len(locked) != 1:
-            raise ValueError(f"missing exact registry package in root Cargo.lock: {name}")
-        verify_source(source, locked[0])
-        patch_sources[name] = source
-    digest = hashlib.sha256()
-    for name, path in patch_sources.items():
-        digest.update(f"{name}:{path}".encode())
-    for patch, contents in patch_inputs:
-        digest.update(patch.name.encode() + contents)
-    stamp = build / "sources.sha256"
-    if stamp.is_symlink() or (stamp.exists() and not stamp.is_file()):
-        raise ValueError("refusing nonregular generated source stamp")
-    fingerprint = digest.hexdigest()
-    if not (build / "patched").exists() or not stamp.exists() or stamp.read_text() != fingerprint:
-        temporary = build / "patched.new"
-        if temporary.exists() or temporary.is_symlink():
-            owned_directory(temporary, marker_value)
-            shutil.rmtree(temporary)
-        owned_directory(temporary, marker_value)
-        for name, source in patch_sources.items():
-            shutil.copytree(source, temporary / name)
-        # Each checked-in patch is rooted at its copied crate (a/src/...).
-        for patch, contents in patch_inputs:
-            run(["patch", "--batch", "--forward", "-p1"], input=contents,
-                cwd=temporary / patch_crates[patch.name])
-        destination = build / "patched"
-        if destination.exists() or destination.is_symlink():
-            owned_directory(destination, marker_value)
-            shutil.rmtree(destination)
-        temporary.rename(destination)
-        stamp.write_text(fingerprint)
-    return crates
+            raise ValueError(f"root metadata must use promoted vendor source: {name}")
+    return dict(PATCH_VERSIONS)
 
 
 def main():
@@ -213,7 +175,7 @@ def main():
         'name = "gpui-mpv-gpu-experiment"', f'path = {json.dumps(str(SOURCE / "src/main.rs"))}',
         '', '[dependencies]', *[f'{name} = {value}' for name, value in deps.items()],
         '', '[patch.crates-io]',
-        *[f'{name} = {{ path = "patched/{name}" }}' for name in patch_versions],
+        *[f'{name} = {{ path = {json.dumps(str(ROOT / "vendor" / name))} }}' for name in patch_versions],
         '', '[profile.dev]', 'debug = 1', '', '[profile.dev.package."*"]', 'opt-level = 2', '',
     ])
     write_generated(BUILD / "Cargo.toml", manifest)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build only the isolated generated workspace; no root patches or registry writes.
+# Regression wrapper; ordinary builds use root Cargo directly. No registry writes.
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 SOURCE="$ROOT/experiments/kinema-gpu-app"
@@ -15,14 +15,14 @@ case "$command" in
     check)
         python3 "$SOURCE/prepare.py"
         exec cargo check --manifest-path "$BUILD/Cargo.toml" --locked \
-            -p kinema-desktop --features experimental-gpu "$@"
+            -p kinema-desktop --features gpu-surface "$@"
         ;;
     build)
         python3 "$SOURCE/prepare.py"
         artifacts="$(mktemp "$BUILD/build-artifacts.XXXXXX")"
         trap 'rm -f "$artifacts"' EXIT
         cargo build --manifest-path "$BUILD/Cargo.toml" --locked \
-            -p kinema-desktop --features experimental-gpu --bin kinema-desktop \
+            -p kinema-desktop --features gpu-surface --bin kinema-desktop \
             --message-format=json-render-diagnostics "$@" >"$artifacts"
         python3 - "$artifacts" <<'PY'
 import json
@@ -40,7 +40,7 @@ PY
     test)
         python3 "$SOURCE/prepare.py"
         exec cargo test --manifest-path "$BUILD/Cargo.toml" --locked \
-            --workspace --features kinema-desktop/experimental-gpu "$@"
+            --workspace --features kinema-desktop/gpu-surface "$@"
         ;;
     run)
         if [[ "${1:-}" == --probe ]]; then
@@ -50,13 +50,13 @@ PY
             session="$(mktemp -d "$BUILD/probe-session.XXXXXX")"
             cd "$session"
             exec cargo run --quiet --manifest-path "$BUILD/Cargo.toml" --locked \
-                -p kinema-desktop --features experimental-gpu,ui-probe --bin ui-probe -- "$@"
+                -p kinema-desktop --features gpu-surface,ui-probe --bin ui-probe -- "$@"
         fi
         # Explicit USER launch: ordinary app paths and OS credentials may be used.
         # Agents must never execute this branch for testing.
         python3 "$SOURCE/prepare.py"
         exec cargo run --quiet --manifest-path "$BUILD/Cargo.toml" --locked \
-            -p kinema-desktop --features experimental-gpu --bin kinema-desktop -- "$@"
+            -p kinema-desktop --features gpu-surface --bin kinema-desktop -- "$@"
         ;;
     *)
         echo 'Usage: run.sh {prepare|build|check|test|run [app args]|run --probe [fixture args]}' >&2

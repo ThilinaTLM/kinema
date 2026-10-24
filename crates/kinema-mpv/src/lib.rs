@@ -16,5 +16,5 @@ pub use state::{
     ResolutionPolicy, Track, TrackKind,
 };
 
-#[cfg(feature = "experimental-gpu")]
-pub use mpv::{ExperimentalFrame, ExperimentalGpuContext};
+#[cfg(feature = "gpu-surface")]
+pub use mpv::{GpuSurfaceContext, GpuSurfaceFrame};
