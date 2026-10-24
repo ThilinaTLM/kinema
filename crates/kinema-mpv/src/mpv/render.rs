@@ -49,7 +49,36 @@ fn validate_size(size: [u32; 2], limit: usize) -> Result<usize> {
     }
     Ok(bytes)
 }
+/// Presence is an opt-in, not permission to override contradictory policies.
+#[cfg(any(feature = "experimental-gpu", test))]
+fn validate_experimental_policy(
+    enabled: bool,
+    backend: RenderBackend,
+    decoding: HardwareDecoding,
+) -> Result<()> {
+    if !enabled {
+        return Ok(());
+    }
+    if backend == RenderBackend::Cpu {
+        return Err(Error::InvalidInput(
+            "experimental_gpu requires Auto or Gpu rendering; Cpu is incompatible",
+        ));
+    }
+    if decoding != HardwareDecoding::Auto {
+        return Err(Error::InvalidInput(
+            "experimental_gpu requires Auto direct hardware decoding; Disabled and CopyBack are incompatible",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_config(config: &Config) -> Result<()> {
+    #[cfg(feature = "experimental-gpu")]
+    validate_experimental_policy(
+        config.experimental_gpu.is_some(),
+        config.render_backend,
+        config.hardware_decoding,
+    )?;
     if let Some(size) = config.max_render_size {
         validate_size(size, usize::MAX)?;
     }
@@ -155,6 +184,9 @@ impl Pipeline {
         if self.experimental_enabled() {
             self.invalidate();
         }
+    }
+    pub fn record_shutdown_pause_failure(&mut self) {
+        self.stats.shutdown_pause_enqueue_failed = true;
     }
     pub fn option_warnings(&mut self, warnings: Vec<String>) {
         self.stats.option_warnings = warnings;
@@ -555,6 +587,42 @@ pub(super) fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn experimental_policy_allows_only_auto_or_gpu_with_auto_decoding() {
+        for backend in [RenderBackend::Auto, RenderBackend::Gpu] {
+            assert!(validate_experimental_policy(true, backend, HardwareDecoding::Auto).is_ok());
+        }
+    }
+    #[test]
+    fn experimental_policy_rejects_explicit_cpu_and_non_direct_decoding() {
+        for backend in [RenderBackend::Auto, RenderBackend::Cpu, RenderBackend::Gpu] {
+            for decoding in [
+                HardwareDecoding::Auto,
+                HardwareDecoding::Disabled,
+                HardwareDecoding::CopyBack,
+            ] {
+                if backend != RenderBackend::Cpu && decoding == HardwareDecoding::Auto {
+                    continue;
+                }
+                let error = validate_experimental_policy(true, backend, decoding).unwrap_err();
+                assert!(matches!(error, Error::InvalidInput(_)));
+                assert!(error.to_string().contains("experimental_gpu requires"));
+            }
+        }
+    }
+    #[test]
+    fn absent_experimental_context_preserves_all_existing_policy_combinations() {
+        for backend in [RenderBackend::Auto, RenderBackend::Cpu, RenderBackend::Gpu] {
+            for decoding in [
+                HardwareDecoding::Auto,
+                HardwareDecoding::Disabled,
+                HardwareDecoding::CopyBack,
+            ] {
+                assert!(validate_experimental_policy(false, backend, decoding).is_ok());
+            }
+        }
+    }
+
     #[cfg(feature = "experimental-gpu")]
     #[test]
     fn paused_metadata_ready_forces_redraw_after_consumed_generation() {

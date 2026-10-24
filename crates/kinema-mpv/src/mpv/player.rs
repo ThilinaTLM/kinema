@@ -23,6 +23,9 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// Presence opts into experimental direct GPU-resident SDR playback with
+    /// no CPU/copy-back fallback. Requires Auto/Gpu rendering and Auto decoding;
+    /// explicit Cpu, Disabled, or CopyBack policies are rejected before loading.
     #[cfg(feature = "experimental-gpu")]
     pub experimental_gpu: Option<super::experimental::ExperimentalGpuContext>,
     pub library_path: Option<PathBuf>,
@@ -117,6 +120,8 @@ pub struct Player {
 }
 impl Player {
     pub fn new(config: Config) -> Result<Self> {
+        validate_volume(config.initial_volume)?;
+        render::validate_config(&config)?;
         #[cfg(feature = "experimental-gpu")]
         let config = {
             let mut config = config;
@@ -125,8 +130,6 @@ impl Player {
             }
             config
         };
-        validate_volume(config.initial_volume)?;
-        render::validate_config(&config)?;
         let loaded = Loaded::load(config.library_path.as_deref())?;
         let handle = unsafe { (loaded.api.create)() };
         if handle.is_null() {
@@ -546,6 +549,42 @@ unsafe fn copied_string(property: &Property) -> Option<String> {
     }
 }
 
+/// Runs on the existing control worker before its client reference is dropped,
+/// including on unwind. Never invoke from the GL/render thread: quarantined
+/// clients must remain alive, but should not continue playback intentionally.
+struct ControlPauseOnExit<'a> {
+    client: &'a Client,
+    shared: &'a Shared,
+}
+impl Drop for ControlPauseOnExit<'_> {
+    fn drop(&mut self) {
+        pause_on_control_exit(self.shared, |arguments| {
+            let pointers = [
+                arguments[0].as_ptr(),
+                arguments[1].as_ptr(),
+                arguments[2].as_ptr(),
+                std::ptr::null(),
+            ];
+            // mpv_command_async copies its arguments; do not await a reply or
+            // request stop/reload/GL cleanup while resources are quarantined.
+            unsafe { (self.client.loaded.api.command)(self.client.handle, 0, pointers.as_ptr()) }
+        });
+    }
+}
+
+/// Cooperative best effort, not a guarantee that a hung core/driver will pause.
+/// Bypasses Player::command's stopped check on purpose. Only a fixed diagnostic
+/// category is recorded on enqueue failure; fatal/observed state is untouched.
+fn pause_on_control_exit(shared: &Shared, enqueue: impl FnOnce(&[&CStr; 3]) -> c_int) {
+    if enqueue(&[c"set", c"pause", c"yes"]) < 0 {
+        shared
+            .pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record_shutdown_pause_failure();
+    }
+}
+
 fn control_worker(
     client: Arc<Client>,
     shared: Arc<Shared>,
@@ -553,6 +592,10 @@ fn control_worker(
     decoder: Receiver<SyncSender<Result<()>>>,
 ) {
     let _exit = WorkerExit(shared.clone());
+    let _pause_on_exit = ControlPauseOnExit {
+        client: &client,
+        shared: &shared,
+    };
     while !shared.stopped.load(Ordering::Acquire) {
         for reply in decoder.try_iter() {
             if shared.stopped.load(Ordering::Acquire) {
@@ -781,6 +824,37 @@ mod tests {
             },
             receiver,
         )
+    }
+    #[test]
+    fn control_exit_enqueues_one_async_pause_even_after_fatal_stop() {
+        let (player, _) = mock_player();
+        player
+            .shared
+            .fail_render("fatal GPU completion uncertainty".into());
+        let before = player.state();
+        let mut calls = 0;
+        pause_on_control_exit(&player.shared, |arguments| {
+            calls += 1;
+            assert_eq!(arguments, &[c"set", c"pause", c"yes"]);
+            0
+        });
+        assert_eq!(calls, 1);
+        assert_eq!(player.state(), before);
+        assert!(!player.diagnostics().shutdown_pause_enqueue_failed);
+    }
+    #[test]
+    fn control_exit_pause_enqueue_failure_preserves_fatal_state_and_records_category() {
+        let (player, _) = mock_player();
+        player.shared.fail_render("original fatal failure".into());
+        let before = player.state();
+        let mut calls = 0;
+        pause_on_control_exit(&player.shared, |_| {
+            calls += 1;
+            -1
+        });
+        assert_eq!(calls, 1);
+        assert_eq!(player.state(), before);
+        assert!(player.diagnostics().shutdown_pause_enqueue_failed);
     }
     #[test]
     fn dock_commands_enqueue_exact_arguments_without_optimistic_state() {

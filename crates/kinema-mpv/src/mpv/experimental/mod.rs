@@ -190,7 +190,7 @@ fn with_queue_gate<T>(
 /// Owns all native refs together so uncertain teardown can quarantine all of them.
 pub(super) struct Renderer {
     mpv: Option<Box<MpvContext>>,
-    retained: Vec<ExperimentalFrame>,
+    retained: Vec<Arc<FrameOwner>>,
     evidence_wait: EvidenceWait,
 }
 impl Renderer {
@@ -285,10 +285,11 @@ impl Renderer {
     }
     pub fn render(&mut self, size: [u32; 2]) -> Result<Option<ExperimentalFrame>> {
         let mpv = self.mpv.as_mut().unwrap();
+        // Snapshot liveness BEFORE waiting. A UI owner can submit and release a
+        // frame during the wait; that frame must survive until a later pass.
         // Wait only on this worker, never while holding the shared queue gate.
-        mpv.native.complete_submissions().map_err(Error::Gpu)?;
-        self.retained
-            .retain(|frame| Arc::strong_count(&frame.0) > 1);
+        retire_completed_frames(&mut self.retained, || mpv.native.complete_submissions())
+            .map_err(Error::Gpu)?;
         if self.retained.len() == 3 {
             self.skip()?;
             return Ok(None);
@@ -315,7 +316,7 @@ impl Renderer {
             .check(code, "render experimental GPU frame")?;
         let native = mpv.native.finish_frame().map_err(Error::Gpu)?;
         let frame = ExperimentalFrame(Arc::new(FrameOwner { native, size }));
-        self.retained.push(frame.clone());
+        self.retained.push(frame.0.clone());
         Ok(Some(frame))
     }
 }
@@ -333,6 +334,24 @@ impl Drop for Renderer {
             std::mem::forget(std::mem::take(&mut self.retained));
         }
     }
+}
+
+/// A unique owner cannot be resurrected: FrameOwner is private and no Weak
+/// handles are exposed. Thus UI submissions preceding its last external drop
+/// are covered by the completion wait following this snapshot. Never rescan
+/// liveness after waiting, nor mutate retained owners when completion fails.
+fn retire_completed_frames<T>(
+    retained: &mut Vec<Arc<T>>,
+    complete: impl FnOnce() -> std::result::Result<(), String>,
+) -> std::result::Result<(), String> {
+    let candidates: Vec<bool> = retained
+        .iter()
+        .map(|owner| Arc::strong_count(owner) == 1)
+        .collect();
+    complete()?;
+    let mut candidates = candidates.into_iter();
+    retained.retain(|_| !candidates.next().unwrap());
+    Ok(())
 }
 
 // False means the entire owner graph must be quarantined, not dropped.
@@ -432,6 +451,55 @@ fn validate_direct(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn frame_released_during_completion_wait_is_not_retired() {
+        let mut retained = vec![Arc::new(())];
+        let external = retained[0].clone();
+        retire_completed_frames(&mut retained, || {
+            drop(external);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(Arc::strong_count(&retained[0]), 1);
+        retire_completed_frames(&mut retained, || Ok(())).unwrap();
+        assert!(retained.is_empty());
+    }
+    #[test]
+    fn unique_frame_is_released_only_after_positive_completion() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct ObserveDrop(Arc<AtomicBool>);
+        impl Drop for ObserveDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let mut retained = vec![Arc::new(ObserveDrop(dropped.clone()))];
+        retire_completed_frames(&mut retained, || {
+            assert!(!dropped.load(Ordering::SeqCst));
+            Ok(())
+        })
+        .unwrap();
+        assert!(retained.is_empty());
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+    #[test]
+    fn failed_completion_preserves_all_retained_owners_for_quarantine() {
+        let mut retained = vec![Arc::new(1), Arc::new(2)];
+        let external = retained[1].clone();
+        assert!(
+            retire_completed_frames(&mut retained, || {
+                drop(external);
+                Err("completion uncertain".into())
+            })
+            .is_err()
+        );
+        assert_eq!(retained.len(), 2);
+        assert_eq!(*retained[0], 1);
+        assert_eq!(*retained[1], 2);
+        assert!(retained.iter().all(|owner| Arc::strong_count(owner) == 1));
+    }
     #[test]
     fn queue_gate_covers_only_the_call_and_poison_refuses_work() {
         let gate = std::sync::Mutex::new(());

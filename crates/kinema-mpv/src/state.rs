@@ -22,6 +22,9 @@ pub enum ResolutionPolicy {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenderDiagnostics {
+    /// Control-worker exit could not enqueue its cooperative async pause. Even
+    /// successful enqueue cannot guarantee silence/recovery from a native hang.
+    pub shutdown_pause_enqueue_failed: bool,
     /// Unsupported optional quality/SDR options; initialization remains usable.
     pub option_warnings: Vec<String>,
     pub requested_backend: RenderBackend,

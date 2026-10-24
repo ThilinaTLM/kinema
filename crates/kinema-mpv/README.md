@@ -50,6 +50,18 @@ A zero viewport suspends rendering. Drop joins both workers;
 render-context owners keep the native client and libraries alive until after
 render resources are freed.
 
+On exit, the existing control worker makes one best-effort nonblocking
+`mpv_command_async` request to `set pause yes`, even after a fatal shutdown.
+It does not wait for a reply or issue stop/reload/render cleanup. This matters
+when uncertain GPU completion quarantines the full native/client owner graph
+instead of destroying it. Failed enqueue sets the fixed
+`RenderDiagnostics.shutdown_pause_enqueue_failed` category without replacing
+fatal state or logging command/media data. Enqueue success is not confirmation:
+a hung libmpv core or driver may never process the pause, and already-buffered
+audio/network work may continue. This is cooperative mitigation, not guaranteed
+silence, shutdown, or driver-hang recovery; restarting the application may be
+necessary. Quarantined resources remain retained for safety.
+
 `PlaybackState.stopped` / `Player::is_stopped()` indicate permanent worker
 termination; recreate Player. `fatal_error` preserves terminal backend failure,
 while `error` also reports recoverable media/command failures. `media_stopped`
