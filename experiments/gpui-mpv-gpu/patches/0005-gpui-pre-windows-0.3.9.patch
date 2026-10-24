@@ -1,0 +1,502 @@
+# Isolated Kinema GPU video experiment; not a production override.
+# Base: crates.io gpui-pre-windows-0.3.9, exact unmodified registry release.
+# Upstream license: Apache-2.0; retain the upstream license files in copied sources.
+# Provenance: https://github.com/zed-industries/zed @ 93d745668805029476e6d7fbb19652116fed51de
+# Apply from the COPIED crate directory using patch -p1; never patch the registry.
+
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -35,6 +35,7 @@
+ zed-rev = "93d745668805029476e6d7fbb19652116fed51de"
+ 
+ [features]
++gpu-video-experiment = ["gpui/gpu-video-experiment", "dep:gpui_wgpu", "gpui_wgpu/gpu-video-experiment"]
+ default = ["gpui/default"]
+ screen-capture = [
+     "gpui/screen-capture",
+@@ -225,3 +226,9 @@
+ [lints.rust.unexpected_cfgs]
+ level = "allow"
+ priority = 0
++
++[target.'cfg(target_os = "windows")'.dependencies.gpui_wgpu]
++version = "=0.3.9"
++package = "gpui-pre-wgpu"
++optional = true
++default-features = false
+--- a/src/gpui_windows.rs
++++ b/src/gpui_windows.rs
+@@ -5,8 +5,11 @@
+ mod dialog;
+ mod direct_manipulation;
+ mod direct_write;
++#[cfg_attr(feature = "gpu-video-experiment", allow(dead_code, reason = "legacy types retained for native Windows font rasterization"))]
+ mod directx_atlas;
++#[cfg_attr(feature = "gpu-video-experiment", allow(dead_code, reason = "legacy types retained for native Windows font rasterization"))]
+ mod directx_devices;
++#[cfg_attr(feature = "gpu-video-experiment", allow(dead_code, reason = "legacy types retained for native Windows font rasterization"))]
+ mod directx_renderer;
+ mod dispatcher;
+ mod display;
+@@ -19,6 +22,12 @@
+ mod vsync;
+ mod window;
+ mod wrapper;
++#[cfg(feature = "gpu-video-experiment")]
++mod wgpu_window_renderer;
++#[cfg(feature = "gpu-video-experiment")]
++pub(crate) use wgpu_window_renderer::WgpuWindowRenderer as WindowRenderer;
++#[cfg(not(feature = "gpu-video-experiment"))]
++pub(crate) use directx_renderer::DirectXRenderer as WindowRenderer;
+ 
+ pub(crate) use clipboard::*;
+ pub(crate) use destination_list::*;
+--- a/src/directx_renderer.rs
++++ b/src/directx_renderer.rs
+@@ -385,6 +385,7 @@
+                     self.draw_polychrome_sprites(texture_id, range.start, range.len())
+                 }
+                 PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
++
+             }
+             .with_context(|| {
+                 format!(
+@@ -817,6 +818,9 @@
+         if surfaces.is_empty() {
+             return Ok(());
+         }
++        #[cfg(feature = "gpu-video-experiment")]
++        anyhow::bail!("GPU surfaces require experimental WGPU HWND renderer; legacy DirectXRenderer cannot draw them");
++        #[cfg(not(feature = "gpu-video-experiment"))]
+         Ok(())
+     }
+ 
+--- a/src/events.rs
++++ b/src/events.rs
+@@ -97,7 +97,7 @@
+             WM_ACTIVATE => self.handle_activate_msg(wparam),
+             WM_CREATE => self.handle_create_msg(handle),
+             WM_MOVE => self.handle_move_msg(handle, lparam),
+-            WM_SIZE => self.handle_size_msg(wparam, lparam),
++            WM_SIZE => self.handle_size_msg(handle, wparam, lparam),
+             WM_GETMINMAXINFO => self.handle_get_min_max_info_msg(lparam),
+             WM_ENTERSIZEMOVE | WM_ENTERMENULOOP => self.handle_size_move_loop(handle),
+             WM_EXITSIZEMOVE | WM_EXITMENULOOP => self.handle_size_move_loop_exit(handle),
+@@ -220,26 +220,61 @@
+         Some(0)
+     }
+ 
+-    fn handle_size_msg(self: &Rc<Self>, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
++    fn handle_size_msg(
++        self: &Rc<Self>,
++        handle: HWND,
++        wparam: WPARAM,
++        lparam: LPARAM,
++    ) -> Option<isize> {
++        #[cfg(not(feature = "gpu-video-experiment"))]
++        let _ = handle;
+         // Minimizing and restoring both arrive as `WM_SIZE`; the deferred report
+         // reads `IsIconic` at delivery, so one call covers both directions.
+         self.report_visibility();
+ 
+-        // Don't resize the renderer when the window is minimized, but record that it was minimized so
+-        // that on restore the swap chain can be recreated via `update_drawable_size_even_if_unchanged`.
++        // Legacy DirectX preserves its old drawable size while minimized.
++        // The experiment instead records zero to suspend WGPU acquisition, then
++        // explicitly resizes to the physical client extent on the first restore.
+         if wparam.0 == SIZE_MINIMIZED as usize {
++            #[cfg(not(feature = "gpu-video-experiment"))]
+             self.state
+                 .restore_from_minimized
+                 .set(self.state.callbacks.request_frame.take());
++            #[cfg(feature = "gpu-video-experiment")]
++            {
++                // Repeated minimized WM_SIZE messages must not overwrite the
++                // saved callback with None. Suspend WGPU acquisition immediately,
++                // even though the normal logical window bounds stay unchanged.
++                if let Some(callback) = self.state.callbacks.request_frame.take() {
++                    self.state.restore_from_minimized.set(Some(callback));
++                }
++                self.state
++                    .renderer
++                    .borrow_mut()
++                    .resize(size(DevicePixels(0), DevicePixels(0)))
++                    .log_err();
++            }
+             return Some(0);
+         }
+ 
+-        let width = lparam.loword().max(1) as i32;
+-        let height = lparam.hiword().max(1) as i32;
+-        let new_size = size(DevicePixels(width), DevicePixels(height));
++        #[cfg(not(feature = "gpu-video-experiment"))]
++        let new_size = {
++            let width = lparam.loword().max(1) as i32;
++            let height = lparam.hiword().max(1) as i32;
++            size(DevicePixels(width), DevicePixels(height))
++        };
++        #[cfg(feature = "gpu-video-experiment")]
++        let new_size = {
++            // WM_SIZE's packed dimensions are only 16 bits; use the actual
++            // physical client extent, including on the first restored frame.
++            let _ = lparam;
++            self.experimental_client_size(handle)?
++        };
+ 
+         let scale_factor = self.state.scale_factor.get();
+-        let mut should_resize_renderer = false;
++        // Legacy DirectX skips resize on first restore; WGPU must leave its
++        // recorded zero-size state before the request-frame callback can draw.
++        let mut should_resize_renderer = cfg!(feature = "gpu-video-experiment");
+         if let Some(restore_from_minimized) = self.state.restore_from_minimized.take() {
+             self.state
+                 .callbacks
+@@ -253,6 +288,18 @@
+         Some(0)
+     }
+ 
++    #[cfg(feature = "gpu-video-experiment")]
++    fn experimental_client_size(&self, handle: HWND) -> Option<Size<DevicePixels>> {
++        let mut client = RECT::default();
++        unsafe { GetClientRect(handle, &mut client) }
++            .context("query experimental WGPU physical client size")
++            .log_err()?;
++        Some(size(
++            DevicePixels((client.right - client.left).max(0)),
++            DevicePixels((client.bottom - client.top).max(0)),
++        ))
++    }
++
+     fn handle_size_change(
+         &self,
+         device_size: Size<DevicePixels>,
+@@ -265,10 +312,16 @@
+         if should_resize_renderer
+             && let Err(e) = self.state.renderer.borrow_mut().resize(device_size)
+         {
++            #[cfg(not(feature = "gpu-video-experiment"))]
+             log::error!("Failed to resize renderer, invalidating devices: {}", e);
++            #[cfg(feature = "gpu-video-experiment")]
++            log::error!("Experimental WGPU resize failed; no device-replacement fallback: {}", e);
++            #[cfg(not(feature = "gpu-video-experiment"))]
+             self.state
+                 .invalidate_devices
+                 .store(true, std::sync::atomic::Ordering::Release);
++            #[cfg(feature = "gpu-video-experiment")]
++            self.state.force_render_pending.set(true);
+         }
+         if let Some(mut callback) = self.state.callbacks.resize.take() {
+             callback(new_logical_size, scale_factor);
+@@ -325,6 +378,10 @@
+     }
+ 
+     fn handle_destroy_msg(&self, handle: HWND) -> Option<isize> {
++        // WM_DESTROY also covers native user-close paths, before HWND becomes
++        // invalid at WM_NCDESTROY. Release WGPU surface ownership first.
++        #[cfg(feature = "gpu-video-experiment")]
++        self.state.renderer.borrow_mut().destroy();
+         let callback = { self.state.callbacks.close.take() };
+         // Re-enable parent window if this was a modal dialog
+         if let Some(parent_hwnd) = self.parent_hwnd {
+@@ -904,7 +961,13 @@
+ 
+                 // SetWindowPos may not send WM_SIZE for maximized windows in some cases,
+                 // so we manually update the size to ensure proper rendering
++                #[cfg(not(feature = "gpu-video-experiment"))]
+                 let device_size = size(DevicePixels(width), DevicePixels(height));
++                #[cfg(feature = "gpu-video-experiment")]
++                let device_size = self.experimental_client_size(handle)?;
++                // The monitor work area and suggested RECT are outer bounds.
++                // They must never overwrite a correct reentrant WM_SIZE client
++                // extent in the experimental WGPU surface configuration.
+                 self.handle_size_change(device_size, new_scale_factor, true);
+             }
+         } else {
+@@ -1347,6 +1410,8 @@
+             }
+         }
+ 
++        #[cfg(feature = "gpu-video-experiment")]
++        let force_render = force_render || self.state.renderer.borrow_mut().needs_redraw();
+         let force_render = force_render || self.state.force_render_pending.take();
+         if force_render {
+             // Re-enable drawing after a device loss recovery. The forced render
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -64,7 +64,7 @@
+     pub last_visibility: Cell<Option<WindowVisibility>>,
+     pub direct_manipulation: DirectManipulationHandler,
+ 
+-    pub renderer: RefCell<DirectXRenderer>,
++    pub renderer: RefCell<WindowRenderer>,
+     /// Set when the next `draw_window` call must be treated as a forced
+     /// render. Used after a GPU device-lost recovery, where the next frame
+     /// must both re-enable drawing (via `mark_drawable`) and bypass the GPUI
+@@ -83,6 +83,7 @@
+     pub display: Cell<WindowsDisplay>,
+     /// Flag to instruct the `VSyncProvider` thread to invalidate the directx devices
+     /// as resizing them has failed, causing us to have lost at least the render target.
++    #[cfg_attr(feature = "gpu-video-experiment", allow(dead_code, reason = "D3D11 invalidation is not WGPU recovery"))]
+     pub invalidate_devices: Arc<AtomicBool>,
+     /// Shared with [`WindowsPlatformState::draw_coordinator`] and every other window.
+     pub(crate) draw_coordinator: Rc<DrawCoordinator>,
+@@ -142,8 +143,8 @@
+         };
+         let border_offset = WindowBorderOffset::default();
+         let restore_from_minimized = None;
+-        let renderer = DirectXRenderer::new(hwnd, directx_devices, disable_direct_composition)
+-            .context("Creating DirectX renderer")?;
++        let renderer = WindowRenderer::new(hwnd, directx_devices, disable_direct_composition)
++            .context("Creating native window renderer")?;
+         let callbacks = Callbacks::default();
+         let input_handler = None;
+         let pending_surrogate = None;
+@@ -510,7 +511,9 @@
+ 
+             (dwexstyle, dwstyle)
+         };
+-        if !disable_direct_composition {
++        // WGPU uses a normal HWND swapchain, not a DirectComposition visual.
++        // Preserve the default renderer style exactly when the feature is off.
++        if !disable_direct_composition && !cfg!(feature = "gpu-video-experiment") {
+             dwexstyle |= WS_EX_NOREDIRECTIONBITMAP;
+         }
+ 
+@@ -624,6 +627,8 @@
+                 let handle = this.hwnd;
+                 unsafe {
+                     RevokeDragDrop(handle).log_err();
++                    #[cfg(feature = "gpu-video-experiment")]
++                    this.state.renderer.borrow_mut().destroy();
+                     DestroyWindow(handle).log_err();
+                 }
+             })
+--- /dev/null
++++ b/src/wgpu_window_renderer.rs
+@@ -0,0 +1,226 @@
++//! Experimental HWND renderer. The D3D11 text rasterizer remains independent;
++//! every scene primitive (including GPU video) is drawn/presented by WGPU Dx12.
++//! No canvas, readback, D3D11 scene renderer, or device-recovery fallback.
++use std::{cell::RefCell, num::NonZeroIsize, rc::Rc, sync::Arc};
++
++use anyhow::{Context, Result, ensure};
++use gpui::{DevicePixels, GpuSpecs, PlatformAtlas, Scene, Size, WindowBackgroundAppearance};
++use gpui_wgpu::{GpuContext, WgpuRenderer, WgpuSurfaceConfig, wgpu};
++use raw_window_handle::{
++    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawWindowHandle,
++    Win32WindowHandle, WindowHandle,
++};
++use windows::Win32::{
++    Foundation::{HWND, RECT},
++    UI::WindowsAndMessaging::GetClientRect,
++};
++
++use crate::{DirectXDevices, DirectXRenderer};
++
++/// A raw handle, not a COM wrapper: windows 0.61 and WGPU's windows 0.62 never
++/// exchange interface types. WM_DESTROY releases the surface before HWND dies.
++#[derive(Clone, Debug)]
++struct HwndHost(NonZeroIsize);
++impl HasWindowHandle for HwndHost {
++    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
++        // SAFETY: WindowsWindow owns the HWND; destroy() runs before its native
++        // destruction. WgpuRenderer does not outlive this enclosing window state.
++        Ok(unsafe {
++            WindowHandle::borrow_raw(RawWindowHandle::Win32(Win32WindowHandle::new(self.0)))
++        })
++    }
++}
++impl HasDisplayHandle for HwndHost {
++    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
++        Ok(DisplayHandle::windows())
++    }
++}
++
++thread_local! {
++    // Cache one context on the native UI thread, as the platform already does
++    // for its D3D11 text device. This is NOT a live-renderer registration: 0002's
++    // weak registration disappears with the renderer core. Keeping the slot
++    // also prevents a later window from replacing a lost device behind frames
++    // still retained by a video worker after the original window closes.
++    static WINDOWS_CONTEXT: GpuContext = Rc::new(RefCell::new(None));
++}
++
++pub(crate) struct WgpuWindowRenderer {
++    renderer: WgpuRenderer,
++    size: Size<DevicePixels>,
++    force_redraw: bool,
++    terminal: bool,
++}
++impl WgpuWindowRenderer {
++    pub(crate) fn new(
++        hwnd: HWND,
++        _font_devices: &DirectXDevices,
++        _disable_direct_composition: bool,
++    ) -> Result<Self> {
++        let host = HwndHost(NonZeroIsize::new(hwnd.0 as isize).context("null WGPU HWND")?);
++        let mut rect = RECT::default();
++        unsafe { GetClientRect(hwnd, &mut rect) }.context("query WGPU client rectangle")?;
++        let size = gpui::size(
++            DevicePixels((rect.right - rect.left).max(0)),
++            DevicePixels((rect.bottom - rect.top).max(0)),
++        );
++        // Patch 0002's context factory adopts the active device/queue/gate across
++        // windows, rather than constructing one independent device per HWND.
++        let context = WINDOWS_CONTEXT.with(Clone::clone);
++        ensure!(
++            !context
++                .borrow()
++                .as_ref()
++                .is_some_and(|context| context.device_lost()),
++            "experimental Windows context was lost; restart required before creating another window"
++        );
++        let mut renderer = WgpuRenderer::new(
++            context.clone(),
++            &host,
++            WgpuSurfaceConfig {
++                size: gpui::size(
++                    DevicePixels(size.width.0.max(1)),
++                    DevicePixels(size.height.0.max(1)),
++                ),
++                transparent: false,
++                preferred_present_mode: None,
++            },
++            None,
++        )
++        .context("create experimental HWND WGPU renderer")?;
++        {
++            let context = context.borrow();
++            let context = context
++                .as_ref()
++                .context("missing actual HWND WGPU context")?;
++            ensure!(
++                context.adapter.get_info().backend == wgpu::Backend::Dx12,
++                "experimental HWND renderer requires Dx12, not a fallback backend"
++            );
++            ensure!(
++                context.adapter.get_info().device_type != wgpu::DeviceType::Cpu,
++                "experimental HWND renderer rejects software adapters"
++            );
++        }
++        validate_drawable_size(size, renderer.max_texture_size())?;
++        renderer.set_subpixel_layout(DirectXRenderer::get_font_info().is_bgr);
++        Ok(Self {
++            renderer,
++            size,
++            force_redraw: true,
++            terminal: false,
++        })
++    }
++
++    fn ensure_live(&mut self) -> Result<()> {
++        self.terminal |= self.renderer.device_lost();
++        ensure!(
++            !self.terminal,
++            "experimental WGPU device unavailable; restart required (no in-place device replacement with live video frames)"
++        );
++        Ok(())
++    }
++
++    pub(crate) fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
++        self.renderer.sprite_atlas().clone()
++    }
++
++    pub(crate) fn gpu_specs(&self) -> Result<GpuSpecs> {
++        self.renderer
++            .gpu_specs()
++            .context("experimental HWND WGPU specs unavailable")
++    }
++
++    pub(crate) fn resize(&mut self, size: Size<DevicePixels>) -> Result<()> {
++        self.ensure_live()?;
++        if let Err(error) = validate_drawable_size(size, self.renderer.max_texture_size()) {
++            self.terminal = true;
++            return Err(error);
++        }
++        self.size = size;
++        self.force_redraw = true;
++        // A minimized window must not acquire/present a synthetic 1x1 frame.
++        // Keep its last surface configuration until restored to a nonzero size.
++        if size.width.0 > 0 && size.height.0 > 0 {
++            self.renderer.update_drawable_size(size);
++        }
++        Ok(())
++    }
++
++    pub(crate) fn draw(
++        &mut self,
++        scene: &Scene,
++        appearance: WindowBackgroundAppearance,
++    ) -> Result<()> {
++        self.ensure_live()?;
++        if self.size.width.0 == 0 || self.size.height.0 == 0 {
++            return Ok(());
++        }
++        self.renderer
++            .update_transparency(appearance != WindowBackgroundAppearance::Opaque);
++        if !self.renderer.draw(scene) {
++            self.force_redraw = true;
++            self.ensure_live()?;
++        }
++        // WGPU draw owns acquisition, submission, and present exactly once.
++        Ok(())
++    }
++
++    pub(crate) fn mark_drawable(&mut self) {
++        // Never reset terminal device loss in response to a D3D11 font event.
++    }
++
++    pub(crate) fn needs_redraw(&mut self) -> bool {
++        self.renderer.needs_redraw() | std::mem::take(&mut self.force_redraw)
++    }
++
++    pub(crate) fn handle_device_lost(&mut self, _font_devices: &DirectXDevices) -> Result<()> {
++        // The platform's message concerns the independent D3D11 font/vsync
++        // device. Never adopt it as the renderer device or call WGPU recover().
++        self.ensure_live()?;
++        self.force_redraw = true;
++        Ok(())
++    }
++
++    pub(crate) fn destroy(&mut self) {
++        self.terminal = true;
++        self.renderer.destroy();
++    }
++
++    #[cfg(any(test, feature = "test-support"))]
++    pub(crate) fn render_to_image(
++        &mut self,
++        _scene: &Scene,
++        _appearance: WindowBackgroundAppearance,
++    ) -> Result<image::RgbaImage> {
++        anyhow::bail!("CPU scene readback is unsupported by the experimental HWND renderer")
++    }
++}
++
++fn validate_drawable_size(size: Size<DevicePixels>, limit: u32) -> Result<()> {
++    ensure!(
++        size.width.0 >= 0 && size.height.0 >= 0,
++        "negative HWND drawable size"
++    );
++    ensure!(
++        size.width.0 as u32 <= limit && size.height.0 as u32 <= limit,
++        "HWND drawable exceeds WGPU texture limits"
++    );
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn drawable_bounds_reject_negative_and_oversized_but_allow_minimized() {
++        let valid =
++            |w, h| validate_drawable_size(gpui::size(DevicePixels(w), DevicePixels(h)), 16384);
++        assert!(valid(0, 0).is_ok());
++        assert!(valid(3840, 2160).is_ok());
++        assert!(valid(-1, 2160).is_err());
++        assert!(valid(3840, -1).is_err());
++        assert!(valid(16385, 2160).is_err());
++    }
++}

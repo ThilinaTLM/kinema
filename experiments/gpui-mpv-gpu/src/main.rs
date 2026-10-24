@@ -143,12 +143,7 @@ fn main() -> std::process::ExitCode {
                 cx.update(|cx| cx.quit());
                 return;
             };
-            let Some(queue_gate) = gpui_wgpu::experimental_gpu_queue_gate() else {
-                app_outcome.borrow_mut().failed = true;
-                eprintln!("GPU queue gate unavailable; refusing unsafe interop");
-                cx.update(|cx| cx.quit());
-                return;
-            };
+            let queue_gate = context.experimental_gpu_queue_gate();
             let producer = match options.decoder {
                 producer::DecoderMode::Software => Producer::spawn(
                     context.device.clone(),

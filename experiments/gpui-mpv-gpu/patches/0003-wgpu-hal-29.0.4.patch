@@ -1,4 +1,4 @@
-# Standalone Kinema Linux/Vulkan GPU video experiment; not a production override.
+# Isolated Kinema GPU video experiment; not a production override.
 # Base: crates.io wgpu-hal-29.0.4, exact unmodified registry release.
 # Upstream license: MIT OR Apache-2.0; retain the upstream license files in copied sources.
 # Provenance: https://github.com/gfx-rs/wgpu (wgpu-hal 29.0.4 release).

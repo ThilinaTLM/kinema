@@ -1,4 +1,4 @@
-# Standalone Kinema Linux/Vulkan GPU video experiment; not a production override.
+# Isolated Kinema GPU video experiment; not a production override.
 # Base: crates.io gpui-pre-wgpu-0.3.9, exact unmodified registry release.
 # Upstream license: Apache-2.0; retain the upstream license files in copied sources.
 # Provenance: https://github.com/zed-industries/zed @ 93d745668805029476e6d7fbb19652116fed51de
@@ -16,16 +16,64 @@
      "gpui/test-support",
 --- a/src/gpui_wgpu.rs
 +++ b/src/gpui_wgpu.rs
-@@ -13,3 +13,6 @@
+@@ -13,3 +13,9 @@
  ))]
  pub use wgpu_renderer::WgpuHeadlessRenderer;
  pub use wgpu_renderer::{GpuContext, WgpuRenderer, WgpuSurfaceConfig};
 +
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +pub use wgpu_renderer::{experimental_gpu_context, experimental_gpu_queue_gate};
 --- a/src/wgpu_context.rs
 +++ b/src/wgpu_context.rs
-@@ -471,6 +471,11 @@
+@@ -9,6 +9,13 @@
+ 
+ #[derive(Clone)]
+ pub struct WgpuContext {
++    // A context clone retains the same gate even after the last window is gone;
++    // returned device/gate handles do not keep a live-renderer registration alive.
++    #[cfg(all(
++        any(target_os = "linux", target_os = "windows"),
++        feature = "gpu-video-experiment"
++    ))]
++    pub(crate) experimental_queue_gate: Arc<std::sync::Mutex<()>>,
+     pub instance: wgpu::Instance,
+     pub adapter: wgpu::Adapter,
+     pub device: Arc<wgpu::Device>,
+@@ -127,6 +134,18 @@
+ }
+ 
+ impl WgpuContext {
++    /// Clone the synchronization gate belonging to this exact device/context.
++    /// Capture it from the returned context, rather than querying global state a
++    /// second time across window creation/destruction or recovery. This does not
++    /// make an obsolete device current; callers must still reject stale work.
++    #[cfg(all(
++        any(target_os = "linux", target_os = "windows"),
++        feature = "gpu-video-experiment"
++    ))]
++    pub fn experimental_gpu_queue_gate(&self) -> Arc<std::sync::Mutex<()>> {
++        self.experimental_queue_gate.clone()
++    }
++
+     #[cfg(not(target_family = "wasm"))]
+     pub fn new(
+         instance: wgpu::Instance,
+@@ -305,6 +324,11 @@
+         let backend = WgpuBackend::Native(adapter.get_info().backend);
+ 
+         Self {
++            #[cfg(all(
++                any(target_os = "linux", target_os = "windows"),
++                feature = "gpu-video-experiment"
++            ))]
++            experimental_queue_gate: Arc::new(std::sync::Mutex::new(())),
+             instance,
+             adapter,
+             device: Arc::new(device),
+@@ -471,6 +495,16 @@
      #[cfg(not(target_family = "wasm"))]
      pub fn instance(display: Option<Box<dyn wgpu::wgt::WgpuHasDisplayHandle>>) -> wgpu::Instance {
          wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -33,70 +81,139 @@
 +            // backend against the same process-global EGL display in this proof.
 +            #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
 +            backends: wgpu::Backends::VULKAN,
-+            #[cfg(not(all(target_os = "linux", feature = "gpu-video-experiment")))]
++            #[cfg(all(target_os = "windows", feature = "gpu-video-experiment"))]
++            backends: wgpu::Backends::DX12,
++            #[cfg(not(all(
++                any(target_os = "linux", target_os = "windows"),
++                feature = "gpu-video-experiment"
++            )))]
              backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
              flags: wgpu::InstanceFlags::default(),
              backend_options: wgpu::BackendOptions::default(),
 --- a/src/wgpu_renderer.rs
 +++ b/src/wgpu_renderer.rs
-@@ -16,6 +16,50 @@
+@@ -16,6 +16,111 @@
  use std::rc::Rc;
  use std::sync::Arc;
  
-+// Weak records only: released/dropped renderer devices must never be returned.
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++// Weak per-device records: callers holding returned context/gate clones do not
++// keep a renderer registration alive. All windows on one actual device share the
++// same Arc<WgpuContext> and external synchronization gate.
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +static EXPERIMENTAL_CONTEXTS: parking_lot::Mutex<Vec<std::sync::Weak<ExperimentalGpuContext>>> =
 +    parking_lot::Mutex::new(Vec::new());
 +
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +struct ExperimentalGpuContext {
-+    context: WgpuContext,
++    context: Arc<WgpuContext>,
 +    queue_gate: Arc<std::sync::Mutex<()>>,
 +}
 +
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
-+fn active_experimental_context() -> Option<Arc<ExperimentalGpuContext>> {
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
++fn register_experimental_context(
++    context: &WgpuContext,
++    shared: Option<Arc<WgpuContext>>,
++) -> anyhow::Result<Arc<ExperimentalGpuContext>> {
 +    let mut contexts = EXPERIMENTAL_CONTEXTS.lock();
-+    contexts.retain(|context| context.strong_count() > 0);
-+    contexts
++    contexts.retain(|record| record.strong_count() > 0);
++    for record in contexts.iter().filter_map(std::sync::Weak::upgrade) {
++        // Device's Eq compares the actual wgpu dispatch identity, including when
++        // a caller wraps a cloned Device handle in another outer Arc.
++        if record.context.device == context.device {
++            anyhow::ensure!(
++                record.context.queue == context.queue,
++                "same-device experiment contexts must use the same queue"
++            );
++            return Ok(record);
++        }
++    }
++    let record = Arc::new(ExperimentalGpuContext {
++        context: shared.unwrap_or_else(|| Arc::new(context.clone())),
++        queue_gate: context.experimental_queue_gate.clone(),
++    });
++    // Publish only after surface configuration and core creation succeed.
++    Ok(record)
++}
++
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
++fn active_experimental_context() -> anyhow::Result<Option<Arc<ExperimentalGpuContext>>> {
++    let mut contexts = EXPERIMENTAL_CONTEXTS.lock();
++    contexts.retain(|record| record.strong_count() > 0);
++    let mut unique: Option<Arc<ExperimentalGpuContext>> = None;
++    for record in contexts
 +        .iter()
-+        .rev()
 +        .filter_map(std::sync::Weak::upgrade)
-+        .find(|record| !record.context.device_lost())
++        .filter(|record| !record.context.device_lost())
++    {
++        if let Some(previous) = &unique {
++            anyhow::ensure!(
++                previous.context.device == record.context.device,
++                "multiple live GPU devices make the experiment context ambiguous"
++            );
++        }
++        unique = Some(record);
++    }
++    Ok(unique)
 +}
 +
-+/// The single live window renderer's actual device context.
-+/// Returns None before renderer creation or after release/device loss. Call again
-+/// after device recovery; frames on an obsolete device must be discarded.
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++/// The actual device shared by live window renderers, if unambiguous.
++/// None before window renderer creation, after all registrations are released or
++/// lost, or when multiple live devices exist. Returned clones are not leases on
++/// renderer registrations. Discard old-device frames after recovery.
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +pub fn experimental_gpu_context() -> Option<WgpuContext> {
-+    active_experimental_context().map(|record| record.context.clone())
++    active_experimental_context()
++        .ok()
++        .flatten()
++        .map(|record| (*record.context).clone())
 +}
 +
-+/// Shared external synchronization gate for this proof's one Vulkan queue.
-+/// Raw Vulkan queue submits and all wgpu submissions/presentation must use this
-+/// exact gate. Producer waits/polls and command recording must stay outside it.
-+/// Submit/present scopes are short. Existing framework surface configure/drop is
-+/// the exception: HAL waits for device idle there and must retain the gate for
-+/// external queue synchronization, including on UI-thread resize/teardown. A poisoned
-+/// gate is fatal: do not bypass it. Reacquire context AND gate after recovery.
-+/// GL/Vulkan ownership and visibility still require explicit external semaphores;
-+/// this mutex alone is not a GPU memory dependency or presentation fence.
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++/// External synchronization gate shared by EVERY window on the actual device.
++/// None when the live device lookup is absent/ambiguous. Producer waits/polls and
++/// command recording stay outside it. Submit/present scopes are short; existing
++/// framework configure/drop retains the gate across device-idle waits, including
++/// UI-thread resize/teardown. A poisoned gate is fatal: never bypass it.
++/// Reacquire context AND gate on the UI lifecycle thread after recovery. This is
++/// not a GPU memory dependency, cross-API fence, or actual-presentation fence.
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +pub fn experimental_gpu_queue_gate() -> Option<Arc<std::sync::Mutex<()>>> {
-+    active_experimental_context().map(|record| record.queue_gate.clone())
++    active_experimental_context()
++        .ok()
++        .flatten()
++        .map(|record| record.queue_gate.clone())
 +}
 +
  const MAX_INSTANCE_BUFFER_SIZE: u64 = 256 * 1024 * 1024;
  
  const INSTANCE_TEXTURE_TEXEL_SIZE: u64 = 16;
-@@ -94,6 +138,16 @@
+@@ -94,6 +199,19 @@
      subpixel_enhanced_contrast: f32,
      is_bgr: u32,
      _pad: u32,
 +}
 +
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +#[repr(C)]
 +#[derive(Clone, Copy, Pod, Zeroable)]
 +struct GpuSurfaceParams {
@@ -107,36 +224,64 @@
  }
  
  #[derive(Clone, Debug)]
-@@ -124,6 +178,8 @@
+@@ -124,6 +242,11 @@
  }
  
  struct WgpuPipelines {
-+    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    #[cfg(all(
++        any(target_os = "linux", target_os = "windows"),
++        feature = "gpu-video-experiment"
++    ))]
 +    gpu_surfaces: wgpu::RenderPipeline,
      quads: wgpu::RenderPipeline,
      shadows: wgpu::RenderPipeline,
      path_rasterization: wgpu::RenderPipeline,
-@@ -157,6 +213,8 @@
+@@ -157,6 +280,11 @@
  }
  
  struct WgpuBindGroupLayouts {
-+    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    #[cfg(all(
++        any(target_os = "linux", target_os = "windows"),
++        feature = "gpu-video-experiment"
++    ))]
 +    gpu_surfaces: wgpu::BindGroupLayout,
      globals: wgpu::BindGroupLayout,
      instances: wgpu::BindGroupLayout,
      texture: wgpu::BindGroupLayout,
-@@ -211,6 +269,10 @@
+@@ -164,6 +292,15 @@
+ }
+ 
+ /// Shared GPU context reference, used to coordinate device recovery across multiple windows.
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
++pub type GpuContext = Rc<RefCell<Option<Arc<WgpuContext>>>>;
++#[cfg(not(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++)))]
+ pub type GpuContext = Rc<RefCell<Option<WgpuContext>>>;
+ 
+ enum InstanceData {
+@@ -211,6 +348,16 @@
  }
  
  struct WgpuRendererCore {
-+    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    #[cfg(all(
++        any(target_os = "linux", target_os = "windows"),
++        feature = "gpu-video-experiment"
++    ))]
 +    experimental_context: Option<Arc<ExperimentalGpuContext>>,
-+    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    #[cfg(all(
++        any(target_os = "linux", target_os = "windows"),
++        feature = "gpu-video-experiment"
++    ))]
 +    queue_gate: Arc<std::sync::Mutex<()>>,
      resources: WgpuResources,
      atlas: Arc<WgpuAtlas>,
      path_globals_offset: u64,
-@@ -227,12 +289,71 @@
+@@ -227,12 +374,86 @@
      max_texture_size: u32,
  }
  
@@ -145,13 +290,19 @@
 +// which externally synchronizes every queue, including the producer's raw queue.
 +// The wrapper covers normal Drop, destroy, unconfigure, replacement, recovery,
 +// and error unwinding without relying on each caller remembering teardown locks.
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +struct WgpuWindowSurface {
 +    surface: Option<wgpu::Surface<'static>>,
 +    queue_gate: Arc<std::sync::Mutex<()>>,
 +}
 +
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +impl WgpuWindowSurface {
 +    fn new(surface: wgpu::Surface<'static>, queue_gate: Arc<std::sync::Mutex<()>>) -> Self {
 +        Self {
@@ -174,7 +325,10 @@
 +    }
 +}
 +
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +impl std::ops::Deref for WgpuWindowSurface {
 +    type Target = wgpu::Surface<'static>;
 +
@@ -183,7 +337,10 @@
 +    }
 +}
 +
-+#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++#[cfg(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++))]
 +impl Drop for WgpuWindowSurface {
 +    fn drop(&mut self) {
 +        let _queue_gate = self
@@ -196,7 +353,10 @@
 +    }
 +}
 +
-+#[cfg(not(all(target_os = "linux", feature = "gpu-video-experiment")))]
++#[cfg(not(all(
++    any(target_os = "linux", target_os = "windows"),
++    feature = "gpu-video-experiment"
++)))]
 +type WgpuWindowSurface = wgpu::Surface<'static>;
 +
  /// GPU resources of a windowed renderer. A surface is only ever configured against the
@@ -209,57 +369,122 @@
          core: WgpuRendererCore,
      },
      /// The native surface is gone (Android `TerminateWindow`, browser context loss) but
-@@ -379,6 +500,16 @@
+@@ -308,6 +529,21 @@
+             raw_window_handle: window_handle.as_raw(),
+         };
+ 
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
++        if let Some(shared) = active_experimental_context()? {
++            let mut slot = gpu_context.borrow_mut();
++            if slot.as_ref().is_none_or(|context| {
++                context.device_lost()
++                    || (context.device == shared.context.device
++                        && context.queue == shared.context.queue)
++            }) {
++                *slot = Some(shared.context.clone());
++            }
++        }
++
+         // Use the existing context's instance if available, otherwise create a new one.
+         // The surface must be created with the same instance that will be used for
+         // adapter selection, otherwise wgpu will panic.
+@@ -332,10 +568,32 @@
+                 context.check_compatible_with_surface(&surface)?;
+                 context
+             }
+-            None => ctx_ref.insert(WgpuContext::new(instance, &surface, compositor_gpu)?),
++            None => {
++                let context = WgpuContext::new(instance, &surface, compositor_gpu)?;
++                #[cfg(all(
++                    any(target_os = "linux", target_os = "windows"),
++                    feature = "gpu-video-experiment"
++                ))]
++                let context = Arc::new(context);
++                ctx_ref.insert(context)
++            }
+         };
+ 
+         let atlas = Arc::new(WgpuAtlas::from_context(context));
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
++        let context = {
++            let context = Arc::clone(context);
++            drop(ctx_ref);
++            context
++        };
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
++        let context = &*context;
+ 
+         Self::new_internal(
+             Some(Rc::clone(&gpu_context)),
+@@ -379,6 +637,24 @@
          compositor_gpu: Option<CompositorGpuHint>,
          atlas: Arc<WgpuAtlas>,
      ) -> anyhow::Result<Self> {
 +        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
 +        anyhow::ensure!(
-+            active_experimental_context().is_none(),
-+            "GPU video experiment supports only one live WGPU window/context; destroy it before replacing it"
-+        );
-+        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
-+        anyhow::ensure!(
 +            context.adapter.get_info().backend == wgpu::Backend::Vulkan,
-+            "GPU video experiment requires the Vulkan backend"
++            "GPU video experiment requires Vulkan on Linux"
 +        );
++        #[cfg(all(target_os = "windows", feature = "gpu-video-experiment"))]
++        anyhow::ensure!(
++            context.adapter.get_info().backend == wgpu::Backend::Dx12,
++            "GPU video experiment requires DX12 on Windows"
++        );
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
++        let experimental_context = register_experimental_context(
++            context,
++            gpu_context.as_ref().and_then(|slot| slot.borrow().clone()),
++        )?;
          let surface_caps = surface.get_capabilities(&context.adapter);
          let preferred_formats = [
              wgpu::TextureFormat::Bgra8Unorm,
-@@ -459,9 +590,32 @@
+@@ -459,9 +735,33 @@
          };
          // Configure the surface immediately. The adapter selection process already validated
          // that this adapter can successfully configure this surface.
-+        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
-+        let surface = WgpuWindowSurface::new(surface, Arc::new(std::sync::Mutex::new(())));
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
++        let surface = WgpuWindowSurface::new(surface, experimental_context.queue_gate.clone());
          surface.configure(&context.device, &surface_config);
  
          let core = WgpuRendererCore::new(context, atlas.clone(), surface_format, alpha_mode);
-+        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
 +        let core = {
 +            let mut core = core;
-+            core.queue_gate = surface.queue_gate.clone();
-+            let context = Arc::new(ExperimentalGpuContext {
-+                context: context.clone(),
-+                queue_gate: core.queue_gate.clone(),
-+            });
++            core.queue_gate = experimental_context.queue_gate.clone();
 +            let mut contexts = EXPERIMENTAL_CONTEXTS.lock();
-+            contexts.retain(|context| context.strong_count() > 0);
-+            anyhow::ensure!(
-+                !contexts
-+                    .iter()
-+                    .filter_map(std::sync::Weak::upgrade)
-+                    .any(|record| !record.context.device_lost()),
-+                "GPU video experiment rejects concurrent renderer/context creation"
-+            );
-+            contexts.push(Arc::downgrade(&context));
-+            core.experimental_context = Some(context);
++            contexts.retain(|record| record.strong_count() > 0);
++            if !contexts
++                .iter()
++                .filter_map(std::sync::Weak::upgrade)
++                .any(|record| Arc::ptr_eq(&record, &experimental_context))
++            {
++                contexts.push(Arc::downgrade(&experimental_context));
++            }
++            core.experimental_context = Some(experimental_context);
 +            core
 +        };
  
          Ok(Self {
              context: gpu_context,
-@@ -483,6 +637,18 @@
+@@ -483,6 +783,21 @@
  }
  
  impl WgpuRendererCore {
@@ -267,7 +492,10 @@
 +        &self,
 +        commands: impl IntoIterator<Item = wgpu::CommandBuffer>,
 +    ) -> wgpu::SubmissionIndex {
-+        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
 +        let _queue_gate = self
 +            .queue_gate
 +            .lock()
@@ -278,11 +506,14 @@
      fn create_bind_group_layouts(
          device: &wgpu::Device,
          uses_webgl_instance_data: bool,
-@@ -608,7 +774,44 @@
+@@ -608,7 +923,50 @@
              ],
          });
  
-+        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
 +        let gpu_surfaces = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 +            label: Some("experimental_rgba_surface_layout"),
 +            entries: &[
@@ -318,16 +549,22 @@
 +        });
 +
          WgpuBindGroupLayouts {
-+            #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++            #[cfg(all(
++                any(target_os = "linux", target_os = "windows"),
++                feature = "gpu-video-experiment"
++            ))]
 +            gpu_surfaces,
              globals,
              instances,
              texture,
-@@ -930,7 +1133,33 @@
+@@ -930,7 +1288,39 @@
              &shader_module,
          );
  
-+        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
 +        let gpu_surfaces = {
 +            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
 +                label: Some("experimental_rgba_surface_shader"),
@@ -352,18 +589,24 @@
 +        };
 +
          WgpuPipelines {
-+            #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++            #[cfg(all(
++                any(target_os = "linux", target_os = "windows"),
++                feature = "gpu-video-experiment"
++            ))]
 +            gpu_surfaces,
              quads,
              shadows,
              path_rasterization,
-@@ -1207,7 +1436,14 @@
+@@ -1207,7 +1597,17 @@
              return false;
          }
  
 -        frame.present();
 +        {
-+            #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++            #[cfg(all(
++                any(target_os = "linux", target_os = "windows"),
++                feature = "gpu-video-experiment"
++            ))]
 +            let _queue_gate = core
 +                .queue_gate
 +                .lock()
@@ -373,18 +616,24 @@
          true
      }
  }
-@@ -1338,6 +1574,10 @@
+@@ -1338,6 +1738,16 @@
          let max_texture_size = device.limits().max_texture_dimension_2d;
  
          Self {
-+            #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++            #[cfg(all(
++                any(target_os = "linux", target_os = "windows"),
++                feature = "gpu-video-experiment"
++            ))]
 +            experimental_context: None,
-+            #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
-+            queue_gate: Arc::new(std::sync::Mutex::new(())),
++            #[cfg(all(
++                any(target_os = "linux", target_os = "windows"),
++                feature = "gpu-video-experiment"
++            ))]
++            queue_gate: context.experimental_queue_gate.clone(),
              resources: WgpuResources {
                  device,
                  queue,
-@@ -1471,7 +1711,7 @@
+@@ -1471,7 +1881,7 @@
          self.record_frame(scene, target_view, clear_color)
              .inspect_err(|_| {
                  // Queue writes are staged before encoding; flush them even if the frame fails.
@@ -393,7 +642,7 @@
              })
      }
  
-@@ -1609,18 +1849,95 @@
+@@ -1609,18 +2019,104 @@
                              &mut pass,
                          )?;
                      }
@@ -401,11 +650,17 @@
 -                    // implemented by the WGPU renderer.
 -                    PrimitiveBatch::Surfaces(_surfaces) => {}
 +                    PrimitiveBatch::Surfaces(range) => {
-+                        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++                        #[cfg(all(
++                            any(target_os = "linux", target_os = "windows"),
++                            feature = "gpu-video-experiment"
++                        ))]
 +                        for surface in &scene.surfaces[range.clone()] {
 +                            self.draw_gpu_surface(surface, frame_view, &mut pass);
 +                        }
-+                        #[cfg(not(all(target_os = "linux", feature = "gpu-video-experiment")))]
++                        #[cfg(not(all(
++                            any(target_os = "linux", target_os = "windows"),
++                            feature = "gpu-video-experiment"
++                        )))]
 +                        let _ = range; // The existing CoreVideo path remains unimplemented.
 +                    }
                  }
@@ -419,7 +674,10 @@
 +        Ok(submission)
 +    }
 +
-+    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    #[cfg(all(
++        any(target_os = "linux", target_os = "windows"),
++        feature = "gpu-video-experiment"
++    ))]
 +    fn draw_gpu_surface(
 +        &self,
 +        surface: &gpui::PaintSurface,
@@ -496,16 +754,53 @@
      }
  
      fn write_instances(
-@@ -2176,6 +2493,8 @@
+@@ -2176,6 +2672,11 @@
                  anyhow::bail!("Cannot replace the surface: GPU resources have been released")
              }
          };
-+        #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
 +        let surface = WgpuWindowSurface::new(surface, core.queue_gate.clone());
          surface.configure(&core.resources.device, &self.surface_config);
          core.resources.invalidate_intermediate_textures();
          self.state = RendererState::Ready { surface, core };
-@@ -2471,11 +2790,8 @@
+@@ -2214,6 +2715,21 @@
+     {
+         let gpu_context = self.context.as_ref().expect("recover requires gpu_context");
+ 
++        // Independent platform context slots can initially adopt the same Arc.
++        // If another window has recovered already, adopt its healthy replacement
++        // before deciding whether to create another device. Old surfaces/cores
++        // retain their old gate until their guarded teardown below.
++        #[cfg(all(
++            any(target_os = "linux", target_os = "windows"),
++            feature = "gpu-video-experiment"
++        ))]
++        if let Some(shared) = active_experimental_context()? {
++            let mut slot = gpu_context.borrow_mut();
++            if slot.as_ref().is_none_or(|context| context.device_lost()) {
++                *slot = Some(shared.context.clone());
++            }
++        }
++
+         // Check if another window already recovered the context
+         let needs_new_context = gpu_context
+             .borrow()
+@@ -2241,6 +2757,11 @@
+             let surface = create_surface(&instance, window_handle.as_raw())?;
+             let new_context =
+                 WgpuContext::new_rejecting_software(instance, &surface, self.compositor_gpu)?;
++            #[cfg(all(
++                any(target_os = "linux", target_os = "windows"),
++                feature = "gpu-video-experiment"
++            ))]
++            let new_context = Arc::new(new_context);
+             *gpu_context.borrow_mut() = Some(new_context);
+             surface
+         } else {
+@@ -2471,11 +2992,8 @@
                  depth_or_array_layers: 1,
              },
          );
@@ -519,7 +814,7 @@
          let (sender, receiver) = std::sync::mpsc::channel();
          readback_buffer
              .slice(..)
-@@ -2927,3 +3243,104 @@
+@@ -2927,3 +3445,104 @@
          );
      }
  }
