@@ -67,12 +67,7 @@ fn print_decoder_evidence(summary: &producer::Summary, requested: producer::Deco
         "unavailable" | "" => "unavailable",
         _ => "unqualified",
     };
-    let codec = match summary.codec.as_str() {
-        "h264" => "h264",
-        "hevc" => "hevc",
-        "mpeg4" => "mpeg4",
-        _ => "other",
-    };
+    let codec = protocol::safe_codec(&summary.codec);
     let [source_width, source_height] = summary.source_size.unwrap_or([0, 0]);
     println!(
         "decoder_evidence: requested_hwdec={requested} hwdec_current={decoder} codec={codec} decoder_pixel_format={} output_pixel_format={} hw_pixel_format={} source_width={} source_height={} render_width={} render_height={}",

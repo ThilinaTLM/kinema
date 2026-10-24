@@ -20,6 +20,8 @@ gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.9" }
 log = "0.4"
 glow = "0.16"
 libloading = "0.8"
+windows = "0.62.2"
+metal = "0.29"
 thiserror = "2"
 gpui = { package = "gpui-pre", version = "=0.3.9" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9" }

@@ -93,6 +93,17 @@ pub fn parse_render_size(value: &str) -> Result<[u32; 2], String> {
     Ok([width, height])
 }
 
+/// Codec evidence uses fixed labels, never arbitrary media metadata.
+pub fn safe_codec(value: &str) -> &'static str {
+    match value {
+        "h264" => "h264",
+        "hevc" => "hevc",
+        "mpeg4" => "mpeg4",
+        "av1" => "av1",
+        _ => "other",
+    }
+}
+
 /// Only reviewed format names may reach logs; never echo arbitrary media metadata.
 pub fn safe_pixel_format(value: &str) -> &'static str {
     match value {
@@ -354,6 +365,22 @@ mod tests {
     }
 
     #[test]
+    fn codec_evidence_includes_av1_without_echoing_unknown_metadata() {
+        for codec in ["h264", "hevc", "mpeg4", "av1"] {
+            assert_eq!(safe_codec(codec), codec);
+        }
+        for unknown in [
+            "",
+            "AV1",
+            "av1-copy",
+            "/private/media/av1.mkv",
+            "secret\nav1",
+        ] {
+            assert_eq!(safe_codec(unknown), "other");
+        }
+    }
+
+    #[test]
     fn explicit_vaapi_and_hd_size() {
         let options = parse(&[
             "--media",
@@ -367,6 +394,17 @@ mod tests {
         assert_eq!(options.decoder, DecoderMode::Vaapi);
         assert_eq!(options.render_size, [1920, 1080]);
         assert_eq!(parse_render_size("3840x2160").unwrap(), [3840, 2160]);
+        let uhd = parse(&[
+            "--media",
+            "/tmp/synthetic.mkv",
+            "--hwdec",
+            "vaapi",
+            "--render-size",
+            "3840x2160",
+        ])
+        .unwrap();
+        assert_eq!(uhd.decoder, DecoderMode::Vaapi);
+        assert_eq!(uhd.render_size, [3840, 2160]);
     }
 
     #[test]

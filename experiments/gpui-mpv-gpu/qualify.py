@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = Path(__file__).resolve().parent
@@ -20,7 +21,10 @@ CASES = {
     "h2648": ("h264", "libx264", "yuv420p"),
     "hevc8": ("hevc", "libx265", "yuv420p"),
     "hevc10": ("hevc", "libx265", "yuv420p10le"),
+    "av18": ("av1", "libaom-av1", "yuv420p"),
+    "av110": ("av1", "libaom-av1", "yuv420p10le"),
 }
+DEFAULT_CASES = ("h2648", "hevc8", "hevc10")
 # Exact key/value tokens only; never echo arbitrary backend text into reports.
 FIELDS = {
     "request_hwdec": ("request_hwdec", "requested_hwdec"),
@@ -107,6 +111,8 @@ def native_diagnostics(text):
     return {
         "native_vuid_tokens": len(re.findall(r"VUID-", text, re.IGNORECASE)),
         "native_validation_errors": len(re.findall(r"Validation\s+Error", text, re.IGNORECASE)),
+        "native_threading_errors": len(re.findall(
+            r"UNASSIGNED[ -]Threading[^\s\]]*|THREADING\s+ERROR", text, re.IGNORECASE)),
     }
 
 
@@ -200,25 +206,27 @@ def fixture_command(case, destination, size, seconds):
                "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709")
     args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
             "-filter_threads", "2", "-f", "lavfi", "-i", pattern,
-            "-t", str(seconds + 2), "-an", "-c:v", encoder, "-preset", "ultrafast",
+            "-t", str(seconds + 2), "-an", "-c:v", encoder,
             "-threads", "2", "-pix_fmt", pixel_format, "-color_range", "tv",
             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
     if encoder == "libx265":
-        args += ["-x265-params", "pools=2:frame-threads=2:log-level=error"]
+        args += ["-preset", "ultrafast", "-x265-params", "pools=2:frame-threads=2:log-level=error"]
+    elif encoder == "libaom-av1":
+        args += ["-cpu-used", "8", "-row-mt", "0", "-crf", "40", "-b:v", "0"]
     else:
-        args += ["-profile:v", "high", "-x264-params", "cabac=1:8x8dct=1"]
+        args += ["-preset", "ultrafast", "-profile:v", "high", "-x264-params", "cabac=1:8x8dct=1"]
     return args + [str(destination)]
 
 
 def probe_fixture(media, log, codec, pixel_format, size):
     capture(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-             "stream=codec_name,pix_fmt,width,height,r_frame_rate,color_space,color_transfer,color_primaries",
+             "stream=codec_name,pix_fmt,width,height,r_frame_rate,color_range,color_space,color_transfer,color_primaries",
              "-of", "json", str(media)], log, 20)
     streams = json.loads(log.read_text())["streams"]
     if len(streams) != 1:
         raise GateError("fixture must contain one video stream")
     expected = dict(codec_name=codec, pix_fmt=pixel_format, width=size[0], height=size[1],
-                    r_frame_rate="24/1", color_space="bt709", color_transfer="bt709",
+                    r_frame_rate="24/1", color_range="tv", color_space="bt709", color_transfer="bt709",
                     color_primaries="bt709")
     if any(streams[0].get(key) != value for key, value in expected.items()):
         raise GateError("fixture metadata mismatch")
@@ -243,39 +251,55 @@ def run(args):
     directory = Path(tempfile.mkdtemp(prefix="run-", dir=base))
     (directory / MARKER).write_text(TOKEN)
     report = {"status": "failed", "pixel_tests": "separate-required",
-              "validation_layer_requested": env["VK_INSTANCE_LAYERS"],
-              "stress_resize": True, "cases": []}
+              "validation_layer_requested": (None if args.fixtures_only else env["VK_INSTANCE_LAYERS"]),
+              "stress_resize": not args.fixtures_only, "fixtures_only": args.fixtures_only,
+              "selected_cases": args.cases, "cases": []}
     print(f"Evidence: {directory.relative_to(ROOT)}", flush=True)
     try:
-        for name, command in (("ffmpeg", ["ffmpeg", "-version"]),
-                              ("mpv", ["mpv", "--version"]),
-                              ("vainfo", ["vainfo", "--display", "drm", "--device", "/dev/dri/renderD128"])):
+        probes = [("ffmpeg", ["ffmpeg", "-version"])]
+        if not args.fixtures_only:
+            probes += [("mpv", ["mpv", "--version"]),
+                       ("vainfo", ["vainfo", "--display", "drm", "--device", "/dev/dri/renderD128"])]
+        for name, command in probes:
             try:
                 capture(command, directory / f"{name}-caps.log", 20, env)
                 report[name + "_probe"] = "ok"
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 report[name + "_probe"] = "unavailable-see-log"
+        capture(["ffmpeg", "-hide_banner", "-encoders"], directory / "encoders.log", 20, env)
+        encoders = set(re.findall(r"^\s*[A-Z.]{6}\s+(\S+)",
+                                  (directory / "encoders.log").read_text(), re.MULTILINE))
+        report["encoder_availability"] = {case: CASES[case][1] in encoders for case in args.cases}
         size = (3840, 2160) if args.four_k else (1920, 1080)
-        for case, (codec, _, pixel_format) in CASES.items():
+        for case in args.cases:
+            codec, encoder, pixel_format = CASES[case]
             row = {"case": case, "status": "failed"}
             report["cases"].append(row)
+            row.update(source_width=size[0], source_height=size[1])
+            if encoder not in encoders:
+                row["status"] = "unavailable-encoder"
+                raise GateError("selected fixture encoder unavailable")
             media = directory / f"{case}.mkv"
             capture(fixture_command(case, media, size, args.seconds),
                     directory / f"{case}-encode.log", 180, env)
             row["fixture"] = probe_fixture(media, directory / f"{case}-probe.json",
                                            codec, pixel_format, size)
+            if args.fixtures_only:
+                row["status"] = "fixture-pass-not-native-qualified"
+                continue
             log = directory / f"{case}-renderer.log"
             native_text = capture_renderer(
                 [str(SOURCE / "run.sh"), "run", "--media", str(media),
                  "--seconds", str(args.seconds), "--render-size", f"{size[0]}x{size[1]}",
                  "--hwdec", "vaapi", "--stress-resize"], row, log, args.app_timeout, env)
-            if row["native_vuid_tokens"] or row["native_validation_errors"]:
+            if any(row[key] for key in native_diagnostics("")):
                 raise GateError("native_validation_diagnostic")
             summary = parse_summary(native_text)
             row["summary"] = summary
-            validate_summary(summary, codec, size, 10 if case == "hevc10" else 8)
+            validate_summary(summary, codec, size, 10 if pixel_format == "yuv420p10le" else 8)
             row["status"] = "renderer-pass-pixel-tests-required"
-        report["status"] = "renderer-pass-pixel-tests-required"
+        report["status"] = ("fixture-pass-not-native-qualified" if args.fixtures_only
+                            else "renderer-pass-pixel-tests-required")
     except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
         report["failure_code"] = failure_code(error)
         raise
@@ -283,7 +307,8 @@ def run(args):
         with (directory / "report.json").open("x") as output:
             json.dump(report, output, indent=2)
             output.write("\n")
-    print("Renderer matrix passed; native pixel tests still required for qualification.")
+    print("Fixtures passed; no native qualification performed." if args.fixtures_only else
+          "Renderer matrix passed; native pixel tests still required for qualification.")
 
 
 class Tests(unittest.TestCase):
@@ -299,8 +324,10 @@ class Tests(unittest.TestCase):
 
     def test_native_diagnostics_and_10bit(self):
         self.assertEqual(native_diagnostics("Mesa: alternate EGL probe warning"),
-                         {"native_vuid_tokens": 0, "native_validation_errors": 0})
-        for message in ("VUID-vkSubmit-12345", "vuid-anything", "VALIDATION ERROR: test"):
+                         {"native_vuid_tokens": 0, "native_validation_errors": 0, "native_threading_errors": 0})
+        for message in ("VUID-vkSubmit-12345", "vuid-anything", "VALIDATION ERROR: test",
+                        "UNASSIGNED-Threading-MultipleThreads", "UNASSIGNED-Threading-Info",
+                        "threading error: simultaneous use"):
             self.assertGreater(sum(native_diagnostics(message).values()), 0)
         text = self.summary().replace("codec=h264", "codec=hevc").replace(
             "hw_pixel_format=nv12", "hw_pixel_format=p010")
@@ -334,7 +361,7 @@ class Tests(unittest.TestCase):
             # Historical failed logs need not contain the newly required stress fields.
             text = self.summary().replace("gpu_validation_errors=0", "gpu_validation_errors=8")
             text = re.sub(r" resize_(?:requests|observed_changes)=\d+", "", text)
-            text += " secret_field=not_for_report"
+            text += " secret_field=not_for_report\nUNASSIGNED-Threading-MultipleThreads-Write"
             try:
                 capture_renderer([sys.executable, "-c", f"print({text!r}); raise SystemExit(1)"],
                                  row, Path(tmp) / "renderer.log", 5)
@@ -344,6 +371,7 @@ class Tests(unittest.TestCase):
             saved = json.loads(json.dumps(report))
             self.assertEqual(saved["status"], "failed")
             self.assertEqual(saved["cases"][0]["status"], "failed")
+            self.assertEqual(saved["cases"][0]["native_threading_errors"], 1)
             evidence = saved["cases"][0]["observed_evidence"]
             self.assertEqual(evidence["gpu_validation_errors"], 8)
             self.assertEqual(evidence["actual_decoder"], "vaapi")
@@ -402,22 +430,98 @@ class Tests(unittest.TestCase):
                          "required_component_unavailable")
         self.assertEqual(failure_code(ValueError("private backend text")), "invalid_metadata")
 
+    def test_av1_4k_gates(self):
+        for depth in (8, 10):
+            text = self.summary().replace("codec=h264", "codec=av1").replace(
+                "1920", "3840").replace("1080", "2160")
+            if depth == 10:
+                text = text.replace("hw_pixel_format=nv12", "hw_pixel_format=p010")
+            summary = parse_summary(text)
+            validate_summary(summary, "av1", (3840, 2160), depth)
+            for field, value in (("actual_decoder", "no"), ("maps", 1),
+                                 ("source_width", 1920), ("render_width", 1920),
+                                 ("hw_pixel_format", "nv12" if depth == 10 else "p010")):
+                with self.subTest(depth=depth, field=field), self.assertRaises(GateError):
+                    validate_summary(dict(summary, **{field: value}), "av1", (3840, 2160), depth)
+
+    def test_fixture_probe_rejects_wrong_av1_metadata(self):
+        expected = dict(codec_name="av1", pix_fmt="yuv420p10le", width=3840, height=2160,
+                        r_frame_rate="24/1", color_range="tv", color_space="bt709",
+                        color_transfer="bt709", color_primaries="bt709")
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "probe.json"
+            for key, value in (("codec_name", "hevc"), ("pix_fmt", "yuv420p"),
+                               ("width", 1920), ("color_range", "pc"),
+                               ("color_transfer", "smpte2084")):
+                log.write_text(json.dumps({"streams": [dict(expected, **{key: value})]}))
+                with self.subTest(key=key), \
+                     mock.patch.object(sys.modules[__name__], "capture"), \
+                     self.assertRaisesRegex(GateError, "fixture metadata mismatch"):
+                    probe_fixture(Path(tmp) / "av110.mkv", log, "av1", "yuv420p10le", (3840, 2160))
+
+    def test_fixture_failures_are_not_skips(self):
+        # No external tools, native app, or GUI are launched by this test.
+        for failure in ("unavailable", "encode", "timeout"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "target").mkdir()
+                args = argparse.Namespace(fixtures_only=True, four_k=True, cases=["av110"],
+                                          seconds=4, app_timeout=30)
+
+                def fake_capture(command, log, timeout, env=None):
+                    if "-encoders" in command:
+                        log.write_text(" V....D libaom-av1 encoder\n" if failure != "unavailable" else "")
+                    elif "-c:v" in command:
+                        if failure == "timeout":
+                            raise subprocess.TimeoutExpired(command, timeout)
+                        raise GateError("fixture encoding failed")
+                    else:
+                        log.write_text("")
+
+                with mock.patch.dict(os.environ, {"KINEMA_GPU_EXPERIMENT_HWDEC": "no"}), \
+                     mock.patch.object(sys.modules[__name__], "ROOT", root), \
+                     mock.patch.object(sys.modules[__name__], "capture", side_effect=fake_capture), \
+                     mock.patch.object(sys.modules[__name__], "capture_renderer") as renderer, \
+                     mock.patch("builtins.print"):
+                    with self.assertRaises((GateError, subprocess.TimeoutExpired)):
+                        run(args)
+                    renderer.assert_not_called()
+                report_path, = root.glob("target/gpui-mpv-gpu/qualification/run-*/report.json")
+                report = json.loads(report_path.read_text())
+                self.assertEqual(report["status"], "failed")
+                self.assertEqual(report["selected_cases"], ["av110"])
+                self.assertEqual(report["cases"][0]["status"],
+                                 "unavailable-encoder" if failure == "unavailable" else "failed")
+                self.assertEqual(report["failure_code"], {
+                    "unavailable": "selected_fixture_encoder_unavailable",
+                    "encode": "fixture_encoding_failed", "timeout": "subprocess_timeout"}[failure])
+
     def test_encoding_argument_lists(self):
         for case in CASES:
             command = fixture_command(case, Path("/owned/fixture.mkv"), (1920, 1080), 5)
             self.assertIn("-n", command)
             self.assertEqual(command[command.index("-threads") + 1], "2")
             self.assertEqual(command[-1], "/owned/fixture.mkv")
+            self.assertEqual(command[command.index("-filter_threads") + 1], "2")
+            if case.startswith("av1"):
+                self.assertEqual(command[command.index("-c:v") + 1], "libaom-av1")
+                self.assertNotIn("-preset", command)
+                self.assertEqual(command[command.index("-row-mt") + 1], "0")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", nargs="?", choices=["run"], default="run")
+    parser.add_argument("--cases", nargs="+", choices=tuple(CASES), default=list(DEFAULT_CASES),
+                        help="explicit codec cases; default: h2648 hevc8 hevc10")
+    parser.add_argument("--fixtures-only", action="store_true", help="encode/probe only; no native renderer")
     parser.add_argument("--self-test", action="store_true", help="stdlib tests only; no GPU/tools")
     parser.add_argument("--seconds", type=int, choices=range(4, 11), default=5, metavar="4..10")
     parser.add_argument("--4k", dest="four_k", action="store_true", help="3840x2160 source AND render")
     parser.add_argument("--app-timeout", type=int, choices=range(30, 901), default=300, metavar="30..900")
     args = parser.parse_args()
+    if len(args.cases) != len(set(args.cases)):
+        parser.error("duplicate cases are not allowed")
     if args.self_test:
         return 0 if unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(Tests)).wasSuccessful() else 1
     try:

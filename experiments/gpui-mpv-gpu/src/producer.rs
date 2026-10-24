@@ -849,35 +849,121 @@ mod tests {
         }
     }
 
+    /// Explicit encoder parameters: no encoder substitution or playback fallback.
+    /// AV1 fixtures require FFmpeg's libaom-av1 with 8/10-bit support; encoding
+    /// is software-only fixture preparation, never a playback decoding fallback.
+    #[derive(Clone, Copy)]
+    struct NativeCodec {
+        encoder: &'static str,
+        codec: &'static str,
+        pixel_format: &'static str,
+        encoder_args: &'static [&'static str],
+    }
+    const FFV1: NativeCodec = NativeCodec {
+        encoder: "ffv1",
+        codec: "ffv1",
+        pixel_format: "yuv444p",
+        encoder_args: &[],
+    };
+    const H264: NativeCodec = NativeCodec {
+        encoder: "libx264",
+        codec: "h264",
+        pixel_format: "yuv420p",
+        encoder_args: &[
+            "-preset",
+            "ultrafast",
+            "-profile:v",
+            "high",
+            "-x264-params",
+            "cabac=1:8x8dct=1",
+        ],
+    };
+    const HEVC: NativeCodec = NativeCodec {
+        encoder: "libx265",
+        codec: "hevc",
+        pixel_format: "yuv420p",
+        encoder_args: &[
+            "-preset",
+            "ultrafast",
+            "-x265-params",
+            "pools=2:frame-threads=2:log-level=error",
+        ],
+    };
+    const HEVC10: NativeCodec = NativeCodec {
+        pixel_format: "yuv420p10le",
+        ..HEVC
+    };
+    const AV1: NativeCodec = NativeCodec {
+        encoder: "libaom-av1",
+        codec: "av1",
+        pixel_format: "yuv420p",
+        encoder_args: &["-cpu-used", "8", "-row-mt", "1", "-crf", "24", "-b:v", "0"],
+    };
+    const AV1_10: NativeCodec = NativeCodec {
+        pixel_format: "yuv420p10le",
+        ..AV1
+    };
+
     /// TEST-ONLY GPU readback: verifies real mpv/PBO/Vulkan pixels and vertical
     /// orientation. This mapping path is deliberately not used by playback.
     #[test]
     #[ignore = "requires Intel Mesa Vulkan, patched HAL external semaphores, EGL, libmpv and ffmpeg"]
     fn native_synthetic_orientation_readback() {
-        native_readback("ffv1", "yuv444p", DecoderMode::Software, [64, 64]);
-    }
-    #[test]
-    #[ignore = "exclusive native Intel VAAPI qualification with validation and test-only readback"]
-    fn native_vaapi_h264_1080p() {
-        native_readback("libx264", "yuv420p", DecoderMode::Vaapi, [1920, 1080]);
-    }
-    #[test]
-    #[ignore = "exclusive native Intel VAAPI qualification with validation and test-only readback"]
-    fn native_vaapi_hevc_1080p() {
-        native_readback("libx265", "yuv420p", DecoderMode::Vaapi, [1920, 1080]);
-    }
-    #[test]
-    #[ignore = "exclusive native Intel VAAPI qualification with validation and test-only readback"]
-    fn native_vaapi_hevc10_1080p() {
-        native_readback("libx265", "yuv420p10le", DecoderMode::Vaapi, [1920, 1080]);
+        native_readback(FFV1, DecoderMode::Software, [64, 64]);
     }
 
-    fn native_readback(codec: &str, pixel_format: &str, decoder: DecoderMode, size: [u32; 2]) {
+    // Run each dedicated test exclusively (--ignored --exact --test-threads=1),
+    // with Intel Mesa Vulkan/VAAPI, patched HAL, EGL, libmpv, validation layers,
+    // and FFmpeg built with the named encoder and requested pixel format.
+    // Missing encoder, VAAPI codec/profile/resolution, or runtime support FAILS;
+    // ignored means opt-in, not a successful capability skip. All cases are SDR.
+    macro_rules! vaapi_readback_test {
+        ($name:ident, $codec:expr, $size:expr) => {
+            #[test]
+            #[ignore = "exclusive native Intel VAAPI SDR qualification; requires matching FFmpeg encoder, hardware codec/profile/size, Vulkan validation and TEST ONLY readback"]
+            fn $name() {
+                native_readback($codec, DecoderMode::Vaapi, $size);
+            }
+        };
+    }
+    vaapi_readback_test!(native_vaapi_h264_1080p, H264, [1920, 1080]);
+    vaapi_readback_test!(native_vaapi_hevc_1080p, HEVC, [1920, 1080]);
+    vaapi_readback_test!(native_vaapi_hevc10_1080p, HEVC10, [1920, 1080]);
+    vaapi_readback_test!(native_vaapi_h264_4k, H264, [3840, 2160]);
+    vaapi_readback_test!(native_vaapi_hevc_4k, HEVC, [3840, 2160]);
+    vaapi_readback_test!(native_vaapi_hevc10_4k, HEVC10, [3840, 2160]);
+    vaapi_readback_test!(native_vaapi_av1_1080p, AV1, [1920, 1080]);
+    vaapi_readback_test!(native_vaapi_av1_10_1080p, AV1_10, [1920, 1080]);
+    vaapi_readback_test!(native_vaapi_av1_4k, AV1, [3840, 2160]);
+    vaapi_readback_test!(native_vaapi_av1_10_4k, AV1_10, [3840, 2160]);
+
+    #[test]
+    fn native_fixture_codec_parameters_are_explicit_sdr() {
+        for codec in [H264, HEVC, HEVC10, AV1, AV1_10] {
+            assert!(matches!(codec.pixel_format, "yuv420p" | "yuv420p10le"));
+            assert!(!codec.encoder_args.is_empty());
+        }
+        assert_eq!(HEVC10.codec, "hevc");
+        assert_eq!(AV1.codec, "av1");
+        assert_eq!(AV1_10.codec, "av1");
+        assert_eq!(AV1.encoder, "libaom-av1");
+        assert_eq!(AV1_10.encoder, AV1.encoder);
+        assert_eq!(AV1.pixel_format, "yuv420p");
+        assert_eq!(AV1_10.pixel_format, "yuv420p10le");
+        assert_eq!(AV1_10.encoder_args, AV1.encoder_args);
+    }
+
+    fn native_readback(codec: NativeCodec, decoder: DecoderMode, size: [u32; 2]) {
+        assert!(size[0] > 0 && size[0] <= 3840 && size[0].is_multiple_of(2));
+        assert!(size[1] > 0 && size[1] <= 2160 && size[1].is_multiple_of(2));
+        let pixel_format = codec.pixel_format;
         // Run this ignored native test exclusively: the process-wide validator
         // must observe device creation, submissions, and complete teardown.
         crate::validation::install();
         assert_eq!(crate::validation::problem_count(), 0);
-        let root = std::env::temp_dir().join(format!(
+        // The generated manifest lives under target/gpui-mpv-gpu. Never write
+        // fixtures to configuration directories or outside generated targets.
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
             "kinema-gpu-smoke-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -908,6 +994,7 @@ mod tests {
         );
         let mut ffmpeg = std::process::Command::new("ffmpeg");
         ffmpeg.args([
+            "-nostdin",
             "-v",
             "error",
             "-filter_threads",
@@ -919,7 +1006,7 @@ mod tests {
             "-t",
             "2",
             "-c:v",
-            codec,
+            codec.encoder,
             "-threads",
             "2",
             "-pix_fmt",
@@ -933,16 +1020,33 @@ mod tests {
             "-color_trc",
             "bt709",
         ]);
-        if codec != "ffv1" {
-            ffmpeg.args(["-preset", "ultrafast"]);
+        ffmpeg.args(codec.encoder_args);
+        // Bound both generated media (20 frames at 10 fps) and encoder wall
+        // time. A missing/unsupported encoder is a failure, never a test skip.
+        ffmpeg.args(["-frames:v", "20"]);
+        let mut child = ffmpeg.arg(&media).spawn().unwrap_or_else(|error| {
+            panic!("fixture encoder {} unavailable: {error}", codec.encoder)
+        });
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(
+                    status.success(),
+                    "fixture encoder {} ({pixel_format}, {size:?}) failed: {status}; no substitution permitted",
+                    codec.encoder
+                );
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "fixture encoder {} ({pixel_format}, {size:?}) exceeded 120 seconds",
+                    codec.encoder
+                );
+            }
+            thread::sleep(Duration::from_millis(20));
         }
-        if codec == "libx264" {
-            ffmpeg.args(["-profile:v", "high", "-x264-params", "cabac=1:8x8dct=1"]);
-        }
-        if codec == "libx265" {
-            ffmpeg.args(["-x265-params", "pools=2:frame-threads=2:log-level=error"]);
-        }
-        assert!(ffmpeg.arg(&media).status().unwrap().success());
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -1060,14 +1164,7 @@ mod tests {
         assert_eq!(summary.requested_decoder, decoder.as_str());
         assert_eq!(summary.source_size, Some(size));
         assert_eq!(summary.render_size, size);
-        assert_eq!(
-            summary.codec,
-            match codec {
-                "libx264" => "h264",
-                "libx265" => "hevc",
-                other => other,
-            }
-        );
+        assert_eq!(summary.codec, codec.codec);
         if decoder == DecoderMode::Vaapi {
             assert_eq!(summary.decoder, "vaapi");
             assert_eq!(summary.decoder_pixel_format, "vaapi");
@@ -1090,7 +1187,9 @@ mod tests {
             0,
             "native validation reported problems during creation, rendering, or shutdown"
         );
-        eprintln!("native synthetic readback verified: {summary:?}");
+        eprintln!(
+            "TEST ONLY native synthetic pixel/orientation readback verified (not playback CPU maps): {summary:?}"
+        );
     }
 
     #[test]
