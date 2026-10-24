@@ -13,6 +13,11 @@ publish = false
 unicode-segmentation = "1.13"
 kinema-core = { path = "crates/kinema-core" }
 kinema-mpv = { path = "crates/kinema-mpv" }
+wgpu = "=29.0.4"
+wgpu-hal = "=29.0.4"
+ash = "0.38"
+gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.9" }
+log = "0.4"
 glow = "0.16"
 libloading = "0.8"
 thiserror = "2"

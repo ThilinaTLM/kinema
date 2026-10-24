@@ -1,0 +1,212 @@
+# Standalone Kinema Linux/Vulkan GPU video experiment; not a production override.
+# Base: crates.io gpui-pre-0.3.9, exact unmodified registry release.
+# Upstream license: Apache-2.0; retain the upstream license files in copied sources.
+# Provenance: https://github.com/zed-industries/zed @ 93d745668805029476e6d7fbb19652116fed51de
+# Apply from the COPIED crate directory using patch -p1; never patch the registry.
+
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -61,6 +61,7 @@
+     "windows-manifest",
+ ]
+ font-kit = []
++gpu-video-experiment = ["dep:wgpu"]
+ inspector = ["gpui_macros/inspector"]
+ leak-detection = []
+ profiler = ["dep:hdrhistogram"]
+@@ -656,3 +657,9 @@
+ [lints.rust.unexpected_cfgs]
+ level = "allow"
+ priority = 0
++
++[target.'cfg(target_os = "linux")'.dependencies.wgpu]
++version = "=29.0.4"
++optional = true
++default-features = false
++features = ["std"]
+--- a/src/elements/surface.rs
++++ b/src/elements/surface.rs
+@@ -8,9 +8,108 @@
+ use objc2_core_video::{CVPixelBuffer, CVPixelBufferGetHeight, CVPixelBufferGetWidth};
+ use refineable::Refineable;
+ 
++/// An immutable, opaque experimental SDR GPU frame on the renderer's device.
++///
++/// The producer must finish GPU writes before publishing this frame and must not
++/// mutate or reuse the texture while any frame reference exists. Use a default
++/// 2D view of a single-layer, single-mip RGBA8Unorm texture. This API performs no
++/// import, synchronization, color conversion, or CPU readback. Device identity
++/// and view compatibility are validated by wgpu when the renderer binds it.
++///
++/// The owner keeps producer resources alive through element/scene drawing; wgpu
++/// tracks submitted GPU resources. Dropping a frame is NOT a presentation fence
++/// and gives no guarantee about actual presentation time.
++#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++pub struct GpuSurfaceFrame {
++    view: wgpu::TextureView,
++    size: [u32; 2],
++    _owner: std::sync::Arc<dyn Send + Sync>,
++}
++
++#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++impl GpuSurfaceFrame {
++    /// Validate basic texture metadata and retain the immutable view and owner.
++    /// The view itself must use the default format, mip, layer, and dimension.
++    pub fn new(
++        view: wgpu::TextureView,
++        size: [u32; 2],
++        owner: std::sync::Arc<dyn Send + Sync>,
++    ) -> Result<Self, &'static str> {
++        let texture = view.texture();
++        if !valid_gpu_surface_size(size, [texture.width(), texture.height()]) {
++            return Err("GPU surface dimensions must be nonzero and match the texture");
++        }
++        if texture.format() != wgpu::TextureFormat::Rgba8Unorm
++            || texture.dimension() != wgpu::TextureDimension::D2
++            || texture.depth_or_array_layers() != 1
++            || texture.mip_level_count() != 1
++            || texture.sample_count() != 1
++            || !texture
++                .usage()
++                .contains(wgpu::TextureUsages::TEXTURE_BINDING)
++        {
++            return Err(
++                "GPU surface requires a single-layer/mip/sample RGBA8Unorm sampled 2D texture",
++            );
++        }
++        Ok(Self {
++            view,
++            size,
++            _owner: owner,
++        })
++    }
++
++    /// The frame's pixel dimensions.
++    pub fn size(&self) -> [u32; 2] {
++        self.size
++    }
++
++    /// Immutable texture view, for the experimental renderer only.
++    #[doc(hidden)]
++    pub fn texture_view(&self) -> &wgpu::TextureView {
++        &self.view
++    }
++}
++
++#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++fn valid_gpu_surface_size(size: [u32; 2], actual: [u32; 2]) -> bool {
++    size[0] != 0 && size[1] != 0 && size == actual
++}
++
++#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++impl std::fmt::Debug for GpuSurfaceFrame {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("GpuSurfaceFrame")
++            .field("size", &self.size)
++            .finish_non_exhaustive()
++    }
++}
++
++#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++impl PartialEq for GpuSurfaceFrame {
++    fn eq(&self, other: &Self) -> bool {
++        std::ptr::eq(self, other)
++    }
++}
++#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++impl Eq for GpuSurfaceFrame {}
++
++/// Create an experimental GPU surface, using the usual styling and object fit.
++#[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++pub fn gpu_surface(frame: std::sync::Arc<GpuSurfaceFrame>) -> Surface {
++    Surface {
++        source: SurfaceSource::Gpu(frame),
++        object_fit: ObjectFit::Contain,
++        style: Default::default(),
++    }
++}
++
+ /// A source of a surface's content.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub enum SurfaceSource {
++    /// An immutable RGBA frame on the active WGPU renderer device.
++    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    Gpu(std::sync::Arc<GpuSurfaceFrame>),
+     /// A CoreVideo image buffer
+     #[cfg(any(target_os = "macos", target_os = "ios"))]
+     Surface(CFRetained<CVPixelBuffer>),
+@@ -103,6 +202,16 @@
+         _: &mut App,
+     ) {
+         match &self.source {
++            #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++            SurfaceSource::Gpu(frame) => {
++                let [width, height] = frame.size();
++                let size = crate::size(
++                    crate::DevicePixels(width as i32),
++                    crate::DevicePixels(height as i32),
++                );
++                let new_bounds = self.object_fit.get_bounds(bounds, size);
++                window.paint_gpu_surface(new_bounds, frame.clone());
++            }
+             #[cfg(any(target_os = "macos", target_os = "ios"))]
+             SurfaceSource::Surface(surface) => {
+                 let size = crate::size(
+@@ -132,3 +241,14 @@
+         &mut self.style
+     }
+ }
++
++#[cfg(all(test, target_os = "linux", feature = "gpu-video-experiment"))]
++mod gpu_surface_tests {
++    #[test]
++    fn dimensions_must_be_nonzero_and_match() {
++        assert!(super::valid_gpu_surface_size([640, 360], [640, 360]));
++        assert!(!super::valid_gpu_surface_size([0, 360], [0, 360]));
++        assert!(!super::valid_gpu_surface_size([640, 0], [640, 0]));
++        assert!(!super::valid_gpu_surface_size([640, 360], [360, 640]));
++    }
++}
+--- a/src/scene.rs
++++ b/src/scene.rs
+@@ -766,6 +766,10 @@
+ #[derive(Clone, Debug)]
+ #[allow(missing_docs)]
+ pub struct PaintSurface {
++    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    pub gpu_frame: std::sync::Arc<crate::GpuSurfaceFrame>,
++    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    pub opacity: f32,
+     pub order: DrawOrder,
+     pub bounds: Bounds<ScaledPixels>,
+     pub content_mask: ContentMask<ScaledPixels>,
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -5171,6 +5171,27 @@
+         });
+     }
+ 
++    /// Paint an immutable GPU frame using normal scene ordering and clipping.
++    /// This does not wait for GPU completion or actual presentation.
++    #[cfg(all(target_os = "linux", feature = "gpu-video-experiment"))]
++    pub fn paint_gpu_surface(
++        &mut self,
++        bounds: Bounds<Pixels>,
++        frame: Arc<crate::GpuSurfaceFrame>,
++    ) {
++        self.invalidator.debug_assert_paint();
++        let bounds = self.snap_bounds(bounds);
++        let content_mask = self.snapped_content_mask();
++        let opacity = self.element_opacity();
++        self.next_frame.scene.insert_primitive(crate::PaintSurface {
++            order: 0,
++            bounds,
++            content_mask,
++            gpu_frame: frame,
++            opacity,
++        });
++    }
++
+     /// Removes an image from the sprite atlas.
+     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
+         for frame_index in 0..data.frame_count() {

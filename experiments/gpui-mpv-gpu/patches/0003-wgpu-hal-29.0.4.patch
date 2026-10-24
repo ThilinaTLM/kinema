@@ -1,0 +1,20 @@
+# Standalone Kinema Linux/Vulkan GPU video experiment; not a production override.
+# Base: crates.io wgpu-hal-29.0.4, exact unmodified registry release.
+# Upstream license: MIT OR Apache-2.0; retain the upstream license files in copied sources.
+# Provenance: https://github.com/gfx-rs/wgpu (wgpu-hal 29.0.4 release).
+# Apply from the COPIED crate directory using patch -p1; never patch the registry.
+
+--- a/src/vulkan/adapter.rs
++++ b/src/vulkan/adapter.rs
+@@ -1296,6 +1296,11 @@
+         // Optional `VK_KHR_external_memory_fd`
+         if self.supports_extension(khr::external_memory_fd::NAME) {
+             extensions.push(khr::external_memory_fd::NAME);
++        }
++
++        // Optional `VK_KHR_external_semaphore_fd` (standalone GPU video experiment)
++        if self.supports_extension(khr::external_semaphore_fd::NAME) {
++            extensions.push(khr::external_semaphore_fd::NAME);
+         }
+ 
+         // Optional `VK_EXT_external_memory_dma`
