@@ -760,9 +760,7 @@ fn refresh_decode_evidence(client: &Client, shared: &Shared) {
         value
     });
     let mut pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
-    if pipeline.generation == generation {
-        pipeline.decode_evidence = evidence;
-    }
+    pipeline.update_decode_evidence(generation, evidence);
 }
 
 #[cfg(test)]

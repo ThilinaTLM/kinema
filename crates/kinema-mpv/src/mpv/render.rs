@@ -86,7 +86,7 @@ pub(super) struct Pipeline {
     config: Config,
     pub viewport: [u32; 2],
     #[cfg(feature = "experimental-gpu")]
-    pub decode_evidence: [String; 5],
+    decode_evidence: [String; 5],
     pub metadata: [Option<i64>; 5],
     size: [u32; 2],
     pub video_absent: bool,
@@ -133,6 +133,18 @@ impl Pipeline {
         if self.frame.take().is_some() {
             self.stats.coalesced_frames += 1;
         }
+    }
+    /// Accept a control-worker snapshot only for the generation queried. A
+    /// changed snapshot invalidates the mailbox and forces a render even when
+    /// paused libmpv has no further frame-update notification to send.
+    #[cfg(feature = "experimental-gpu")]
+    pub fn update_decode_evidence(&mut self, generation: u64, evidence: [String; 5]) -> bool {
+        if self.generation != generation || self.decode_evidence == evidence {
+            return false;
+        }
+        self.decode_evidence = evidence;
+        self.invalidate();
+        true
     }
     #[cfg(feature = "experimental-gpu")]
     pub fn experimental_enabled(&self) -> bool {
@@ -543,6 +555,60 @@ pub(super) fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "experimental-gpu")]
+    #[test]
+    fn paused_metadata_ready_forces_redraw_after_consumed_generation() {
+        let mut pipeline = Pipeline::new(Config::default());
+        let mut state = PlaybackState {
+            paused: true,
+            ..Default::default()
+        };
+        pipeline.viewport = [1920, 1080];
+        pipeline.metadata = [Some(1920), Some(1080), None, None, None];
+        pipeline.recompute(&mut state).unwrap();
+        let mut schedule = GpuSchedule::new();
+        schedule.consumed(pipeline.generation);
+        schedule.observe(0); // Paused video supplies no more mpv updates.
+        assert!(!schedule.ready(false, pipeline.generation));
+        let evidence = ["vaapi", "vaapi", "vaapi", "nv12", "bt.1886"].map(str::to_owned);
+        assert!(pipeline.update_decode_evidence(pipeline.generation, evidence.clone()));
+        assert!(schedule.ready(false, pipeline.generation));
+        schedule.consumed(pipeline.generation);
+        assert!(!pipeline.update_decode_evidence(pipeline.generation, evidence));
+        assert!(!schedule.ready(false, pipeline.generation));
+        assert!(state.paused);
+    }
+    #[cfg(feature = "experimental-gpu")]
+    #[test]
+    fn stale_evidence_cannot_override_source_invalidation() {
+        let mut pipeline = Pipeline::new(Config::default());
+        let queried_generation = pipeline.generation;
+        pipeline.clear(&mut PlaybackState::default());
+        let generation = pipeline.generation;
+        assert!(
+            !pipeline
+                .update_decode_evidence(queried_generation, std::array::from_fn(|_| "old".into()))
+        );
+        assert_eq!(pipeline.generation, generation);
+        assert_eq!(
+            pipeline.decode_evidence,
+            std::array::from_fn(|_| String::new())
+        );
+    }
+    #[cfg(feature = "experimental-gpu")]
+    #[test]
+    fn unknown_evidence_forces_recheck_but_never_produces_cpu_pixels() {
+        let mut pipeline = Pipeline::new(Config::default());
+        let evidence = std::array::from_fn(|_| "unavailable".into());
+        assert!(pipeline.update_decode_evidence(pipeline.generation, evidence));
+        assert!(pipeline.take().is_none());
+        assert!(pipeline.take_gpu().is_none());
+        let stats = pipeline.snapshot(&PlaybackState::default());
+        assert_eq!(stats.rendered_frames, 0);
+        assert_eq!(stats.readback_bytes, 0);
+        assert_eq!(stats.upload_bytes_estimate, 0);
+    }
+
     #[test]
     fn gpu_pending_deferral_retains_and_coalesces_updates() {
         let mut schedule = GpuSchedule::new();
