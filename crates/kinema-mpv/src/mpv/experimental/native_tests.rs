@@ -6,8 +6,8 @@
 //! The sole pixel mapping below is explicitly TEST ONLY. Playback readback
 //! counters must remain zero; each Player owns only its ordinary client/workers.
 use crate::{
-    Config, ExperimentalFrame, ExperimentalGpuContext, HardwareDecoding, PlaybackState, Player,
-    RenderBackend, ResolutionPolicy,
+    Config, ExperimentalFrame, ExperimentalGpuContext, HardwareDecoding, PlaybackFailure,
+    PlaybackState, Player, RenderBackend, ResolutionPolicy,
 };
 use std::{
     fs::{self, File},
@@ -297,6 +297,50 @@ const AV1_10: Codec = Codec {
     ..AV1
 };
 
+// Metadata-only HDR gate stimulus: the source pattern remains SDR, NOT an HDR
+// visual qualification. Untagged deliberately omits both filter and encoder tags.
+#[derive(Clone, Copy, Debug)]
+enum Metadata {
+    Bt709,
+    Untagged,
+    PqTestOnly,
+}
+impl Metadata {
+    fn tags(self) -> &'static [&'static str] {
+        match self {
+            Self::Bt709 => &[
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+            ],
+            Self::Untagged => &[],
+            Self::PqTestOnly => &[
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "smpte2084",
+            ],
+        }
+    }
+}
+const H264_HIGH10: Codec = Codec {
+    pixels: "yuv420p10le",
+    args: &[
+        "-preset",
+        "ultrafast",
+        "-profile:v",
+        "high10",
+        "-x264-params",
+        "cabac=1:8x8dct=1",
+    ],
+    ..H264
+};
+
 struct Fixtures(PathBuf);
 impl Fixtures {
     fn new() -> Self {
@@ -315,15 +359,30 @@ impl Fixtures {
         Self(root)
     }
     fn encode(&self, codec: Codec, size: [u32; 2]) -> PathBuf {
+        self.encode_metadata(codec, size, Metadata::Bt709)
+    }
+    fn encode_metadata(&self, codec: Codec, size: [u32; 2], metadata: Metadata) -> PathBuf {
         let stem = format!("{}-{}-{}x{}", codec.name, codec.pixels, size[0], size[1]);
         let path = self.0.join(format!("{stem}.mkv"));
         let log = self.0.join(format!("{stem}.stderr"));
         // Lavfi colors originate in BT.601 YUV: convert, do not merely tag as
         // BT.709. Ten-bit variants are SDR, never an HDR qualification.
-        let pattern = format!(
+        let mut pattern = format!(
             "color=c=red:s={}x{}:r=24,drawbox=x=iw/2:y=0:w=iw/2:h=ih/2:color=lime:t=fill,drawbox=x=0:y=ih/2:w=iw/2:h=ih/2:color=blue:t=fill,drawbox=x=iw/2:y=ih/2:w=iw/2:h=ih/2:color=white:t=fill,scale=in_color_matrix=bt601:out_color_matrix=bt709:in_range=tv:out_range=tv,format={},setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
             size[0], size[1], codec.pixels,
         );
+        match metadata {
+            Metadata::Bt709 => {}
+            Metadata::Untagged => {
+                // Even scale's out_color_matrix can propagate a matrix tag.
+                // Keep the raw SDR pattern and pixel format, with no color tags.
+                pattern.truncate(pattern.find(",scale=").unwrap());
+                pattern.push_str(&format!(",format={}", codec.pixels));
+            }
+            Metadata::PqTestOnly => {
+                pattern = pattern.replace("color_trc=bt709", "color_trc=smpte2084")
+            }
+        }
         let child = Command::new("ffmpeg")
             .args([
                 "-nostdin",
@@ -352,13 +411,8 @@ impl Fixtures {
                 codec.pixels,
                 "-color_range",
                 "tv",
-                "-colorspace",
-                "bt709",
-                "-color_primaries",
-                "bt709",
-                "-color_trc",
-                "bt709",
             ])
+            .args(metadata.tags())
             .args(codec.args)
             .arg(&path)
             .stdin(Stdio::null())
@@ -386,6 +440,72 @@ impl Fixtures {
             thread::sleep(Duration::from_millis(20));
         }
         path
+    }
+    fn verify_metadata(&self, path: &Path, codec: Codec, metadata: Metadata) {
+        // Probe only this test's owned synthetic file. Never print raw probe
+        // output: the fixed assertions below are the complete metadata evidence.
+        assert_eq!(path.parent(), Some(self.0.as_path()));
+        let output = self.0.join("probe.txt");
+        let mut child = OwnedChild(
+            Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_name,profile,pix_fmt,color_space,color_transfer,color_primaries",
+                    "-of",
+                    "default=noprint_wrappers=1",
+                ])
+                .arg(path)
+                .stdin(Stdio::null())
+                .stdout(File::create(&output).unwrap())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("synthetic ffprobe required"),
+        );
+        let deadline = Instant::now() + WAIT;
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert!(status.success(), "synthetic ffprobe failed");
+                break;
+            }
+            assert!(Instant::now() < deadline, "synthetic ffprobe timed out");
+            thread::sleep(Duration::from_millis(20));
+        }
+        let text = fs::read_to_string(output).unwrap();
+        let has = |key, value| text.lines().any(|line| line == format!("{key}={value}"));
+        assert!(has("codec_name", "h264"), "synthetic codec mismatch");
+        assert!(
+            has("pix_fmt", codec.pixels),
+            "synthetic pixel format mismatch"
+        );
+        assert!(
+            has(
+                "profile",
+                if codec.pixels == "yuv420p10le" {
+                    "High 10"
+                } else {
+                    "High"
+                }
+            ),
+            "synthetic H264 profile mismatch"
+        );
+        let (space, transfer, primaries) = match metadata {
+            Metadata::Bt709 => ("bt709", "bt709", "bt709"),
+            Metadata::Untagged => ("unknown", "unknown", "unknown"),
+            Metadata::PqTestOnly => ("bt709", "smpte2084", "bt709"),
+        };
+        assert!(has("color_space", space), "synthetic matrix mismatch");
+        assert!(
+            has("color_transfer", transfer),
+            "synthetic transfer mismatch"
+        );
+        assert!(
+            has("color_primaries", primaries),
+            "synthetic primaries mismatch"
+        );
     }
 }
 impl Drop for Fixtures {
@@ -629,4 +749,138 @@ fn native_player_two_players_close_survivor() {
 #[ignore = "EXCLUSIVE mixed EGL owners: two experimental + normal GPU readback Player; fails clearly if normal EGL capability unavailable"]
 fn native_player_mixed_egl_close_survivor() {
     concurrent_players(true);
+}
+
+// These cases diagnose controlled synthetic inputs, never the user's media.
+// First publication OR fatal is the bounded outcome; no sleep-and-guess success.
+fn failure_case(codec: Codec, metadata: Metadata) -> Option<PlaybackFailure> {
+    let _exclusive = EXCLUSIVE.lock().unwrap_or_else(|e| e.into_inner());
+    let fixtures = Fixtures::new();
+    let media = fixtures.encode_metadata(codec, HD, metadata);
+    fixtures.verify_metadata(&media, codec, metadata);
+    eprintln!("synthetic verified metadata: {metadata:?}");
+    let gpu = Gpu::new();
+    let player = gpu.player(); // Initialization failure is not a fixture outcome.
+    player.resize(640, 360).expect("synthetic viewport");
+    player
+        .load(media.to_str().unwrap())
+        .expect("synthetic load queued");
+    let deadline = Instant::now() + WAIT;
+    let reason = loop {
+        let state = player.state();
+        if state.fatal_error.is_some() || state.error.is_some() {
+            let reason = state
+                .failure_reason
+                .expect("fatal must have safe classification");
+            eprintln!("synthetic failure: {}", reason.code());
+            break Some(reason);
+        }
+        if let Some(frame) = player.take_gpu_frame() {
+            assert_eq!(frame.size(), HD);
+            assert_direct(&player, HD);
+            drop(frame);
+            eprintln!("synthetic outcome: direct-gpu-frame");
+            break None;
+        }
+        assert!(Instant::now() < deadline, "synthetic outcome timed out");
+        thread::sleep(Duration::from_millis(10));
+    };
+    let diagnostics = player.diagnostics();
+    assert_eq!(diagnostics.readback_bytes, 0);
+    assert_eq!(diagnostics.upload_bytes_estimate, 0);
+    assert!(player.take_frame().is_none(), "CPU fallback forbidden");
+    assert!(player.state().fallback_reason.is_none());
+    if reason.is_some() {
+        assert_eq!(
+            diagnostics.gpu_surface_frames, 0,
+            "rejected fixture published GPU frames"
+        );
+    }
+    close(player);
+    gpu.assert_clean();
+    reason
+}
+
+#[test]
+#[ignore = "EXCLUSIVE synthetic untagged H264; lead-only patched Intel native execution"]
+fn native_player_failure_untagged_sdr() {
+    // validate_direct rejects unknown gamma, but libmpv may infer bt.1886 from
+    // untagged HD. Source alone does NOT establish that this fixture must fail.
+    if let Some(reason) = failure_case(H264, Metadata::Untagged) {
+        assert!(matches!(
+            reason.code(),
+            "color-transfer-unqualified" | "color-metadata-unavailable"
+        ));
+    }
+}
+
+#[test]
+#[ignore = "EXCLUSIVE synthetic H264 High10 rejection; lead-only patched Intel native execution"]
+fn native_player_failure_h264_high10() {
+    let reason = failure_case(H264_HIGH10, Metadata::Bt709)
+        .expect("High10 must reject without software/copy fallback on the qualified Intel device");
+    assert!(high10_rejection(Some(reason)));
+}
+
+fn high10_rejection(reason: Option<PlaybackFailure>) -> bool {
+    // Lead observed absent decode properties with software fallback disabled:
+    // the five-second metadata gate legitimately reports decode-metadata-unavailable.
+    // mpv can also fail decoding before a non-direct surface reaches validation.
+    // All accepted outcomes are fatal rejection; a GPU frame (None) never passes.
+    matches!(
+        reason.map(PlaybackFailure::code),
+        Some("decoder-not-direct" | "media-load-failed" | "decode-metadata-unavailable")
+    )
+}
+
+#[test]
+fn synthetic_high10_policy_requires_known_fatal_rejection() {
+    for reason in [
+        PlaybackFailure::DecoderNotDirect,
+        PlaybackFailure::MediaLoadFailed,
+        PlaybackFailure::DecodeMetadataUnavailable,
+    ] {
+        assert!(high10_rejection(Some(reason)));
+    }
+    assert!(!high10_rejection(None), "GPU publication is not rejection");
+    for reason in [
+        PlaybackFailure::Unknown,
+        PlaybackFailure::HdrUnsupported,
+        PlaybackFailure::ColorMetadataUnavailable,
+        PlaybackFailure::GpuInteropUnavailable,
+    ] {
+        assert!(!high10_rejection(Some(reason)));
+    }
+}
+
+#[test]
+#[ignore = "EXCLUSIVE TEST ONLY PQ metadata on SDR pixels, NOT HDR visuals; lead-only native execution"]
+fn native_player_failure_hdr_transfer() {
+    let reason = failure_case(H264, Metadata::PqTestOnly)
+        .expect("PQ transfer must be rejected by the experimental SDR gate");
+    assert_eq!(reason.code(), "hdr-unsupported");
+}
+
+#[test]
+fn synthetic_failure_codes_never_echo_driver_strings() {
+    for (message, expected) in [
+        (
+            "direct hardware surface required: driver=/private/SECRET",
+            "decoder-not-direct",
+        ),
+        (
+            "experimental SDR only; unqualified transfer function: pq",
+            "hdr-unsupported",
+        ),
+        (
+            "driver=/private/SECRET https://SECRET.invalid/?token=SECRET",
+            "unknown",
+        ),
+    ] {
+        let reason = crate::Error::Gpu(message.into()).playback_failure();
+        assert_eq!(reason.code(), expected);
+        assert!(!reason.code().contains("SECRET"));
+        assert!(!reason.message().contains("SECRET"));
+        assert!(!reason.message().contains("/private/"));
+    }
 }
