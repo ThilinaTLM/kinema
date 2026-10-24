@@ -1,11 +1,43 @@
+# Archived GPU-surface qualification — retired harness
+
+The experiment harnesses were retired after GPU promotion commit `75748c9`
+(the pre-retirement revision). The original report was
+`experiments/gpui-mpv-gpu/QUALIFICATION.md`; supplementary notes below came from
+`experiments/gpui-mpv-gpu/README.md`, `experiments/kinema-gpu-app/README.md`, and
+`experiments/mpv-platform-probes/README.md`. The former
+`experiments/gpui-mpv-gpu/patches/README.md` is retained as
+[patch API/synchronization notes](../../vendor/patches/README.md).
+
+The report below preserves **historical evidence**, including unchanged evidence
+matrices and then-current defaults, experimental feature names, and status
+statements. Relative Markdown links have been retargeted to maintained records.
+Every reproduction command below is **historical, not currently runnable**:
+the standalone harness and wrappers have been deleted. Recover the harness from
+Git history at `75748c9` in a separate checkout if historical reproduction is
+needed; do not run those commands against the current source tree. “Latest” and “current” within the report refer to
+its original checkpoints, not today's root application.
+
+The current build entry point is `cargo run -p kinema-desktop --locked`, using
+sole/default embedded GPU playback via default-on `gpu-surface` and durable
+[vendor inputs](../../vendor/README.md). For current validation commands and
+safe offline-probe requirements, see [development](../development.md); for current
+status see [architecture](../architecture.md). Patch API and synchronization
+constraints are retained in [the patch notes](../../vendor/patches/README.md).
+Retirement does not rerun or extend qualification: native Windows/macOS runtime,
+linking, native Metal shader execution, and HDR remain unqualified. Counts and
+artifact paths below describe historical observations; local generated evidence
+and conversation artifacts are not portable checked-in test results.
+
+---
+
 # Explicit Intel Mesa VAAPI qualification (experimental only)
 
 This report qualifies the **standalone Linux harness**, not the real-app port.
 The original qualification-before-integration stage is complete for the ten SDR
 rows below. The user has since authorized the fourth `exp-embedded-mpv` option
 and Windows/macOS implementation. **Latest native Linux real-Player backend tests,
-three offline PlayerWindow/multiwindow probes and final root/app checks passed**. See the [real-app wrapper](../kinema-gpu-app/README.md) and
-[architecture status](../../docs/architecture.md#experimental-fourth-embedded-option--integration-in-progress).
+three offline PlayerWindow/multiwindow probes and final root/app checks passed**. See the [archived real-app evidence](#final-integrated-playerwindow-linux-probes--separate-scoped-evidence) and
+[current architecture status](../architecture.md).
 The ordinary embedded default and external mpv/VLC behavior remain unchanged.
 The fourth stable setting is visible in all builds and fails clearly without the
 opt-in `experimental-gpu` backend, never silently falling back. HDR and native
@@ -17,7 +49,7 @@ Normal Kinema's default and this harness's `hwdec=no` default remain unchanged.
 qualification candidates. The earlier `auto` run
 selected `vulkan-copy` and emitted Vulkan VUID errors; it is not a passing result.
 
-## Reproduce
+## Historical reproduction — requires harness recovered from Git
 
 From the repository root on the native Linux graphical session:
 
@@ -496,3 +528,63 @@ implementation. This Linux runner qualifies neither those platforms nor the
 real-app GUI integration; the later native backend and three PlayerWindow probe
 results are separately recorded above, with their own limits.
 The ordinary embedded default remains unchanged.
+
+
+---
+
+## Additional retired README evidence and limitations
+
+These notes preserve useful information from the retired standalone, real-app
+wrapper, and native-platform probe READMEs. They are historical, not new tests.
+The real-app GUI results and limitations are already retained in the report above.
+
+### Earlier standalone software baseline (2026-10-24)
+
+Lead-reported software runs lasted 60 seconds (1786 accepted surfaces, 1790 GPU
+copies, 60033 ms) and 120 seconds (3588 accepted, 3590 copies, 120028 ms, exit 0).
+Both reported zero playback pixel maps, maximum three live frames, decoder `no`.
+The user reported a moving pattern and clean resizing without flicker/corruption.
+Five FD samples four seconds apart stayed at 154; RSS changed from 310756 to
+310880 KiB over 16 seconds. This was not exhaustive leak proof. Those runs
+requested the Vulkan validation layer but preceded the logger, so do not prove
+zero log-routed validation errors. A later logger-backed five-second software
+smoke exited 0 with 139 accepted surfaces, 140 copies, zero pixel maps, maximum
+three live frames, 5025 ms, zero captured GPU errors and four nonfatal warnings.
+None of this qualifies the rejected automatic decoder path or a CPU-free pipeline.
+
+### Retired Windows/macOS native texture probes
+
+These were **test-readback-only** probes, not libmpv playback, GPUI/WGPU handoff,
+hardware-decoder support, presentation, HDR, or whole-pipeline zero-copy proof.
+Neither native path was executed on its native host in the recorded validation.
+Linux checks covered cross-target compilation/Clippy, preparation safety and pure
+layout/channel/orientation/identity policies; they did not establish native SDK,
+linker or GPU availability. The macOS `block 0.1.6` future-incompatibility warning
+was neither native success nor failure evidence.
+
+- Windows selected hardware DXGI (no WARP), one D3D12 device/direct queue and a
+  BGRA8 texture shared through D3D11On12 and executable-adjacent trusted ANGLE.
+  Canonical COM identity had to match. An explicit barrier established
+  RENDER_TARGET; AcquireWrappedResources alone was not a state transition.
+  GLES clear/flush/unbind, ReleaseWrappedResources and D3D11 Flush returned the
+  texture in COMMON, followed by D3D12 COPY_SOURCE/readback and fence completion.
+  Test code checked exact BGRA/alpha/orientation, not physical presentation.
+  DLL loading used absolute executable-adjacent names and
+  DLL_LOAD_DIR | DEFAULT_DIRS, not PATH changes or backend fallback.
+  **No D3D12 debug layer or message collection was enabled**: a pixel pass would
+  not have established zero debug errors.
+- macOS used accelerated legacy CGL 3.2, IOSurface BGRA8 GL rectangle/FBO clears,
+  worker GLsync completion, then same-IOSurface Metal import/copy to test memory.
+  CGL registry-ID properties had to uniquely match an enumerated Metal device;
+  missing/ambiguous identity failed rather than guessing a default device.
+- Both used a non-symmetric 4×4 pattern, expecting native row zero to contain
+  GL y=0; they did not accept either orientation or promise UI coordinates.
+  Retention covered their own test, not eventual GPUI sampling/completion.
+  Native calls/destruction ran on workers with five-second polling deadlines.
+  Uncertain completion/device loss/panic after submission quarantined the whole
+  native ownership graph through process exit. This was a one-shot probe, not
+  production recovery or a universal bound on native driver calls/teardown.
+
+Generated `target/` evidence and ignored caches were intentionally left in place
+when tracked harness sources were retired; generated workspaces that referenced
+those sources are historical artifacts, not maintained build entry points.

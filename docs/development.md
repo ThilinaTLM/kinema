@@ -310,9 +310,10 @@ GPUI presentation has scoped Linux evidence; final option hardening and root/nat
 reruns passed, while broader acceptance remains incomplete. See the
 [player contract and validation evidence](design/player.md#validation-evidence-lead-reviewed).
 
-The new `kinema-mpv` backend ports the experiment without modifying it. Desktop
-presentation must use the workspace's sole `gpui-pre =0.3.9`, not the experiment's
-GPUI 0.2.2 view. Native **libmpv** is a separate runtime requirement for embedded
+The `kinema-mpv` backend was originally ported from the external `mpv-gpui`
+prototype; its GPUI 0.2.2 view was not imported. Desktop presentation uses the
+workspace's sole `gpui-pre =0.3.9`. The retired in-repository GPU harness is
+[documented separately](validation/gpu-surface-qualification.md). Native **libmpv** is a separate runtime requirement for embedded
 playback; an installed `mpv` executable alone does not satisfy it. External modes
 continue to require their respective executables and argument-list launching.
 
@@ -633,12 +634,12 @@ or decoder evidence fails closed; no playback rendered-frame CPU mapping,
 readback/re-upload or automatic alternate player is permitted. GPU copies are
 allowed, so this is not a zero-copy claim.
 
-The prior [isolated real-app wrapper](../experiments/kinema-gpu-app/README.md)
+The retired isolated real-app wrapper ([historical qualification record](validation/gpu-surface-qualification.md))
 generated a workspace with five source-copy patches: `gpui-pre`, `gpui-pre-wgpu`,
 `gpui-pre-apple`, `wgpu-hal`, and `gpui-pre-windows`. It is historical integration
 infrastructure, not required for current root builds. The patches are now durable
 vendored root dependencies, including multiwindow/shared queue gating and the
-Windows WGPU HWND/D3D12 adapter. Windows GPUI's prior native D3D11 renderer was not
+Windows WGPU HWND/D3D12 adapter; see the [patch API/synchronization notes](../vendor/patches/README.md). Windows GPUI's prior native D3D11 renderer was not
 already WGPU; native D3D11 remains for glyph rasterization, not video CPU pixel
 mapping. Registry sources are never edited. Intentional manifest/lockfile updates
 remain lead-coordinated; checks use `--locked`. Standalone or prior wrapper passes
@@ -647,14 +648,16 @@ alone do not qualify the current default-on app.
 Do not start ordinary Kinema or access user configuration, secure storage,
 credentials, databases, remote media or services for fixture validation. The
 historical wrapper's automated tests used **only `run --probe`**, owned generated sessions
-and the real desktop probe; the user-facing `run` command launches the real app, and ordinary startup is not implicitly credential-isolated by
-changing CWD. Follow its reviewed scene/fixture arguments rather than inventing
-a launch command here. Native GUI/tests are lead-scheduled exclusively, never
-concurrently. Generated artifacts stay in owned `target/` subdirectories.
+and the real desktop probe; that harness and command are retired. For current
+fixture checks use the root offline `ui-probe` PlayerWindow path recorded in
+[current scoped validation](#gpu-surface-default-promotion--current-scoped-validation).
+Ordinary app startup is not implicitly credential-isolated by changing CWD.
+Native GUI/tests are lead-scheduled exclusively, never concurrently. Generated
+artifacts stay in owned `target/` subdirectories.
 
 | Scope | Prior scoped evidence / remaining validation |
 | --- | --- |
-| Standalone Linux Intel Mesa bridge | Ten codec/size rows qualified with separate native pixel tests; [report](../experiments/gpui-mpv-gpu/QUALIFICATION.md). Not app-integration acceptance. |
+| Standalone Linux Intel Mesa bridge | Ten codec/size rows qualified with separate native pixel tests; [historical report](validation/gpu-surface-qualification.md). Not app-integration acceptance. |
 | Real-Player Linux backend | All 8 ignored native backend tests passed in 47.89 seconds; latest rerun at `203640b` passed all 8 in 48.43 seconds. Controls, source switching, bounded ownership and coexistence covered below. |
 | Real-PlayerWindow multiwindow, controls, resize and teardown | Three offline Linux probes passed with five patches and Vulkan validation; three GPUI windows exercised. The earlier multiwindow blocker is fixed/tested in this scope. |
 | Windows ANGLE + D3D11On12 on supplied D3D12 device/queue, GPU copy | Backend cross-target Clippy passed. Fifth GPUI Windows WGPU adapter implemented; owner reports feature-on/off cross-check/Clippy passes. Windows HWND adapter and backend source cross-checks passed, compile-only. Native linking/runtime tests explicitly user-deferred; unqualified. |
@@ -740,9 +743,10 @@ retained in conversation tool artifact
 `01M5QQT7D34GGF6PGFYDKF0MSW/files/output.txt` (not a repository artifact). Native
 execution was offline fixture/probe-only; no ordinary user app/accounts were
 opened. These results and backend cross-Clippy passes are attributed to the lead,
-not rerun for this documentation update. Follow the test source's exclusive
-native execution contract in the generated patched workspace; do not run these
-ignored tests concurrently with GUI/native work.
+not rerun for this documentation update. The generated patched workspace is
+retired; use current root test sources and their exclusive native execution
+contract for new checks. Do not run ignored native tests concurrently with
+GUI/native work.
 
 Windows/macOS runtime-test deferral is authorization to implement now, not a
 capability waiver or runtime-support claim. Device-loss recovery is unsupported.

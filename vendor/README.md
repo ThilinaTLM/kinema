@@ -56,7 +56,9 @@ compiles Metal shaders on the actual Apple runtime, not on a Linux build host.
 
 Promotion changes the supported build entry point, not native qualification.
 Windows/macOS runtime/linking/GPU behavior and HDR remain unqualified. Keep the
-regression tools and detailed API/synchronization constraints in
-`experiments/gpui-mpv-gpu/patches/README.md` and its qualification documents; those
-tools now consume these durable sources rather than regenerating target patches.
+detailed [API/synchronization constraints](patches/README.md) with these patches.
+The experimental harnesses are retired; their
+[historical qualification record](../docs/validation/gpu-surface-qualification.md)
+is not current root validation. Use the [root validation instructions](../docs/development.md#run-and-validate)
+and offline `ui-probe` fixture path for new checks, not retired wrapper commands.
 No desktop CPU readback fallback is introduced here.

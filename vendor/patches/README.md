@@ -1,11 +1,18 @@
-# Isolated experimental GPU-surface patches
+# GPU-surface patch API and synchronization notes
 
-The canonical production build inputs now live in [`vendor/`](../../../vendor/README.md),
-including identical copies of these five patch inputs. Root `[patch.crates-io]`
-is intentional and uses authenticated exact-release sources. Ordinary root builds
-need no preparation; the regression scripts consume those same sources. Never
-modify registry sources or global Cargo configuration. For optional reproduction,
-use `vendor/verify.py --reproduce NEW_DIRECTORY` (zero-fuzz patching).
+These five patch inputs are the canonical production inputs under
+[`vendor/`](../README.md). They were promoted unchanged at commit `75748c9`
+from experiment harnesses retired afterward. Root `[patch.crates-io]` uses
+authenticated exact-release sources. The current root entry point is
+`cargo run -p kinema-desktop --locked`; embedded playback uses default-on
+`gpu-surface`, with no experiment preparation or wrapper. Never modify registry
+sources or global Cargo configuration. Optional zero-fuzz reproduction uses
+`python3 -B vendor/verify.py --reproduce NEW_DIRECTORY` from the repository root.
+Historical qualification is archived [here](../../docs/validation/gpu-surface-qualification.md);
+it does not qualify native Windows/macOS runtime or HDR. Internal patched API
+names retain `experimental`/`gpu-video-experiment`; these are not separate app
+settings. The contracts and historical findings below are retained, not newly
+remeasured by retirement.
 Resolve one **wgpu 29.0.4**.
 
 | Patch | Copied crate | License |
@@ -46,9 +53,13 @@ and Apple renderer features forward it to core. On Windows, also enable
 `gpui_windows/gpu-video-experiment`: patch 0005 activates the HWND WGPU adapter and
 forwards the core/WGPU features. The root desktop manifest has an optional Windows-target `gpui_windows`
 dependency forwarded by its default-on `gpu-surface` feature; the root catalog
-enables the underlying patched API features. Feature-off builds do not expose the frame/context
-APIs or allocate experimental pipelines/registrations, and retain the legacy
-Windows scene renderer.
+unconditionally enables the underlying patched API features. Here, “feature-off”
+means disabling `gpu-video-experiment` on the patched GPUI crates themselves:
+those crate builds do not expose the frame/context APIs or allocate the added
+pipelines/registrations, and retain the legacy Windows scene renderer. This does
+**not** describe disabling the application's `gpu-surface` feature. The current
+root desktop external-only build with `--no-default-features` still has the root
+catalog's patched GPUI presentation feature active.
 
 Core's added dependencies are optional, platform-specific:
 
@@ -65,8 +76,8 @@ normal `xcrun metal`/`metallib` path. Runtime shader source stitching is **not**
 Metal shader compilation or validation. The root catalog enables `runtime_shaders`; actual Metal compilation then occurs
 on the Apple device.
 
-HAL's optional extension-enable patch has no feature switch: root and regression
-workspaces select the same repository-owned HAL source.
+HAL's optional extension-enable patch has no feature switch: the root workspace
+selects the repository-owned HAL source (as did the retired regression workspaces).
 
 ## Public API
 

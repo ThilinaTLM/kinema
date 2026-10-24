@@ -104,8 +104,8 @@ External mpv and VLC remain explicit alternatives with their existing lifetime
 policy. See the [player design](design/player.md) for chrome, controls, states,
 ownership, and acceptance requirements.
 
-The backend is imported from `/home/tlm/Projects/Random/mpv-gpui` into the new
-`kinema-mpv` crate without modifying the experiment. Keep native libmpv loading,
+The backend was imported from `/home/tlm/Projects/Random/mpv-gpui` into
+`kinema-mpv` without modifying that source experiment at import time. Keep native libmpv loading,
 commands, events, decoding/render workers, and resource teardown behind that
 backend boundary; the desktop owns the GPUI view, window, Cinema tokens, and
 session coordination. Do not import the experiment's GPUI 0.2.2 view or introduce
@@ -178,14 +178,15 @@ The root workspace uses durable vendored patches for `gpui-pre`, `gpui-pre-wgpu`
 `gpui-pre-apple`, `wgpu-hal`, and `gpui-pre-windows`; root Cargo patch configuration
 and the lockfile own their resolution. Run `cargo run -p kinema-desktop --locked`
 from the repository root without generating an isolated wrapper workspace.
-The [former real-app wrapper](../experiments/kinema-gpu-app/README.md) is historical
-integration evidence, not a default-build prerequisite. Registry sources are not
+The former real-app wrapper is retired; its [historical qualification record](validation/gpu-surface-qualification.md)
+is evidence, not a default-build prerequisite. [Patch API and synchronization notes](../vendor/patches/README.md)
+describe the durable patches. Registry sources are not
 edited. The patches cover surface presentation, multiwindow/shared-queue gating,
 and Windows' WGPU HWND/D3D12 adapter. Windows GPUI's prior native D3D11 renderer
 was not already WGPU; native D3D11 remains for glyph rasterization, not video CPU
 pixel mapping. See [current build instructions](development.md#run-and-validate).
 
-**Prior scoped evidence boundaries (not a new default-build test run):** the [standalone qualification](../experiments/gpui-mpv-gpu/QUALIFICATION.md)
+**Prior scoped evidence boundaries (not a new default-build test run):** the [archived standalone qualification](validation/gpu-surface-qualification.md)
 combines ten-second Linux Intel Mesa resize-stress runs and separate native pixel
 tests for H.264 8-bit, HEVC 8/10-bit, and AV1 8/10-bit, each at 1080p and 4K,
 24-fps limited-range BT.709 SDR. It does not validate the real-app port,
@@ -231,6 +232,9 @@ unsupported; cooperative audio pause is best-effort and uncertain completion
 uses quarantine, not GPU-hang recovery. These historical probes used the isolated
 wrapper's offline `run --probe`, not ordinary app/accounts. Current user launch is
 `cargo run -p kinema-desktop --locked`; it is not an isolated validation fixture.
+Use the root offline `ui-probe` PlayerWindow path described in the
+[current scoped validation](development.md#gpu-surface-default-promotion--current-scoped-validation)
+for fixture checks, not the retired wrapper.
 
 ## UI direction and historical implementation evidence
 
