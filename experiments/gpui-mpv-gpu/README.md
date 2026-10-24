@@ -1,14 +1,32 @@
 # GPUI/libmpv GPU-surface experiment
 
-Standalone **Linux Vulkan + Intel Mesa proof**, not a production playback backend.
-No production default, global Cargo patch, DB, network service, or credentials are
-used. Windows/macOS are unsupported by this experiment. The user chose hardware
-qualification **before** any fourth-player-option integration: no settings,
-production player choices, or production backend are added here. See the
-[VAAPI qualification report](QUALIFICATION.md) for the lead-verified HD results
-and remaining limits. Explicit VAAPI passed on the tested Intel Mesa system for
-H.264 and HEVC 8-/10-bit SDR at 1920×1080; 4K, HDR, AV1, other drivers and platforms
-remain unqualified. Software decoding (`--hwdec no`) remains the default.
+Standalone **Linux Vulkan + Intel Mesa proof**, not the real application's
+playback backend. This standalone harness does not use production settings, a DB,
+network service or credentials. Its Linux native path is qualified narrowly below;
+it does not provide Windows/macOS runtime support.
+
+**Current direction:** the user has now authorized fourth-player integration as
+`exp-embedded-mpv`, including Windows/macOS implementations, with native
+Windows/macOS runtime tests and HDR explicitly deferred. The earlier
+qualification-before-integration stage is historical, not a continuing ban on
+integration. The [real-app wrapper](../kinema-gpu-app/README.md) builds the root
+application's opt-in `experimental-gpu` feature in an isolated generated workspace;
+it is not this harness's `Producer` inserted into the app. The ordinary three
+player choices and embedded default remain unchanged. The fourth stable setting
+is visible in all builds but fails clearly if the backend is not compiled—no
+silent fallback. **The latest eight native real-Player backend tests, three offline
+Linux PlayerWindow/multiwindow probes and final root/experimental checks passed**.
+Standalone qualification remains distinct from that scoped app evidence. User
+opt-in real-app launch: `experiments/kinema-gpu-app/run.sh run`; automated validation
+uses only `run --probe`, never ordinary user app/accounts.
+
+See the [VAAPI qualification report](QUALIFICATION.md) for the lead-verified
+standalone 1080p/4K results and remaining limits. Explicit VAAPI passed on the
+tested Intel Mesa system for H.264 8-bit, HEVC 8-/10-bit and AV1 8-/10-bit SDR
+BT.709 at 24 fps, at both 1920×1080 and 3840×2160. These are ten-second
+qualification runs, not long-soak or physical-presentation guarantees. HDR is
+deferred; other drivers and platforms remain unqualified. This harness's software
+decoding (`--hwdec no`) remains the default.
 
 ## Reproduce
 
@@ -29,6 +47,8 @@ experiments/gpui-mpv-gpu/run.sh run --media /absolute/local/clip.mkv --seconds 1
 experiments/gpui-mpv-gpu/run.sh run --hwdec vaapi --render-size 1920x1080 --seconds 10
 # User-owned local file; explicit HD allocation, without changing the default:
 experiments/gpui-mpv-gpu/run.sh run --media /absolute/local/clip.mkv --hwdec vaapi --render-size 1920x1080 --seconds 120
+# User-owned local file; full 4K allocation (not a scaled 640×360 buffer):
+experiments/gpui-mpv-gpu/run.sh run --media /absolute/local/clip.mkv --hwdec vaapi --render-size 3840x2160 --seconds 120
 # Probe-only deterministic swapchain resize regression (not producer-buffer resize):
 experiments/gpui-mpv-gpu/run.sh run --hwdec vaapi --render-size 1920x1080 --seconds 6 --stress-resize
 ```
@@ -61,11 +81,12 @@ the hardware API. Missing/mismatched properties fail qualification rather than
 falling back to software or a copy decoder. The summary prints only allowlisted
 codec/format labels and numeric source/render dimensions. High-resolution runs
 must use `--render-size` explicitly: enlarging the window alone still scales the
-fixed per-run allocation. With `--render-size 1920x1080`, source and render were
-both verified at 1920×1080: there is no hidden 360p cap. Synthetic color/orientation
-correctness, native HD allocation, and zero captured GPU Error/VUID diagnostics
-passed the tested three-codec matrix; consult the report rather than extending
-that result to untested media or capabilities.
+fixed per-run allocation. Source and render were verified at matching 1920×1080
+and 3840×2160 allocations: there is no hidden 360p cap when `--render-size` is
+explicit. Synthetic color/orientation correctness, native allocation, and zero
+captured GPU Error/VUID diagnostics passed all ten tested codec/size combinations;
+consult the report rather than extending that result to untested media or
+capabilities.
 
 `--stress-resize` is off by default, rejects duplicates, and requires a duration
 of at least four seconds. After three unique accepted surfaces, the existing UI
@@ -82,7 +103,12 @@ qualification or proof of physical presentation.
 
 Checked-in files under this directory are the source of truth. `prepare.py` uses
 root `cargo metadata --locked` to locate **exact registry version 0.3.9** of
-`gpui-pre` and `gpui-pre-wgpu`, plus exact `wgpu-hal` 29.0.4. It copies their complete source trees (including
+`gpui-pre`, `gpui-pre-wgpu`, `gpui-pre-apple` and `gpui-pre-windows`, plus exact
+`wgpu-hal` 29.0.4. These five local-copy patches are also used by the real-app
+wrapper. The fifth Windows adapter patch is implemented with owner-reported
+feature-on/off cross-check/Clippy passes, not native Windows runtime qualification. See the
+[patch documentation](patches/README.md) for current interfaces and limits.
+Preparation copies their complete source trees (including
 licenses) to `target/gpui-mpv-gpu/patched/`, then applies sorted checked-in
 `patches/*.patch` inside the corresponding copied crate. Each patch filename
 identifies its exact crate/version, and its paths use `a/src/...`. Registry sources
@@ -137,7 +163,7 @@ buffer → GPU copy into a normal WGPU texture → GPUI surface. This is **not
 zero-copy**: GPU copies are allowed. No CPU mapping/readback/re-upload of rendered
 video frames belongs in playback. Software decoding and decoder CPU→GPU uploads
 may still occur on the unchanged software default. Explicit `--hwdec vaapi`
-passed the narrowly scoped Intel Mesa HD qualification documented in the report;
+passed the narrowly scoped Intel Mesa 1080p/4K SDR qualification in the report;
 that does not qualify every hardware-decoding path. `auto` remains rejected:
 prior automatic probing selected `vulkan-copy` and emitted decoder-path Vulkan
 validation errors. The old environment-based automatic selector is not an
@@ -188,20 +214,98 @@ VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
   experiments/gpui-mpv-gpu/run.sh run --seconds 5
 ```
 
-### Lead-verified HD VAAPI qualification (2026-10-24)
+### Lead-verified standalone 1080p/4K VAAPI qualification (2026-10-25)
 
-- Experimental unit tests: 21 passed, 4 native tests ignored by default; all four
-  explicit native tests passed, including the software baseline and H.264,
-  HEVC 8-bit, and HEVC 10-bit HD color/orientation checks using **test-only CPU
-  readback**.
-- All three HD codec GUI stress runs passed with 13 requested and 13 observed
-  resizes each, zero playback pixel maps, and zero captured GPU errors/VUIDs.
-  Source and render allocation were both 1920×1080; resizing did not change the
-  producer allocation.
-- These combined renderer/pixel results qualify only explicit VAAPI on the
-  tested Intel Mesa SDR HD path. See [QUALIFICATION.md](QUALIFICATION.md) for
-  detailed evidence. 4K, HDR and AV1 remain unqualified. No settings or fourth
-  player option has been integrated; normal Kinema is unchanged.
+- Experimental Rust unit tests: 23 passed, 11 native tests ignored by default.
+  All eleven explicit native tests passed: the software baseline plus all ten
+  codec/size color/orientation cases using **test-only CPU readback**. Qualification
+  runner Python tests: 13 passed; preparation safety tests: 5 passed.
+- Both ten-second GUI stress matrices passed: H.264 8-bit, HEVC 8-bit, HEVC 10-bit,
+  AV1 8-bit and AV1 10-bit, each at 1920×1080 and 3840×2160. Every case reported
+  actual VAAPI decoding, VAAPI decoder/output pixel formats, NV12/P010 underlying
+  storage, zero playback pixel maps, zero captured GPU errors/VUIDs, and 13
+  requested/13 observed resizes. Source and producer-render allocations matched;
+  window resizing did not change the producer allocation.
+- Owned evidence directories:
+  `target/gpui-mpv-gpu/qualification/run-7ep33973/` and
+  `target/gpui-mpv-gpu/qualification/run-6gd1a0u7/`.
+  See [QUALIFICATION.md](QUALIFICATION.md) for the ten qualified rows and detailed
+  evidence. Scope is the tested Intel Mesa SDR BT.709 24-fps path only: ten seconds
+  is not a long soak, and accepted surfaces are not physical-present counts.
+  HDR remains deferred.
+- These runs qualified the standalone harness only, before the newly authorized
+  fourth-option integration. They do not validate the port's multiwindow behavior,
+  control/audio/session lifecycle or current platform implementations.
+
+### Real-app integration — scoped Linux validation; other OS runtime deferred
+
+The root `kinema-mpv` integration extends the existing `Player` and libmpv client,
+control/audio workers and session lifecycle with a separate bounded GPU mailbox.
+Linux ports this bridge; Windows implements ANGLE + D3D11On12 on GPUI's actual
+D3D12 device/queue with GPU copying; macOS implements legacy CGL +
+IOSurface/CVPixelBuffer ownership into GPUI's Apple BGRA surface path. Native
+interop/unsafe remains backend-owned. There is no rendered-frame CPU
+readback/re-upload fallback or automatic alternate-player fallback.
+
+The isolated [real-app wrapper](../kinema-gpu-app/README.md) uses local copies of
+five patched GPUI/HAL/platform crates, including multiwindow/shared-queue-gate
+fixes. The implemented fifth `gpui-pre-windows` patch adds an opt-in WGPU
+HWND/D3D12 adapter to GPUI's ordinarily custom native D3D11 platform. Its feature
+is activated only in the generated workspace; ordinary root GPUI/default players
+are unchanged. Native D3D11 remains for glyph rasterization, not CPU video pixel
+mapping.
+Follow its owner's current build/run/check/test and safe-probe contract; do not
+launch ordinary Kinema against user data/credentials for fixture validation.
+Root manifests/lockfiles remain lead-coordinated; no production root Cargo patch
+or registry edits are required.
+
+The lead's latest native real-Player backend rerun at `203640b` with all five
+patches passed **8 tests in 48.43 seconds**, zero failed, 77 filtered. Its raw scan
+found zero VUID/validation/threading matches. The earlier corrected run passed in
+47.89 seconds; the initial all-eight failure was a test viewport left zero
+(rendering suspended), not a pass or a demonstrated backend capability failure.
+Coverage includes five 1080p codec/control cases, H.264 1080p/4K source switches,
+three-frame backpressure/release, retained-frame lifetime past Player, concurrent
+experimental players on one WGPU device/queue, and ordinary EGL GPU-readback
+coexistence/close-survivor behavior. These backend tests do not open GPUI windows.
+
+The lead separately passed three actual PlayerWindow probes under Vulkan
+validation, each with an **8-second total budget (7 playback + 1 cleanup)**:
+
+| Case | Source = render | GPU surfaces / UI acceptances |
+| --- | --- | --- |
+| H.264 8-bit | 1920×1080 | 167 / 165 |
+| HEVC 10-bit | 3840×2160 | 166 / 164 |
+| AV1 10-bit | 3840×2160 | 165 / 163 |
+
+All verified pause/seek/resume/speed/volume control phase 5, zero CPU readback
+bytes/upload estimate, 2 requested/2 observed player resizes, and two painted
+auxiliary GPUI windows, including resize and close/reopen while playing. The
+three-window blocker is fixed/tested in this scope. Presentation owners released
+cleanly, background Player join was observed, no late frames arrived, and GPU
+errors/panics were zero; raw VUID/validation/threading scans remained zero through
+all window teardown. Evidence: `target/kinema-gpu-app/gui-smoke-report.json`.
+See [detailed app evidence](../../docs/development.md#experimental-gpu-player-integration--validation-pending)
+for output artifacts and source checkpoints `203640b`/`ebfbb78`/`cc424ff`.
+
+Lead final checks passed: root fmt/strict locked Clippy/tests **575 passed,
+12 ignored**; experimental workspace fmt/strict locked Clippy/tests **598 passed,
+20 ignored**; backend feature tests **69 passed, 16 ignored**; app/shared prepare
+self-tests **8/6 passed**; standalone **23 passed, 11 ignored**; qualifier **13 passed**.
+No DB/settings/accounts/providers were opened. These offline probes do not verify
+managed downloads/providers, audible audio (fixtures have none), physical presents
+or long-soak performance. Device-loss recovery is unsupported; cooperative audio
+pause is best-effort and uncertain completion uses quarantine, not hang recovery.
+
+Windows/macOS backend and GPUI Windows HWND/macOS BGRA/Metal source cross-checks
+passed; Windows adapter feature-on/off and other four-patch Rust checks also
+passed as reported by their owners. This is compile-only, not native OS support.
+Native Windows/macOS linking/runtime tests, native Metal shader execution and HDR
+remain explicitly user-deferred. Earlier
+[native interop probes](../mpv-platform-probes/README.md) likewise did not qualify
+those platforms. The ordinary root embedded default and other players remain
+unchanged; selecting the fourth option without its compiled backend explains the
+required isolated build rather than falling back.
 
 ### Observed stage-1 software validation (2026-10-24)
 
@@ -229,4 +333,5 @@ VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
   warnings were still emitted directly by Mesa.
 
 No result qualifies the rejected `auto` decoder path or an entirely CPU-free
-pipeline. The normal production player is unchanged.
+pipeline. The ordinary embedded-player default remains unchanged; experimental
+real-app integration has its own scoped Linux validation record above.

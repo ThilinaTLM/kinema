@@ -85,7 +85,7 @@ downloading and playback completion are never proof that someone watched it.
 ## Approved embedded-player direction
 
 **Source implemented; scoped Linux presentation and root checks passed, full acceptance pending.**
-The backend crate import, embedded default and three primary settings choices
+The original backend crate import, embedded default and three ordinary settings choices
 (embedded mpv, external mpv, VLC), managed-window code, close/lease release,
 retry, and stale-event logic are implemented. Backend native synthetic checks
 and scoped integration tests passed as reviewed by the lead. Root checks passed
@@ -132,6 +132,104 @@ alone is insufficient. Library/API/dependency failures must be actionable, witho
 silent installation or silent external fallback. Dynamic loading does not waive
 libmpv/FFmpeg licensing obligations. See [native playback prerequisites and
 validation limits](development.md#embedded-mpv-prerequisites-and-validation-plan).
+
+<a id="experimental-fourth-embedded-option--integration-in-progress"></a>
+
+### Experimental fourth embedded option — scoped Linux validation
+
+**Implemented; scoped Linux backend and real-PlayerWindow checks passed.** The earlier
+standalone qualification-before-integration stage is complete for ten Linux SDR
+cases; it is not the acceptance record for this integration. The user has now
+explicitly authorized the fourth `exp-embedded-mpv` option and Windows/macOS
+backend implementation, while deferring HDR and native Windows/macOS runtime
+tests. That test deferral does not qualify those platforms or imply support.
+
+Current settings/source wiring includes the persisted stable key
+`exp-embedded-mpv`, visible in all builds. Ordinary embedded mpv remains the
+default; external mpv and VLC are unchanged alternatives. Without the opt-in
+`experimental-gpu` build feature, selecting the experimental option fails with
+an actionable not-compiled message, never a silent switch to an ordinary player.
+The default build does not enable the experimental GPU backend.
+
+This is a rendering path in the existing `kinema-mpv::Player`, using the same
+libmpv client, control/audio workers, session/lease rules and managed player
+window—not the standalone experiment's `Producer`, a second libmpv client, or a
+parallel playback subsystem. A separate bounded GPU-surface mailbox retains
+native frame owners; cancellation, generation rejection and teardown remain
+owned by the existing player lifecycle. Desktop presents surfaces and controls;
+`kinema-core` remains pure. Native interop/unsafe code stays behind the backend
+boundary, not in domain or desktop UI code. Experimental playback must reject
+missing capabilities or decoder evidence rather than use rendered-frame CPU
+readback/re-upload or an automatic alternate player.
+
+Source implementation includes three native paths:
+- Linux: port of the qualified standalone GL/external-memory Vulkan-buffer bridge
+  into the real player, using GPUI's actual WGPU device/queue.
+- Windows: ANGLE GL through D3D11On12 on GPUI's actual D3D12 device/queue, with GPU
+  copying into the presentation texture; native DLL/extension/device checks are
+  required, not an invented libmpv D3D12 render API.
+- macOS: legacy CGL rendering into IOSurface-backed CVPixelBuffer ownership,
+  presented through GPUI's Apple BGRA surface path, not a WGPU/Vulkan assumption.
+
+The isolated generated [real-app workspace](../experiments/kinema-gpu-app/README.md)
+uses root application sources with local copies of five patched crates:
+`gpui-pre`, `gpui-pre-wgpu`, `gpui-pre-apple`, `wgpu-hal`, and `gpui-pre-windows`.
+The implemented fifth patch routes Windows' usual custom native D3D11 platform
+renderer to an **opt-in WGPU HWND/D3D12 adapter**; Windows GPUI was not already a
+native WGPU renderer. Feature activation is generated-workspace-only, leaving
+ordinary root GPUI/default-player behavior unchanged. The native D3D11 text system
+remains for glyph rasterization; this is not video CPU pixel mapping. The patch
+work covers GPU-surface presentation and multiwindow/shared-queue-gate behavior. Registry
+sources and ordinary root Cargo patch configuration are not modified. The lead
+coordinates intentional manifest/lockfile updates; all validation uses locked
+builds rather than root production patches.
+
+**Evidence boundaries:** the [standalone qualification](../experiments/gpui-mpv-gpu/QUALIFICATION.md)
+combines ten-second Linux Intel Mesa resize-stress runs and separate native pixel
+tests for H.264 8-bit, HEVC 8/10-bit, and AV1 8/10-bit, each at 1080p and 4K,
+24-fps limited-range BT.709 SDR. It does not validate the real-app port,
+multiwindow/session behavior, sustained playback, physical presentation, HDR, or
+Windows/macOS. The lead's later eight ignored native real-Player backend tests
+all passed in 47.89 seconds: five 1080p codecs and controls, H.264 source switching
+between 1080p/4K, three retained-frame backpressure/release, retained-frame lifetime
+past Player teardown, concurrent experimental players on one supplied WGPU
+device/queue, and coexistence with the ordinary EGL GPU-readback player including
+close-survivor behavior. These are backend tests, not actual GPUI-window tests.
+Playback had zero uncaptured WGPU errors; the lead's raw scan found zero VUID,
+validation-error or UNASSIGNED-threading diagnostics. The corrected tests set the
+required nonzero viewport before loading; the first all-eight failure was test
+API misuse (zero viewport means suspended), not a claimed capability pass.
+
+The latest native backend rerun at `203640b` with the five-patch GPUI snapshot
+passed **all 8 in 48.43 seconds**, with zero raw VUID, validation-error or threading
+matches. Backend feature tests passed 69 with 16 ignored. Final root fmt/strict
+locked Clippy/tests passed **575 tests, 12 ignored**; the experimental workspace
+passed fmt/strict locked Clippy/tests with **598 passed, 20 ignored** (lead).
+
+Separately, the actual five-patch PlayerWindow passed three offline Linux probes:
+H.264 8-bit 1080p (167 GPU surfaces / 165 UI acceptances), HEVC 10-bit 4K
+(166/164), and AV1 10-bit 4K (165/163), with exact source/render dimensions. Each
+had an 8-second total budget (7 playback + 1 cleanup), verified pause/seek/resume/
+speed/volume phase 5, zero readback bytes/upload estimate, two requested/observed
+player resizes, and two painted auxiliary GPUI windows including resize and
+close/reopen while playing. Three-window behavior is therefore scoped-tested,
+not a remaining multiwindow blocker. Presentation owners released, background
+Player join was observed, no late frames arrived, and GPU errors/panics/raw VUID,
+validation and threading matches were zero through window teardown.
+See `target/kinema-gpu-app/gui-smoke-report.json` and the
+[development evidence](development.md#experimental-gpu-player-integration--validation-pending)
+for artifacts and attribution. No DB/settings/accounts/providers were opened.
+These probes do not verify managed-download/provider workflows, audible audio
+(fixtures have none), physical presentation or long-soak performance.
+
+Windows/macOS backend and GPUI Windows HWND/macOS BGRA/Metal source cross-checks
+passed, including owner-reported feature-on/off checks. These are compile-only,
+not cross-OS qualification: native linking/runtime tests, native Metal shader
+execution and HDR remain explicitly user-deferred. Device-loss recovery is
+unsupported; cooperative audio pause is best-effort and uncertain completion
+uses quarantine, not GPU-hang recovery. The ordinary default remains embedded
+mpv. User opt-in launch is `experiments/kinema-gpu-app/run.sh run`; automated
+validation uses only offline `run --probe`, not ordinary app/accounts.
 
 ## UI direction and historical implementation evidence
 

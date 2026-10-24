@@ -21,6 +21,34 @@ Missing capabilities must fail closed rather than silently selecting another
 player/backend. Cancellation, generation rejection, bounded GPU mailbox ownership
 and shutdown belong to the real player integration, not a launcher-side producer.
 
+## Measured real-app GUI evidence — 2026-10-25
+
+Lead-run offline `ui-probe` tests passed under the Vulkan validation layer:
+
+| Synthetic SDR fixture | GPU surfaces | UI frame acceptances |
+| --- | ---: | ---: |
+| H.264 8-bit 1080p | 167 | 165 |
+| HEVC 10-bit 4K | 166 | 164 |
+| AV1 10-bit 4K | 165 | 163 |
+
+Each probe had an **8-second total budget: 7 seconds playback plus 1 second
+shutdown**, not 8 seconds of steady playback. All three retained source-sized
+render dimensions, reached verified control phase 5, observed both requested
+resizes, and exercised two auxiliary windows through paint/resize/close/reopen.
+Presentation release and shutdown completed with no late frames, panics, GPU
+errors, validation errors, threading errors or VUIDs. Reported readback bytes and
+upload-byte estimates were zero; frame acceptances do **not** measure physical
+presents. Fixtures had no audio, so audible playback was not tested. No accounts,
+ordinary user configuration or providers were opened; the ordinary main-app
+launcher was not run during validation.
+
+Review artifacts: [GUI smoke report](../../target/kinema-gpu-app/gui-smoke-report.json)
+and [raw lead probe log](/home/tlm/.nerve/data/conversations/conv_01M5P40MMVT3FR6J02EER8DRFV/tool-calls/tool_01M5QS7ZHBW2RTC47G5EMRK4R9/files/output.txt).
+These are local generated evidence, not portable checked-in artifacts. This is
+scoped Linux GUI evidence, not general platform qualification. Native Windows
+and macOS linking/runtime and HDR remain user-deferred. Device-loss recovery and
+restart are unsupported; audio pause remains best-effort.
+
 ## Prepare and build
 
 From the repository root, using its Rust **1.97.1** toolchain:
