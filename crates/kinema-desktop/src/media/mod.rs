@@ -1,5 +1,6 @@
 //! Owned, loopback-only media leases and durable, quota-reserved acquisition.
 //! All public methods performing I/O must be called from a service worker, not UI rendering.
+mod diagnostics;
 #[cfg(test)]
 mod remote_tests;
 mod server;
@@ -124,6 +125,7 @@ pub struct UsageSnapshot {
 }
 
 struct Asset {
+    diagnostic_id: u64,
     dir: PathBuf,
     identity: MediaIdentity,
     state: Mutex<AssetState>,
@@ -379,6 +381,11 @@ impl MediaService {
                 let spawned = std::thread::Builder::new()
                     .name("media-acquire".into())
                     .spawn(move || {
+                        let _span = tracing::info_span!(
+                            "media_acquisition",
+                            asset_id = acquired.diagnostic_id
+                        )
+                        .entered();
                         tracing::info!(size = acquired.identity.size, "Media acquisition started");
                         let result = storage::acquire(&shared, &acquired, resolved, renew);
                         match &result {

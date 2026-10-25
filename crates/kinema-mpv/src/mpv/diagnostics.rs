@@ -6,16 +6,18 @@ use std::sync::{
     Mutex,
     atomic::{AtomicU64, Ordering},
 };
+use std::time::Instant;
 
 static NEXT_PLAYER: AtomicU64 = AtomicU64::new(1);
 
 // Every string expression below belongs to Evidence's fixed vocabulary. Keep
 // the event fields explicit so text and JSON subscribers expose the same data.
 macro_rules! evidence_event {
-    ($level:expr, $id:expr, $e:expr, $failure:expr, $details:expr, $message:literal) => {
+    ($level:expr, $id:expr, $e:expr, $failure:expr, $details:expr, $terminal:expr, $message:literal) => {
         tracing::event!(
             $level,
             player_id = $id,
+            player_terminal = $terminal,
             failure_code = $failure,
             error_kind = $details.kind,
             operation = $details.operation,
@@ -61,6 +63,13 @@ impl Default for FailureDetails {
     }
 }
 impl FailureDetails {
+    fn media_end(code: i32) -> Self {
+        Self {
+            kind: "mpv",
+            operation: "load",
+            mpv_error: Some(code),
+        }
+    }
     pub fn from_error(error: &Error) -> Self {
         let kind = match error {
             Error::Mpv { .. } => "mpv",
@@ -353,6 +362,10 @@ pub(super) enum NativeDiagnostic {
     NetworkFailed,
     ReadFailed,
     DemuxFailed,
+    DecodeFailed,
+    TruncatedStream,
+    CancelledIo,
+    MetadataUnseekable,
     Unclassified,
 }
 impl NativeDiagnostic {
@@ -364,6 +377,10 @@ impl NativeDiagnostic {
             Self::NetworkFailed => "network-failed",
             Self::ReadFailed => "read-failed",
             Self::DemuxFailed => "demux-failed",
+            Self::DecodeFailed => "decode-failed",
+            Self::TruncatedStream => "truncated-stream",
+            Self::CancelledIo => "cancelled-io",
+            Self::MetadataUnseekable => "metadata-unseekable",
             Self::Unclassified => "unclassified",
         }
     }
@@ -384,6 +401,7 @@ enum NativeModule {
     Stream,
     StreamCurl,
     Cplayer,
+    Mkv,
     Other,
 }
 impl NativeModule {
@@ -396,13 +414,18 @@ impl NativeModule {
             "vo/gpu" => Self::VoGpu,
             "vo/gpu/opengl" => Self::VoGpuOpenGl,
             "ffmpeg" => Self::Ffmpeg,
-            "ffmpeg/video" => Self::FfmpegVideo,
-            "ffmpeg/demuxer" => Self::FfmpegDemuxer,
+            "ffmpeg/video" | "ffmpeg/video/h264" | "ffmpeg/video/hevc" | "ffmpeg/video/av1" => {
+                Self::FfmpegVideo
+            }
+            "ffmpeg/demuxer"
+            | "ffmpeg/demuxer/mov,mp4,m4a,3gp,3g2,mj2"
+            | "ffmpeg/demuxer/matroska,webm" => Self::FfmpegDemuxer,
             "demux" => Self::Demux,
             "demux/lavf" => Self::DemuxLavf,
             "stream" => Self::Stream,
             "stream/curl" => Self::StreamCurl,
             "cplayer" => Self::Cplayer,
+            "mkv" => Self::Mkv,
             _ => Self::Other,
         }
     }
@@ -422,6 +445,7 @@ impl NativeModule {
             Self::Stream => "stream",
             Self::StreamCurl => "stream/curl",
             Self::Cplayer => "cplayer",
+            Self::Mkv => "mkv",
             Self::Other => "other",
         }
     }
@@ -470,6 +494,41 @@ impl NativeMessage {
         };
         let begins = |prefixes: &[&str]| prefixes.iter().any(|p| text.starts_with(p));
         let code = match module {
+            Mkv if text
+                == "Stream is not seekable or unknown size, not reading mkv metadata at end of file.\n" =>
+            {
+                NativeDiagnostic::MetadataUnseekable
+            }
+            // Cancellation text is evidence only, not proof of user intent. In
+            // particular, do not suppress read errors near Player shutdown.
+            Stream | StreamCurl | Ffmpeg | FfmpegDemuxer
+                if matches!(text.trim_end_matches('\n'), "Immediate exit requested") =>
+            {
+                NativeDiagnostic::CancelledIo
+            }
+            Ffmpeg | FfmpegDemuxer
+                if begins(&[
+                    "Stream ends prematurely at ",
+                    "http: Stream ends prematurely at ",
+                ]) =>
+            {
+                NativeDiagnostic::TruncatedStream
+            }
+            DemuxLavf | FfmpegDemuxer
+                if begins(&["Packet corrupt", "partial file", "File ended prematurely"]) =>
+            {
+                NativeDiagnostic::TruncatedStream
+            }
+            Vd | VdFfmpeg | FfmpegVideo
+                if begins(&[
+                    "Error while decoding",
+                    "Error decoding",
+                    "Invalid NAL unit size",
+                    "Invalid data found when processing input",
+                ]) =>
+            {
+                NativeDiagnostic::DecodeFailed
+            }
             Vd | VdFfmpeg | FfmpegVideo
                 if begins(&[
                     "Failed to initialize a hardware decoder",
@@ -570,10 +629,16 @@ struct Observations {
     suppressed: u64,
     warnings: WarningBudget,
     failures: Vec<PlaybackFailure>,
+    phase: Option<Lifecycle>,
+    start_file: Option<Instant>,
+    media_sequence: u64,
+    qualified: bool,
+    published: bool,
 }
 pub(super) struct Diagnostics {
     pub id: u64,
     sequence: AtomicU64,
+    started: Instant,
     observations: Mutex<Observations>,
 }
 impl Diagnostics {
@@ -581,6 +646,7 @@ impl Diagnostics {
         let this = Self {
             id: NEXT_PLAYER.fetch_add(1, Ordering::Relaxed),
             sequence: AtomicU64::new(0),
+            started: Instant::now(),
             observations: Mutex::new(Observations::default()),
         };
         this.event(Lifecycle::Startup);
@@ -600,6 +666,28 @@ impl Diagnostics {
     }
     pub fn event(&self, event: Lifecycle) -> u64 {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let (media_sequence, start_file_elapsed_ms, open_duration_ms) = {
+            let mut observed = self.observations.lock().unwrap_or_else(|e| e.into_inner());
+            observed.phase = Some(event);
+            if event == Lifecycle::StartFile {
+                observed.media_sequence = observed.media_sequence.wrapping_add(1);
+                observed.start_file = Some(Instant::now());
+            }
+            let elapsed = observed
+                .start_file
+                .map(|start| start.elapsed().as_secs_f64() * 1000.0);
+            // This is START_FILE -> FILE_LOADED, not load intent -> readiness.
+            // No duration is attributed to an unobserved or already closed file.
+            let duration = if event == Lifecycle::FileLoaded {
+                elapsed
+            } else {
+                None
+            };
+            if event == Lifecycle::EndFile {
+                observed.start_file = None;
+            }
+            (observed.media_sequence, elapsed, duration)
+        };
         let scope = if event == Lifecycle::WorkersStopped {
             "workers"
         } else {
@@ -610,6 +698,10 @@ impl Diagnostics {
             sequence,
             scope,
             event = event.name(),
+            elapsed_ms = self.started.elapsed().as_secs_f64() * 1000.0,
+            media_sequence,
+            start_file_elapsed_ms,
+            open_duration_ms,
             "mpv lifecycle"
         );
         sequence
@@ -648,26 +740,82 @@ impl Diagnostics {
         tracing::info!(player_id = self.id, available, "mpv native warning capture");
     }
     pub fn native_message(&self, message: NativeMessage) {
-        if self
-            .observations
+        let mut observed = self.observations.lock().unwrap_or_else(|e| e.into_inner());
+        if !observed.warnings.accept(message) {
+            return;
+        }
+        let phase = observed.phase.map(Lifecycle::name).unwrap_or("unknown");
+        // Native FATAL is a diagnostic severity, not a terminal Player event.
+        // Only END_FILE / typed worker failures decide playback state.
+        macro_rules! emit {
+            ($level:expr) => {
+                tracing::event!(
+                    $level,
+                    player_id = self.id,
+                    diagnostic_code = message.code.code(),
+                    module = message.module.name(),
+                    severity = message.severity.name(),
+                    phase,
+                    media_sequence = observed.media_sequence,
+                    player_terminal = false,
+                    elapsed_ms = self.started.elapsed().as_secs_f64() * 1000.0,
+                    "mpv native diagnostic"
+                )
+            };
+        }
+        match message.severity {
+            NativeSeverity::Fatal | NativeSeverity::Error => emit!(tracing::Level::ERROR),
+            NativeSeverity::Warn => emit!(tracing::Level::WARN),
+            NativeSeverity::Info | NativeSeverity::Other => emit!(tracing::Level::INFO),
+        }
+    }
+    /// First qualification/backend-mailbox publication per media only. Neither
+    /// milestone measures UI acceptance or physical presentation; no per-frame logs.
+    #[cfg(feature = "gpu-surface")]
+    pub fn gpu_milestone(&self, generation: u64, publication: bool) {
+        let mut observed = self.observations.lock().unwrap_or_else(|e| e.into_inner());
+        let recorded = if publication {
+            &mut observed.published
+        } else {
+            &mut observed.qualified
+        };
+        if *recorded {
+            return;
+        }
+        *recorded = true;
+        tracing::info!(
+            player_id = self.id,
+            generation,
+            milestone = if publication {
+                "first-mailbox-publication"
+            } else {
+                "first-qualification"
+            },
+            elapsed_ms = self.started.elapsed().as_secs_f64() * 1000.0,
+            media_sequence = observed.media_sequence,
+            start_file_elapsed_ms = observed
+                .start_file
+                .map(|start| start.elapsed().as_secs_f64() * 1000.0),
+            "mpv GPU surface startup timing"
+        );
+    }
+    #[cfg(test)]
+    pub fn native_diagnostic_codes(&self) -> Vec<&'static str> {
+        self.observations
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .warnings
-            .accept(message)
-        {
-            tracing::warn!(
-                player_id = self.id,
-                diagnostic_code = message.code.code(),
-                module = message.module.name(),
-                severity = message.severity.name(),
-                "mpv native diagnostic"
-            );
-        }
+            .seen
+            .iter()
+            .map(|message| message.code.code())
+            .collect()
     }
     pub fn new_media(&self) {
         let mut observed = self.observations.lock().unwrap_or_else(|e| e.into_inner());
         observed.evidence = None;
         observed.failures.clear();
+        observed.qualified = false;
+        observed.published = false;
     }
     pub fn render_size(&self, size: [u32; 2]) {
         let mut observed = self.observations.lock().unwrap_or_else(|e| e.into_inner());
@@ -698,14 +846,23 @@ impl Diagnostics {
                     operation: "none",
                     mpv_error: None
                 },
+                false,
                 "mpv evidence changed"
             );
         } else {
             observed.suppressed = observed.suppressed.saturating_add(1);
         }
     }
+    #[cfg(test)]
     pub fn failure(&self, reason: PlaybackFailure, state: Option<&PlaybackState>) {
         self.failure_details(reason, state, FailureDetails::default());
+    }
+    pub fn media_failure(&self, code: i32, state: &PlaybackState) {
+        self.failure_details(
+            PlaybackFailure::MediaLoadFailed,
+            Some(state),
+            FailureDetails::media_end(code),
+        );
     }
     pub fn failure_typed(&self, error: &Error, state: Option<&PlaybackState>) {
         self.failure_details(
@@ -744,6 +901,7 @@ impl Diagnostics {
             evidence,
             reason.code(),
             details,
+            state.is_some_and(|state| state.stopped),
             "mpv playback failure"
         );
     }
@@ -798,6 +956,17 @@ impl Drop for Diagnostics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn media_end_failure_preserves_numeric_context_without_native_text() {
+        assert_eq!(
+            FailureDetails::media_end(-17),
+            FailureDetails {
+                kind: "mpv",
+                operation: "load",
+                mpv_error: Some(-17),
+            }
+        );
+    }
     #[test]
     fn typed_failure_details_keep_numeric_codes_but_never_native_text_or_operations() {
         const SECRET: &str =
@@ -951,6 +1120,80 @@ mod tests {
         );
     }
     #[test]
+    fn native_failure_fixtures_do_not_infer_cancellation_or_terminal_state() {
+        let fixtures = [
+            (
+                "ffmpeg",
+                "http: Stream ends prematurely at 1024, should be 4096\n",
+                NativeDiagnostic::TruncatedStream,
+            ),
+            (
+                "ffmpeg/demuxer",
+                "Packet corrupt (stream = 0, dts = 1).",
+                NativeDiagnostic::TruncatedStream,
+            ),
+            (
+                "ffmpeg/video/h264",
+                "Invalid NAL unit size (1024 > 2).",
+                NativeDiagnostic::DecodeFailed,
+            ),
+            (
+                "stream",
+                "Immediate exit requested\n",
+                NativeDiagnostic::CancelledIo,
+            ),
+            (
+                "stream",
+                "Read error: Immediate exit requested",
+                NativeDiagnostic::ReadFailed,
+            ),
+            (
+                "other",
+                "Immediate exit requested",
+                NativeDiagnostic::Unclassified,
+            ),
+        ];
+        for (module, text, expected) in fixtures {
+            let message = NativeMessage::classify(module, "error", text, 20);
+            assert_eq!(message.code, expected);
+            assert_eq!(message.severity, NativeSeverity::Error);
+        }
+        for secret in [
+            "https://name:token@host/private?token=SECRET",
+            "/private/SECRET",
+            "Bearer SECRET",
+            "秘密\nSECRET",
+        ] {
+            for module in ["ffmpeg", "ffmpeg/video/h264", "stream", secret] {
+                // A phrase embedded in a URL/path/error must not become a cause.
+                let text =
+                    format!("{secret}: Immediate exit requested; Stream ends prematurely at 1");
+                let message = NativeMessage::classify(module, secret, &text, 20);
+                assert_eq!(message.code, NativeDiagnostic::Unclassified);
+                assert!(!message.summary().contains("SECRET"));
+                assert!(!message.summary().contains(secret));
+            }
+        }
+    }
+    #[cfg(feature = "gpu-surface")]
+    #[test]
+    fn startup_milestones_are_once_per_media_and_reset_without_resetting_log_budget() {
+        let diagnostics = Diagnostics::new(&Config::default());
+        diagnostics.new_media();
+        diagnostics.gpu_milestone(1, false);
+        diagnostics.gpu_milestone(1, true);
+        diagnostics.gpu_milestone(2, false);
+        diagnostics.gpu_milestone(2, true);
+        {
+            let observations = diagnostics.observations.lock().unwrap();
+            assert!(observations.qualified && observations.published);
+            assert!(observations.start_file.is_none());
+        }
+        diagnostics.new_media();
+        let observations = diagnostics.observations.lock().unwrap();
+        assert!(!observations.qualified && !observations.published);
+    }
+    #[test]
     fn ffmpeg_aliases_and_severity_use_fixed_enums() {
         for (module, text, expected) in [
             (
@@ -1021,6 +1264,47 @@ mod tests {
         assert!(observations.evidence.is_none());
         assert!(observations.failures.is_empty());
         assert_eq!(observations.changes, 32);
+    }
+    #[test]
+    fn open_timing_is_scoped_to_observed_start_file_and_closed_at_end_file() {
+        let diagnostics = Diagnostics::new(&Config::default());
+        diagnostics.new_media();
+        diagnostics.event(Lifecycle::LoadRequested);
+        assert!(
+            diagnostics
+                .observations
+                .lock()
+                .unwrap()
+                .start_file
+                .is_none()
+        );
+        diagnostics.event(Lifecycle::StartFile);
+        diagnostics.event(Lifecycle::FileLoaded);
+        {
+            let observed = diagnostics.observations.lock().unwrap();
+            assert_eq!(observed.media_sequence, 1);
+            assert!(observed.start_file.is_some());
+        }
+        diagnostics.event(Lifecycle::EndFile);
+        assert!(
+            diagnostics
+                .observations
+                .lock()
+                .unwrap()
+                .start_file
+                .is_none()
+        );
+        diagnostics.event(Lifecycle::FileLoaded); // A late event cannot reopen timing.
+        assert!(
+            diagnostics
+                .observations
+                .lock()
+                .unwrap()
+                .start_file
+                .is_none()
+        );
+        diagnostics.event(Lifecycle::StartFile);
+        assert_eq!(diagnostics.observations.lock().unwrap().media_sequence, 2);
     }
     #[test]
     fn missing_observations_are_distinct_from_unrecognized_metadata() {

@@ -15,6 +15,7 @@ struct Fixture {
     mode: Arc<AtomicUsize>,
     bytes: Arc<Vec<u8>>,
     gate: Arc<AtomicBool>,
+    stage: Arc<AtomicUsize>,
 }
 impl Fixture {
     fn start(size: usize, mode: usize) -> Result<Self, Box<dyn std::error::Error>> {
@@ -28,6 +29,8 @@ impl Fixture {
         let bytes = Arc::new((0..size).map(|i| (i % 251) as u8).collect::<Vec<_>>());
         let gate = Arc::new(AtomicBool::new(false));
         let permitted = gate.clone();
+        let stage = Arc::new(AtomicUsize::new(0));
+        let progress = stage.clone();
         let (canceled, recorded, count, behavior, data) = (
             stop.clone(),
             requests.clone(),
@@ -66,7 +69,12 @@ impl Fixture {
                     .unwrap_or_else(|e| e.into_inner())
                     .push((start, end));
                 let call = count.fetch_add(1, Ordering::Relaxed);
-                let mode = behavior.load(Ordering::Relaxed);
+                let mut mode = behavior.load(Ordering::Relaxed);
+                if mode == 13 && call == 0 {
+                    progress.store(1, Ordering::Release);
+                    wait_gate(&permitted, &canceled);
+                    mode = behavior.load(Ordering::Relaxed);
+                }
                 if mode == 12 {
                     // Close before sending response headers.
                     continue;
@@ -108,6 +116,14 @@ impl Fixture {
                     end - 1,
                     data.len()
                 );
+                if mode == 14 && call == 0 {
+                    let prefix_end = end.min(start + 64 * 1024);
+                    let _ = stream.write_all(&data[start as usize..prefix_end as usize]);
+                    progress.store(2, Ordering::Release);
+                    wait_gate(&permitted, &canceled);
+                    let _ = stream.write_all(&data[prefix_end as usize..end as usize]);
+                    continue;
+                }
                 if mode == 8 {
                     let _ = stream.write_all(&data[start as usize..(start + 1) as usize]);
                     continue;
@@ -136,6 +152,7 @@ impl Fixture {
             mode,
             bytes,
             gate,
+            stage,
         })
     }
     fn resolved(&self) -> ResolvedMedia {
@@ -145,6 +162,15 @@ impl Fixture {
             url: SensitiveUrl::for_test(self.url.clone()),
             expires_at: None,
         }
+    }
+}
+fn wait_gate(permitted: &AtomicBool, canceled: &AtomicBool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !permitted.load(Ordering::Acquire)
+        && !canceled.load(Ordering::Relaxed)
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 impl Drop for Fixture {
@@ -504,6 +530,7 @@ fn media_diagnostics_exclude_signed_urls_identities_and_session_tokens()
     let key = storage::key(&resolved.identity);
     let asset = storage::create(&service.shared.root, &key, resolved.identity.clone())?;
     let renewal = resolved.clone();
+    let signed_url = url.as_str().to_owned();
     let (result, output) = capture(|| {
         let error = reqwest::blocking::Client::new()
             .get("invalid-url")
@@ -528,6 +555,10 @@ fn media_diagnostics_exclude_signed_urls_identities_and_session_tokens()
     assert_eq!(result, Err(MediaError::UnsupportedRange));
     assert!(output.contains("range_status"));
     assert!(output.contains("Media session created"));
+    if diagnostics::enabled() {
+        assert!(output.contains("Media operation ended"));
+        assert!(output.contains("Some(UnsupportedRange)"));
+    }
     excludes(
         &output,
         &[
@@ -536,6 +567,9 @@ fn media_diagnostics_exclude_signed_urls_identities_and_session_tokens()
             "signature=",
             "filename-secret",
             "local-filename-secret",
+            &signed_url,
+            &key,
+            &root.path().to_string_lossy(),
             &token,
         ],
     );
@@ -570,5 +604,101 @@ fn remote_acquisition_amortizes_requests_with_four_mib_ranges()
     let bytes = reqwest::blocking::get(&lease.url)?.bytes()?;
     assert_eq!(bytes.as_ref(), fixture.bytes.as_slice());
     service.release(&lease.id)?;
+    Ok(())
+}
+
+// The headers and first 64KiB arriving upstream do not imply a durable range.
+// Gate both phases independently; no real provider or wall-time latency oracle.
+#[test]
+fn slow_headers_and_partial_body_keep_reader_waiting_until_durable()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (mode, stage) in [(13, 1), (14, 2)] {
+        let root = tempfile::tempdir()?;
+        let fixture = Fixture::start(CHUNK as usize, mode)?;
+        let service = service(root.path(), CHUNK * 2);
+        let resolved = fixture.resolved();
+        let next = resolved.clone();
+        let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+        wait_until(|| fixture.stage.load(Ordering::Acquire) == stage);
+        let response = reqwest::blocking::Client::new()
+            .get(&lease.url)
+            .header("Range", "bytes=0-65535")
+            .send()?;
+        assert_eq!(response.status(), 206);
+        let (sent, received) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let _ = sent.send(response.bytes().map(|b| b.to_vec()).map_err(|_| ()));
+        });
+        wait_until(|| {
+            service.shared.state.lock().is_ok_and(|s| {
+                s.assets
+                    .values()
+                    .any(|a| a.state.lock().is_ok_and(|s| s.priority == Some(0)))
+            })
+        });
+        assert_eq!(service.usage().downloaded_bytes, 0);
+        assert!(matches!(
+            received.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        fixture.gate.store(true, Ordering::Release);
+        let bytes = received
+            .recv_timeout(Duration::from_secs(8))?
+            .map_err(|_| "body failed")?;
+        assert_eq!(bytes, fixture.bytes[..65536]);
+        reader.join().map_err(|_| "reader panicked")?;
+        service.release(&lease.id)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn unavailable_range_reader_aborts_on_release_or_upstream_failure()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (cancel, mode, stage) in [(false, 13, 1), (true, 13, 1), (true, 14, 2)] {
+        let root = tempfile::tempdir()?;
+        let fixture = Fixture::start(CHUNK as usize, mode)?;
+        let service = service(root.path(), CHUNK * 2);
+        let resolved = fixture.resolved();
+        let next = resolved.clone();
+        let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+        wait_until(|| fixture.stage.load(Ordering::Acquire) == stage);
+        let response = reqwest::blocking::Client::new()
+            .get(&lease.url)
+            .header("Range", "bytes=0-65535")
+            .send()?;
+        let (sent, received) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let _ = sent.send(response.bytes().is_err());
+        });
+        wait_until(|| {
+            service.shared.state.lock().is_ok_and(|s| {
+                s.assets
+                    .values()
+                    .any(|a| a.state.lock().is_ok_and(|s| s.priority == Some(0)))
+            })
+        });
+        if cancel {
+            service.release(&lease.id)?;
+            // Reader cancellation does not wait for the blocked upstream header.
+            assert!(received.recv_timeout(Duration::from_secs(3))?);
+            fixture.gate.store(true, Ordering::Release);
+        } else {
+            fixture.mode.store(3, Ordering::Relaxed); // unsupported HTTP 200
+            fixture.gate.store(true, Ordering::Release);
+            assert!(received.recv_timeout(Duration::from_secs(3))?);
+            assert_eq!(service.session_errors()[0].1, MediaError::UnsupportedRange);
+            service.release(&lease.id)?;
+        }
+        reader.join().map_err(|_| "reader panicked")?;
+        wait_until(|| {
+            service.shared.state.lock().is_ok_and(|s| {
+                s.assets
+                    .values()
+                    .all(|a| !a.running.load(Ordering::Acquire))
+            })
+        });
+        assert_eq!(service.usage().downloaded_bytes, 0);
+    }
     Ok(())
 }

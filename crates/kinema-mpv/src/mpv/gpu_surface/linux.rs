@@ -73,6 +73,115 @@ gl_api! {
     signal_semaphore: unsafe extern "system" fn(u32,u32,*const u32,u32,*const u32,*const u32) = "glSignalSemaphoreEXT";
 }
 
+// EGL_EXT_device_persistent_id is optional. Use its UUID only to avoid
+// initializing unrelated displays, never as a substitute for the GL UUID proof.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeviceUuid {
+    Unavailable,
+    Known([u8; 16]),
+    Invalid,
+}
+
+impl DeviceUuid {
+    fn queried(success: bool, size: i32, uuid: [u8; 16]) -> Self {
+        if success && size == 16 && uuid != [0; 16] {
+            Self::Known(uuid)
+        } else {
+            Self::Invalid
+        }
+    }
+
+    fn priority(self, expected: [u8; 16]) -> Option<u8> {
+        match self {
+            Self::Known(uuid) if uuid == expected => Some(0),
+            Self::Unavailable => Some(1),
+            Self::Known(_) | Self::Invalid => None,
+        }
+    }
+}
+
+// One numeric-only summary per discovery attempt, including early startup
+// failure. No device identifiers, native strings or candidate errors are logged.
+#[derive(Default)]
+struct DiscoverySummary {
+    enumerated: usize,
+    advertised_mismatches: usize,
+    invalid_identities: usize,
+    unknown_identities: usize,
+    context_probes: usize,
+    context_failures: usize,
+    gl_uuid_rejections: usize,
+    render_node_failures: usize,
+    matched: bool,
+}
+
+impl DiscoverySummary {
+    fn candidate(&mut self, identity: DeviceUuid, expected: [u8; 16]) -> Option<u8> {
+        match identity {
+            DeviceUuid::Known(uuid) if uuid != expected => self.advertised_mismatches += 1,
+            DeviceUuid::Invalid => self.invalid_identities += 1,
+            DeviceUuid::Unavailable => self.unknown_identities += 1,
+            DeviceUuid::Known(_) => {}
+        }
+        identity.priority(expected)
+    }
+}
+
+impl Drop for DiscoverySummary {
+    fn drop(&mut self) {
+        tracing::info!(
+            target: "kinema_mpv::gpu_surface",
+            enumerated = self.enumerated,
+            advertised_mismatches = self.advertised_mismatches,
+            invalid_identities = self.invalid_identities,
+            unknown_identities = self.unknown_identities,
+            context_probes = self.context_probes,
+            context_failures = self.context_failures,
+            gl_uuid_rejections = self.gl_uuid_rejections,
+            render_node_failures = self.render_node_failures,
+            matched = self.matched,
+            "EGL device discovery summary"
+        );
+    }
+}
+
+fn has_extension(extensions: &[u8], required: &[u8]) -> bool {
+    extensions
+        .split(|&byte| byte == b' ')
+        .any(|name| name == required)
+}
+
+// SAFETY: the device is from eglQueryDevicesEXT; get and its library remain live.
+unsafe fn device_uuid(get: GetProc, device: *mut c_void) -> DeviceUuid {
+    let query = unsafe { get(c"eglQueryDeviceStringEXT".as_ptr()) };
+    if query.is_null() {
+        return DeviceUuid::Unavailable;
+    }
+    let query: unsafe extern "system" fn(*mut c_void, i32) -> *const c_char =
+        unsafe { std::mem::transmute(query) };
+    let extensions = unsafe { query(device, 0x3055) }; // EGL_EXTENSIONS
+    if extensions.is_null()
+        || !has_extension(
+            unsafe { CStr::from_ptr(extensions) }.to_bytes(),
+            b"EGL_EXT_device_persistent_id",
+        )
+    {
+        return DeviceUuid::Unavailable;
+    }
+    let binary = unsafe { get(c"eglQueryDeviceBinaryEXT".as_ptr()) };
+    if binary.is_null() {
+        return DeviceUuid::Invalid;
+    }
+    let binary: unsafe extern "system" fn(*mut c_void, i32, i32, *mut c_void, *mut i32) -> u32 =
+        unsafe { std::mem::transmute(binary) };
+    let mut uuid = [0; 16];
+    let mut size = 0;
+    let success = unsafe {
+        binary(device, 0x335c, 16, uuid.as_mut_ptr().cast(), &mut size) // EGL_DEVICE_UUID_EXT
+    };
+    DeviceUuid::queried(success != 0, size, uuid)
+}
+
 /// Owns a private surfaceless desktop-GL context; created and dropped on worker.
 pub(crate) struct Egl {
     _library: ManuallyDrop<Library>,
@@ -95,11 +204,12 @@ impl Egl {
     pub fn new(expected_uuid: [u8; 16]) -> Result<Self, String> {
         // A multi-GPU host may default EGL to NVIDIA while wgpu uses Intel.
         // Enumerate native EGL devices and accept only the exact Vulkan UUID.
+        let mut discovery = DiscoverySummary::default();
         unsafe {
-            let library = Library::new("libEGL.so.1").map_err(|e| e.to_string())?;
+            let library = Library::new("libEGL.so.1").map_err(|_| "cannot load EGL library")?;
             let get: GetProc = *library
                 .get(b"eglGetProcAddress\0")
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglGetProcAddress")?;
             let p = get(c"eglQueryDevicesEXT".as_ptr());
             if p.is_null() {
                 return Err("EGL device enumeration required for exact GPU selection".into());
@@ -111,26 +221,51 @@ impl Egl {
                 return Err("EGL device enumeration failed".into());
             }
             let mut devices = vec![ptr::null_mut(); count as usize];
-            if query(count, devices.as_mut_ptr(), &mut count) == 0 {
+            if query(count, devices.as_mut_ptr(), &mut count) == 0
+                || count < 0
+                || count as usize > devices.len()
+            {
                 return Err("EGL device enumeration failed".into());
             }
-            let mut errors = Vec::new();
-            for device in devices.into_iter().take(count as usize) {
-                match Self::for_device(device) {
-                    Ok(mut egl) => match egl.verify_uuid(expected_uuid) {
-                        Ok(()) => {
-                            egl.open_render_node()?;
-                            return Ok(egl);
-                        }
-                        Err(error) => errors.push(error),
-                    },
-                    Err(error) => errors.push(error),
+            discovery.enumerated = count as usize;
+            // Prefer an advertised exact match even when an older driver without
+            // persistent IDs appears first. Unknown devices retain the original
+            // context-based verification path; known mismatches are never probed.
+            let mut candidates: Vec<_> = devices
+                .into_iter()
+                .take(count as usize)
+                .filter_map(|device| {
+                    if device.is_null() {
+                        discovery.invalid_identities += 1;
+                        return None;
+                    }
+                    discovery
+                        .candidate(device_uuid(get, device), expected_uuid)
+                        .map(|priority| (priority, device))
+                })
+                .collect();
+            candidates.sort_by_key(|&(priority, _)| priority);
+            for (_, device) in candidates {
+                discovery.context_probes += 1;
+                let mut egl = match Self::for_device(device) {
+                    Ok(egl) => egl,
+                    Err(_) => {
+                        discovery.context_failures += 1;
+                        continue;
+                    }
+                };
+                if egl.verify_uuid(expected_uuid).is_err() {
+                    discovery.gl_uuid_rejections += 1;
+                    continue;
                 }
+                if let Err(error) = egl.open_render_node() {
+                    discovery.render_node_failures += 1;
+                    return Err(error);
+                }
+                discovery.matched = true;
+                return Ok(egl);
             }
-            Err(format!(
-                "no EGL device matches Vulkan UUID: {}",
-                errors.join("; ")
-            ))
+            Err("no compatible EGL device matches the Vulkan device UUID".into())
         }
     }
     /// Node comes from the exact EGL device whose full UUID matched Vulkan.
@@ -177,13 +312,16 @@ impl Egl {
     fn open_render_node(&mut self) -> Result<(), String> {
         use std::os::{linux::fs::MetadataExt, unix::fs::FileTypeExt};
         let node = self.vaapi_render_node()?;
-        let before = std::fs::metadata(&node).map_err(|e| e.to_string())?;
+        let before =
+            std::fs::metadata(&node).map_err(|_| "cannot inspect verified DRM render node")?;
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(&node)
-            .map_err(|e| format!("open verified DRM render node: {e}"))?;
-        let after = file.metadata().map_err(|e| e.to_string())?;
+            .map_err(|_| "cannot open verified DRM render node")?;
+        let after = file
+            .metadata()
+            .map_err(|_| "cannot inspect verified DRM render node")?;
         if !after.file_type().is_char_device()
             || before.st_rdev() != after.st_rdev()
             || before.st_ino() != after.st_ino()
@@ -197,18 +335,21 @@ impl Egl {
     fn for_device(native_device: *mut c_void) -> Result<Self, String> {
         // SAFETY: EGL ABI signatures below are from EGL 1.5; library is retained.
         unsafe {
-            let library = Library::new("libEGL.so.1").map_err(|e| e.to_string())?;
+            let library = Library::new("libEGL.so.1").map_err(|_| "cannot load EGL library")?;
             let get_proc: GetProc = *library
                 .get(b"eglGetProcAddress\0")
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglGetProcAddress")?;
             let platform: unsafe extern "system" fn(u32, *mut c_void, *const isize) -> Display =
                 *library
                     .get(b"eglGetPlatformDisplay\0")
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|_| "missing EGL entry point eglGetPlatformDisplay")?;
             let initialize: unsafe extern "system" fn(Display, *mut i32, *mut i32) -> u32 =
-                *library.get(b"eglInitialize\0").map_err(|e| e.to_string())?;
-            let bind: unsafe extern "system" fn(u32) -> u32 =
-                *library.get(b"eglBindAPI\0").map_err(|e| e.to_string())?;
+                *library
+                    .get(b"eglInitialize\0")
+                    .map_err(|_| "missing EGL entry point eglInitialize")?;
+            let bind: unsafe extern "system" fn(u32) -> u32 = *library
+                .get(b"eglBindAPI\0")
+                .map_err(|_| "missing EGL entry point eglBindAPI")?;
             let choose: unsafe extern "system" fn(
                 Display,
                 *const i32,
@@ -217,7 +358,7 @@ impl Egl {
                 *mut i32,
             ) -> u32 = *library
                 .get(b"eglChooseConfig\0")
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglChooseConfig")?;
             let create_context: unsafe extern "system" fn(
                 Display,
                 *mut c_void,
@@ -225,34 +366,36 @@ impl Egl {
                 *const i32,
             ) -> Context = *library
                 .get(b"eglCreateContext\0")
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglCreateContext")?;
             let create_surface: unsafe extern "system" fn(
                 Display,
                 *mut c_void,
                 *const i32,
             ) -> Surface = *library
                 .get(b"eglCreatePbufferSurface\0")
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglCreatePbufferSurface")?;
             let make_current = *library
                 .get(b"eglMakeCurrent\0")
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglMakeCurrent")?;
             let get_current_context = *library
                 .get(b"eglGetCurrentContext\0")
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglGetCurrentContext")?;
             let destroy_context = *library
                 .get(b"eglDestroyContext\0")
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglDestroyContext")?;
             let destroy_surface = *library
                 .get(b"eglDestroySurface\0")
-                .map_err(|e| e.to_string())?;
-            let terminate = *library.get(b"eglTerminate\0").map_err(|e| e.to_string())?;
+                .map_err(|_| "missing EGL entry point eglDestroySurface")?;
+            let terminate = *library
+                .get(b"eglTerminate\0")
+                .map_err(|_| "missing EGL entry point eglTerminate")?;
             let gl = Gl::load(get_proc)?;
             let display = platform(0x313f, native_device, ptr::null()); // EGL_PLATFORM_DEVICE_EXT
             if display.is_null() {
                 return Err("surfaceless EGL display unavailable".into());
             }
             crate::mpv::platform::acquire_headless_display(initialize, display)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "EGL display initialization failed")?;
             let mut this = Self {
                 _library: ManuallyDrop::new(library),
                 quarantined: Cell::new(false),
@@ -361,9 +504,7 @@ impl Egl {
             (self.gl.get_uuid)(0x9597, 0, uuid.as_mut_ptr());
             self.check("GL device UUID")?;
             if uuid != expected {
-                return Err(format!(
-                    "GL/Vulkan device UUID mismatch: GL {uuid:02x?}, Vulkan {expected:02x?}"
-                ));
+                return Err("GL/Vulkan device UUID mismatch".into());
             }
             Ok(())
         }
@@ -486,6 +627,11 @@ struct Allocation {
     row: u32,
     bytes: u64,
 }
+// This is only the existing vendor gate, not native capability qualification.
+fn presentation_vendor_supported(vendor_id: u32) -> bool {
+    vendor_id == 0x8086
+}
+
 impl Allocation {
     pub fn new(
         device: Arc<wgpu::Device>,
@@ -514,7 +660,20 @@ impl Allocation {
             instance
                 .raw_instance()
                 .get_physical_device_properties2(physical, &mut properties);
-            if properties.properties.vendor_id != 0x8086 {
+            let vendor_id = properties.properties.vendor_id;
+            let vendor_supported = presentation_vendor_supported(vendor_id);
+            // Emit once at context startup, not for each frame/resize allocation.
+            // Report the actual supplied presentation device even when the vendor
+            // gate fails before EGL discovery. Never include UUID/name/driver text.
+            if existing_egl.is_none() {
+                tracing::info!(
+                    target: "kinema_mpv::gpu_surface",
+                    vendor_id,
+                    vendor_supported,
+                    "GPU surface presentation device vendor gate"
+                );
+            }
+            if !vendor_supported {
                 return Err("this proof currently supports Intel Mesa only".into());
             }
             let egl = match existing_egl {
@@ -1174,8 +1333,98 @@ impl Interop {
 
 #[cfg(test)]
 mod tests {
-    use super::{Phase, completed_raw_phase, layout, prove_completion};
+    use super::{
+        DeviceUuid, DiscoverySummary, Phase, completed_raw_phase, has_extension, layout,
+        presentation_vendor_supported, prove_completion,
+    };
     use std::cell::RefCell;
+
+    #[test]
+    fn presentation_vendor_gate_preserves_intel_only_policy() {
+        assert!(presentation_vendor_supported(0x8086));
+        for vendor_id in [0, 0x10de, 0x1002, 0x1414, u32::MAX] {
+            assert!(!presentation_vendor_supported(vendor_id));
+        }
+    }
+
+    #[test]
+    fn persistent_uuid_filter_prefers_exact_match_and_keeps_legacy_verification() {
+        let expected = [7; 16];
+        let advertised = [
+            DeviceUuid::Unavailable,
+            DeviceUuid::Known([8; 16]),
+            DeviceUuid::Invalid,
+            DeviceUuid::Known(expected),
+            DeviceUuid::Unavailable,
+        ];
+        let mut candidates: Vec<_> = advertised
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, uuid)| uuid.priority(expected).map(|rank| (rank, index)))
+            .collect();
+        candidates.sort_by_key(|&(rank, _)| rank);
+        assert_eq!(candidates, [(0, 3), (1, 0), (1, 4)]);
+        // No claim of compatibility is made for unknown IDs: they must still
+        // pass for_device + verify_uuid before opening the decoder render node.
+        assert_eq!(DeviceUuid::Known(expected).priority([9; 16]), None);
+    }
+
+    #[test]
+    fn discovery_summary_counts_fixed_identity_outcomes() {
+        let expected = [7; 16];
+        let mut summary = DiscoverySummary::default();
+        assert_eq!(
+            summary.candidate(DeviceUuid::Known(expected), expected),
+            Some(0)
+        );
+        assert_eq!(
+            summary.candidate(DeviceUuid::Known([8; 16]), expected),
+            None
+        );
+        assert_eq!(summary.candidate(DeviceUuid::Invalid, expected), None);
+        assert_eq!(
+            summary.candidate(DeviceUuid::Unavailable, expected),
+            Some(1)
+        );
+        assert_eq!(summary.advertised_mismatches, 1);
+        assert_eq!(summary.invalid_identities, 1);
+        assert_eq!(summary.unknown_identities, 1);
+        assert_eq!(summary.context_probes, 0);
+        assert!(!summary.matched);
+    }
+
+    #[test]
+    fn persistent_uuid_query_requires_complete_nonzero_evidence() {
+        assert_eq!(
+            DeviceUuid::queried(true, 16, [7; 16]),
+            DeviceUuid::Known([7; 16])
+        );
+        for size in [-1, 0, 15, 17, i32::MAX] {
+            assert_eq!(
+                DeviceUuid::queried(true, size, [7; 16]),
+                DeviceUuid::Invalid
+            );
+        }
+        assert_eq!(DeviceUuid::queried(false, 16, [7; 16]), DeviceUuid::Invalid);
+        assert_eq!(DeviceUuid::queried(true, 16, [0; 16]), DeviceUuid::Invalid);
+    }
+
+    #[test]
+    fn persistent_uuid_extension_is_an_exact_token_not_a_vendor_hint() {
+        let required = b"EGL_EXT_device_persistent_id";
+        assert!(has_extension(
+            b"other EGL_EXT_device_persistent_id another",
+            required
+        ));
+        for extensions in [
+            b"".as_slice(),
+            b"EGL_EXT_device_persistent_id_suffix",
+            b"prefix_EGL_EXT_device_persistent_id",
+            b"NVIDIA Mesa Intel",
+        ] {
+            assert!(!has_extension(extensions, required));
+        }
+    }
 
     #[test]
     fn completion_proof_requires_all_domains_and_stops_at_first_failure() {

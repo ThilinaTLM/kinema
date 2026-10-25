@@ -1142,7 +1142,9 @@ impl CatalogService {
                                 },
                             )),
                             ProviderId::Tmdb => match self.tmdb_client(|| {
-                                crate::credentials::MetadataCredentialStore::new().get()
+                                crate::credentials::MetadataCredentialStore::new()
+                                    .get_optional()?
+                                    .ok_or(crate::credentials::CredentialError::Missing)
                             }) {
                                 Ok(client) => {
                                     sources.push(Box::new(crate::metadata_providers::tmdb::Tmdb {

@@ -21,6 +21,92 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+// Test-only startup tracing: never format arbitrary event fields or native text.
+struct SafeStartupSubscriber;
+#[derive(Default)]
+struct SafeStartupFields(String);
+impl tracing::field::Visit for SafeStartupFields {
+    fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        if matches!(
+            field.name(),
+            "enumerated"
+                | "advertised_mismatches"
+                | "invalid_identities"
+                | "unknown_identities"
+                | "context_probes"
+                | "context_failures"
+                | "gl_uuid_rejections"
+                | "render_node_failures"
+                | "player_id"
+                | "generation"
+                | "qualification_wait_ms"
+        ) {
+            use std::fmt::Write;
+            let _ = write!(self.0, " {}={value}", field.name());
+        }
+    }
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        if field.name() == "matched" {
+            use std::fmt::Write;
+            let _ = write!(self.0, " matched={value}");
+        }
+    }
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "qualification"
+            && matches!(
+                value,
+                "ready"
+                    | "waiting-decode"
+                    | "waiting-effective-transfer"
+                    | "hdr-unsupported"
+                    | "decoder-not-direct"
+                    | "decode-metadata-unavailable"
+                    | "color-transfer-unqualified"
+                    | "color-metadata-unavailable"
+            )
+        {
+            use std::fmt::Write;
+            let _ = write!(self.0, " qualification={value}");
+        }
+    }
+}
+impl tracing::Subscriber for SafeStartupSubscriber {
+    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+        matches!(
+            metadata.target(),
+            "kinema_mpv::gpu_surface" | "kinema_mpv::mpv::gpu_surface"
+        )
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        if !self.enabled(event.metadata()) {
+            return;
+        }
+        let mut fields = SafeStartupFields::default();
+        event.record(&mut fields);
+        let category = if event.metadata().target() == "kinema_mpv::gpu_surface" {
+            "discovery"
+        } else {
+            "qualification"
+        };
+        eprintln!("native-safe-{category}{}", fields.0);
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+fn startup_tracing() {
+    static START: std::sync::Once = std::sync::Once::new();
+    START.call_once(|| {
+        tracing::subscriber::set_global_default(SafeStartupSubscriber)
+            .expect("native test safe tracing subscriber");
+    });
+}
+
 static EXCLUSIVE: Mutex<()> = Mutex::new(());
 const HD: [u32; 2] = [1920, 1080];
 const UHD: [u32; 2] = [3840, 2160];
@@ -62,6 +148,7 @@ struct Gpu {
 }
 impl Gpu {
     fn new() -> Self {
+        startup_tracing();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
             flags: wgpu::InstanceFlags::VALIDATION | wgpu::InstanceFlags::DEBUG,
@@ -582,6 +669,15 @@ fn assert_direct(player: &Player, size: [u32; 2]) {
         player.take_frame().is_none(),
         "GPU surface playback published CPU pixels"
     );
+    static LAST_SIZE: Mutex<Option<[u32; 2]>> = Mutex::new(None);
+    let mut last_size = LAST_SIZE.lock().unwrap();
+    if *last_size != Some(size) {
+        eprintln!(
+            "native-safe-direct decoder=vaapi backend=gpu source_width={} source_height={} render_width={} render_height={} readback_bytes=0 upload_bytes=0 cpu_frame=false fallback=false",
+            size[0], size[1], size[0], size[1]
+        );
+        *last_size = Some(size);
+    }
     // Production Renderer validates actual decoded/output vaapi and NV12/P010
     // before publishing these GPU surfaces. The public API exposes hwdec only;
     // this test intentionally does not open a second mpv client for metadata.

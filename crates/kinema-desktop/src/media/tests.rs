@@ -304,6 +304,7 @@ fn outstanding_disk_reservations_and_overflow_are_rejected() {
     );
     let asset = |name: &str| {
         Arc::new(Asset {
+            diagnostic_id: diagnostics::next_id(),
             dir: PathBuf::new(),
             identity: MediaIdentity {
                 file_path: name.into(),

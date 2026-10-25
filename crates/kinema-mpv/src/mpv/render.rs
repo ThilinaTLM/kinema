@@ -467,10 +467,17 @@ pub(super) fn run(
     #[cfg(any(feature = "gpu-render", feature = "gpu-surface"))]
     let mut gpu_schedule = GpuSchedule::new();
     while !shared.stopped.load(Ordering::Acquire) {
-        let (size, generation) = {
-            let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
-            (pipeline.size, pipeline.generation)
-        };
+        let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+        let (size, generation) = (pipeline.size, pipeline.generation);
+        // Evidence and dimensions must belong to the same generation as size.
+        // The control worker can invalidate the pipeline during renderer.update().
+        #[cfg(feature = "gpu-surface")]
+        let qualification = (
+            pipeline.decode_evidence.clone(),
+            pipeline.decode_evidence_observed,
+            dimensions(pipeline.metadata[0], pipeline.metadata[1]).is_some(),
+        );
+        drop(pipeline);
         if last_diagnostic_size != Some(size) {
             shared.diagnostics.render_size(size);
             last_diagnostic_size = Some(size);
@@ -506,18 +513,34 @@ pub(super) fn run(
                 #[cfg(feature = "gpu-surface")]
                 Renderer::GpuSurface(gpu) => {
                     gpu_schedule.observe(updates);
-                    let (evidence, observed, video_ready) = {
-                        let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
-                        (
-                            pipeline.decode_evidence.clone(),
-                            pipeline.decode_evidence_observed,
-                            dimensions(pipeline.metadata[0], pipeline.metadata[1]).is_some(),
-                        )
-                    };
+                    let (evidence, observed, video_ready) = qualification;
                     // Missing video dimensions must not short-circuit the decode
                     // metadata timeout after an active-media observation.
-                    let qualified = observed && gpu.evidence_ready(generation, &evidence)?;
+                    let qualified = if observed {
+                        match gpu.evidence_ready(generation, &evidence) {
+                            Ok(ready) => ready,
+                            Err(error) => {
+                                // EvidenceWait may have consumed the old snapshot,
+                                // but only its current generation can stop Player.
+                                // Its next observation requalifies the new generation.
+                                shared.fail_qualification_if_current(generation, error);
+                                return Ok(());
+                            }
+                        }
+                    } else {
+                        false
+                    };
                     let valid = video_ready && qualified;
+                    {
+                        let pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+                        if generation != pipeline.generation {
+                            // Keep the update request for the next coherent snapshot.
+                            return Ok(());
+                        }
+                        if valid {
+                            shared.diagnostics.gpu_milestone(generation, false);
+                        }
+                    }
                     if !gpu_schedule.ready(false, generation) {
                         return Ok(());
                     }
@@ -538,6 +561,7 @@ pub(super) fn run(
                             pipeline.stats.render_call_ms +=
                                 created.elapsed().as_secs_f64() * 1000.0;
                             if generation == pipeline.generation && !pipeline.size.contains(&0) {
+                                shared.diagnostics.gpu_milestone(generation, true);
                                 if pipeline
                                     .gpu_frame
                                     .replace((frame, generation, created))
@@ -738,6 +762,29 @@ mod tests {
             pipeline.decode_evidence,
             std::array::from_fn(|_| String::new())
         );
+    }
+    #[test]
+    fn transient_dimensions_invalidate_even_when_viewport_size_is_unchanged() {
+        let mut pipeline = Pipeline::new(Config {
+            resolution: ResolutionPolicy::Viewport,
+            ..Config::default()
+        });
+        let mut state = PlaybackState::default();
+        pipeline.viewport = [320, 180];
+        pipeline.metadata = [Some(1920), Some(1080), None, None, None];
+        pipeline.recompute(&mut state).unwrap();
+        let generation = pipeline.generation;
+        pipeline.metadata[1] = None;
+        pipeline.recompute(&mut state).unwrap();
+        assert_ne!(pipeline.generation, generation);
+        assert_eq!(state.source_size, None);
+        assert_eq!(state.render_size, [320, 180]);
+        assert!(pipeline.take().is_none());
+        let unavailable_generation = pipeline.generation;
+        pipeline.metadata[1] = Some(1080);
+        pipeline.recompute(&mut state).unwrap();
+        assert_ne!(pipeline.generation, unavailable_generation);
+        assert_eq!(state.source_size, Some([1920, 1080]));
     }
     #[cfg(feature = "gpu-surface")]
     #[test]

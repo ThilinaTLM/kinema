@@ -104,21 +104,50 @@ impl Shared {
         // this final error is written; later events cannot obtain a mutation guard.
         self.stopped.store(true, Ordering::Release);
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.stopped = true;
-        state.loading = false;
-        state.paused_for_cache = false;
-        if state.fatal_error.is_none() {
-            self.diagnostics
-                .failure_details(reason, Some(&state), details);
-            state.failure_reason = Some(reason);
-            state.fatal_error = Some(error.clone());
-            state.error = Some(error);
-        }
+        self.publish_render_failure(&mut state, error, reason, details);
         #[cfg(feature = "gpu-surface")]
         self.pipeline
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .cancel_gpu();
+    }
+    fn publish_render_failure(
+        &self,
+        state: &mut PlaybackState,
+        error: String,
+        reason: PlaybackFailure,
+        details: FailureDetails,
+    ) {
+        state.stopped = true;
+        state.loading = false;
+        state.paused_for_cache = false;
+        if state.fatal_error.is_none() {
+            self.diagnostics
+                .failure_details(reason, Some(state), details);
+            state.failure_reason = Some(reason);
+            state.fatal_error = Some(error.clone());
+            state.error = Some(error);
+        }
+    }
+    /// Qualification belongs to a sampled source generation, unlike a native
+    /// device failure. Reject stale errors atomically with source invalidation.
+    #[cfg(feature = "gpu-surface")]
+    pub fn fail_qualification_if_current(&self, generation: u64, error: Error) -> bool {
+        // Same state -> pipeline order used by load/control metadata mutation.
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pipeline = self.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+        if self.stopped.load(Ordering::Acquire) || pipeline.generation != generation {
+            return false;
+        }
+        self.stopped.store(true, Ordering::Release);
+        self.publish_render_failure(
+            &mut state,
+            error.to_string(),
+            error.playback_failure(),
+            FailureDetails::from_error(&error),
+        );
+        pipeline.cancel_gpu();
+        true
     }
     fn control_state(&self) -> Option<std::sync::MutexGuard<'_, PlaybackState>> {
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -770,9 +799,7 @@ fn control_worker(
                         state.ended = end.reason == 0;
                         if end.reason == 4 {
                             state.failure_reason = Some(PlaybackFailure::MediaLoadFailed);
-                            shared
-                                .diagnostics
-                                .failure(PlaybackFailure::MediaLoadFailed, Some(&state));
+                            shared.diagnostics.media_failure(end.error, &state);
                             state.error = client
                                 .loaded
                                 .check(end.error, "playback")
@@ -1275,6 +1302,30 @@ mod tests {
                 .contains("SECRET")
         );
     }
+    #[cfg(feature = "gpu-surface")]
+    #[test]
+    fn obsolete_hdr_qualification_cannot_terminal_fail_a_replaced_source() {
+        let (player, _commands) = mock_player();
+        let generation = player.shared.pipeline.lock().unwrap().generation;
+        player.load("synthetic-replacement").unwrap();
+        let hdr = || Error::Gpu("GPU surface SDR only; HDR transfer detected".into());
+        assert!(
+            !player
+                .shared
+                .fail_qualification_if_current(generation, hdr())
+        );
+        assert!(!player.shared.stopped.load(Ordering::Acquire));
+        assert!(player.state().fatal_error.is_none());
+        assert!(player.state().failure_reason.is_none());
+        let current = player.shared.pipeline.lock().unwrap().generation;
+        assert!(player.shared.fail_qualification_if_current(current, hdr()));
+        assert!(player.shared.stopped.load(Ordering::Acquire));
+        assert_eq!(
+            player.state().failure_reason,
+            Some(PlaybackFailure::HdrUnsupported)
+        );
+        assert!(player.state().fatal_error.is_some());
+    }
     #[test]
     fn fatal_render_failure_rejects_control_and_preserves_last_diagnostics() {
         let (player, receiver) = mock_player();
@@ -1527,6 +1578,187 @@ mod tests {
         });
         assert!(matches!(result, Err(Error::Library { .. })));
     }
+    fn install_fixture_capture() {
+        struct Capture;
+        impl tracing::Subscriber for Capture {
+            fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+                metadata.target() == "kinema_mpv::mpv::diagnostics"
+            }
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                tracing::span::Id::from_u64(1)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+            fn event(&self, event: &tracing::Event<'_>) {
+                struct Fields(String);
+                impl tracing::field::Visit for Fields {
+                    fn record_debug(
+                        &mut self,
+                        field: &tracing::field::Field,
+                        value: &dyn std::fmt::Debug,
+                    ) {
+                        use std::fmt::Write;
+                        let _ = write!(&mut self.0, " {}={value:?}", field.name());
+                    }
+                }
+                let mut fields = Fields(String::new());
+                event.record(&mut fields);
+                eprintln!(
+                    "fixture_backend level={}{}",
+                    event.metadata().level(),
+                    fields.0
+                );
+            }
+        }
+        tracing::subscriber::set_global_default(Capture).expect("exclusive test subscriber");
+    }
+
+    #[test]
+    #[ignore = "requires exclusive native slot and libmpv; malformed synthetic startup"]
+    fn real_synthetic_startup_failure_diagnostics() {
+        install_fixture_capture();
+        let media = TemporaryMedia::new();
+        let path = media.0.join("malformed.mkv");
+        // EBML signature followed by an invalid header; no user media involved.
+        let mut bytes = vec![0x1a, 0x45, 0xdf, 0xa3];
+        bytes.extend_from_slice(&[0xff; 4096]);
+        std::fs::write(&path, bytes).expect("synthetic malformed fixture written");
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            ..Config::default()
+        })
+        .expect("synthetic CPU player initialized");
+        player.resize(320, 180).unwrap();
+        player
+            .load(path.to_str().expect("synthetic fixture path is UTF-8"))
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(6);
+        while std::time::Instant::now() < deadline {
+            if player.state().error.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let state = player.state();
+        eprintln!(
+            "fixture startup_media_error={} player_terminal={} first_frame={}",
+            state.error.is_some(),
+            state.fatal_error.is_some(),
+            player.take_frame().is_some()
+        );
+        assert_eq!(state.failure_reason, Some(PlaybackFailure::MediaLoadFailed));
+        assert!(
+            state.fatal_error.is_none(),
+            "malformed source became Player-terminal"
+        );
+        assert!(
+            player.take_frame().is_none(),
+            "malformed source published an image"
+        );
+        drop(player);
+    }
+
+    /// Isolated synthetic transport failure, never a provider/lease test. Run
+    /// exclusively: installs a process-wide subscriber for worker diagnostics.
+    #[test]
+    #[ignore = "requires exclusive native slot, libmpv and ffmpeg; loopback synthetic truncation"]
+    fn real_synthetic_stream_interrupted_before_drop() {
+        use std::io::{Read, Write};
+        install_fixture_capture();
+        let media = TemporaryMedia::new();
+        let path = media.clip("synthetic.mkv", "testsrc2=s=320x180:r=30", false);
+        let bytes = std::fs::read(path).expect("synthetic fixture readable");
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .expect("isolated loopback listener");
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let worker_stopped = stopped.clone();
+        let (interrupt, release) = mpsc::sync_channel::<()>(1);
+        let server = thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(15);
+            let mut first = true;
+            while !worker_stopped.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request); // Never log request bytes.
+                if first {
+                    first = false;
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: video/x-matroska\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        bytes.len()
+                    );
+                    let _ = stream.write_all(&bytes[..bytes.len() / 2]);
+                    let _ = stream.flush();
+                    let _ = release.recv_timeout(Duration::from_secs(8));
+                    eprintln!("fixture transport_closed=true backend_drop_started=false");
+                    // Deliberately truncate the declared body, before Player drop.
+                } else {
+                    let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                }
+            }
+        });
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            ..Config::default()
+        })
+        .expect("synthetic CPU player initialized");
+        player.resize(320, 180).unwrap();
+        player.load(&format!("http://{address}/synthetic")).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(6);
+        let mut first_frame = false;
+        while std::time::Instant::now() < deadline {
+            if player.take_frame().is_some() {
+                first_frame = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        eprintln!("fixture first_frame={first_frame} interruption_requested=true");
+        let _ = interrupt.send(());
+        let deadline = std::time::Instant::now() + Duration::from_secs(6);
+        while std::time::Instant::now() < deadline {
+            let state = player.state();
+            if state.ended || state.error.is_some() || state.media_stopped {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let state = player.state();
+        eprintln!(
+            "fixture ended={} media_error={} fatal={} backend_drop_started=true",
+            state.ended,
+            state.error.is_some(),
+            state.fatal_error.is_some()
+        );
+        let native_codes = player.shared.diagnostics.native_diagnostic_codes();
+        drop(player);
+        stopped.store(true, Ordering::Release);
+        server.join().expect("synthetic server completed");
+        assert!(
+            first_frame,
+            "synthetic stream never published a frame before interruption"
+        );
+        assert!(
+            native_codes.contains(&"truncated-stream"),
+            "synthetic truncation diagnostic missing"
+        );
+        // Truncation can be demuxer EOF or media error. Neither is evidence of
+        // a renderer-terminal failure or expected user cancellation.
+        assert!(
+            state.fatal_error.is_none(),
+            "transport failure became renderer-terminal"
+        );
+    }
+
     #[test]
     #[ignore = "requires installed libmpv and ffmpeg; exercises real software rendering"]
     fn real_mpv_render_and_teardown() {

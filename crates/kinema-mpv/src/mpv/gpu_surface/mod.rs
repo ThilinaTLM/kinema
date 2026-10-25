@@ -281,14 +281,14 @@ impl Renderer {
     }
     pub fn evidence_ready(&mut self, generation: u64, evidence: &[String; 6]) -> Result<bool> {
         let previous = (self.evidence_wait.0.map(|v| v.0), self.evidence_wait.1);
-        let result = self
-            .evidence_wait
-            .ready(generation, evidence, std::time::Instant::now());
+        let now = std::time::Instant::now();
+        let result = self.evidence_wait.ready(generation, evidence, now);
         if previous != (Some(generation), self.evidence_wait.1) && self.evidence_events < 32 {
             tracing::info!(
                 player_id = self.diagnostic_id,
                 generation,
                 qualification = self.evidence_wait.1.unwrap_or("unknown"),
+                qualification_wait_ms = self.evidence_wait.elapsed_ms(now),
                 "mpv GPU surface metadata qualification"
             );
             self.evidence_events += 1;
@@ -414,6 +414,17 @@ fn sdr(value: &str) -> bool {
     )
 }
 impl EvidenceWait {
+    // Numeric only, emitted with the existing transition-only, 32-event budget.
+    // This is time since first evidence check in the generation, not load-to-frame
+    // latency or a GPU/display timing. Requalification keeps that same origin.
+    fn elapsed_ms(&self, now: std::time::Instant) -> u64 {
+        self.0.map_or(0, |(_, started)| {
+            now.saturating_duration_since(started)
+                .as_millis()
+                .min(u64::MAX as u128) as u64
+        })
+    }
+
     fn ready(
         &mut self,
         generation: u64,
@@ -532,6 +543,42 @@ mod tests {
         };
         [hwdec(), native, native, "nv12", decoded, effective].map(str::to_owned)
     }
+    #[test]
+    fn qualification_timing_and_requalification_are_generation_scoped() {
+        let now = std::time::Instant::now();
+        let later = now + std::time::Duration::from_millis(250);
+        let mut wait = EvidenceWait::default();
+        assert_eq!(wait.elapsed_ms(now), 0);
+        assert!(
+            !wait
+                .ready(1, &direct_evidence("auto", "auto"), now)
+                .unwrap()
+        );
+        assert_eq!(wait.1, Some("waiting-effective-transfer"));
+        assert!(
+            wait.ready(1, &direct_evidence("auto", "bt.1886"), later)
+                .unwrap()
+        );
+        assert_eq!(wait.1, Some("ready"));
+        assert_eq!(wait.elapsed_ms(later), 250);
+        // A paused source can change metadata without a new frame/generation.
+        // No ready result is cached, and resolved SDR never conceals decoded HDR.
+        assert_eq!(
+            wait.ready(1, &direct_evidence("pq", "bt.1886"), later)
+                .unwrap_err()
+                .playback_failure(),
+            crate::PlaybackFailure::HdrUnsupported
+        );
+        assert_eq!(wait.elapsed_ms(later), 250);
+        assert!(
+            !wait
+                .ready(2, &direct_evidence("auto", "auto"), later)
+                .unwrap()
+        );
+        assert_eq!(wait.elapsed_ms(later), 0);
+        assert_eq!(wait.1, Some("waiting-effective-transfer"));
+    }
+
     #[test]
     fn auto_requires_effective_resolution_and_unknown_is_bounded() {
         let now = std::time::Instant::now();

@@ -198,6 +198,7 @@ pub(super) fn open(root: &Path) -> Result<(File, HashMap<String, Arc<Asset>>), M
             assets.insert(
                 name,
                 Arc::new(Asset {
+                    diagnostic_id: diagnostics::next_id(),
                     dir,
                     identity,
                     state: Mutex::new(AssetState {
@@ -255,6 +256,7 @@ pub(super) fn create(
             file.set_len(identity.size)?;
             file.sync_all()?;
             let asset = Asset {
+                diagnostic_id: diagnostics::next_id(),
                 dir: staged.clone(),
                 identity: identity.clone(),
                 state: Mutex::new(AssetState {
@@ -313,6 +315,7 @@ pub(super) fn failed_asset(root: &Path, key: &str, identity: MediaIdentity) -> O
         return None;
     };
     Some(Arc::new(Asset {
+        diagnostic_id: diagnostics::next_id(),
         dir,
         identity,
         state: Mutex::new(AssetState {
@@ -383,12 +386,29 @@ pub(super) fn checkpoint(asset: &Asset, ranges: &[(u64, u64)]) -> Result<(), Med
 pub(super) fn available(ranges: &RangeSet, start: u64, end: u64) -> bool {
     ByteRange::new(start, end).is_some_and(|range| ranges.contains(range))
 }
+// A reader buffer can overlap durable and missing bytes. Its priority must
+// identify actual demand, not the already-durable beginning of that buffer.
+pub(super) fn reader_priority(ranges: &RangeSet, start: u64, end: u64) -> Option<u64> {
+    ranges
+        .missing(ByteRange::new(start, end)?)
+        .first()
+        .map(|range| range.start())
+}
 fn missing(ranges: &RangeSet, size: u64, preferred: u64) -> Option<(u64, u64)> {
     let range = ByteRange::new(preferred, size)?;
     ranges
         .missing(range)
         .first()
         .map(|r| (r.start(), r.end().min(r.start().saturating_add(CHUNK))))
+}
+// A reader republishes its offset while an in-flight range is unavailable.
+// Once that offset is durable the stale hint must not steer background prefetch
+// beyond it: only an actually missing byte represents outstanding reader demand.
+fn next_range(ranges: &RangeSet, size: u64, priority: Option<u64>) -> Option<(u64, u64)> {
+    priority
+        .filter(|&start| start < size && !available(ranges, start, start + 1))
+        .and_then(|start| missing(ranges, size, start))
+        .or_else(|| missing(ranges, size, 0))
 }
 pub(super) fn check_payload(asset: &Asset) -> Result<(), MediaError> {
     if !asset.dir.symlink_metadata()?.file_type().is_dir() {
@@ -479,8 +499,23 @@ impl AcquisitionReport {
 pub(super) fn acquire(
     shared: &Shared,
     asset: &Asset,
+    resolved: ResolvedMedia,
+    renew: Renew,
+) -> Result<(), MediaError> {
+    let mut observation =
+        diagnostics::Observation::start(asset.diagnostic_id, diagnostics::Phase::Open);
+    let result = acquire_inner(shared, asset, resolved, renew, &mut observation);
+    if let Some(observation) = &observation {
+        observation.finish(&result);
+    }
+    result
+}
+fn acquire_inner(
+    shared: &Shared,
+    asset: &Asset,
     mut resolved: ResolvedMedia,
     renew: Renew,
+    observation: &mut Option<diagnostics::Observation>,
 ) -> Result<(), MediaError> {
     // Snapshot opt-in once per acquisition; no environment reads on the hot path.
     let mut telemetry = (std::env::var_os("KINEMA_PLAYER_DIAGNOSTICS").as_deref()
@@ -493,6 +528,7 @@ pub(super) fn acquire(
         .open(asset.dir.join("payload"))?;
     let mut renewals = 0;
     let mut link_age = std::time::Instant::now();
+    let mut request_id = 0u64;
     loop {
         if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
@@ -500,13 +536,15 @@ pub(super) fn acquire(
         let cycle_started = telemetry.as_ref().map(|_| std::time::Instant::now());
         let range = {
             let mut state = asset.state.lock().map_err(|_| MediaError::Storage)?;
-            let preferred = state.priority.take().unwrap_or(0);
-            missing(&state.ranges, asset.identity.size, preferred)
-                .or_else(|| missing(&state.ranges, asset.identity.size, 0))
+            let priority = state.priority.take();
+            next_range(&state.ranges, asset.identity.size, priority)
         };
         let Some((start, end)) = range else {
             return Ok(());
         };
+        if let Some(o) = observation.as_ref() {
+            o.range(start, end, asset.identity.size);
+        }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| {
@@ -518,11 +556,18 @@ pub(super) fn acquire(
             .ok()
             .map(|now| now.as_secs());
         if needs_renewal(resolved.expires_at, link_age.elapsed(), now) {
+            if let Some(o) = observation.as_ref() {
+                o.phase(diagnostics::Phase::Renewal, request_id);
+            }
             renew_media(&mut resolved, &renew, &mut renewals, &asset.identity)?;
             link_age = std::time::Instant::now();
         }
         if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
+        }
+        request_id = request_id.saturating_add(1);
+        if let Some(o) = observation.as_ref() {
+            o.phase(diagnostics::Phase::Headers, request_id);
         }
         let request_started = std::time::Instant::now();
         let mut response = shared
@@ -557,6 +602,9 @@ pub(super) fn acquire(
             return Err(MediaError::Canceled);
         }
         if matches!(response.status().as_u16(), 401 | 403) {
+            if let Some(o) = observation.as_ref() {
+                o.phase(diagnostics::Phase::Renewal, request_id);
+            }
             renew_media(&mut resolved, &renew, &mut renewals, &asset.identity)?;
             link_age = std::time::Instant::now();
             continue;
@@ -584,6 +632,9 @@ pub(super) fn acquire(
             tracing::warn!(category = "identity_mismatch", "Media validation failed");
             return Err(MediaError::IdentityMismatch);
         }
+        if let Some(o) = observation.as_ref() {
+            o.phase(diagnostics::Phase::Body, request_id);
+        }
         let body_started = telemetry.as_ref().map(|_| std::time::Instant::now());
         // Reserve the validation probe byte too, avoiding capacity doubling if
         // an invalid response yields one byte beyond the requested range.
@@ -606,6 +657,9 @@ pub(super) fn acquire(
         if asset.cancel.load(Ordering::Relaxed) || shared.canceled.load(Ordering::Relaxed) {
             return Err(MediaError::Canceled);
         }
+        if let Some(o) = observation.as_ref() {
+            o.phase(diagnostics::Phase::PayloadSync, request_id);
+        }
         let payload_started = telemetry.as_ref().map(|_| std::time::Instant::now());
         payload.seek(SeekFrom::Start(start))?;
         payload.write_all(&bytes)?;
@@ -623,12 +677,27 @@ pub(super) fn acquire(
             .iter()
             .map(|r| (r.start(), r.end()))
             .collect();
+        if let Some(o) = observation.as_ref() {
+            o.phase(diagnostics::Phase::Checkpoint, request_id);
+        }
         let checkpoint_started = telemetry.as_ref().map(|_| std::time::Instant::now());
         checkpoint(asset, &durable)?;
         let checkpoint_time = checkpoint_started.map(|started| started.elapsed());
         asset.state.lock().map_err(|_| MediaError::Storage)?.ranges = ranges;
         renewals = 0;
         asset.changed.notify_all();
+        if let Some(o) = observation.as_mut() {
+            o.first_durable(
+                bytes.len() as u64,
+                request_id,
+                [
+                    request_headers.unwrap_or_default(),
+                    body_read.unwrap_or_default(),
+                    payload_write_sync.unwrap_or_default(),
+                    checkpoint_time.unwrap_or_default(),
+                ],
+            );
+        }
         if let (Some(telemetry), Some(cycle_started)) = (&mut telemetry, cycle_started) {
             let now = std::time::Instant::now();
             if let Some(report) = telemetry.record(
@@ -864,6 +933,64 @@ mod missing_range_tests {
     }
 
     #[test]
+    fn overlapping_reader_window_prioritizes_missing_suffix_before_background_hole()
+    -> Result<(), &'static str> {
+        let mut ranges = RangeSet::new();
+        ranges.insert(ByteRange::new(0, CHUNK).ok_or("head")?);
+        ranges.insert(ByteRange::new(CHUNK * 16, CHUNK * 17).ok_or("seek")?);
+        let start = CHUNK * 17 - 32 * 1024;
+        let end = start + 64 * 1024;
+        let size = CHUNK * 20;
+        assert!(available(&ranges, start, start + 1));
+        assert!(!available(&ranges, start, end));
+        // Publishing Some(start) would be rejected as a satisfied stale hint.
+        assert_eq!(
+            next_range(&ranges, size, Some(start)),
+            Some((CHUNK, CHUNK * 2))
+        );
+        let priority = reader_priority(&ranges, start, end);
+        assert_eq!(priority, Some(CHUNK * 17));
+        assert_eq!(
+            next_range(&ranges, size, priority),
+            Some((CHUNK * 17, CHUNK * 18))
+        );
+        ranges.insert(ByteRange::new(CHUNK * 17, CHUNK * 18).ok_or("suffix")?);
+        // Once the entire reader window is durable, both freshly evaluated and
+        // stale priorities correctly fall back to the earliest background gap.
+        assert_eq!(reader_priority(&ranges, start, end), None);
+        assert_eq!(
+            next_range(&ranges, size, priority),
+            Some((CHUNK, CHUNK * 2))
+        );
+        assert_eq!(reader_priority(&ranges, start, start), None);
+        Ok(())
+    }
+
+    #[test]
+    fn satisfied_reader_hint_does_not_skip_earlier_missing_bytes() -> Result<(), &'static str> {
+        let mut ranges = RangeSet::new();
+        ranges.insert(ByteRange::new(0, CHUNK).ok_or("head")?);
+        // The reader repeated its hint while this seek fetch was in flight.
+        let hint = CHUNK * 2 + 100;
+        assert_eq!(
+            next_range(&ranges, CHUNK * 5, Some(hint)),
+            Some((hint, hint + CHUNK))
+        );
+        ranges.insert(ByteRange::new(hint, hint + CHUNK).ok_or("seek")?);
+        // Before the fix this selected (hint + CHUNK, hint + CHUNK * 2),
+        // delaying the earliest hole by another complete network/durability cycle.
+        assert_eq!(
+            next_range(&ranges, CHUNK * 5, Some(hint)),
+            Some((CHUNK, CHUNK * 2))
+        );
+        assert_eq!(
+            next_range(&ranges, CHUNK * 5, Some(CHUNK * 5)),
+            Some((CHUNK, CHUNK * 2))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn preferred_offset_selects_gap_without_crossing_durable_ranges() -> Result<(), &'static str> {
         let mut ranges = RangeSet::new();
         ranges.insert(ByteRange::new(0, CHUNK).ok_or("invalid first range")?);
@@ -874,8 +1001,8 @@ mod missing_range_tests {
             missing(&ranges, CHUNK * 4, CHUNK + 50),
             Some((CHUNK + 50, CHUNK + 100))
         );
-        // A preferred offset in a durable range advances to the following gap;
-        // it does not backfill an earlier hole until acquisition's fallback.
+        // The low-level forward scanner advances past durable bytes. The
+        // scheduler must reject a satisfied priority before calling it.
         assert_eq!(
             missing(&ranges, CHUNK * 4, CHUNK + 100),
             Some((CHUNK * 2, CHUNK * 3))

@@ -90,6 +90,16 @@ impl PlaybackFailure {
         {
             return Self::HdrUnsupported;
         }
+        for &(known, reason) in GPU_MESSAGES {
+            if message == known {
+                return reason;
+            }
+        }
+        if let Some(symbol) = message.strip_prefix("missing EGL entry point ")
+            && EGL_ENTRY_POINTS.contains(&symbol)
+        {
+            return Self::GpuInteropUnavailable;
+        }
         for &(prefix, reason) in GPU_PREFIXES {
             if message.starts_with(prefix) {
                 return reason;
@@ -98,6 +108,46 @@ impl PlaybackFailure {
         Self::Unknown
     }
 }
+
+// Redacted native startup boundaries are exact vocabulary, not prefixes that
+// accept arbitrary library paths, driver messages, or symbol names.
+const GPU_MESSAGES: &[(&str, PlaybackFailure)] = &[
+    (
+        "no compatible EGL device matches the Vulkan device UUID",
+        PlaybackFailure::GpuInteropUnavailable,
+    ),
+    (
+        "GL/Vulkan device UUID mismatch",
+        PlaybackFailure::GpuInteropUnavailable,
+    ),
+    (
+        "cannot open verified DRM render node",
+        PlaybackFailure::GpuInteropUnavailable,
+    ),
+    (
+        "cannot inspect verified DRM render node",
+        PlaybackFailure::GpuInteropUnavailable,
+    ),
+    ("cannot load EGL library", PlaybackFailure::RenderInitFailed),
+    (
+        "EGL display initialization failed",
+        PlaybackFailure::RenderInitFailed,
+    ),
+];
+const EGL_ENTRY_POINTS: &[&str] = &[
+    "eglGetProcAddress",
+    "eglGetPlatformDisplay",
+    "eglInitialize",
+    "eglBindAPI",
+    "eglChooseConfig",
+    "eglCreateContext",
+    "eglCreatePbufferSurface",
+    "eglMakeCurrent",
+    "eglGetCurrentContext",
+    "eglDestroyContext",
+    "eglDestroySurface",
+    "eglTerminate",
+];
 
 // This allowlist translates existing native boundary messages without exposing
 // their dynamic suffixes. Unknown messages deliberately stay unclassified.
@@ -108,10 +158,6 @@ const GPU_PREFIXES: &[(&str, PlaybackFailure)] = &[
     ),
     (
         "expected exactly one GL device UUID, got ",
-        PlaybackFailure::GpuInteropUnavailable,
-    ),
-    (
-        "GL/Vulkan device UUID mismatch: ",
         PlaybackFailure::GpuInteropUnavailable,
     ),
     (
@@ -194,15 +240,7 @@ const GPU_PREFIXES: &[(&str, PlaybackFailure)] = &[
         "EGL device enumeration",
         PlaybackFailure::GpuInteropUnavailable,
     ),
-    (
-        "no EGL device matches",
-        PlaybackFailure::GpuInteropUnavailable,
-    ),
     ("vaapi-capability: ", PlaybackFailure::GpuInteropUnavailable),
-    (
-        "open verified DRM render node: ",
-        PlaybackFailure::GpuInteropUnavailable,
-    ),
     (
         "DRM render node changed during open",
         PlaybackFailure::GpuInteropUnavailable,
@@ -369,6 +407,43 @@ mod tests {
             assert_eq!(
                 PlaybackFailure::from_gpu_message(&format!("{secret}{prefix}")),
                 PlaybackFailure::Unknown
+            );
+        }
+    }
+
+    #[test]
+    fn redacted_linux_startup_vocabulary_has_exact_safe_classification() {
+        for &(message, expected) in GPU_MESSAGES {
+            assert_eq!(PlaybackFailure::from_gpu_message(message), expected);
+            for decorated in [
+                format!("{message}: https://user:SECRET@host/private"),
+                format!("/private/SECRET/{message}"),
+                format!("{message}\nSECRET"),
+            ] {
+                assert_eq!(
+                    PlaybackFailure::from_gpu_message(&decorated),
+                    PlaybackFailure::Unknown
+                );
+            }
+            assert!(!expected.message().contains("SECRET"));
+        }
+        for symbol in EGL_ENTRY_POINTS {
+            assert_eq!(
+                PlaybackFailure::from_gpu_message(&format!("missing EGL entry point {symbol}")),
+                PlaybackFailure::GpuInteropUnavailable,
+            );
+        }
+        for symbol in [
+            "",
+            "eglUnknown",
+            "eglInitialize SECRET",
+            "https://user:SECRET@host/path",
+            "/private/eglInitialize",
+            "eglInitialize\nSECRET",
+        ] {
+            assert_eq!(
+                PlaybackFailure::from_gpu_message(&format!("missing EGL entry point {symbol}")),
+                PlaybackFailure::Unknown,
             );
         }
     }

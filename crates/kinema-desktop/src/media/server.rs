@@ -199,9 +199,36 @@ async fn serve(
 fn stream(
     shared: &Shared,
     lease: Lease,
+    start: u64,
+    end: u64,
+    sender: &tokio::sync::mpsc::Sender<Result<Bytes, std::io::Error>>,
+) -> Result<(), MediaError> {
+    let mut observation = match &lease.source {
+        Source::Remote(asset) => {
+            let observation = diagnostics::Observation::start(
+                asset.diagnostic_id,
+                diagnostics::Phase::ReaderWait,
+            );
+            if let Some(o) = observation.as_ref() {
+                o.range(start, end, asset.identity.size);
+            }
+            observation
+        }
+        Source::Local(..) => None,
+    };
+    let result = stream_inner(shared, lease, start, end, sender, &mut observation);
+    if let Some(o) = observation.as_ref() {
+        o.finish(&result);
+    }
+    result
+}
+fn stream_inner(
+    shared: &Shared,
+    lease: Lease,
     mut start: u64,
     end: u64,
     sender: &tokio::sync::mpsc::Sender<Result<Bytes, std::io::Error>>,
+    observation: &mut Option<diagnostics::Observation>,
 ) -> Result<(), MediaError> {
     while start < end {
         if sender.is_closed()
@@ -220,31 +247,46 @@ fn stream(
             Source::Remote(asset) => {
                 let mut state = asset.state.lock().map_err(|_| MediaError::Storage)?;
                 let deadline = std::time::Instant::now() + Duration::from_secs(45);
-                while !storage::available(&state.ranges, start, next) {
-                    if let Some(error) = &state.error {
-                        return Err(error.clone());
-                    }
-                    if sender.is_closed()
-                        || !lease.active.load(Ordering::Acquire)
-                        || asset.cancel.load(Ordering::Relaxed)
-                        || shared.canceled.load(Ordering::Relaxed)
-                        || std::time::Instant::now() >= deadline
-                    {
-                        return Err(MediaError::Canceled);
-                    }
-                    state.priority = Some(start);
-                    state = asset
-                        .changed
-                        .wait_timeout(state, Duration::from_millis(200))
-                        .map_err(|_| MediaError::Storage)?
-                        .0;
+                if let Some(o) = observation.as_ref() {
+                    o.phase(diagnostics::Phase::ReaderWait, 0);
                 }
+                let wait_started =
+                    (!storage::available(&state.ranges, start, next)).then(std::time::Instant::now);
+                let wait_result = (|| {
+                    while !storage::available(&state.ranges, start, next) {
+                        if let Some(error) = &state.error {
+                            return Err(error.clone());
+                        }
+                        if sender.is_closed()
+                            || !lease.active.load(Ordering::Acquire)
+                            || asset.cancel.load(Ordering::Relaxed)
+                            || shared.canceled.load(Ordering::Relaxed)
+                            || std::time::Instant::now() >= deadline
+                        {
+                            return Err(MediaError::Canceled);
+                        }
+                        state.priority = storage::reader_priority(&state.ranges, start, next);
+                        state = asset
+                            .changed
+                            .wait_timeout(state, Duration::from_millis(200))
+                            .map_err(|_| MediaError::Storage)?
+                            .0;
+                    }
+                    Ok(state)
+                })();
+                if let (Some(o), Some(started)) = (observation.as_mut(), wait_started) {
+                    o.range_wait(started.elapsed());
+                }
+                let state = wait_result?;
                 drop(state);
                 storage::check_payload(asset)?;
                 let mut file = File::open(asset.dir.join("payload"))?;
                 file.seek(SeekFrom::Start(start))?;
                 file.read_exact(&mut bytes)?;
             }
+        }
+        if let Some(o) = observation.as_ref() {
+            o.phase(diagnostics::Phase::ReaderSend, 0);
         }
         let mut message = Ok(Bytes::from(bytes));
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
@@ -263,6 +305,9 @@ fn stream(
                 return Err(MediaError::Canceled);
             }
             std::thread::sleep(Duration::from_millis(25));
+        }
+        if let Some(o) = observation.as_mut() {
+            o.first_delivery();
         }
         start = next;
     }
@@ -387,5 +432,53 @@ impl tokio::io::AsyncWrite for Connection {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         std::pin::Pin::new(&mut self.get_mut().socket).poll_shutdown(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlapping_reader_publishes_missing_suffix_not_durable_start()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let service = MediaService::start(
+            &super::super::tests::paths(root.path()),
+            super::super::tests::budget(CHUNK * 20),
+        )?;
+        let identity = super::super::tests::identity(CHUNK * 20);
+        let asset = storage::create(&service.shared.root, &storage::key(&identity), identity)?;
+        {
+            // Synthetic in-memory availability only. The reader must wait for
+            // the suffix, so no sparse payload bytes may be read in this test.
+            let mut state = asset.state.lock().map_err(|_| "asset lock")?;
+            state.ranges.insert(ByteRange::new(0, CHUNK).ok_or("head")?);
+            state
+                .ranges
+                .insert(ByteRange::new(CHUNK * 16, CHUNK * 17).ok_or("seek")?);
+        }
+        let lease = Lease::new(Source::Remote(asset.clone()));
+        let active = lease.active.clone();
+        let shared = service.shared.clone();
+        let (sender, _receiver) = tokio::sync::mpsc::channel(2);
+        let start = CHUNK * 17 - 32 * 1024;
+        let reader =
+            std::thread::spawn(move || stream(&shared, lease, start, start + 64 * 1024, &sender));
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let observed = loop {
+            let priority = asset.state.lock().map_err(|_| "asset lock")?.priority;
+            if priority.is_some() || std::time::Instant::now() >= deadline {
+                break priority;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        // Always retire the worker before assertions, including on regression.
+        active.store(false, Ordering::Release);
+        asset.changed.notify_all();
+        let result = reader.join().map_err(|_| "reader panicked")?;
+        assert_eq!(observed, Some(CHUNK * 17));
+        assert_eq!(result, Err(MediaError::Canceled));
+        Ok(())
     }
 }

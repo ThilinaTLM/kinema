@@ -144,6 +144,10 @@ checks or runtime verification for the current increment.
 
 ## Opt-in playback performance logging
 
+See the [playback startup and safe-logging investigation](validation/playback-startup-logging.md)
+for targeted manual launch filters, credential/activation classifications, GPU
+discovery diagnostics, isolated probe commands and current validation limits.
+
 Set `KINEMA_PLAYER_DIAGNOSTICS=1` in the desktop process environment before
 starting acquisition or opening a player window (unset or any other value
 disables it). The toggle is read once per acquisition worker and once per player
@@ -197,6 +201,35 @@ wall time excludes diagnostics snapshot/logging and does not measure GPU work.
 not the five-second window; backend elapsed time can differ from view elapsed
 time. Render/readback/fence/age means and transfer estimates retain backend
 semantics. No playback/performance policy changes are enabled by this toggle.
+
+With the same exact opt-in, startup observations on
+`kinema_desktop::media_performance` complement the completed-range aggregates:
+process-local numeric `asset_id`, `operation_id` and `request_id` correlate
+acquisition attempts and loopback body readers, never persistent identity hashes,
+capability IDs, URLs or paths. Numeric half-open range offsets and `near_tail`
+provide request shape; near-tail is not proof of a demuxer probe.
+
+Each operation reports its latest fixed pending phase and phase age every five
+seconds, capped at 12 pending events (the first minute). One acquisition
+first-durable event includes elapsed worker time and header/body/payload-sync/
+checkpoint times; one reader first-queued event measures handoff into its bounded
+body queue, not delivery to mpv or presentation. A terminal summary records typed
+outcome/category, elapsed time and latest-phase time. Reader end totals include
+`range_wait_count`, `range_wait_total_ms` and `range_wait_max_ms` across unavailable
+64 KiB buffer segments, including failed/canceled waits: these are not HTTP
+request counts. `phase_ms` is only the latest phase, not total wait time;
+still-open waits contribute to totals only when they exit. Fast phases may never
+appear in pending samples. Timings alone cannot attribute a roughly 30-second
+startup delay to a provider, decoder, GPU, or any other single cause.
+
+Disabled diagnostics create no timer owners/startup summaries. Enabled work owns
+at most one constant-size timer snapshot/thread per acquisition or body reader
+(up to 8 + 8 = 16 live timer threads). Timer teardown stays on blocking workers,
+not UI/service Drop; spawn failure disables observation without failing playback.
+These bounded pending/first/end events add no per-chunk INFO. Existing completed-
+range aggregate reports remain separate and are not lifetime-capped. See the
+[investigation](validation/playback-startup-logging.md) for source findings,
+fixture evidence and native-validation boundaries.
 
 Acquisition reports aggregate approximately five-second completed-durable-chunk
 windows: bytes, completed requests and byte rate; mean header wait, body read,
@@ -266,9 +299,11 @@ cache-ahead reset with backend drops; exact seek/action timing was not confirmed
 These are separate signals. Occasional dips remain; no all-stalls-fixed, GPU-fence or
 cross-platform qualification is claimed. See the investigation record for detail.
 
-Manual check: use the generated local media/native probe below (extend media and
-`--smoke-seconds` to at least 20), first without the variable, then with it set to
-`1`. Confirm no diagnostics summaries or FPS monitor when disabled. Confirm approximately one-second cadence events and the
+Manual check: use the generated local media/native probe below, first without
+the variable, then with it set to `1`. The current native CLI accepts
+`--smoke-seconds` only from 1 through 15; its maximum 15-second probe is a bounded
+smoke check, not a soak test. Longer sustained-playback validation needs a
+separately approved workflow, not an out-of-range CLI value. Confirm no diagnostics summaries or FPS monitor when disabled. Confirm approximately one-second cadence events and the
 persistent overlay when enabled; five-second backend/acquisition summaries remain.
 Pause/resume and resize; inspect accepted-image vs received/backend
 rates, sample gaps/retirement skips, dimensions, cache state and timing fields.
