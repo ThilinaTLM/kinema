@@ -56,6 +56,10 @@ const ICONS: &[(&str, &[u8])] = icons![
     "tv",
     "triangle-alert",
     "circle-alert",
+    "compass",
+    "library-big",
+    "sliders-horizontal",
+    "layers-2",
 ];
 
 const LOGO: &[u8] = include_bytes!("../../assets/tmdb-logo.svg");

@@ -111,6 +111,10 @@ If needed, select a software Vulkan ICD with `KINEMA_UI_PROBE_VULKAN_ICD`.
 Captures under ignored `target/ui-probe/` are candidates requiring image review,
 not accepted baselines, native performance or cross-platform acceptance.
 
+`--click X,Y` performs one primary click after the first frame and saves
+`native-clicked.png` (e.g. to review header popovers); `browse-live-tmdb` makes
+TMDB the primary provider so the Discover Filters popover shows provider facets.
+
 The lab also includes production-screen fixtures (`browse-live`, detail-live,
 play-live, transfers-live, quit-live and settings scenes); consult the scene list
 in `src/design_lab.rs` for exact names. These retain synthetic/offline data.

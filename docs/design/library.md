@@ -60,8 +60,10 @@ the originating context rather than restoring stale membership/watch snapshots.
 
 ## 3. Landing scope and local queries
 
-One compact **Discover / Library** scope menu sits next to media kind; no rail or
-new tab bar. Discover retains its provider kind/search/sort behavior.
+One compact **Discover / Library** scope chip sits next to media kind and opens
+two choice tiles; no rail or new tab bar. Discover retains its provider
+kind/search behavior; its sort and facets live in its own Filters popover. See
+desktop-v3 §4.1 for the shared header.
 
 Library offers:
 
@@ -70,7 +72,7 @@ Library offers:
 - **Any / Unwatched / In progress / Watched** (default Any). In progress is
   show-only; selecting Movies resets an active In progress filter to Any.
 - **Recently added / Title A–Z / Newest release-year** (default Recently added).
-  Status and sort live in Library's Filters menu, replacing provider sort.
+  Status and sort live in Library's Filters popover, replacing provider sort.
 
 Library begins at local membership, not an intersection with a provider page or
 loaded cards. Apply kind/search/status before pagination, with stable ID tie
@@ -82,10 +84,10 @@ Restore search, filters, sort, scroll and focus independently per scope within
 the window. Persist personal records across restart, not browse context. Detail
 Back restores the originating view against updated personal state.
 
-Keep the 48 px toolbar on one row. At 960 px, allow search to shrink to 160 px,
-use the app mark without wordmark, and icon-only Filters with accessible name and
-tooltip. Status indicators use checked menu items and descriptive labels, not
-color alone. Native review must verify actual fit.
+Keep the 48 px toolbar on one row. Below 1100 px the scope and Filters chips
+become icon-only (with accessible names) and search may shrink to 180 px. Status
+and sort choices are labelled radio chips (selected state is not color alone).
+Native review must verify actual fit.
 
 ## 4. Conservative show completeness
 

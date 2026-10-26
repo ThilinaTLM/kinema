@@ -165,6 +165,7 @@ pub(super) fn tmdb(service: &mut CatalogService, query: &TmdbQuery, error: Catal
     };
     let target = match query {
         TmdbQuery::Browse { page, .. }
+        | TmdbQuery::Discover { page, .. }
         | TmdbQuery::Search { page, .. }
         | TmdbQuery::Similar { page, .. } => RequestTarget::Page {
             provider: "tmdb",

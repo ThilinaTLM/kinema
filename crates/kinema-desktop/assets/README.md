@@ -22,6 +22,9 @@ Pinned sources (downloaded 2026-10-18):
   are Lucide (ISC) SVGs taken from the icon set bundled in the `gpui-kit-assets`
   0.7.3 crate, not the 0.468.0 release; the upstream Lucide version of those
   three files is not pinned. Only the stroke-width adjustment was applied.
+  Header toolbar additions (`compass`, `library-big`, `sliders-horizontal`,
+  `layers-2`) were downloaded from the pinned 0.468.0 release on 2026-10-27,
+  with only the stroke-width adjustment.
   License: https://raw.githubusercontent.com/lucide-icons/lucide/0.468.0/LICENSE
   retained as `icons/LICENSE-lucide.txt` (ISC; includes Feather attribution).
 - **TMDB logo**: existing, unchanged; source URL and terms are in root `NOTICE`.
@@ -78,6 +81,10 @@ d8c3b23eb6156b21584fe35c2095b5d30023ef5bd57a601b1f2cc66e5422b50b  icons/volume-2
 7730715cc3e6da031ab936716d63ee33f8e8b515edf39b98dc2e3381123d5958  icons/volume-x.svg
 1659e8f9b2affe6422c69fab1e0dbd1f0d6c3c1794d0db04be325baadab2a6b8  icons/maximize.svg
 45e938096623d6c0a08955c454082acd11f142534f68ef8586b7b8813db185fe  icons/minimize.svg
+bc53ee795b67239e163fc87b2b6a51f18db4a88986fe7497b7572b94ef399d46  icons/compass.svg
+5ada478aa1530cc5452666d514fdf2ed128ca57482161dc7070344b64b319610  icons/library-big.svg
+df57124d4994da68e59ebd31a23d5b582015e647ee9a9afe8f6d3ce11a5b6727  icons/sliders-horizontal.svg
+6fc6a2e739c3e8a88700abdaf9d18d132a3ac3894bebdab3dd303779444904df  icons/layers-2.svg
 b5a82d987232ad1e5c3038fe38850ec6aa8c7253b7dc2e4be35ac51b61605a3b  icons/rotate-ccw.svg
 1029b72e250f0037cfead7429ab47234a03c7080fe625dd9d2c662fdf288af5e  icons/rotate-cw.svg
 df00c597bf626a049ba7a723a42183750db898acf11227bd51021aa384c2d9dd  icons/minus.svg

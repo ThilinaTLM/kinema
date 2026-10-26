@@ -55,13 +55,37 @@ impl PopoverState {
     }
 }
 
+/// Lets popover content close its own panel (e.g. after a single choice).
+#[derive(Clone)]
+pub struct PopoverHandle(Entity<PopoverState>);
+impl PopoverHandle {
+    /// Close the panel and return focus to the trigger.
+    pub fn dismiss(&self, window: &mut Window, cx: &mut App) {
+        self.0.update(cx, |this, cx| this.dismiss(window, cx));
+    }
+}
+
+/// Which trigger edge the panel lines up with; triggers near the right window
+/// edge use [`PopoverAlign::End`] so the panel grows leftwards.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PopoverAlign {
+    #[default]
+    Start,
+    End,
+}
+
+type TriggerBuilder = Box<dyn FnOnce(bool) -> AnyElement>;
+type ContentBuilder = Box<dyn FnOnce(PopoverHandle, &mut Window, &mut App) -> AnyElement>;
+
 /// The trigger toggles a floating panel below its bounds. Content may contain
 /// arbitrary interactive children; this is intentionally not a modal focus trap.
 #[derive(IntoElement)]
 pub struct Popover {
     id: ElementId,
-    trigger: Option<AnyElement>,
-    content: Option<AnyElement>,
+    trigger: Option<TriggerBuilder>,
+    content: Option<ContentBuilder>,
+    align: PopoverAlign,
+    label: Option<SharedString>,
 }
 impl Popover {
     pub fn new(id: impl Into<ElementId>) -> Self {
@@ -69,14 +93,40 @@ impl Popover {
             id: id.into(),
             trigger: None,
             content: None,
+            align: PopoverAlign::Start,
+            label: None,
         }
     }
-    pub fn trigger(mut self, trigger: impl IntoElement) -> Self {
-        self.trigger = Some(trigger.into_any_element());
+    pub fn trigger(mut self, trigger: impl IntoElement + 'static) -> Self {
+        self.trigger = Some(Box::new(move |_| trigger.into_any_element()));
         self
     }
-    pub fn content(mut self, content: impl IntoElement) -> Self {
-        self.content = Some(content.into_any_element());
+    /// Trigger that reflects whether the panel is open (pressed styling).
+    pub fn trigger_with<E: IntoElement>(mut self, build: impl FnOnce(bool) -> E + 'static) -> Self {
+        self.trigger = Some(Box::new(move |open| build(open).into_any_element()));
+        self
+    }
+    pub fn content(mut self, content: impl IntoElement + 'static) -> Self {
+        self.content = Some(Box::new(move |_, _, _| content.into_any_element()));
+        self
+    }
+    /// Content built only while open, with a handle to close the panel.
+    pub fn content_with<E: IntoElement>(
+        mut self,
+        build: impl FnOnce(PopoverHandle, &mut Window, &mut App) -> E + 'static,
+    ) -> Self {
+        self.content = Some(Box::new(move |handle, window, cx| {
+            build(handle, window, cx).into_any_element()
+        }));
+        self
+    }
+    pub fn align(mut self, align: PopoverAlign) -> Self {
+        self.align = align;
+        self
+    }
+    /// Accessible name of the trigger when its content is icon-only.
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
         self
     }
 }
@@ -102,12 +152,17 @@ impl RenderOnce for Popover {
         let p = *palette(cx);
         let click_state = state.clone();
         let key_state = state.clone();
+        let open = state.read(cx).open && !state.read(cx).closing;
+        let trigger = self.trigger.map(|build| build(open));
         let mut root = div().id(self.id).relative().flex().flex_col().child(
             div()
                 .id("popover-trigger")
                 .track_focus(&state.read(cx).trigger)
                 .tab_stop(true)
-                .rounded(radius::SM)
+                .role(Role::Button)
+                .aria_expanded(open)
+                .when_some(self.label, |el, label| el.aria_label(label))
+                .rounded(radius::MD)
                 .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
                 .on_click(move |_, window, cx| {
                     click_state.update(cx, |this, cx| {
@@ -126,7 +181,7 @@ impl RenderOnce for Popover {
                         cx.stop_propagation();
                     }
                 })
-                .children(self.trigger),
+                .children(trigger),
         );
         if state.read(cx).open {
             let outside_state = state.clone();
@@ -154,7 +209,10 @@ impl RenderOnce for Popover {
                         cx.stop_propagation();
                     }
                 })
-                .children(self.content);
+                .children(
+                    self.content
+                        .map(|build| build(PopoverHandle(state.clone()), window, cx)),
+                );
             let closing = state.read(cx).closing;
             let duration = motion::duration(
                 if closing {
@@ -190,10 +248,16 @@ impl RenderOnce for Popover {
                     )
                     .into_any_element()
             };
+            let (edge, corner) = match self.align {
+                PopoverAlign::Start => (div().absolute().top_full().left_0(), Anchor::TopLeft),
+                PopoverAlign::End => (div().absolute().top_full().right_0(), Anchor::TopRight),
+            };
             root = root.child(
-                div().absolute().top_full().left_0().child(
+                edge.child(
                     deferred(
                         anchored()
+                            .anchor(corner)
+                            .offset(point(px(0.), space::S6))
                             .snap_to_window_with_margin(space::S8)
                             .child(panel),
                     )

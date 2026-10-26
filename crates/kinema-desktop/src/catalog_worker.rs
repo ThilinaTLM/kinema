@@ -329,7 +329,7 @@ fn metadata_slot(action: &MetadataAction) -> usize {
         }
         MetadataAction::Tmdb(query) => {
             8 + match query {
-                TmdbQuery::Browse { kind, .. } => slot(*kind),
+                TmdbQuery::Browse { kind, .. } | TmdbQuery::Discover { kind, .. } => slot(*kind),
                 TmdbQuery::Search { query, .. } => 2 + slot(query.kind()),
                 TmdbQuery::Details { kind, .. } => 4 + slot(*kind),
                 TmdbQuery::Season { .. } => 6,

@@ -21,7 +21,7 @@ use crate::{
     },
 };
 use gpui::{prelude::*, *};
-use kinema_core::MediaKind;
+use kinema_core::{MediaKind, discover::DiscoverFilters};
 use layout::LoadingLayout;
 pub(crate) use library::{LibraryFilters, Scope};
 use library::{ScopeContext, membership_status, movie_watched, refocus};
@@ -189,7 +189,15 @@ impl MenuSig {
     }
 }
 
-type Subject = (Scope, MediaKind, String, Option<LibraryFilters>);
+/// What the grid shows; a change resets scroll and selection. Discover facets
+/// are part of it because a new facet set is a new result list.
+type Subject = (
+    Scope,
+    MediaKind,
+    String,
+    Option<LibraryFilters>,
+    Option<DiscoverFilters>,
+);
 
 struct Cell {
     title: BrowseTitle,
@@ -240,7 +248,7 @@ impl Browse {
             cols: 2,
             page_request_generation: None,
             last_visible: Vec::new(),
-            subject: (Scope::Discover, MediaKind::Movie, String::new(), None),
+            subject: (Scope::Discover, MediaKind::Movie, String::new(), None, None),
             scope: Scope::Discover,
             contexts: Default::default(),
             library: LibraryFilters::default(),
@@ -454,12 +462,21 @@ impl Browse {
     fn current_subject(&self, cx: &App) -> Subject {
         let state = self.coordinator.read(cx);
         match self.scope {
-            Scope::Discover => (Scope::Discover, state.kind, state.query.clone(), None),
+            Scope::Discover => (
+                Scope::Discover,
+                state.kind,
+                state.query.clone(),
+                None,
+                state
+                    .discover_filters_apply()
+                    .then(|| state.discover_filters().clone()),
+            ),
             Scope::Library => (
                 Scope::Library,
                 MediaKind::Movie,
                 self.library_search().to_owned(),
                 Some(self.library),
+                None,
             ),
         }
     }
@@ -542,7 +559,9 @@ impl Browse {
             self.last_visible.clear();
         }
 
-        if self.scope == Scope::Discover {
+        // Provider facets order results server-side; the local sort only applies
+        // where they cannot (search, or a provider without faceted Discover).
+        if self.scope == Scope::Discover && !self.coordinator.read(cx).discover_filters_apply() {
             match self.sort {
                 Sort::Provider => {}
                 Sort::Title => titles.sort_by_key(|a| a.name().to_lowercase()),

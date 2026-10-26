@@ -259,7 +259,7 @@ pub(super) fn read(
                 saved.fetched_at,
             )
         }
-        TmdbQuery::Browse { kind, page } => {
+        TmdbQuery::Browse { kind, page } | TmdbQuery::Discover { kind, page, .. } => {
             let Some(saved) = read_page(&tx, "tmdb", &resource, *page)? else {
                 return Ok(None);
             };
@@ -401,7 +401,7 @@ pub(super) fn write_rich(
                 priority,
             );
         }
-        TmdbQuery::Browse { kind, page } => {
+        TmdbQuery::Browse { kind, page } | TmdbQuery::Discover { kind, page, .. } => {
             return super::normalized_rich::write_page_rich(
                 tx,
                 "tmdb",

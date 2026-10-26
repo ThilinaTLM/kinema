@@ -11,7 +11,7 @@ const { decode, crop, diff } = require('./pixels.cjs');
 const exec = promisify(execFile);
 const args = process.argv.slice(2);
 const artifacts = path.resolve(args[0] && !args[0].startsWith('--') ? args.shift() : 'target/ui-probe/native-artifacts');
-let light = false, size, scene, reduceMotion = false, hover, focusPoint, tabs = 8;
+let light = false, size, scene, reduceMotion = false, hover, focusPoint, click, tabs = 8;
 while (args.length) {
   const arg = args.shift();
   if (arg === '--lab') { /* Explicitly select the sole native fixture. */ }
@@ -27,10 +27,11 @@ while (args.length) {
   else if (arg === '--tabs') {
     tabs = Number(args.shift());
     assert.ok(Number.isInteger(tabs) && tabs >= 1 && tabs <= 40, '--tabs requires an integer 1-40');
-  } else if (arg === '--hover' || arg === '--focus') {
+  } else if (arg === '--hover' || arg === '--focus' || arg === '--click') {
     const value = args.shift();
     assert.ok(/^\d+,\d+$/.test(value || ''), `${arg} requires X,Y`);
     if (arg === '--hover') hover = value.split(',').map(Number);
+    else if (arg === '--click') click = value.split(',').map(Number);
     else focusPoint = value.split(',').map(Number);
   } else throw new Error(`Unknown argument: ${arg}`);
 }
@@ -179,6 +180,15 @@ async function main() {
       report.hover.artwork = { bounds: artworkBounds, diff: diff(crop(image, artworkBounds), crop(hovered, artworkBounds)) };
       assert.ok(report.hover.artwork.diff.changedPixels > 0, 'Hover did not visibly zoom first-card artwork');
     }
+  }
+  if (click) {
+    // One primary click (e.g. to open a header popover), then a settled capture.
+    assert.ok(click[0] < image.width && click[1] < image.height, 'Click point outside fixture');
+    await exec('xdotool', ['mousemove', '--window', windowId, ...click.map(String), 'click', '1'], { env, timeout: 2000 });
+    await pause(400);
+    const clickedPath = path.join(artifacts, 'native-clicked.png');
+    await exec('import', ['-silent', '-window', windowId, '-depth', '8', `PNG32:${clickedPath}`], { env, timeout: 5000 });
+    report.click = { point: click, path: clickedPath, needsAgentImageReview: true };
   }
   if (focusPoint) {
     assert.ok(focusPoint[0] < image.width && focusPoint[1] < image.height, 'Focus point outside fixture');

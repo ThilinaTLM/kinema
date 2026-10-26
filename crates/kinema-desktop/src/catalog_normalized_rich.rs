@@ -217,7 +217,7 @@ pub(crate) fn tmdb(
         TmdbQuery::Similar { .. } => {
             records = tmdb_summaries(value, MediaKind::Movie)?;
         }
-        TmdbQuery::Browse { kind, .. } => {
+        TmdbQuery::Browse { kind, .. } | TmdbQuery::Discover { kind, .. } => {
             records = tmdb_summaries(value, *kind)?;
         }
         TmdbQuery::Search { query, .. } => {

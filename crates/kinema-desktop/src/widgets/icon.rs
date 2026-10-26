@@ -50,6 +50,10 @@ pub enum IconName {
     Tv,
     Warning,
     Error,
+    Compass,
+    Library,
+    Filters,
+    Layers,
 }
 
 impl IconName {
@@ -97,6 +101,10 @@ impl IconName {
             IconName::Tv => "icons/tv.svg",
             IconName::Warning => "icons/triangle-alert.svg",
             IconName::Error => "icons/circle-alert.svg",
+            IconName::Compass => "icons/compass.svg",
+            IconName::Library => "icons/library-big.svg",
+            IconName::Filters => "icons/sliders-horizontal.svg",
+            IconName::Layers => "icons/layers-2.svg",
         }
     }
 
@@ -142,6 +150,10 @@ impl IconName {
         IconName::Tv,
         IconName::Warning,
         IconName::Error,
+        IconName::Compass,
+        IconName::Library,
+        IconName::Filters,
+        IconName::Layers,
     ];
 }
 

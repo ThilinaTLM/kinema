@@ -26,12 +26,6 @@ impl Scope {
             Self::Library => 1,
         }
     }
-    pub(crate) fn options() -> Vec<(Self, SharedString)> {
-        vec![
-            (Self::Discover, "Discover".into()),
-            (Self::Library, "Library".into()),
-        ]
-    }
     pub(crate) fn search_placeholder(self, kind: MediaKind) -> &'static str {
         match (self, kind) {
             (Self::Library, _) => "Search your Library…",

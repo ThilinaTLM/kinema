@@ -446,9 +446,11 @@ mod tests {
                     MetadataAction::Sources { .. } => {
                         &["media_kind", "imdb_id", "season", "episode"]
                     }
-                    MetadataAction::Tmdb(TmdbQuery::Browse { .. } | TmdbQuery::Search { .. }) => {
-                        &["media_kind", "page"]
-                    }
+                    MetadataAction::Tmdb(
+                        TmdbQuery::Browse { .. }
+                        | TmdbQuery::Discover { .. }
+                        | TmdbQuery::Search { .. },
+                    ) => &["media_kind", "page"],
                     MetadataAction::Tmdb(TmdbQuery::Details { .. }) => &["media_kind", "tmdb_id"],
                     MetadataAction::Tmdb(TmdbQuery::Similar { .. }) => &["tmdb_id", "page"],
                     MetadataAction::Tmdb(TmdbQuery::Season { .. }) => &["tmdb_id", "season"],

@@ -36,6 +36,7 @@ use gpui::*;
 use kinema_core::{
     MediaKind,
     catalog::{CatalogTitle, ImdbId, SearchQuery, TitleDetails},
+    discover::DiscoverFilters,
     provider::ProviderId,
     sources::{IndexerKind, PlaybackTarget},
 };
@@ -252,6 +253,7 @@ pub struct AppCoordinator {
     pub(crate) tmdb_details: Resource<TmdbDetails>,
     pub kind: MediaKind,
     pub query: String,
+    discover_filters: DiscoverFilters,
     pub notice: Option<String>,
     pub quit_requested: bool,
     generation: u64,
@@ -333,6 +335,7 @@ impl AppCoordinator {
             tmdb_details: Resource::default(),
             kind: MediaKind::Movie,
             query: String::new(),
+            discover_filters: DiscoverFilters::default(),
             notice: None,
             quit_requested: false,
             generation: 0,
@@ -418,6 +421,7 @@ impl AppCoordinator {
             tmdb_details: Resource::default(),
             kind: MediaKind::Movie,
             query: String::new(),
+            discover_filters: DiscoverFilters::default(),
             notice: None,
             quit_requested: false,
             generation: 0,
@@ -453,6 +457,34 @@ impl AppCoordinator {
             fixture_sources: Default::default(),
         }
     }
+    pub fn discover_filters(&self) -> &DiscoverFilters {
+        &self.discover_filters
+    }
+    /// Facets apply only to TMDB Discover, never search or Cinemeta.
+    pub fn discover_filters_apply(&self) -> bool {
+        self.query.trim().is_empty() && self.provider() == ProviderId::Tmdb
+    }
+    pub fn set_discover_filters(&mut self, mut filters: DiscoverFilters, cx: &mut Context<Self>) {
+        filters.retain_genres_for(self.kind);
+        if !filters.is_valid_for(self.kind) || self.discover_filters == filters {
+            return;
+        }
+        self.discover_filters = filters;
+        // Cancel against the old resource generation before replacing it.
+        self.cancel_collection();
+        self.reload_collection(cx);
+    }
+    fn cancel_collection(&mut self) {
+        if let (Ok(worker), Some((ask, generation))) = (&self.worker, self.request.take()) {
+            metadata_bridge::cancel(worker, ask, generation);
+        }
+        if let Ok(worker) = &self.worker {
+            worker.cancel_search(self.kind, self.collection.generation());
+            if let Some(query) = self.tmdb_request.take() {
+                worker.cancel_metadata(&MetadataAction::Tmdb(query), self.collection.generation());
+            }
+        }
+    }
     pub fn load(&mut self, kind: MediaKind, query: String, refresh: bool, cx: &mut Context<Self>) {
         tracing::debug!(
             ?kind,
@@ -460,6 +492,7 @@ impl AppCoordinator {
             searching = !query.trim().is_empty(),
             "UI collection load requested"
         );
+        self.discover_filters.retain_genres_for(kind);
         if let Some(source) = &self.fixture {
             self.kind = kind;
             self.query = query;
@@ -487,15 +520,7 @@ impl AppCoordinator {
         if self.settings.is_none() {
             return;
         }
-        if let (Ok(worker), Some((ask, generation))) = (&self.worker, self.request.take()) {
-            metadata_bridge::cancel(worker, ask, generation);
-        }
-        if let Ok(worker) = &self.worker {
-            worker.cancel_search(self.kind, self.collection.generation());
-            if let Some(query) = self.tmdb_request.take() {
-                worker.cancel_metadata(&MetadataAction::Tmdb(query), self.collection.generation());
-            }
-        }
+        self.cancel_collection();
         let replace = kind != self.kind || query != self.query;
         self.kind = kind;
         self.query = query;
@@ -568,9 +593,17 @@ impl AppCoordinator {
             let worker = self.worker.as_ref().map_err(Clone::clone)?;
             if self.provider() == ProviderId::Tmdb {
                 let query = if self.query.trim().is_empty() {
-                    TmdbQuery::Browse {
-                        kind: self.kind,
-                        page: self.offset + 1,
+                    if self.discover_filters.is_default() {
+                        TmdbQuery::Browse {
+                            kind: self.kind,
+                            page: self.offset + 1,
+                        }
+                    } else {
+                        TmdbQuery::Discover {
+                            kind: self.kind,
+                            page: self.offset + 1,
+                            filters: self.discover_filters.clone(),
+                        }
                     }
                 } else {
                     TmdbQuery::Search {
@@ -3011,6 +3044,53 @@ mod enrichment_tests {
             assert_eq!(c.generation, before + 1);
             c.apply_credential_status(CredentialState::Present, cx);
             assert_eq!(c.generation, before + 1);
+        });
+    }
+}
+
+#[cfg(all(test, feature = "ui-probe-test"))]
+mod discover_filter_tests {
+    use super::*;
+    use ::core::prelude::v1::test;
+    use gpui::{AppContext, TestAppContext};
+    use kinema_core::discover::DiscoverSort;
+
+    #[test]
+    fn filter_changes_replace_generation_search_ignores_and_kind_prunes_genres() {
+        let mut cx = TestAppContext::single();
+        let entity = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        entity.update(&mut cx, |c, cx| {
+            let settings = Settings {
+                metadata_priority: kinema_core::provider::ProviderPriority::new([
+                    ProviderId::Tmdb,
+                    ProviderId::Cinemeta,
+                ]),
+                ..Default::default()
+            };
+            c.settings = Some(settings);
+            c.tmdb_credential = Some(CredentialState::Present);
+            let old = c.collection.generation();
+            let filters = DiscoverFilters {
+                sort: DiscoverSort::Newest,
+                genres: [18, 28].into(),
+                ..Default::default()
+            };
+            c.set_discover_filters(filters.clone(), cx);
+            assert_eq!(c.discover_filters(), &filters);
+            assert!(c.discover_filters_apply());
+            assert!(c.collection.generation() > old);
+            assert!(!c.collection.fetched(old, vec![], 0));
+            let current = c.collection.generation();
+            c.set_discover_filters(filters, cx);
+            assert_eq!(c.collection.generation(), current);
+            c.load(MediaKind::Series, " query ".into(), false, cx);
+            assert!(!c.discover_filters_apply());
+            assert_eq!(c.discover_filters().genres, [18].into());
+            assert_eq!(c.discover_filters().sort, DiscoverSort::Newest);
+            c.load(MediaKind::Series, "  ".into(), false, cx);
+            assert!(c.discover_filters_apply());
+            c.tmdb_credential = Some(CredentialState::Missing);
+            assert!(!c.discover_filters_apply());
         });
     }
 }

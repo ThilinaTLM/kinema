@@ -2,7 +2,7 @@
 use super::{
     browse::{
         Browse, BrowseRequest, LibraryFilters, OpenTitle, Scope, Sort,
-        filters::{FiltersButton, FiltersChanged},
+        filters::{self, DiscoverMode, DiscoverPanel},
         menu_item,
     },
     coordinator::{AppCoordinator, BrowseTitle, CoordinatorEvent},
@@ -10,19 +10,21 @@ use super::{
 };
 use crate::widgets::{
     button::Button,
+    choice_card::ChoiceTile,
     icon::IconName,
     icon_button::IconButton,
-    menu::{Menu, Select, SelectEvent},
+    menu::Menu,
     notice::{Notice, NoticeKind},
-    popover::Popover,
+    popover::{Popover, PopoverAlign},
     search_field::{SearchField, SearchFieldEvent},
     segmented::Segmented,
     text::TypeExt,
     text_input::TextInputEvent,
-    tokens::{self, radius, space as s, typeface as t},
+    tokens::{self, space as s, typeface as t},
+    toolbar::{Toolbar, ToolbarChip, ToolbarGroup, icon_cell},
 };
 use gpui::{prelude::*, *};
-use kinema_core::{MediaKind, library::LibraryKind};
+use kinema_core::{MediaKind, library::LibraryKind, provider::ProviderId};
 use std::{rc::Rc, time::Duration};
 
 /// How long a non-actionable personal-state notice stays visible.
@@ -65,8 +67,8 @@ const SEARCH_HINT: &str = if cfg!(target_os = "macos") {
     "Ctrl K"
 };
 /// Preferred search width; it yields space to the side groups when narrow.
-const SEARCH_WIDTH: Pixels = px(420.);
-const SEARCH_MIN_WIDTH: Pixels = px(160.);
+const SEARCH_WIDTH: Pixels = px(440.);
+const SEARCH_MIN_WIDTH: Pixels = px(180.);
 
 pub(crate) enum Route {
     Browse,
@@ -77,10 +79,6 @@ pub struct MainWindow {
     browse: Entity<Browse>,
     transfers: Entity<super::transfers::Transfers>,
     search: Entity<SearchField>,
-    sort: Entity<Select<Sort>>,
-    scope_select: Entity<Select<Scope>>,
-    library_kind: Entity<Select<LibraryKind>>,
-    filters_button: Entity<FiltersButton>,
     notice_seen: Option<String>,
     notice_task: Option<Task<()>>,
     pub(crate) route: Route,
@@ -114,15 +112,12 @@ impl MainWindow {
         let transfers = cx.new(|cx| super::transfers::Transfers::new(coordinator.clone(), cx));
         let browse = cx.new(|cx| Browse::new(coordinator.clone(), cx));
         let search = cx.new(|cx| {
-            let mut s = SearchField::new(window, cx).shortcut_hint(SEARCH_HINT);
+            let mut s = SearchField::new(window, cx)
+                .shortcut_hint(SEARCH_HINT)
+                .toolbar_style();
             s.set_placeholder("Search movies…", cx);
             s
         });
-        let sort = cx.new(|cx| Select::new(Sort::Provider, Sort::options(), cx));
-        let scope_select = cx.new(|cx| Select::new(Scope::Discover, Scope::options(), cx));
-        let library_kind =
-            cx.new(|cx| Select::new(LibraryKind::All, LibraryFilters::kind_options(), cx));
-        let filters_button = cx.new(FiltersButton::new);
         let editor = search.read(cx).input();
         let subscriptions = vec![
             cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
@@ -209,29 +204,6 @@ impl MainWindow {
                 }
             }),
             cx.subscribe_in(
-                &scope_select,
-                window,
-                |this, _, event: &SelectEvent<Scope>, window, cx| {
-                    let SelectEvent::Changed(scope) = event;
-                    this.switch_scope(*scope, window, cx);
-                },
-            ),
-            cx.subscribe(
-                &library_kind,
-                |this, _, event: &SelectEvent<LibraryKind>, cx| {
-                    let SelectEvent::Changed(kind) = event;
-                    let kind = *kind;
-                    this.update_filters(cx, |f| f.set_kind(kind));
-                },
-            ),
-            cx.subscribe(&filters_button, |this, _, event: &FiltersChanged, cx| {
-                let FiltersChanged(next) = *event;
-                this.update_filters(cx, |f| {
-                    f.status = next.status;
-                    f.sort = next.sort;
-                });
-            }),
-            cx.subscribe_in(
                 &browse,
                 window,
                 |this, _, request: &BrowseRequest, window, cx| match request {
@@ -239,13 +211,6 @@ impl MainWindow {
                     BrowseRequest::ClearLibraryFilters => this.clear_library(cx),
                 },
             ),
-            cx.subscribe(&sort, |this, _, event: &SelectEvent<Sort>, cx| {
-                let SelectEvent::Changed(sort) = event;
-                this.browse.update(cx, |b, cx| {
-                    b.sort = *sort;
-                    cx.notify();
-                });
-            }),
             cx.subscribe_in(&browse, window, |this, _, event: &OpenTitle, window, cx| {
                 this.open_title(event.0.clone(), window, cx);
             }),
@@ -268,10 +233,6 @@ impl MainWindow {
             browse,
             transfers,
             search,
-            sort,
-            scope_select,
-            library_kind,
-            filters_button,
             notice_seen: None,
             notice_task: None,
             route: Route::Browse,
@@ -338,12 +299,6 @@ impl MainWindow {
         self.browse.update(cx, |b, cx| {
             b.show_library_fixture(filters, search, window, cx)
         });
-        self.scope_select
-            .update(cx, |s, cx| s.set_value(Scope::Library, cx));
-        self.library_kind
-            .update(cx, |s, cx| s.set_value(filters.kind, cx));
-        self.filters_button
-            .update(cx, |button, cx| button.set_filters(filters, cx));
         self.search.update(cx, |s, cx| {
             s.set_placeholder(Scope::Library.search_placeholder(MediaKind::Movie), cx);
             s.set_text(search, cx);
@@ -358,7 +313,6 @@ impl MainWindow {
         }
         self.browse
             .update(cx, |b, cx| b.set_scope(scope, window, cx));
-        self.scope_select.update(cx, |s, cx| s.set_value(scope, cx));
         let (text, placeholder) = match scope {
             Scope::Library => (
                 self.browse.read(cx).library_search().to_owned(),
@@ -387,19 +341,12 @@ impl MainWindow {
         if filters == before {
             return;
         }
-        self.filters_button
-            .update(cx, |button, cx| button.set_filters(filters, cx));
         self.browse
             .update(cx, |b, cx| b.set_library(filters, &search, cx));
         cx.notify();
     }
     fn clear_library(&mut self, cx: &mut Context<Self>) {
-        self.library_kind
-            .update(cx, |s, cx| s.set_value(LibraryKind::All, cx));
         self.browse.update(cx, |b, cx| b.clear_library_filters(cx));
-        let filters = self.browse.read(cx).library_filters();
-        self.filters_button
-            .update(cx, |button, cx| button.set_filters(filters, cx));
         self.search.update(cx, |s, cx| s.set_text("", cx));
         cx.notify();
     }
@@ -554,21 +501,6 @@ impl MainWindow {
     }
 }
 
-/// Opacity of the control pills drawn over detail backdrops.
-const PILL_ALPHA: f32 = 0.78;
-
-/// Equal-size, centered cell for one toolbar icon control; grows only for a badge.
-fn icon_cell(child: impl IntoElement) -> Div {
-    div()
-        .flex_none()
-        .min_w(s::ICON_TARGET)
-        .h(s::CONTROL_HEIGHT)
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(child)
-}
-
 /// Scroll distance over which the scrim fades in.
 const SCRIM_RAMP: Pixels = px(24.);
 
@@ -619,17 +551,167 @@ const SCRIM_ALPHA: f32 = 0.92;
 const SCRIM_HOLD: f32 = 0.6;
 const SCRIM_STEPS: usize = 36;
 
-impl Render for MainWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = *tokens::palette(cx);
-        let kind = self.coordinator.read(cx).kind;
-        let scope = self.browse.read(cx).scope();
-        let personal_notice = self.personal_notice(cx);
-        let count = self.coordinator.read(cx).active_sessions();
-        let change = cx.entity().downgrade();
-        let in_detail = matches!(self.route, Route::Detail(_));
-        // The popover wraps its trigger; a control-height flex box keeps the glyph
-        // on the same centre line as its neighbours.
+/// Header controls. Every view composes the same primitives (see
+/// `widgets::toolbar`), so only the slot contents differ between routes.
+impl MainWindow {
+    /// Discover/Library picker: a chip that opens two choice tiles.
+    fn scope_control(&self, scope: Scope, compact: bool, cx: &mut Context<Self>) -> AnyElement {
+        let (icon, label) = scope_face(scope);
+        let weak = cx.entity().downgrade();
+        Popover::new("scope-picker")
+            .label("Switch between Discover and Library")
+            .trigger_with(move |open| ToolbarChip::new(icon, label).open(open).compact(compact))
+            .content_with(move |handle, _, _| {
+                let tile = move |value: Scope, description: &'static str| {
+                    let (icon, title) = scope_face(value);
+                    let weak = weak.clone();
+                    let handle = handle.clone();
+                    ChoiceTile::new(("scope", value.index()), icon, title, description)
+                        .selected(scope == value)
+                        .on_click(move |window, cx| {
+                            handle.dismiss(window, cx);
+                            let _ =
+                                weak.update(cx, |this, cx| this.switch_scope(value, window, cx));
+                        })
+                };
+                div()
+                    .flex()
+                    .gap(s::S8)
+                    .child(tile(
+                        Scope::Discover,
+                        "Popular titles and catalogues from your provider.",
+                    ))
+                    .child(tile(
+                        Scope::Library,
+                        "Titles you saved, with watch progress.",
+                    ))
+            })
+            .into_any_element()
+    }
+
+    /// Movies/Series (Discover) or All/Movies/Series (Library), always visible.
+    fn kind_control(&self, scope: Scope, cx: &mut Context<Self>) -> AnyElement {
+        let weak = cx.entity().downgrade();
+        if scope == Scope::Library {
+            let kind = self.browse.read(cx).library_filters().kind;
+            return Segmented::new("library-kind", LibraryFilters::kind_options(), kind)
+                .icons([IconName::Layers, IconName::Film, IconName::Tv])
+                .toolbar()
+                .on_change(move |kind: &LibraryKind, _, cx| {
+                    let kind = *kind;
+                    let _ =
+                        weak.update(cx, |this, cx| this.update_filters(cx, |f| f.set_kind(kind)));
+                })
+                .into_any_element();
+        }
+        Segmented::new(
+            "kind",
+            [
+                (MediaKind::Movie, "Movies".into()),
+                (MediaKind::Series, "Series".into()),
+            ],
+            self.coordinator.read(cx).kind,
+        )
+        .icons([IconName::Film, IconName::Tv])
+        .toolbar()
+        .on_change(move |kind, _, cx| {
+            let kind = *kind;
+            let _ = weak.update(cx, |this, cx| {
+                let query = this.search.read(cx).text(cx).to_owned();
+                this.coordinator
+                    .update(cx, |c, cx| c.load(kind, query, false, cx));
+                this.search.update(cx, |s, cx| {
+                    s.set_placeholder(Scope::Discover.search_placeholder(kind), cx)
+                });
+            });
+        })
+        .into_any_element()
+    }
+
+    /// One Filters chip per scope; its popover holds every advanced option.
+    fn filters_control(&self, scope: Scope, compact: bool, cx: &mut Context<Self>) -> AnyElement {
+        let weak = cx.entity().downgrade();
+        let (selector, active) = match scope {
+            Scope::Library => (
+                "library-filters",
+                filters::library_active(&self.browse.read(cx).library_filters()),
+            ),
+            Scope::Discover => {
+                let c = self.coordinator.read(cx);
+                (
+                    "discover-filters",
+                    filters::discover_active(
+                        self.discover_mode(cx),
+                        c.discover_filters(),
+                        self.browse.read(cx).sort,
+                    ),
+                )
+            }
+        };
+        let browse = self.browse.clone();
+        let coordinator = self.coordinator.clone();
+        let mode = self.discover_mode(cx);
+        div()
+            .debug_selector(move || selector.into())
+            .child(
+                Popover::new(selector)
+                    .label("Filters")
+                    .align(PopoverAlign::End)
+                    .trigger_with(move |open| {
+                        ToolbarChip::new(IconName::Filters, "Filters")
+                            .count(active)
+                            .open(open)
+                            .compact(compact)
+                    })
+                    .content_with(move |_, _, cx| match scope {
+                        Scope::Library => {
+                            let current = browse.read(cx).library_filters();
+                            filters::library_panel(current, move |next, _, cx| {
+                                let _ = weak
+                                    .update(cx, |this, cx| this.update_filters(cx, |f| *f = next));
+                            })
+                            .into_any_element()
+                        }
+                        Scope::Discover => {
+                            let c = coordinator.read(cx);
+                            let apply_to = coordinator.clone();
+                            let sort_in = browse.clone();
+                            DiscoverPanel {
+                                mode,
+                                kind: c.kind,
+                                filters: c.discover_filters().clone(),
+                                local: browse.read(cx).sort,
+                                apply: Rc::new(move |next, _, cx| {
+                                    apply_to.update(cx, |c, cx| c.set_discover_filters(next, cx))
+                                }),
+                                apply_local: Rc::new(move |sort: Sort, _, cx| {
+                                    sort_in.update(cx, |b, cx| {
+                                        b.sort = sort;
+                                        cx.notify();
+                                    })
+                                }),
+                            }
+                            .render()
+                            .into_any_element()
+                        }
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn discover_mode(&self, cx: &App) -> DiscoverMode {
+        let c = self.coordinator.read(cx);
+        if c.discover_filters_apply() {
+            DiscoverMode::Provider
+        } else if c.provider() == ProviderId::Tmdb {
+            DiscoverMode::Searching
+        } else {
+            DiscoverMode::Unsupported
+        }
+    }
+
+    /// Transfers, Settings and the app menu: same capsule, same place, every view.
+    fn global_group(&self, count: usize, cx: &mut Context<Self>) -> ToolbarGroup {
         let transfer_trigger = div().child(
             IconButton::new("transfers-trigger", IconName::Transfers, "Transfers").badge(count),
         );
@@ -645,185 +727,73 @@ impl Render for MainWindow {
         } else {
             transfer_trigger.into_any_element()
         };
-        // Light backdrops swallow bare ghost icons, so light browse pills too.
-        let light = tokens::theme(cx).mode == tokens::Mode::Light;
-        let pill_bg = Hsla {
-            a: PILL_ALPHA,
-            ..p.bg_overlay
-        };
-        // Compact translucent control group: every control sits in an
-        // equal icon-target cell, centered on both axes.
-        let pill = move |el: Div| {
-            el.flex_none()
-                .flex()
-                .items_center()
-                .gap(s::S2)
-                .rounded(radius::SM)
-                .bg(pill_bg)
-                .border_1()
-                .border_color(p.line_subtle)
-                .p(s::S2)
-        };
-        let actions = vec![
-            icon_cell(
+        ToolbarGroup::new()
+            .debug_selector("toolbar-global")
+            .child(
                 Popover::new("transfers")
-                    .trigger(transfer_trigger)
+                    .align(PopoverAlign::End)
+                    .label("Transfers")
+                    .trigger(icon_cell(transfer_trigger))
                     .content(self.transfers.clone()),
             )
-            // Popover's wrapper reports a taller box than its glyph; top-aligning
-            // puts the glyph on the same centre line as its neighbours.
-            .items_start(),
-            icon_cell(
+            .divider()
+            .child(
                 IconButton::new("settings", IconName::Settings, "Settings").on_click({
                     let coordinator = self.coordinator.clone();
                     move |_, _, cx| coordinator.update(cx, |c, cx| c.open_settings(cx))
                 }),
-            ),
-            icon_cell(
+            )
+            .child(
                 IconButton::new("overflow", IconName::MoreHorizontal, "App menu")
                     .on_click(cx.listener(|this, _, window, cx| this.overflow(window, cx))),
-            ),
-        ];
-        let mut actions = Some(actions);
-        let back_label = match &self.route {
-            Route::Detail(detail) if detail.read(cx).on_streams_page() => "Back to details",
-            _ => "Back to browse",
-        };
-        let leading = if in_detail {
-            // One left-aligned control group: back | divider | app actions.
-            pill(div())
-                .child(icon_cell(
-                    IconButton::new("detail-back", IconName::ArrowLeft, back_label)
-                        .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
-                ))
-                .child(
-                    div()
-                        .flex_none()
-                        .w(px(1.))
-                        .h(s::S16)
-                        .mx(s::S4)
-                        .bg(p.line_hairline),
-                )
-                .children(actions.take().unwrap_or_default())
-                .into_any_element()
-        } else {
-            let kind_control = if scope == Scope::Library {
-                self.library_kind.clone().into_any_element()
-            } else {
-                Segmented::new(
-                    "kind",
-                    [
-                        (MediaKind::Movie, "Movies".into()),
-                        (MediaKind::Series, "Series".into()),
-                    ],
-                    kind,
-                )
-                .on_change(move |kind, _, cx| {
-                    let _ = change.update(cx, |this, cx| {
-                        let query = this.search.read(cx).text(cx).to_owned();
-                        this.coordinator
-                            .update(cx, |c, cx| c.load(*kind, query, false, cx));
-                        this.search.update(cx, |s, cx| {
-                            s.set_placeholder(
-                                if *kind == MediaKind::Movie {
-                                    "Search movies…"
-                                } else {
-                                    "Search series…"
-                                },
-                                cx,
-                            )
-                        });
-                    });
-                })
-                .into_any_element()
-            };
-            div()
-                .flex()
-                .items_center()
-                .gap(s::S8)
-                .child(self.scope_select.clone())
-                .child(kind_control)
-                .into_any_element()
-        };
-        // Left and right groups share the free space equally, so the search
-        // field stays centered regardless of what each side holds.
-        // Transparent overlay: no bar surface or border. The controls float over
-        // the page; `scroll_scrim` provides legibility once content scrolls under.
-        let toolbar = div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .h(s::TOOLBAR_HEIGHT)
-            .flex()
-            .items_center()
-            .gap(s::S12)
-            .px(if in_detail {
-                super::detail::page_inset(window.viewport_size().width)
-            } else {
-                s::S20
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .child(leading),
             )
-            .when(!in_detail, |el| {
-                el.child(
-                    div()
-                        .w(SEARCH_WIDTH)
-                        .min_w(SEARCH_MIN_WIDTH)
-                        .child(self.search.clone()),
+    }
+}
+
+fn scope_face(scope: Scope) -> (IconName, &'static str) {
+    match scope {
+        Scope::Discover => (IconName::Compass, "Discover"),
+        Scope::Library => (IconName::Library, "Library"),
+    }
+}
+
+impl Render for MainWindow {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = *tokens::palette(cx);
+        let scope = self.browse.read(cx).scope();
+        let personal_notice = self.personal_notice(cx);
+        let count = self.coordinator.read(cx).active_sessions();
+        let in_detail = matches!(self.route, Route::Detail(_));
+        let inset = if in_detail {
+            super::detail::page_inset(window.viewport_size().width)
+        } else {
+            s::S20
+        };
+        let compact = window.viewport_size().width < filters::COMPACT_BELOW;
+        let toolbar = if in_detail {
+            let back_label = match &self.route {
+                Route::Detail(detail) if detail.read(cx).on_streams_page() => "Back to details",
+                _ => "Back to browse",
+            };
+            Toolbar::new()
+                .inset(inset)
+                .leading(
+                    ToolbarGroup::new().child(
+                        IconButton::new("detail-back", IconName::ArrowLeft, back_label)
+                            .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
+                    ),
                 )
-            })
-            .when(!in_detail, |el| {
-                el.child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .justify_end()
-                        .gap(s::S8)
-                        .child(if scope == Scope::Library {
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(s::S6)
-                                .child(self.filters_button.clone())
-                                .into_any_element()
-                        } else {
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(s::S6)
-                                .child(
-                                    div()
-                                        .type_style(t::SMALL)
-                                        .text_color(p.text_primary)
-                                        .child("Sort"),
-                                )
-                                .child(self.sort.clone())
-                                .into_any_element()
-                        })
-                        .child(if light {
-                            pill(div())
-                                .children(actions.take().unwrap_or_default())
-                                .into_any_element()
-                        } else {
-                            div()
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(s::S8)
-                                .children(actions.take().unwrap_or_default())
-                                .into_any_element()
-                        }),
-                )
-            });
+                .trailing(self.global_group(count, cx))
+        } else {
+            Toolbar::new()
+                .inset(inset)
+                .center_width(SEARCH_WIDTH, SEARCH_MIN_WIDTH)
+                .leading(self.scope_control(scope, compact, cx))
+                .leading(self.kind_control(scope, cx))
+                .center(self.search.clone())
+                .trailing(self.filters_control(scope, compact, cx))
+                .trailing(self.global_group(count, cx))
+        };
         let scrolled: Rc<dyn Fn(&App) -> Pixels> = match &self.route {
             Route::Browse => {
                 let browse = self.browse.clone();
@@ -921,17 +891,9 @@ impl Render for MainWindow {
                 el.child(
                     deferred(
                         anchored()
-                            .anchor(if in_detail {
-                                Anchor::TopLeft
-                            } else {
-                                Anchor::TopRight
-                            })
+                            .anchor(Anchor::TopRight)
                             .position(point(
-                                if in_detail {
-                                    s::S20
-                                } else {
-                                    window.viewport_size().width - s::S20
-                                },
+                                window.viewport_size().width - inset,
                                 s::TOOLBAR_HEIGHT,
                             ))
                             .child(menu),
@@ -1351,36 +1313,92 @@ mod interaction_tests {
     }
 
     #[gpui::test]
-    fn one_filters_control_is_text_when_wide_and_icon_only_at_960(cx: &mut TestAppContext) {
+    fn one_filters_chip_per_scope_collapses_to_icon_at_960(cx: &mut TestAppContext) {
         let (_, main) = fixture_window(cx);
-        main.update(cx, |view, window, cx| {
-            view.switch_scope(Scope::Library, window, cx)
-        })
-        .unwrap();
         let mut visual = VisualTestContext::from_window(main.into(), cx);
-        let mut widths = Vec::new();
+        for (scope, selector, other) in [
+            (Scope::Library, "library-filters", "discover-filters"),
+            (Scope::Discover, "discover-filters", "library-filters"),
+        ] {
+            main.update(cx, |view, window, cx| view.switch_scope(scope, window, cx))
+                .unwrap();
+            let mut widths = Vec::new();
+            for width in [1280., 960.] {
+                visual.simulate_resize(size(px(width), px(800.)));
+                draw(main, cx);
+                let bounds = visual
+                    .debug_bounds(selector)
+                    .expect("each scope shows exactly one Filters control");
+                // Single 48px toolbar row, fully inside the window.
+                assert!(
+                    bounds.top() >= px(0.) && bounds.bottom() <= s::TOOLBAR_HEIGHT,
+                    "{bounds:?}"
+                );
+                assert!(bounds.right() <= px(width), "{bounds:?}");
+                widths.push(bounds.size.width);
+                assert!(visual.debug_bounds(other).is_none());
+            }
+            assert!(widths[0] > widths[1] + px(20.), "{widths:?}");
+        }
+    }
+
+    #[gpui::test]
+    fn header_tools_and_global_group_fit_inside_the_row(cx: &mut TestAppContext) {
+        let (_, main) = fixture_window(cx);
+        let mut visual = VisualTestContext::from_window(main.into(), cx);
         for width in [1280., 960.] {
             visual.simulate_resize(size(px(width), px(800.)));
             draw(main, cx);
-            let bounds = visual
-                .debug_bounds("library-filters")
-                .expect("Library shows exactly one Filters control");
-            // Single 48px toolbar row, fully inside the window.
-            assert!(
-                bounds.top() >= px(0.) && bounds.bottom() <= s::TOOLBAR_HEIGHT,
-                "{bounds:?}"
-            );
-            assert!(bounds.right() <= px(width), "{bounds:?}");
-            widths.push(bounds.size.width);
+            let filters = visual.debug_bounds("discover-filters").unwrap();
+            let global = visual.debug_bounds("toolbar-global").unwrap();
+            // Transfers, divider, Settings and overflow: three icon targets at least.
+            assert!(global.size.width >= s::ICON_TARGET * 3., "{global:?}");
+            assert!(filters.right() <= global.left(), "{filters:?} {global:?}");
+            assert!(global.right() <= px(width) - s::S20 + px(0.5), "{global:?}");
+            assert!(global.bottom() <= s::TOOLBAR_HEIGHT, "{global:?}");
         }
-        assert!(widths[0] > widths[1] + px(20.), "{widths:?}");
-        // Discover has no Filters control.
-        main.update(cx, |view, window, cx| {
-            view.switch_scope(Scope::Discover, window, cx)
-        })
-        .unwrap();
+    }
+
+    #[gpui::test]
+    fn header_owns_clicks_but_lets_the_wheel_scroll_the_grid(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            tokens::init(cx);
+            tokens::set_reduce_motion(true, cx);
+            bind_keys(cx);
+        });
+        let titles = (1..=60)
+            .map(|id| BrowseTitle::Tmdb(movie(id, &format!("Movie {id}"))))
+            .collect();
+        let coordinator = cx.new(|cx| {
+            let mut c = AppCoordinator::fixture(titles, None, cx);
+            c.load(MediaKind::Movie, String::new(), false, cx);
+            c
+        });
+        let main = cx
+            .add_window(|window, cx| MainWindow::with_coordinator(coordinator.clone(), window, cx));
+        let mut visual = VisualTestContext::from_window(main.into(), cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
         draw(main, cx);
-        assert!(visual.debug_bounds("library-filters").is_none());
+        let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+        // Wheel over the header still scrolls the page beneath it.
+        let empty_header = point(px(380.), px(24.));
+        visual.simulate_event(ScrollWheelEvent {
+            position: empty_header,
+            delta: ScrollDelta::Pixels(point(px(0.), px(-160.))),
+            ..Default::default()
+        });
+        draw(main, cx);
+        assert!(browse.read_with(cx, |b, _| b.scrolled_under_header()) > px(0.));
+        // A card now sits under the header; clicking the header must not open it.
+        visual.simulate_click(empty_header, Modifiers::default());
+        draw(main, cx);
+        main.read_with(cx, |v, _| assert!(matches!(v.route, Route::Browse)))
+            .unwrap();
+        // The same card below the header still opens.
+        visual.simulate_click(point(px(100.), px(300.)), Modifiers::default());
+        draw(main, cx);
+        main.read_with(cx, |v, _| assert!(matches!(v.route, Route::Detail(_))))
+            .unwrap();
     }
 
     #[gpui::test]

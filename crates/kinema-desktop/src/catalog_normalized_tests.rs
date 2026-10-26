@@ -801,3 +801,74 @@ fn unknown_field_suppliers_rank_below_known_providers() {
         &priority
     ));
 }
+
+#[test]
+fn discover_filter_pages_keep_distinct_saved_membership() -> TestResult {
+    use kinema_core::discover::{DiscoverFilters, DiscoverSort, YearRange};
+    let dir = tempfile::tempdir()?;
+    let mut service = CatalogService::open(&dir.path().join("catalog"))?;
+    let mut queries = vec![TmdbQuery::Browse {
+        kind: MediaKind::Movie,
+        page: 1,
+    }];
+    for filters in [
+        DiscoverFilters {
+            sort: DiscoverSort::TopRated,
+            ..Default::default()
+        },
+        DiscoverFilters {
+            genres: [18, 35].into(),
+            ..Default::default()
+        },
+        DiscoverFilters {
+            years: Some(YearRange {
+                from: 1990,
+                to: 1999,
+            }),
+            ..Default::default()
+        },
+        DiscoverFilters {
+            min_rating: Some(7),
+            ..Default::default()
+        },
+    ] {
+        for page in [1, 2] {
+            queries.push(TmdbQuery::Discover {
+                kind: MediaKind::Movie,
+                page,
+                filters: filters.clone(),
+            });
+        }
+    }
+    for (index, query) in queries.iter().enumerate() {
+        let page = match query {
+            TmdbQuery::Browse { page, .. } | TmdbQuery::Discover { page, .. } => *page,
+            _ => return Err("not a page".into()),
+        };
+        let data = TmdbData::Page(TmdbPage {
+            page,
+            total_pages: 2,
+            titles: vec![TmdbTitle {
+                id: index as u64 + 1,
+                kind: MediaKind::Movie,
+                name: format!("Film {index}"),
+                overview: None,
+                release_info: None,
+                poster_url: None,
+                display: Default::default(),
+                imdb: None,
+            }],
+        });
+        let tx = service.connection.transaction()?;
+        normalized_tmdb::write(&tx, query, &data, 1, true, &Default::default())?;
+        tx.commit()?;
+    }
+    for (index, query) in queries.iter().enumerate() {
+        let saved = normalized_tmdb::read(&mut service, query)?.ok_or("page")?;
+        let TmdbData::Page(page) = saved.data else {
+            return Err("page type".into());
+        };
+        assert_eq!(page.titles[0].id, index as u64 + 1);
+    }
+    Ok(())
+}

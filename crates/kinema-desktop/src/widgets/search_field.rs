@@ -4,6 +4,7 @@ use super::{
     icon::{Icon, IconName},
     text_input::{TextInput, TextInputEvent},
     tokens::{palette, radius, space, typeface},
+    toolbar,
 };
 use gpui::{prelude::*, *};
 use std::time::Duration;
@@ -22,6 +23,7 @@ pub struct SearchField {
     generation: u64,
     debounce: Option<Task<()>>,
     shortcut_hint: Option<SharedString>,
+    toolbar: bool,
     _subscription: Subscription,
 }
 impl SearchField {
@@ -64,12 +66,18 @@ impl SearchField {
             generation: 0,
             debounce: None,
             shortcut_hint: None,
+            toolbar: false,
             _subscription: subscription,
         }
     }
     /// Trailing key hint (e.g. "Ctrl K"), shown only while the field is empty.
     pub fn shortcut_hint(mut self, hint: impl Into<SharedString>) -> Self {
         self.shortcut_hint = Some(hint.into());
+        self
+    }
+    /// Floating-header geometry and glass material (see [`toolbar`]).
+    pub fn toolbar_style(mut self) -> Self {
+        self.toolbar = true;
         self
     }
     pub fn set_shortcut_hint(&mut self, hint: Option<SharedString>, cx: &mut Context<Self>) {
@@ -104,7 +112,12 @@ impl Focusable for SearchField {
 }
 impl Render for SearchField {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(cx);
+        let p = *palette(cx);
+        let (fill, hover, edge) = if self.toolbar {
+            toolbar::glass(&p)
+        } else {
+            (p.ctl_rest, p.ctl_rest, p.line_control)
+        };
         let nonempty = !self.text(cx).is_empty();
         let focus = self.input.read(cx).focus_handle(cx);
         let focused = focus.is_focused(window);
@@ -117,14 +130,21 @@ impl Render for SearchField {
             .flex()
             .items_center()
             .gap(space::S4)
-            .h(space::CONTROL_HEIGHT)
+            .h(if self.toolbar {
+                space::TOOLBAR_CONTROL
+            } else {
+                space::CONTROL_HEIGHT
+            })
             .w_full()
-            .pl(space::S8)
+            .pl(if self.toolbar { space::S12 } else { space::S8 })
             .pr(space::S2)
-            .rounded(radius::SM)
-            .bg(p.ctl_rest)
+            .rounded(if self.toolbar { radius::MD } else { radius::SM })
+            .bg(fill)
+            .when(self.toolbar && !focused, |el| {
+                el.hover(move |s| s.bg(hover))
+            })
             .border(space::HAIRLINE)
-            .border_color(if focused { p.accent } else { p.line_control })
+            .border_color(if focused { p.accent } else { edge })
             // Keyboard focus ring follows the host radius: 2 px gap, then 2 px ring.
             .when(ring, |el| {
                 el.shadow(vec![
@@ -159,7 +179,7 @@ impl Render for SearchField {
                         .id("clear-search")
                         .track_focus(&self.clear_focus)
                         .rounded(radius::XS)
-                        .focus_visible(|s| s.border_2().border_color(p.focus_ring))
+                        .focus_visible(move |s| s.border_2().border_color(p.focus_ring))
                         .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                             if event.keystroke.key == "enter" || event.keystroke.key == "space" {
                                 this.input.update(cx, |input, cx| input.set_text("", cx));
@@ -172,7 +192,7 @@ impl Render for SearchField {
                         .items_center()
                         .justify_center()
                         .cursor_pointer()
-                        .hover(|s| s.bg(p.ctl_hover).text_color(p.text_primary))
+                        .hover(move |s| s.bg(p.ctl_hover).text_color(p.text_primary))
                         .child(Icon::new(IconName::Close).color(p.text_secondary))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.input.update(cx, |input, cx| input.set_text("", cx));

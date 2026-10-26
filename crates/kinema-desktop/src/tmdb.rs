@@ -10,6 +10,7 @@ use kinema_core::{
     catalog::{
         CastMember, CatalogDisplay, CatalogEpisode, ImdbId, ImdbRating, SearchQuery, TitleFacts,
     },
+    discover::{DiscoverFilters, DiscoverSort},
 };
 use reqwest::{
     Url,
@@ -32,16 +33,36 @@ const MAX_SEASONS: usize = 1000;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum TmdbQuery {
-    Browse { kind: MediaKind, page: u32 },
-    Search { query: SearchQuery, page: u32 },
-    Details { kind: MediaKind, id: u64 },
-    Similar { id: u64, page: u32 },
-    Season { series_id: u64, season: u32 },
+    Browse {
+        kind: MediaKind,
+        page: u32,
+    },
+    Discover {
+        kind: MediaKind,
+        page: u32,
+        filters: DiscoverFilters,
+    },
+    Search {
+        query: SearchQuery,
+        page: u32,
+    },
+    Details {
+        kind: MediaKind,
+        id: u64,
+    },
+    Similar {
+        id: u64,
+        page: u32,
+    },
+    Season {
+        series_id: u64,
+        season: u32,
+    },
 }
 impl TmdbQuery {
     pub(crate) fn operation(&self) -> &'static str {
         match self {
-            Self::Browse { .. } => "browse",
+            Self::Browse { .. } | Self::Discover { .. } => "browse",
             Self::Search { .. } => "search",
             Self::Details { .. } => "details",
             Self::Similar { .. } => "similar",
@@ -51,7 +72,7 @@ impl TmdbQuery {
     // No Debug of the query: search text can contain private text or URLs.
     pub(crate) fn record_diagnostics(&self, span: &tracing::Span) {
         match self {
-            Self::Browse { kind, page } => {
+            Self::Browse { kind, page } | Self::Discover { kind, page, .. } => {
                 span.record("media_kind", tracing::field::debug(kind));
                 span.record("page", page);
             }
@@ -403,7 +424,7 @@ impl TmdbClient {
         let started = std::time::Instant::now();
         let result = self.fetch_normalized_inner(query);
         let request_kind = match query {
-            TmdbQuery::Browse { .. } => "browse",
+            TmdbQuery::Browse { .. } | TmdbQuery::Discover { .. } => "browse",
             TmdbQuery::Search { .. } => "search",
             TmdbQuery::Details { .. } => "details",
             TmdbQuery::Similar { .. } => "similar",
@@ -438,6 +459,18 @@ impl TmdbClient {
                     &format!("{}/popular", kind_path(*kind)),
                     &[("page", page.to_string())],
                 )?;
+                rich = crate::catalog::normalized_rich::tmdb(&raw, query)
+                    .map_err(|_| TmdbError::Malformed)?;
+                let dto: PageDto = serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
+                TmdbData::Page(dto.normalize(*kind)?)
+            }
+            TmdbQuery::Discover {
+                kind,
+                page,
+                filters,
+            } => {
+                let (path, params) = discover_request(*kind, *page, filters);
+                let raw: serde_json::Value = self.get(&path, &params)?;
                 rich = crate::catalog::normalized_rich::tmdb(&raw, query)
                     .map_err(|_| TmdbError::Malformed)?;
                 let dto: PageDto = serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
@@ -532,9 +565,104 @@ fn kind_path(kind: MediaKind) -> &'static str {
         MediaKind::Series => "tv",
     }
 }
+// A minimum of 100 votes avoids tiny-sample leaders and rating matches.
+const DISCOVER_VOTE_FLOOR: &str = "100";
+/// Today's UTC date as `YYYY-MM-DD` (civil-from-days; no calendar dependency).
+fn utc_today() -> String {
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 86_400) as i64;
+    civil_date(days)
+}
+fn civil_date(days_since_epoch: i64) -> String {
+    let z = days_since_epoch + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+fn discover_request(
+    kind: MediaKind,
+    page: u32,
+    filters: &DiscoverFilters,
+) -> (String, Vec<(&'static str, String)>) {
+    discover_request_on(kind, page, filters, &utc_today())
+}
+fn discover_request_on(
+    kind: MediaKind,
+    page: u32,
+    filters: &DiscoverFilters,
+    today: &str,
+) -> (String, Vec<(&'static str, String)>) {
+    if filters.is_default() {
+        return (
+            format!("{}/popular", kind_path(kind)),
+            vec![("page", page.to_string())],
+        );
+    }
+    let sort = match (filters.sort, kind) {
+        (DiscoverSort::Popular, _) => "popularity.desc",
+        (DiscoverSort::TopRated, _) => "vote_average.desc",
+        (DiscoverSort::Newest, MediaKind::Movie) => "primary_release_date.desc",
+        (DiscoverSort::Newest, MediaKind::Series) => "first_air_date.desc",
+        (DiscoverSort::Title, MediaKind::Movie) => "title.asc",
+        (DiscoverSort::Title, MediaKind::Series) => "name.asc",
+    };
+    let mut params = vec![
+        ("sort_by", sort.into()),
+        ("include_adult", "false".into()),
+        ("page", page.to_string()),
+    ];
+    if !filters.genres.is_empty() {
+        params.push((
+            "with_genres",
+            filters
+                .genres
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        ));
+    }
+    let (gte, lte) = match kind {
+        MediaKind::Movie => ("primary_release_date.gte", "primary_release_date.lte"),
+        MediaKind::Series => ("first_air_date.gte", "first_air_date.lte"),
+    };
+    if let Some(years) = filters.years {
+        params.push((gte, format!("{:04}-01-01", years.from)));
+    }
+    // Newest means already released: without a ceiling TMDB lists announced
+    // titles with far-future dates first. ISO dates compare lexically.
+    let ceiling = filters.years.map(|years| format!("{:04}-12-31", years.to));
+    let ceiling = match (filters.sort == DiscoverSort::Newest, ceiling) {
+        (true, Some(end)) => Some(end.min(today.to_owned())),
+        (true, None) => Some(today.to_owned()),
+        (false, end) => end,
+    };
+    if let Some(ceiling) = ceiling {
+        params.push((lte, ceiling));
+    }
+    if let Some(rating) = filters.min_rating {
+        params.push(("vote_average.gte", rating.to_string()));
+    }
+    if filters.sort == DiscoverSort::TopRated || filters.min_rating.is_some() {
+        params.push(("vote_count.gte", DISCOVER_VOTE_FLOOR.into()));
+    }
+    (format!("discover/{}", kind_path(kind)), params)
+}
 fn validate_query(query: &TmdbQuery) -> Result<(), TmdbError> {
     let valid = match query {
         TmdbQuery::Browse { page, .. } | TmdbQuery::Search { page, .. } => (1..=500).contains(page),
+        TmdbQuery::Discover {
+            kind,
+            page,
+            filters,
+        } => (1..=500).contains(page) && filters.is_valid_for(*kind),
         TmdbQuery::Details { id, .. } => *id > 0,
         TmdbQuery::Similar { id, page } => *id > 0 && (1..=500).contains(page),
         TmdbQuery::Season { series_id, season } => *series_id > 0 && *season <= 1000,
@@ -550,6 +678,26 @@ pub fn cache_query_identity(query: &TmdbQuery) -> Result<String, TmdbError> {
     validate_query(query)?;
     let key = match query {
         TmdbQuery::Browse { kind, page } => format!("browse:{}:{page}", kind_path(*kind)),
+        TmdbQuery::Discover {
+            kind,
+            page,
+            filters,
+        } => {
+            if filters.is_default() {
+                format!("browse:{}:{page}", kind_path(*kind))
+            } else {
+                let (path, params) = discover_request(*kind, *page, filters);
+                let mut identity =
+                    Url::parse("https://cache.invalid/").map_err(|_| TmdbError::InvalidQuery)?;
+                identity.set_path(&path);
+                identity.query_pairs_mut().extend_pairs(params);
+                format!(
+                    "discover-v1:{}?{}",
+                    identity.path(),
+                    identity.query().unwrap_or_default()
+                )
+            }
+        }
         TmdbQuery::Search { query, page } => {
             format!("search:{}:{page}:{}", kind_path(query.kind()), query.text())
         }
@@ -826,9 +974,10 @@ fn validate_data(data: &TmdbData, query: Option<&TmdbQuery>) -> Result<(), TmdbE
             (TmdbData::Page(p), TmdbQuery::Similar { page, .. }) => {
                 p.page == *page && p.titles.iter().all(|t| t.kind == MediaKind::Movie)
             }
-            (TmdbData::Page(p), TmdbQuery::Browse { kind, page }) => {
-                p.page == *page && p.titles.iter().all(|t| t.kind == *kind)
-            }
+            (
+                TmdbData::Page(p),
+                TmdbQuery::Browse { kind, page } | TmdbQuery::Discover { kind, page, .. },
+            ) => p.page == *page && p.titles.iter().all(|t| t.kind == *kind),
             (TmdbData::Page(p), TmdbQuery::Search { query, page }) => {
                 p.page == *page && p.titles.iter().all(|t| t.kind == query.kind())
             }
@@ -1074,7 +1223,7 @@ pub(crate) fn decode_fixture_response(
                     .collect::<Result<Vec<_>, _>>()?,
             })
         }
-        TmdbQuery::Browse { kind, .. } => TmdbData::Page(
+        TmdbQuery::Browse { kind, .. } | TmdbQuery::Discover { kind, .. } => TmdbData::Page(
             serde_json::from_value::<PageDto>(raw)
                 .map_err(|_| TmdbError::Malformed)?
                 .normalize(*kind)?,
@@ -1148,6 +1297,216 @@ mod tests {
         assert!(!format!("{data:?}").contains(TOKEN));
         assert_eq!(ok(decode(&encoded, query)), *data);
         assert!(decode(&encoded.replace("en-US", "fr-FR"), query).is_err());
+    }
+    #[test]
+    fn discover_requests_encode_all_facets_for_each_kind() {
+        use kinema_core::discover::YearRange;
+        for (kind, genre, date, sort) in [
+            (MediaKind::Movie, 28, "primary_release_date", "title.asc"),
+            (MediaKind::Series, 10759, "first_air_date", "name.asc"),
+        ] {
+            let query = TmdbQuery::Discover {
+                kind,
+                page: 2,
+                filters: DiscoverFilters {
+                    sort: DiscoverSort::Title,
+                    genres: [18, genre].into(),
+                    years: Some(YearRange {
+                        from: 1990,
+                        to: 1999,
+                    }),
+                    min_rating: Some(7),
+                },
+            };
+            let (result, request) = local(200, r#"{"page":2,"total_pages":2,"results":[]}"#, |c| {
+                c.fetch(&query)
+            });
+            let data = ok(result);
+            roundtrip(&data, &query);
+            let target = request
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or_else(|| panic!("request target"));
+            let url = ok(Url::parse(&format!("http://local{target}")));
+            assert_eq!(url.path(), format!("/3/discover/{}", kind_path(kind)));
+            let params: std::collections::BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+            assert_eq!(params.get("sort_by").map(String::as_str), Some(sort));
+            assert_eq!(params.get("with_genres"), Some(&format!("18,{genre}")));
+            assert_eq!(
+                params.get(&format!("{date}.gte")).map(String::as_str),
+                Some("1990-01-01")
+            );
+            assert_eq!(
+                params.get(&format!("{date}.lte")).map(String::as_str),
+                Some("1999-12-31")
+            );
+            for (key, value) in [
+                ("page", "2"),
+                ("include_adult", "false"),
+                ("vote_average.gte", "7"),
+                ("vote_count.gte", "100"),
+            ] {
+                assert_eq!(params.get(key).map(String::as_str), Some(value));
+            }
+        }
+    }
+    #[test]
+    fn newest_is_capped_at_today_and_civil_dates_are_exact() {
+        assert_eq!(civil_date(0), "1970-01-01");
+        assert_eq!(civil_date(11_016), "2000-02-29");
+        assert_eq!(civil_date(20_753), "2026-10-27");
+        let params = |filters: &DiscoverFilters| {
+            discover_request_on(MediaKind::Movie, 1, filters, "2026-10-27")
+                .1
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        let mut filters = DiscoverFilters {
+            sort: DiscoverSort::Newest,
+            ..Default::default()
+        };
+        assert_eq!(
+            params(&filters)
+                .get("primary_release_date.lte")
+                .map(String::as_str),
+            Some("2026-10-27")
+        );
+        filters.years = Some(kinema_core::discover::YearRange {
+            from: 2020,
+            to: 2029,
+        });
+        assert_eq!(
+            params(&filters)
+                .get("primary_release_date.lte")
+                .map(String::as_str),
+            Some("2026-10-27")
+        );
+        filters.years = Some(kinema_core::discover::YearRange {
+            from: 1990,
+            to: 1999,
+        });
+        assert_eq!(
+            params(&filters)
+                .get("primary_release_date.lte")
+                .map(String::as_str),
+            Some("1999-12-31")
+        );
+        // Other sorts keep the decade ceiling and never add one by themselves.
+        filters.sort = DiscoverSort::Title;
+        filters.years = None;
+        assert!(!params(&filters).contains_key("primary_release_date.lte"));
+    }
+    #[test]
+    fn discover_sort_requests_and_default_popular_fallback() {
+        for kind in [MediaKind::Movie, MediaKind::Series] {
+            for sort in [
+                DiscoverSort::Popular,
+                DiscoverSort::TopRated,
+                DiscoverSort::Newest,
+            ] {
+                let filters = DiscoverFilters {
+                    sort,
+                    ..Default::default()
+                };
+                let query = TmdbQuery::Discover {
+                    kind,
+                    page: 1,
+                    filters,
+                };
+                let (result, request) =
+                    local(200, r#"{"page":1,"total_pages":1,"results":[]}"#, |c| {
+                        c.fetch(&query)
+                    });
+                ok(result);
+                if sort == DiscoverSort::Popular {
+                    assert!(request.starts_with(&format!("GET /3/{}/popular?", kind_path(kind))));
+                    assert!(!request.contains("sort_by="));
+                    assert_eq!(
+                        ok(cache_query_identity(&query)),
+                        ok(cache_query_identity(&TmdbQuery::Browse { kind, page: 1 }))
+                    );
+                } else {
+                    let expected = if sort == DiscoverSort::TopRated {
+                        "vote_average.desc"
+                    } else if kind == MediaKind::Movie {
+                        "primary_release_date.desc"
+                    } else {
+                        "first_air_date.desc"
+                    };
+                    assert!(request.contains(&format!("sort_by={expected}")));
+                    assert_eq!(
+                        request.contains("vote_count.gte=100"),
+                        sort == DiscoverSort::TopRated
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn discover_cache_keys_separate_every_facet_and_validate_decode() {
+        use kinema_core::discover::YearRange;
+        let base = DiscoverFilters::default();
+        let mut identities = HashSet::new();
+        for filters in [
+            base.clone(),
+            DiscoverFilters {
+                sort: DiscoverSort::TopRated,
+                ..base.clone()
+            },
+            DiscoverFilters {
+                genres: [18].into(),
+                ..base.clone()
+            },
+            DiscoverFilters {
+                genres: [18, 35].into(),
+                ..base.clone()
+            },
+            DiscoverFilters {
+                years: Some(YearRange {
+                    from: 1990,
+                    to: 1999,
+                }),
+                ..base.clone()
+            },
+            DiscoverFilters {
+                min_rating: Some(7),
+                ..base.clone()
+            },
+            DiscoverFilters {
+                min_rating: Some(8),
+                ..base.clone()
+            },
+        ] {
+            for kind in [MediaKind::Movie, MediaKind::Series] {
+                for page in [1, 2] {
+                    assert!(
+                        identities.insert(ok(cache_query_identity(&TmdbQuery::Discover {
+                            kind,
+                            page,
+                            filters: filters.clone()
+                        })))
+                    );
+                }
+            }
+        }
+        for filters in [
+            DiscoverFilters {
+                min_rating: Some(11),
+                ..base.clone()
+            },
+            DiscoverFilters {
+                genres: [10759].into(),
+                ..base
+            },
+        ] {
+            let query = TmdbQuery::Discover {
+                kind: MediaKind::Movie,
+                page: 1,
+                filters,
+            };
+            assert_eq!(cache_query_identity(&query), Err(TmdbError::InvalidQuery));
+            assert_eq!(decode("{}", &query), Err(TmdbError::InvalidQuery));
+        }
     }
     #[test]
     fn tmdb_diagnostics_redact_bearer_search_and_error_payloads() {

@@ -31,6 +31,7 @@ pub mod tooltip;
 pub mod button;
 pub mod chip;
 pub mod choice_card;
+pub mod filter_panel;
 pub mod icon_button;
 pub mod notice;
 pub mod progress;
@@ -39,6 +40,7 @@ pub mod segmented;
 pub mod sheet;
 pub mod state_toggle;
 pub mod switch;
+pub mod toolbar;
 
 pub use icon::{Icon, IconName};
 pub use motion::Motion;

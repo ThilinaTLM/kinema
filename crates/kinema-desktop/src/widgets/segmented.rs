@@ -1,7 +1,8 @@
 //! Controlled segmented selection, with wraparound arrow-key navigation.
 use super::{
-    TypeExt, motion,
+    Icon, IconName, TypeExt, motion,
     tokens::{elevation, palette, radius, space, typeface},
+    toolbar,
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -27,6 +28,8 @@ pub struct Segmented<T: Clone + PartialEq + 'static> {
     options: Vec<(T, SharedString)>,
     selected: T,
     on_change: Option<ChangeHandler<T>>,
+    icons: Vec<IconName>,
+    toolbar: bool,
 }
 impl<T: Clone + PartialEq + 'static> Segmented<T> {
     pub fn new(
@@ -39,7 +42,19 @@ impl<T: Clone + PartialEq + 'static> Segmented<T> {
             options: options.into_iter().collect(),
             selected,
             on_change: None,
+            icons: Vec::new(),
+            toolbar: false,
         }
+    }
+    /// Leading glyph per option, matched by position.
+    pub fn icons(mut self, icons: impl IntoIterator<Item = IconName>) -> Self {
+        self.icons = icons.into_iter().collect();
+        self
+    }
+    /// Floating-header geometry and glass material (see [`toolbar`]).
+    pub fn toolbar(mut self) -> Self {
+        self.toolbar = true;
+        self
     }
     pub fn on_change(mut self, handler: impl Fn(&T, &mut Window, &mut App) + 'static) -> Self {
         self.on_change = Some(Rc::new(handler));
@@ -57,6 +72,32 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
         let duration = motion::duration(motion::Motion::Feedback, cx);
         let options = self.options.clone();
         let keyboard_handler = self.on_change.clone();
+        let icons = self.icons;
+        let in_toolbar = self.toolbar;
+        let (track, track_edge, height, outer, inner) = if in_toolbar {
+            let (fill, _, edge) = toolbar::glass(&p);
+            (fill, edge, space::TOOLBAR_CONTROL, radius::MD, radius::SM)
+        } else {
+            (
+                p.ctl_rest,
+                p.line_subtle,
+                space::CONTROL_HEIGHT,
+                radius::SM,
+                radius::XS,
+            )
+        };
+        let content = move |index: usize, label: SharedString, ink: Hsla| {
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S6)
+                .children(
+                    icons
+                        .get(index)
+                        .map(|icon| Icon::new(*icon).size(space::S12 + space::S2).color(ink)),
+                )
+                .child(label)
+        };
         div()
             .id(self.id)
             .flex()
@@ -64,7 +105,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
             .border_color(transparent_black())
             .p(space::S2)
             .m(-space::S4)
-            .rounded(radius::SM + space::S4)
+            .rounded(outer + space::S4)
             .focusable()
             .tab_stop(true)
             .role(Role::TabList)
@@ -80,12 +121,12 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
             .child(
                 div()
                     .flex()
-                    .h(space::CONTROL_HEIGHT)
+                    .h(height)
                     .p(space::S2)
-                    .rounded(radius::SM)
-                    .bg(p.ctl_rest)
+                    .rounded(outer)
+                    .bg(track)
                     .border(space::HAIRLINE)
-                    .border_color(p.line_subtle)
+                    .border_color(track_edge)
                     .children(self.options.into_iter().enumerate().map(
                         |(index, (value, label))| {
                             let active = value == self.selected;
@@ -100,10 +141,18 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(radius::XS)
+                                .rounded(inner)
                                 .type_style(typeface::SMALL_MEDIUM)
                                 .when(active, |el| el.shadow(elevation::raised(&p)))
-                                .child(label.clone());
+                                .child(content(
+                                    index,
+                                    label.clone(),
+                                    if active {
+                                        p.accent_text
+                                    } else {
+                                        p.text_secondary
+                                    },
+                                ));
                             // Selected state is a raised pill that cross-fades, not an underline.
                             let face = if duration.is_zero() {
                                 face.bg(if active { pill } else { transparent_black() })
@@ -140,14 +189,18 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(radius::XS)
+                                .rounded(inner)
                                 .type_style(typeface::SMALL_MEDIUM)
                                 .role(Role::Tab)
                                 .aria_label(label.clone())
                                 .aria_selected(active)
                                 .cursor_pointer()
                                 .when(!active, |el| el.hover(move |s| s.bg(p.ctl_hover)))
-                                .child(div().invisible().child(label))
+                                .child(div().invisible().child(content(
+                                    index,
+                                    label,
+                                    p.text_secondary,
+                                )))
                                 .child(face)
                                 .on_click(move |_, window, cx| {
                                     if let Some(handler) = &handler {

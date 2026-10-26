@@ -254,6 +254,8 @@ pub mod space {
     pub const TOOLBAR_HEIGHT: Pixels = px(48.0);
     pub const CONTROL_HEIGHT: Pixels = px(28.0);
     pub const CONTROL_HEIGHT_LARGE: Pixels = px(32.0);
+    /// Every floating-header control (chips, segmented, search, icon groups).
+    pub const TOOLBAR_CONTROL: Pixels = px(32.0);
     pub const ICON: Pixels = px(16.0);
     pub const ICON_TARGET: Pixels = px(28.0);
     pub const ROW: Pixels = px(32.0);

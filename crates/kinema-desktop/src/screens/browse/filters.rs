@@ -1,154 +1,302 @@
-//! Library's single Filters control: watch status and sort in one menu. It shows
-//! the word "Filters" at normal widths and only an icon (with tooltip) when the
-//! window is narrow, so the 48px toolbar row never grows.
-use super::library::LibraryFilters;
+//! Header Filters popover bodies for both Browse scopes. Choices apply
+//! immediately; the host owns state and receives the next value.
+//!
+//! - Discover: provider-backed facets (sort, genres, release, rating) when TMDB
+//!   Discover can serve them; otherwise only a sort of the loaded results, with
+//!   a note saying why the other facets are unavailable.
+//! - Library: watch status and sort of the local query.
+use super::{LibraryFilters, Sort};
 use crate::widgets::{
-    button::{Button, ButtonVariant},
-    icon::IconName,
-    menu::{Menu, MenuItem},
+    choice_card::ChoiceChip,
+    filter_panel::{FilterPanel, FilterSection},
 };
 use gpui::{prelude::*, *};
-use kinema_core::library::{LibrarySort, WatchFilter};
+use kinema_core::{
+    MediaKind,
+    discover::{DiscoverFilters, DiscoverSort, YearRange, genres_for},
+    library::{LibrarySort, WatchFilter},
+};
 use std::rc::Rc;
 
-/// Below this window width the control collapses to its icon.
+/// Below this window width header chips collapse to their icon.
 pub(crate) const COMPACT_BELOW: Pixels = px(1100.);
 
-/// New status/sort selection; the host reloads the Library query.
-pub(crate) struct FiltersChanged(pub LibraryFilters);
-impl EventEmitter<FiltersChanged> for FiltersButton {}
+type Apply<T> = Rc<dyn Fn(T, &mut Window, &mut App)>;
 
-pub(crate) struct FiltersButton {
-    filters: LibraryFilters,
-    focus: FocusHandle,
-    menu: Option<Entity<Menu>>,
-    _menu_subscription: Option<Subscription>,
+/// Server-side Discover sorts, in display order.
+pub(crate) fn discover_sorts() -> [(DiscoverSort, &'static str); 4] {
+    [
+        (DiscoverSort::Popular, "Popular"),
+        (DiscoverSort::TopRated, "Top rated"),
+        (DiscoverSort::Newest, "Newest"),
+        (DiscoverSort::Title, "Title A–Z"),
+    ]
 }
-impl FiltersButton {
-    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        Self {
-            filters: LibraryFilters::default(),
-            focus: cx.focus_handle().tab_stop(true),
-            menu: None,
-            _menu_subscription: None,
-        }
-    }
-    /// Mirror the host's filters (kind decides whether In progress is offered).
-    pub(crate) fn set_filters(&mut self, filters: LibraryFilters, cx: &mut Context<Self>) {
-        if self.filters != filters {
-            self.filters = filters;
-            cx.notify();
-        }
-    }
-    /// Number of non-default choices, shown beside the label.
-    fn active(&self) -> usize {
-        usize::from(self.filters.status != WatchFilter::Any)
-            + usize::from(self.filters.sort != LibrarySort::RecentlyAdded)
-    }
-    fn items(&self, cx: &mut Context<Self>) -> Vec<MenuItem> {
-        let weak = cx.entity().downgrade();
-        let mut items = Vec::new();
-        for (status, label) in LibraryFilters::status_options(self.filters.kind) {
-            let weak = weak.clone();
-            items.push(MenuItem::Action {
-                label,
-                shortcut: None,
-                icon: None,
-                disabled_reason: None,
-                checked: self.filters.status == status,
-                handler: Rc::new(move |_, cx| {
-                    let _ = weak.update(cx, |this, cx| this.choose(|f| f.status = status, cx));
-                }),
-            });
-        }
-        items.push(MenuItem::Separator);
-        for (sort, label) in LibraryFilters::sort_options() {
-            let weak = weak.clone();
-            items.push(MenuItem::Action {
-                label,
-                shortcut: None,
-                icon: None,
-                disabled_reason: None,
-                checked: self.filters.sort == sort,
-                handler: Rc::new(move |_, cx| {
-                    let _ = weak.update(cx, |this, cx| this.choose(|f| f.sort = sort, cx));
-                }),
-            });
-        }
-        items
-    }
-    fn choose(&mut self, change: impl FnOnce(&mut LibraryFilters), cx: &mut Context<Self>) {
-        let before = self.filters;
-        change(&mut self.filters);
-        if self.filters != before {
-            cx.emit(FiltersChanged(self.filters));
-            cx.notify();
-        }
-    }
-    fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(menu) = &self.menu {
-            menu.update(cx, |menu, cx| menu.dismiss(window, cx));
-            return;
-        }
-        self.focus.focus(window, cx);
-        let items = self.items(cx);
-        let menu = cx.new(|cx| Menu::new(items, window, cx));
-        self._menu_subscription = Some(cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
-            this.menu = None;
-            cx.notify();
-        }));
-        self.menu = Some(menu);
-        cx.notify();
+
+/// Release-period presets; `None` is "Any".
+pub(crate) fn release_presets() -> [(Option<YearRange>, &'static str); 6] {
+    let range = |from, to| Some(YearRange { from, to });
+    [
+        (None, "Any time"),
+        (range(2020, 2029), "2020s"),
+        (range(2010, 2019), "2010s"),
+        (range(2000, 2009), "2000s"),
+        (range(1990, 1999), "1990s"),
+        (range(1900, 1989), "Classics"),
+    ]
+}
+
+/// Minimum TMDB score presets; `None` is "Any".
+pub(crate) fn rating_presets() -> [(Option<u8>, &'static str); 4] {
+    [
+        (None, "Any"),
+        (Some(6), "6+"),
+        (Some(7), "7+"),
+        (Some(8), "8+"),
+    ]
+}
+
+/// Why provider facets are unavailable, if they are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DiscoverMode {
+    /// TMDB Discover serves every facet.
+    Provider,
+    /// A search is active; provider facets pause, loaded results can be sorted.
+    Searching,
+    /// The active provider has no faceted Discover endpoint.
+    Unsupported,
+}
+
+/// Active count shown on the Discover chip for the current mode.
+pub(crate) fn discover_active(mode: DiscoverMode, filters: &DiscoverFilters, local: Sort) -> usize {
+    match mode {
+        DiscoverMode::Provider => filters.active_count(),
+        _ => usize::from(local != Sort::Provider),
     }
 }
-impl Focusable for FiltersButton {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus.clone()
-    }
+
+pub(crate) struct DiscoverPanel {
+    pub mode: DiscoverMode,
+    pub kind: MediaKind,
+    pub filters: DiscoverFilters,
+    /// Client-side order of loaded results, used when facets are unavailable.
+    pub local: Sort,
+    pub apply: Apply<DiscoverFilters>,
+    pub apply_local: Apply<Sort>,
 }
-impl Render for FiltersButton {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let compact = window.viewport_size().width < COMPACT_BELOW;
-        let active = self.active();
-        let open = cx.listener(|this, _, window, cx| this.toggle(window, cx));
-        let trigger = if compact {
-            // Secondary (filled, bordered) rather than a bare ghost glyph: the
-            // control must stay legible over any ambient backdrop.
-            let mut button = Button::new("library-filters", "")
-                .variant(ButtonVariant::Secondary)
-                .icon(IconName::Menu)
-                .focus_handle(self.focus.clone())
-                .on_click(open);
-            button.square = true;
-            button.tooltip = Some("Filters".into());
-            button.toggled = active > 0 || self.menu.is_some();
-            button.into_any_element()
-        } else {
-            let label = if active > 0 {
-                format!("Filters · {active}")
+
+impl DiscoverPanel {
+    pub(crate) fn render(self) -> FilterPanel {
+        let Self {
+            mode,
+            kind,
+            filters,
+            local,
+            apply,
+            apply_local,
+        } = self;
+        if mode != DiscoverMode::Provider {
+            let mut sort = FilterSection::new("Sort").hint("loaded results");
+            for (value, label) in Sort::options() {
+                let apply_local = apply_local.clone();
+                sort = sort.child(
+                    ChoiceChip::new(SharedString::from(format!("local-sort-{label}")), label)
+                        .selected(local == value)
+                        .on_click(move |window, cx| apply_local(value, window, cx)),
+                );
+            }
+            let panel = FilterPanel::new("Filters")
+                .section(sort)
+                .footer(match mode {
+                    DiscoverMode::Searching => {
+                        "Genre, release and rating filters pause while searching."
+                    }
+                    _ => "Genre, release and rating filters need TMDB as the Discover provider.",
+                });
+            return if local == Sort::Provider {
+                panel
             } else {
-                "Filters".to_owned()
+                panel.on_reset(move |window, cx| apply_local(Sort::Provider, window, cx))
             };
-            Button::new("library-filters", label)
-                .focus_handle(self.focus.clone())
-                .on_click(open)
-                .into_any_element()
+        }
+
+        let choose = |id: String,
+                      label: SharedString,
+                      selected: bool,
+                      next: DiscoverFilters,
+                      apply: &Apply<DiscoverFilters>| {
+            let apply = apply.clone();
+            ChoiceChip::new(SharedString::from(id), label)
+                .selected(selected)
+                .on_click(move |window, cx| apply(next.clone(), window, cx))
         };
-        div()
-            .relative()
-            .debug_selector(|| "library-filters".into())
-            .child(trigger)
-            .when_some(self.menu.clone(), |el, menu| {
-                el.child(
-                    div().absolute().top_full().right_0().child(
-                        deferred(
-                            anchored()
-                                .snap_to_window_with_margin(crate::widgets::tokens::space::S8)
-                                .child(menu),
-                        )
-                        .priority(10),
-                    ),
+
+        let mut sort = FilterSection::new("Sort");
+        for (value, label) in discover_sorts() {
+            let mut next = filters.clone();
+            next.sort = value;
+            sort = sort.child(choose(
+                format!("discover-sort-{label}"),
+                label.into(),
+                filters.sort == value,
+                next,
+                &apply,
+            ));
+        }
+
+        let mut genres = FilterSection::new("Genres").hint("match all selected");
+        for genre in genres_for(kind) {
+            let selected = filters.genres.contains(&genre.id);
+            let mut next = filters.clone();
+            if selected {
+                next.genres.remove(&genre.id);
+            } else {
+                next.genres.insert(genre.id);
+            }
+            genres = genres.child(
+                choose(
+                    format!("discover-genre-{}", genre.id),
+                    genre.name.into(),
+                    selected,
+                    next,
+                    &apply,
                 )
-            })
+                .multi(),
+            );
+        }
+
+        let mut release = FilterSection::new("Released");
+        for (value, label) in release_presets() {
+            let mut next = filters.clone();
+            next.years = value;
+            release = release.child(choose(
+                format!("discover-release-{label}"),
+                label.into(),
+                filters.years == value,
+                next,
+                &apply,
+            ));
+        }
+
+        let mut rating = FilterSection::new("Rating").hint("TMDB score");
+        for (value, label) in rating_presets() {
+            let mut next = filters.clone();
+            next.min_rating = value;
+            rating = rating.child(choose(
+                format!("discover-rating-{label}"),
+                label.into(),
+                filters.min_rating == value,
+                next,
+                &apply,
+            ));
+        }
+
+        let panel = FilterPanel::new("Filters")
+            .section(sort)
+            .section(genres)
+            .section(release)
+            .section(rating);
+        if filters.is_default() {
+            panel
+        } else {
+            panel.on_reset(move |window, cx| apply(DiscoverFilters::default(), window, cx))
+        }
+    }
+}
+
+/// Number of non-default Library choices (kind lives in the toolbar).
+pub(crate) fn library_active(filters: &LibraryFilters) -> usize {
+    usize::from(filters.status != WatchFilter::Any)
+        + usize::from(filters.sort != LibrarySort::RecentlyAdded)
+}
+
+pub(crate) fn library_panel(
+    filters: LibraryFilters,
+    apply: impl Fn(LibraryFilters, &mut Window, &mut App) + 'static,
+) -> FilterPanel {
+    let apply: Apply<LibraryFilters> = Rc::new(apply);
+    let mut status = FilterSection::new("Show");
+    for (value, label) in LibraryFilters::status_options(filters.kind) {
+        let apply = apply.clone();
+        let mut next = filters;
+        next.status = value;
+        status = status.child(
+            ChoiceChip::new(SharedString::from(format!("library-status-{label}")), label)
+                .selected(filters.status == value)
+                .on_click(move |window, cx| apply(next, window, cx)),
+        );
+    }
+    let mut sort = FilterSection::new("Sort");
+    for (value, label) in LibraryFilters::sort_options() {
+        let apply = apply.clone();
+        let mut next = filters;
+        next.sort = value;
+        sort = sort.child(
+            ChoiceChip::new(SharedString::from(format!("library-sort-{label}")), label)
+                .selected(filters.sort == value)
+                .on_click(move |window, cx| apply(next, window, cx)),
+        );
+    }
+    let panel = FilterPanel::new("Filters").section(status).section(sort);
+    if library_active(&filters) == 0 {
+        panel
+    } else {
+        panel.on_reset(move |window, cx| {
+            apply(
+                LibraryFilters {
+                    kind: filters.kind,
+                    ..LibraryFilters::default()
+                },
+                window,
+                cx,
+            )
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn presets_start_with_any_and_are_valid() {
+        assert_eq!(release_presets()[0].0, None);
+        assert!(
+            release_presets()
+                .iter()
+                .filter_map(|(r, _)| *r)
+                .all(YearRange::is_valid)
+        );
+        assert_eq!(rating_presets()[0].0, None);
+        assert_eq!(discover_sorts()[0].0, DiscoverSort::default());
+    }
+
+    #[::core::prelude::v1::test]
+    fn active_count_follows_mode() {
+        let mut filters = DiscoverFilters::default();
+        filters.genres.insert(28);
+        assert_eq!(
+            discover_active(DiscoverMode::Provider, &filters, Sort::Title),
+            1
+        );
+        // Provider facets are paused while searching; only the local sort counts.
+        assert_eq!(
+            discover_active(DiscoverMode::Searching, &filters, Sort::Title),
+            1
+        );
+        assert_eq!(
+            discover_active(DiscoverMode::Unsupported, &filters, Sort::Provider),
+            0
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn library_active_ignores_kind() {
+        let mut filters = LibraryFilters::default();
+        filters.set_kind(kinema_core::library::LibraryKind::Movies);
+        assert_eq!(library_active(&filters), 0);
+        filters.status = WatchFilter::Watched;
+        filters.sort = LibrarySort::Title;
+        assert_eq!(library_active(&filters), 2);
     }
 }

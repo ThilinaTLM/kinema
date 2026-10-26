@@ -85,7 +85,7 @@ Design principles, in priority order:
 - **Provider priority (default Cinemeta, TMDB) lives in Settings** as an ordered
   list. The first enabled, active provider is primary; others enrich. Missing
   required credentials show an inactive provider that is skipped, not an error.
-  The toolbar picks a catalog/collection and sort within the primary provider.
+  The header Filters popover picks sort and facets within the primary provider.
 - **Detail is a scrolling page; streams get their own page.** The detail page holds
   a compact hero, facts, episodes (series) or similar titles (movies) and
   provenance. Play (movies) or an episode card (series) navigates to a full-width
@@ -341,12 +341,17 @@ in `kinema-core`; widgets must not own provider, storage or playback policy.
 | --- | --- |
 | `Button` | Primary (accent), Secondary (`ctl.rest`), Ghost, Danger (error outline). Busy keeps width/label, blocks repeats |
 | `IconButton` | Ghost 28×28, tooltip + accessible name; optional badge count (transfers) |
-| `Segmented` | Movies / Series; accent ink + 2 px bottom marker; arrows/Home/End |
+| `Segmented` | Movies / Series; raised selected pill with accent ink; optional per-option icons; `toolbar()` glass variant; arrows/Home/End |
 | `TextInput` | Caret, selection, mouse/keyboard selection, word/grapheme motion, clipboard, undo/redo, horizontal scroll, IME composition with candidate positioning, secret mode; context menu |
 | `SearchField` | TextInput + search icon + clear; debounced live query (300 ms) + Enter commits; Esc clears then blurs |
 | `Menu` / `ContextMenu` | Shared item model (see §3.1); anchored or at-pointer; keyboard navigation; submenus one level max |
 | `Select` | Trigger + Menu with check marker; type-ahead |
-| `Popover` | Anchored nonmodal panel; Esc/outside click dismiss; repositions within window |
+| `Popover` | Anchored nonmodal panel; Esc/outside click dismiss; repositions within window; start/end alignment; open-aware trigger; content can dismiss itself via `PopoverHandle` |
+| `Toolbar` | Floating 48 px header row with leading / center / trailing slots; owns pointer hits across its height (clicks never reach the page beneath) while the wheel still scrolls the page |
+| `ToolbarGroup` | One glass capsule of equal icon targets with optional hairline dividers (back; transfers · settings · overflow) |
+| `ToolbarChip` | Glass popover-trigger face: icon, label, active-count badge, chevron; icon-only below 1100 px |
+| `ChoiceTile` | Large icon-led choice (title, description, check) for popover pickers such as Discover / Library |
+| `FilterPanel` / `FilterSection` | Popover body: title + Reset, labelled sections of `ChoiceChip`s (radio or multi), optional footer note; choices apply immediately |
 | `Tooltip` | 500 ms delay, instant hide; text only |
 | `Checkbox` / `Switch` | Switch only for immediate boolean settings |
 | `Chip` | Rating (`★ 8.1`), `SERIES`, quality (`2160P`, `HDR`), status; non-interactive |
@@ -389,7 +394,7 @@ Fixture data only. Primary review size 1280 × 800; minimum 960 × 600.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ ◆ Kinema [Movies│Series]  [⌕ Search movies…       Ctrl+F]  Popular ▾   ⇅2 ⚙ ⋯ │
+│ (◎ Discover ▾) [🎞 Movies│📺 Series]  [⌕ Search movies…  Ctrl K]  (☰ Filters 2 ▾) (⇅2│⚙ ⋯) │
 ├──────────────────────────────────────────────────────────────────────────────┤ 48
 │                                                                              │
 │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐           │
@@ -413,14 +418,36 @@ over the page (grid, or the detail hero art). Pages inset their content by the
 scrolls beneath, a canvas-colored top scrim (≈92 % → 0, fades in over 24 px of
 scroll) keeps the controls legible in both themes.
 
-Toolbar, left to right: app mark; Movies/Series segmented; search (flexible,
-240–480 px, placeholder follows the active kind); collection menu (`Popular ▾`
-lists the active provider's catalogs, then a separator and named sorts); flexible
-space; transfers indicator (icon + count; hidden count when zero, icon remains);
-Settings gear (opens the Settings window); overflow `⋯` (Open local file…,
-Refresh, About Kinema, Quit). On macOS the toolbar sits in a transparent
-titlebar beside the traffic lights; on Windows/Linux the native frame stays above
-it in P1 (integrated client-side titlebar is a later, optional refinement).
+One header design language serves every main-window view; only slot contents
+change. All header controls share one translucent **glass** material
+(`bg.overlay` at 78 % with a `line.subtle` edge), 32 px height and `radius::MD`,
+so they stay legible over posters, hero art and both themes. Primitives live in
+`widgets/toolbar.rs` (`Toolbar`, `ToolbarGroup`, `ToolbarChip`, `glass`).
+
+| Slot | Browse (Discover / Library) | Detail and Streams |
+| --- | --- | --- |
+| Leading | Scope chip (`◎ Discover ▾` / `Library ▾`); kind segmented with icons (Discover: Movies / Series; Library: All / Movies / Series) | Back capsule |
+| Center | Search (flexible, 180–440 px; placeholder follows scope and kind) | — |
+| Trailing | `Filters` chip with active-count badge; global capsule | Global capsule |
+
+- **Scope chip** opens a popover of two `ChoiceTile`s (icon, title, one-line
+  description, check on the current one); choosing one switches scope and closes.
+- **Kind** stays a visible segmented control: it is a frequent two/three-way
+  toggle, so a popover would add a click.
+- **Filters** is the single home for advanced options, so the header never grows.
+  Library: watch status and sort. Discover with TMDB primary: provider-backed
+  sort (Popular, Top rated, Newest, Title), genres (match all), release decade
+  and minimum TMDB score, requested from TMDB `/discover` (default facets keep
+  `/popular`). While searching, or when the primary provider has no faceted
+  Discover, only a sort of the loaded results is offered, with a footer saying
+  why the other facets are unavailable; facets are never faked. Choices apply
+  immediately; Reset is enabled only when something differs from the default.
+- **Global capsule** (transfers indicator with count · Settings gear · overflow
+  `⋯`: Open local file…, Refresh, About Kinema, Quit) sits at the trailing edge
+  in every view; the overflow menu anchors to it.
+- On macOS the toolbar sits in a transparent titlebar beside the traffic lights;
+  on Windows/Linux the native frame stays above it in P1 (integrated client-side
+  titlebar is a later, optional refinement).
 
 Freshness is quiet: no "Updated 12:40" in the toolbar. Stale or failed refresh
 shows a one-line `Notice` strip under the toolbar only while relevant.
@@ -522,7 +549,7 @@ overview measure scale with the window (140–232 px, 560–920 px).
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ [←]  The Quiet Orbit                                            ⇅2  ⚙ ⋯      │ toolbar
+│ (←)                                                              (⇅2│⚙ ⋯)      │ toolbar
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ compact hero: backdrop as ambient art fading into the canvas                 │
 │ ┌────────┐  The Quiet Orbit                                                  │
@@ -811,8 +838,8 @@ Linux fixture pixels do not prove Windows/macOS support or real provider/playbac
    until after P2.
 3. **Episode stills** in episode rows if the metadata model supplies them; rows
    are text-only until then.
-4. **Provider collections:** the catalog worker currently browses by kind and
-   offset only (`metadata_bridge::Ask::Browse { kind, offset }`). Until a
-   collection request exists, the toolbar menu lists named sorts over loaded
-   results only (labelled as such); collection entries are added with backend
-   support, never faked.
+4. **Provider collections:** TMDB Discover now accepts facets (sort, genres,
+   release years, minimum score); Cinemeta catalogues still browse by kind and
+   offset only, so with Cinemeta primary the Filters popover offers a sort of
+   loaded results only (labelled as such). Named catalogue entries (e.g.
+   Trending, Top 250) are added with backend support, never faked.

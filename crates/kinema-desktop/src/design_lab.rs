@@ -8,9 +8,10 @@ use crate::widgets::{
     self,
     button::{Button, ButtonSize, ButtonVariant},
     chip::{Chip, StatusKind},
+    choice_card::ChoiceTile,
     icon::{Icon, IconName},
     icon_button::IconButton,
-    menu::{ContextMenuExt, Menu, MenuItem, Select, SelectEvent},
+    menu::{ContextMenuExt, Menu, MenuItem, Select},
     notice::{Notice, NoticeKind},
     patterns::{
         Badge, BadgeTone, Card, Carousel, ListRow, MediaHero, ResourceView, Section, Skeleton,
@@ -28,12 +29,13 @@ use crate::widgets::{
     text::TypeExt,
     text_input::TextInput,
     tokens::{self, Mode, Palette, space as s, typeface as t},
+    toolbar::{Toolbar, ToolbarChip, ToolbarGroup},
     tooltip::tooltip,
 };
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 45] = [
+const SCENES: [&str; 46] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
@@ -69,6 +71,7 @@ const SCENES: [&str; 45] = [
     "transfers-live-menu",
     "quit-live",
     "browse-live",
+    "browse-live-tmdb",
     "browse-live-empty",
     "browse-live-failure",
     "components",
@@ -308,7 +311,9 @@ pub fn run_native() {
                                 MediaKind,
                                 catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
                             };
-                            let titles = if scene == "browse-live" || scene == "browse-live-pending"
+                            let titles = if scene == "browse-live"
+                                || scene == "browse-live-tmdb"
+                                || scene == "browse-live-pending"
                             {
                                 (0..if scene == "browse-live-pending" {
                                     12
@@ -365,6 +370,17 @@ pub fn run_native() {
                             }
                             if scene == "browse-live-pending" {
                                 coordinator.fixture_pending_append(cx);
+                            }
+                            if scene == "browse-live-tmdb" {
+                                // TMDB primary, so the header offers provider facets.
+                                coordinator.settings = Some(crate::settings::Settings {
+                                    metadata_priority: kinema_core::provider::ProviderPriority::new(
+                                        [kinema_core::provider::ProviderId::Tmdb],
+                                    ),
+                                    ..Default::default()
+                                });
+                                coordinator.tmdb_credential =
+                                    Some(crate::app::CredentialState::Present);
                             }
                             coordinator
                         });
@@ -504,8 +520,6 @@ struct Lab {
     selected_episode: usize,
     provenance_open: bool,
     kind: usize,
-    library_select: Entity<Select<usize>>,
-    scope_select: Entity<Select<usize>>,
     movie_saved: bool,
     movie_watched: bool,
     show_saved: bool,
@@ -541,7 +555,7 @@ impl Lab {
             })
             .collect();
         let search = cx.new(|cx| {
-            let mut field = SearchField::new(window, cx);
+            let mut field = SearchField::new(window, cx).toolbar_style();
             field.set_placeholder("Search movies…", cx);
             field
         });
@@ -574,44 +588,7 @@ impl Lab {
                 cx,
             )
         });
-        let library_select = cx.new(|cx| {
-            Select::new(
-                0,
-                vec![
-                    (0, "Recently added".into()),
-                    (1, "Title A\u{2013}Z".into()),
-                    (2, "Newest release".into()),
-                    (3, "Unwatched".into()),
-                    (4, "In progress".into()),
-                    (5, "Watched".into()),
-                ],
-                cx,
-            )
-        });
         let in_library = scene.starts_with("library");
-        let scope_select = cx.new(|cx| {
-            Select::new(
-                usize::from(in_library),
-                vec![(0, "Discover".into()), (1, "Library".into())],
-                cx,
-            )
-        });
-        cx.subscribe(&scope_select, |this, _, event: &SelectEvent<usize>, cx| {
-            let SelectEvent::Changed(value) = event;
-            this.scene = if *value == 1 { "library" } else { "browse" }.into();
-            this.search.update(cx, |field, cx| {
-                field.set_placeholder(
-                    if *value == 1 {
-                        "Search library\u{2026}"
-                    } else {
-                        "Search movies\u{2026}"
-                    },
-                    cx,
-                );
-            });
-            cx.notify();
-        })
-        .detach();
         if in_library {
             search.update(cx, |field, cx| {
                 field.set_placeholder("Search library\u{2026}", cx)
@@ -752,8 +729,6 @@ impl Lab {
             poster: art(0, 240, 360),
             thumbs: (0..6).map(|i| art(i, 112, 168)).collect(),
             kind: 0,
-            library_select,
-            scope_select,
             movie_saved: false,
             movie_watched: true,
             show_saved: true,
@@ -763,65 +738,104 @@ impl Lab {
             context,
         }
     }
+    /// Same primitives as the production header, in flow for lab scenes.
     fn toolbar(&self, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
-        row()
-            .h(s::TOOLBAR_HEIGHT)
-            .flex_none()
-            .px(s::GRID_INSET)
-            .gap(s::S16)
-            .bg(p.bg_surface)
-            .border_b_1()
-            .border_color(p.line_hairline)
-            .child(
-                row()
-                    .child(Icon::new(IconName::Film))
-                    .child(div().type_style(t::HEADING).child("Kinema")),
-            )
-            .child(self.scope_select.clone())
-            .child(
-                if self.scene.starts_with("library") {
-                    Segmented::new(
-                        "library-kind",
-                        [
-                            (0, "All".into()),
-                            (1, "Movies".into()),
-                            (2, "Series".into()),
-                        ],
-                        self.kind,
-                    )
-                } else {
-                    Segmented::new(
-                        "kind",
-                        [(0, "Movies".into()), (1, "Series".into())],
-                        self.kind.min(1),
-                    )
-                }
-                .on_change(cx.listener(|this, value, _, cx| {
-                    this.kind = *value;
-                    cx.notify();
-                })),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(240.))
-                    .max_w(px(480.))
-                    .child(self.search.clone()),
-            )
-            .child(if self.scene.starts_with("library") {
-                self.library_select.clone()
-            } else {
-                self.select.clone()
+        let library = self.scene.starts_with("library");
+        let weak = cx.entity().downgrade();
+        let scope = Popover::new("lab-scope")
+            .trigger_with(move |open| {
+                ToolbarChip::new(
+                    if library {
+                        IconName::Library
+                    } else {
+                        IconName::Compass
+                    },
+                    if library { "Library" } else { "Discover" },
+                )
+                .open(open)
             })
-            .child(div().flex_1())
-            .child(IconButton::new("transfers", IconName::Transfers, "Transfers").badge(2))
-            .child(IconButton::new("settings", IconName::Settings, "Settings"))
-            .child(IconButton::new(
-                "overflow",
-                IconName::MoreHorizontal,
-                "More",
-            ))
+            .content_with(move |handle, _, _| {
+                let tile = move |to_library: bool| {
+                    let weak = weak.clone();
+                    let handle = handle.clone();
+                    ChoiceTile::new(
+                        ("lab-scope", usize::from(to_library)),
+                        if to_library {
+                            IconName::Library
+                        } else {
+                            IconName::Compass
+                        },
+                        if to_library { "Library" } else { "Discover" },
+                        if to_library {
+                            "Titles you saved, with watch progress."
+                        } else {
+                            "Popular titles and catalogues from your provider."
+                        },
+                    )
+                    .selected(library == to_library)
+                    .on_click(move |window, cx| {
+                        handle.dismiss(window, cx);
+                        let _ = weak.update(cx, |this, cx| {
+                            this.scene = if to_library { "library" } else { "browse" }.into();
+                            let placeholder = if to_library {
+                                "Search your Library\u{2026}"
+                            } else {
+                                "Search movies\u{2026}"
+                            };
+                            this.search
+                                .update(cx, |field, cx| field.set_placeholder(placeholder, cx));
+                            cx.notify();
+                        });
+                    })
+                };
+                div().flex().gap(s::S8).child(tile(false)).child(tile(true))
+            });
+        let kind = if library {
+            Segmented::new(
+                "library-kind",
+                [
+                    (0, "All".into()),
+                    (1, "Movies".into()),
+                    (2, "Series".into()),
+                ],
+                self.kind,
+            )
+            .icons([IconName::Layers, IconName::Film, IconName::Tv])
+        } else {
+            Segmented::new(
+                "kind",
+                [(0, "Movies".into()), (1, "Series".into())],
+                self.kind.min(1),
+            )
+            .icons([IconName::Film, IconName::Tv])
+        }
+        .toolbar()
+        .on_change(cx.listener(|this, value, _, cx| {
+            this.kind = *value;
+            cx.notify();
+        }));
+        div().relative().flex_none().h(s::TOOLBAR_HEIGHT).child(
+            Toolbar::new()
+                .leading(scope)
+                .leading(kind)
+                .center(self.search.clone())
+                .trailing(
+                    ToolbarChip::new(IconName::Filters, "Filters").count(usize::from(library)),
+                )
+                .trailing(
+                    ToolbarGroup::new()
+                        .child(
+                            IconButton::new("transfers", IconName::Transfers, "Transfers").badge(2),
+                        )
+                        .divider()
+                        .child(IconButton::new("settings", IconName::Settings, "Settings"))
+                        .child(IconButton::new(
+                            "overflow",
+                            IconName::MoreHorizontal,
+                            "More",
+                        )),
+                ),
+        )
     }
     fn browse(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let (columns, width) = grid(f32::from(window.viewport_size().width));
