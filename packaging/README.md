@@ -16,15 +16,24 @@ python3 packaging/generate-icons.py
 python3 packaging/test_assets.py
 ```
 
-The SVGs are the editable sources, copied from the read-only historical C++
-artwork and recolored to `#FF7A45`. They retain Thilina Lakshan's copyright and
-Apache-2.0 SPDX headers. The application glyph is white; the player surface uses
-warm dark accents. The symbolic variant is monochrome `currentColor` with a
-`#232629` fallback and no colored tile. PNGs for all three variants are generated
-at 16, 24, 32, 48, 64, 128, 256 and 512px. ICO uses sizes through 256px; ICNS also
+The SVGs are the editable sources: clean vector redraws of the historical C++
+K/play mark that retain Thilina Lakshan's copyright and Apache-2.0 SPDX headers.
+[Brand guidelines](../docs/design/brand.md) define geometry, colours and usage.
+
+| Source | Used for |
+| --- | --- |
+| `dev.tlmtech.kinema.svg` | App icon: hicolor scalable, PNGs 24–512px, ICO 24–256px |
+| `dev.tlmtech.kinema-16.svg` | Pixel-hinted app icon: 16px PNG and ICO slot |
+| `dev.tlmtech.kinema-player.svg` | Player-window icon: hicolor scalable, PNGs 24–512px |
+| `dev.tlmtech.kinema-player-16.svg` | Pixel-hinted player icon: 16px PNG |
+| `dev.tlmtech.kinema-symbolic.svg` | 16px monochrome symbolic icon; SVG only |
+| `dev.tlmtech.kinema-macos.svg` | ICNS only (Apple 824/1024 grid with shadow); not installed on Linux |
+
+PNGs are generated at 16, 24, 32, 48, 64, 128, 256 and 512px. The symbolic
+icon has no PNGs because desktops recolour it to match the panel/theme. ICNS
 includes a 1024px Retina image. Generation is explicit, never a Cargo build step.
 Different librsvg/Pillow versions may change encoded bytes; this revision was
-generated with librsvg 2.63.3 and Pillow 13.0.0.
+generated with librsvg 2.63.4 and Pillow 13.0.0.
 
 ## Linux staging
 
@@ -39,16 +48,20 @@ of tests):
 | `packaging/linux/dev.tlmtech.kinema.metainfo.xml` | `/usr/share/metainfo/dev.tlmtech.kinema.metainfo.xml` |
 | `assets/brand/png/SIZE/dev.tlmtech.kinema.png` | `/usr/share/icons/hicolor/SIZExSIZE/apps/dev.tlmtech.kinema.png` |
 | `assets/brand/dev.tlmtech.kinema.svg` | `/usr/share/icons/hicolor/scalable/apps/dev.tlmtech.kinema.svg` |
+| `assets/brand/png/SIZE/dev.tlmtech.kinema-player.png` | `/usr/share/icons/hicolor/SIZExSIZE/apps/dev.tlmtech.kinema-player.png` |
 | `assets/brand/dev.tlmtech.kinema-player.svg` | `/usr/share/icons/hicolor/scalable/apps/dev.tlmtech.kinema-player.svg` |
 | `assets/brand/dev.tlmtech.kinema-symbolic.svg` | `/usr/share/icons/hicolor/symbolic/apps/dev.tlmtech.kinema-symbolic.svg` |
 
 Here `assets/brand/` is relative to `crates/kinema-desktop/`; repeat the PNG row
-for each generated size. Packaging should update the desktop/icon caches using
+for each generated size. Do not install the `-16` or `-macos` SVG sources. Packaging should update the desktop/icon caches using
 its distribution's standard hooks. The launcher accepts no URI placeholders:
 there is no implemented URI activation or D-Bus service. GPUI main-window
 `app_id` matches the desktop ID (Wayland application ID / X11 WM_CLASS); the main
-window also embeds the 256px PNG for GPUI's X11 icon API. Wayland compositors
-resolve the installed desktop entry/icon. No notification service or embedded
+window also embeds the 256px PNG for GPUI's X11 icon API. Embedded player
+windows use the player variant (orange mark on the ink tile with a seek bar)
+through the same API, while retaining the main application ID. Wayland compositors
+resolve the installed desktop entry/icon, so the distinct player icon is not
+promised there; Windows/macOS per-window icons remain unqualified. No notification service or embedded
 mpv configuration is shipped: the Rust app launches an external player.
 
 ```sh

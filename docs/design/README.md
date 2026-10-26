@@ -2,6 +2,7 @@
 
 - [Desktop v3](desktop-v3.md) is the sole approved/default native UI direction.
   Production uses direct GPUI and in-house widgets; Kit and version switches are removed.
+- [Brand guidelines](brand.md) define the Kinema mark, icon variants, colours and usage.
 - [Native v3 lab](ui-probe.md) documents offline captures and validation limits.
 - The v2 guide below, [design system](design-system.md),
   [native implementation report](native-implementation.md), and

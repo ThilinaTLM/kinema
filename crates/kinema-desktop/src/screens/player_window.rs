@@ -301,6 +301,10 @@ pub fn open(
         registry.next
     };
     let options = WindowOptions {
+        // Keep the installed application identity for Wayland grouping. GPUI's
+        // per-window icon is used on X11; other platforms may use the app icon.
+        app_id: Some("dev.tlmtech.kinema".into()),
+        icon: player_window_icon(),
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
             size(px(1100.), px(680.)),
@@ -331,6 +335,20 @@ pub fn open(
         },
     );
     Ok(())
+}
+
+fn player_window_icon() -> Option<std::sync::Arc<image::RgbaImage>> {
+    image::load_from_memory(include_bytes!(
+        "../../assets/brand/png/256/dev.tlmtech.kinema-player.png"
+    ))
+    .inspect_err(|_| {
+        tracing::warn!(
+            category = "icon_decode",
+            "Could not decode the player icon; continuing without it"
+        );
+    })
+    .ok()
+    .map(|image| std::sync::Arc::new(image.into_rgba8()))
 }
 
 fn is_current(current: Option<u64>, closing: u64) -> bool {
@@ -2697,6 +2715,8 @@ pub fn run_probe_mode(
         crate::widgets::tokens::set_mode(if light { crate::widgets::tokens::Mode::Light } else { crate::widgets::tokens::Mode::Dark }, cx);
         bind_keys(cx);
         let options = WindowOptions {
+            app_id: Some("dev.tlmtech.kinema".into()),
+            icon: player_window_icon(),
             window_bounds: Some(WindowBounds::Windowed(Bounds { origin: point(px(0.), px(0.)), size: size(px(dimensions[0]), px(dimensions[1])) })),
             titlebar: Some(TitlebarOptions { title: Some(if gpu_playback { "Kinema / EMBEDDED GPU SMOKE" } else { "Kinema Design Lab / Player — FIXTURE ONLY" }.into()), ..Default::default() }),
             ..Default::default()
@@ -2871,6 +2891,19 @@ pub fn run_probe_mode(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn embedded_player_icon_decodes_and_differs_from_application_icon()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let player = super::player_window_icon().ok_or("invalid embedded player PNG")?;
+        let application = image::load_from_memory(include_bytes!(
+            "../../assets/brand/png/256/dev.tlmtech.kinema.png"
+        ))?
+        .into_rgba8();
+        assert_eq!(player.dimensions(), (256, 256));
+        assert_ne!(player.as_ref(), &application);
+        Ok(())
+    }
+
     #[cfg(feature = "ui-probe")]
     #[test]
     fn probe_controls_require_observed_mpv_state_for_every_phase() {

@@ -131,8 +131,9 @@ Neutral near-black chrome with layered depth. The brand accent is warm
 amber/coral (`#FF7A45` in Dark), with a darker AA-safe Light variant. Artwork
 colors provide secondary accents, never replace brand focus or primary actions.
 Desktop brand assets use an `#FF7A45` tile and white K/play glyph; the player
-variant uses warm dark accents and the symbolic variant remains monochrome.
-Editable SVGs and generated PNG/ICO/ICNS files live in
+variant inverts it onto a `#382218` ink tile with a seek bar, and the symbolic
+variant remains monochrome. [Brand guidelines](brand.md) define geometry,
+colours and usage. Editable SVGs and generated PNG/ICO/ICNS files live in
 `crates/kinema-desktop/assets/brand/`; root `packaging/` owns generation and Linux
 integration (see [packaging notes](../../packaging/README.md)). The application
 ID remains `dev.tlmtech.kinema`; Windows EXE resources and macOS bundles are not
