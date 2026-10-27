@@ -191,6 +191,9 @@ fn durable_ranges_recovery_quota_cleanup_and_lock() -> Result<(), Box<dyn std::e
     let mut content = [0u8; 13];
     file.read_exact(&mut content)?;
     assert_eq!(&content, b"durable bytes");
+    // This raw test reader does not pin the asset. Close it before releasing
+    // ownership: Windows cannot rename a directory with an open descendant.
+    drop(file);
     drop(asset);
     service.release(&lease.id)?;
     assert_eq!(service.cleanup_unused()?.freed_bytes, 100);
