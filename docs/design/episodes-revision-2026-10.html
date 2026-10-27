@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kinema — Hero actions, season & episode redesign (2026-10)</title>
+<style>
+:root{
+  --canvas:#0B0C0E;--surface:#131418;--raised:#1B1D22;--overlay:#202228;
+  --line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.14);--hair:#25282E;
+  --ctl:#24272D;--ctl-h:#2D3037;--ctl-p:#373B43;
+  --tx:#F2F3F5;--tx2:#B3B8C1;--tx3:#8C929D;
+  --accent:#FF7A45;--accent-h:#FF915F;--on-accent:#21130D;--accent-tx:#FF9B72;--accent-tint:rgba(255,122,69,.16);
+  --rating:#F5C451;--ph:#1B1D22;--shadow:rgba(0,0,0,.32);
+  --r4:4px;--r6:6px;--r8:8px;--r12:12px;--ease:cubic-bezier(.22,.8,.26,1);
+}
+*{box-sizing:border-box}
+body{margin:0;background:#050607;color:var(--tx);font:13px/18px Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums}
+.doc{padding:0 32px 64px}
+header.top{position:sticky;top:0;z-index:5;background:rgba(5,6,7,.94);border-bottom:1px solid var(--hair);padding:12px 32px;margin:0 -32px 24px;display:flex;gap:16px;align-items:center}
+header.top h1{font-size:15px;margin:0}
+header.top a{color:var(--tx2);text-decoration:none}
+h2{font-size:18px;margin:40px 0 4px}
+p.lead{color:var(--tx2);margin:0 0 16px;max-width:1000px}
+.notes{background:var(--raised);border:1px solid var(--line);border-radius:var(--r8);padding:12px 16px;margin:16px 0 0;color:var(--tx2);max-width:1200px}
+.notes b{color:var(--tx)}.notes li{margin:3px 0}
+.frame{background:var(--canvas);border:1px solid #2a2d33;border-radius:10px;padding:28px 40px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.lab{font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em;min-width:150px}
+.spec{display:grid;grid-template-columns:auto 1fr;gap:14px 24px;align-items:center}
+code{color:var(--accent-tx)}
+
+/* ===== Primitive: ActionButton (all hero actions share height 32, radius 6) ===== */
+.ab{height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border-radius:var(--r6);border:1px solid var(--line);background:var(--ctl);color:var(--tx);font-weight:600;cursor:pointer;transition:background 80ms linear,border-color 80ms,color 80ms;user-select:none}
+.ab:hover{background:var(--ctl-h)}
+.ab:active{background:var(--ctl-p)}
+.ab .sub{font-weight:500;color:var(--tx3);font-size:12px}
+.ab.primary{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.ab.primary:hover{background:var(--accent-h)}
+.ab.icon{width:32px;padding:0;justify-content:center;color:var(--tx2)}
+.ab.icon:hover{color:var(--tx)}
+.ab.on{background:var(--accent-tint);border-color:rgba(255,122,69,.35);color:var(--accent-tx)}
+.ab.on:hover{background:rgba(255,122,69,.22)}
+.ab[aria-disabled=true]{background:var(--raised);color:var(--tx3);cursor:default}
+.ab svg{flex:none}
+
+/* ===== Primitive: WatchMark (one glyph everywhere: hero, season, episode) ===== */
+.wm{width:16px;height:16px;position:relative;display:inline-block;flex:none}
+.wm svg{position:absolute;inset:0}
+.wm.lg{width:20px;height:20px}
+
+/* ===== Primitive: Thumb (16:9 / 2:3 media frame with Loading/Fallback/Missing) ===== */
+.thumb{position:relative;overflow:hidden;background:var(--ph)}
+.thumb .img{position:absolute;inset:0;background-size:cover;background-position:center}
+.thumb.loading .img{filter:blur(6px) brightness(.55);transform:scale(1.06)}
+.thumb.loading::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.05);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{background:rgba(255,255,255,.11)}}
+.thumb.fallback .img{filter:brightness(.6) saturate(.8)}
+.thumb .ph{position:absolute;inset:0;display:grid;place-items:center;color:var(--tx3);font-weight:600;font-size:13px}
+
+/* ===== Primitive: OverlayBadge (dark backing for anything on artwork) ===== */
+.ob{height:20px;padding:0 6px;border-radius:var(--r4);background:rgba(11,12,14,.8);color:var(--tx2);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px}
+.ob.accent{background:var(--accent);color:var(--on-accent)}
+.obtn{width:28px;height:28px;border-radius:var(--r6);background:rgba(11,12,14,.8);display:grid;place-items:center;cursor:pointer;transition:background 80ms}
+.obtn:hover{background:rgba(32,34,40,.95)}
+
+/* ===== Composite: Hero ===== */
+.hero{display:grid;grid-template-columns:200px 1fr;gap:32px;align-items:end;background:radial-gradient(80% 140% at 90% 0%,rgba(40,90,110,.35),transparent 60%);padding:20px;border-radius:var(--r12)}
+.hero .poster{aspect-ratio:2/3;border-radius:var(--r8)}
+.hero h1{font-size:30px;line-height:36px;margin:0 0 6px}
+.meta{color:var(--tx2);display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.chip{height:20px;padding:0 6px;border-radius:var(--r4);font-size:11px;font-weight:600;background:var(--ctl);color:var(--tx2);display:inline-flex;align-items:center}
+.chip.a{background:var(--accent-tint);color:var(--accent-tx)}
+.ov{max-width:880px;font-size:14px;line-height:21px;margin:0 0 16px}
+.vsep{width:1px;height:20px;background:var(--hair);margin:0 4px}
+
+/* ===== Composite: SeasonTile ===== */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:8px}
+.tile{display:grid;grid-template-columns:40px 1fr;gap:12px;align-items:center;padding:8px 10px 8px 8px;border-radius:var(--r8);background:var(--raised);border:1px solid var(--line);cursor:pointer;transition:background 140ms var(--ease),border-color 140ms}
+.tile:hover{background:var(--ctl-h)}
+.tile.on{background:var(--accent-tint);border-color:rgba(255,122,69,.45)}
+.tile .thumb{width:40px;aspect-ratio:2/3;border-radius:var(--r4)}
+.tile .t{font-weight:600;display:flex;align-items:center;gap:6px}
+.tile .s{font-size:12px;color:var(--tx3)}
+.tile .bar{height:2px;border-radius:1px;background:var(--line);margin-top:7px;overflow:hidden}
+.tile .bar i{display:block;height:100%;background:var(--accent)}
+.tile.special{background:transparent}
+
+/* ===== Composite: SeasonHeader ===== */
+.shead{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:20px;align-items:start;padding:24px 0 20px;margin-top:20px;border-top:1px solid var(--hair)}
+.shead .thumb{width:72px;aspect-ratio:2/3;border-radius:var(--r6)}
+.shead h3{margin:0;font-size:20px;line-height:26px}
+.shead .m{color:var(--tx3);font-size:12px;margin:2px 0 8px}
+.shead .o{color:var(--tx2);max-width:880px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.shead .more{color:var(--accent-tx);font-size:12px;cursor:pointer;margin-top:4px;display:inline-block}
+
+/* ===== Composite: EpisodeCard ===== */
+.egrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.ec{border-radius:var(--r8);background:var(--raised);border:1px solid var(--line);overflow:hidden;cursor:pointer;transition:transform 220ms var(--ease),box-shadow 220ms var(--ease),border-color 140ms}
+.ec:hover{transform:translateY(-3px);box-shadow:0 4px 14px var(--shadow);border-color:var(--line2)}
+.ec .thumb{aspect-ratio:16/9}
+.ec .tl{position:absolute;left:8px;top:8px;display:flex;gap:4px;z-index:1}
+.ec .tr{position:absolute;right:8px;top:8px;z-index:1}
+.ec .body{padding:10px 12px 12px}
+.ec .k{font-size:12px;color:var(--tx3);display:flex;gap:6px;align-items:center}
+.ec .k b{color:var(--tx2);font-weight:600}
+.ec .t{font-size:15px;font-weight:600;line-height:20px;margin:2px 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ec .o{font-size:12px;color:var(--tx2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:36px}
+.ec.watched .thumb .img{filter:brightness(.7) saturate(.6)}
+.ec.watched .t{color:var(--tx2)}
+.ec.next{border-color:rgba(255,122,69,.55)}
+.ec .pbar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent);z-index:1}
+.comp{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.comp .c{background:var(--raised);border:1px solid var(--line);border-radius:var(--r8);padding:12px}
+.comp .c h4{margin:0 0 4px;font-size:13px}
+.comp .c p{margin:0;color:var(--tx3);font-size:12px}
+</style>
+</head>
+<body>
+<div class="doc">
+<header class="top"><h1>Hero actions · Season & Episode redesign</h1>
+<a href="#hero">1 Hero actions</a><a href="#episodes">2 Seasons & episodes</a><a href="#states">3 Image states</a><a href="#components">4 Components</a>
+<span style="margin-left:auto;color:var(--tx3)">Theme tokens only · no pill radii · watched = accent</span></header>
+
+<svg width="0" height="0" style="position:absolute">
+ <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m8 2 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+ <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor"/></symbol>
+ <symbol id="i-book" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+ <symbol id="i-bookf" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+ <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+ <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.8-4M4 4v4h4m-4 5a8 8 0 0 0 14.8 4M20 20v-4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+ <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6m0-6-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+ <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v4l3 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+</svg>
+
+<!-- ============ 1 HERO ============ -->
+<section id="hero">
+<h2>1 · Hero action row</h2>
+<p class="lead">Every action uses one <code>ActionButton</code> primitive: 32 px tall, 6 px radius, the same fill and edge. Icon-only actions are 32 × 32 squares. Library state is a labelled toggle with a clear on state (accent tint + filled bookmark), not a tiny black icon.</p>
+<div class="frame">
+ <div class="hero">
+  <div class="poster" style="background:linear-gradient(160deg,#e9e2cf,#6b2a2a)"></div>
+  <div>
+   <h1>The Mentalist</h1>
+   <div class="meta"><span class="chip a">SERIES</span>2008–2015 · 7 seasons · 153 episodes · Crime, Drama, Mystery</div>
+   <p class="ov">Patrick Jane, a former celebrity psychic medium, uses his razor sharp skills of observation and expertise at "reading" people to solve serious crimes with the California Bureau of Investigation.</p>
+   <div class="row" id="heroRow"></div>
+  </div>
+ </div>
+ <div class="spec" style="margin-top:24px" id="heroStates"></div>
+</div>
+<div class="notes"><ul>
+ <li><b>Order:</b> primary (Episodes / Continue · S1 E3 / Play) · Watch toggle · Library toggle | Refresh · Open on IMDb. The hairline divider separates state toggles from utilities.</li>
+ <li><b>Watch toggle:</b> same box as other buttons, with the <code>WatchMark</code> glyph + state word + muted count. Partial shows an accent arc; All shows a filled accent mark and accent-tint button (same "on" style as Library). The green status colour is no longer used.</li>
+ <li><b>Library toggle:</b> off = "+ Add to Library" (secondary); on = "In Library" with a filled bookmark, accent tint and accent ink; hover on "In Library" shows the tooltip "Remove from Library". Busy keeps width; failure shows the inline notice as today.</li>
+ <li>Narrow windows (&lt; 900 px): Watch and Library collapse to icon-only 32 × 32 with tooltips; labels stay as accessible names.</li>
+</ul></div>
+</section>
+
+<!-- ============ 2 EPISODES ============ -->
+<section id="episodes">
+<h2>2 · Seasons, season header and episode cards</h2>
+<p class="lead">There are three calm layers: season tiles, a season header with a hairline divider, and a grid of contained episode cards. Each card is a raised surface with 8 px radius, like the Discover poster cards, with its text inside the card. Watched state uses the same <code>WatchMark</code> as the hero, in accent colour.</p>
+<div class="frame">
+ <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:12px"><span style="font-size:18px;font-weight:600">Episodes</span><span style="color:var(--tx3);font-size:12px">7 seasons · 153 episodes</span></div>
+ <div class="tiles" id="tiles"></div>
+ <div class="shead">
+  <div class="thumb"><div class="img" style="background:linear-gradient(160deg,#e9e2cf,#6b2a2a)"></div></div>
+  <div>
+   <h3>Season 1</h3>
+   <div class="m">2008–2009 · 23 episodes · 2 watched</div>
+   <div class="o">Patrick Jane is a celebrity psychic whose wife and child are viciously murdered by an elusive serial killer called Red John. Devastated, Patrick admits his paranormal act is fake, renounces his earlier life and uses his astonishing skills of observation and analysis - talents that made him appear psychically gifted - to bring killers to justice. At crime scenes across California, Patrick now helps an elite team of detectives break their toughest cases.</div>
+   <span class="more">More</span>
+  </div>
+  <div id="seasonToggle"></div>
+ </div>
+ <div class="egrid" id="eps"></div>
+</div>
+<div class="notes"><ul>
+ <li><b>Spacing:</b> 12 px between season tiles. Then a 20 px gap, a hairline, and 24 px to the season header, and 20 px from the header to the grid. Card gap is 16 px. Season overview is clamped to 3 lines with "More / Less".</li>
+ <li><b>Season tile:</b> 2:3 thumb (season poster, falling back to the series poster), with a 2 px accent progress line. Complete seasons show a small accent <code>WatchMark</code> beside the title, not a green chip. Selected = accent tint + accent edge.</li>
+ <li><b>Episode card:</b> a raised card with 8 px radius and a subtle edge, clipping its still. The top-left of the still shows <code>OverlayBadge</code>s ("Next up"). The top-right has a 28 px <code>OverlayButton</code> holding the <code>WatchMark</code>: an empty ring means unwatched, and a filled accent mark with a check means watched. Below the still: a muted key line (E03 · 43 min · 14 Oct 2008), the title (15/600) and a 2-line overview.</li>
+ <li><b>Watched card:</b> the still is dimmed and desaturated and the title turns secondary, so it recedes rather than shouting. <b>Next up:</b> accent edge plus an accent "Next up" badge. Hover lifts the card 3 px with a brighter edge, the same motion as Discover cards.</li>
+ <li>Clicking the card opens streams. Clicking the mark toggles watched only. The mark has its own tooltip ("Mark watched" / "Mark unwatched") and an accessible name.</li>
+</ul></div>
+</section>
+
+<!-- ============ 3 STATES ============ -->
+<section id="states">
+<h2>3 · Image states, fallbacks and caching</h2>
+<p class="lead">The <code>Thumb</code> primitive renders four states from one resolved artwork state. Cards keep their size in every state.</p>
+<div class="frame"><div class="egrid" id="stateCards"></div></div>
+<div class="notes"><ul>
+ <li><b>Fallback chain:</b> episode still → season backdrop → series backdrop → season poster (cropped) → placeholder with "E03". Season thumb → series poster → placeholder with the number.</li>
+ <li><b>Loading:</b> if a fallback image is already in memory, show it blurred and dimmed under a pulsing skeleton (the combined look you suggested). Otherwise show a plain skeleton. Memory and disk cache hits render without a skeleton; the skeleton only appears after about 150 ms of real waiting.</li>
+ <li><b>Fallback:</b> the substitute image, slightly dimmed, so it doesn't pretend to be the episode still.</li>
+ <li><b>Not available</b> (404/410 or an undecodable image) is remembered on disk for 24 h, so revisits go straight to the fallback with no request. It is retried after the TTL, or immediately on Refresh. Timeouts and offline errors are never remembered on disk.</li>
+</ul></div>
+</section>
+
+<!-- ============ 4 COMPONENTS ============ -->
+<section id="components">
+<h2>4 · Primitive components (reused, not duplicated)</h2>
+<div class="comp">
+ <div class="c"><h4>ActionButton</h4><p>Primary / Secondary / Icon variants, optional <i>on</i> state (accent tint), busy, disabled with reason. 32 px, radius 6. Used in hero, streams drawer and season header.</p></div>
+ <div class="c"><h4>WatchMark</h4><p>Pure glyph for None / Partial(fraction) / All; 16 or 20 px. Used inside WatchToggle, OverlayButton and SeasonTile.</p></div>
+ <div class="c"><h4>WatchToggle</h4><p>ActionButton + WatchMark + word + count. It replaces the pill toggle and is used for movie, series and season.</p></div>
+ <div class="c"><h4>LibraryToggle</h4><p>ActionButton with on/off/busy states and a filled or outline bookmark.</p></div>
+ <div class="c"><h4>Thumb</h4><p>Aspect-ratio media frame with radius. Renders <code>ArtState</code> (Ready / Loading{fallback} / Fallback / Missing) with a pulse skeleton and placeholder label.</p></div>
+ <div class="c"><h4>OverlayBadge / OverlayButton</h4><p>A contrast-safe dark backing for anything placed on artwork: chips (E03, Next up) and 28 px icon buttons.</p></div>
+ <div class="c"><h4>MediaCard</h4><p>A raised r8 container with subtle edge, hover lift and clipping. EpisodeCard = MediaCard + Thumb 16:9 + body.</p></div>
+ <div class="c"><h4>SeasonTile, SeasonHeader</h4><p>Composites built from the above. No ad-hoc colours: only palette tokens (accent, accent tint, raised, line.subtle, text tiers).</p></div>
+</div>
+</section>
+</div>
+
+<script>
+// WatchMark SVG
+function wm(state,frac=0,size=16){const r=size/2-1.5,c=size/2,C=2*Math.PI*r;
+ if(state==='all')return `<span class="wm" style="width:${size}px;height:${size}px"><svg viewBox="0 0 ${size} ${size}"><circle cx="${c}" cy="${c}" r="${c}" fill="#FF7A45"/><path d="M${size*.3} ${size*.52} l${size*.14} ${size*.14} l${size*.26} -${size*.3}" fill="none" stroke="#21130D" stroke-width="${size/9}" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+ let arc=state==='part'?`<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#FF7A45" stroke-width="2" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-frac)}" transform="rotate(-90 ${c} ${c})"/>`:'';
+ return `<span class="wm" style="width:${size}px;height:${size}px"><svg viewBox="0 0 ${size} ${size}"><circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#8C929D" stroke-width="1.5" opacity="${state==='part'?.45:1}"/>${arc}</svg></span>`}
+const I=(id,s=16)=>`<svg width="${s}" height="${s}"><use href="#${id}"/></svg>`;
+function watchBtn(st,n,t,label){const cls=st==='all'?'ab on':'ab';return `<span class="${cls}" data-w>${wm(st,n/t)}<span>${label}</span><span class="sub">${n} of ${t}</span></span>`}
+const lib=(on)=>on?`<span class="ab on" title="Remove from Library">${I('i-bookf')}In Library</span>`:`<span class="ab">${I('i-plus')}Add to Library</span>`;
+const utils=`<span class="vsep"></span><span class="ab icon" title="Refresh">${I('i-refresh')}</span><span class="ab icon" title="Open on IMDb">${I('i-ext')}</span>`;
+document.getElementById('heroRow').innerHTML=`<span class="ab primary">${I('i-play',14)}Continue · S1 E3</span>${watchBtn('part',2,153,'Watching')}${lib(true)}${utils}`;
+const hs=document.getElementById('heroStates');
+[['Nothing tracked',`<span class="ab primary">${I('i-tv')}Episodes</span>${watchBtn('none',0,153,'Not watched')}${lib(false)}${utils}`],
+ ['Partly watched',`<span class="ab primary">${I('i-play',14)}Continue · S1 E3</span>${watchBtn('part',2,153,'Watching')}${lib(true)}${utils}`],
+ ['All watched',`<span class="ab primary">${I('i-tv')}Episodes</span>${watchBtn('all',153,153,'Watched')}${lib(true)}${utils}`],
+ ['Movie',`<span class="ab primary">${I('i-play',14)}Play</span><span class="ab">${wm('none')}<span>Mark watched</span></span>${lib(false)}${utils}`],
+ ['Tracking unavailable',`<span class="ab primary">${I('i-tv')}Episodes</span><span class="ab" aria-disabled="true" title="Library unavailable: storage error">${wm('none')}<span>Watched status unavailable</span></span>${lib(false)}${utils}`],
+ ['Narrow (&lt; 900 px)',`<span class="ab primary">${I('i-tv')}Episodes</span><span class="ab icon">${wm('part',.3)}</span><span class="ab icon on">${I('i-bookf')}</span>${utils}`]
+].forEach(([l,h])=>hs.insertAdjacentHTML('beforeend',`<span class="lab">${l}</span><div class="row">${h}</div>`));
+document.getElementById('seasonToggle').innerHTML=watchBtn('part',2,23,'Partly watched');
+// tiles
+const tg=document.getElementById('tiles');
+const seasons=[[1,23,'2008–2009',2],[2,23,'2009–2010',0],[3,24,'2010–2011',0],[4,24,'2011–2012',0],[5,22,'2012–2013',0],[6,22,'2013–2014',0],[7,13,'2014–2015',0]];
+const pcol=['#c9b98f','#355a7a','#6b4f1d','#3d2a63','#235a43','#7d3c5b','#4a4f57'];
+seasons.forEach(([n,e,y,w],i)=>{const fb=i==3||i==5;tg.insertAdjacentHTML('beforeend',`<div class="tile ${i==0?'on':''}"><div class="thumb ${fb?'fallback':''}"><div class="img" style="background:linear-gradient(160deg,${fb?'#e9e2cf,#6b2a2a':pcol[i]+',#16171b'})"></div></div><div><div class="t">Season ${n}${i==6?wm('all',1,14):''}</div><div class="s">${e} ep · ${y}${i==0?' · <span style="color:var(--accent-tx)">Next up</span>':''}</div><div class="bar"><i style="width:${i==6?100:Math.round(w/e*100)}%"></i></div></div></div>`)});
+tg.insertAdjacentHTML('beforeend',`<div class="tile special"><div class="thumb"><div class="img" style="background:linear-gradient(160deg,#e9e2cf,#6b2a2a)"></div></div><div><div class="t">Specials</div><div class="s">2 ep · 2009</div></div></div>`);
+// episodes
+const eps=['Pilot','Red Hair and Silver Tape','Red Tide','Ladies in Red','Redwood','Red Handed','Seeing Red','The Thin Red Line'];
+const ov='CBI consultant Patrick Jane, Senior Agent Teresa Lisbon and her team investigate the double murder in Palm Springs.';
+function card(i,t,{state='ready',watched=false,next=false}={}){
+ const hue=(i*47)%360;const img=`<div class="img" style="background:linear-gradient(135deg,hsl(${hue} 25% 38%),hsl(${hue+40} 20% 16%))"></div>`;
+ let thumb;
+ if(state==='ready')thumb=`<div class="thumb">${img}`;
+ else if(state==='loading')thumb=`<div class="thumb loading"><div class="img" style="background:linear-gradient(135deg,#355a6a,#121317)"></div>`;
+ else if(state==='loading-plain')thumb=`<div class="thumb loading">`;
+ else if(state==='fallback')thumb=`<div class="thumb fallback"><div class="img" style="background:linear-gradient(135deg,#355a6a,#121317)"></div>`;
+ else thumb=`<div class="thumb"><div class="ph">E${String(i+1).padStart(2,'0')}</div>`;
+ return `<div class="ec ${watched?'watched':''} ${next?'next':''}">${thumb}<div class="tl">${next?'<span class="ob accent">Next up</span>':''}</div><div class="tr"><span class="obtn" title="${watched?'Mark unwatched':'Mark watched'}">${wm(watched?'all':'none',0,18)}</span></div></div><div class="body"><div class="k"><b>E${String(i+1).padStart(2,'0')}</b>· ${42+i%3} min · ${String(14+i).padStart(2,'0')} Oct 2008</div><div class="t">${t}</div><div class="o">${ov}</div></div></div>`}
+document.getElementById('eps').innerHTML=eps.map((t,i)=>card(i,t,{watched:i<2,next:i==2})).join('');
+document.getElementById('stateCards').innerHTML=[
+ card(0,'Ready · own still',{state:'ready'}),
+ card(1,'Loading · fallback under skeleton',{state:'loading'}),
+ card(2,'Loading · nothing cached yet',{state:'loading-plain'}),
+ card(3,'Fallback · season/series backdrop',{state:'fallback'}),
+ card(4,'Missing · no image anywhere',{state:'missing'})].join('');
+</script>
+</body>
+</html>

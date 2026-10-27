@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kinema — UI revision proposal (2026-10)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Desktop v3 "Cinema" dark tokens (docs/design/desktop-v3.md §2) */
+:root{
+  --canvas:#0B0C0E;--surface:#131418;--raised:#1B1D22;--overlay:#202228;
+  --line:rgba(255,255,255,.08);--hair:#25282E;--lctl:#646A75;
+  --ctl:#24272D;--ctl-h:#2D3037;--ctl-p:#373B43;
+  --tx:#F2F3F5;--tx2:#B3B8C1;--tx3:#8C929D;
+  --accent:#FF7A45;--accent-h:#FF915F;--on-accent:#21130D;--accent-tx:#FF9B72;--accent-tint:rgba(255,122,69,.16);
+  --rating:#F5C451;--ok:#46C98A;--warn:#F2A33A;--err:#FF6B6B;--imdb:#F5C518;
+  --scrim:rgba(11,12,14,.92);--shadow:rgba(0,0,0,.32);
+  --r4:4px;--r6:6px;--r8:8px;--r12:12px;
+  --ease:cubic-bezier(.22,.8,.26,1);
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:#050607;color:var(--tx);font:13px/18px Inter,system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit}
+.doc{max-width:none;padding:0 24px 64px}
+header.top{position:sticky;top:0;z-index:50;background:rgba(5,6,7,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--hair);padding:12px 24px;margin:0 -24px 24px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+header.top h1{font-size:15px;margin:0 12px 0 0}
+header.top a{color:var(--tx2);text-decoration:none;padding:4px 10px;border-radius:var(--r6)}
+header.top a:hover{background:var(--ctl-h);color:var(--tx)}
+section.spec{margin:0 0 56px}
+section.spec>h2{font-size:18px;margin:0 0 4px}
+section.spec>p.lead{color:var(--tx2);margin:0 0 16px;max-width:980px}
+.notes{background:var(--raised);border:1px solid var(--line);border-radius:var(--r8);padding:12px 16px;margin:16px 0 0;color:var(--tx2);max-width:1200px}
+.notes b{color:var(--tx)}
+.notes ul{margin:6px 0 0;padding-left:18px}
+.notes li{margin:3px 0}
+.q{color:var(--warn)}
+
+/* Window frame */
+.win{border:1px solid #2a2d33;border-radius:10px;overflow:hidden;background:var(--canvas);box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.win .title{height:28px;background:#1a1b1f;color:var(--tx3);font-size:12px;display:flex;align-items:center;justify-content:center}
+.page{position:relative;padding:0 40px 40px}
+.tb{display:flex;justify-content:space-between;align-items:center;height:56px;position:relative;z-index:3}
+.glass{display:flex;background:rgba(32,34,40,.72);border:1px solid var(--line);border-radius:var(--r8);padding:2px}
+.ib{width:28px;height:28px;display:grid;place-items:center;border-radius:var(--r6);color:var(--tx2);background:none;border:0;cursor:pointer}
+.ib:hover{background:var(--ctl-h);color:var(--tx)}
+.btn{height:32px;padding:0 14px;border-radius:var(--r6);border:0;background:var(--ctl);display:inline-flex;align-items:center;gap:8px;font-weight:600;cursor:pointer}
+.btn:hover{background:var(--ctl-h)}
+.btn.primary{background:var(--accent);color:var(--on-accent)}
+.btn.primary:hover{background:var(--accent-h)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:var(--r4);font-size:11px;font-weight:600;background:rgba(11,12,14,.8);color:var(--tx2)}
+.chip.q4k{color:var(--accent-tx);background:var(--accent-tint)}
+.chip.ok{color:var(--ok);background:rgba(70,201,138,.12)}
+.chip.muted{color:var(--tx3);background:var(--ctl)}
+.star{color:var(--rating)}
+.muted{color:var(--tx3)}.sec{color:var(--tx2)}
+.h3{font-size:15px;font-weight:600;margin:0 0 12px;display:flex;align-items:baseline;gap:8px}
+.h3 .count{font-size:12px;color:var(--tx3);font-weight:500}
+.poster{border-radius:var(--r8);background:linear-gradient(160deg,#7a1f1f,#1b1d22 70%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);display:flex;align-items:flex-end;padding:10px;font-weight:700;color:rgba(255,255,255,.75);aspect-ratio:2/3}
+.p2{background:linear-gradient(160deg,#2b5876,#14161a 75%)}.p3{background:linear-gradient(160deg,#6b4f1d,#16171b 75%)}
+.p4{background:linear-gradient(160deg,#3d2a63,#121317 75%)}.p5{background:linear-gradient(160deg,#235a43,#121317 75%)}
+.p6{background:linear-gradient(160deg,#7d3c5b,#121317 75%)}.p7{background:linear-gradient(160deg,#4a4f57,#121317 75%)}
+.still{aspect-ratio:16/9;border-radius:var(--r8);background:linear-gradient(135deg,#3b3f47,#1b1d22);position:relative;overflow:hidden}
+.kbd{font-size:11px;color:var(--tx3);border:1px solid var(--hair);border-radius:4px;padding:0 4px}
+
+/* ---------- Toolbar trailing group ---------- */
+.tgroup{display:flex;align-items:center;gap:2px;background:rgba(32,34,40,.72);border:1px solid var(--line);border-radius:var(--r8);padding:2px}
+.tgroup .div{width:1px;height:18px;background:var(--line);margin:0 4px}
+.xfer{height:28px;display:inline-flex;align-items:center;gap:8px;padding:0 10px 0 8px;border-radius:var(--r6);color:var(--tx2);cursor:pointer;position:relative;font-size:12px}
+.xfer:hover{background:var(--ctl-h);color:var(--tx)}
+.xfer b{color:var(--tx);font-weight:600;font-family:var(--mono);font-size:12px}
+.xfer .mini{position:absolute;left:8px;right:10px;bottom:3px;height:2px;border-radius:1px;background:rgba(255,255,255,.08);overflow:hidden}
+.xfer .mini i{display:block;height:100%;width:38%;background:var(--accent)}
+.tbspec{display:grid;grid-template-columns:auto 1fr;gap:12px 20px;align-items:center;margin-top:16px}
+.tbspec .lab{font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em}
+/* ---------- 1. Menu ---------- */
+.menu-demo{display:flex;gap:48px;flex-wrap:wrap;align-items:flex-start}
+.menu-col h4{margin:0 0 8px;font-size:12px;color:var(--tx3);text-transform:uppercase;letter-spacing:.04em}
+.menu{width:240px;background:var(--overlay);border:1px solid var(--line);border-radius:var(--r12);padding:4px;box-shadow:0 6px 20px var(--shadow)}
+.mi{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r6);color:var(--tx);cursor:default;outline:none;transition:background 80ms linear}
+.mi svg{color:var(--tx2)}
+.mi .sc{margin-left:auto;font-size:12px;color:var(--tx3)}
+.mi:hover,.mi.kb{background:var(--accent-tint)}
+.mi.stuck{background:rgba(120,60,40,.6)}
+.msep{height:1px;background:var(--hair);margin:4px 6px}
+.bad .mi:hover{background:none}
+
+/* ---------- 2/5. Detail ---------- */
+.hero{position:relative;margin:0 -40px;padding:8px 40px 32px}
+.hero::before{content:"";position:absolute;inset:-56px 0 0 0;background:
+  radial-gradient(80% 120% at 85% 0%,rgba(140,30,30,.45),transparent 60%),
+  linear-gradient(180deg,rgba(11,12,14,.2),var(--canvas) 96%);z-index:0}
+.hero.series::before{background:radial-gradient(80% 120% at 85% 0%,rgba(40,90,110,.45),transparent 60%),linear-gradient(180deg,rgba(11,12,14,.2),var(--canvas) 96%)}
+.hero-grid{position:relative;z-index:1;display:grid;grid-template-columns:clamp(160px,14vw,240px) minmax(0,1fr) clamp(280px,24vw,380px);gap:32px;align-items:end}
+.hero h1{font-size:30px;line-height:36px;margin:0 0 6px;display:flex;align-items:center;gap:10px}
+.metaline{color:var(--tx2);display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;margin-bottom:12px}
+.metaline .dot{color:var(--tx3)}
+.tagline{font-style:italic;color:var(--tx2);margin:0 0 8px;font-size:14px}
+.overview{font-size:14px;line-height:21px;max-width:880px;margin:0 0 16px}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.glance{background:rgba(27,29,34,.82);border:1px solid var(--line);border-radius:var(--r12);padding:16px;box-shadow:0 2px 8px var(--shadow)}
+.ratings{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.rt{background:var(--ctl);border-radius:var(--r8);padding:10px 12px}
+.rt .v{font-size:24px;font-weight:700;line-height:28px}.rt .v small{font-size:12px;color:var(--tx3);font-weight:500}
+.rt .src{font-size:11px;color:var(--tx3);display:flex;gap:6px;align-items:center;margin-top:2px}
+.imdb{background:var(--imdb);color:#111;font-weight:800;font-size:10px;padding:0 4px;border-radius:3px}
+.tmdb{background:#0d253f;color:#90cea1;font-weight:800;font-size:10px;padding:0 4px;border-radius:3px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}
+.kv dt{color:var(--tx3)}.kv dd{margin:0;color:var(--tx)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:8px 0 32px}
+.fcard{background:var(--raised);border:1px solid var(--line);border-radius:var(--r12);padding:14px 16px}
+.fcard h4{margin:0 0 10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--tx3)}
+.fcard .kv{grid-template-columns:96px 1fr;font-size:13px}
+.person{display:inline-flex;align-items:center;gap:6px}
+.av{width:22px;height:22px;border-radius:50%;background:#2d3037;display:inline-grid;place-items:center;font-size:9px;color:var(--tx2);font-weight:700}
+.castrow{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:16px 12px;margin-bottom:8px}
+.castrow .cast:nth-child(n+19){display:none}
+.showall{display:flex;justify-content:center;margin:8px 0 32px}
+.cast .ph{aspect-ratio:3/4;border-radius:var(--r8);background:linear-gradient(170deg,#30343c,#1b1d22);display:grid;place-items:center;font-weight:700;color:var(--tx3);font-size:18px}
+.cast .n{font-weight:600;margin-top:6px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cast .r{color:var(--tx3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.sechead{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}
+.sechead .h3{margin:0}
+.link{color:var(--accent-tx);cursor:pointer}
+.foot{color:var(--tx3);font-size:12px;margin-top:24px;border-top:1px solid var(--hair);padding-top:12px}
+
+/* ---------- 3. Streams ---------- */
+.shead{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;padding:4px 0 16px}
+.shead .poster{width:56px;padding:0}
+.shead h2{margin:0;font-size:18px;line-height:24px}
+.ctlbar{position:sticky;top:0;display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r12);margin-bottom:12px}
+.seg{display:inline-flex;background:var(--ctl);border-radius:var(--r8);padding:2px}
+.seg button{border:0;background:none;height:28px;padding:0 12px;border-radius:var(--r6);cursor:pointer;color:var(--tx2);display:inline-flex;gap:6px;align-items:center}
+.seg button.on{background:var(--overlay);color:var(--accent-tx);box-shadow:0 1px 3px var(--shadow);font-weight:600}
+.seg .n{font-size:11px;color:var(--tx3)}
+.vsep{width:1px;height:24px;background:var(--hair)}
+.filter{height:32px;min-width:220px;flex:1;max-width:360px;background:var(--ctl);border-radius:var(--r6);display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--tx3)}
+.sel{height:32px;background:var(--ctl);border-radius:var(--r6);display:inline-flex;align-items:center;gap:8px;padding:0 10px;color:var(--tx2);cursor:pointer}
+.sw{display:inline-flex;align-items:center;gap:8px;color:var(--tx2);cursor:pointer}
+.sw i{width:30px;height:18px;border-radius:9px;background:var(--accent);position:relative;display:inline-block}
+.sw i::after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--on-accent)}
+.remember{margin-left:auto;font-size:12px;color:var(--tx3);display:inline-flex;gap:6px;align-items:center}
+.sbody{display:grid;grid-template-columns:minmax(0,1fr) clamp(320px,26vw,420px);gap:16px;align-items:start}
+.slist{background:var(--surface);border:1px solid var(--line);border-radius:var(--r12);overflow:hidden}
+.srow,.shdr{display:grid;grid-template-columns:64px minmax(0,1fr) 84px 84px 132px;gap:12px;align-items:center;padding:10px 14px}
+.shdr{font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--hair);padding-top:8px;padding-bottom:8px}
+.srow{border-bottom:1px solid var(--hair);cursor:pointer;transition:background 80ms}
+.srow:hover{background:var(--ctl-h)}
+.srow.on{background:var(--accent-tint);box-shadow:inset 3px 0 0 var(--accent)}
+.qcol{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+.rel{font-family:var(--mono);font-size:12px;line-height:16px;color:var(--tx);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tags{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap;align-items:center}
+.tag{font-size:11px;color:var(--tx2);background:var(--ctl);border-radius:var(--r4);padding:0 6px;height:18px;display:inline-flex;align-items:center}
+.num{text-align:right;font-family:var(--mono);font-size:12px}
+.seed{color:var(--ok)}
+.cache{display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+.cb{font-size:11px;font-weight:600;border-radius:var(--r4);height:20px;padding:0 6px;display:inline-flex;align-items:center;gap:4px}
+.cb.yes{color:var(--ok);background:rgba(70,201,138,.12)}
+.cb.no{color:var(--tx3);background:var(--ctl)}
+.cb.chk{color:var(--tx3);background:var(--ctl)}
+.cb.unk{color:var(--warn);background:rgba(242,163,58,.12)}
+.drawer{position:sticky;top:12px;background:var(--raised);border:1px solid var(--line);border-radius:var(--r12);padding:16px;box-shadow:0 2px 8px var(--shadow)}
+.drawer .rel{-webkit-line-clamp:unset;font-size:12px;margin:6px 0 12px;word-break:break-all}
+.dsec{border-top:1px solid var(--hair);padding-top:12px;margin-top:12px}
+.dsec h5{margin:0 0 8px;font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em}
+.svcrow{display:flex;justify-content:space-between;align-items:center;height:28px}
+.playwith{display:flex;gap:8px;margin-top:16px}
+.playwith .sel{flex:1;justify-content:space-between}
+
+/* ---------- 4. Seasons / watched ---------- */
+.ep-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin:0 0 16px;flex-wrap:wrap}
+.seasons{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:10px;padding:4px 0 0;margin:0 0 8px}
+.seasons.collapsed .stile.hide{display:none}
+.seasonmore{display:flex;gap:12px;align-items:center;margin:0 0 20px;color:var(--tx3);font-size:12px}
+.stile{display:grid;grid-template-columns:44px 1fr;gap:10px;align-items:center;padding:8px;border-radius:var(--r12);background:var(--raised);border:1px solid var(--line);cursor:pointer;transition:background 140ms var(--ease),border-color 140ms,transform 140ms var(--ease);position:relative}
+.stile:hover{background:var(--ctl-h);transform:translateY(-2px)}
+.stile.on{border-color:var(--accent);background:linear-gradient(180deg,var(--accent-tint),var(--raised))}
+.stile .poster{width:44px;padding:0;border-radius:var(--r6)}
+.stile .t{font-weight:600}
+.stile .s{font-size:12px;color:var(--tx3)}
+.stile .bar{height:3px;border-radius:2px;background:var(--ctl);margin-top:6px;overflow:hidden}
+.stile .bar i{display:block;height:100%;background:var(--accent)}
+.stile .bar i.full{background:var(--ok)}
+.stile.special{background:transparent;border-style:dashed}
+.stile .done{position:absolute;top:6px;right:6px}
+.shead2{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:end;margin-bottom:16px}
+.shead2 h3{margin:0;font-size:22px;line-height:28px}
+/* Tri-state watched toggle */
+.wt{display:inline-flex;align-items:center;gap:10px;height:36px;padding:0 14px 0 6px;border-radius:18px;background:var(--ctl);border:1px solid var(--line);cursor:pointer;transition:background 140ms var(--ease);user-select:none}
+.wt:hover{background:var(--ctl-h)}
+.wt .lbl{font-weight:600}
+.wt .sub{font-size:12px;color:var(--tx3)}
+.ring{width:26px;height:26px;position:relative;flex:0 0 auto}
+.ring>svg{width:26px;height:26px;transform:rotate(-90deg)}
+.ring .ic{position:absolute;inset:0;display:grid;place-items:center}
+.wt.all{background:rgba(70,201,138,.12);border-color:rgba(70,201,138,.35)}
+.wt.all .lbl{color:var(--ok)}
+.states{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}
+.egrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.ecard{border-radius:var(--r8);transition:transform 160ms var(--ease)}
+.ecard:hover{transform:translateY(-3px)}
+.ecard .still .no{position:absolute;left:8px;bottom:8px}
+.ecard .still .w{position:absolute;right:8px;top:8px;width:28px;height:28px;border-radius:50%;background:rgba(11,12,14,.8);display:grid;place-items:center}
+.ecard.watched .still::after{content:"";position:absolute;inset:0;background:rgba(11,12,14,.35)}
+.ecard.watched .still .w{background:var(--ok);z-index:1}
+.ecard.next .still{box-shadow:0 0 0 2px var(--accent)}
+.ecard .still .nx{position:absolute;left:8px;top:8px;z-index:1}
+.ecard .t{font-weight:600;margin-top:8px}
+.ecard .m{font-size:12px;color:var(--tx3)}
+.ecard .o{font-size:12px;color:var(--tx2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px}
+.progress{height:3px;background:rgba(255,255,255,.15);position:absolute;left:0;right:0;bottom:0;z-index:1}
+
+/* ---------- 6. Card hover ---------- */
+.browse{position:relative;padding:20px;border-radius:var(--r8);overflow:hidden;transition:background 600ms var(--ease)}
+.browse.bg-brand{background:
+  radial-gradient(70% 60% at 0% 0%,rgba(255,122,69,.16),transparent 70%),
+  radial-gradient(60% 60% at 100% 100%,rgba(120,70,160,.10),transparent 70%),var(--canvas)}
+.browse.bg-neutral{background:linear-gradient(180deg,#121317,var(--canvas))}
+.browse.bg-current{background:var(--canvas)}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;position:relative;z-index:1}
+.card{position:relative;border-radius:var(--r8);aspect-ratio:2/3;cursor:pointer;
+  transition:transform var(--d-lift,220ms) var(--ease),box-shadow var(--d-lift,220ms) var(--ease)}
+.card .poster{position:absolute;inset:0;padding:10px}
+.card .rc{position:absolute;left:8px;top:8px;z-index:2}
+.card .sc{position:absolute;right:8px;top:8px;z-index:2}
+.card .panel{position:absolute;left:0;right:0;bottom:0;border-radius:0 0 var(--r8) var(--r8);padding:48px 12px 12px;
+  background:linear-gradient(180deg,transparent,rgba(11,12,14,.86) 34%,var(--scrim));
+  opacity:0;transition:opacity var(--d-out,200ms) var(--ease);pointer-events:none}
+.card .panel>*{transform:translateY(10px);opacity:0;transition:transform var(--d-out,200ms) var(--ease),opacity var(--d-out,200ms) var(--ease)}
+.card .panel .pt{font-size:15px;font-weight:600;line-height:20px}
+.card .panel .pm{font-size:12px;color:var(--tx2);margin-top:4px}
+.card .panel .po{font-size:12px;color:var(--tx2);margin-top:6px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.card:hover{transform:translateY(-3px);box-shadow:0 4px 14px var(--shadow)}
+.card:hover .panel{opacity:1;transition-duration:var(--d-in,260ms)}
+.card:hover .panel>*{transform:none;opacity:1;transition-duration:var(--d-in,260ms)}
+.card:hover .panel>*:nth-child(2){transition-delay:30ms}
+.card:hover .panel>*:nth-child(3){transition-delay:60ms}
+.card:hover .panel>*:nth-child(4){transition-delay:90ms}
+/* Current (approx.): instant snap, no exit */
+.browse.motion-current .card{transition:transform 60ms linear}
+.browse.motion-current .card .panel,.browse.motion-current .card .panel>*{transition:none!important}
+.browse.slow{--d-lift:880ms;--d-in:1040ms;--d-out:800ms}
+.opts{display:flex;gap:24px;flex-wrap:wrap;margin:0 0 12px;align-items:center}
+.opts label{display:inline-flex;gap:6px;align-items:center;color:var(--tx2);cursor:pointer}
+.opts .grp{display:flex;gap:12px;align-items:center}
+.opts .grp>span{font-size:11px;text-transform:uppercase;color:var(--tx3);letter-spacing:.05em}
+table.dec{border-collapse:collapse;width:100%;max-width:1200px}
+table.dec td,table.dec th{border-bottom:1px solid var(--hair);padding:8px 10px;text-align:left;vertical-align:top}
+table.dec th{color:var(--tx3);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+</style>
+</head>
+<body>
+<div class="doc">
+<header class="top">
+  <h1>Kinema · UI revision proposal</h1>
+  <a href="#menu">1 Menus</a><a href="#movie">2 Movie detail</a><a href="#streams">3 Streams</a>
+  <a href="#series">4 Series · seasons</a><a href="#hover">6 Card hover</a><a href="#decisions">Open decisions</a>
+  <span class="muted" style="margin-left:auto">Design-only mock · fixture data · Cinema dark tokens</span>
+</header>
+
+<!-- SVG icon sprite -->
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10 2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.8-4M4 4v4h4m-4 5a8 8 0 0 0 14.8 4M20 20v-4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6m0-6-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m20 20-4.5-4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 22s7-7.5 7-13a7 7 0 1 0-14 0c0 5.5 7 13 7 13z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="9" r="2.4" fill="currentColor"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 11v6m0-9.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-chevl" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-chevr" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
+<!-- ===================== 1. MENUS ===================== -->
+<section class="spec" id="menu">
+  <h2>1 · Toolbar overflow menu &amp; action labels</h2>
+  <p class="lead">Fix: the highlight follows the pointer on every row, and no row starts highlighted when the menu is opened with the mouse. Separately, no action label anywhere ends in "…".</p>
+  <div class="menu-demo">
+    <div class="menu-col bad">
+      <h4>Now (bug)</h4>
+      <div class="menu">
+        <div class="mi stuck"><svg width="16" height="16"><use href="#i-file"/></svg>Open local file…</div>
+        <div class="mi">Refresh</div><div class="mi">About Kinema</div><div class="mi">Quit</div>
+      </div>
+      <p class="muted" style="max-width:240px">Row 1 stays highlighted, and hovering other rows doesn't highlight them.</p>
+    </div>
+    <div class="menu-col">
+      <h4>Proposed: try it (hover, or Tab in and use ↑/↓)</h4>
+      <div class="menu" id="demoMenu" tabindex="0">
+        <div class="mi"><svg width="16" height="16"><use href="#i-file"/></svg>Open local file<span class="sc">Ctrl O</span></div>
+        <div class="mi"><svg width="16" height="16"><use href="#i-refresh"/></svg>Refresh<span class="sc">F5</span></div>
+        <div class="msep"></div>
+        <div class="mi"><svg width="16" height="16"><use href="#i-info"/></svg>About Kinema</div>
+        <div class="mi"><svg width="16" height="16"><use href="#i-power"/></svg>Quit<span class="sc">Ctrl Q</span></div>
+      </div>
+    </div>
+    <div class="notes" style="margin:0;flex:1;min-width:320px">
+      <b>Rules</b>
+      <ul>
+        <li>Opened with the pointer: nothing is highlighted. Opened with the keyboard (Enter, Space, ↓): the first row is highlighted.</li>
+        <li>Hover sets the highlighted row, and arrow keys continue from the hovered row. A row is never both "selected" and "hovered", so only one highlight shows at a time.</li>
+        <li>Fix this in the shared <code>Menu</code> widget, not just this one menu. That covers context menus and <code>Select</code> as well.</li>
+        <li>If any row has a leading icon, every row gets one (Quit uses a power glyph). In the new toolbar (below), Open local file and Refresh are also buttons, so the menu is mostly About and Quit, but the menu keeps them for keyboard users.</li>
+        <li><b>Remove the "…" suffix everywhere:</b> Open local file, Settings, Play, Stop, Stop serving, Add, Open Settings, Storage settings, Mark season watched/unwatched. Progress text like "Loading…" or "Searching…" keeps its ellipsis, because it's a status message, not an action label.</li>
+      </ul>
+    </div>
+  </div>
+  <h3 style="margin:28px 0 4px;font-size:15px">1b · Toolbar trailing group: fewer clicks, live transfer status</h3>
+  <p class="muted" style="margin:0;max-width:980px">The header has plenty of spare width, so the frequent overflow actions become direct buttons, and Transfers becomes a live status button instead of a bare icon. Click it to open the existing Transfers popover.</p>
+  <div class="tbspec">
+    <span class="lab">Idle</span><div><div class="tgroup" style="display:inline-flex"><button class="ib" title="Open local file"><svg width="16" height="16"><use href="#i-folder"/></svg></button><button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button><span class="div"></span><span class="xfer" title="Transfers"><svg width="16" height="16"><use href="#i-dl"/></svg><span>No transfers</span></span><span class="div"></span><button class="ib" title="Settings"><svg width="16" height="16"><use href="#i-gear"/></svg></button><button class="ib" title="More"><svg width="16" height="16"><use href="#i-more"/></svg></button></div></div>
+    <span class="lab">Downloading</span><div><div class="tgroup" style="display:inline-flex"><button class="ib" title="Open local file"><svg width="16" height="16"><use href="#i-folder"/></svg></button><button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button><span class="div"></span><span class="xfer" title="Transfers"><svg width="16" height="16"><use href="#i-dl"/></svg><b>12.4 MB/s</b><span>2 active · 1.4 / 4.2 GiB</span><span class="mini"><i></i></span></span><span class="div"></span><button class="ib" title="Settings"><svg width="16" height="16"><use href="#i-gear"/></svg></button><button class="ib" title="More"><svg width="16" height="16"><use href="#i-more"/></svg></button></div></div>
+    <span class="lab">Serving only</span><div><div class="tgroup" style="display:inline-flex"><button class="ib" title="Open local file"><svg width="16" height="16"><use href="#i-folder"/></svg></button><button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button><span class="div"></span><span class="xfer" title="Transfers"><svg width="16" height="16"><use href="#i-dl"/></svg><span>1 serving</span></span><span class="div"></span><button class="ib" title="Settings"><svg width="16" height="16"><use href="#i-gear"/></svg></button><button class="ib" title="More"><svg width="16" height="16"><use href="#i-more"/></svg></button></div></div>
+    <span class="lab">Narrow (&lt; 1100 px)</span><div><div class="tgroup" style="display:inline-flex"><button class="ib" title="Open local file"><svg width="16" height="16"><use href="#i-folder"/></svg></button><button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button><span class="div"></span><span class="xfer" title="Transfers"><svg width="16" height="16"><use href="#i-dl"/></svg><b>12.4 MB/s</b><span class="mini"><i></i></span></span><span class="div"></span><button class="ib" title="Settings"><svg width="16" height="16"><use href="#i-gear"/></svg></button><button class="ib" title="More"><svg width="16" height="16"><use href="#i-more"/></svg></button></div></div>
+  </div>
+  <div class="notes"><b>Rules</b><ul>
+    <li>Order: Open local file · Refresh | Transfers | Settings · More (About, Quit). Every icon button has a tooltip and an accessible name.</li>
+    <li>Speed is derived from successive <code>downloaded_bytes</code> samples (about 1 s window, smoothed) in the coordinator, not in render. The 2 px bar shows the combined progress of active downloads. Under 1100 px the "N active · x / y" text drops off and only the speed and bar stay.</li>
+    <li>Truthful states only: "No transfers", "N serving" (local or debrid streams with no download), or speed plus progress. It never says "Playing".</li>
+  </ul></div>
+</section>
+
+<!-- ===================== 2. MOVIE DETAIL ===================== -->
+<section class="spec" id="movie">
+  <h2>2 · Movie detail: full-width, grouped facts</h2>
+  <p class="lead">The hero uses three columns: poster, story and actions, and an "at a glance" panel with ratings and key facts. Below it, the flat ten-cell fact grid becomes three labelled groups (Crew, Production, Release). Cast and Similar span the full frame, using the same gutters as Discover and Library.</p>
+  <div class="win"><div class="title">Kinema</div>
+  <div class="page">
+    <div class="tb">
+      <div class="glass"><button class="ib"><svg width="16" height="16"><use href="#i-back"/></svg></button></div>
+      <div class="tgroup" style="display:inline-flex"><button class="ib" title="Open local file"><svg width="16" height="16"><use href="#i-folder"/></svg></button><button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button><span class="div"></span><span class="xfer" title="Transfers"><svg width="16" height="16"><use href="#i-dl"/></svg><b>12.4 MB/s</b><span>2 active · 1.4 / 4.2 GiB</span><span class="mini"><i></i></span></span><span class="div"></span><button class="ib" title="Settings"><svg width="16" height="16"><use href="#i-gear"/></svg></button><button class="ib" title="More"><svg width="16" height="16"><use href="#i-more"/></svg></button></div>
+    </div>
+    <div class="hero">
+      <div class="hero-grid">
+        <div class="poster">SPIDER-MAN</div>
+        <div>
+          <h1>Spider-Man: Brand New Day <button class="ib" title="Copy title"><svg width="16" height="16"><use href="#i-copy"/></svg></button></h1>
+          <div class="metaline"><span>2026</span><span class="dot">·</span><span>2 h 25 min</span><span class="dot">·</span><span class="chip muted">PG-13</span><span class="dot">·</span><span>Action, Adventure</span></div>
+          <p class="tagline">A brand new day starts now.</p>
+          <p class="overview">Fighting crime full-time as Spider-Man in a world that doesn't remember him—and the pressure of seeing his old friends move on without him—sparks a change in Peter Parker he may not have the power to control. But that transformation might also be the only thing that can stop a shocking new threat to the city.</p>
+          <div class="actions">
+            <button class="btn primary"><svg width="14" height="14"><use href="#i-play"/></svg>Play</button>
+            <span class="wt none" title="Mark watched"><span class="ring"><svg viewBox="0 0 26 26"><circle cx="13" cy="13" r="11" fill="none" stroke="#646A75" stroke-width="2"/></svg></span><span class="lbl">Not watched</span></span>
+            <button class="btn"><svg width="14" height="14"><use href="#i-book"/></svg>In Library</button>
+            <button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button>
+            <button class="ib" title="Open on IMDb"><svg width="16" height="16"><use href="#i-ext"/></svg></button>
+          </div>
+        </div>
+        <aside class="glance">
+          <div class="ratings">
+            <div class="rt"><div class="v"><span class="star">★</span> 8.0 <small>/10</small></div><div class="src"><span class="imdb">IMDb</span></div></div>
+            <div class="rt"><div class="v"><span class="star">★</span> 8.5 <small>/10</small></div><div class="src"><span class="tmdb">TMDB</span>6,169 votes</div></div>
+          </div>
+          <dl class="kv">
+            <dt>Released</dt><dd>29 Jul 2026</dd>
+            <dt>Status</dt><dd>Released</dd>
+            <dt>Director</dt><dd>Destin Daniel Cretton</dd>
+            <dt>Language</dt><dd>English</dd>
+          </dl>
+        </aside>
+      </div>
+    </div>
+
+    <div class="facts">
+      <div class="fcard"><h4>Crew</h4><dl class="kv">
+        <dt>Director</dt><dd><span class="person"><span class="av">DC</span>Destin Daniel Cretton</span></dd>
+        <dt>Writers</dt><dd>Chris McKenna, Erik Sommers, Stan Lee</dd></dl></div>
+      <div class="fcard"><h4>Production</h4><dl class="kv">
+        <dt>Studios</dt><dd>Marvel Studios, Columbia Pictures, Pascal Pictures, TSG Entertainment</dd>
+        <dt>Countries</dt><dd>United States, Canada, United Kingdom, Germany</dd></dl></div>
+      <div class="fcard"><h4>Release</h4><dl class="kv">
+        <dt>Release date</dt><dd>29 Jul 2026</dd><dt>Runtime</dt><dd>145 min</dd>
+        <dt>Certification</dt><dd>PG-13</dd><dt>Original language</dt><dd>English</dd></dl></div>
+    </div>
+
+    <div class="sechead"><div class="h3">Cast <span class="count">24</span></div></div>
+    <div class="castrow" id="castrow"></div>
+    <div class="showall"><button class="btn">Show all 24</button></div>
+
+    <div class="sechead"><div class="h3">Similar movies</div></div>
+    <div class="pgrid" id="similar1"></div>
+    <div style="text-align:center;margin-top:16px"><button class="btn">Show more</button></div>
+    <div class="foot">Data from TMDB and Cinemeta · IMDb tt1234567 · TMDB 969681</div>
+  </div></div>
+  <div class="notes"><b>Layout rules</b>
+    <ul>
+      <li>One frame for everything: responsive gutters 20–48 px. The 1800 px cap is raised to 2400 px so 1440p and 4K windows use the full width. The right-hand <b>At a glance</b> panel fills the space that's empty today.</li>
+      <li>Hero columns: poster 160–240, story fills the rest (overview max 880), glance panel 280–380. Under 1100 px the glance panel moves below the story as a single row of tiles.</li>
+      <li>The "chips" row becomes a plain metadata line. Certification stays a small chip, and the duplicate rating chip is removed because ratings live in the glance panel.</li>
+      <li>Fact groups use <code>fit_grid</code> with cards of at least 260 px: three across on wide windows, stacked on narrow ones. A group is hidden when it has no data, and nothing shows "—".</li>
+      <li>Cast becomes portrait cards with photos (TMDB profile images, with an initials fallback) in a <b>wrapping grid, with no carousel</b>. It shows up to 2 rows at the current column count, and "Show all N" expands it in place. Similar movies is the full-width poster grid, the same card component as Discover.</li>
+      <li>The watched toggle in the hero is the same component as the season and series toggles in section 4.</li>
+    </ul></div>
+</section>
+
+<!-- ===================== 3. STREAMS ===================== -->
+<section class="spec" id="streams">
+  <h2>3 · Streams: remembered filters, scannable table, debrid cache, detail drawer</h2>
+  <p class="lead">The 400 px sidebar is gone. A compact title header sits on top, then one control bar whose choices persist across titles and episodes. Below that is a column-aligned list, plus a detail drawer for the selected stream.</p>
+  <div class="win"><div class="title">Kinema</div>
+  <div class="page">
+    <div class="tb">
+      <div class="glass"><button class="ib"><svg width="16" height="16"><use href="#i-back"/></svg></button></div>
+      <div class="tgroup" style="display:inline-flex"><button class="ib" title="Open local file"><svg width="16" height="16"><use href="#i-folder"/></svg></button><button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button><span class="div"></span><span class="xfer" title="Transfers"><svg width="16" height="16"><use href="#i-dl"/></svg><b>12.4 MB/s</b><span>2 active · 1.4 / 4.2 GiB</span><span class="mini"><i></i></span></span><span class="div"></span><button class="ib" title="Settings"><svg width="16" height="16"><use href="#i-gear"/></svg></button><button class="ib" title="More"><svg width="16" height="16"><use href="#i-more"/></svg></button></div>
+    </div>
+    <div class="shead">
+      <div class="poster"></div>
+      <div><h2>Spider-Man: Brand New Day</h2><div class="sec">2026 · 145 min · Action, Adventure <span class="muted">· for series: <b style="color:var(--tx2)">S01E09 · Red John's Friends</b></span></div></div>
+      <div class="sec">Showing <b style="color:var(--tx)">147</b> of 304</div>
+    </div>
+    <div class="ctlbar">
+      <div class="seg"><button class="on">Torrentio <span class="n">304</span></button><button>Peerflix <span class="n">41</span></button></div>
+      <div class="vsep"></div>
+      <div class="seg"><button>All</button><button>4K <span class="n">89</span></button><button class="on">1080p <span class="n">147</span></button><button>720p <span class="n">25</span></button><button>Other <span class="n">43</span></button></div>
+      <div class="vsep"></div>
+      <div class="filter"><svg width="14" height="14"><use href="#i-search"/></svg>Filter releases (e.g. "HEVC", "Atmos", "ITA")</div>
+      <span class="sel">Sort: Seeders <svg width="14" height="14"><use href="#i-down"/></svg></span>
+      <span class="sw"><i></i>Cached only</span>
+      <button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button>
+      <span class="remember"><svg width="12" height="12"><use href="#i-pin"/></svg>Provider, quality, sort and cached-only are remembered</span>
+    </div>
+    <div class="sbody">
+      <div class="slist">
+        <div class="shdr"><span>Quality</span><span>Release</span><span style="text-align:right">Size</span><span style="text-align:right">Seeders</span><span style="text-align:right">Debrid cache</span></div>
+        <div id="srows"></div>
+      </div>
+      <aside class="drawer">
+        <div class="tags" style="margin:0"><span class="chip">1080p</span><span class="chip">HDR10</span><span class="tag">HEVC</span><span class="tag">DDP 5.1 Atmos</span></div>
+        <div class="rel">Spider-Man.Brand.New.Day.2026.1080p.WEB-DL.HDR10.DDP5.1.Atmos.H.265-FLUX</div>
+        <dl class="kv"><dt>Size</dt><dd>7.4 GiB</dd><dt>Seeders</dt><dd class="seed">812</dd><dt>Source</dt><dd>Torrentio · TorrentGalaxy</dd><dt>Languages</dt><dd>English, Italian</dd><dt>Subtitles</dt><dd>EN, IT, ES (embedded)</dd></dl>
+        <div class="dsec"><h5>Debrid cache</h5>
+          <div class="svcrow"><span>Real-Debrid</span><span class="cb yes"><svg width="10" height="10"><use href="#i-bolt"/></svg>Cached · instant</span></div>
+          <div class="svcrow"><span>AllDebrid</span><span class="cb no">Not cached</span></div>
+          <div class="muted" style="font-size:12px">Only services with a saved token are checked.</div>
+        </div>
+        <div class="dsec"><h5>Files</h5><div class="rel" style="margin:0">Spider-Man.Brand.New.Day.2026.1080p….mkv · 7.3 GiB</div></div>
+        <div class="playwith"><span class="sel">Real-Debrid <svg width="14" height="14"><use href="#i-down"/></svg></span><button class="btn primary"><svg width="14" height="14"><use href="#i-play"/></svg>Play</button></div>
+      </aside>
+    </div>
+  </div></div>
+  <div class="notes"><b>Behaviour</b>
+    <ul>
+      <li><b>Remembered (global, in settings):</b> provider, quality bucket, sort and cached-only. Changing any of them saves it immediately and applies it to the next title or episode. The free-text filter is per visit and isn't saved. If the saved quality bucket has no streams for a title, the page shows <i>All</i> for that visit only, with a muted "No 1080p streams · showing all" note, and the saved choice stays as it was.</li>
+      <li><b>Columns:</b> quality badges (resolution, plus HDR/DV) · release name in mono (2 lines) with parsed tags (codec, audio, languages, source tracker) · size · seeders · cache. The flag-emoji soup is parsed into language tags.</li>
+      <li><b>Debrid cache column</b> only appears when at least one of Real-Debrid or AllDebrid has a stored token, and it only shows columns for services that have one. Cells show <span class="cb yes">⚡ RD</span>, <span class="cb no">Not cached</span>, <span class="cb chk">Checking</span> (with a spinner) or <span class="cb unk">Unknown</span> when the check failed. A failed check is never shown as "not cached". The cached-only switch is hidden when no token exists. <span class="q">See open decision D1: there's an API constraint.</span></li>
+      <li><b>Drawer</b> (≥ 1280 px): single-click selects a row and fills the drawer, and double-click or Enter plays. Below 1280 px there's no drawer, and clicking opens the existing Play sheet. "Play with" defaults to a debrid service that has the stream cached.</li>
+    </ul></div>
+</section>
+
+<!-- ===================== 4/5. SERIES ===================== -->
+<section class="spec" id="series">
+  <h2>4 + 5 · Series detail: same layout, season strip, tri-state watched, Similar series</h2>
+  <p class="lead">The series page reuses the movie layout and adds a Seasons and Episodes section. A season strip of tiles replaces the number button group; each tile shows its progress. A single tri-state toggle replaces the two "Mark season…" buttons.</p>
+  <div class="win"><div class="title">Kinema</div>
+  <div class="page">
+    <div class="tb">
+      <div class="glass"><button class="ib"><svg width="16" height="16"><use href="#i-back"/></svg></button></div>
+      <div class="tgroup" style="display:inline-flex"><button class="ib" title="Open local file"><svg width="16" height="16"><use href="#i-folder"/></svg></button><button class="ib" title="Refresh"><svg width="16" height="16"><use href="#i-refresh"/></svg></button><span class="div"></span><span class="xfer" title="Transfers"><svg width="16" height="16"><use href="#i-dl"/></svg><b>12.4 MB/s</b><span>2 active · 1.4 / 4.2 GiB</span><span class="mini"><i></i></span></span><span class="div"></span><button class="ib" title="Settings"><svg width="16" height="16"><use href="#i-gear"/></svg></button><button class="ib" title="More"><svg width="16" height="16"><use href="#i-more"/></svg></button></div>
+    </div>
+    <div class="hero series">
+      <div class="hero-grid">
+        <div class="poster p2">THE MENTALIST</div>
+        <div>
+          <h1>The Mentalist <button class="ib"><svg width="16" height="16"><use href="#i-copy"/></svg></button></h1>
+          <div class="metaline"><span class="chip">SERIES</span><span>2008–2015</span><span class="dot">·</span><span>7 seasons · 153 episodes</span><span class="dot">·</span><span class="chip muted">TV-14</span><span class="dot">·</span><span>Crime, Drama, Mystery</span></div>
+          <p class="tagline">Let the mind games begin.</p>
+          <p class="overview">Patrick Jane, a former celebrity psychic medium, uses his razor sharp skills of observation and expertise at "reading" people to solve serious crimes with the California Bureau of Investigation.</p>
+          <div class="actions">
+            <button class="btn primary"><svg width="14" height="14"><use href="#i-play"/></svg>Continue · S6 E9</button>
+            <span class="wt part" data-wt><span class="ring"></span><span><span class="lbl">Watching</span> <span class="sub">98 of 153</span></span></span>
+            <button class="btn"><svg width="14" height="14"><use href="#i-book"/></svg>In Library</button>
+            <button class="ib"><svg width="16" height="16"><use href="#i-refresh"/></svg></button>
+            <button class="ib"><svg width="16" height="16"><use href="#i-ext"/></svg></button>
+          </div>
+        </div>
+        <aside class="glance">
+          <div class="ratings">
+            <div class="rt"><div class="v"><span class="star">★</span> 8.2 <small>/10</small></div><div class="src"><span class="imdb">IMDb</span></div></div>
+            <div class="rt"><div class="v"><span class="star">★</span> 8.4 <small>/10</small></div><div class="src"><span class="tmdb">TMDB</span>4,889 votes</div></div>
+          </div>
+          <dl class="kv"><dt>Status</dt><dd>Ended</dd><dt>Network</dt><dd>CBS</dd><dt>First aired</dt><dd>23 Sep 2008</dd><dt>Last aired</dt><dd>18 Feb 2015</dd></dl>
+        </aside>
+      </div>
+    </div>
+
+    <div class="h3" style="font-size:18px">Episodes</div>
+    <div class="seasons collapsed" id="seasons"></div>
+    <div class="seasonmore"><span class="link" id="seasonToggleAll">Show all 14 seasons</span><span>Collapsed: fully watched Seasons 1–4 are folded away so the next-up season starts the first row (max 2 rows).</span></div>
+
+    <div class="shead2">
+      <div><h3>Season 6</h3><div class="sec">2013–2014 · 22 episodes · <span class="muted">The Red John hunt reaches its endgame as Jane narrows the list of suspects.</span></div></div>
+      <span class="wt part" id="seasonToggle" data-wt><span class="ring"></span><span><span class="lbl">Partly watched</span> <span class="sub">8 of 22</span></span></span>
+    </div>
+    <div class="egrid" id="episodes"></div>
+
+    <div class="h3" style="font-size:18px;margin-top:36px">About the series</div>
+    <div class="facts">
+      <div class="fcard"><h4>Crew</h4><dl class="kv"><dt>Created by</dt><dd><span class="person"><span class="av">BH</span>Bruno Heller</span></dd><dt>Writers</dt><dd>Bruno Heller</dd></dl></div>
+      <div class="fcard"><h4>Production</h4><dl class="kv"><dt>Studios</dt><dd>Warner Bros. Television, Primrose Hill Productions</dd><dt>Network</dt><dd>CBS</dd><dt>Country</dt><dd>United States</dd></dl></div>
+      <div class="fcard"><h4>Broadcast</h4><dl class="kv"><dt>Seasons</dt><dd>7 · 153 episodes</dd><dt>Episode length</dt><dd>43 min</dd><dt>Language</dt><dd>English</dd></dl></div>
+    </div>
+
+    <div class="sechead"><div class="h3">Cast <span class="count">32</span></div></div>
+    <div class="castrow" id="castrow2"></div>
+    <div class="showall"><button class="btn">Show all 32</button></div>
+
+    <div class="sechead"><div class="h3">Similar series</div><span class="link">Show more</span></div>
+    <div class="pgrid" id="similar2"></div>
+    <div class="foot">Data from TMDB and Cinemeta · IMDb tt1196946 · TMDB 5920</div>
+  </div></div>
+
+  <div class="notes"><b>Tri-state watched toggle</b>: one component used for the series (hero), the season header and the movie hero. Click a toggle below to cycle it.
+    <div class="states">
+      <span class="wt none" data-wt><span class="ring"></span><span><span class="lbl">Not watched</span> <span class="sub">0 of 23</span></span></span>
+      <span class="wt part" data-wt><span class="ring"></span><span><span class="lbl">Partly watched</span> <span class="sub">8 of 23</span></span></span>
+      <span class="wt all" data-wt><span class="ring"></span><span><span class="lbl">Watched</span> <span class="sub">23 of 23</span></span></span>
+    </div>
+    <ul>
+      <li>The ring shows the watched share (none, partial arc, or full ring with a check), and the label always spells out the state in words for accessibility. Exposed as a checkbox with <code>mixed</code> state.</li>
+      <li>Click on <i>none</i> or <i>partial</i> marks everything watched. Click on <i>all</i> marks everything unwatched. Changes apply immediately, with no confirmation and no Undo, because clicking again reverses them. The context menu keeps the explicit "Mark season watched" and "Mark season unwatched" items, without "…".</li>
+      <li>Episode cards keep their per-episode circle (the part you liked). Watched stills dim slightly and the circle turns green. The first unwatched episode gets an accent ring and a "Next up" chip, and the hero's primary button becomes <b>Continue · S6 E9</b> (from the Library's manual tracking only, never inferred from playback).</li>
+      <li>With no tracking backend, or when status is unavailable, toggles render disabled with a reason tooltip, replacing the current loose "Watched status unavailable" line.</li>
+    </ul>
+    <b>Page order (series)</b>
+    <ul><li>Hero, then <b>Episodes</b> (seasons and episode grid), then About the series (Crew, Production, Broadcast), then Cast, then Similar series. Episodes come first because that's what you open a series page for. Movies keep: hero, facts, cast, similar.</li></ul>
+    <b>Season picker (wrapping grid, no carousel)</b>
+    <ul>
+      <li>Tiles wrap like every other grid (<code>fit_grid</code>, at least 176 px). Each tile has a season poster thumbnail, the name, "22 ep · 2013", a 3 px progress bar (accent while partial, green with a check when complete) and a "Next up" marker. The selected tile has an accent border and tint. Specials come last, with a dashed outline.</li>
+      <li><b>Smart default:</b> the opening season is the one holding the next unwatched episode (the first unwatched episode after the last watched one). If nothing is tracked, it's the first regular season. A season you pick explicitly is remembered per series and wins until you leave.</li>
+      <li><b>Many seasons:</b> when the tiles need more than 2 rows, the grid collapses to 2 rows that contain the next-up season, folding away fully-watched seasons before it. "Show all N seasons" expands in place. No horizontal scrolling is needed, so there's no GPUI carousel risk.</li>
+      <li>The next-up episode card gets an accent ring and a "Next up" chip, and it's scrolled into view when you arrive via "Continue". Keyboard: arrows move between tiles, and Enter selects.</li>
+      <li>The season header shows the season overview, when TMDB has one, beside the toggle.</li>
+      <li><b>Similar series</b> is new. It uses TMDB recommendations for TV, with the same grid and Show more as Similar movies, and the section is hidden when the provider has nothing.</li>
+    </ul></div>
+</section>
+
+<!-- ===================== 6. HOVER ===================== -->
+<section class="spec" id="hover">
+  <h2>6 · Discover / Library: stable backdrop, smoother card hover</h2>
+  <p class="lead">The backdrop stops recolouring on every hover. The card overlay eases in, staggers its content, and has a real exit animation. Use the controls to compare options.</p>
+  <div class="opts">
+    <div class="grp"><span>Backdrop</span>
+      <label><input type="radio" name="bg" value="bg-brand" checked> A · Fixed brand gradient (recommended)</label>
+      <label><input type="radio" name="bg" value="bg-neutral"> B · Neutral, no colour</label>
+      <label><input type="radio" name="bg" value="bg-current"> Now · follows hovered card</label></div>
+    <div class="grp"><span>Motion</span>
+      <label><input type="radio" name="mo" value="new" checked> Proposed</label>
+      <label><input type="radio" name="mo" value="motion-current"> Now (approx.)</label>
+      <label><input type="checkbox" id="slow"> Slow motion ×4</label></div>
+  </div>
+  <div class="browse bg-brand" id="browse"><div class="cgrid" id="cgrid"></div></div>
+  <div class="notes"><b>Motion spec</b>
+    <ul>
+      <li><b>Enter:</b> the card lifts 3 px and gains a shadow over 220 ms (ease-out). The scrim fades in over 260 ms. Title, facts and synopsis rise 10 px and fade in, staggered by 30 ms each.</li>
+      <li><b>Exit:</b> the same properties reverse over 200 ms, with no stagger. Exit is interruptible: re-entering mid-exit continues from the current progress, so nothing snaps or flickers (progress is stored per card, not restarted with <code>with_animation</code>).</li>
+      <li>Moving quickly across the grid gets a 60 ms hover-intent delay before the overlay starts. The lift still starts immediately, which keeps sweeps from strobing.</li>
+      <li>Reduced motion: every duration is 0.</li>
+      <li><b>Backdrop A:</b> a static brand wash (amber at the top-left, faint violet at the bottom-right) on the canvas, identical in Discover and Library and never tied to artwork. Detail pages keep their per-title artwork hero.</li>
+    </ul></div>
+</section>
+
+<!-- ===================== DECISIONS ===================== -->
+<section class="spec" id="decisions">
+  <h2>Open decisions</h2>
+  <table class="dec">
+    <tr><th>#</th><th>Question</th><th>Recommendation</th></tr>
+    <tr><td>D1</td><td><b>Debrid cache checks (researched 2026-10-28).</b><br>
+<b>Real-Debrid:</b> <code>instantAvailability</code> now answers error 37 "Disabled endpoint", and there's no bulk replacement. A per-torrent probe is addMagnet → selectFiles → info → delete, about 4 calls per torrent against a 250 requests/min limit, and it writes to your account. Side-effect-free, in one call: <code>GET /torrents</code> (up to 5000) tells you which hashes are already <i>in your account</i>.<br>
+<b>AllDebrid:</b> <code>POST /v4/magnet/upload</code> accepts <code>magnets[]</code> in one request and returns <code>ready: true/false</code> per magnet, so it's a real bulk check. But it adds every magnet to your account. Uncached ones start downloading and count toward the 30-active limit, and each one must then be deleted individually. Side-effect-free: <code>/v4.1/magnet/status</code> lists your account's magnets in one call.</td>
+<td>Pending your choice; options are in the chat summary.</td></tr>
+    <tr><td>D2</td><td>Stream preference scope</td><td><b>Decided:</b> shared across movies and series.</td></tr>
+    <tr><td>D3</td><td>Discover/Library backdrop</td><td><b>Decided:</b> A, the fixed brand gradient.</td></tr>
+    <tr><td>D4</td><td>Bulk watched changes</td><td><b>Decided:</b> apply immediately, with no confirmation and no Undo.</td></tr>
+    <tr><td>D5</td><td>"Continue · SxEy" primary button on series (based on manual Library tracking)</td><td>Yes, with a fallback to "Episodes" when nothing is tracked</td></tr>
+  </table>
+</section>
+</div>
+
+<script>
+// ---------- menu keyboard demo ----------
+(function(){
+  const m=document.getElementById('demoMenu');const items=[...m.querySelectorAll('.mi')];let k=-1;
+  const set=i=>{items.forEach(x=>x.classList.remove('kb'));k=i;if(i>=0)items[i].classList.add('kb')};
+  m.addEventListener('focus',()=>{if(m.matches(':focus-visible'))set(0)});
+  m.addEventListener('blur',()=>set(-1));
+  items.forEach((it,i)=>it.addEventListener('mouseenter',()=>set(i)));
+  m.addEventListener('mouseleave',()=>set(-1));
+  m.addEventListener('keydown',e=>{if(e.key==='ArrowDown'){set((k+1)%items.length);e.preventDefault()}if(e.key==='ArrowUp'){set((k-1+items.length)%items.length);e.preventDefault()}});
+})();
+// ---------- fixtures ----------
+const pc=['','p2','p3','p4','p5','p6','p7'];
+const titles=['Batman vs Robin','The Man with the Iron Fists 2','Independence Day: Resurgence','Eye of the Storm','Moonlight Superman','Dragon Superman','Red Zone','Toxic Avenger','Lord of the Rings','Night Patrol','Harbor Lights','Quiet Orbit','North Harbor','Signal Lost'];
+function posters(id,n,off){const g=document.getElementById(id);for(let i=0;i<n;i++){const d=document.createElement('div');d.className='poster '+pc[(i+off)%7];d.textContent=titles[(i+off)%titles.length];g.appendChild(d)}}
+posters('similar1',16,0);posters('similar2',16,5);
+const cast=[['Tom Holland','Peter Parker'],['Zendaya','MJ'],['Sadie Sink','Jean Grey'],['Jon Bernthal','Frank Castle'],['Mark Ruffalo','Bruce Banner'],['Florence Pugh','Yelena Belova'],['Jacob Batalon','Ned Leeds'],['Marisa Tomei','May Parker'],['Tramell Tillman','Bill Metzger'],['Liza Colón-Zayas','Jean DeWolff'],['Michael Mando','Mac Gargan'],['Tony Revolori','Flash Thompson'],['Angourie Rice','Betty Brant'],['J.B. Smoove','Julius Dell']];
+const cast2=[['Simon Baker','Patrick Jane'],['Robin Tunney','Teresa Lisbon'],['Tim Kang','Kimball Cho'],['Owain Yeoman','Wayne Rigsby'],['Amanda Righetti','Grace Van Pelt'],['Joe Adler','Jason Wylie'],['Aunjanue Ellis','Madeleine Hightower'],['Michael Gaston','Gale Bertram'],['Rockmond Dunbar','Dennis Abbott'],['Gregory Itzin','Virgil Minelli'],['Emily Swallow','Kim Fischer'],['Pedro Pascal','Marcus Pike'],['Xander Berkeley','Red John?'],['Malcolm McDowell','Bret Stiles']];
+function castRow(id,list){const g=document.getElementById(id);list.forEach(([n,r])=>{const ini=n.split(' ').map(x=>x[0]).join('').slice(0,2);g.insertAdjacentHTML('beforeend',`<div class="cast"><div class="ph">${ini}</div><div class="n">${n}</div><div class="r">${r}</div></div>`)})}
+castRow('castrow',cast);castRow('castrow2',cast2);
+// streams
+const S=[
+ ['1080p','HDR10','Spider-Man.Brand.New.Day.2026.1080p.WEB-DL.HDR10.DDP5.1.Atmos.H.265-FLUX',['HEVC','Atmos 5.1','EN','IT','TorrentGalaxy'],'7.4 GiB',812,['yes','no']],
+ ['1080p','','Spider-Man.Brand.New.Day.2026.1080p.WEBRip.x264.AAC5.1-YTS',['x264','AAC 5.1','EN','YTS'],'2.1 GiB',1410,['yes','yes']],
+ ['1080p','DV','Spider-Man Brand New Day 2026 1080p iT WEB-DL DDP5.1 Atmos DV HDR H265-BYNDR',['HEVC','Atmos 5.1','EN','FR','DE','ES','+14','1337x'],'6.9 GiB',420,['chk','chk']],
+ ['1080p','','Человек-паук: Новый день / Spider-Man: Brand New Day (2026) WEB-DL 1080p | Dub',['x264','RU','EN','Rutor'],'4.6 GiB',376,['no','no']],
+ ['1080p','HDR','Spider-Man.Brand.New.Day.2026.MULTi.TRUEFRENCH.1080p.HDR.WEB-DL.H265-Slay3R',['HEVC','FR','EN','Torrent9'],'5.3 GiB',255,['unk','no']],
+ ['1080p','','Homem-Aranha - Um Novo Dia 2026 WEB-DL 1080p x265 DUAL 5.1',['HEVC','PT','EN','BluDV'],'3.0 GiB',171,['no','yes']],
+];
+const cbl={yes:'<span class="cb yes"><svg width="10" height="10"><use href="#i-bolt"/></svg>RD</span>',no:'<span class="cb no">Not cached</span>',chk:'<span class="cb chk">Checking</span>',unk:'<span class="cb unk">Unknown</span>'};
+const cbl2={yes:'<span class="cb yes"><svg width="10" height="10"><use href="#i-bolt"/></svg>AD</span>',no:'',chk:'<span class="cb chk">Checking</span>',unk:'<span class="cb unk">Unknown</span>'};
+const sr=document.getElementById('srows');
+S.forEach((s,i)=>{sr.insertAdjacentHTML('beforeend',`<div class="srow ${i==0?'on':''}"><div class="qcol"><span class="chip">${s[0]}</span>${s[1]?`<span class="chip">${s[1]}</span>`:''}</div><div><div class="rel">${s[2]}</div><div class="tags">${s[3].map(t=>`<span class="tag">${t}</span>`).join('')}</div></div><div class="num">${s[4]}</div><div class="num seed">${s[5]}</div><div class="cache">${cbl[s[6][0]]}${cbl2[s[6][1]]}</div></div>`)});
+sr.querySelectorAll('.srow').forEach(r=>r.addEventListener('click',()=>{sr.querySelectorAll('.srow').forEach(x=>x.classList.remove('on'));r.classList.add('on')}));
+// seasons: 14 seasons, 1-5 fully watched, 6 partly (next-up), rest unwatched
+const sg=document.getElementById('seasons');
+const seasons=[];for(let n=1;n<=14;n++){const e=[23,23,24,24,22,22,13,22,22,24,22,22,20,22][n-1];seasons.push([n,e,2007+n,n<=5?e:n==6?8:0])}
+seasons.forEach(([n,e,y,w],i)=>{const pct=Math.round(w/e*100);const full=w==e;
+ sg.insertAdjacentHTML('beforeend',`<div class="stile ${n==6?'on':''} ${n<5?'hide':''}"><div class="poster ${pc[(i+1)%7]}"></div><div><div class="t">Season ${n}</div><div class="s">${e} ep · ${y}${n==6?' · <span style="color:var(--accent-tx)">Next up</span>':''}</div><div class="bar"><i class="${full?'full':''}" style="width:${pct}%"></i></div></div>${full?'<span class="chip ok done"><svg width="10" height="10"><use href="#i-check"/></svg></span>':''}</div>`)});
+sg.insertAdjacentHTML('beforeend',`<div class="stile special"><div class="poster p7"></div><div><div class="t">Specials</div><div class="s">4 extras</div></div></div>`);
+sg.querySelectorAll('.stile').forEach(t=>t.addEventListener('click',()=>{sg.querySelectorAll('.stile').forEach(x=>x.classList.remove('on'));t.classList.add('on')}));
+document.getElementById('seasonToggleAll').addEventListener('click',e=>{const c=sg.classList.toggle('collapsed');e.target.textContent=c?'Show all 14 seasons':'Show fewer'});
+// episodes
+const eps=['Pilot','Red Hair and Silver Tape','Red Tide','Ladies in Red','Redwood','Red Handed','Seeing Red','The Thin Red Line','Flame Red','Red Brick and Ivy','Red John\'s Friends','Red Rum'];
+const eg=document.getElementById('episodes');
+eps.forEach((t,i)=>{const w=i<8,nx=i==8;eg.insertAdjacentHTML('beforeend',`<div class="ecard ${w?'watched':''} ${nx?'next':''}"><div class="still" style="background:linear-gradient(135deg,hsl(${(i*37)%360} 18% 30%),#1b1d22)">${nx?'<span class="chip q4k nx">Next up</span>':''}<span class="chip no">E${String(i+1).padStart(2,'0')}</span><span class="w">${w?'<svg width="14" height="14" style="color:#0b0c0e"><use href="#i-check"/></svg>':'<svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="#B3B8C1" stroke-width="2"/></svg>'}</span></div><div class="t">${t}</div><div class="m">${42+i%3} min · 2008-${String(9+Math.floor(i/4)).padStart(2,'0')}-${String(1+(i*7)%28).padStart(2,'0')}</div><div class="o">CBI consultant Patrick Jane and Senior Agent Teresa Lisbon investigate a case that tests Jane's talent for reading people.</div></div>`)});
+// tri-state toggles
+function ring(state,frac){const C=2*Math.PI*11;const off=C*(1-frac);
+ const col=state==='all'?'#46C98A':'#FF7A45';
+ return `<svg viewBox="0 0 26 26"><circle cx="13" cy="13" r="11" fill="none" stroke="#373B43" stroke-width="2.5"/>${frac>0?`<circle cx="13" cy="13" r="11" fill="none" stroke="${col}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}" style="transition:stroke-dashoffset 280ms cubic-bezier(.22,.8,.26,1)"/>`:''}</svg><span class="ic">${state==='all'?'<svg width="12" height="12" style="color:#46C98A"><use href="#i-check"/></svg>':''}</span>`}
+function paint(el){const st=el.classList.contains('all')?'all':el.classList.contains('part')?'part':'none';const sub=el.querySelector('.sub');let tot=23,cur=8;
+ if(sub){const m=sub.textContent.match(/(\d+) of (\d+)/);if(m){cur=+m[1];tot=+m[2]}}
+ const frac=st==='all'?1:st==='none'?0:Math.max(cur/tot,.08);el.querySelector('.ring').innerHTML=ring(st,frac)}
+document.querySelectorAll('[data-wt]').forEach(el=>{el.dataset.orig=el.querySelector('.sub').textContent;paint(el);el.addEventListener('click',()=>{
+ const sub=el.querySelector('.sub'),lbl=el.querySelector('.lbl');const m=el.dataset.orig.match(/(\d+) of (\d+)/);const tot=+m[2];
+ if(el.classList.contains('all')){el.className='wt none';lbl.textContent='Not watched';sub.textContent=`0 of ${tot}`}
+ else if(el.classList.contains('none')&&+m[1]>0&&!el.dataset.cycled){el.className='wt part';lbl.textContent='Partly watched';sub.textContent=el.dataset.orig;el.dataset.cycled=1}
+ else{el.className='wt all';lbl.textContent='Watched';sub.textContent=`${tot} of ${tot}`;delete el.dataset.cycled}
+ paint(el)})});
+// hover grid
+const cg=document.getElementById('cgrid');
+const gs=['Drama · Mystery','Action · Sci-Fi','Comedy','Thriller · Crime','Animation · Family','Horror'];
+for(let i=0;i<14;i++){cg.insertAdjacentHTML('beforeend',`<div class="card"><div class="poster ${pc[i%7]}">${titles[i]}</div><span class="chip rc"><span class="star">★</span> ${(6.5+(i*0.37)%2.5).toFixed(1)}</span>${i%3==1?'<span class="chip sc">SERIES</span>':''}<div class="panel"><div class="pt">${titles[i]}</div><div class="pm">${2010+i} · ${i%3==1?'4 seasons':(95+i*3)+' min'} · <span class="star">★</span> ${(6.5+(i*0.37)%2.5).toFixed(1)}</div><div class="pm">${gs[i%6]}</div><div class="po">A visitor uncovers a secret that the harbor town has kept for decades, and nobody wants it found.</div></div></div>`)}
+const br=document.getElementById('browse');
+const tints=['rgba(140,30,30,.35)','rgba(40,90,120,.35)','rgba(120,90,30,.35)','rgba(70,40,120,.35)','rgba(40,110,80,.35)','rgba(130,50,90,.35)','rgba(80,85,95,.35)'];
+cg.querySelectorAll('.card').forEach((c,i)=>c.addEventListener('mouseenter',()=>{if(br.classList.contains('bg-current'))br.style.background=`radial-gradient(90% 90% at 50% 0%,${tints[i%7]},var(--canvas))`}));
+document.querySelectorAll('input[name=bg]').forEach(r=>r.addEventListener('change',()=>{br.style.background='';br.classList.remove('bg-brand','bg-neutral','bg-current');br.classList.add(r.value)}));
+document.querySelectorAll('input[name=mo]').forEach(r=>r.addEventListener('change',()=>{br.classList.toggle('motion-current',r.value==='motion-current')}));
+document.getElementById('slow').addEventListener('change',e=>br.classList.toggle('slow',e.target.checked));
+</script>
+</body>
+</html>

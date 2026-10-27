@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com> -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Pixel-hinted 16px app icon; the generator uses it only for 16px rasters. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <rect x="1" y="1" width="14" height="14" rx="3" fill="#FF7A45"/>
+  <path fill="#ffffff" d="M4 3L7 3L7 13L4 13ZM7 7L10 4L12.5 4L10.5 6L13 8L10.5 10L12.5 13L10 13L7 9Z"/>
+</svg>

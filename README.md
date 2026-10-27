@@ -1,320 +1,73 @@
-![Kinema — Cinema in motion. Native KDE Plasma 6, open source, Apache-2.0.](docs/banner.webp)
-
 # Kinema
 
-[![Latest release](https://img.shields.io/github/v/release/ThilinaTLM/kinema?sort=semver&display_name=tag&label=release&color=8b5cf6)](https://github.com/ThilinaTLM/kinema/releases/latest)
-[![CI](https://github.com/ThilinaTLM/kinema/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ThilinaTLM/kinema/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/github/license/ThilinaTLM/kinema?color=blue)](LICENSE)
-[![KDE Plasma 6](https://img.shields.io/badge/KDE-Plasma%206-1d99f3?logo=kde&logoColor=white)](https://kde.org/plasma-desktop/)
+A pre-1.0 Rust desktop application using direct GPUI (`gpui-pre =0.3.9`) and
+`gpui_platform`, targeting Windows, macOS, and Linux. The Rust workspace is the
+sole implementation; it has no Qt/KDE application dependencies.
+V3 is the sole/default UI, with in-house widgets and no UI version switch. **The first bounded catalog
+increment has expanded into integrated MVP source flows; full MVP validation
+is not complete.**
 
-**Cinema in motion.** A native KDE Plasma 6 desktop app for discovering
-movies and TV series, finding stream sources through public
-Stremio-compatible indexers ([Torrentio](https://torrentio.strem.fun/),
-[Peerflix](https://github.com/mafintosh/peerflix-server)), and — with a
-[Real-Debrid](https://real-debrid.com/) or
-[AllDebrid](https://alldebrid.com/) subscription — streaming the result
-straight into the built-in **mpv** player or handing it off to external
-**mpv** / **VLC**.
+The planned MVP combines a local-first movie/series catalog, Torrentio/Peerflix
+source discovery, debrid acquisition, managed local media storage, and a local
+server for default GPU-surface Embedded MPV or explicit external VLC/mpv.
+Personal tracking and a torrent engine are outside this playback increment. See the [design docs](docs/README.md) for scope and open decisions.
 
-## Screenshots
+## Current increment
 
-![Discover — trending, popular series, and now-playing rails](docs/screenshots/discover.webp)
+Source wiring now covers Cinemeta/TMDB browse, search, details and episodes;
+Torrentio/Peerflix sources; Real-Debrid/AllDebrid adapters; settings with secure
+credentials; managed media and loopback serving to Embedded MPV or external players.
+Settings control metadata provider priority and background enrichment; cached results
+do not refresh automatically by TTL. TMDB requires a user bearer token, and titles
+need IMDb mapping before source lookup.
 
-| | |
-|:---:|:---:|
-| ![Browse with filters](docs/screenshots/browse.webp) | ![Series detail with seasons and episodes](docs/screenshots/series-detail.webp) |
-| **Browse** — filter by kind, genre, and sort order | **Series detail** — backdrop, metadata, per-season episode list |
-| ![Up Next — ready to watch and airing soon](docs/screenshots/up-next.webp) | ![Library with watched state](docs/screenshots/library.webp) |
-| **Up Next** — ready to watch, airing soon, recently added | **Library** — watched-state and next-episode tracking |
-| ![Stream list with quality, source, and seeder chips](docs/screenshots/streams.webp) | ![Downloads with debrid status chips](docs/screenshots/downloads.webp) |
-| **Streams** — sorted by quality with source / codec / seeder chips | **Downloads** — debrid-backed transfers with per-row status |
+Start with the [quickstart and setup](docs/development.md#quickstart-and-setup).
+Local-server/mpv smoke evidence does **not** establish live paid-provider playback,
+complete GUI acceptance or cross-platform runtime support. Automated workspace
+checks are separate from provider/UI acceptance and native runtime qualification.
+See the [validation matrix](docs/development.md#validation-status-and-limits) and
+[architecture](docs/architecture.md) for current limits. No full-MVP completion
+claim is made.
 
-![Embedded mpv player with title chrome, codec chips, transport row, and live subtitles](docs/screenshots/player.webp)
+## Development
 
-*Embedded **mpv** player — episode-aware chrome, live OpenSubtitles overlay, transport / speed / fullscreen controls.*
+Install Rust **1.97.1** through rustup and the
+[platform prerequisites](docs/development.md). From the repository root:
 
-## Features
-
-- **Discover** powered by TMDB, with a Trending / Popular / Top-rated
-  home and a "More like this" rail on every detail page
-- **Continue Watching** — resume movies and episodes at the exact
-  timestamp, even across different releases of the same title
-- **Library** for movies and series, with per-episode watched-state
-  tracking
-- Search by title or IMDB id; series view with seasons, episodes, and
-  per-episode sources
-- Stream discovery via **Torrentio** or **Peerflix** (switchable in
-  Settings → Indexers), with a universal client-side blocklist for
-  resolutions / variants / keywords
-- **Real-Debrid** and **AllDebrid** integration with cached-only
-  filtering, direct stream URLs, and download manager
-- **OpenSubtitles** integration for subtitle search and selection
-- Built-in **mpv** player (Qt Quick chrome on top of `mpvqt`) plus a
-  one-click hand-off to external mpv / VLC / a custom command
-- **MPRIS** support (media keys + desktop control) and a system tray
-  with close-to-tray
-- First-class **Plasma 6** theming with Kirigami, full keyboard
-  navigation
-
-## Install
-
-Official builds are published on the
-[Releases page](https://github.com/ThilinaTLM/kinema/releases). Six
-artifacts ship per release: two `.deb`s, two `.rpm`s, an `.AppImage`,
-and a portable `.tar.gz` (plus the source tarball and a `SHA256SUMS`
-manifest).
-
-### System requirements
-
-- x86_64 Linux. New AppImage/portable builds target Ubuntu 22.04
-  (glibc ≥ 2.35 and its C++ runtime); native packages require their named
-  distro. Earlier trixie-built AppImages do **not** gain this compatibility
-  by extraction—use a release built with the new compatibility pipeline.
-- Wayland or X11 session. KDE Plasma 6 is the primary target; other
-  Qt 6 desktops work but get less testing.
-- Enough disk space for the downloaded bundle (and its extracted contents
-  for portable use). Native packages reuse system Qt 6 / KF 6 / libmpv.
-
-### Pick a package
-
-| You are on…                                 | Use                                                                                    |
-| ------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Ubuntu 25.04 (plucky)                       | `.deb` (`ubuntu25.04`)                                                                 |
-| Debian 13 (trixie) or newer                 | `.deb` (`debian13`)                                                                    |
-| Fedora 41 / 42                              | matching `.rpm`                                                                        |
-| Ubuntu 24.04 LTS                            | **AppImage** (system Qt/KF too old — see [`packaging/README.md`](packaging/README.md)) |
-| Arch / openSUSE / NixOS / immutable distros | AppImage or portable tarball                                                           |
-| Don't want to install anything              | Portable tarball                                                                       |
-
-Each command block below resolves the **latest** release from the
-GitHub API. To install a specific version instead, set `VERSION=x.y.z`
-before running the rest of the block.
-
-### .deb (Ubuntu 25.04, Debian 13)
-
-```bash
-VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
-                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
-URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
-
-# Ubuntu 25.04
-wget "${URL}/kinema_${VERSION}_amd64-ubuntu25.04.deb"
-sudo apt install "./kinema_${VERSION}_amd64-ubuntu25.04.deb"
-
-# Debian 13 (trixie)
-wget "${URL}/kinema_${VERSION}_amd64-debian13.deb"
-sudo apt install "./kinema_${VERSION}_amd64-debian13.deb"
+```sh
+cargo run -p kinema-desktop --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-`apt install ./...deb` (not `dpkg -i`) so apt resolves the dependency
-chain. mpv and VLC are listed as `Recommends` — install whichever
-external player you want, or neither if the built-in mpv is enough.
+The default Cargo feature `gpu-surface` enables the sole/default Embedded MPV
+renderer using durable vendored GPUI/HAL patches in the root workspace; no
+experimental wrapper is required. Supply native [libmpv and platform prerequisites](docs/development.md#embedded-mpv-prerequisites-and-validation-plan)
+separately. External mpv/VLC are unchanged. Prior scoped Linux evidence is not
+new default-build qualification; native Windows/macOS tests and HDR remain
+unqualified. Default-on does not imply release readiness.
 
-### .rpm (Fedora 41 / 42)
+With `debug_assertions` enabled (default debug builds), catalog data lives in
+`./data/` relative to the process working directory; the repository-root directory
+is gitignored. `cargo run -p kinema-desktop --release --locked` disables debug
+assertions by default and uses native app data resolved through
+`ProjectDirs::from("", "", "kinema").data_local_dir()` instead. Switching modes
+uses separate databases; existing data is not migrated, moved, or deleted.
+See [storage locations](docs/storage-layout.md#implemented-catalog-location).
 
-```bash
-VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
-                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
-URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
+The workspace contains `kinema-core` (UI-independent domain code),
+`kinema-desktop` (direct-GPUI v3 UI and background catalog adapters), and
+`kinema-mpv` (native embedded playback). See the [feature overview](docs/features.md)
+and [development guide](docs/development.md) for current scope, core-only checks,
+and OS setup. Release packaging is not yet provided.
 
-# Fedora 41
-wget "${URL}/kinema-${VERSION}-1.fc41.x86_64.rpm"
-sudo dnf install "./kinema-${VERSION}-1.fc41.x86_64.rpm"
+## Data and compatibility
 
-# Fedora 42
-wget "${URL}/kinema-${VERSION}-1.fc42.x86_64.rpm"
-sudo dnf install "./kinema-${VERSION}-1.fc42.x86_64.rpm"
-```
-
-### AppImage (anything else, including Ubuntu 24.04 LTS)
-
-```bash
-VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
-                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
-URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
-
-wget "${URL}/Kinema-${VERSION}-x86_64.AppImage"
-chmod +x "Kinema-${VERSION}-x86_64.AppImage"
-./Kinema-${VERSION}-x86_64.AppImage
-```
-
-The AppImage bundles Qt 6 / KF 6 / libmpv / mpvqt / libtorrent / SSL,
-with a glibc ≥ 2.35 baseline for new builds. Host display/graphics drivers,
-Wayland/X11 client libraries, and a normal desktop runtime are still required.
-The release gate tests Ubuntu 22.04, Ubuntu 24.04 and Debian 13; this is not a
-promise of support for every Linux distribution. See the
-[compatibility checks](packaging/README.md#appimage-compatibility) for details.
-
-If your distro lacks FUSE (e.g. some immutable spins), run it with
-`--appimage-extract-and-run`, or install `libfuse2` (Ubuntu / Debian) /
-`fuse-libs` (Fedora).
-
-### Portable tarball
-
-The same AppDir as the AppImage, pre-extracted. No FUSE needed; ideal
-for `/opt` installs or trying Kinema without committing.
-
-```bash
-VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
-                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
-URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
-
-wget "${URL}/kinema-${VERSION}-x86_64.tar.gz"
-tar -xzf "kinema-${VERSION}-x86_64.tar.gz"
-./kinema-${VERSION}-x86_64/kinema.sh
-```
-
-### Verify the download
-
-Every release also publishes `SHA256SUMS`:
-
-```bash
-VERSION=${VERSION:-$(curl -fsSL https://api.github.com/repos/ThilinaTLM/kinema/releases/latest \
-                       | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')}
-URL="https://github.com/ThilinaTLM/kinema/releases/download/v${VERSION}"
-
-wget "${URL}/SHA256SUMS"
-sha256sum -c --ignore-missing SHA256SUMS
-```
-
-When a `SHA256SUMS.asc` is present alongside it, verify the manifest
-signature first with `gpg --verify SHA256SUMS.asc SHA256SUMS`. The
-GitHub Release page is the trust anchor — no apt/dnf repository is
-published.
-
-## First-run setup
-
-See the [configuration guide](docs/Configuration.md) for how TMDB, debrid
-providers, stream indexers, and players fit together, with complete setup and
-troubleshooting steps. The essentials are summarized below.
-
-### TMDB (Discover)
-
-Official builds ship with **no embedded TMDB token** (TMDB's terms of
-service prohibit redistributing a personal v4 read token in a
-publicly downloadable artifact). On first launch:
-
-1. Get a free v4 read access token at
-   <https://www.themoviedb.org/settings/api>.
-2. Open **Settings → TMDB** and paste it.
-
-Distributions or packagers that have been allocated a bot token can
-pre-bake one with `-DKINEMA_TMDB_DEFAULT_TOKEN=...` when building.
-
-### Real-Debrid / AllDebrid
-
-Open **Settings → Debrid**, pick the active provider from the radio
-group, and paste the credential:
-
-- Real-Debrid token from <https://real-debrid.com/apitoken>
-- AllDebrid API key from <https://alldebrid.com/apikeys/>
-
-Both providers share one page — there is no separate "Tools" menu and
-no global shortcut. Tokens are stored in the system keyring (kwallet
-or gnome-keyring), never in `kinemarc`.
-
-### External players (optional)
-
-Kinema's built-in mpv player is enabled in every official package.
-External **mpv** and **VLC** are only needed if you prefer to launch
-playback in a separate window — configure under
-**Settings → Player**. Native packages list them as `Recommends`
-(deb) / soft dep (rpm); AppImage users install them through their
-distro if they want them.
-
-## Build from source
-
-Most users do not need this. If you do:
-
-```bash
-cmake -B build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build -j$(nproc)
-ctest --test-dir build --output-on-failure
-./build/bin/kinema
-```
-
-Before opening a pull request, run the same quality checks used by CI:
-
-```bash
-./scripts/check-format.sh origin/main HEAD
-cmake --build build --target all_qmllint
-ctest --test-dir build --output-on-failure
-```
-
-The format check covers changed C++ lines so existing formatting debt does not
-block unrelated work. QML lint warnings are currently informational; lint errors
-fail CI. Pull requests and pushes to `main` run these checks plus a clean build
-with embedded-player support enabled.
-
-CI uses an unoptimized Debug build with lightweight debug information
-(`-O0 -g1`) and the `mold` linker; local and release build defaults are unchanged.
-Compiler objects are cached by compiler version and CI profile. Cold runs compile
-all objects; subsequent matching runs can reuse them. Pull-request caches cannot
-seed `main` builds. Per-step timing and memory usage appear in the job logs,
-compiler-cache statistics in the job summary, and `.ninja_log` plus cache statistics
-in the seven-day `ci-build-diagnostics` artifact. QML lint also builds its C++
-dependencies, so its step duration is not just linting time.
-
-`./scripts/install.sh` builds and installs into `$HOME/.local` (no
-sudo), refreshes the KDE/XDG caches, and makes Kinema show up in the
-Plasma launcher. `./scripts/uninstall.sh` removes it. Both accept
-`-h` / `--help`; uninstall leaves `~/.config/kinemarc` and keyring
-tokens alone.
-
-Useful CMake options:
-
-- `-DKINEMA_ENABLE_MPV_EMBED=OFF` — build without the embedded
-  player (external mpv / VLC only).
-- `-DKINEMA_TMDB_DEFAULT_TOKEN=...` — bake a default TMDB token in
-  (packagers only).
-
-The full per-distro dependency lists, container recipes, and the
-release matrix live in [`packaging/README.md`](packaging/README.md).
-The dependency rules and source layout are documented in
-[`docs/Architecture.md`](docs/Architecture.md); contributor conventions are
-in [`AGENTS.md`](AGENTS.md).
-
-## Troubleshooting
-
-Kinema splits runtime logs across per-subsystem `QLoggingCategory`
-names so you can crank up just the noise you need when filing a bug:
-
-| Category            | Covers                                                 |
-| ------------------- | ------------------------------------------------------ |
-| `kinema.app`        | Shell, lifecycle                                       |
-| `kinema.controller` | Controllers under `src/controllers/`                   |
-| `kinema.ui`         | View-models, image loader, stream-action service       |
-| `kinema.db`         | `Database` + `*Store`                                  |
-| `kinema.api`        | TMDB / Real-Debrid / AllDebrid / OpenSubtitles clients |
-| `kinema.http`       | HTTP transport, image fetches                          |
-| `kinema.player`     | Embedded mpv                                           |
-| `kinema.torrent`    | libtorrent session, alert pump, per-torrent telemetry  |
-| `kinema.download`   | Unified download manager, local server                 |
-
-All categories default to **Info**. Flip a subsystem to debug with
-`QT_LOGGING_RULES`:
-
-```bash
-QT_LOGGING_RULES='kinema.torrent.debug=true;kinema.download.debug=true' \
-    ./scripts/run.sh
-```
-
-Logs are also written to
-`~/.local/share/kinema/logs/kinema.log` (rotated 5 MB × 5). Attach
-the relevant slice when reporting an issue.
-
-## Notes
-
-Kinema is a client for public Stremio-compatible indexers and for
-debrid services you already have an account with. You are responsible
-for complying with the laws of your jurisdiction regarding the content
-you stream or download.
+Kinema starts fresh: old `~/.config/kinemarc`, `kinema.db`, and keyring entries
+are not migrated. Historical release binaries do not represent this Rust application.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
-The Apache-2.0 license applies only to the original code and assets in
-this repository. Kinema links against third-party libraries (Qt, KDE
-Frameworks, mpv, mpvqt, QCoro, QtKeychain, libtorrent, …) that remain
-under their own licenses; see [`NOTICE`](NOTICE) for the rundown.
+Original Kinema code remains [Apache-2.0](LICENSE). See [NOTICE](NOTICE) for
+third-party code, bundled-asset credits, and distribution obligations.

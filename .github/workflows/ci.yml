@@ -1,145 +1,89 @@
-# SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
-# SPDX-License-Identifier: Apache-2.0
-
-name: CI
+name: Rust CI
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-env:
-  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  format:
-    name: C++ format
-    runs-on: ubuntu-latest
-    container: debian:trixie
+  assets:
+    name: Desktop assets and probe utilities
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-      HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - name: Install formatter
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git clang-format
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-          ref: ${{ env.HEAD_SHA }}
-      - name: Check changed C++ lines
+          persist-credentials: false
+      - name: Install asset validation tools
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          scripts/check-format.sh "$BASE_SHA" "$HEAD_SHA"
+          sudo apt-get update
+          sudo apt-get install -y python3-pil desktop-file-utils appstream
+      - run: /usr/bin/python3 packaging/test_assets.py
+      - run: node --test scripts/ui-probe/pixels.test.cjs
+      - run: desktop-file-validate packaging/linux/dev.tlmtech.kinema.desktop
+      - run: appstreamcli validate --no-net packaging/linux/dev.tlmtech.kinema.metainfo.xml
 
-  qml-lint-build-test:
-    name: QML lint, build, and tests
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    timeout-minutes: 60
-    env:
-      DEBIAN_FRONTEND: noninteractive
-      QT_QPA_PLATFORM: offscreen
-      QT_QUICK_BACKEND: software
-      CCACHE_MAXSIZE: 1G
-      CCACHE_COMPRESS: "true"
-      CCACHE_COMPILERCHECK: content
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - name: Install build and runtime dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-              ca-certificates git pkg-config \
-              cmake ninja-build g++ ccache mold time python3 binutils \
-              extra-cmake-modules gettext \
-              qt6-base-dev qt6-base-private-dev \
-              qt6-declarative-dev qt6-tools-dev qt6-svg-dev \
-              libkf6kio-dev libkf6i18n-dev libkf6config-dev \
-              libkf6notifications-dev libkf6statusnotifieritem-dev \
-              libkf6coreaddons-dev libkirigami-dev \
-              kirigami-addons-dev \
-              qcoro-qt6-dev qtkeychain-qt6-dev \
-              libmpv-dev libmpvqt-dev \
-              libtorrent-rasterbar-dev libboost-dev libssl-dev \
-              qml6-module-qtquick qml6-module-qtquick-controls \
-              qml6-module-qtquick-layouts qml6-module-qtquick-templates \
-              qml6-module-qtquick-window qml6-module-qtquick-effects \
-              qml6-module-qtquick-shapes qml6-module-qtquick-dialogs \
-              qml6-module-qtqml-workerscript \
-              qml6-module-org-kde-kirigami \
-              qml6-module-org-kde-kirigamiaddons-formcard \
-              qml6-module-org-kde-kirigamiaddons-settings \
-              qml6-module-org-kde-desktop
       - uses: actions/checkout@v7
-      - name: Configure compiler cache
-        id: compiler-cache
-        run: |
-          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
-          echo "compiler-version=$(g++ -dumpfullversion -dumpversion)" >> "$GITHUB_OUTPUT"
-      - name: Restore compiler cache
-        uses: actions/cache@v6
         with:
-          path: .ccache
-          key: ccache-v2-trixie-${{ runner.arch }}-gcc${{ steps.compiler-cache.outputs.compiler-version }}-${{ hashFiles('.github/workflows/ci.yml') }}-${{ github.sha }}
-          restore-keys: |
-            ccache-v2-trixie-${{ runner.arch }}-gcc${{ steps.compiler-cache.outputs.compiler-version }}-${{ hashFiles('.github/workflows/ci.yml') }}-
-      - name: Report build environment
-        run: |
-          echo "Available CPUs: $(nproc)"
-          free -h
-          g++ --version
-          cmake --version
-          ninja --version
-          ccache --version
-          mold --version
-          ccache --show-config
-          ccache --zero-stats
-      - name: Configure
-        run: |
-          cmake -B build -S . -G Ninja \
-              -DCMAKE_BUILD_TYPE=Debug \
-              -DCMAKE_CXX_FLAGS_DEBUG="-O0 -g1" \
-              -DCMAKE_LINKER_TYPE=MOLD \
-              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-              -DBUILD_TESTING=ON \
-              -DKINEMA_ENABLE_MPV_EMBED=ON \
-              -DKINEMA_TMDB_DEFAULT_TOKEN=""
-      - name: Lint QML
-        run: /usr/bin/time -v cmake --build build --target all_qmllint
-      - name: Build
-        run: /usr/bin/time -v cmake --build build
-      - name: Run tests
-        run: ctest --test-dir build --output-on-failure
-      - name: Report compiler cache statistics
-        if: always() && steps.compiler-cache.outcome == 'success'
-        run: |
-          mkdir -p build
-          ccache --show-stats --verbose > build/ccache-stats.txt
-          cat build/ccache-stats.txt
-          {
-            echo '### Compiler cache statistics (this run)'
-            echo '```text'
-            cat build/ccache-stats.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload build diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
+          persist-credentials: false
+      - name: Install Rust 1.97.1
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt
+      - run: cargo +1.97.1 fmt --all -- --check
+
+  native:
+    name: Native checks (${{ matrix.os }})
+    env:
+      # Ephemeral runners do not reuse incremental state; rust-cache prunes it.
+      CARGO_INCREMENTAL: "0"
+      # Preserve optimization/features while reducing compile/link and cache size.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      # Content-addressed reuse also covers our vendored path dependencies.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
         with:
-          name: ci-build-diagnostics
-          path: |
-            build/.ninja_log
-            build/ccache-stats.txt
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 7
+          persist-credentials: false
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ clang pkg-config libfontconfig-dev libwayland-dev \
+            libwebkit2gtk-4.1-dev libxkbcommon-x11-dev libx11-xcb-dev \
+            libssl-dev libzstd-dev vulkan-validationlayers libvulkan1
+      - name: Install Rust 1.97.1
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.19.0
+      - uses: Swatinem/rust-cache@v2
+      # Clippy checks the same packages/targets; a preceding cargo check is redundant.
+      - name: Lint default-feature workspace and all targets
+        run: cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test default-feature workspace
+        run: cargo +1.97.1 test --workspace --locked
+      - name: Check isolated GPUI fixture (no production services)
+        run: cargo +1.97.1 clippy -p kinema-desktop --lib --bin ui-probe --features ui-probe-test --locked -- -D warnings
+      - name: Test GPUI interaction and layout (not pixels)
+        run: cargo +1.97.1 test -p kinema-desktop --lib --features ui-probe-test --locked

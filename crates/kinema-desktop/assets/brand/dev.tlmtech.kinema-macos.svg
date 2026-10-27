@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com> -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- macOS .icns source: Apple icon grid (824px body on a 1024px canvas)
+     with a soft drop shadow. Not installed on Linux. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10"/>
+      <feOffset dy="10" result="blur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.3"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="#FF7A45"/>
+    <path fill="#ffffff" transform="translate(41.1429 41.1429) scale(0.919643)" d="M266.6 212.5Q266.6 200 279.1 200L396.4 200Q408.9 200 408.9 212.5L408.9 811.5Q408.9 824 396.4 824L279.1 824Q266.6 824 266.6 811.5ZM408.9 459L573.7 294.1Q577.4 290.5 582.5 290.5L667.7 290.5Q697.8 290.5 676.5 311.8L595 393.3Q588.7 399.5 595.9 404.7L758.6 520.7Q781.4 537 758.6 553.2L594.7 670.2Q588.7 674.4 592.8 680.4L676.5 804.5Q689.6 824 666.2 824L578.3 824Q571.6 824 567.9 818.5L408.9 582.7Z"/>
+  </g>
+</svg>

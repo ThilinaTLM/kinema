@@ -1,0 +1,83 @@
+[workspace]
+members = ["crates/kinema-core", "crates/kinema-desktop", "crates/kinema-mpv"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+unicode-segmentation = "1.13"
+kinema-core = { path = "crates/kinema-core" }
+kinema-mpv = { path = "crates/kinema-mpv", default-features = false }
+wgpu = "=29.0.4"
+wgpu-hal = "=29.0.4"
+ash = "0.38"
+gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.9", features = ["gpu-video-experiment"] }
+gpui_apple = { package = "gpui-pre-apple", version = "=0.3.9", features = ["gpu-video-experiment", "runtime_shaders"] }
+gpui_windows = { package = "gpui-pre-windows", version = "=0.3.9", features = ["gpu-video-experiment"] }
+objc2-core-foundation = "0.3.2"
+objc2-core-video = "0.3.2"
+log = "0.4"
+glow = "0.16"
+libloading = "0.8"
+windows = "0.62.2"
+metal = "0.29"
+thiserror = "2"
+gpui = { package = "gpui-pre", version = "=0.3.9", features = ["gpu-video-experiment"] }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9" }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+directories = "6.0.0"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "net", "sync", "time"] }
+tokio-stream = { version = "0.1.18", default-features = false }
+fs4 = { version = "1.1.0", default-features = false }
+sha2 = { version = "0.10.9", default-features = false }
+rand = { version = "0.9.2", default-features = false, features = ["thread_rng"] }
+keyring = { version = "4.2.0", default-features = false, features = ["v1"] }
+zeroize = "1.8"
+toml = "1.1"
+url = "2.5"
+percent-encoding = "2.3"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls"] }
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.27.0"
+tracing = "0.1"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Repository-owned exact-release patches; no preparation or registry mutation.
+# The upstream feature spelling remains internal; the app uses `gpu-surface`.
+[patch.crates-io]
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu" }
+gpui-pre-apple = { path = "vendor/gpui-pre-apple" }
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
+wgpu-hal = { path = "vendor/wgpu-hal" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.dev]
+debug = 1
+
+# Optimize codecs/transport while keeping workspace development builds cheap.
+[profile.dev.package."*"]
+opt-level = 2
+
+# Workspace members are excluded from the wildcard above. Keep the backend's
+# per-pixel packing/alpha loops optimized for representative dev playback.
+[profile.dev.package.kinema-mpv]
+opt-level = 2

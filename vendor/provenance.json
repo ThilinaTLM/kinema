@@ -1,0 +1,41 @@
+{
+  "packages": [
+    {
+      "name": "gpui-pre",
+      "version": "0.3.9",
+      "checksum": "34f61c1cfd36fc9c436af09308c963822ae27a45a84feb21a77ba5c9e051f1c0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    },
+    {
+      "name": "gpui-pre-apple",
+      "version": "0.3.9",
+      "checksum": "b52f58893fe1a0836464428dfad2b5eaf42c9c303a9638f4c2aced5a69072a15",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    },
+    {
+      "name": "gpui-pre-wgpu",
+      "version": "0.3.9",
+      "checksum": "5b1cdb26c1503bf9662ee8fbc5ab0b44b2deeee4b5c12dc67491ba6fb5fc544b",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    },
+    {
+      "name": "gpui-pre-windows",
+      "version": "0.3.9",
+      "checksum": "513d4f0fc7d596d3bdef2a73a524ffb83dabc95bf484f2855a698e7f431290a9",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    },
+    {
+      "name": "wgpu-hal",
+      "version": "29.0.4",
+      "checksum": "97ace1c17727311c22a46e4e3faf56ea6de81af99dcc839bdfb54857b94d448d",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    }
+  ],
+  "patches": {
+    "0001-gpui-pre-0.3.9.patch": "8f28230956d3ff624fd1b14df725a52b529774689434c41ab5c2f4c574348d90",
+    "0002-gpui-pre-wgpu-0.3.9.patch": "064d0284ebccc08eebcb82f4a4c64b0f46d5bbe2e069ea988ed3787888533635",
+    "0003-wgpu-hal-29.0.4.patch": "0d38410e538d6d5ba52f8afdff2ea875d95194c148653b00622d9c87110ec94c",
+    "0004-gpui-pre-apple-0.3.9.patch": "e451682112cc98775795037039d87f7499053ee177c389f5cfc42584ce1f2464",
+    "0005-gpui-pre-windows-0.3.9.patch": "28b74a24c6f438a2addae9a6332bc92f2f479031416e58ef285810117b7be810"
+  }
+}

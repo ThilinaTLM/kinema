@@ -1,0 +1,249 @@
+//! Offline native v3 lab; see docs/design/ui-probe.md.
+use kinema_desktop::{player::PlayerChoice, screens::player_window};
+
+#[derive(Debug, PartialEq)]
+struct PlayerProbeArgs {
+    native: bool,
+    media: Option<std::path::PathBuf>,
+    seconds: u64,
+    light: bool,
+    dimensions: [f32; 2],
+    stress_resize: bool,
+}
+
+fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'static str> {
+    let value = |flag: &str| {
+        args.iter()
+            .position(|arg| arg == flag)
+            .and_then(|index| args.get(index + 1))
+    };
+    let Some(scene) = value("--scene") else {
+        return Ok(None);
+    };
+    // Historical scene id is retained for the existing offline regression scripts,
+    // not as a player choice or settings compatibility alias.
+    let experimental = scene == "player-experimental";
+    let native = experimental || scene == "player-native";
+    if !native && scene != "player" {
+        return Ok(None);
+    }
+    if native && !cfg!(feature = "gpu-surface") {
+        return Err("native GPU probes require gpu-surface + ui-probe");
+    }
+    let media = value("--media").map(std::path::PathBuf::from);
+    if native && media.is_none() {
+        return Err("native player scenes require --media PATH to a generated local video");
+    }
+    let seconds = match value("--smoke-seconds") {
+        Some(value) => value
+            .parse::<u64>()
+            .ok()
+            .filter(|value| (1..=15).contains(value))
+            .ok_or("--smoke-seconds must be between 1 and 15")?,
+        None => 8,
+    };
+    let dimensions = match value("--size") {
+        Some(value) => value
+            .split_once('x')
+            .and_then(|(width, height)| {
+                Some([width.parse::<f32>().ok()?, height.parse::<f32>().ok()?])
+            })
+            .filter(|dimensions| {
+                dimensions
+                    .iter()
+                    .all(|value| value.is_finite() && *value >= 320.)
+            })
+            .ok_or("--size must be WIDTHxHEIGHT, each finite and at least 320")?,
+        None => [1100., 680.],
+    };
+    let stress_resize = args.iter().any(|arg| arg == "--stress-resize");
+    if stress_resize && !native {
+        return Err("--stress-resize requires --scene player-native or player-experimental");
+    }
+    Ok(Some(PlayerProbeArgs {
+        native,
+        media,
+        seconds,
+        light: args.iter().any(|arg| arg == "--light"),
+        dimensions,
+        stress_resize,
+    }))
+}
+
+fn probe_log_filter(value: Option<&str>) -> tracing_subscriber::EnvFilter {
+    value
+        .and_then(|value| {
+            tracing_subscriber::EnvFilter::builder()
+                .with_regex(false)
+                .parse(value)
+                .ok()
+        })
+        .unwrap_or_else(|| {
+            tracing_subscriber::EnvFilter::new("kinema_mpv=info,kinema_desktop=info")
+        })
+}
+
+fn probe_subscriber(
+    filter: tracing_subscriber::EnvFilter,
+) -> impl tracing::Subscriber + Send + Sync {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(filter)
+        .finish()
+}
+
+fn main() {
+    let args: Vec<_> = std::env::args().collect();
+    let probe = match parse_player_probe(&args) {
+        Ok(probe) => probe,
+        Err(category) => {
+            eprintln!("player probe: {category}");
+            std::process::exit(2);
+        }
+    };
+    let Some(probe) = probe else {
+        kinema_desktop::design_lab::run_native();
+        return;
+    };
+    if probe.native && !probe.media.as_ref().is_some_and(|path| path.is_file()) {
+        eprintln!(
+            "player probe: --media must be an existing local generated video; no services or user data are opened"
+        );
+        std::process::exit(2);
+    }
+    // Do not use init/try_init: those install LogTracer and would conflict
+    // with the native probe's dedicated GPU-error log::Log collector. No app
+    // paths, file logging, user configuration, or provider setup is involved.
+    let filter = probe_log_filter(std::env::var("RUST_LOG").ok().as_deref());
+    if tracing::subscriber::set_global_default(probe_subscriber(filter)).is_err() {
+        eprintln!("player probe: category=tracing-subscriber-already-set");
+    }
+    let successful = if probe.native {
+        player_window::run_probe_mode(
+            probe.media,
+            probe.seconds,
+            probe.light,
+            probe.dimensions,
+            PlayerChoice::Embedded,
+            probe.stress_resize,
+        )
+    } else {
+        player_window::run_probe(
+            if probe.native { probe.media } else { None },
+            probe.seconds,
+            probe.light,
+            probe.dimensions,
+        )
+    };
+    if !successful {
+        std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).into()).collect()
+    }
+    #[test]
+    fn stderr_subscriber_filters_backend_events_without_replacing_log_collector() {
+        let logger = log::logger();
+        let subscriber = probe_subscriber(probe_log_filter(None));
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(tracing::enabled!(target: "kinema_mpv", tracing::Level::INFO));
+            assert!(tracing::enabled!(target: "kinema_desktop", tracing::Level::WARN));
+            assert!(!tracing::enabled!(target: "kinema_mpv", tracing::Level::DEBUG));
+            assert!(!tracing::enabled!(target: "wgpu", tracing::Level::INFO));
+        });
+        assert!(std::ptr::eq(logger, log::logger()));
+        assert_eq!(
+            probe_log_filter(Some("invalid[filter")).to_string(),
+            probe_log_filter(None).to_string()
+        );
+        let subscriber = probe_subscriber(probe_log_filter(Some("kinema_mpv=debug")));
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(tracing::enabled!(target: "kinema_mpv", tracing::Level::DEBUG));
+        });
+        assert!(std::ptr::eq(logger, log::logger()));
+    }
+
+    #[test]
+    fn existing_player_defaults_are_preserved() -> Result<(), &'static str> {
+        let Some(probe) = parse_player_probe(&args(&["--scene", "player"]))? else {
+            panic!("player scene");
+        };
+        assert!(!probe.native && !probe.stress_resize);
+        assert_eq!(probe.seconds, 8);
+        assert_eq!(probe.dimensions, [1100., 680.]);
+        Ok(())
+    }
+    #[test]
+    fn native_gpu_probe_requires_feature_and_media() {
+        assert!(parse_player_probe(&args(&["--scene", "player-experimental"])).is_err());
+        let parsed = parse_player_probe(&args(&[
+            "--scene",
+            "player-experimental",
+            "--media",
+            "fixture.mkv",
+            "--stress-resize",
+            "--smoke-seconds",
+            "12",
+        ]));
+        if cfg!(feature = "gpu-surface") {
+            assert!(matches!(
+                parsed,
+                Ok(Some(PlayerProbeArgs {
+                    native: true,
+                    stress_resize: true,
+                    seconds: 12,
+                    ..
+                }))
+            ));
+        } else {
+            assert!(parsed.is_err());
+        }
+    }
+    #[cfg(feature = "gpu-surface")]
+    #[test]
+    fn native_scene_and_historical_regression_id_use_the_same_gpu_path() {
+        let normal = parse_player_probe(&args(&[
+            "--scene",
+            "player-native",
+            "--media",
+            "fixture.mkv",
+            "--stress-resize",
+        ]));
+        let historical = parse_player_probe(&args(&[
+            "--scene",
+            "player-experimental",
+            "--media",
+            "fixture.mkv",
+            "--stress-resize",
+        ]));
+        assert_eq!(normal, historical);
+        assert!(matches!(
+            normal,
+            Ok(Some(PlayerProbeArgs {
+                native: true,
+                stress_resize: true,
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn bounded_duration_size_and_resize_policy() {
+        for value in ["0", "16", "invalid"] {
+            assert!(
+                parse_player_probe(&args(&["--scene", "player", "--smoke-seconds", value]))
+                    .is_err()
+            );
+        }
+        for value in ["NaNx500", "100x500", "bad"] {
+            assert!(parse_player_probe(&args(&["--scene", "player", "--size", value])).is_err());
+        }
+        assert!(parse_player_probe(&args(&["--scene", "player", "--stress-resize"])).is_err());
+        assert!(parse_player_probe(&args(&["--scene", "player-native"])).is_err());
+    }
+}

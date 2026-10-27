@@ -1,0 +1,69 @@
+[package]
+name = "kinema-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+default-run = "kinema-desktop"
+
+[lints]
+workspace = true
+
+[features]
+default = ["gpu-surface"]
+gpu-surface = ["dep:wgpu", "dep:gpui_wgpu", "dep:gpui_apple", "kinema-mpv/gpu-surface", "dep:gpui_windows"]
+ui-probe = ["dep:log"]
+ui-probe-test = ["ui-probe", "gpui/test-support"]
+
+[[bin]]
+name = "ui-probe"
+path = "src/bin/ui-probe.rs"
+required-features = ["ui-probe"]
+
+[dependencies]
+unicode-segmentation.workspace = true
+gpui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log = { workspace = true, optional = true }
+
+# gpui_platform defaults do not enable native Linux windowing backends.
+[target.'cfg(target_os = "linux")'.dependencies]
+gpui_platform = { workspace = true, features = ["x11", "wayland"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+gpui_platform.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+image.workspace = true
+directories.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+fs4.workspace = true
+sha2.workspace = true
+rand.workspace = true
+keyring.workspace = true
+zeroize.workspace = true
+toml.workspace = true
+url.workspace = true
+tempfile.workspace = true
+reqwest.workspace = true
+rusqlite.workspace = true
+kinema-core.workspace = true
+kinema-mpv.workspace = true
+percent-encoding.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+wgpu = { workspace = true, optional = true }
+gpui_wgpu = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui_apple = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui_windows = { workspace = true, optional = true, features = ["gpu-video-experiment"] }

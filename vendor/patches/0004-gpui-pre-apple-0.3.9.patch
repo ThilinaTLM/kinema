@@ -1,0 +1,398 @@
+# Isolated Kinema GPU video experiment; not a production override.
+# Base: crates.io gpui-pre-apple-0.3.9, exact unmodified registry release.
+# Upstream license: Apache-2.0; retain the upstream license files in copied sources.
+# Provenance: https://github.com/zed-industries/zed @ 93d745668805029476e6d7fbb19652116fed51de
+# Apply from the COPIED crate directory using patch -p1; never patch the registry.
+
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -34,6 +34,7 @@
+ [features]
+ bench-support = ["gpui/bench-support"]
+ default = []
++gpu-video-experiment = ["gpui/gpu-video-experiment"]
+ font-kit = [
+     "dep:font-kit",
+     "dep:core-text",
+@@ -262,7 +263,7 @@
+ [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.thiserror]
+ version = "2.0.12"
+ 
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.build-dependencies.cbindgen]
++[build-dependencies.cbindgen]
+ version = "0.28.0"
+ default-features = false
+ 
+--- a/build.rs
++++ b/build.rs
+@@ -2,11 +2,26 @@
+ #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
+ 
+ fn main() {
+-    #[cfg(any(target_os = "macos", target_os = "ios"))]
+-    apple_build::run();
++    #[cfg(any(
++        target_os = "macos",
++        target_os = "ios",
++        feature = "gpu-video-experiment",
++        feature = "runtime_shaders"
++    ))]
++    if matches!(
++        std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
++        Ok("macos" | "ios")
++    ) {
++        apple_build::run();
++    }
+ }
+ 
+-#[cfg(any(target_os = "macos", target_os = "ios"))]
++#[cfg(any(
++    target_os = "macos",
++    target_os = "ios",
++    feature = "gpu-video-experiment",
++    feature = "runtime_shaders"
++))]
+ mod apple_build {
+     use std::{
+         env,
+@@ -94,6 +109,16 @@
+             .expect("Unable to generate bindings")
+             .write_to_file(&output_path);
+ 
++        #[cfg(feature = "gpu-video-experiment")]
++        {
++            use std::io::Write as _;
++            std::fs::OpenOptions::new()
++                .append(true)
++                .open(&output_path)
++                .unwrap()
++                .write_all(b"\n#define GPUI_GPU_VIDEO_EXPERIMENT 1\n")
++                .unwrap();
++        }
+         output_path
+     }
+ 
+--- a/src/gpui_apple.rs
++++ b/src/gpui_apple.rs
+@@ -19,3 +19,6 @@
+ pub use dispatcher::{AppleActivity, AppleDispatcher};
+ #[cfg(feature = "font-kit")]
+ pub use text_system::AppleTextSystem;
++
++#[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++pub use metal_renderer::experimental_gpu_registry_id;
+--- a/src/metal_renderer.rs
++++ b/src/metal_renderer.rs
+@@ -24,6 +24,51 @@
+ use parking_lot::Mutex;
+ 
+ use std::{cell::Cell, ffi::c_void, mem, mem::MaybeUninit, ops::Range, ptr, slice, sync::Arc};
++
++// Weak registrations are owned only by live window renderers, never accessors
++// or a guessed/default Metal device. Multiple windows on one registry ID work;
++// multiple active GPU IDs make the public lookup fail closed.
++#[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++static EXPERIMENTAL_METAL_DEVICES: Mutex<Vec<std::sync::Weak<ExperimentalMetalDevice>>> =
++    Mutex::new(Vec::new());
++
++#[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++struct ExperimentalMetalDevice {
++    registry_id: u64,
++}
++
++#[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++fn register_experimental_device(device: &metal::DeviceRef) -> Arc<ExperimentalMetalDevice> {
++    let record = Arc::new(ExperimentalMetalDevice {
++        registry_id: device.registry_id(),
++    });
++    let mut devices = EXPERIMENTAL_METAL_DEVICES.lock();
++    devices.retain(|record| record.strong_count() > 0);
++    devices.push(Arc::downgrade(&record));
++    record
++}
++
++/// Actual live GPUI window renderer Metal device registry ID, only when unique.
++/// None before renderer creation, after destroy/drop, for zero IDs, or while
++/// live renderers use different GPUs. Not a default-device guess or lifetime lease.
++#[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++pub fn experimental_gpu_registry_id() -> Option<u64> {
++    let mut devices = EXPERIMENTAL_METAL_DEVICES.lock();
++    devices.retain(|record| record.strong_count() > 0);
++    unique_live_registry_id(&devices)
++}
++
++#[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++fn unique_live_registry_id(devices: &[std::sync::Weak<ExperimentalMetalDevice>]) -> Option<u64> {
++    let mut unique = None;
++    for device in devices.iter().filter_map(std::sync::Weak::upgrade) {
++        if device.registry_id == 0 || unique.is_some_and(|id| id != device.registry_id) {
++            return None;
++        }
++        unique = Some(device.registry_id);
++    }
++    unique
++}
+ 
+ // Exported to metal
+ pub(crate) type PointF = gpui::Point<f32>;
+@@ -108,6 +153,10 @@
+ }
+ 
+ pub struct MetalRenderer {
++    #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++    experimental_device: Mutex<Option<Arc<ExperimentalMetalDevice>>>,
++    #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++    bgra_surfaces_pipeline_state: metal::RenderPipelineState,
+     device: metal::Device,
+     layer: Option<metal::MetalLayer>,
+     is_apple_gpu: bool,
+@@ -360,6 +409,16 @@
+             MTLPixelFormat::BGRA8Unorm,
+         );
+ 
++        #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++        let bgra_surfaces_pipeline_state = build_pipeline_state(
++            &device,
++            &library,
++            "experimental_bgra_surfaces",
++            "surface_vertex",
++            "surface_bgra_fragment",
++            MTLPixelFormat::BGRA8Unorm,
++        );
++
+         let command_queue = device.new_command_queue();
+         let supports_shared_storage = cfg!(target_os = "ios") || is_apple_gpu;
+         let sprite_atlas = Arc::new(MetalAtlas::new(device.clone(), supports_shared_storage));
+@@ -383,7 +442,18 @@
+             CFRetained::from_raw(ptr::NonNull::new(cache).expect("CoreVideo returned a null cache"))
+         };
+ 
++        #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++        let experimental_device = Mutex::new(
++            layer
++                .as_ref()
++                .map(|_| register_experimental_device(&device)),
++        );
++
+         Self {
++            #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++            experimental_device,
++            #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++            bgra_surfaces_pipeline_state,
+             device,
+             layer,
+             presents_with_transaction: false,
+@@ -486,7 +556,8 @@
+     }
+ 
+     pub fn destroy(&self) {
+-        // nothing to do
++        #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++        self.experimental_device.lock().take();
+     }
+ 
+     pub fn draw(&mut self, scene: &Scene) {
+@@ -555,17 +626,39 @@
+                 scene.surfaces.len(),
+             )
+         })?;
++        #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++        let mut surface_textures = Vec::new();
+         let command_buffer = self.draw_primitives_to_texture(
+             scene,
+             &instance_bindings,
+             &mut writer,
+             texture,
+             viewport_size,
++            #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++            &mut surface_textures,
+         )?;
+ 
++        #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++        let surface_owners = Cell::new(Some((
++            scene
++                .surfaces
++                .iter()
++                .filter_map(|surface| surface.gpu_frame.clone())
++                .collect::<Vec<_>>(),
++            scene
++                .surfaces
++                .iter()
++                .map(|surface| surface.image_buffer.clone())
++                .collect::<Vec<_>>(),
++            surface_textures,
++        )));
+         let instance_buffer_pool = self.instance_buffer_pool.clone();
+         let instance_buffer = Cell::new(Some(writer.finish()));
+         let block = RcBlock::new(move |_: ptr::NonNull<AnyObject>| {
++            // Never recycle producer CV/IOSurface resources at scene-drop time:
++            // command-buffer completion, not presentation, releases this ownership.
++            #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++            drop(surface_owners.take());
+             if let Some(instance_buffer) = instance_buffer.take() {
+                 instance_buffer_pool.lock().release(instance_buffer);
+             }
+@@ -716,6 +809,8 @@
+         writer: &mut InstanceBufferWriter,
+         texture: &metal::TextureRef,
+         viewport_size: Size<DevicePixels>,
++        #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++        surface_textures: &mut Vec<CFRetained<CVMetalTexture>>,
+     ) -> Result<metal::CommandBuffer> {
+         let command_queue = self.command_queue.clone();
+         let command_buffer = command_queue.new_command_buffer();
+@@ -791,6 +886,8 @@
+                     instance_bindings,
+                     viewport_size,
+                     command_encoder,
++                    #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++                    surface_textures,
+                 ),
+                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
+             }
+@@ -1187,12 +1284,13 @@
+         instance_bindings: &InstanceBindings,
+         viewport_size: Size<DevicePixels>,
+         command_encoder: &metal::RenderCommandEncoderRef,
++        #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++        surface_textures: &mut Vec<CFRetained<CVMetalTexture>>,
+     ) {
+         if surfaces.is_empty() {
+             return;
+         }
+ 
+-        command_encoder.set_render_pipeline_state(&self.surfaces_pipeline_state);
+         command_encoder.set_vertex_buffer(
+             SurfaceInputIndex::Vertices as u64,
+             Some(&self.unit_vertices),
+@@ -1216,6 +1314,63 @@
+                 DevicePixels::from(CVPixelBufferGetHeight(image_buffer) as i32),
+             );
+ 
++            #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++            if surface.gpu_frame.is_some() {
++                // GpuSurfaceFrame validated BGRA32/nonplanar/IOSurface metadata.
++                // Bind the actual renderer device's CVMetalTextureCache; no CPU
++                // map/readback, copy fallback, or guessed second Metal device.
++                let bgra_texture = unsafe {
++                    let mut texture = ptr::null_mut();
++                    let status = CVMetalTextureCache::create_texture_from_image(
++                        None,
++                        &self.core_video_texture_cache,
++                        image_buffer,
++                        None,
++                        objc2_metal::MTLPixelFormat::BGRA8Unorm,
++                        CVPixelBufferGetWidth(image_buffer),
++                        CVPixelBufferGetHeight(image_buffer),
++                        0,
++                        ptr::NonNull::from(&mut texture),
++                    );
++                    if status != kCVReturnSuccess || texture.is_null() {
++                        log::error!("experimental BGRA surface Metal texture import failed");
++                        continue; // fail closed: do not enter the NV12 path
++                    }
++                    CFRetained::<CVMetalTexture>::from_raw(ptr::NonNull::new(texture).unwrap())
++                };
++                let Some(texture) = CVMetalTextureGetTexture(&bgra_texture) else {
++                    log::error!("experimental BGRA surface has no Metal texture");
++                    continue;
++                };
++                command_encoder.set_render_pipeline_state(&self.bgra_surfaces_pipeline_state);
++                command_encoder.set_fragment_bytes(
++                    0,
++                    mem::size_of::<f32>() as u64,
++                    &surface.opacity as *const f32 as *const _,
++                );
++                command_encoder.set_vertex_bytes(
++                    SurfaceInputIndex::TextureSize as u64,
++                    mem::size_of_val(&texture_size) as u64,
++                    &texture_size as *const Size<DevicePixels> as *const _,
++                );
++                command_encoder.set_fragment_texture(
++                    SurfaceInputIndex::YTexture as u64,
++                    Some(unsafe {
++                        metal::TextureRef::from_ptr(objc2::rc::Retained::as_ptr(&texture) as *mut _)
++                    }),
++                );
++                command_encoder.draw_primitives_instanced_base_instance(
++                    metal::MTLPrimitiveType::Triangle,
++                    0,
++                    6,
++                    1,
++                    (first_surface + index) as u64,
++                );
++                surface_textures.push(bgra_texture);
++                continue;
++            }
++            // Preserve the pre-existing NV12/CoreVideo path and shader.
++            command_encoder.set_render_pipeline_state(&self.surfaces_pipeline_state);
+             assert_eq!(
+                 CVPixelBufferGetPixelFormatType(image_buffer),
+                 kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+@@ -1272,6 +1427,8 @@
+                 1,
+                 (first_surface + index) as u64,
+             );
++            #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++            surface_textures.extend([y_texture, cb_cr_texture]);
+         }
+     }
+ }
+@@ -1752,6 +1909,10 @@
+         };
+         let mut scene = Scene::default();
+         scene.insert_primitive(PaintSurface {
++            #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++            gpu_frame: None,
++            #[cfg(all(target_os = "macos", feature = "gpu-video-experiment"))]
++            opacity: 1.0,
+             order: 0,
+             bounds,
+             content_mask: ContentMask { bounds },
+@@ -1772,3 +1933,25 @@
+         }
+     }
+ }
++
++#[cfg(all(test, target_os = "macos", feature = "gpu-video-experiment"))]
++mod experimental_registry_tests {
++    use super::*;
++    #[test]
++    fn registry_lookup_is_unique_and_never_owns_a_renderer() {
++        let first = Arc::new(ExperimentalMetalDevice { registry_id: 11 });
++        let same = Arc::new(ExperimentalMetalDevice { registry_id: 11 });
++        let different = Arc::new(ExperimentalMetalDevice { registry_id: 12 });
++        let mut devices = vec![Arc::downgrade(&first), Arc::downgrade(&same)];
++        assert_eq!(unique_live_registry_id(&devices), Some(11));
++        devices.push(Arc::downgrade(&different));
++        assert_eq!(unique_live_registry_id(&devices), None);
++        drop(different);
++        assert_eq!(unique_live_registry_id(&devices), Some(11));
++        drop(first);
++        drop(same);
++        assert_eq!(unique_live_registry_id(&devices), None);
++        let zero = Arc::new(ExperimentalMetalDevice { registry_id: 0 });
++        assert_eq!(unique_live_registry_id(&[Arc::downgrade(&zero)]), None);
++    }
++}
+--- a/src/shaders.metal
++++ b/src/shaders.metal
+@@ -1277,3 +1277,18 @@
+ 
+   return color;
+ }
++
++#ifdef GPUI_GPU_VIDEO_EXPERIMENT
++// Experimental opaque BGRA32 SDR surface. Logical RGBA sampling of a BGRA8Unorm
++// Metal texture requires no channel swizzle. The existing surface_vertex retains
++// object-fit geometry and hardware rectangular clip distances; NV12 is unchanged.
++fragment float4 surface_bgra_fragment(
++    SurfaceFragmentInput input [[stage_in]],
++    texture2d<float> image [[texture(SurfaceInputIndex_YTexture)]],
++    constant float &opacity [[buffer(0)]]) {
++  constexpr sampler texture_sampler(mag_filter::linear, min_filter::linear);
++  float3 rgb = image.sample(texture_sampler, input.texture_position).rgb;
++  return float4(rgb, clamp(opacity, 0.0f, 1.0f));
++}
++
++#endif // GPUI_GPU_VIDEO_EXPERIMENT

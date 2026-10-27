@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com> -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Pixel-hinted 16px player icon; the seek-bar knob is omitted at this size. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <rect x="1" y="1" width="14" height="14" rx="3" fill="#382218"/>
+  <path fill="#FF7A45" d="M4 2L6.5 2L6.5 11L4 11ZM6.5 6L9 3.5L11 3.5L9.5 5L12 7L9.5 9L11 11L9 11L6.5 8.5Z"/>
+  <rect x="4" y="12" width="8" height="1" fill="#ffffff" fill-opacity="0.28"/>
+  <rect x="4" y="12" width="5" height="1" fill="#FF7A45"/>
+</svg>

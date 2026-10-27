@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com> -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Kinema player-window icon: the app mark inverted onto the ink tile, with a
+     seek bar so it stays distinct from the app icon at every size. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect x="64" y="64" width="896" height="896" rx="192" fill="#382218"/>
+  <path fill="#FF7A45" d="M299.6 186.9Q299.6 176 310.5 176L412.8 176Q423.6 176 423.6 186.9L423.6 709.1Q423.6 720 412.8 720L310.5 720Q299.6 720 299.6 709.1ZM423.6 401.8L567.3 258.1Q570.5 254.9 575 254.9L649.2 254.9Q675.5 254.9 656.9 273.5L585.9 344.5Q580.4 350 586.7 354.4L728.5 455.6Q748.4 469.8 728.5 483.9L585.6 585.9Q580.4 589.6 584 594.8L657 703Q668.4 720 647.9 720L571.3 720Q565.5 720 562.3 715.2L423.6 509.6Z"/>
+  <rect x="224" y="816" width="576" height="56" rx="28" fill="#ffffff" fill-opacity="0.28"/>
+  <rect x="224" y="816" width="334.08" height="56" rx="28" fill="#FF7A45"/>
+  <circle cx="558.08" cy="844" r="50.4" fill="#ffffff"/>
+</svg>

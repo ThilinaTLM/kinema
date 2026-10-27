@@ -1,73 +1,74 @@
 Kinema
 Copyright 2026 Thilina Lakshan <thilinalakshanmail@gmail.com>
 
-This product is licensed under the Apache License, Version 2.0 (the
-"License"); you may not use this product except in compliance with the
-License. You may obtain a copy of the License in the LICENSE file
-distributed with this source, or at:
+Original Kinema source and assets are licensed under the Apache License,
+Version 2.0. See LICENSE or https://www.apache.org/licenses/LICENSE-2.0.
+Third-party code and assets retain their respective licenses and notices.
 
-    http://www.apache.org/licenses/LICENSE-2.0
+Rust desktop application
+------------------------
+The desktop shell uses direct GPUI and gpui_platform (gpui-pre 0.3.9), with
+in-house widgets. It does not use GPUI Kit. Upstream GPUI software is distributed
+under Apache-2.0; retain applicable upstream notices and asset-specific terms
+when distributing.
+  https://github.com/zed-industries/zed/tree/main/crates/gpui
 
---------------------------------------------------------------------------
-Third-party dependencies
---------------------------------------------------------------------------
+Repository-owned GPUI platform and wgpu-hal patches live under vendor/.
+GPUI packages are Apache-2.0; wgpu-hal is MIT OR Apache-2.0. Retain their
+upstream license files and notices with distributions of the patched code.
+  https://github.com/gfx-rs/wgpu
 
-The Apache-2.0 license above applies only to the source code and assets
-that are original to this repository. At build and run time, Kinema
-depends on the following third-party components, each of which is
-licensed under its own terms. Those licenses are NOT altered by this
-project's relicensing, and redistributors must continue to comply with
-them when shipping a combined binary.
+Cargo dependencies have their own licenses. This notice is not a complete
+transitive dependency or bundled-asset license audit; a release must review
+its actual dependency graph, assets, and distribution obligations.
 
-  * Qt 6 (Core, Gui, Widgets, Network, OpenGL, Qml, Quick,
-    QuickControls2, Sql, Svg, Test)
-      Copyright The Qt Company Ltd. and contributors.
-      Licensed under LGPL-3.0-only (or GPL-2.0-or-later / GPL-3.0, or a
-      commercial license from The Qt Company).
-      https://www.qt.io/licensing/
+TMDB attribution asset and API
+------------------------------
+crates/kinema-desktop/assets/tmdb-logo.svg is the unmodified official TMDB
+blue short logo, retrieved from:
+  https://www.themoviedb.org/assets/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg
+SHA-256: 8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c
 
-  * KDE Frameworks 6 (CoreAddons, I18n, KIO, Config, Kirigami,
-    Notifications, StatusNotifierItem)
-      Copyright the KDE contributors.
-      Primarily licensed under LGPL-2.1-or-later; individual modules
-      may carry additional permissive licenses. See each framework's
-      own COPYING/LICENSES file for the authoritative terms.
-      https://api.kde.org/frameworks/
+The TMDB logo, branding, API, and service content are not licensed under this
+project's Apache-2.0 license. TMDB's applicable terms and branding requirements
+apply independently:
+  https://developer.themoviedb.org/docs/faq#what-are-the-attribution-requirements
+  https://www.themoviedb.org/about/logos-attribution
+  https://www.themoviedb.org/api-terms-of-use
 
-  * Extra CMake Modules (ECM)
-      Copyright the KDE contributors. BSD-3-Clause.
+Required application notice (in About/Credits, alongside an approved logo):
+This product uses the TMDB API but is not endorsed or certified by TMDB.
+The logo must remain unmodified in color/aspect/orientation and less prominent
+than Kinema branding. Asset inclusion alone does not establish UI compliance.
+TMDB describes API use as free for non-commercial purposes with attribution;
+commercial use requires separate licensing. Users supply their own API access
+token; no project API key is embedded.
 
-  * QCoro
-      Copyright Daniel Vrátil and contributors. MIT.
-      https://github.com/danvratil/qcoro
+External players and services
+-----------------------------
+External VLC/mpv executables, the native libmpv library, and online metadata,
+indexer, and debrid services are not bundled by this application. The TMDB attribution logo above is bundled separately.
+Integrations do not imply implementation, endorsement,
+or a grant of rights to service content or trademarks. Their software licenses
+and service terms apply independently. See docs/architecture.md for scope.
 
-  * QtKeychain
-      Copyright Frank Osterfeld and contributors. BSD-3-Clause / LGPL.
-      https://github.com/frankosterfeld/qtkeychain
+Bundled desktop v3 fonts and icons
+---------------------------------
+Inter 4.1, Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter),
+is distributed under SIL Open Font License 1.1. Bundled static faces are Regular,
+Medium, SemiBold and Bold; see crates/kinema-desktop/assets/fonts/OFL-Inter.txt.
 
-  * mpv / libmpv (runtime dependency for the embedded player)
-      Copyright the mpv contributors. LGPL-2.1-or-later (with some
-      GPL-2.0-or-later components depending on build configuration).
-      https://mpv.io/
+JetBrains Mono 2.304, Copyright 2020 The JetBrains Mono Project Authors
+(https://github.com/JetBrains/JetBrainsMono), is distributed under SIL Open Font
+License 1.1. Only Regular is bundled; see
+crates/kinema-desktop/assets/fonts/OFL-JetBrainsMono.txt.
 
---------------------------------------------------------------------------
-Third-party services
---------------------------------------------------------------------------
+Lucide icons 0.468.0 (https://github.com/lucide-icons/lucide) are distributed under
+ISC. Copyright for portions is held by Cole Bemis 2013-2022 as part of Feather
+(MIT); other copyright is held by Lucide Contributors 2022. SVG stroke widths
+are locally changed from 2 to 1.5 for Kinema's visual language. See
+crates/kinema-desktop/assets/icons/LICENSE-lucide.txt for the full license.
 
-Kinema communicates at runtime with the following online services. They
-are not bundled with this source, and their trademarks, content, and
-APIs remain the property of their respective owners:
-
-  * The Movie Database (TMDB) - https://www.themoviedb.org/
-      "This product uses the TMDB API but is not endorsed or certified
-       by TMDB."
-  * Torrentio          - https://torrentio.strem.fun/
-  * Cinemeta (Stremio) - https://v3-cinemeta.strem.io/
-  * Real-Debrid        - https://real-debrid.com/
-
---------------------------------------------------------------------------
-Bundled assets
---------------------------------------------------------------------------
-
-  * data/dev.tlmtech.kinema.metainfo.xml - CC0-1.0
-  * All other original code and assets   - Apache-2.0
+Pinned download sources and shipped-asset SHA-256 checksums are recorded in
+crates/kinema-desktop/assets/README.md. These bundled-asset credits must also be
+presented in the v3 About window when that screen is implemented.

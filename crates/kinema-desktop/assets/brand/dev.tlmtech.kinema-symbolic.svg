@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Thilina Lakshan <thilinalakshanmail@gmail.com> -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Monochrome 16px symbolic mark. GTK recolours any fill; KDE recolours the
+     ColorScheme-Text class through the current-color-scheme stylesheet. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <defs>
+    <style id="current-color-scheme" type="text/css">.ColorScheme-Text { color:#232629; }</style>
+  </defs>
+  <path class="ColorScheme-Text" fill="currentColor" d="M2 1L5 1L5 15L2 15ZM5 6.5L8.5 3L11.5 3L9.5 5L14 8.5L9.5 12L11.5 15L8.5 15L5 9.75Z"/>
+</svg>
