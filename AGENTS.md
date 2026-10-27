@@ -28,8 +28,7 @@ These rules apply to the Rust workspace. Historical C++ rules apply only under
   manifests, or logs. Distinguish service failures from successful empty results.
 - Add focused tests for domain rules and failure paths. Do not claim real provider,
   playback, or OS support based only on a compiling scaffold.
-- Preserve `reference/cpp` as historical source; no compatibility promises or active
-  release pipelines. Do not move or delete ignored/generated user files.
+- Do not move or delete ignored/generated user files.
 - Validate from the repository root:
   `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
