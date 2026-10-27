@@ -1,10 +1,9 @@
 # Kinema documentation
 
-The Rust workspace is Kinema's sole active implementation: direct GPUI
+The Rust workspace is Kinema's sole implementation: direct GPUI
 (`gpui-pre =0.3.9`) and `gpui_platform`, with in-house widgets. **Desktop v3 is the
 sole/default UI**; GPUI Kit and Graphite v2 are historical designs, not runtime
-alternatives. The [C++ archive](../reference/cpp/README.md) is historical reference,
-not a parity checklist or supported implementation.
+alternatives. There is no supported C++ implementation or feature-parity promise.
 
 ## Start here
 
@@ -20,6 +19,8 @@ not a parity checklist or supported implementation.
 | [Storage and media server](storage-layout.md) | Managed media, loopback serving, quota, cleanup and recovery |
 | [Caching](cache-policy.md) | Saved provider results, artwork, freshness and refresh policies |
 | [Native UI probe](design/ui-probe.md) | Isolated fixture/capture tooling and its evidence limits |
+| [GPU qualification record](validation/gpu-surface-qualification.md) | Retired harness evidence and its limits; not current build instructions |
+| [Vendor patch documentation](../vendor/patches/README.md) | Required GPUI/HAL patch APIs, synchronization and maintenance |
 | [Open decisions](decisions.md) | Unresolved choices; not implemented behavior |
 
 ## Reading status and evidence
@@ -46,7 +47,7 @@ playback, full GUI workflows, Windows/macOS runtime behavior or HDR. Follow the
 [current root build instructions](development.md#run-and-validate), not a retired
 experimental wrapper.
 
-Older Graphite designs, HTML previews, handoffs and validation records remain in
-place as historical evidence. They do not override the v3 contract or establish
-current acceptance. No legacy C++ `~/.config/kinemarc`, `kinema.db` or keyring-entry
+Superseded Graphite v2 designs and development handoffs have been removed.
+Retained HTML previews are design artifacts, not runtime implementations;
+validation records establish only their stated scope, not current acceptance. No legacy C++ `~/.config/kinemarc`, `kinema.db` or keyring-entry
 migration is supported.

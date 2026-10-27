@@ -129,3 +129,27 @@ done   # likewise ...-movie-streams, ...-series, ...-series-streams
 
 Use a tall size such as `1920x2000` to see the page below the fold. Captures are
 candidates for image review, not baselines.
+
+## Visual-baseline review requirements
+
+These retained acceptance requirements are not a claim that a baseline-upload
+pipeline or cross-platform visual qualification exists.
+
+- Keep baselines separate by OS/backend, renderer/driver, fonts, scale, viewport,
+  theme, fixture version and toolchain; record logical and physical dimensions.
+  HTML previews are not GPUI pixel baselines.
+- Assert fixture readiness, drive native input, check semantics, capture the
+  client area and compare within the same environment, then inspect the images.
+  Measure nondeterminism before approving tolerances. Masks must be narrow and
+  reviewed, never hiding focus rings, text or artwork to force a pass.
+- A missing baseline requires review, not a pass. Never silently regenerate
+  approved references. Submit changes with fixture ID, reason, before/after/diff
+  images and environment details for reviewer approval.
+- On failure retain available images, semantic snapshot, failed step, bounded
+  logs, build identity/dirty status, fixture/seed, environment and exit reason.
+  Startup failure may have only logs; never fall back to capturing the user's
+  desktop. Upload only fixture artifacts with bounded retention, not secrets,
+  user databases, home directories, environment dumps or arbitrary core dumps.
+- Inspect clipping, hierarchy, focus visibility, hover/keyboard parity, long
+  titles, missing/error states, both themes, scale and reduced motion. Image diffs
+  detect changes; they do not decide usability or prove native performance.

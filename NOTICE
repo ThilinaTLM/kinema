@@ -22,14 +22,6 @@ Cargo dependencies have their own licenses. This notice is not a complete
 transitive dependency or bundled-asset license audit; a release must review
 its actual dependency graph, assets, and distribution obligations.
 
-Historical C++ archive
-----------------------
-reference/cpp/NOTICE preserves the old application's dependency and service
-notices, including Qt, KDE Frameworks, and optional libmpv. These describe the
-archive, not the Rust application's dependency graph. The Rust application
-independently loads a user-installed libmpv for embedded playback. The archive's original
-metainfo asset is CC0-1.0; see its source notice.
-
 TMDB attribution asset and API
 ------------------------------
 crates/kinema-desktop/assets/tmdb-logo.svg is the unmodified official TMDB

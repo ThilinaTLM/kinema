@@ -46,7 +46,7 @@ user-reported successes do not establish current-version acceptance. See the
 [validation matrix](development.md#validation-status-and-limits). The diagram
 below remains a responsibility model, not a claim that every target policy is done.
 
-Kinema Next is a local-first movie and TV-series application written in Rust with GPUI. It targets **Windows, macOS, and Linux from the first release**, without KDE dependencies.
+Kinema is a local-first movie and TV-series application written in Rust with GPUI. It targets **Windows, macOS, and Linux from the first release**, without KDE dependencies.
 
 ### Agreed MVP
 
@@ -94,7 +94,7 @@ and scoped integration tests passed as reviewed by the lead. Root checks passed
 presentation, not full-provider, cross-platform, or performance acceptance. Final
 backend review added explicit script/OSC/OSD disabling; post-change root/native
 reruns passed. Native no-Lua builds are not runtime-qualified; missing-option
-classification has pure-test coverage only. See the [validation evidence](design/player.md#validation-evidence-lead-reviewed).
+classification has pure-test coverage only. See the [validation evidence](design/player.md#historical-validation-evidence-earlier-increment-lead-reviewed).
 
 Embedded mpv uses the GPU-surface path as its sole/default renderer, enabled by
 the default Cargo feature `gpu-surface`. Playback opens an independent
@@ -104,13 +104,11 @@ External mpv and VLC remain explicit alternatives with their existing lifetime
 policy. See the [player design](design/player.md) for chrome, controls, states,
 ownership, and acceptance requirements.
 
-The backend was imported from `/home/tlm/Projects/Random/mpv-gpui` into
-`kinema-mpv` without modifying that source experiment at import time. Keep native libmpv loading,
-commands, events, decoding/render workers, and resource teardown behind that
-backend boundary; the desktop owns the GPUI view, window, Cinema tokens, and
-session coordination. Do not import the experiment's GPUI 0.2.2 view or introduce
-a second engine: desktop presentation uses only pinned `gpui-pre =0.3.9` and
-`gpui_platform`. Domain policies remain in `kinema-core`.
+The `kinema-mpv` backend owns native libmpv loading, commands, events,
+decoding/render workers, and resource teardown. The desktop owns the GPUI view,
+window, v3 tokens, and session coordination. Do not introduce a second engine:
+desktop presentation uses only pinned `gpui-pre =0.3.9` and `gpui_platform`.
+Domain policies remain in `kinema-core`.
 
 Embedded playback consumes the same loopback media-server lease boundary as
 external playback, never upstream debrid URLs. Each embedded window owns one
@@ -236,42 +234,19 @@ Use the root offline `ui-probe` PlayerWindow path described in the
 [current scoped validation](development.md#gpu-surface-default-promotion--current-scoped-validation)
 for fixture checks, not the retired wrapper.
 
-## UI direction and historical implementation evidence
+## UI direction
 
-**Current authority:** [Desktop v3](design/desktop-v3.md) is the sole/default
-Cinema dark/warm UI, using direct pinned GPUI and in-house widgets. The Graphite
-and Kit records below are historical evidence, not current dependencies or
-instructions; their checks do not validate the embedded-player increment.
-
-The user approved the six-area UI feature scope and decided on a **permanent
-left icon-only rail**, with no expanded-sidebar or top-navigation mode. The new
-direction is a professional neutral Graphite theme with blue accents, not amber;
-compact desktop spacing and a native font stack; polished primitive controls and
-composable GPUI components; visible IMDb card ratings and hover/focus states;
-purposeful motion; and lazy-loading/performance requirements.
-
-The user **approved native Graphite implementation** and lead-owned commits.
-The [design system](design/design-system.md) is the visual/state contract; the
-[native implementation record](design/native-implementation.md) describes actual
-shared themes/cards/buttons/grid sizing, fixed-rail shell/provider-view composition,
-bounded artwork, safe gallery commands and remaining gaps. That historical implementation used pinned Kit reexports/components/assets/init/open_window;
-current v3 must not restore Kit or introduce a second UI engine.
-
-The **Graphite v2** [HTML artifact](design/desktop-wireframes.html) remains frozen
-as a design-only reference, with its historical browser checks and simulated
-performance preview. See the [review guide](design/README.md) for limits. Earlier
-three-layout comparisons are superseded exploration, not supported modes. Native
-approval is no longer pending. Final offline gallery captures were visually
-inspected by the lead; serialized root checks passed **331 tests / 3 ignored**,
-with **20** explicit feature passes (17 overlap + 3 GPUI tests) and **5** Node
-passes. See [final evidence](design/native-implementation.md#final-validation-evidence).
-Neither these fixtures nor HTML counters prove GPU/RAM bounds, OS support or
-complete workflow acceptance.
+[Desktop v3](design/desktop-v3.md) is the sole/default native UI contract,
+using direct pinned GPUI and in-house widgets. Its approved revisions govern
+current layouts and controls; Graphite v2 and Kit are not supported alternatives.
+Use the [design index](design/README.md) for active contracts and the
+[native UI lab](design/ui-probe.md) for isolated fixture commands and evidence limits.
 
 Search/detail/sources cancellation and shared display facts are implemented, not
-full rich/provenance UI acceptance. Preserve prior backend evidence as historical.
-The approved Library extension above supersedes the historical library deferral;
-history and other deferred work remain outside its scope.
+full rich/provenance UI acceptance. The approved Library extension above adds
+personal membership and manual watched state; history and other deferred work
+remain outside its scope. Fixtures and HTML design artifacts do not prove native
+GPU/RAM bounds, cross-platform support, or complete workflow acceptance.
 
 ## Agreed metadata-provider contract
 

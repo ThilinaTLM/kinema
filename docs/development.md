@@ -132,7 +132,7 @@ sudo apt-get install -y gcc g++ clang pkg-config libfontconfig-dev libwayland-de
 ```
 
 Other distributions need equivalent packages. ALSA development headers are only
-needed if the optional speech feature is enabled; this scaffold does not enable it.
+needed if the optional speech feature is enabled; Kinema does not enable it.
 Running the desktop on Linux requires a graphical Wayland/X11 session and a working
 Vulkan driver, not just the Vulkan loader. No KDE SDK is required.
 
@@ -343,7 +343,7 @@ added. External player behavior is unchanged. The backend import, original-playe
 replay, close/lease release, retry, and stale-event logic are implemented. Actual
 GPUI presentation has scoped Linux evidence; final option hardening and root/native
 reruns passed, while broader acceptance remains incomplete. See the
-[player contract and validation evidence](design/player.md#validation-evidence-lead-reviewed).
+[player contract and validation evidence](design/player.md#historical-validation-evidence-earlier-increment-lead-reviewed).
 
 The `kinema-mpv` backend was originally ported from the external `mpv-gpui`
 prototype; its GPUI 0.2.2 view was not imported. Desktop presentation uses the
@@ -936,9 +936,8 @@ claimed.
 Post-v4 authenticated-provider/debrid and new GUI acceptance remain unverified;
 prior user-reported TMDB/AllDebrid success remains evidence for earlier versions
 only. Existing search/detail/sources cancellation wiring was updated, not the
-GPUI layout. The source/documentation batch is frozen. The [HTML prototype](design/desktop-wireframes.html)
-is frozen with expanded-sidebar, rail, and top-navigation variants and awaits
-user review; browser prototype checks do not validate GPUI or backend behavior.
+GPUI layout. Those historical checks do not validate the current
+[Desktop v3](design/desktop-v3.md) UI or its approved revisions.
 
 ### Prior evidence and remaining acceptance limits
 
@@ -988,15 +987,6 @@ less prominent than Kinema branding. The asset is subject to TMDB's branding ter
 not the project's Apache-2.0 license. The logo and exact About notice were visually
 checked on Linux X11; this does not establish rendering on other platforms or
 live provider/keyring behavior.
-
-## Historical C++ source
-
-[reference/cpp](../reference/cpp/README.md) preserves the previous source, tests,
-packaging, and workflows as reference. Its workflows are inactive. Old build commands
-must run with `reference/cpp` as the source/working directory, not the Rust root.
-Old release automation assumes the former repository layout and is not maintained
-as runnable release infrastructure. Generated user files left at the root are not
-part of the Rust workspace and are not moved or cleaned by this migration.
 
 ## Native v3 lab
 

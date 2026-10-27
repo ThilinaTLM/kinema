@@ -2,7 +2,7 @@
 
 A pre-1.0 Rust desktop application using direct GPUI (`gpui-pre =0.3.9`) and
 `gpui_platform`, targeting Windows, macOS, and Linux. The Rust workspace is the
-only active implementation; it has no Qt/KDE application dependencies.
+sole implementation; it has no Qt/KDE application dependencies.
 V3 is the sole/default UI, with in-house widgets and no UI version switch. **The first bounded catalog
 increment has expanded into integrated MVP source flows; full MVP validation
 is not complete.**
@@ -62,15 +62,12 @@ The workspace contains `kinema-core` (UI-independent domain code),
 and [development guide](docs/development.md) for current scope, core-only checks,
 and OS setup. Release packaging is not yet provided.
 
-## Historical archive
+## Data and compatibility
 
-The previous Qt/KDE application is preserved under [reference/cpp](reference/cpp/README.md).
-It is historical reference, not a compatibility layer or a promise of feature parity.
-The Rust application starts fresh; old settings, databases, and keyring entries
-will not be migrated.
-Historical release binaries do not represent this Rust scaffold.
+Kinema starts fresh: old `~/.config/kinemarc`, `kinema.db`, and keyring entries
+are not migrated. Historical release binaries do not represent this Rust application.
 
 ## License
 
 Original Kinema code remains [Apache-2.0](LICENSE). See [NOTICE](NOTICE) for
-third-party notices and the distinction between the scaffold and archived dependencies.
+third-party code, bundled-asset credits, and distribution obligations.

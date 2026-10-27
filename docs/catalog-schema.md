@@ -174,8 +174,7 @@ V6 subsequently removes the legacy tables with the user's explicit authorization
   v6 discards those legacy snapshots. Never invent identities to make them reusable.
 
 Detailed check scopes, intermediate runs, and logs are recorded in the
-[development validation history](development.md#current-normalized-catalog-batch)
-and [handoff](handoff-next-lead.md#current-next-action-design-system-cards-and-motion-review).
+[development validation history](development.md#current-normalized-catalog-batch).
 Post-v4 authenticated-provider/debrid and new GUI acceptance remain unverified;
 earlier user-reported successes apply to earlier versions, not this acceptance.
 

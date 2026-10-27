@@ -1,10 +1,9 @@
 # Current Rust implementation
 
-Rust is Kinema's sole active implementation. This is a source-based overview,
+Rust is Kinema's sole implementation. This is a source-based overview,
 not a completion report, runtime qualification or C++ parity checklist. The
 [architecture](architecture.md) separates approved scope from deferred work;
 [development](development.md) records prerequisites and scoped validation limits.
-Historical C++ source and documentation remain in the [archive](../reference/cpp/README.md).
 
 ## Desktop and ownership
 
@@ -113,7 +112,7 @@ support, sustained performance or complete live-provider workflows.
 No full MVP, end-to-end live-provider playback or all-desktop runtime acceptance
 is claimed here. Manual watched state is not viewing history, persistent playback
 resume or automatic completion tracking. Built-in torrenting, download
-pause/prefetch suspension and the archived application's subtitle/Up Next features
+pause/prefetch suspension and subtitle/Up Next features
 must not be inferred from this overview. See [architecture](architecture.md) for
 scope and [validation status](development.md#validation-status-and-limits) for
 evidence boundaries.

@@ -49,9 +49,8 @@ parts of §§3.1, 4.1, 4.2, 4.5, 4.6 and 6.1 below:
   interruptible: lift 220 ms, overlay 260 ms after 60 ms intent delay with 30 ms
   row stagger, 200 ms exit.
 
-References: [architecture](../architecture.md), [historical feature inventory](../features.md),
-[v2 review guide](README.md), [v2 design system](design-system.md),
-[native implementation](native-implementation.md), [isolated UI probe](ui-probe.md).
+References: [architecture](../architecture.md), [current implementation](../features.md),
+[design index](README.md), [isolated UI probe](ui-probe.md).
 
 Approved playback extension: [independent embedded-mpv player](player.md), with
 Cinema chrome and separate window/lease lifetime rules. Embedded is the approved
@@ -841,10 +840,38 @@ immediately; animations never delay input.
 - Validate 100–200 % scale, 960/1280/1600 widths, both themes, reduced motion.
   These are acceptance targets, not claims of current cross-OS support.
 
+### Retained collection and artwork acceptance requirements
+
+These requirements survive removal of the v2 design docs; they are acceptance
+targets, not new runtime qualification or changes to the approved visual revisions.
+
+- Collection focus belongs to a stable canonical identity, not a recycled cell.
+  Scroll/mount the target before restoring focus; recycled cells must not inherit
+  another title's state or callbacks. Resolve identity remaps on modal return;
+  if filtering/removal hides the target, choose a predictable surviving neighbor
+  or results heading rather than losing focus.
+- Bound demand-driven page requests, retained pages and queues; coalesce matching
+  demand, stop at known end, and require explicit retry after paging failure.
+- Own artwork work in an application-wide bounded pool. Obsolete blocking jobs
+  retain their active slots until completion; navigation must not reset global
+  accounting. Cancel obsolete subscriptions and reject stale keys/generations.
+  Prioritize visible artwork before overscan; do not crawl the catalog.
+- Enforce encoded-byte, dimension, pixel and decoder-allocation limits before
+  large allocations and during decoding. Budget decoded cache bytes separately
+  from compressed buffers, temporary allocations and GPU residency. Evict unused
+  handles; reduce resolution/defer overscan when pinned images exceed budget.
+  Store quotas are not process-memory guarantees or part of the media quota.
+  Missing, pending and failed artwork stay distinct; never retry every render.
+- Profile native scrolling, input latency and repeated route/query/resize changes
+  with slow/failing providers and large synthetic catalogs. Record hardware,
+  OS/backend, scale, data/image sizes, cold/warm cache, p50/p95 frame time and
+  worst stalls. Historical targets of p95 ≤16.7 ms and input feedback ≤100 ms
+  require measurement; fixtures and HTML counters do not establish them.
+
 ## 8. Superseded directions
 
-Older v2 documents are retained and marked historical; `AGENTS.md` and the design
-index now identify v3 as the sole/default UI:
+Superseded v2 documents and prototypes have been removed. `AGENTS.md` and the
+design index identify v3 as the sole/default UI:
 
 - Permanent 56 px left rail → toolbar-only main window.
 - Footer labels at rest → poster-only cards with chips; facts on hover/focus.
@@ -852,7 +879,7 @@ index now identify v3 as the sole/default UI:
 - v2 Graphite blue-gray palette and system font stack → Cinema palette, Inter.
 - Provider picker in browse chrome → ordered priority list in Settings › Accounts.
 - Release inspector pane, inline prepare panel → stream rows + Play sheet.
-- `desktop-wireframes.html` → this document + native design lab.
+- Graphite HTML prototype → this document + native design lab.
 - gpui-kit facade/components → direct `gpui-pre` + in-house components.
 
 ## 9. Delivery phases and gates

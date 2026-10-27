@@ -23,10 +23,9 @@ qualification: prior Linux evidence remains scoped; native Windows/macOS tests
 and HDR remain deferred and unqualified. Play opens an independent Kinema-managed
 GPUI window; the browse/detail window remains usable. Retain external mpv and VLC
 as explicit alternatives, not silent fallbacks. Use only pinned `gpui-pre =0.3.9`
-and `gpui_platform`, with in-house desktop widgets. Backend functionality has been
-imported into `kinema-mpv` from `/home/tlm/Projects/Random/mpv-gpui`; the experiment
-is unchanged and its GPUI 0.2.2 view is not imported. No HTML player or second UI
-engine. The approved [Cinema Dock wireframe](player-controls-wireframes.html) is
+and `gpui_platform`, with in-house desktop widgets. Native playback lives in
+`kinema-mpv`; desktop presentation stays in `kinema-desktop`. No HTML player or
+second UI engine. The approved [Cinema Dock wireframe](player-controls-wireframes.html) is
 an HTML **design artifact exception only**, not shipped player UI or a second
 engine. Its illustrative media, metadata, buffering, thumbnails, and demo actions
 are not evidence of native capabilities. Settings provide three primary choices:

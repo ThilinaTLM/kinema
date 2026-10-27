@@ -70,17 +70,10 @@ reported. Current post-backfill/quality-fix root fmt, strict locked workspace
 Clippy, locked tests, and diff checks passed. Run history is in
 [development](development.md#current-normalized-catalog-batch). Preserve the
 [conservative backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits).
-The user settled navigation: a **permanent left icon-only rail**, with no expanded
-or top-navigation mode. The professional neutral Graphite/blue direction replaces
-amber and calls for compact desktop spacing, native fonts, polished primitive
-controls/composable GPUI components, visible IMDb card ratings, hover/focus states,
-purposeful motion, and lazy loading/performance. These are design requirements,
-not implemented styling or measured performance.
-
-The [design system](design/design-system.md) is the authoritative **design proposal**.
-Review its detailed controls, cards, and motion together with the aligned prototype
-before GPUI visual implementation. Navigation is no longer an open choice; broader
-visual details and full rich/provenance UI presentation are not yet accepted.
+[Desktop v3](design/desktop-v3.md) and its approved revisions now govern the
+sole/default UI. Earlier Graphite palette, fixed-rail and Kit proposals are
+superseded, not open choices. Full rich/provenance UI presentation and runtime
+acceptance are not established by design approval.
 
 The user additionally approved [narrow automatic transactional reconciliation](catalog-schema.md#approved-narrow-identity-reconciliation)
 when explicit provider-supplied IMDb mapping proves duplicates with no contradictory
@@ -89,12 +82,7 @@ this is identity reconciliation, not cache cleanup. Backend reports graph
 reconciliation and rollback coverage, with current root checks passing. Post-v4
 authenticated-provider/debrid and new GUI acceptance remain unverified.
 
-The **Graphite v2** [HTML artifact](design/desktop-wireframes.html) is frozen and
-review-ready; [review guidance](design/README.md) separates its browser checks
-from unmeasured/unimplemented native GPUI performance. The design-system proposal
-and guide are frozen after token/alias alignment and API peer review. User review
-of the proposal, cards, and motion remains pending, not navigation selection.
-Provider policy is now superseded by the 2026-10-21 priority/enrichment decision;
+Provider policy is superseded by the 2026-10-21 priority/enrichment decision;
 automatic TTLs and full-catalog crawling remain outside that decision.
 
 ## Other open media storage behavior

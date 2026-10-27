@@ -35,11 +35,6 @@ User-assisted embedded playback sample:
 - The user then opened the same episode stream in external MPV through Kinema
   and reported that it **also buffers**. This is a user report, not an
   independently instrumented external-player benchmark.
-- The user reports the same content plays smoothly in the historical C++/Qt
-  embedded application, and emphasizes that current embedded video becomes
-  choppy as buffering begins. Neither observation is an instrumented throughput
-  or presentation comparison. The read-only source comparison below identifies
-  concrete differences, not their measured performance effect.
 
 Root format, strict Clippy, tests and build passed in the shared validation
 record. Native GPU lifecycle validation passed with Intel hardware GL; this
@@ -54,8 +49,7 @@ make an embedded-only GPU or image-retirement issue a weaker explanation for
 this observed buffering. They do not prove the root cause of individual long
 header waits or exclude additional local-serving/player effects. Confirmed cache
 starvation can itself produce discontinuous frame delivery and apparent
-choppiness; separate presentation problems are not excluded. Smooth playback
-reported in the historical application is not a controlled GPU comparison.
+choppiness; separate presentation problems are not excluded.
 
 **Secondary candidate:** embedded image retirement can throttle accepted-image
 rate. In the baseline, `sample` refused `take_frame` while `retiring`, and
@@ -122,16 +116,7 @@ Header overhead is therefore the leading measured cost, rather than payload
 sync or checkpoint time in this sample. Stage means describe windows and need
 not sum to endpoints of the separately reported typical cycle range.
 
-## Historical comparison, configuration and approved work
-
-Read-only historical-source comparison found a **4 MiB** default request in
-`reference/cpp/src/playback/sources/HttpRangeAssetSession.cpp:24`, versus Rust's
-**256 KiB** measured baseline. The historical path flushes/closes payload data
-and updates its bitmap without the Rust path's explicit fsync sequence. This is
-a source difference, not evidence that durability sync dominates the measured
-Rust cycles. Historical Qt/mpvqt FBO integration is not proof of zero-copy or
-superior sustained presentation. No historical files or Qt/KDE dependencies
-are changed.
+## Configuration and approved work
 
 User-authorized configuration inspection found external mpv settings of
 `cache=yes`, `cache-secs=300`, `demuxer-max-bytes=400MiB` and
