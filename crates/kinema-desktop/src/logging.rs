@@ -364,7 +364,11 @@ mod tests {
                 "tmdb",
             ),
             (
-                metadata(MetadataAction::Tmdb(TmdbQuery::Similar { id: 99, page: 3 })),
+                metadata(MetadataAction::Tmdb(TmdbQuery::Similar {
+                    kind: MediaKind::Movie,
+                    id: 99,
+                    page: 3,
+                })),
                 "tmdb",
             ),
             (
@@ -452,7 +456,9 @@ mod tests {
                         | TmdbQuery::Search { .. },
                     ) => &["media_kind", "page"],
                     MetadataAction::Tmdb(TmdbQuery::Details { .. }) => &["media_kind", "tmdb_id"],
-                    MetadataAction::Tmdb(TmdbQuery::Similar { .. }) => &["tmdb_id", "page"],
+                    MetadataAction::Tmdb(TmdbQuery::Similar { .. }) => {
+                        &["media_kind", "tmdb_id", "page"]
+                    }
                     MetadataAction::Tmdb(TmdbQuery::Season { .. }) => &["tmdb_id", "season"],
                 },
             };

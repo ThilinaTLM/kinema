@@ -40,7 +40,7 @@ pub(crate) fn install(coordinator: &Entity<AppCoordinator>, main: AnyWindowHandl
     cx.set_menus([Menu::new("Kinema").items([
         MenuItem::action("About Kinema", V3About),
         MenuItem::separator(),
-        MenuItem::action("Settings…", V3Settings),
+        MenuItem::action("Settings", V3Settings),
         MenuItem::separator(),
         MenuItem::action("Quit Kinema", V3Quit),
     ])]);

@@ -3,25 +3,26 @@ use super::{
     browse::{
         Browse, BrowseRequest, LibraryFilters, OpenTitle, Scope, Sort,
         filters::{self, DiscoverMode, DiscoverPanel},
-        menu_item,
     },
     coordinator::{AppCoordinator, BrowseTitle, CoordinatorEvent},
     detail::{Detail, OpenDetailTitle},
 };
 use crate::widgets::{
     button::Button,
-    choice_card::ChoiceTile,
     icon::IconName,
     icon_button::IconButton,
     menu::Menu,
     notice::{Notice, NoticeKind},
+    patterns::menu_item_icon,
     popover::{Popover, PopoverAlign},
     search_field::{SearchField, SearchFieldEvent},
     segmented::Segmented,
     text::TypeExt,
     text_input::TextInputEvent,
     tokens::{self, space as s, typeface as t},
-    toolbar::{Toolbar, ToolbarChip, ToolbarGroup, icon_cell},
+    toolbar::{
+        TRANSFER_DETAIL_MIN_WIDTH, Toolbar, ToolbarChip, ToolbarGroup, TransferStatus, icon_cell,
+    },
 };
 use gpui::{prelude::*, *};
 use kinema_core::{MediaKind, library::LibraryKind, provider::ProviderId};
@@ -429,7 +430,7 @@ impl MainWindow {
         );
     }
 
-    fn overflow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn overflow(&mut self, pointer: bool, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(menu) = &self.menu {
             menu.update(cx, |menu, cx| menu.dismiss(window, cx));
             return;
@@ -439,22 +440,22 @@ impl MainWindow {
         let refresh = cx.entity().downgrade();
         let quit = self.coordinator.clone();
         let items = vec![
-            menu_item("Open local file…", move |w, cx| {
+            menu_item_icon("Open local file", IconName::Folder, move |w, cx| {
                 let _ = local.update(cx, |s, cx| s.open_local(w, cx));
             }),
-            menu_item("Refresh", move |_, cx| {
+            menu_item_icon("Refresh", IconName::Refresh, move |_, cx| {
                 let _ = refresh.update(cx, |s, cx| s.refresh(cx));
             }),
-            menu_item("About Kinema", move |_, cx| {
+            menu_item_icon("About Kinema", IconName::Info, move |_, cx| {
                 let _ = weak.update(cx, |s, cx| {
                     s.coordinator.update(cx, |c, cx| c.about(cx));
                 });
             }),
-            menu_item("Quit", move |window, cx| {
+            menu_item_icon("Quit", IconName::Power, move |window, cx| {
                 super::quit::request(&quit, window, cx);
             }),
         ];
-        let menu = cx.new(|cx| Menu::new(items, window, cx));
+        let menu = cx.new(|cx| Menu::new(items, window, cx).opened_by_pointer(pointer));
         self.menu_subscription = Some(cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.menu = None;
             cx.notify();
@@ -554,38 +555,30 @@ const SCRIM_STEPS: usize = 36;
 /// Header controls. Every view composes the same primitives (see
 /// `widgets::toolbar`), so only the slot contents differ between routes.
 impl MainWindow {
-    /// Discover/Library picker: a chip that opens two choice tiles.
+    /// Discover/Library switch: the chip shows the current scope and each
+    /// click (or Enter/Space) flips to the other one; no popover.
     fn scope_control(&self, scope: Scope, compact: bool, cx: &mut Context<Self>) -> AnyElement {
         let (icon, label) = scope_face(scope);
-        let weak = cx.entity().downgrade();
-        Popover::new("scope-picker")
-            .label("Switch between Discover and Library")
-            .trigger_with(move |open| ToolbarChip::new(icon, label).open(open).compact(compact))
-            .content_with(move |handle, _, _| {
-                let tile = move |value: Scope, description: &'static str| {
-                    let (icon, title) = scope_face(value);
-                    let weak = weak.clone();
-                    let handle = handle.clone();
-                    ChoiceTile::new(("scope", value.index()), icon, title, description)
-                        .selected(scope == value)
-                        .on_click(move |window, cx| {
-                            handle.dismiss(window, cx);
-                            let _ =
-                                weak.update(cx, |this, cx| this.switch_scope(value, window, cx));
-                        })
-                };
-                div()
-                    .flex()
-                    .gap(s::S8)
-                    .child(tile(
-                        Scope::Discover,
-                        "Popular titles and catalogues from your provider.",
-                    ))
-                    .child(tile(
-                        Scope::Library,
-                        "Titles you saved, with watch progress.",
-                    ))
-            })
+        let next = other_scope(scope);
+        let hint: SharedString = format!("Switch to {}", scope_face(next).1).into();
+        let p = *tokens::palette(cx);
+        div()
+            .id("scope-toggle")
+            .debug_selector(|| "scope-toggle".into())
+            .flex_none()
+            .rounded(tokens::radius::MD)
+            .role(Role::Button)
+            .aria_label(SharedString::from(format!("{label}. {hint}")))
+            .focusable()
+            .tab_stop(true)
+            .focus_visible(move |s| s.border(s::FOCUS_RING).border_color(p.focus_ring))
+            .tooltip(crate::widgets::tooltip::tooltip(hint))
+            .on_click(cx.listener(move |this, _, window, cx| this.switch_scope(next, window, cx)))
+            .child(
+                ToolbarChip::new(icon, label)
+                    .chevron(false)
+                    .compact(compact),
+            )
             .into_any_element()
     }
 
@@ -710,11 +703,14 @@ impl MainWindow {
         }
     }
 
-    /// Transfers, Settings and the app menu: same capsule, same place, every view.
-    fn global_group(&self, count: usize, cx: &mut Context<Self>) -> ToolbarGroup {
-        let transfer_trigger = div().child(
-            IconButton::new("transfers-trigger", IconName::Transfers, "Transfers").badge(count),
-        );
+    /// Open local file and Refresh, the Transfers status, then Settings and the
+    /// app menu: same capsule, same place, every view.
+    fn global_group(&self, window: &Window, cx: &mut Context<Self>) -> ToolbarGroup {
+        let coordinator = self.coordinator.read(cx);
+        let summary = coordinator.transfer_summary();
+        let speed = coordinator.transfer_bytes_per_second();
+        let compact = window.viewport_size().width < TRANSFER_DETAIL_MIN_WIDTH;
+        let transfer_trigger = div().child(TransferStatus::new(summary, speed, compact));
         let pulse = crate::widgets::motion::duration(crate::widgets::motion::Motion::Feedback, cx);
         let transfer_trigger = if self.launch_pulse > 0 && !pulse.is_zero() {
             transfer_trigger
@@ -730,6 +726,15 @@ impl MainWindow {
         ToolbarGroup::new()
             .debug_selector("toolbar-global")
             .child(
+                IconButton::new("open-local", IconName::Folder, "Open local file")
+                    .on_click(cx.listener(|this, _, window, cx| this.open_local(window, cx))),
+            )
+            .child(
+                IconButton::new("refresh", IconName::Refresh, "Refresh")
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+            )
+            .divider()
+            .child(
                 Popover::new("transfers")
                     .align(PopoverAlign::End)
                     .label("Transfers")
@@ -744,9 +749,19 @@ impl MainWindow {
                 }),
             )
             .child(
-                IconButton::new("overflow", IconName::MoreHorizontal, "App menu")
-                    .on_click(cx.listener(|this, _, window, cx| this.overflow(window, cx))),
+                IconButton::new("overflow", IconName::MoreHorizontal, "More").on_click(
+                    cx.listener(|this, event: &ClickEvent, window, cx| {
+                        this.overflow(!event.is_keyboard(), window, cx)
+                    }),
+                ),
             )
+    }
+}
+
+fn other_scope(scope: Scope) -> Scope {
+    match scope {
+        Scope::Discover => Scope::Library,
+        Scope::Library => Scope::Discover,
     }
 }
 
@@ -762,7 +777,6 @@ impl Render for MainWindow {
         let p = *tokens::palette(cx);
         let scope = self.browse.read(cx).scope();
         let personal_notice = self.personal_notice(cx);
-        let count = self.coordinator.read(cx).active_sessions();
         let in_detail = matches!(self.route, Route::Detail(_));
         let inset = if in_detail {
             super::detail::page_inset(window.viewport_size().width)
@@ -783,7 +797,7 @@ impl Render for MainWindow {
                             .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
                     ),
                 )
-                .trailing(self.global_group(count, cx))
+                .trailing(self.global_group(window, cx))
         } else {
             Toolbar::new()
                 .inset(inset)
@@ -792,7 +806,7 @@ impl Render for MainWindow {
                 .leading(self.kind_control(scope, cx))
                 .center(self.search.clone())
                 .trailing(self.filters_control(scope, compact, cx))
-                .trailing(self.global_group(count, cx))
+                .trailing(self.global_group(window, cx))
         };
         let scrolled: Rc<dyn Fn(&App) -> Pixels> = match &self.route {
             Route::Browse => {
@@ -905,7 +919,7 @@ impl Render for MainWindow {
                 el.child(super::quit::confirmation_for(
                     self.coordinator.clone(),
                     self.cancel_focus.clone(),
-                    count,
+                    self.coordinator.read(cx).active_sessions(),
                 ))
             })
     }
@@ -1339,6 +1353,21 @@ mod interaction_tests {
                 assert!(visual.debug_bounds(other).is_none());
             }
             assert!(widths[0] > widths[1] + px(20.), "{widths:?}");
+        }
+    }
+
+    #[gpui::test]
+    fn scope_chip_click_toggles_discover_and_library(cx: &mut TestAppContext) {
+        let (_, main) = fixture_window(cx);
+        let mut visual = VisualTestContext::from_window(main.into(), cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+        for expected in [Scope::Library, Scope::Discover, Scope::Library] {
+            draw(main, cx);
+            let chip = visual.debug_bounds("scope-toggle").expect("scope chip");
+            visual.simulate_click(chip.center(), Modifiers::default());
+            draw(main, cx);
+            assert_eq!(browse.read_with(cx, |b, _| b.scope()), expected);
         }
     }
 

@@ -105,10 +105,13 @@ acquisition evidence, not an eager network crawl.
 - Empty sets and unknown completeness never imply Watched. Unknown summaries
   remain in Any only, not any of the three status-specific filters. Show
   “N watched · total unknown” or “Episode status unavailable”, not a false zero.
-- Season bulk watched/unwatched actions require a complete loaded season.
-  Confirm the exact season and count (for example “Mark 6 episodes in Season 1
-  watched?”), then atomically change that displayed episode set. Episodes arriving
-  after confirmation are excluded. There is no whole-show bulk toggle.
+- Season bulk watched/unwatched actions require a complete loaded season. As of
+  the 2026-10 UI revision ([wireframe](ui-revision-2026-10.html)) they apply
+  immediately through the tri-state season toggle, without confirmation or Undo
+  (the user considers them non-destructive and reversible by toggling again).
+  The write still atomically changes the snapshotted episode set; episodes arriving
+  after the snapshot are excluded. The series hero toggle has no whole-show write:
+  it queues per-season writes, skipping seasons with no saved episodes.
 - Storage source now freezes verified title identity anchors, title/season IDs,
   season number and episode ID/number pairs. It rechecks these before the atomic
   bulk write, rejecting stale merged/reused identities instead of targeting

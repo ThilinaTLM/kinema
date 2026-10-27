@@ -190,7 +190,7 @@ impl Render for PlaySheet {
             body = body.child(
                 Notice::new(NoticeKind::Warning, "This stream can’t be prepared yet")
                     .body(self.credential_notice.clone())
-                    .action(Button::new("play-settings", "Open Settings…").on_click(
+                    .action(Button::new("play-settings", "Open Settings").on_click(
                         move |_, _, cx| {
                             coordinator.update(cx, |c, cx| c.open_settings_at(destination, cx))
                         },
@@ -231,7 +231,7 @@ impl Render for PlaySheet {
                     NoticeKind::Warning,
                     format!("File exceeds the cache limit ({})", format_bytes(limit)),
                 )
-                .action(Button::new("play-storage", "Storage settings…").on_click(
+                .action(Button::new("play-storage", "Storage settings").on_click(
                     move |_, _, cx| {
                         coordinator.update(cx, |c, cx| {
                             c.open_settings_at(SettingsDestination::Storage, cx)

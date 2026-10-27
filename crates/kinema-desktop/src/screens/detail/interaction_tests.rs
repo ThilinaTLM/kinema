@@ -137,13 +137,26 @@ fn play_opens_the_streams_page_and_enter_prepares_a_stream(cx: &mut TestAppConte
         .unwrap_or_else(|e| panic!("focus:{e}"));
     cx.simulate_keystrokes(window.into(), "shift-f10");
     cx.run_until_parked();
-    cx.simulate_keystrokes(window.into(), "down");
+    // The row menu now contains Play, not the retired inline-details action.
     cx.simulate_keystrokes(window.into(), "enter");
     cx.run_until_parked();
     window
         .update(cx, |view, window, cx| {
-            assert_eq!(view.inline, Some(0));
-            assert!(view.play.is_none());
+            assert!(
+                !view.stream_page.wide,
+                "1280 px viewport has a narrower frame"
+            );
+            assert_eq!(
+                view.inline, None,
+                "inline details were replaced by the drawer"
+            );
+            assert_eq!(view.selected, Some(0));
+            assert!(
+                view.play.is_some(),
+                "the context menu's Play opens the sheet"
+            );
+            view.play = None;
+            view.play_subscription = None;
             view.stream_focus[0].focus(window, cx);
         })
         .unwrap_or_else(|e| panic!("details:{e}"));
@@ -225,22 +238,62 @@ fn facts_block_shows_ratings_votes_and_provider_facts(cx: &mut TestAppContext) {
                     facts.tagline.as_deref(),
                     Some("The signal was never meant to be answered.")
                 );
-                let labels: Vec<_> = facts.rows.iter().map(|r| r.0).collect();
-                for want in [
-                    "Status",
-                    "Certification",
-                    "Language",
-                    "Writers",
-                    "Studios",
-                    "Countries",
-                ] {
-                    assert!(labels.contains(&want), "{want} in {labels:?}");
-                }
-                assert_eq!(facts.cast.len(), 10);
+                let series = view.is_series();
+                let titles: Vec<_> = facts.groups.iter().map(|g| g.title).collect();
+                assert_eq!(
+                    titles,
+                    [
+                        "Crew",
+                        "Production",
+                        if series { "Broadcast" } else { "Release" }
+                    ]
+                );
+                let glance: Vec<_> = facts.glance.iter().map(|r| r.0).collect();
+                let want: &[&str] = if series {
+                    &["Status", "Network", "First aired", "Last aired"]
+                } else {
+                    &["Released", "Status", "Director", "Language"]
+                };
+                assert_eq!(glance, want);
+                assert!(
+                    facts
+                        .groups
+                        .iter()
+                        .flat_map(|g| &g.rows)
+                        .all(|(_, v)| v != "—" && !v.is_empty())
+                );
+                assert_eq!(facts.cast.len(), 24);
                 assert_eq!(facts.cast[0].role.as_deref(), Some("Role 1"));
             })
             .unwrap_or_else(|e| panic!("facts:{e}"));
     }
+}
+#[gpui::test]
+fn series_page_loads_similar_series_and_cast_expands_in_place(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
+    let title = title(true);
+    let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+    let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
+    cx.simulate_window_resize(window.into(), size(px(1280.), px(900.)));
+    draw(window, cx);
+    window
+        .update(cx, |view, _, cx| {
+            assert_eq!(view.similar.loaded(), 20, "series recommendations loaded");
+            assert!(
+                view.similar
+                    .visible(6)
+                    .iter()
+                    .all(|t| t.kind == MediaKind::Series)
+            );
+            assert!(!view.cast_expanded);
+            view.cast_expanded = true;
+            cx.notify();
+        })
+        .unwrap_or_else(|e| panic!("window:{e}"));
+    draw(window, cx);
 }
 #[gpui::test]
 fn column_counts_follow_the_window_width_on_every_resize(cx: &mut TestAppContext) {
@@ -253,11 +306,122 @@ fn column_counts_follow_the_window_width_on_every_resize(cx: &mut TestAppContext
     let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
     // The count is derived from the viewport inside the same render pass, so a
     // single draw after each resize already shows the new count (no stale frame).
-    for (width, cols) in [(520., 3), (1280., 6), (1920., 9), (2560., 9), (960., 5)] {
+    for (width, cols) in [(520., 3), (1280., 6), (1920., 9), (2560., 11), (960., 5)] {
         cx.simulate_window_resize(window.into(), size(px(width), px(900.)));
         draw(window, cx);
         window
             .read_with(cx, |view, _| assert_eq!(view.similar_cols, cols, "{width}"))
             .unwrap_or_else(|e| panic!("window:{e}"));
     }
+}
+
+#[gpui::test]
+fn stream_pointer_selection_uses_a_wide_drawer_and_narrow_clicks_play(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
+    let title = tmdb_movie();
+    let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+    let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
+    cx.simulate_window_resize(window.into(), size(px(1600.), px(900.)));
+    window
+        .update(cx, |view, _, cx| view.run_primary(cx))
+        .unwrap_or_else(|e| panic!("play:{e}"));
+    draw(window, cx);
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    let row = visual
+        .debug_bounds("stream-row-0")
+        .unwrap_or_else(|| panic!("first stream row"));
+    visual.simulate_click(row.center(), Modifiers::default());
+    draw(window, cx);
+    window
+        .read_with(cx, |view, _| {
+            assert!(view.stream_page.wide);
+            assert_eq!(view.selected, Some(0));
+            assert!(
+                view.play.is_none(),
+                "wide single-click selects without playing"
+            );
+        })
+        .unwrap_or_else(|e| panic!("selection:{e}"));
+    let drawer = visual
+        .debug_bounds("streams-drawer")
+        .unwrap_or_else(|| panic!("selection drawer"));
+    assert!((px(320.)..=px(420.)).contains(&drawer.size.width));
+    let row = visual
+        .debug_bounds("stream-row-1")
+        .unwrap_or_else(|| panic!("second stream row"));
+    visual.simulate_click(row.center(), Modifiers::default());
+    draw(window, cx);
+    window
+        .read_with(cx, |view, _| {
+            assert_eq!(view.selected, Some(1));
+            assert!(view.play.is_none());
+        })
+        .unwrap_or_else(|e| panic!("second selection:{e}"));
+    cx.simulate_keystrokes(window.into(), "enter");
+    cx.run_until_parked();
+    window
+        .update(cx, |view, _, _| {
+            assert_eq!(view.selected, Some(1));
+            assert!(view.play.is_some(), "Enter plays the focused wide row");
+            view.play = None;
+            view.play_subscription = None;
+        })
+        .unwrap_or_else(|e| panic!("enter:{e}"));
+    draw(window, cx);
+    let row = visual
+        .debug_bounds("stream-row-0")
+        .unwrap_or_else(|| panic!("first stream row"));
+    // Dispatch through the window context, not WindowHandle<Detail>::update:
+    // the typed update leases Detail, and its click listener needs that same entity.
+    cx.update_window(window.into(), |_, window, cx| {
+        for event in [
+            MouseDownEvent {
+                position: row.center(),
+                button: MouseButton::Left,
+                click_count: 2,
+                ..Default::default()
+            }
+            .to_platform_input(),
+            MouseUpEvent {
+                position: row.center(),
+                button: MouseButton::Left,
+                click_count: 2,
+                ..Default::default()
+            }
+            .to_platform_input(),
+        ] {
+            window.dispatch_event(event, cx);
+        }
+    })
+    .unwrap_or_else(|e| panic!("double-click:{e}"));
+    cx.run_until_parked();
+    window
+        .update(cx, |view, _, _| {
+            assert_eq!(view.selected, Some(0));
+            assert!(view.play.is_some(), "wide double-click plays");
+            view.play = None;
+            view.play_subscription = None;
+        })
+        .unwrap_or_else(|e| panic!("double-click result:{e}"));
+    cx.simulate_window_resize(window.into(), size(px(1000.), px(900.)));
+    draw(window, cx);
+    assert!(visual.debug_bounds("streams-drawer").is_none());
+    let row = visual
+        .debug_bounds("stream-row-1")
+        .unwrap_or_else(|| panic!("narrow stream row"));
+    visual.simulate_click(row.center(), Modifiers::default());
+    cx.run_until_parked();
+    window
+        .read_with(cx, |view, _| {
+            assert!(!view.stream_page.wide);
+            assert_eq!(view.selected, Some(1));
+            assert!(
+                view.play.is_some(),
+                "narrow single-click opens Play immediately"
+            );
+        })
+        .unwrap_or_else(|e| panic!("narrow click:{e}"));
 }

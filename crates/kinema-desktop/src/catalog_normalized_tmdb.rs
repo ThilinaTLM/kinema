@@ -113,6 +113,24 @@ pub(super) fn write(
             )?;
             for summary in &details.seasons {
                 let id = season(tx, id, summary.number, time)?;
+                for (key, value) in [
+                    ("poster_url", summary.poster_url.as_ref()),
+                    ("air_date", summary.air_date.as_ref()),
+                    ("overview", summary.overview.as_ref()),
+                ] {
+                    if let Some(value) = value {
+                        field(
+                            tx,
+                            Target::Season(id),
+                            (key, &FieldValue::Text(value.clone())),
+                            "tmdb",
+                            Quality::Summary,
+                            fetch_id,
+                            time,
+                            priority,
+                        )?;
+                    }
+                }
                 if let Some(name) = &summary.name {
                     field(
                         tx,
@@ -242,7 +260,7 @@ pub(super) fn read(
     let resource = crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?;
     let tx = service.connection.transaction()?;
     let (data, fetched_at) = match query {
-        TmdbQuery::Similar { page, .. } => {
+        TmdbQuery::Similar { kind, page, .. } => {
             let Some(saved) = read_page(&tx, "tmdb", &resource, *page)? else {
                 return Ok(None);
             };
@@ -251,7 +269,7 @@ pub(super) fn read(
                     titles: saved
                         .ids
                         .into_iter()
-                        .map(|id| title(&tx, id, MediaKind::Movie))
+                        .map(|id| title(&tx, id, *kind))
                         .collect::<Result<_, _>>()?,
                     page: *page,
                     total_pages: saved.total.ok_or(CatalogError::InvalidCache)?,
@@ -322,6 +340,9 @@ pub(super) fn read(
                         name: record.text("name").map(str::to_owned),
                         episode_count: u32::try_from(count)
                             .map_err(|_| CatalogError::InvalidCache)?,
+                        poster_url: record.text("poster_url").map(str::to_owned),
+                        air_date: record.text("air_date").map(str::to_owned),
+                        overview: record.text("overview").map(str::to_owned),
                     });
                 }
             }
@@ -389,13 +410,13 @@ pub(super) fn write_rich(
         return Ok(());
     }
     match query {
-        TmdbQuery::Similar { page, .. } => {
+        TmdbQuery::Similar { kind, page, .. } => {
             return super::normalized_rich::write_page_rich(
                 tx,
                 "tmdb",
                 &crate::tmdb::cache_query_identity(query).map_err(CatalogError::Tmdb)?,
                 *page,
-                MediaKind::Movie,
+                *kind,
                 rich,
                 time,
                 priority,
@@ -450,6 +471,71 @@ pub(super) fn write_rich(
 #[cfg(test)]
 mod display_projection_tests {
     use super::*;
+    #[test]
+    fn all_season_artwork_survives_sql_and_old_complete_rows_refresh_once()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let mut service = CatalogService::open(&directory.path().join("catalog"))?;
+        let query = TmdbQuery::Details {
+            kind: MediaKind::Series,
+            id: 42,
+        };
+        let data = TmdbData::Details(TmdbDetails {
+            facts: Default::default(),
+            backdrop_url: None,
+            title: TmdbTitle {
+                id: 42,
+                kind: MediaKind::Series,
+                name: "Series".into(),
+                overview: None,
+                release_info: None,
+                poster_url: None,
+                display: Default::default(),
+                imdb: None,
+            },
+            imdb: None,
+            genres: vec![],
+            seasons: (1..=3)
+                .map(|number| TmdbSeasonSummary {
+                    number,
+                    name: Some(format!("Season {number}")),
+                    episode_count: 8,
+                    poster_url: (number != 3)
+                        .then(|| format!("https://image.tmdb.org/t/p/w500/season{number}.jpg")),
+                    air_date: Some("2024-03-12".into()),
+                    overview: Some("Season overview".into()),
+                })
+                .collect(),
+        });
+        service.save_tmdb(&query, data.clone())?;
+        let saved = service.read_tmdb(&query)?.ok_or("missing details")?;
+        let TmdbData::Details(details) = saved.data else {
+            return Err("wrong resource".into());
+        };
+        assert_eq!(details.seasons.len(), 3);
+        assert!(details.seasons[0].poster_url.is_some());
+        assert!(details.seasons[1].poster_url.is_some());
+        assert!(details.seasons[2].poster_url.is_none());
+        assert_eq!(details.seasons[1].air_date.as_deref(), Some("2024-03-12"));
+        assert_eq!(
+            details.seasons[1].overview.as_deref(),
+            Some("Season overview")
+        );
+        let current = crate::tmdb::cache_query_identity(&query)?;
+        let old = current
+            .strip_suffix(":season-art-v1")
+            .ok_or("identity suffix")?;
+        service.connection.execute(
+            "UPDATE metadata_fetches SET resource_key=?1 WHERE resource_key=?2",
+            params![old, current],
+        )?;
+        assert!(service.read_tmdb(&query)?.is_none());
+        service.save_tmdb(&query, data)?;
+        assert!(service.read_tmdb(&query)?.is_some());
+        assert!(service.read_tmdb(&query)?.is_some()); // null poster is complete, no loop
+        Ok(())
+    }
+
     #[test]
     fn actual_tmdb_read_exposes_retained_facts_and_only_genuine_imdb_scores()
     -> Result<(), Box<dyn std::error::Error>> {

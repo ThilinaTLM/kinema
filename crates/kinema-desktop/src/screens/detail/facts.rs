@@ -21,13 +21,17 @@ pub(super) struct RatingTile {
 pub(super) struct CastEntry {
     pub name: String,
     pub role: Option<String>,
+    pub profile_url: Option<String>,
 }
 #[derive(Default)]
 pub(super) struct FactsView {
     pub tagline: Option<String>,
     pub ratings: Vec<RatingTile>,
-    pub rows: Vec<(&'static str, String)>,
+    pub glance: Vec<(&'static str, String)>,
+    pub groups: Vec<layout::FactGroup>,
     pub cast: Vec<CastEntry>,
+    /// Pieces of the hero meta line (year, runtime, certification, genres…).
+    pub meta: Vec<layout::MetaPart>,
 }
 
 /// Up to two letters for a cast placeholder avatar.
@@ -52,29 +56,10 @@ fn votes_label(n: u64) -> String {
     format!("{out} vote{}", if n == 1 { "" } else { "s" })
 }
 
-/// Most cast members shown in the row.
-const CAST_MAX: usize = 12;
-
-/// Date fields come as `YYYY-MM-DD`; anything else is shown as given.
-fn date_text(raw: &str) -> String {
-    air_date(raw).unwrap_or(raw).to_owned()
-}
-
-fn push_row(rows: &mut Vec<(&'static str, String)>, label: &'static str, value: Option<String>) {
-    if let Some(value) = value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()) {
-        rows.push((label, value));
-    }
-}
-fn push_list(rows: &mut Vec<(&'static str, String)>, label: &'static str, list: &[String]) {
-    let items: Vec<&str> = list
-        .iter()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect();
-    if !items.is_empty() {
-        rows.push((label, items.join(", ")));
-    }
-}
+/// Cast members kept from the provider.
+const CAST_MAX: usize = kinema_core::catalog::MAX_CAST;
+/// Cast photo frame: 3:4 portrait.
+const CAST_PHOTO_ASPECT: f32 = 4. / 3.;
 
 impl Detail {
     /// Provider facts for the open title; default (all empty) until loaded.
@@ -88,6 +73,40 @@ impl Detail {
                 .map(|d| local::local_facts(&d.metadata)),
         }
         .unwrap_or_default()
+    }
+
+    /// Season summary from the TMDB series details (poster, air date,
+    /// overview) -- available for every season without loading it.
+    pub(super) fn tmdb_season_summary(
+        &self,
+        season: u32,
+        cx: &App,
+    ) -> Option<crate::tmdb::TmdbSeasonSummary> {
+        match &self.title {
+            BrowseTitle::Tmdb(_) | BrowseTitle::Local(_) => self
+                .coordinator
+                .read(cx)
+                .tmdb_details
+                .value()
+                .and_then(|d| d.seasons.iter().find(|s| s.number == season).cloned()),
+            BrowseTitle::Cinemeta(_) => None,
+        }
+    }
+
+    /// Episodes known for the whole show (not just the open season).
+    fn known_episode_count(&self, cx: &App) -> Option<u64> {
+        let c = self.coordinator.read(cx);
+        match &self.title {
+            BrowseTitle::Cinemeta(_) => c.details.value().map(|d| d.episodes.len() as u64),
+            BrowseTitle::Tmdb(_) => c.tmdb_details.value().map(|d| {
+                d.seasons
+                    .iter()
+                    .map(|s| u64::from(s.episode_count))
+                    .sum::<u64>()
+            }),
+            BrowseTitle::Local(_) => self.local_detail(cx).map(|d| d.episodes.len() as u64),
+        }
+        .filter(|n| *n > 0)
     }
 
     pub(super) fn facts_view(&self, title: &BrowseTitle, cx: &App) -> FactsView {
@@ -137,70 +156,45 @@ impl Detail {
                 })
         };
         let series = title.kind() == MediaKind::Series;
-        let rows = &mut view.rows;
         let first = if series {
             facts.first_air_date.as_deref()
         } else {
             facts.release_date.as_deref()
         };
-        push_row(
-            rows,
-            if series { "First aired" } else { "Released" },
-            first
-                .map(date_text)
-                .or(facts.release_info.clone())
-                .or(release.filter(|r| !r.is_empty())),
-        );
-        if series {
-            push_row(
-                rows,
-                "Last aired",
-                facts.last_air_date.as_deref().map(date_text),
-            );
-        }
-        push_row(rows, "Status", facts.status.clone());
-        push_row(
-            rows,
-            "Runtime",
-            facts
-                .runtime_minutes
-                .map(u64::from)
-                .or(title.runtime().map(u64::from))
-                .filter(|n| *n > 0 && (!series || facts.runtime_minutes.is_some()))
-                .map(|n| format!("{n} min")),
-        );
-        push_row(rows, "Certification", facts.certification.clone());
-        push_row(
-            rows,
-            "Language",
-            facts.original_language.as_deref().map(str::to_uppercase),
-        );
-        push_list(rows, "Directors", &facts.directors);
-        push_list(rows, "Creators", &facts.creators);
-        push_list(rows, "Writers", &facts.writers);
-        push_list(rows, "Studios", &facts.studios);
-        push_list(rows, "Networks", &facts.networks);
-        push_list(rows, "Countries", &facts.countries);
-        if series {
-            if let Some(n) = title.seasons() {
-                rows.push(("Seasons", n.to_string()));
-            }
-            let c = self.coordinator.read(cx);
-            let known = match &self.title {
-                BrowseTitle::Cinemeta(_) => c.details.value().map(|d| d.episodes.len() as u64),
-                BrowseTitle::Tmdb(_) => c.tmdb_details.value().map(|d| {
-                    d.seasons
-                        .iter()
-                        .map(|s| u64::from(s.episode_count))
-                        .sum::<u64>()
-                }),
-                BrowseTitle::Local(_) => self.local_detail(cx).map(|d| d.episodes.len() as u64),
-            };
-            if let Some(n) = known.filter(|n| *n > 0) {
-                rows.push(("Episodes", n.to_string()));
-            }
-        }
-        push_list(rows, "Genres", title.genres());
+        let released = first
+            .map(layout::format_date)
+            .or(facts.release_info.clone())
+            .or(release.filter(|r| !r.is_empty()))
+            .map(|r| r.trim().to_owned())
+            .filter(|r| !r.is_empty());
+        let runtime = facts
+            .runtime_minutes
+            .or_else(|| {
+                // A series' catalog runtime is a per-episode guess only when the
+                // provider's facts carry it.
+                title.runtime().map(u32::from).filter(|_| !series)
+            })
+            .filter(|n| *n > 0);
+        let episodes = series.then(|| self.known_episode_count(cx)).flatten();
+        let source = layout::FactSource {
+            series,
+            facts: &facts,
+            released,
+            runtime,
+            seasons: title.seasons(),
+            episodes,
+        };
+        view.glance = layout::glance_rows(&source);
+        view.groups = layout::fact_groups(&source);
+        view.meta = layout::meta_parts(&layout::MetaInput {
+            series,
+            year: title.year(),
+            facts: &facts,
+            runtime,
+            seasons: title.seasons(),
+            episodes,
+            genres: title.genres(),
+        });
         view.cast = facts
             .cast
             .iter()
@@ -214,37 +208,48 @@ impl Detail {
                     .map(str::trim)
                     .filter(|c| !c.is_empty())
                     .map(str::to_owned),
+                profile_url: m.profile_url.clone(),
             })
             .collect();
         view
     }
 
-    /// A prominent score card: star, large value, source and optional votes.
-    fn rating_tile(&self, tile: &RatingTile, cx: &App) -> Div {
+    /// Raised "At a glance" panel: two score tiles and a short key/value list.
+    /// `stacked` lays tiles and facts side by side under the story.
+    pub(super) fn glance_panel(
+        &self,
+        view: &FactsView,
+        stacked: bool,
+        cx: &App,
+    ) -> Option<Stateful<Div>> {
+        if view.ratings.is_empty() && view.glance.is_empty() {
+            return None;
+        }
         let p = self.tinted_palette(cx);
-        div()
+        let tiles = div()
             .flex()
-            .items_center()
-            .gap(s::S12)
-            .px(s::S16)
-            .py(s::S12)
-            .rounded(radius::MD)
-            .bg(p.bg_surface)
-            .border(s::HAIRLINE)
-            .border_color(p.line_subtle)
-            .child(Icon::new(IconName::StarFilled).color(p.accent_text))
-            .child(
+            .gap(s::S8)
+            .when(stacked, |el| el.w(px(300.)).flex_none())
+            .children(view.ratings.iter().enumerate().map(|(i, tile)| {
                 div()
-                    .flex()
-                    .flex_col()
+                    .id(("detail-rating", i))
+                    .flex_1()
+                    .min_w_0()
+                    .px(s::S12)
+                    .py(s::S8)
+                    .rounded(radius::SM)
+                    .bg(p.ctl_rest)
                     .child(
                         div()
                             .flex()
-                            .items_baseline()
+                            .items_center()
                             .gap(s::S4)
+                            .child(Icon::new(IconName::StarFilled).color(p.accent_text))
                             .child(
                                 div()
-                                    .type_style(t::DISPLAY)
+                                    .text_size(px(24.))
+                                    .line_height(px(28.))
+                                    .font_weight(FontWeight::BOLD)
                                     .text_color(p.text_primary)
                                     .child(tile.value.clone()),
                             )
@@ -252,94 +257,234 @@ impl Detail {
                                 div()
                                     .type_style(t::SMALL)
                                     .text_color(p.text_muted)
-                                    .child("/ 10"),
+                                    .child("/10"),
                             ),
                     )
                     .child(
                         div()
-                            .type_style(t::SMALL_MEDIUM)
-                            .text_color(p.text_secondary)
-                            .child(match &tile.detail {
-                                Some(votes) => format!("{} · {votes}", tile.label),
-                                None => tile.label.to_owned(),
-                            }),
-                    ),
-            )
+                            .flex()
+                            .gap(s::S6)
+                            .pt(s::S2)
+                            .type_style(t::CAPTION)
+                            .child(div().text_color(p.text_secondary).child(tile.label))
+                            .children(
+                                tile.detail
+                                    .clone()
+                                    .map(|d| div().text_color(p.text_muted).child(d)),
+                            ),
+                    )
+            }));
+        let rows = div()
+            .flex()
+            .flex_col()
+            .gap(s::S6)
+            .when(stacked, |el| el.flex_1().min_w_0())
+            .children(view.glance.iter().map(|(label, value)| {
+                div()
+                    .flex()
+                    .gap(s::S16)
+                    .type_style(t::SMALL)
+                    .child(
+                        div()
+                            .w(px(84.))
+                            .flex_none()
+                            .text_color(p.text_muted)
+                            .child(*label),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_color(p.text_primary)
+                            .child(value.clone()),
+                    )
+            }));
+        Some(
+            div()
+                .id("detail-glance")
+                .w_full()
+                .p(s::S16)
+                .flex()
+                .gap(s::S16)
+                .when(!stacked, |el| el.flex_col())
+                .when(stacked, |el| el.items_start())
+                .rounded(radius::LG)
+                .bg(p.bg_raised.opacity(0.86))
+                .border(s::HAIRLINE)
+                .border_color(p.line_subtle)
+                .shadow(tokens::elevation::raised(&p))
+                .when(!view.ratings.is_empty(), |el| el.child(tiles))
+                .when(!view.glance.is_empty(), |el| el.child(rows)),
+        )
     }
 
-    fn cast_row(&self, cast: &[CastEntry], width: Pixels, cx: &App) -> Stateful<Div> {
+    /// Titled raised card holding key/value rows.
+    fn fact_card(&self, group: &layout::FactGroup, width: Pixels, cx: &App) -> Div {
         let p = self.tinted_palette(cx);
+        div()
+            .w(width)
+            .flex_none()
+            .px(s::S16)
+            .py(s::S12)
+            .flex()
+            .flex_col()
+            .gap(s::S8)
+            .rounded(radius::LG)
+            .bg(p.bg_raised)
+            .border(s::HAIRLINE)
+            .border_color(p.line_subtle)
+            .child(
+                div()
+                    .type_style(t::CAPTION)
+                    .text_color(p.text_muted)
+                    .child(group.title.to_uppercase()),
+            )
+            .children(group.rows.iter().map(|(label, value)| {
+                div()
+                    .flex()
+                    .gap(s::S12)
+                    .type_style(t::BODY)
+                    .child(
+                        div()
+                            .w(px(112.))
+                            .flex_none()
+                            .text_color(p.text_muted)
+                            .child(*label),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_color(p.text_primary)
+                            .child(value.clone()),
+                    )
+            }))
+    }
+
+    /// Portrait card: 3:4 photo (initials until/unless it loads), name, role.
+    fn cast_card(&self, member: &CastEntry, tile: Pixels, cx: &mut Context<Self>) -> Div {
+        let p = self.tinted_palette(cx);
+        let mut photo = div()
+            .w(tile)
+            .h(tile * CAST_PHOTO_ASPECT)
+            .relative()
+            .overflow_hidden()
+            .rounded(radius::MD)
+            .bg(p.bg_placeholder)
+            .border(s::HAIRLINE)
+            .border_color(p.poster_edge)
+            .flex()
+            .items_center()
+            .justify_center()
+            .type_style(t::TITLE)
+            .text_color(p.text_muted)
+            .child(initials(&member.name));
+        if let Some(image) = self.image(
+            member.profile_url.as_deref(),
+            ArtworkKind::Poster,
+            &format!("cast:{}", member.name),
+            cx,
+        ) {
+            photo = photo.child(
+                img(image)
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
+            );
+        }
+        div()
+            .w(tile)
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(s::S2)
+            .child(photo)
+            .child(
+                div()
+                    .pt(s::S4)
+                    .type_style(t::SMALL_MEDIUM)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(p.text_primary)
+                    .truncate()
+                    .child(member.name.clone()),
+            )
+            .children(member.role.clone().map(|role| {
+                div()
+                    .type_style(t::SMALL)
+                    .text_color(p.text_muted)
+                    .truncate()
+                    .child(role)
+            }))
+    }
+
+    /// Wrapping cast grid: two rows, then "Show all N" expands in place.
+    fn cast_section(
+        &self,
+        cast: &[CastEntry],
+        width: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let fit = fit_grid(
             width,
             geometry::CAST_MIN_WIDTH,
             geometry::CAST_MAX_WIDTH,
             s::S12,
         );
+        let total = cast.len();
+        let visible = layout::cast_visible(total, fit.cols, self.cast_expanded);
+        let toggle = layout::cast_has_toggle(total, fit.cols);
+        let expanded = self.cast_expanded;
+        let cards: Vec<Div> = cast
+            .iter()
+            .take(visible)
+            .map(|member| self.cast_card(member, fit.tile, cx))
+            .collect();
         div()
             .id("detail-cast")
             .w_full()
             .flex()
             .flex_col()
             .gap(s::S12)
+            .child(Section::new("Cast").count(total))
             .child(
                 div()
-                    .type_style(t::HEADING)
-                    .text_color(p.text_primary)
-                    .child("Cast"),
-            )
-            .child(
-                div()
+                    .id("detail-cast-grid")
+                    .w_full()
                     .flex()
                     .flex_wrap()
-                    .gap(s::S12)
-                    .children(cast.iter().take(fit.cols).map(|member| {
-                        div()
-                            .w(fit.tile)
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap(s::S4)
-                            .child(
-                                div()
-                                    .size(s::S48)
-                                    .rounded_full()
-                                    .bg(p.bg_placeholder)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .type_style(t::BODY_STRONG)
-                                    .text_color(p.text_secondary)
-                                    .child(initials(&member.name)),
-                            )
-                            .child(
-                                div()
-                                    .w_full()
-                                    .type_style(t::SMALL_MEDIUM)
-                                    .text_color(p.text_primary)
-                                    .text_center()
-                                    .clamp_lines(2)
-                                    .child(member.name.clone()),
-                            )
-                            .children(member.role.clone().map(|role| {
-                                div()
-                                    .w_full()
-                                    .type_style(t::CAPTION)
-                                    .text_color(p.text_muted)
-                                    .text_center()
-                                    .clamp_lines(2)
-                                    .child(role)
-                            }))
-                    })),
+                    .gap_x(s::S12)
+                    .gap_y(s::S16)
+                    .children(cards),
             )
+            .when(toggle, |el| {
+                el.child(
+                    div().w_full().flex().justify_center().pt(s::S4).child(
+                        Button::new(
+                            "detail-cast-toggle",
+                            if expanded {
+                                "Show fewer".to_owned()
+                            } else {
+                                format!("Show all {total}")
+                            },
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.cast_expanded = !this.cast_expanded;
+                            cx.notify();
+                        })),
+                    ),
+                )
+            })
     }
 
-    /// Ratings, tagline, a responsive facts grid and cast, under the hero.
+    /// Grouped fact cards (and, for series, the "About the series" heading)
+    /// followed by the cast grid.
     pub(super) fn facts_section(
         &self,
         title: &BrowseTitle,
         status: &MetaStatus,
         width: Pixels,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = self.tinted_palette(cx);
         let view = self.facts_view(title, cx);
@@ -350,9 +495,9 @@ impl Detail {
             .flex()
             .flex_col()
             .gap(s::S20);
-        if view.rows.is_empty()
+        if view.groups.is_empty()
             && view.ratings.is_empty()
-            && view.tagline.is_none()
+            && view.cast.is_empty()
             && status.busy
             && !status.loaded
         {
@@ -364,33 +509,22 @@ impl Detail {
                 )
                 .into_any_element();
         }
-        if let Some(tagline) = view.tagline.clone() {
+        if self.is_series() && (!view.groups.is_empty() || !view.cast.is_empty()) {
             section = section.child(
                 div()
-                    .id("detail-tagline")
-                    .max_w(px(900.))
+                    .id("detail-about")
                     .type_style(t::TITLE)
-                    .italic()
-                    .text_color(p.text_secondary)
-                    .child(tagline),
+                    .text_color(p.text_primary)
+                    .child("About the series"),
             );
         }
-        if !view.ratings.is_empty() {
-            section = section.child(
-                div()
-                    .id("detail-ratings")
-                    .flex()
-                    .flex_wrap()
-                    .gap(s::S12)
-                    .children(view.ratings.iter().map(|tile| self.rating_tile(tile, cx))),
-            );
-        }
-        if !view.rows.is_empty() {
+        if !view.groups.is_empty() {
+            let gap = s::S16;
             let fit = fit_grid(
                 width,
-                geometry::FACT_MIN_WIDTH,
-                geometry::FACT_MAX_WIDTH,
-                s::S24,
+                layout::FACT_CARD_MIN,
+                layout::fact_card_max(width, view.groups.len(), layout::FACT_CARD_MIN, gap),
+                gap,
             );
             section = section.child(
                 div()
@@ -398,31 +532,16 @@ impl Detail {
                     .w_full()
                     .flex()
                     .flex_wrap()
-                    .gap_x(s::S24)
-                    .gap_y(s::S16)
-                    .children(view.rows.into_iter().map(|(label, value)| {
-                        div()
-                            .w(fit.tile)
-                            .flex()
-                            .flex_col()
-                            .gap(s::S2)
-                            .child(
-                                div()
-                                    .type_style(t::CAPTION)
-                                    .text_color(p.text_muted)
-                                    .child(label),
-                            )
-                            .child(
-                                div()
-                                    .type_style(t::BODY)
-                                    .text_color(p.text_secondary)
-                                    .child(value),
-                            )
-                    })),
+                    .gap(gap)
+                    .children(
+                        view.groups
+                            .iter()
+                            .map(|group| self.fact_card(group, fit.tile, cx)),
+                    ),
             );
         }
         if !view.cast.is_empty() {
-            section = section.child(self.cast_row(&view.cast, width, cx));
+            section = section.child(self.cast_section(&view.cast, width, cx));
         }
         section.into_any_element()
     }

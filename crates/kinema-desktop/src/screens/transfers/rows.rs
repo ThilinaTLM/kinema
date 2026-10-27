@@ -77,7 +77,7 @@ impl Transfers {
                 )
             })
             .child(div().px(s::S12).flex().justify_end().child(
-                Button::new(("stop-session", i), "Stop…").on_click(cx.listener(
+                Button::new(("stop-session", i), "Stop").on_click(cx.listener(
                     move |this, _, _, cx| {
                         this.stop = Some(id.clone());
                         cx.notify();
@@ -104,7 +104,7 @@ impl Transfers {
                         let url = url.clone();
                         move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(url.clone()))
                     }),
-                    crate::screens::browse::menu_item("Stop serving…", {
+                    crate::screens::browse::menu_item("Stop serving", {
                         let weak = weak.clone();
                         let stop = stop.clone();
                         move |_, cx| {

@@ -3,6 +3,7 @@
 //! Keep GUI, provider protocols, persistence, and filesystem operations outside
 //! this crate.
 
+pub mod artwork;
 pub mod catalog;
 pub mod catalog_normalized;
 pub mod discover;
@@ -10,6 +11,8 @@ pub mod library;
 pub mod media;
 pub mod provider;
 pub mod sources;
+pub mod transfer_rate;
+pub mod watch_progress;
 
 use std::num::NonZeroU64;
 

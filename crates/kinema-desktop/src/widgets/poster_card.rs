@@ -3,13 +3,13 @@
 use super::{
     chip::{self, Chip},
     menu::{ContextMenuExt, MenuItem},
-    motion::{self, Motion},
+    motion::{self, CardHover, Motion, card_hover as hv},
     state_toggle::{StateToggle, ToggleKind, ToggleStatus},
     text::TypeExt,
     tokens::{self, Palette, radius, space as s, typeface as t},
 };
 use gpui::{prelude::*, *};
-use std::{cell::Cell, rc::Rc, sync::Arc};
+use std::{sync::Arc, time::Instant};
 fn col() -> Div {
     div().flex().flex_col().gap(s::S8)
 }
@@ -25,10 +25,8 @@ pub struct PosterCard {
     rating: Option<f32>,
     focus: FocusHandle,
     hovered: bool,
-    disclosed: bool,
-    generation: usize,
-    progress: Rc<Cell<f32>>,
-    from: f32,
+    hover: CardHover,
+    origin: Instant,
     pub width: f32,
     pub facts: SharedString,
     pub genres: SharedString,
@@ -72,10 +70,8 @@ impl PosterCard {
             rating: None,
             focus,
             hovered: false,
-            disclosed: false,
-            generation: 0,
-            progress: Rc::new(Cell::new(0.)),
-            from: 0.,
+            hover: CardHover::default(),
+            origin: Instant::now(),
             width: 190.,
             facts: "".into(),
             genres: "".into(),
@@ -114,23 +110,19 @@ impl Render for PosterCard {
         let dark = Palette::dark();
         let focus = self.focus.clone();
         let target = self.hovered || focus.is_focused(window);
-        if target != self.disclosed {
-            self.disclosed = target;
-            self.from = self.progress.get();
-            self.generation += 1;
+        let now = self.origin.elapsed().as_secs_f32() * 1000.;
+        let reduced = cx.reduce_motion() || motion::reduced(cx);
+        self.hover.set_hovered(now, target, reduced);
+        let hover = self.hover.values(now);
+        if !self.hover.settled(now) {
+            // Frame-driven so a reversal mid-flight continues from the current value.
+            window.request_animation_frame();
         }
-        let duration = if cx.reduce_motion() {
-            std::time::Duration::ZERO
-        } else {
-            motion::duration(Motion::Hover, cx)
-        };
         let fade = if cx.reduce_motion() {
             std::time::Duration::ZERO
         } else {
             motion::duration(Motion::Crossfade, cx)
         };
-        let from = self.from;
-        let progress = self.progress.clone();
         let w = self.width;
         let h = w * 1.5;
         let placeholder = col()
@@ -199,6 +191,12 @@ impl Render for PosterCard {
                 (true, None) => String::new(),
             }
         };
+        let row = |el: Div, value: f32| {
+            el.relative()
+                .top(px(hv::ROW_RISE_PX * (1. - value)))
+                .opacity(value)
+        };
+        let [r_title, r_meta, r_genres, r_synopsis] = hover.rows;
         let panel = col()
             .gap(s::S4)
             .absolute()
@@ -210,77 +208,59 @@ impl Render for PosterCard {
             .pt(s::S32)
             .rounded_b(radius::MD)
             .text_color(dark.text_primary)
-            .bg(linear_gradient(
-                180.,
-                linear_color_stop(dark.scrim_max.opacity(0.), 0.),
-                linear_color_stop(dark.scrim_max.opacity(0.92), 0.55),
-            ))
             .child(
+                // Scrim fades on its own so the text rows can rise independently.
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded_b(radius::MD)
+                    .opacity(hover.scrim)
+                    .bg(linear_gradient(
+                        180.,
+                        linear_color_stop(dark.scrim_max.opacity(0.), 0.),
+                        linear_color_stop(dark.scrim_max.opacity(0.92), 0.55),
+                    )),
+            )
+            .child(row(
                 div()
                     .type_style(t::HEADING)
                     .clamp_lines(2)
                     .child(self.title.clone()),
-            )
+                r_title,
+            ))
             .when(!meta.is_empty(), |el| {
-                el.child(
+                el.child(row(
                     div()
                         .type_style(t::SMALL)
                         .text_color(dark.text_secondary)
                         .child(meta),
-                )
+                    r_meta,
+                ))
             })
             .when(!self.genres.is_empty(), |el| {
-                el.child(
+                el.child(row(
                     div()
                         .type_style(t::SMALL)
                         .text_color(dark.text_secondary)
                         .child(self.genres.clone()),
-                )
+                    r_genres,
+                ))
             })
             .when(w >= 172. && !self.synopsis.is_empty(), |el| {
-                el.child(
+                el.child(row(
                     div()
                         .type_style(t::BODY)
                         .clamp_lines(2)
                         .overflow_hidden()
                         .child(self.synopsis.clone()),
-                )
+                    r_synopsis,
+                ))
             });
-        let end = if target { 1. } else { 0. };
         let shadow = tokens::elevation::card_hover(&p);
-        let style_panel =
-            move |el: Div, value: f32| el.opacity(value).bottom(px(-8. * (1. - value)));
-        let style_lift = {
-            let shadow = shadow.clone();
-            move |el: Div, value: f32| {
-                el.top(px(-3. * value)).shadow(
-                    shadow
-                        .iter()
-                        .map(|s| {
-                            let mut s = s.clone();
-                            s.color = s.color.opacity(s.color.a * value);
-                            s
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            }
-        };
-        let panel = if duration.is_zero() {
-            self.from = end;
-            progress.set(end);
-            style_panel(panel, end).into_any_element()
-        } else {
-            panel
-                .with_animation(
-                    ("disclose", self.generation),
-                    Animation::new(duration).with_easing(motion::ease_out_cubic),
-                    move |el, t| {
-                        let value = from + (end - from) * t;
-                        progress.set(value);
-                        style_panel(el, value)
-                    },
-                )
-                .into_any_element()
+        let panel_visible = hover.scrim > 0. || hover.rows.iter().any(|v| *v > 0.);
+        let style_lift = |el: Div, value: f32| {
+            el.top(px(-hv::LIFT_PX * value))
+                .shadow(super::media_card::lift_shadow(shadow.clone(), value))
         };
         let this = cx.entity();
         let lift = div()
@@ -289,7 +269,7 @@ impl Render for PosterCard {
             .rounded(radius::MD)
             .child(placeholder)
             .children(artwork)
-            .child(panel)
+            .when(panel_visible, |el| el.child(panel))
             .child(
                 // Independent anchors: the optional rating never moves the top-right stack.
                 div()
@@ -351,16 +331,7 @@ impl Render for PosterCard {
                         .border_color(p.focus_ring),
                 )
             });
-        let lift = if duration.is_zero() {
-            style_lift(lift, end).into_any_element()
-        } else {
-            lift.with_animation(
-                ("lift", self.generation),
-                Animation::new(duration).with_easing(motion::ease_out_cubic),
-                move |el, t| style_lift(el, from + (end - from) * t),
-            )
-            .into_any_element()
-        };
+        let lift = style_lift(lift, hover.lift);
         let card = div()
             .id(("poster", self.index))
             .track_focus(&focus)

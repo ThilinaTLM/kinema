@@ -6,6 +6,49 @@ now bootstraps direct GPUI v3 only. The native lab remains available for offline
 captures. Specification and phase checklists below are targets, not proof of full
 workflow, provider, playback or cross-platform acceptance.
 
+**2026-10 UI revision (user-approved, source implemented; native visual QA and
+live-provider checks pending).** The approved wireframe
+[ui-revision-2026-10.html](ui-revision-2026-10.html) supersedes the conflicting
+parts of §§3.1, 4.1, 4.2, 4.5, 4.6 and 6.1 below:
+
+- Action labels never end in "…" (status text such as "Loading…" keeps it). The
+  shared `Menu` highlights only the pointed row; pointer-opened menus start with
+  no highlight, keyboard-opened ones highlight the first enabled row. Menus with
+  any leading icon give every row an icon.
+- Toolbar trailing group: Open local file · Refresh | Transfers status button
+  ("No transfers" / "N serving" / speed + "N active · x / y" + 2 px bar; speed only
+  below 1100 px; rate sampled in the coordinator) | Settings · More (About, Quit).
+- Detail: 2400 px max frame; hero = poster · story/actions · "At a glance" panel
+  (IMDb/TMDB tiles + key facts); grouped fact cards (Crew / Production / Release or
+  Broadcast); cast as a wrapping photo grid (2 rows + Show all). No carousels.
+  Series order: hero → Episodes → About the series → Cast → Similar series (TMDB TV).
+- Episodes: wrapping season tiles with progress, collapsed to 2 rows around the
+  next-up season; tri-state `WatchedToggle` for movie, season and series (applies
+  immediately, no confirm/Undo); next-up episode highlight and hero
+  "Continue · SxEy"; default season = season of next-up.
+- Streams: no sidebar; compact header + control bar (provider, quality, filter,
+  sort, "In my debrid account"); provider/quality/sort/account-only remembered
+  globally; column table with parsed tags; selection drawer ≥ 1280 px. Debrid shows
+  only *account presence* from one read-only listing per configured service —
+  RD/AllDebrid instant-availability is unavailable, and no magnets are uploaded.
+- Header chips: an open popover chip (Filters) keeps the shared glass edge and only
+  gains the hover fill, matching other header controls. The Discover/Library chip
+  is a one-click switch (no popover, no chevron): it shows the current scope and
+  each click / Enter / Space flips to the other; tooltip "Switch to …" names the
+  target. `ChoiceTile` is no longer used for scope.
+- Hero actions, seasons and episode cards follow
+  [episodes-revision-2026-10.html](episodes-revision-2026-10.html): one 32 px / radius-SM
+  `ActionButton` family (Watch and Library toggles use the accent `on` state; no pill
+  radii), a shared accent `WatchMark` (no green for watched), `Thumb` with
+  Ready / Loading{fallback} / Fallback / Missing (skeleton only after 150 ms),
+  `OverlayBadge`/`OverlayButton` on artwork, and `MediaCard` episode cards sharing
+  the poster-card hover lift and shadow. Artwork fallbacks: episode still → season
+  backdrop → series backdrop → season poster; season poster → series poster.
+  Definitive artwork misses persist for 24 h (see [cache policy](../cache-policy.md)).
+- Discover/Library: fixed brand wash backdrop, never artwork-derived. Card hover is
+  interruptible: lift 220 ms, overlay 260 ms after 60 ms intent delay with 30 ms
+  row stagger, 200 ms exit.
+
 References: [architecture](../architecture.md), [historical feature inventory](../features.md),
 [v2 review guide](README.md), [v2 design system](design-system.md),
 [native implementation](native-implementation.md), [isolated UI probe](ui-probe.md).

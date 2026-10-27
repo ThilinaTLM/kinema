@@ -88,9 +88,15 @@ impl SimilarGrid {
     }
 }
 
+/// Series pages drop the section instead of showing an empty or failed state.
+fn series_hides_similar(series: bool, state: ViewState) -> bool {
+    series && matches!(state, ViewState::Empty | ViewState::Error)
+}
+
 impl Detail {
-    /// Similar movies. Cinemeta has no such feed, so its titles simply show no
-    /// section rather than a permanent apology.
+    /// Similar movies / series. Cinemeta has no such feed, so its titles simply
+    /// show no section rather than a permanent apology. Series hide the section
+    /// when TMDB has nothing or cannot be reached.
     pub(super) fn recommendations(&mut self, width: Pixels, cx: &mut Context<Self>) -> AnyElement {
         let BrowseTitle::Tmdb(_) = &self.title else {
             return div().into_any_element();
@@ -113,6 +119,10 @@ impl Detail {
             error.is_some() && self.similar.is_empty(),
             busy,
         );
+        let series = self.is_series();
+        if series_hides_similar(series, sel.state) {
+            return div().into_any_element();
+        }
         let weak = cx.entity().downgrade();
         let mut view = state_view("similar", sel)
             .skeleton(
@@ -128,10 +138,18 @@ impl Detail {
                             .rounded(radius::MD)
                     })),
             )
-            .message("Couldn’t load similar movies")
+            .message(if series {
+                "Couldn’t load similar series"
+            } else {
+                "Couldn’t load similar movies"
+            })
             .empty(
                 IconName::Film,
-                "No similar movies",
+                if series {
+                    "No similar series"
+                } else {
+                    "No similar movies"
+                },
                 Some("TMDB has no recommendations for this title yet.".into()),
             )
             .on_retry(move |_, cx| {
@@ -150,7 +168,11 @@ impl Detail {
             .flex()
             .flex_col()
             .gap(s::S12)
-            .child(Section::new("Similar movies"))
+            .child(Section::new(if series {
+                "Similar series"
+            } else {
+                "Similar movies"
+            }))
             .child(view)
             .into_any_element()
     }
@@ -327,5 +349,36 @@ mod tests {
         grid.reset();
         assert!(grid.is_empty());
         assert_eq!(grid.rows, INITIAL_ROWS + ROWS_STEP);
+    }
+
+    #[test]
+    fn series_hide_empty_and_failed_similar_but_movies_keep_their_states() {
+        for state in [ViewState::Empty, ViewState::Error] {
+            assert!(series_hides_similar(true, state));
+            assert!(!series_hides_similar(false, state));
+        }
+        for state in [ViewState::Loading, ViewState::Content] {
+            assert!(!series_hides_similar(true, state));
+        }
+    }
+
+    #[test]
+    fn series_pages_merge_like_movie_pages() {
+        let series = |ids: std::ops::Range<u64>| TmdbPage {
+            titles: ids
+                .map(|id| TmdbTitle {
+                    kind: MediaKind::Series,
+                    name: format!("Show {id}"),
+                    ..title(id)
+                })
+                .collect(),
+            page: 1,
+            total_pages: 1,
+        };
+        let mut grid = SimilarGrid::default();
+        grid.merge(&series(0..20));
+        assert_eq!(grid.visible(8).len(), 16);
+        assert!(grid.visible(8).iter().all(|t| t.kind == MediaKind::Series));
+        assert!(grid.has_more(8));
     }
 }

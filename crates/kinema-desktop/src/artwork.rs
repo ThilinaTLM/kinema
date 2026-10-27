@@ -9,7 +9,11 @@ use std::{
     fs,
     io::{Cursor, Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock, mpsc},
+    sync::{
+        Arc, Mutex, OnceLock, Weak,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime},
 };
@@ -30,18 +34,21 @@ const DISK_BYTES: u64 = 256 * 1024 * 1024;
 pub enum ArtworkKind {
     Poster,
     Backdrop,
+    Still,
 }
 impl ArtworkKind {
     fn thumbnail_bounds(self) -> (u32, u32) {
         match self {
             Self::Poster => (384, 576),
             Self::Backdrop => (1024, 576),
+            Self::Still => (480, 270),
         }
     }
     fn quota(self) -> usize {
         match self {
             Self::Poster => POSTER_BYTES,
             Self::Backdrop => 16 * 1024 * 1024,
+            Self::Still => 64 * 1024 * 1024,
         }
     }
 }
@@ -204,6 +211,8 @@ fn mute_color(color: [f32; 3]) -> [u8; 3] {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArtworkError {
     Transport,
+    Unavailable,
+    CachedMiss(SystemTime),
     TooLarge,
     InvalidImage,
 }
@@ -238,11 +247,15 @@ struct Job {
     generation: u64,
     key: ArtworkKey,
     interactive: bool,
+    queued_at: Instant,
 }
 #[derive(Clone)]
 struct DecodedArtwork {
     image: Arc<RenderImage>,
     palette: ArtworkPalette,
+}
+fn expired(result: &ArtworkResult) -> bool {
+    matches!(result, Err(ArtworkError::CachedMiss(until)) if SystemTime::now() >= *until)
 }
 struct Cached {
     key: ArtworkKey,
@@ -255,9 +268,13 @@ struct ArtworkStore {
     queue: VecDeque<Job>,
     active: HashMap<u64, Job>,
     tasks: HashMap<u64, Task<()>>,
+    timers: HashMap<u64, Task<()>>,
     cache: VecDeque<Cached>,
     next: u64,
     newest_owner: Option<String>,
+    requested: HashMap<String, Vec<String>>,
+    title_scopes: HashMap<String, String>,
+    retry: std::collections::HashSet<String>,
     workers: Option<ArtworkWorkers>,
 }
 impl Global for ArtworkStore {}
@@ -273,9 +290,67 @@ pub fn init(cx: &mut App) {
 /// or automatic retries are introduced.
 /// Use stable view identifiers, not per-title/query strings. At most 64 owners and
 /// 128-byte owner names are accepted; zero denotes a rejected registration.
+/// Explicit refresh clears this title's persisted misses, including prior mounts.
+/// Requested URLs also retry on workers, including older unscoped markers.
+/// Route changes alone never erase persisted misses.
+pub fn refresh_misses(owner: &str, cx: &mut App) {
+    init(cx);
+    let receiver = cx.update_global::<ArtworkStore, _>(|store, _| {
+        let urls = store.requested.get(owner).cloned().unwrap_or_default();
+        store.retry.clear();
+        store.retry.extend(urls.iter().cloned());
+        let (reply, receiver) = tokio::sync::oneshot::channel();
+        let workers = store.workers.get_or_insert_with(ArtworkWorkers::new);
+        if workers
+            .sender
+            .try_send(WorkerCommand::Clear(
+                urls,
+                store.title_scopes.get(owner).cloned(),
+                reply,
+            ))
+            .is_err()
+        {
+            tracing::warn!("Artwork miss clearing queue unavailable");
+        }
+        store.next = store.next.wrapping_add(1);
+        (store.next, receiver)
+    });
+    let (id, receiver) = receiver;
+    let task = cx.spawn(async move |cx| {
+        let _ = receiver.await;
+        cx.update(|cx| {
+            cx.update_global::<ArtworkStore, _>(|store, _| {
+                store.tasks.remove(&id);
+            });
+        });
+    });
+    cx.update_global::<ArtworkStore, _>(|store, _| {
+        store.tasks.insert(id, task);
+    });
+}
+fn permanent(error: ArtworkError) -> bool {
+    matches!(
+        error,
+        ArtworkError::Unavailable | ArtworkError::InvalidImage | ArtworkError::CachedMiss(_)
+    )
+}
 pub fn begin_generation(owner: &str, cx: &mut App) -> u64 {
     init(cx);
     cx.update_global::<ArtworkStore, _>(|store, _| store.advance_generation(owner))
+}
+/// A mounted title tracks its requested URLs so explicit Refresh can clear all
+/// of its misses, including earlier seasons. Browse windows need no URL history.
+pub fn begin_title_generation(owner: &str, title: &str, cx: &mut App) -> u64 {
+    let generation = begin_generation(owner, cx);
+    if generation != 0 {
+        cx.update_global::<ArtworkStore, _>(|store, _| {
+            store.requested.insert(owner.to_owned(), Vec::new());
+            store
+                .title_scopes
+                .insert(owner.to_owned(), title.to_owned());
+        });
+    }
+    generation
 }
 /// Cache lookup touches the decoded LRU. None includes pending and failed images;
 /// `status` distinguishes a negative-cache hit from missing work.
@@ -292,8 +367,19 @@ pub fn status(key: &ArtworkKey, cx: &App) -> Option<Result<(), ArtworkError>> {
     cx.try_global::<ArtworkStore>()?
         .cache
         .iter()
-        .find(|e| &e.key == key)
+        .find(|e| &e.key == key && !expired(&e.result))
         .map(|e| e.result.as_ref().map(|_| ()).map_err(|e| *e))
+}
+/// Disk hits stay a quiet placeholder for 150 ms instead of flashing a shimmer.
+pub fn skeleton_due(key: &ArtworkKey, cx: &App) -> bool {
+    cx.try_global::<ArtworkStore>().is_some_and(|store| {
+        store
+            .queue
+            .iter()
+            .chain(store.active.values())
+            .find(|job| &job.key == key)
+            .is_some_and(|job| job.queued_at.elapsed() >= Duration::from_millis(150))
+    })
 }
 pub fn request(owner: &str, generation: u64, key: ArtworkKey, cx: &mut App) {
     init(cx);
@@ -317,6 +403,15 @@ fn pump(cx: &mut App) {
             break;
         };
         let id = job.id;
+        let timer = cx.spawn(async move |cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(150))
+                .await;
+            cx.update(|cx| cx.refresh_windows());
+        });
+        cx.update_global::<ArtworkStore, _>(|store, _| {
+            store.timers.insert(id, timer);
+        });
         // Clone only an Arc on the UI thread, never image bytes. A negative source
         // cache hit also propagates without a second download.
         let source = cx.update_global::<ArtworkStore, _>(|store, _| {
@@ -324,7 +419,13 @@ fn pump(cx: &mut App) {
         });
         let receiver = cx.update_global::<ArtworkStore, _>(|store, _| {
             let workers = store.workers.get_or_insert_with(ArtworkWorkers::new);
-            workers.submit(job.key.clone(), source)
+            let clear_miss = store.retry.remove(&job.key.url);
+            workers.submit(
+                job.key.clone(),
+                source,
+                clear_miss,
+                store.title_scopes.get(&job.owner).cloned(),
+            )
         });
         let task = cx.spawn(async move |cx| {
             let result = receiver.await.unwrap_or(Err(ArtworkError::Transport));
@@ -352,15 +453,25 @@ type ArtworkResult = Result<DecodedArtwork, ArtworkError>;
 struct ArtworkWork {
     key: ArtworkKey,
     source: Option<ArtworkResult>,
+    clear_miss: bool,
+    title_scope: Option<String>,
     reply: tokio::sync::oneshot::Sender<ArtworkResult>,
 }
+enum WorkerCommand {
+    Image(ArtworkWork),
+    Clear(
+        Vec<String>,
+        Option<String>,
+        tokio::sync::oneshot::Sender<()>,
+    ),
+}
 struct ArtworkWorkers {
-    sender: mpsc::SyncSender<ArtworkWork>,
+    sender: mpsc::SyncSender<WorkerCommand>,
     threads: Vec<JoinHandle<()>>,
 }
 impl ArtworkWorkers {
     fn new() -> Self {
-        let (sender, receiver) = mpsc::sync_channel::<ArtworkWork>(ACTIVE);
+        let (sender, receiver) = mpsc::sync_channel::<WorkerCommand>(ACTIVE + 1);
         let receiver = Arc::new(Mutex::new(receiver));
         let mut threads = Vec::new();
         for index in 0..ACTIVE {
@@ -379,13 +490,35 @@ impl ArtworkWorkers {
                             };
                             receiver.recv()
                         };
-                        let Ok(work) = work else { break };
+                        let Ok(command) = work else { break };
+                        let work = match command {
+                            WorkerCommand::Image(work) => work,
+                            WorkerCommand::Clear(urls, scope, reply) => {
+                                if let Some(disk) = disk_cache() {
+                                    if let Some(scope) = scope {
+                                        disk.clear_scope(&scope);
+                                    }
+                                    for url in urls {
+                                        disk.clear_miss(&url);
+                                    }
+                                }
+                                let _ = reply.send(());
+                                continue;
+                            }
+                        };
                         if work.source.is_some() {
                             tracing::debug!(cache = "memory", "Artwork source reused");
                         }
                         let result = work
                             .source
-                            .unwrap_or_else(|| fetch(&work.key.url, work.key.kind))
+                            .unwrap_or_else(|| {
+                                fetch(
+                                    &work.key.url,
+                                    work.key.kind,
+                                    work.clear_miss,
+                                    work.title_scope.as_deref(),
+                                )
+                            })
                             .and_then(|decoded| {
                                 if work.key.blurred {
                                     derive_backdrop(&decoded)
@@ -414,6 +547,8 @@ impl ArtworkWorkers {
         &self,
         key: ArtworkKey,
         source: Option<ArtworkResult>,
+        clear_miss: bool,
+        title_scope: Option<String>,
     ) -> tokio::sync::oneshot::Receiver<ArtworkResult> {
         let (reply, receiver) = tokio::sync::oneshot::channel();
         // A failed spawn or disconnected/full queue becomes a retryable failure,
@@ -421,7 +556,13 @@ impl ArtworkWorkers {
         if !self.threads.is_empty()
             && self
                 .sender
-                .try_send(ArtworkWork { key, source, reply })
+                .try_send(WorkerCommand::Image(ArtworkWork {
+                    key,
+                    source,
+                    clear_miss,
+                    title_scope,
+                    reply,
+                }))
                 .is_err()
         {
             tracing::warn!(category = "queue_unavailable", "Artwork work not admitted");
@@ -432,6 +573,7 @@ impl ArtworkWorkers {
 impl ArtworkStore {
     fn source(&mut self, key: &ArtworkKey) -> Option<Result<DecodedArtwork, ArtworkError>> {
         let source = key.source();
+        self.cache.retain(|entry| !expired(&entry.result));
         let index = self.cache.iter().position(|entry| entry.key == source)?;
         let entry = self.cache.remove(index)?;
         let result = entry.result.clone();
@@ -456,6 +598,8 @@ impl ArtworkStore {
         let generation = self.generations.entry(owner.into()).or_default();
         *generation = generation.wrapping_add(1);
         self.queue.retain(|job| job.owner != owner);
+        self.requested.remove(owner);
+        self.title_scopes.remove(owner);
         self.cache.retain(|entry| entry.result.is_ok());
         self.newest_owner = Some(owner.into());
         *generation
@@ -471,6 +615,7 @@ impl ArtworkStore {
         key: ArtworkKey,
         interactive: bool,
     ) {
+        self.cache.retain(|entry| !expired(&entry.result));
         if self.generations.get(owner).copied() != Some(generation)
             || self.cache.iter().any(|e| e.key == key)
             || self
@@ -503,6 +648,11 @@ impl ArtworkStore {
                 return;
             }
         }
+        if let Some(urls) = self.requested.get_mut(owner)
+            && !urls.contains(&key.url)
+        {
+            urls.push(key.url.clone());
+        }
         self.next = self.next.wrapping_add(1);
         self.queue.push_back(Job {
             id: self.next,
@@ -510,6 +660,7 @@ impl ArtworkStore {
             generation,
             key,
             interactive,
+            queued_at: Instant::now(),
         });
     }
     fn replace_window(&mut self, owner: &str, generation: u64, keys: Vec<ArtworkKey>) {
@@ -563,6 +714,7 @@ impl ArtworkStore {
     fn complete(&mut self, job: &Job, result: Result<DecodedArtwork, ArtworkError>) -> bool {
         self.active.remove(&job.id);
         self.tasks.remove(&job.id);
+        self.timers.remove(&job.id);
         if self.generations.get(&job.owner).copied() != Some(job.generation) {
             return false;
         }
@@ -592,6 +744,7 @@ impl ArtworkStore {
         for (kind, blurred) in [
             (ArtworkKind::Poster, false),
             (ArtworkKind::Backdrop, false),
+            (ArtworkKind::Still, false),
             (ArtworkKind::Poster, true),
         ] {
             let matches =
@@ -618,12 +771,28 @@ impl ArtworkStore {
                 }
             }
         }
-        while self.cache.len() > ENTRIES {
-            if let Some(Cached {
-                result: Ok(image), ..
-            }) = self.cache.pop_front()
+        // Browse posters cannot consume the episode-still entry allowance.
+        for (still, limit) in [(false, ENTRIES), (true, 128)] {
+            while self
+                .cache
+                .iter()
+                .filter(|entry| {
+                    (entry.key.kind == ArtworkKind::Still && !entry.key.blurred) == still
+                })
+                .count()
+                > limit
             {
-                evicted.push(image.image);
+                let Some(index) = self.cache.iter().position(|entry| {
+                    (entry.key.kind == ArtworkKind::Still && !entry.key.blurred) == still
+                }) else {
+                    break;
+                };
+                if let Some(Cached {
+                    result: Ok(image), ..
+                }) = self.cache.remove(index)
+                {
+                    evicted.push(image.image);
+                }
             }
         }
         evicted
@@ -685,7 +854,11 @@ fn download(client: &Client, url: &str) -> Result<Vec<u8>, ArtworkError> {
             duration_ms = started.elapsed().as_millis() as u64,
             "Artwork HTTP request failed"
         );
-        return Err(ArtworkError::Transport);
+        return Err(if matches!(response.status().as_u16(), 404 | 410) {
+            ArtworkError::Unavailable
+        } else {
+            ArtworkError::Transport
+        });
     }
     if response.content_length().is_some_and(|n| n > ENCODED) {
         tracing::warn!(category = "encoded_size", "Artwork exceeds size limit");
@@ -725,6 +898,7 @@ struct DiskCache {
     root: PathBuf,
     budget: u64,
     maintenance: Mutex<TrimState>,
+    miss_leases: Mutex<HashMap<PathBuf, Weak<AtomicBool>>>,
 }
 #[derive(Default)]
 struct TrimState {
@@ -754,12 +928,164 @@ impl DiskCache {
             root,
             budget,
             maintenance: Mutex::new(TrimState::default()),
+            miss_leases: Mutex::new(HashMap::new()),
         }
     }
     fn path(&self, url: &str) -> PathBuf {
         use sha2::{Digest, Sha256};
         self.root
             .join(format!("{:x}.img", Sha256::digest(url.as_bytes())))
+    }
+    fn scope_hash(scope: &str) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(scope.as_bytes()))
+    }
+    fn associate_scope(&self, url: &str, scope: &str) {
+        let Ok(_guard) = DISK_LOCK.lock() else { return };
+        if !fs::symlink_metadata(&self.root).is_ok_and(|meta| meta.is_dir()) {
+            return;
+        }
+        let path = self.path(url).with_extension("miss");
+        if !fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file() && meta.len() < 4096) {
+            return;
+        }
+        let Ok(mut contents) = fs::read_to_string(&path) else {
+            return;
+        };
+        let hash = Self::scope_hash(scope);
+        if contents.lines().skip(1).any(|line| line == hash) {
+            return;
+        }
+        contents.push('\n');
+        contents.push_str(&hash);
+        cache_result(
+            (|| -> std::io::Result<()> {
+                let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
+                file.write_all(contents.as_bytes())?;
+                file.persist(path).map_err(|e| e.error)?;
+                Ok(())
+            })(),
+            "associate_title_miss",
+        );
+    }
+    fn clear_scope(&self, scope: &str) {
+        let Ok(_guard) = DISK_LOCK.lock() else { return };
+        if !fs::symlink_metadata(&self.root).is_ok_and(|meta| meta.is_dir()) {
+            return;
+        }
+        let hash = Self::scope_hash(scope);
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !owned_cache_file(&path)
+                || path.extension().is_none_or(|ext| ext != "miss")
+                || !entry.file_type().is_ok_and(|kind| kind.is_file())
+                || !entry.metadata().is_ok_and(|meta| meta.len() <= 4096)
+            {
+                continue;
+            }
+            if fs::read_to_string(&path)
+                .is_ok_and(|text| text.lines().skip(1).any(|line| line == hash))
+            {
+                cache_result(fs::remove_file(path), "clear_title_miss");
+            }
+        }
+    }
+    // A refresh invalidates in-flight miss writes for this URL, not other titles.
+    fn miss_lease(&self, url: &str) -> Arc<AtomicBool> {
+        let Ok(mut leases) = self.miss_leases.lock() else {
+            return Arc::new(AtomicBool::new(true));
+        };
+        leases.retain(|_, lease| lease.strong_count() > 0);
+        let lease = leases.entry(self.path(url)).or_default();
+        if let Some(existing) = lease.upgrade() {
+            return existing;
+        }
+        let current = Arc::new(AtomicBool::new(false));
+        *lease = Arc::downgrade(&current);
+        current
+    }
+    fn clear_miss(&self, url: &str) {
+        let Ok(_guard) = DISK_LOCK.lock() else { return };
+        if let Ok(mut leases) = self.miss_leases.lock()
+            && let Some(lease) = leases
+                .remove(&self.path(url))
+                .and_then(|lease| lease.upgrade())
+        {
+            lease.store(true, Ordering::Release);
+        }
+        if !fs::symlink_metadata(&self.root).is_ok_and(|meta| meta.is_dir()) {
+            return;
+        }
+        cache_result(
+            fs::remove_file(self.path(url).with_extension("miss")),
+            "clear_miss",
+        );
+    }
+    #[cfg(test)]
+    fn missed(&self, url: &str, now: SystemTime) -> bool {
+        self.miss_expiry(url, now).is_some()
+    }
+    fn miss_expiry(&self, url: &str, now: SystemTime) -> Option<SystemTime> {
+        let Ok(_guard) = DISK_LOCK.lock() else {
+            return None;
+        };
+        if !fs::symlink_metadata(&self.root).ok()?.is_dir() {
+            return None;
+        }
+        let path = self.path(url).with_extension("miss");
+        if !fs::symlink_metadata(&path).ok()?.is_file() {
+            return None;
+        }
+        let expiry = (|| {
+            let mut text = String::new();
+            fs::File::open(&path)
+                .ok()?
+                .take(32)
+                .read_to_string(&mut text)
+                .ok()?;
+            let stamp = text.lines().next()?.parse::<u64>().ok()?;
+            let created = SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(stamp))?;
+            let age = now.duration_since(created).ok()?;
+            (age < Duration::from_secs(86_400)).then_some(())?;
+            created.checked_add(Duration::from_secs(86_400))
+        })();
+        if expiry.is_none() {
+            cache_result(fs::remove_file(path), "expire_miss");
+        }
+        expiry
+    }
+
+    fn write_miss(&self, url: &str, now: SystemTime, lease: Option<&AtomicBool>) {
+        let Ok(_guard) = DISK_LOCK.lock() else { return };
+        if lease.is_some_and(|lease| lease.load(Ordering::Acquire)) {
+            return;
+        }
+        let Some(stamp) = now.duration_since(SystemTime::UNIX_EPOCH).ok() else {
+            return;
+        };
+        cache_result(
+            (|| -> std::io::Result<()> {
+                fs::create_dir_all(&self.root)?;
+                if !fs::symlink_metadata(&self.root)?.is_dir() {
+                    return Ok(());
+                }
+                let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
+                write!(file, "{}", stamp.as_secs())?;
+                file.persist(self.path(url).with_extension("miss"))
+                    .map_err(|e| e.error)?;
+                if let Ok(mut state) = self.maintenance.lock() {
+                    let now = Instant::now();
+                    if state.record_write(20, self.budget, now) {
+                        state.trimmed(self.trim()?, now);
+                    }
+                }
+                Ok(())
+            })(),
+            "write_miss",
+        );
     }
     fn read(&self, url: &str, kind: ArtworkKind) -> Option<DecodedArtwork> {
         let _guard = DISK_LOCK
@@ -856,12 +1182,21 @@ impl DiskCache {
         }
         files.sort_by_key(|entry| entry.0);
         let mut total: u64 = files.iter().map(|entry| entry.2).sum();
+        let mut misses = files
+            .iter()
+            .filter(|(_, path, _)| path.extension().is_some_and(|ext| ext == "miss"))
+            .count();
         for (_, path, size) in files {
-            if total <= self.budget {
+            if total <= self.budget && misses <= 4096 {
                 break;
+            }
+            let is_miss = path.extension().is_some_and(|ext| ext == "miss");
+            if total <= self.budget && !is_miss {
+                continue;
             }
             if cache_result(fs::remove_file(path), "evict").is_some() {
                 total -= size;
+                misses -= usize::from(is_miss);
             }
         }
         Ok(total)
@@ -871,28 +1206,57 @@ fn owned_cache_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
-            name.len() == 68
-                && name.ends_with(".img")
+            ((name.len() == 68 && name.ends_with(".img"))
+                || (name.len() == 69 && name.ends_with(".miss")))
                 && name.as_bytes()[..64].iter().all(u8::is_ascii_hexdigit)
         })
 }
-fn fetch(url: &str, kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
-    let start = Instant::now();
-    // Pipeline tests must not read, write or evict real application cache files.
-    // Disk behavior is tested separately with isolated temporary directories.
+fn disk_cache() -> Option<&'static DiskCache> {
     static DISK: OnceLock<Option<DiskCache>> = OnceLock::new();
-    let disk = DISK
-        .get_or_init(|| {
-            if cfg!(test) {
-                None
-            } else {
-                crate::paths::AppPaths::resolve()
-                    .map_err(|_| tracing::warn!("Artwork cache paths unavailable"))
-                    .ok()
-                    .map(|paths| DiskCache::new(paths.cache.join("artwork"), DISK_BYTES))
-            }
-        })
-        .as_ref();
+    DISK.get_or_init(|| {
+        if cfg!(test) {
+            None
+        } else {
+            crate::paths::AppPaths::resolve()
+                .map_err(|_| tracing::warn!("Artwork cache paths unavailable"))
+                .ok()
+                .map(|paths| DiskCache::new(paths.cache.join("artwork"), DISK_BYTES))
+        }
+    })
+    .as_ref()
+}
+fn fetch(
+    url: &str,
+    kind: ArtworkKind,
+    clear_miss: bool,
+    title_scope: Option<&str>,
+) -> Result<DecodedArtwork, ArtworkError> {
+    let disk = disk_cache();
+    let result = fetch_cached(url, kind, clear_miss, disk);
+    if let Err(error) = &result
+        && permanent(*error)
+        && let (Some(disk), Some(scope)) = (disk, title_scope)
+    {
+        disk.associate_scope(url, scope);
+    }
+    result
+}
+fn fetch_cached(
+    url: &str,
+    kind: ArtworkKind,
+    clear_miss: bool,
+    disk: Option<&DiskCache>,
+) -> Result<DecodedArtwork, ArtworkError> {
+    let start = Instant::now();
+    if clear_miss && let Some(disk) = disk {
+        disk.clear_miss(url);
+    }
+    let miss_lease = disk.map(|cache| cache.miss_lease(url));
+    if let Some(disk) = disk
+        && let Some(expiry) = disk.miss_expiry(url, SystemTime::now())
+    {
+        return Err(ArtworkError::CachedMiss(expiry));
+    }
     if let Some(image) = disk.and_then(|cache| cache.read(url, kind)) {
         tracing::debug!(
             cache = "disk",
@@ -901,10 +1265,21 @@ fn fetch(url: &str, kind: ArtworkKind) -> Result<DecodedArtwork, ArtworkError> {
         );
         return Ok(image);
     }
-    let bytes = download(shared_client()?, url)?;
+    let failure = |error| {
+        if permanent(error)
+            && let Some(disk) = disk
+        {
+            let now = SystemTime::now();
+            disk.write_miss(url, now, miss_lease.as_deref());
+            ArtworkError::CachedMiss(now + Duration::from_secs(86_400))
+        } else {
+            error
+        }
+    };
+    let bytes = download(shared_client()?, url).map_err(failure)?;
     let fetched = start.elapsed();
     let decode_start = Instant::now();
-    let image = decode(&bytes, kind)?;
+    let image = decode(&bytes, kind).map_err(failure)?;
     tracing::debug!(
         bytes = bytes.len(),
         cache = "network",
@@ -1215,7 +1590,7 @@ mod tests {
             palette: ArtworkPalette::NEUTRAL,
         };
         let result = workers
-            .submit(test_key(0).blurred(), Some(Ok(decoded)))
+            .submit(test_key(0).blurred(), Some(Ok(decoded)), false, None)
             .blocking_recv()
             .unwrap_or_else(|error| panic!("{error}"))
             .unwrap_or_else(|error| panic!("{error:?}"));
@@ -1225,7 +1600,7 @@ mod tests {
         );
         assert!(matches!(
             workers
-                .submit(test_key(1), Some(Err(ArtworkError::Transport)))
+                .submit(test_key(1), Some(Err(ArtworkError::Transport)), false, None)
                 .blocking_recv(),
             Ok(Err(ArtworkError::Transport))
         ));
@@ -2024,10 +2399,176 @@ mod tests {
             .unwrap_or_else(|_| panic!("fixture server failed"));
     }
     #[::core::prelude::v1::test]
+    fn disk_still_revisit_uses_encoded_bytes_without_transport() {
+        let temp = tempfile::tempdir().unwrap_or_else(|e| panic!("temp: {e}"));
+        let disk = DiskCache::new(temp.path().to_owned(), DISK_BYTES);
+        let url = "https://invalid.invalid/no-network.jpg";
+        let mut bytes = Vec::new();
+        image::DynamicImage::new_rgb8(960, 540)
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .unwrap_or_else(|e| panic!("encode: {e}"));
+        disk.write(url, &bytes);
+        let start = Instant::now();
+        let decoded = fetch_cached(url, ArtworkKind::Still, false, Some(&disk))
+            .unwrap_or_else(|e| panic!("disk hit: {e:?}"));
+        eprintln!(
+            "episode disk read+decode: {:?} (shimmer grace: 150 ms)",
+            start.elapsed()
+        );
+        assert_eq!(
+            decoded.image.as_bytes(0).map(<[u8]>::len),
+            Some(480 * 270 * 4)
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn permanent_misses_skip_transport_but_transient_failures_retry() {
+        use std::net::TcpListener;
+        for (status, body, persists) in [
+            (404, "", true),
+            (410, "", true),
+            (200, "not-image", true),
+            (503, "", false),
+        ] {
+            let temp = tempfile::tempdir().unwrap_or_else(|e| panic!("temp: {e}"));
+            let disk = DiskCache::new(temp.path().to_owned(), DISK_BYTES);
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap_or_else(|e| panic!("bind: {e}"));
+            let address = listener
+                .local_addr()
+                .unwrap_or_else(|e| panic!("address: {e}"));
+            listener
+                .set_nonblocking(true)
+                .unwrap_or_else(|e| panic!("listener: {e}"));
+            let server = thread::spawn(move || {
+                for _ in 0..2 {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    let mut stream = loop {
+                        match listener.accept() {
+                            Ok((stream, _)) => break stream,
+                            Err(e)
+                                if e.kind() == std::io::ErrorKind::WouldBlock
+                                    && Instant::now() < deadline =>
+                            {
+                                thread::sleep(Duration::from_millis(5))
+                            }
+                            Err(e) => panic!("accept: {e}"),
+                        }
+                    };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap_or_else(|e| panic!("timeout: {e}"));
+                    let mut request = [0; 1024];
+                    let _ = stream
+                        .read(&mut request)
+                        .unwrap_or_else(|e| panic!("read: {e}"));
+                    write!(stream, "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap_or_else(|e| panic!("write: {e}"));
+                }
+            });
+            let url = format!("http://{address}/image");
+            assert!(fetch_cached(&url, ArtworkKind::Still, false, Some(&disk)).is_err());
+            assert_eq!(disk.missed(&url, SystemTime::now()), persists);
+            if persists {
+                // No server response consumed: only the explicit refresh below fetches.
+                assert!(matches!(
+                    fetch_cached(&url, ArtworkKind::Still, false, Some(&disk)),
+                    Err(ArtworkError::CachedMiss(_))
+                ));
+                assert!(fetch_cached(&url, ArtworkKind::Still, true, Some(&disk)).is_err());
+            } else {
+                assert!(fetch_cached(&url, ArtworkKind::Still, false, Some(&disk)).is_err());
+            }
+            server.join().unwrap_or_else(|_| panic!("server"));
+        }
+    }
+
+    #[::core::prelude::v1::test]
+    fn title_refresh_clears_prior_mount_misses_without_clearing_other_titles() {
+        let temp = tempfile::tempdir().unwrap_or_else(|e| panic!("temp: {e}"));
+        let disk = DiskCache::new(temp.path().to_owned(), DISK_BYTES);
+        let now = SystemTime::now();
+        let old_season = "https://example.com/season1-still.jpg";
+        let other_title = "https://example.com/another-title.jpg";
+        disk.write_miss(old_season, now, None);
+        disk.associate_scope(old_season, "tmdb:tv:1");
+        disk.associate_scope(old_season, "tmdb:tv:shared");
+        disk.write_miss(other_title, now, None);
+        disk.associate_scope(other_title, "tmdb:tv:2");
+        assert!(disk.missed(old_season, now));
+        // The current detail need not have loaded this older season, even after restart.
+        let reopened = DiskCache::new(temp.path().to_owned(), DISK_BYTES);
+        reopened.clear_scope("tmdb:tv:1");
+        assert!(!reopened.missed(old_season, now));
+        assert!(reopened.missed(other_title, now));
+    }
+
+    #[::core::prelude::v1::test]
+    fn persisted_misses_expire_and_refresh_clears_them() {
+        let temp = tempfile::tempdir().unwrap_or_else(|e| panic!("fixture: {e:?}"));
+        let disk = DiskCache::new(temp.path().to_owned(), DISK_BYTES);
+        let url = "https://example.com/missing.jpg";
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        disk.write_miss(url, now, None);
+        assert!(disk.missed(url, now + Duration::from_secs(86_399)));
+        // A new cache instance models an application restart.
+        let reopened = DiskCache::new(temp.path().to_owned(), DISK_BYTES);
+        assert!(reopened.missed(url, now));
+        assert!(!reopened.missed(url, now + Duration::from_secs(86_400)));
+        assert!(!disk.path(url).with_extension("miss").exists());
+        disk.write_miss(url, now, None);
+        disk.clear_miss(url);
+        assert!(!disk.missed(url, now));
+        let stale = disk.miss_lease(url);
+        disk.clear_miss(url);
+        disk.write_miss(url, now, Some(&stale));
+        assert!(!disk.missed(url, now)); // obsolete worker cannot resurrect a cleared miss
+        let current = disk.miss_lease(url);
+        disk.write_miss(url, now, Some(&current));
+        assert!(disk.missed(url, now));
+        disk.clear_miss(url);
+        disk.write_miss(url, now + Duration::from_secs(1), None);
+        assert!(!disk.missed(url, now)); // future/corrupt timestamps never suppress retries
+        assert!(permanent(ArtworkError::Unavailable));
+        assert!(permanent(ArtworkError::InvalidImage));
+        assert!(!permanent(ArtworkError::Transport));
+        assert!(!permanent(ArtworkError::TooLarge));
+    }
+
+    #[::core::prelude::v1::test]
+    fn browse_pressure_cannot_evict_episode_stills_and_hits_are_synchronous() {
+        let mut store = ArtworkStore::default();
+        let generation = store.advance_generation("detail");
+        let still = ArtworkKey::new(ArtworkKind::Still, "https://example.com/still.jpg")
+            .unwrap_or_else(|| panic!("fixture key"));
+        let mut bytes = Vec::new();
+        image::DynamicImage::new_rgb8(480, 270)
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .unwrap_or_else(|e| panic!("fixture: {e:?}"));
+        let decoded =
+            decode(&bytes, ArtworkKind::Still).unwrap_or_else(|e| panic!("fixture: {e:?}"));
+        store.enqueue("detail", generation, still.clone());
+        let job = store.start_next().unwrap_or_else(|| panic!("fixture job"));
+        store.complete(&job, Ok(decoded.clone()));
+        for index in 0..300 {
+            store.cache.push_back(Cached {
+                key: test_key(index),
+                result: Ok(decoded.clone()),
+                bytes: 384 * 576 * 4,
+            });
+        }
+        store.trim_images();
+        let start = Instant::now();
+        assert!(store.lookup(&still).is_some());
+        eprintln!("episode memory hit: {:?}; no job queued", start.elapsed());
+        assert!(store.queue.is_empty());
+        assert!(store.active.is_empty());
+    }
+
+    #[::core::prelude::v1::test]
     fn thumbnails_fit_kind_buckets_without_upscaling() {
         for (width, height, kind, expected) in [
             (1000, 1500, ArtworkKind::Poster, (384, 576)),
             (1920, 1080, ArtworkKind::Backdrop, (1024, 576)),
+            (1920, 1080, ArtworkKind::Still, (480, 270)),
             (20, 30, ArtworkKind::Poster, (20, 30)),
         ] {
             let mut bytes = Vec::new();

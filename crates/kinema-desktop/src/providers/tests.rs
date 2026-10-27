@@ -586,3 +586,78 @@ fn diagnostics_redact_credentials_magnets_and_provider_payloads() -> TestResult 
     excludes(&output, &["transport-secret", "bearer-secret"]);
     Ok(())
 }
+
+#[test]
+fn account_presence_is_read_only_and_normalizes_hashes() -> TestResult {
+    let hash = "ABCDEF0123456789ABCDEF0123456789ABCDEF01";
+    for (kind, body, path) in [
+        (
+            DebridKind::RealDebrid,
+            json!([{ "hash": hash }]),
+            "/torrents?limit=5000&page=1",
+        ),
+        (
+            DebridKind::AllDebrid,
+            json!({"status":"success", "data":{"magnets":[{"hash":hash}]}}),
+            "/v4.1/magnet/status",
+        ),
+    ] {
+        let (base, server) = fixture(vec![(200, body)])?;
+        let hashes = client(kind, base)?.account_torrents(&AtomicBool::new(false))?;
+        assert_eq!(hashes.len(), 1);
+        assert!(
+            hashes
+                .iter()
+                .any(|h| h.as_str() == hash.to_ascii_lowercase())
+        );
+        let requests = server.join().map_err(|_| "fixture failed")?;
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with(&format!("GET {path} ")));
+        assert!(!requests[0].contains("upload"));
+        assert!(!requests[0].contains("instantAvailability"));
+    }
+    Ok(())
+}
+
+#[test]
+fn account_presence_empty_failure_and_malformed_are_distinct() -> TestResult {
+    for (kind, empty) in [
+        (DebridKind::RealDebrid, json!([])),
+        (
+            DebridKind::AllDebrid,
+            json!({"status":"success","data":{"magnets":[]}}),
+        ),
+    ] {
+        let (base, server) = fixture(vec![(200, empty)])?;
+        assert!(
+            client(kind, base)?
+                .account_torrents(&AtomicBool::new(false))?
+                .is_empty()
+        );
+        server.join().map_err(|_| "fixture failed")?;
+        let (base, server) = fixture(vec![(503, json!({"private":"not logged"}))])?;
+        assert!(
+            client(kind, base)?
+                .account_torrents(&AtomicBool::new(false))
+                .is_err()
+        );
+        server.join().map_err(|_| "fixture failed")?;
+        let (base, server) = fixture(vec![(200, json!({"unexpected":[]}))])?;
+        assert_eq!(
+            client(kind, base)?.account_torrents(&AtomicBool::new(false)),
+            Err(DebridError::Malformed)
+        );
+        server.join().map_err(|_| "fixture failed")?;
+    }
+    Ok(())
+}
+
+#[test]
+fn account_presence_cancellation_makes_no_request() -> TestResult {
+    let client = client(DebridKind::RealDebrid, Url::parse("http://127.0.0.1:1/")?)?;
+    assert_eq!(
+        client.account_torrents(&AtomicBool::new(true)),
+        Err(DebridError::Canceled)
+    );
+    Ok(())
+}

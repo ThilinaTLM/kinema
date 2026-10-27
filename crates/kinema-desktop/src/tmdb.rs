@@ -50,7 +50,10 @@ pub enum TmdbQuery {
         kind: MediaKind,
         id: u64,
     },
+    /// Related titles of the same `kind`: movies use `/similar`, series use
+    /// `/recommendations`.
     Similar {
+        kind: MediaKind,
         id: u64,
         page: u32,
     },
@@ -84,7 +87,8 @@ impl TmdbQuery {
                 span.record("media_kind", tracing::field::debug(kind));
                 span.record("tmdb_id", id);
             }
-            Self::Similar { id, page } => {
+            Self::Similar { kind, id, page } => {
+                span.record("media_kind", tracing::field::debug(kind));
                 span.record("tmdb_id", id);
                 span.record("page", page);
             }
@@ -151,6 +155,17 @@ pub struct TmdbSeasonSummary {
     pub number: u32,
     pub name: Option<String>,
     pub episode_count: u32,
+    /// Season poster, overview and air date straight from the series details,
+    /// so season tiles and headers need no per-season request.
+    pub poster_url: Option<String>,
+    pub air_date: Option<String>,
+    pub overview: Option<String>,
+}
+impl TmdbSeasonSummary {
+    /// Four-digit year of the air date, when there is one.
+    pub fn year(&self) -> Option<u16> {
+        self.air_date.as_deref()?.get(..4)?.parse().ok()
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TmdbDetails {
@@ -496,15 +511,15 @@ impl TmdbClient {
                 let dto: PageDto = serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
                 TmdbData::Page(dto.normalize(query.kind())?)
             }
-            TmdbQuery::Similar { id, page } => {
+            TmdbQuery::Similar { kind, id, page } => {
                 let raw: serde_json::Value = self.get(
-                    &format!("movie/{id}/similar"),
+                    &format!("{}/{id}/{}", kind_path(*kind), similar_path(*kind)),
                     &[("page", page.to_string())],
                 )?;
                 rich = crate::catalog::normalized_rich::tmdb(&raw, query)
                     .map_err(|_| TmdbError::Malformed)?;
                 let dto: PageDto = serde_json::from_value(raw).map_err(|_| TmdbError::Malformed)?;
-                TmdbData::Page(dto.normalize(MediaKind::Movie)?)
+                TmdbData::Page(dto.normalize(*kind)?)
             }
             TmdbQuery::Details { kind, id } => {
                 let raw: serde_json::Value = self.get(
@@ -664,7 +679,7 @@ fn validate_query(query: &TmdbQuery) -> Result<(), TmdbError> {
             filters,
         } => (1..=500).contains(page) && filters.is_valid_for(*kind),
         TmdbQuery::Details { id, .. } => *id > 0,
-        TmdbQuery::Similar { id, page } => *id > 0 && (1..=500).contains(page),
+        TmdbQuery::Similar { id, page, .. } => *id > 0 && (1..=500).contains(page),
         TmdbQuery::Season { series_id, season } => *series_id > 0 && *season <= 1000,
     };
     if valid {
@@ -701,8 +716,17 @@ pub fn cache_query_identity(query: &TmdbQuery) -> Result<String, TmdbError> {
         TmdbQuery::Search { query, page } => {
             format!("search:{}:{page}:{}", kind_path(query.kind()), query.text())
         }
+        // The normalized writer formerly omitted season summary artwork. A new
+        // series-detail resource identity refreshes those incomplete rows once,
+        // even when they were marked complete. Explicit nulls stay complete.
+        TmdbQuery::Details {
+            kind: MediaKind::Series,
+            id,
+        } => format!("details:tv:{id}:season-art-v1"),
         TmdbQuery::Details { kind, id } => format!("details:{}:{id}", kind_path(*kind)),
-        TmdbQuery::Similar { id, page } => format!("similar:movie:{id}:{page}"),
+        TmdbQuery::Similar { kind, id, page } => {
+            format!("{}:{}:{id}:{page}", similar_path(*kind), kind_path(*kind))
+        }
         TmdbQuery::Season { series_id, season } => format!("season:{series_id}:{season}"),
     };
     Ok(format!("{CACHE_QUERY_IDENTITY}:{key}"))
@@ -795,6 +819,12 @@ struct SummaryDto {
     season_number: u32,
     name: Option<String>,
     episode_count: u32,
+    #[serde(default)]
+    poster_path: Option<String>,
+    #[serde(default)]
+    air_date: Option<String>,
+    #[serde(default)]
+    overview: Option<String>,
 }
 impl DetailDto {
     fn normalize(self, kind: MediaKind) -> Result<TmdbDetails, TmdbError> {
@@ -825,12 +855,17 @@ impl DetailDto {
             seasons: self
                 .seasons
                 .into_iter()
-                .map(|s| TmdbSeasonSummary {
-                    number: s.season_number,
-                    name: nonempty(s.name),
-                    episode_count: s.episode_count,
+                .map(|s| {
+                    Ok(TmdbSeasonSummary {
+                        number: s.season_number,
+                        name: nonempty(s.name),
+                        episode_count: s.episode_count,
+                        poster_url: image_url(s.poster_path)?,
+                        air_date: nonempty(s.air_date),
+                        overview: nonempty(s.overview),
+                    })
                 })
-                .collect(),
+                .collect::<Result<_, TmdbError>>()?,
         })
     }
 }
@@ -861,6 +896,13 @@ impl EpisodeDto {
             overview: nonempty(self.overview),
             released: nonempty(self.air_date),
         })
+    }
+}
+/// Endpoint segment (and cache-identity word) of related titles per kind.
+fn similar_path(kind: MediaKind) -> &'static str {
+    match kind {
+        MediaKind::Movie => "similar",
+        MediaKind::Series => "recommendations",
     }
 }
 fn image_url(path: Option<String>) -> Result<Option<String>, TmdbError> {
@@ -943,6 +985,11 @@ fn validate_data(data: &TmdbData, query: Option<&TmdbQuery>) -> Result<(), TmdbE
                     s.number <= 1000
                         && s.episode_count as usize <= MAX_EPISODES
                         && optional_text(&s.name, 500)
+                        && valid_optional_image(&s.poster_url)
+                        && s.air_date
+                            .as_deref()
+                            .is_none_or(kinema_core::catalog_normalized::valid_date)
+                        && optional_text(&s.overview, 20_000)
                         && seasons.insert(s.number)
                 })
         }
@@ -971,8 +1018,8 @@ fn validate_data(data: &TmdbData, query: Option<&TmdbQuery>) -> Result<(), TmdbE
     if let Some(query) = query {
         validate_query(query)?;
         let matches = match (data, query) {
-            (TmdbData::Page(p), TmdbQuery::Similar { page, .. }) => {
-                p.page == *page && p.titles.iter().all(|t| t.kind == MediaKind::Movie)
+            (TmdbData::Page(p), TmdbQuery::Similar { kind, page, .. }) => {
+                p.page == *page && p.titles.iter().all(|t| t.kind == *kind)
             }
             (
                 TmdbData::Page(p),
@@ -1091,6 +1138,13 @@ pub fn encode(data: &TmdbData) -> Result<String, TmdbError> {
                     season_number: s.number,
                     name: s.name.clone(),
                     episode_count: s.episode_count,
+                    poster_path: s
+                        .poster_url
+                        .as_deref()
+                        .and_then(|u| u.strip_prefix(IMAGE_PREFIX))
+                        .map(str::to_owned),
+                    air_date: s.air_date.clone(),
+                    overview: s.overview.clone(),
                 })
                 .collect(),
         },
@@ -1132,6 +1186,21 @@ pub fn decode(encoded: &str, query: &TmdbQuery) -> Result<TmdbData, TmdbError> {
     if encoded.len() as u64 > MAX_BYTES {
         return Err(TmdbError::TooLarge);
     }
+    // Old details snapshots predate season artwork. Absent is incomplete, while
+    // explicit null is a valid provider response and must not refresh forever.
+    let value: serde_json::Value =
+        serde_json::from_str(encoded).map_err(|_| TmdbError::Malformed)?;
+    if value["data"]["resource"] == "Details"
+        && value["data"]["seasons"].as_array().is_some_and(|seasons| {
+            seasons.iter().any(|season| {
+                ["poster_path", "air_date", "overview"]
+                    .iter()
+                    .any(|field| season.get(*field).is_none())
+            })
+        })
+    {
+        return Err(TmdbError::Malformed);
+    }
     let snapshot: Snapshot = serde_json::from_str(encoded).map_err(|_| TmdbError::Malformed)?;
     if snapshot.identity != CACHE_QUERY_IDENTITY {
         return Err(TmdbError::Malformed);
@@ -1166,12 +1235,17 @@ pub fn decode(encoded: &str, query: &TmdbQuery) -> Result<TmdbData, TmdbError> {
             genres,
             seasons: seasons
                 .into_iter()
-                .map(|s| TmdbSeasonSummary {
-                    number: s.season_number,
-                    name: s.name,
-                    episode_count: s.episode_count,
+                .map(|s| {
+                    Ok(TmdbSeasonSummary {
+                        number: s.season_number,
+                        name: s.name,
+                        episode_count: s.episode_count,
+                        poster_url: image_url(s.poster_path)?,
+                        air_date: s.air_date,
+                        overview: s.overview,
+                    })
                 })
-                .collect(),
+                .collect::<Result<_, TmdbError>>()?,
         }),
         SnapshotData::Season {
             poster_url,
@@ -1233,10 +1307,10 @@ pub(crate) fn decode_fixture_response(
                 .map_err(|_| TmdbError::Malformed)?
                 .normalize(query.kind())?,
         ),
-        TmdbQuery::Similar { .. } => TmdbData::Page(
+        TmdbQuery::Similar { kind, .. } => TmdbData::Page(
             serde_json::from_value::<PageDto>(raw)
                 .map_err(|_| TmdbError::Malformed)?
-                .normalize(MediaKind::Movie)?,
+                .normalize(*kind)?,
         ),
     };
     validate_data(&data, Some(query))?;
@@ -1553,7 +1627,11 @@ mod tests {
 
     #[test]
     fn similar_uses_movie_scoped_endpoint_and_distinct_cache_identity() {
-        let query = TmdbQuery::Similar { id: 91, page: 2 };
+        let query = TmdbQuery::Similar {
+            kind: MediaKind::Movie,
+            id: 91,
+            page: 2,
+        };
         let (result, request) = local(
             200,
             r#"{"page":2,"total_pages":3,"results":[{"id":42,"title":"Related","overview":"Supplied by provider","poster_path":"/related.jpg"}]}"#,
@@ -1573,10 +1651,86 @@ mod tests {
         assert_ne!(
             ok(cache_query_identity(&query)),
             ok(cache_query_identity(&TmdbQuery::Similar {
+                kind: MediaKind::Movie,
                 id: 92,
                 page: 2
             }))
         );
+    }
+    #[test]
+    fn series_recommendations_use_tv_endpoint_series_pages_and_own_cache_identity() {
+        let query = TmdbQuery::Similar {
+            kind: MediaKind::Series,
+            id: 91,
+            page: 1,
+        };
+        let (result, request) = local(
+            200,
+            r#"{"page":1,"total_pages":2,"results":[{"id":42,"name":"Related show","first_air_date":"2019-05-01","poster_path":"/related.jpg"}]}"#,
+            |c| c.fetch(&query),
+        );
+        let data = ok(result);
+        assert!(request.contains("/3/tv/91/recommendations?"));
+        roundtrip(&data, &query);
+        let TmdbData::Page(page) = &data else {
+            panic!("page")
+        };
+        assert!(page.titles.iter().all(|t| t.kind == MediaKind::Series));
+        // A movie page can never satisfy a series query, nor the reverse.
+        assert!(
+            validate_data(
+                &data,
+                Some(&TmdbQuery::Similar {
+                    kind: MediaKind::Movie,
+                    id: 91,
+                    page: 1
+                })
+            )
+            .is_err()
+        );
+        assert_ne!(
+            ok(cache_query_identity(&query)),
+            ok(cache_query_identity(&TmdbQuery::Similar {
+                kind: MediaKind::Movie,
+                id: 91,
+                page: 1
+            }))
+        );
+    }
+    #[test]
+    fn season_summaries_carry_poster_year_and_overview_through_snapshots() {
+        let query = TmdbQuery::Details {
+            kind: MediaKind::Series,
+            id: 91,
+        };
+        let (result, _) = local(
+            200,
+            r#"{"id":91,"name":"Series","external_ids":{"imdb_id":"tt1234567"},"genres":[],"seasons":[{"season_number":1,"name":"Season 1","episode_count":8,"poster_path":"/s1.jpg","air_date":"2013-09-24","overview":"The first season."},{"season_number":2,"name":"Season 2","episode_count":3,"poster_path":null,"air_date":"","overview":""}]}"#,
+            |c| c.fetch(&query),
+        );
+        let data = ok(result);
+        roundtrip(&data, &query);
+        let mut snapshot: serde_json::Value = ok(serde_json::from_str(&ok(encode(&data))));
+        // Explicit nulls remain complete. Absent fields force one reacquisition.
+        assert!(decode(&snapshot.to_string(), &query).is_ok());
+        snapshot["data"]["seasons"][0]
+            .as_object_mut()
+            .unwrap_or_else(|| panic!("snapshot object"))
+            .remove("poster_path");
+        assert!(decode(&snapshot.to_string(), &query).is_err());
+        let TmdbData::Details(details) = data else {
+            panic!("details")
+        };
+        let first = &details.seasons[0];
+        assert_eq!(
+            first.poster_url.as_deref(),
+            Some("https://image.tmdb.org/t/p/w500/s1.jpg")
+        );
+        assert_eq!(first.year(), Some(2013));
+        assert_eq!(first.overview.as_deref(), Some("The first season."));
+        let second = &details.seasons[1];
+        assert_eq!((second.poster_url.as_deref(), second.year()), (None, None));
+        assert_eq!(second.overview, None);
     }
     #[test]
     fn backdrop_season_poster_and_episode_still_survive_transport_and_snapshot() {
@@ -2067,6 +2221,8 @@ pub(crate) struct FactsPayload {
     writers: Vec<String>,
     countries: Vec<String>,
     cast: Vec<(String, Option<String>)>,
+    /// Portrait URL per `cast` entry (same order); absent in older snapshots.
+    cast_profiles: Vec<Option<String>>,
 }
 impl From<&TitleFacts> for FactsPayload {
     fn from(f: &TitleFacts) -> Self {
@@ -2094,6 +2250,7 @@ impl From<&TitleFacts> for FactsPayload {
                 .iter()
                 .map(|c| (c.name.clone(), c.character.clone()))
                 .collect(),
+            cast_profiles: f.cast.iter().map(|c| c.profile_url.clone()).collect(),
         }
     }
 }
@@ -2126,11 +2283,17 @@ impl FactsPayload {
             networks: self.networks,
             writers: self.writers,
             countries: self.countries,
-            cast: self
-                .cast
-                .into_iter()
-                .map(|(name, character)| CastMember { name, character })
-                .collect(),
+            cast: {
+                let mut profiles = self.cast_profiles.into_iter();
+                self.cast
+                    .into_iter()
+                    .map(|(name, character)| CastMember {
+                        name,
+                        character,
+                        profile_url: profiles.next().flatten(),
+                    })
+                    .collect()
+            },
         };
         if !facts.is_valid() {
             return Err(TmdbError::Malformed);
@@ -2203,7 +2366,7 @@ fn tmdb_facts(raw: &serde_json::Value, kind: MediaKind) -> Result<TitleFacts, Tm
         .and_then(|v| v.as_array())
         .into_iter()
         .flatten()
-        .take(10)
+        .take(kinema_core::catalog::MAX_CAST)
         .filter_map(|v| {
             let name = v.get("name")?.as_str()?;
             let character = v
@@ -2217,10 +2380,17 @@ fn tmdb_facts(raw: &serde_json::Value, kind: MediaKind) -> Result<TitleFacts, Tm
                         .as_str()
                 })
                 .filter(|s| !s.is_empty());
-            Some((name, character))
+            let profile = v
+                .get("profile_path")
+                .and_then(|v| v.as_str())
+                .filter(|p| valid_image_path(p))
+                .map(|p| format!("{IMAGE_PREFIX}{p}"));
+            Some(((name, character), profile))
         })
         .collect();
+    let (cast, profiles): (Vec<_>, Vec<_>) = cast.into_iter().unzip();
     payload.insert("cast".into(), serde_json::json!(cast));
+    payload.insert("cast_profiles".into(), serde_json::json!(profiles));
     let ratings = raw
         .get(if kind == MediaKind::Movie {
             "release_dates"
@@ -2256,6 +2426,39 @@ fn tmdb_facts(raw: &serde_json::Value, kind: MediaKind) -> Result<TitleFacts, Tm
 mod facts_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn cast_profiles_survive_snapshots_and_old_snapshots_have_none() -> Result<(), TmdbError> {
+        let credits = json!({"cast": [
+            {"name": "A", "character": "x", "profile_path": "/a.jpg"},
+            {"name": "B", "profile_path": null},
+            {"name": "C", "profile_path": "no-slash"},
+        ]});
+        let facts = tmdb_facts(&json!({"credits": credits}), MediaKind::Movie)?;
+        let urls: Vec<_> = facts
+            .cast
+            .iter()
+            .map(|c| c.profile_url.as_deref())
+            .collect();
+        assert_eq!(
+            urls,
+            [Some("https://image.tmdb.org/t/p/w500/a.jpg"), None, None]
+        );
+        let payload =
+            serde_json::to_value(FactsPayload::from(&facts)).map_err(|_| TmdbError::Malformed)?;
+        let again = serde_json::from_value::<FactsPayload>(payload.clone())
+            .map_err(|_| TmdbError::Malformed)?
+            .normalize()?;
+        assert_eq!(again, facts);
+        let mut old = payload;
+        old.as_object_mut().map(|o| o.remove("cast_profiles"));
+        let old = serde_json::from_value::<FactsPayload>(old)
+            .map_err(|_| TmdbError::Malformed)?
+            .normalize()?;
+        assert_eq!(old.cast.len(), 3);
+        assert!(old.cast.iter().all(|c| c.profile_url.is_none()));
+        Ok(())
+    }
 
     #[test]
     fn movie_and_series_facts_decode_with_credits_and_us_certification() -> Result<(), TmdbError> {

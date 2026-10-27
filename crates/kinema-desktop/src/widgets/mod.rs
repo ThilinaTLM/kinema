@@ -28,19 +28,26 @@ pub mod popover;
 pub mod tooltip;
 
 // Controls and surfaces.
+pub mod action_button;
 pub mod button;
 pub mod chip;
 pub mod choice_card;
 pub mod filter_panel;
 pub mod icon_button;
+pub mod library_toggle;
+pub mod media_card;
 pub mod notice;
+pub mod overlay;
 pub mod progress;
 pub mod scroll_area;
 pub mod segmented;
 pub mod sheet;
 pub mod state_toggle;
 pub mod switch;
+pub mod thumb;
 pub mod toolbar;
+pub mod watch_mark;
+pub mod watched_toggle;
 
 pub use icon::{Icon, IconName};
 pub use motion::Motion;

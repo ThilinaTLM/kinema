@@ -275,9 +275,26 @@ fn parse(value: &Value) -> Result<SourceResults, SourceError> {
                     .filter(|s| !s.trim().is_empty())
             })
             .unwrap_or("Torrent");
-        let name = label(release);
+        // Retain line boundaries for the display-only release parser, while
+        // applying the same URL redaction and a total size cap.
+        let mut name: String = release
+            .lines()
+            .take(8)
+            .map(label)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .chars()
+            .take(512)
+            .collect();
         let (label_size, label_seeders) = label_hints(release);
         let addon = label(row.get("name").and_then(Value::as_str).unwrap_or_default());
+        if !kinema_core::sources::parse_release_tags(&addon)
+            .languages
+            .is_empty()
+        {
+            name.push('\n');
+            name.extend(addon.chars().take(128));
+        }
         let structured_quality = label(
             row.get("quality")
                 .and_then(Value::as_str)

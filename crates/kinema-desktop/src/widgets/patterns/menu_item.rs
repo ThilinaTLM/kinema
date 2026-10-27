@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use gpui::{App, Window};
 
-use crate::widgets::menu::MenuItem;
+use crate::widgets::{icon::IconName, menu::MenuItem};
 
 pub fn menu_item(
     label: &'static str,
@@ -13,6 +13,22 @@ pub fn menu_item(
         label: label.into(),
         shortcut: None,
         icon: None,
+        disabled_reason: None,
+        checked: false,
+        handler: Rc::new(handler),
+    }
+}
+
+/// Action entry with a leading icon.
+pub fn menu_item_icon(
+    label: &'static str,
+    icon: IconName,
+    handler: impl Fn(&mut Window, &mut App) + 'static,
+) -> MenuItem {
+    MenuItem::Action {
+        label: label.into(),
+        shortcut: None,
+        icon: Some(icon),
         disabled_reason: None,
         checked: false,
         handler: Rc::new(handler),

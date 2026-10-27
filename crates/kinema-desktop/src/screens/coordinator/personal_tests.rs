@@ -357,6 +357,9 @@ mod integration {
                 c.episode_personal(&absent).state,
                 PersonalLoad::Failed(_)
             ));
+            // A row-less episode is reported separately from read failures.
+            assert!(c.episode_has_no_row(&absent));
+            assert!(!c.episode_has_no_row(&first));
         });
     }
     #[test]

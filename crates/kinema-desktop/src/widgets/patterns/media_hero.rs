@@ -50,7 +50,7 @@ pub fn uses_over_art(has_backdrop: bool, mode: Mode) -> bool {
     has_backdrop && mode == Mode::Dark
 }
 
-enum MetaItem {
+pub enum MetaItem {
     Element(AnyElement),
     /// Restyled over artwork when the hero has a backdrop.
     Badge(Badge),
@@ -72,6 +72,10 @@ pub struct MediaHero {
     poster: Option<AnyElement>,
     meta: Vec<MetaItem>,
     overview: Option<SharedString>,
+    tagline: Option<SharedString>,
+    aside: Option<AnyElement>,
+    aside_width: Pixels,
+    stack_aside: bool,
     title_action: Option<AnyElement>,
     primary: Option<AnyElement>,
     secondary: Vec<AnyElement>,
@@ -98,6 +102,10 @@ impl MediaHero {
             poster: None,
             meta: Vec::new(),
             overview: None,
+            tagline: None,
+            aside: None,
+            aside_width: px(320.0),
+            stack_aside: false,
             title_action: None,
             primary: None,
             secondary: Vec::new(),
@@ -135,6 +143,11 @@ impl MediaHero {
     /// One chip/badge/text in the meta line.
     pub fn meta(mut self, item: impl IntoElement) -> Self {
         self.meta.push(MetaItem::Element(item.into_any_element()));
+        self
+    }
+    /// A pre-built meta item (plain element or over-art-aware badge).
+    pub fn meta_item(mut self, item: MetaItem) -> Self {
+        self.meta.push(item);
         self
     }
     pub fn metas(mut self, items: impl IntoIterator<Item = impl IntoElement>) -> Self {
@@ -201,6 +214,19 @@ impl MediaHero {
     }
     pub fn overview(mut self, overview: impl Into<SharedString>) -> Self {
         self.overview = Some(overview.into());
+        self
+    }
+    /// Italic one-liner between the meta line and the overview.
+    pub fn tagline(mut self, tagline: impl Into<SharedString>) -> Self {
+        self.tagline = Some(tagline.into());
+        self
+    }
+    /// Raised side panel (e.g. "At a glance") to the right of the story. With
+    /// `stacked` it sits under the story at full width instead.
+    pub fn aside(mut self, aside: impl IntoElement, width: Pixels, stacked: bool) -> Self {
+        self.aside = Some(aside.into_any_element());
+        self.aside_width = width;
+        self.stack_aside = stacked;
         self
     }
     /// Small control right next to the title (e.g. an icon-only copy button).
@@ -364,69 +390,96 @@ impl RenderOnce for MediaHero {
                         .w_full()
                         .when_some(self.max_width, |el, w| el.max_w(w))
                         .flex()
-                        .items_end()
                         .gap(space::S24)
                         .px(self.gutter)
                         .pt(space::S24 + self.top_inset)
                         .pb(space::S24)
-                        .children(poster)
+                        .when(self.stack_aside, |el| el.flex_col())
+                        .when(!self.stack_aside, |el| el.items_end())
                         .child(
                             div()
+                                .flex()
+                                .items_end()
+                                .gap(space::S24)
                                 .flex_1()
                                 .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap(space::S8)
+                                .children(poster)
                                 .child(
                                     div()
+                                        .flex_1()
+                                        .min_w_0()
                                         .flex()
-                                        .items_center()
+                                        .flex_col()
                                         .gap(space::S8)
                                         .child(
                                             div()
-                                                .min_w_0()
-                                                .type_style(typeface::DISPLAY)
-                                                .text_color(ink.text_primary)
-                                                .clamp_lines(2)
-                                                .child(self.title),
+                                                .flex()
+                                                .items_center()
+                                                .gap(space::S8)
+                                                .child(
+                                                    div()
+                                                        .min_w_0()
+                                                        .type_style(typeface::DISPLAY)
+                                                        .text_color(ink.text_primary)
+                                                        .clamp_lines(2)
+                                                        .child(self.title),
+                                                )
+                                                .children(
+                                                    self.title_action
+                                                        .map(|a| div().flex_none().child(a)),
+                                                ),
                                         )
-                                        .children(
-                                            self.title_action.map(|a| div().flex_none().child(a)),
-                                        ),
-                                )
-                                .when(!self.meta.is_empty(), |el| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .flex_wrap()
-                                            .items_center()
-                                            .gap(space::S8)
-                                            .text_color(ink.text_secondary)
-                                            .type_style(typeface::SMALL_MEDIUM)
-                                            .children(self.meta.into_iter().map(
-                                                |item| match item {
-                                                    MetaItem::Element(el) => el,
-                                                    MetaItem::Badge(badge) => {
-                                                        badge.over_art(over_art).into_any_element()
-                                                    }
-                                                },
-                                            )),
-                                    )
-                                })
-                                .children(overview)
-                                .when(has_actions, |el| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .flex_wrap()
-                                            .items_center()
-                                            .gap(space::S8)
-                                            .pt(space::S4)
-                                            .children(self.primary)
-                                            .children(self.secondary),
-                                    )
-                                }),
-                        ),
+                                        .when(!self.meta.is_empty(), |el| {
+                                            el.child(
+                                                div()
+                                                    .flex()
+                                                    .flex_wrap()
+                                                    .items_center()
+                                                    .gap(space::S8)
+                                                    .text_color(ink.text_secondary)
+                                                    .type_style(typeface::SMALL_MEDIUM)
+                                                    .children(self.meta.into_iter().map(|item| {
+                                                        match item {
+                                                            MetaItem::Element(el) => el,
+                                                            MetaItem::Badge(badge) => badge
+                                                                .over_art(over_art)
+                                                                .into_any_element(),
+                                                        }
+                                                    })),
+                                            )
+                                        })
+                                        .children(self.tagline.map(|text| {
+                                            div()
+                                                .w_full()
+                                                .min_w_0()
+                                                .max_w(self.text_max_width)
+                                                .type_style(typeface::BODY)
+                                                .italic()
+                                                .text_color(ink.text_secondary)
+                                                .child(text)
+                                        }))
+                                        .children(overview)
+                                        .when(has_actions, |el| {
+                                            el.child(
+                                                div()
+                                                    .flex()
+                                                    .flex_wrap()
+                                                    .items_center()
+                                                    .gap(space::S8)
+                                                    .pt(space::S4)
+                                                    .children(self.primary)
+                                                    .children(self.secondary),
+                                            )
+                                        }),
+                                ),
+                        )
+                        .children(self.aside.map(|aside| {
+                            div()
+                                .flex_none()
+                                .when(!self.stack_aside, |el| el.w(self.aside_width))
+                                .when(self.stack_aside, |el| el.w_full())
+                                .child(aside)
+                        })),
                 ),
             )
     }

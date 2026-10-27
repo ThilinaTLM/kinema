@@ -79,6 +79,16 @@ impl MenuNavigation {
             .find(|&i| items[i].enabled());
         self.prefix.clear();
     }
+    /// Pointer hover owns the single highlight and the keyboard index, so
+    /// arrows continue from the hovered row. Returns whether anything changed.
+    pub fn hover(&mut self, items: &[MenuItem], index: usize) -> bool {
+        if !items.get(index).is_some_and(MenuItem::enabled) || self.selected == Some(index) {
+            return false;
+        }
+        self.selected = Some(index);
+        self.prefix.clear();
+        true
+    }
     pub fn edge(&mut self, items: &[MenuItem], last: bool) {
         self.selected = if last {
             items.iter().rposition(MenuItem::enabled)
@@ -136,6 +146,15 @@ impl Focusable for Menu {
     }
 }
 impl Menu {
+    /// Opened by pointer: nothing is highlighted until the pointer or an arrow
+    /// key picks a row. Keyboard opening (the default) highlights the first
+    /// enabled (or checked) row.
+    pub fn opened_by_pointer(mut self, pointer: bool) -> Self {
+        if pointer {
+            self.nav.selected = None;
+        }
+        self
+    }
     /// Capture focus and open a menu. Nested submenu entries beyond one level
     /// are omitted; callers should keep the shared model at one submenu level.
     pub fn new(items: Vec<MenuItem>, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -348,12 +367,6 @@ impl Menu {
                 continue;
             }
             let enabled = item.enabled();
-            let hover_state = window.use_keyed_state(
-                (if child { "submenu-hover" } else { "menu-hover" }, i),
-                cx,
-                |_, _| false,
-            );
-            let hovered = enabled && *hover_state.read(cx);
             let selected = if child || self.submenu.is_none() {
                 self.nav.selected == Some(i)
             } else {
@@ -372,14 +385,21 @@ impl Menu {
                 } else {
                     p.text_muted
                 })
-                .when(selected, |row| row.bg(p.accent_tint))
                 .when(enabled, |row| {
-                    row.on_hover(move |hovered, _, cx| {
-                        hover_state.update(cx, |state, cx| {
-                            *state = *hovered;
+                    row.on_mouse_move(cx.listener(move |this, _, _, cx| {
+                        if !child && this.submenu.is_some_and(|open| open != i) {
+                            this.submenu = None;
+                            this.nav.selected = None;
+                        }
+                        let items = if child {
+                            this.active_items().to_vec()
+                        } else {
+                            this.items.clone()
+                        };
+                        if (child || this.submenu.is_none()) && this.nav.hover(&items, i) {
                             cx.notify();
-                        });
-                    })
+                        }
+                    }))
                 })
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if enabled {
@@ -438,28 +458,7 @@ impl Menu {
                 }
                 MenuItem::Separator => unreachable!(),
             }
-            let rest = if selected {
-                p.bg_overlay.blend(p.accent_tint)
-            } else {
-                p.bg_overlay
-            };
-            let duration = motion::duration(Motion::Feedback, cx);
-            let row = if duration.is_zero() {
-                row.bg(if hovered { p.ctl_hover } else { rest })
-                    .into_any_element()
-            } else {
-                row.with_spring(
-                    "menu-hover-fill",
-                    SpringAnimation::new(SpringConfig::new(
-                        (6. / duration.as_secs_f32()).powi(2),
-                        12. / duration.as_secs_f32(),
-                        1.,
-                    ))
-                    .to(if hovered { 1_f32 } else { 0. }),
-                    move |el, t| el.bg(rest.blend(p.ctl_hover.opacity(t.clamp(0., 1.)))),
-                )
-                .into_any_element()
-            };
+            let row = row.bg(if selected { p.ctl_hover } else { p.bg_overlay });
             panel = panel.child(row);
         }
         panel
@@ -585,7 +584,7 @@ impl<E: InteractiveElement + IntoElement + 'static> RenderOnce for ContextMenu<E
             let builder = self.builder;
             let focus = focus.clone();
             Rc::new(
-                move |position: Point<Pixels>, window: &mut Window, cx: &mut App| {
+                move |position: Point<Pixels>, pointer: bool, window: &mut Window, cx: &mut App| {
                     let old = cx
                         .try_global::<OpenMenus>()
                         .and_then(|g| g.0.get(&window.window_handle().window_id()))
@@ -597,7 +596,7 @@ impl<E: InteractiveElement + IntoElement + 'static> RenderOnce for ContextMenu<E
                         focus.focus(window, cx);
                     }
                     let items = builder(window, cx);
-                    let menu = cx.new(|cx| Menu::new(items, window, cx));
+                    let menu = cx.new(|cx| Menu::new(items, window, cx).opened_by_pointer(pointer));
                     let subscription = cx.subscribe(&menu, {
                         let state = state.downgrade();
                         let window_id = window.window_handle().window_id();
@@ -643,11 +642,11 @@ impl<E: InteractiveElement + IntoElement + 'static> RenderOnce for ContextMenu<E
             .track_focus(&focus)
             .tab_stop(false)
             .on_action(move |_: &OpenContextMenu, window, cx| {
-                key_open(key_bounds.read(cx).bottom_left(), window, cx);
+                key_open(key_bounds.read(cx).bottom_left(), false, window, cx);
                 cx.stop_propagation();
             })
             .on_mouse_down(MouseButton::Right, move |event, window, cx| {
-                open(event.position, window, cx);
+                open(event.position, true, window, cx);
                 cx.stop_propagation();
             })
             .child(self.element)
@@ -707,7 +706,7 @@ impl<T: Clone + PartialEq + 'static> Select<T> {
         self.value = value;
         cx.notify();
     }
-    fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn open(&mut self, pointer: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.menu.is_some() {
             return;
         }
@@ -737,7 +736,7 @@ impl<T: Clone + PartialEq + 'static> Select<T> {
                 }
             })
             .collect();
-        let menu = cx.new(|cx| Menu::new(items, window, cx));
+        let menu = cx.new(|cx| Menu::new(items, window, cx).opened_by_pointer(pointer));
         self.subscription = Some(cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.menu = None;
             cx.notify();
@@ -783,10 +782,12 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
                     .child(label)
                     .child(Icon::new(IconName::ChevronDown)),
             )
-            .on_click(cx.listener(|this, _, window, cx| this.open(window, cx)))
+            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                this.open(!event.is_keyboard(), window, cx)
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "space" | "enter" | "down") {
-                    this.open(window, cx);
+                    this.open(false, window, cx);
                     cx.stop_propagation();
                 }
             }))
@@ -813,6 +814,28 @@ mod tests {
             checked: false,
             handler: Rc::new(|_, _| {}),
         }
+    }
+    #[::core::prelude::v1::test]
+    fn hover_sets_single_index_and_arrows_continue() {
+        let items = vec![
+            action("Alpha", false),
+            MenuItem::Separator,
+            action("Blocked", true),
+            action("Beta", false),
+            action("Gamma", false),
+        ];
+        let mut nav = MenuNavigation::default();
+        assert!(nav.hover(&items, 3));
+        assert_eq!(nav.selected, Some(3));
+        assert!(!nav.hover(&items, 3), "unchanged hover does not repaint");
+        assert!(!nav.hover(&items, 1), "separators never highlight");
+        assert!(!nav.hover(&items, 2), "disabled rows never highlight");
+        assert_eq!(nav.selected, Some(3));
+        nav.step(&items, true);
+        assert_eq!(nav.selected, Some(4));
+        assert!(nav.hover(&items, 0));
+        nav.step(&items, true);
+        assert_eq!(nav.selected, Some(3));
     }
     #[::core::prelude::v1::test]
     fn navigation_skips_and_wraps() {

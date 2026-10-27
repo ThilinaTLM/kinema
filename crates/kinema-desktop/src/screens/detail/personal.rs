@@ -4,7 +4,11 @@ use super::*;
 use crate::widgets::{menu::MenuItem, patterns::menu_item};
 use crate::{
     screens::coordinator::{EpisodeRef, PersonalLoad, SeasonSnapshot},
-    widgets::state_toggle::{StateToggle, ToggleKind, ToggleStatus},
+    widgets::{
+        overlay::OverlayButton,
+        state_toggle::ToggleStatus,
+        watch_mark::{WatchMark, WatchMarkSize, WatchMarkState},
+    },
 };
 use kinema_core::library::TitleId;
 
@@ -18,21 +22,13 @@ pub(super) enum Write {
     Season(SeasonSnapshot, bool),
 }
 
-/// Everything a detail toggle needs; `write` maps the desired value to its intent.
-pub(super) struct ToggleSpec {
-    id: ElementId,
-    kind: ToggleKind,
-    status: ToggleStatus,
-    subject: String,
-    over_art: bool,
-    write: Box<dyn Fn(bool) -> Option<Write>>,
-}
-
-/// A season bulk action awaiting explicit confirmation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A season bulk change applied as soon as its snapshot is ready (no confirmation
+/// step, no undo). `failure` keeps a rejected request visible with Retry.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SeasonConfirm {
     pub season: u32,
     pub watched: bool,
+    pub failure: Option<String>,
 }
 
 pub(super) fn season_label(season: u32) -> String {
@@ -43,15 +39,40 @@ pub(super) fn season_label(season: u32) -> String {
     }
 }
 
-pub(super) fn summary_text(s: kinema_core::library::ShowSummary) -> String {
-    if s.complete && s.total > 0 && s.watched <= s.total {
-        format!("{} of {} watched", s.watched, s.total)
-    } else if s.watched > 0 {
-        format!("{} watched \u{b7} total unknown", s.watched)
-    } else {
-        "Watched status unavailable".into()
-    }
+/// What activating an episode mark does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MarkIntent {
+    Set(bool),
+    Retry,
+    None,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct MarkTip {
+    pub text: &'static str,
+    pub intent: MarkIntent,
+}
+
+/// Tooltip and intent of an episode mark. Unknown state is never writable.
+pub(super) fn mark_tooltip(status: ToggleStatus, ready: bool) -> MarkTip {
+    let (text, intent) = match status {
+        ToggleStatus::Known { on, pending } => (
+            if on { "Mark unwatched" } else { "Mark watched" },
+            if pending || !ready {
+                MarkIntent::None
+            } else {
+                MarkIntent::Set(!on)
+            },
+        ),
+        ToggleStatus::Failed => ("Watched status unavailable. Retry", MarkIntent::Retry),
+        ToggleStatus::Loading => ("Loading watched status\u{2026}", MarkIntent::None),
+    };
+    MarkTip { text, intent }
+}
+
+/// Why the season watched toggle is disabled, when it is.
+pub(super) const TRACKING_UNAVAILABLE: &str =
+    "Watched tracking isn\u{2019}t available for this title yet.";
 
 /// `Loading` and `Failed` stay distinct from off: unknown is never "not saved".
 fn status<T>(load: &PersonalLoad<T>, pending: bool, on: impl Fn(&T) -> bool) -> ToggleStatus {
@@ -66,7 +87,7 @@ fn status<T>(load: &PersonalLoad<T>, pending: bool, on: impl Fn(&T) -> bool) -> 
 }
 
 impl Detail {
-    fn title_id(&self, cx: &App) -> Option<TitleId> {
+    pub(super) fn title_id(&self, cx: &App) -> Option<TitleId> {
         match self.coordinator.read(cx).personal(&self.title).state {
             PersonalLoad::Ready(t) => Some(t.title_id),
             _ => None,
@@ -112,21 +133,16 @@ impl Detail {
         if !self.is_series() {
             return;
         }
-        let (Some(id), Some(season)) = (self.title_id(cx), self.season) else {
+        let (Some(id), Some(_)) = (self.title_id(cx), self.season) else {
             return;
         };
-        let episodes = self.episodes(cx);
+        let episodes = self.personal_scope(cx);
         // Request only episodes not yet asked for, so episodes that arrive later in
         // the same season (refresh/enrichment) are never left Loading.
         let missing: Vec<_> = episodes
             .iter()
-            .filter(|e| {
-                e.season == season
-                    && !self
-                        .episode_personal_requested
-                        .contains(&(id, e.season, e.number))
-            })
-            .map(|e| (e.season, e.number))
+            .filter(|(s, n)| !self.episode_personal_requested.contains(&(id, *s, *n)))
+            .copied()
             .collect();
         if missing.is_empty() {
             return;
@@ -140,6 +156,75 @@ impl Detail {
         self.coordinator
             .update(cx, |c, cx| c.load_episode_personal(&refs, cx));
     }
+    /// Episode coordinates whose watched state is read: everything the provider
+    /// listed, plus (for TMDB, which loads one season at a time) `1..=count` of
+    /// every season from the season summaries. Unloaded seasons are therefore
+    /// covered by one batched read instead of one per season.
+    pub(super) fn episode_coordinates(&self, options: &[(u32, u32)], cx: &App) -> Vec<(u32, u32)> {
+        let mut set: std::collections::BTreeSet<(u32, u32)> = self
+            .all_episodes(cx)
+            .iter()
+            .map(|e| (e.season, e.number))
+            .collect();
+        if matches!(self.title, BrowseTitle::Tmdb(_)) {
+            for (season, count) in options {
+                set.extend((1..=*count).map(|n| (*season, n)));
+            }
+        }
+        set.into_iter().collect()
+    }
+    /// Coordinates requested from the store; very long shows read the shown season only.
+    fn personal_scope(&self, cx: &App) -> Vec<(u32, u32)> {
+        const WHOLE_SHOW_MAX: usize = 2_000;
+        let all = self.episode_coordinates(&self.season_options, cx);
+        if all.len() <= WHOLE_SHOW_MAX && !matches!(self.title, BrowseTitle::Local(_)) {
+            return all;
+        }
+        self.episodes(cx)
+            .iter()
+            .map(|e| (e.season, e.number))
+            .collect()
+    }
+    /// Known watched state of one episode; unknown (loading/failed) is `None`,
+    /// never unwatched. Local titles fall back to their persisted detail, and an
+    /// episode with no stored row is unwatched by construction.
+    pub(super) fn episode_known_watched(&self, season: u32, number: u32, cx: &App) -> Option<bool> {
+        match self.episode_status(season, number, cx) {
+            ToggleStatus::Known { on, .. } => return Some(on),
+            ToggleStatus::Failed
+                if self.title_id(cx).is_some()
+                    && self
+                        .coordinator
+                        .read(cx)
+                        .episode_has_no_row(&self.episode_ref(season, number)) =>
+            {
+                return Some(false);
+            }
+            _ => {}
+        }
+        self.local_detail(cx)?
+            .episodes
+            .iter()
+            .find(|e| e.season == season && e.metadata.number == number)
+            .map(|e| e.personal.watch.is_some_and(|w| w.watched))
+    }
+    /// Every episode with a known watched state.
+    pub(super) fn episode_marks(
+        &self,
+        options: &[(u32, u32)],
+        cx: &App,
+    ) -> Vec<kinema_core::watch_progress::EpisodeMark> {
+        self.episode_coordinates(options, cx)
+            .into_iter()
+            .filter_map(|(season, number)| {
+                Some(kinema_core::watch_progress::EpisodeMark {
+                    season,
+                    number,
+                    watched: self.episode_known_watched(season, number, cx)?,
+                })
+            })
+            .collect()
+    }
     pub(super) fn retry_personal(&mut self, cx: &mut Context<Self>) {
         self.episode_personal_requested.clear();
         self.ensure_personal(cx);
@@ -149,6 +234,8 @@ impl Detail {
     /// Submit one write. A synchronous rejection keeps exactly this intent for Retry;
     /// asynchronous commit failures are retried by the coordinator's own record.
     pub(super) fn perform(&mut self, write: Write, cx: &mut Context<Self>) {
+        // Acting on the shown season keeps it shown (no smart-default jump).
+        self.season_chosen |= matches!(write, Write::Episode(..) | Write::Season(..));
         let title = self.title.clone();
         let result = self.coordinator.update(cx, |c, cx| match &write {
             Write::Membership(on) => c.set_membership(&title, *on, cx),
@@ -159,70 +246,58 @@ impl Detail {
         self.write_error = result.err().map(|error| (write, error));
         cx.notify();
     }
-    pub(super) fn toggle(&self, spec: ToggleSpec, cx: &mut Context<Self>) -> StateToggle {
-        let this = cx.entity().downgrade();
-        let retry = this.clone();
-        let write = spec.write;
-        StateToggle::new(spec.id, spec.kind, spec.status, spec.subject)
-            .over_art(spec.over_art)
-            .on_change(move |wanted, _, cx| {
-                if let Some(write) = write(wanted) {
-                    let _ = this.update(cx, |d, cx| d.perform(write, cx));
-                }
-            })
-            .on_retry(move |_, cx| {
-                let _ = retry.update(cx, |d, cx| d.retry_personal(cx));
-            })
-    }
-    pub(super) fn membership_toggle(&self, over_art: bool, cx: &mut Context<Self>) -> StateToggle {
-        self.toggle(
-            ToggleSpec {
-                id: "detail-library".into(),
-                kind: ToggleKind::Membership,
-                status: self.membership_status(cx),
-                subject: self.title.name().to_owned(),
-                over_art,
-                write: Box::new(|on| Some(Write::Membership(on))),
-            },
-            cx,
-        )
-    }
-    pub(super) fn movie_watched_toggle(
+    pub(super) fn membership_toggle(
         &self,
-        over_art: bool,
         cx: &mut Context<Self>,
-    ) -> StateToggle {
-        self.toggle(
-            ToggleSpec {
-                id: "detail-watched".into(),
-                kind: ToggleKind::Watched,
-                status: self.movie_watched_status(cx),
-                subject: self.title.name().to_owned(),
-                over_art,
-                write: Box::new(|on| Some(Write::Movie(on))),
-            },
-            cx,
+    ) -> crate::widgets::library_toggle::LibraryToggle {
+        use crate::widgets::library_toggle::LibraryToggle;
+        let (change, retry) = (cx.entity().downgrade(), cx.entity().downgrade());
+        LibraryToggle::new(
+            "detail-library",
+            self.membership_status(cx),
+            self.title.name().to_owned(),
         )
+        .on_change(move |wanted, _, cx| {
+            let _ = change.update(cx, |d, cx| d.perform(Write::Membership(wanted), cx));
+        })
+        .on_retry(move |_, cx| {
+            let _ = retry.update(cx, |d, cx| d.retry_personal(cx));
+        })
     }
-    pub(super) fn episode_toggle(
+    /// Top-right watched mark on an episode still.
+    pub(super) fn episode_mark(
         &self,
         season: u32,
         number: u32,
         cx: &mut Context<Self>,
-    ) -> StateToggle {
+    ) -> OverlayButton {
         let reference = self.episode_ref(season, number);
         let ready = self.title_id(cx).is_some();
-        self.toggle(
-            ToggleSpec {
-                id: ElementId::Name(format!("episode-watched-s{season}-e{number}").into()),
-                kind: ToggleKind::Watched,
-                status: self.episode_status(season, number, cx),
-                subject: format!("episode S{season:02}E{number:02}"),
-                over_art: true,
-                write: Box::new(move |on| ready.then(|| Write::Episode(reference.clone(), on))),
-            },
-            cx,
+        let status = self.episode_status(season, number, cx);
+        let tip = mark_tooltip(status, ready);
+        let on = matches!(status, ToggleStatus::Known { on: true, .. });
+        let this = cx.entity().downgrade();
+        OverlayButton::new(
+            ElementId::Name(format!("episode-watched-s{season}-e{number}").into()),
+            tip.text,
         )
+        .accessible_name(format!(
+            "{} \u{b7} episode S{season:02}E{number:02}",
+            tip.text
+        ))
+        .child(
+            WatchMark::new(WatchMarkState::from_watched(on))
+                .size(WatchMarkSize::S18)
+                .over_art(true),
+        )
+        .inert(tip.intent == MarkIntent::None)
+        .on_click(move |_, _, cx| {
+            let _ = this.update(cx, |d, cx| match tip.intent {
+                MarkIntent::Set(wanted) => d.perform(Write::Episode(reference.clone(), wanted), cx),
+                MarkIntent::Retry => d.retry_personal(cx),
+                MarkIntent::None => {}
+            });
+        })
     }
 
     /// Text commands mirroring the icon toggles, for the keyboard/context menu.
@@ -298,145 +373,236 @@ impl Detail {
                     )),
             );
         }
+        // A bulk season change that could not start keeps its own Retry.
+        if let Some(request) = self.season_confirm.clone()
+            && let Some(error) = request.failure.clone()
+        {
+            any = true;
+            stack = stack.child(
+                Notice::new(
+                    NoticeKind::Warning,
+                    format!("Couldn\u{2019}t update {}", season_label(request.season)),
+                )
+                .body(error)
+                .action(
+                    Button::new("season-write-retry", "Retry").on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.request_season(request.season, request.watched, cx)
+                        },
+                    )),
+                ),
+            );
+        }
         // Commit failures, success and Undo use the shared MainWindow toast, so they
         // are never duplicated here.
         any.then(|| hero::body_shell(viewport, stack).into_any_element())
     }
 
     // ── season bulk actions ──────────────────────────────────────────────
+    /// Apply a bulk season change immediately: freeze the exact persisted episode
+    /// set first, then write it as soon as the snapshot arrives (`apply_season_request`).
     pub(super) fn request_season(&mut self, season: u32, watched: bool, cx: &mut Context<Self>) {
         let Some(id) = self.title_id(cx) else {
             return;
         };
-        self.season_confirm = Some(SeasonConfirm { season, watched });
+        self.season_confirm = Some(SeasonConfirm {
+            season,
+            watched,
+            failure: None,
+        });
         self.coordinator
             .update(cx, |c, cx| c.load_season_snapshot(id, season, cx));
         cx.notify();
     }
-    fn cancel_season(&mut self, cx: &mut Context<Self>) {
-        self.season_confirm = None;
-        self.coordinator.update(cx, |c, cx| {
-            c.season_snapshot.cancel();
-            cx.notify();
+    /// Complete a requested bulk change once its snapshot is ready. Called on every
+    /// coordinator update; a snapshot for another season is never applied.
+    pub(super) fn apply_season_request(&mut self, cx: &mut Context<Self>) {
+        let Some(request) = self.season_confirm.clone().filter(|r| r.failure.is_none()) else {
+            return;
+        };
+        let (snapshot, busy, error) = {
+            let c = self.coordinator.read(cx);
+            (
+                c.season_snapshot
+                    .value()
+                    .filter(|s| s.season == request.season)
+                    .cloned(),
+                c.season_snapshot.busy(),
+                c.season_snapshot.error().map(str::to_owned),
+            )
+        };
+        if busy {
+            return;
+        }
+        match (snapshot, error) {
+            (_, Some(error)) => self.fail_season_request(request, error, cx),
+            // Whole-series change: seasons with nothing saved are skipped.
+            (Some(snapshot), None) if snapshot.episodes.is_empty() && self.series_active() => {
+                self.coordinator
+                    .update(cx, |c, _| c.season_snapshot.cancel());
+                self.season_confirm = None;
+                self.advance_series(cx);
+            }
+            (Some(snapshot), None) if snapshot.episodes.is_empty() => {
+                self.fail_season_request(request, "No saved episodes to change yet.".to_owned(), cx)
+            }
+            (Some(snapshot), None) => {
+                self.season_confirm = None;
+                self.coordinator
+                    .update(cx, |c, _| c.season_snapshot.cancel());
+                self.season_chosen = true;
+                self.series_applied = true;
+                self.perform(Write::Season(snapshot, request.watched), cx);
+                self.advance_series(cx);
+            }
+            (None, None) => {}
+        }
+    }
+    fn fail_season_request(
+        &mut self,
+        request: SeasonConfirm,
+        error: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.series_queue.clear();
+        self.season_confirm = Some(SeasonConfirm {
+            failure: Some(error),
+            ..request
         });
         cx.notify();
     }
-    fn confirm_season(&mut self, snapshot: SeasonSnapshot, watched: bool, cx: &mut Context<Self>) {
-        self.season_confirm = None;
-        self.perform(Write::Season(snapshot, watched), cx);
+    fn series_active(&self) -> bool {
+        !self.series_queue.is_empty() || self.series_applied
     }
-
-    /// Computed show progress; unknown completeness never reads as complete.
-    pub(super) fn show_progress(&self, cx: &App) -> Option<String> {
-        let v = self.coordinator.read(cx).personal(&self.title);
-        let PersonalLoad::Ready(t) = v.state else {
-            return None;
-        };
-        t.show_summary.map(summary_text)
+    /// Mark every known season watched/unwatched, one season snapshot at a time
+    /// (the library has no whole-series write). Applies immediately.
+    pub(super) fn request_series(&mut self, watched: bool, cx: &mut Context<Self>) {
+        let mut seasons: Vec<u32> = self
+            .season_options
+            .iter()
+            .filter(|(_, count)| *count > 0)
+            .map(|(n, _)| *n)
+            .collect();
+        seasons.sort_unstable();
+        self.series_queue = seasons;
+        self.series_watched = watched;
+        self.series_applied = false;
+        self.advance_series(cx);
     }
-
-    /// Season command buttons plus the exact-count confirmation panel.
-    pub(super) fn season_actions(&self, season: u32, cx: &mut Context<Self>) -> AnyElement {
-        let p = *tokens::palette(cx);
+    /// Start the next queued season; when the queue ends with nothing written,
+    /// report that there was nothing saved to change.
+    fn advance_series(&mut self, cx: &mut Context<Self>) {
+        if self.series_queue.is_empty() {
+            let none = !std::mem::take(&mut self.series_applied);
+            if none && self.season_confirm.is_none() {
+                self.season_confirm = Some(SeasonConfirm {
+                    season: self.season.unwrap_or(1),
+                    watched: self.series_watched,
+                    failure: Some("No saved episodes to change yet.".to_owned()),
+                });
+                cx.notify();
+            }
+            return;
+        }
+        let season = self.series_queue.remove(0);
+        self.request_season(season, self.series_watched, cx);
+    }
+    /// Watched tally over the whole series, only when the library knows its
+    /// completeness (or every episode has a known state).
+    pub(super) fn series_tally(&self, cx: &App) -> Option<kinema_core::watch_progress::Tally> {
+        use kinema_core::watch_progress::Tally;
+        if let PersonalLoad::Ready(t) = self.coordinator.read(cx).personal(&self.title).state
+            && let Some(s) = t.show_summary
+            && s.complete
+            && s.total > 0
+        {
+            return Some(Tally {
+                watched: s.watched,
+                total: s.total,
+            });
+        }
+        let total: usize = self
+            .season_options
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(_, c)| *c as usize)
+            .sum();
+        let marks: Vec<_> = self
+            .episode_marks(&self.season_options, cx)
+            .into_iter()
+            .filter(|m| m.season > 0)
+            .collect();
+        (total > 0 && marks.len() >= total).then(|| Tally {
+            watched: marks.iter().filter(|m| m.watched).count(),
+            total: marks.len(),
+        })
+    }
+    /// Hero toggle for the whole series.
+    pub(super) fn series_watched_toggle(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> crate::widgets::watched_toggle::WatchedToggle {
+        use crate::widgets::watched_toggle::{WatchedLabels, WatchedToggle};
+        let weak = cx.entity().downgrade();
+        let pending = self.coordinator.read(cx).personal(&self.title).pending;
+        let busy = self.season_request_busy() || self.series_active() || pending;
         let ready = self.title_id(cx).is_some();
-        let label = season_label(season);
-        let mut column = div().w_full().flex().flex_col().gap(s::S8);
-        column =
-            column.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(s::S8)
-                    .child(
-                        Button::new("season-mark-watched", "Mark season watched")
-                            .variant(ButtonVariant::Ghost)
-                            .icon(IconName::CircleCheck)
-                            .disabled(!ready)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.request_season(season, true, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("season-mark-unwatched", "Mark season unwatched")
-                            .variant(ButtonVariant::Ghost)
-                            .icon(IconName::Circle)
-                            .disabled(!ready)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.request_season(season, false, cx)
-                            })),
-                    ),
-            );
-        let Some(confirm) = self.season_confirm.filter(|c| c.season == season) else {
-            return column.into_any_element();
-        };
-        let verb = if confirm.watched {
-            "watched"
-        } else {
-            "unwatched"
-        };
-        let c = self.coordinator.read(cx);
-        let snapshot = c
-            .season_snapshot
-            .value()
-            .filter(|s| s.season == season)
-            .cloned();
-        let busy = c.season_snapshot.busy();
-        let error = c.season_snapshot.error().map(str::to_owned);
-        let (text, confirm_button): (String, Option<AnyElement>) = match (snapshot, error, busy) {
-            (_, Some(error), _) => (format!("Can’t change {label}: {error}"), None),
-            (Some(snapshot), None, false) if snapshot.episodes.is_empty() => {
-                (format!("{label} has no episodes to change."), None)
-            }
-            (Some(snapshot), None, false) => {
-                let n = snapshot.episodes.len();
-                (
-                    format!(
-                        "Mark all {n} {} of {label} as {verb}? Episodes added later are not included.",
-                        if n == 1 { "episode" } else { "episodes" }
-                    ),
-                    Some(
-                        Button::new("season-confirm", format!("Mark {n} {verb}"))
-                            .variant(ButtonVariant::Primary)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.confirm_season(snapshot.clone(), confirm.watched, cx)
-                            }))
-                            .into_any_element(),
-                    ),
-                )
-            }
-            _ => (format!("Checking {label}…"), None),
-        };
-        column
-            .child(
-                div()
-                    .id("season-confirm-panel")
-                    .role(Role::Group)
-                    .aria_label(text.clone())
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap(s::S12)
-                    .p(s::S12)
-                    .rounded(radius::SM)
-                    .bg(p.bg_surface)
-                    .border_1()
-                    .border_color(p.line_subtle)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_primary)
-                            .child(text),
-                    )
-                    .children(confirm_button)
-                    .child(
-                        Button::new("season-cancel", "Cancel")
-                            .variant(ButtonVariant::Ghost)
-                            .on_click(cx.listener(|this, _, _, cx| this.cancel_season(cx))),
-                    ),
+        let toggle = match self.series_tally(cx) {
+            Some(tally) if ready => WatchedToggle::new("detail-series-watched", tally),
+            other => WatchedToggle::new(
+                "detail-series-watched",
+                other.unwrap_or(kinema_core::watch_progress::Tally {
+                    watched: 0,
+                    total: 0,
+                }),
             )
-            .into_any_element()
+            .unavailable(if ready {
+                "Open each season to load its watched status."
+            } else {
+                TRACKING_UNAVAILABLE
+            }),
+        };
+        toggle
+            .labels(WatchedLabels::SERIES_HERO)
+            .subject("series")
+            .busy(busy)
+            .on_change(move |wanted, _, cx| {
+                let _ = weak.update(cx, |d, cx| d.request_series(wanted, cx));
+            })
+    }
+    /// Hero toggle for a movie: one title, driving the existing watched state.
+    pub(super) fn movie_hero_toggle(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> crate::widgets::watched_toggle::WatchedToggle {
+        use crate::widgets::watched_toggle::{WatchedLabels, WatchedToggle};
+        use kinema_core::watch_progress::Tally;
+        let weak = cx.entity().downgrade();
+        let toggle = |watched| {
+            WatchedToggle::new("detail-watched", Tally { watched, total: 1 })
+                .labels(WatchedLabels::MOVIE)
+                .show_count(false)
+        };
+        match self.movie_watched_status(cx) {
+            ToggleStatus::Known { on, pending } => toggle(usize::from(on))
+                .subject(self.title.name().to_owned())
+                .busy(pending)
+                .on_change(move |wanted, _, cx| {
+                    let _ = weak.update(cx, |d, cx| d.perform(Write::Movie(wanted), cx));
+                }),
+            ToggleStatus::Loading => toggle(0)
+                .subject(self.title.name().to_owned())
+                .unavailable("Loading watched status…"),
+            _ => toggle(0)
+                .subject(self.title.name().to_owned())
+                .unavailable("Watched status isn\u{2019}t available right now."),
+        }
+    }
+    /// A bulk change is waiting for its snapshot.
+    pub(super) fn season_request_busy(&self) -> bool {
+        self.season_confirm
+            .as_ref()
+            .is_some_and(|r| r.failure.is_none())
     }
 }
 
@@ -444,21 +610,33 @@ impl Detail {
 mod tests {
     use super::*;
     use ::core::prelude::v1::test;
-    use kinema_core::library::ShowSummary;
 
     #[test]
-    fn summary_never_claims_unknown_totals() {
-        let s = |watched, total, complete| {
-            summary_text(ShowSummary {
-                watched,
-                total,
-                complete,
-            })
-        };
-        assert_eq!(s(3, 12, true), "3 of 12 watched");
-        assert_eq!(s(3, 12, false), "3 watched \u{b7} total unknown");
-        assert_eq!(s(0, 0, true), "Watched status unavailable");
-        assert_eq!(s(0, 5, false), "Watched status unavailable");
+    fn mark_intent_follows_status_and_readiness() {
+        let known = |on, pending| ToggleStatus::Known { on, pending };
+        let t = mark_tooltip(known(false, false), true);
+        assert_eq!((t.text, t.intent), ("Mark watched", MarkIntent::Set(true)));
+        let t = mark_tooltip(known(true, false), true);
+        assert_eq!(
+            (t.text, t.intent),
+            ("Mark unwatched", MarkIntent::Set(false))
+        );
+        assert_eq!(
+            mark_tooltip(known(true, true), true).intent,
+            MarkIntent::None
+        );
+        assert_eq!(
+            mark_tooltip(known(false, false), false).intent,
+            MarkIntent::None
+        );
+        assert_eq!(
+            mark_tooltip(ToggleStatus::Loading, true).intent,
+            MarkIntent::None
+        );
+        assert_eq!(
+            mark_tooltip(ToggleStatus::Failed, true).intent,
+            MarkIntent::Retry
+        );
     }
 }
 

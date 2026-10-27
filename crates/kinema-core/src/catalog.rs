@@ -97,11 +97,16 @@ impl ImdbRating {
     }
 }
 
+/// Most cast members kept per title.
+pub const MAX_CAST: usize = 24;
+
 /// A credited performer; character is unknown when the provider supplies only names.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CastMember {
     pub name: String,
     pub character: Option<String>,
+    /// Absolute https portrait URL when the provider has one.
+    pub profile_url: Option<String>,
 }
 
 /// Optional detail facts. Rating values use the validated tenths score container;
@@ -168,11 +173,14 @@ impl TitleFacts {
             ]
             .into_iter()
             .all(|v| v.len() <= 32 && v.iter().all(|s| text(s, 200)))
-            && self.cast.len() <= 10
-            && self
-                .cast
-                .iter()
-                .all(|c| text(&c.name, 200) && c.character.as_deref().is_none_or(|s| text(s, 200)))
+            && self.cast.len() <= MAX_CAST
+            && self.cast.iter().all(|c| {
+                text(&c.name, 200)
+                    && c.character.as_deref().is_none_or(|s| text(s, 200))
+                    && c.profile_url
+                        .as_deref()
+                        .is_none_or(|s| text(s, 300) && s.starts_with("https://"))
+            })
     }
 }
 
@@ -301,12 +309,18 @@ mod tests {
         assert!(!facts.is_valid());
         facts.release_date = Some("2024-02-29".into());
         assert!(facts.is_valid());
-        facts.cast = (0..11)
-            .map(|_| CastMember {
-                name: "Actor".into(),
-                character: None,
-            })
-            .collect();
+        let member = |profile_url: Option<&str>| CastMember {
+            name: "Actor".into(),
+            character: None,
+            profile_url: profile_url.map(str::to_owned),
+        };
+        facts.cast = (0..MAX_CAST).map(|_| member(None)).collect();
+        assert!(facts.is_valid());
+        facts.cast.push(member(None));
+        assert!(!facts.is_valid());
+        facts.cast = vec![member(Some("https://image.tmdb.org/t/p/w500/a.jpg"))];
+        assert!(facts.is_valid());
+        facts.cast = vec![member(Some("javascript:alert(1)"))];
         assert!(!facts.is_valid());
     }
     #[test]

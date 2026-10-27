@@ -232,3 +232,27 @@ pub(super) fn resolve(
     }
     Err(DebridError::PendingTimeout)
 }
+
+/// Status is read-only; upload/instant-availability are deliberately not used.
+pub(super) fn account_torrents(
+    client: &DebridClient,
+    cancel: &AtomicBool,
+) -> Result<std::collections::HashSet<kinema_core::sources::InfoHash>, DebridError> {
+    let data = envelope(http::json(
+        client.request(reqwest::Method::GET, &["v4.1", "magnet", "status"])?,
+        cancel,
+    )?)?;
+    let rows = data
+        .get("magnets")
+        .and_then(Value::as_array)
+        .ok_or(DebridError::Malformed)?;
+    if rows.len() > 5000 {
+        return Err(DebridError::TooLarge);
+    }
+    rows.iter()
+        .map(|row| {
+            kinema_core::sources::InfoHash::new(http::text(row, "hash")?)
+                .map_err(|_| DebridError::Malformed)
+        })
+        .collect()
+}

@@ -6,17 +6,15 @@ use super::{
 use crate::{
     artwork::{self, ArtworkKey, ArtworkKind, ArtworkState},
     widgets::{
-        button::{Button, ButtonSize, ButtonVariant},
+        button::{Button, ButtonVariant},
         icon::{Icon, IconName},
         icon_button::IconButton,
         menu::{ContextMenuExt, Select, SelectEvent},
         motion::{self, Motion},
         patterns::{
-            Badge, BadgeTone, ListRow, Section, Skeleton, StateView, ViewSelection, menu_item,
-            select_view,
+            Badge, BadgeTone, Section, Skeleton, StateView, ViewSelection, menu_item, select_view,
         },
         scroll_area::ScrollArea,
-        segmented::Segmented,
         text::TypeExt,
         tokens::{self, radius, space as s, typeface as t},
         tooltip::tooltip,
@@ -37,6 +35,7 @@ pub(crate) use fixtures::local_fixture_title;
 mod hero;
 #[cfg(all(test, feature = "ui-probe-test"))]
 mod interaction_tests;
+mod layout;
 mod local;
 mod personal;
 mod recommendations;
@@ -51,39 +50,22 @@ use std::{cell::Cell, collections::HashMap, rc::Rc};
 mod geometry {
     use gpui::{Pixels, px};
     /// Hero and body share one frame; it only centres beyond this width.
-    pub const PAGE_MAX_WIDTH: Pixels = px(1800.);
-    /// Below this frame width the Streams page is one column.
-    pub const STREAMS_TWO_PANE_AT: Pixels = px(1040.);
-    pub const STREAMS_SIDEBAR_MIN: Pixels = px(300.);
-    pub const STREAMS_SIDEBAR_MAX: Pixels = px(400.);
-    /// Fixed width of the resolution/HDR/codec badge stack in a stream row.
-    pub const BADGE_STACK_WIDTH: Pixels = px(84.);
-    pub const EPISODE_CARD_MIN_WIDTH: Pixels = px(260.);
+    pub const PAGE_MAX_WIDTH: Pixels = px(2400.);
+    pub const EPISODE_CARD_MIN_WIDTH: Pixels = px(280.);
     pub const EPISODE_CARD_MAX_WIDTH: Pixels = px(360.);
     pub const EPISODE_GRID_GAP: Pixels = px(16.);
     pub const SIMILAR_MIN_WIDTH: Pixels = px(140.);
     pub const SIMILAR_MAX_WIDTH: Pixels = px(200.);
     pub const SIMILAR_GAP: Pixels = px(14.);
-    pub const FACT_MIN_WIDTH: Pixels = px(200.);
-    pub const FACT_MAX_WIDTH: Pixels = px(300.);
-    pub const CAST_MIN_WIDTH: Pixels = px(104.);
-    pub const CAST_MAX_WIDTH: Pixels = px(136.);
+    pub const CAST_MIN_WIDTH: Pixels = px(112.);
+    pub const CAST_MAX_WIDTH: Pixels = px(160.);
     pub const FACT_LABEL_WIDTH: Pixels = px(120.);
-    /// Up to this many seasons get "Season N" tabs; more use compact numbers.
-    pub const FULL_SEASON_LABELS_MAX: usize = 4;
     /// Skeleton row counts, roughly one screenful.
     pub const STREAM_SKELETON_ROWS: usize = 6;
     pub const EPISODE_SKELETON_CARDS: usize = 4;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Quality {
-    All,
-    Uhd,
-    Hd,
-    Sd,
-    Other,
-}
+pub(crate) use crate::settings::StreamQuality as Quality;
 impl Quality {
     fn label(self) -> &'static str {
         match self {
@@ -290,16 +272,6 @@ pub(super) fn page_inset(viewport: Pixels) -> Pixels {
 fn content_width(viewport: Pixels) -> Pixels {
     viewport.min(geometry::PAGE_MAX_WIDTH) - gutter(viewport) * 2.
 }
-/// Overview measure and poster width scale with the window.
-fn hero_sizing(viewport: Pixels) -> (Pixels, Pixels) {
-    let w = f32::from(viewport);
-    match w {
-        w if w < 1100. => (px(140.), px(560.)),
-        w if w < 1500. => (px(168.), px(680.)),
-        w if w < 2100. => (px(200.), px(820.)),
-        _ => (px(232.), px(920.)),
-    }
-}
 
 pub(crate) struct Detail {
     coordinator: Entity<AppCoordinator>,
@@ -312,6 +284,7 @@ pub(crate) struct Detail {
     target: Option<PlaybackTarget>,
     page: Page,
     filter: Quality,
+    stream_page: streams_page::StreamPage,
     selected: Option<usize>,
     stream_focus: Vec<FocusHandle>,
     episode_focus: HashMap<(u32, u32), FocusHandle>,
@@ -331,9 +304,24 @@ pub(crate) struct Detail {
     streams_scroll: ScrollHandle,
     similar: recommendations::SimilarGrid,
     similar_cols: usize,
+    /// Cast grid expanded past its two collapsed rows.
+    cast_expanded: bool,
     /// Synchronous rejection: the exact rejected intent plus reason.
     write_error: Option<(personal::Write, String)>,
+    /// Bulk season change waiting for its snapshot (applied immediately; no confirmation).
     season_confirm: Option<personal::SeasonConfirm>,
+    /// The user picked a season (or acted on one); smart defaults no longer apply.
+    season_chosen: bool,
+    /// Season tile grid shows every season instead of the two-row window.
+    season_expanded: bool,
+    /// Season whose overview is shown in full (collapses on season change).
+    season_overview_open: Option<u32>,
+    /// Whole-series watched change: seasons still to write, the wanted value,
+    /// and whether any season was written yet.
+    series_queue: Vec<u32>,
+    series_watched: bool,
+    series_applied: bool,
+    season_focus: HashMap<u32, FocusHandle>,
     /// Episodes whose personal state has been requested (per canonical show).
     episode_personal_requested:
         std::collections::HashSet<(kinema_core::library::TitleId, u32, u32)>,
@@ -377,6 +365,7 @@ impl Detail {
                 this.reconcile_metadata(cx);
                 this.reconcile_similar(cx);
                 this.ensure_episode_personal(cx);
+                this.apply_season_request(cx);
                 cx.notify();
             }),
             cx.subscribe(&indexer, |this, _, event: &SelectEvent<IndexerKind>, cx| {
@@ -397,11 +386,11 @@ impl Detail {
         } else {
             None
         };
-        if let BrowseTitle::Tmdb(t) = &title
-            && t.kind == MediaKind::Movie
-        {
-            coordinator.update(cx, |c, cx| c.load_similar(t.id, 1, false, cx));
+        if let BrowseTitle::Tmdb(t) = &title {
+            let (kind, id) = (t.kind, t.id);
+            coordinator.update(cx, |c, cx| c.load_similar(kind, id, 1, false, cx));
         }
+        let art_generation = artwork::begin_title_generation("v3-detail", &title.key(), cx);
         let mut this = Self {
             coordinator,
             title,
@@ -413,6 +402,7 @@ impl Detail {
             target,
             page: Page::Overview,
             filter: Quality::All,
+            stream_page: streams_page::StreamPage::default(),
             selected: None,
             stream_focus: Vec::new(),
             episode_focus: HashMap::new(),
@@ -420,7 +410,7 @@ impl Detail {
             play: None,
             play_subscription: None,
             bounds: Rc::new(Cell::new(None)),
-            art_generation: artwork::begin_generation("v3-detail", cx),
+            art_generation,
             page_generation: 0,
             page_direction: 1.,
             pending_stream_focus: false,
@@ -432,8 +422,16 @@ impl Detail {
             streams_scroll: ScrollHandle::new(),
             similar: Default::default(),
             similar_cols: 6,
+            cast_expanded: false,
             write_error: None,
             season_confirm: None,
+            season_chosen: false,
+            season_expanded: false,
+            season_overview_open: None,
+            series_queue: Vec::new(),
+            series_watched: false,
+            series_applied: false,
+            season_focus: HashMap::new(),
             episode_personal_requested: Default::default(),
             #[cfg(feature = "ui-probe")]
             fixture_ambient: None,
@@ -631,7 +629,18 @@ impl Detail {
         let Some(options) = options else {
             return;
         };
-        let chosen = choose_season(self.season, &options);
+        // Explicit choices win; otherwise open on the next-up season. The default
+        // locks once next-up is known so later toggling never moves the view.
+        let next_up = self.next_up_in(&options, cx);
+        let chosen = kinema_core::watch_progress::default_season(
+            self.season.filter(|_| self.season_chosen),
+            next_up,
+            &options,
+        )
+        .or_else(|| choose_season(self.season, &options));
+        if next_up.is_some() {
+            self.season_chosen = true;
+        }
         if self.season != chosen {
             self.coordinator.update(cx, |c, cx| {
                 c.cancel_detail_sources(cx);
@@ -727,16 +736,16 @@ impl Detail {
     }
     pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
         self.title.log_navigation("detail_refresh");
-        self.art_generation = artwork::begin_generation("v3-detail", cx);
+        artwork::refresh_misses("v3-detail", cx);
+        self.art_generation = artwork::begin_title_generation("v3-detail", &self.title.key(), cx);
         self.coordinator
             .update(cx, |c, cx| c.title_details(&self.title, true, cx));
         self.ensure_season(true, cx);
-        if let BrowseTitle::Tmdb(t) = &self.title
-            && t.kind == MediaKind::Movie
-        {
+        if let BrowseTitle::Tmdb(t) = &self.title {
             self.similar.reset();
+            let (kind, id) = (t.kind, t.id);
             self.coordinator
-                .update(cx, |c, cx| c.load_similar(t.id, 1, true, cx));
+                .update(cx, |c, cx| c.load_similar(kind, id, 1, true, cx));
         }
         if let (Page::Streams, Some(target)) = (self.page, self.target.clone()) {
             let indexer = *self.indexer.read(cx).value();
@@ -766,6 +775,16 @@ impl Detail {
     }
     fn go_to_streams(&mut self, target: PlaybackTarget, cx: &mut Context<Self>) {
         tracing::debug!(route = "streams", ?target, "UI route changed");
+        self.stream_page = streams_page::StreamPage::default();
+        let active = self
+            .coordinator
+            .read(cx)
+            .settings
+            .as_ref()
+            .map(|s| s.indexer)
+            .unwrap_or(IndexerKind::Torrentio);
+        self.indexer
+            .update(cx, |select, cx| select.set_value(active, cx));
         self.target = Some(target.clone());
         self.page = Page::Streams;
         self.reset_stream_selection();
@@ -778,6 +797,7 @@ impl Detail {
         cx.notify();
     }
     fn close_streams(&mut self, cx: &mut Context<Self>) {
+        self.stream_page = streams_page::StreamPage::default();
         tracing::debug!(route = "detail", "UI route changed");
         self.page = Page::Overview;
         self.play = None;
@@ -800,7 +820,7 @@ impl Detail {
     fn open_recommendation(&mut self, title: crate::tmdb::TmdbTitle, cx: &mut Context<Self>) {
         let intent = OpenDetailTitle(BrowseTitle::Tmdb(title));
         // Preserve provider scope even for externally injected fixture results.
-        if matches!(&intent.0,BrowseTitle::Tmdb(t) if t.kind==MediaKind::Movie) {
+        if matches!(&intent.0,BrowseTitle::Tmdb(t) if t.kind==self.title.kind()) {
             cx.emit(intent);
         }
     }
@@ -809,9 +829,9 @@ impl Detail {
     fn show_more_similar(&mut self, cx: &mut Context<Self>) {
         let cols = self.similar_cols;
         if let (Some(page), BrowseTitle::Tmdb(t)) = (self.similar.show_more(cols), &self.title) {
-            let id = t.id;
+            let (kind, id) = (t.kind, t.id);
             self.coordinator
-                .update(cx, |c, cx| c.load_similar(id, page, false, cx));
+                .update(cx, |c, cx| c.load_similar(kind, id, page, false, cx));
         }
         cx.notify();
     }
@@ -865,6 +885,8 @@ enum PrimaryAction {
     Streams,
     /// Scroll to the episodes (series).
     Episodes,
+    /// Open the Streams page for the next episode to watch (series).
+    Continue(u32, u32),
     /// Unavailable, with the reason shown as a tooltip.
     Blocked(&'static str),
 }
@@ -908,7 +930,12 @@ impl Detail {
     }
     fn primary_action(&self, cx: &App) -> PrimaryAction {
         if self.is_series() {
-            return PrimaryAction::Episodes;
+            return match self.next_up(cx) {
+                Some((season, episode)) if self.display_title(cx).imdb().is_some() => {
+                    PrimaryAction::Continue(season, episode)
+                }
+                _ => PrimaryAction::Episodes,
+            };
         }
         if self.target.is_none() {
             return PrimaryAction::Blocked(if self.meta_status(cx).busy {
@@ -927,8 +954,27 @@ impl Detail {
         match self.primary_action(cx) {
             PrimaryAction::Streams => self.open_streams(cx),
             PrimaryAction::Episodes => self.focus_episodes(cx),
+            PrimaryAction::Continue(season, number) => self.continue_episode(season, number, cx),
             PrimaryAction::Blocked(_) => {}
         }
+    }
+    /// Open the Streams page for an episode, like clicking its card. An episode
+    /// not loaded yet (other season) still opens by its coordinates.
+    fn continue_episode(&mut self, season: u32, number: u32, cx: &mut Context<Self>) {
+        let episode = self
+            .all_episodes(cx)
+            .into_iter()
+            .find(|e| e.season == season && e.number == number)
+            .unwrap_or(CatalogEpisode {
+                season,
+                number,
+                name: None,
+                overview: None,
+                released: None,
+                runtime_minutes: None,
+                still_url: None,
+            });
+        self.open_episode(episode, cx);
     }
     /// Scroll the page to the episodes section and focus its first card.
     fn focus_episodes(&mut self, cx: &mut Context<Self>) {
@@ -952,17 +998,17 @@ impl Detail {
     }
     fn retry_similar(&mut self, cx: &mut Context<Self>) {
         if let BrowseTitle::Tmdb(t) = &self.title {
-            let id = t.id;
+            let (kind, id) = (t.kind, t.id);
             let page = self.similar.next_page().unwrap_or(1);
             self.coordinator
-                .update(cx, |c, cx| c.load_similar(id, page, true, cx));
+                .update(cx, |c, cx| c.load_similar(kind, id, page, true, cx));
         }
     }
 }
 
 /// Index of the episodes section among the scroll area's children
-/// (hero, facts, episodes, …).
-const EPISODES_ITEM: usize = 2;
+/// (series: hero, episodes, about, similar, …).
+const EPISODES_ITEM: usize = 1;
 
 /// Snapshot of the title-metadata resource, whichever provider backs it.
 struct MetaStatus {
@@ -990,16 +1036,17 @@ impl Detail {
         let target = if self.page == Page::Streams {
             if !self.pending_stream_focus || self.coordinator.read(cx).sources.busy() {
                 None
-            } else if self
-                .coordinator
-                .read(cx)
-                .sources
-                .value()
-                .is_some_and(|s| !s.candidates.is_empty())
-            {
-                self.stream_focus.first().cloned()
             } else {
-                Some(self.page_focus.clone())
+                self.coordinator
+                    .read(cx)
+                    .sources
+                    .value()
+                    .and_then(|sources| {
+                        self.stream_indices(sources, cx)
+                            .first()
+                            .and_then(|i| self.stream_focus.get(*i).cloned())
+                    })
+                    .or_else(|| Some(self.page_focus.clone()))
             }
         } else if !self.pending_return_focus {
             None

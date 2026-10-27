@@ -51,10 +51,13 @@ fn full_facts(series: bool) -> kinema_core::catalog::TitleFacts {
             "Elias Novak",
         ]
         .into_iter()
+        .map(str::to_owned)
+        .chain((11..=24).map(|n| format!("Extra Performer {n}")))
         .enumerate()
         .map(|(i, name)| CastMember {
-            name: s(name),
+            name,
             character: (i % 4 != 3).then(|| format!("Role {}", i + 1)),
+            profile_url: None,
         })
         .collect(),
         release_info: None,
@@ -107,8 +110,9 @@ impl Detail {
                     if series{for (season,count) in [(0,1),(2,8),(3,3)]{
                         let raw=serde_json::json!({"id":1000+season,"season_number":season,"poster_path":if season==2{Some("/season-2.jpg")}else{None},"episodes":(1..=count).map(|n|serde_json::json!({"id":10000+season*100+n,"season_number":season,"episode_number":n,"name":if n==2{"The Signal".to_owned()}else{format!("Arrival {n}")},"overview":"A signal reaches the harbor.","air_date":"2024-03-02","runtime":48,"still_path":if n%2==1{Some(format!("/episode-{season}-{n}.jpg"))}else{None}})).collect::<Vec<_>>()}).to_string();
                         let TmdbData::Season(data)=crate::tmdb::decode_fixture_response(&TmdbQuery::Season{series_id:t.id,season},&raw).unwrap_or_else(|e|panic!("TMDB season fixture DTO: {e}"))else{unreachable!()};c.fixture_seasons.insert((t.id,season),data);
-                    }}else{
-                        for page in 1..=2{let raw=serde_json::json!({"page":page,"total_pages":2,"results":(1..=20).map(|n|serde_json::json!({"id":t.id+page as u64*100+n,"title":format!("Similar film {page}.{n}"),"overview":"A related synthetic film returned by the offline TMDB page fixture.","release_date":"2024-10-11","poster_path":format!("/similar-{page}-{n}.jpg")})).collect::<Vec<_>>()}).to_string();let TmdbData::Page(data)=crate::tmdb::decode_fixture_response(&TmdbQuery::Similar{id:t.id,page},&raw).unwrap_or_else(|e|panic!("TMDB similar fixture DTO: {e}"))else{unreachable!()};c.fixture_similar.insert((t.id,page),data);}
+                    }}
+                    {let (title_key,date_key)=if series{("name","first_air_date")}else{("title","release_date")};
+                        for page in 1..=2{let raw=serde_json::json!({"page":page,"total_pages":2,"results":(1..=20).map(|n|serde_json::json!({"id":t.id+page as u64*100+n,title_key:format!("Similar {} {page}.{n}",if series{"show"}else{"film"}),"overview":"A related synthetic title returned by the offline TMDB page fixture.",date_key:"2024-10-11","poster_path":format!("/similar-{page}-{n}.jpg")})).collect::<Vec<_>>()}).to_string();let TmdbData::Page(data)=crate::tmdb::decode_fixture_response(&TmdbQuery::Similar{kind:t.kind,id:t.id,page},&raw).unwrap_or_else(|e|panic!("TMDB similar fixture DTO: {e}"))else{unreachable!()};c.fixture_similar.insert((t.id,page),data);}
                     }
                 }
             }
@@ -121,10 +125,9 @@ impl Detail {
                 if series{for season in 0..=3{for n in 1..=8{c.fixture_sources.insert((indexer,PlaybackTarget::Episode{series:id.clone(),season,episode:n}),set.clone());}}}else{c.fixture_sources.insert((indexer,PlaybackTarget::Movie(id.clone())),set);}}
         });
         this.reconcile_metadata(cx);
-        if let BrowseTitle::Tmdb(t) = &this.title
-            && !series
-        {
-            coordinator.update(cx, |c, cx| c.load_similar(t.id, 1, true, cx));
+        if let BrowseTitle::Tmdb(t) = &this.title {
+            let (kind, id) = (t.kind, t.id);
+            coordinator.update(cx, |c, cx| c.load_similar(kind, id, 1, true, cx));
             this.reconcile_similar(cx);
         }
         if streams {

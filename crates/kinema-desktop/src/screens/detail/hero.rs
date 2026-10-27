@@ -1,8 +1,9 @@
 //! Detail page: compact hero (backdrop, poster, chips, actions) and the
 //! scrolling page body that hosts the other sections.
+use super::layout;
 use super::*;
-use crate::widgets::patterns::{MediaHero, uses_over_art};
-use kinema_core::catalog::TitleFacts;
+use crate::widgets::action_button::{ActionButton, ActionKind};
+use crate::widgets::patterns::{MediaHero, MetaItem, uses_over_art};
 use std::time::Duration;
 
 /// Wraps a page section in the shared frame: the same side gutters and
@@ -74,74 +75,52 @@ impl Detail {
         )
     }
 
-    /// Year, runtime/seasons, genres and rating as badges.
-    pub(super) fn meta_badges(title: &BrowseTitle, facts: &TitleFacts) -> Vec<Badge> {
-        let mut badges = Vec::new();
-        if title.kind() == MediaKind::Series {
-            badges.push(
-                Badge::new("Series")
-                    .icon(IconName::Tv)
-                    .tone(BadgeTone::Info),
-            );
-        }
-        if let Some(year) = title.year() {
-            badges.push(Badge::new(year.to_string()));
-        }
-        if title.kind() == MediaKind::Series {
-            if let Some(n) = title.seasons() {
-                badges.push(Badge::new(if n == 1 {
-                    "1 season".to_owned()
-                } else {
-                    format!("{n} seasons")
-                }));
+    /// Hero meta line: plain text pieces separated by dots, with the
+    /// certification (and the SERIES marker) as small chips.
+    fn meta_items(parts: Vec<layout::MetaPart>, muted: Hsla) -> Vec<MetaItem> {
+        let mut items = Vec::new();
+        for (i, part) in parts.into_iter().enumerate() {
+            if i > 0 {
+                items.push(MetaItem::Element(
+                    div().text_color(muted).child("·").into_any_element(),
+                ));
             }
-        } else if let Some(n) = facts.runtime_minutes.or(title.runtime().map(u32::from)) {
-            badges.push(Badge::new(format!("{n} min")));
+            items.push(match part {
+                layout::MetaPart::Text(text) => {
+                    MetaItem::Element(div().child(text).into_any_element())
+                }
+                layout::MetaPart::Chip(text) => MetaItem::Badge(Badge::new(text)),
+                layout::MetaPart::Kind(text) => {
+                    MetaItem::Badge(Badge::new(text).uppercase(true).tone(BadgeTone::Accent))
+                }
+            });
         }
-        if let Some(cert) = facts
-            .certification
-            .as_deref()
-            .filter(|c| !c.trim().is_empty())
-        {
-            badges.push(Badge::new(cert.trim().to_owned()));
-        }
-        badges.extend(title.genres().iter().take(3).map(|g| Badge::new(g.clone())));
-        if let Some(rating) = title.rating().and_then(rating_label) {
-            badges.push(
-                Badge::new(rating)
-                    .icon(IconName::StarFilled)
-                    .tone(BadgeTone::Accent),
-            );
-        }
-        badges
+        items
     }
 
     fn primary_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let action = self.primary_action(cx);
         let (label, icon): (SharedString, _) = match &action {
             PrimaryAction::Episodes => ("Episodes".into(), IconName::Tv),
+            PrimaryAction::Continue(season, episode) => (
+                format!("Continue · S{season} E{episode}").into(),
+                IconName::Play,
+            ),
             _ => ("Play".into(), IconName::Play),
         };
         let blocked = match &action {
             PrimaryAction::Blocked(reason) => Some(*reason),
             _ => None,
         };
-        let button = Button::new("detail-primary", label)
-            .variant(ButtonVariant::Primary)
-            .size(ButtonSize::Large)
+        let mut button = ActionButton::new("detail-primary", ActionKind::Primary, label)
             .icon(icon)
             .focus_handle(self.primary_focus.clone())
-            .disabled(blocked.is_some())
             .on_click(cx.listener(|this, _, _, cx| this.run_primary(cx)));
-        match blocked {
-            // The disabled button swallows hover, so the reason hangs on a wrapper.
-            Some(reason) => div()
-                .id("detail-primary-blocked")
-                .tooltip(tooltip(reason))
-                .child(button)
-                .into_any_element(),
-            None => button.into_any_element(),
+        // The reason becomes the tooltip of the disabled button.
+        if let Some(reason) = blocked {
+            button = button.disabled(reason);
         }
+        button.into_any_element()
     }
 
     /// Compact hero: ambient backdrop behind poster, title, chips, overview and
@@ -180,6 +159,8 @@ impl Detail {
         let over_art = uses_over_art(backdrop.is_some(), tokens::theme(cx).mode);
         let poster = self.poster_face(title, poster_url.as_deref(), cx);
 
+        let hero_layout = layout::hero_layout(viewport);
+        let mut view = self.facts_view(title, cx);
         let mut banner = MediaHero::new("detail-hero", title.name().to_owned())
             .backdrop(backdrop)
             .poster(poster)
@@ -187,40 +168,54 @@ impl Detail {
             .min_height(px(0.))
             .top_inset(s::TOOLBAR_HEIGHT)
             .frame(gutter(viewport), geometry::PAGE_MAX_WIDTH)
-            .sizing(hero_sizing(viewport).0, hero_sizing(viewport).1)
+            .sizing(hero_layout.poster, hero_layout.overview_max)
             .overview_loading(status.busy && !status.loaded)
             .primary(self.primary_button(cx));
-        let facts = self.title_facts(cx);
-        for badge in Self::meta_badges(title, &facts) {
-            banner = banner.meta_badge(badge);
+        for item in Self::meta_items(std::mem::take(&mut view.meta), p.text_muted) {
+            banner = banner.meta_item(item);
+        }
+        if let Some(tagline) = view.tagline.clone() {
+            banner = banner.tagline(tagline);
+        }
+        if let Some(glance) = self.glance_panel(&view, hero_layout.stack_glance, cx) {
+            banner = banner.aside(glance, hero_layout.glance, hero_layout.stack_glance);
         }
         if let Some(text) = title.overview().filter(|o| !o.trim().is_empty()) {
             banner = banner.overview(text.to_owned());
         }
-        banner = banner
-            .title_action(CopyTitleButton {
-                title: title.name().to_owned().into(),
-                over_art,
-            })
-            .secondary(
-                IconButton::new("detail-refresh", IconName::Refresh, "Refresh")
-                    .over_art(over_art)
-                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-            );
+        banner = banner.title_action(CopyTitleButton {
+            title: title.name().to_owned().into(),
+            over_art,
+        });
+        // Action row: primary, Watch, Library | Refresh, IMDb. All share one
+        // ActionButton face; Watch and Library collapse to icons when narrow.
+        let compact = layout::compact_actions(viewport);
+        banner = banner.secondary(if self.is_series() {
+            self.series_watched_toggle(cx).compact(compact)
+        } else {
+            self.movie_hero_toggle(cx).compact(compact)
+        });
+        banner = banner.secondary(self.membership_toggle(cx).compact(compact));
+        banner = banner.secondary(
+            div()
+                .flex_none()
+                .w(s::HAIRLINE)
+                .h(s::S20)
+                .mx(s::S4)
+                .bg(p.line_hairline),
+        );
+        banner = banner.secondary(
+            ActionButton::new("detail-refresh", ActionKind::Icon, "Refresh")
+                .icon(IconName::Refresh)
+                .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+        );
         if let Some(id) = title.imdb() {
             let url = format!("https://www.imdb.com/title/{}/", id.as_str());
             banner = banner.secondary(
-                IconButton::new("detail-imdb", IconName::ExternalLink, "Open on IMDb")
-                    .over_art(over_art)
+                ActionButton::new("detail-imdb", ActionKind::Icon, "Open on IMDb")
+                    .icon(IconName::ExternalLink)
                     .on_click(move |_, _, cx| cx.open_url(&url)),
             );
-        }
-
-        // Library membership (all titles) and watched (movies) follow all existing
-        // utility actions (Refresh, IMDb); each is an independent toggle with its own pending/error state.
-        banner = banner.secondary(self.membership_toggle(over_art, cx));
-        if !self.is_series() {
-            banner = banner.secondary(self.movie_watched_toggle(over_art, cx));
         }
 
         let mut section = div()
@@ -270,20 +265,25 @@ impl Detail {
         let width = content_width(viewport);
         let hero = self.hero(&title, &status, viewport, cx);
         let facts = self.facts_section(&title, &status, width, cx);
-        let middle = if self.is_series() {
-            self.episodes_section(width, cx)
-        } else {
-            self.recommendations(width, cx)
-        };
+        let similar = self.recommendations(width, cx);
         let footer = self.metadata_footer(&title, &status, cx);
+        // Movies: hero, facts + cast, similar. Series: hero, episodes, then
+        // "About the series" (facts + cast), similar.
+        let mut scroll = ScrollArea::new("detail-scroll", self.scroll.clone()).child(hero);
+        if self.is_series() {
+            let episodes = self.episodes_section(width, cx);
+            scroll = scroll
+                .child(body_shell(viewport, episodes))
+                .child(body_shell(viewport, facts));
+        } else {
+            scroll = scroll.child(body_shell(viewport, facts));
+        }
         div()
             .size_full()
             .bg(p.bg_canvas)
             .child(
-                ScrollArea::new("detail-scroll", self.scroll.clone())
-                    .child(hero)
-                    .child(body_shell(viewport, facts))
-                    .child(body_shell(viewport, middle))
+                scroll
+                    .child(body_shell(viewport, similar))
                     .child(body_shell(viewport, footer)),
             )
             .into_any_element()

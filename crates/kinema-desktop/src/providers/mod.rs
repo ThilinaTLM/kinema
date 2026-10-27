@@ -175,6 +175,18 @@ impl DebridClient {
         }
         result
     }
+    /// Side-effect-free account presence, not cache/instant availability.
+    /// A successful empty set is distinct from a failed lookup.
+    pub fn account_torrents(
+        &self,
+        cancel: &AtomicBool,
+    ) -> Result<std::collections::HashSet<kinema_core::sources::InfoHash>, DebridError> {
+        http::check(cancel)?;
+        match self.kind {
+            DebridKind::RealDebrid => real_debrid::account_torrents(self, cancel),
+            DebridKind::AllDebrid => all_debrid::account_torrents(self, cancel),
+        }
+    }
     pub fn prepare(
         &self,
         source: &TorrentSource,

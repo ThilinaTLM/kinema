@@ -48,8 +48,45 @@ pub enum MotionChoice {
     Always,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamQuality {
+    #[default]
+    All,
+    Uhd,
+    Hd,
+    Sd,
+    Other,
+}
+impl StreamQuality {
+    /// A missing bucket falls back for this visit, without changing the preference.
+    pub fn for_visit(self, present: impl FnOnce(Self) -> bool) -> Self {
+        if self == Self::All || present(self) {
+            self
+        } else {
+            Self::All
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamSort {
+    #[default]
+    Seeders,
+    Size,
+    Quality,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StreamPreferences {
+    pub quality: StreamQuality,
+    pub sort: StreamSort,
+    pub account_only: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct Settings {
+    pub streams: StreamPreferences,
     pub metadata_priority: ProviderPriority,
     pub indexer: IndexerKind,
     pub debrid: DebridKind,
@@ -62,6 +99,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            streams: StreamPreferences::default(),
             metadata_priority: ProviderPriority::default(),
             indexer: IndexerKind::Torrentio,
             debrid: DebridKind::RealDebrid,
@@ -256,6 +294,8 @@ fn validate(settings: &Settings) -> Result<(), SettingsError> {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Document {
+    #[serde(default)]
+    streams: StreamPreferences,
     version: u32,
     /// Ordered provider ids; unknown entries are ignored on load.
     #[serde(default)]
@@ -293,6 +333,7 @@ impl Document {
         };
         Ok(Self {
             version: 1,
+            streams: settings.streams,
             metadata_providers: Some(
                 settings
                     .metadata_priority
@@ -325,6 +366,7 @@ impl Document {
             return Err(SettingsError::UnsupportedVersion);
         }
         let settings = Settings {
+            streams: self.streams,
             metadata_priority: ProviderPriority::new(
                 self.metadata_providers
                     .unwrap_or_default()
@@ -768,6 +810,46 @@ mod logging_tests {
                 "signature=",
                 "invalid toml",
             ],
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod stream_preference_tests {
+    use super::*;
+    #[test]
+    fn stream_preferences_round_trip_and_visit_fallback() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let settings = Settings {
+            indexer: IndexerKind::Peerflix,
+            streams: StreamPreferences {
+                quality: StreamQuality::Hd,
+                sort: StreamSort::Size,
+                account_only: true,
+            },
+            ..Settings::default()
+        };
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&AppPaths {
+            data: dir.path().into(),
+            config: dir.path().into(),
+            cache: dir.path().into(),
+        })?;
+        store.save(&settings)?;
+        assert_eq!(store.load()?.streams, settings.streams);
+        let text = toml::to_string(&Document::from_settings(&settings)?)?;
+        let loaded = toml::from_str::<Document>(&text)?.into_settings()?;
+        assert_eq!(loaded.indexer, IndexerKind::Peerflix);
+        assert_eq!(loaded.streams, settings.streams);
+        assert_eq!(
+            loaded.streams.quality.for_visit(|_| false),
+            StreamQuality::All
+        );
+        assert_eq!(loaded.streams.quality, StreamQuality::Hd);
+        assert_eq!(
+            loaded.streams.quality.for_visit(|_| true),
+            StreamQuality::Hd
         );
         Ok(())
     }

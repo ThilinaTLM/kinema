@@ -687,3 +687,163 @@ mod tests {
         );
     }
 }
+
+/// Conservative display tags parsed from an indexer release description. These
+/// are hints, never evidence of playback capability or debrid availability.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ReleaseTags {
+    pub release_name: String,
+    pub codec: Option<&'static str>,
+    pub audio: Option<String>,
+    pub languages: Vec<String>,
+    pub tracker: Option<String>,
+}
+
+pub fn parse_release_tags(name: &str) -> ReleaseTags {
+    let lower = name.to_lowercase();
+    let words: Vec<_> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let has = |s: &str| words.contains(&s);
+    let codec = if ["hevc", "x265", "h265"].iter().any(|s| has(s)) || lower.contains("h.265") {
+        Some("HEVC")
+    } else if ["avc", "x264", "h264"].iter().any(|s| has(s)) || lower.contains("h.264") {
+        Some("AVC")
+    } else if has("av1") {
+        Some("AV1")
+    } else {
+        None
+    };
+    let audio = if has("atmos") {
+        Some("Atmos")
+    } else if lower.contains("dts-hd") {
+        Some("DTS-HD")
+    } else if has("dts") {
+        Some("DTS")
+    } else if has("ddp") || lower.contains("ddp5") || has("eac3") {
+        Some("DDP")
+    } else if has("aac") {
+        Some("AAC")
+    } else {
+        None
+    };
+    let audio = audio.map(|a| {
+        let channels = ["7.1", "5.1", "2.0"]
+            .into_iter()
+            .find(|s| lower.contains(s));
+        channels.map_or_else(|| a.to_owned(), |c| format!("{a} {c}"))
+    });
+    let mut languages = Vec::new();
+    // Regional indicators are converted to ISO country codes, then mapped to
+    // language codes where the country/language spellings differ.
+    let mut regional = None;
+    for ch in name.chars() {
+        if ('\u{1f1e6}'..='\u{1f1ff}').contains(&ch) {
+            let letter = (b'A' + (ch as u32 - 0x1f1e6) as u8) as char;
+            if let Some(first) = regional.take() {
+                let code = format!("{first}{letter}");
+                let code = match code.as_str() {
+                    "GB" | "US" => "EN",
+                    "JP" => "JA",
+                    "CN" => "ZH",
+                    "KR" => "KO",
+                    "BR" => "PT",
+                    other => other,
+                }
+                .to_owned();
+                if !languages.contains(&code) {
+                    languages.push(code);
+                }
+            } else {
+                regional = Some(letter);
+            }
+        } else {
+            regional = None;
+        }
+    }
+    for (code, names) in [
+        ("EN", &["english", "eng"][..]),
+        ("IT", &["italian", "ita"]),
+        ("ES", &["spanish", "spa"]),
+        ("FR", &["french", "fra", "fre"]),
+        ("DE", &["german", "deu", "ger"]),
+        ("PT", &["portuguese", "por"]),
+        ("JA", &["japanese", "jpn"]),
+        ("ZH", &["chinese", "zho"]),
+        ("KO", &["korean", "kor"]),
+        ("RU", &["russian", "rus"]),
+        ("HI", &["hindi", "hin"]),
+    ] {
+        if names.iter().any(|n| has(n)) && !languages.iter().any(|s| s == code) {
+            languages.push(code.to_owned());
+        }
+    }
+    let tracker = name
+        .lines()
+        .find_map(|line| line.split_once("🌐").map(|(_, s)| s.trim().to_owned()))
+        .filter(|s| !s.is_empty());
+    let release_name = name
+        .lines()
+        .next()
+        .unwrap_or(name)
+        .split(['👤', '💾', '🌐', '⚙'])
+        .next()
+        .unwrap_or(name)
+        .trim()
+        .to_owned();
+    ReleaseTags {
+        release_name,
+        codec,
+        audio,
+        languages,
+        tracker,
+    }
+}
+
+/// Match both the original release and the normalized display tags (e.g. x265
+/// is searchable as HEVC, and flag emoji are searchable by language code).
+pub fn release_matches_filter(name: &str, filter: &str) -> bool {
+    let filter = filter.trim().to_lowercase();
+    if filter.is_empty() || name.to_lowercase().contains(&filter) {
+        return true;
+    }
+    let tags = parse_release_tags(name);
+    tags.codec
+        .is_some_and(|s| s.to_lowercase().contains(&filter))
+        || tags
+            .audio
+            .is_some_and(|s| s.to_lowercase().contains(&filter))
+        || tags
+            .languages
+            .iter()
+            .any(|s| s.to_lowercase().contains(&filter))
+}
+
+#[cfg(test)]
+mod release_tag_tests {
+    use super::*;
+    #[test]
+    fn release_tags_flags_names_audio_and_tracker() {
+        let tags =
+            parse_release_tags("Film.1080p.H.265.DDP5.1.Atmos 🇬🇧 🇮🇹 English\n🌐 TorrentGalaxy");
+        assert_eq!(tags.codec, Some("HEVC"));
+        assert_eq!(tags.audio.as_deref(), Some("Atmos 5.1"));
+        assert_eq!(tags.languages, ["EN", "IT"]);
+        assert_eq!(tags.tracker.as_deref(), Some("TorrentGalaxy"));
+    }
+    #[test]
+    fn release_tags_do_not_guess_from_substrings() {
+        assert!(release_matches_filter("Movie.x265 🇮🇹", "hevc"));
+        assert!(release_matches_filter("Movie.x265 🇮🇹", "IT"));
+        assert!(!release_matches_filter("Movie.x265 🇮🇹", "EN"));
+        let tags = parse_release_tags("Frenchman.Englishman.2026");
+        assert_eq!(tags.codec, None);
+        assert!(tags.languages.is_empty());
+        assert_eq!(tags.release_name, "Frenchman.Englishman.2026");
+        assert_eq!(
+            parse_release_tags("Movie.AV1.Japanese 🇯🇵").languages,
+            ["JA"]
+        );
+    }
+}

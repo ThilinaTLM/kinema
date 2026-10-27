@@ -288,6 +288,8 @@ pub struct AppCoordinator {
     pub(crate) fixture_sources: std::collections::HashMap<(IndexerKind, PlaybackTarget), SourceSet>,
     // ── sessions: preparation and launch identity correlation ──
     session_identity: std::collections::HashMap<u64, (String, PlaybackTarget)>,
+    rates: kinema_core::transfer_rate::RateTracker,
+    rate_epoch: std::time::Instant,
     // ── detail: provider-scoped recommendation page ──
     pub(crate) similar: Resource<crate::tmdb::TmdbPage>,
     similar_request: Option<(TmdbQuery, u64)>,
@@ -319,6 +321,8 @@ impl AppCoordinator {
             personal_notice: None,
             // ── sessions ──
             session_identity: Default::default(),
+            rates: Default::default(),
+            rate_epoch: std::time::Instant::now(),
             settings: None,
             tmdb_credential: None,
             credentials: Vec::new(),
@@ -405,6 +409,8 @@ impl AppCoordinator {
             personal_notice: None,
             // ── sessions ──
             session_identity: Default::default(),
+            rates: Default::default(),
+            rate_epoch: std::time::Instant::now(),
             settings: Some(Settings::default()),
             tmdb_credential: None,
             credentials: Vec::new(),
@@ -1010,14 +1016,22 @@ impl AppCoordinator {
             }
             AppOutcome::Usage(usage) => self.usage = Some(usage.clone()),
             AppOutcome::SessionUpdates(updates) => {
+                let now_ms = self.rate_epoch.elapsed().as_millis() as u64;
                 for update in updates {
                     if let Some(row) = self.sessions.iter_mut().find(|s| s.session.id == update.id)
                     {
                         row.origin = update.origin;
                         row.progress = update.progress.clone();
                         row.can_reveal = update.can_reveal;
+                        if let Some(progress) = &update.progress {
+                            self.rates
+                                .observe(&update.id, progress.downloaded_bytes, now_ms);
+                        }
                     }
                 }
+                let sessions = &self.sessions;
+                self.rates
+                    .retain(|id| sessions.iter().any(|s| s.session.id == id));
             }
             AppOutcome::MediaFailed {
                 session_id,
@@ -1393,6 +1407,24 @@ impl AppCoordinator {
         self.quit_requested = true;
         cx.notify();
         false
+    }
+    /// Toolbar summary of held sessions: idle, serving-only or downloading.
+    pub fn transfer_summary(&self) -> kinema_core::transfer_rate::TransferSummary {
+        use kinema_core::transfer_rate::{SessionTally, TransferSummary};
+        TransferSummary::from_sessions(self.sessions.iter().map(|s| {
+            SessionTally {
+                remote: s.origin == crate::media::SessionOrigin::Remote,
+                progress: s
+                    .progress
+                    .as_ref()
+                    .map(|p| (p.downloaded_bytes, p.total_bytes)),
+            }
+        }))
+    }
+    /// Smoothed combined download speed, sampled when telemetry arrives.
+    pub fn transfer_bytes_per_second(&self) -> u64 {
+        self.rates
+            .total_bytes_per_second(self.rate_epoch.elapsed().as_millis() as u64)
     }
     pub fn active_sessions(&self) -> usize {
         self.tracker.active_sessions()
@@ -2172,8 +2204,15 @@ impl AppCoordinator {
         self.fixture.is_some()
     }
 
-    pub fn load_similar(&mut self, id: u64, page: u32, refresh: bool, cx: &mut Context<Self>) {
-        let query = TmdbQuery::Similar { id, page };
+    pub fn load_similar(
+        &mut self,
+        kind: MediaKind,
+        id: u64,
+        page: u32,
+        refresh: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let query = TmdbQuery::Similar { kind, id, page };
         let same = self
             .similar_request
             .as_ref()
@@ -2251,8 +2290,8 @@ impl AppCoordinator {
         let stage = match event.result {
             Ok(MetadataSnapshot::Tmdb(snapshot)) => match snapshot.data {
                 TmdbData::Page(value)
-                    if matches!(query,TmdbQuery::Similar{page,..} if *page==value.page)
-                        && value.titles.iter().all(|t| t.kind == MediaKind::Movie) =>
+                    if matches!(query,TmdbQuery::Similar{kind,page,..} if *page==value.page
+                        && value.titles.iter().all(|t| t.kind == *kind)) =>
                 {
                     if event.saved {
                         Stage::CacheHit {
@@ -2767,14 +2806,18 @@ mod detail_request_tests {
                     total_pages: 2,
                 },
             );
-            c.load_similar(91, 1, false, cx);
+            c.load_similar(MediaKind::Movie, 91, 1, false, cx);
             let old = c.similar.generation();
-            c.load_similar(91, 2, false, cx);
+            c.load_similar(MediaKind::Movie, 91, 2, false, cx);
             let mut event = reply(old, 91, 1);
-            event.action = MetadataAction::Tmdb(TmdbQuery::Similar { id: 91, page: 1 });
+            event.action = MetadataAction::Tmdb(TmdbQuery::Similar {
+                kind: MediaKind::Movie,
+                id: 91,
+                page: 1,
+            });
             assert!(!c.apply_detail_similar(event));
             c.fixture_similar.clear();
-            c.load_similar(91, 2, true, cx);
+            c.load_similar(MediaKind::Movie, 91, 2, true, cx);
             assert_eq!(c.similar.value().map(|p| p.page), Some(2));
             assert!(c.similar.error().is_some());
         });

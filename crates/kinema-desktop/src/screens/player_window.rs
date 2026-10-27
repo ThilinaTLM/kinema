@@ -1475,7 +1475,13 @@ impl PlayerWindow {
         }
         active
     }
-    fn toggle_menu(&mut self, kind: MenuKind, window: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_menu(
+        &mut self,
+        kind: MenuKind,
+        pointer: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let same = self.menu.as_ref().is_some_and(|open| open.kind == kind);
         if let Some(open) = self.menu.take() {
             open.menu.update(cx, |menu, cx| menu.dismiss(window, cx));
@@ -1487,7 +1493,7 @@ impl PlayerWindow {
         if items.is_empty() {
             return;
         }
-        let menu = cx.new(|cx| Menu::new(items, window, cx));
+        let menu = cx.new(|cx| Menu::new(items, window, cx).opened_by_pointer(pointer));
         let dismissed = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.menu = None;
             cx.notify();
@@ -2065,67 +2071,66 @@ impl PlayerWindow {
         // Fixed-width slots: the cluster's intrinsic width collapses under the
         // shared Button's negative focus-ring margins (verified on a capture), so
         // every utility sits in a slot whose width does not depend on measurement.
-        let utilities =
-            div()
-                .relative()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(s::S4)
-                .child(slot(
-                    s::S32,
-                    self.control(CHAPTERS, "player-chapters", IconName::Menu, "Chapters")
-                        .on_click(cx.listener(|view, _, window, cx| {
-                            view.toggle_menu(MenuKind::Chapters, window, cx)
-                        })),
-                ))
-                .child(slot(
-                    s::S48,
-                    self.text_control(
-                        SUBTITLES,
-                        "player-subtitles",
-                        "CC",
-                        "Subtitles",
-                        subtitle_on,
-                    )
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        view.toggle_menu(MenuKind::Subtitles, window, cx)
+        let utilities = div()
+            .relative()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(s::S4)
+            .child(slot(
+                s::S32,
+                self.control(CHAPTERS, "player-chapters", IconName::Menu, "Chapters")
+                    .on_click(cx.listener(|view, event: &ClickEvent, window, cx| {
+                        view.toggle_menu(MenuKind::Chapters, !event.is_keyboard(), window, cx)
                     })),
-                ))
-                .child(slot(
-                    s::S48 + s::S12,
-                    self.text_control(AUDIO, "player-audio", "Audio", "Audio track", false)
-                        .on_click(cx.listener(|view, _, window, cx| {
-                            view.toggle_menu(MenuKind::Audio, window, cx)
-                        })),
-                ))
-                .child(slot(
-                    s::S48 + s::S4,
-                    self.text_control(
-                        SPEED,
-                        "player-speed",
-                        speed_label(self.state.speed),
-                        "Playback speed",
-                        (self.state.speed - 1.).abs() > 0.01,
-                    )
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        view.toggle_menu(MenuKind::Speed, window, cx)
+            ))
+            .child(slot(
+                s::S48,
+                self.text_control(
+                    SUBTITLES,
+                    "player-subtitles",
+                    "CC",
+                    "Subtitles",
+                    subtitle_on,
+                )
+                .on_click(cx.listener(|view, event: &ClickEvent, window, cx| {
+                    view.toggle_menu(MenuKind::Subtitles, !event.is_keyboard(), window, cx)
+                })),
+            ))
+            .child(slot(
+                s::S48 + s::S12,
+                self.text_control(AUDIO, "player-audio", "Audio", "Audio track", false)
+                    .on_click(cx.listener(|view, event: &ClickEvent, window, cx| {
+                        view.toggle_menu(MenuKind::Audio, !event.is_keyboard(), window, cx)
                     })),
-                ))
-                .child(slot(
-                    s::S32,
-                    self.control(
-                        FULLSCREEN,
-                        "player-fullscreen",
-                        if fullscreen {
-                            IconName::ExitFullscreen
-                        } else {
-                            IconName::Fullscreen
-                        },
-                        "Toggle fullscreen (F)",
-                    )
-                    .on_click(|_, window, _| window.toggle_fullscreen()),
-                ));
+            ))
+            .child(slot(
+                s::S48 + s::S4,
+                self.text_control(
+                    SPEED,
+                    "player-speed",
+                    speed_label(self.state.speed),
+                    "Playback speed",
+                    (self.state.speed - 1.).abs() > 0.01,
+                )
+                .on_click(cx.listener(|view, event: &ClickEvent, window, cx| {
+                    view.toggle_menu(MenuKind::Speed, !event.is_keyboard(), window, cx)
+                })),
+            ))
+            .child(slot(
+                s::S32,
+                self.control(
+                    FULLSCREEN,
+                    "player-fullscreen",
+                    if fullscreen {
+                        IconName::ExitFullscreen
+                    } else {
+                        IconName::Fullscreen
+                    },
+                    "Toggle fullscreen (F)",
+                )
+                .on_click(|_, window, _| window.toggle_fullscreen()),
+            ));
         div()
             .absolute()
             .inset_0()

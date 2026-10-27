@@ -10,7 +10,8 @@ remain unverified. Existing GPUI projections do not render
 per-field origins or the full rich domain API. The first-increment section below
 is historical baseline evidence, not a claim that live paths still use v3 tables.
 Automatic refresh timing, retained-entry limits, and offline use of stale results
-remain open. No automatic TTL is adopted.
+remain open. No catalog metadata TTL is adopted; artwork misses have the approved
+24-hour TTL described below.
 
 The atomic v3 → v4 source upgrade preserves old tables without promising all old
 entries are reusable offline: nonempty legacy Cinemeta exact-query searches are
@@ -63,8 +64,9 @@ pass: visible rows in visual order, then two rows below, then two above. Obsolet
 queued prefetch is dropped; already-running work retains its slot.
 
 Decoded posters have a 192 MiB byte budget; backdrops retain 16 MiB, with a shared
-256-entry ceiling (including failures). These constants bound accounted decoded
-pixels, not total process/GPU memory or references held by mounted cards.
+256-entry ceiling (including failures). Episode stills use a separate 64 MiB /
+128-entry allowance and 480×270 thumbnails, so browse posters cannot evict them.
+These constants bound accounted decoded pixels, not total process/GPU memory or references held by mounted cards.
 
 Validated static JPEG/PNG/WebP encoded bytes are also cached under
 `AppPaths.cache/artwork/<sha256-of-exact-url>.img`, independently of managed media,
@@ -72,13 +74,30 @@ with a 256 MiB encoded-file budget. Background workers read/decode and atomicall
 publish via same-directory temporary files; process-local maintenance is serialized.
 Last-use mtime is touched on successful reads and oldest mtimes are evicted first.
 Only owned hash-named regular files are pruned; missing, oversized or corrupt files
-are misses and reacquired. Error responses/invalid images are never persisted.
+are misses and reacquired. Error response bodies/invalid image bytes are never persisted.
 Disk failures degrade to network use; eviction is best effort on unwritable/locked
 files, not a reservation guarantee across multiple processes. Crash-left temporary
 files are not counted or automatically removed. Encoded responses remain limited
 to 4 MiB and images to 8 megapixels/8192 pixels per edge before thumbnail decoding.
-No TTL or automatic artwork refresh is introduced: a changed URL changes the key;
-cache loss is recoverable, not guaranteed offline storage. No URLs are logged by
+Definitive misses (HTTP 404/410 or invalid/undecodable images) persist as tiny
+`<sha256>.miss` timestamp markers for **24 hours** (at most 4096 markers after
+maintenance, sharing the disk byte budget). Within that TTL workers skip
+transport and views resolve the fallback chain; expired markers are removed and
+retried on demand. Transient transport failures (including 5xx, offline and DNS)
+remain memory-only until a route/refresh boundary. No-URL artwork makes no request.
+Explicit detail Refresh clears persisted misses associated with that title,
+including previously visited seasons and earlier mounts/app sessions. Markers
+retain only hashed title associations alongside their timestamp. Workers perform marker I/O;
+route changes do not remove persisted misses. Memory hits render synchronously;
+episode loading shimmers wait 150 ms to avoid a flash on typical disk hits.
+TMDB series-detail cache identities include a season-artwork revision: older
+normalized records that omitted season summary artwork refresh once; a successful
+response with explicit null artwork remains complete.
+The fallback policy is primary → landscape (series backdrop when no season
+backdrop exists) → season poster for episodes, and season poster → series poster
+for tiles. Pending primary work remains Loading, not a promoted fallback.
+No catalog metadata TTL or automatic positive-artwork refresh is introduced:
+a changed URL changes the key; cache loss is recoverable, not guaranteed offline storage. No URLs are logged by
 artwork timing events (`tracing::debug` fetch/decode milliseconds).
 
 Reproduce the opt-in 30-poster network/decode comparison with

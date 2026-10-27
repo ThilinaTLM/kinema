@@ -290,7 +290,9 @@ impl RenderOnce for ToolbarChip {
                     .pr(if self.chevron { space::S6 } else { space::S12 })
             })
             .cursor_pointer()
-            .when(self.open, |el| el.bg(hover).border_color(p.line_control))
+            // Open keeps the shared glass edge: only the fill changes, so an open
+            // chip reads like a pressed header control, not a brighter outline.
+            .when(self.open, |el| el.bg(hover))
             .when(!self.open, |el| el.hover(move |s| s.bg(hover)))
             .when(active && !self.open, |el| el.border_color(p.accent_tint))
             .child(Icon::new(self.icon).color(ink))
@@ -331,5 +333,178 @@ impl RenderOnce for ToolbarChip {
                     .color(p.text_secondary),
                 )
             })
+    }
+}
+
+/// Below this window width the downloading button drops its detail text and
+/// keeps only the speed and the combined progress bar.
+pub const TRANSFER_DETAIL_MIN_WIDTH: Pixels = px(1100.);
+
+/// Decimal speed, e.g. `12.4 MB/s`.
+pub fn format_rate(bytes_per_second: u64) -> String {
+    const UNITS: [&str; 4] = ["B/s", "KB/s", "MB/s", "GB/s"];
+    let mut value = bytes_per_second as f64;
+    let mut unit = 0;
+    while value >= 1000. && unit < UNITS.len() - 1 {
+        value /= 1000.;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes_per_second} B/s")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// `1.4 / 4.2 GiB`: both numbers in the unit of the total.
+pub fn format_progress_pair(done: u64, total: u64) -> String {
+    const UNITS: [(&str, f64); 4] = [
+        ("GiB", 1_073_741_824.),
+        ("MiB", 1_048_576.),
+        ("KiB", 1024.),
+        ("B", 1.),
+    ];
+    let (name, size) = UNITS
+        .iter()
+        .copied()
+        .find(|(_, size)| total as f64 >= *size)
+        .unwrap_or(UNITS[3]);
+    if size == 1. {
+        format!("{done} / {total} B")
+    } else {
+        format!(
+            "{:.1} / {:.1} {name}",
+            done as f64 / size,
+            total as f64 / size
+        )
+    }
+}
+
+/// Face of the Transfers popover trigger: idle, serving-only or downloading.
+/// Never claims playback; it reports only held sessions and bytes moved.
+#[derive(IntoElement)]
+pub struct TransferStatus {
+    summary: kinema_core::transfer_rate::TransferSummary,
+    bytes_per_second: u64,
+    compact: bool,
+}
+impl TransferStatus {
+    pub fn new(
+        summary: kinema_core::transfer_rate::TransferSummary,
+        bytes_per_second: u64,
+        compact: bool,
+    ) -> Self {
+        Self {
+            summary,
+            bytes_per_second,
+            compact,
+        }
+    }
+    /// Accessible name and tooltip text.
+    pub fn description(&self) -> String {
+        use kinema_core::transfer_rate::TransferSummary as S;
+        match self.summary {
+            S::Idle => "Transfers: none".into(),
+            S::Serving { count } => format!("Transfers: {count} serving"),
+            S::Downloading {
+                active,
+                downloaded,
+                total,
+            } => format!(
+                "Transfers: {} at {}, {active} active, {}",
+                self.summary
+                    .fraction()
+                    .map(|f| format!("{:.0}%", f * 100.))
+                    .unwrap_or_default(),
+                format_rate(self.bytes_per_second),
+                format_progress_pair(downloaded, total)
+            ),
+        }
+    }
+}
+impl RenderOnce for TransferStatus {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        use kinema_core::transfer_rate::TransferSummary as S;
+        let p = *palette(cx);
+        let (_, hover, _) = glass(&p);
+        let description = self.description();
+        let mut face = div()
+            .id("transfers-status")
+            .relative()
+            .h(space::ICON_TARGET)
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .pl(space::S8)
+            .pr(space::S12)
+            .rounded(radius::SM)
+            .cursor_pointer()
+            .text_color(p.text_secondary)
+            .type_style(typeface::SMALL)
+            .whitespace_nowrap()
+            .hover(move |s| s.bg(hover))
+            .aria_label(SharedString::from(description.clone()))
+            .tooltip(super::tooltip::tooltip(description))
+            .child(Icon::new(IconName::Transfers).color(p.text_secondary));
+        match self.summary {
+            S::Idle => face = face.child("No transfers"),
+            S::Serving { count } => face = face.child(format!("{count} serving")),
+            S::Downloading {
+                active,
+                downloaded,
+                total,
+            } => {
+                face = face.child(
+                    div()
+                        .type_style(typeface::MONO)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(p.text_primary)
+                        .child(format_rate(self.bytes_per_second)),
+                );
+                if !self.compact {
+                    face = face.child(format!(
+                        "{active} active · {}",
+                        format_progress_pair(downloaded, total)
+                    ));
+                }
+                let fraction = self.summary.fraction().unwrap_or(0.);
+                face = face.child(
+                    div()
+                        .absolute()
+                        .left(space::S8)
+                        .right(space::S12)
+                        .bottom(px(3.))
+                        .h(px(2.))
+                        .rounded(px(1.))
+                        .bg(p.line_subtle)
+                        .overflow_hidden()
+                        .child(div().h_full().w(relative(fraction)).bg(p.accent)),
+                );
+            }
+        }
+        face
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn rate_uses_decimal_units() {
+        assert_eq!(format_rate(0), "0 B/s");
+        assert_eq!(format_rate(950), "950 B/s");
+        assert_eq!(format_rate(12_400_000), "12.4 MB/s");
+        assert_eq!(format_rate(1_500), "1.5 KB/s");
+    }
+    #[::core::prelude::v1::test]
+    fn progress_pair_shares_the_totals_unit() {
+        assert_eq!(
+            format_progress_pair(1_503_238_554, 4_509_715_661),
+            "1.4 / 4.2 GiB"
+        );
+        assert_eq!(format_progress_pair(512, 2048), "0.5 / 2.0 KiB");
+        assert_eq!(format_progress_pair(3, 10), "3 / 10 B");
     }
 }

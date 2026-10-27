@@ -188,3 +188,27 @@ pub(super) fn resolve(
     }
     Err(DebridError::PendingTimeout)
 }
+
+/// RD permits up to 5000 entries per listing request. Never add a magnet.
+pub(super) fn account_torrents(
+    client: &DebridClient,
+    cancel: &AtomicBool,
+) -> Result<std::collections::HashSet<kinema_core::sources::InfoHash>, DebridError> {
+    let mut url = http::endpoint(&client.base, &["torrents"])?;
+    url.query_pairs_mut()
+        .extend_pairs([("limit", "5000"), ("page", "1")]);
+    let value = http::json(
+        client.client.get(url).bearer_auth(client.secret.expose()),
+        cancel,
+    )?;
+    let rows = value.as_array().ok_or(DebridError::Malformed)?;
+    if rows.len() > 5000 {
+        return Err(DebridError::TooLarge);
+    }
+    rows.iter()
+        .map(|row| {
+            kinema_core::sources::InfoHash::new(http::text(row, "hash")?)
+                .map_err(|_| DebridError::Malformed)
+        })
+        .collect()
+}

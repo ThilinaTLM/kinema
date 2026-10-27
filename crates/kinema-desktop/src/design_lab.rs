@@ -1763,7 +1763,7 @@ impl Lab {
                 Some(IconName::Key),
                 "TMDB needs an API token.",
                 "Add a token in Settings → Accounts.",
-                "Open Settings…",
+                "Open Settings",
             ),
             (
                 "Secure storage failure",

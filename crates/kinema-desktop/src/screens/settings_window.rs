@@ -763,7 +763,7 @@ impl SettingsWindow {
                         Button::new(
                             ("credential-edit", account as usize),
                             if status == AccountStatus::Missing {
-                                "Add…"
+                                "Add"
                             } else {
                                 "Replace"
                             },

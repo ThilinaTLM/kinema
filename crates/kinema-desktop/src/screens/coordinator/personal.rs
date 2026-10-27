@@ -68,6 +68,10 @@ pub(super) struct PersonalStore {
     revision: u64,
     title_states: HashMap<String, PersonalLoad<PersonalTitle>>,
     episode_states: HashMap<String, PersonalLoad<PersonalEpisode>>,
+    /// Coordinate reads whose episode has no stored row. A row-less episode cannot
+    /// have been marked watched, so progress may count it unwatched (the state
+    /// itself stays `Failed`: it is still not a writable toggle).
+    episode_unmapped: std::collections::HashSet<String>,
     canonical: HashMap<String, TitleId>,
     episode_canonical: HashMap<String, kinema_core::library::EpisodeId>,
     pending: HashMap<String, u64>,
@@ -368,6 +372,12 @@ impl AppCoordinator {
                     .is_some_and(|k| self.personal_state.pending.contains_key(k)),
         }
     }
+    /// The read found no stored row for these coordinates (not a read failure).
+    pub(crate) fn episode_has_no_row(&self, episode: &EpisodeRef) -> bool {
+        self.personal_state
+            .episode_unmapped
+            .contains(&episode_key(episode))
+    }
     pub(crate) fn episode_personal(&self, episode: &EpisodeRef) -> EpisodePersonalView {
         let key = episode_key(episode);
         EpisodePersonalView {
@@ -503,6 +513,7 @@ impl AppCoordinator {
         for chunk in episodes.chunks(500) {
             for reference in chunk {
                 let key = episode_key(reference);
+                self.personal_state.episode_unmapped.remove(&key);
                 if !matches!(
                     self.personal_state.episode_states.get(&key),
                     Some(PersonalLoad::Ready(_))
@@ -1144,6 +1155,17 @@ impl AppCoordinator {
                                         self.personal_state.put_episode(state);
                                     }
                                     Err(error) => {
+                                        if matches!(
+                                            (&error, reference),
+                                            (
+                                                crate::catalog::CatalogError::MissingIdentityMapping,
+                                                EpisodeRef::Coordinates { .. }
+                                            )
+                                        ) {
+                                            self.personal_state
+                                                .episode_unmapped
+                                                .insert(episode_key(reference));
+                                        }
                                         self.personal_state.episode_states.insert(
                                             episode_key(reference),
                                             PersonalLoad::Failed(crate::catalog::diagnostic_error(

@@ -1,17 +1,16 @@
 //! Virtualized poster browse with stable loaded cards and static loading rows,
-//! over a cinematic backdrop that follows the hovered or keyboard-selected title.
+//! over a fixed brand wash.
 pub(crate) mod filters;
 mod layout;
 pub(crate) mod library;
 use super::coordinator::{AppCoordinator, BrowseTitle, PersonalLoad, PersonalView};
 pub(crate) use crate::widgets::patterns::menu_item;
 use crate::{
-    artwork::{self, ArtworkKey, ArtworkKind, ArtworkState},
+    artwork::{self, ArtworkState},
     widgets::{
         button::Button,
         icon::IconName,
         menu::MenuItem,
-        motion::{self, Motion},
         notice::{Notice, NoticeKind},
         patterns::{StateView, ViewState},
         poster_card::{CardOpened, MembershipRequested, MembershipRetry, PosterCard},
@@ -25,14 +24,7 @@ use kinema_core::{MediaKind, discover::DiscoverFilters};
 use layout::LoadingLayout;
 pub(crate) use library::{LibraryFilters, Scope};
 use library::{ScopeContext, membership_status, movie_watched, refocus};
-use std::{cmp::Ordering, rc::Rc, sync::Arc, time::Duration};
-
-/// Hover changes shorter than this never reach the artwork pipeline.
-const BACKDROP_DEBOUNCE: Duration = Duration::from_millis(150);
-/// Light canvas shows the (dark) backdrop only as a faint wash.
-const BACKDROP_LIGHT_OPACITY: f32 = 0.22;
-/// Share of the height, from the bottom, that fades into the canvas.
-const BACKDROP_FADE_HEIGHT: f32 = 0.7;
+use std::{cmp::Ordering, rc::Rc};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Sort {
@@ -68,6 +60,13 @@ pub(crate) fn columns(width: f32, preferred: f32) -> (usize, f32) {
         count,
         ((available - (count - 1) as f32 * gap) / count as f32).max(1.),
     )
+}
+/// Peak alpha of the (amber, violet) corner glows. Not artwork-derived.
+fn brand_wash_alphas(mode: Mode) -> (f32, f32) {
+    match mode {
+        Mode::Dark => (0.16, 0.10),
+        Mode::Light => (0.08, 0.05),
+    }
 }
 fn navigate(
     current: Option<usize>,
@@ -121,34 +120,6 @@ fn navigate(
         _ => return None,
     })
 }
-/// Which title drives the backdrop: the settled hover/selection if it is still
-/// loaded, else the first title of the viewport. `None` for an empty grid.
-fn backdrop_index(hinted: Option<usize>, first_visible: usize, count: usize) -> Option<usize> {
-    (count > 0).then(|| {
-        hinted
-            .filter(|i| *i < count)
-            .unwrap_or(first_visible.min(count - 1))
-    })
-}
-
-/// Crossfade bookkeeping for the backdrop image, kept across renders.
-#[derive(Default)]
-struct BackdropLayers {
-    current: Option<Arc<RenderImage>>,
-    previous: Option<Arc<RenderImage>>,
-}
-impl BackdropLayers {
-    fn show(&mut self, image: Arc<RenderImage>) {
-        if self
-            .current
-            .as_ref()
-            .is_none_or(|current| !Arc::ptr_eq(current, &image))
-        {
-            self.previous = self.current.replace(image);
-        }
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct OpenTitle(pub BrowseTitle);
 impl EventEmitter<OpenTitle> for Browse {}
@@ -224,11 +195,6 @@ pub(crate) struct Browse {
     /// Row to scroll to once the restored scope has cards again.
     pending_scroll: Option<usize>,
     artwork_generation: u64,
-    /// Settled title (by key) the backdrop follows; set after `BACKDROP_DEBOUNCE`.
-    backdrop_title: Option<String>,
-    pending_backdrop: Option<String>,
-    backdrop_task: Option<Task<()>>,
-    backdrop: BackdropLayers,
     _observation: Subscription,
 }
 impl Browse {
@@ -254,131 +220,30 @@ impl Browse {
             library: LibraryFilters::default(),
             pending_scroll: None,
             artwork_generation: artwork::begin_generation("v3-browse", cx),
-            backdrop_title: None,
-            pending_backdrop: None,
-            backdrop_task: None,
-            backdrop: BackdropLayers::default(),
             _observation: observation,
         }
     }
-    /// Debounced: the backdrop follows the pointer or keyboard only once it rests.
-    fn point_at(&mut self, key: String, cx: &mut Context<Self>) {
-        if self.backdrop_title.as_ref() == Some(&key) {
-            self.pending_backdrop = None;
-            self.backdrop_task = None;
-            return;
-        }
-        if self.pending_backdrop.as_ref() == Some(&key) {
-            return;
-        }
-        self.pending_backdrop = Some(key);
-        self.backdrop_task = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(BACKDROP_DEBOUNCE).await;
-            let _ = this.update(cx, |this, cx| {
-                this.backdrop_title = this.pending_backdrop.take();
-                this.backdrop_task = None;
-                cx.notify();
-            });
-        }));
-    }
-    fn reset_backdrop(&mut self) {
-        self.backdrop_title = None;
-        self.pending_backdrop = None;
-        self.backdrop_task = None;
-        self.backdrop = BackdropLayers::default();
-    }
-    /// Resolve the backdrop image for the target title. Requests carry the
-    /// owner generation and are deduplicated by the artwork store.
-    fn update_backdrop(&mut self, cols: usize, cx: &mut Context<Self>) {
-        let hinted = self
-            .backdrop_title
-            .as_ref()
-            .and_then(|key| self.cells.iter().position(|c| c.title.key() == *key));
-        let first = self.scroll.0.borrow().base_handle.logical_scroll_top().0 * cols;
-        let Some(index) = backdrop_index(hinted, first, self.cells.len()) else {
-            return;
-        };
-        #[cfg(feature = "ui-probe")]
-        if let Some(image) = self
-            .coordinator
-            .read(cx)
-            .fixture_art
-            .get(&self.cells[index].title.key())
-            .cloned()
-        {
-            self.backdrop.show(image);
-            return;
-        }
-        let Some(key) = self.cells[index]
-            .title
-            .poster_url()
-            .and_then(|url| ArtworkKey::new(ArtworkKind::Poster, url))
-        else {
-            return;
-        };
-        // Loading and failed keep the previous image: no flash to empty.
-        if let ArtworkState::Ready(image) =
-            artwork::backdrop_or_request("v3-browse", self.artwork_generation, &key, cx)
-        {
-            self.backdrop.show(image);
-        }
-    }
-    fn backdrop_layer(&self, cx: &App) -> impl IntoElement {
+    /// Fixed brand wash over the canvas: identical for Discover and Library and
+    /// never derived from artwork. GPUI has no radial gradient, so each glow is a
+    /// diagonal linear fade anchored in its corner.
+    fn brand_wash(&self, cx: &App) -> impl IntoElement {
         let p = *tokens::palette(cx);
-        let light = theme(cx).mode == Mode::Light;
-        let fade = motion::duration(Motion::Crossfade, cx);
-        let image = |image: &Arc<RenderImage>| {
-            div()
-                .absolute()
-                .inset_0()
-                .when(light, |el| el.opacity(BACKDROP_LIGHT_OPACITY))
-                .child(img(image.clone()).object_fit(ObjectFit::Cover).size_full())
+        let (amber, violet) = brand_wash_alphas(theme(cx).mode);
+        let violet_hue = hsla(274. / 360., 0.40, 0.46, 1.);
+        let glow = |angle: f32, color: Hsla, alpha: f32, reach: f32| {
+            div().absolute().inset_0().bg(linear_gradient(
+                angle,
+                linear_color_stop(color.opacity(alpha), 0.),
+                linear_color_stop(color.opacity(0.), reach),
+            ))
         };
-        let current = self.backdrop.current.as_ref().map(|current| {
-            let layer = image(current);
-            if fade.is_zero() {
-                layer.into_any_element()
-            } else {
-                // Keyed by the image so each new backdrop restarts the fade-in.
-                let key = Arc::as_ptr(current) as *const () as usize;
-                layer
-                    .with_animation(
-                        ("browse-backdrop", key),
-                        Animation::new(fade).with_easing(motion::ease_out_cubic),
-                        |el, t| el.opacity(t),
-                    )
-                    .into_any_element()
-            }
-        });
-        let previous = self
-            .backdrop
-            .previous
-            .as_ref()
-            .filter(|_| !fade.is_zero())
-            .map(image);
         div()
             .absolute()
             .inset_0()
             .overflow_hidden()
             .bg(p.bg_canvas)
-            .children(previous)
-            .children(current)
-            .when(!light && self.backdrop.current.is_some(), |el| {
-                el.child(div().absolute().inset_0().bg(p.backdrop_scrim))
-            })
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .h(relative(BACKDROP_FADE_HEIGHT))
-                    .bg(linear_gradient(
-                        180.,
-                        linear_color_stop(p.bg_canvas.opacity(0.), 0.),
-                        linear_color_stop(p.bg_canvas, 1.),
-                    )),
-            )
+            .child(glow(135., p.accent, amber, 0.62))
+            .child(glow(315., violet_hue, violet, 0.62))
     }
     #[cfg(all(test, feature = "ui-probe-test"))]
     pub(crate) fn card_keys(&self) -> Vec<String> {
@@ -451,7 +316,6 @@ impl Browse {
         // Cards belong to one scope; the other's list is rebuilt from its source.
         self.cells.clear();
         self.subject = self.current_subject(cx);
-        self.reset_backdrop();
         self.last_visible.clear();
         self.page_request_generation = None;
         if reload && scope == Scope::Library {
@@ -555,7 +419,6 @@ impl Browse {
             self.pending_scroll = None;
             self.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
             self.artwork_generation = artwork::begin_generation("v3-browse", cx);
-            self.reset_backdrop();
             self.last_visible.clear();
         }
 
@@ -890,7 +753,6 @@ impl Render for Browse {
             )
         };
         let filtered = library && self.library.is_filtered(&query);
-        self.update_backdrop(cols, cx);
         let is_list = !(count == 0 && !busy);
         let stale = !self.cells.is_empty() && error.is_some();
         // A stale strip sits directly under the header and pushes the grid down.
@@ -1055,7 +917,6 @@ impl Render for Browse {
                             });
                         });
                     }
-                    let weak = cx.entity().downgrade();
                     range
                         .map(|row| {
                             let mut cards = Vec::new();
@@ -1090,21 +951,12 @@ impl Render for Browse {
                                     card.width = width;
                                     card.set_art(image);
                                 });
-                                let key = cell.title.key();
-                                let weak = weak.clone();
                                 cards.push(
                                     div()
                                         .id(("poster-cell", index))
                                         .flex_none()
                                         .w(px(width))
                                         .child(cell.card.clone())
-                                        .on_hover(move |hovered, _, cx| {
-                                            if *hovered {
-                                                let _ = weak.update(cx, |this, cx| {
-                                                    this.point_at(key.clone(), cx)
-                                                });
-                                            }
-                                        })
                                         .into_any_element(),
                                 );
                             }
@@ -1160,7 +1012,7 @@ impl Render for Browse {
             .bg(p.bg_canvas)
             .text_color(p.text_primary)
             .type_style(t::BODY)
-            .child(self.backdrop_layer(cx))
+            .child(self.brand_wash(cx))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let current = this
                     .cells
@@ -1198,7 +1050,6 @@ impl Render for Browse {
                 ) {
                     let key = this.cells[i].title.key();
                     this.selected = Some(key.clone());
-                    this.point_at(key, cx);
                     this.scroll.scroll_to_item(i / cols, ScrollStrategy::Top);
                     this.cells[i]
                         .card
@@ -1248,12 +1099,11 @@ mod tests {
         assert_eq!(columns(100., 172.).0, 2);
     }
     #[::core::prelude::v1::test]
-    fn backdrop_defaults_to_first_visible_and_survives_stale_hints() {
-        assert_eq!(backdrop_index(None, 6, 20), Some(6));
-        assert_eq!(backdrop_index(Some(3), 6, 20), Some(3));
-        assert_eq!(backdrop_index(Some(30), 6, 20), Some(6));
-        assert_eq!(backdrop_index(None, 40, 20), Some(19));
-        assert_eq!(backdrop_index(Some(0), 0, 0), None);
+    fn brand_wash_is_faint_and_dimmer_in_light() {
+        let (dark_amber, dark_violet) = brand_wash_alphas(Mode::Dark);
+        let (light_amber, light_violet) = brand_wash_alphas(Mode::Light);
+        assert_eq!((dark_amber, dark_violet), (0.16, 0.10));
+        assert!(light_amber < dark_amber && light_violet < dark_violet);
     }
     #[::core::prelude::v1::test]
     fn sort_labels_are_user_facing() {

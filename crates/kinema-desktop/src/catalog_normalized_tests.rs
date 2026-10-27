@@ -597,8 +597,22 @@ fn similar_pages_are_isolated_from_browse_and_other_titles() -> TestResult {
     let dir = tempfile::tempdir()?;
     let mut service = CatalogService::open(&dir.path().join("catalog"))?;
     for (query, id) in [
-        (TmdbQuery::Similar { id: 91, page: 1 }, 201),
-        (TmdbQuery::Similar { id: 92, page: 1 }, 202),
+        (
+            TmdbQuery::Similar {
+                kind: MediaKind::Movie,
+                id: 91,
+                page: 1,
+            },
+            201,
+        ),
+        (
+            TmdbQuery::Similar {
+                kind: MediaKind::Movie,
+                id: 92,
+                page: 1,
+            },
+            202,
+        ),
         (
             TmdbQuery::Browse {
                 kind: MediaKind::Movie,
@@ -626,8 +640,22 @@ fn similar_pages_are_isolated_from_browse_and_other_titles() -> TestResult {
         tx.commit()?;
     }
     for (query, id) in [
-        (TmdbQuery::Similar { id: 91, page: 1 }, 201),
-        (TmdbQuery::Similar { id: 92, page: 1 }, 202),
+        (
+            TmdbQuery::Similar {
+                kind: MediaKind::Movie,
+                id: 91,
+                page: 1,
+            },
+            201,
+        ),
+        (
+            TmdbQuery::Similar {
+                kind: MediaKind::Movie,
+                id: 92,
+                page: 1,
+            },
+            202,
+        ),
         (
             TmdbQuery::Browse {
                 kind: MediaKind::Movie,

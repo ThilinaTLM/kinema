@@ -14,6 +14,8 @@ Pinned sources (downloaded 2026-10-18):
   SVG strokes use `stroke-width="1.5"` instead of upstream `2` for desktop-v3 §2.4.
   `star-filled.svg` is derived from the same pinned `star.svg`, with
   `fill="currentColor"` instead of `none`; its stroke remains `currentColor`.
+  `bookmark-filled.svg` is derived from the pinned `bookmark.svg` with
+  `fill="currentColor"` instead of `none`.
   `circle.svg` and `circle-dot.svg` come from the same pinned release.
   Player transport additions (`pause`, `volume-2`, `volume-x`, `maximize`,
   `minimize`, `rotate-ccw`, `rotate-cw`, `minus`, `plus`) were downloaded from
@@ -90,6 +92,7 @@ b5a82d987232ad1e5c3038fe38850ec6aa8c7253b7dc2e4be35ac51b61605a3b  icons/rotate-c
 df00c597bf626a049ba7a723a42183750db898acf11227bd51021aa384c2d9dd  icons/minus.svg
 92b529bf61fc7ab386be035194d3180dbc97320dfa766283989ec43bc5afc4e7  icons/plus.svg
 e9bb03148fe72a5b7eaa8b03221b0993487034ecfebc6635abdd8f0485b66cf3  icons/bookmark.svg
+5021def5a27a115b7a7f6386f2891572206dd8296b3be5b42efce3ac9c01c0b6  icons/bookmark-filled.svg
 a03dd3d1082ccb12ada187ed7c10a602f1d11e49c831fd341187d81d0b2d75ff  icons/bookmark-off.svg
 b1b8b00316f2abf2fbac51a78cddd001603ea561524524c3d4efb412b0973c2c  icons/circle-check.svg
 ```

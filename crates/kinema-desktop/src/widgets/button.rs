@@ -44,7 +44,29 @@ pub struct Button {
     pub(crate) aria_toggled: Option<bool>,
     pub(crate) over_art: bool,
     pub(crate) tooltip: Option<SharedString>,
+    /// Accent "on" state (tinted fill, accent edge and ink); ignored when disabled.
+    pub(crate) on: bool,
+    /// Custom leading glyph (e.g. a watch mark) drawn instead of `icon`.
+    pub(crate) glyph: Option<AnyElement>,
+    /// Muted trailing text after the label (e.g. a count).
+    pub(crate) sub: Option<SharedString>,
+    /// Secondary ink instead of primary (utility icon buttons).
+    pub(crate) quiet: bool,
+    /// Report `Toggled::Mixed` when `aria_toggled` is `Some(false)`.
+    pub(crate) aria_mixed: bool,
+    /// Accessible name overriding tooltip and label (e.g. when a tooltip carries a reason).
+    pub(crate) aria_name: Option<SharedString>,
 }
+
+/// Colours of the accent "on" state: `(rest, hover, ink, border)`.
+pub(crate) fn on_colors(p: &Palette) -> (Hsla, Hsla, Hsla, Hsla) {
+    let hover = Hsla {
+        a: (p.accent_tint.a * 1.4).min(1.0),
+        ..p.accent_tint
+    };
+    (p.accent_tint, hover, p.accent_text, p.accent.opacity(0.35))
+}
+
 impl Button {
     pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Self {
         Self {
@@ -63,6 +85,12 @@ impl Button {
             aria_toggled: None,
             over_art: false,
             tooltip: None,
+            on: false,
+            glyph: None,
+            sub: None,
+            quiet: false,
+            aria_mixed: false,
+            aria_name: None,
         }
     }
     pub fn variant(mut self, variant: ButtonVariant) -> Self {
@@ -195,6 +223,14 @@ impl RenderOnce for Button {
                 p.status_error.opacity(0.4),
             ),
         };
+        let (rest, hover, ink, border) = if self.on && !self.disabled {
+            let (rest, hover, ink, border) = on_colors(&p);
+            (rest, hover, ink, border)
+        } else if self.quiet && self.variant == ButtonVariant::Secondary {
+            (rest, hover, p.text_secondary, border)
+        } else {
+            (rest, hover, ink, border)
+        };
         let (rest, ink, border) = if self.disabled {
             disabled_colors(self.variant, &p)
         } else {
@@ -211,7 +247,11 @@ impl RenderOnce for Button {
             .flex()
             .items_center()
             .justify_center()
-            .gap(space::S6)
+            .gap(if self.glyph.is_some() {
+                space::S8
+            } else {
+                space::S6
+            })
             .h(match self.size {
                 ButtonSize::Compact => space::CONTROL_HEIGHT,
                 ButtonSize::Large => space::CONTROL_HEIGHT_LARGE,
@@ -233,7 +273,16 @@ impl RenderOnce for Button {
                 el.group_active("button", move |s| s.bg(pressed))
             })
             .when_some(self.icon, |el, icon| el.child(Icon::new(icon).color(ink)))
+            .children(self.glyph)
             .when(!self.square, |el| el.child(self.label.clone()))
+            .when_some(self.sub.clone().filter(|_| !self.square), |el, sub| {
+                el.child(
+                    div()
+                        .type_style(typeface::SMALL)
+                        .text_color(if self.on { ink } else { p.text_muted })
+                        .child(sub),
+                )
+            })
             .when_some(self.badge, |el, count| {
                 el.child(
                     div()
@@ -282,9 +331,18 @@ impl RenderOnce for Button {
             // Ring follows the host radius: face radius + gap + ring width.
             .rounded(radius::SM + space::S4)
             .role(Role::Button)
-            .aria_label(self.tooltip.clone().unwrap_or(self.label.clone()))
+            .aria_label(
+                self.aria_name
+                    .clone()
+                    .or_else(|| self.tooltip.clone())
+                    .unwrap_or(self.label.clone()),
+            )
             .when_some(self.aria_toggled, |el, on| {
-                el.aria_toggled(if on { Toggled::True } else { Toggled::False })
+                el.aria_toggled(match (on, self.aria_mixed) {
+                    (true, _) => Toggled::True,
+                    (false, true) => Toggled::Mixed,
+                    (false, false) => Toggled::False,
+                })
             })
             .when(!blocked, |el| {
                 el.focusable()
