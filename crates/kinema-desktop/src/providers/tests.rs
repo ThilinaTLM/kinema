@@ -28,6 +28,10 @@ pub(crate) fn fixture(
                     Err(_) => panic!("fixture accept failed"),
                 }
             };
+            // Accepted sockets may inherit nonblocking mode on macOS.
+            stream
+                .set_nonblocking(false)
+                .unwrap_or_else(|e| panic!("blocking fixture socket: {e}"));
             assert!(
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))

@@ -15,6 +15,10 @@ Use `Config.library_path`, then `MPV_LIBRARY_PATH` (a full library filename), or
 normal OS loader discovery: `libmpv.so.2`/`libmpv.so`,
 `libmpv.2.dylib`/`libmpv.dylib`, or `mpv-2.dll`/`libmpv-2.dll`.
 Typical Linux package: `libmpv2`; typical macOS installation: Homebrew `mpv`.
+Default macOS discovery also checks `/opt/homebrew/lib` and `/usr/local/lib`.
+Windows lookup checks the executable/system directories and absolute `PATH`
+entries without enabling working-directory DLL search. An explicitly selected
+DLL resolves companion dependencies from its own directory.
 Nothing is downloaded or bundled automatically. Loading a library executes native
 code; do not accept untrusted library paths.
 
@@ -36,9 +40,10 @@ the default GPU-surface loader requires trusted architecture-matching ANGLE
 for default `cargo run`, `target/debug/deps/` for test executables). ANGLE must
 support the required device-creation/query and D3D texture extensions and retain
 the supplied D3D11-on-12 device; an arbitrary ANGLE build is not sufficient.
-Nothing downloads or bundles these DLLs automatically. `Config.egl_library_path`
-and `Config.gles_library_path` apply only to the older readback EGL path, not
-the default GPU-surface loader. See the [precise Windows requirements and open
+Nothing downloads or bundles these DLLs automatically. Backend consumers may
+set `Config.egl_library_path` and `Config.gles_library_path` to trusted library
+filenames instead; these overrides apply to both GPU-surface and readback EGL.
+The desktop default still uses executable-adjacent ANGLE. See the [precise Windows requirements and open
 qualification checks](../../docs/validation/cross-platform.md#default-windows-gpu-surface-prerequisites).
 Inspect diagnostics rather than assuming hardware decoding or zero-copy.
 

@@ -11,6 +11,22 @@ and Windows 2025 for workspace compilation via Clippy, tests and GPUI fixture ch
 is configured coverage, **not evidence that those jobs executed or passed**.
 Build prerequisites are in [development](../development.md#native-prerequisites).
 
+## Native libmpv CI smoke
+
+Each native job installs libmpv and FFmpeg and runs this exact, otherwise ignored
+test in isolation (with the default `gpu-surface` feature still compiled):
+
+```sh
+cargo test -p kinema-mpv --locked mpv::player::tests::real_mpv_render_and_teardown -- --ignored --exact --nocapture --test-threads=1
+```
+
+It generates synthetic local video and exercises native library loading, decoding,
+CPU-rendered RGBA frames, controls and teardown. Windows playback dependencies are
+version-pinned and SHA-256 verified; they are test inputs, not application bundling.
+This test does **not** exercise the default GPU surface, hardware decoding or HDR.
+Only actual successful CI runs establish this limited native runtime evidence.
+
+
 Additional checks executed locally on 2026-10-28:
 `cargo check -p kinema-mpv --all-targets --target x86_64-pc-windows-msvc --locked`
 and the same command with `--target aarch64-apple-darwin` both **passed**.
@@ -68,6 +84,7 @@ libmpv/ANGLE versions and provenance, exact command, observed result and remaini
 limits. Do not treat a skipped/ignored test or an unavailable service as a pass.
 
 - **Native GUI:** launch the default root build in a real graphical session;
+  also test launch outside the repository and from read-only install directories;
   inspect rendering, keyboard focus, resize/DPI, light/dark, main/player window
   lifecycle and teardown. Fixture tests are not native pixel acceptance.
 - **Secure storage:** with a disposable test account, verify save/read/restart/
@@ -82,6 +99,9 @@ limits. Do not treat a skipped/ignored test or an unavailable service as a pass.
   unsupported metadata fail actionably. Older readback tests do not qualify
   surface presentation. Test external mpv and VLC launch/arguments, including
   paths with spaces and missing executables. Live-provider acceptance is separate.
+- **Media storage:** verify loopback-streamed media, interruption/recovery and
+  cache cleanup while readers are active. Managed cleanup must never delete
+  original source files.
 - **Settings durability:** `settings.rs::sync_parent` performs directory
   `sync_all()` on Unix but is a successful no-op on non-Unix (including Windows).
   Do not claim Windows crash-durable settings replacement; native durability

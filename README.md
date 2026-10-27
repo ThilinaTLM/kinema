@@ -1,5 +1,7 @@
 # Kinema
 
+[![Rust CI](https://github.com/ThilinaTLM/kinema/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ThilinaTLM/kinema/actions/workflows/ci.yml)
+
 A pre-1.0 Rust desktop application using direct GPUI (`gpui-pre =0.3.9`) and
 `gpui_platform`, targeting Windows, macOS, and Linux. The Rust workspace is the
 sole implementation; it has no Qt/KDE application dependencies.

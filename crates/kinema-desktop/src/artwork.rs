@@ -2302,6 +2302,10 @@ mod tests {
                         Err(error) => panic!("fixture accept: {error}"),
                     }
                 };
+                // Accepted sockets may inherit nonblocking mode on macOS.
+                stream
+                    .set_nonblocking(false)
+                    .unwrap_or_else(|e| panic!("blocking fixture socket: {e}"));
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap_or_else(|e| panic!("timeout: {e}"));
@@ -2454,6 +2458,10 @@ mod tests {
                             Err(e) => panic!("accept: {e}"),
                         }
                     };
+                    // Accepted sockets may inherit nonblocking mode on macOS.
+                    stream
+                        .set_nonblocking(false)
+                        .unwrap_or_else(|e| panic!("blocking fixture socket: {e}"));
                     stream
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .unwrap_or_else(|e| panic!("timeout: {e}"));

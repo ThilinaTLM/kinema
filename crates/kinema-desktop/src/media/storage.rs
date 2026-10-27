@@ -255,6 +255,10 @@ pub(super) fn create(
                 .open(staged.join("payload"))?;
             file.set_len(identity.size)?;
             file.sync_all()?;
+            // Windows cannot rename a directory with an open descendant, even
+            // when that file was opened with delete sharing. Finish payload
+            // creation before publishing the staged directory.
+            drop(file);
             let asset = Asset {
                 diagnostic_id: diagnostics::next_id(),
                 dir: staged.clone(),

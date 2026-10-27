@@ -51,7 +51,7 @@ fn required<T>(value: Option<T>, stage: &str) -> Result<T, String> {
 }
 
 // All signatures below match EGL 1.5, ANGLE extension headers and GLES2 gl2.h.
-// DLL search is restricted to the executable's directory and system defaults;
+// DLL search uses explicit Config overrides or the executable's directory;
 // no process-wide DLL search path or environment is modified.
 struct Egl {
     _gles: Library,
@@ -85,16 +85,25 @@ struct Egl {
 }
 
 impl Egl {
-    unsafe fn load() -> Result<Self, String> {
+    unsafe fn load(config: &crate::Config) -> Result<Self, String> {
         let directory = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.to_owned()))
             .ok_or("cannot locate executable directory")?;
-        const FLAGS: u32 = 0x00000100 | 0x00001000; // DLL_LOAD_DIR | DEFAULT_DIRS
-        let gles = unsafe { Library::load_with_flags(directory.join("libGLESv2.dll"), FLAGS) }
-            .map_err(|_| "cannot load executable-adjacent ANGLE libGLESv2.dll")?;
-        let egl = unsafe { Library::load_with_flags(directory.join("libEGL.dll"), FLAGS) }
-            .map_err(|_| "cannot load executable-adjacent ANGLE libEGL.dll")?;
+        let gles_path = config
+            .gles_library_path
+            .clone()
+            .unwrap_or_else(|| directory.join("libGLESv2.dll"));
+        let egl_path = config
+            .egl_library_path
+            .clone()
+            .unwrap_or_else(|| directory.join("libEGL.dll"));
+        // Dependencies resolve beside each explicitly loaded DLL; never enable
+        // legacy CWD lookup or mutate global DLL directories for another player.
+        let gles: Library = unsafe { crate::mpv::library::open_native_library(&gles_path) }
+            .map_err(|_| "cannot load ANGLE libGLESv2.dll; provision beside executable or set Config::gles_library_path")?.into();
+        let egl: Library = unsafe { crate::mpv::library::open_native_library(&egl_path) }
+            .map_err(|_| "cannot load ANGLE libEGL.dll; provision beside executable or set Config::egl_library_path")?.into();
         let get_proc: unsafe extern "system" fn(*const i8) -> Ptr =
             *unsafe { egl.get(b"eglGetProcAddress\0") }.map_err(|_| "missing eglGetProcAddress")?;
         macro_rules! symbol {
@@ -395,7 +404,10 @@ pub(super) struct NativeInterop {
 }
 
 impl NativeInterop {
-    pub(super) fn new(context: &super::GpuSurfaceContext) -> Result<Self, String> {
+    pub(super) fn new(
+        context: &super::GpuSurfaceContext,
+        config: &crate::Config,
+    ) -> Result<Self, String> {
         let device = Arc::clone(&context.device);
         let queue = Arc::clone(&context.queue);
         let (native_device, native_queue) = {
@@ -426,7 +438,7 @@ impl NativeInterop {
             .at("Create native interop fence")?;
         let mut interop = Self {
             native: Some(Box::new(Native {
-                egl: unsafe { Egl::load()? },
+                egl: unsafe { Egl::load(config)? },
                 target: None,
                 retired: Vec::new(),
                 imported: None,

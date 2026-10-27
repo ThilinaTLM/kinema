@@ -81,7 +81,6 @@ pub unsafe fn enable_warning_capture(
 }
 
 pub struct Api {
-    pub version: unsafe extern "C" fn() -> std::os::raw::c_ulong,
     pub get_property_string: unsafe extern "C" fn(*mut Handle, *const c_char) -> *mut c_char,
     pub free: unsafe extern "C" fn(*mut c_void),
     pub create: unsafe extern "C" fn() -> *mut Handle,

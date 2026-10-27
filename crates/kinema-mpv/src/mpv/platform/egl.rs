@@ -107,12 +107,12 @@ impl Api {
 
 fn load_library(override_path: Option<&Path>, names: &[&str]) -> crate::Result<Library> {
     if let Some(path) = override_path {
-        return unsafe { Library::new(path) }
+        return unsafe { crate::mpv::library::open_native_library(path) }
             .map_err(|e| crate::Error::Gpu(format!("loading {}: {e}", path.display())));
     }
     let mut errors = Vec::new();
     for name in names {
-        match unsafe { Library::new(name) } {
+        match unsafe { crate::mpv::library::open_native_library(Path::new(name)) } {
             Ok(lib) => return Ok(lib),
             Err(e) => errors.push(format!("{name}: {e}")),
         }

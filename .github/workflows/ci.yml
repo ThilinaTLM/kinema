@@ -70,7 +70,37 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc g++ clang pkg-config libfontconfig-dev libwayland-dev \
             libwebkit2gtk-4.1-dev libxkbcommon-x11-dev libx11-xcb-dev \
-            libssl-dev libzstd-dev vulkan-validationlayers libvulkan1
+            libssl-dev libzstd-dev vulkan-validationlayers libvulkan1 libmpv2 ffmpeg
+      - name: Install macOS playback dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install mpv ffmpeg
+          echo "MPV_LIBRARY_PATH=$(brew --prefix mpv)/lib/libmpv.2.dylib" >> "$GITHUB_ENV"
+      - name: Install Windows playback dependencies (pinned and verified)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'kinema-playback'
+          New-Item -ItemType Directory -Force $root | Out-Null
+          $assets = @(
+            @{ Name = 'mpv-dev-x86_64-20261021-git-e471496c56.7z'; Hash = 'efc719eff3dc5954b4a5efc800632808bcec01cc9034940dd14e5eb7fe9ea633' },
+            @{ Name = 'ffmpeg-x86_64-git-9a861e968.7z'; Hash = 'fc9c135b799b410ffc78517f428904c299bc64cd8144f21f63f84fcd8c35ea19' }
+          )
+          foreach ($asset in $assets) {
+            $archive = Join-Path $root $asset.Name
+            Invoke-WebRequest "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261021/$($asset.Name)" -OutFile $archive
+            if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $asset.Hash) {
+              throw "Playback dependency checksum mismatch: $($asset.Name)"
+            }
+            & 7z x $archive "-o$root" -y | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not extract $($asset.Name)" }
+          }
+          $library = Get-ChildItem $root -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1
+          $ffmpeg = Get-ChildItem $root -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1
+          if (!$library -or !$ffmpeg) { throw 'Missing libmpv or ffmpeg in playback dependencies' }
+          "MPV_LIBRARY_PATH=$($library.FullName)" >> $env:GITHUB_ENV
+          $library.DirectoryName >> $env:GITHUB_PATH
+          $ffmpeg.DirectoryName >> $env:GITHUB_PATH
       - name: Install Rust 1.97.1
         run: rustup toolchain install 1.97.1 --profile minimal --component clippy
       - name: Set up compiler cache
@@ -83,6 +113,10 @@ jobs:
         run: cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
       - name: Test default-feature workspace
         run: cargo +1.97.1 test --workspace --locked
+      # Exercises native libmpv loading, decoding, RGBA output, controls and teardown.
+      # CPU rendering is intentional: hosted runners do not qualify GPU presentation/HDR.
+      - name: Smoke test native embedded libmpv
+        run: cargo +1.97.1 test -p kinema-mpv --locked mpv::player::tests::real_mpv_render_and_teardown -- --ignored --exact --nocapture --test-threads=1
       - name: Check isolated GPUI fixture (no production services)
         run: cargo +1.97.1 clippy -p kinema-desktop --lib --bin ui-probe --features ui-probe-test --locked -- -D warnings
       - name: Test GPUI interaction and layout (not pixels)
