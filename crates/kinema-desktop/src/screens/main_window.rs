@@ -785,18 +785,34 @@ impl Render for MainWindow {
         };
         let compact = window.viewport_size().width < filters::COMPACT_BELOW;
         let toolbar = if in_detail {
-            let back_label = match &self.route {
-                Route::Detail(detail) if detail.read(cx).on_streams_page() => "Back to details",
-                _ => "Back to browse",
+            let on_streams =
+                matches!(&self.route, Route::Detail(d) if d.read(cx).on_streams_page());
+            let (back_name, back_label) = if on_streams {
+                ("Back to details", "Back to details".to_owned())
+            } else {
+                ("Back to browse", format!("Back to {}", scope_face(scope).1))
             };
             Toolbar::new()
                 .inset(inset)
-                .leading(
-                    ToolbarGroup::new().child(
-                        IconButton::new("detail-back", IconName::ArrowLeft, back_label)
-                            .on_click(cx.listener(|this, _, window, cx| this.back(window, cx))),
-                    ),
-                )
+                .leading({
+                    // Same glass chip face and 32 px height as the other header
+                    // controls; the visible label is the destination, the
+                    // accessible name and tooltip keep the plain Back wording.
+                    let p = *tokens::palette(cx);
+                    div()
+                        .id("detail-back")
+                        .debug_selector(|| "detail-back".into())
+                        .flex_none()
+                        .rounded(tokens::radius::MD)
+                        .role(Role::Button)
+                        .aria_label(SharedString::from(back_name))
+                        .focusable()
+                        .tab_stop(true)
+                        .focus_visible(move |s| s.border(s::FOCUS_RING).border_color(p.focus_ring))
+                        .tooltip(crate::widgets::tooltip::tooltip(back_name))
+                        .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)))
+                        .child(ToolbarChip::new(IconName::ArrowLeft, back_label).chevron(false))
+                })
                 .trailing(self.global_group(window, cx))
         } else {
             Toolbar::new()

@@ -519,6 +519,39 @@ impl Detail {
             None => ArtworkState::Failed,
         }
     }
+    /// Poster URL and ready backdrop image shared by the hero and the Streams
+    /// page, so both draw the same artwork through one code path. A failed or
+    /// pending backdrop is `None` (neutral canvas).
+    fn hero_art(
+        &self,
+        title: &BrowseTitle,
+        cx: &mut App,
+    ) -> (Option<String>, Option<std::sync::Arc<RenderImage>>) {
+        let (poster_url, backdrop_url) = {
+            let c = self.coordinator.read(cx);
+            let details = if matches!(self.title, BrowseTitle::Cinemeta(_)) {
+                c.details.value()
+            } else {
+                None
+            };
+            let poster = details
+                .and_then(|d| d.poster_url.as_deref())
+                .or_else(|| title.poster_url())
+                .map(str::to_owned);
+            let backdrop = match &self.title {
+                BrowseTitle::Cinemeta(_) => details.and_then(|d| d.background_url.clone()),
+                BrowseTitle::Tmdb(_) => c.tmdb_details.value().and_then(|d| d.backdrop_url.clone()),
+                BrowseTitle::Local(_) => self.local_backdrop(cx),
+            };
+            (poster, backdrop)
+        };
+        let backdrop = match self.backdrop_state(backdrop_url.as_deref(), poster_url.as_deref(), cx)
+        {
+            ArtworkState::Ready(image) => Some(image),
+            _ => None,
+        };
+        (poster_url, backdrop)
+    }
     /// Theme palette with this title's artwork wash applied to the surfaces.
     fn tinted_palette(&self, cx: &App) -> tokens::Palette {
         tokens::palette(cx).tinted(self.ambient_palette(cx), tokens::theme(cx).mode)

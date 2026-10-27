@@ -24,6 +24,18 @@ pub(super) fn stream_skeleton() -> AnyElement {
         }))
         .into_any_element()
 }
+/// First row of the filtered, sorted list unless the user's explicit pick is
+/// still visible.
+pub(super) fn default_selection(
+    selected: Option<usize>,
+    explicit: bool,
+    visible: &[usize],
+) -> Option<usize> {
+    match selected {
+        Some(i) if explicit && visible.contains(&i) => Some(i),
+        _ => visible.first().copied(),
+    }
+}
 fn size_label(size: Option<u64>) -> String {
     size.map(|n| format!("{:.1} GiB", n as f64 / 1_073_741_824.))
         .unwrap_or_default()
@@ -92,7 +104,28 @@ impl Detail {
         }
         list.into_any_element()
     }
+    /// Explicit user pick (click, Enter, Play): survives re-sorting while visible.
     fn select_stream_row(&mut self, i: usize, cx: &mut Context<Self>) {
+        self.stream_page.explicit_selection = true;
+        self.apply_stream_selection(i, cx);
+        cx.notify();
+    }
+    /// Keep a valid default selection for the visible rows. Selecting never plays.
+    pub(super) fn reconcile_stream_selection(&mut self, visible: &[usize], cx: &mut Context<Self>) {
+        let next = default_selection(self.selected, self.stream_page.explicit_selection, visible);
+        if next == self.selected {
+            if next.is_some() && self.stream_page.play_service.is_none() {
+                self.apply_stream_selection(next.unwrap_or_default(), cx);
+            }
+            return;
+        }
+        self.stream_page.explicit_selection = false;
+        match next {
+            Some(i) => self.apply_stream_selection(i, cx),
+            None => self.selected = None,
+        }
+    }
+    fn apply_stream_selection(&mut self, i: usize, cx: &mut Context<Self>) {
         if self.selected != Some(i) || self.stream_page.play_service.is_none() {
             let hash = self
                 .coordinator
@@ -132,7 +165,6 @@ impl Detail {
             self.stream_page.play_service = Some(service);
         }
         self.selected = Some(i);
-        cx.notify();
     }
     pub(super) fn refresh_default_stream_service(&mut self, cx: &mut Context<Self>) {
         if self.stream_page.service_chosen {
@@ -253,7 +285,7 @@ impl Detail {
                     .flex()
                     .flex_col()
                     .gap(s::S4)
-                    .child(div().type_style(t::MONO).clamp_lines(2).child(release))
+                    .child(div().type_style(t::SMALL).clamp_lines(2).child(release))
                     .child(
                         div()
                             .type_style(t::CAPTION)
@@ -379,7 +411,7 @@ impl Detail {
             .gap(s::S12)
             .type_style(t::SMALL)
             .child(chips)
-            .child(div().type_style(t::MONO).child(tags.release_name))
+            .child(div().type_style(t::SMALL).child(tags.release_name))
             .child(field("Size", size_label(candidate.size)))
             .child(field(
                 "Seeders",
@@ -412,7 +444,7 @@ impl Detail {
         if let Some(file) = &candidate.torrent.filename {
             drawer = drawer
                 .child(div().type_style(t::SMALL_MEDIUM).child("Files"))
-                .child(div().type_style(t::MONO).child(file.clone()));
+                .child(div().type_style(t::SMALL).child(file.clone()));
         }
         if let Some(i) = self.selected {
             let mut play = div()
@@ -433,5 +465,25 @@ impl Detail {
             );
         }
         drawer
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::default_selection;
+    #[test]
+    fn first_visible_row_is_selected_by_default() {
+        assert_eq!(default_selection(None, false, &[4, 1, 2]), Some(4));
+        assert_eq!(default_selection(None, false, &[]), None);
+    }
+    #[test]
+    fn auto_selection_follows_the_new_first_row() {
+        assert_eq!(default_selection(Some(4), false, &[1, 4]), Some(1));
+    }
+    #[test]
+    fn explicit_pick_stays_while_visible_and_falls_back_when_hidden() {
+        assert_eq!(default_selection(Some(2), true, &[4, 2]), Some(2));
+        assert_eq!(default_selection(Some(2), true, &[4, 1]), Some(4));
+        assert_eq!(default_selection(Some(2), true, &[]), None);
     }
 }

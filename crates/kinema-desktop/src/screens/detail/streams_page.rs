@@ -1,6 +1,7 @@
 //! Compact Streams header, remembered controls and read-only account presence.
 use super::streams::stream_skeleton;
 use super::*;
+use crate::widgets::patterns::MediaHero;
 use crate::{
     app::{AppAction, CredentialState},
     credentials::CredentialStore,
@@ -27,6 +28,9 @@ pub(super) struct StreamPage {
     sort: Option<Entity<Select<StreamSort>>>,
     pub play_service: Option<Entity<Select<DebridKind>>>,
     pub service_chosen: bool,
+    /// True once the user clicked/played a row; otherwise the first row is followed.
+    pub explicit_selection: bool,
+    pub drawer_scroll: ScrollHandle,
     pub service_subscription: Option<Subscription>,
     pub query: String,
     pub wide: bool,
@@ -326,7 +330,7 @@ impl Detail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.prepare_stream_page(window, cx);
-        let p = *tokens::palette(cx);
+        let p = self.tinted_palette(cx);
         let viewport = window.viewport_size();
         let frame = content_width(viewport.width);
         self.stream_page.wide = frame >= px(1280.);
@@ -351,9 +355,14 @@ impl Detail {
         if sources.is_some() && !busy {
             self.stream_page.counts.insert(active, total);
         }
-        let visible = sources
+        let visible_rows = sources
             .as_ref()
-            .map_or(0, |s| self.stream_indices(s, cx).len());
+            .map(|s| self.stream_indices(s, cx))
+            .unwrap_or_default();
+        if sources.is_some() {
+            self.reconcile_stream_selection(&visible_rows, cx);
+        }
+        let visible = visible_rows.len();
         let mut poster = div()
             .w(px(56.))
             .h(px(56.) * POSTER_ASPECT)
@@ -539,47 +548,78 @@ impl Detail {
         {
             view = view.content(self.stream_list(sources, provider, cx));
         }
+        let list = div().flex_1().min_w_0().h_full().child(
+            ScrollArea::new("streams-scroll", self.streams_scroll.clone())
+                .gutter(s::S8)
+                .child(view),
+        );
         let mut body = div()
-            .w_full()
+            .size_full()
             .flex()
             .items_start()
             .gap(s::S16)
-            .child(div().flex_1().min_w_0().child(view));
+            .child(list);
         if self.stream_page.wide
             && let Some(candidate) = sources
                 .as_ref()
                 .and_then(|s| self.selected.and_then(|i| s.candidates.get(i)))
         {
-            body = body.child(self.stream_drawer(
-                candidate,
-                provider,
-                (frame * 0.27).clamp(px(320.), px(420.)),
-                cx,
-            ));
+            let width = (frame * 0.27).clamp(px(320.), px(420.));
+            // Sticky: the drawer column never scrolls with the list; it scrolls
+            // internally only when taller than the viewport.
+            body = body.child(
+                div().w(width + s::S8).flex_none().h_full().child(
+                    ScrollArea::new(
+                        "streams-drawer-scroll",
+                        self.stream_page.drawer_scroll.clone(),
+                    )
+                    .gutter(s::S8)
+                    .child(self.stream_drawer(candidate, provider, width, cx)),
+                ),
+            );
         }
+        let (_, backdrop) = self.hero_art(&title, cx);
+        let backdrop_layer = backdrop.map(|image| {
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(px(320.))
+                .child(
+                    MediaHero::new("streams-backdrop", "")
+                        .backdrop(Some(image))
+                        .fade_into(p.bg_canvas)
+                        .min_height(px(320.)),
+                )
+        });
         div()
             .id("detail-streams-page")
             .track_focus(&self.page_focus)
             .size_full()
-            .pt(s::TOOLBAR_HEIGHT)
+            .relative()
             .bg(p.bg_canvas)
-            .flex()
-            .justify_center()
+            .children(backdrop_layer)
             .child(
                 div()
-                    .w_full()
-                    .max_w(geometry::PAGE_MAX_WIDTH)
-                    .px(gutter(viewport.width))
-                    .h_full()
+                    .size_full()
+                    .pt(s::TOOLBAR_HEIGHT)
                     .flex()
-                    .flex_col()
-                    .gap(s::S16)
-                    .pt(s::S16)
-                    .child(header)
-                    .child(controls)
-                    .child(div().flex_1().min_h_0().child(
-                        ScrollArea::new("streams-scroll", self.streams_scroll.clone()).child(body),
-                    )),
+                    .justify_center()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(geometry::PAGE_MAX_WIDTH)
+                            .px(gutter(viewport.width))
+                            .h_full()
+                            .flex()
+                            .flex_col()
+                            .gap(s::S16)
+                            .pt(s::S16)
+                            .child(header)
+                            .child(controls)
+                            .child(div().flex_1().min_h_0().child(body)),
+                    ),
             )
             .into_any_element()
     }

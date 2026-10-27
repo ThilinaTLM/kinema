@@ -133,29 +133,7 @@ impl Detail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = self.tinted_palette(cx);
-        let (poster_url, backdrop_url) = {
-            let c = self.coordinator.read(cx);
-            let details = if matches!(self.title, BrowseTitle::Cinemeta(_)) {
-                c.details.value()
-            } else {
-                None
-            };
-            let poster = details
-                .and_then(|d| d.poster_url.as_deref())
-                .or_else(|| title.poster_url())
-                .map(str::to_owned);
-            let backdrop = match &self.title {
-                BrowseTitle::Cinemeta(_) => details.and_then(|d| d.background_url.clone()),
-                BrowseTitle::Tmdb(_) => c.tmdb_details.value().and_then(|d| d.backdrop_url.clone()),
-                BrowseTitle::Local(_) => self.local_backdrop(cx),
-            };
-            (poster, backdrop)
-        };
-        let backdrop = match self.backdrop_state(backdrop_url.as_deref(), poster_url.as_deref(), cx)
-        {
-            ArtworkState::Ready(image) => Some(image),
-            _ => None,
-        };
+        let (poster_url, backdrop) = self.hero_art(title, cx);
         let over_art = uses_over_art(backdrop.is_some(), tokens::theme(cx).mode);
         let poster = self.poster_face(title, poster_url.as_deref(), cx);
 

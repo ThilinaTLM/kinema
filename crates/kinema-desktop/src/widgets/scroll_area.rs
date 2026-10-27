@@ -23,6 +23,7 @@ fn thumb_height(handle: &ScrollHandle) -> Pixels {
 pub struct ScrollArea {
     id: ElementId,
     handle: ScrollHandle,
+    gutter: Pixels,
     children: Vec<AnyElement>,
 }
 impl ScrollArea {
@@ -30,8 +31,15 @@ impl ScrollArea {
         Self {
             id: id.into(),
             handle,
+            gutter: px(0.0),
             children: Vec::new(),
         }
+    }
+    /// Reserve end padding so content never touches the overlay scrollbar.
+    /// Full-bleed pages leave it off; columns beside other content use it.
+    pub fn gutter(mut self, gutter: Pixels) -> Self {
+        self.gutter = gutter;
+        self
     }
     pub fn child(mut self, child: impl IntoElement) -> Self {
         self.children.push(child.into_any_element());
@@ -93,6 +101,7 @@ impl RenderOnce for ScrollArea {
                 div()
                     .id("viewport")
                     .size_full()
+                    .pr(self.gutter)
                     .overflow_y_scroll()
                     .track_scroll(&self.handle)
                     .focusable()
