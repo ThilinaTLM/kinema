@@ -1,10 +1,3 @@
-# Kinema Next development
-
-These rules apply to the Rust workspace. Historical C++ rules apply only under
-`reference/cpp/`, whose `AGENTS.md` documents that archive.
-
-- This is a pre-1.0 scaffold, not the complete MVP. Follow `docs/architecture.md`;
-  keep proposals and open decisions distinct from implemented behavior.
 - Prefer clean designs over compatibility shims. Do not migrate old
   `~/.config/kinemarc`, `kinema.db`, or keyring entries.
 - Use Rust 1.97.1, edition 2024, resolver 3. Keep shared dependency versions in the
@@ -28,7 +21,6 @@ These rules apply to the Rust workspace. Historical C++ rules apply only under
   manifests, or logs. Distinguish service failures from successful empty results.
 - Add focused tests for domain rules and failure paths. Do not claim real provider,
   playback, or OS support based only on a compiling scaffold.
-- Do not move or delete ignored/generated user files.
 - Validate from the repository root:
   `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
