@@ -204,7 +204,11 @@ impl Renderer {
         client: Arc<Client>,
         context: &GpuSurfaceContext,
         diagnostic_id: u64,
+        #[cfg(target_os = "windows")] config: &crate::Config,
     ) -> Result<Self> {
+        #[cfg(target_os = "windows")]
+        let native = Box::new(NativeInterop::new(context, config).map_err(Error::Gpu)?);
+        #[cfg(not(target_os = "windows"))]
         let native = Box::new(NativeInterop::new(context).map_err(Error::Gpu)?);
         let mut this = Self {
             diagnostic_id,

@@ -117,6 +117,37 @@ fn empty_local_and_parallel_reads() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+// Publication must not retain open payload/manifest handles across directory
+// renames (Windows rejects open descendants). Replacements must remain readable
+// after reopening, not just appear successful in the in-memory range set.
+#[test]
+fn staged_publication_and_repeated_checkpoint_recover() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let managed = root.path().join("media");
+    let identity = identity(32);
+    let key = storage::key(&identity);
+    {
+        let (_lock, _) = storage::open(&managed)?;
+        let asset = storage::create(&managed, &key, identity.clone())?;
+        assert!(!managed.join(format!(".create-{key}")).exists());
+        assert_eq!(std::fs::metadata(asset.dir.join("payload"))?.len(), 32);
+        storage::checkpoint(&asset, &[(0, 8)])?;
+        storage::checkpoint(&asset, &[(0, 8), (16, 24)])?;
+        assert!(!asset.dir.join("manifest.next").exists());
+    }
+    let (_lock, assets) = storage::open(&managed)?;
+    let asset = assets.get(&key).ok_or("published asset missing")?;
+    let state = asset.state.lock().map_err(|_| "poisoned asset")?;
+    assert!(storage::available(&state.ranges, 0, 8));
+    assert!(!storage::available(&state.ranges, 8, 16));
+    assert!(storage::available(&state.ranges, 16, 24));
+    drop(state);
+    storage::discard(&managed, asset)?;
+    assert!(!managed.join(&key).exists());
+    assert!(!managed.join(format!(".delete-{key}")).exists());
+    Ok(())
+}
+
 #[test]
 fn durable_ranges_recovery_quota_cleanup_and_lock() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;

@@ -44,6 +44,11 @@ impl Fixture {
                     std::thread::sleep(Duration::from_millis(5));
                     continue;
                 };
+                // BSD/macOS can inherit the listener's nonblocking mode. The
+                // fixture uses blocking read_exact/write_all, including large bodies.
+                stream
+                    .set_nonblocking(false)
+                    .unwrap_or_else(|e| panic!("blocking fixture socket: {e}"));
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
                 let mut headers = Vec::new();
@@ -191,6 +196,32 @@ fn wait_until(mut predicate: impl FnMut() -> bool) {
 fn service(root: &Path, limit: u64) -> MediaService {
     MediaService::start(&super::tests::paths(root), super::tests::budget(limit))
         .unwrap_or_else(|e| panic!("{e}"))
+}
+
+#[test]
+fn fixture_handles_fragmented_headers_and_backpressured_body()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::start(CHUNK as usize, 0)?;
+    let address = fixture.url.socket_addrs(|| None)?[0];
+    let mut stream = std::net::TcpStream::connect(address)?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.write_all(b"GET /bytes HTTP/1.1\r\nHost: localhost\r\n")?;
+    // A slow client must not make a blocking fixture abandon a partial request.
+    // macOS accepted sockets inherit nonblocking mode unless reset explicitly.
+    std::thread::sleep(Duration::from_millis(50));
+    write!(stream, "Range: bytes=0-{}\r\n\r\n", CHUNK - 1)?;
+    // Let the large response exceed socket buffering before consuming it.
+    std::thread::sleep(Duration::from_millis(50));
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response)?;
+    let end = response
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or("missing response headers")?
+        + 4;
+    assert!(response.starts_with(b"HTTP/1.1 206 Partial Content\r\n"));
+    assert_eq!(&response[end..], fixture.bytes.as_slice());
+    Ok(())
 }
 
 #[test]

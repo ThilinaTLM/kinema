@@ -38,6 +38,8 @@ fn connect_budget_allows_one_five_second_dns_retry() -> Result<(), Box<dyn std::
                 Err(error) => return Err(error),
             }
         };
+        // Do not inherit the polling listener's mode on BSD/macOS.
+        stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(Duration::from_secs(3)))?;
         let mut request = [0; 4096];
         assert!(stream.read(&mut request)? > 0);
@@ -112,6 +114,8 @@ fn request_timeouts_distinguish_connection_from_response_and_redact_urls()
                 Err(error) => return Err(error),
             }
         };
+        // Do not inherit the polling listener's mode on BSD/macOS.
+        stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
         let mut bytes = [0; 4096];
         let _ = stream.read(&mut bytes)?;

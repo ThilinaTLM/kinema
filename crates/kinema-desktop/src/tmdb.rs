@@ -1806,6 +1806,8 @@ mod tests {
                     Err(error) => panic!("local accept failed: {error}"),
                 }
             };
+            // Accepted sockets may inherit nonblocking mode on macOS.
+            ok(stream.set_nonblocking(false));
             ok(stream.set_read_timeout(Some(Duration::from_secs(3))));
             let mut request = [0; 4096];
             assert!(ok(stream.read(&mut request)) > 0);

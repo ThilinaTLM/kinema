@@ -374,8 +374,14 @@ fn initialize(
 ) -> Result<(Renderer, Option<String>)> {
     #[cfg(feature = "gpu-surface")]
     if let Some(context) = &config.gpu_surface {
-        return super::gpu_surface::Renderer::new(client, context, diagnostics.id)
-            .map(|r| (Renderer::GpuSurface(r), None));
+        return super::gpu_surface::Renderer::new(
+            client,
+            context,
+            diagnostics.id,
+            #[cfg(target_os = "windows")]
+            config,
+        )
+        .map(|r| (Renderer::GpuSurface(r), None));
     }
     select(
         config.render_backend,

@@ -1762,7 +1762,10 @@ mod tests {
     #[test]
     #[ignore = "requires installed libmpv and ffmpeg; exercises real software rendering"]
     fn real_mpv_render_and_teardown() {
-        let path = std::env::temp_dir().join(format!("mpv-gpui-test-{}.mkv", std::process::id()));
+        // Keep the fixture owned until AFTER Player's worker joins. Windows
+        // cannot unlink an open media file; RAII also cleans up assertion failures.
+        let media = TemporaryMedia::new();
+        let path = media.0.join("red clip 日本語.mkv");
         let status = std::process::Command::new("ffmpeg")
             .args([
                 "-v",
@@ -1826,11 +1829,11 @@ mod tests {
         }
         player.set_paused(false).unwrap();
         wait_for(&player, |s| s.ended);
-        player.load("/definitely/not/a/video-file").unwrap();
+        let missing = media.0.join("missing video.mkv");
+        player.load(missing.to_str().unwrap()).unwrap();
         wait_for(&player, |s| s.error.is_some() && !s.loading);
         player.stop().unwrap();
         drop(player);
-        let _ = std::fs::remove_file(path);
         // Exercise context initialization and destruction repeatedly without media.
         for _ in 0..3 {
             drop(

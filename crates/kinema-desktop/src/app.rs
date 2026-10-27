@@ -2167,6 +2167,10 @@ mod tests {
                         }
                         Err(_) => break,
                     };
+                    // Accepted sockets may inherit nonblocking mode on macOS.
+                    stream
+                        .set_nonblocking(false)
+                        .unwrap_or_else(|e| panic!("blocking fixture socket: {e}"));
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
                     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
                     let mut request = Vec::new();
