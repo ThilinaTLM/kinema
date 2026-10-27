@@ -1,57 +1,119 @@
-# Old application feature inventory
+# Current Rust implementation
 
-This is a reference for the old C++/Qt application, **not a parity checklist** for the Rust/GPUI redesign. See [architecture](architecture.md) for confirmed MVP scope and future work. Old settings, database and keyring entries will not be migrated.
+Rust is Kinema's sole active implementation. This is a source-based overview,
+not a completion report, runtime qualification or C++ parity checklist. The
+[architecture](architecture.md) separates approved scope from deferred work;
+[development](development.md) records prerequisites and scoped validation limits.
+Historical C++ source and documentation remain in the [archive](../reference/cpp/README.md).
 
-Implementation and tests describe intended behavior; they do not guarantee that live third-party services still work.
+## Desktop and ownership
 
-## Metadata and discovery
+- Direct GPUI (`gpui-pre =0.3.9`) and `gpui_platform` bootstrap **v3 only**, with
+  in-house widgets; no GPUI Kit, Graphite default or UI-version selector.
+- Browse, detail/episodes and Streams pages compose with a separate Settings
+  window, preparation sheet, transfers popover, local-file opening and quit
+  confirmation. The coordinator owns background workers and rejects stale
+  results by generation; blocking provider/storage work stays outside rendering.
+- Pure values and policies live in `kinema-core`; desktop adapters and GPUI
+  presentation live in `kinema-desktop`; native playback lives in `kinema-mpv`.
 
-- TMDB supplies discovery rails and filtered, paginated browsing; it requires a token.
-- Cinemeta is the primary text-search and title-detail source. Empty searches can fall back to token-enabled TMDB search; request failures are not empty results.
-- Search accepts IMDb IDs and title URLs. Series details expose seasons, episodes and episode-specific sources.
-- TMDB discoveries must map to IMDb before source lookup. Title/episode identity is separate from release/file identity, so progress can survive a release change.
+**Source:** [workspace](../Cargo.toml), [bootstrap](../crates/kinema-desktop/src/main.rs),
+[widgets](../crates/kinema-desktop/src/widgets/),
+[coordinator](../crates/kinema-desktop/src/screens/coordinator.rs).
+**Contract:** [desktop v3](design/desktop-v3.md). Source composition does not establish
+keyboard/accessibility, visual, performance or cross-platform acceptance.
+
+## Metadata and catalog
+
+- Cinemeta and token-enabled TMDB adapters provide browse/search, title details
+  and series episodes. Settings hold provider priority; background enrichment
+  fills missing metadata. Domain/display data includes optional artwork, ratings,
+  identifiers and facts; this is not a full per-field provenance inspector.
+- SQLite stores canonical metadata, provider-specific query/page membership and
+  indexer snapshots. Saved exact queries/pages can be reopened; they are not
+  arbitrary offline full-text discovery over all cached titles.
+- **V6** is the normalized-cache retirement baseline (twelve `STRICT` tables;
+  seven obsolete provider-cache tables removed). **Current source is v7** with
+  fifteen `STRICT` tables, including personal records. Supported Rust schema
+  upgrades are distinct from migration of the historical C++ application.
+
+**Source:** [metadata adapters](../crates/kinema-desktop/src/metadata_providers/),
+[catalog worker](../crates/kinema-desktop/src/catalog_worker.rs),
+[version/migrations](../crates/kinema-desktop/src/catalog.rs),
+[DDL](../crates/kinema-desktop/src/catalog_schema.rs).
+**Limits:** [schema and migration boundaries](catalog-schema.md),
+[cache policy](cache-policy.md). Live authenticated-provider acceptance and automatic
+TTL-refresh policy must not be inferred from cached fixtures or source wiring.
 
 ## Sources and debrid
 
-- Settings select **one active indexer**, Torrentio or Peerflix; results are not federated.
-- Results may include release quality, size, seeders, codec/audio hints and file identity. Parsed labels are hints, not verified media properties.
-- Shared exclusions, picker filters and sorting help narrow results. Some categories cannot be inferred locally; language filtering depends on provider data. **Enforced cached-only filtering is not established** by the old implementation.
-- Actions include play/download and copying or opening release links. Selecting the correct episode in a pack matters; largest-file or positional guesses are not reliable.
-- Real-Debrid and AllDebrid resolve magnets, wait for metadata/readiness, select files and unlock links with bounded waits. Real-Debrid does not use the deprecated instant-availability endpoint.
-- Resolvers retain file catalogs for pack navigation. Playback URLs can expire: stable source/file references, not temporary authorized URLs, are the durable identity.
-- Debrid-backed transfers use a shared local cache/range gateway; URL-only sources can go directly to a player. Debrid failure reports an error rather than silently switching to local torrenting.
+- Torrentio or Peerflix is selected explicitly, not federated. IMDb movie/episode
+  targets drive public noncredentialed indexer requests. Parsed quality, size and
+  seed counts are unverified hints; unsupported direct-URL-only rows are omitted.
+- Real-Debrid and AllDebrid adapters implement account checks, preparation,
+  provider file catalogs and link resolution with bounded requests/polling and
+  cancellation. Playback requires an unambiguous file selection; it does not
+  guess the largest file or silently fall back to local torrenting.
+- Service, transport, malformed-response and cancellation failures are distinct
+  from successful empty results. Instant availability is not established by
+  account presence or a successful credential check.
 
-## Playback and subtitles
+**Source/evidence:** [indexers and parsing tests](../crates/kinema-desktop/src/sources.rs),
+[selection policies](../crates/kinema-core/src/sources.rs),
+[debrid adapters and endpoint contract](../crates/kinema-desktop/src/providers/README.md),
+[preparation coordinator](../crates/kinema-desktop/src/app.rs).
+Fixture/public-endpoint evidence is not authenticated debrid/playback acceptance.
 
-- Optional embedded mpv provides play/pause, seeking, volume, speed, fullscreen, keyboard controls, track/chapter selection and local subtitle attachment.
-- Embedded playback supports resume prompts, remembered track languages and chapter-based intro/credits skipping. Position, duration and terminal events feed history; EOF, stop, replacement and failure are distinct.
-- Pack catalogs support previous/next episodes and auto-next on natural EOF when an adjacent episode is identified. This is **same-pack navigation**, not universal next-episode discovery; stop/failure does not auto-next.
-- External mpv, VLC or custom commands are detached hand-offs: no progress telemetry, reliable app-controlled resume, transport/track control or subtitle attachment. Kinema cannot stop the detached player; launch success is not completion.
-- OpenSubtitles supports title/episode, language and release filters plus best-effort moviehash matching. Downloads require API key and account credentials, expose quota and use a bounded subtitle cache. Embedded playback can attach them; external integration is not equivalent.
+## Managed media and playback
 
-## History, library and Up Next
+- Managed remote acquisition persists validated byte ranges and stable file
+  identity, not authorized upstream URLs. A loopback-only HTTP server serves
+  leased remote assets and existing local files, including single byte ranges.
+  Local originals are opened in place, outside managed quota and deletion.
+- Cache admission uses a configurable budget (20 GiB default); manual cleanup
+  protects active assets. Streaming is not proof of complete offline retention.
+  Upstream acquisition requires exact range responses; no full-download HTTP 200
+  fallback, LAN serving or active eviction is implemented.
+- Embedded MPV is the default, in a separate managed GPUI window with controls
+  and lease ownership. The default `gpu-surface` feature selects its sole renderer;
+  there is no automatic renderer/external-player fallback. Native libmpv must be
+  supplied separately. External mpv/VLC remain explicit process hand-offs, not
+  tracked playback completion.
 
-- History tracks title/episode progress, stable last-source references and track-language preferences. Continue Watching excludes completed items and deduplicates series.
-- Completion uses EOF/progress/credits policies, not simply opening a source. Movies and episodes can also be marked watched manually.
-- Library membership and watched history are separate; removing a saved title does not erase history. Library browsing has filters and sorting.
-- Up Next groups saved titles into ready-to-watch, airing-soon and recently-added rails. It is distinct from player auto-next.
+**Source/evidence:** [media contract and tests](../crates/kinema-desktop/src/media/README.md),
+[player choice/launch](../crates/kinema-desktop/src/player.rs),
+[player window](../crates/kinema-desktop/src/screens/player_window.rs),
+[native backend](../crates/kinema-mpv/README.md),
+[default features](../crates/kinema-desktop/Cargo.toml).
+**Limits:** [player contract](design/player.md), [storage policy](storage-layout.md).
+Default-on and scoped Linux evidence do not qualify HDR, Windows/macOS runtime
+support, sustained performance or complete live-provider workflows.
 
-## Downloads, local torrenting and offline use
+## Personal state and credentials
 
-- Downloads support pause/resume, retry, cancellation, pinning and removal with optional file deletion. Retained work can be restored at startup; streaming and saving offline can reuse the same asset.
-- The local libtorrent backend selects files and schedules pieces/ranges behind a localhost HTTP gateway. It is separate from debrid and exposes the user's connection to torrent peers; using it must be explicit.
-- Offline playback means retained local bytes, not a debrid cached badge or a partially streamed file. It does not promise offline metadata discovery or source resolution. Cleanup distinguishes temporary data from pinned downloads.
+- Personal Library membership is independent of manual movie/episode watched
+  state. Local Library queries and conservative series summaries use canonical
+  records; missing/partial episode listings never imply a fully watched show.
+  Removing membership does not erase watch state. Personal rows and referenced
+  entities are protected from cache cleanup, but deleting the database loses them.
+- Settings and credential actions use OS secure storage, with missing,
+  unavailable and denied states; secrets do not belong in settings, catalog rows,
+  media manifests or logs. No historical C++ settings/database/keyring migration.
 
-## Desktop and credentials
+**Source/evidence:** [personal storage](../crates/kinema-desktop/src/catalog_library.rs),
+[queries](../crates/kinema-desktop/src/catalog_library_query.rs),
+[storage tests](../crates/kinema-desktop/src/catalog_library_tests.rs),
+[shared personal state](../crates/kinema-desktop/src/screens/coordinator/personal.rs),
+[credentials](../crates/kinema-desktop/src/credentials.rs),
+[settings](../crates/kinema-desktop/src/settings.rs).
+**Contract:** [Library/manual watch tracking](design/library.md).
 
-- The old Linux desktop integration includes Qt/KDE theming, keyboard navigation, tray/close behavior, notifications, idle inhibition and embedded-player MPRIS/media keys. These are historical behaviors, not requirements for the redesign.
-- Settings cover providers, filtering, players, subtitles and transfer/cache limits. Secrets go through `TokenController`/`TokenStore` into the system keyring, not ordinary settings.
-- Missing/rejected credentials and unavailable keyring storage need distinct states. Credentials must stay out of logs and shared links; credential-bearing Torrentio URLs are reduced to safe source/file references before link actions.
+## Not established or deferred
 
-## Selected implementation references
-
-- **Discovery:** [search and IMDb mapping](../reference/cpp/src/ui/qml-bridge/search/SearchViewModel.cpp), [title actions](../reference/cpp/src/ui/qml-bridge/details/TitleActions.cpp); [search tests](../reference/cpp/tests/tst_search_view_model.cpp).
-- **Sources:** [indexer selection](../reference/cpp/src/api/indexers/IndexerSelector.cpp), [filters](../reference/cpp/src/core/util/StreamFilter.cpp), [RD](../reference/cpp/src/playback/sources/RealDebridResolver.cpp) / [AD](../reference/cpp/src/playback/sources/AllDebridResolver.cpp); [file-selection tests](../reference/cpp/tests/tst_media_file_selection_policy.cpp).
-- **Playback:** [embedded adapter](../reference/cpp/src/ui/player/EmbeddedMpvPlayerAdapter.cpp), [external adapter](../reference/cpp/src/playback/adapters/ExternalPlayerAdapter.cpp), [subtitles](../reference/cpp/src/playback/subtitles/SubtitleSessionService.cpp); [pack-navigation tests](../reference/cpp/tests/tst_series_session_service.cpp).
-- **Personal state and media:** [library](../reference/cpp/src/ui/qml-bridge/library/LibraryViewModel.h), [transfers](../reference/cpp/src/playback/transfer/TransferUseCase.h), [local gateway](../reference/cpp/src/playback/streaming/LocalHttpStreamGateway.cpp); [history tests](../reference/cpp/tests/tst_history_store.cpp), [transfer tests](../reference/cpp/tests/tst_transfer_use_case.cpp).
-- **Desktop and secrets:** [shell](../reference/cpp/src/ui/qml-bridge/shell/ShellViewModel.cpp), [tokens](../reference/cpp/src/controllers/TokenController.cpp); [token tests](../reference/cpp/tests/tst_token_controller.cpp), [URL-redaction tests](../reference/cpp/tests/tst_url_redactor.cpp).
+No full MVP, end-to-end live-provider playback or all-desktop runtime acceptance
+is claimed here. Manual watched state is not viewing history, persistent playback
+resume or automatic completion tracking. Built-in torrenting, download
+pause/prefetch suspension and the archived application's subtitle/Up Next features
+must not be inferred from this overview. See [architecture](architecture.md) for
+scope and [validation status](development.md#validation-status-and-limits) for
+evidence boundaries.

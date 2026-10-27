@@ -1,7 +1,8 @@
-# Kinema Next
+# Kinema
 
 A pre-1.0 Rust desktop application using direct GPUI (`gpui-pre =0.3.9`) and
-`gpui_platform`, targeting Windows, macOS, and Linux without KDE dependencies.
+`gpui_platform`, targeting Windows, macOS, and Linux. The Rust workspace is the
+only active implementation; it has no Qt/KDE application dependencies.
 V3 is the sole/default UI, with in-house widgets and no UI version switch. **The first bounded catalog
 increment has expanded into integrated MVP source flows; full MVP validation
 is not complete.**
@@ -15,15 +16,15 @@ Personal tracking and a torrent engine are outside this playback increment. See 
 
 Source wiring now covers Cinemeta/TMDB browse, search, details and episodes;
 Torrentio/Peerflix sources; Real-Debrid/AllDebrid adapters; settings with secure
-credentials; managed media and loopback serving to Embedded MPV or external players. Both metadata
-providers are explicit selections, with no automatic fallback or TTL refresh.
-TMDB requires a user bearer token and IMDb mapping before source lookup.
+credentials; managed media and loopback serving to Embedded MPV or external players.
+Settings control metadata provider priority and background enrichment; cached results
+do not refresh automatically by TTL. TMDB requires a user bearer token, and titles
+need IMDb mapping before source lookup.
 
 Start with the [quickstart and setup](docs/development.md#quickstart-and-setup).
 Local-server/mpv smoke evidence does **not** establish live paid-provider playback,
-complete GUI acceptance or cross-platform runtime support. Historical locked root
-checks predate the v3 cleanup; current validation and provider/UI acceptance gaps
-are tracked separately.
+complete GUI acceptance or cross-platform runtime support. Automated workspace
+checks are separate from provider/UI acceptance and native runtime qualification.
 See the [validation matrix](docs/development.md#validation-status-and-limits) and
 [architecture](docs/architecture.md) for current limits. No full-MVP completion
 claim is made.
@@ -55,15 +56,18 @@ assertions by default and uses native app data resolved through
 uses separate databases; existing data is not migrated, moved, or deleted.
 See [storage locations](docs/storage-layout.md#implemented-catalog-location).
 
-The workspace contains `kinema-core` (UI-independent domain code) and
-`kinema-desktop` (direct-GPUI v3 UI and background catalog adapters). See [development](docs/development.md) for
-core-only checks and OS setup. Release packaging is not yet provided.
+The workspace contains `kinema-core` (UI-independent domain code),
+`kinema-desktop` (direct-GPUI v3 UI and background catalog adapters), and
+`kinema-mpv` (native embedded playback). See the [feature overview](docs/features.md)
+and [development guide](docs/development.md) for current scope, core-only checks,
+and OS setup. Release packaging is not yet provided.
 
-## C++ reference
+## Historical archive
 
 The previous Qt/KDE application is preserved under [reference/cpp](reference/cpp/README.md).
 It is historical reference, not a compatibility layer or a promise of feature parity.
-Next starts fresh; old settings, databases, and keyring entries will not be migrated.
+The Rust application starts fresh; old settings, databases, and keyring entries
+will not be migrated.
 Historical release binaries do not represent this Rust scaffold.
 
 ## License

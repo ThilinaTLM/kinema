@@ -1,69 +1,52 @@
-# Kinema Next
+# Kinema documentation
 
-Design notes for a Rust + GPUI Kit rewrite. The Rust workspace implements a first
-bounded catalog foundation with additional MVP source flows now composed; full
-GUI/live-provider acceptance is not complete, although prior baseline locked root
-checks passed. The [archived C++ source](../reference/cpp/README.md) remains a reference, not a template to port line by line.
-
-**The goal:** browse movies and series, find sources through Torrentio/Peerflix, acquire media through debrid, and serve it from local storage to external VLC/mpv.
+The Rust workspace is Kinema's sole active implementation: direct GPUI
+(`gpui-pre =0.3.9`) and `gpui_platform`, with in-house widgets. **Desktop v3 is the
+sole/default UI**; GPUI Kit and Graphite v2 are historical designs, not runtime
+alternatives. The [C++ archive](../reference/cpp/README.md) is historical reference,
+not a parity checklist or supported implementation.
 
 ## Start here
 
 | Document | What it covers |
 | --- | --- |
-| [Development](development.md) | Quickstart, secure-token setup, prerequisites, and validation matrix |
-| [Next-lead handoff](handoff-next-lead.md) | Frozen-batch scope, code map, evidence, and finalization risks |
-| [Architecture](architecture.md) | Agreed scope, system diagram, responsibilities, and desktop support |
-| [Desktop design system](design/design-system.md) | User-approved fixed-rail Graphite visual/state contract and remaining acceptance targets |
-| [Native Graphite implementation](design/native-implementation.md) | Implemented components, normal-app warning, safe gallery commands and evidence limits |
-| [Catalog and database](catalog-schema.md) | Approved target and reported v4 source implementation, retained legacy data, and conservative backfill limits |
-| [Storage and media server](storage-layout.md) | File locations, streaming, cache limits, and recovery |
-| [Caching](cache-policy.md) | What is cached, expiry, timestamps, and force-refresh |
-| [Existing features](features.md) | Useful behavior and limitations in the C++ application |
-| [Open decisions](decisions.md) | The remaining choices, discussed one at a time |
+| [Current implementation](features.md) | Rust source overview, evidence links and limitations |
+| [Development](development.md) | Rust 1.97.1 setup, native prerequisites, secure credentials, checks and scoped validation evidence |
+| [Architecture](architecture.md) | Responsibilities, approved scope, implemented boundaries and deferred work |
+| [Desktop v3](design/desktop-v3.md) | Direct-GPUI UI contract and subsequent approved revisions |
+| [Embedded player](design/player.md) | Managed player window, controls, session ownership and acceptance limits |
+| [Library and manual watch state](design/library.md) | Personal membership, manual tracking and conservative episode summaries |
+| [Catalog and database](catalog-schema.md) | Normalized catalog, v6 cache retirement and current v7 personal records |
+| [Storage and media server](storage-layout.md) | Managed media, loopback serving, quota, cleanup and recovery |
+| [Caching](cache-policy.md) | Saved provider results, artwork, freshness and refresh policies |
+| [Native UI probe](design/ui-probe.md) | Isolated fixture/capture tooling and its evidence limits |
+| [Open decisions](decisions.md) | Unresolved choices; not implemented behavior |
 
-## Reading the design
+## Reading status and evidence
 
-**Implemented** describes observed source, not verified tests, GUI runtime, or
-comprehensive live-provider support. **Agreed** means a direction confirmed in
-discussion. **Proposed** means an implementation choice still open to change.
-The architecture's MVP scope and reviewed normalized catalog target are approved;
-the actual cache/schema and build-mode data locations remain labeled separately
-from target behavior and proposed file layout. Backend evidence reports v4 source
-implementation: twelve normalized `STRICT` tables and seven retained legacy tables,
-with canonical metadata/indexer reads and writes. Historical backend post-fix root fmt,
-strict locked workspace Clippy, locked tests (295 passed, 3 ignored), and diff
-checks passed. Post-v4 authenticated-provider/debrid and new GUI acceptance remain
-unverified; earlier user-reported successes remain historical. No user database/credentials were
-accessed; databases upgrade on next open with the new build. Retained legacy rows
-have [conservative backfill limits](catalog-schema.md#conservative-v3-preservation-and-backfill-limits),
-not a guarantee that every old query/detail/source snapshot is reusable offline.
+**Implemented** means present in source, not completed MVP or verified runtime
+support. **Approved** describes a design decision; **proposed** and open decisions
+are not implementation promises. Use the [source overview](features.md) alongside
+the [validation matrix](development.md#validation-status-and-limits), rather than
+using historical test counts as evidence for the current checkout.
 
-The user chose a **permanent left icon-only rail** and explicitly approved
-native Graphite implementation and lead-owned commits. The six-area scope stays
-unchanged. The [design system](design/design-system.md) defines neutral Graphite
-with blue accents, compact controls/native fonts and IMDb card semantics. Shared
-native themes/cards/buttons, shell and provider-view composition, and bounded
-artwork now exist; see [native implementation status](design/native-implementation.md)
-for actual boundaries, runnable commands and remaining gaps. Compilation does not
-establish workflow, live-provider, OS, accessibility or performance acceptance.
+The catalog's **v6 baseline** retires the seven obsolete provider-cache tables and
+retains the twelve normalized `STRICT` tables. Current Rust source declares
+**schema v7**, adding three personal Library/watch-state tables; see the
+[schema specification](catalog-schema.md) and
+[version/migration source](../crates/kinema-desktop/src/catalog.rs). Provider page
+membership is distinct from personal Library membership. Saved provider queries
+are not arbitrary offline full-text discovery. Personal records share the catalog
+database: deleting it loses those records.
 
-The **Graphite v2** [HTML artifact](design/desktop-wireframes.html) remains a frozen
-design reference, not the native runtime. Its 159 browser checks and simulated
-1,000-fixture performance preview remain HTML-only evidence. Final offline dark/light/hover captures were visually inspected by the lead;
-serialized root checks passed **331 tests / 3 ignored**. Explicit fixture tests
-passed **20** (17 overlap + 3 GPUI tests), and Node tests passed **5**; these are not
-351 unique tests. See [final evidence](design/native-implementation.md#final-validation-evidence).
-The 295-test backend checkpoint remains historical.
-No real-app/private-data or provider probes are part of this documentation pass.
+Embedded MPV uses the sole/default **GPU-surface** path through the default
+`gpu-surface` Cargo feature; external mpv and VLC remain alternatives. Native
+libmpv is a separate prerequisite. Default-on does not qualify live-provider
+playback, full GUI workflows, Windows/macOS runtime behavior or HDR. Follow the
+[current root build instructions](development.md#run-and-validate), not a retired
+experimental wrapper.
 
-The cache reopens saved exact-query/page membership and normalized detail/episode
-and source snapshots. It is not arbitrary offline full-text search across all
-cached titles. Canonical rows are the reported current source read model, not
-proof of full rich/provenance UI acceptance. Start with the
-[quickstart](development.md#quickstart-and-setup) and
-[validation matrix](development.md#validation-status-and-limits).
-
-Keep the design small. Add structures when a feature needs them, rather than building a framework for possible future work.
-
-Next starts with fresh application data. Do not migrate the existing `~/.config/kinemarc`, `kinema.db`, or keyring entries.
+Older Graphite designs, HTML previews, handoffs and validation records remain in
+place as historical evidence. They do not override the v3 contract or establish
+current acceptance. No legacy C++ `~/.config/kinemarc`, `kinema.db` or keyring-entry
+migration is supported.

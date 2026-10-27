@@ -16,8 +16,8 @@ python3 packaging/generate-icons.py
 python3 packaging/test_assets.py
 ```
 
-The SVGs are the editable sources: clean vector redraws of the historical C++
-K/play mark that retain Thilina Lakshan's copyright and Apache-2.0 SPDX headers.
+The SVGs are the editable sources for the Kinema K/play mark and retain
+Thilina Lakshan's copyright and Apache-2.0 SPDX headers.
 [Brand guidelines](../docs/design/brand.md) define geometry, colours and usage.
 
 | Source | Used for |
@@ -61,8 +61,10 @@ window also embeds the 256px PNG for GPUI's X11 icon API. Embedded player
 windows use the player variant (orange mark on the ink tile with a seek bar)
 through the same API, while retaining the main application ID. Wayland compositors
 resolve the installed desktop entry/icon, so the distinct player icon is not
-promised there; Windows/macOS per-window icons remain unqualified. No notification service or embedded
-mpv configuration is shipped: the Rust app launches an external player.
+promised there; Windows/macOS per-window icons remain unqualified. No notification
+service or mpv configuration files are shipped. Embedded MPV is the default
+player and loads a separately installed libmpv; external mpv/VLC remain explicit
+alternatives. See [playback prerequisites](../docs/development.md#embedded-mpv-prerequisites-and-validation-plan).
 
 ```sh
 desktop-file-validate packaging/linux/dev.tlmtech.kinema.desktop

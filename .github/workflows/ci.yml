@@ -12,6 +12,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  assets:
+    name: Desktop assets and probe utilities
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install asset validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil desktop-file-utils appstream
+      - run: /usr/bin/python3 packaging/test_assets.py
+      - run: node --test scripts/ui-probe/pixels.test.cjs
+      - run: desktop-file-validate packaging/linux/dev.tlmtech.kinema.desktop
+      - run: appstreamcli validate --no-net packaging/linux/dev.tlmtech.kinema.metainfo.xml
+
   fmt:
     name: Formatting
     runs-on: ubuntu-24.04

@@ -5,13 +5,18 @@ Original Kinema source and assets are licensed under the Apache License,
 Version 2.0. See LICENSE or https://www.apache.org/licenses/LICENSE-2.0.
 Third-party code and assets retain their respective licenses and notices.
 
-Rust scaffold
--------------
-The desktop shell uses GPUI Kit 0.7.3 and its GPUI reexports and default
-assets. GPUI Kit and upstream GPUI software are distributed under Apache-2.0;
-retain applicable upstream notices and asset-specific terms when distributing.
-  https://github.com/longbridge/gpui-kit
+Rust desktop application
+------------------------
+The desktop shell uses direct GPUI and gpui_platform (gpui-pre 0.3.9), with
+in-house widgets. It does not use GPUI Kit. Upstream GPUI software is distributed
+under Apache-2.0; retain applicable upstream notices and asset-specific terms
+when distributing.
   https://github.com/zed-industries/zed/tree/main/crates/gpui
+
+Repository-owned GPUI platform and wgpu-hal patches live under vendor/.
+GPUI packages are Apache-2.0; wgpu-hal is MIT OR Apache-2.0. Retain their
+upstream license files and notices with distributions of the patched code.
+  https://github.com/gfx-rs/wgpu
 
 Cargo dependencies have their own licenses. This notice is not a complete
 transitive dependency or bundled-asset license audit; a release must review
@@ -21,7 +26,8 @@ Historical C++ archive
 ----------------------
 reference/cpp/NOTICE preserves the old application's dependency and service
 notices, including Qt, KDE Frameworks, and optional libmpv. These describe the
-archive, not dependencies of the Rust scaffold. The archive's original
+archive, not the Rust application's dependency graph. The Rust application
+independently loads a user-installed libmpv for embedded playback. The archive's original
 metainfo asset is CC0-1.0; see its source notice.
 
 TMDB attribution asset and API
@@ -48,8 +54,8 @@ token; no project API key is embedded.
 
 External players and services
 -----------------------------
-VLC/mpv and online metadata, indexer, and debrid services are not bundled by
-this application. The TMDB attribution logo above is bundled separately.
+External VLC/mpv executables, the native libmpv library, and online metadata,
+indexer, and debrid services are not bundled by this application. The TMDB attribution logo above is bundled separately.
 Integrations do not imply implementation, endorsement,
 or a grant of rights to service content or trademarks. Their software licenses
 and service terms apply independently. See docs/architecture.md for scope.
