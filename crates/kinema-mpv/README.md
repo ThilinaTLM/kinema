@@ -30,9 +30,17 @@ Explicit low-level `RenderBackend::Cpu` or `Gpu` without a context retains RGBA
 readback support for backend consumers/tests, not desktop presentation. Building
 with `--no-default-features` also opts out of surfaces; enabling only `gpu-render`
 retains the older Auto GL-to-CPU initialization fallback. Linux needs working
-EGL/OpenGL drivers (Wayland, X11 or surfaceless); Windows needs compatible ANGLE
-EGL/GLES DLLs; macOS uses CGL. Optional Config EGL/GLES paths select trusted
-libraries. Inspect diagnostics rather than assuming hardware decoding or zero-copy.
+EGL/OpenGL drivers (Wayland, X11 or surfaceless); macOS uses CGL. On Windows,
+the default GPU-surface loader requires trusted architecture-matching ANGLE
+`libEGL.dll` and `libGLESv2.dll` beside the actual executable (`target/debug/`
+for default `cargo run`, `target/debug/deps/` for test executables). ANGLE must
+support the required device-creation/query and D3D texture extensions and retain
+the supplied D3D11-on-12 device; an arbitrary ANGLE build is not sufficient.
+Nothing downloads or bundles these DLLs automatically. `Config.egl_library_path`
+and `Config.gles_library_path` apply only to the older readback EGL path, not
+the default GPU-surface loader. See the [precise Windows requirements and open
+qualification checks](../../docs/validation/cross-platform.md#default-windows-gpu-surface-prerequisites).
+Inspect diagnostics rather than assuming hardware decoding or zero-copy.
 
 ## Host lifecycle contract
 

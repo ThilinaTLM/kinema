@@ -2,7 +2,9 @@ name: Rust CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -43,6 +45,15 @@ jobs:
 
   native:
     name: Native checks (${{ matrix.os }})
+    env:
+      # Ephemeral runners do not reuse incremental state; rust-cache prunes it.
+      CARGO_INCREMENTAL: "0"
+      # Preserve optimization/features while reducing compile/link and cache size.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      # Content-addressed reuse also covers our vendored path dependencies.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
       matrix:
@@ -62,10 +73,16 @@ jobs:
             libssl-dev libzstd-dev vulkan-validationlayers libvulkan1
       - name: Install Rust 1.97.1
         run: rustup toolchain install 1.97.1 --profile minimal --component clippy
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.19.0
       - uses: Swatinem/rust-cache@v2
-      - run: cargo +1.97.1 check --workspace --all-targets --locked
-      - run: cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo +1.97.1 test --workspace --locked
+      # Clippy checks the same packages/targets; a preceding cargo check is redundant.
+      - name: Lint default-feature workspace and all targets
+        run: cargo +1.97.1 clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test default-feature workspace
+        run: cargo +1.97.1 test --workspace --locked
       - name: Check isolated GPUI fixture (no production services)
         run: cargo +1.97.1 clippy -p kinema-desktop --lib --bin ui-probe --features ui-probe-test --locked -- -D warnings
       - name: Test GPUI interaction and layout (not pixels)

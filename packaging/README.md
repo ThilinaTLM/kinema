@@ -5,6 +5,10 @@ artwork lives in `crates/kinema-desktop/assets/brand/`. These are not a release
 packaging pipeline. The application ID is **dev.tlmtech.kinema**; Cargo's actual
 application executable is **kinema-desktop** (the implicit `src/main.rs` binary).
 The separate `ui-probe` executable is not installed.
+See the [cross-platform qualification matrix](../docs/validation/cross-platform.md)
+for executed versus configured evidence, Windows ANGLE runtime requirements,
+open native checks and distribution gaps. Integration assets do not establish
+OS support or release qualification.
 
 ## Regenerate icons
 

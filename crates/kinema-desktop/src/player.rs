@@ -178,28 +178,59 @@ fn discover(choice: &PlayerChoice) -> Result<PathBuf, PlayerError> {
     }
     let mut candidates = Vec::new();
     if cfg!(target_os = "macos") {
-        candidates.push(PathBuf::from(match choice {
-            PlayerChoice::Mpv => "/Applications/mpv.app/Contents/MacOS/mpv",
-            _ => "/Applications/VLC.app/Contents/MacOS/VLC",
-        }));
-        candidates.push(PathBuf::from("/opt/homebrew/bin").join(&filename));
-        candidates.push(PathBuf::from("/usr/local/bin").join(&filename));
+        let base_dirs = directories::BaseDirs::new();
+        candidates.extend(macos_candidates(
+            choice,
+            base_dirs.as_ref().map(|dirs| dirs.home_dir()),
+        ));
     }
     if cfg!(windows) {
-        for variable in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
-            if let Some(root) = std::env::var_os(variable) {
-                let sub = match choice {
-                    PlayerChoice::Mpv => "mpv",
-                    _ => "VideoLAN/VLC",
-                };
-                candidates.push(PathBuf::from(root).join(sub).join(&filename));
-            }
-        }
+        let roots = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"]
+            .into_iter()
+            .filter_map(std::env::var_os)
+            .map(PathBuf::from);
+        candidates.extend(windows_candidates(choice, roots));
     }
     candidates
         .into_iter()
         .find(|path| executable(path))
         .ok_or(PlayerError::NotFound)
+}
+
+// Pure fallback policies: no environment reads or filesystem probes. PATH is
+// searched first by discover; never turn relative roots into launch candidates.
+fn macos_candidates(choice: &PlayerChoice, home: Option<&Path>) -> Vec<PathBuf> {
+    let (bundle, filename) = match choice {
+        PlayerChoice::Mpv => ("mpv.app/Contents/MacOS/mpv", "mpv"),
+        PlayerChoice::Vlc => ("VLC.app/Contents/MacOS/VLC", "vlc"),
+        _ => return Vec::new(),
+    };
+    let mut candidates = vec![Path::new("/Applications").join(bundle)];
+    if let Some(home) = home.filter(|home| home.is_absolute()) {
+        candidates.push(home.join("Applications").join(bundle));
+    }
+    candidates.extend(
+        ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
+            .into_iter()
+            .map(|root| Path::new(root).join(filename)),
+    );
+    candidates
+}
+
+fn windows_candidates(
+    choice: &PlayerChoice,
+    roots: impl IntoIterator<Item = PathBuf>,
+) -> Vec<PathBuf> {
+    let (subdirectory, filename) = match choice {
+        PlayerChoice::Mpv => ("mpv", "mpv.exe"),
+        PlayerChoice::Vlc => ("VideoLAN/VLC", "vlc.exe"),
+        _ => return Vec::new(),
+    };
+    roots
+        .into_iter()
+        .filter(|root| root.is_absolute())
+        .map(|root| root.join(subdirectory).join(filename))
+        .collect()
 }
 
 fn executable(path: &Path) -> bool {
@@ -227,6 +258,73 @@ fn executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // macOS paths use Unix absolute-path semantics; also exercise them on Linux.
+    #[cfg(unix)]
+    #[test]
+    fn macos_fallbacks_include_system_user_bundles_and_package_managers() {
+        let home = Path::new("/Users/播放器 with spaces");
+        for (choice, bundle, filename) in [
+            (PlayerChoice::Mpv, "mpv.app/Contents/MacOS/mpv", "mpv"),
+            (PlayerChoice::Vlc, "VLC.app/Contents/MacOS/VLC", "vlc"),
+        ] {
+            assert_eq!(
+                macos_candidates(&choice, Some(home)),
+                vec![
+                    Path::new("/Applications").join(bundle),
+                    home.join("Applications").join(bundle),
+                    Path::new("/opt/homebrew/bin").join(filename),
+                    Path::new("/usr/local/bin").join(filename),
+                    Path::new("/opt/local/bin").join(filename),
+                ],
+            );
+            let without_home = macos_candidates(&choice, None);
+            assert_eq!(without_home.len(), 4);
+            assert!(without_home.iter().all(|path| path.is_absolute()));
+            for relative in ["", ".", "relative home/播放器"] {
+                assert_eq!(
+                    macos_candidates(&choice, Some(Path::new(relative))),
+                    without_home,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn windows_fallbacks_reject_relative_roots_and_preserve_root_order() {
+        // Use host-native absolute roots so the pure policy runs on Linux too.
+        let first = std::env::temp_dir().join("Program Files 播放器");
+        let second = std::env::temp_dir().join("Local App Data");
+        for (choice, suffix) in [
+            (PlayerChoice::Mpv, "mpv/mpv.exe"),
+            (PlayerChoice::Vlc, "VideoLAN/VLC/vlc.exe"),
+        ] {
+            assert_eq!(
+                windows_candidates(
+                    &choice,
+                    [
+                        PathBuf::new(),
+                        PathBuf::from("relative root"),
+                        first.clone(),
+                        PathBuf::from("."),
+                        second.clone(),
+                    ],
+                ),
+                vec![first.join(suffix), second.join(suffix)],
+            );
+        }
+    }
+
+    #[test]
+    fn fallback_candidates_only_apply_to_named_external_players() {
+        for choice in [
+            PlayerChoice::Embedded,
+            PlayerChoice::Custom("custom".into()),
+        ] {
+            assert!(macos_candidates(&choice, Some(Path::new("/Users/test"))).is_empty());
+            assert!(windows_candidates(&choice, [std::env::temp_dir()]).is_empty());
+        }
+    }
+
     #[test]
     fn only_numeric_loopback_http_and_distinct_arguments() {
         let url = "http://127.0.0.1:3210/media/a%20b?token=opaque";

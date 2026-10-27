@@ -11,6 +11,9 @@ experimental wrapper. The [prior scoped evidence](#experimental-gpu-player-integ
 records earlier Linux backend and PlayerWindow probes and root/experimental
 workspace checks; it is not new qualification of this default promotion.
 Native Windows/macOS tests and HDR remain deferred and unqualified.
+See the [cross-platform qualification matrix](validation/cross-platform.md) for
+current evidence, precise Windows ANGLE placement, open runtime checks and
+packaging limits.
 
 <a id="library-and-manual-watch-tracking-validation-pending"></a>
 
@@ -139,7 +142,8 @@ Vulkan driver, not just the Vulkan loader. No KDE SDK is required.
 These are upstream build prerequisites, not a Kinema release-support guarantee.
 Native CI is configured to check compilation and tests on all three OSes; it does
 not establish GUI rendering, secure storage, live-provider behavior, or external
-playback support. The commands below are validation instructions, not a report of
+playback support. See [CI scope and performance](ci.md) for trigger filters,
+retained checks, cache configuration and timing guidance. The commands below are validation instructions, not a report of
 checks or runtime verification for the current increment.
 
 ## Opt-in playback performance logging

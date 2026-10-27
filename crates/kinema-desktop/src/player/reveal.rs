@@ -65,6 +65,29 @@ mod tests {
         );
         Ok(())
     }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn reveal_uses_literal_macos_selection_arguments() -> Result<(), String> {
+        let path = std::path::Path::new("/Users/fixture/工作 ; $name/film.mkv");
+        let command = super::reveal_command(path)?;
+        assert_eq!(command.get_program(), "open");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("-R"), path.as_os_str()]
+        );
+        Ok(())
+    }
+    #[cfg(windows)]
+    #[test]
+    fn reveal_uses_a_single_literal_windows_selection_argument() -> Result<(), String> {
+        let path = std::path::Path::new(r"C:\Users\fixture\工作 ; $name\film.mkv");
+        let command = super::reveal_command(path)?;
+        assert_eq!(command.get_program(), "explorer");
+        let mut expected = std::ffi::OsString::from("/select,");
+        expected.push(path);
+        assert_eq!(command.get_args().collect::<Vec<_>>(), vec![expected]);
+        Ok(())
+    }
     #[test]
     fn file_manager_spawn_failures_are_reported_without_running_a_process()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -81,17 +104,23 @@ mod tests {
         );
         Ok(())
     }
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn file_manager_terminal_failure_is_not_success() -> Result<(), Box<dyn std::error::Error>> {
+        #[cfg(unix)]
         use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        // Unix uses an encoded wait status; Windows uses a process exit code.
+        #[cfg(unix)]
+        let failure = std::process::ExitStatus::from_raw(256);
+        #[cfg(windows)]
+        let failure = std::process::ExitStatus::from_raw(1);
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("film.mkv");
         std::fs::write(&path, b"fixture")?;
         assert_eq!(
-            super::reveal_with(&path, |_| Ok(std::process::ExitStatus::from_raw(256)))
-                .err()
-                .as_deref(),
+            super::reveal_with(&path, |_| Ok(failure)).err().as_deref(),
             Some("File manager rejected the reveal request")
         );
         assert!(super::reveal_with(&path, |_| Ok(std::process::ExitStatus::from_raw(0))).is_ok());
