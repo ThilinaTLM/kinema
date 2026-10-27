@@ -287,7 +287,9 @@ pub struct AppCoordinator {
     #[cfg(feature = "ui-probe")]
     pub(crate) fixture_sources: std::collections::HashMap<(IndexerKind, PlaybackTarget), SourceSet>,
     // ── sessions: preparation and launch identity correlation ──
-    session_identity: std::collections::HashMap<u64, (String, PlaybackTarget)>,
+    session_identity: std::collections::HashMap<u64, (String, PlaybackTarget, Option<String>)>,
+    /// Catalog-derived player titles retained for the lifetime of each replayable lease.
+    player_titles: std::collections::HashMap<String, kinema_core::media::PlaybackTitle>,
     rates: kinema_core::transfer_rate::RateTracker,
     rate_epoch: std::time::Instant,
     // ── detail: provider-scoped recommendation page ──
@@ -321,6 +323,7 @@ impl AppCoordinator {
             personal_notice: None,
             // ── sessions ──
             session_identity: Default::default(),
+            player_titles: Default::default(),
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
             settings: None,
@@ -409,6 +412,7 @@ impl AppCoordinator {
             personal_notice: None,
             // ── sessions ──
             session_identity: Default::default(),
+            player_titles: Default::default(),
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
             settings: Some(Settings::default()),
@@ -973,6 +977,20 @@ impl AppCoordinator {
                     }
                 } else {
                     self.sessions.retain(|s| s.session.id != session.id);
+                    if let Some((title, target, episode_title)) =
+                        self.session_identity.get(&event.generation)
+                    {
+                        let episode = match target {
+                            PlaybackTarget::Episode {
+                                season, episode, ..
+                            } => Some((*season, *episode, episode_title.as_deref())),
+                            PlaybackTarget::Movie(_) => None,
+                        };
+                        self.player_titles.insert(
+                            session.id.clone(),
+                            kinema_core::media::playback_title(title, episode),
+                        );
+                    }
                     self.sessions.push(SessionSnapshot {
                         session: session.clone(),
                         file_name: file_name.clone(),
@@ -1069,6 +1087,8 @@ impl AppCoordinator {
             self.session_identity.remove(&event.generation);
         }
         self.prune_embedded_tombstones();
+        self.player_titles
+            .retain(|id, _| self.sessions.iter().any(|s| &s.session.id == id));
         if let AppOutcome::EmbeddedPlaybackStarted {
             session,
             file_name,
@@ -1081,11 +1101,10 @@ impl AppCoordinator {
             } else {
                 self.embedded_sessions.insert(session.id.clone());
                 let title = self
-                    .sessions
-                    .iter()
-                    .find(|s| s.session.id == session.id)
-                    .and_then(|s| s.title.clone())
-                    .unwrap_or_else(|| file_name.clone());
+                    .player_titles
+                    .get(&session.id)
+                    .cloned()
+                    .unwrap_or_else(|| kinema_core::media::playback_title(file_name, None));
                 if crate::screens::player_window::open(
                     session.id.clone(),
                     mode.clone(),
@@ -1939,6 +1958,7 @@ impl AppCoordinator {
     pub fn prepare(
         &mut self,
         title: String,
+        episode_title: Option<String>,
         target: PlaybackTarget,
         candidate: kinema_core::sources::SourceCandidate,
         cx: &mut Context<Self>,
@@ -1948,7 +1968,7 @@ impl AppCoordinator {
             quality = diagnostic_quality(candidate.quality.as_deref()),
             "UI preparation requested"
         );
-        let identity = (title, target.clone());
+        let identity = (title, target.clone(), episode_title);
         let generation = self.command(AppAction::Prepare { target, candidate }, cx)?;
         // An admitted preparation supersedes the worker's retained preparation.
         // Keep identity still needed by outstanding launches/commands.
@@ -2103,6 +2123,65 @@ mod session_tests {
     }
 
     #[test]
+    fn player_episode_metadata_survives_replay_and_is_removed_with_lease() {
+        let mut cx = gpui::TestAppContext::single();
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        coordinator.update(&mut cx, |c, cx| {
+            let generation = c.tracker.issue(Pending::Play { remote: true });
+            c.session_identity.insert(
+                generation,
+                (
+                    "The Outsider".into(),
+                    PlaybackTarget::Episode {
+                        series: ImdbId::new("tt1234567").unwrap_or_else(|e| panic!("fixture: {e}")),
+                        season: 1,
+                        episode: 4,
+                    },
+                    Some("Que Viene el Coco".into()),
+                ),
+            );
+            let started = AppOutcome::PlaybackStarted {
+                session: PlaybackSession {
+                    id: "episode".into(),
+                    url: "http://127.0.0.1:1234/media/episode".into(),
+                },
+                // Deliberately conflicting: catalog metadata must win.
+                file_name: "release.S09E99.mkv".into(),
+            };
+            c.apply_app(
+                AppEvent {
+                    generation,
+                    outcome: started.clone(),
+                },
+                cx,
+            );
+            assert_eq!(
+                c.player_titles["episode"].full,
+                "The Outsider · S01E04 · Que Viene el Coco"
+            );
+            let replay = c.tracker.issue_session(Pending::Replay, "episode".into());
+            c.apply_app(
+                AppEvent {
+                    generation: replay,
+                    outcome: started,
+                },
+                cx,
+            );
+            assert_eq!(c.player_titles["episode"].compact, "The Outsider · S01E04");
+            c.apply_app(
+                AppEvent {
+                    generation: 0,
+                    outcome: AppOutcome::Released {
+                        id: "episode".into(),
+                    },
+                },
+                cx,
+            );
+            assert!(!c.player_titles.contains_key("episode"));
+        });
+    }
+
+    #[test]
     fn late_launch_is_accounted_and_session_failures_survive_telemetry() {
         let mut cx = gpui::TestAppContext::single();
         let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
@@ -2112,7 +2191,7 @@ mod session_tests {
                 ImdbId::new("tt1234567").unwrap_or_else(|e| panic!("fixture: {e}")),
             );
             c.session_identity
-                .insert(generation, ("Fixture title".into(), target.clone()));
+                .insert(generation, ("Fixture title".into(), target.clone(), None));
             c.cancel_launch(generation, cx);
             c.apply_app(
                 AppEvent {

@@ -54,7 +54,15 @@ impl PlaySheet {
         let pending = if missing {
             None
         } else {
-            coordinator.update(cx, |c, cx| c.prepare(title.clone(), target, candidate, cx))
+            coordinator.update(cx, |c, cx| {
+                c.prepare(
+                    title.clone(),
+                    context.episode_title.clone(),
+                    target,
+                    candidate,
+                    cx,
+                )
+            })
         };
         Self {
             coordinator,

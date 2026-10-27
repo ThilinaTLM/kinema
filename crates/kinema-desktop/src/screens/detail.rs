@@ -872,6 +872,10 @@ impl Detail {
     fn play_context(&self, cx: &mut Context<Self>) -> PlayContext {
         PlayContext {
             episode: self.episode.as_ref().map(episode_caption),
+            episode_title: self
+                .episode
+                .as_ref()
+                .and_then(|episode| episode.name.clone()),
             poster: self
                 .display_title(cx)
                 .poster_url()

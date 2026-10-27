@@ -32,6 +32,7 @@ impl PlaySheet {
             .cloned();
         let context = PlayContext {
             episode: None,
+            episode_title: None,
             poster,
         };
         let mut this = Self::new(

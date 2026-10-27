@@ -1,4 +1,62 @@
-//! Pure byte availability and single HTTP byte-range resolution.
+//! Pure playback titles, byte availability and single HTTP byte-range resolution.
+
+/// Player title text, with the episode name omitted in the compact variant.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaybackTitle {
+    pub full: String,
+    pub compact: String,
+}
+
+/// Formats catalog identity only; local file names pass through unchanged.
+/// Season/episode numbers are never inferred from release or file names.
+pub fn playback_title(title: &str, episode: Option<(u32, u32, Option<&str>)>) -> PlaybackTitle {
+    let Some((season, episode, name)) = episode else {
+        return PlaybackTitle {
+            full: title.into(),
+            compact: title.into(),
+        };
+    };
+    let compact = format!("{title} · S{season:02}E{episode:02}");
+    let full = match name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => format!("{compact} · {name}"),
+        None => compact.clone(),
+    };
+    PlaybackTitle { full, compact }
+}
+
+#[cfg(test)]
+mod playback_title_tests {
+    use super::playback_title;
+
+    #[test]
+    fn episode_name_is_optional_and_dropped_before_identity() {
+        let title = playback_title("The Outsider", Some((1, 4, Some("Que Viene el Coco"))));
+        assert_eq!(title.full, "The Outsider · S01E04 · Que Viene el Coco");
+        assert_eq!(title.compact, "The Outsider · S01E04");
+        for name in [None, Some(""), Some("  ")] {
+            let unnamed = playback_title("The Outsider", Some((1, 4, name)));
+            assert_eq!(unnamed.full, title.compact);
+            assert_eq!(unnamed.compact, title.compact);
+        }
+    }
+
+    #[test]
+    fn numbers_are_padded_not_limited_and_names_support_unicode() {
+        assert_eq!(
+            playback_title("Série", Some((0, 104, Some(" Épisode ")))).full,
+            "Série · S00E104 · Épisode"
+        );
+    }
+
+    #[test]
+    fn movies_and_local_names_are_unchanged() {
+        for name in ["The Outsider", "some.file.S01E04.mkv", "映画.mp4"] {
+            let title = playback_title(name, None);
+            assert_eq!(title.full, name);
+            assert_eq!(title.compact, name);
+        }
+    }
+}
 
 use std::{error::Error, fmt};
 

@@ -29,6 +29,8 @@ const POSTER_HEIGHT: Pixels = px(66.);
 pub(crate) struct PlayContext {
     /// `S01E02`-style label for episodes.
     pub episode: Option<String>,
+    /// Catalog episode name (not parsed from the release name).
+    pub episode_title: Option<String>,
     pub poster: Option<Arc<RenderImage>>,
 }
 

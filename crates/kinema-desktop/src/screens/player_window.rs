@@ -9,6 +9,9 @@ use std::{
 
 use crate::player::PlayerChoice;
 use gpui::{prelude::*, *};
+use kinema_core::media::PlaybackTitle;
+#[cfg(feature = "ui-probe")]
+use kinema_core::media::playback_title;
 use kinema_mpv::{Config, PlaybackFailure, PlaybackState, Player, TrackKind};
 
 #[cfg(feature = "gpu-surface")]
@@ -33,6 +36,14 @@ use crate::widgets::{
 
 #[cfg(feature = "gpu-surface")]
 type VideoSurfaceFrame = GpuSurfaceFrame;
+
+fn title_for_width(title: &PlaybackTitle, full_width: Pixels, available: Pixels) -> &str {
+    if full_width <= available {
+        &title.full
+    } else {
+        &title.compact
+    }
+}
 
 fn embedded_help() -> &'static str {
     if cfg!(feature = "gpu-surface") {
@@ -254,7 +265,7 @@ pub fn open(
     session_id: String,
     mode: PlayerChoice,
     url: String,
-    title: String,
+    title: PlaybackTitle,
     coordinator: Entity<AppCoordinator>,
     cx: &mut App,
 ) -> Result<(), String> {
@@ -312,7 +323,7 @@ pub fn open(
         ))),
         window_min_size: Some(size(px(720.), px(440.))),
         titlebar: Some(TitlebarOptions {
-            title: Some(format!("{title} — Kinema").into()),
+            title: Some(title.full.clone().into()),
             ..Default::default()
         }),
         ..Default::default()
@@ -925,7 +936,7 @@ impl PlayerPerformance {
 }
 
 pub struct PlayerWindow {
-    title: String,
+    title: PlaybackTitle,
     lease: Option<(String, u64)>,
     #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
     frames_presented: u64,
@@ -982,7 +993,7 @@ impl Drop for PlayerWindow {
 
 impl PlayerWindow {
     fn new_mode(
-        title: String,
+        title: PlaybackTitle,
         url: Option<String>,
         mode: PlayerChoice,
         window: &mut Window,
@@ -2003,6 +2014,38 @@ impl PlayerWindow {
         }
         self.transfer.display_key() != before
     }
+    /// Measure with the bundled typography, not a character-count breakpoint.
+    /// Remove the optional episode name before applying normal end truncation.
+    fn chrome_title(&self, window: &Window) -> String {
+        let text_width = |text: &str, style: crate::widgets::tokens::TypeStyle| {
+            let mut font = font(t::UI_FAMILY);
+            font.weight = style.weight;
+            let run = TextRun {
+                len: text.len(),
+                font,
+                color: Rgba::default().into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            window
+                .text_system()
+                .shape_line(text.to_owned().into(), style.size, &[run], None)
+                .width
+        };
+        let available = window.viewport_size().width
+            - s::S16 * 2.
+            - s::S12 * 2.
+            - s::S32
+            - text_width("KINEMA / PLAYER", t::CAPTION);
+        title_for_width(
+            &self.title,
+            text_width(&self.title.full, t::BODY_STRONG),
+            available,
+        )
+        .to_owned()
+    }
+
     fn chrome(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = Palette::dark();
         let fullscreen = window.is_fullscreen();
@@ -2150,7 +2193,7 @@ impl PlayerWindow {
                             .min_w_0()
                             .type_style(t::BODY_STRONG)
                             .truncate()
-                            .child(self.title.clone()),
+                            .child(self.chrome_title(window)),
                     )
                     .child(
                         div()
@@ -2727,7 +2770,7 @@ pub fn run_probe_mode(
             ..Default::default()
         };
         let handle = cx.open_window(options, |window, cx| cx.new(|cx| {
-            let mut view = PlayerWindow::new_mode(if gpu_playback { "Offline fixture" } else { "The Last Light" }.into(), media.map(|path| path.to_string_lossy().into_owned()), mode, window, cx);
+            let mut view = PlayerWindow::new_mode(if gpu_playback { playback_title("Offline fixture", None) } else { playback_title("The Outsider", Some((1, 4, Some("Que Viene el Coco")))) }, media.map(|path| path.to_string_lossy().into_owned()), mode, window, cx);
             if gpu_playback { cx.defer_in(window, |_, _, _| install_probe_gpu_guard()); }
             if !native {
                 let chapter = |time, title: &str| kinema_mpv::Chapter { time, title: Some(title.into()) };
@@ -2896,6 +2939,26 @@ pub fn run_probe_mode(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn player_title_drops_episode_name_before_episode_identity() {
+        let title = kinema_core::media::playback_title(
+            "The Outsider",
+            Some((1, 4, Some("Que Viene el Coco"))),
+        );
+        assert_eq!(
+            super::title_for_width(&title, gpui::px(500.), gpui::px(500.)),
+            title.full
+        );
+        assert_eq!(
+            super::title_for_width(&title, gpui::px(500.), gpui::px(499.)),
+            title.compact
+        );
+        assert_eq!(
+            super::title_for_width(&title, gpui::px(500.), gpui::px(0.)),
+            title.compact
+        );
+    }
+
     #[test]
     fn embedded_player_icon_decodes_and_differs_from_application_icon()
     -> Result<(), Box<dyn std::error::Error>> {
