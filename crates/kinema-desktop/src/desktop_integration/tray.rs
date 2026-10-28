@@ -145,9 +145,10 @@ impl Tray {
         let lease = CallbackLease::claim()?;
         let builder = TrayIconBuilder::new();
         #[cfg(target_os = "macos")]
-        let builder = builder.with_icon_as_template(true);
+        let builder = builder.with_icon_templated(icon);
+        #[cfg(not(target_os = "macos"))]
+        let builder = builder.with_icon(icon);
         let handle = builder
-            .with_icon(icon)
             .with_tooltip("Kinema")
             .with_title("Kinema")
             .build()
