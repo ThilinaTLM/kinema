@@ -20,7 +20,8 @@ modified. The application's Linux backend is exclusively `use_zbus`.
   a bounded channel. These waits happen only on the app's Linux adapter worker.
 - zbus duration overflow is omitted, not unwrapped. macOS rejects invalid absolute
   seek seconds rather than panicking. Windows detaches both button and absolute
-  position subscriptions and clears their tokens.
+  position subscriptions and clears their tokens. macOS Stop-handler teardown
+  uses the same typed null Objective-C target as the other command handlers.
 
 Source evidence: compare upstream 0.9.3 `platform/mpris/zbus.rs` methods
 `can_go_next`, `can_go_previous`, `can_seek` (formerly unconditional true);

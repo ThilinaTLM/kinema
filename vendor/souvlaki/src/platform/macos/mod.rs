@@ -409,7 +409,7 @@ unsafe fn detach_command_handlers() {
     unsafe {
         let command_center: Id = msg_send!(class!(MPRemoteCommandCenter), sharedCommandCenter);
         let cmd: Id = msg_send!(command_center, stopCommand);
-        let _: () = msg_send!(cmd, removeTarget: nil);
+        let _: () = msg_send!(cmd, removeTarget: std::ptr::null_mut::<Object>());
         let _: () = msg_send!(cmd, setEnabled: NO);
 
         let cmd: Id = msg_send!(command_center, togglePlayPauseCommand);
