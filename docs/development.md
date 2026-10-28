@@ -1,8 +1,13 @@
 # Development
 
-Isolated acquisition experiments: [adaptive HTTP range cache and librqbit streaming
-POCs](development/download-poc.md). These do not change default playback or qualify
-production download, torrent, or cross-platform behavior.
+Production HTTP acquisition now uses bounded adaptive parallel ranges; see the
+[implementation contract](../crates/kinema-desktop/src/media/README.md) and
+[validation/limits](validation/adaptive-http.md). Full-file disk reservations and
+durable resume remain unchanged. This does not qualify real-provider throughput
+or native/cross-platform playback.
+
+The earlier [HTTP and librqbit POCs](development/download-poc.md) remain isolated
+experiments. Direct torrent playback is not integrated.
 
 Latest scoped extension evidence: [durable playback progress, native UI, and desktop
 integration](validation/playback-progress-desktop.md). Root checks and an isolated
