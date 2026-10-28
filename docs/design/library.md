@@ -1,5 +1,11 @@
 # Library — membership and manual watch tracking
 
+**Playback-progress extension (2026-10-28):** the approved
+[progress and desktop integration contract](playback-progress-desktop.md) supersedes
+the manual-only/no-resume and Main-close-always-quits rules below. Source is
+implemented with [scoped validation](../validation/playback-progress-desktop.md),
+not full native desktop/provider qualification.
+
 **Status: source implemented and lead-reviewed; scoped validation passed.**
 Storage, shared state and native UI are implemented, with reviewed root/feature
 checks and Linux synthetic native captures, including movie, hero membership and

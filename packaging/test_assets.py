@@ -68,6 +68,30 @@ class BrandingTests(unittest.TestCase):
         # Symbolic icons are recoloured by the desktop, so no baked PNGs ship.
         self.assertEqual(list((BRAND / "png").glob("*/*-symbolic.png")), [])
 
+    def test_tray_glyphs(self):
+        sizes = (16, 18, 20, 22, 24, 32, 36, 40, 44, 48, 64)
+        for variant, rgb in (("dark", (0x23, 0x26, 0x29)), ("light", (255, 255, 255))):
+            name = f"{APP_ID}-tray-{variant}"
+            for suffix, box in (("", "0 0 1024 1024"), ("-16", "0 0 16 16")):
+                text = (BRAND / f"{name}{suffix}.svg").read_text()
+                self.assertEqual(ET.fromstring(text).get("viewBox"), box)
+                self.assertIn("SPDX-License-Identifier: Apache-2.0", text)
+                self.assertNotIn("<rect", text)
+            for size in sizes:
+                with Image.open(BRAND / "tray" / f"{name}-{size}.png") as image:
+                    self.assertEqual(image.size, (size, size))
+                    rgba = image.convert("RGBA")
+                self.assertEqual(rgba.getpixel((0, 0))[3], 0)
+                opaque = [p for p in rgba.getdata() if p[3] > 0]
+                self.assertTrue(opaque)
+                self.assertTrue(all(p[:3] == rgb for p in opaque if p[3] == 255))
+                # Silhouette keeps a margin so no platform crops the glyph.
+                box = rgba.getchannel("A").getbbox()
+                self.assertGreaterEqual(box[0], 1)
+                self.assertLessEqual(box[2], size - 1)
+                # Hinted stem: its left pixel column is fully opaque mid-height.
+                self.assertEqual(rgba.getpixel((box[0], size // 2))[3], 255)
+
     def test_platform_containers(self):
         with Image.open(BRAND / f"{APP_ID}.ico") as image:
             self.assertEqual(image.format, "ICO")

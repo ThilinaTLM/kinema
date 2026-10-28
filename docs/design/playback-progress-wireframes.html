@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kinema — Playback progress &amp; desktop integration wireframes</title>
+<script>document.documentElement.classList.add('js')</script>
+<style>
+:root{color-scheme:dark;--canvas:#0B0C0E;--surface:#131418;--raised:#1B1D22;--overlay:#202228;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);--hair:#25282E;--ctl:#24272D;--ctl-h:#2D3037;--tx:#F2F3F5;--tx2:#B3B8C1;--tx3:#8C929D;--accent:#FF7A45;--accent-h:#FF915F;--on-accent:#21130D;--accent-tx:#FF9B72;--tint:rgba(255,122,69,.16);--warn:#F5C451;--bad:#FF6B6B;--r4:4px;--r6:6px;--r8:8px;--r12:12px}
+*{box-sizing:border-box}.demo>*,.sim>*,.scn>*,.states>*,.tray-grid>*,.callout>*{min-width:0}[hidden]{display:none!important}
+body{margin:0;background:#050607;color:var(--tx);font:13px/1.5 Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums}
+.doc{max-width:1360px;margin:auto;padding:0 32px 64px}
+header.top{position:sticky;top:0;z-index:10;background:rgba(5,6,7,.95);border-bottom:1px solid var(--hair);padding:12px 32px;margin:0 -32px 8px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+header.top h1{font-size:15px;margin:0}header.top nav{display:flex;gap:14px;flex-wrap:wrap;margin-left:auto}
+a{color:var(--tx2);text-decoration:none}a:hover{color:var(--tx)}
+:focus-visible{outline:2px solid var(--accent-tx);outline-offset:3px}
+.pill{font:10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em;padding:3px 8px;border-radius:99px;border:1px solid rgba(245,196,81,.4);color:var(--warn)}
+h2{font-size:20px;margin:56px 0 4px;letter-spacing:-.3px;scroll-margin-top:60px}h2 .n{color:var(--accent);font:11px ui-monospace,monospace;margin-right:8px}
+h3{font-size:14px;margin:0 0 6px}h4{margin:0;font-size:13px}
+p.lead{color:var(--tx2);margin:0 0 16px;max-width:900px}
+code{color:var(--accent-tx);font-size:12px}
+.callout{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r8);overflow:hidden;margin:16px 0}
+.callout>div{background:var(--surface);padding:14px 18px}.callout b{display:block;margin-bottom:4px}.callout p{margin:0;color:var(--tx2)}
+.callout .hide b{color:var(--warn)}.callout .show b{color:var(--accent-tx)}
+.notes{background:var(--raised);border:1px solid var(--line);border-radius:var(--r8);padding:12px 18px;margin:16px 0 0;color:var(--tx2)}.notes b{color:var(--tx)}.notes ul{margin:4px 0;padding-left:18px}.notes li{margin:3px 0}
+.frame{background:var(--canvas);border:1px solid #2a2d33;border-radius:10px;padding:24px}
+.lab{font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 6px}
+.meta{color:var(--tx3);font-size:12px}
+/* controls */
+.btn{height:32px;display:inline-flex;align-items:center;gap:7px;padding:0 12px;border-radius:var(--r6);border:1px solid var(--line);background:var(--ctl);color:var(--tx);font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
+button.btn:hover{background:var(--ctl-h)}span.btn{cursor:default}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent}button.btn.primary:hover{background:var(--accent-h)}
+.btn small{font-weight:500;opacity:.8;font-size:12px}
+.btn.danger{color:#ffb0b0;border-color:rgba(255,107,107,.35)}
+.btn[aria-pressed=true],.btn[aria-selected=true]{background:var(--tint);border-color:rgba(255,122,69,.4);color:var(--accent-tx)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.seg{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.toggle{display:inline-flex;gap:8px;align-items:center;color:var(--tx2);cursor:pointer}.toggle input{accent-color:var(--accent)}
+/* catalog */
+.mcard{display:grid;grid-template-columns:84px 1fr;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r8);padding:12px}
+.poster{aspect-ratio:2/3;border-radius:var(--r6);background:linear-gradient(160deg,#3b5560,#1b2a31 60%,#13181b);position:relative}
+.ob{position:absolute;left:4px;bottom:4px;height:20px;padding:0 6px;border-radius:var(--r4);background:rgba(11,12,14,.85);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px}.ob.ok{color:var(--accent-tx)}.ob .ic{width:12px;height:12px}
+.mb{display:flex;flex-direction:column;gap:6px;min-width:0}.mb .acts{margin-top:auto}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.erow{display:grid;grid-template-columns:96px 1fr;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r8);padding:10px;align-items:start}
+.erow .acts{grid-column:1/-1}
+.ethumb{aspect-ratio:16/9;border-radius:var(--r4);background:linear-gradient(120deg,#4a6067,#203a45)}
+.eb{display:flex;flex-direction:column;gap:4px;min-width:0}.et{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.wm{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line2);display:grid;place-items:center;flex:none}.wm.on{background:var(--tint);border-color:rgba(255,122,69,.55);color:var(--accent-tx)}.wm .ic{width:12px;height:12px}
+.bar{height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
+.ptext{display:flex;gap:8px;font-size:12px;color:var(--tx3);margin-top:3px;flex-wrap:wrap}.ptext b{color:var(--tx2);font-weight:600}
+.states{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.state header{min-height:92px}.tag{font-weight:650;color:var(--accent-tx)}.state p{margin:3px 0 0;color:var(--tx2);font-size:12px}
+.internal{border:1px dashed var(--line2);border-radius:var(--r6);padding:8px 10px;margin-top:12px!important;color:var(--tx3)!important}.internal span{display:block;font:10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em;color:var(--tx3)}
+/* demo */
+.demo{display:grid;grid-template-columns:300px 1fr 1fr;gap:20px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r8);padding:14px}
+.inspect dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:12px 0 0;font-size:12px}.inspect dt{color:var(--tx3)}.inspect dd{margin:0;font-family:ui-monospace,monospace}
+.stack{display:flex;flex-direction:column;gap:12px}
+.demo .v-partial,.demo .v-plain{display:none}
+.demo[data-view=partial] .v-partial{display:revert}.demo[data-view=plain] .v-plain{display:revert}
+.demo[data-view=partial] .v-partial.acts{display:flex}
+.demo[data-view=plain] .v-plain.acts{display:flex}
+.demo[data-view=partial] .prog.v-partial{display:block}
+.demo .watched-only{display:none}.demo[data-watched=true] .watched-only{display:inline-flex}.demo[data-watched=true] .wm:not(.on){display:none}.demo[data-watched=false] .wm.on{background:var(--tint);border-color:rgba(255,122,69,.55);color:var(--accent-tx)}
+.demo[data-watched=false] .ob{display:none}
+.dialog{background:var(--overlay);border:1px solid var(--line2);border-radius:var(--r12);padding:18px;box-shadow:0 18px 50px rgba(0,0,0,.5);max-width:420px}
+.dialog h3{font-size:15px}.dialog p{margin:0 0 14px;color:var(--tx2)}.dialog .acts{justify-content:flex-end}
+.warn-box{display:flex;gap:10px;background:rgba(245,196,81,.08);border:1px solid rgba(245,196,81,.3);border-radius:var(--r6);padding:10px 12px;margin:0 0 14px;color:#f2dc9a;font-size:12px}
+.menu{background:var(--overlay);border:1px solid var(--line2);border-radius:var(--r8);padding:4px;min-width:250px;box-shadow:0 12px 36px rgba(0,0,0,.45)}
+.mi{display:flex;justify-content:space-between;gap:16px;padding:6px 10px;border-radius:var(--r4);font-size:13px}.mi.hl{background:var(--ctl-h)}.mi.dis{color:var(--tx3)}.mi small{color:var(--tx3)}
+.sep{height:1px;background:var(--line);margin:4px 6px}
+/* player */
+.player{position:relative;width:100%;height:clamp(240px,34vw,330px);border-radius:10px;overflow:hidden;border:1px solid #383b3f;background:linear-gradient(180deg,#3d5259,#7f8c82 50%,#26404a);isolation:isolate}
+.player::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,9,12,.55),transparent 30%,transparent 50%,rgba(5,8,12,.9));z-index:-1}
+.ptop{position:absolute;left:16px;top:12px;right:16px;font-size:13px;font-weight:600}.ptop small{display:block;font-weight:400;color:#c4c8cb;font-size:11px}
+.pdock{position:absolute;left:16px;right:16px;bottom:12px}
+.seek{height:12px;position:relative}.seek .tr{position:absolute;left:0;right:0;top:4px;height:4px;border-radius:2px;background:rgba(255,255,255,.25)}.seek .pl{position:absolute;left:0;top:4px;height:4px;border-radius:2px;background:var(--accent)}.seek .th{position:absolute;top:0;width:12px;height:12px;border-radius:50%;background:#fff;margin-left:-6px}
+.seek .m90{position:absolute;top:-3px;width:2px;height:18px;background:var(--warn);left:90%}
+.trow{display:flex;justify-content:space-between;font-size:11px;color:#e0e3e5;margin-top:6px}
+.badge{position:absolute;right:16px;top:12px;font:10px ui-monospace,monospace;border:1px solid rgba(255,255,255,.3);padding:3px 6px;border-radius:3px;background:rgba(0,0,0,.35)}
+.scrim{position:absolute;inset:0;background:rgba(5,7,9,.62);display:grid;place-items:center;padding:16px;z-index:1}
+.scrim .dialog{max-width:380px}
+/* sim */
+.sim{display:grid;grid-template-columns:1.4fr 1fr;gap:20px}
+.chips{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
+.chip{border:1px solid var(--line);border-radius:var(--r6);padding:8px 10px;background:var(--raised)}.chip span{display:block;font:10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3)}.chip b{font-size:14px}
+.chip.on b{color:var(--accent-tx)}
+.log{margin:10px 0 0;padding:0;list-style:none;max-height:150px;overflow:auto;font:12px ui-monospace,monospace;color:var(--tx2)}.log li{padding:3px 0;border-top:1px solid var(--line)}.log li:first-child{border:0;color:var(--tx)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+/* desktop mocks */
+.desk{position:relative;height:300px;border-radius:var(--r8);background:linear-gradient(135deg,#1a2430,#10151b);border:1px solid var(--line);overflow:hidden}
+.win{position:absolute;border-radius:var(--r6);background:var(--surface);border:1px solid var(--line2);box-shadow:0 8px 24px rgba(0,0,0,.4);overflow:hidden;font-size:11px}
+.win .tb{height:22px;background:var(--raised);display:flex;align-items:center;gap:6px;padding:0 8px;color:var(--tx2)}.win .tb i{margin-left:auto;font-style:normal;color:var(--tx3)}
+.win .bd{padding:8px;color:var(--tx3)}
+.win.main{left:4%;top:10%;width:52%;height:62%}.win.pl{right:4%;top:22%;width:42%;height:56%}.win.pl .bd{height:calc(100% - 22px);background:linear-gradient(180deg,#3d5259,#26404a);color:#dfe}
+.win.ghost{border-style:dashed;opacity:.35;box-shadow:none}
+.win.dlg{left:12%;top:28%;width:50%;background:var(--overlay);z-index:3}.win.dlg .bd{color:var(--tx2)}
+.traybar{position:absolute;left:0;right:0;bottom:0;height:26px;background:rgba(0,0,0,.55);display:flex;justify-content:flex-end;gap:10px;align-items:center;padding:0 12px;color:var(--tx2)}
+.tray-ic{width:14px;height:14px;background:var(--accent);clip-path:polygon(0 0,32% 0,32% 36%,76% 0,100% 0,51% 48%,100% 100%,69% 100%,32% 61%,32% 100%,0 100%)}.tray-ic.x{opacity:.25;filter:grayscale(1)}
+.scn{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.scn ol{margin:8px 0 0;padding-left:18px;color:var(--tx2)}.scn li{margin:4px 0}
+.outcome{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.outcome div{background:var(--raised);border:1px solid var(--line);border-radius:var(--r6);padding:8px 10px}.outcome span{display:block;font:10px ui-monospace,monospace;color:var(--tx3);text-transform:uppercase}
+.js .scn-panel{display:none}.js .scn-panel.active{display:block}
+.tray-grid{display:grid;grid-template-columns:auto auto 1fr;gap:20px;align-items:start}
+.tray[data-players=none] .need-player{color:var(--tx3)}
+.tray .p2,.tray .p1{display:none}.tray[data-players=one] .p1,.tray[data-players=two] .p1{display:flex}.tray[data-players=two] .p2{display:flex}.tray .p0{display:none}.tray[data-players=none] .p0{display:flex}
+.tray[data-players=none] .pdep{color:var(--tx3)}
+footer{margin-top:56px;border-top:1px solid var(--hair);padding-top:16px;color:var(--tx3);font-size:12px}
+.open li{margin:6px 0}
+@media(max-width:1100px){.states{grid-template-columns:repeat(2,1fr)}.demo{grid-template-columns:1fr 1fr}.demo .inspect{grid-column:1/-1}.tray-grid{grid-template-columns:1fr 1fr}.tray-grid>.notes{grid-column:1/-1}}
+@media(max-width:760px){.states,.demo,.sim,.scn,.tray-grid,.callout{grid-template-columns:minmax(0,1fr)}.doc{padding:0 16px}header.top{padding:10px 16px;margin:0 -16px}header.top nav{margin-left:0}.states,.demo,.sim,.scn,.tray-grid,.callout{grid-template-columns:1fr}.frame{padding:14px}.outcome{grid-template-columns:1fr}.state header{min-height:0}.mcard{grid-template-columns:72px 1fr}.desk{height:340px}.win.main{width:70%}.win.pl{width:60%;top:40%}.desk .win.dlg{left:6%!important;width:88%!important}.win.dlg .bd>div{flex-wrap:wrap}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="doc">
+<header class="top"><h1>Kinema · Playback progress &amp; desktop integration</h1><span class="pill">Review wireframes · proposal only</span>
+<nav aria-label="Sections"><a href="#s1">Catalog</a><a href="#s2">Demo</a><a href="#s3">Clear</a><a href="#s4">Launch</a><a href="#s5">90%</a><a href="#s6">Tray</a><a href="#s7">Close</a><a href="#s8">Checklist</a></nav></header>
+
+<p class="lead" style="margin-top:20px">Static review artifact for <code>playback-progress-desktop.md</code>. Nothing here is implemented, qualified on any OS, or wired to a database, mpv, a tray or a media session. Fixture titles, times and artwork are placeholders. Native-menu and window chrome are approximations; each OS draws its own.</p>
+
+<div class="callout" role="note"><div class="hide"><b>Catalog progress visibility: conditional</b><p>Progress bar, percent, elapsed text and “Resume · time” appear in cards/detail/episode rows only when the item is <i>unwatched</i> and has a usable checkpoint. A watched item hides them; the checkpoint is retained internally.</p></div>
+<div class="show"><b>Player seek bar: always visible</b><p>The embedded player’s seek bar, elapsed/remaining time and OS transport position are accurate regardless of watched status. Hiding catalog progress never hides playback controls.</p></div></div>
+
+<h2 id="s1"><span class="n">01</span>Movie &amp; episode states</h2>
+<p class="lead">Completion (watched) and resume checkpoint are independent. Same four states for a movie and an episode.</p>
+<div class="frame"><div class="states"><section class="state"><header><span class="tag">Unwatched · partial</span><p>Movie checkpoint 24:18 and episode checkpoint 14:20 each shown as Resume, bar and elapsed/total text.</p></header><div class="lab">Movie · detail / card</div><article class="mcard"><div class="poster"></div><div class="mb"><h4>The Quiet Between</h4><div class="meta">2026 · 1h 42m</div><div class="prog"><div class="bar" role="img" aria-label="24 percent, 24:18 of 1:42:10"><i style="width:24%"></i></div><div class="ptext"><b>24:18</b><span>of 1:42:10 · 24%</span></div></div><div class="acts"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Resume <small>· 24:18</small></span><span class="btn">Play from beginning</span></div></div></article><div class="lab">Episode row</div><article class="erow"><div class="ethumb"></div><div class="eb"><div class="et"><h4>S1 · E4 Across the water</h4><span class="wm"></span></div><div class="meta">37 min</div><div class="prog"><div class="bar" role="img" aria-label="38 percent, 14:20 of 37:40"><i style="width:38%"></i></div><div class="ptext"><b>14:20</b><span>of 37:40 · 38%</span></div></div></div><div class="acts"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Resume <small>· 14:20</small></span><span class="btn">Play from beginning</span></div></article><p class="internal"><span>Internal</span>Visible</p></section><section class="state"><header><span class="tag">Watched · progress hidden</span><p>Only the watched mark and ordinary Play. No bar, percent or timestamp.</p></header><div class="lab">Movie · detail / card</div><article class="mcard"><div class="poster"><span class="ob ok"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Watched</span></div><div class="mb"><h4>The Quiet Between</h4><div class="meta">2026 · 1h 42m</div><div class="acts"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Play</span></div></div></article><div class="lab">Episode row</div><article class="erow"><div class="ethumb"></div><div class="eb"><div class="et"><h4>S1 · E4 Across the water</h4><span class="wm on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span></div><div class="meta">37 min</div></div><div class="acts"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Play</span></div></article><p class="internal"><span>Internal</span>Retained internally: movie 24:18, episode 14:20 · not rendered in catalog</p></section><section class="state"><header><span class="tag">Manual “Mark unwatched”</span><p>Same checkpoints reappear at once. Nothing was deleted or recalculated.</p></header><div class="lab">Movie · detail / card</div><article class="mcard"><div class="poster"></div><div class="mb"><h4>The Quiet Between</h4><div class="meta">2026 · 1h 42m</div><div class="prog"><div class="bar" role="img" aria-label="24 percent, 24:18 of 1:42:10"><i style="width:24%"></i></div><div class="ptext"><b>24:18</b><span>of 1:42:10 · 24%</span></div></div><div class="acts"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Resume <small>· 24:18</small></span><span class="btn">Play from beginning</span></div></div></article><div class="lab">Episode row</div><article class="erow"><div class="ethumb"></div><div class="eb"><div class="et"><h4>S1 · E4 Across the water</h4><span class="wm"></span></div><div class="meta">37 min</div><div class="prog"><div class="bar" role="img" aria-label="38 percent, 14:20 of 37:40"><i style="width:38%"></i></div><div class="ptext"><b>14:20</b><span>of 37:40 · 38%</span></div></div></div><div class="acts"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Resume <small>· 14:20</small></span><span class="btn">Play from beginning</span></div></article><p class="internal"><span>Internal</span>Same retained checkpoints, now visible</p></section><section class="state"><header><span class="tag">Unwatched · duration unknown</span><p>Elapsed time only. No fabricated percentage or bar.</p></header><div class="lab">Movie · detail / card</div><article class="mcard"><div class="poster"></div><div class="mb"><h4>The Quiet Between</h4><div class="meta">2026 · 1h 42m</div><div class="prog"><div class="ptext"><b>Elapsed 24:18</b><span>duration unknown · no percent</span></div></div><div class="acts"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Resume <small>· 24:18</small></span><span class="btn">Play from beginning</span></div></div></article><div class="lab">Episode row</div><article class="erow"><div class="ethumb"></div><div class="eb"><div class="et"><h4>S1 · E4 Across the water</h4><span class="wm"></span></div><div class="meta">37 min</div><div class="prog"><div class="ptext"><b>Elapsed 14:20</b><span>duration unknown · no percent</span></div></div></div><div class="acts"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Resume <small>· 14:20</small></span><span class="btn">Play from beginning</span></div></article><p class="internal"><span>Internal</span>Visible, elapsed only</p></section></div></div>
+<div class="notes"><b>Review notes</b><ul><li>The watched card stays uncluttered; the Resume / Play from beginning choice moves into the player (§04).</li><li>Unknown duration shows elapsed text only; no bar is drawn so nothing implies a percent.</li><li>Season and series totals still count only watched flags; partial playback is a separate has-resume summary, not a fractional episode.</li><li>Unmatched local files do not persist progress in the first increment, so show none of this UI for them.</li></ul></div>
+
+<h2 id="s2"><span class="n">02</span>Interactive: watched vs. progress</h2>
+<p class="lead">Toggle the flags. The catalog mocks follow the visibility rule; the player seek bar below never changes.</p>
+<div class="frame"><div class="demo" id="demo" data-watched="false" data-cp="true" data-view="partial">
+<div class="panel inspect"><h3>Controls &amp; internal state</h3>
+<div class="seg" role="group" aria-label="Watched state"><button class="btn" type="button" data-w="false" aria-pressed="true">Unwatched</button><button class="btn" type="button" data-w="true" aria-pressed="false">Watched</button></div>
+<p class="meta" style="margin:8px 0">“Mark unwatched” reveals preserved progress; “Mark watched” hides it. Neither deletes the checkpoint.</p>
+<button class="btn danger" type="button" id="clear">Clear saved progress</button>
+<dl><dt>watched</dt><dd id="d-w">false</dd><dt>checkpoint</dt><dd id="d-cp">24:18 (saved)</dd><dt>catalog shows</dt><dd id="d-show">bar + Resume</dd><dt>player seek bar</dt><dd>always visible</dd></dl></div>
+<div class="stack"><div><div class="lab">Movie card</div><article class="mcard"><div class="poster"><span class="ob ok"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Watched</span></div><div class="mb"><h4>The Quiet Between</h4><div class="meta">2026 · 1h 42m</div><div class="prog v-partial"><div class="bar" role="img" aria-label="24 percent watched, 24 minutes 18 seconds of 1 hour 42 minutes"><i style="width:24%"></i></div><div class="ptext"><b>24:18</b><span>of 1:42:10 · 24%</span></div></div>
+<div class="acts v-partial"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Resume <small>· 24:18</small></span><span class="btn">Play from beginning</span></div><div class="acts v-plain"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Play</span></div></div></article></div>
+<div><div class="lab">Episode row</div><article class="erow"><div class="ethumb"></div><div class="eb"><div class="et"><h4>S1 · E4 Across the water</h4><span class="wm on"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><span class="wm"></span></div><div class="meta">37 min</div><div class="prog v-partial"><div class="bar" role="img" aria-label="38 percent watched, 24 minutes 18 seconds of 1 hour 42 minutes"><i style="width:38%"></i></div><div class="ptext"><b>14:20</b><span>of 37:40 · 38%</span></div></div></div>
+<div class="acts v-partial"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Resume <small>· 14:20</small></span><span class="btn">Play from beginning</span></div><div class="acts v-plain"><span class="btn primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor" stroke="none"/></svg>Play</span></div></article></div></div>
+<div><div class="lab" style="margin-top:0">Player (separate window) — seek bar</div><div class="player"><div class="ptop">The Quiet Between<small>Always-visible transport, any watched state</small></div><div class="pdock"><div class="seek"><div class="tr"></div><div class="pl" style="width:24%"></div><div class="th" style="left:24%"></div></div><div class="trow"><span>24:18</span><span>−1:17:52</span></div></div></div>
+<p class="meta">Illustrative still, not video.</p></div>
+</div>
+<div id="clear-dialog" hidden style="margin-top:16px"><div class="dialog" role="alertdialog" aria-labelledby="cd-t"><h3 id="cd-t">Clear saved progress?</h3><p>Deletes the saved position only. Watched status is unchanged. This cannot be undone.</p><div class="acts"><button class="btn" type="button" id="cd-cancel">Cancel</button><button class="btn danger" type="button" id="cd-ok">Clear saved progress</button></div></div></div></div>
+
+<h2 id="s3"><span class="n">03</span>Clear saved progress</h2>
+<p class="lead">An explicit context action, independent of watched state. It is offered only when a checkpoint exists, in both watched and unwatched states, so a hidden checkpoint remains discoverable and removable.</p>
+<div class="frame"><div class="scn">
+<div><div class="lab" style="margin-top:0">Context menu (… on card / row)</div><div class="menu"><div class="mi">Mark watched <small>M</small></div><div class="mi">Mark unwatched</div><div class="sep"></div><div class="mi hl">Clear saved progress <small>24:18 saved</small></div><div class="mi dis">Remove from Library</div></div>
+<div class="notes"><b>Notes</b><ul><li>Menu row is hidden when there is no checkpoint, not shown disabled.</li><li>For a watched item the row says “Clear saved progress” without revealing the timestamp.</li><li>Removing from Library never touches progress, and vice versa.</li></ul></div></div>
+<div><div class="lab" style="margin-top:0">Confirmation · idle</div><div class="dialog"><h3>Clear saved progress?</h3><p>Deletes the saved position for “The Quiet Between”. Watched status is unchanged.</p><div class="acts"><span class="btn">Cancel</span><span class="btn danger">Clear saved progress</span></div></div>
+<div class="lab">Confirmation · this title is playing now</div><div class="dialog"><h3>Clear saved progress?</h3><div class="warn-box"><span aria-hidden="true">⚠</span><span>This title is playing in a player window. Playback will not stop, and it may save a new position after you clear.</span></div><p>Watched status is unchanged.</p><div class="acts"><span class="btn">Cancel</span><span class="btn danger">Clear saved progress</span></div></div></div></div></div>
+
+<h2 id="s4"><span class="n">04</span>Watched checkpoint: Resume prompt in player</h2>
+<p class="lead">Playing a watched title that retains a checkpoint asks inside the player, after source preparation. Unwatched partial titles already chose Resume or Start over in the catalog and skip this prompt.</p>
+<div class="frame"><div class="scn"><div class="player"><div class="ptop">The Quiet Between<small>Watched · replay</small></div><div class="pdock"><div class="seek"><div class="tr"></div><div class="th" style="left:0"></div></div><div class="trow"><span>0:00</span><span>1:42:10</span></div></div>
+<div class="scrim"><div class="dialog" role="dialog" aria-labelledby="rp-t"><h3 id="rp-t">Continue where you left off?</h3><p>You have a saved position at 24:18. This title is already marked watched; that will not change.</p><div class="acts"><span class="btn">Play from beginning</span><span class="btn primary">Resume · 24:18</span></div></div></div></div>
+<div class="notes" style="margin-top:0"><b>Review notes</b><ul><li>Playback stays paused until a choice is made; Resume is the focused default.</li><li>The prompt is the only place a watched item’s timestamp appears.</li><li>Play from beginning clears the checkpoint only once the new playback is ready; cancelled or failed preparation keeps it.</li><li>Different source duration (&gt; max(30 s, 2%)): same layout, text “This source differs in length” with Resume anyway / Start over.</li><li>Resume still goes through source selection; a checkpoint is not a stream URL.</li></ul></div></div></div>
+
+<h2 id="s5"><span class="n">05</span>90% auto-watched &amp; backward seek</h2>
+<p class="lead">Simulates the agreed policy on a 100-minute title. Move the slider and release (a confirmed seek) — speculative targets while dragging are not counted.</p>
+<div class="frame"><div class="sim"><div><div class="player" style="height:clamp(220px,28vw,260px)"><div class="ptop">Policy simulator<small>Fixture · 100:00</small></div><div class="pdock"><div class="seek"><div class="tr"></div><div class="m90" title="90%"></div><div class="pl" id="s-pl" style="width:24%"></div><div class="th" id="s-th" style="left:24%"></div></div><div class="trow"><span id="s-pos">24:00</span><span style="color:var(--warn)">90% = 90:00</span><span>100:00</span></div></div></div>
+<label class="lab" for="s-range" style="display:block">Confirmed position (minutes)</label><input id="s-range" type="range" min="0" max="100" value="24" aria-describedby="s-help"><p class="meta" id="s-help">Release to confirm. Keyboard arrow keys confirm on each step.</p>
+<div class="seg" style="margin-top:8px"><button class="btn" type="button" data-sim="fwd">Seek to 95%</button><button class="btn" type="button" data-sim="back">Seek back to 12%</button><button class="btn" type="button" data-sim="unw">Mark unwatched</button><button class="btn" type="button" data-sim="w">Mark watched</button><button class="btn" type="button" data-sim="run">New playback run</button><button class="btn" type="button" data-sim="reset">Reset</button></div></div>
+<div><div class="chips"><div class="chip" id="c-w"><span>Watched</span><b>No</b></div><div class="chip"><span>Checkpoint</span><b id="c-cp">24:00</b></div><div class="chip" id="c-s"><span>Auto-mark this run</span><b>Enabled</b></div><div class="chip"><span>Catalog would show</span><b id="c-show">Resume · 24:00</b></div></div>
+<ul class="log" id="log" aria-live="polite"><li>Playback run started.</li></ul></div></div>
+<div class="notes"><b>Review notes</b><ul><li>Position / duration ≥ 0.90 sets watched, once, and keeps updating the checkpoint. It measures position, not time viewed, so seeking past 90% qualifies.</li><li>Seeking backward saves the smaller position and never unmarks watched. Auto-marking is one-way.</li><li>Mark unwatched during a run suppresses auto-marking for the rest of that run, including later seeks; a new playback run may qualify again.</li><li>Unknown or live duration, loading defaults and failed loads never qualify. EOF is not required.</li></ul></div></div>
+
+<h2 id="s6"><span class="n">06</span>Tray: native menu mock</h2>
+<p class="lead">The OS draws the real menu, so fonts and spacing will differ. The three-item contract is independent of active players. Native behavior remains unqualified.</p>
+<div class="frame tray" id="tray"><div class="seg" role="group" aria-label="Main visibility" style="margin-bottom:16px"><button class="btn" type="button" data-main="visible" aria-pressed="true">Main visible</button><button class="btn" type="button" data-main="hidden" aria-pressed="false">Main hidden</button></div>
+<div class="tray-grid"><div><div class="lab" style="margin-top:0">Top-level menu</div><div class="menu">
+<div class="mi" id="tray-visibility">Hide</div>
+<div class="mi">Settings</div><div class="mi">Quit</div></div></div>
+<div class="notes" style="margin:0"><b>Review notes</b><ul><li>Show when Main is hidden; Hide when Main is visible.</li><li>Hide requires fresh tray health and matching safe Main-only hide/restore operations. Failure leaves Main visible, without quitting.</li><li>Independent player windows are never hidden by this action.</li><li>Settings opens the independent Settings window; Quit uses existing confirmation.</li><li>No players submenu, playback controls, status or Transfers entry. OS media controls remain separate.</li><li>Single click may restore Main where supported.</li></ul></div></div></div>
+
+<h2 id="s7"><span class="n">07</span>Closing windows</h2>
+<p class="lead">Main is a view, not the process owner. Closing the separate player always stops that player. Choose a scenario.</p>
+<div class="frame"><div class="seg" role="tablist" aria-label="Close scenarios" id="tabs" style="margin-bottom:16px">
+<button class="btn" role="tab" type="button" id="tab-a" data-t="a" aria-selected="true" aria-controls="panel-a" tabindex="0">Close Main · playing, tray OK</button><button class="btn" role="tab" type="button" id="tab-b" data-t="b" aria-selected="false" aria-controls="panel-b" tabindex="-1">Close Main · playing, no tray</button><button class="btn" role="tab" type="button" id="tab-c" data-t="c" aria-selected="false" aria-controls="panel-c" tabindex="-1">Close player</button><button class="btn" role="tab" type="button" id="tab-d" data-t="d" aria-selected="false" aria-controls="panel-d" tabindex="-1">Close Main · idle</button></div>
+
+<div class="scn-panel active" data-p="a" id="panel-a" role="tabpanel" aria-labelledby="tab-a"><div class="scn"><div class="desk"><div class="win main ghost"><div class="tb">Kinema <i>hidden</i></div></div><div class="win pl"><div class="tb">The Quiet Between <i>playing</i></div><div class="bd">Player stays visible and keeps playing.</div></div><div class="win dlg" style="left:6%;top:6%;width:44%;z-index:3"><div class="tb">Notice</div><div class="bd"><b style="color:var(--tx)">Kinema is still running</b><br>Playback continues. Restore from the tray, or Quit.</div></div><div class="traybar"><span class="tray-ic" title="Kinema tray"></span><span>12:04</span></div></div>
+<div><h3>Main hides; separate player stays visible</h3><ol><li>Active playback / serving / pending launch + usable tray host.</li><li>Main hides. Player, session, progress writes and leases continue.</li><li>One-time “Kinema is still running” notice with Restore / Quit guidance.</li><li>When the last session ends Kinema stays recoverable in the tray until explicit Quit.</li></ol><div class="outcome"><div><span>Main</span>Hidden</div><div><span>Player</span>Visible, playing</div><div><span>Process</span>Running</div></div></div></div></div>
+
+<div class="scn-panel" data-p="b" id="panel-b" role="tabpanel" aria-labelledby="tab-b"><div class="scn"><div class="desk"><div class="win main"><div class="tb">Kinema <i>still open</i></div><div class="bd">Library</div></div><div class="win pl"><div class="tb">The Quiet Between <i>playing</i></div><div class="bd">Playing</div></div><div class="win dlg" style="left:10%;top:30%;width:46%"><div class="tb">Keep Kinema running?</div><div class="bd">No system tray is available, so Kinema cannot hide in the background.<div style="margin-top:8px;display:flex;gap:6px"><span class="btn" style="height:24px">Minimize</span><span class="btn danger" style="height:24px">Quit</span><span class="btn" style="height:24px">Cancel</span></div></div></div><div class="traybar"><span class="tray-ic x" title="No tray host"></span><span>no tray host</span></div></div>
+<div><h3>No tray host: do not hide Main</h3><ol><li>Tray unavailable or registration failed.</li><li>Main is retained; dialog explains why, with Minimize / Quit / Cancel.</li><li>Quit follows the existing active-session confirmation, then bounded progress flush.</li><li>If the host is lost while Main is hidden, Main is restored.</li></ol><div class="outcome"><div><span>Main</span>Visible (retained)</div><div><span>Player</span>Visible, playing</div><div><span>Process</span>Running</div></div></div></div></div>
+
+<div class="scn-panel" data-p="c" id="panel-c" role="tabpanel" aria-labelledby="tab-c"><div class="scn"><div class="desk"><div class="win main"><div class="tb">Kinema</div><div class="bd">Library</div></div><div class="win pl ghost"><div class="tb">Closed</div></div><div class="win dlg" style="left:14%;top:62%;width:44%;height:auto"><div class="bd"><span style="color:var(--tx)">Progress saved · player stopped</span></div></div></div>
+<div><h3>Closing a player stops it</h3><ol><li>Player close stops that player, flushes its progress, releases its lease.</li><li>Never hides a video player invisibly; no audio-only background mode is proposed.</li><li>Other players and Main are unaffected. Media-control target moves to the most recently active remaining player.</li><li>If Main was hidden and this was the last player, Kinema remains recoverable in the tray.</li></ol><div class="outcome"><div><span>Player</span>Stopped</div><div><span>Progress</span>Flushed</div><div><span>Main</span>Unchanged</div></div></div></div></div>
+
+<div class="scn-panel" data-p="d" id="panel-d" role="tabpanel" aria-labelledby="tab-d"><div class="scn"><div class="desk"><div class="win main ghost"><div class="tb">Kinema <i>closed</i></div></div><div class="win dlg" style="left:20%;top:30%;width:44%"><div class="bd">Nothing active. Kinema quits normally.</div></div></div>
+<div><h3>Idle Main close quits</h3><ol><li>No playback, serving or pending launch.</li><li>Normal quit; no tray lingering.</li><li>Optional “Keep in tray when idle” preference is proposed, default off.</li><li>Settings window close closes Settings only.</li></ol><div class="outcome"><div><span>Main</span>Closed</div><div><span>Process</span>Exits</div><div><span>Tray</span>None</div></div></div></div></div>
+</div>
+
+<h2 id="s8"><span class="n">08</span>Review checklist</h2>
+<p class="lead">These rules are agreed in the proposal and are shown as settled. Review is limited to styling, layout and copy.</p>
+<div class="notes open"><b>Confirm the wireframes show the agreed rules</b><ul>
+<li>&#9744; Watched titles hide catalog progress bars, percentages and resume timestamps; the checkpoint is retained internally.</li>
+<li>&#9744; Manual unwatched reveals the preserved checkpoint. Clear saved progress is separate from watched and warns during active playback.</li>
+<li>&#9744; The player seek bar is always visible, whatever the watched state.</li>
+<li>&#9744; 90% auto-marks watched, backward seeks save the new position, and manual unwatched suppresses auto-marking for the run.</li>
+<li>&#9744; Closing Main with active playback keeps the separate player visible; closing the player stops it; with no tray, Main is retained.</li>
+<li>&#9744; Next / Previous are unsupported by default; tray volume uses discrete commands.</li></ul>
+<b style="display:block;margin-top:10px">Styling and copy only</b><ul><li>&#9744; Wording of dialogs, notices and the active-playback warning.</li><li>&#9744; Spacing, emphasis and placement of progress, Resume and watched marks.</li></ul></div>
+<footer>Design proposal only · not implemented or qualified on Windows, macOS or Linux · fixtures, no media or network · self-contained.</footer>
+</div>
+<script>
+(function(){
+var $=function(s,r){return (r||document).querySelector(s)},$$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+function press(btns,on){btns.forEach(function(b){b.setAttribute('aria-pressed',b===on?'true':'false')})}
+/* 02 demo */
+var demo=$('#demo'),st={w:false,cp:true};
+function dr(){var view=(!st.w&&st.cp)?'partial':'plain';demo.dataset.watched=st.w;demo.dataset.view=view;
+$('#d-w').textContent=st.w;$('#d-cp').textContent=st.cp?'24:18 ('+(st.w?'retained, hidden':'saved')+')':'none';
+$('#d-show').textContent=view==='partial'?'bar + Resume':(st.w?'watched mark + Play':'Play');
+$('#clear').hidden=!st.cp;
+$$('[data-w]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.w===String(st.w)))});}
+$$('[data-w]').forEach(function(b){b.onclick=function(){st.w=b.dataset.w==='true';dr()}});
+$('#clear').onclick=function(){$('#clear-dialog').hidden=false;$('#cd-cancel').focus()};
+$('#cd-cancel').onclick=function(){$('#clear-dialog').hidden=true;$('#clear').focus()};
+$('#cd-ok').onclick=function(){st.cp=false;$('#clear-dialog').hidden=true;dr()};
+dr();
+/* 05 sim */
+var D=100,S,range=$('#s-range');
+function fmt(m){return (m<10?'0':'')+m+':00'}
+function init(){S={w:false,sup:false,pos:24,cp:24};range.value=24;sim(['Playback run started.'],true)}
+function sim(msgs,reset){var l=$('#log');if(reset)l.innerHTML='';msgs.forEach(function(m){var li=document.createElement('li');li.textContent=m;l.insertBefore(li,l.firstChild)});
+$('#s-pl').style.width=S.pos+'%';$('#s-th').style.left=S.pos+'%';$('#s-pos').textContent=fmt(S.pos);
+$('#c-w b').textContent=S.w?'Yes':'No';$('#c-w').classList.toggle('on',S.w);
+$('#c-cp').textContent=S.cp==null?'None':fmt(S.cp);
+$('#c-s b').textContent=S.sup?'Suppressed':'Enabled';
+$('#c-show').textContent=S.w?'Watched · no progress':(S.cp?'Resume · '+fmt(S.cp):'Play')}
+function seek(p){var m=[];S.pos=p;S.cp=p;range.value=p;m.push('Confirmed seek to '+fmt(p)+'; checkpoint saved'+(p<S.cp?'':'')+'.');
+if(p/D>=0.9&&!S.sup&&!S.w){S.w=true;m.push('≥ 90%: marked watched (checkpoint preserved).')}
+else if(p/D>=0.9&&S.sup&&!S.w)m.push('≥ 90% but auto-marking suppressed for this run.');
+sim(m.reverse())}
+range.onchange=function(){seek(+range.value)};range.oninput=function(){$('#s-pos').textContent=fmt(+range.value)+' (target)'};
+$$('[data-sim]').forEach(function(b){b.onclick=function(){var a=b.dataset.sim;
+if(a==='fwd')seek(95);else if(a==='back'){var was=S.pos;seek(12);sim(['Backward seek: watched status unchanged.'])}
+else if(a==='unw'){S.w=false;S.sup=true;sim(['Marked unwatched: auto-marking suppressed this run.'])}
+else if(a==='w'){S.w=true;sim(['Marked watched manually.'])}
+else if(a==='run'){S.sup=false;sim(['New playback run: auto-marking enabled again.'])}
+else init()}});
+init();
+/* 06 tray */
+var tray=$('#tray');$$('[data-main]',tray).forEach(function(b){b.onclick=function(){$('#tray-visibility').textContent=b.dataset.main==='hidden'?'Show':'Hide';press($$('[data-main]',tray),b)}});
+/* 07 tabs */
+var tabs=$$('#tabs [data-t]');
+function selTab(b,f){tabs.forEach(function(x){var on=x===b;x.setAttribute('aria-selected',String(on));x.tabIndex=on?0:-1});$$('.scn-panel').forEach(function(p){p.classList.toggle('active',p.dataset.p===b.dataset.t)});if(f)b.focus()}
+tabs.forEach(function(b,i){b.onclick=function(){selTab(b)};b.onkeydown=function(e){var n=e.key==='ArrowRight'?i+1:e.key==='ArrowLeft'?i-1:e.key==='Home'?0:e.key==='End'?tabs.length-1:null;if(n===null)return;e.preventDefault();selTab(tabs[(n+tabs.length)%tabs.length],true)}});
+})();
+</script>
+</body>
+</html>

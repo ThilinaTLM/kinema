@@ -59,6 +59,16 @@ impl PopoverState {
 #[derive(Clone)]
 pub struct PopoverHandle(Entity<PopoverState>);
 impl PopoverHandle {
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn is_open(&self, cx: &App) -> bool {
+        self.0.read(cx).open && !self.0.read(cx).closing
+    }
+
+    /// Open the existing panel and focus its content.
+    pub fn show(&self, window: &mut Window, cx: &mut App) {
+        self.0.update(cx, |this, cx| this.show(window, cx));
+    }
+
     /// Close the panel and return focus to the trigger.
     pub fn dismiss(&self, window: &mut Window, cx: &mut App) {
         self.0.update(cx, |this, cx| this.dismiss(window, cx));
@@ -86,6 +96,7 @@ pub struct Popover {
     content: Option<ContentBuilder>,
     align: PopoverAlign,
     label: Option<SharedString>,
+    on_handle: Option<Box<dyn FnOnce(PopoverHandle)>>,
 }
 impl Popover {
     pub fn new(id: impl Into<ElementId>) -> Self {
@@ -95,6 +106,7 @@ impl Popover {
             content: None,
             align: PopoverAlign::Start,
             label: None,
+            on_handle: None,
         }
     }
     pub fn trigger(mut self, trigger: impl IntoElement + 'static) -> Self {
@@ -120,6 +132,13 @@ impl Popover {
         }));
         self
     }
+    /// Receive the current rendered panel's handle for programmatic show/dismiss.
+    /// This uses the same keyed state and focus behavior as clicking its trigger.
+    pub fn on_handle(mut self, callback: impl FnOnce(PopoverHandle) + 'static) -> Self {
+        self.on_handle = Some(Box::new(callback));
+        self
+    }
+
     pub fn align(mut self, align: PopoverAlign) -> Self {
         self.align = align;
         self
@@ -142,6 +161,9 @@ impl RenderOnce for Popover {
             from: 0.,
             generation: 0,
         });
+        if let Some(callback) = self.on_handle {
+            callback(PopoverHandle(state.clone()));
+        }
         if state.read(cx).closing && motion::duration(Motion::PopupOut, cx).is_zero() {
             state.update(cx, |this, _| {
                 this.task = None;

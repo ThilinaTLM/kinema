@@ -1,4 +1,4 @@
-# Repository-owned GPU build inputs
+# Repository-owned GPUI/HAL build inputs
 
 Root Cargo uses these exact crates.io releases through `[patch.crates-io]`.
 `cargo run -p kinema-desktop --locked` requires no preparation, target-directory
@@ -24,10 +24,15 @@ registry extraction markers, build outputs, and caches are not included.
 
 GPUI upstream: <https://github.com/zed-industries/zed>, revision
 `93d745668805029476e6d7fbb19652116fed51de`. HAL upstream:
-<https://github.com/gfx-rs/wgpu>, wgpu-hal 29.0.4. The five `patches/` inputs were
-promoted unchanged from the GPU experiment. Their headers preserve provenance and
-license notices; modifications retain upstream licensing terms. Each crate keeps
-its original license files.
+<https://github.com/gfx-rs/wgpu>, wgpu-hal 29.0.4. Patches `0001`–`0005` were
+promoted unchanged from the GPU experiment. Patches `0010` and `0011` add retained
+per-window visibility for the approved close-to-background lifecycle. Their
+headers preserve provenance and license notices; modifications retain upstream
+licensing terms. Each crate keeps its original license files.
+
+The separately maintained desktop media-controls fork is documented in
+[souvlaki/KINEMA-PATCH.md](souvlaki/KINEMA-PATCH.md); the GPUI/HAL checksum inventory
+and reproduction script below cover the five crates in the table.
 
 ## Verification and maintenance
 
@@ -62,3 +67,19 @@ The experimental harnesses are retired; their
 is not current root validation. Use the [root validation instructions](../docs/development.md#run-and-validate)
 and offline `ui-probe` fixture path for new checks, not retired wrapper commands.
 No desktop CPU readback fallback is introduced here.
+
+## Retained window visibility
+
+The lifecycle patches add safe `Window::{hide_window,show_window}` façades over
+per-window platform operations; they never hide the whole application or destroy
+Main's retained native handle. X11 uses checked unmap/map requests, Windows queues
+Main-only native show/hide operations, and macOS orders its retained NSWindow
+out/front. Independent player windows remain outside these operations. Wayland
+returns unsupported rather than manipulating a raw surface: Main offers the
+explicit Minimize / Quit / Cancel fallback with taskbar recovery.
+
+The application requires a fresh usable-tray health lease before hiding, restores
+Main on observed host loss or health expiry, and keeps adapters under an app-global
+owner through bounded Quit teardown. This is lifecycle implementation, not native
+shell/host-loss qualification. Windows and Apple cross-target Rust compile checks
+do not establish native runtime behavior. See [patch details](patches/README.md#retained-main-window-visibility).

@@ -10,6 +10,12 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+raw-window-handle = "0.6.2"
+smol = "2.0"
+souvlaki = { version = "=0.9.3", default-features = false, features = ["use_zbus"] }
+keepawake = "=0.6.1"
+tray-icon = { version = "=0.26.1", default-features = false }
+zbus = { version = "5.16", default-features = false, features = ["blocking-api", "async-io"] }
 unicode-segmentation = "1.13"
 kinema-core = { path = "crates/kinema-core" }
 kinema-mpv = { path = "crates/kinema-mpv", default-features = false }
@@ -25,6 +31,7 @@ log = "0.4"
 glow = "0.16"
 libloading = "0.8"
 windows = "0.62.2"
+winreg = "0.56.0"
 metal = "0.29"
 thiserror = "2"
 gpui = { package = "gpui-pre", version = "=0.3.9", features = ["gpu-video-experiment"] }
@@ -54,6 +61,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Repository-owned exact-release patches; no preparation or registry mutation.
 # The upstream feature spelling remains internal; the app uses `gpu-surface`.
 [patch.crates-io]
+souvlaki = { path = "vendor/souvlaki" }
 gpui-pre = { path = "vendor/gpui-pre" }
 gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu" }
 gpui-pre-apple = { path = "vendor/gpui-pre-apple" }

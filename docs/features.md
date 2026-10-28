@@ -90,8 +90,8 @@ support, sustained performance or complete live-provider workflows.
 
 ## Personal state and credentials
 
-- Personal Library membership is independent of manual movie/episode watched
-  state. Local Library queries and conservative series summaries use canonical
+- Personal Library membership is independent of movie/episode watched state and
+  saved playback checkpoints. Local Library queries and conservative series summaries use canonical
   records; missing/partial episode listings never imply a fully watched show.
   Removing membership does not erase watch state. Personal rows and referenced
   entities are protected from cache cleanup, but deleting the database loses them.
@@ -105,13 +105,46 @@ support, sustained performance or complete live-provider workflows.
 [shared personal state](../crates/kinema-desktop/src/screens/coordinator/personal.rs),
 [credentials](../crates/kinema-desktop/src/credentials.rs),
 [settings](../crates/kinema-desktop/src/settings.rs).
-**Contract:** [Library/manual watch tracking](design/library.md).
+**Contracts:** [Library/manual watch tracking](design/library.md) and the approved
+[playback progress/desktop extension](design/playback-progress-desktop.md).
+
+## Playback progress and desktop extension
+
+Source implementation adds canonical movie/episode checkpoints in catalog schema
+v8, separate from watched flags. Embedded playback saves observed positions
+(including backward seeks), resumes after load/seek confirmation, and marks watched
+at 90% with valid duration evidence. Manual watched toggles preserve checkpoints;
+manual unwatched suppresses automatic marking for the current run. Clear saved
+progress is independent. Watched titles hide catalog progress but retain resume
+data. Seasons/shows remain derived episode summaries, never separate watch flags.
+
+The approved UI uses timestamp-only Resume hero actions, an unwatched episode
+artwork progress indicator, and a reorganized Streams selection drawer using
+native typography tokens. Desktop adapters use souvlaki with a repository-owned
+capability patch, keepawake inhibition, and tray-icon (KSNI on Linux). Media keys
+route to one selected player; inhibition considers all active embedded players.
+The tray contains only visibility-aware Show/Hide, Settings, and Quit; playback
+controls remain in players and OS media controls. Its embedded monochrome Kinema
+logo uses macOS template tinting, a startup Windows taskbar-theme query, or a
+white-on-dark Linux fallback (no Linux/Windows live theme switching). Hide affects Main only and
+requires fresh tray health and matching safe native hide/restore operations.
+Main close and explicit Quit have separate lifecycle paths. Where a usable tray
+or safe Main-only hide is unavailable, Main remains recoverable via the explicit
+Minimize/Quit/Cancel fallback. External mpv/VLC remain process hand-offs.
+
+**Validation:** root format/strict Clippy/workspace tests, the UI-feature tests,
+reviewed native UI fixtures and an isolated Linux MPRIS protocol smoke passed; see
+[the evidence record](validation/playback-progress-desktop.md). This is not
+native Windows/macOS, desktop-shell, real-provider or HDR qualification. Abrupt
+termination can lose the final checkpoint interval. Seekability is not live-stream
+detection: finite unseekable media cannot auto-complete conservatively, while
+seekable DVR/live duration semantics remain unqualified.
 
 ## Not established or deferred
 
 No full MVP, end-to-end live-provider playback or all-desktop runtime acceptance
-is claimed here. Manual watched state is not viewing history, persistent playback
-resume or automatic completion tracking. Built-in torrenting, download
+is claimed here. Checkpoints are not a viewing-history timeline or proof of time
+actually watched; seeking past 90% qualifies. Built-in torrenting, download
 pause/prefetch suspension and subtitle/Up Next features
 must not be inferred from this overview. See [architecture](architecture.md) for
 scope and [validation status](development.md#validation-status-and-limits) for

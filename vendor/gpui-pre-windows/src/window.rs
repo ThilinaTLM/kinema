@@ -817,6 +817,25 @@ impl PlatformWindow for WindowsWindow {
         Some(done_rx)
     }
 
+    fn hide_window(&self) -> bool {
+        // GPUI owns this HWND and invokes PlatformWindow only on the UI thread.
+        // Queue the native operation: synchronous ShowWindow can re-enter GPUI
+        // through WM_SHOWWINDOW while App is borrowed by its close callback.
+        // SW_HIDE affects this window, never independent player windows.
+        unsafe { ShowWindowAsync(self.0.hwnd, SW_HIDE).as_bool() }
+    }
+
+    fn show_window(&self) -> bool {
+        unsafe {
+            let command = if IsIconic(self.0.hwnd).as_bool() {
+                SW_RESTORE
+            } else {
+                SW_SHOWNA
+            };
+            ShowWindowAsync(self.0.hwnd, command).as_bool()
+        }
+    }
+
     fn activate(&self) {
         let hwnd = self.0.hwnd;
         let this = self.0.clone();

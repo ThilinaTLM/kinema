@@ -94,6 +94,15 @@ pub struct BufferedRange {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaybackState {
     pub position: f64,
+    /// Observed media lifecycle, not a queued load command.
+    pub media_generation: u64,
+    pub file_loaded: bool,
+    pub position_revision: u64,
+    pub position_observed: bool,
+    pub seekable: Option<bool>,
+    /// Incremented on observed playback restart (including completed seeks).
+    pub restart_revision: u64,
+    pub seeking: bool,
     pub chapters: Vec<Chapter>,
     /// True only after a successful chapter-list observation, including an empty list.
     pub chapters_available: bool,
@@ -146,6 +155,13 @@ impl Default for PlaybackState {
     fn default() -> Self {
         Self {
             position: 0.0,
+            media_generation: 0,
+            file_loaded: false,
+            position_revision: 0,
+            position_observed: false,
+            seekable: None,
+            restart_revision: 0,
+            seeking: false,
             chapters: Vec::new(),
             chapters_available: false,
             tracks: Vec::new(),

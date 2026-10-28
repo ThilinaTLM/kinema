@@ -8,11 +8,23 @@ use kinema_core::library::{EpisodeId, TitleId};
 fn id() -> TitleId {
     TitleId::new(1).unwrap()
 }
+fn episode_progress(id: EpisodeId) -> crate::catalog::playback_progress::PlaybackProgressSnapshot {
+    crate::catalog::playback_progress::PlaybackProgressSnapshot {
+        target: kinema_core::watch_progress::PlaybackProgressTarget::Episode(id),
+        watch: None,
+        epoch: 0,
+        active_run: 0,
+        auto_mark_suppressed: false,
+        checkpoint: None,
+    }
+}
 fn state(saved: bool, watched: bool) -> PersonalTitle {
     PersonalTitle {
         title_id: id(),
         kind: MediaKind::Movie,
         added_at: saved.then_some(10),
+        has_resume: false,
+        playback_progress: None,
         movie_watch: Some(kinema_core::library::WatchState {
             watched,
             updated_at: 20,
@@ -50,6 +62,7 @@ fn episode_aliases_share_state_and_pending_subject() {
     store.put_episode(PersonalEpisode {
         episode_id: id,
         watch: None,
+        playback_progress: episode_progress(id),
     });
     assert_eq!(store.canonical_subject("coordinates".into()), "episode:3");
     assert!(matches!(
@@ -345,6 +358,7 @@ mod integration {
                     Ok(PersonalEpisode {
                         episode_id: EpisodeId::new(1).unwrap(),
                         watch: None,
+                        playback_progress: episode_progress(EpisodeId::new(1).unwrap()),
                     }),
                     Err(crate::catalog::CatalogError::MissingIdentityMapping),
                 ]),

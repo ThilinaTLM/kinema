@@ -345,9 +345,9 @@ impl Detail {
     pub(super) fn next_up(&self, cx: &App) -> Option<(u32, u32)> {
         self.next_up_in(&self.season_options, cx)
     }
-    /// `next_up` against explicit `(season, episode_count)` options.
+    /// Continue / Next up target (resumed episode first) against explicit `(season, episode_count)` options.
     pub(super) fn next_up_in(&self, options: &[(u32, u32)], cx: &App) -> Option<(u32, u32)> {
-        watch_progress::next_up(&self.episode_marks(options, cx), options)
+        self.continue_target_in(options, cx)
     }
 
     fn season_poster(&self, season: u32, cx: &App) -> Option<String> {
@@ -850,7 +850,7 @@ impl Detail {
             .gap(s::S12)
             .child(header);
         let marks = self.episode_marks(&self.season_options, cx);
-        let next = watch_progress::next_up(&marks, &self.season_options);
+        let next = self.next_up(cx);
         if self.season.is_some() && !self.season_options.is_empty() {
             let season = self.season.unwrap_or_default();
             column = column.child(self.season_selector(season, width, &marks, next, cx));
@@ -952,7 +952,7 @@ impl Detail {
         } else {
             p.text_primary
         };
-        let still = Thumb::new(state, STILL_RATIO, px(0.))
+        let mut still = Thumb::new(state, STILL_RATIO, px(0.))
             .muted(watched_now)
             .overlay(
                 div()
@@ -966,6 +966,11 @@ impl Detail {
                     }),
             )
             .overlay(div().absolute().top(s::S8).right(s::S8).child(mark));
+        if let Some(bar) = self.episode_progress_bar(ep.season, ep.number, cx) {
+            still = still.overlay(bar);
+        }
+        let resume = self.visible_progress(Some((ep.season, ep.number)), cx);
+        let embedded = self.embedded_player(cx);
         let body = div()
             .px(s::S12)
             .pt(s::S8)
@@ -986,9 +991,20 @@ impl Detail {
                             .text_color(p.text_secondary)
                             .child(format!("E{:02}", ep.number)),
                     )
-                    .children(
-                        key_rest.map(|rest| div().truncate().child(format!("\u{b7} {rest}"))),
-                    ),
+                    .children(key_rest.map(|rest| div().truncate().child(format!("\u{b7} {rest}"))))
+                    .children(resume.map(|point| {
+                        div()
+                            .id(("episode-resume", id))
+                            .flex_none()
+                            .ml_auto()
+                            .text_color(p.accent_text)
+                            .tooltip(tooltip(point.spoken()))
+                            .child(format!(
+                                "{} {}",
+                                if embedded { "Resume" } else { "Saved" },
+                                point.timestamp()
+                            ))
+                    })),
             )
             .child(
                 div()
@@ -1006,6 +1022,7 @@ impl Detail {
                     .clamp_lines(2)
                     .children(overview),
             );
+        let progress_items = self.progress_menu(Some((ep.season, ep.number)), cx);
         let ring = BoxShadow::new(px(0.), px(0.), p.focus_ring).spread_radius(s::FOCUS_RING);
         let card = div()
             .id(("episode", id))
@@ -1041,7 +1058,7 @@ impl Detail {
                     .child(body),
             )
             .context_menu(("episode-menu", id), move |_, _| {
-                vec![
+                let mut items = vec![
                     menu_item("Find streams", {
                         let find = find.clone();
                         let ep = ep.clone();
@@ -1096,7 +1113,9 @@ impl Detail {
                             cx.write_to_clipboard(ClipboardItem::new_string(marker.clone()))
                         }
                     }),
-                ]
+                ];
+                items.splice(1..1, progress_items.clone());
+                items
             });
         card.into_any_element()
     }

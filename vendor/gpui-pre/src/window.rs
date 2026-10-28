@@ -6654,6 +6654,18 @@ impl Window {
         subscription
     }
 
+    /// Hide this window without destroying its root view, native handle or other
+    /// application windows. Returns false on unsupported hosts (e.g. Wayland).
+    pub fn hide_window(&self) -> bool {
+        self.platform_window.hide_window()
+    }
+
+    /// Show this retained native window without changing another window's state.
+    /// Call activate_window separately when foreground activation is desired.
+    pub fn show_window(&self) -> bool {
+        self.platform_window.show_window()
+    }
+
     /// Focus the current window and bring it to the foreground at the platform level.
     pub fn activate_window(&self) {
         self.platform_window.activate();

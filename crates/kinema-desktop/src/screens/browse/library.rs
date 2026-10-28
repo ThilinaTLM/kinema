@@ -50,16 +50,15 @@ impl LibraryFilters {
             (LibraryKind::Series, "Series".into()),
         ]
     }
-    pub(crate) fn status_options(kind: LibraryKind) -> Vec<(WatchFilter, SharedString)> {
-        let mut options = vec![
+    /// In progress applies to every kind: movies with an unwatched checkpoint
+    /// and shows with a checkpoint or partial watched totals.
+    pub(crate) fn status_options(_kind: LibraryKind) -> Vec<(WatchFilter, SharedString)> {
+        vec![
             (WatchFilter::Any, "Any status".into()),
             (WatchFilter::Unwatched, "Unwatched".into()),
-        ];
-        if kind != LibraryKind::Movies {
-            options.push((WatchFilter::InProgress, "In progress".into()));
-        }
-        options.push((WatchFilter::Watched, "Watched".into()));
-        options
+            (WatchFilter::InProgress, "In progress".into()),
+            (WatchFilter::Watched, "Watched".into()),
+        ]
     }
     pub(crate) fn sort_options() -> Vec<(LibrarySort, SharedString)> {
         vec![
@@ -68,12 +67,8 @@ impl LibraryFilters {
             (LibrarySort::NewestRelease, "Newest".into()),
         ]
     }
-    /// In progress only exists for shows, so Movies resets it to Any.
     pub(crate) fn set_kind(&mut self, kind: LibraryKind) {
         self.kind = kind;
-        if kind == LibraryKind::Movies && self.status == WatchFilter::InProgress {
-            self.status = WatchFilter::Any;
-        }
     }
     pub(crate) fn query(&self, search: &str) -> LibraryQuery {
         LibraryQuery {
@@ -162,6 +157,8 @@ mod tests {
             title_id: TitleId::new(1).unwrap(),
             kind,
             added_at: added,
+            has_resume: false,
+            playback_progress: None,
             movie_watch: watched.map(|watched| WatchState {
                 watched,
                 updated_at: 1,
@@ -217,25 +214,20 @@ mod tests {
     }
 
     #[test]
-    fn movies_reset_in_progress_and_hide_it() {
+    fn in_progress_is_offered_and_kept_for_every_kind() {
         let mut f = LibraryFilters {
             status: WatchFilter::InProgress,
             ..Default::default()
         };
-        f.set_kind(LibraryKind::Series);
-        assert_eq!(f.status, WatchFilter::InProgress);
-        f.set_kind(LibraryKind::Movies);
-        assert_eq!(f.status, WatchFilter::Any);
-        assert!(
-            !LibraryFilters::status_options(LibraryKind::Movies)
-                .iter()
-                .any(|(s, _)| *s == WatchFilter::InProgress)
-        );
-        assert!(
-            LibraryFilters::status_options(LibraryKind::All)
-                .iter()
-                .any(|(s, _)| *s == WatchFilter::InProgress)
-        );
+        for kind in [LibraryKind::All, LibraryKind::Movies, LibraryKind::Series] {
+            f.set_kind(kind);
+            assert_eq!(f.status, WatchFilter::InProgress);
+            assert!(
+                LibraryFilters::status_options(kind)
+                    .iter()
+                    .any(|(s, _)| *s == WatchFilter::InProgress)
+            );
+        }
     }
 
     #[test]

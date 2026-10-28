@@ -103,10 +103,22 @@ impl Detail {
         let (label, icon): (SharedString, _) = match &action {
             PrimaryAction::Episodes => ("Episodes".into(), IconName::Tv),
             PrimaryAction::Continue(season, episode) => (
-                format!("Continue · S{season} E{episode}").into(),
+                match self.resume_offered(Some((*season, *episode)), cx) {
+                    Some(point) => progress::resume_label(Some((*season, *episode)), point),
+                    None => format!("Continue · S{season} E{episode}"),
+                }
+                .into(),
                 IconName::Play,
             ),
-            _ => ("Play".into(), IconName::Play),
+            PrimaryAction::Streams => (
+                match self.resume_offered(None, cx) {
+                    Some(point) => progress::resume_label(None, point),
+                    None => "Play".into(),
+                }
+                .into(),
+                IconName::Play,
+            ),
+            PrimaryAction::Blocked(_) => ("Play".into(), IconName::Play),
         };
         let blocked = match &action {
             PrimaryAction::Blocked(reason) => Some(*reason),

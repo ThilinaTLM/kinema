@@ -55,6 +55,21 @@ pub fn next_up(marks: &[EpisodeMark], seasons: &[(u32, u32)]) -> Option<(u32, u3
         .map(|n| (n, 1))
 }
 
+/// Prefer the most recently resumed incomplete regular episode over binary
+/// next-up. Callers supply only known-unwatched, positive-position checkpoints;
+/// watched replays and absent/unknown progress must not enter this candidate set.
+/// Specials never displace next-up. Timestamp ties prefer later coordinates,
+/// independent of input order. `None` means fall back to [`next_up`].
+pub fn latest_resume(
+    candidates: impl IntoIterator<Item = ((u32, u32), i64)>,
+) -> Option<(u32, u32)> {
+    candidates
+        .into_iter()
+        .filter(|((season, _), _)| *season > 0)
+        .max_by_key(|(coordinates, updated_at)| (*updated_at, *coordinates))
+        .map(|(coordinates, _)| coordinates)
+}
+
 /// Season to show. An explicit choice wins when it exists; otherwise the
 /// next-up season, else the first regular season, else the first season.
 /// `seasons` is `(number, episode_count)`.
@@ -176,6 +191,19 @@ mod tests {
             number,
             watched,
         }
+    }
+
+    #[test]
+    fn latest_resume_orders_by_recency_then_coordinates_and_ignores_specials() {
+        assert_eq!(latest_resume([]), None);
+        assert_eq!(latest_resume([((0, 1), 999)]), None);
+        assert_eq!(
+            latest_resume([((1, 2), 20), ((2, 1), 10), ((0, 9), 999)]),
+            Some((1, 2))
+        );
+        let tied = [((2, 1), 20), ((1, 9), 20), ((2, 2), 20)];
+        assert_eq!(latest_resume(tied), Some((2, 2)));
+        assert_eq!(latest_resume(tied.into_iter().rev()), Some((2, 2)));
     }
 
     #[test]
@@ -325,6 +353,83 @@ mod tests {
         assert_eq!(
             visible_seasons(&[true, true, false], Some(2), None, 2, false).len(),
             3
+        );
+    }
+}
+
+/// Canonical identity only; unmatched files have no durable progress target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlaybackProgressTarget {
+    Movie(crate::library::TitleId),
+    Episode(crate::library::EpisodeId),
+}
+
+/// Confirmed observation, in integer milliseconds. Construct only after the
+/// player reports a real position (not a loading default or speculative seek).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PlaybackObservation {
+    position_ms: i64,
+    duration_ms: Option<i64>,
+}
+impl PlaybackObservation {
+    pub fn new(position_ms: i64, duration_ms: Option<i64>) -> Option<Self> {
+        (position_ms >= 0 && duration_ms.is_none_or(|v| v > 0)).then_some(Self {
+            position_ms,
+            duration_ms,
+        })
+    }
+    /// Invalid/unknown duration becomes unknown; invalid position rejects the sample.
+    pub fn from_seconds(position: f64, duration: Option<f64>) -> Option<Self> {
+        fn millis(value: f64) -> Option<i64> {
+            let value = value * 1000.0;
+            (value.is_finite() && value >= 0.0 && value < i64::MAX as f64).then_some(value as i64)
+        }
+        Self::new(
+            millis(position)?,
+            duration.and_then(millis).filter(|v| *v > 0),
+        )
+    }
+    pub const fn position_ms(self) -> i64 {
+        self.position_ms
+    }
+    pub const fn duration_ms(self) -> Option<i64> {
+        self.duration_ms
+    }
+    pub fn qualifies_watched(self, suppressed: bool) -> bool {
+        !suppressed
+            && self.duration_ms.is_some_and(|duration| {
+                i128::from(self.position_ms) * 10 >= i128::from(duration) * 9
+            })
+    }
+}
+
+#[cfg(test)]
+mod playback_tests {
+    use super::*;
+    fn required(value: Option<PlaybackObservation>) -> PlaybackObservation {
+        match value {
+            Some(value) => value,
+            None => panic!("invalid fixture"),
+        }
+    }
+    #[test]
+    fn confirmed_threshold_and_invalid_values() {
+        assert!(!required(PlaybackObservation::new(899, Some(1000))).qualifies_watched(false));
+        let at = required(PlaybackObservation::new(900, Some(1000)));
+        assert!(at.qualifies_watched(false));
+        assert!(!at.qualifies_watched(true));
+        assert!(!required(PlaybackObservation::new(i64::MAX, None)).qualifies_watched(false));
+        assert!(PlaybackObservation::new(-1, None).is_none());
+        assert!(PlaybackObservation::new(1, Some(0)).is_none());
+        for invalid in [f64::NAN, f64::INFINITY, -1.0, f64::MAX] {
+            assert!(PlaybackObservation::from_seconds(invalid, None).is_none());
+            assert_eq!(
+                required(PlaybackObservation::from_seconds(1.0, Some(invalid))).duration_ms(),
+                None
+            );
+        }
+        assert!(
+            required(PlaybackObservation::new(i64::MAX, Some(i64::MAX))).qualifies_watched(false)
         );
     }
 }

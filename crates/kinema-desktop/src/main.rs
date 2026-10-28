@@ -19,50 +19,53 @@ fn run_desktop() -> ExitCode {
     use kinema_desktop::widgets;
     let failed = Rc::new(Cell::new(false));
     let startup_failed = failed.clone();
-    gpui_platform::application()
-        .with_assets(widgets::assets::Assets)
-        .run(move |cx| {
-            widgets::assets::init(cx);
-            widgets::text_input::bind_keys(cx);
-            widgets::menu::bind_keys(cx);
-            screens::main_window::bind_keys(cx);
-            screens::player_window::bind_keys(cx);
-            // MainWindow installs app-wide actions and shutdown policy. Settings
-            // closing is independent; Main closing quits even with Settings open.
-            let options = gpui::WindowOptions {
-                app_id: Some("dev.tlmtech.kinema".into()),
-                // GPUI uses this icon on X11; Wayland resolves the desktop ID.
-                icon: image::load_from_memory(include_bytes!(
-                    "../assets/brand/png/256/dev.tlmtech.kinema.png"
-                ))
-                .inspect_err(|_| {
-                    tracing::warn!(
-                        category = "icon_decode",
-                        "Could not decode the application icon; continuing without it"
-                    );
-                })
-                .ok()
-                .map(|image| std::sync::Arc::new(image.into_rgba8())),
-                window_min_size: Some(size(px(960.), px(600.))),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("Kinema Next".into()),
-                    ..Default::default()
-                }),
+    let application = gpui_platform::application().with_assets(widgets::assets::Assets);
+    application.on_reopen(screens::lifecycle::show_main);
+    application.run(move |cx| {
+        widgets::assets::init(cx);
+        widgets::text_input::bind_keys(cx);
+        widgets::menu::bind_keys(cx);
+        screens::main_window::bind_keys(cx);
+        screens::player_window::bind_keys(cx);
+        // MainWindow installs the strong app-global coordinator owner and
+        // separate Main-close / explicit-Quit routes. Settings stays independent.
+        let options = gpui::WindowOptions {
+            app_id: Some("dev.tlmtech.kinema".into()),
+            // GPUI uses this icon on X11; Wayland resolves the desktop ID.
+            icon: image::load_from_memory(include_bytes!(
+                "../assets/brand/png/256/dev.tlmtech.kinema.png"
+            ))
+            .inspect_err(|_| {
+                tracing::warn!(
+                    category = "icon_decode",
+                    "Could not decode the application icon; continuing without it"
+                );
+            })
+            .ok()
+            .map(|image| std::sync::Arc::new(image.into_rgba8())),
+            window_min_size: Some(size(px(960.), px(600.))),
+            titlebar: Some(gpui::TitlebarOptions {
+                title: Some("Kinema Next".into()),
                 ..Default::default()
-            };
-            if cx
-                .open_window(options, |window, cx| {
-                    cx.new(|cx| screens::main_window::MainWindow::new(window, cx))
-                })
-                .is_err()
-            {
+            }),
+            ..Default::default()
+        };
+        match cx.open_window(options, |window, cx| {
+            cx.new(|cx| screens::main_window::MainWindow::new(window, cx))
+        }) {
+            Ok(main) => {
+                let _ = main.update(cx, |_, window, cx| {
+                    screens::lifecycle::start_runtime(window, cx)
+                });
+                cx.activate(true);
+            }
+            Err(_) => {
                 tracing::error!(category = "window_open", "Could not open the Kinema window");
                 failed.set(true);
                 cx.quit();
-            } else {
-                cx.activate(true);
             }
-        });
+        }
+    });
     if startup_failed.get() {
         ExitCode::FAILURE
     } else {

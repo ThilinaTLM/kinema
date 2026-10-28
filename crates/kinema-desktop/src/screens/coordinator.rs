@@ -9,6 +9,7 @@
 //! owns both workers and its polling task; no blocking work runs on the UI thread.
 //! `needs_quit_confirmation` includes pending launches, not just active sessions.
 mod personal;
+mod playback;
 use personal::PersonalStore;
 #[allow(
     unused_imports,
@@ -18,6 +19,7 @@ pub(crate) use personal::{
     EpisodePersonalView, EpisodeRef, LocalBrowseTitle, LocalDetail, PersonalEpisode, PersonalLoad,
     PersonalTitle, PersonalView, SeasonSnapshot, TitleRef,
 };
+pub(crate) use playback::PlaybackIntent;
 
 use crate::{
     app::{AppAction, AppCommand, AppEvent, AppOutcome, AppWorker, CredentialState},
@@ -288,6 +290,7 @@ pub struct AppCoordinator {
     pub(crate) fixture_sources: std::collections::HashMap<(IndexerKind, PlaybackTarget), SourceSet>,
     // ── sessions: preparation and launch identity correlation ──
     session_identity: std::collections::HashMap<u64, (String, PlaybackTarget, Option<String>)>,
+    playback: playback::PlaybackStore,
     /// Catalog-derived player titles retained for the lifetime of each replayable lease.
     player_titles: std::collections::HashMap<String, kinema_core::media::PlaybackTitle>,
     rates: kinema_core::transfer_rate::RateTracker,
@@ -323,6 +326,7 @@ impl AppCoordinator {
             personal_notice: None,
             // ── sessions ──
             session_identity: Default::default(),
+            playback: Default::default(),
             player_titles: Default::default(),
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
@@ -412,6 +416,7 @@ impl AppCoordinator {
             personal_notice: None,
             // ── sessions ──
             session_identity: Default::default(),
+            playback: Default::default(),
             player_titles: Default::default(),
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
@@ -939,6 +944,7 @@ impl AppCoordinator {
             self.apply_app(event, cx);
         }
         self.retry_embedded_releases(cx);
+        self.retry_playback_progress(cx);
         if changed {
             cx.notify();
         }
@@ -1105,22 +1111,24 @@ impl AppCoordinator {
                     .get(&session.id)
                     .cloned()
                     .unwrap_or_else(|| kinema_core::media::playback_title(file_name, None));
-                if crate::screens::player_window::open(
+                let intent = self
+                    .playback
+                    .intents
+                    .remove(&event.generation)
+                    .unwrap_or_default();
+                self.open_with_progress(
                     session.id.clone(),
                     mode.clone(),
                     session.url.clone(),
                     title,
-                    cx.entity(),
+                    intent,
                     cx,
-                )
-                .is_err()
-                {
-                    // Backend/window errors must not expose the capability URL.
-                    self.notice = Some("Embedded player could not be opened.".into());
-                    self.queue_embedded_release(session.id.clone(), cx);
-                }
+                );
             }
         }
+        self.playback
+            .intents
+            .retain(|generation, _| self.session_identity.contains_key(generation));
         if resolved.as_ref().is_some_and(|r| !r.current) {
             tracing::debug!(
                 generation = event.generation,
@@ -1298,6 +1306,9 @@ impl AppCoordinator {
             && let Some(identity) = self.session_identity.get(preparation).cloned()
         {
             self.session_identity.insert(generation, identity);
+            if let Some(intent) = self.playback.intents.get(preparation).copied() {
+                self.playback.intents.insert(generation, intent);
+            }
         }
         let release_id = if let AppAction::ReleaseSession(id) = &action {
             Some(id.clone())
@@ -1961,6 +1972,7 @@ impl AppCoordinator {
         episode_title: Option<String>,
         target: PlaybackTarget,
         candidate: kinema_core::sources::SourceCandidate,
+        intent: PlaybackIntent,
         cx: &mut Context<Self>,
     ) -> Option<u64> {
         tracing::debug!(
@@ -1974,12 +1986,17 @@ impl AppCoordinator {
         // Keep identity still needed by outstanding launches/commands.
         self.session_identity
             .retain(|generation, _| self.tracker.is_pending(*generation));
+        self.playback
+            .intents
+            .retain(|generation, _| self.session_identity.contains_key(generation));
         self.session_identity.insert(generation, identity);
+        self.playback.intents.insert(generation, intent);
         Some(generation)
     }
     pub fn cancel_preparation(&mut self, preparation: u64, cx: &mut Context<Self>) -> bool {
         self.tracker.cancel(preparation);
         self.session_identity.remove(&preparation);
+        self.playback.intents.remove(&preparation);
         let canceled = self
             .app
             .as_ref()

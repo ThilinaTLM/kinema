@@ -189,7 +189,10 @@ fn merge_preserves_membership_and_conservative_watch_rows() -> TestResult {
     INSERT INTO titles(id,kind,locale,updated_at) VALUES (4,'series','en-US',1);
     INSERT INTO seasons(id,series_id,series_kind,season_number,locale,updated_at) VALUES (11,4,'series',1,'en-US',1);
     INSERT INTO episodes(id,season_id,episode_number,locale,updated_at) VALUES (103,11,1,'en-US',1);
-    INSERT INTO episode_watch_state VALUES (100,1,60),(103,0,70);")?;
+    INSERT INTO episode_watch_state(episode_id,watched,updated_at) VALUES (100,1,60),(103,0,70);")?;
+    service.connection.execute_batch("UPDATE movie_watch_state SET revision=7,active_run=7 WHERE title_id=3;
+    INSERT INTO movie_playback_progress(title_id,position_ms,duration_ms,updated_at,revision) VALUES(1,500,1000,20,0),(3,100,1000,30,7);
+    INSERT INTO episode_playback_progress(episode_id,position_ms,duration_ms,updated_at,revision) VALUES(103,800,NULL,40,0);")?;
     let priority = service.provider_priority.clone();
     let tx = service.connection.transaction()?;
     super::super::normalized_merge::reconcile(&tx, 1, 3, 100, &priority)?;
@@ -198,6 +201,18 @@ fn merge_preserves_membership_and_conservative_watch_rows() -> TestResult {
     let state = personal(&service.connection.transaction()?, 1)?;
     assert_eq!(state.added_at, Some(10));
     assert!(!required(state.movie_watch).watched);
+    let movie = required(state.playback_progress);
+    assert_eq!(movie.active_run, 0);
+    assert!(movie.epoch > 7);
+    assert_eq!(required(movie.checkpoint).observation.position_ms(), 100);
+    assert_eq!(required(movie.checkpoint).revision, movie.epoch);
+    let episode = episode_personal(&service.connection.transaction()?, 100)?;
+    assert_eq!(
+        required(episode.playback_progress.checkpoint)
+            .observation
+            .position_ms(),
+        800
+    );
     let state: (bool, i64) = service.connection.query_row(
         "SELECT watched,updated_at FROM episode_watch_state WHERE episode_id=100",
         [],
@@ -227,7 +242,7 @@ fn v6_migration_preserves_catalog_and_restricts_deletion() -> TestResult {
         let tx = service.connection.transaction()?;
         CatalogService::title_record(&tx, 1)?
     };
-    service.connection.execute_batch("DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state; PRAGMA user_version=6;")?;
+    service.connection.execute_batch("DROP TABLE movie_playback_progress; DROP TABLE episode_playback_progress; DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state; PRAGMA user_version=6;")?;
     drop(service);
     let mut service = CatalogService::open(&path)?;
     let after = {
@@ -262,7 +277,10 @@ fn v6_migration_preserves_catalog_and_restricts_deletion() -> TestResult {
     assert!(
         service
             .connection
-            .execute("INSERT INTO episode_watch_state VALUES(100,2,0)", [])
+            .execute(
+                "INSERT INTO episode_watch_state(episode_id,watched,updated_at) VALUES(100,2,0)",
+                []
+            )
             .is_err()
     );
     Ok(())
@@ -437,7 +455,7 @@ fn failed_v7_migration_rolls_back_schema_and_version() -> TestResult {
     let path = dir.path().join("catalog");
     let service = CatalogService::open(&path)?;
     seed(&service)?;
-    service.connection.execute_batch("DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state; CREATE VIEW movie_watch_state AS SELECT 1 title_id; PRAGMA user_version=6;")?;
+    service.connection.execute_batch("DROP TABLE movie_playback_progress; DROP TABLE episode_playback_progress; DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state; CREATE VIEW movie_watch_state AS SELECT 1 title_id; PRAGMA user_version=6;")?;
     drop(service);
     assert!(matches!(
         CatalogService::open(&path),
@@ -994,5 +1012,411 @@ fn real_worker_local_roundtrips_commit_and_survive_reopen_without_remote_work() 
     };
     assert_eq!(page.total, 1);
     assert_eq!(page.entries[0].metadata.id, 2);
+    Ok(())
+}
+
+#[test]
+fn playback_epochs_manual_override_backward_and_clear() -> TestResult {
+    use crate::catalog::playback_progress::{
+        PlaybackProgressOperation as Op, PlaybackProgressResult as Out,
+    };
+    use kinema_core::watch_progress::{
+        PlaybackObservation as Obs, PlaybackProgressTarget as Target,
+    };
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("progress");
+    let mut service = CatalogService::open(&path)?;
+    seed(&service)?;
+    let target = Target::Movie(required(TitleId::new(1)));
+    let applied = |out| match out {
+        Out::Applied(s) => s,
+        Out::Stale(_) => panic!("unexpected stale"),
+    };
+    let begin = applied(service.playback_progress_operation(Op::BeginRun {
+        target,
+        start_over: false,
+    })?);
+    let save = |epoch, position| Op::Save {
+        target,
+        run: begin.active_run,
+        epoch,
+        observation: required(Obs::new(position, Some(1000))),
+    };
+    let at = applied(service.playback_progress_operation(save(begin.epoch, 900))?);
+    assert!(required(at.watch).watched);
+    let back = applied(service.playback_progress_operation(save(begin.epoch, 100))?);
+    assert_eq!(required(back.checkpoint).observation.position_ms(), 100);
+    assert_eq!(back.watch, at.watch); // No repeated watched writes.
+    service.library_operation(LibraryOperation::SetMovieWatched {
+        title: id(1),
+        watched: false,
+    })?;
+    let Out::Stale(manual) = service.playback_progress_operation(save(begin.epoch, 999))? else {
+        panic!("stale expected")
+    };
+    assert!(manual.auto_mark_suppressed);
+    assert_eq!(manual.active_run, begin.active_run);
+    assert_eq!(required(manual.checkpoint).observation.position_ms(), 100);
+    let suppressed = applied(service.playback_progress_operation(save(manual.epoch, 999))?);
+    assert!(!required(suppressed.watch).watched);
+    let cleared = applied(service.playback_progress_operation(Op::Clear(target))?);
+    assert!(cleared.checkpoint.is_none());
+    assert!(matches!(
+        service.playback_progress_operation(save(manual.epoch, 999))?,
+        Out::Stale(_)
+    ));
+    let resumed = applied(service.playback_progress_operation(save(cleared.epoch, 500))?);
+    assert!(resumed.auto_mark_suppressed);
+    drop(service);
+    let mut service = CatalogService::open(&path)?;
+    let next = applied(service.playback_progress_operation(Op::BeginRun {
+        target,
+        start_over: false,
+    })?);
+    assert!(!next.auto_mark_suppressed);
+    assert!(matches!(
+        service.playback_progress_operation(save(cleared.epoch, 999))?,
+        Out::Stale(_)
+    ));
+    let done = applied(service.playback_progress_operation(Op::CompleteRun {
+        target,
+        run: next.active_run,
+        epoch: next.epoch,
+        observation: Some(required(Obs::new(900, Some(1000)))),
+    })?);
+    assert!(required(done.watch).watched);
+    assert_eq!(done.active_run, 0);
+    assert!(done.checkpoint.is_some());
+    Ok(())
+}
+
+#[test]
+fn progress_migration_preserves_flags_and_failure_is_atomic() -> TestResult {
+    use crate::catalog::playback_progress::{
+        PlaybackProgressOperation as Op, PlaybackProgressResult as Out,
+    };
+    use kinema_core::watch_progress::{
+        PlaybackObservation as Obs, PlaybackProgressTarget as Target,
+    };
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("v7");
+    let mut db = Connection::open(&path)?;
+    let tx = db.transaction()?;
+    schema::migrate(&tx)?;
+    schema::migrate_library(&tx)?;
+    tx.execute_batch("INSERT INTO titles(id,kind,locale,updated_at) VALUES(1,'movie','en-US',1); INSERT INTO movie_watch_state(title_id,watched,updated_at) VALUES(1,1,17); INSERT INTO titles(id,kind,locale,updated_at) VALUES(2,'series','en-US',1); INSERT INTO seasons(id,series_id,series_kind,season_number,locale,updated_at) VALUES(10,2,'series',1,'en-US',1); INSERT INTO episodes(id,season_id,episode_number,locale,updated_at) VALUES(100,10,1,'en-US',1),(101,10,2,'en-US',1); INSERT INTO episode_watch_state(episode_id,watched,updated_at) VALUES(100,1,13),(101,0,14); PRAGMA user_version=7;")?;
+    tx.commit()?;
+    drop(db);
+    let mut service = CatalogService::open(&path)?;
+    let target = Target::Movie(required(TitleId::new(1)));
+    let Out::Applied(old) = service.playback_progress_operation(Op::Read(target))? else {
+        panic!("read")
+    };
+    assert_eq!(
+        old.watch,
+        Some(WatchState {
+            watched: true,
+            updated_at: 17
+        })
+    );
+    assert!(old.checkpoint.is_none());
+    for (id, watched, time) in [(100, true, 13), (101, false, 14)] {
+        let Out::Applied(episode) = service
+            .playback_progress_operation(Op::Read(Target::Episode(required(EpisodeId::new(id)))))?
+        else {
+            panic!("read")
+        };
+        assert_eq!(
+            episode.watch,
+            Some(WatchState {
+                watched,
+                updated_at: time
+            })
+        );
+        assert_eq!(episode.epoch, 0);
+        assert!(episode.checkpoint.is_none());
+    }
+    service.library_operation(LibraryOperation::SetMovieWatched {
+        title: id(1),
+        watched: false,
+    })?;
+    let Out::Applied(run) = service.playback_progress_operation(Op::BeginRun {
+        target,
+        start_over: false,
+    })?
+    else {
+        panic!("begin")
+    };
+    service.connection.execute_batch("CREATE TRIGGER fail_watch BEFORE UPDATE OF watched ON movie_watch_state BEGIN SELECT RAISE(ABORT,'fixture'); END;")?;
+    assert_eq!(
+        service.playback_progress_operation(Op::Save {
+            target,
+            run: run.active_run,
+            epoch: run.epoch,
+            observation: required(Obs::new(900, Some(1000)))
+        }),
+        Err(CatalogError::Storage)
+    );
+    let Out::Applied(after) = service.playback_progress_operation(Op::Read(target))? else {
+        panic!("read")
+    };
+    assert!(after.checkpoint.is_none());
+    assert!(!required(after.watch).watched);
+    Ok(())
+}
+
+#[test]
+fn episode_progress_cross_process_latest_run_and_failed_reset() -> TestResult {
+    use crate::catalog::playback_progress::{
+        PlaybackProgressOperation as Op, PlaybackProgressResult as Out,
+    };
+    use kinema_core::watch_progress::{
+        PlaybackObservation as Obs, PlaybackProgressTarget as Target,
+    };
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("episodes");
+    let mut first = CatalogService::open(&path)?;
+    seed(&first)?;
+    let target = Target::Episode(required(EpisodeId::new(100)));
+    let applied = |out| match out {
+        Out::Applied(s) => s,
+        Out::Stale(_) => panic!("stale"),
+    };
+    let a = applied(first.playback_progress_operation(Op::BeginRun {
+        target,
+        start_over: false,
+    })?);
+    let unknown = applied(first.playback_progress_operation(Op::Save {
+        target,
+        run: a.active_run,
+        epoch: a.epoch,
+        observation: required(Obs::new(999999, None)),
+    })?);
+    assert!(!required(unknown.watch).watched);
+    let mut second = CatalogService::open(&path)?;
+    let b = applied(second.playback_progress_operation(Op::BeginRun {
+        target,
+        start_over: false,
+    })?);
+    assert!(b.epoch > a.epoch);
+    assert!(matches!(
+        first.playback_progress_operation(Op::Save {
+            target,
+            run: a.active_run,
+            epoch: a.epoch,
+            observation: required(Obs::new(900, Some(1000)))
+        }),
+        Ok(Out::Stale(_))
+    ));
+    second.connection.execute_batch("CREATE TRIGGER fail_reset BEFORE DELETE ON episode_playback_progress BEGIN SELECT RAISE(ABORT,'fixture'); END;")?;
+    assert_eq!(
+        second.playback_progress_operation(Op::BeginRun {
+            target,
+            start_over: true
+        }),
+        Err(CatalogError::Storage)
+    );
+    let preserved = applied(first.playback_progress_operation(Op::Read(target))?);
+    assert_eq!(preserved, b);
+    second
+        .connection
+        .execute_batch("DROP TRIGGER fail_reset;")?;
+    second.library_operation(LibraryOperation::SetEpisodeWatched {
+        episode: EpisodeRef::Canonical(required(EpisodeId::new(100))),
+        watched: true,
+    })?;
+    let manual = applied(first.playback_progress_operation(Op::Read(target))?);
+    assert_eq!(
+        manual.checkpoint.map(|c| c.observation),
+        b.checkpoint.map(|c| c.observation)
+    );
+    assert!(required(manual.watch).watched);
+    let clear = applied(first.playback_progress_operation(Op::Clear(target))?);
+    assert!(required(clear.watch).watched);
+    assert!(clear.checkpoint.is_none());
+    Ok(())
+}
+
+#[test]
+fn in_progress_counts_checkpoints_before_pagination_and_excludes_watched_replays() -> TestResult {
+    use crate::catalog::playback_progress::{
+        PlaybackProgressOperation as Op, PlaybackProgressResult as Out,
+    };
+    use kinema_core::watch_progress::{
+        PlaybackObservation as Obs, PlaybackProgressTarget as Target,
+    };
+    let dir = tempfile::tempdir()?;
+    let mut service = CatalogService::open(&dir.path().join("aggregates"))?;
+    seed(&service)?;
+    for title in [1, 2, 3] {
+        service.library_operation(LibraryOperation::SetMembership {
+            title: id(title),
+            saved: true,
+            restore_added_at: Some(title),
+        })?;
+    }
+    let mut movie_run = None;
+    for target in [
+        Target::Movie(required(TitleId::new(1))),
+        Target::Movie(required(TitleId::new(3))),
+        Target::Episode(required(EpisodeId::new(100))),
+    ] {
+        let Out::Applied(run) = service.playback_progress_operation(Op::BeginRun {
+            target,
+            start_over: false,
+        })?
+        else {
+            panic!("begin")
+        };
+        service.playback_progress_operation(Op::Save {
+            target,
+            run: run.active_run,
+            epoch: run.epoch,
+            observation: required(Obs::new(500, None)),
+        })?;
+        if target == Target::Movie(required(TitleId::new(1))) {
+            movie_run = Some(run);
+        }
+    }
+    service.library_operation(LibraryOperation::SetMovieWatched {
+        title: id(3),
+        watched: true,
+    })?;
+    let LibraryResult::Page(page) =
+        service.library_operation(LibraryOperation::List(LibraryQuery {
+            status: WatchFilter::InProgress,
+            limit: 1,
+            ..Default::default()
+        }))?
+    else {
+        panic!("page")
+    };
+    assert_eq!(page.total, 2);
+    assert_eq!(page.entries.len(), 1);
+    assert!(page.entries[0].personal.has_resume);
+    let LibraryResult::Page(movies) =
+        service.library_operation(LibraryOperation::List(LibraryQuery {
+            kind: LibraryKind::Movies,
+            status: WatchFilter::InProgress,
+            limit: 1,
+            ..Default::default()
+        }))?
+    else {
+        panic!("movies page")
+    };
+    assert_eq!(movies.total, 1);
+    assert_eq!(movies.entries.len(), 1);
+    assert_eq!(
+        movies.entries[0].personal.title_id,
+        required(TitleId::new(1))
+    );
+
+    service.library_operation(LibraryOperation::SetEpisodeWatched {
+        episode: EpisodeRef::Canonical(required(EpisodeId::new(100))),
+        watched: true,
+    })?;
+    let LibraryResult::Page(page) =
+        service.library_operation(LibraryOperation::List(LibraryQuery {
+            status: WatchFilter::InProgress,
+            ..Default::default()
+        }))?
+    else {
+        panic!("page")
+    };
+    assert_eq!(page.total, 1);
+    let run = required(movie_run);
+    service.playback_progress_operation(Op::Save {
+        target: run.target,
+        run: run.active_run,
+        epoch: run.epoch,
+        observation: required(Obs::new(0, None)),
+    })?;
+    let LibraryResult::Page(page) =
+        service.library_operation(LibraryOperation::List(LibraryQuery {
+            status: WatchFilter::InProgress,
+            ..Default::default()
+        }))?
+    else {
+        panic!("page")
+    };
+    assert_eq!(page.total, 0);
+    // Cache-page pruning and membership removal never clear personal data.
+    service.connection.execute_batch(
+        "DELETE FROM catalog_page_items; UPDATE catalog_pages SET membership_available=0;",
+    )?;
+    service.library_operation(LibraryOperation::SetMembership {
+        title: id(1),
+        saved: false,
+        restore_added_at: None,
+    })?;
+    let Out::Applied(retained) = service.playback_progress_operation(Op::Read(run.target))? else {
+        panic!("read")
+    };
+    assert_eq!(required(retained.checkpoint).observation.position_ms(), 0);
+    Ok(())
+}
+
+#[test]
+fn progress_timestamps_advance_beyond_all_prior_checkpoints_despite_older_wall_clock() -> TestResult
+{
+    use crate::catalog::playback_progress::{
+        PlaybackProgressOperation as Op, PlaybackProgressResult as Out,
+    };
+    use kinema_core::watch_progress::{
+        PlaybackObservation as Obs, PlaybackProgressTarget as Target,
+    };
+    let dir = tempfile::tempdir()?;
+    let mut service = CatalogService::open(&dir.path().join("progress-clock"))?;
+    seed(&service)?;
+    let movie = Target::Movie(required(TitleId::new(1)));
+    let episode = Target::Episode(required(EpisodeId::new(100)));
+    let applied = |out| match out {
+        Out::Applied(state) => state,
+        Out::Stale(_) => panic!("unexpected stale checkpoint"),
+    };
+    let movie_run = applied(service.playback_progress_operation(Op::BeginRun {
+        target: movie,
+        start_over: false,
+    })?);
+    let episode_run = applied(service.playback_progress_operation(Op::BeginRun {
+        target: episode,
+        start_over: false,
+    })?);
+    // Both values are deliberately beyond the real wall clock. The episode
+    // checkpoint is newer than every watch row and the movie checkpoint.
+    service.connection.execute(
+        "INSERT INTO movie_playback_progress(title_id,position_ms,updated_at,revision) VALUES(1,700,?1,?2)",
+        params![i64::MAX - 10, movie_run.epoch],
+    )?;
+    service.connection.execute(
+        "INSERT INTO episode_playback_progress(episode_id,position_ms,updated_at,revision) VALUES(100,700,?1,?2)",
+        params![i64::MAX - 5, episode_run.epoch],
+    )?;
+    assert_eq!(
+        mutation_time(&service.connection.transaction()?)?,
+        i64::MAX - 4
+    );
+    for (run, expected) in [
+        (movie_run, i64::MAX - 4),
+        (episode_run, i64::MAX - 3),
+        (movie_run, i64::MAX - 2),
+    ] {
+        let saved = applied(service.playback_progress_operation(Op::Save {
+            target: run.target,
+            run: run.active_run,
+            epoch: run.epoch,
+            observation: required(Obs::new(100, Some(1000))),
+        })?);
+        assert_eq!(required(saved.checkpoint).updated_at, expected);
+        assert!(!required(saved.watch).watched);
+    }
+    service.connection.execute(
+        "UPDATE movie_playback_progress SET updated_at=?1",
+        [i64::MAX],
+    )?;
+    assert_eq!(
+        mutation_time(&service.connection.transaction()?),
+        Err(CatalogError::Clock)
+    );
     Ok(())
 }

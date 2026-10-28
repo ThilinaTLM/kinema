@@ -156,6 +156,7 @@ impl Detail {
             }
             let service = cx.new(|cx| Select::new(preferred, options, cx));
             self.stream_page.service_chosen = false;
+            self.stream_page.file_detail_open = false;
             self.stream_page.service_subscription = Some(cx.subscribe(
                 &service,
                 |this, _, _: &SelectEvent<DebridKind>, _| {
@@ -187,7 +188,9 @@ impl Detail {
             select.update(cx, |select, cx| select.set_value(preferred, cx));
         }
     }
-    fn play_stream_row(&mut self, i: usize, cx: &mut Context<Self>) {
+    /// `from_beginning`: `Some` is an explicit button choice; `None` follows the
+    /// default (resume a shown checkpoint unless Play from beginning is pending).
+    fn play_stream_row(&mut self, i: usize, from_beginning: Option<bool>, cx: &mut Context<Self>) {
         self.select_stream_row(i, cx);
         if let Some(select) = &self.stream_page.play_service {
             let kind = *select.read(cx).value();
@@ -198,7 +201,9 @@ impl Detail {
                 }
             });
         }
-        self.open_stream(i, cx);
+        let intent = self.play_intent(from_beginning, cx);
+        self.start_over_requested = false;
+        self.open_stream(i, intent, cx);
     }
     fn stream_row(
         &self,
@@ -268,12 +273,12 @@ impl Detail {
                 if this.stream_page.wide && event.click_count() < 2 {
                     this.select_stream_row(i, cx);
                 } else {
-                    this.play_stream_row(i, cx);
+                    this.play_stream_row(i, None, cx);
                 }
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "enter" {
-                    this.play_stream_row(i, cx);
+                    this.play_stream_row(i, None, cx);
                     cx.stop_propagation();
                 }
             }))
@@ -357,7 +362,7 @@ impl Detail {
             vec![menu_item("Play", {
                 let play = play.clone();
                 move |_, cx| {
-                    let _ = play.update(cx, |s, cx| s.play_stream_row(i, cx));
+                    let _ = play.update(cx, |s, cx| s.play_stream_row(i, None, cx));
                 }
             })]
         })
@@ -373,6 +378,36 @@ impl Detail {
         let p = *tokens::palette(cx);
         let tags = parse_release_tags(&candidate.name);
         let badges = stream_badges(candidate);
+        let stat =
+            |label: &'static str, value: String| {
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(s::S2)
+                    .child(
+                        div()
+                            .type_style(t::CAPTION)
+                            .text_color(p.text_muted)
+                            .child(label),
+                    )
+                    .child(div().type_style(t::SMALL_MEDIUM).truncate().child(
+                        if value.is_empty() {
+                            "\u{2014}".into()
+                        } else {
+                            value
+                        },
+                    ))
+            };
+        let section = |title: &'static str| {
+            div()
+                .type_style(t::CAPTION)
+                .text_color(p.text_muted)
+                .child(title)
+        };
+
+        // Identity: quality badges, the cleaned release name, then where it came from.
         let mut chips = div().flex().flex_wrap().gap(s::S6);
         for chip in [badges.resolution, badges.dynamic_range, tags.codec]
             .into_iter()
@@ -383,20 +418,37 @@ impl Detail {
         if let Some(audio) = tags.audio {
             chips = chips.child(Badge::new(audio));
         }
-        let field = |label: &'static str, value: String| {
-            div()
-                .w_full()
-                .flex()
-                .gap(s::S8)
-                .child(
-                    div()
-                        .w(px(80.))
-                        .flex_none()
-                        .text_color(p.text_muted)
-                        .child(label),
-                )
-                .child(div().flex_1().min_w_0().child(value))
-        };
+        let mut origin = vec![provider.to_owned()];
+        origin.extend(tags.tracker);
+        origin.extend(tags.languages);
+        let identity = div()
+            .flex()
+            .flex_col()
+            .gap(s::S8)
+            .child(chips)
+            .child(
+                div()
+                    .type_style(t::SMALL_MEDIUM)
+                    .clamp_lines(3)
+                    .child(tags.release_name),
+            )
+            .child(
+                div()
+                    .type_style(t::SMALL)
+                    .text_color(p.text_muted)
+                    .child(origin.join(" \u{b7} ")),
+            );
+
+        // Technical stats: one compact row.
+        let stats = div()
+            .flex()
+            .gap(s::S12)
+            .child(stat("Size", size_label(candidate.size)))
+            .child(stat(
+                "Seeders",
+                candidate.seeders.map(|n| n.to_string()).unwrap_or_default(),
+            ));
+
         let mut drawer = div()
             .debug_selector(|| "streams-drawer".into())
             .w(width)
@@ -408,61 +460,150 @@ impl Detail {
             .border_color(p.line_subtle)
             .flex()
             .flex_col()
-            .gap(s::S12)
+            .gap(s::S16)
             .type_style(t::SMALL)
-            .child(chips)
-            .child(div().type_style(t::SMALL).child(tags.release_name))
-            .child(field("Size", size_label(candidate.size)))
-            .child(field(
-                "Seeders",
-                candidate.seeders.map(|n| n.to_string()).unwrap_or_default(),
-            ))
-            .child(field(
-                "Source",
-                tags.tracker
-                    .map(|s| format!("{provider} · {s}"))
-                    .unwrap_or_else(|| provider.to_owned()),
-            ));
-        if !tags.languages.is_empty() {
-            drawer = drawer.child(field("Languages", tags.languages.join(", ")));
-        }
+            .child(identity)
+            .child(stats);
+
+        // Account presence only; never readiness or availability.
         if !self.stream_page.accounts.is_empty() {
-            drawer = drawer.child(div().type_style(t::SMALL_MEDIUM).child("Debrid"));
+            let mut accounts = div()
+                .flex()
+                .flex_col()
+                .gap(s::S6)
+                .child(section("Debrid account"));
             for (kind, state) in &self.stream_page.accounts {
-                drawer = drawer.child(field(
-                    service_name(*kind),
-                    state.label(&candidate.torrent.hash).to_owned(),
-                ));
+                let present = state.contains(&candidate.torrent.hash);
+                accounts = accounts.child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .gap(s::S8)
+                        .child(div().child(service_name(*kind)))
+                        .child(
+                            div()
+                                .text_color(if present { p.status_ok } else { p.text_muted })
+                                .child(state.label(&candidate.torrent.hash)),
+                        ),
+                );
             }
             drawer = drawer.child(
-                div()
-                    .type_style(t::CAPTION)
-                    .text_color(p.text_muted)
-                    .child("Account presence only; not a cache or readiness check."),
+                accounts.child(
+                    div()
+                        .type_style(t::CAPTION)
+                        .text_color(p.text_muted)
+                        .child("Account presence only; not a cache or readiness check."),
+                ),
             );
         }
+
+        // The file name repeats the release, so it is shown on demand.
         if let Some(file) = &candidate.torrent.filename {
-            drawer = drawer
-                .child(div().type_style(t::SMALL_MEDIUM).child("Files"))
-                .child(div().type_style(t::SMALL).child(file.clone()));
+            let open = self.stream_page.file_detail_open;
+            // Fixed-height slot: the Button's focus-ring margins would otherwise
+            // let the next section's separator cut through the label.
+            let mut files = div().flex().flex_col().gap(s::S6).child(
+                div()
+                    .w_full()
+                    .h(s::CONTROL_HEIGHT)
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        Button::new(
+                            "streams-drawer-file",
+                            if open {
+                                "Hide file name"
+                            } else {
+                                "Show file name"
+                            },
+                        )
+                        .variant(ButtonVariant::Ghost)
+                        .icon(if open {
+                            IconName::ChevronUp
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.stream_page.file_detail_open = !this.stream_page.file_detail_open;
+                            cx.notify();
+                        })),
+                    ),
+            );
+            if open {
+                files = files.child(
+                    div()
+                        .type_style(t::CAPTION)
+                        .text_color(p.text_secondary)
+                        .child(file.clone()),
+                );
+            }
+            drawer = drawer.child(files);
         }
+
+        // Playback: provider first, then the primary action, then the quieter one.
         if let Some(i) = self.selected {
+            let episode = self.episode.as_ref().map(|e| (e.season, e.number));
+            let saved = self.visible_progress(episode, cx);
+            let resume = self.resume_offered(episode, cx);
             let mut play = div()
+                .pt(s::S16)
+                .border_t(s::HAIRLINE)
+                .border_color(p.line_subtle)
                 .flex()
-                .flex_wrap()
-                .items_center()
+                .flex_col()
                 .gap(s::S8)
-                .child("Play with");
+                .child(section("Play with"));
             if let Some(service) = &self.stream_page.play_service {
                 play = play.child(service.clone());
             }
-            drawer = drawer.child(
-                play.child(
-                    Button::new("streams-drawer-play", "Play")
-                        .icon(IconName::Play)
-                        .on_click(cx.listener(move |this, _, _, cx| this.play_stream_row(i, cx))),
+            // Full-width stack: the primary action, then a quieter secondary below.
+            // Each button sits in a fixed-height, full-width slot: the Button's
+            // focus-ring margins would otherwise under-measure a stacked column.
+            let slot = |height: Pixels, button: Button| {
+                div()
+                    .w_full()
+                    .h(height)
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .child(button)
+            };
+            let mut actions = div().w_full().flex().flex_col().gap(s::S8).child(slot(
+                s::CONTROL_HEIGHT_LARGE,
+                Button::new(
+                    "streams-drawer-play",
+                    match resume {
+                        Some(point) => format!("Resume \u{b7} {}", point.timestamp()),
+                        None => "Play".to_owned(),
+                    },
+                )
+                .variant(ButtonVariant::Primary)
+                .size(ButtonSize::Large)
+                .icon(IconName::Play)
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.play_stream_row(i, Some(false), cx)),
                 ),
-            );
+            ));
+            if resume.is_some() {
+                actions = actions.child(slot(
+                    s::CONTROL_HEIGHT,
+                    Button::new("streams-drawer-restart", "Play from beginning")
+                        .variant(ButtonVariant::Ghost)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.play_stream_row(i, Some(true), cx)
+                        })),
+                ));
+            }
+            if let (Some(point), None) = (saved, resume) {
+                play = play.child(div().type_style(t::CAPTION).text_color(p.text_muted).child(
+                    format!(
+                        "Saved at {}. External players start from the beginning.",
+                        point.timestamp()
+                    ),
+                ));
+            }
+            drawer = drawer.child(play.child(actions));
         }
         drawer
     }

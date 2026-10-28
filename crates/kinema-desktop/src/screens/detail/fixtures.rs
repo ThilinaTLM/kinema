@@ -94,7 +94,7 @@ impl Detail {
                     let episodes=if series{local_fixture_episodes()}else{Vec::new()};
                     let detail=crate::catalog::library::LocalDetail{
                         metadata:t.metadata.clone(),
-                        personal:crate::catalog::library::PersonalTitle{title_id:t.title_id,kind:t.metadata.kind,added_at:None,movie_watch:None,show_summary:None},
+                        personal:crate::catalog::library::PersonalTitle{title_id:t.title_id,kind:t.metadata.kind,added_at:None,has_resume:false,playback_progress:None,movie_watch:None,show_summary:None},
                         seasons:Vec::new(),episodes};
                     let generation=c.local_details.begin(true);c.local_details.fetched(generation,detail,1);
                     // No provider is contacted offline; clear the provisional request error so
@@ -119,7 +119,7 @@ impl Detail {
             c.fixture_enrichment_contributors();
             use crate::metadata_bridge::SourceSet;
             use kinema_core::sources::{InfoHash,TorrentSource};
-            let sources=SourceSet{omitted:0,candidates:["2160p.HDR","1080p.WEB","1080p.BluRay.x265","1080p.WEB-DL.x264","720p"].into_iter().map(|q|SourceCandidate{name:format!("Quiet.Orbit.2024.{q}.REMUX.DTS-HD.MA.5.1-GROUP Quiet Orbit (2024) complete release with extras, commentary and multi-language subtitles [FIXTURE]"),quality:Some(q.into()),size:Some(4_200_000_000),seeders:Some(412),torrent:TorrentSource{hash:InfoHash::new("a".repeat(40)).unwrap_or_else(|e|panic!("fixture hash: {e}")),file_index:None,filename:None}}).collect()};
+            let sources=SourceSet{omitted:0,candidates:["2160p.HDR","1080p.WEB","1080p.BluRay.x265","1080p.WEB-DL.x264","720p"].into_iter().map(|q|SourceCandidate{name:format!("Quiet.Orbit.2024.{q}.REMUX.DTS-HD.MA.5.1-GROUP Quiet Orbit (2024) complete release with extras, commentary and multi-language subtitles [FIXTURE]"),quality:Some(q.into()),size:Some(4_200_000_000),seeders:Some(412),torrent:TorrentSource{hash:InfoHash::new("a".repeat(40)).unwrap_or_else(|e|panic!("fixture hash: {e}")),file_index:None,filename:Some(format!("Quiet.Orbit.2024.{q}.REMUX.DTS-HD.MA.5.1-GROUP.mkv"))}}).collect()};
             let id=title.imdb().cloned().unwrap_or_else(||kinema_core::catalog::ImdbId::new("tt1234567").unwrap_or_else(|e|panic!("fixture id:{e}")));
             for indexer in [IndexerKind::Torrentio,IndexerKind::Peerflix] {let mut set=sources.clone();if indexer==IndexerKind::Peerflix{set.candidates.retain(|s|source_quality(s)==Quality::Sd);}
                 if series{for season in 0..=3{for n in 1..=8{c.fixture_sources.insert((indexer,PlaybackTarget::Episode{series:id.clone(),season,episode:n}),set.clone());}}}else{c.fixture_sources.insert((indexer,PlaybackTarget::Movie(id.clone())),set);}}
@@ -183,9 +183,19 @@ fn local_fixture_episodes() -> Vec<crate::catalog::library::LocalEpisode> {
                     ratings: Vec::new(),
                     updated_at: 0,
                 },
-                personal: PersonalEpisode {
-                    episode_id: EpisodeId::new(id).unwrap_or_else(|| panic!("fixture id")),
-                    watch: None,
+                personal: {
+                    let episode_id = EpisodeId::new(id).unwrap_or_else(|| panic!("fixture id"));
+                    PersonalEpisode {
+                        episode_id,
+                        watch: None,
+                        playback_progress: fixture_progress(
+                            kinema_core::watch_progress::PlaybackProgressTarget::Episode(
+                                episode_id,
+                            ),
+                            None,
+                            None,
+                        ),
+                    }
                 },
             });
         }
@@ -253,12 +263,39 @@ pub(crate) fn local_fixture_title(series: bool) -> BrowseTitle {
     ))
 }
 
+/// Committed-looking progress state for capture; `checkpoint` is
+/// `(position_ms, duration_ms)`. Nothing persists.
+#[cfg(feature = "ui-probe")]
+fn fixture_progress(
+    target: kinema_core::watch_progress::PlaybackProgressTarget,
+    watch: Option<kinema_core::library::WatchState>,
+    checkpoint: Option<(i64, Option<i64>)>,
+) -> crate::catalog::playback_progress::PlaybackProgressSnapshot {
+    use crate::catalog::playback_progress::{PlaybackCheckpoint, PlaybackProgressSnapshot};
+    use kinema_core::watch_progress::PlaybackObservation;
+    PlaybackProgressSnapshot {
+        target,
+        watch,
+        epoch: 0,
+        active_run: 0,
+        auto_mark_suppressed: false,
+        checkpoint: checkpoint.and_then(|(position, duration)| {
+            Some(PlaybackCheckpoint {
+                observation: PlaybackObservation::new(position, duration)?,
+                updated_at: 1,
+                revision: 1,
+            })
+        }),
+    }
+}
+
 #[cfg(feature = "ui-probe")]
 impl Detail {
     /// Seed shared personal snapshots for a native fixture. This mirrors committed
     /// state only for capture; nothing persists and no write is simulated.
     /// `scene` suffixes: `-failed` seeds nothing (the read visibly fails offline),
-    /// `-unsaved` seeds not saved/unwatched, otherwise saved with some watched.
+    /// `-unsaved` seeds not saved/unwatched, `-resume` adds unwatched checkpoints
+    /// (movie 24:18 of 1:40:00; series E3 at 12:05 of 45:00), otherwise saved with some watched.
     pub(crate) fn seed_personal_fixture(&mut self, scene: &str, cx: &mut Context<Self>) {
         use crate::{
             catalog::library::{PersonalEpisode, PersonalTitle},
@@ -279,14 +316,32 @@ impl Detail {
                 updated_at: 1,
             })
         };
+        let resume = scene.contains("-resume");
+        if resume && scene.ends_with("streams") {
+            let target = self.target.clone();
+            self.stream_page.fixture_checking_account(target);
+        }
+        if resume && scene.ends_with("-clear") {
+            self.clear_confirm = Some(series.then_some((1, 3)));
+        }
+        let movie_watch = (!series && !unsaved).then_some(WatchState {
+            watched: !resume,
+            updated_at: 1,
+        });
+        let movie_checkpoint = (!series && resume).then_some((1_458_000, Some(6_000_000)));
         let personal = PersonalTitle {
             title_id: local.title_id,
             kind: local.metadata.kind,
             added_at: (!unsaved).then_some(1_700_000_000_000),
-            movie_watch: (!series && !unsaved).then_some(WatchState {
-                watched: true,
-                updated_at: 1,
+            has_resume: resume,
+            playback_progress: (!series).then(|| {
+                fixture_progress(
+                    kinema_core::watch_progress::PlaybackProgressTarget::Movie(local.title_id),
+                    movie_watch,
+                    movie_checkpoint,
+                )
             }),
+            movie_watch,
             show_summary: series.then_some(ShowSummary {
                 watched: if unsaved { 0 } else { 3 },
                 total: 12,
@@ -296,7 +351,11 @@ impl Detail {
         let mut episodes = Vec::new();
         if series {
             for e in local_fixture_episodes() {
-                let on = !unsaved && matches!((e.season, e.metadata.number), (1, 1 | 2 | 5));
+                // The streams scene opens E02, so its checkpoint (and unwatched state) is E02.
+                let resume_episode = if scene.ends_with("streams") { 2 } else { 3 };
+                let on = !unsaved
+                    && matches!((e.season, e.metadata.number), (1, 1 | 2 | 5))
+                    && !(resume && e.metadata.number == resume_episode);
                 let reference = EpisodeRef::Coordinates {
                     title: self.title.personal_ref(),
                     season: e.season,
@@ -307,12 +366,23 @@ impl Detail {
                     e.season,
                     e.metadata.number,
                 ));
+                let episode_id =
+                    EpisodeId::new(e.metadata.id).unwrap_or_else(|| panic!("fixture id"));
+                let checkpoint =
+                    (resume && !on && (e.season, e.metadata.number) == (1, resume_episode))
+                        .then_some((725_000, Some(2_700_000)));
                 episodes.push((
                     reference,
                     PersonalEpisode {
-                        episode_id: EpisodeId::new(e.metadata.id)
-                            .unwrap_or_else(|| panic!("fixture id")),
+                        episode_id,
                         watch: watched(on),
+                        playback_progress: fixture_progress(
+                            kinema_core::watch_progress::PlaybackProgressTarget::Episode(
+                                episode_id,
+                            ),
+                            watched(on),
+                            checkpoint,
+                        ),
                     },
                 ));
             }

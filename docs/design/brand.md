@@ -44,11 +44,34 @@ is 5.8:1.
 | Player | `dev.tlmtech.kinema-player.svg` | Same tile on ink; orange glyph `H = 544` raised to fit a seek bar (58 % progress, white knob) | Player windows (X11) |
 | Player 16 px | `dev.tlmtech.kinema-player-16.svg` | Hinted glyph plus a 1 px seek bar with no knob | 16 px player PNG |
 | Symbolic | `dev.tlmtech.kinema-symbolic.svg` | 16 px grid; `currentColor` plus KDE's `current-color-scheme` hook; no tile | Panels, monochrome contexts |
+| Tray | `dev.tlmtech.kinema-tray-{dark,light}.svg`, `-16.svg`, `tray/*.png` | Same glyph path as the app icon, no tile; one flat colour, transparent. `dark` (`#232629`) is for light trays, `light` (`#FFFFFF`) for dark trays. 1024 master; 16 px hand-hinted (shared with symbolic); other sizes generated with whole-pixel height and stem | System tray / menu bar |
 | macOS | `dev.tlmtech.kinema-macos.svg` | Apple grid: 824 px body inset 100 px, 185 px radius, 10 px drop shadow | ICNS only |
 
 The player variant reverses the colours instead of shrinking the mark into a
 screen frame. This keeps the K the same size as in the app icon and keeps the two
 icons distinct even at 16 px.
+
+## Tray icons
+
+PNGs are `crates/kinema-desktop/assets/brand/tray/dev.tlmtech.kinema-tray-<dark|light>-<size>.png`
+for 16, 18, 20, 22, 24, 32, 36, 40, 44, 48 and 64 px (square, RGBA). Sizes are for
+Windows DPI steps (16/20/24/32), Linux StatusNotifier (22/24, 44/48 for 2x),
+and macOS menu bar (18 pt = 18/36 px). Each size is fitted to the pixel grid
+(1 px margin at 16-22 px, 2-4 px above); only the stem is widened to whole pixels,
+the arm, arrow and leg keep the logo's proportions.
+
+- **macOS**: use the `dark` 18 px (1x) and 36 px (2x) files as a *template image*
+  (`NSImage.isTemplate`). Templates use only the alpha channel; the system tints
+  them for light, dark and highlighted menu bars, so a single set is enough and no
+  light variant is needed there.
+- **Windows**: the shell does not tint. Pick by the taskbar theme
+  (`SystemUsesLightTheme` registry value, not `AppsUseLightTheme`): light taskbar
+  gets `dark`, dark taskbar gets `light`. Accent-coloured taskbars can break this.
+- **Linux**: there is no reliable tray theme query. The color-scheme portal or
+  GTK/Qt theme describes apps, not the panel, which may differ (dark panel with a
+  light desktop is common). Prefer sending the `-symbolic` icon name where the
+  host recolours it, else use the portal result with `light` on dark as a heuristic
+  and keep a manual override.
 
 ## Usage rules
 
@@ -70,3 +93,6 @@ Edit the SVG sources. Keep the geometry and the `-16` hinted sources in step: th
 python3 packaging/generate-icons.py
 python3 packaging/test_assets.py
 ```
+
+The generator also rebuilds the tray SVGs and PNGs from the app glyph path and the
+hand-hinted symbolic path, so edit those sources, not the tray files.

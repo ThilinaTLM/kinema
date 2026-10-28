@@ -18,6 +18,11 @@ GPUI packages are Apache-2.0; wgpu-hal is MIT OR Apache-2.0. Retain their
 upstream license files and notices with distributions of the patched code.
   https://github.com/gfx-rs/wgpu
 
+The repository-owned souvlaki media-session capability patch is under
+vendor/souvlaki/. Souvlaki is MIT licensed, Copyright (c) 2021 Aldo Acevedo.
+Retain vendor/souvlaki/LICENSE with distributions of this patched code.
+  https://github.com/Sinono3/souvlaki
+
 Cargo dependencies have their own licenses. This notice is not a complete
 transitive dependency or bundled-asset license audit; a release must review
 its actual dependency graph, assets, and distribution obligations.

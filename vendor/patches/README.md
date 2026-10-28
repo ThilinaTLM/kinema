@@ -263,3 +263,28 @@ undeclared naga dev dependency. Earlier focused scratch validation disabled only
 those unrelated upstream `#[cfg(test)]` modules, then restored them; those
 exclusions are not part of these patches. Full upstream unit-test targets retain
 those pre-existing packaging limitations.
+
+## Retained Main-window visibility
+
+`0010-gpui-pre-0.3.9.patch` and `0011-gpui-pre-windows-0.3.9.patch`
+add `Window::{hide_window,show_window}` backed by per-window `PlatformWindow`
+operations. They never call application-wide hide, destroy the window, or hide
+independent player windows. Unsupported/failed operations return false so the
+application retains Main and offers Minimize / Quit / Cancel.
+
+- X11 uses a separate safe x11rb connection to the same DISPLAY as GPUI, sends
+  checked unmap/map requests, and leaves the original GPUI-owned window alive.
+  GPUI's existing MapNotify/UnmapNotify handlers update native visibility.
+- Windows queues ShowWindowAsync for the retained HWND, avoiding synchronous
+  WM_SHOWWINDOW re-entry while GPUI is processing Main's close callback. Success
+  means the native operation was queued, not independent shell-host qualification.
+- macOS borrows the NSWindow from GPUI's retained NSView and orders only that
+  window out/front on the UI thread. The existing GPUI macOS backend defers
+  visibility observers; native runtime behavior remains unqualified.
+- Wayland has no safe portable raw-surface unmap/remap operation here. It returns
+  unsupported: Main stays recoverable through the explicit minimize fallback.
+
+Cross-target Rust checks do not qualify tray visibility/host-loss detection,
+window-manager behavior, media registration, actual playback, or HDR. Main's
+native handle remains retained until explicit application shutdown; desktop
+adapter teardown is requested before the bounded final progress/quit gate exits.

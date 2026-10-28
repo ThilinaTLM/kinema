@@ -5,11 +5,15 @@ pub(crate) use crate::catalog::library::{
     EpisodeRef, LibraryOperation, LibraryResult, LocalDetail, PersonalEpisode, PersonalTitle,
     SeasonSnapshot, TitleRef,
 };
+use crate::catalog::playback_progress::{
+    PlaybackProgressOperation, PlaybackProgressResult, PlaybackProgressSnapshot,
+};
 use crate::catalog_worker::local::{LocalEvent, LocalRequest, LocalSubmit, is_mutation};
 use gpui::Context;
+use kinema_core::watch_progress::PlaybackProgressTarget;
 use kinema_core::{
     catalog_normalized::{CanonicalTitle, ExternalIdentifier, FieldValue},
-    library::{LibraryKind, LibraryQuery, TitleId, WatchFilter},
+    library::{LibraryQuery, TitleId},
 };
 use std::collections::HashMap;
 
@@ -148,6 +152,12 @@ fn local_reference(metadata: &CanonicalTitle) -> TitleRef {
 }
 fn subjects(operation: &LibraryOperation) -> Vec<String> {
     match operation {
+        LibraryOperation::PlaybackProgress(PlaybackProgressOperation::Clear(target)) => {
+            vec![match target {
+                PlaybackProgressTarget::Movie(id) => title_key(&TitleRef::Canonical(*id)),
+                PlaybackProgressTarget::Episode(id) => episode_key(&EpisodeRef::Canonical(*id)),
+            }]
+        }
         LibraryOperation::SetMembership { title, .. }
         | LibraryOperation::SetMovieWatched { title, .. } => vec![title_key(title)],
         LibraryOperation::SetEpisodeWatched { episode, .. } => vec![episode_key(episode)],
@@ -766,9 +776,6 @@ impl AppCoordinator {
         Ok(())
     }
     pub(crate) fn load_library(&mut self, mut query: LibraryQuery, cx: &mut Context<Self>) {
-        if query.kind == LibraryKind::Movies && query.status == WatchFilter::InProgress {
-            query.status = WatchFilter::Any;
-        }
         if query.limit == 0 {
             query.limit = 60;
         }
@@ -996,6 +1003,9 @@ impl AppCoordinator {
         let changed = !events.is_empty();
         let mut invalidate = false;
         for event in events {
+            if self.apply_playback_event(&event, cx) {
+                continue;
+            }
             invalidate |= self.apply_personal_event(event);
         }
         if let Some(detail) = self.local_details.value_mut() {
@@ -1118,6 +1128,12 @@ impl AppCoordinator {
                 }
                 self.personal_state.revision = self.personal_state.revision.max(revision);
                 match result {
+                    LibraryResult::PlaybackProgress(result) => {
+                        let (PlaybackProgressResult::Applied(snapshot)
+                        | PlaybackProgressResult::Stale(snapshot)) = result;
+                        self.apply_playback_snapshot(snapshot);
+                        self.personal_notice = Some("Saved playback progress cleared.".into());
+                    }
                     LibraryResult::Titles(states) => {
                         if let LibraryOperation::ReadTitles(refs) = &request.operation {
                             for (reference, result) in refs.iter().zip(states) {
@@ -1339,3 +1355,82 @@ impl AppCoordinator {
 #[cfg(test)]
 #[path = "personal_tests.rs"]
 mod tests;
+
+impl AppCoordinator {
+    pub(crate) fn clear_movie_progress(
+        &mut self,
+        title: TitleRef,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let id = match &title {
+            TitleRef::Canonical(id) => Some(*id),
+            _ => self
+                .personal_state
+                .canonical
+                .get(&title_key(&title))
+                .copied(),
+        }
+        .ok_or("Movie identity is not loaded. Retry after details load.")?;
+        self.submit_mutation(
+            LibraryOperation::PlaybackProgress(PlaybackProgressOperation::Clear(
+                PlaybackProgressTarget::Movie(id),
+            )),
+            Ok(()),
+            cx,
+        )
+    }
+    pub(crate) fn clear_episode_progress(
+        &mut self,
+        episode: EpisodeRef,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let id = match &episode {
+            EpisodeRef::Canonical(id) => Some(*id),
+            _ => self
+                .personal_state
+                .episode_canonical
+                .get(&episode_key(&episode))
+                .copied(),
+        }
+        .ok_or("Episode identity is not loaded. Retry after details load.")?;
+        self.submit_mutation(
+            LibraryOperation::PlaybackProgress(PlaybackProgressOperation::Clear(
+                PlaybackProgressTarget::Episode(id),
+            )),
+            Ok(()),
+            cx,
+        )
+    }
+    pub(super) fn apply_playback_snapshot(&mut self, snapshot: PlaybackProgressSnapshot) {
+        match snapshot.target {
+            PlaybackProgressTarget::Movie(id) => {
+                let state =
+                    self.personal_state
+                        .title_states
+                        .values()
+                        .find_map(|value| match value {
+                            PersonalLoad::Ready(state) if state.title_id == id => {
+                                Some(state.clone())
+                            }
+                            _ => None,
+                        });
+                if let Some(mut state) = state {
+                    state.movie_watch = snapshot.watch;
+                    state.playback_progress = Some(snapshot);
+                    state.has_resume = !snapshot.watch.is_some_and(|w| w.watched)
+                        && snapshot
+                            .checkpoint
+                            .is_some_and(|c| c.observation.position_ms() > 0);
+                    self.personal_state.put_title(state);
+                }
+            }
+            PlaybackProgressTarget::Episode(id) => {
+                self.personal_state.put_episode(PersonalEpisode {
+                    episode_id: id,
+                    watch: snapshot.watch,
+                    playback_progress: snapshot,
+                })
+            }
+        }
+    }
+}

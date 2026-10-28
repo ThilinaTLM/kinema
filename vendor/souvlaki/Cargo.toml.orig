@@ -1,0 +1,50 @@
+[package]
+name = "souvlaki"
+version = "0.9.3"
+authors = ["Sinono3 <aldoacevedo@protonmail.com>"]
+edition = "2024"
+rust-version = "1.87"
+description = "A cross-platform media key and metadata handling library."
+repository = "https://github.com/Sinono3/souvlaki"
+documentation = "https://docs.rs/souvlaki"
+license = "MIT"
+
+[target.'cfg(target_os = "windows")'.dependencies.windows]
+version = "0.62"
+features = ["Foundation", "Media", "Win32_Foundation", "Win32_System_WinRT", "Storage_Streams"]
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+block = "0.1.6"
+core-graphics = "0.25.0"
+dispatch = "0.2.0"
+objc = "0.2.7"
+base64 = "0.22.1"
+
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
+dbus = { version = "0.9.5", optional = true }
+dbus-crossroads = { version = "0.5.0", optional = true }
+zbus = { version = "5.15", optional = true }
+zbus_macros = { version = "5.15", optional = true }
+zvariant = { version = "5.11", optional = true }
+pollster = { version = "1", optional = true }
+thiserror = "2.0"
+
+[features]
+default = ["use_dbus"]
+use_dbus = ["dbus", "dbus-crossroads"]
+use_zbus = ["zbus", "zbus_macros", "zvariant", "pollster"]
+
+[dev-dependencies]
+winit = "0.30.13"
+raw-window-handle = "0.6.2"
+
+[target.'cfg(target_os = "windows")'.dev-dependencies.windows]
+version = "0.62"
+features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"]
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(cargo_clippy)'] }
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]

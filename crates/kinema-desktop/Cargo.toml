@@ -31,11 +31,18 @@ log = { workspace = true, optional = true }
 # gpui_platform defaults do not enable native Linux windowing backends.
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { workspace = true, features = ["x11", "wayland"] }
+tray-icon = { workspace = true, features = ["ksni"] }
+zbus.workspace = true
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 gpui_platform.workspace = true
+tray-icon.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+raw-window-handle.workspace = true
+smol.workspace = true
+souvlaki.workspace = true
+keepawake.workspace = true
 image.workspace = true
 directories.workspace = true
 axum.workspace = true
@@ -66,4 +73,5 @@ gpui_wgpu = { workspace = true, optional = true }
 gpui_apple = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+winreg.workspace = true
 gpui_windows = { workspace = true, optional = true, features = ["gpu-video-experiment"] }

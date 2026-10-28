@@ -11,6 +11,9 @@ implementation do not establish full workflow or cross-platform acceptance.
 | [UI revision](ui-revision-2026-10.html) | Approved toolbar, detail, Streams and catalog design revisions |
 | [Episodes revision](episodes-revision-2026-10.html) | Approved episode, season and shared artwork/control revisions |
 | [Player](player.md) | Independent native player, controls, ownership and scoped evidence |
+| [Playback progress and desktop integration](playback-progress-desktop.md) | Approved resume persistence, OS media controls, inhibition, and tray lifecycle; scoped source validation |
+| [Playback progress in context](playback-progress-in-context.html) | Reviewed screenshot-based placements in series, episode grid, Streams and movie detail |
+| [Playback progress state wireframes](playback-progress-wireframes.html) | Supporting watch/resume behavior and tray lifecycle illustrations, not current-layout placement |
 | [Player controls wireframe](player-controls-wireframes.html) | Approved Cinema Dock visual reference |
 | [Library](library.md) | Personal membership and manual watch-state contract |
 | [Brand](brand.md) | Mark, icon, color and usage guidance |

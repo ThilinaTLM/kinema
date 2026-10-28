@@ -41,6 +41,7 @@ impl PlaySheet {
             context,
             target,
             candidate,
+            crate::screens::coordinator::PlaybackIntent::Normal,
             cx,
         );
         this.missing = state == "play-live-missing-creds";
