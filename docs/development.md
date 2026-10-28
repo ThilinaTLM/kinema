@@ -7,7 +7,10 @@ durable resume remain unchanged. This does not qualify real-provider throughput
 or native/cross-platform playback.
 
 The earlier [HTTP and librqbit POCs](development/download-poc.md) remain isolated
-experiments. Direct torrent playback is not integrated.
+experiments. Direct torrent playback is not integrated. The subsequent
+[first-play readiness correction](validation/player-startup-readiness.md) separates
+startup and seek-confirmation deadlines and removes misleading resume errors for
+sources without a saved checkpoint.
 
 Latest scoped extension evidence: [durable playback progress, native UI, and desktop
 integration](validation/playback-progress-desktop.md). Root checks and an isolated
