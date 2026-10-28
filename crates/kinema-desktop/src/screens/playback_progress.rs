@@ -5,6 +5,12 @@ use std::time::{Duration, Instant};
 
 pub(crate) use super::super::coordinator::PlaybackIntent;
 
+// Remote startup can include a 45s loopback missing-range wait and a 20s
+// upstream request. Allow a conservative bounded readiness window, distinct
+// from confirmation of an already-issued seek command.
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+const SEEK_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Prepared off-thread by the application before loading a source.
 #[derive(Clone, Debug)]
 pub struct PlaybackLaunch {
@@ -87,12 +93,14 @@ impl Progress {
     /// Includes pre-file-loaded and missing-property waits. A user prompt never
     /// consumes this budget; an explicit retry starts a new bounded attempt.
     pub fn check_timeout(&mut self, now: Instant) -> bool {
-        let since = match self.phase {
-            Phase::Loading | Phase::AwaitSeekability => Some(self.wait_started),
-            Phase::Seeking { .. } | Phase::Starting { .. } => self.seek_started,
+        let deadline = match self.phase {
+            Phase::Loading | Phase::AwaitSeekability => Some((self.wait_started, STARTUP_TIMEOUT)),
+            Phase::Seeking { .. } | Phase::Starting { .. } => {
+                self.seek_started.map(|at| (at, SEEK_TIMEOUT))
+            }
             _ => None,
         };
-        if since.is_some_and(|at| now.saturating_duration_since(at) >= Duration::from_secs(10)) {
+        if deadline.is_some_and(|(at, budget)| now.saturating_duration_since(at) >= budget) {
             self.phase = Phase::Unavailable;
             self.authorized = false;
             self.seek_started = None;
@@ -148,6 +156,43 @@ impl Progress {
             }
             Some(generation) => generation == state.media_generation,
         }
+    }
+    /// Consume valid observations before checking deadlines. Unavailable is
+    /// deliberately terminal until explicit action, including late seek replies.
+    pub fn observe_readiness(&mut self, state: &PlaybackState) -> bool {
+        if !self.loaded(state) {
+            return false;
+        }
+        match self.phase {
+            Phase::Loading
+                if self.initial_position_ready(state)
+                    && self.usable_checkpoint().is_none()
+                    && self.launch.intent != PlaybackIntent::StartOver =>
+            {
+                self.phase = Phase::Ready;
+            }
+            Phase::Starting {
+                position_revision,
+                restart_revision,
+            } if seek_confirmed(state, 0.0, position_revision, restart_revision) => {
+                self.phase = Phase::Reset;
+            }
+            Phase::Seeking {
+                target,
+                position_revision,
+                restart_revision,
+            } if seek_confirmed(state, target, position_revision, restart_revision) => {
+                self.phase = Phase::Ready;
+            }
+            _ => {}
+        }
+        true
+    }
+    pub fn initial_position_ready(&self, state: &PlaybackState) -> bool {
+        state.position_observed
+            && state.position.is_finite()
+            && state.position >= 0.0
+            && !state.seeking
     }
     pub fn sample(
         &mut self,
@@ -393,11 +438,106 @@ mod tests {
             s.file_loaded = file_loaded;
             s.position_observed = false;
             p.loaded(&s);
-            assert!(!p.check_timeout(now + Duration::from_secs(9)));
-            assert!(p.check_timeout(now + Duration::from_secs(10)));
+            assert!(!p.check_timeout(now + Duration::from_secs(59)));
+            assert!(p.check_timeout(now + Duration::from_secs(60)));
             assert_eq!(p.phase, Phase::Unavailable);
             assert!(!p.can_start_over(&s));
-            assert!(p.sample(&s, now + Duration::from_secs(10), true).is_none());
+            assert!(p.sample(&s, now + Duration::from_secs(60), true).is_none());
+        }
+        Ok(())
+    }
+    #[test]
+    fn first_play_delayed_and_boundary_readiness_precede_timeout()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for delay in [11, 45, 60] {
+            let mut p = progress()?;
+            let now = Instant::now();
+            p.retry_startup(now);
+            assert!(!p.launch.watched);
+            assert!(p.usable_checkpoint().is_none());
+            let mut s = state(0.0, 0);
+            s.position_observed = false;
+            p.observe_readiness(&s);
+            assert_eq!(p.phase, Phase::Loading);
+            assert!(!p.check_timeout(now + Duration::from_secs(10)));
+            assert!(p.sample(&s, now, true).is_none());
+            s.position_observed = true;
+            s.position_revision = 1;
+            p.observe_readiness(&s);
+            assert!(!p.check_timeout(now + Duration::from_secs(delay)));
+            assert_eq!(p.phase, Phase::Ready);
+            // Readiness is not persistence authorization; coordinator must accept.
+            assert!(!p.authorized);
+            assert!(p.sample(&s, now, true).is_none());
+        }
+        Ok(())
+    }
+    #[test]
+    fn readiness_never_bypasses_saved_checkpoint_or_invalid_position()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let now = Instant::now();
+        for watched in [false, true] {
+            let mut p = progress()?;
+            p.retry_startup(now);
+            p.launch.watched = watched;
+            p.launch.checkpoint = PlaybackObservation::new(20_000, None);
+            p.observe_readiness(&state(0.0, 1));
+            assert_eq!(p.phase, Phase::Loading);
+            assert!(!p.authorized);
+            assert!(p.sample(&state(0.0, 1), now, true).is_none());
+        }
+        for position in [f64::NAN, f64::INFINITY, -1.0] {
+            let mut p = progress()?;
+            p.retry_startup(now);
+            let s = state(position, 1);
+            p.observe_readiness(&s);
+            assert_eq!(p.phase, Phase::Loading);
+            assert!(p.sample(&s, now, true).is_none());
+        }
+        Ok(())
+    }
+    #[test]
+    fn timeout_and_explicit_decisions_do_not_auto_recover() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut p = progress()?;
+        let now = Instant::now();
+        p.retry_startup(now);
+        assert!(p.check_timeout(now + STARTUP_TIMEOUT));
+        assert!(!p.check_timeout(now + STARTUP_TIMEOUT));
+        for phase in [Phase::Unavailable, Phase::Choice, Phase::Mismatch] {
+            p.phase = phase;
+            p.observe_readiness(&state(0.0, 1));
+            assert_eq!(p.phase, phase);
+            assert!(p.sample(&state(0.0, 1), now, true).is_none());
+        }
+        Ok(())
+    }
+    #[test]
+    fn seek_confirmation_wins_at_deadline_but_not_without_both_revisions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let now = Instant::now();
+        for confirmed in [false, true] {
+            let mut p = progress()?;
+            p.authorized = false;
+            p.phase = Phase::Seeking {
+                target: 20.0,
+                position_revision: 1,
+                restart_revision: 1,
+            };
+            p.seek_started = Some(now);
+            let mut s = state(20.0, 2);
+            s.restart_revision = if confirmed { 2 } else { 1 };
+            p.observe_readiness(&s);
+            assert_eq!(p.check_timeout(now + SEEK_TIMEOUT), !confirmed);
+            assert_eq!(
+                p.phase,
+                if confirmed {
+                    Phase::Ready
+                } else {
+                    Phase::Unavailable
+                }
+            );
+            assert!(p.sample(&s, now, true).is_none());
         }
         Ok(())
     }
@@ -435,16 +575,16 @@ mod tests {
         let now = Instant::now();
         p.retry_startup(now);
         p.await_seekability(now + Duration::from_secs(9));
-        assert!(p.check_timeout(now + Duration::from_secs(10)));
-        p.retry_startup(now + Duration::from_secs(11));
-        assert!(!p.check_timeout(now + Duration::from_secs(20)));
-        assert!(p.check_timeout(now + Duration::from_secs(21)));
+        assert!(p.check_timeout(now + Duration::from_secs(60)));
+        p.retry_startup(now + Duration::from_secs(61));
+        assert!(!p.check_timeout(now + Duration::from_secs(120)));
+        assert!(p.check_timeout(now + Duration::from_secs(121)));
         // Waiting for a user choice is not a startup timeout.
         p.phase = Phase::Choice;
         assert!(!p.check_timeout(now + Duration::from_secs(200)));
         p.await_seekability(now + Duration::from_secs(200));
-        assert!(!p.check_timeout(now + Duration::from_secs(209)));
-        assert!(p.check_timeout(now + Duration::from_secs(210)));
+        assert!(!p.check_timeout(now + Duration::from_secs(259)));
+        assert!(p.check_timeout(now + Duration::from_secs(260)));
         Ok(())
     }
     #[test]
