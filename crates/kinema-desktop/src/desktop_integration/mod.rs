@@ -5,6 +5,7 @@ pub mod inhibition;
 pub mod media_session;
 pub mod runtime;
 pub mod tray;
+mod tray_asset;
 pub use runtime::{IconData, Runtime, RuntimeConfig, RuntimeSnapshot, RuntimeStatus};
 
 use std::sync::{
@@ -47,6 +48,8 @@ pub enum Command {
     ShowPlayer(PlayerTarget),
     SelectPlayer(PlayerTarget),
     ShowMain,
+    /// Request lifecycle-guarded Main-only hide, never application-wide hide.
+    HideMain,
     Transfers,
     Settings,
     Quit,

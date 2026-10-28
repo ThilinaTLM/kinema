@@ -123,6 +123,11 @@ artwork progress indicator, and a reorganized Streams selection drawer using
 native typography tokens. Desktop adapters use souvlaki with a repository-owned
 capability patch, keepawake inhibition, and tray-icon (KSNI on Linux). Media keys
 route to one selected player; inhibition considers all active embedded players.
+The tray contains only visibility-aware Show/Hide, Settings, and Quit; playback
+controls remain in players and OS media controls. Its embedded monochrome Kinema
+logo uses macOS template tinting, a startup Windows taskbar-theme query, or a
+white-on-dark Linux fallback (no Linux/Windows live theme switching). Hide affects Main only and
+requires fresh tray health and matching safe native hide/restore operations.
 Main close and explicit Quit have separate lifecycle paths. Where a usable tray
 or safe Main-only hide is unavailable, Main remains recoverable via the explicit
 Minimize/Quit/Cancel fallback. External mpv/VLC remain process hand-offs.

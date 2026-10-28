@@ -171,22 +171,12 @@ footer{margin-top:56px;border-top:1px solid var(--hair);padding-top:16px;color:v
 <div class="notes"><b>Review notes</b><ul><li>Position / duration ≥ 0.90 sets watched, once, and keeps updating the checkpoint. It measures position, not time viewed, so seeking past 90% qualifies.</li><li>Seeking backward saves the smaller position and never unmarks watched. Auto-marking is one-way.</li><li>Mark unwatched during a run suppresses auto-marking for the rest of that run, including later seeks; a new playback run may qualify again.</li><li>Unknown or live duration, loading defaults and failed loads never qualify. EOF is not required.</li></ul></div></div>
 
 <h2 id="s6"><span class="n">06</span>Tray: native menu mock</h2>
-<p class="lead">The OS draws the real menu, so fonts, spacing and submenu behavior will differ. Labels and enabled state follow capability. Menu content is not claimed to be implemented or verified on any desktop.</p>
-<div class="frame tray" id="tray" data-players="one"><div class="seg" role="group" aria-label="Active players" style="margin-bottom:16px"><button class="btn" type="button" data-p="none" aria-pressed="false">No player</button><button class="btn" type="button" data-p="one" aria-pressed="true">One player</button><button class="btn" type="button" data-p="two" aria-pressed="false">Two players</button></div>
+<p class="lead">The OS draws the real menu, so fonts and spacing will differ. The three-item contract is independent of active players. Native behavior remains unqualified.</p>
+<div class="frame tray" id="tray"><div class="seg" role="group" aria-label="Main visibility" style="margin-bottom:16px"><button class="btn" type="button" data-main="visible" aria-pressed="true">Main visible</button><button class="btn" type="button" data-main="hidden" aria-pressed="false">Main hidden</button></div>
 <div class="tray-grid"><div><div class="lab" style="margin-top:0">Top-level menu</div><div class="menu">
-<div class="mi dis"><span class="p0">Nothing playing</span><span class="p1">The Quiet Between · Playing</span></div><div class="sep"></div>
-<div class="mi">Show Kinema</div>
-<div class="mi hl">Players <small>▸</small></div>
-<div class="mi pdep">Play / Pause <small>selected player</small></div>
-<div class="mi pdep">Stop playback</div>
-<div class="mi pdep">Volume <small>▸</small></div>
-<div class="sep"></div><div class="mi">Transfers</div><div class="mi">Settings</div><div class="sep"></div><div class="mi">Quit Kinema</div></div></div>
-<div><div class="lab" style="margin-top:0">Players ▸</div><div class="menu" style="min-width:230px"><div class="mi p0 dis" style="display:none">No active players</div>
-<div class="p1"><div style="width:100%"><div class="mi">✓ The Quiet Between <small>media controls</small></div><div class="mi" style="padding-left:28px;color:var(--tx3)">Show player</div></div></div>
-<div class="p2" style="width:100%"><div style="width:100%"><div class="sep"></div><div class="mi">&nbsp;&nbsp;S1 · E4 Across the water</div><div class="mi" style="padding-left:28px;color:var(--tx3)">Show player</div><div class="mi" style="padding-left:28px;color:var(--tx3)">Use for media controls</div></div></div>
-<div class="p0 mi dis">No active players</div>
-<div class="lab" style="margin:14px 8px 4px">Volume ▸ (discrete)</div><div class="mi pdep">Mute / Unmute</div><div class="mi pdep">Volume down</div><div class="mi pdep">Volume up</div></div></div>
-<div class="notes" style="margin:0"><b>Review notes</b><ul><li>Volume is three discrete commands (Mute/Unmute, down, up). No tray slider: not portable.</li><li>Next / Previous are <b>unsupported by default</b> and omitted here; they stay disabled in OS media controls until a real queue exists.</li><li>Player actions are disabled (not hidden) with no player. Show Kinema, Transfers, Settings and Quit always work.</li><li>System volume keys usually change system, not player, volume.</li><li>Single click may restore Main where supported; the menu always offers Show Kinema.</li><li>Pause / Stop go through the same commands as the player’s own controls.</li></ul></div></div></div>
+<div class="mi" id="tray-visibility">Hide</div>
+<div class="mi">Settings</div><div class="mi">Quit</div></div></div>
+<div class="notes" style="margin:0"><b>Review notes</b><ul><li>Show when Main is hidden; Hide when Main is visible.</li><li>Hide requires fresh tray health and matching safe Main-only hide/restore operations. Failure leaves Main visible, without quitting.</li><li>Independent player windows are never hidden by this action.</li><li>Settings opens the independent Settings window; Quit uses existing confirmation.</li><li>No players submenu, playback controls, status or Transfers entry. OS media controls remain separate.</li><li>Single click may restore Main where supported.</li></ul></div></div></div>
 
 <h2 id="s7"><span class="n">07</span>Closing windows</h2>
 <p class="lead">Main is a view, not the process owner. Closing the separate player always stops that player. Choose a scenario.</p>
@@ -257,7 +247,7 @@ else if(a==='run'){S.sup=false;sim(['New playback run: auto-marking enabled agai
 else init()}});
 init();
 /* 06 tray */
-var tray=$('#tray');$$('[data-p]',tray).forEach(function(b){b.onclick=function(){tray.dataset.players=b.dataset.p;press($$('[data-p]',tray).filter(function(x){return x.tagName==='BUTTON'}),b)}});
+var tray=$('#tray');$$('[data-main]',tray).forEach(function(b){b.onclick=function(){$('#tray-visibility').textContent=b.dataset.main==='hidden'?'Show':'Hide';press($$('[data-main]',tray),b)}});
 /* 07 tabs */
 var tabs=$$('#tabs [data-t]');
 function selTab(b,f){tabs.forEach(function(x){var on=x===b;x.setAttribute('aria-selected',String(on));x.tabIndex=on?0:-1});$$('.scn-panel').forEach(function(p){p.classList.toggle('active',p.dataset.p===b.dataset.t)});if(f)b.focus()}

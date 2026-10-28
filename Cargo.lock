@@ -3422,6 +3422,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "wgpu",
+ "winreg",
  "zbus",
  "zeroize",
 ]

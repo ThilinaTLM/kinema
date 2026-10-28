@@ -31,6 +31,7 @@ log = "0.4"
 glow = "0.16"
 libloading = "0.8"
 windows = "0.62.2"
+winreg = "0.56.0"
 metal = "0.29"
 thiserror = "2"
 gpui = { package = "gpui-pre", version = "=0.3.9", features = ["gpu-video-experiment"] }

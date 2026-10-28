@@ -31,8 +31,10 @@ ignoring callbacks. See `vendor/souvlaki/KINEMA-PATCH.md` for source evidence.
 ```rust,ignore
 let (tx, rx) = desktop_integration::command_channel(64);
 // Only after GPUI's native loop and a native window are ready:
-let mut runtime = Runtime::start_after_native_ready(tx, RuntimeConfig::default())?;
-runtime.update(RuntimeSnapshot { players, selected, activities });
+// Prepare on a background executor before entering this native UI-thread code:
+let config = RuntimeConfig::new(prepared_icon);
+let mut runtime = Runtime::start_after_native_ready(tx, config)?;
+runtime.update(RuntimeSnapshot { main_hidden, players, selected, activities });
 let status = runtime.poll();
 let can_hide_main = status.tray_usable_at(Instant::now());
 ```
@@ -40,9 +42,33 @@ let can_hide_main = status.tray_usable_at(Instant::now());
 Keep Runtime in the application owner, **not Main**. It owns a Linux tray/media
 worker plus an independent inhibitor worker. Windows/macOS native tray/media
 remain in the UI-owned Runtime; start/poll/drop on GPUI's running UI thread.
-Runtime is deliberately `!Send`. Icon data is RGBA in memory; the default is a
-small K glyph, with no path or temporary-file lifetime dependency. Artwork is
-omitted (souvlaki's macOS URL artwork loader is synchronous).
+Runtime is deliberately `!Send`. `IconData::load_for_current_platform()` selects
+and decodes embedded monochrome Kinema PNGs on the lifecycle's owned background
+startup task; decoded RGBA is passed to `RuntimeConfig::new`. No runtime asset
+paths, temporary files or UI-thread decoding are required. Startup results are
+rejected after quitting begins. Artwork is omitted (souvlaki's macOS URL artwork
+loader is synchronous).
+
+Tray icon policy (not native visual qualification):
+
+- **macOS:** dark 36px logo (18pt at 2×), marked as a template image via
+  tray-icon's `with_icon_as_template(true)`; macOS controls appearance/tint.
+- **Windows:** 32px dark logo for a light taskbar, white logo for a dark taskbar.
+  Read HKCU `Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize` /
+  `SystemUsesLightTheme` once on the background task using the safe `winreg` API
+  (already locked through embed-resource, no new packages; not `AppsUseLightTheme`).
+  Missing/unreadable
+  DWORD defaults to white on dark. Accent-coloured/high-contrast taskbars may not
+  match this hint. No shell commands or application unsafe code.
+- **Linux KSNI:** white 48px logo, scaled by the host. No portable, dependency-free
+  tray-background query is available here; white-on-dark is an explicit fallback,
+  not automatic shell-theme detection. A light panel may have low contrast.
+
+Windows/Linux theme changes are not monitored: restart to reselect the icon.
+macOS template tinting is delegated to the OS. No theme polling, GTK, or KDE
+library dependencies are introduced. Selection/PNG tests check both Windows
+variants, macOS/Linux sizes, monochrome opaque pixels, alpha and decode failures;
+actual light/dark trays and high-DPI scaling still require native visual checks.
 
 `update` replaces a single latest-value mailbox; it never queues unbounded state.
 Workers wake on updates and at least once/second for host health/buffering expiry.
@@ -60,6 +86,18 @@ failed Linux worker causes health to expire and restores Main. Restore on
 `Command::TrayHostLost` too; the bounded channel is best effort, so its event
 cannot replace the independent health deadline. Missing tray retains Main and
 uses the existing Minimize / Quit / Cancel fallback.
+
+The tray menu contains only **Show** (when Main is hidden) / **Hide** (when
+Main is visible), **Settings**, and **Quit**. Publish lifecycle-observed
+`main_hidden` in each snapshot; only visibility changes replace the native menu.
+Players, playback controls, and Transfers are not tray entries. Media-session
+transport routing remains independent of the tray menu.
+
+Hide shares close-to-background's fresh tray-health, matching native restorer,
+and Main-only hider checks. Failed/unsupported Hide leaves Main visible (it does
+not quit an idle application). It never hides the application or independent
+players. Show and host-loss restoration retain the existing lifecycle path;
+Settings opens the independent Settings window and Quit uses confirmation.
 
 ### Commands and generations
 

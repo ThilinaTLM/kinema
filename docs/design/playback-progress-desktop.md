@@ -387,7 +387,7 @@ Recommended defaults:
 | Close Main while idle | Quit normally; optional explicit “Keep in tray when idle” preference, default off |
 | Close player | Stop that player, flush progress and release its lease; do not hide the video invisibly |
 | Close Settings | Close Settings only |
-| Tray Show Kinema / OS app activation | Restore the existing main view or recreate it against the same app coordinator; never duplicate workers |
+| Tray Show / OS app activation | Restore the existing main view or recreate it against the same app coordinator; never duplicate workers |
 | Quit / native app Quit | Existing active-session confirmation, then bounded flush and deterministic teardown; never merely hide |
 | Last active session ends while Main hidden | Remain recoverable in tray until explicit Quit; do not disappear unexpectedly |
 
@@ -416,19 +416,20 @@ stateDiagram-v2
     ShuttingDown --> [*]: Bounded progress flush and resource teardown
 ```
 
-Suggested menu (native menu labels and enabled state follow actual capability):
+The tray menu contains exactly three items:
 
-- **Show Kinema**
-- **Players** → title per active player → Show player; Use for media controls
-- **Play/Pause** — selected player; **Stop playback**
-- **Volume** → Mute/Unmute; Volume down; Volume up (no nonportable tray slider)
-- **Transfers** — restore Main and open transfers
+- **Show** when Main is hidden; **Hide** when Main is visible
 - **Settings**
-- **Quit Kinema**
+- **Quit**
 
-Show selected title/status as a disabled item; disable player actions when empty.
-Single activation restores Main where supported; the menu always offers restore
-because tray click behavior differs across desktops. Session callbacks reference
+Hide uses the same fresh tray-health, native restorer and Main-only hider safety
+checks as close-to-background. A failed/unsupported explicit Hide leaves Main
+visible and never quits an idle application or hides independent players.
+Settings reuses the independent Settings window; Quit uses existing confirmation.
+No players submenu, playback controls, status item or Transfers entry is present.
+OS media controls remain separate. Single activation restores Main where
+supported; the visibility menu action follows observed Main state, not player
+visibility. Session callbacks reference
 stable IDs/generations, never stale window pointers. Retain existing external
 serving/quit warnings; do not infer that an external process stopped from a lack
 of network traffic.

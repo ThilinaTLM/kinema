@@ -214,16 +214,30 @@ pub fn host_lost(cx: &mut App) {
     }
 }
 
-pub(crate) fn close_main(coordinator: &Entity<AppCoordinator>, window: &mut Window, cx: &mut App) {
-    if !coordinator.read(cx).needs_quit_confirmation() {
-        super::quit::request(coordinator, window, cx);
+/// Explicit Hide never means Quit, even when Main has no active work. It uses
+/// the same health, restoration and Main-only native hide gate as close-to-tray.
+pub fn hide_main(cx: &mut App) {
+    if !cx.has_global::<Lifecycle>() || cx.global::<Lifecycle>().hidden {
         return;
     }
-    let hider = tray_usable(cx)
-        .then_some(())
-        .filter(|_| cx.global::<Lifecycle>().restorer.is_some())
-        .and_then(|_| cx.global::<Lifecycle>().hider.clone());
-    if hider.is_some_and(|hide| hide(window)) {
+    let main = cx.global::<Lifecycle>().main;
+    let _ = main.update(cx, |_, window, cx| {
+        try_hide_current(window, cx);
+    });
+}
+
+fn guarded_hide(tray_usable: bool, can_restore: bool, hide: Option<impl FnOnce() -> bool>) -> bool {
+    tray_usable && can_restore && hide.is_some_and(|hide| hide())
+}
+
+fn try_hide_current(window: &mut Window, cx: &mut App) -> bool {
+    let owner = cx.global::<Lifecycle>();
+    let hider = owner.hider.clone();
+    if guarded_hide(
+        tray_usable(cx),
+        owner.restorer.is_some(),
+        hider.map(|hide| move || hide(window)),
+    ) {
         cx.global_mut::<Lifecycle>().hidden = true;
         if !cx.global::<Lifecycle>().background_notice_shown {
             cx.global_mut::<Lifecycle>().background_notice_shown = true;
@@ -234,6 +248,17 @@ pub(crate) fn close_main(coordinator: &Entity<AppCoordinator>, window: &mut Wind
                 actions: Vec::new(),
             });
         }
+        return true;
+    }
+    false
+}
+
+pub(crate) fn close_main(coordinator: &Entity<AppCoordinator>, window: &mut Window, cx: &mut App) {
+    if !coordinator.read(cx).needs_quit_confirmation() {
+        super::quit::request(coordinator, window, cx);
+        return;
+    }
+    if try_hide_current(window, cx) {
         return;
     }
     cx.global_mut::<Lifecycle>().close_fallback = true;
@@ -251,5 +276,28 @@ pub(crate) fn is_close_fallback(cx: &App) -> bool {
 pub(crate) fn cancel(cx: &mut App) {
     if cx.has_global::<Lifecycle>() {
         cx.global_mut::<Lifecycle>().close_fallback = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::guarded_hide;
+
+    #[test]
+    fn hide_requires_healthy_tray_and_matching_restore_without_invoking_hider() {
+        for (healthy, restorable) in [(false, false), (false, true), (true, false)] {
+            assert!(!guarded_hide(
+                healthy,
+                restorable,
+                Some(|| { panic!("unsafe hide must not reach native window operation") })
+            ));
+        }
+        assert!(!guarded_hide(true, true, None::<fn() -> bool>));
+    }
+
+    #[test]
+    fn hide_only_succeeds_when_native_main_only_operation_succeeds() {
+        assert!(!guarded_hide(true, true, Some(|| false)));
+        assert!(guarded_hide(true, true, Some(|| true)));
     }
 }

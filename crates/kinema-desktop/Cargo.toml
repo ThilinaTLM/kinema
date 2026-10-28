@@ -73,4 +73,5 @@ gpui_wgpu = { workspace = true, optional = true }
 gpui_apple = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+winreg.workspace = true
 gpui_windows = { workspace = true, optional = true, features = ["gpu-video-experiment"] }

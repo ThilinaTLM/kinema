@@ -18,43 +18,31 @@ use std::{
 
 #[derive(Clone, Default, Debug)]
 pub struct RuntimeSnapshot {
+    /// Lifecycle-observed Main visibility, independent of player windows.
+    pub main_hidden: bool,
     pub players: Vec<PlayerSnapshot>,
     pub selected: Option<PlayerTarget>,
     pub activities: Vec<PlayerActivity>,
 }
 
+pub use super::tray_asset::IconData;
+
 #[derive(Clone)]
-pub struct IconData {
-    pub rgba: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-}
-
-impl Default for IconData {
-    fn default() -> Self {
-        // Small in-memory K glyph. No file lifetime, image decoding or GTK dependency.
-        let mut rgba = vec![0; 16 * 16 * 4];
-        for y in 2..14usize {
-            for x in 3..13usize {
-                if x < 5 || (x as isize - 5 - (y as isize - 7).abs()).abs() < 2 {
-                    rgba[(y * 16 + x) * 4..(y * 16 + x + 1) * 4]
-                        .copy_from_slice(&[75, 205, 190, 255]);
-                }
-            }
-        }
-        Self {
-            rgba,
-            width: 16,
-            height: 16,
-        }
-    }
-}
-
-#[derive(Clone, Default)]
 pub struct RuntimeConfig {
     pub icon: IconData,
     #[cfg(target_os = "windows")]
     pub media_host: Option<Rc<dyn super::media_session::WindowsMediaHost>>,
+}
+
+impl RuntimeConfig {
+    /// Supply an icon prepared on a worker, before entering the native UI loop.
+    pub fn new(icon: IconData) -> Self {
+        Self {
+            icon,
+            #[cfg(target_os = "windows")]
+            media_host: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -299,10 +287,6 @@ impl Drop for Runtime {
 }
 
 type MediaSignature = Option<(PlayerTarget, Playback, bool, u64)>;
-type MenuSignature = (
-    Vec<(PlayerTarget, String, super::Playback)>,
-    Option<PlayerTarget>,
-);
 
 struct NativeAdapters {
     tray: Option<Tray>,
@@ -314,7 +298,7 @@ struct NativeAdapters {
     last_probe: Option<Instant>,
     last_publish: Option<Instant>,
     media_signature: MediaSignature,
-    menu_signature: Option<MenuSignature>,
+    menu_signature: Option<bool>,
     pending_publication: bool,
 }
 
@@ -428,17 +412,10 @@ impl NativeAdapters {
             self.media_signature = media_signature;
             self.pending_publication = false;
         }
-        let menu_signature = (
-            snapshot
-                .players
-                .iter()
-                .map(|player| (player.target, player.title.clone(), player.playback))
-                .collect(),
-            snapshot.selected,
-        );
+        let menu_signature = snapshot.main_hidden;
         if self.menu_signature.as_ref() != Some(&menu_signature) {
             if let Some(tray) = &mut self.tray
-                && let Err(error) = tray.update_menu(&snapshot.players, snapshot.selected)
+                && let Err(error) = tray.update_menu(snapshot.main_hidden)
             {
                 self.error = Some(format!("Tray menu: {error:?}"));
                 self.tray = None;
@@ -556,6 +533,7 @@ mod tests {
         };
         for generation in [1, 2] {
             runtime.update(RuntimeSnapshot {
+                main_hidden: generation == 2,
                 selected: Some(PlayerTarget {
                     session_id: 7,
                     generation,
@@ -575,6 +553,13 @@ mod tests {
                 session_id: 7,
                 generation: 2
             }))
+        );
+        assert!(
+            runtime
+                .shared
+                .latest
+                .lock()
+                .is_ok_and(|latest| latest.snapshot.main_hidden)
         );
         runtime.shutdown();
         let joined = runtime

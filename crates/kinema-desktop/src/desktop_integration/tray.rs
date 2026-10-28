@@ -1,5 +1,5 @@
 //! tray-icon KSNI on Linux (no GTK/AppIndicator), native Windows/macOS elsewhere.
-use super::{Command, CommandSender, PlayerSnapshot, Transport};
+use super::{Command, CommandSender};
 use std::{
     collections::HashMap,
     sync::{
@@ -10,7 +10,7 @@ use std::{
 };
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
-    menu::{Menu, MenuEvent, MenuId, MenuItem, Submenu},
+    menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
 static CALLBACKS_OWNED: AtomicBool = AtomicBool::new(false);
@@ -85,6 +85,7 @@ pub struct Tray {
     handle: TrayIcon,
     commands: Arc<Mutex<HashMap<MenuId, Command>>>,
     callback_alive: Arc<AtomicBool>,
+    #[cfg(target_os = "linux")]
     sender: CommandSender,
     health: HostHealth,
 }
@@ -142,7 +143,10 @@ impl Tray {
 
     fn create(icon: Icon, sender: CommandSender) -> Result<Self, TrayError> {
         let lease = CallbackLease::claim()?;
-        let handle = TrayIconBuilder::new()
+        let builder = TrayIconBuilder::new();
+        #[cfg(target_os = "macos")]
+        let builder = builder.with_icon_as_template(true);
+        let handle = builder
             .with_icon(icon)
             .with_tooltip("Kinema")
             .with_title("Kinema")
@@ -190,64 +194,21 @@ impl Tray {
             handle,
             commands,
             callback_alive,
+            #[cfg(target_os = "linux")]
             sender,
             health: HostHealth::default(),
         };
-        tray.update_menu(&[], None)?;
+        tray.update_menu(false)?;
         // Creating an icon does NOT prove a host exists (KSNI assumes one).
         Ok(tray)
     }
 
-    pub fn update_menu(
-        &mut self,
-        players: &[PlayerSnapshot],
-        selected: Option<super::PlayerTarget>,
-    ) -> Result<(), TrayError> {
+    pub fn update_menu(&mut self, main_hidden: bool) -> Result<(), TrayError> {
         let menu = Menu::new();
         let mut commands = HashMap::new();
-        append(&menu, &mut commands, "Show Kinema", Some(Command::ShowMain))?;
-        let player_menu = Submenu::new("Players", !players.is_empty());
-        for player in players {
-            let submenu = Submenu::new(&player.title, true);
-            let show = MenuItem::new("Show player", true, None);
-            let select = MenuItem::new("Use for media controls", true, None);
-            commands.insert(show.id().clone(), Command::ShowPlayer(player.target));
-            commands.insert(select.id().clone(), Command::SelectPlayer(player.target));
-            submenu.append(&show).map_err(backend)?;
-            submenu.append(&select).map_err(backend)?;
-            player_menu.append(&submenu).map_err(backend)?;
+        for (label, command) in menu_entries(main_hidden) {
+            append(&menu, &mut commands, label, Some(command))?;
         }
-        menu.append(&player_menu).map_err(backend)?;
-        let selected = players.iter().find(|p| Some(p.target) == selected);
-        if let Some(player) = selected {
-            let state = match player.playback {
-                super::Playback::Playing => "Playing",
-                super::Playback::Paused => "Paused",
-                super::Playback::Stopped => "Stopped",
-            };
-            append(
-                &menu,
-                &mut commands,
-                &format!("{} · {state}", player.title),
-                None,
-            )?;
-        }
-        for (label, action) in [
-            ("Play/Pause", Transport::Toggle),
-            ("Stop playback", Transport::Stop),
-            ("Mute/Unmute", Transport::ToggleMute),
-            ("Volume down", Transport::ChangeVolume(-0.05)),
-            ("Volume up", Transport::ChangeVolume(0.05)),
-        ] {
-            let command = selected.map(|p| Command::Transport {
-                target: p.target,
-                action,
-            });
-            append(&menu, &mut commands, label, command)?;
-        }
-        append(&menu, &mut commands, "Transfers", Some(Command::Transfers))?;
-        append(&menu, &mut commands, "Settings", Some(Command::Settings))?;
-        append(&menu, &mut commands, "Quit Kinema", Some(Command::Quit))?;
         // Replace the routing map before the menu. Old menu events now find no ID.
         *self
             .commands
@@ -285,6 +246,19 @@ impl Drop for Tray {
     fn drop(&mut self) {
         self.callback_alive.store(false, Ordering::Release);
     }
+}
+
+/// Pure menu contract: independent players and media controls are not tray entries.
+fn menu_entries(main_hidden: bool) -> [(&'static str, Command); 3] {
+    [
+        if main_hidden {
+            ("Show", Command::ShowMain)
+        } else {
+            ("Hide", Command::HideMain)
+        },
+        ("Settings", Command::Settings),
+        ("Quit", Command::Quit),
+    ]
 }
 
 fn backend(error: impl std::fmt::Display) -> TrayError {
@@ -332,6 +306,26 @@ fn linux_host_owner() -> Result<String, TrayError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_contains_only_visibility_settings_and_quit() {
+        assert_eq!(
+            menu_entries(false),
+            [
+                ("Hide", Command::HideMain),
+                ("Settings", Command::Settings),
+                ("Quit", Command::Quit),
+            ]
+        );
+        assert_eq!(
+            menu_entries(true),
+            [
+                ("Show", Command::ShowMain),
+                ("Settings", Command::Settings),
+                ("Quit", Command::Quit),
+            ]
+        );
+    }
 
     #[test]
     fn fake_host_loss_and_restart_never_leave_a_usable_tray() {
