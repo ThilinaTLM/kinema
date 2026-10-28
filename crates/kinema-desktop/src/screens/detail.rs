@@ -1,12 +1,12 @@
 //! Production title detail. Route-local selection; the shared coordinator owns I/O.
 use super::{
-    coordinator::{AppCoordinator, BrowseTitle},
+    coordinator::{AppCoordinator, BrowseTitle, PlaybackIntent},
     play_sheet::{PlayContext, PlaySheet, format_bytes},
 };
 use crate::{
     artwork::{self, ArtworkKey, ArtworkKind, ArtworkState},
     widgets::{
-        button::{Button, ButtonVariant},
+        button::{Button, ButtonSize, ButtonVariant},
         icon::{Icon, IconName},
         icon_button::IconButton,
         menu::{ContextMenuExt, Select, SelectEvent},
@@ -38,6 +38,7 @@ mod interaction_tests;
 mod layout;
 mod local;
 mod personal;
+mod progress;
 mod recommendations;
 mod streams;
 mod streams_page;
@@ -297,6 +298,10 @@ pub(crate) struct Detail {
     page_direction: f32,
     pending_stream_focus: bool,
     pending_return_focus: bool,
+    /// "Play from beginning" chosen from a context menu, consumed by the next play.
+    start_over_requested: bool,
+    /// Pending Clear saved progress confirmation: `Some(None)` is the movie.
+    clear_confirm: Option<Option<(u32, u32)>>,
     episode_return_focus: Option<(u32, u32)>,
     page_focus: FocusHandle,
     primary_focus: FocusHandle,
@@ -415,6 +420,8 @@ impl Detail {
             page_direction: 1.,
             pending_stream_focus: false,
             pending_return_focus: false,
+            start_over_requested: false,
+            clear_confirm: None,
             episode_return_focus: None,
             page_focus: cx.focus_handle().tab_stop(true),
             primary_focus: cx.focus_handle().tab_stop(true),
@@ -830,6 +837,7 @@ impl Detail {
         cx.notify();
     }
     fn close_streams(&mut self, cx: &mut Context<Self>) {
+        self.start_over_requested = false;
         self.stream_page = streams_page::StreamPage::default();
         tracing::debug!(route = "detail", "UI route changed");
         self.page = Page::Overview;
@@ -883,7 +891,7 @@ impl Detail {
                 .and_then(|url| self.image(Some(&url), ArtworkKind::Poster, &self.title.key(), cx)),
         }
     }
-    fn open_stream(&mut self, index: usize, cx: &mut Context<Self>) {
+    fn open_stream(&mut self, index: usize, intent: PlaybackIntent, cx: &mut Context<Self>) {
         let candidate = self
             .coordinator
             .read(cx)
@@ -892,12 +900,13 @@ impl Detail {
             .and_then(|s| s.candidates.get(index))
             .cloned();
         if let (Some(target), Some(candidate)) = (self.target.clone(), candidate) {
-            tracing::debug!(indexer = ?self.indexer.read(cx).value(), quality = super::coordinator::diagnostic_quality(candidate.quality.as_deref()), ?target, "UI stream chosen");
+            tracing::debug!(indexer = ?self.indexer.read(cx).value(), ?intent, quality = super::coordinator::diagnostic_quality(candidate.quality.as_deref()), ?target, "UI stream chosen");
             let coordinator = self.coordinator.clone();
             let title = self.display_title(cx).name().to_owned();
             let context = self.play_context(cx);
-            let sheet =
-                cx.new(|cx| PlaySheet::new(coordinator, title, context, target, candidate, cx));
+            let sheet = cx.new(|cx| {
+                PlaySheet::new(coordinator, title, context, target, candidate, intent, cx)
+            });
             self.play_subscription = Some(cx.subscribe(&sheet, |this, _, _: &DismissEvent, cx| {
                 this.play = None;
                 cx.notify();

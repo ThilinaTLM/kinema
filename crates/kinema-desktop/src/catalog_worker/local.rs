@@ -4,6 +4,9 @@ pub(crate) use crate::catalog::library::{LibraryOperation, LibraryResult};
 pub(crate) fn is_mutation(operation: &LibraryOperation) -> bool {
     matches!(
         operation,
+        LibraryOperation::PlaybackProgress(operation) if !matches!(operation, crate::catalog::playback_progress::PlaybackProgressOperation::Read(_))
+    ) || matches!(
+        operation,
         LibraryOperation::SetMembership { .. }
             | LibraryOperation::SetMovieWatched { .. }
             | LibraryOperation::SetEpisodeWatched { .. }

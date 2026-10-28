@@ -1,5 +1,9 @@
 //! Local personal data; all operations execute on the catalog owner, without HTTP.
+use super::playback_progress::{
+    self, PlaybackProgressOperation, PlaybackProgressResult, PlaybackProgressSnapshot,
+};
 use super::*;
+use kinema_core::watch_progress::PlaybackProgressTarget;
 use kinema_core::{
     catalog_normalized::{CanonicalChild, CanonicalTitle, ExternalIdentifier},
     library::*,
@@ -34,12 +38,16 @@ pub(crate) struct PersonalTitle {
     pub kind: MediaKind,
     pub added_at: Option<i64>,
     pub movie_watch: Option<WatchState>,
+    pub playback_progress: Option<PlaybackProgressSnapshot>,
     pub show_summary: Option<ShowSummary>,
+    /// At least one unwatched, positive-position checkpoint (including specials).
+    pub has_resume: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PersonalEpisode {
     pub episode_id: EpisodeId,
     pub watch: Option<WatchState>,
+    pub playback_progress: PlaybackProgressSnapshot,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LibraryEntry {
@@ -78,6 +86,7 @@ pub(crate) struct SeasonSnapshot {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LibraryOperation {
+    PlaybackProgress(PlaybackProgressOperation),
     ReadTitles(Vec<TitleRef>),
     ReadEpisodes(Vec<EpisodeRef>),
     List(LibraryQuery),
@@ -106,6 +115,7 @@ pub(crate) enum LibraryOperation {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LibraryResult {
+    PlaybackProgress(PlaybackProgressResult),
     /// Positional batch outcomes, including duplicate refs. Only unresolved
     /// identity is per-ref; storage/cache failures fail the operation itself.
     Titles(Vec<Result<PersonalTitle, CatalogError>>),
@@ -155,7 +165,7 @@ fn episode_id(tx: &Transaction<'_>, reference: &EpisodeRef) -> Result<i64, Catal
     };
     found.ok_or(CatalogError::MissingIdentityMapping)
 }
-fn wall_millis() -> Result<i64, CatalogError> {
+pub(super) fn wall_millis() -> Result<i64, CatalogError> {
     i64::try_from(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -164,8 +174,8 @@ fn wall_millis() -> Result<i64, CatalogError> {
     )
     .map_err(|_| CatalogError::Clock)
 }
-fn mutation_time(tx: &Transaction<'_>) -> Result<i64, CatalogError> {
-    let last: i64 = tx.query_row("SELECT max(value) FROM (SELECT coalesce(max(updated_at),0) value FROM movie_watch_state UNION ALL SELECT coalesce(max(updated_at),0) FROM episode_watch_state)", [], |r|r.get(0))?;
+pub(super) fn mutation_time(tx: &Transaction<'_>) -> Result<i64, CatalogError> {
+    let last: i64 = tx.query_row("SELECT max(value) FROM (SELECT coalesce(max(updated_at),0) value FROM movie_watch_state UNION ALL SELECT coalesce(max(updated_at),0) FROM episode_watch_state UNION ALL SELECT coalesce(max(updated_at),0) FROM movie_playback_progress UNION ALL SELECT coalesce(max(updated_at),0) FROM episode_playback_progress)", [], |r|r.get(0))?;
     next_watch_timestamp(wall_millis()?, last).ok_or(CatalogError::Clock)
 }
 fn watch(
@@ -191,6 +201,10 @@ fn episode_personal(tx: &Transaction<'_>, id: i64) -> Result<PersonalEpisode, Ca
     Ok(PersonalEpisode {
         episode_id: EpisodeId::new(id).ok_or(CatalogError::InvalidCache)?,
         watch: watch(tx, "episode_watch_state", "episode_id", id)?,
+        playback_progress: playback_progress::read(
+            tx,
+            PlaybackProgressTarget::Episode(EpisodeId::new(id).ok_or(CatalogError::InvalidCache)?),
+        )?,
     })
 }
 
@@ -204,8 +218,16 @@ impl CatalogService {
         &mut self,
         operation: LibraryOperation,
     ) -> Result<LibraryResult, CatalogError> {
-        let tx = self.connection.transaction()?;
+        if let LibraryOperation::PlaybackProgress(operation) = operation {
+            return self
+                .playback_progress_operation(operation)
+                .map(LibraryResult::PlaybackProgress);
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let result = match operation {
+            LibraryOperation::PlaybackProgress(_) => unreachable!(),
             LibraryOperation::ReadTitles(refs) => {
                 if refs.len() > 500 {
                     return Err(CatalogError::InvalidMetadata);
@@ -250,7 +272,7 @@ impl CatalogService {
                     return Err(CatalogError::InvalidMetadata);
                 }
                 let time = mutation_time(&tx)?;
-                tx.execute("INSERT INTO movie_watch_state(title_id,watched,updated_at) VALUES (?1,?2,?3) ON CONFLICT(title_id) DO UPDATE SET watched=excluded.watched,updated_at=excluded.updated_at",params![id,watched,time])?;
+                playback_progress::manual_watch(&tx, "movie", "title_id", id, watched, time)?;
                 LibraryResult::Movie(personal(&tx, id)?)
             }
             LibraryOperation::SetEpisodeWatched { episode, watched } => {
@@ -319,7 +341,7 @@ fn write_episode(
     watched: bool,
     time: i64,
 ) -> Result<(), CatalogError> {
-    tx.execute("INSERT INTO episode_watch_state(episode_id,watched,updated_at) VALUES (?1,?2,?3) ON CONFLICT(episode_id) DO UPDATE SET watched=excluded.watched,updated_at=excluded.updated_at",params![id,watched,time])?;
+    playback_progress::manual_watch(tx, "episode", "episode_id", id, watched, time)?;
     Ok(())
 }
 

@@ -1,5 +1,11 @@
 # Desktop v3 — native media UI redesign
 
+**Playback-progress extension (2026-10-28):** the approved
+[progress and desktop integration contract](playback-progress-desktop.md) supersedes
+the manual-only/no-resume and Main-close-always-quits rules below. Source is
+implemented with [scoped validation](../validation/playback-progress-desktop.md),
+not full native desktop/provider qualification.
+
 **Status: approved sole/default UI; native implementation in progress.** The user
 approved complete removal of the old UI, version switches and gpui-kit. Production
 now bootstraps direct GPUI v3 only. The native lab remains available for offline

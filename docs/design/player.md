@@ -1,5 +1,11 @@
 # Player — independent native playback window
 
+**Playback-progress extension (2026-10-28):** the approved
+[progress and desktop integration contract](playback-progress-desktop.md) supersedes
+the manual-only/no-resume and Main-close-always-quits rules below. Source is
+implemented with [scoped validation](../validation/playback-progress-desktop.md),
+not full native desktop/provider qualification.
+
 **Status: Cinema Dock source implemented; scoped Linux synthetic-media presentation reviewed.**
 The earlier embedded-player increment implemented the backend import, embedded
 default/settings choices, managed window, original player per-session replay,

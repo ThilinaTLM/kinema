@@ -1189,8 +1189,23 @@ pub enum TextInputStateChange {
     ContentChanged,
 }
 
+mod window_visibility;
+
 #[expect(missing_docs)]
 pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+    /// Hide only this retained native window. False means unsupported or failed.
+    /// Unlike Platform::hide, other application windows remain visible.
+    fn hide_window(&self) -> bool {
+        self.window_handle()
+            .is_ok_and(|handle| window_visibility::set_visible(handle, false))
+    }
+
+    /// Show a window previously hidden by hide_window; activation is separate.
+    fn show_window(&self) -> bool {
+        self.window_handle()
+            .is_ok_and(|handle| window_visibility::set_visible(handle, true))
+    }
+
     fn bounds(&self) -> Bounds<Pixels>;
     fn is_maximized(&self) -> bool;
     fn window_bounds(&self) -> WindowBounds;

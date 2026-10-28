@@ -28,6 +28,8 @@ pub(super) struct StreamPage {
     sort: Option<Entity<Select<StreamSort>>>,
     pub play_service: Option<Entity<Select<DebridKind>>>,
     pub service_chosen: bool,
+    /// Full file name disclosure in the drawer; reset when the selection changes.
+    pub file_detail_open: bool,
     /// True once the user clicked/played a row; otherwise the first row is followed.
     pub explicit_selection: bool,
     pub drawer_scroll: ScrollHandle,
@@ -44,6 +46,14 @@ pub(super) struct StreamPage {
     cancel: Option<Arc<AtomicBool>>,
     task: Option<Task<()>>,
     subscriptions: Vec<Subscription>,
+}
+#[cfg(feature = "ui-probe")]
+impl StreamPage {
+    /// Fixture only: one neutral "Checking" account without touching credentials.
+    pub(super) fn fixture_checking_account(&mut self, target: Option<PlaybackTarget>) {
+        self.account_key = Some((target, Vec::new()));
+        self.accounts = vec![(DebridKind::RealDebrid, AccountPresence::Checking)];
+    }
 }
 impl Drop for StreamPage {
     fn drop(&mut self) {

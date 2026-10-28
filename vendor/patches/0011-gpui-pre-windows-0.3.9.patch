@@ -1,0 +1,33 @@
+# Kinema retained per-window hide/show lifecycle support.
+# Applies after the GPU-surface patches to crates.io gpui-pre-windows-0.3.9.
+# Upstream license: Apache-2.0; retain upstream license files.
+# Apply from the vendored crate directory with patch -p1; never edit registry sources.
+
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -817,6 +817,25 @@
+         Some(done_rx)
+     }
+ 
++    fn hide_window(&self) -> bool {
++        // GPUI owns this HWND and invokes PlatformWindow only on the UI thread.
++        // Queue the native operation: synchronous ShowWindow can re-enter GPUI
++        // through WM_SHOWWINDOW while App is borrowed by its close callback.
++        // SW_HIDE affects this window, never independent player windows.
++        unsafe { ShowWindowAsync(self.0.hwnd, SW_HIDE).as_bool() }
++    }
++
++    fn show_window(&self) -> bool {
++        unsafe {
++            let command = if IsIconic(self.0.hwnd).as_bool() {
++                SW_RESTORE
++            } else {
++                SW_SHOWNA
++            };
++            ShowWindowAsync(self.0.hwnd, command).as_bool()
++        }
++    }
++
+     fn activate(&self) {
+         let hwnd = self.0.hwnd;
+         let this = self.0.clone();

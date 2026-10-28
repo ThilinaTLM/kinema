@@ -8,6 +8,7 @@ impl PlaySheet {
         context: PlayContext,
         target: PlaybackTarget,
         candidate: SourceCandidate,
+        intent: PlaybackIntent,
         cx: &mut Context<Self>,
     ) -> Self {
         // Navigation/window teardown can drop the view without a Sheet dismiss event.
@@ -60,6 +61,7 @@ impl PlaySheet {
                     context.episode_title.clone(),
                     target,
                     candidate,
+                    intent,
                     cx,
                 )
             })

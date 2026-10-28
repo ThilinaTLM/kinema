@@ -1,0 +1,150 @@
+# Kinema retained per-window hide/show lifecycle support.
+# Applies after the GPU-surface patches to crates.io gpui-pre-0.3.9.
+# Upstream license: Apache-2.0; retain upstream license files.
+# Apply from the vendored crate directory with patch -p1; never edit registry sources.
+
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -55,6 +55,7 @@
+     "dep:bench_metrics",
+ ]
+ default = [
++    "objc2",
+     "font-kit",
+     "wayland",
+     "x11",
+@@ -605,6 +606,9 @@
+ version = "0.4"
+ features = ["std"]
+ default-features = false
++
++[target.'cfg(target_os = "linux")'.dependencies.x11rb]
++version = "0.13.2"
+ 
+ [target.'cfg(target_os = "macos")'.dependencies.objc2]
+ version = "0.6"
+--- a/src/platform.rs
++++ b/src/platform.rs
+@@ -1189,8 +1189,23 @@
+     ContentChanged,
+ }
+ 
++mod window_visibility;
++
+ #[expect(missing_docs)]
+ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
++    /// Hide only this retained native window. False means unsupported or failed.
++    /// Unlike Platform::hide, other application windows remain visible.
++    fn hide_window(&self) -> bool {
++        self.window_handle()
++            .is_ok_and(|handle| window_visibility::set_visible(handle, false))
++    }
++
++    /// Show a window previously hidden by hide_window; activation is separate.
++    fn show_window(&self) -> bool {
++        self.window_handle()
++            .is_ok_and(|handle| window_visibility::set_visible(handle, true))
++    }
++
+     fn bounds(&self) -> Bounds<Pixels>;
+     fn is_maximized(&self) -> bool;
+     fn window_bounds(&self) -> WindowBounds;
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -6654,6 +6654,18 @@
+         subscription
+     }
+ 
++    /// Hide this window without destroying its root view, native handle or other
++    /// application windows. Returns false on unsupported hosts (e.g. Wayland).
++    pub fn hide_window(&self) -> bool {
++        self.platform_window.hide_window()
++    }
++
++    /// Show this retained native window without changing another window's state.
++    /// Call activate_window separately when foreground activation is desired.
++    pub fn show_window(&self) -> bool {
++        self.platform_window.show_window()
++    }
++
+     /// Focus the current window and bring it to the foreground at the platform level.
+     pub fn activate_window(&self) {
+         self.platform_window.activate();
+--- /dev/null
++++ b/src/platform/window_visibility.rs
+@@ -0,0 +1,75 @@
++//! Main-thread, per-window visibility for retained desktop windows.
++//! Unsupported backends deliberately return false; minimizing is a separate policy.
++#[cfg(any(target_os = "linux", all(target_os = "macos", feature = "objc2")))]
++use raw_window_handle::RawWindowHandle;
++use raw_window_handle::WindowHandle;
++
++pub(super) fn set_visible(handle: WindowHandle<'_>, _visible: bool) -> bool {
++    match handle.as_raw() {
++        #[cfg(target_os = "linux")]
++        RawWindowHandle::Xcb(handle) => x11_set_visible(handle.window.get(), _visible),
++        #[cfg(target_os = "linux")]
++        RawWindowHandle::Xlib(handle) => {
++            u32::try_from(handle.window).is_ok_and(|window| x11_set_visible(window, _visible))
++        }
++        #[cfg(all(target_os = "macos", feature = "objc2"))]
++        RawWindowHandle::AppKit(handle) => {
++            use objc2::{
++                msg_send,
++                runtime::{AnyObject, Bool},
++            };
++            // GPUI owns this NSView for the lifetime of PlatformWindow. Calls
++            // originate on the native UI thread; the NSWindow is only borrowed.
++            unsafe {
++                let view = handle.ns_view.as_ptr().cast::<AnyObject>();
++                let window: *mut AnyObject = msg_send![view, window];
++                if window.is_null() {
++                    return false;
++                }
++                if _visible {
++                    let _: () = msg_send![window, orderFront: std::ptr::null::<AnyObject>()];
++                } else {
++                    let _: () = msg_send![window, orderOut: std::ptr::null::<AnyObject>()];
++                }
++                let is_visible: Bool = msg_send![window, isVisible];
++                is_visible.as_bool() == _visible
++            }
++        }
++        // In particular, raw wl_surface handles are not enough to safely
++        // unmap/remap xdg_toplevel state. Keep taskbar recovery via minimize.
++        _ => false,
++    }
++}
++
++#[cfg(target_os = "linux")]
++fn x11_set_visible(window: u32, visible: bool) -> bool {
++    use x11rb::{connection::Connection, protocol::xproto::ConnectionExt};
++    // Same DISPLAY selection as GPUI's Linux backend. This independent client
++    // never owns/destroys the retained window. UnmapNotify/MapNotify update
++    // GPUI's native visibility tracking without its close callback.
++    let Ok((connection, _)) = x11rb::connect(None) else {
++        return false;
++    };
++    let result = if visible {
++        connection.map_window(window)
++    } else {
++        connection.unmap_window(window)
++    };
++    result.is_ok_and(|cookie| cookie.check().is_ok()) && connection.flush().is_ok()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn wayland_is_unsupported_without_accessing_the_surface() {
++        let raw = raw_window_handle::RawWindowHandle::Wayland(
++            raw_window_handle::WaylandWindowHandle::new(std::ptr::NonNull::dangling()),
++        );
++        // The unsupported branch never dereferences this dummy surface.
++        let handle = unsafe { WindowHandle::borrow_raw(raw) };
++        assert!(!set_visible(handle, false));
++        assert!(!set_visible(handle, true));
++    }
++}

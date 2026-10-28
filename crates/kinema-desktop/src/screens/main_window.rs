@@ -14,7 +14,7 @@ use crate::widgets::{
     menu::Menu,
     notice::{Notice, NoticeKind},
     patterns::menu_item_icon,
-    popover::{Popover, PopoverAlign},
+    popover::{Popover, PopoverAlign, PopoverHandle},
     search_field::{SearchField, SearchFieldEvent},
     segmented::Segmented,
     text::TypeExt,
@@ -26,7 +26,7 @@ use crate::widgets::{
 };
 use gpui::{prelude::*, *};
 use kinema_core::{MediaKind, library::LibraryKind, provider::ProviderId};
-use std::{rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 /// How long a non-actionable personal-state notice stays visible.
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -39,6 +39,7 @@ actions!(
         V3Local,
         V3Back,
         V3Settings,
+        V3Transfers,
         V3About,
         V3Quit,
         V3NextFocus,
@@ -79,6 +80,7 @@ pub struct MainWindow {
     pub(crate) coordinator: Entity<AppCoordinator>,
     browse: Entity<Browse>,
     transfers: Entity<super::transfers::Transfers>,
+    transfers_popover: Rc<RefCell<Option<PopoverHandle>>>,
     search: Entity<SearchField>,
     notice_seen: Option<String>,
     notice_task: Option<Task<()>>,
@@ -110,6 +112,7 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) -> Self {
         super::quit::install(&coordinator, window.window_handle(), cx);
+        super::lifecycle::install_native_visibility(window, cx);
         let transfers = cx.new(|cx| super::transfers::Transfers::new(coordinator.clone(), cx));
         let browse = cx.new(|cx| Browse::new(coordinator.clone(), cx));
         let search = cx.new(|cx| {
@@ -219,7 +222,7 @@ impl MainWindow {
         let weak = coordinator.downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             if let Some(coordinator) = weak.upgrade() {
-                super::quit::request(&coordinator, window, cx);
+                super::lifecycle::close_main(&coordinator, window, cx);
             } else {
                 cx.quit();
             }
@@ -233,6 +236,7 @@ impl MainWindow {
             coordinator,
             browse,
             transfers,
+            transfers_popover: Rc::new(RefCell::new(None)),
             search,
             notice_seen: None,
             notice_task: None,
@@ -738,6 +742,10 @@ impl MainWindow {
                 Popover::new("transfers")
                     .align(PopoverAlign::End)
                     .label("Transfers")
+                    .on_handle({
+                        let handle = self.transfers_popover.clone();
+                        move |popover| *handle.borrow_mut() = Some(popover)
+                    })
                     .trigger(icon_cell(transfer_trigger))
                     .content(self.transfers.clone()),
             )
@@ -854,10 +862,20 @@ impl Render for MainWindow {
                 this.refresh(cx);
             }))
             .on_action(cx.listener(|this, _: &V3Local, window, cx| this.open_local(window, cx)))
+            .on_action(cx.listener(|this, _: &V3Transfers, window, cx| {
+                if this.coordinator.read(cx).quit_requested {
+                    return;
+                }
+                let handle = this.transfers_popover.borrow().clone();
+                if let Some(handle) = handle {
+                    handle.show(window, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &V3Back, window, cx| {
                 // GPUI resolves the Main Escape binding before the sheet's raw
                 // key handler. A modal quit request must win over route Back.
                 if this.coordinator.read(cx).quit_requested {
+                    super::lifecycle::cancel(cx);
                     this.coordinator.update(cx, |c, cx| {
                         c.quit_requested = false;
                         cx.notify();
@@ -932,10 +950,11 @@ impl Render for MainWindow {
                 )
             })
             .when(confirmation, |el| {
-                el.child(super::quit::confirmation_for(
+                el.child(super::quit::confirmation_for_close(
                     self.coordinator.clone(),
                     self.cancel_focus.clone(),
                     self.coordinator.read(cx).active_sessions(),
+                    super::lifecycle::is_close_fallback(cx),
                 ))
             })
     }
@@ -948,6 +967,31 @@ mod interaction_tests {
     use crate::app::{AppEvent, AppOutcome};
     use ::core::prelude::v1::test;
     use std::time::Duration;
+
+    #[gpui::test]
+    fn tray_transfers_opens_existing_panel_without_toggling_it_closed(cx: &mut TestAppContext) {
+        cx.update(tokens::init);
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(Vec::new(), None, cx));
+        let main = cx
+            .add_window(|window, cx| MainWindow::with_coordinator(coordinator.clone(), window, cx));
+        cx.run_until_parked();
+        let open = |cx: &mut TestAppContext| {
+            main.read_with(cx, |view, cx| {
+                view.transfers_popover
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|handle| handle.is_open(cx))
+            })
+            .unwrap()
+        };
+        assert!(!open(cx));
+        cx.update(super::super::lifecycle::show_transfers);
+        cx.run_until_parked();
+        assert!(open(cx));
+        cx.update(super::super::lifecycle::show_transfers);
+        cx.run_until_parked();
+        assert!(open(cx));
+    }
 
     fn movie(id: u64, name: &str) -> crate::tmdb::TmdbTitle {
         crate::tmdb::TmdbTitle {
@@ -1529,6 +1573,8 @@ mod interaction_tests {
                 kind: MediaKind::Movie,
                 added_at,
                 movie_watch: None,
+                playback_progress: None,
+                has_resume: false,
                 show_summary: None,
             },
         }

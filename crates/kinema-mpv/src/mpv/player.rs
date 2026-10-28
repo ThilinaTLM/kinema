@@ -301,6 +301,8 @@ impl Player {
             (14, c"track-list", 6),
             (15, c"speed", 5),
             (16, c"demuxer-cache-state", 6),
+            (22, c"seekable", 3),
+            (23, c"seeking", 3),
         ] {
             client.loaded.check(
                 unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), format) },
@@ -418,6 +420,12 @@ impl Player {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         self.command(&["loadfile", source, "replace"])?;
+        // Revoke old readiness immediately; START_FILE supplies the new observed
+        // generation. A queued load must never expose the outgoing file as ready.
+        state.file_loaded = false;
+        state.position_observed = false;
+        state.seekable = None;
+        state.loading = true;
         self.shared.diagnostics.new_media();
         self.shared.diagnostics.event(Lifecycle::LoadRequested);
         pipeline.clear(&mut state);
@@ -770,6 +778,11 @@ fn control_worker(
                     shared.diagnostics.new_media();
                     shared.diagnostics.event(Lifecycle::StartFile);
                     state.loading = true;
+                    state.media_generation += 1;
+                    state.file_loaded = false;
+                    state.position_observed = false;
+                    state.seekable = None;
+                    state.seeking = false;
                     state.media_stopped = false;
                     state.paused_for_cache = false;
                     state.ended = false;
@@ -811,7 +824,11 @@ fn control_worker(
                         shared.diagnostics.end_file(-1, event.error);
                     }
                 }
+                21 => {
+                    state.restart_revision += 1;
+                }
                 8 => {
+                    state.file_loaded = true;
                     shared.diagnostics.event(Lifecycle::FileLoaded);
                     state.loading = false;
                 }
@@ -831,13 +848,26 @@ fn control_worker(
                             let value = unsafe { *property.data.cast::<f64>() };
                             if value.is_finite() {
                                 match event.userdata {
-                                    1 => state.position = value.max(0.0),
+                                    1 => {
+                                        state.position = value;
+                                        state.position_revision += 1;
+                                        state.position_observed = true;
+                                    }
                                     2 => state.duration = Some(value.max(0.0)),
                                     4 => state.volume = value,
                                     _ => {}
                                 }
                             }
                         }
+                        (22 | 23, 3, false) => {
+                            let value = unsafe { *property.data.cast::<c_int>() } != 0;
+                            if event.userdata == 22 {
+                                state.seekable = Some(value);
+                            } else {
+                                state.seeking = value;
+                            }
+                        }
+                        (22, 0, _) => state.seekable = None,
                         (3 | 5 | 12, 3, false) => {
                             let value = unsafe { *property.data.cast::<c_int>() } != 0;
                             if event.userdata == 3 {

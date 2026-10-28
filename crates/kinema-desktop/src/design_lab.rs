@@ -35,7 +35,7 @@ use crate::widgets::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 46] = [
+const SCENES: [&str; 52] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
@@ -49,8 +49,14 @@ const SCENES: [&str; 46] = [
     "detail-live-local-movie",
     "detail-live-local-movie-unsaved",
     "detail-live-local-movie-failed",
+    "detail-live-local-movie-resume",
+    "detail-live-local-movie-resume-streams",
+    "detail-live-local-movie-resume-clear",
     "detail-live-local-series",
     "detail-live-local-series-unsaved",
+    "detail-live-local-series-resume",
+    "detail-live-local-series-resume-streams",
+    "detail-live-local-series-resume-clear",
     // Full MainWindow (floating header) on the detail route; `-scrolled`
     // wheel-scrolls the page to show the header scrim over long content.
     "detail-live-window-tmdb-movie",
@@ -237,6 +243,8 @@ pub fn run_native() {
                                         .unwrap_or_else(|| panic!("fixture id")),
                                     kind: metadata.kind,
                                     added_at: Some(1_700_000_000_000 + i as i64),
+                                    has_resume: false,
+                                    playback_progress: None,
                                     movie_watch: (!series).then_some(WatchState {
                                         watched: i % 2 == 0,
                                         updated_at: 1,

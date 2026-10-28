@@ -1,5 +1,10 @@
 # Development
 
+Latest scoped extension evidence: [durable playback progress, native UI, and desktop
+integration](validation/playback-progress-desktop.md). Root checks and an isolated
+Linux MPRIS protocol smoke passed; native desktop-shell and Windows/macOS runtime
+qualification remain separate.
+
 The Rust workspace composes metadata, preparation and playback services with
 the native v3 UI; it is not a fully accepted [MVP](architecture.md).
 Run commands from the repository root. Rustup selects **Rust 1.97.1** via

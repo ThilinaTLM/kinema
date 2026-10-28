@@ -11,15 +11,17 @@ WITH season_stats AS (
  OR NOT EXISTS(SELECT 1 FROM metadata_fetches f WHERE f.season_id=s.id AND f.fetched_at IS NOT NULL AND f.completeness='detail' AND f.success_kind IN ('data','empty') AND f.last_error_code IS NULL) THEN 1 ELSE 0 END) invalid
  FROM seasons s GROUP BY s.series_id
 ), episode_stats AS (
- SELECT s.series_id,count(*) total,sum(coalesce(w.watched,0)) watched
- FROM episodes e JOIN seasons s ON s.id=e.season_id LEFT JOIN episode_watch_state w ON w.episode_id=e.id GROUP BY s.series_id
+ SELECT s.series_id,count(*) total,sum(coalesce(w.watched,0)) watched,
+ max(CASE WHEN coalesce(w.watched,0)=0 AND c.position_ms>0 THEN 1 ELSE 0 END) has_resume
+ FROM episodes e JOIN seasons s ON s.id=e.season_id LEFT JOIN episode_watch_state w ON w.episode_id=e.id LEFT JOIN episode_playback_progress c ON c.episode_id=e.id GROUP BY s.series_id
 )
 SELECT t.id,t.kind,l.added_at,m.watched,m.updated_at,coalesce(e.watched,0),coalesce(e.total,0),
  CASE WHEN t.episode_count IS NOT NULL AND t.season_count IS NOT NULL
  AND (t.episode_count=coalesce(e.total,0) OR t.episode_count=ss.regular_advertised)
  AND t.season_count=ss.regular_seasons AND ss.advertised=e.total AND ss.invalid=0
  AND EXISTS(SELECT 1 FROM metadata_fetches f WHERE f.title_id=t.id AND f.fetched_at IS NOT NULL AND f.completeness='detail' AND f.success_kind='data' AND f.last_error_code IS NULL)
- THEN 1 ELSE 0 END
+ THEN 1 ELSE 0 END,
+ CASE WHEN t.kind='movie' THEN coalesce(m.watched,0)=0 AND EXISTS(SELECT 1 FROM movie_playback_progress c WHERE c.title_id=t.id AND c.position_ms>0) ELSE coalesce(e.has_resume,0) END
  FROM titles t LEFT JOIN library_entries l ON l.title_id=t.id LEFT JOIN movie_watch_state m ON m.title_id=t.id
  LEFT JOIN season_stats ss ON ss.series_id=t.id LEFT JOIN episode_stats e ON e.series_id=t.id
 "#;
@@ -43,31 +45,37 @@ fn personal_rows(tx: &Transaction<'_>, ids: &[i64]) -> Result<Vec<PersonalTitle>
                 r.get::<_, u32>(5)? as usize,
                 r.get::<_, u32>(6)? as usize,
                 r.get::<_, bool>(7)?,
+                r.get::<_, bool>(8)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    let progress = playback_progress::read_many(tx, true, ids)?;
     rows.into_iter()
-        .map(|(id, kind, added_at, watch, watched, total, complete)| {
-            let kind = match kind.as_str() {
-                "movie" => MediaKind::Movie,
-                "series" => MediaKind::Series,
-                _ => return Err(CatalogError::InvalidCache),
-            };
-            Ok(PersonalTitle {
-                title_id: TitleId::new(id).ok_or(CatalogError::InvalidCache)?,
-                kind,
-                added_at,
-                movie_watch: watch.map(|(watched, updated_at)| WatchState {
-                    watched,
-                    updated_at,
-                }),
-                show_summary: (kind == MediaKind::Series).then_some(ShowSummary {
-                    watched,
-                    total,
-                    complete,
-                }),
-            })
-        })
+        .map(
+            |(id, kind, added_at, watch, watched, total, complete, has_resume)| {
+                let kind = match kind.as_str() {
+                    "movie" => MediaKind::Movie,
+                    "series" => MediaKind::Series,
+                    _ => return Err(CatalogError::InvalidCache),
+                };
+                Ok(PersonalTitle {
+                    title_id: TitleId::new(id).ok_or(CatalogError::InvalidCache)?,
+                    kind,
+                    added_at,
+                    has_resume,
+                    playback_progress: progress.get(&id).copied(),
+                    movie_watch: watch.map(|(watched, updated_at)| WatchState {
+                        watched,
+                        updated_at,
+                    }),
+                    show_summary: (kind == MediaKind::Series).then_some(ShowSummary {
+                        watched,
+                        total,
+                        complete,
+                    }),
+                })
+            },
+        )
         .collect()
 }
 pub(super) fn personal(tx: &Transaction<'_>, id: i64) -> Result<PersonalTitle, CatalogError> {
@@ -241,6 +249,7 @@ pub(super) fn batch_episodes(
     // Chunk to remain beneath SQLite's portable bind-variable limit.
     let resolved_ids = ids.iter().flatten().copied().collect::<Vec<_>>();
     for chunk in resolved_ids.chunks(500) {
+        let progress = playback_progress::read_many(tx, false, chunk)?;
         let mut stmt=tx.prepare(&format!("SELECT e.id,w.watched,w.updated_at FROM episodes e LEFT JOIN episode_watch_state w ON w.episode_id=e.id WHERE e.id IN ({})",vec!["?";chunk.len()].join(",")))?;
         for row in stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
             Ok((
@@ -254,6 +263,7 @@ pub(super) fn batch_episodes(
                 id,
                 PersonalEpisode {
                     episode_id: EpisodeId::new(id).ok_or(CatalogError::InvalidCache)?,
+                    playback_progress: *progress.get(&id).ok_or(CatalogError::InvalidCache)?,
                     watch: watch.map(|(watched, updated_at)| WatchState {
                         watched,
                         updated_at,
@@ -272,11 +282,8 @@ pub(super) fn batch_episodes(
 }
 pub(super) fn listing(
     tx: &Transaction<'_>,
-    mut query: LibraryQuery,
+    query: LibraryQuery,
 ) -> Result<LibraryPage, CatalogError> {
-    if query.kind == LibraryKind::Movies && query.status == WatchFilter::InProgress {
-        query.status = WatchFilter::Any;
-    }
     // SQLite lower is ASCII-only: include non-ASCII candidates and finish Unicode
     // lowercase matching locally, still before pagination. No LIKE wildcards.
     let needle = query.search.to_lowercase();
@@ -304,9 +311,13 @@ pub(super) fn listing(
             let status = if state.kind == MediaKind::Movie {
                 Some(if state.movie_watch.is_some_and(|w| w.watched) {
                     WatchFilter::Watched
+                } else if state.has_resume {
+                    WatchFilter::InProgress
                 } else {
                     WatchFilter::Unwatched
                 })
+            } else if state.has_resume {
+                Some(WatchFilter::InProgress)
             } else {
                 state.show_summary.and_then(ShowSummary::status)
             };

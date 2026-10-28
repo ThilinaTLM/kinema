@@ -238,6 +238,38 @@ CREATE INDEX episode_watch_state_updated ON episode_watch_state(updated_at DESC)
     Ok(())
 }
 
+/// v8: independent checkpoints and durable writer authorization; no fabricated progress.
+pub(super) fn migrate_playback_progress(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<(), CatalogError> {
+    for table in ["movie_watch_state", "episode_watch_state"] {
+        tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0);
+            ALTER TABLE {table} ADD COLUMN active_run INTEGER NOT NULL DEFAULT 0 CHECK(active_run >= 0);
+            ALTER TABLE {table} ADD COLUMN auto_mark_suppressed INTEGER NOT NULL DEFAULT 0 CHECK(auto_mark_suppressed IN (0,1));"))?;
+    }
+    tx.execute_batch(r#"
+CREATE TABLE movie_playback_progress (
+ title_id INTEGER PRIMARY KEY,
+ title_kind TEXT NOT NULL DEFAULT 'movie' CHECK(title_kind = 'movie'),
+ position_ms INTEGER NOT NULL CHECK(position_ms >= 0),
+ duration_ms INTEGER CHECK(duration_ms > 0),
+ updated_at INTEGER NOT NULL CHECK(updated_at >= 0),
+ revision INTEGER NOT NULL CHECK(revision >= 0),
+ FOREIGN KEY(title_id,title_kind) REFERENCES titles(id,kind) ON DELETE RESTRICT
+) STRICT;
+CREATE INDEX movie_playback_progress_recency ON movie_playback_progress(updated_at DESC,title_id);
+CREATE TABLE episode_playback_progress (
+ episode_id INTEGER PRIMARY KEY REFERENCES episodes(id) ON DELETE RESTRICT,
+ position_ms INTEGER NOT NULL CHECK(position_ms >= 0),
+ duration_ms INTEGER CHECK(duration_ms > 0),
+ updated_at INTEGER NOT NULL CHECK(updated_at >= 0),
+ revision INTEGER NOT NULL CHECK(revision >= 0)
+) STRICT;
+CREATE INDEX episode_playback_progress_recency ON episode_playback_progress(updated_at DESC,episode_id);
+"#)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

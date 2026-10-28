@@ -484,6 +484,28 @@ fn merge_personal(tx: &Transaction<'_>, target: Target, loser: i64) -> Result<()
         _ => return Ok(()),
     };
     tx.execute(&format!("INSERT INTO {table}({column},watched,updated_at) SELECT ?1,watched,updated_at FROM {table} WHERE {column}=?2 ON CONFLICT({column}) DO UPDATE SET watched=CASE WHEN excluded.updated_at>{table}.updated_at THEN excluded.watched WHEN excluded.updated_at={table}.updated_at THEN min({table}.watched,excluded.watched) ELSE {table}.watched END,updated_at=max({table}.updated_at,excluded.updated_at)"),params![winner,loser])?;
+    // Pre-v8 backfill runs before the progress migration; current catalogs
+    // preserve the most recently observed checkpoint and revoke both writers.
+    let progress = table.replace("watch_state", "playback_progress");
+    let has_progress: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+        [&progress],
+        |r| r.get(0),
+    )?;
+    if has_progress {
+        let epoch: i64 = tx.query_row(
+            &format!("SELECT coalesce(max(revision),0) FROM {table} WHERE {column} IN (?1,?2)"),
+            params![winner, loser],
+            |r| r.get(0),
+        )?;
+        tx.execute(&format!("UPDATE {table} SET revision=?2+1,active_run=0,auto_mark_suppressed=max(auto_mark_suppressed,coalesce((SELECT auto_mark_suppressed FROM {table} WHERE {column}=?3),0)) WHERE {column}=?1"),params![winner,epoch,loser])?;
+        tx.execute(&format!("INSERT INTO {progress}({column},position_ms,duration_ms,updated_at,revision) SELECT ?1,position_ms,duration_ms,updated_at,revision FROM {progress} WHERE {column}=?2 ON CONFLICT({column}) DO UPDATE SET position_ms=excluded.position_ms,duration_ms=excluded.duration_ms,updated_at=excluded.updated_at WHERE excluded.updated_at>{progress}.updated_at"),params![winner,loser])?;
+        tx.execute(&format!("UPDATE {progress} SET revision=(SELECT revision FROM {table} WHERE {column}=?1) WHERE {column}=?1"),[winner])?;
+        tx.execute(
+            &format!("DELETE FROM {progress} WHERE {column}=?1"),
+            [loser],
+        )?;
+    }
     tx.execute(&format!("DELETE FROM {table} WHERE {column}=?1"), [loser])?;
     Ok(())
 }

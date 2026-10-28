@@ -55,6 +55,7 @@ bench-support = [
     "dep:bench_metrics",
 ]
 default = [
+    "objc2",
     "font-kit",
     "wayland",
     "x11",
@@ -605,6 +606,9 @@ features = [
 version = "0.4"
 features = ["std"]
 default-features = false
+
+[target.'cfg(target_os = "linux")'.dependencies.x11rb]
+version = "0.13.2"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2]
 version = "0.6"

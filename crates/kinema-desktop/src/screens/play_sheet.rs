@@ -1,6 +1,6 @@
 //! Explicit-file playback workflow. Subscribe before issuing any command.
 use super::{
-    coordinator::{AppCoordinator, CoordinatorEvent, SettingsDestination},
+    coordinator::{AppCoordinator, CoordinatorEvent, PlaybackIntent, SettingsDestination},
     detail::{StreamBadges, stream_badges, stream_summary},
 };
 use crate::player::PlayerChoice;

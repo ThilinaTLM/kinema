@@ -2,6 +2,7 @@
 pub(crate) mod browse;
 pub mod coordinator;
 pub(crate) mod enrichment;
+pub mod lifecycle;
 pub mod main_window;
 mod player_controls;
 pub mod player_window;

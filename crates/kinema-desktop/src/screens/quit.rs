@@ -1,4 +1,4 @@
-//! Application-wide quit routing. Main owns the gate; Settings never owns shutdown.
+//! Explicit Quit routing, separate from Main's close-to-background policy.
 use super::{
     coordinator::AppCoordinator,
     main_window::{V3About, V3Quit, V3Settings},
@@ -7,10 +7,11 @@ use crate::widgets::{
     button::{Button, ButtonVariant},
     sheet::Sheet,
 };
-use gpui::*;
+use gpui::{prelude::FluentBuilder, *};
 
 /// Install once for the application's main window, using its shared coordinator.
 pub(crate) fn install(coordinator: &Entity<AppCoordinator>, main: AnyWindowHandle, cx: &mut App) {
+    super::lifecycle::install(coordinator, main, cx);
     let quit = coordinator.downgrade();
     cx.on_action(move |_: &V3Quit, cx| {
         if let Some(coordinator) = quit.upgrade() {
@@ -29,7 +30,7 @@ pub(crate) fn install(coordinator: &Entity<AppCoordinator>, main: AnyWindowHandl
             coordinator.update(cx, |c, cx| c.about(cx));
         }
     });
-    // Also cover programmatic removal of Main: a Settings-only app is never valid.
+    // Unexpected Main destruction cannot leave an inaccessible Settings-only app.
     cx.on_window_closed(move |cx, closed| {
         if closed == main.window_id() {
             exit(cx);
@@ -46,13 +47,13 @@ pub(crate) fn install(coordinator: &Entity<AppCoordinator>, main: AnyWindowHandl
     ])]);
 }
 
-/// Always veto native removal: either quit the entire app, or keep Main alive
-/// and activate it so the confirmation (with Cancel initially focused) is visible.
+/// Explicit Quit (or idle Main close): restore Main for the existing confirmation,
+/// then finish persistence before exiting. Never route this operation to hiding.
 pub(crate) fn request(coordinator: &Entity<AppCoordinator>, window: &mut Window, cx: &mut App) {
-    window.activate_window();
-    cx.activate(true);
+    super::lifecycle::cancel(cx);
+    super::lifecycle::restore_current(window, cx);
     if coordinator.update(cx, |c, cx| c.request_quit(cx)) {
-        exit(cx);
+        finish(cx);
     }
 }
 
@@ -64,7 +65,59 @@ struct ExitRequests(usize);
 #[cfg(all(test, feature = "ui-probe-test"))]
 impl Global for ExitRequests {}
 
+fn finish(cx: &mut App) {
+    use super::lifecycle::Lifecycle;
+    use smol::future::race;
+    if cx.global::<Lifecycle>().quitting {
+        return;
+    }
+    super::lifecycle::begin_shutdown(cx);
+    let callback = cx.global::<Lifecycle>().final_flush.clone();
+    let coordinator = cx.global::<Lifecycle>().coordinator.clone();
+    let Some(callback) = callback else {
+        tracing::warn!(
+            category = "quit_flush_unavailable",
+            "Final progress flush callback is not installed"
+        );
+        exit(cx);
+        return;
+    };
+    let flush = callback(&coordinator, cx);
+    let task = cx.spawn(async move |cx| {
+        let timeout = cx
+            .background_executor()
+            .timer(std::time::Duration::from_secs(2));
+        if race(
+            async {
+                flush.await;
+                while !cx.update(|cx| super::lifecycle::shutdown_complete(cx)) {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(20))
+                        .await;
+                }
+                false
+            },
+            async {
+                timeout.await;
+                true
+            },
+        )
+        .await
+        {
+            tracing::warn!(
+                category = "quit_shutdown_timeout",
+                "Final progress flush or desktop teardown exceeded quit deadline"
+            );
+        }
+        cx.update(exit);
+    });
+    cx.global_mut::<Lifecycle>().flush = Some(task);
+}
+
 fn exit(cx: &mut App) {
+    if cx.has_global::<super::lifecycle::Lifecycle>() {
+        super::lifecycle::begin_shutdown(cx);
+    }
     #[cfg(all(test, feature = "ui-probe-test"))]
     {
         if !cx.has_global::<ExitRequests>() {
@@ -89,17 +142,32 @@ pub(crate) fn confirmation_for(
     cancel_focus: FocusHandle,
     active_sessions: usize,
 ) -> Sheet {
-    let body = match active_sessions {
+    confirmation_for_close(coordinator, cancel_focus, active_sessions, false)
+}
+
+pub(crate) fn confirmation_for_close(
+    coordinator: Entity<AppCoordinator>,
+    cancel_focus: FocusHandle,
+    active_sessions: usize,
+    close_fallback: bool,
+) -> Sheet {
+    let body = if close_fallback {
+        "Kinema cannot hide Main safely because a usable tray or Main-only hide capability is unavailable. Minimize keeps playback and pending launches running. Quit stops them; Cancel keeps Main open.".to_owned()
+    } else {
+        match active_sessions {
         0 => "A launch is still pending. Quitting cancels it and your player may lose access to the media.".to_owned(),
         1 => "1 playback or download is still in progress. Quitting stops it and your player may lose access to the media.".to_owned(),
         n => format!("{n} playbacks or downloads are still in progress. Quitting stops them and your player may lose access to the media."),
+    }
     };
     let cancel = coordinator.clone();
+    let minimize = coordinator.clone();
     let dismiss = coordinator;
     Sheet::new("quit-sheet", "Quit Kinema?")
         .body(body)
         .initial_focus(cancel_focus.clone())
         .on_dismiss(move |_, cx| {
+            super::lifecycle::cancel(cx);
             dismiss.update(cx, |c, cx| {
                 c.quit_requested = false;
                 cx.notify();
@@ -109,6 +177,7 @@ pub(crate) fn confirmation_for(
             Button::new("cancel-quit", "Cancel")
                 .focus_handle(cancel_focus)
                 .on_click(move |_, _, cx| {
+                    super::lifecycle::cancel(cx);
                     cancel.update(cx, |c, cx| {
                         c.quit_requested = false;
                         cx.notify();
@@ -118,8 +187,20 @@ pub(crate) fn confirmation_for(
         .footer(
             Button::new("confirm-quit", "Quit")
                 .variant(ButtonVariant::Danger)
-                .on_click(|_, _, cx| exit(cx)),
+                .on_click(|_, _, cx| finish(cx)),
         )
+        .when(close_fallback, |sheet| {
+            sheet.footer(
+                Button::new("minimize-main", "Minimize").on_click(move |_, window, cx| {
+                    super::lifecycle::cancel(cx);
+                    minimize.update(cx, |c, cx| {
+                        c.quit_requested = false;
+                        cx.notify();
+                    });
+                    window.minimize_window();
+                }),
+            )
+        })
 }
 
 #[cfg(all(test, feature = "ui-probe-test"))]
@@ -129,7 +210,6 @@ mod interaction_tests {
     use crate::screens::{main_window::MainWindow, settings_window};
     use crate::widgets::tokens;
     use ::core::prelude::v1::test;
-    use gpui::prelude::*;
 
     fn setup(cx: &mut TestAppContext) -> (WindowHandle<MainWindow>, Entity<AppCoordinator>) {
         cx.update(|cx| {
@@ -170,6 +250,10 @@ mod interaction_tests {
         // Native removal is vetoed: the application quit operation closes all
         // windows on real platforms, not just the window requesting closure.
         assert!(!visual.simulate_close());
+        cx.run_until_parked();
+        cx.background_executor
+            .advance_clock(std::time::Duration::from_millis(1));
+        cx.run_until_parked();
         assert_eq!(exits(cx), 1);
         assert!(!coordinator.read_with(cx, |c, _| c.quit_requested));
     }
@@ -182,6 +266,9 @@ mod interaction_tests {
             .update(cx, |_, window, _| window.activate_window())
             .unwrap();
         cx.simulate_keystrokes(settings, "secondary-q");
+        cx.run_until_parked();
+        cx.background_executor
+            .advance_clock(std::time::Duration::from_millis(1));
         cx.run_until_parked();
         assert_eq!(exits(cx), 1);
         assert!(!coordinator.read_with(cx, |c, _| c.quit_requested));
@@ -243,6 +330,130 @@ mod interaction_tests {
         cx.run_until_parked();
         assert!(!coordinator.read_with(cx, |c, _| c.quit_requested));
         assert_eq!(exits(cx), 0);
+    }
+
+    #[gpui::test]
+    fn usable_tray_hides_main_without_quit_confirmation(cx: &mut TestAppContext) {
+        let (main, coordinator) = setup(cx);
+        coordinator.update(cx, |c, cx| c.fixture_pending_launch(cx));
+        let hides = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = hides.clone();
+        let restores = std::rc::Rc::new(std::cell::Cell::new(0));
+        let restored = restores.clone();
+        cx.update(|cx| {
+            super::super::lifecycle::set_main_hider(
+                Some(std::rc::Rc::new(move |_| {
+                    seen.set(seen.get() + 1);
+                    true
+                })),
+                cx,
+            );
+            super::super::lifecycle::set_main_restorer(
+                std::rc::Rc::new(move |_| {
+                    restored.set(restored.get() + 1);
+                    true
+                }),
+                cx,
+            );
+            super::super::lifecycle::set_tray_available(true, cx);
+        });
+        let mut visual = VisualTestContext::from_window(main.into(), cx);
+        assert!(!visual.simulate_close());
+        assert_eq!(hides.get(), 1);
+        assert_eq!(exits(cx), 0);
+        assert!(!coordinator.read_with(cx, |c, _| c.quit_requested));
+        cx.update(super::super::lifecycle::host_lost);
+        assert_eq!(restores.get(), 1);
+        cx.update(super::super::lifecycle::host_lost);
+        assert_eq!(restores.get(), 1);
+        assert!(main.update(cx, |_, _, _| ()).is_ok());
+        assert_eq!(exits(cx), 0);
+    }
+
+    #[gpui::test]
+    fn expired_host_health_never_hides_main(cx: &mut TestAppContext) {
+        let (main, coordinator) = setup(cx);
+        coordinator.update(cx, |c, cx| c.fixture_pending_launch(cx));
+        let hides = std::rc::Rc::new(std::cell::Cell::new(0));
+        let hidden = hides.clone();
+        cx.update(|cx| {
+            super::super::lifecycle::set_main_hider(
+                Some(std::rc::Rc::new(move |_| {
+                    hidden.set(hidden.get() + 1);
+                    true
+                })),
+                cx,
+            );
+            super::super::lifecycle::set_main_restorer(std::rc::Rc::new(|_| true), cx);
+            super::super::lifecycle::set_tray_health(
+                Some(std::time::Instant::now() - std::time::Duration::from_secs(1)),
+                cx,
+            );
+        });
+        let mut visual = VisualTestContext::from_window(main.into(), cx);
+        assert!(!visual.simulate_close());
+        assert_pending_confirmation(main, &coordinator, cx);
+        assert_eq!(hides.get(), 0);
+    }
+
+    #[gpui::test]
+    fn tray_without_main_only_hide_uses_explicit_fallback(cx: &mut TestAppContext) {
+        let (main, coordinator) = setup(cx);
+        coordinator.update(cx, |c, cx| c.fixture_pending_launch(cx));
+        cx.update(|cx| super::super::lifecycle::set_tray_available(true, cx));
+        let mut visual = VisualTestContext::from_window(main.into(), cx);
+        assert!(!visual.simulate_close());
+        assert_pending_confirmation(main, &coordinator, cx);
+        assert!(cx.update(|cx| super::super::lifecycle::is_close_fallback(cx)));
+        cx.simulate_keystrokes(main.into(), "escape");
+        assert!(!cx.update(|cx| super::super::lifecycle::is_close_fallback(cx)));
+    }
+
+    #[gpui::test]
+    fn quit_waits_for_registered_final_flush(cx: &mut TestAppContext) {
+        let _ = setup(cx);
+        cx.run_until_parked();
+        let flushed = std::rc::Rc::new(std::cell::Cell::new(false));
+        let observed = flushed.clone();
+        cx.update(|cx| {
+            super::super::lifecycle::set_final_flush(
+                std::rc::Rc::new(move |_, cx| {
+                    let observed = observed.clone();
+                    cx.spawn(async move |_| {
+                        observed.set(true);
+                    })
+                }),
+                cx,
+            )
+        });
+        cx.update(super::super::lifecycle::request_quit);
+        cx.run_until_parked();
+        assert!(flushed.get());
+        assert_eq!(exits(cx), 1);
+    }
+
+    #[gpui::test]
+    fn stalled_final_flush_is_bounded_and_quit_is_not_duplicated(cx: &mut TestAppContext) {
+        let _ = setup(cx);
+        cx.run_until_parked();
+        cx.update(|cx| {
+            super::super::lifecycle::set_final_flush(
+                std::rc::Rc::new(|_, cx| {
+                    cx.spawn(async move |_| {
+                        smol::future::pending::<()>().await;
+                    })
+                }),
+                cx,
+            )
+        });
+        cx.update(super::super::lifecycle::request_quit);
+        cx.run_until_parked();
+        assert_eq!(exits(cx), 0);
+        cx.update(super::super::lifecycle::request_quit);
+        cx.background_executor
+            .advance_clock(std::time::Duration::from_secs(3));
+        cx.run_until_parked();
+        assert_eq!(exits(cx), 1);
     }
 
     #[gpui::test]

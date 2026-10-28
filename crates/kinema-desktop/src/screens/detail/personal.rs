@@ -18,6 +18,9 @@ pub(super) enum Write {
     Membership(bool),
     Movie(bool),
     Episode(EpisodeRef, bool),
+    /// Delete the movie checkpoint only; watched state is unchanged.
+    ClearMovieProgress,
+    ClearEpisodeProgress(EpisodeRef),
     /// Exact frozen season snapshot, never a recomputed one.
     Season(SeasonSnapshot, bool),
 }
@@ -242,6 +245,10 @@ impl Detail {
             Write::Movie(on) => c.set_movie_watched(&title, *on, cx),
             Write::Episode(reference, on) => c.set_episode_watched(reference.clone(), *on, cx),
             Write::Season(snapshot, on) => c.set_season_watched(snapshot.clone(), *on, cx),
+            Write::ClearMovieProgress => c.clear_movie_progress(title.personal_ref(), cx),
+            Write::ClearEpisodeProgress(reference) => {
+                c.clear_episode_progress(reference.clone(), cx)
+            }
         });
         self.write_error = result.err().map(|error| (write, error));
         cx.notify();
@@ -328,6 +335,9 @@ impl Detail {
                 command("Mark as watched", Write::Movie(true))
             });
         }
+        if !self.is_series() {
+            items.extend(self.progress_menu(None, cx));
+        }
         items
     }
 
@@ -392,6 +402,10 @@ impl Detail {
                     )),
                 ),
             );
+        }
+        if let Some(confirm) = self.clear_confirmation(cx) {
+            any = true;
+            stack = stack.child(confirm);
         }
         // Commit failures, success and Undo use the shared MainWindow toast, so they
         // are never duplicated here.

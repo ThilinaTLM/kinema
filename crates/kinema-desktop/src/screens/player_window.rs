@@ -7,12 +7,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::player::PlayerChoice;
+#[path = "playback_progress.rs"]
+mod playback_progress;
+use crate::{
+    desktop_integration::{
+        Playback as DesktopPlayback, PlayerSnapshot, PlayerTarget, Transport, normalized_volume,
+    },
+    player::PlayerChoice,
+};
 use gpui::{prelude::*, *};
 use kinema_core::media::PlaybackTitle;
 #[cfg(feature = "ui-probe")]
 use kinema_core::media::playback_title;
 use kinema_mpv::{Config, PlaybackFailure, PlaybackState, Player, TrackKind};
+use playback_progress::PlaybackIntent;
+use playback_progress::{Phase as ProgressPhase, Progress, duration_mismatch, seek_confirmed};
+pub(crate) use playback_progress::{PlaybackLaunch, PlayerCheckpoint};
 
 #[cfg(feature = "gpu-surface")]
 use kinema_mpv::ResolutionPolicy;
@@ -251,6 +261,7 @@ struct OpenMenu {
 struct PlayerWindows {
     next: u64,
     entries: HashMap<String, LeaseWindow>,
+    focus_events: VecDeque<PlayerTarget>,
 }
 impl Global for PlayerWindows {}
 struct LeaseWindow {
@@ -260,12 +271,214 @@ struct LeaseWindow {
     mode: PlayerChoice,
 }
 
+/// Public, sanitized state for application-owned media routing and inhibition.
+#[derive(Clone, Debug)]
+pub(crate) struct ManagedPlayerSnapshot {
+    pub media: PlayerSnapshot,
+    pub paused: bool,
+    pub playing: bool,
+    pub buffering: bool,
+    pub error: bool,
+}
+
+fn desktop_target(generation: u64) -> PlayerTarget {
+    // Opaque process-local identity. Never parse or publish a provider session ID.
+    PlayerTarget {
+        session_id: generation,
+        generation,
+    }
+}
+
+/// In-memory snapshots only; does not sample progress, perform I/O, or select a player.
+pub(crate) fn desktop_snapshots(cx: &mut App) -> Vec<ManagedPlayerSnapshot> {
+    let mut entries: Vec<_> = cx
+        .try_global::<PlayerWindows>()
+        .map(|registry| {
+            registry
+                .entries
+                .iter()
+                .map(|(session, entry)| (session.clone(), entry.generation, entry.handle))
+                .collect()
+        })
+        .unwrap_or_default();
+    entries.sort_by_key(|(_, generation, _)| *generation);
+    entries
+        .into_iter()
+        .filter_map(|(session_id, generation, handle)| {
+            handle
+                .update(cx, |view, _, _| {
+                    if view.lease.as_ref().is_none_or(|(session, current)| {
+                        session != &session_id || *current != generation
+                    }) {
+                        return None;
+                    }
+                    let state = view
+                        .player
+                        .as_ref()
+                        .and_then(|owner| owner.player.as_ref())
+                        .map_or_else(|| view.state.clone(), Player::state);
+                    let failed = terminal_failure(view.error.is_some(), &state);
+                    let mut media = desktop_snapshot(
+                        desktop_target(generation),
+                        &view.title,
+                        view.progress.is_some(),
+                        &state,
+                    );
+                    if failed {
+                        media.playback = DesktopPlayback::Stopped;
+                        media.seekable = false;
+                    }
+                    Some(ManagedPlayerSnapshot {
+                        playing: media.playback == DesktopPlayback::Playing
+                            && !state.paused_for_cache,
+                        media,
+                        paused: state.paused,
+                        buffering: !failed && (state.loading || state.paused_for_cache),
+                        error: view.error.is_some()
+                            || state.error.is_some()
+                            || state.failure_reason.is_some(),
+                    })
+                })
+                .ok()
+                .flatten()
+        })
+        .collect()
+}
+
+fn desktop_snapshot(
+    target: PlayerTarget,
+    title: &PlaybackTitle,
+    catalog_bound: bool,
+    state: &PlaybackState,
+) -> PlayerSnapshot {
+    let ready = state.file_loaded
+        && !state.loading
+        && !state.media_stopped
+        && !state.stopped
+        && !terminal_failure(false, state);
+    PlayerSnapshot {
+        target,
+        title: if catalog_bound {
+            title.full.clone()
+        } else {
+            "Local video".into()
+        },
+        description: None,
+        playback: if !ready {
+            DesktopPlayback::Stopped
+        } else if state.paused {
+            DesktopPlayback::Paused
+        } else {
+            DesktopPlayback::Playing
+        },
+        position: media_time(state.position).unwrap_or_default(),
+        duration: state.duration.and_then(media_time).filter(|v| !v.is_zero()),
+        volume: normalized_volume(state.volume / 100.0).unwrap_or(0.0),
+        seekable: desktop_can_seek(state),
+    }
+}
+fn desktop_can_seek(state: &PlaybackState) -> bool {
+    state.position_observed
+        && state.position.is_finite()
+        && state.position >= 0.0
+        && state.file_loaded
+        && !state.loading
+        && !state.media_stopped
+        && !state.stopped
+        && state.seekable == Some(true)
+        && !terminal_failure(false, state)
+}
+fn bounded_seek(position: f64, duration: Option<f64>) -> f64 {
+    let position = position.max(0.0);
+    duration
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .map_or(position, |duration| position.min(duration))
+}
+fn media_time(seconds: f64) -> Option<Duration> {
+    Duration::try_from_secs_f64(seconds).ok()
+}
+fn desktop_handle(target: PlayerTarget, cx: &App) -> Option<WindowHandle<PlayerWindow>> {
+    cx.try_global::<PlayerWindows>()?
+        .entries
+        .values()
+        .find(|entry| desktop_target(entry.generation) == target)
+        .map(|entry| entry.handle)
+}
+
+/// Returns false for stale targets or currently unsupported/invalid transport.
+/// True means routed, not backend acknowledgement; command failures use the
+/// player's existing safe, nonfatal control notice.
+pub(crate) fn dispatch_transport(target: PlayerTarget, action: Transport, cx: &mut App) -> bool {
+    let Some(handle) = desktop_handle(target, cx) else {
+        return false;
+    };
+    handle
+        .update(cx, |view, _, cx| {
+            if view
+                .lease
+                .as_ref()
+                .is_none_or(|(_, generation)| desktop_target(*generation) != target)
+            {
+                return false;
+            }
+            view.desktop_transport(action, cx)
+        })
+        .unwrap_or(false)
+}
+pub(crate) fn show_player(target: PlayerTarget, cx: &mut App) -> bool {
+    let Some(handle) = desktop_handle(target, cx) else {
+        return false;
+    };
+    handle
+        .update(cx, |view, window, cx| {
+            if view
+                .lease
+                .as_ref()
+                .is_none_or(|(_, generation)| desktop_target(*generation) != target)
+            {
+                return false;
+            }
+            window.show_window();
+            window.activate_window();
+            view.activity(cx);
+            true
+        })
+        .unwrap_or(false)
+}
+fn record_player_focus(generation: u64, cx: &mut App) {
+    if cx.has_global::<PlayerWindows>() {
+        let registry = cx.global_mut::<PlayerWindows>();
+        let target = desktop_target(generation);
+        registry.focus_events.retain(|event| *event != target);
+        registry.focus_events.push_back(target);
+    }
+}
+/// Drain activation events after reconciling snapshot starts/closes. Sampling
+/// cannot steal explicit selection; closed generations are discarded here.
+pub(crate) fn take_focus_events(cx: &mut App) -> Vec<PlayerTarget> {
+    if !cx.has_global::<PlayerWindows>() {
+        return Vec::new();
+    }
+    let registry = cx.global_mut::<PlayerWindows>();
+    registry
+        .focus_events
+        .drain(..)
+        .filter(|target| {
+            registry
+                .entries
+                .values()
+                .any(|entry| desktop_target(entry.generation) == *target)
+        })
+        .collect()
+}
+
 /// Replaying a lease activates its existing window without reloading its URL.
 pub fn open(
     session_id: String,
     mode: PlayerChoice,
     url: String,
     title: PlaybackTitle,
+    progress: Option<PlaybackLaunch>,
     coordinator: Entity<AppCoordinator>,
     cx: &mut App,
 ) -> Result<(), String> {
@@ -333,9 +546,14 @@ pub fn open(
             cx.new(|cx| PlayerWindow::new_mode(title, Some(url), mode.clone(), window, cx))
         })
         .map_err(|error| format!("Could not open embedded player window: {error}"))?;
-    let _ = handle.update(cx, |view, _, _| {
-        view.lease = Some((session_id.clone(), generation))
-    });
+    let initially_active = handle
+        .update(cx, |view, window, _| {
+            view.lease = Some((session_id.clone(), generation));
+            view.progress = progress.map(Progress::new);
+            view.progress_owner = Some(coordinator.clone());
+            window.is_window_active()
+        })
+        .unwrap_or(false);
     cx.global_mut::<PlayerWindows>().entries.insert(
         session_id,
         LeaseWindow {
@@ -345,6 +563,9 @@ pub fn open(
             mode,
         },
     );
+    if initially_active {
+        record_player_focus(generation, cx);
+    }
     Ok(())
 }
 
@@ -376,12 +597,18 @@ fn release_window(session_id: &str, generation: u64, failed: bool, cx: &mut App)
         return;
     }
     if let Some(entry) = cx.global_mut::<PlayerWindows>().entries.remove(session_id) {
-        entry.coordinator.update(cx, |coordinator, cx| {
-            if failed {
-                coordinator.embedded_player_failed(session_id.to_owned(), cx);
-            } else {
-                coordinator.embedded_player_closed(session_id.to_owned(), cx);
-            }
+        cx.global_mut::<PlayerWindows>()
+            .focus_events
+            .retain(|event| *event != desktop_target(generation));
+        let session_id = session_id.to_owned();
+        cx.defer(move |cx| {
+            entry.coordinator.update(cx, |coordinator, cx| {
+                if failed {
+                    coordinator.embedded_player_failed(session_id, cx);
+                } else {
+                    coordinator.embedded_player_closed(session_id, cx);
+                }
+            })
         });
     }
 }
@@ -403,7 +630,119 @@ pub fn close_session(session_id: &str, cx: &mut App) {
         )
     {
         cx.global_mut::<PlayerWindows>().entries.remove(session_id);
-        let _ = handle.update(cx, |_, window, _| window.remove_window());
+        cx.global_mut::<PlayerWindows>()
+            .focus_events
+            .retain(|event| *event != desktop_target(generation));
+        let _ = handle.update(cx, |view, window, cx| {
+            view.flush_progress(cx);
+            view.lease = None;
+            window.remove_window();
+        });
+    }
+}
+
+/// Snapshot all live players before application-owned shutdown draining.
+/// Delivery is deferred to avoid reentering an updating coordinator. The caller
+/// must yield one app-effects turn before deciding that the writer is drained.
+pub fn checkpoint_all(cx: &mut App) {
+    let handles: Vec<_> = cx
+        .try_global::<PlayerWindows>()
+        .map(|registry| {
+            registry
+                .entries
+                .values()
+                .map(|entry| entry.handle)
+                .collect()
+        })
+        .unwrap_or_default();
+    for handle in handles {
+        let _ = handle.update(cx, |view, _, cx| view.flush_progress(cx));
+    }
+}
+
+/// Invalidate queued observations immediately; continuing playback requires an
+/// application-owned durable epoch handshake before it can save again.
+pub fn invalidate_progress(session: &str, generation: u64, epoch: i64, cx: &mut App) {
+    update_progress_window(session, cx, |view, _| {
+        if view
+            .lease
+            .as_ref()
+            .is_none_or(|(_, current)| *current != generation)
+        {
+            return;
+        }
+        if let Some(p) = &mut view.progress
+            && p.launch.epoch == epoch
+        {
+            p.authorized = false;
+            p.last = None;
+        }
+    });
+}
+pub fn authorize_progress(
+    session: &str,
+    generation: u64,
+    old_epoch: i64,
+    new_epoch: i64,
+    active_run: i64,
+    cx: &mut App,
+) {
+    update_progress_window(session, cx, |view, cx| {
+        if view
+            .lease
+            .as_ref()
+            .is_none_or(|(_, current)| *current != generation)
+        {
+            return;
+        }
+        let Some(p) = &mut view.progress else {
+            return;
+        };
+        if p.launch.epoch != old_epoch || new_epoch < old_epoch || active_run <= 0 {
+            return;
+        }
+        p.launch.epoch = new_epoch;
+        p.launch.run = active_run;
+        p.authorized = true;
+        p.notice = false;
+        if matches!(p.phase, ProgressPhase::Reset | ProgressPhase::Ready) {
+            p.last = None;
+            if p.phase == ProgressPhase::Reset {
+                p.launch.checkpoint = None;
+            }
+            p.phase = ProgressPhase::Active;
+            let play = p.play;
+            view.presentation_command(|player| player.set_paused(!play), cx);
+        }
+        cx.notify();
+    });
+}
+pub fn progress_notice(session: &str, generation: u64, failed: bool, cx: &mut App) {
+    update_progress_window(session, cx, |view, cx| {
+        if view
+            .lease
+            .as_ref()
+            .is_none_or(|(_, current)| *current != generation)
+        {
+            return;
+        }
+        if let Some(p) = &mut view.progress {
+            p.notice = failed;
+            cx.notify();
+        }
+    });
+}
+fn update_progress_window(
+    session: &str,
+    cx: &mut App,
+    update: impl FnOnce(&mut PlayerWindow, &mut Context<PlayerWindow>),
+) {
+    let handle = cx
+        .try_global::<PlayerWindows>()
+        .and_then(|registry| registry.entries.get(session))
+        .map(|entry| entry.handle);
+    if let Some(handle) = handle {
+        let _ = handle.update(cx, |view, _, cx| update(view, cx));
     }
 }
 
@@ -937,6 +1276,8 @@ impl PlayerPerformance {
 
 pub struct PlayerWindow {
     title: PlaybackTitle,
+    progress: Option<Progress>,
+    progress_owner: Option<Entity<AppCoordinator>>,
     lease: Option<(String, u64)>,
     #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
     frames_presented: u64,
@@ -1021,8 +1362,31 @@ impl PlayerWindow {
         let surface_focus = cx.focus_handle();
         surface_focus.focus(window, cx);
         let controls = (0..CONTROL_COUNT).map(|_| cx.focus_handle()).collect();
+        cx.observe_window_activation(window, |view, window, cx| {
+            if window.is_window_active()
+                && let Some((_, generation)) = &view.lease
+            {
+                record_player_focus(*generation, cx);
+            }
+        })
+        .detach();
+        let weak = cx.weak_entity();
+        window.on_window_should_close(cx, move |_, cx| {
+            if let Some(view) = weak.upgrade() {
+                view.update(cx, |view, cx| {
+                    view.flush_progress(cx);
+                    if let Some(p) = &mut view.progress {
+                        p.authorized = false;
+                    }
+                });
+            }
+            true
+        });
+        cx.on_release(|view, cx| view.flush_progress(cx)).detach();
         let view = Self {
             title,
+            progress: None,
+            progress_owner: None,
             lease: None,
             #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
             frames_presented: 0,
@@ -1089,6 +1453,7 @@ impl PlayerWindow {
         }
         let config = player_config();
         let url = self.source_url.clone();
+        let paused_load = self.progress.is_some();
         let executor = cx.background_executor().clone();
         let worker = executor.clone();
         let canceled = self.startup_cancel.clone();
@@ -1111,6 +1476,11 @@ impl PlayerWindow {
                 return Ok(None);
             }
             if let Some(player) = owner.player.as_ref() {
+                if paused_load {
+                    player
+                        .set_paused(true)
+                        .map_err(|error| startup_error(error, FailurePhase::Load))?;
+                }
                 player
                     .load(&url)
                     .map_err(|error| startup_error(error, FailurePhase::Load))?;
@@ -1132,7 +1502,16 @@ impl PlayerWindow {
                     return;
                 }
                 match result {
-                    Ok(player) => view.player = player,
+                    Ok(player) => {
+                        view.player = player;
+                        if let Some(p) = &view.progress
+                            && p.phase == ProgressPhase::Active
+                            && !p.authorized
+                        {
+                            let play = p.play;
+                            view.presentation_command(|player| player.set_paused(!play), cx);
+                        }
+                    }
                     Err((error, reason, phase)) => {
                         view.failure_phase = Some(phase);
                         view.failure_reason = Some(reason);
@@ -1161,6 +1540,215 @@ impl PlayerWindow {
         element.into_any_element()
     }
 
+    fn deliver_checkpoint(&self, mut sample: PlayerCheckpoint, cx: &mut App) {
+        if let (Some((session, generation)), Some(owner)) = (&self.lease, &self.progress_owner) {
+            sample.generation = *generation;
+            let owner = owner.clone();
+            let session = session.clone();
+            cx.defer(move |cx| {
+                owner.update(cx, |owner, cx| {
+                    owner.submit_player_checkpoint(session, sample, cx)
+                })
+            });
+        }
+    }
+    fn flush_progress(&mut self, cx: &mut App) {
+        if let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref()) {
+            self.state = player.state();
+        }
+        if let Some(sample) = self
+            .progress
+            .as_mut()
+            .and_then(|p| p.sample(&self.state, Instant::now(), true))
+        {
+            self.deliver_checkpoint(sample, cx);
+        }
+    }
+    fn sample_progress(&mut self, cx: &mut Context<Self>) {
+        let Some(mut p) = self.progress.take() else {
+            return;
+        };
+        let previous = p.phase;
+        p.check_timeout(Instant::now());
+        if p.loaded(&self.state) {
+            match p.phase {
+                ProgressPhase::Loading => {
+                    if !self.state.position_observed {
+                        self.progress = Some(p);
+                        return;
+                    }
+                    if p.launch.watched
+                        && p.launch.intent == PlaybackIntent::Normal
+                        && p.usable_checkpoint().is_some()
+                    {
+                        p.phase = ProgressPhase::Choice;
+                    } else if p.launch.intent == PlaybackIntent::StartOver {
+                        self.begin_start_over(&mut p);
+                    } else if let Some(saved) = p.usable_checkpoint() {
+                        if !p.duration_accepted && duration_mismatch(saved, self.state.duration) {
+                            p.phase = ProgressPhase::Mismatch;
+                        } else {
+                            self.begin_resume(&mut p);
+                        }
+                    } else {
+                        p.phase = ProgressPhase::Ready;
+                    }
+                }
+                ProgressPhase::AwaitSeekability => {
+                    if !p.duration_accepted
+                        && p.usable_checkpoint()
+                            .is_some_and(|saved| duration_mismatch(saved, self.state.duration))
+                    {
+                        p.phase = ProgressPhase::Mismatch;
+                    } else {
+                        self.begin_resume(&mut p);
+                    }
+                }
+                ProgressPhase::Starting {
+                    position_revision,
+                    restart_revision,
+                } if seek_confirmed(&self.state, 0.0, position_revision, restart_revision) => {
+                    p.phase = ProgressPhase::Reset;
+                }
+                ProgressPhase::Seeking {
+                    target,
+                    position_revision,
+                    restart_revision,
+                } if seek_confirmed(&self.state, target, position_revision, restart_revision) => {
+                    p.phase = ProgressPhase::Ready;
+                }
+                _ => {}
+            }
+        }
+        if previous != p.phase && matches!(p.phase, ProgressPhase::Ready | ProgressPhase::Reset) {
+            self.send_progress_ready(&p, cx);
+        }
+        if let Some(sample) = p.sample(&self.state, Instant::now(), false) {
+            self.deliver_checkpoint(sample, cx);
+        }
+        if previous != p.phase {
+            cx.notify();
+        }
+        self.progress = Some(p);
+    }
+    fn send_progress_ready(&self, p: &Progress, cx: &mut Context<Self>) {
+        if let (Some((session, generation)), Some(owner)) = (&self.lease, &self.progress_owner) {
+            let (session, generation, epoch, start_over, owner) = (
+                session.clone(),
+                *generation,
+                p.launch.epoch,
+                p.phase == ProgressPhase::Reset,
+                owner.clone(),
+            );
+            cx.defer(move |cx| {
+                owner.update(cx, |owner, cx| {
+                    owner.player_progress_ready(session, generation, epoch, start_over, cx)
+                })
+            });
+        }
+    }
+    fn begin_resume(&mut self, p: &mut Progress) {
+        let target = p
+            .usable_checkpoint()
+            .map_or(0.0, |v| v.position_ms() as f64 / 1000.0);
+        if self.state.seekable == Some(false)
+            || self
+                .state
+                .duration
+                .is_some_and(|duration| target >= duration)
+        {
+            p.phase = ProgressPhase::Unavailable;
+        } else if self.state.seekable == Some(true) {
+            let result = self
+                .player
+                .as_ref()
+                .and_then(|owner| owner.player.as_ref())
+                .map(|player| player.seek_absolute(target));
+            p.phase = if matches!(result, Some(Ok(()))) {
+                p.seek_started = Some(Instant::now());
+                ProgressPhase::Seeking {
+                    target,
+                    position_revision: self.state.position_revision,
+                    restart_revision: self.state.restart_revision,
+                }
+            } else {
+                ProgressPhase::Unavailable
+            };
+        } else {
+            p.await_seekability(Instant::now());
+        }
+    }
+    fn retry_startup(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = &mut self.progress {
+            p.retry_startup(Instant::now());
+        }
+        cx.notify();
+    }
+    fn retry_progress_ready(&mut self, cx: &mut Context<Self>) {
+        let Some(mut p) = self.progress.take() else {
+            return;
+        };
+        p.notice = false;
+        self.send_progress_ready(&p, cx);
+        self.progress = Some(p);
+        cx.notify();
+    }
+    fn play_without_saving(&mut self, cx: &mut Context<Self>) {
+        let Some(p) = &mut self.progress else {
+            return;
+        };
+        p.authorized = false;
+        p.phase = ProgressPhase::Active;
+        p.play = true;
+        let play = p.play;
+        self.presentation_command(|player| player.set_paused(!play), cx);
+        cx.notify();
+    }
+    fn begin_start_over(&mut self, p: &mut Progress) {
+        p.launch.intent = PlaybackIntent::StartOver;
+        p.authorized = false;
+        if !p.can_start_over(&self.state) {
+            p.phase = ProgressPhase::Unavailable;
+        } else if self.state.position > 1.0 {
+            let result = self
+                .player
+                .as_ref()
+                .and_then(|owner| owner.player.as_ref())
+                .map(|player| player.seek_absolute(0.0));
+            p.phase = if matches!(result, Some(Ok(()))) {
+                p.seek_started = Some(Instant::now());
+                ProgressPhase::Starting {
+                    position_revision: self.state.position_revision,
+                    restart_revision: self.state.restart_revision,
+                }
+            } else {
+                ProgressPhase::Unavailable
+            };
+        } else {
+            p.phase = ProgressPhase::Reset;
+        }
+    }
+    fn choose_progress(&mut self, resume: bool, cx: &mut Context<Self>) {
+        if let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref()) {
+            self.state = player.state();
+        }
+        let Some(mut p) = self.progress.take() else {
+            return;
+        };
+        if resume {
+            p.duration_accepted |= p.phase == ProgressPhase::Mismatch;
+            p.launch.intent = PlaybackIntent::Resume;
+            self.begin_resume(&mut p);
+        } else {
+            self.begin_start_over(&mut p);
+        }
+        if p.phase == ProgressPhase::Reset {
+            self.send_progress_ready(&p, cx);
+        }
+        self.progress = Some(p);
+        cx.notify();
+    }
+
     fn sample(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let sample_started = self.diagnostics.as_ref().map(|_| Instant::now());
         let mut state_changed = false;
@@ -1171,6 +1759,9 @@ impl PlayerWindow {
         #[cfg(feature = "gpu-surface")]
         if terminal_failure(self.error.is_some(), &self.state) {
             frame_received |= self.gpu_frame.take().is_some();
+        }
+        if terminal_failure(self.error.is_some(), &self.state) {
+            self.flush_progress(cx);
         }
         if terminal_failure(self.error.is_some(), &self.state)
             && let Some((session, generation)) = self.lease.take()
@@ -1224,6 +1815,7 @@ impl PlayerWindow {
                 "Embedded GPU playback unavailable"
             );
         }
+        self.sample_progress(cx);
         self.sync_subtitle_position(window, cx);
         let now = Instant::now();
         // Bounded in-memory read (~1 Hz, by reference, no session clones). The
@@ -1313,10 +1905,95 @@ impl PlayerWindow {
             self.control_notice = false;
         }
     }
+    fn desktop_transport(&mut self, action: Transport, cx: &mut Context<Self>) -> bool {
+        if !self.backend_available() {
+            return false;
+        }
+        // Commands use a fresh observed snapshot, never toolbar scrub targets.
+        if let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref()) {
+            self.state = player.state();
+        }
+        let pending = self
+            .progress
+            .as_ref()
+            .is_some_and(|p| p.phase != ProgressPhase::Active);
+        match action {
+            Transport::Play | Transport::Pause => {
+                let play = action == Transport::Play;
+                if let Some(p) = &mut self.progress {
+                    p.play = play;
+                }
+                if !pending {
+                    if play && replay_needed(&self.state) {
+                        self.toggle_playback(cx);
+                    } else {
+                        self.presentation_command(|player| player.set_paused(!play), cx);
+                    }
+                }
+            }
+            Transport::Toggle => self.toggle_playback(cx),
+            Transport::Stop => {
+                self.flush_progress(cx);
+                if let Some(p) = &mut self.progress {
+                    p.play = false;
+                }
+                self.presentation_command(Player::stop, cx);
+            }
+            Transport::SeekRelative { forward, amount } => {
+                if pending || !desktop_can_seek(&self.state) {
+                    return false;
+                }
+                let delta = amount.as_secs_f64() * if forward { 1.0 } else { -1.0 };
+                let target = bounded_seek(self.state.position + delta, self.state.duration);
+                self.presentation_command(|player| player.seek_absolute(target), cx);
+            }
+            Transport::SeekAbsolute(position) => {
+                if pending || !desktop_can_seek(&self.state) {
+                    return false;
+                }
+                let target = bounded_seek(position.as_secs_f64(), self.state.duration);
+                self.presentation_command(|player| player.seek_absolute(target), cx);
+            }
+            Transport::SetVolume(volume) => {
+                let Some(volume) = normalized_volume(volume) else {
+                    return false;
+                };
+                self.presentation_command(|player| player.set_volume(volume * 100.0), cx);
+            }
+            Transport::ChangeVolume(delta) => {
+                if !delta.is_finite() {
+                    return false;
+                }
+                let Some(volume) = normalized_volume(self.state.volume / 100.0 + delta) else {
+                    return false;
+                };
+                self.presentation_command(|player| player.set_volume(volume * 100.0), cx);
+            }
+            Transport::ToggleMute => self.presentation_command(Player::toggle_mute, cx),
+        }
+        cx.notify();
+        true
+    }
     fn toggle_playback(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = &mut self.progress
+            && p.phase != ProgressPhase::Active
+        {
+            p.play = !p.play;
+            cx.notify();
+            return;
+        }
         if replay_needed(&self.state)
             && let Some(url) = self.source_url.clone()
         {
+            self.flush_progress(cx);
+            let tracked = self.progress.is_some();
+            if let Some(p) = &mut self.progress {
+                p.authorized = false;
+                p.generation = None;
+                p.retry_startup(Instant::now());
+                p.launch.intent = PlaybackIntent::StartOver;
+                p.play = true;
+            }
             // A new load: discard the previous GPU generation before issuing
             // load. The backend rejects late frames from the obsolete source.
             #[cfg(feature = "gpu-surface")]
@@ -1327,8 +2004,8 @@ impl PlayerWindow {
             self.subtitle_position = None;
             self.command(
                 |player| {
-                    player.load(&url)?;
-                    player.set_paused(false)
+                    player.set_paused(tracked)?;
+                    player.load(&url)
                 },
                 cx,
             );
@@ -1634,7 +2311,10 @@ impl PlayerWindow {
         controls_visible(
             self.state.paused || self.state.ended,
             self.state.loading || self.state.paused_for_cache || self.player.is_none(),
-            self.error.is_some() || self.control_notice || self.state.error.is_some(),
+            self.error.is_some()
+                || self.control_notice
+                || self.state.error.is_some()
+                || self.progress.as_ref().is_some_and(|p| p.notice),
             self.dock_hover
                 || self.scrub.is_some()
                 || self.volume_dragging
@@ -2083,7 +2763,9 @@ impl PlayerWindow {
         );
         let dock_entity = cx.entity();
         let notice = {
-            if self.state.paused_for_cache {
+            if self.progress.as_ref().is_some_and(|p| p.notice) {
+                "Progress could not be saved"
+            } else if self.state.paused_for_cache {
                 "Buffering…"
             } else if self.control_notice
                 || (self.state.error.is_some() && !terminal_failure(false, &self.state))
@@ -2416,6 +3098,25 @@ impl Render for PlayerWindow {
                 });
             }, |_, _, _, _| {}).absolute().size_full())
             .when(visible, |div| div.child(self.chrome(window, cx)))
+            .when(self.progress.as_ref().is_some_and(|p| matches!(p.phase, ProgressPhase::Choice | ProgressPhase::Mismatch | ProgressPhase::Unavailable)), |element| {
+                let unavailable = self.progress.as_ref().is_some_and(|p| p.phase == ProgressPhase::Unavailable);
+                let mismatch = self.progress.as_ref().is_some_and(|p| p.phase == ProgressPhase::Mismatch);
+                element.child(div().absolute().inset_0().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
+                    .child(div().type_style(t::TITLE).child(if unavailable { "Saved position cannot be resumed" } else if mismatch { "This source has a different duration" } else { "Resume this replay?" }))
+                    .child(div().type_style(t::BODY).child(if unavailable { "Playback readiness or resume could not be confirmed. Your saved progress is unchanged." } else if mismatch { "Resume at the saved time, or start over. Your saved progress is unchanged until playback is ready." } else { "Resume your saved position, or play from the beginning." }))
+                    .when(!unavailable, |panel| panel.child(Button::new("progress-resume", if mismatch { "Resume anyway" } else { "Resume" }).on_click(cx.listener(|view, _, _, cx| view.choose_progress(true, cx)))))
+                    .when(unavailable, |panel| panel
+                        .child(Button::new("progress-retry-startup", "Retry").on_click(cx.listener(|view, _, _, cx| view.retry_startup(cx))))
+                        .child(Button::new("progress-play-unsaved", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
+                    .when(self.progress.as_ref().is_some_and(|progress| progress.can_start_over(&self.state)), |panel| panel.child(Button::new("progress-start-over", "Play from beginning").on_click(cx.listener(|view, _, _, cx| view.choose_progress(false, cx))))))
+            })
+            .when(self.progress.as_ref().is_some_and(|p| p.notice && matches!(p.phase, ProgressPhase::Ready | ProgressPhase::Reset)), |element| {
+                element.child(div().absolute().inset_0().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
+                    .child(div().type_style(t::TITLE).child("Progress could not be saved"))
+                    .child(div().type_style(t::BODY).child("Your saved progress is unchanged. Retry saving, or play without saving progress."))
+                    .child(Button::new("progress-retry-saving", "Retry saving").on_click(cx.listener(|view, _, _, cx| view.retry_progress_ready(cx))))
+                    .child(Button::new("progress-untracked", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
+            })
             // Opt-in diagnostics only: no handlers, id or focus, so it never takes input.
             .when_some(self.cadence_text.clone(), |el, text| {
                 el.child(
@@ -2939,6 +3640,122 @@ pub fn run_probe_mode(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deferred_close_checkpoint_is_an_owned_pre_teardown_observation()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use super::{PlaybackIntent, PlaybackLaunch, Progress, ProgressPhase};
+        use kinema_core::{library::TitleId, watch_progress::PlaybackProgressTarget};
+        let captured = {
+            let mut progress = Progress::new(PlaybackLaunch {
+                subject: PlaybackProgressTarget::Movie(
+                    TitleId::new(1).ok_or("expected valid checkpoint fixture")?,
+                ),
+                epoch: 3,
+                run: 3,
+                checkpoint: None,
+                watched: false,
+                intent: PlaybackIntent::Normal,
+            });
+            progress.phase = ProgressPhase::Active;
+            progress.authorized = true;
+            progress.generation = Some(1);
+            let state = kinema_mpv::PlaybackState {
+                position: 24.0,
+                position_revision: 1,
+                position_observed: true,
+                file_loaded: true,
+                media_stopped: false,
+                media_generation: 1,
+                ..Default::default()
+            };
+            progress
+                .sample(&state, std::time::Instant::now(), true)
+                .ok_or("expected valid checkpoint fixture")?
+        }; // Delivery owns values, not a player/view borrow.
+        assert_eq!(captured.epoch, 3);
+        assert_eq!(captured.run, 3);
+        assert_eq!(captured.observation.position_ms(), 24_000);
+        assert!(captured.force);
+        Ok(())
+    }
+
+    #[test]
+    fn desktop_metadata_never_publishes_untracked_filenames_or_urls() {
+        let title = kinema_core::media::playback_title("/private/SECRET.mkv?token=secret", None);
+        let snapshot = super::desktop_snapshot(
+            super::desktop_target(7),
+            &title,
+            false,
+            &kinema_mpv::PlaybackState::default(),
+        );
+        assert_eq!(snapshot.title, "Local video");
+        assert_eq!(snapshot.description, None);
+        let public = kinema_core::media::playback_title("Public movie", None);
+        assert_eq!(
+            super::desktop_snapshot(
+                super::desktop_target(7),
+                &public,
+                true,
+                &kinema_mpv::PlaybackState::default()
+            )
+            .title,
+            "Public movie"
+        );
+    }
+    #[test]
+    fn desktop_snapshot_uses_observed_state_and_valid_units() {
+        use crate::desktop_integration::Playback;
+        let mut state = kinema_mpv::PlaybackState {
+            file_loaded: true,
+            position_observed: true,
+            media_stopped: false,
+            position: 12.5,
+            duration: Some(90.0),
+            volume: 75.0,
+            seekable: Some(true),
+            ..Default::default()
+        };
+        let title = kinema_core::media::playback_title("Public movie", None);
+        let snapshot = super::desktop_snapshot(super::desktop_target(1), &title, true, &state);
+        assert_eq!(snapshot.playback, Playback::Playing);
+        assert_eq!(snapshot.position, std::time::Duration::from_millis(12_500));
+        assert_eq!(snapshot.duration, Some(std::time::Duration::from_secs(90)));
+        assert_eq!(snapshot.volume, 0.75);
+        assert!(snapshot.seekable);
+        state.paused = true;
+        assert_eq!(
+            super::desktop_snapshot(super::desktop_target(1), &title, true, &state).playback,
+            Playback::Paused
+        );
+        state.loading = true;
+        state.position = f64::NAN;
+        state.duration = Some(f64::INFINITY);
+        let snapshot = super::desktop_snapshot(super::desktop_target(1), &title, true, &state);
+        assert_eq!(snapshot.playback, Playback::Stopped);
+        assert!(!snapshot.seekable);
+        assert_eq!(snapshot.position, std::time::Duration::ZERO);
+        assert_eq!(snapshot.duration, None);
+    }
+    #[test]
+    fn desktop_seek_capability_and_bounds_are_not_speculative() {
+        let mut state = kinema_mpv::PlaybackState {
+            duration: Some(90.0),
+            ..Default::default()
+        };
+        assert!(!super::desktop_can_seek(&state));
+        state.file_loaded = true;
+        state.position_observed = true;
+        state.media_stopped = false;
+        state.seekable = Some(false);
+        assert!(!super::desktop_can_seek(&state));
+        state.seekable = Some(true);
+        assert!(super::desktop_can_seek(&state));
+        assert_eq!(super::bounded_seek(-10.0, Some(90.0)), 0.0);
+        assert_eq!(super::bounded_seek(120.0, Some(90.0)), 90.0);
+        assert_eq!(super::bounded_seek(120.0, None), 120.0);
+        assert_ne!(super::desktop_target(1), super::desktop_target(2));
+    }
+
     #[test]
     fn player_title_drops_episode_name_before_episode_identity() {
         let title = kinema_core::media::playback_title(
