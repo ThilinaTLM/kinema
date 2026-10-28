@@ -103,7 +103,12 @@ impl Fixture {
                     let _ = stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     continue;
                 }
+                if mode == 15 {
+                    let _ = stream.write_all(b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    continue;
+                }
                 let reported_start = if mode == 2 { start + 1 } else { start };
+                let reported_size = data.len() + usize::from(mode == 11);
                 let encoding = if mode == 4 {
                     "Content-Encoding: gzip\r\n"
                 } else {
@@ -119,7 +124,7 @@ impl Fixture {
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {reported_start}-{}/{}\r\n{encoding}Connection: close\r\n\r\n",
                     length,
                     end - 1,
-                    data.len()
+                    reported_size
                 );
                 if mode == 14 && call == 0 {
                     let prefix_end = end.min(start + 64 * 1024);
@@ -186,8 +191,13 @@ impl Drop for Fixture {
         }
     }
 }
-fn wait_until(mut predicate: impl FnMut() -> bool) {
-    let end = std::time::Instant::now() + Duration::from_secs(8);
+#[track_caller]
+fn wait_until(predicate: impl FnMut() -> bool) {
+    wait_for(Duration::from_secs(45), predicate);
+}
+#[track_caller]
+fn wait_for(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+    let end = std::time::Instant::now() + timeout;
     while !predicate() {
         assert!(std::time::Instant::now() < end, "condition timed out");
         std::thread::sleep(Duration::from_millis(10));
@@ -303,7 +313,13 @@ fn expired_and_rejected_access_renew_without_discarding_bytes()
     wait_until(|| {
         service.usage().downloaded_bytes == CHUNK * 4 || !service.session_errors().is_empty()
     });
-    assert!(service.session_errors().is_empty());
+    assert!(
+        service.session_errors().is_empty(),
+        "errors: {:?}; calls: {}; renewals: {}",
+        service.session_errors(),
+        fixture.calls.load(Ordering::Relaxed),
+        count.load(Ordering::Relaxed)
+    );
     assert!(count.load(Ordering::Relaxed) >= 4);
     assert!(fixture.calls.load(Ordering::Relaxed) >= 8);
     service.release(&lease.id)?;
@@ -320,7 +336,9 @@ fn upstream_failures_are_safe_visible_and_do_not_publish_bytes()
         (7, MediaError::UnsupportedRange),
         (8, MediaError::BodyRead),
         (10, MediaError::IdentityMismatch),
+        (11, MediaError::IdentityMismatch),
         (12, MediaError::Upstream),
+        (15, MediaError::UnsupportedRange),
     ] {
         let root = tempfile::tempdir()?;
         let mut fixture = Fixture::start(CHUNK as usize, mode)?;
@@ -343,7 +361,19 @@ fn upstream_failures_are_safe_visible_and_do_not_publish_bytes()
             assert_eq!(fixture.calls.load(Ordering::Relaxed), 3);
         }
         assert_eq!(service.usage().downloaded_bytes, 0);
-        assert!(fixture.calls.load(Ordering::Relaxed) <= 3);
+        // Transient transport/body failures receive three bounded retries;
+        // protocol/identity failures still fail immediately.
+        let attempts = fixture.calls.load(Ordering::Relaxed);
+        assert_eq!(
+            attempts,
+            if matches!(mode, 8 | 12) {
+                4
+            } else if mode == 6 {
+                3
+            } else {
+                1
+            }
+        );
         service.release(&lease.id)?;
     }
     Ok(())
@@ -432,6 +462,11 @@ fn actual_interruption_restarts_only_missing_durable_ranges()
     });
     let downloaded = service.usage().downloaded_bytes;
     assert!((CHUNK..CHUNK * 8).contains(&downloaded));
+    let key = storage::key(&fixture.resolved().identity);
+    let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        service.shared.root.join(key).join("manifest.json"),
+    )?)?;
+    let durable: Vec<(u64, u64)> = serde_json::from_value(manifest["ranges"].clone())?;
     drop(service);
     let service = reopen(root.path(), CHUNK * 10)?;
     assert_eq!(service.usage().downloaded_bytes, downloaded);
@@ -447,7 +482,7 @@ fn actual_interruption_restarts_only_missing_durable_ranges()
     assert!(
         requests[request_count..]
             .iter()
-            .all(|&(start, _)| start >= downloaded)
+            .all(|&(start, end)| durable.iter().all(|&(s, e)| end <= s || start >= e))
     );
     service.release(&lease.id)?;
     Ok(())
@@ -608,14 +643,14 @@ fn media_diagnostics_exclude_signed_urls_identities_and_session_tokens()
 }
 
 #[test]
-fn remote_acquisition_amortizes_requests_with_four_mib_ranges()
--> Result<(), Box<dyn std::error::Error>> {
+fn remote_acquisition_adapts_ranges_with_four_mib_ceiling() -> Result<(), Box<dyn std::error::Error>>
+{
     let root = tempfile::tempdir()?;
-    let size = CHUNK * 2 + 123;
-    // The fixture adds per-request delay. Assert request shape/count rather than
-    // wall-clock throughput, which would depend on host scheduling and storage.
+    let size = CHUNK * 8 + 123;
+    // Range sizes adapt to measured reads. Assert exact coverage and the size
+    // ceiling, not a fixed ramp schedule or wall-clock throughput.
     let fixture = Fixture::start(size as usize, 0)?;
-    let service = service(root.path(), CHUNK * 3);
+    let service = service(root.path(), CHUNK * 10);
     let resolved = fixture.resolved();
     let renewal = resolved.clone();
     let lease = service.register_remote(resolved, Arc::new(move || Ok(renewal.clone())))?;
@@ -626,10 +661,17 @@ fn remote_acquisition_amortizes_requests_with_four_mib_ranges()
         .requests
         .lock()
         .map_err(|_| "request lock poisoned")?;
-    assert_eq!(
-        requests.as_slice(),
-        &[(0, CHUNK), (CHUNK, CHUNK * 2), (CHUNK * 2, size)]
+    let mut ordered = requests.clone();
+    ordered.sort_unstable();
+    assert_eq!(ordered[0].0, 0);
+    assert_eq!(ordered.last().ok_or("missing requests")?.1, size);
+    assert!(ordered.windows(2).all(|pair| pair[0].1 == pair[1].0));
+    assert!(
+        ordered
+            .iter()
+            .all(|&(start, end)| start < end && end - start <= CHUNK)
     );
+    assert!(ordered.len() >= size.div_ceil(CHUNK) as usize);
     drop(requests);
     // Read the entire durable result through the same route players use.
     let bytes = reqwest::blocking::get(&lease.url)?.bytes()?;

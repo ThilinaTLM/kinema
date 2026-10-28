@@ -345,6 +345,8 @@ fn outstanding_disk_reservations_and_overflow_are_rejected() {
                 ..identity(u64::MAX)
             },
             state: Mutex::new(AssetState {
+                generation: 0,
+                readers: adaptive::Readers::default(),
                 ranges: RangeSet::new(),
                 priority: None,
                 error: None,
