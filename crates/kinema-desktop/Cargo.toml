@@ -10,7 +10,13 @@ default-run = "kinema-desktop"
 [lints]
 workspace = true
 
+[[example]]
+name = "rqbit_poc"
+path = "examples/rqbit_poc.rs"
+required-features = ["rqbit-poc"]
+
 [features]
+rqbit-poc = ["dep:librqbit", "dep:anyhow", "tokio/io-util"]
 default = ["gpu-surface"]
 gpu-surface = ["dep:wgpu", "dep:gpui_wgpu", "dep:gpui_apple", "kinema-mpv/gpu-surface", "dep:gpui_windows"]
 ui-probe = ["dep:log"]
@@ -22,6 +28,8 @@ path = "src/bin/ui-probe.rs"
 required-features = ["ui-probe"]
 
 [dependencies]
+librqbit = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
 unicode-segmentation.workspace = true
 gpui.workspace = true
 serde.workspace = true

@@ -1,5 +1,9 @@
 # Development
 
+Isolated acquisition experiments: [adaptive HTTP range cache and librqbit streaming
+POCs](development/download-poc.md). These do not change default playback or qualify
+production download, torrent, or cross-platform behavior.
+
 Latest scoped extension evidence: [durable playback progress, native UI, and desktop
 integration](validation/playback-progress-desktop.md). Root checks and an isolated
 Linux MPRIS protocol smoke passed; native desktop-shell and Windows/macOS runtime
