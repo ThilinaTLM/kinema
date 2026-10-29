@@ -42,7 +42,7 @@
 ## Packaging and Releases
 
 - [ ] Configure a desktop installer for Windows.
-- [ ] Plan iOS installation and distribution, including feasibility and platform requirements for an iOS build.
+- [ ] Plan MacOS installation and distribution, including feasibility and platform requirements for an MacOS build.
 - [ ] Evaluate Linux AppImage packaging and standalone binary distribution.
 - [ ] Configure a CD pipeline to build release artifacts and publish GitHub releases when a release tag is pushed.
 
