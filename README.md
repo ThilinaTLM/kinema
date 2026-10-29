@@ -31,6 +31,10 @@ See the [validation matrix](docs/development.md#validation-status-and-limits) an
 [architecture](docs/architecture.md) for current limits. No full-MVP completion
 claim is made.
 
+## Roadmap
+
+See [TODO.md](TODO.md) for the project roadmap and planned improvements.
+
 ## Development
 
 Install Rust **1.97.1** through rustup and the

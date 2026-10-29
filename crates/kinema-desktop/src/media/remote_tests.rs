@@ -103,7 +103,12 @@ impl Fixture {
                     let _ = stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     continue;
                 }
+                if mode == 15 {
+                    let _ = stream.write_all(b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    continue;
+                }
                 let reported_start = if mode == 2 { start + 1 } else { start };
+                let reported_size = data.len() + usize::from(mode == 11);
                 let encoding = if mode == 4 {
                     "Content-Encoding: gzip\r\n"
                 } else {
@@ -119,7 +124,7 @@ impl Fixture {
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {reported_start}-{}/{}\r\n{encoding}Connection: close\r\n\r\n",
                     length,
                     end - 1,
-                    data.len()
+                    reported_size
                 );
                 if mode == 14 && call == 0 {
                     let prefix_end = end.min(start + 64 * 1024);
@@ -186,8 +191,13 @@ impl Drop for Fixture {
         }
     }
 }
-fn wait_until(mut predicate: impl FnMut() -> bool) {
-    let end = std::time::Instant::now() + Duration::from_secs(8);
+#[track_caller]
+fn wait_until(predicate: impl FnMut() -> bool) {
+    wait_for(Duration::from_secs(45), predicate);
+}
+#[track_caller]
+fn wait_for(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+    let end = std::time::Instant::now() + timeout;
     while !predicate() {
         assert!(std::time::Instant::now() < end, "condition timed out");
         std::thread::sleep(Duration::from_millis(10));
@@ -303,7 +313,13 @@ fn expired_and_rejected_access_renew_without_discarding_bytes()
     wait_until(|| {
         service.usage().downloaded_bytes == CHUNK * 4 || !service.session_errors().is_empty()
     });
-    assert!(service.session_errors().is_empty());
+    assert!(
+        service.session_errors().is_empty(),
+        "errors: {:?}; calls: {}; renewals: {}",
+        service.session_errors(),
+        fixture.calls.load(Ordering::Relaxed),
+        count.load(Ordering::Relaxed)
+    );
     assert!(count.load(Ordering::Relaxed) >= 4);
     assert!(fixture.calls.load(Ordering::Relaxed) >= 8);
     service.release(&lease.id)?;
@@ -320,7 +336,9 @@ fn upstream_failures_are_safe_visible_and_do_not_publish_bytes()
         (7, MediaError::UnsupportedRange),
         (8, MediaError::BodyRead),
         (10, MediaError::IdentityMismatch),
+        (11, MediaError::IdentityMismatch),
         (12, MediaError::Upstream),
+        (15, MediaError::UnsupportedRange),
     ] {
         let root = tempfile::tempdir()?;
         let mut fixture = Fixture::start(CHUNK as usize, mode)?;
@@ -343,7 +361,19 @@ fn upstream_failures_are_safe_visible_and_do_not_publish_bytes()
             assert_eq!(fixture.calls.load(Ordering::Relaxed), 3);
         }
         assert_eq!(service.usage().downloaded_bytes, 0);
-        assert!(fixture.calls.load(Ordering::Relaxed) <= 3);
+        // Transient transport/body failures receive three bounded retries;
+        // protocol/identity failures still fail immediately.
+        let attempts = fixture.calls.load(Ordering::Relaxed);
+        assert_eq!(
+            attempts,
+            if matches!(mode, 8 | 12) {
+                4
+            } else if mode == 6 {
+                3
+            } else {
+                1
+            }
+        );
         service.release(&lease.id)?;
     }
     Ok(())
@@ -432,9 +462,17 @@ fn actual_interruption_restarts_only_missing_durable_ranges()
     });
     let downloaded = service.usage().downloaded_bytes;
     assert!((CHUNK..CHUNK * 8).contains(&downloaded));
+    let key = storage::key(&fixture.resolved().identity);
+    let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        service.shared.root.join(key).join("manifest.json"),
+    )?)?;
+    let durable: Vec<(u64, u64)> = serde_json::from_value(manifest["ranges"].clone())?;
+    // A checkpoint completing during cancellation can exceed live publication.
+    let durable_bytes: u64 = durable.iter().map(|&(start, end)| end - start).sum();
+    assert!(durable_bytes >= downloaded);
     drop(service);
     let service = reopen(root.path(), CHUNK * 10)?;
-    assert_eq!(service.usage().downloaded_bytes, downloaded);
+    assert_eq!(service.usage().downloaded_bytes, durable_bytes);
     let request_count = fixture.requests.lock().map_err(|_| "poison")?.len();
     let resolved = fixture.resolved();
     let next = resolved.clone();
@@ -447,7 +485,7 @@ fn actual_interruption_restarts_only_missing_durable_ranges()
     assert!(
         requests[request_count..]
             .iter()
-            .all(|&(start, _)| start >= downloaded)
+            .all(|&(start, end)| durable.iter().all(|&(s, e)| end <= s || start >= e))
     );
     service.release(&lease.id)?;
     Ok(())
@@ -608,14 +646,14 @@ fn media_diagnostics_exclude_signed_urls_identities_and_session_tokens()
 }
 
 #[test]
-fn remote_acquisition_amortizes_requests_with_four_mib_ranges()
--> Result<(), Box<dyn std::error::Error>> {
+fn remote_acquisition_adapts_ranges_with_four_mib_ceiling() -> Result<(), Box<dyn std::error::Error>>
+{
     let root = tempfile::tempdir()?;
-    let size = CHUNK * 2 + 123;
-    // The fixture adds per-request delay. Assert request shape/count rather than
-    // wall-clock throughput, which would depend on host scheduling and storage.
+    let size = CHUNK * 8 + 123;
+    // Range sizes adapt to measured reads. Assert exact coverage and the size
+    // ceiling, not a fixed ramp schedule or wall-clock throughput.
     let fixture = Fixture::start(size as usize, 0)?;
-    let service = service(root.path(), CHUNK * 3);
+    let service = service(root.path(), CHUNK * 10);
     let resolved = fixture.resolved();
     let renewal = resolved.clone();
     let lease = service.register_remote(resolved, Arc::new(move || Ok(renewal.clone())))?;
@@ -626,10 +664,17 @@ fn remote_acquisition_amortizes_requests_with_four_mib_ranges()
         .requests
         .lock()
         .map_err(|_| "request lock poisoned")?;
-    assert_eq!(
-        requests.as_slice(),
-        &[(0, CHUNK), (CHUNK, CHUNK * 2), (CHUNK * 2, size)]
+    let mut ordered = requests.clone();
+    ordered.sort_unstable();
+    assert_eq!(ordered[0].0, 0);
+    assert_eq!(ordered.last().ok_or("missing requests")?.1, size);
+    assert!(ordered.windows(2).all(|pair| pair[0].1 == pair[1].0));
+    assert!(
+        ordered
+            .iter()
+            .all(|&(start, end)| start < end && end - start <= CHUNK)
     );
+    assert!(ordered.len() >= size.div_ceil(CHUNK) as usize);
     drop(requests);
     // Read the entire durable result through the same route players use.
     let bytes = reqwest::blocking::get(&lease.url)?.bytes()?;
@@ -731,5 +776,1029 @@ fn unavailable_range_reader_aborts_on_release_or_upstream_failure()
         });
         assert_eq!(service.usage().downloaded_bytes, 0);
     }
+    Ok(())
+}
+
+// Unlike Fixture, each accepted connection has its own worker. Gates, rather
+// than throughput comparisons, make overlap and completion order observable.
+const PRESSURE_WARMUPS: usize = 6;
+type RecordedValidators = Arc<Mutex<Vec<(u64, Option<String>)>>>;
+
+// Capture actual outstanding handlers, not an offset inferred from arrival order.
+// A wave may straddle the warmup count; it is never split at that count.
+// Arrivals saturate; pending/captured storage is bounded by active fetches (four).
+#[derive(Default)]
+struct GatedWave {
+    arrivals: usize,
+    pending: Vec<(u64, u64)>,
+    captured: Option<Vec<(u64, u64)>>,
+    selected: Option<(u64, u64)>,
+}
+impl GatedWave {
+    fn arrive(&mut self, range: (u64, u64)) {
+        self.arrivals = (self.arrivals + 1).min(PRESSURE_WARMUPS);
+        self.pending.push(range);
+        if self.arrivals == PRESSURE_WARMUPS && self.pending.len() >= 2 && self.captured.is_none() {
+            self.captured = Some(self.pending.clone());
+        }
+    }
+
+    fn select(&mut self) -> Option<(u64, u64)> {
+        let selected = self.captured.as_ref()?.iter().copied().min()?;
+        self.selected = Some(selected);
+        Some(selected)
+    }
+
+    fn held(&self, range: (u64, u64)) -> bool {
+        self.captured.is_some() && (self.selected.is_none() || self.selected == Some(range))
+    }
+}
+
+#[test]
+fn gated_wave_captures_reversed_arrivals_across_warmup_boundary() {
+    for reverse in [false, true] {
+        for straddles in [false, true] {
+            let mut wave = GatedWave::default();
+            let completed = if straddles {
+                PRESSURE_WARMUPS - 1
+            } else {
+                PRESSURE_WARMUPS
+            };
+            for index in 0..completed {
+                wave.arrive((index as u64, index as u64 + 1));
+                assert!(wave.captured.is_none());
+                wave.pending.clear();
+            }
+            let ranges = if reverse {
+                [(20, 30), (10, 20)]
+            } else {
+                [(10, 20), (20, 30)]
+            };
+            wave.arrive(ranges[0]);
+            assert!(wave.select().is_none());
+            wave.arrive(ranges[1]);
+            assert!(wave.held(ranges[0]) && wave.held(ranges[1]));
+            assert_eq!(wave.select(), Some((10, 20)));
+            assert!(wave.held((10, 20)));
+            assert!(!wave.held((20, 30)));
+            assert_eq!(wave.captured.as_ref().map(Vec::len), Some(2));
+        }
+    }
+}
+
+struct ParallelFixture {
+    url: reqwest::Url,
+    bytes: Arc<Vec<u8>>,
+    stop: Arc<AtomicBool>,
+    gate: Arc<AtomicBool>,
+    tail_gate: Arc<AtomicBool>,
+    requests: Arc<Mutex<Vec<(u64, u64)>>>,
+    completed: Arc<Mutex<Vec<(u64, u64)>>>,
+    validators: RecordedValidators,
+    dispatches: Arc<Mutex<Vec<std::time::Instant>>>,
+    throttle_sent: Arc<Mutex<Option<std::time::Instant>>>,
+    peak: Arc<AtomicUsize>,
+    wave: Arc<Mutex<GatedWave>>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+impl ParallelFixture {
+    // 1: paced warmup, then test-selected outstanding wave; 2: hold all;
+    // 3: fail first with 503;
+    // 4: fail first with Retry-After; 5: always rate limited;
+    // 6: paced per-asset warmup, then hold all subsequent ranges;
+    // 7: gate byte-zero and nonzero responses independently for stale seeks;
+    // 8: truncate the first body, then serve exact bytes;
+    // 9: bounded Retry-After followed by recovery.
+    fn start(size: usize, mode: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
+        listener.set_nonblocking(true)?;
+        let url = reqwest::Url::parse(&format!("http://{}/bytes", listener.local_addr()?))?;
+        let bytes = Arc::new(
+            (0..size)
+                .map(|i| ((i * 17 + i / 251) % 256) as u8)
+                .collect::<Vec<_>>(),
+        );
+        let stop = Arc::new(AtomicBool::new(false));
+        let gate = Arc::new(AtomicBool::new(false));
+        let tail_gate = Arc::new(AtomicBool::new(false));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let completed = Arc::new(Mutex::new(Vec::new()));
+        let validators = Arc::new(Mutex::new(Vec::new()));
+        let dispatches = Arc::new(Mutex::new(Vec::new()));
+        let throttle_sent = Arc::new(Mutex::new(None));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let wave = Arc::new(Mutex::new(GatedWave::default()));
+        let captured_wave = wave.clone();
+        let (canceled, permitted, recorded, finished, data, maximum) = (
+            stop.clone(),
+            gate.clone(),
+            requests.clone(),
+            completed.clone(),
+            bytes.clone(),
+            peak.clone(),
+        );
+        let tail_permitted = tail_gate.clone();
+        let recorded_validators = validators.clone();
+        let dispatched = dispatches.clone();
+        let throttled = throttle_sent.clone();
+        let asset_calls = Arc::new(Mutex::new(HashMap::<String, usize>::new()));
+        let worker = std::thread::spawn(move || {
+            let mut workers = Vec::new();
+            while !canceled.load(Ordering::Acquire) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                let (canceled, permitted, recorded, finished, data, active, maximum) = (
+                    canceled.clone(),
+                    permitted.clone(),
+                    recorded.clone(),
+                    finished.clone(),
+                    data.clone(),
+                    active.clone(),
+                    maximum.clone(),
+                );
+                let tail_permitted = tail_permitted.clone();
+                let recorded_validators = recorded_validators.clone();
+                let dispatched = dispatched.clone();
+                let throttled = throttled.clone();
+                let asset_calls = asset_calls.clone();
+                let wave = captured_wave.clone();
+                workers.push(std::thread::spawn(move || {
+                    let _ = stream.set_nonblocking(false);
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
+                    let mut headers = Vec::new();
+                    let mut byte = [0];
+                    while headers.len() < 8192 && !headers.ends_with(b"\r\n\r\n") {
+                        if stream.read_exact(&mut byte).is_err() { return; }
+                        headers.push(byte[0]);
+                    }
+                    let headers = String::from_utf8_lossy(&headers).to_ascii_lowercase();
+                    let Some((start, end)) = headers.lines()
+                        .find_map(|line| line.strip_prefix("range: bytes="))
+                        .and_then(|r| r.split_once('-'))
+                        .and_then(|(s, e)| Some((s.parse::<u64>().ok()?, e.parse::<u64>().ok()?.checked_add(1)?))) else { return; };
+                    let call = {
+                        let mut requests = recorded.lock().unwrap_or_else(|e| e.into_inner());
+                        let call = requests.len();
+                        requests.push((start, end));
+                        call
+                    };
+                    dispatched.lock().unwrap_or_else(|e| e.into_inner()).push(std::time::Instant::now());
+                    recorded_validators.lock().unwrap_or_else(|e| e.into_inner()).push((start, headers.lines().find_map(|line| line.strip_prefix("if-range: ")).map(str::to_owned)));
+                    maximum.fetch_max(active.fetch_add(1, Ordering::AcqRel) + 1, Ordering::AcqRel);
+                    let asset_call = {
+                        let target = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
+                        let mut calls = asset_calls.lock().unwrap_or_else(|e| e.into_inner());
+                        let call = calls.entry(target.to_owned()).or_default();
+                        let previous = *call;
+                        *call += 1;
+                        previous
+                    };
+                    if mode == 1 {
+                        wave.lock().unwrap_or_else(|e| e.into_inner()).arrive((start, end));
+                    }
+                    if matches!(mode, 1 | 6) && asset_call == 0 {
+                        while !tail_permitted.load(Ordering::Acquire) && !canceled.load(Ordering::Acquire) {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                    // Healthy waves spanning the controller's dwell/cooldown
+                    // establish sustained pressure before we hold the next wave.
+                    // This delay is a fixture input, never a speed assertion.
+                    // Continue pacing unpaired mode-1 requests beyond warmup:
+                    // a singleton must finish so the coordinator can advance.
+                    if matches!(mode, 1 | 6) && asset_call < PRESSURE_WARMUPS
+                        || mode == 1 && wave.lock().unwrap_or_else(|e| e.into_inner()).captured.is_none()
+                    {
+                        std::thread::sleep(Duration::from_millis(1200));
+                    }
+                    if matches!(mode, 14..=16) && call == 0 {
+                        while !permitted.load(Ordering::Acquire) && !canceled.load(Ordering::Acquire) {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                    if mode == 1 {
+                        loop {
+                            let mut wave = wave.lock().unwrap_or_else(|e| e.into_inner());
+                            if permitted.load(Ordering::Acquire) || canceled.load(Ordering::Acquire) || !wave.held((start, end)) {
+                                wave.pending.retain(|r| *r != (start, end));
+                                break;
+                            }
+                            drop(wave);
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                    if mode == 2 || mode == 6 && asset_call >= PRESSURE_WARMUPS || mode == 7 {
+                        let permitted = if mode == 7 && start > 0 { &tail_permitted } else { &permitted };
+                        while !permitted.load(Ordering::Acquire)
+                            && !canceled.load(Ordering::Acquire)
+                        {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                    if !canceled.load(Ordering::Acquire) {
+                        if matches!(mode, 14..=16) && call == 0 {
+                            let status = if mode == 15 { "503 Service Unavailable" } else { "429 Too Many Requests" };
+                            let delay = if mode == 16 { 86400 } else { 1 };
+                            *throttled.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
+                            let _ = write!(stream, "HTTP/1.1 {status}\r\nRetry-After: {delay}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        } else if mode == 13 && call == 1 {
+                            let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        } else if mode == 5 || matches!(mode, 4 | 9) && call == 0 {
+                            // Oversized delays must stop acquisition, not cause
+                            // an early retry; bounded values exercise recovery.
+                            let delay = if mode == 4 { 86400 } else { 0 };
+                            let _ = write!(stream, "HTTP/1.1 429 Too Many Requests\r\nRetry-After: {delay}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        } else if mode == 3 && call == 0 {
+                            let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        } else if start < end && end <= data.len() as u64 {
+                            let changed = matches!(mode, 11..=13) && call > 0;
+                            let etag = if mode == 12 && changed || mode < 10 { "" } else if changed { "ETag: \"changed-v2\"\r\n" } else { "ETag: \"stable-v1\"\r\n" };
+                            let header = format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{}/{}\r\n{etag}Connection: close\r\n\r\n", end-start, end-1, data.len());
+                            let body_end = if mode == 8 && call == 0 { start + 1 } else { end };
+                            let changed_body;
+                            let body = if changed {
+                                changed_body = data[start as usize..body_end as usize].iter().map(|byte| byte ^ 0xff).collect::<Vec<_>>();
+                                changed_body.as_slice()
+                            } else { &data[start as usize..body_end as usize] };
+                            if stream.write_all(header.as_bytes()).and_then(|()| stream.write_all(body)).is_ok() && body_end == end {
+                                finished.lock().unwrap_or_else(|e| e.into_inner()).push((start, end));
+                            }
+                        }
+                    }
+                    active.fetch_sub(1, Ordering::AcqRel);
+                }));
+            }
+            for worker in workers {
+                let _ = worker.join();
+            }
+        });
+        Ok(Self {
+            url,
+            bytes,
+            stop,
+            gate,
+            tail_gate,
+            requests,
+            completed,
+            validators,
+            dispatches,
+            throttle_sent,
+            peak,
+            wave,
+            worker: Some(worker),
+        })
+    }
+    fn resolved(&self) -> ResolvedMedia {
+        ResolvedMedia {
+            identity: super::tests::identity(self.bytes.len() as u64),
+            file_name: "movie.mp4".into(),
+            url: SensitiveUrl::for_test(self.url.clone()),
+            expires_at: None,
+        }
+    }
+}
+impl Drop for ParallelFixture {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.gate.store(true, Ordering::Release);
+        self.tail_gate.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[test]
+fn adaptive_parallel_out_of_order_bytes_are_exact_and_durable()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let fixture = ParallelFixture::start((CHUNK * 12 + 123) as usize, 1)?;
+    let service = service(root.path(), CHUNK * 16);
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    let url = lease.url.clone();
+    let reader = std::thread::spawn(move || -> Result<Vec<u8>, String> {
+        let response = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| e.to_string())?
+            .get(url)
+            .send()
+            .map_err(|e| e.to_string())?;
+        assert_eq!(response.status(), 200);
+        Ok(response.bytes().map_err(|e| e.to_string())?.to_vec())
+    });
+    wait_until(|| {
+        service.shared.state.lock().is_ok_and(|state| {
+            state.assets.values().any(|asset| {
+                asset
+                    .state
+                    .lock()
+                    .is_ok_and(|state| state.priority == Some(0))
+            })
+        })
+    });
+    fixture.tail_gate.store(true, Ordering::Release);
+    let mut selected = None;
+    wait_until(|| {
+        selected = fixture
+            .wave
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .select();
+        selected.is_some()
+    });
+    let first = selected.ok_or("missing captured wave")?;
+    wait_until(|| {
+        assert!(service.session_errors().is_empty());
+        fixture
+            .completed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|&(start, _)| start >= first.1)
+    });
+    wait_until(|| {
+        service.shared.state.lock().is_ok_and(|state| {
+            state.assets.values().any(|asset| {
+                asset.state.lock().is_ok_and(|state| {
+                    assert!(!storage::available(&state.ranges, first.0, first.0 + 1));
+                    storage::available(&state.ranges, first.1, first.1 + 1)
+                })
+            })
+        })
+    });
+    // A later range finishing while the first is gated proves parallelism.
+    // Exact ramp-up depends on observed demand and the shared permit budget;
+    // neither the scheduler nor this scenario promises at least three requests.
+    let peak = fixture.peak.load(Ordering::Acquire);
+    assert!(
+        (2..=4).contains(&peak),
+        "unexpected request overlap: {peak}"
+    );
+    assert!(
+        fixture
+            .completed
+            .lock()
+            .map_err(|_| "poison")?
+            .iter()
+            .all(|r| *r != first)
+    );
+    assert_eq!(service.usage().reserved_bytes, fixture.bytes.len() as u64);
+    fixture.gate.store(true, Ordering::Release);
+    wait_until(|| {
+        service.usage().downloaded_bytes == fixture.bytes.len() as u64
+            || !service.session_errors().is_empty()
+    });
+    assert!(service.session_errors().is_empty());
+    assert!(fixture.peak.load(Ordering::Acquire) <= 4);
+    assert_eq!(
+        reader.join().map_err(|_| "reader panicked")??,
+        fixture.bytes.as_slice()
+    );
+    service.release(&lease.id)?;
+    drop(service);
+    let service = reopen(root.path(), CHUNK * 16)?;
+    assert_eq!(service.usage().downloaded_bytes, fixture.bytes.len() as u64);
+    let before = fixture.requests.lock().map_err(|_| "poison")?.len();
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    assert_eq!(
+        reqwest::blocking::get(&lease.url)?.bytes()?.as_ref(),
+        fixture.bytes.as_slice()
+    );
+    assert_eq!(fixture.requests.lock().map_err(|_| "poison")?.len(), before);
+    service.release(&lease.id)?;
+    Ok(())
+}
+
+#[test]
+fn adaptive_transient_status_and_bounded_retry_after_recover()
+-> Result<(), Box<dyn std::error::Error>> {
+    for mode in [3, 8, 9] {
+        let root = tempfile::tempdir()?;
+        let fixture = ParallelFixture::start(128 * 1024 + 17, mode)?;
+        let service = service(root.path(), CHUNK);
+        let resolved = fixture.resolved();
+        let next = resolved.clone();
+        let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+        wait_until(|| {
+            service.usage().downloaded_bytes == fixture.bytes.len() as u64
+                || !service.session_errors().is_empty()
+        });
+        assert!(
+            service.session_errors().is_empty(),
+            "mode {mode}: {:?}",
+            service.session_errors()
+        );
+        let requests = fixture.requests.lock().map_err(|_| "poison")?;
+        assert!((2..=4).contains(&requests.len()));
+        let mut recovered = requests[1..].to_vec();
+        recovered.sort_unstable();
+        assert_eq!(recovered[0].0, 0);
+        assert_eq!(
+            recovered.last().ok_or("missing retry")?.1,
+            fixture.bytes.len() as u64
+        );
+        assert!(recovered.windows(2).all(|pair| pair[0].1 == pair[1].0));
+        drop(requests);
+        assert_eq!(
+            reqwest::blocking::get(&lease.url)?.bytes()?.as_ref(),
+            fixture.bytes.as_slice()
+        );
+        service.release(&lease.id)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn adaptive_persistent_rate_limit_exhausts_without_publishing()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let fixture = ParallelFixture::start(128 * 1024, 5)?;
+    let service = service(root.path(), CHUNK);
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    wait_for(Duration::from_secs(120), || {
+        !service.session_errors().is_empty()
+    });
+    assert_eq!(
+        service.session_errors(),
+        vec![(lease.id.clone(), MediaError::Upstream)]
+    );
+    assert_eq!(service.usage().downloaded_bytes, 0);
+    assert_eq!(service.usage().reserved_bytes, fixture.bytes.len() as u64);
+    assert!((2..=4).contains(&fixture.requests.lock().map_err(|_| "poison")?.len()));
+    service.release(&lease.id)?;
+    Ok(())
+}
+
+#[test]
+fn adaptive_out_of_order_cancel_resume_skips_all_durable_intervals()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let fixture = ParallelFixture::start((CHUNK * 12 + 71) as usize, 1)?;
+    let service = service(root.path(), CHUNK * 16);
+    let resolved = fixture.resolved();
+    let key = storage::key(&resolved.identity);
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    // Demand at the missing beginning enables bounded parallel acquisition while
+    // the next lowest range is held, leaving a genuinely non-prefix checkpoint.
+    let url = lease.url.clone();
+    let reader = std::thread::spawn(move || {
+        reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()?
+            .get(url)
+            .send()?
+            .bytes()
+    });
+    wait_until(|| {
+        service.shared.state.lock().is_ok_and(|state| {
+            state.assets.values().any(|asset| {
+                asset
+                    .state
+                    .lock()
+                    .is_ok_and(|state| state.priority == Some(0))
+            })
+        })
+    });
+    fixture.tail_gate.store(true, Ordering::Release);
+    let mut selected = None;
+    wait_until(|| {
+        selected = fixture
+            .wave
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .select();
+        selected.is_some()
+    });
+    let first = selected.ok_or("missing captured wave")?;
+    // Wait for an actual durable interval beyond the held hole, not a byte
+    // count (which says nothing about where those bytes were committed).
+    wait_until(|| {
+        assert!(service.session_errors().is_empty());
+        service.shared.state.lock().is_ok_and(|state| {
+            state.assets.values().any(|asset| {
+                asset
+                    .state
+                    .lock()
+                    .is_ok_and(|state| storage::available(&state.ranges, first.1, first.1 + 1))
+            })
+        })
+    });
+    service.release(&lease.id)?;
+    wait_until(|| {
+        service.shared.state.lock().is_ok_and(|s| {
+            s.assets
+                .values()
+                .all(|a| !a.running.load(Ordering::Acquire))
+        })
+    });
+    let downloaded = service.usage().downloaded_bytes;
+    assert!(downloaded > 0 && downloaded < fixture.bytes.len() as u64);
+    // Read persisted intervals, not a prefix inferred from downloaded byte count.
+    let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        service.shared.root.join(&key).join("manifest.json"),
+    )?)?;
+    let durable: Vec<(u64, u64)> = serde_json::from_value(manifest["ranges"].clone())?;
+    // Cancellation can race checkpoint completion: the validated chunk is safe
+    // on disk, but is deliberately not published to the canceled live session.
+    // Recovery trusts the manifest, not the live progress snapshot.
+    let durable_bytes: u64 = durable.iter().map(|&(start, end)| end - start).sum();
+    assert!(durable_bytes >= downloaded);
+    assert!(durable_bytes < fixture.bytes.len() as u64);
+    assert!(durable.iter().all(|&(s, e)| e <= first.0 || s >= first.1));
+    assert!(durable.iter().any(|&(s, _)| s >= first.1));
+    // Late successful upstream responses belong to the canceled generation and
+    // must not become durable after the acquisition worker has stopped.
+    let stopped_requests = fixture.requests.lock().map_err(|_| "poison")?.len();
+    fixture.gate.store(true, Ordering::Release);
+    assert!(reader.join().map_err(|_| "reader panicked")?.is_err());
+    drop(service);
+    let service = reopen(root.path(), CHUNK * 16)?;
+    assert_eq!(service.usage().downloaded_bytes, durable_bytes);
+    assert_eq!(service.usage().reserved_bytes, fixture.bytes.len() as u64);
+    let before = fixture.requests.lock().map_err(|_| "poison")?.len();
+    assert_eq!(
+        before, stopped_requests,
+        "canceled acquisition started more requests"
+    );
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    wait_until(|| {
+        service.usage().downloaded_bytes == fixture.bytes.len() as u64
+            || !service.session_errors().is_empty()
+    });
+    assert!(service.session_errors().is_empty());
+    let requests = fixture.requests.lock().map_err(|_| "poison")?.clone();
+    assert!(
+        requests[before..]
+            .iter()
+            .all(|&(start, end)| { durable.iter().all(|&(s, e)| end <= s || start >= e) })
+    );
+    assert_eq!(
+        reqwest::blocking::get(&lease.url)?.bytes()?.as_ref(),
+        fixture.bytes.as_slice()
+    );
+    service.release(&lease.id)?;
+    Ok(())
+}
+
+#[test]
+fn adaptive_two_distant_readers_both_make_exact_progress() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = tempfile::tempdir()?;
+    let fixture = ParallelFixture::start((CHUNK * 12 + 19) as usize, 2)?;
+    let service = service(root.path(), CHUNK * 16);
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    wait_until(|| {
+        !fixture
+            .requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+    });
+    let tail = fixture.bytes.len() as u64 - 128 * 1024;
+    let (ready, pending) = std::sync::mpsc::channel();
+    let readers = [0, tail].map(|start| {
+        let url = lease.url.clone();
+        let ready = ready.clone();
+        std::thread::spawn(move || -> Result<Vec<u8>, String> {
+            let response = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .map_err(|e| e.to_string())?
+                .get(url)
+                .header("Range", format!("bytes={start}-{}", start + 65535))
+                .send()
+                .map_err(|e| e.to_string())?;
+            assert_eq!(response.status(), 206);
+            ready.send(()).map_err(|e| e.to_string())?;
+            Ok(response.bytes().map_err(|e| e.to_string())?.to_vec())
+        })
+    });
+    // Both loopback responses have started while origin bodies remain gated.
+    // Fairness need not cancel the first reader to schedule the distant one.
+    for _ in 0..2 {
+        pending.recv_timeout(Duration::from_secs(30))?;
+    }
+    fixture.gate.store(true, Ordering::Release);
+    for (reader, start) in readers.into_iter().zip([0, tail]) {
+        assert_eq!(
+            reader.join().map_err(|_| "reader panicked")??,
+            fixture.bytes[start as usize..start as usize + 65536]
+        );
+    }
+    assert!(service.session_errors().is_empty());
+    service.release(&lease.id)?;
+    Ok(())
+}
+
+#[test]
+fn adaptive_multiple_services_share_global_request_bound() -> Result<(), Box<dyn std::error::Error>>
+{
+    // Other tests consume the process-global pool; saturate a fresh process so
+    // unrelated held fixtures cannot force request timeouts during this test.
+    if !crate::providers::test_logging::isolated(
+        module_path!(),
+        "adaptive_multiple_services_share_global_request_bound",
+    ) {
+        return Ok(());
+    }
+    let roots = [tempfile::tempdir()?, tempfile::tempdir()?];
+    let fixture = ParallelFixture::start((CHUNK * 4 + 17) as usize, 6)?;
+    let services = roots
+        .each_ref()
+        .map(|root| service(root.path(), CHUNK * 40));
+    let mut leases = Vec::new();
+    for (index, service) in services.iter().enumerate() {
+        for asset in 0..6 {
+            let mut resolved = fixture.resolved();
+            resolved.identity.file_path = format!("{index}-{asset}.mp4");
+            let mut url = fixture.url.clone();
+            url.set_path(&format!("/{index}-{asset}"));
+            resolved.url = SensitiveUrl::for_test(url);
+            let next = resolved.clone();
+            leases.push((
+                index,
+                service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?,
+            ));
+        }
+    }
+    let mut readers = Vec::new();
+    for (_, lease) in &leases {
+        let url = lease.url.clone();
+        let expected = fixture.bytes.clone();
+        readers.push(std::thread::spawn(move || -> Result<(), String> {
+            let response = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(45))
+                .build()
+                .map_err(|e| e.to_string())?
+                .get(url)
+                .send()
+                .map_err(|e| e.to_string())?;
+            assert_eq!(response.status(), 200);
+            let bytes = response.bytes().map_err(|e| e.to_string())?;
+            assert_eq!(bytes.as_ref(), expected.as_slice());
+            Ok(())
+        }));
+    }
+    wait_until(|| {
+        services.iter().all(|service| {
+            service.shared.state.lock().is_ok_and(|state| {
+                state.assets.values().all(|asset| {
+                    asset
+                        .state
+                        .lock()
+                        .is_ok_and(|state| state.priority == Some(0))
+                })
+            })
+        })
+    });
+    fixture.tail_gate.store(true, Ordering::Release);
+    // Twelve demanding readers can each schedule parallel ranges, but the
+    // process-wide permit pool must stop the origin at sixteen held requests.
+    wait_until(|| fixture.peak.load(Ordering::Acquire) >= 16);
+    assert_eq!(fixture.peak.load(Ordering::Acquire), 16);
+    fixture.gate.store(true, Ordering::Release);
+    wait_until(|| {
+        services.iter().all(|service| {
+            service.usage().downloaded_bytes == fixture.bytes.len() as u64 * 6
+                || !service.session_errors().is_empty()
+        })
+    });
+    assert!(fixture.peak.load(Ordering::Acquire) <= 16);
+    for service in &services {
+        assert!(service.session_errors().is_empty());
+        assert_eq!(
+            service.usage().reserved_bytes,
+            fixture.bytes.len() as u64 * 6
+        );
+    }
+    for reader in readers {
+        reader.join().map_err(|_| "reader panicked")??;
+    }
+    for (index, lease) in leases {
+        services[index].release(&lease.id)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn adaptive_seek_discards_old_success_before_publishing_new_demand()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let fixture = ParallelFixture::start((CHUNK * 8) as usize, 7)?;
+    let service = service(root.path(), CHUNK * 10);
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    wait_until(|| {
+        !fixture
+            .requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+    });
+    let tail = CHUNK * 7 + 123;
+    let url = lease.url.clone();
+    let reader = std::thread::spawn(move || -> Result<Vec<u8>, String> {
+        let response = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| e.to_string())?
+            .get(url)
+            .header("Range", format!("bytes={tail}-"))
+            .send()
+            .map_err(|e| e.to_string())?;
+        assert_eq!(response.status(), 206);
+        Ok(response.bytes().map_err(|e| e.to_string())?.to_vec())
+    });
+    wait_until(|| {
+        service.shared.state.lock().is_ok_and(|state| {
+            state.assets.values().any(|asset| {
+                asset
+                    .state
+                    .lock()
+                    .is_ok_and(|state| state.priority == Some(tail))
+            })
+        })
+    });
+    // Deliver a valid old response only after the far seek changed demand.
+    // New-demand responses stay gated, making stale publication observable.
+    fixture.gate.store(true, Ordering::Release);
+    wait_until(|| {
+        fixture
+            .requests
+            .lock()
+            .is_ok_and(|requests| requests.iter().any(|&(start, _)| start == tail))
+    });
+    assert_eq!(service.usage().downloaded_bytes, 0);
+    assert!(service.session_errors().is_empty());
+    fixture.tail_gate.store(true, Ordering::Release);
+    assert_eq!(
+        reader.join().map_err(|_| "reader panicked")??,
+        fixture.bytes[tail as usize..]
+    );
+    wait_until(|| {
+        service.usage().downloaded_bytes == fixture.bytes.len() as u64
+            || !service.session_errors().is_empty()
+    });
+    assert!(service.session_errors().is_empty());
+    assert_eq!(
+        reqwest::blocking::get(&lease.url)?.bytes()?.as_ref(),
+        fixture.bytes.as_slice()
+    );
+    service.release(&lease.id)?;
+    Ok(())
+}
+
+#[test]
+fn adaptive_oversized_retry_after_stops_without_early_retry()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let fixture = ParallelFixture::start(128 * 1024, 4)?;
+    let service = service(root.path(), CHUNK);
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    wait_until(|| !service.session_errors().is_empty());
+    assert_eq!(
+        service.session_errors(),
+        vec![(lease.id.clone(), MediaError::RetryAfterExceedsBudget)]
+    );
+    assert_eq!(fixture.requests.lock().map_err(|_| "poison")?.len(), 1);
+    assert_eq!(service.usage().downloaded_bytes, 0);
+    assert_eq!(service.usage().reserved_bytes, fixture.bytes.len() as u64);
+    service.release(&lease.id)?;
+    Ok(())
+}
+
+#[test]
+fn adaptive_stable_strong_etag_is_sent_as_if_range() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let fixture = ParallelFixture::start((CHUNK * 3 + 17) as usize, 10)?;
+    let service = service(root.path(), CHUNK * 4);
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    wait_until(|| {
+        service.usage().downloaded_bytes == fixture.bytes.len() as u64
+            || !service.session_errors().is_empty()
+    });
+    assert!(service.session_errors().is_empty());
+    let validators = fixture.validators.lock().map_err(|_| "poison")?;
+    assert!(validators.len() > 1);
+    assert_eq!(validators[0], (0, None));
+    assert!(
+        validators[1..]
+            .iter()
+            .all(|(_, validator)| validator.as_deref() == Some("\"stable-v1\""))
+    );
+    drop(validators);
+    assert_eq!(
+        reqwest::blocking::get(&lease.url)?.bytes()?.as_ref(),
+        fixture.bytes.as_slice()
+    );
+    service.release(&lease.id)?;
+    Ok(())
+}
+
+#[test]
+fn adaptive_changed_or_missing_bound_etag_never_commits_changed_body()
+-> Result<(), Box<dyn std::error::Error>> {
+    for mode in [11, 12, 13] {
+        let root = tempfile::tempdir()?;
+        let fixture = ParallelFixture::start((CHUNK * 3 + 17) as usize, mode)?;
+        let service = service(root.path(), CHUNK * 4);
+        let resolved = fixture.resolved();
+        let key = storage::key(&resolved.identity);
+        let next = resolved.clone();
+        let renewals = Arc::new(AtomicUsize::new(0));
+        let renewed = renewals.clone();
+        let lease = service.register_remote(
+            resolved,
+            Arc::new(move || {
+                renewed.fetch_add(1, Ordering::AcqRel);
+                Ok(next.clone())
+            }),
+        )?;
+        wait_until(|| !service.session_errors().is_empty());
+        assert_eq!(
+            service.session_errors(),
+            vec![(lease.id.clone(), MediaError::IdentityMismatch)],
+            "mode {mode}"
+        );
+        let first_end = fixture.requests.lock().map_err(|_| "poison")?[0].1;
+        assert_eq!(service.usage().downloaded_bytes, first_end);
+        let validators = fixture.validators.lock().map_err(|_| "poison")?;
+        assert!(
+            validators[1..]
+                .iter()
+                .all(|(_, validator)| validator.as_deref() == Some("\"stable-v1\""))
+        );
+        drop(validators);
+        let payload = std::fs::read(service.shared.root.join(key).join("payload"))?;
+        assert_eq!(
+            &payload[..first_end as usize],
+            &fixture.bytes[..first_end as usize]
+        );
+        assert!(payload[first_end as usize..].iter().all(|&byte| byte == 0));
+        if mode == 13 {
+            assert_eq!(renewals.load(Ordering::Acquire), 1);
+        }
+        service.release(&lease.id)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn adaptive_idle_background_keeps_small_request_width() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let fixture = ParallelFixture::start((CHUNK * 6 + 17) as usize, 0)?;
+    let service = service(root.path(), CHUNK * 8);
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    wait_until(|| {
+        service.usage().downloaded_bytes == fixture.bytes.len() as u64
+            || !service.session_errors().is_empty()
+    });
+    assert!(service.session_errors().is_empty());
+    assert!((1..=2).contains(&fixture.peak.load(Ordering::Acquire)));
+    assert_eq!(
+        reqwest::blocking::get(&lease.url)?.bytes()?.as_ref(),
+        fixture.bytes.as_slice()
+    );
+    service.release(&lease.id)?;
+    Ok(())
+}
+
+#[test]
+fn adaptive_stale_generation_preserves_throttle_minimum_and_overbudget_stop()
+-> Result<(), Box<dyn std::error::Error>> {
+    for mode in [14, 15, 16] {
+        let root = tempfile::tempdir()?;
+        let fixture = ParallelFixture::start(128 * 1024, mode)?;
+        let service = service(root.path(), CHUNK);
+        let resolved = fixture.resolved();
+        let key = storage::key(&resolved.identity);
+        let next = resolved.clone();
+        let lease = service.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+        wait_until(|| {
+            !fixture
+                .requests
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        });
+        // The old request is inside send(), gated before response headers.
+        // Reproduce a far-seek generation change without introducing a second
+        // reader or depending on how quickly the loopback reader is scheduled.
+        {
+            let shared = service.shared.state.lock().map_err(|_| "poison")?;
+            let asset = shared.assets.get(&key).ok_or("missing asset")?;
+            let mut state = asset.state.lock().map_err(|_| "poison")?;
+            state.generation = state.generation.wrapping_add(1);
+            drop(state);
+            asset.changed.notify_all();
+        }
+        fixture.gate.store(true, Ordering::Release);
+        wait_until(|| {
+            service.usage().downloaded_bytes == fixture.bytes.len() as u64
+                || !service.session_errors().is_empty()
+        });
+        let sent = fixture
+            .throttle_sent
+            .lock()
+            .map_err(|_| "poison")?
+            .ok_or("missing throttle response")?;
+        let dispatches = fixture.dispatches.lock().map_err(|_| "poison")?;
+        if mode == 16 {
+            assert_eq!(
+                service.session_errors(),
+                vec![(lease.id.clone(), MediaError::RetryAfterExceedsBudget)]
+            );
+            assert_eq!(
+                dispatches.len(),
+                1,
+                "oversized stale throttle dispatched again"
+            );
+            assert_eq!(service.usage().downloaded_bytes, 0);
+        } else {
+            assert!(service.session_errors().is_empty());
+            assert!(dispatches.len() >= 2);
+            // This is the server's explicit minimum, not a throughput target:
+            // the next request must not arrive before the old 429/503 expires.
+            assert!(
+                dispatches[1].duration_since(sent) >= Duration::from_secs(1),
+                "mode {mode}: stale generation bypassed Retry-After"
+            );
+        }
+        drop(dispatches);
+        assert_eq!(service.usage().reserved_bytes, fixture.bytes.len() as u64);
+        service.release(&lease.id)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn completed_cached_asset_with_expired_url_never_renews() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = tempfile::tempdir()?;
+    let fixture = Fixture::start(128 * 1024 + 17, 0)?;
+    let media = service(root.path(), CHUNK);
+    let resolved = fixture.resolved();
+    let next = resolved.clone();
+    let lease = media.register_remote(resolved, Arc::new(move || Ok(next.clone())))?;
+    wait_until(|| {
+        media.usage().downloaded_bytes == fixture.bytes.len() as u64
+            || !media.session_errors().is_empty()
+    });
+    assert!(media.session_errors().is_empty());
+    media.release(&lease.id)?;
+    drop(media);
+    let media = reopen(root.path(), CHUNK)?;
+    assert_eq!(media.usage().downloaded_bytes, fixture.bytes.len() as u64);
+    let requests = fixture.calls.load(Ordering::Acquire);
+    let renewals = Arc::new(AtomicUsize::new(0));
+    let called = renewals.clone();
+    let mut resolved = fixture.resolved();
+    resolved.expires_at = Some(0);
+    let lease = media.register_remote(
+        resolved,
+        Arc::new(move || {
+            called.fetch_add(1, Ordering::AcqRel);
+            Err(MediaError::Upstream)
+        }),
+    )?;
+    wait_until(|| {
+        media.shared.state.lock().is_ok_and(|state| {
+            state
+                .assets
+                .values()
+                .all(|asset| !asset.running.load(Ordering::Acquire))
+        })
+    });
+    assert_eq!(renewals.load(Ordering::Acquire), 0);
+    assert!(media.session_errors().is_empty());
+    assert_eq!(fixture.calls.load(Ordering::Acquire), requests);
+    let response = reqwest::blocking::get(&lease.url)?;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.bytes()?.as_ref(), fixture.bytes.as_slice());
+    assert_eq!(media.usage().reserved_bytes, fixture.bytes.len() as u64);
+    media.release(&lease.id)?;
     Ok(())
 }

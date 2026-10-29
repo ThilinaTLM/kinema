@@ -1,5 +1,6 @@
 //! Owned, loopback-only media leases and durable, quota-reserved acquisition.
 //! All public methods performing I/O must be called from a service worker, not UI rendering.
+mod adaptive;
 mod diagnostics;
 #[cfg(test)]
 mod remote_tests;
@@ -47,6 +48,7 @@ pub enum MediaError {
     Storage,
     UnsupportedRange,
     Upstream,
+    RetryAfterExceedsBudget,
     ConnectTimeout,
     RequestTimeout,
     BodyRead,
@@ -64,6 +66,7 @@ impl fmt::Display for MediaError {
             Self::UnknownSize => "Media size is unknown",
             Self::Storage => "Media storage operation failed",
             Self::UnsupportedRange => "Upstream does not support validated byte ranges",
+            Self::RetryAfterExceedsBudget => "Media provider retry delay cannot be honored within the service budget",
             Self::Upstream => "Media provider request failed",
             Self::ConnectTimeout => "Media connection timed out during DNS, TCP, or TLS setup",
             Self::RequestTimeout => "Media request timed out before response headers arrived",
@@ -136,6 +139,8 @@ struct Asset {
 struct AssetState {
     ranges: RangeSet,
     priority: Option<u64>,
+    generation: u64,
+    readers: adaptive::Readers,
     error: Option<MediaError>,
 }
 #[derive(Clone)]

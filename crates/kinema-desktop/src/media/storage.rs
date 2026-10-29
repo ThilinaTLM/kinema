@@ -1,6 +1,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Write;
 
 #[derive(Serialize, Deserialize)]
 struct Manifest {
@@ -204,6 +204,8 @@ pub(super) fn open(root: &Path) -> Result<(File, HashMap<String, Arc<Asset>>), M
                     state: Mutex::new(AssetState {
                         ranges,
                         priority: None,
+                        generation: 0,
+                        readers: adaptive::Readers::default(),
                         error: None,
                     }),
                     changed: Condvar::new(),
@@ -266,6 +268,8 @@ pub(super) fn create(
                 state: Mutex::new(AssetState {
                     ranges: RangeSet::new(),
                     priority: None,
+                    generation: 0,
+                    readers: adaptive::Readers::default(),
                     error: None,
                 }),
                 changed: Condvar::new(),
@@ -325,6 +329,8 @@ pub(super) fn failed_asset(root: &Path, key: &str, identity: MediaIdentity) -> O
         state: Mutex::new(AssetState {
             ranges: RangeSet::new(),
             priority: None,
+            generation: 0,
+            readers: adaptive::Readers::default(),
             error: Some(MediaError::Storage),
         }),
         changed: Condvar::new(),
@@ -408,7 +414,11 @@ fn missing(ranges: &RangeSet, size: u64, preferred: u64) -> Option<(u64, u64)> {
 // A reader republishes its offset while an in-flight range is unavailable.
 // Once that offset is durable the stale hint must not steer background prefetch
 // beyond it: only an actually missing byte represents outstanding reader demand.
-fn next_range(ranges: &RangeSet, size: u64, priority: Option<u64>) -> Option<(u64, u64)> {
+pub(super) fn next_range(
+    ranges: &RangeSet,
+    size: u64,
+    priority: Option<u64>,
+) -> Option<(u64, u64)> {
     priority
         .filter(|&start| start < size && !available(ranges, start, start + 1))
         .and_then(|start| missing(ranges, size, start))
@@ -423,16 +433,16 @@ pub(super) fn check_payload(asset: &Asset) -> Result<(), MediaError> {
 const ACQUISITION_REPORT_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
-struct AcquisitionTimings {
-    request_headers: Duration,
-    body_read: Duration,
-    payload_write_sync: Duration,
-    checkpoint: Duration,
-    cycle: Duration,
+pub(super) struct AcquisitionTimings {
+    pub(super) request_headers: Duration,
+    pub(super) body_read: Duration,
+    pub(super) payload_write_sync: Duration,
+    pub(super) checkpoint: Duration,
+    pub(super) cycle: Duration,
 }
 
 #[derive(Default)]
-struct AcquisitionReport {
+pub(super) struct AcquisitionReport {
     bytes: u64,
     requests: u64,
     elapsed: Duration,
@@ -440,13 +450,13 @@ struct AcquisitionReport {
     cycle_max: Duration,
 }
 
-struct AcquisitionTelemetry {
+pub(super) struct AcquisitionTelemetry {
     started: std::time::Instant,
     interval: AcquisitionReport,
 }
 
 impl AcquisitionTelemetry {
-    fn new(started: std::time::Instant) -> Self {
+    pub(super) fn new(started: std::time::Instant) -> Self {
         Self {
             started,
             interval: AcquisitionReport::default(),
@@ -456,7 +466,7 @@ impl AcquisitionTelemetry {
     // Only fully validated, durable chunks contribute. Failed/retried requests are
     // not samples. Keep constant-size interval totals, never per-chunk history.
     // Check on completion only: no timer, catch-up reports, or short tail flush.
-    fn record(
+    pub(super) fn record(
         &mut self,
         now: std::time::Instant,
         bytes: u64,
@@ -481,7 +491,7 @@ impl AcquisitionTelemetry {
 }
 
 impl AcquisitionReport {
-    fn log(&self) {
+    pub(super) fn log(&self) {
         let mean_ms = |total: Duration| total.as_secs_f64() * 1000.0 / self.requests as f64;
         tracing::info!(
             target: "kinema_desktop::media_performance",
@@ -517,214 +527,17 @@ pub(super) fn acquire(
 fn acquire_inner(
     shared: &Shared,
     asset: &Asset,
-    mut resolved: ResolvedMedia,
+    resolved: ResolvedMedia,
     renew: Renew,
     observation: &mut Option<diagnostics::Observation>,
 ) -> Result<(), MediaError> {
-    // Snapshot opt-in once per acquisition; no environment reads on the hot path.
-    let mut telemetry = (std::env::var_os("KINEMA_PLAYER_DIAGNOSTICS").as_deref()
-        == Some(std::ffi::OsStr::new("1")))
-    .then(|| AcquisitionTelemetry::new(std::time::Instant::now()));
-    check_payload(asset)?;
-    let mut payload = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(asset.dir.join("payload"))?;
-    let mut renewals = 0;
-    let mut link_age = std::time::Instant::now();
-    let mut request_id = 0u64;
-    loop {
-        if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
-            return Err(MediaError::Canceled);
-        }
-        let cycle_started = telemetry.as_ref().map(|_| std::time::Instant::now());
-        let range = {
-            let mut state = asset.state.lock().map_err(|_| MediaError::Storage)?;
-            let priority = state.priority.take();
-            next_range(&state.ranges, asset.identity.size, priority)
-        };
-        let Some((start, end)) = range else {
-            return Ok(());
-        };
-        if let Some(o) = observation.as_ref() {
-            o.range(start, end, asset.identity.size);
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| {
-                tracing::warn!(
-                    category = "clock_before_epoch",
-                    "Media expiry clock unavailable"
-                )
-            })
-            .ok()
-            .map(|now| now.as_secs());
-        if needs_renewal(resolved.expires_at, link_age.elapsed(), now) {
-            if let Some(o) = observation.as_ref() {
-                o.phase(diagnostics::Phase::Renewal, request_id);
-            }
-            renew_media(&mut resolved, &renew, &mut renewals, &asset.identity)?;
-            link_age = std::time::Instant::now();
-        }
-        if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
-            return Err(MediaError::Canceled);
-        }
-        request_id = request_id.saturating_add(1);
-        if let Some(o) = observation.as_ref() {
-            o.phase(diagnostics::Phase::Headers, request_id);
-        }
-        let request_started = std::time::Instant::now();
-        let mut response = shared
-            .client
-            .get(resolved.url.as_url().clone())
-            .header(reqwest::header::RANGE, format!("bytes={start}-{}", end - 1))
-            .header(reqwest::header::ACCEPT_ENCODING, "identity")
-            .send()
-            .map_err(|error| {
-                tracing::warn!(
-                    kind = crate::logging::http_error_kind(&error),
-                    duration_ms = request_started.elapsed().as_millis() as u64,
-                    "Media range transport failed"
-                );
-                request_error(error)
-            })?;
-        let request_headers = telemetry.as_ref().map(|_| request_started.elapsed());
-        tracing::trace!(
-            status = response.status().as_u16(),
-            bytes = end - start,
-            duration_ms = request_started.elapsed().as_millis() as u64,
-            "Media upstream range headers"
-        );
-        if !response.status().is_success() {
-            tracing::warn!(
-                status = response.status().as_u16(),
-                duration_ms = request_started.elapsed().as_millis() as u64,
-                "Media upstream range rejected"
-            );
-        }
-        if shared.canceled.load(Ordering::Relaxed) || asset.cancel.load(Ordering::Relaxed) {
-            return Err(MediaError::Canceled);
-        }
-        if matches!(response.status().as_u16(), 401 | 403) {
-            if let Some(o) = observation.as_ref() {
-                o.phase(diagnostics::Phase::Renewal, request_id);
-            }
-            renew_media(&mut resolved, &renew, &mut renewals, &asset.identity)?;
-            link_age = std::time::Instant::now();
-            continue;
-        }
-        if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-            tracing::warn!(
-                status = response.status().as_u16(),
-                category = "range_status",
-                "Media upstream validation failed"
-            );
-            return Err(MediaError::UnsupportedRange);
-        }
-        let expected = format!("bytes {start}-{}/{}", end - 1, asset.identity.size);
-        if response
-            .headers()
-            .get(reqwest::header::CONTENT_RANGE)
-            .and_then(|v| v.to_str().ok())
-            != Some(expected.as_str())
-            || response.content_length() != Some(end - start)
-            || response
-                .headers()
-                .get(reqwest::header::CONTENT_ENCODING)
-                .is_some_and(|v| v != "identity")
-        {
-            tracing::warn!(category = "identity_mismatch", "Media validation failed");
-            return Err(MediaError::IdentityMismatch);
-        }
-        if let Some(o) = observation.as_ref() {
-            o.phase(diagnostics::Phase::Body, request_id);
-        }
-        let body_started = telemetry.as_ref().map(|_| std::time::Instant::now());
-        // Reserve the validation probe byte too, avoiding capacity doubling if
-        // an invalid response yields one byte beyond the requested range.
-        let mut bytes = Vec::with_capacity((end - start + 1) as usize);
-        response
-            .by_ref()
-            .take(end - start + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|error| { tracing::warn!(io_kind = ?error.kind(), duration_ms = request_started.elapsed().as_millis() as u64, "Media upstream body read failed"); MediaError::BodyRead })?;
-        let body_read = body_started.map(|started| started.elapsed());
-        if bytes.len() as u64 != end - start {
-            tracing::warn!(
-                category = "body_length",
-                expected_bytes = end - start,
-                actual_bytes = bytes.len(),
-                "Media upstream validation failed"
-            );
-            return Err(MediaError::BodyRead);
-        }
-        if asset.cancel.load(Ordering::Relaxed) || shared.canceled.load(Ordering::Relaxed) {
-            return Err(MediaError::Canceled);
-        }
-        if let Some(o) = observation.as_ref() {
-            o.phase(diagnostics::Phase::PayloadSync, request_id);
-        }
-        let payload_started = telemetry.as_ref().map(|_| std::time::Instant::now());
-        payload.seek(SeekFrom::Start(start))?;
-        payload.write_all(&bytes)?;
-        payload.sync_data()?;
-        let payload_write_sync = payload_started.map(|started| started.elapsed());
-        let mut ranges = asset
-            .state
-            .lock()
-            .map_err(|_| MediaError::Storage)?
-            .ranges
-            .clone();
-        ranges.insert(ByteRange::new(start, end).ok_or(MediaError::Storage)?);
-        let durable: Vec<_> = ranges
-            .ranges()
-            .iter()
-            .map(|r| (r.start(), r.end()))
-            .collect();
-        if let Some(o) = observation.as_ref() {
-            o.phase(diagnostics::Phase::Checkpoint, request_id);
-        }
-        let checkpoint_started = telemetry.as_ref().map(|_| std::time::Instant::now());
-        checkpoint(asset, &durable)?;
-        let checkpoint_time = checkpoint_started.map(|started| started.elapsed());
-        asset.state.lock().map_err(|_| MediaError::Storage)?.ranges = ranges;
-        renewals = 0;
-        asset.changed.notify_all();
-        if let Some(o) = observation.as_mut() {
-            o.first_durable(
-                bytes.len() as u64,
-                request_id,
-                [
-                    request_headers.unwrap_or_default(),
-                    body_read.unwrap_or_default(),
-                    payload_write_sync.unwrap_or_default(),
-                    checkpoint_time.unwrap_or_default(),
-                ],
-            );
-        }
-        if let (Some(telemetry), Some(cycle_started)) = (&mut telemetry, cycle_started) {
-            let now = std::time::Instant::now();
-            if let Some(report) = telemetry.record(
-                now,
-                bytes.len() as u64,
-                AcquisitionTimings {
-                    request_headers: request_headers.unwrap_or_default(),
-                    body_read: body_read.unwrap_or_default(),
-                    payload_write_sync: payload_write_sync.unwrap_or_default(),
-                    checkpoint: checkpoint_time.unwrap_or_default(),
-                    cycle: now.duration_since(cycle_started),
-                },
-            ) {
-                report.log();
-            }
-        }
-    }
+    super::adaptive::acquire(shared, asset, resolved, renew, observation)
 }
 pub(super) fn needs_renewal(expires_at: Option<u64>, age: Duration, now: Option<u64>) -> bool {
     age >= Duration::from_secs(300)
         || expires_at.is_some_and(|expiry| now.is_none_or(|now| now.saturating_add(5) >= expiry))
 }
-fn renew_media(
+pub(super) fn renew_media(
     resolved: &mut ResolvedMedia,
     renew: &Renew,
     attempts: &mut u32,
