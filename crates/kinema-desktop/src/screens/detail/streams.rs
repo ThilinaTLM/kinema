@@ -192,18 +192,35 @@ impl Detail {
     /// default (resume a shown checkpoint unless Play from beginning is pending).
     fn play_stream_row(&mut self, i: usize, from_beginning: Option<bool>, cx: &mut Context<Self>) {
         self.select_stream_row(i, cx);
-        if let Some(select) = &self.stream_page.play_service {
-            let kind = *select.read(cx).value();
-            // PlaySheet uses the coordinator's current service; no credential leaves the vault.
-            self.coordinator.update(cx, |c, _| {
-                if let Some(settings) = &mut c.settings {
-                    settings.debrid = kind;
-                }
-            });
-        }
+        let switch = self
+            .stream_page
+            .play_service
+            .as_ref()
+            .map(|select| *select.read(cx).value())
+            .and_then(|kind| self.activate_debrid(kind, cx));
         let intent = self.play_intent(from_beginning, cx);
         self.start_over_requested = false;
-        self.open_stream(i, intent, cx);
+        self.open_stream(i, intent, switch, cx);
+    }
+    /// Makes `kind` the worker's active debrid account, which preparation reads.
+    /// Returns the admitted save generation the play sheet must outlast; a
+    /// UI-only settings edit would leave the worker preparing with the old account.
+    pub(super) fn activate_debrid(
+        &mut self,
+        kind: DebridKind,
+        cx: &mut Context<Self>,
+    ) -> Option<u64> {
+        let mut settings = self.coordinator.read(cx).settings.clone()?;
+        if settings.debrid == kind {
+            return None;
+        }
+        settings.debrid = kind;
+        self.coordinator.update(cx, |c, cx| {
+            let generation =
+                c.command(crate::app::AppAction::SaveSettings(settings.clone()), cx)?;
+            c.settings = Some(settings);
+            Some(generation)
+        })
     }
     fn stream_row(
         &self,

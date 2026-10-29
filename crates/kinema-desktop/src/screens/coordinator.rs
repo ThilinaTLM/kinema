@@ -239,6 +239,7 @@ pub struct AppCoordinator {
     app: Result<AppWorker, String>,
     tracker: Tracker,
     pub settings: Option<Settings>,
+    accepted_settings: Option<Settings>,
     pub tmdb_credential: Option<CredentialState>,
     pub credentials: Vec<(kinema_core::sources::DebridKind, CredentialState)>,
     pub usage: Option<crate::media::UsageSnapshot>,
@@ -331,6 +332,7 @@ impl AppCoordinator {
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
             settings: None,
+            accepted_settings: None,
             tmdb_credential: None,
             credentials: Vec::new(),
             usage: None,
@@ -421,6 +423,7 @@ impl AppCoordinator {
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
             settings: Some(Settings::default()),
+            accepted_settings: Some(Settings::default()),
             tmdb_credential: None,
             credentials: Vec::new(),
             usage: None,
@@ -1163,6 +1166,7 @@ impl AppCoordinator {
                     .as_ref()
                     .is_none_or(|s| s.metadata_priority != settings.metadata_priority);
                 self.settings = Some(settings.clone());
+                self.accepted_settings = Some(settings.clone());
                 self.credentials = credentials.clone();
                 self.tmdb_credential = Some(tmdb_credential.clone());
                 if reload || self.provider() != before {
@@ -1176,6 +1180,14 @@ impl AppCoordinator {
             AppOutcome::Failed { message } => {
                 tracing::warn!(message, "UI notice displayed");
                 self.notice = Some(message.clone());
+                if resolved
+                    .as_ref()
+                    .is_some_and(|r| r.pending == Some(Pending::Settings))
+                    && let Some(accepted) = &self.accepted_settings
+                {
+                    // Restore so a retried switch is saved again instead of skipped.
+                    self.settings = Some(accepted.clone());
+                }
                 if resolved
                     .as_ref()
                     .is_some_and(|r| r.pending == Some(Pending::Load))
@@ -2031,6 +2043,18 @@ impl AppCoordinator {
     pub(crate) fn fixture_pending_launch(&mut self, cx: &mut Context<Self>) {
         self.tracker.issue(Pending::Play { remote: false });
         cx.notify();
+    }
+    pub(crate) fn fixture_apply_app(&mut self, event: AppEvent, cx: &mut Context<Self>) {
+        self.apply_app(event, cx);
+    }
+    pub(crate) fn fixture_attach_mailbox(&mut self) {
+        self.app = Ok(AppWorker::test_mailbox());
+    }
+    pub(crate) fn fixture_drain_requests(&self) -> Vec<crate::app::AppCommand> {
+        self.app
+            .as_ref()
+            .map(AppWorker::test_drain_requests)
+            .unwrap_or_default()
     }
 }
 

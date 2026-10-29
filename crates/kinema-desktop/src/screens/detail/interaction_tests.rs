@@ -425,3 +425,54 @@ fn stream_pointer_selection_uses_a_wide_drawer_and_narrow_clicks_play(cx: &mut T
         })
         .unwrap_or_else(|e| panic!("narrow click:{e}"));
 }
+#[gpui::test]
+fn failed_debrid_switch_is_saved_again_on_the_next_play(cx: &mut TestAppContext) {
+    use crate::app::{AppAction, AppEvent, AppOutcome};
+    use kinema_core::sources::DebridKind;
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
+    let title = title(false);
+    let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+    coordinator.update(cx, |c, _| c.fixture_attach_mailbox());
+    let window =
+        cx.add_window(|_, cx| Detail::fixture(coordinator.clone(), title, false, None, cx));
+    let saves = |cx: &mut TestAppContext| {
+        coordinator.update(cx, |c, _| {
+            c.fixture_drain_requests()
+                .into_iter()
+                .filter(|r| {
+                    matches!(&r.action, AppAction::SaveSettings(s) if s.debrid == DebridKind::AllDebrid)
+                })
+                .map(|r| r.generation)
+                .collect::<Vec<_>>()
+        })
+    };
+    let activate = |cx: &mut TestAppContext| {
+        window
+            .update(cx, |view, _, cx| {
+                view.activate_debrid(DebridKind::AllDebrid, cx)
+            })
+            .unwrap_or_else(|e| panic!("activate:{e}"))
+    };
+    let first = activate(cx).unwrap_or_else(|| panic!("switch not saved"));
+    assert_eq!(saves(cx), [first]);
+    coordinator.update(cx, |c, cx| {
+        c.fixture_apply_app(
+            AppEvent {
+                generation: first,
+                outcome: AppOutcome::Failed {
+                    message: "settings unavailable".into(),
+                },
+            },
+            cx,
+        );
+        assert_eq!(
+            c.settings.as_ref().map(|s| s.debrid),
+            Some(DebridKind::RealDebrid)
+        );
+    });
+    let retry = activate(cx).unwrap_or_else(|| panic!("retry skipped the save"));
+    assert_eq!(saves(cx), [retry]);
+}
