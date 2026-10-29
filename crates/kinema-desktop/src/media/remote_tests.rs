@@ -784,6 +784,68 @@ fn unavailable_range_reader_aborts_on_release_or_upstream_failure()
 const PRESSURE_WARMUPS: usize = 6;
 type RecordedValidators = Arc<Mutex<Vec<(u64, Option<String>)>>>;
 
+// Capture actual outstanding handlers, not an offset inferred from arrival order.
+// A wave may straddle the warmup count; it is never split at that count.
+// Arrivals saturate; pending/captured storage is bounded by active fetches (four).
+#[derive(Default)]
+struct GatedWave {
+    arrivals: usize,
+    pending: Vec<(u64, u64)>,
+    captured: Option<Vec<(u64, u64)>>,
+    selected: Option<(u64, u64)>,
+}
+impl GatedWave {
+    fn arrive(&mut self, range: (u64, u64)) {
+        self.arrivals = (self.arrivals + 1).min(PRESSURE_WARMUPS);
+        self.pending.push(range);
+        if self.arrivals == PRESSURE_WARMUPS && self.pending.len() >= 2 && self.captured.is_none() {
+            self.captured = Some(self.pending.clone());
+        }
+    }
+
+    fn select(&mut self) -> Option<(u64, u64)> {
+        let selected = self.captured.as_ref()?.iter().copied().min()?;
+        self.selected = Some(selected);
+        Some(selected)
+    }
+
+    fn held(&self, range: (u64, u64)) -> bool {
+        self.captured.is_some() && (self.selected.is_none() || self.selected == Some(range))
+    }
+}
+
+#[test]
+fn gated_wave_captures_reversed_arrivals_across_warmup_boundary() {
+    for reverse in [false, true] {
+        for straddles in [false, true] {
+            let mut wave = GatedWave::default();
+            let completed = if straddles {
+                PRESSURE_WARMUPS - 1
+            } else {
+                PRESSURE_WARMUPS
+            };
+            for index in 0..completed {
+                wave.arrive((index as u64, index as u64 + 1));
+                assert!(wave.captured.is_none());
+                wave.pending.clear();
+            }
+            let ranges = if reverse {
+                [(20, 30), (10, 20)]
+            } else {
+                [(10, 20), (20, 30)]
+            };
+            wave.arrive(ranges[0]);
+            assert!(wave.select().is_none());
+            wave.arrive(ranges[1]);
+            assert!(wave.held(ranges[0]) && wave.held(ranges[1]));
+            assert_eq!(wave.select(), Some((10, 20)));
+            assert!(wave.held((10, 20)));
+            assert!(!wave.held((20, 30)));
+            assert_eq!(wave.captured.as_ref().map(Vec::len), Some(2));
+        }
+    }
+}
+
 struct ParallelFixture {
     url: reqwest::Url,
     bytes: Arc<Vec<u8>>,
@@ -796,10 +858,11 @@ struct ParallelFixture {
     dispatches: Arc<Mutex<Vec<std::time::Instant>>>,
     throttle_sent: Arc<Mutex<Option<std::time::Instant>>>,
     peak: Arc<AtomicUsize>,
+    wave: Arc<Mutex<GatedWave>>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 impl ParallelFixture {
-    // 1: paced warmup, then hold lowest missing range; 2: hold all;
+    // 1: paced warmup, then test-selected outstanding wave; 2: hold all;
     // 3: fail first with 503;
     // 4: fail first with Retry-After; 5: always rate limited;
     // 6: paced per-asset warmup, then hold all subsequent ranges;
@@ -825,6 +888,8 @@ impl ParallelFixture {
         let throttle_sent = Arc::new(Mutex::new(None));
         let active = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
+        let wave = Arc::new(Mutex::new(GatedWave::default()));
+        let captured_wave = wave.clone();
         let (canceled, permitted, recorded, finished, data, maximum) = (
             stop.clone(),
             gate.clone(),
@@ -859,6 +924,7 @@ impl ParallelFixture {
                 let dispatched = dispatched.clone();
                 let throttled = throttled.clone();
                 let asset_calls = asset_calls.clone();
+                let wave = captured_wave.clone();
                 workers.push(std::thread::spawn(move || {
                     let _ = stream.set_nonblocking(false);
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
@@ -891,12 +957,9 @@ impl ParallelFixture {
                         *call += 1;
                         previous
                     };
-                    let warmup_end = {
-                        let requests = recorded.lock().unwrap_or_else(|e| e.into_inner());
-                        if requests.len() >= PRESSURE_WARMUPS {
-                            requests[..PRESSURE_WARMUPS].iter().map(|r| r.1).max().unwrap_or(u64::MAX)
-                        } else { u64::MAX }
-                    };
+                    if mode == 1 {
+                        wave.lock().unwrap_or_else(|e| e.into_inner()).arrive((start, end));
+                    }
                     if matches!(mode, 1 | 6) && asset_call == 0 {
                         while !tail_permitted.load(Ordering::Acquire) && !canceled.load(Ordering::Acquire) {
                             std::thread::sleep(Duration::from_millis(5));
@@ -905,7 +968,11 @@ impl ParallelFixture {
                     // Healthy waves spanning the controller's dwell/cooldown
                     // establish sustained pressure before we hold the next wave.
                     // This delay is a fixture input, never a speed assertion.
-                    if matches!(mode, 1 | 6) && asset_call < PRESSURE_WARMUPS {
+                    // Continue pacing unpaired mode-1 requests beyond warmup:
+                    // a singleton must finish so the coordinator can advance.
+                    if matches!(mode, 1 | 6) && asset_call < PRESSURE_WARMUPS
+                        || mode == 1 && wave.lock().unwrap_or_else(|e| e.into_inner()).captured.is_none()
+                    {
                         std::thread::sleep(Duration::from_millis(1200));
                     }
                     if matches!(mode, 14..=16) && call == 0 {
@@ -913,7 +980,18 @@ impl ParallelFixture {
                             std::thread::sleep(Duration::from_millis(5));
                         }
                     }
-                    if mode == 2 || mode == 1 && start == warmup_end || mode == 6 && asset_call >= PRESSURE_WARMUPS || mode == 7 {
+                    if mode == 1 {
+                        loop {
+                            let mut wave = wave.lock().unwrap_or_else(|e| e.into_inner());
+                            if permitted.load(Ordering::Acquire) || canceled.load(Ordering::Acquire) || !wave.held((start, end)) {
+                                wave.pending.retain(|r| *r != (start, end));
+                                break;
+                            }
+                            drop(wave);
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                    if mode == 2 || mode == 6 && asset_call >= PRESSURE_WARMUPS || mode == 7 {
                         let permitted = if mode == 7 && start > 0 { &tail_permitted } else { &permitted };
                         while !permitted.load(Ordering::Acquire)
                             && !canceled.load(Ordering::Acquire)
@@ -970,6 +1048,7 @@ impl ParallelFixture {
             dispatches,
             throttle_sent,
             peak,
+            wave,
             worker: Some(worker),
         })
     }
@@ -1025,28 +1104,34 @@ fn adaptive_parallel_out_of_order_bytes_are_exact_and_durable()
         })
     });
     fixture.tail_gate.store(true, Ordering::Release);
+    let mut selected = None;
     wait_until(|| {
-        let requests = fixture.requests.lock().unwrap_or_else(|e| e.into_inner());
-        assert!(
-            service.session_errors().is_empty(),
-            "errors: {:?}; requests: {:?}",
-            service.session_errors(),
-            requests.as_slice()
-        );
-        requests.len() >= PRESSURE_WARMUPS + 2
-            && fixture
-                .completed
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .iter()
-                .any(|&(start, _)| {
-                    start
-                        > requests[..PRESSURE_WARMUPS]
-                            .iter()
-                            .map(|r| r.1)
-                            .max()
-                            .unwrap_or(u64::MAX)
+        selected = fixture
+            .wave
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .select();
+        selected.is_some()
+    });
+    let first = selected.ok_or("missing captured wave")?;
+    wait_until(|| {
+        assert!(service.session_errors().is_empty());
+        fixture
+            .completed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|&(start, _)| start >= first.1)
+    });
+    wait_until(|| {
+        service.shared.state.lock().is_ok_and(|state| {
+            state.assets.values().any(|asset| {
+                asset.state.lock().is_ok_and(|state| {
+                    assert!(!storage::available(&state.ranges, first.0, first.0 + 1));
+                    storage::available(&state.ranges, first.1, first.1 + 1)
                 })
+            })
+        })
     });
     // A later range finishing while the first is gated proves parallelism.
     // Exact ramp-up depends on observed demand and the shared permit budget;
@@ -1056,19 +1141,6 @@ fn adaptive_parallel_out_of_order_bytes_are_exact_and_durable()
         (2..=4).contains(&peak),
         "unexpected request overlap: {peak}"
     );
-    let requests = fixture.requests.lock().map_err(|_| "poison")?;
-    let first = *requests
-        .iter()
-        .find(|&&(start, _)| {
-            start
-                == requests[..PRESSURE_WARMUPS]
-                    .iter()
-                    .map(|r| r.1)
-                    .max()
-                    .unwrap_or(u64::MAX)
-        })
-        .ok_or("missing gated range")?;
-    drop(requests);
     assert!(
         fixture
             .completed
@@ -1200,15 +1272,28 @@ fn adaptive_out_of_order_cancel_resume_skips_all_durable_intervals()
         })
     });
     fixture.tail_gate.store(true, Ordering::Release);
+    let mut selected = None;
     wait_until(|| {
-        let requests = fixture.requests.lock().unwrap_or_else(|e| e.into_inner());
-        requests.len() >= PRESSURE_WARMUPS + 2
-            && service.usage().downloaded_bytes
-                > requests[..PRESSURE_WARMUPS]
-                    .iter()
-                    .map(|r| r.1)
-                    .max()
-                    .unwrap_or(u64::MAX)
+        selected = fixture
+            .wave
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .select();
+        selected.is_some()
+    });
+    let first = selected.ok_or("missing captured wave")?;
+    // Wait for an actual durable interval beyond the held hole, not a byte
+    // count (which says nothing about where those bytes were committed).
+    wait_until(|| {
+        assert!(service.session_errors().is_empty());
+        service.shared.state.lock().is_ok_and(|state| {
+            state.assets.values().any(|asset| {
+                asset
+                    .state
+                    .lock()
+                    .is_ok_and(|state| storage::available(&state.ranges, first.1, first.1 + 1))
+            })
+        })
     });
     service.release(&lease.id)?;
     wait_until(|| {
@@ -1231,19 +1316,6 @@ fn adaptive_out_of_order_cancel_resume_skips_all_durable_intervals()
     let durable_bytes: u64 = durable.iter().map(|&(start, end)| end - start).sum();
     assert!(durable_bytes >= downloaded);
     assert!(durable_bytes < fixture.bytes.len() as u64);
-    let requests = fixture.requests.lock().map_err(|_| "poison")?;
-    let first = *requests
-        .iter()
-        .find(|&&(start, _)| {
-            start
-                == requests[..PRESSURE_WARMUPS]
-                    .iter()
-                    .map(|r| r.1)
-                    .max()
-                    .unwrap_or(u64::MAX)
-        })
-        .ok_or("missing gated range")?;
-    drop(requests);
     assert!(durable.iter().all(|&(s, e)| e <= first.0 || s >= first.1));
     assert!(durable.iter().any(|&(s, _)| s >= first.1));
     // Late successful upstream responses belong to the canceled generation and
