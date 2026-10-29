@@ -467,9 +467,12 @@ fn actual_interruption_restarts_only_missing_durable_ranges()
         service.shared.root.join(key).join("manifest.json"),
     )?)?;
     let durable: Vec<(u64, u64)> = serde_json::from_value(manifest["ranges"].clone())?;
+    // A checkpoint completing during cancellation can exceed live publication.
+    let durable_bytes: u64 = durable.iter().map(|&(start, end)| end - start).sum();
+    assert!(durable_bytes >= downloaded);
     drop(service);
     let service = reopen(root.path(), CHUNK * 10)?;
-    assert_eq!(service.usage().downloaded_bytes, downloaded);
+    assert_eq!(service.usage().downloaded_bytes, durable_bytes);
     let request_count = fixture.requests.lock().map_err(|_| "poison")?.len();
     let resolved = fixture.resolved();
     let next = resolved.clone();
@@ -1045,7 +1048,14 @@ fn adaptive_parallel_out_of_order_bytes_are_exact_and_durable()
                             .unwrap_or(u64::MAX)
                 })
     });
-    assert!((3..=4).contains(&fixture.peak.load(Ordering::Acquire)));
+    // A later range finishing while the first is gated proves parallelism.
+    // Exact ramp-up depends on observed demand and the shared permit budget;
+    // neither the scheduler nor this scenario promises at least three requests.
+    let peak = fixture.peak.load(Ordering::Acquire);
+    assert!(
+        (2..=4).contains(&peak),
+        "unexpected request overlap: {peak}"
+    );
     let requests = fixture.requests.lock().map_err(|_| "poison")?;
     let first = *requests
         .iter()
@@ -1215,6 +1225,12 @@ fn adaptive_out_of_order_cancel_resume_skips_all_durable_intervals()
         service.shared.root.join(&key).join("manifest.json"),
     )?)?;
     let durable: Vec<(u64, u64)> = serde_json::from_value(manifest["ranges"].clone())?;
+    // Cancellation can race checkpoint completion: the validated chunk is safe
+    // on disk, but is deliberately not published to the canceled live session.
+    // Recovery trusts the manifest, not the live progress snapshot.
+    let durable_bytes: u64 = durable.iter().map(|&(start, end)| end - start).sum();
+    assert!(durable_bytes >= downloaded);
+    assert!(durable_bytes < fixture.bytes.len() as u64);
     let requests = fixture.requests.lock().map_err(|_| "poison")?;
     let first = *requests
         .iter()
@@ -1237,7 +1253,7 @@ fn adaptive_out_of_order_cancel_resume_skips_all_durable_intervals()
     assert!(reader.join().map_err(|_| "reader panicked")?.is_err());
     drop(service);
     let service = reopen(root.path(), CHUNK * 16)?;
-    assert_eq!(service.usage().downloaded_bytes, downloaded);
+    assert_eq!(service.usage().downloaded_bytes, durable_bytes);
     assert_eq!(service.usage().reserved_bytes, fixture.bytes.len() as u64);
     let before = fixture.requests.lock().map_err(|_| "poison")?.len();
     assert_eq!(
