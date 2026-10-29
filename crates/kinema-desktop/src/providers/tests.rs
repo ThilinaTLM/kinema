@@ -11,23 +11,58 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 pub(crate) fn fixture(
     replies: Vec<(u16, Value)>,
 ) -> Result<(Url, thread::JoinHandle<Vec<String>>), std::io::Error> {
+    fixture_with_request_pauses(
+        replies
+            .into_iter()
+            .map(|(status, body)| (status, body, Duration::ZERO))
+            .collect(),
+    )
+}
+
+// Match http::client's total request timeout, not just its connect timeout.
+const FIXTURE_TRANSPORT_TIMEOUT: Duration = Duration::from_secs(20);
+// Retain the old accept window as scheduling allowance, *in addition* to work
+// the client deliberately does before sending and its full transport deadline.
+const FIXTURE_SCHEDULING_ALLOWANCE: Duration = Duration::from_secs(10);
+const AD_DELAYED_POLL_PAUSE: Duration = Duration::from_secs(5);
+
+fn fixture_request_budget(pause: Duration) -> Duration {
+    pause + FIXTURE_TRANSPORT_TIMEOUT + FIXTURE_SCHEDULING_ALLOWANCE
+}
+
+fn fixture_with_request_pauses(
+    replies: Vec<(u16, Value, Duration)>,
+) -> Result<(Url, thread::JoinHandle<Vec<String>>), std::io::Error> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let address = listener.local_addr()?;
     listener.set_nonblocking(true)?;
     let handle = thread::spawn(move || {
         let mut requests = Vec::new();
-        for (status, json) in replies {
-            let deadline = Instant::now() + Duration::from_secs(10);
+        let mut previous_response_started = Instant::now();
+        for (index, (status, json, pause)) in replies.into_iter().enumerate() {
+            let started = Instant::now();
+            let budget = fixture_request_budget(pause);
+            let deadline = started + budget;
             let mut stream = loop {
                 match listener.accept() {
                     Ok((stream, _)) => break stream,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        assert!(Instant::now() < deadline, "fixture request timeout");
+                        assert!(
+                            Instant::now() < deadline,
+                            "fixture request {} timeout after {:?} (budget {budget:?}, pre-request pause {pause:?})",
+                            index + 1,
+                            started.elapsed(),
+                        );
                         thread::sleep(Duration::from_millis(5));
                     }
                     Err(_) => panic!("fixture accept failed"),
                 }
             };
+            assert!(
+                previous_response_started.elapsed() >= pause,
+                "fixture request {} arrived before the required {pause:?} poll pause",
+                index + 1,
+            );
             // Accepted sockets may inherit nonblocking mode on macOS.
             stream
                 .set_nonblocking(false)
@@ -71,6 +106,10 @@ pub(crate) fn fixture(
                 "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
+            // Timestamp before writing: the client cannot start its poll pause
+            // until it has received this response. This also checks the real
+            // AllDebrid >=5s guarantee without an upper wall-clock assertion.
+            previous_response_started = Instant::now();
             assert!(stream.write_all(reply.as_bytes()).is_ok());
         }
         requests
@@ -243,6 +282,22 @@ fn canceled_before_network_and_zero_size() -> TestResult {
 }
 
 #[test]
+fn fixture_budget_covers_poll_pause_transport_and_scheduling() {
+    // Synthetic elapsed time: no wall-clock sleeps or scheduler-dependent load.
+    // A poll that reaches the old 10s deadline still needs its transport window.
+    let started = Instant::now();
+    let deadline = started + fixture_request_budget(AD_DELAYED_POLL_PAUSE);
+    let contended_poll_start = started + AD_DELAYED_POLL_PAUSE + FIXTURE_SCHEDULING_ALLOWANCE;
+    assert!(contended_poll_start > started + Duration::from_secs(10));
+    assert_eq!(deadline - contended_poll_start, FIXTURE_TRANSPORT_TIMEOUT);
+    assert_eq!(deadline - started, Duration::from_secs(35));
+    assert_eq!(
+        fixture_request_budget(Duration::ZERO),
+        Duration::from_secs(30)
+    );
+}
+
+#[test]
 fn ad_delayed_ready_and_timeout() -> TestResult {
     for ready in [true, false] {
         let response = if ready {
@@ -250,10 +305,10 @@ fn ad_delayed_ready_and_timeout() -> TestResult {
         } else {
             ad(json!({"status":1}))
         };
-        let (base, server) = fixture(vec![
-            (200, ad_files()),
-            (200, ad(json!({"delayed":1234}))),
-            (200, response),
+        let (base, server) = fixture_with_request_pauses(vec![
+            (200, ad_files(), Duration::ZERO),
+            (200, ad(json!({"delayed":1234})), Duration::ZERO),
+            (200, response, AD_DELAYED_POLL_PAUSE),
         ])?;
         let c = client(DebridKind::AllDebrid, base)?;
         let prepared = PreparedTorrent {

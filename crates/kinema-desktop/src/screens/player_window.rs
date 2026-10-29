@@ -21,7 +21,7 @@ use kinema_core::media::PlaybackTitle;
 use kinema_core::media::playback_title;
 use kinema_mpv::{Config, PlaybackFailure, PlaybackState, Player, TrackKind};
 use playback_progress::PlaybackIntent;
-use playback_progress::{Phase as ProgressPhase, Progress, duration_mismatch, seek_confirmed};
+use playback_progress::{Phase as ProgressPhase, Progress, duration_mismatch};
 pub(crate) use playback_progress::{PlaybackLaunch, PlayerCheckpoint};
 
 #[cfg(feature = "gpu-surface")]
@@ -1569,14 +1569,9 @@ impl PlayerWindow {
             return;
         };
         let previous = p.phase;
-        p.check_timeout(Instant::now());
-        if p.loaded(&self.state) {
+        if p.observe_readiness(&self.state) {
             match p.phase {
-                ProgressPhase::Loading => {
-                    if !self.state.position_observed {
-                        self.progress = Some(p);
-                        return;
-                    }
+                ProgressPhase::Loading if p.initial_position_ready(&self.state) => {
                     if p.launch.watched
                         && p.launch.intent == PlaybackIntent::Normal
                         && p.usable_checkpoint().is_some()
@@ -1604,21 +1599,33 @@ impl PlayerWindow {
                         self.begin_resume(&mut p);
                     }
                 }
-                ProgressPhase::Starting {
-                    position_revision,
-                    restart_revision,
-                } if seek_confirmed(&self.state, 0.0, position_revision, restart_revision) => {
-                    p.phase = ProgressPhase::Reset;
-                }
-                ProgressPhase::Seeking {
-                    target,
-                    position_revision,
-                    restart_revision,
-                } if seek_confirmed(&self.state, target, position_revision, restart_revision) => {
-                    p.phase = ProgressPhase::Ready;
-                }
                 _ => {}
             }
+        }
+        let timeout_phase = match p.phase {
+            ProgressPhase::Loading => "loading",
+            ProgressPhase::AwaitSeekability => "await_seekability",
+            ProgressPhase::Seeking { .. } => "seeking",
+            ProgressPhase::Starting { .. } => "starting",
+            _ => "other",
+        };
+        if p.check_timeout(Instant::now()) {
+            // Fixed fields only: never log source URLs, content, or positions.
+            tracing::warn!(
+                reason = "playback_readiness_timeout",
+                phase = timeout_phase,
+                has_checkpoint = p.usable_checkpoint().is_some(),
+                file_loaded = self.state.file_loaded,
+                loading = self.state.loading,
+                position_observed = self.state.position_observed,
+                seeking = self.state.seeking,
+                seekable = ?self.state.seekable,
+                generation_matches = p.generation == Some(self.state.media_generation),
+                stopped = self.state.stopped,
+                media_stopped = self.state.media_stopped,
+                has_error = self.state.error.is_some() || self.state.failure_reason.is_some(),
+                "Playback progress readiness timed out"
+            );
         }
         if previous != p.phase && matches!(p.phase, ProgressPhase::Ready | ProgressPhase::Reset) {
             self.send_progress_ready(&p, cx);
@@ -3100,14 +3107,15 @@ impl Render for PlayerWindow {
             .when(visible, |div| div.child(self.chrome(window, cx)))
             .when(self.progress.as_ref().is_some_and(|p| matches!(p.phase, ProgressPhase::Choice | ProgressPhase::Mismatch | ProgressPhase::Unavailable)), |element| {
                 let unavailable = self.progress.as_ref().is_some_and(|p| p.phase == ProgressPhase::Unavailable);
+                let first_play = self.progress.as_ref().is_some_and(|p| p.usable_checkpoint().is_none());
                 let mismatch = self.progress.as_ref().is_some_and(|p| p.phase == ProgressPhase::Mismatch);
                 element.child(div().absolute().inset_0().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
-                    .child(div().type_style(t::TITLE).child(if unavailable { "Saved position cannot be resumed" } else if mismatch { "This source has a different duration" } else { "Resume this replay?" }))
-                    .child(div().type_style(t::BODY).child(if unavailable { "Playback readiness or resume could not be confirmed. Your saved progress is unchanged." } else if mismatch { "Resume at the saved time, or start over. Your saved progress is unchanged until playback is ready." } else { "Resume your saved position, or play from the beginning." }))
+                    .child(div().type_style(t::TITLE).child(if unavailable && first_play { "Playback could not start" } else if unavailable { "Saved position cannot be resumed" } else if mismatch { "This source has a different duration" } else { "Resume this replay?" }))
+                    .child(div().type_style(t::BODY).child(if unavailable && first_play { "Playback readiness could not be confirmed. Retry, or try playing without saving progress." } else if unavailable { "Playback readiness or resume could not be confirmed. Your saved progress is unchanged." } else if mismatch { "Resume at the saved time, or start over. Your saved progress is unchanged until playback is ready." } else { "Resume your saved position, or play from the beginning." }))
                     .when(!unavailable, |panel| panel.child(Button::new("progress-resume", if mismatch { "Resume anyway" } else { "Resume" }).on_click(cx.listener(|view, _, _, cx| view.choose_progress(true, cx)))))
                     .when(unavailable, |panel| panel
                         .child(Button::new("progress-retry-startup", "Retry").on_click(cx.listener(|view, _, _, cx| view.retry_startup(cx))))
-                        .child(Button::new("progress-play-unsaved", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
+                        .child(Button::new("progress-play-unsaved", if first_play { "Try playing without saving" } else { "Play without saving" }).on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
                     .when(self.progress.as_ref().is_some_and(|progress| progress.can_start_over(&self.state)), |panel| panel.child(Button::new("progress-start-over", "Play from beginning").on_click(cx.listener(|view, _, _, cx| view.choose_progress(false, cx))))))
             })
             .when(self.progress.as_ref().is_some_and(|p| p.notice && matches!(p.phase, ProgressPhase::Ready | ProgressPhase::Reset)), |element| {

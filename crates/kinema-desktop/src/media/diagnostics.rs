@@ -56,7 +56,23 @@ pub(super) struct Observation {
     wait_total: Duration,
     wait_max: Duration,
 }
+#[derive(Clone)]
+pub(super) struct FetchObservation(std::sync::Arc<std::sync::Mutex<Snapshot>>);
+impl FetchObservation {
+    pub(super) fn phase(&self, phase: Phase, start: u64, end: u64) {
+        if let Ok(mut state) = self.0.lock() {
+            state.phase = phase;
+            state.since = Instant::now();
+            state.range_start = start;
+            state.range_end = end;
+        }
+    }
+}
 impl Observation {
+    // Concurrent fetches share a latest-progress snapshot, not per-request history.
+    pub(super) fn fetch_observation(&self) -> FetchObservation {
+        FetchObservation(self.state.clone())
+    }
     pub(super) fn start(asset_id: u64, phase: Phase) -> Option<Self> {
         if !enabled() {
             return None;

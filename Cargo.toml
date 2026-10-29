@@ -10,6 +10,9 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+# Isolated opt-in torrent experiment; never enabled by the desktop defaults.
+librqbit = { version = "=9.0.1", default-features = false, features = ["rust-tls"] }
+anyhow = "1.0"
 raw-window-handle = "0.6.2"
 smol = "2.0"
 souvlaki = { version = "=0.9.3", default-features = false, features = ["use_zbus"] }

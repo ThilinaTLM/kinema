@@ -46,34 +46,69 @@ Core `parse_http_range`, `ByteRange`, and
 `RangeSet` implement range policies. Headers do not claim any missing bytes are
 available: streaming waits for durable range membership and aborts on failure.
 
-Each active remote asset has one acquisition owner. It fetches at most 4MiB per
-request, clipped to the next missing gap or file end, prioritizing missing reader
-offsets over sequential background progress. The larger range amortizes measured
-request-header latency; it does not introduce parallel requests per asset. Each
-worker buffers one full range plus one validation probe byte (about 32MiB of
-payload buffers across the maximum 8 acquisition workers, excluding HTTP/TLS,
-allocator and other service overhead). A range becomes available only after full
-validation, payload sync and manifest checkpoint. Larger ranges can increase
-initial/seek latency: a new reader priority is honored after the in-flight cycle,
-not by interrupting it. Cancellation checks and durability ordering are unchanged.
+Each active remote asset has one acquisition coordinator and 1–4 parallel range
+fetches in bounded waves. The process-wide limit is 16 reservations, including
+completed bodies waiting for disk commit; every scoped fetch thread is joined.
+Only the coordinator writes payloads, syncs and checkpoints, then publishes durable
+ranges. Out-of-order completion cannot expose sparse holes or incomplete bodies.
+The maximum reserved response payload is 16 × (4 MiB + one probe byte), plus up
+to 16 × 64 KiB read scratch buffers. HTTP/TLS, allocator, thread-stack, range-set
+and filesystem overhead are excluded; this is not a strict process RSS bound.
+
+Range size starts at 256 KiB and adapts between 64 KiB and 4 MiB, targeting about
+two seconds of observed body delivery, growing at most twofold per healthy wave.
+Body failures/timeouts halve it. The first missing interactive range is at most
+256 KiB. Local reader delivery provides bounded, decaying demand hints, **not media
+bitrate measurements**. The controller uses contiguous durable bytes ahead, reader
+waits, useful throughput and hysteresis: sustained pressure grows concurrency,
+healthy buffer coverage shrinks it, and throttling halves it. Isolated transport
+failures do not automatically halve concurrency. With no active reader, background
+completion uses at most two requests after two healthy waves.
+
+An outstanding missing reader hint is retained until satisfied, avoiding two
+readers continually canceling each other. A distant new hint (>16 MiB from the
+previous hint) advances a generation; obsolete results cannot become live ranges.
+Cancellation is checked between body reads and before publication, but cannot
+forcibly interrupt a blocking request. A seek during checkpoint may leave validated
+bytes in the durable manifest without publishing them live. Guaranteed fairness,
+immediate cancellation and real-provider performance remain unqualified.
 
 Loopback HTTP bodies use 64KiB buffers and a two-message queue. Limits: 8 acquisition
 workers, 8 HTTP workers, 32 accepted sockets and 32 session leases. Socket inactivity
 is 60s; a missing chunk waits at most 45s; a stalled body consumer at most 30s.
 Upstream connect/whole-request deadlines remain 10s/20s, including body transfer
-in the whole-request deadline. A slow 4MiB transfer may therefore fail rather than
-receive more time; larger chunks do not guarantee adequate provider throughput.
+in the whole-request deadline. Adaptive sizing reduces slow-link exposure but
+cannot guarantee progress below the minimum-range/deadline combination or during
+long outages. Requests are not governed by a separate idle-progress deadline.
 Drop only sets cancellation
 and signals the owned server thread; it never joins or waits for provider I/O.
 The root lock remains owned until all service/network/reader owners finish.
 
 Upstream must return exact 206, Content-Range, Content-Length and identity
-Content-Encoding. HTTP 200 fallback/full download is not implemented and returns
-`UnsupportedRange`. Redirects are disabled (including HTTPS redirects); provider
-resolution must yield a usable final HTTPS URL. Test-only provider constructors
-allow loopback HTTP fixtures. Expired or 5-minute-old links renew before a missing
-fetch, as do 401/403 responses. Two renewals without validated durable byte
-progress fail; progress resets that budget. Renewed hash/path/size must match.
+Content-Encoding. HTTP 200 fallback/full download is not implemented. A strong
+ETag on the first accepted response binds the acquisition: later requests send
+If-Range and require the same strong ETag, including after URL renewal; changed or
+missing validators and HTTP 200 in this mode fail with IdentityMismatch. Without
+an initial strong validator, the existing provider MediaIdentity (torrent hash,
+path, size) is trusted. Validators are not persisted across acquisition restarts;
+this is not cryptographic payload verification or independent proof of immutable
+content from an untrusted origin.
+
+Redirects remain disabled (including HTTPS redirects); provider resolution must
+yield a usable final HTTPS URL. No URL/ETag/header content or raw HTTP errors are
+logged or persisted. Test-only provider constructors allow loopback HTTP fixtures.
+Expired or 5-minute-old links renew before a missing fetch, as do 401/403 responses.
+Renewal belongs to the coordinator, never individual parallel workers. Two
+renewals without validated durable byte progress fail; progress resets that
+budget. Renewed hash/path/size must match.
+
+Transient transport/body failures and HTTP 500/502/504 receive at most three
+consecutive-wave retries, with 250/500/1000 ms backoff. HTTP 429/503 also reduce
+concurrency and respect delta-seconds or IMF-fixdate Retry-After up to 30 seconds;
+a larger requested wait fails explicitly rather than retrying before the server's
+minimum. Waits observe cancellation. Terminal validation errors cannot be replaced
+by a later transient error in the same wave. This is per-asset coordination, not
+a provider/account-wide rate limiter or an unlimited reconnect policy.
 **Renewal callbacks must themselves have bounded I/O/timeouts**, as the service
 cannot forcibly interrupt an arbitrary synchronous caller-supplied closure.
 
@@ -101,7 +136,12 @@ Tests use actual loopback HTTP byte fixtures and temporary storage. Windows/macO
 build/runtime and power-loss filesystem behavior are not established by Linux
 fixture tests. No real provider account or external-player playback was tested.
 
-## Startup investigation / documentation handoff (2026-10-25)
+## Historical startup investigation / documentation handoff (2026-10-25)
+
+The following records the former serial implementation. The adaptive contract
+above and [current validation](../../../../docs/validation/adaptive-http.md)
+supersede its scheduling, range-size, and retry descriptions. Historical results
+are not new qualification of the adaptive implementation.
 
 Source evidence, not a native performance measurement:
 

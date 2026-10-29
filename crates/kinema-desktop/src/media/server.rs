@@ -230,6 +230,10 @@ fn stream_inner(
     sender: &tokio::sync::mpsc::Sender<Result<Bytes, std::io::Error>>,
     observation: &mut Option<diagnostics::Observation>,
 ) -> Result<(), MediaError> {
+    let reader = match &lease.source {
+        Source::Remote(asset) => Some(adaptive::ReaderTracker::new(asset.clone(), start)?),
+        Source::Local(..) => None,
+    };
     while start < end {
         if sender.is_closed()
             || shared.canceled.load(Ordering::Relaxed)
@@ -265,7 +269,21 @@ fn stream_inner(
                         {
                             return Err(MediaError::Canceled);
                         }
-                        state.priority = storage::reader_priority(&state.ranges, start, next);
+                        if let Some(reader) = &reader {
+                            state.readers.waiting(reader.id, start);
+                        }
+                        let demand = storage::reader_priority(&state.ranges, start, next);
+                        // Keep an outstanding hint until it is satisfied: concurrent readers
+                        // must not continually invalidate one another's fetches.
+                        let outstanding = state
+                            .priority
+                            .is_some_and(|p| !storage::available(&state.ranges, p, p + 1));
+                        if !outstanding && let Some(demand) = demand {
+                            if demand.abs_diff(state.priority.unwrap_or(0)) > CHUNK * 4 {
+                                state.generation = state.generation.wrapping_add(1);
+                            }
+                            state.priority = Some(demand);
+                        }
                         state = asset
                             .changed
                             .wait_timeout(state, Duration::from_millis(200))
@@ -277,7 +295,10 @@ fn stream_inner(
                 if let (Some(o), Some(started)) = (observation.as_mut(), wait_started) {
                     o.range_wait(started.elapsed());
                 }
-                let state = wait_result?;
+                let mut state = wait_result?;
+                if let Some(reader) = &reader {
+                    state.readers.ready(reader.id);
+                }
                 drop(state);
                 storage::check_payload(asset)?;
                 let mut file = File::open(asset.dir.join("payload"))?;
@@ -308,6 +329,9 @@ fn stream_inner(
         }
         if let Some(o) = observation.as_mut() {
             o.first_delivery();
+        }
+        if let Some(reader) = &reader {
+            reader.delivered(next, next - start)?;
         }
         start = next;
     }
