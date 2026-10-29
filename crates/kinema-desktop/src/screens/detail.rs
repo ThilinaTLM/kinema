@@ -891,7 +891,13 @@ impl Detail {
                 .and_then(|url| self.image(Some(&url), ArtworkKind::Poster, &self.title.key(), cx)),
         }
     }
-    fn open_stream(&mut self, index: usize, intent: PlaybackIntent, cx: &mut Context<Self>) {
+    fn open_stream(
+        &mut self,
+        index: usize,
+        intent: PlaybackIntent,
+        switch: Option<u64>,
+        cx: &mut Context<Self>,
+    ) {
         let candidate = self
             .coordinator
             .read(cx)
@@ -906,6 +912,7 @@ impl Detail {
             let context = self.play_context(cx);
             let sheet = cx.new(|cx| {
                 PlaySheet::new(coordinator, title, context, target, candidate, intent, cx)
+                    .after_switch(switch)
             });
             self.play_subscription = Some(cx.subscribe(&sheet, |this, _, _: &DismissEvent, cx| {
                 this.play = None;

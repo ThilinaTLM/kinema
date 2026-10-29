@@ -74,6 +74,7 @@ impl PlaySheet {
             provider,
             preparation: None,
             pending,
+            switch: None,
             limit_exceeded: None,
             error: if !missing && pending.is_none() {
                 Some("Application service unavailable or busy. Close and retry.".into())
@@ -86,7 +87,34 @@ impl PlaySheet {
             _subscription: subscription,
         }
     }
+    /// Keeps the preparation through invalidations caused by the given settings
+    /// save, which makes this sheet's provider the worker's active account.
+    pub(crate) fn after_switch(mut self, switch: Option<u64>) -> Self {
+        self.switch = switch.filter(|_| self.pending.is_some());
+        self
+    }
     fn apply_event(&mut self, event: &crate::app::AppEvent, cx: &mut Context<Self>) {
+        if let Some(save) = self.switch {
+            // The worker runs requests in order: invalidations reported before the
+            // save outcome precede this sheet's preparation, which is still fresh.
+            if matches!(event.outcome, AppOutcome::Invalidated { .. }) {
+                return;
+            }
+            if event.generation == save {
+                self.switch = None;
+                if let AppOutcome::Failed { message } = &event.outcome {
+                    // The queued preparation would use the previous account.
+                    self.cancel_owned_work(cx);
+                    self.error = Some(format!(
+                        "Couldn't switch to {}: {message}",
+                        provider_name(self.provider)
+                    ));
+                    tracing::warn!("UI debrid switch failed; preparation cancelled");
+                    cx.notify();
+                    return;
+                }
+            }
+        }
         if let AppOutcome::Settings { settings, .. }
         | AppOutcome::SettingsWarning { settings, .. } = &event.outcome
         {

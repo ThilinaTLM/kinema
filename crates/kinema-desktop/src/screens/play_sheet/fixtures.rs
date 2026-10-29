@@ -47,7 +47,10 @@ impl PlaySheet {
         this.missing = state == "play-live-missing-creds";
         this.credential_notice =
             "No Real-Debrid credential is saved. Preparation has not started.".into();
-        this.pending = (state == "play-live-preparing").then_some(100);
+        this.pending =
+            matches!(state, "play-live-preparing" | "play-live-switching").then_some(100);
+        // Switching: preparation queued behind the save that activates its provider.
+        this.switch = (state == "play-live-switching").then_some(50);
         this.error = (state == "play-live-failure").then(|| {
             "Player launch failed: executable not found. Try again or pick another stream.".into()
         });

@@ -61,6 +61,81 @@ fn account_invalidation_clears_the_preparation() {
         assert!(sheet.missing);
     });
 }
+#[cfg(feature = "ui-probe-test")]
+mod switch {
+    use super::super::{AppCoordinator, AppOutcome, CoordinatorEvent, PlaySheet};
+    use crate::app::{AppEvent, CredentialState};
+    use gpui::{AppContext, Entity, TestAppContext};
+
+    fn emit(cx: &mut TestAppContext, coordinator: &Entity<AppCoordinator>, event: AppEvent) {
+        coordinator.update(cx, |_, cx| cx.emit(CoordinatorEvent::App(event)));
+        cx.run_until_parked();
+    }
+    fn invalidated() -> AppEvent {
+        AppEvent {
+            generation: 0,
+            outcome: AppOutcome::Invalidated { released: vec![] },
+        }
+    }
+    fn switching(cx: &mut TestAppContext) -> (Entity<AppCoordinator>, Entity<PlaySheet>) {
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        let sheet = cx.new(|cx| PlaySheet::fixture(coordinator.clone(), "play-live-switching", cx));
+        (coordinator, sheet)
+    }
+
+    #[test]
+    fn own_provider_switch_does_not_abandon_the_queued_preparation() {
+        let mut cx = TestAppContext::single();
+        let (coordinator, sheet) = switching(&mut cx);
+        emit(&mut cx, &coordinator, invalidated());
+        sheet.update(&mut cx, |sheet, _| {
+            assert_eq!(sheet.pending, Some(100));
+            assert!(!sheet.missing);
+        });
+        emit(
+            &mut cx,
+            &coordinator,
+            AppEvent {
+                generation: 50,
+                outcome: AppOutcome::Settings {
+                    settings: Default::default(),
+                    credentials: vec![],
+                    tmdb_credential: CredentialState::Missing,
+                },
+            },
+        );
+        // After the switch settles, a later account change is a real invalidation.
+        emit(&mut cx, &coordinator, invalidated());
+        sheet.update(&mut cx, |sheet, _| {
+            assert_eq!(sheet.switch, None);
+            assert!(sheet.pending.is_none());
+            assert!(sheet.missing);
+        });
+    }
+
+    #[test]
+    fn failed_provider_switch_cancels_preparation_with_the_old_account() {
+        let mut cx = TestAppContext::single();
+        let (coordinator, sheet) = switching(&mut cx);
+        emit(
+            &mut cx,
+            &coordinator,
+            AppEvent {
+                generation: 50,
+                outcome: AppOutcome::Failed {
+                    message: "settings unavailable".into(),
+                },
+            },
+        );
+        sheet.update(&mut cx, |sheet, _| {
+            assert!(sheet.pending.is_none());
+            assert_eq!(
+                sheet.error.as_deref(),
+                Some("Couldn't switch to Real-Debrid: settings unavailable")
+            );
+        });
+    }
+}
 
 #[cfg(feature = "ui-probe-test")]
 mod events {

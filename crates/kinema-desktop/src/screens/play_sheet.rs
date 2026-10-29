@@ -42,6 +42,9 @@ pub(crate) struct PlaySheet {
     provider: kinema_core::sources::DebridKind,
     preparation: Option<u64>,
     pending: Option<u64>,
+    /// Settings save that makes `provider` the worker's active account. Until its
+    /// outcome arrives, invalidations come from that switch, not a later change.
+    switch: Option<u64>,
     /// Set when the prepared file is larger than the cache limit.
     limit_exceeded: Option<u64>,
     error: Option<String>,
