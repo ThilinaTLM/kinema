@@ -205,7 +205,11 @@ impl Detail {
     /// Makes `kind` the worker's active debrid account, which preparation reads.
     /// Returns the admitted save generation the play sheet must outlast; a
     /// UI-only settings edit would leave the worker preparing with the old account.
-    fn activate_debrid(&mut self, kind: DebridKind, cx: &mut Context<Self>) -> Option<u64> {
+    pub(super) fn activate_debrid(
+        &mut self,
+        kind: DebridKind,
+        cx: &mut Context<Self>,
+    ) -> Option<u64> {
         let mut settings = self.coordinator.read(cx).settings.clone()?;
         if settings.debrid == kind {
             return None;
