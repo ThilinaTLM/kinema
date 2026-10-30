@@ -2237,11 +2237,12 @@ impl Render for Lab {
 }
 
 // ── P4 Settings: append-only production fixture scene registrations ──────────
-const SETTINGS_SCENES: [&str; 7] = [
+const SETTINGS_SCENES: [&str; 8] = [
     "settings-general",
     "settings-accounts-no-token",
     "settings-accounts",
     "settings-playback",
+    "settings-keyboard-mouse",
     "settings-storage",
     "settings-appearance",
     "settings-about",
@@ -2261,6 +2262,7 @@ fn open_settings_fixture(
     let section = match scene {
         "settings-accounts" | "settings-accounts-no-token" => Section::Accounts,
         "settings-playback" => Section::Playback,
+        "settings-keyboard-mouse" => Section::KeyboardMouse,
         "settings-storage" => Section::Storage,
         "settings-appearance" => Section::Appearance,
         "settings-about" => Section::About,

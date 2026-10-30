@@ -110,6 +110,10 @@ pub struct PlaybackState {
     /// True only after a successful track-list observation, including an empty list.
     pub tracks_available: bool,
     pub speed: f64,
+    /// Observed subtitle visibility; None means unavailable or lifecycle reset.
+    pub subtitle_visibility: Option<bool>,
+    /// Observed subtitle delay in seconds (positive is later); None is unavailable.
+    pub subtitle_delay: Option<f64>,
     /// None means unavailable; Some(empty) is an observed empty cache.
     pub buffered_ranges: Option<Vec<BufferedRange>>,
     pub duration: Option<f64>,
@@ -167,6 +171,8 @@ impl Default for PlaybackState {
             tracks: Vec::new(),
             tracks_available: false,
             speed: 1.0,
+            subtitle_visibility: None,
+            subtitle_delay: None,
             buffered_ranges: None,
             duration: None,
             paused: false,

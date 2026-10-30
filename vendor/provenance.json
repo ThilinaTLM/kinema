@@ -38,6 +38,7 @@
     "0004-gpui-pre-apple-0.3.9.patch": "e451682112cc98775795037039d87f7499053ee177c389f5cfc42584ce1f2464",
     "0005-gpui-pre-windows-0.3.9.patch": "28b74a24c6f438a2addae9a6332bc92f2f479031416e58ef285810117b7be810",
     "0010-gpui-pre-0.3.9.patch": "b475858e4a7699857951e49024c1886f47b87f4457329492a18ed6acc601289d",
-    "0011-gpui-pre-windows-0.3.9.patch": "9c62a92b18f9a56d14ca2f520ba7d3f1edacc4fd7dfb0c2c3ba49a7e442eff1d"
+    "0011-gpui-pre-windows-0.3.9.patch": "9c62a92b18f9a56d14ca2f520ba7d3f1edacc4fd7dfb0c2c3ba49a7e442eff1d",
+    "0012-gpui-pre-0.3.9.patch": "011f7c4578f6c4b10047020018fc99c22beff96a26c4d9d513e6549f33fcc568"
   }
 }

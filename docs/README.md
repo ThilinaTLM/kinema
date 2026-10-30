@@ -14,6 +14,7 @@ alternatives. There is no supported C++ implementation or feature-parity promise
 | [Architecture](architecture.md) | Responsibilities, approved scope, implemented boundaries and deferred work |
 | [Desktop v3](design/desktop-v3.md) | Direct-GPUI UI contract and subsequent approved revisions |
 | [Embedded player](design/player.md) | Managed player window, controls, session ownership and acceptance limits |
+| [Player shortcuts](design/player-shortcuts.md) | Keyboard/mouse controls, Settings reference, implementation contract and scoped validation |
 | [Library and manual watch state](design/library.md) | Personal membership, manual tracking and conservative episode summaries |
 | [Catalog and database](catalog-schema.md) | Normalized catalog, v6 cache retirement and current v7 personal records |
 | [Storage and media server](storage-layout.md) | Managed media, loopback serving, quota, cleanup and recovery |

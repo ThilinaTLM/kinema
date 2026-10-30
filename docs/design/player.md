@@ -150,6 +150,14 @@ buffer ranges, or subtitle samples into production as invented capabilities.
 
 ## Controls and focus
 
+**Keyboard/mouse expansion (2026-10-31):** the source now extends the baseline
+below with coarse/fine seeking, speed, frame stepping, chapter/track navigation,
+subtitle visibility/timing, and shared shortcut help. See the
+[expanded contract and validation scope](player-shortcuts.md). Settings →
+Keyboard & Mouse lists the same catalog. Video double-left-click toggles
+fullscreen; single-right-click toggles playback, excluding controls and overlays.
+
+
 All icon buttons have accessible names and hover tooltips including shortcuts.
 Focus-visible uses the shared ring; selected, disabled, hover and pressed states
 remain distinct. Native menus should support arrows, Enter, Escape,

@@ -288,3 +288,17 @@ Cross-target Rust checks do not qualify tray visibility/host-loss detection,
 window-manager behavior, media registration, actual playback, or HDR. Main's
 native handle remains retained until explicit application shutdown; desktop
 adapter teardown is requested before the bounded final progress/quit gate exits.
+
+## Native repeat state before action dispatch
+
+`0012-gpui-pre-0.3.9.patch` adds `KeystrokeEvent::is_held`, forwarding
+`KeyDownEvent::is_held` to pre-action interceptors and post-action observers.
+Modifier-only events and replayed multi-stroke input report false, matching the
+existing replay `KeyDownEvent`. This does not alter key matching or dispatch order.
+
+Player repeat policy consumes this flag instead of inferring held keys from
+logical key-up names. X11 can normalize Shift+/ keydown to `?` while reporting
+`/` on keyup, so a key-name latch can remain stuck. No keyboard-layout-specific
+symbol mapping or repeat timer is introduced. Desktop event tests replay the
+captured normalized down/unshifted up pair, held toggles, and repeated help
+open/Tab/Escape cycles. Native evidence remains Linux/X11-only.
